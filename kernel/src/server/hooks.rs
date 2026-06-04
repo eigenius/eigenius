@@ -417,4 +417,73 @@ impl crate::commit::CommitHookHost for EigeniusService {
         });
         Ok(())
     }
+
+    /// D43 §5.5 — post-Load vector-index sweep. The coordinator is
+    /// optional: no embedders registered → no coordinator → hook is
+    /// a no-op. When present, we spawn the sweep onto the current
+    /// tokio runtime via [`SweepCoordinator::trigger_async`] so the
+    /// commit pipeline doesn't block on Embedder IO (per D43 §5.5's
+    /// "async and non-gating" stance). The handle is intentionally
+    /// detached — the sweep's terminal state is observable via the
+    /// `SweepRegistry`, not by awaiting here.
+    fn trigger_vector_sweep_for_layer(
+        &self,
+        layer: &Arc<crate::layer::Layer>,
+    ) -> Result<(), Vec<crate::validation::ValidationError>> {
+        let Some(coord) = self.sweep_coordinator.clone() else {
+            return Ok(());
+        };
+        // Cheap pre-check: skip the spawn entirely when the layer
+        // has no active VectorIndex Resources — the coordinator
+        // would short-circuit anyway, but the empty case is the
+        // common one (any non-vector Load) and we don't want a
+        // detached task per commit on those.
+        let active = crate::layer::resolve_active_vector_indexes(layer);
+        if active.is_empty() {
+            return Ok(());
+        }
+        let layer_arc = Arc::clone(layer);
+        let layer_id_disp = format!("{}", layer.id());
+        let n_indexes = active.len();
+        tracing::info!(
+            { crate::observability::field::OPERATION } =
+                crate::observability::operation::COMMIT_DID_PERSIST,
+            { crate::observability::field::LAYER_ID } = %layer_id_disp,
+            n_indexes = n_indexes,
+            "scheduling post-Load vector sweep"
+        );
+        tokio::spawn(async move {
+            match coord.trigger_async(layer_arc).await {
+                Ok(None) => {
+                    tracing::debug!(
+                        { crate::observability::field::OPERATION } =
+                            crate::observability::operation::COMMIT_DID_PERSIST,
+                        { crate::observability::field::LAYER_ID } = %layer_id_disp,
+                        "vector sweep finished: no active indexes (race after detection)"
+                    );
+                }
+                Ok(Some((_handle, report))) => {
+                    tracing::info!(
+                        { crate::observability::field::OPERATION } =
+                            crate::observability::operation::COMMIT_DID_PERSIST,
+                        { crate::observability::field::LAYER_ID } = %layer_id_disp,
+                        total_subjects = report.total_subjects,
+                        skipped = report.skipped,
+                        "vector sweep completed"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        { crate::observability::field::OPERATION } =
+                            crate::observability::operation::COMMIT_DID_PERSIST,
+                        { crate::observability::field::ERROR_KIND } = "vector_sweep_failed",
+                        { crate::observability::field::LAYER_ID } = %layer_id_disp,
+                        { crate::observability::field::ERROR_MESSAGE } = %e,
+                        "post-Load vector sweep failed"
+                    );
+                }
+            }
+        });
+        Ok(())
+    }
 }

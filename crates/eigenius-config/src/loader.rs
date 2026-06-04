@@ -227,6 +227,35 @@ fn apply_env(cfg: &mut Config, env: &EnvProvider) {
     if let Some(v) = env("EIGENIUS_LOCAL_JULIA_BINARY") {
         cfg.substrate.local.julia_binary = PathBuf::from(v);
     }
+    // ── [embedder] section ───────────────────────────────────────
+    if let Some(v) = env("EIGENIUS_EMBEDDER_ENABLED") {
+        // Comma-separated list; empty string → empty list.
+        cfg.embedder.enabled = v
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+    }
+    if let Some(v) = env("EIGENIUS_EMBEDDER_DEVICE") {
+        if let Some(d) = crate::embedder::DeviceSelection::parse(&v) {
+            cfg.embedder.device = d;
+        }
+        // Silently leave the value alone on unrecognised input; the
+        // service-side path emits a structured diagnostic when the
+        // typed value is consumed.
+    }
+    if let Some(v) = env("EIGENIUS_EMBEDDER_BATCH_SIZE") {
+        if let Ok(n) = v.parse::<usize>() {
+            if n > 0 {
+                cfg.embedder.batch_size = n;
+            }
+        }
+    }
+    if let Some(v) = env("EIGENIUS_EMBEDDER_FAIL_FAST_ON_MISSING_MODEL") {
+        cfg.embedder.fail_fast_on_missing_model =
+            matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on");
+    }
 }
 
 fn default_env_provider() -> Box<EnvProvider> {

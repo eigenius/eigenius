@@ -96,6 +96,13 @@ impl CommitHookHost for NoopHost {
     ) -> Result<(), Vec<ValidationError>> {
         Ok(())
     }
+
+    fn trigger_vector_sweep_for_layer(
+        &self,
+        _layer: &Arc<Layer>,
+    ) -> Result<(), Vec<ValidationError>> {
+        Ok(())
+    }
 }
 
 /// D41 §3.6.
@@ -126,6 +133,29 @@ pub trait CommitHookHost: Send + Sync {
     /// D41 §6.5.
     fn rebuild_institution_index(&self, top_layer: &Arc<Layer>)
         -> Result<(), Vec<ValidationError>>;
+
+    /// D43 §5.5 — fire a vector-index sweep against the just-
+    /// persisted layer if any active VectorIndex Resource is visible
+    /// at it. The host's impl looks up the
+    /// [`crate::task::sweep_registry::SweepCoordinator`] (if any),
+    /// calls `trigger_blocking` or `trigger_async` as the deployment
+    /// shape dictates, and threads the resulting
+    /// [`crate::task::sweep_registry::SweepHandle`] into its task
+    /// registry for observability.
+    ///
+    /// Best-effort like the WASM-registration hook: on `Err`, the
+    /// errors flow into `state.hook_errors` and the commit stands.
+    /// A no-op default impl is provided so hosts that haven't been
+    /// updated for vector retrieval still typecheck — `NoopHost`
+    /// returns `Ok(())` regardless. The default impl also makes the
+    /// trait method backward-compatible across the kernel test
+    /// suite, which has dozens of bespoke `CommitHookHost` impls.
+    fn trigger_vector_sweep_for_layer(
+        &self,
+        _layer: &Arc<Layer>,
+    ) -> Result<(), Vec<ValidationError>> {
+        Ok(())
+    }
 }
 
 /// Hook fn type for the post-persist stage of a single pipeline run.
@@ -207,6 +237,31 @@ pub fn register_wasm_components(state: &mut CommitState<'_>) -> HookOutcome {
             HookOutcome::default()
         }
     }
+}
+
+/// D43 §5.5 — `didPersist` hook that schedules the post-Load
+/// vector-index sweep against the just-persisted layer.
+///
+/// Delegates to the host's
+/// [`CommitHookHost::trigger_vector_sweep_for_layer`], which decides
+/// whether to dispatch synchronously (tests / CLI commit modes) or
+/// onto a tokio task (the gRPC service path). The hook is a no-op
+/// when the host has no `SweepCoordinator` attached or no active
+/// VectorIndex Resource is visible at the layer — neither is an
+/// error.
+///
+/// Like [`register_wasm_components`], errors flow into
+/// `state.hook_errors` and the commit stands.
+pub fn trigger_vector_sweep(state: &mut CommitState<'_>) -> HookOutcome {
+    let layer = state
+        .layer
+        .as_ref()
+        .expect("trigger_vector_sweep runs after persist; layer must be Some")
+        .clone();
+    if let Err(errors) = state.host.trigger_vector_sweep_for_layer(&layer) {
+        state.hook_errors.extend(errors);
+    }
+    HookOutcome::default()
 }
 
 /// `didDrain` hook on the orchestrator.

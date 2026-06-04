@@ -84,6 +84,22 @@ pub trait Embedder: Send + Sync {
     /// on success; a length mismatch is a programming error and the
     /// caller may panic. Failures surface as [`EmbedderError`].
     fn embed(&self, text: &str) -> Result<Vec<f32>, EmbedderError>;
+
+    /// Embed `texts` in one batched forward pass, returning a
+    /// `Vec<Vec<f32>>` of length `texts.len()` with each inner vector
+    /// of length `self.dim()`. The default implementation loops
+    /// [`Self::embed`] one-at-a-time — correct, but slow for
+    /// real ML backends. Embedders backed by a batched runtime
+    /// (Candle, ORT, …) should override for the 10-30× speedup at
+    /// batch ≈ 32. The sweep driver
+    /// ([`crate::query::vector::indexing::sweep_one_index`]) calls
+    /// this method exclusively; implementing only [`Self::embed`]
+    /// still works but pays the per-text trip cost on the index
+    /// path. Result ordering corresponds to input ordering — caller
+    /// pairs them positionally.
+    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedderError> {
+        texts.iter().map(|t| self.embed(t)).collect()
+    }
 }
 
 /// Registry of [`Embedder`] implementations keyed by their declared
@@ -341,5 +357,46 @@ mod tests {
         assert!(reg
             .get(&iri("urn:eigenius:embed:dummy:v1"))
             .is_some_and(|e| e.dim() == 8));
+    }
+
+    /// The default `embed_batch` impl must return per-text results
+    /// in input order and each be byte-identical to the
+    /// per-text `embed` call. This pins the trait contract any
+    /// override (e.g. the Candle batched path) has to honour.
+    #[test]
+    fn embed_batch_default_impl_matches_per_text_embed() {
+        let e = DummyEmbedder::new("urn:eigenius:embed:dummy:v1", 16);
+        let texts = ["alpha", "beta gamma", "the quick brown fox"];
+        let batched = e.embed_batch(&texts).unwrap();
+        assert_eq!(batched.len(), texts.len());
+        for (i, t) in texts.iter().enumerate() {
+            let single = e.embed(t).unwrap();
+            assert_eq!(batched[i], single, "row {i} ({t:?}) mismatched");
+        }
+    }
+
+    /// Empty batch must yield empty output without dispatching to the
+    /// embedder — sweep's chunked dispatch relies on this for the
+    /// degenerate final-chunk case.
+    #[test]
+    fn embed_batch_empty_input_returns_empty_output() {
+        let e = DummyEmbedder::new("urn:eigenius:embed:dummy:v1", 8);
+        let out = e.embed_batch(&[]).unwrap();
+        assert!(out.is_empty());
+    }
+
+    /// One bad input in a batch must surface its `InvalidInput`
+    /// diagnostic — the default impl propagates the first per-text
+    /// error eagerly, which the sweep relies on for attribution
+    /// (the sweep's `embed_batch_with_retry` then falls back to
+    /// per-text dispatch to localise which subject is broken).
+    #[test]
+    fn embed_batch_default_impl_propagates_per_text_error() {
+        let e = DummyEmbedder::new("urn:eigenius:embed:dummy:v1", 8);
+        let texts = ["ok one", "", "ok two"];
+        match e.embed_batch(&texts) {
+            Err(EmbedderError::InvalidInput(_)) => (),
+            other => panic!("expected InvalidInput from empty entry; got {other:?}"),
+        }
     }
 }

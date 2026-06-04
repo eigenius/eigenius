@@ -73,18 +73,25 @@ pub struct VectorSweepDriver {
     pub max_retries: u32,
     pub retry_backoff_base_ms: u64,
     pub in_flight_limit: u32,
+    /// Cache-miss text chunk size for the per-Index batched embed
+    /// path ([`crate::query::vector::indexing::SweepOptions::batch_size`]).
+    /// Defaults to [`crate::query::vector::indexing::DEFAULT_BATCH_SIZE`].
+    /// Set to `1` to reproduce pre-batched legacy per-text dispatch.
+    pub batch_size: usize,
     record: Option<TaskRecord>,
 }
 
 impl VectorSweepDriver {
     /// Construct a sweep driver with D43 §5.5 defaults
-    /// (3 retries, 100 ms backoff base, 64 in-flight cap).
+    /// (3 retries, 100 ms backoff base, 64 in-flight cap,
+    /// batch ≈ 32).
     pub fn new() -> Self {
         Self {
             cancel: Arc::new(AtomicBool::new(false)),
             max_retries: DEFAULT_MAX_RETRIES,
             retry_backoff_base_ms: DEFAULT_RETRY_BACKOFF_BASE_MS,
             in_flight_limit: DEFAULT_IN_FLIGHT_LIMIT,
+            batch_size: crate::query::vector::indexing::DEFAULT_BATCH_SIZE,
             record: None,
         }
     }
@@ -96,6 +103,18 @@ impl VectorSweepDriver {
     /// this field on each state transition.
     pub fn with_record(mut self, record: TaskRecord) -> Self {
         self.record = Some(record);
+        self
+    }
+
+    /// Override the `batch_size` used by this driver's sweep. `0`
+    /// is clamped to `1` (per-text dispatch). The default at
+    /// construction is
+    /// [`crate::query::vector::indexing::DEFAULT_BATCH_SIZE`]; the
+    /// service-side [`crate::task::sweep_registry::SweepCoordinator`]
+    /// threads its configured default through this method on every
+    /// new driver it spawns.
+    pub fn with_batch_size(mut self, batch_size: usize) -> Self {
+        self.batch_size = batch_size.max(1);
         self
     }
 
@@ -126,6 +145,7 @@ impl VectorSweepDriver {
             cancellation: Some(self.cancel.as_ref()),
             max_retries: self.max_retries,
             retry_backoff_base_ms: self.retry_backoff_base_ms,
+            batch_size: self.batch_size,
         };
         let outcome = sweep_layer_vectors_with_options(layer, embedders, cache, &options);
         if let Some(record) = self.record.as_mut() {

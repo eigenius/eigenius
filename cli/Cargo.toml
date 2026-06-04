@@ -25,6 +25,12 @@ eigenius-julia = { path = "../crates/eigenius-julia" }
 eigenius-lean = { path = "../crates/eigenius-lean" }
 eigenius-runtime-substrate = { path = "../crates/runtime-substrate" }
 eigenius-config = { path = "../crates/eigenius-config" }
+# D43: BGE-small Candle embedder. Pulled in by the `serve` path so
+# `cmd_serve` can register a CandleEmbedder when `[embedder].enabled`
+# names it. The crate has its own `cuda` / `metal` features; this
+# manifest forwards them via the `cuda` / `metal` features below so
+# `cargo build -p eigenius-cli --features cuda` propagates correctly.
+eigenius-embedder-candle = { path = "../crates/eigenius-embedder-candle" }
 clap = { version = "4", features = ["derive", "env"] }
 futures = "0.3"
 humantime = "2"
@@ -33,3 +39,12 @@ tokio.workspace = true
 tonic.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[features]
+# Forwarded to `eigenius-embedder-candle`. Build the CLI with
+# `--features cuda` to ship a GPU-capable `eigenius serve` binary;
+# the binary still runs on CPU when `[embedder].device = "cpu"` or
+# the GPU isn't visible at runtime.
+default = []
+cuda = ["eigenius-embedder-candle/cuda"]
+metal = ["eigenius-embedder-candle/metal"]

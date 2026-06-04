@@ -38,9 +38,11 @@
 //! in the worker bootstrap.
 
 mod config;
+pub mod embedder;
 mod loader;
 pub mod substrate;
 
 pub use config::Config;
+pub use embedder::{DeviceSelection, EmbedderConfig};
 pub use loader::{Loader, LoaderError};
 pub use substrate::{DockerConfig, ImageConfig, LocalConfig, SubstrateConfig};

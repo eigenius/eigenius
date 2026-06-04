@@ -25,6 +25,15 @@ hf-hub = "0.4"
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
+[features]
+# Off by default — most consumers build CPU-only and `cargo build`
+# from a fresh checkout must not require CUDA. Enable with
+# `--features cuda` (or `--features metal`) on the consuming binary;
+# the Candle crates forward the flag to their cuda / metal backends.
+default = []
+cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
+
 [dev-dependencies]
 # Real-recall integration test against the GO corpus: convert via
 # obograph, load into a RocksDB-backed kernel layer, sweep with the

@@ -1,0 +1,99 @@
+# Eigenius Kernel Service — CUDA / GPU variant
+#
+# Same shape as `Dockerfile.kernel` but the CLI is compiled with
+# `--features cuda` so the linked `eigenius-embedder-candle` lights up
+# Candle's CUDA backend. The runtime stage uses NVIDIA's CUDA runtime
+# image so cuBLAS / cuDNN / driver-libs are available without bundling
+# them into the binary.
+#
+# Build (host needs CUDA 12.x toolchain available to the *runtime*
+# image consumer; the build stage carries its own toolkit):
+#
+#   docker buildx build \
+#     --file deploy/Dockerfile.kernel.gpu \
+#     --tag eigenius-kernel:local-gpu \
+#     .
+#
+# Run via `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`.
+# The compose override pins the kernel service to this image and
+# reserves a GPU on the host via nvidia-container-toolkit.
+
+# --- Build stage ---
+# `devel` image carries nvcc + the headers candle-kernels needs at
+# build time. ~5 GB image, downloaded once and cached.
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
+
+RUN apt-get update && apt-get install -y \
+        ca-certificates \
+        curl \
+        protobuf-compiler \
+        libclang-dev \
+        build-essential \
+        pkg-config \
+        && rm -rf /var/lib/apt/lists/*
+
+# Install rustup + the pinned toolchain. We match the CPU image's
+# Rust version family (1.95 / Bookworm) explicitly so toolchain
+# drift doesn't surprise the GPU build.
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --default-toolchain 1.95 --profile minimal --no-modify-path
+
+# Ensure nvcc / cuda libs are on the build PATH so candle-kernels'
+# build.rs can find them when it compiles the kernels.
+ENV PATH=/usr/local/cuda/bin:$PATH \
+    LIBRARY_PATH=/usr/local/cuda/lib64:$LIBRARY_PATH \
+    LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+
+ARG CARGO_PROFILE=release
+
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY .cargo/ .cargo/
+COPY kernel/ kernel/
+COPY crates/ crates/
+COPY sdk/ sdk/
+COPY storage/ storage/
+COPY cli/ cli/
+COPY proto/ proto/
+COPY ontologies/ ontologies/
+COPY julia/ julia/
+
+# Build the CLI binary with --features cuda so the linked embedder
+# embeds the CUDA backend. Same cache-mount discipline as the CPU
+# Dockerfile.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/target \
+    cargo build --profile ${CARGO_PROFILE} -p eigenius-cli --features cuda \
+    && mkdir -p /out \
+    && cp /build/target/${CARGO_PROFILE}/eigenius /out/eigenius
+
+# --- Runtime stage ---
+# `runtime` image (~1.6 GB) ships cuBLAS + driver libs but not nvcc,
+# which is fine — we built ahead of time.
+FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
+
+LABEL org.opencontainers.image.title="eigenius-kernel-gpu"
+LABEL org.opencontainers.image.description="Eigenius kernel gRPC server with CUDA-accelerated vector embeddings (Candle BGE-small)."
+LABEL org.opencontainers.image.source="https://github.com/eigenius/eigenius"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.vendor="Eigenius"
+LABEL org.opencontainers.image.documentation="https://github.com/eigenius/eigenius/tree/main/docs"
+
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /out/eigenius /usr/local/bin/eigenius
+
+EXPOSE 50051
+
+# Default the embedder to BGE-small on CUDA. Override at deploy time
+# via the same env vars (`EIGENIUS_EMBEDDER_*`) or by mounting a
+# different `eigenius.toml`.
+ENV EIGENIUS_ORCHESTRATOR_ENDPOINT="" \
+    EIGENIUS_EMBEDDER_ENABLED="bge-small-en-v1.5" \
+    EIGENIUS_EMBEDDER_DEVICE="cuda"
+
+ENTRYPOINT ["eigenius"]
+CMD ["serve", "--port", "50051"]

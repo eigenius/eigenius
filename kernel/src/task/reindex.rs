@@ -68,6 +68,7 @@ pub struct ReindexDriver {
     pub max_retries: u32,
     pub retry_backoff_base_ms: u64,
     pub in_flight_limit: u32,
+    pub batch_size: usize,
     record: Option<TaskRecord>,
 }
 
@@ -85,8 +86,17 @@ impl ReindexDriver {
             max_retries: DEFAULT_MAX_RETRIES,
             retry_backoff_base_ms: DEFAULT_RETRY_BACKOFF_BASE_MS,
             in_flight_limit: DEFAULT_IN_FLIGHT_LIMIT,
+            batch_size: crate::query::vector::indexing::DEFAULT_BATCH_SIZE,
             record: None,
         }
+    }
+
+    /// Override the `batch_size` passed to `reindex_chain`'s sweep.
+    /// `0` is clamped to `1`. Defaults to
+    /// [`crate::query::vector::indexing::DEFAULT_BATCH_SIZE`].
+    pub fn with_batch_size(mut self, batch_size: usize) -> Self {
+        self.batch_size = batch_size.max(1);
+        self
     }
 
     /// Attach an existing [`TaskRecord`]. Per the [`VectorSweepDriver`]
@@ -136,6 +146,7 @@ impl ReindexDriver {
             cancellation: Some(self.cancel.as_ref()),
             max_retries: self.max_retries,
             retry_backoff_base_ms: self.retry_backoff_base_ms,
+            batch_size: self.batch_size,
         };
         let outcome = reindex_chain(head, &self.target_index_iri, embedders, cache, &options);
         if let Some(record) = self.record.as_mut() {

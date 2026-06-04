@@ -48,6 +48,7 @@ impl EigeniusService {
 
         let outcome = {
             let ctx = ctx_arc.read().await;
+            let embedders_ref = self.embedders.as_ref();
             let runtime = query::evaluate::FiberRuntime {
                 index: Some(&index),
                 runtime: Some(&inst_runtime),
@@ -55,7 +56,7 @@ impl EigeniusService {
                 overlay: None,
                 ctx: Some(&ctx),
                 similarity: None,
-                embedders: None,
+                embedders: Some(embedders_ref),
                 embedding_cache: None,
                 vector_segment_cache: None,
             };

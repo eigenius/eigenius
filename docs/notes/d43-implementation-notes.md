@@ -144,16 +144,26 @@ The semantic recall test [`crates/eigenius-embedder-candle/tests/go_recall.rs`](
 
 **Recall@10 = 7/7 = 1.00.** Every paraphrased query (no word-overlap with the canonical GO term name) found the expected term in the top 10, most in the top 5. The test corpus was 1 007 GO Classes (the 7 gold-set targets + 1 000 random distractors with biomedical descriptions) under a flat `core:VectorIndex` strategy — the test measures embedder semantic quality, not HNSW behaviour (the HNSW story has its own bench).
 
-**Timing on CPU:**
+**Timing:**
 
 | Phase | Wall-clock |
 |---|---|
 | Obograph convert (52 032 Resources) | 0.23s |
-| Vector sweep (1 007 Resources embedded by Candle) | 162s |
-| Per-document embed (mean) | ~161ms |
-| Per-query embed + flat search (1 007 docs) | ~130ms |
+| Vector sweep, CPU per-text (baseline) | 162s |
+| Vector sweep, CPU batched at batch_size=32 | 326s |
+| Vector sweep, CUDA batched at batch_size=32 (RTX 4070) | **3.62s** |
+| Per-query embed + flat search (CPU) | ~130ms |
+| Per-query embed + flat search (CUDA) | ~30ms |
 
-The per-doc 161ms is well above the ~5-15ms BGE-small can hit with batched inference. The current `Embedder` trait does single-text inference (`embed(&self, text: &str)`); batched embed is the obvious follow-up the kernel's sweep would benefit from immediately. At 161ms × 52k = ~140 min for a full-GO sweep; batched at 16-32× would land it at 4-9 min.
+**The batched-sweep follow-up.** The `Embedder` trait grew an `embed_batch` method (default impl: per-text loop; `CandleEmbedder` overrides with a single batched BertModel forward pass). The sweep was restructured to dispatch in chunks of `SweepOptions::batch_size`.
+
+On **CUDA** (`cargo test -p eigenius-embedder-candle --features cuda ...`) the result is what the trait promised: a single forward pass over `[32, max_seq]` saturates the GPU's compute units, so the dispatch saving dwarfs every other cost. 162s → 3.62s — a 45× speedup over the per-text CPU baseline.
+
+On **CPU**, the batched path was actually ~2× *slower* (326s vs 162s) on this corpus. The cause is well-understood: `Tokenizer::encode_batch` uses `BatchLongest` padding, so each batch's forward cost is `[batch, max_seq] × hidden`. GO Class labels run from ~10 to a few hundred tokens, and a batch with one long member multiplies everyone's compute by an order of magnitude. CPU BLAS's batched-GEMM win (typically 2-5× on fixed-length batches) gets out-fought by that padding penalty. The single-text CPU path embeds each Resource at its own native length and avoids the waste entirely. The standard cure is length-bucketed batching (sort by `text.len()` then chunk so a batch's members are similar in length); that's tracked separately and would be the path to a fast CPU sweep on heterogeneous corpora without needing a GPU.
+
+Functionally the batched path is correct on both devices — round-trip parity is pinned by [`sweep_results_are_independent_of_batch_size`](../../kernel/src/query/vector/indexing.rs) and the recall@10 stays at 7/7. The intra-sweep deduplication contract that the cache supplied in the per-subject loop is preserved in the batched path explicitly (group cache-miss entries by text, dispatch each unique text once, fan out to peers). Cancellation responsiveness was tightened to also cover the case where cancel fires *during* the final batch's embed — the segment write is now gated on a post-batch cancel check so the cooperative-cancel contract holds regardless of batch size.
+
+GPU enablement is feature-flagged: `cargo build -p eigenius-embedder-candle --features cuda` (or `--features metal` on Apple Silicon). The `select_device()` helper attempts the accelerator and falls back to CPU with a `eprintln!` warning if the driver isn't present. The default build is CPU-only so a fresh checkout doesn't require CUDA toolchain to compile.
 
 For production scenarios where on-CPU embedding cost matters, the same crate can build with `--features cuda` or `--features metal` (Candle's GPU backends). The Embedder trait stays unchanged; only the constructor path differs. Multi-process / paid-API embedders (Cohere, OpenAI) plug in via the D6 IO envelope as before — Candle isn't the only option, just the recommended pure-Rust default.
 

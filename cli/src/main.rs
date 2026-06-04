@@ -1572,13 +1572,94 @@ async fn cmd_serve(port: u16, orchestrator: Option<&str>, db: Option<&str>) {
         std::sync::Arc<dyn eigenius_kernel::institution::runtime::Institution>,
     > = vec![eigenius_lean::LeanInstitution::arc()];
 
-    if let Err(e) =
-        eigenius_kernel::server::start_server(port, orchestrator, backend, in_process_institutions)
-            .await
+    // D43 §5.2 — load eigenius.toml's `[embedder]` section and
+    // construct any built-in embedders it names. Empty config
+    // means no embedders, no sweep coordinator; vector retrieval
+    // queries return errors (or no-ops) but the rest of the kernel
+    // works. `Loader::load` is the layered defaults→file→env→
+    // overrides path; failures here are configuration errors and
+    // the right move is to refuse to start (vs. silently dropping
+    // user-declared embedders).
+    let cfg = match eigenius_config::Loader::new().load() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("config load failed: {e}");
+            std::process::exit(1);
+        }
+    };
+    let embedder_cfg = build_embedder_startup(&cfg.embedder).unwrap_or_else(|e| {
+        eprintln!("[embedder] config error: {e}");
+        std::process::exit(1);
+    });
+
+    if let Err(e) = eigenius_kernel::server::start_server(
+        port,
+        orchestrator,
+        backend,
+        in_process_institutions,
+        embedder_cfg,
+    )
+    .await
     {
         eprintln!("Server error: {e}");
         std::process::exit(1);
     }
+}
+
+/// Build the kernel's [`EmbedderStartupConfig`] from a loaded
+/// [`eigenius_config::EmbedderConfig`]. Each entry in
+/// `cfg.enabled` names a built-in embedder kind; unknown names
+/// surface as an error so a typo in the config doesn't silently
+/// produce a service that lacks the embedders the operator asked
+/// for. Build-time device support is checked at the same time:
+/// `device = "cuda"` against a CPU-only binary errors immediately
+/// with a fix hint.
+///
+/// Currently supported kinds: `"bge-small-en-v1.5"` — BGE-small
+/// via Candle (D43 §5.4 / [eigenius-embedder-candle]).
+fn build_embedder_startup(
+    cfg: &eigenius_config::EmbedderConfig,
+) -> Result<eigenius_kernel::server::EmbedderStartupConfig, String> {
+    use eigenius_config::DeviceSelection;
+    // Reject `device = "cuda"` / `"metal"` when the binary lacks
+    // the corresponding feature, before the embedder constructor's
+    // `Device::new_cuda` call fails confusingly deep inside Candle.
+    match cfg.device {
+        DeviceSelection::Cuda if !cfg!(feature = "cuda") => {
+            return Err("device = \"cuda\" requires building eigenius-cli with \
+                 `--features cuda` (or `just build-gpu`)"
+                .into());
+        }
+        DeviceSelection::Metal if !cfg!(feature = "metal") => {
+            return Err(
+                "device = \"metal\" requires building eigenius-cli with `--features metal`".into(),
+            );
+        }
+        _ => {}
+    }
+
+    let mut embedders: Vec<std::sync::Arc<dyn eigenius_kernel::program::embedder::Embedder>> =
+        Vec::new();
+    for kind in &cfg.enabled {
+        match kind.as_str() {
+            "bge-small-en-v1.5" | "bge-small" => {
+                let e = eigenius_embedder_candle::CandleEmbedder::new_bge_small()
+                    .map_err(|e| format!("loading bge-small embedder: {e}"))?;
+                embedders.push(std::sync::Arc::new(e));
+            }
+            other => {
+                return Err(format!(
+                    "unknown embedder kind {other:?} in [embedder].enabled — \
+                     supported: [\"bge-small-en-v1.5\"]"
+                ));
+            }
+        }
+    }
+    Ok(eigenius_kernel::server::EmbedderStartupConfig {
+        embedders,
+        batch_size: cfg.batch_size,
+        fail_fast_on_missing_model: cfg.fail_fast_on_missing_model,
+    })
 }
 
 // --- Remote mode (gRPC client) ---

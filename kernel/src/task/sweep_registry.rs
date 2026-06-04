@@ -243,6 +243,13 @@ pub struct SweepCoordinator {
     /// `FiberRuntime::vector_segment_cache` reads from, so the
     /// sweep's HNSW build pays the cost once.
     segment_cache: Option<Arc<SegmentCache>>,
+    /// Default `batch_size` for the [`VectorSweepDriver`] this
+    /// coordinator spawns. Inherits
+    /// [`crate::query::vector::indexing::DEFAULT_BATCH_SIZE`] (32)
+    /// when not overridden. The service-side config layer
+    /// ([`eigenius_config::EmbedderConfig::batch_size`]) is the only
+    /// production caller; tests rely on the default.
+    default_batch_size: usize,
 }
 
 impl SweepCoordinator {
@@ -252,6 +259,7 @@ impl SweepCoordinator {
             embedders,
             cache,
             segment_cache: None,
+            default_batch_size: crate::query::vector::indexing::DEFAULT_BATCH_SIZE,
         }
     }
 
@@ -262,6 +270,15 @@ impl SweepCoordinator {
     /// segment instead of at sweep time.
     pub fn with_segment_cache(mut self, segment_cache: Arc<SegmentCache>) -> Self {
         self.segment_cache = Some(segment_cache);
+        self
+    }
+
+    /// Set the default `batch_size` for sweeps this coordinator
+    /// dispatches. `0` is clamped up to `1`. Affects every
+    /// [`Self::trigger_blocking`] / [`Self::trigger_async`] /
+    /// [`Self::trigger_reindex_blocking`] call thereafter.
+    pub fn with_default_batch_size(mut self, batch_size: usize) -> Self {
+        self.default_batch_size = batch_size.max(1);
         self
     }
 
@@ -294,7 +311,9 @@ impl SweepCoordinator {
             layer.id().clone(),
             now_millis(),
         );
-        let mut driver = VectorSweepDriver::new().with_record(record.clone());
+        let mut driver = VectorSweepDriver::new()
+            .with_batch_size(self.default_batch_size)
+            .with_record(record.clone());
         let cancel = driver.cancel_handle();
         let record_arc = Arc::new(RwLock::new(record));
         let handle = Arc::new(SweepHandle {
@@ -374,7 +393,9 @@ impl SweepCoordinator {
                 head.id().clone(),
                 now_millis(),
             );
-            let mut driver = ReindexDriver::new(target_iri.clone()).with_record(record.clone());
+            let mut driver = ReindexDriver::new(target_iri.clone())
+                .with_batch_size(self.default_batch_size)
+                .with_record(record.clone());
             let cancel = driver.cancel_handle();
             let record_arc = Arc::new(RwLock::new(record));
             let handle = Arc::new(SweepHandle {

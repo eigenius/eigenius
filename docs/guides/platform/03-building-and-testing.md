@@ -82,7 +82,45 @@ cargo component build
 
 The output lives at `target/wasm32-unknown-unknown/debug/<crate_name>.wasm`.
 
-## 3.6. Other recipes
+## 3.6. GPU acceleration for vector embeddings (optional)
+
+D43 vector retrieval ships [BGE-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) via [HuggingFace Candle](https://github.com/huggingface/candle), wired into the `eigenius serve` binary so the embedder pool registers at startup and the post-Load sweep fires automatically against any layer that declares a `core:VectorIndex` Resource. The default build is CPU-only and requires no extra toolchain. To opt into GPU inference:
+
+```bash
+just build-gpu      # CUDA — workspace + CLI with --features cuda
+just build-metal    # Apple Silicon equivalent
+cargo build-gpu     # alias for `cargo build -p eigenius-cli --features cuda`
+```
+
+`build-gpu` forwards `--features cuda` to `eigenius-embedder-candle`, which lights up Candle's CUDA backend (cuBLAS / cuDNN). The CPU-default workspace build is still produced first so unrelated crates don't grow a transitive CUDA dependency; only the CLI binary picks up the feature.
+
+Requirements on the host:
+
+- **CUDA build**: CUDA 12.x toolkit on `PATH` (`nvcc`), `libclang-dev` (for `bindgen`), and a matching NVIDIA driver visible to the build.
+- **Metal build**: macOS on Apple Silicon. No extra toolchain.
+
+The runtime device choice is independent of the build flag — set it in `eigenius.toml`:
+
+```toml
+[embedder]
+enabled = ["bge-small-en-v1.5"]
+device = "auto"      # auto | cpu | cuda | metal
+batch_size = 32
+fail_fast_on_missing_model = true
+```
+
+Or via env (`EIGENIUS_EMBEDDER_ENABLED`, `EIGENIUS_EMBEDDER_DEVICE`, `EIGENIUS_EMBEDDER_BATCH_SIZE`, `EIGENIUS_EMBEDDER_FAIL_FAST_ON_MISSING_MODEL`). Resolution order is defaults → file → env → construction overrides; the schema lives in [`crates/eigenius-config/src/embedder.rs`](../../../crates/eigenius-config/src/embedder.rs). `device = "auto"` (default) picks the accelerator the binary was compiled with and falls back to CPU on init failure; `device = "cpu"` forces CPU even on a CUDA build. The `select_device()` helper inside the embedder is what enforces this — see [`crates/eigenius-embedder-candle/src/lib.rs`](../../../crates/eigenius-embedder-candle/src/lib.rs).
+
+For deploying the GPU build in Docker (kernel image + `docker-compose.gpu.yml` override), see [chapter 5 — Running locally](05-running-locally.md).
+
+Measured speedup, 1 007 GO Class corpus, batch=32, RTX 4070 (see [docs/notes/d43-implementation-notes.md](../../notes/d43-implementation-notes.md) for the full table + caveats):
+
+| device | sweep | per-query |
+|---|---|---|
+| CPU, per-text | 162 s | ~130 ms |
+| **CUDA, batched** | **3.62 s** | **~30 ms** |
+
+## 3.7. Other recipes
 
 ```bash
 just generate           # regenerate protobuf types (requires `buf`)
@@ -102,7 +140,7 @@ The Docker recipes (`up`, `up-mock`, `down`) are the easiest way to get the full
 
 The single-command recipes (`compile`, `load`, `validate`) are convenience shortcuts for the most common ad-hoc commands; for everything else, drop to the `eigenius` CLI directly.
 
-## 3.7. Build artifact locations
+## 3.8. Build artifact locations
 
 | Artifact | Location |
 |---|---|
@@ -113,7 +151,7 @@ The single-command recipes (`compile`, `load`, `validate`) are convenience short
 | Deno-cached deps | `~/.cache/deno/` |
 | Docker images | local Docker daemon (`docker images | grep eigenius`) |
 
-## 3.8. Common build issues
+## 3.9. Common build issues
 
 The frequent culprits, in rough order of frequency:
 

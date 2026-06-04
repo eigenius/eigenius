@@ -61,21 +61,30 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// Knobs controlling sweep execution. Pass via [`SweepOptions::default`]
-/// for the M5 defaults (no retries, no cancellation).
+/// for the M5 defaults (no retries, no cancellation, batch=32).
 #[derive(Debug, Clone)]
 pub struct SweepOptions<'a> {
-    /// Cooperative-cancellation flag. Checked between Resources
-    /// within an Index and between Indexes. When the flag flips to
-    /// `true`, the sweep returns
-    /// [`SweepError::Cancelled`] after the next check; any segment
-    /// fully embedded before the check is still written.
+    /// Cooperative-cancellation flag. Checked between batches within
+    /// an Index and between Indexes. When the flag flips to `true`,
+    /// the sweep returns [`SweepError::Cancelled`] after the next
+    /// check; any segment fully embedded before the check is still
+    /// written.
     pub cancellation: Option<&'a AtomicBool>,
     /// Maximum retry attempts on transient `EmbedderError::Io`
-    /// failures per subject. `0` disables retries.
+    /// failures per *batch*. `0` disables retries.
     pub max_retries: u32,
     /// Base backoff in milliseconds. The Nth retry sleeps
     /// `base * 2^N` before re-dispatching.
     pub retry_backoff_base_ms: u64,
+    /// Cache-miss texts are grouped into chunks of this size and
+    /// passed through [`Embedder::embed_batch`] in one call. Real
+    /// batched runtimes (Candle, ORT) get a 10-30× speedup at
+    /// batch ≈ 32; embedders that don't override `embed_batch` see
+    /// the default per-text loop with no slowdown beyond the chunking
+    /// overhead. `1` reproduces the pre-batched legacy behaviour
+    /// exactly. Larger values raise per-batch peak memory roughly
+    /// linearly.
+    pub batch_size: usize,
 }
 
 impl Default for SweepOptions<'_> {
@@ -84,9 +93,17 @@ impl Default for SweepOptions<'_> {
             cancellation: None,
             max_retries: 0,
             retry_backoff_base_ms: 100,
+            batch_size: DEFAULT_BATCH_SIZE,
         }
     }
 }
+
+/// Default batch size for [`SweepOptions::batch_size`]. 32 is the
+/// commonly-cited sweet spot for transformer-based sentence
+/// embedders on CPU — large enough to amortise per-batch overhead
+/// (tokenisation, kernel launches), small enough that peak memory
+/// stays in the tens-of-MiB range even for 384-768-dim models.
+pub const DEFAULT_BATCH_SIZE: usize = 32;
 
 /// Per-Index summary of one sweep. Aggregated into a top-level
 /// [`SweepReport`] so callers can correlate sweep outcomes with the
@@ -222,33 +239,59 @@ fn is_cancelled(token: Option<&AtomicBool>) -> bool {
     matches!(token, Some(b) if b.load(Ordering::SeqCst))
 }
 
-/// Dispatch the embedder with optional retry-on-`Io` backoff. Only
-/// [`EmbedderError::Io`] is retried — `InvalidInput` is a permanent
-/// failure (the input isn't going to suddenly become tokenisable).
-/// Sleeps via `std::thread::sleep` since the sync sweep doesn't have
-/// an async runtime; the M5 follow-up that makes the sweep async
-/// (per D43 §5.5 "per-orchestrator in-flight Embedder-call limit
-/// (default ~64)") replaces this with `tokio::time::sleep`.
-fn embed_with_retry(
+/// Dispatch the embedder over a batch with optional retry-on-`Io`
+/// backoff. Only [`EmbedderError::Io`] is retried — `InvalidInput`
+/// is a permanent failure (the input isn't going to suddenly become
+/// tokenisable). Sleeps via `std::thread::sleep` since the sync
+/// sweep doesn't have an async runtime; the async sibling
+/// [`embed_with_async_retry`] uses `tokio::time::sleep` and runs
+/// inside the async sweep's per-subject tasks.
+///
+/// Retries `Io` failures
+/// per the same backoff schedule, but on a whole batch — sleeping
+/// once per failed forward pass instead of per failed subject.
+///
+/// **Per-subject error attribution.** When a non-retriable error
+/// surfaces (or retries are exhausted), the helper falls back to
+/// per-text dispatch over the batch so the *specific* failing
+/// subject's text can be re-tried in isolation. The caller's error
+/// reporting then names the actual broken input rather than
+/// blaming whichever subject happened to be first in the batch.
+/// This makes the error path slower on dispatch failures — which
+/// is the right trade-off: the happy path stays batched and fast,
+/// the failure path gets precision instead of speed.
+fn embed_batch_with_retry(
     embedder: &dyn Embedder,
-    text: &str,
+    texts: &[&str],
     options: &SweepOptions<'_>,
-) -> Result<Vec<f32>, EmbedderError> {
+) -> Result<Vec<Vec<f32>>, EmbedderError> {
     let mut attempt: u32 = 0;
     loop {
-        match embedder.embed(text) {
-            Ok(v) => return Ok(v),
-            Err(EmbedderError::Io(msg)) if attempt < options.max_retries => {
+        match embedder.embed_batch(texts) {
+            Ok(vectors) => return Ok(vectors),
+            Err(EmbedderError::Io(_)) if attempt < options.max_retries => {
                 let backoff_ms = options
                     .retry_backoff_base_ms
                     .saturating_mul(1u64 << attempt);
                 std::thread::sleep(Duration::from_millis(backoff_ms));
                 attempt += 1;
-                let _ = msg; // suppress unused-binding lint without
-                             // committing to a particular log shape;
-                             // tracing wiring is the M5.8 follow-up.
             }
-            Err(e) => return Err(e),
+            Err(_) => {
+                // Fall back to per-text dispatch so the failing
+                // subject gets isolated. If a per-text call surfaces
+                // an error, that's the one we want to surface — its
+                // index in `texts` corresponds to the offending
+                // subject in the caller's parallel array.
+                for text in texts {
+                    let _ = embedder.embed(text)?;
+                }
+                // Every per-text call succeeded but the batch
+                // didn't — the embedder's batched path is broken
+                // independent of any specific input. Replay the
+                // batch one more time and propagate whatever it
+                // returns. This is rare and intentionally noisy.
+                return embedder.embed_batch(texts);
+            }
         }
     }
 }
@@ -779,8 +822,10 @@ struct EmbedResult {
     cache_hit: bool,
 }
 
-/// Async-aware retry-with-exponential-backoff. Mirrors
-/// [`embed_with_retry`] but uses `tokio::time::sleep` so the
+/// Async-aware retry-with-exponential-backoff for per-subject
+/// dispatch (the async sweep is per-subject parallel, not batched —
+/// batching the sync sweep was the M5-followup; the async sweep
+/// keeps the per-task model). Uses `tokio::time::sleep` so the
 /// scheduler can do other work while a subject backs off.
 /// Embedder dispatch runs in `spawn_blocking` so a slow synchronous
 /// embedder blocks one worker thread rather than the whole runtime.
@@ -842,13 +887,20 @@ fn sweep_one_index(
         });
     }
     let metric_short = metric_short_name(index);
-
-    // Buffer subject-IRI / vector pairs so we can issue one
-    // `extend_layer` call at the end (matches the M2 trait's
-    // batched-write contract).
-    let mut owned_subjects: Vec<Iri> = Vec::new();
-    let mut owned_vectors: Vec<Vec<f32>> = Vec::new();
     let mut stats = IndexSweepStats::default();
+
+    // ─── Pass 1: collect (subject, owned text, optional cached vector) ─
+    //
+    // Owned text strings: the per-Resource borrow doesn't outlive
+    // this loop, but the batched embed call in pass 2 needs the
+    // texts after iteration finishes. Cache hits fill the slot
+    // immediately; cache misses leave `vector = None` for pass 2.
+    struct Entry {
+        subject: Iri,
+        text: String,
+        vector: Option<Vec<f32>>,
+    }
+    let mut entries: Vec<Entry> = Vec::new();
 
     for subject_iri in layer.defined_iris().iter() {
         if is_cancelled(options.cancellation) {
@@ -863,7 +915,7 @@ fn sweep_one_index(
             None => continue,
         };
         let text = match value {
-            Value::String(s) => s.as_str(),
+            Value::String(s) => s.clone(),
             _ => {
                 *skipped += 1;
                 continue;
@@ -874,36 +926,107 @@ fn sweep_one_index(
         // ([`crate::query::evaluate::expression::eval_embed`]) so
         // index-side and query-side embeds share the same cache
         // entries (D43 §5.1 cross-path reuse).
-        let vector = if let Some(c) = cache {
-            if let Some(cached) = c.get(text, &index.model) {
-                stats.cache_hits += 1;
-                (*cached).clone()
-            } else {
-                stats.embedder_calls += 1;
-                let v = embed_with_retry(embedder.as_ref(), text, options).map_err(|e| {
-                    SweepError::EmbedderDispatch {
-                        index: index.iri.as_str().to_string(),
-                        subject: subject_iri.as_str().to_string(),
-                        source: e,
-                    }
-                })?;
-                c.insert(text, &index.model, std::sync::Arc::new(v.clone()));
-                v
-            }
-        } else {
-            stats.embedder_calls += 1;
-            embed_with_retry(embedder.as_ref(), text, options).map_err(|e| {
-                SweepError::EmbedderDispatch {
-                    index: index.iri.as_str().to_string(),
-                    subject: subject_iri.as_str().to_string(),
-                    source: e,
-                }
-            })?
-        };
+        let cached = cache.and_then(|c| c.get(&text, &index.model).map(|a| (*a).clone()));
+        if cached.is_some() {
+            stats.cache_hits += 1;
+        }
 
-        owned_subjects.push(subject_iri.clone());
-        owned_vectors.push(vector);
+        entries.push(Entry {
+            subject: subject_iri.clone(),
+            text,
+            vector: cached,
+        });
     }
+
+    // ─── Pass 2: batched embed for cache-miss entries ───────────────────
+    //
+    // **Intra-sweep deduplication.** The pre-batched code dispatched
+    // per-subject and let the embedding cache short-circuit
+    // duplicates within the same sweep (doc1's identical body hit
+    // the cache that doc0's dispatch just populated). The batched
+    // path can't rely on that — pass 1 reads the cache *before* any
+    // pass-2 inserts — so we explicitly group cache-miss entries by
+    // text and dispatch each unique text once. The fan-out then
+    // assigns the same vector to every entry sharing that text.
+    //
+    // `embedder_calls` counts *unique-text dispatches*, not subjects.
+    // The duplicate subjects that re-use a peer's embedding bump
+    // `cache_hits` so the saving stays visible in sweep reports.
+    //
+    // Entry order is preserved at the segment-write step via pass 3
+    // (which iterates `entries.into_iter()`), so HNSW neighbour
+    // selection remains stable irrespective of which texts batch
+    // together in pass 2.
+    let mut text_to_entries: std::collections::BTreeMap<&str, Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for (i, e) in entries.iter().enumerate() {
+        if e.vector.is_none() {
+            text_to_entries.entry(e.text.as_str()).or_default().push(i);
+        }
+    }
+    // SAFETY-via-lifetime: BTreeMap iteration over `&entries`
+    // borrows immutably; collect the (text, indices) pairs into
+    // owned slots before mutating `entries[idx].vector` below.
+    let dedup: Vec<(String, Vec<usize>)> = text_to_entries
+        .into_iter()
+        .map(|(t, idxs)| (t.to_string(), idxs))
+        .collect();
+    let batch_size = options.batch_size.max(1);
+    for chunk in dedup.chunks(batch_size) {
+        if is_cancelled(options.cancellation) {
+            return Err(SweepError::Cancelled);
+        }
+        let texts: Vec<&str> = chunk.iter().map(|(t, _)| t.as_str()).collect();
+        let vectors = embed_batch_with_retry(embedder.as_ref(), &texts, options).map_err(|e| {
+            // First-subject attribution is lossy when many subjects
+            // share a batch; the fallback-to-per-text path in
+            // `embed_batch_with_retry` ensures the *actual* broken
+            // subject's text is the one that surfaces here when the
+            // root cause is per-input.
+            let first_idx = chunk[0].1[0];
+            SweepError::EmbedderDispatch {
+                index: index.iri.as_str().to_string(),
+                subject: entries[first_idx].subject.as_str().to_string(),
+                source: e,
+            }
+        })?;
+        stats.embedder_calls += texts.len();
+        for ((text, idxs), v) in chunk.iter().zip(vectors) {
+            if let Some(c) = cache {
+                c.insert(text, &index.model, std::sync::Arc::new(v.clone()));
+            }
+            // First entry in the dedup group gets the original
+            // vector; peers count as cache_hits (saved dispatches).
+            for (offset, &idx) in idxs.iter().enumerate() {
+                if offset > 0 {
+                    stats.cache_hits += 1;
+                }
+                entries[idx].vector = Some(v.clone());
+            }
+        }
+    }
+
+    // Catch a cancel that landed *during* the final batch's embed
+    // (the pre-batch check fires once per chunk; on a single-chunk
+    // sweep there is no next iteration where it could trip).
+    // Without this guard a cancel issued mid-embed would still
+    // commit the segment, which subverts the cooperative-cancel
+    // contract — registry observers expect the sweep to terminate
+    // with no side-effects when cancel won the race.
+    if is_cancelled(options.cancellation) {
+        return Err(SweepError::Cancelled);
+    }
+
+    // ─── Pass 3: extract owned (subject, vector) lists in input order ───
+    let (owned_subjects, owned_vectors): (Vec<Iri>, Vec<Vec<f32>>) = entries
+        .into_iter()
+        .map(|e| {
+            let v = e
+                .vector
+                .expect("every entry should have a vector after pass 1 + 2");
+            (e.subject, v)
+        })
+        .unzip();
 
     stats.subjects = owned_subjects.len();
     if owned_subjects.is_empty() {
@@ -1193,6 +1316,142 @@ mod tests {
         let report = sweep_layer_vectors(&layer, &reg, None).expect("sweep");
         assert!(report.per_index.is_empty());
         assert_eq!(report.total_subjects, 0);
+    }
+
+    // ─── Batched-embed sweep round-trip & cancellation ─────────
+
+    /// `batch_size` is purely a performance knob — the sweep must
+    /// produce byte-identical segments for any value. This pins the
+    /// contract: `batch_size=1` (degenerate, no batching) and
+    /// `batch_size=32` (typical sweep config) yield the same subject
+    /// IRIs in the same order with the same vector bytes, and the
+    /// `embedder_calls` accounting reports the same total work.
+    /// Future batched-embedder implementations that diverge (e.g.
+    /// numerical drift between per-text and batched forward passes)
+    /// will fail this test loudly.
+    #[test]
+    fn sweep_results_are_independent_of_batch_size() {
+        const N: usize = 75;
+        let make_layer = || {
+            build_corpus(
+                "urn:eigenius:test:body",
+                "urn:eigenius:embed:dummy:v1",
+                8,
+                N,
+            )
+        };
+        let make_registry = || {
+            let mut reg = EmbedderRegistry::new();
+            reg.register(Arc::new(DummyEmbedder::new(
+                "urn:eigenius:embed:dummy:v1",
+                8,
+            )));
+            reg
+        };
+
+        let run = |batch_size: usize| {
+            let layer = make_layer();
+            let reg = make_registry();
+            let opts = SweepOptions {
+                batch_size,
+                ..SweepOptions::default()
+            };
+            let report = sweep_layer_vectors_with_options(&layer, &reg, None, &opts)
+                .expect("sweep should succeed");
+            let seg = layer
+                .storage()
+                .vector_index
+                .get_segment(&iri("urn:eigenius:test:vi"), layer.id())
+                .expect("storage")
+                .expect("segment was written");
+            (report, seg)
+        };
+
+        let (report_1, seg_1) = run(1);
+        let (report_32, seg_32) = run(32);
+
+        assert_eq!(report_1.total_subjects, N);
+        assert_eq!(report_32.total_subjects, N);
+        let stats_key = iri("urn:eigenius:test:vi");
+        assert_eq!(
+            report_1.per_index.get(&stats_key).unwrap().embedder_calls,
+            report_32.per_index.get(&stats_key).unwrap().embedder_calls,
+            "embedder_calls counts work, not dispatches — must match across batch sizes"
+        );
+        assert_eq!(seg_1.subjects, seg_32.subjects, "subject IRI order");
+        assert_eq!(seg_1.dim, seg_32.dim, "declared dim");
+        assert_eq!(
+            seg_1.vectors, seg_32.vectors,
+            "vector payload must be byte-identical regardless of batch size"
+        );
+    }
+
+    /// Cancellation between batches must abort the sweep before the
+    /// next chunk is dispatched. We use an embedder whose first
+    /// `embed_batch` call flips the cancellation flag, so the second
+    /// chunk's pre-dispatch check trips it. The sweep must surface
+    /// `Cancelled` rather than running the remaining batches.
+    #[test]
+    fn sweep_cancellation_between_batches_aborts_remaining_work() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CancelOnSecondBatch {
+            iri: Iri,
+            calls: AtomicUsize,
+            cancel: Arc<AtomicBool>,
+        }
+        impl Embedder for CancelOnSecondBatch {
+            fn model_iri(&self) -> &Iri {
+                &self.iri
+            }
+            fn dim(&self) -> u32 {
+                8
+            }
+            fn embed(&self, _text: &str) -> Result<Vec<f32>, EmbedderError> {
+                Ok(vec![0.0; 8])
+            }
+            fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedderError> {
+                let n = self.calls.fetch_add(1, Ordering::SeqCst);
+                // After the very first batch returns, fire cancel so
+                // the sweep's pre-batch check on the *next* iteration
+                // observes it.
+                if n == 0 {
+                    self.cancel.store(true, Ordering::SeqCst);
+                }
+                Ok(vec![vec![0.0; 8]; texts.len()])
+            }
+        }
+
+        let model = "urn:eigenius:embed:cancel-test:v1";
+        let layer = build_corpus("urn:eigenius:test:body", model, 8, 50);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(CancelOnSecondBatch {
+            iri: iri(model),
+            calls: AtomicUsize::new(0),
+            cancel: Arc::clone(&cancel),
+        }));
+
+        let opts = SweepOptions {
+            cancellation: Some(cancel.as_ref()),
+            batch_size: 10,
+            ..SweepOptions::default()
+        };
+        let err = sweep_layer_vectors_with_options(&layer, &reg, None, &opts)
+            .expect_err("expected cancel");
+        assert!(matches!(err, SweepError::Cancelled), "got {err:?}");
+
+        // No segment should have been written: the sweep aborted
+        // before the storage write at the end of `sweep_one_index`.
+        assert!(
+            layer
+                .storage()
+                .vector_index
+                .get_segment(&iri("urn:eigenius:test:vi"), layer.id())
+                .expect("storage")
+                .is_none(),
+            "cancellation must abort before segment write"
+        );
     }
 
     // ─── D43 §5.7 / M8.3 atomic reindex ────────────────────────

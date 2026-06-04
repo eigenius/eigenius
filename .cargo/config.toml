@@ -1,0 +1,17 @@
+# Workspace-level cargo aliases.
+#
+# `cargo build-gpu` and `cargo build-metal` are convenience shorthands
+# for building the `eigenius-cli` binary with GPU support. They
+# forward to `eigenius-embedder-candle`'s `cuda` / `metal` features
+# via the CLI crate's feature passthrough.
+#
+# Both require the corresponding toolchain on the host:
+#   - build-gpu   → CUDA 12.x (`nvcc` on PATH, compatible driver)
+#   - build-metal → Apple Silicon
+#
+# These build only the CLI with the feature on; the rest of the
+# workspace builds in its CPU-default shape. To build everything at
+# once, use `just build-gpu` (or `just build-metal`).
+[alias]
+build-gpu = ["build", "-p", "eigenius-cli", "--features", "cuda"]
+build-metal = ["build", "-p", "eigenius-cli", "--features", "metal"]
