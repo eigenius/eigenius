@@ -141,4 +141,4 @@ Change any rule to reference `Contributor` negatively (or via a chain of negatio
 
 ---
 
-Next: **[10. Result format →](11-result-format.md)**
+Next: **[11. Result format →](11-result-format.md)**

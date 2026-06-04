@@ -286,4 +286,4 @@ The postfix Verdict predicate sits between primary and unary so that `NOT qc:che
 
 ---
 
-Next: **[7. FIBER clauses →](08-fiber-clauses.md)**
+Next: **[8. FIBER clauses →](08-fiber-clauses.md)**

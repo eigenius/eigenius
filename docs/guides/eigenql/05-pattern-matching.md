@@ -194,4 +194,4 @@ After this chain, the surviving bindings have all five variables populated and c
 
 ---
 
-Next: **[6. Expressions →](07-expressions.md)**
+Next: **[6. Text and vector retrieval →](06-text-and-vector-retrieval.md)**

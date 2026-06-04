@@ -214,4 +214,4 @@ To debug:
 
 ---
 
-Next: **[9. Stratification →](10-stratification.md)**
+Next: **[10. Stratification →](10-stratification.md)**

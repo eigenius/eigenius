@@ -286,4 +286,4 @@ When in doubt, start the query without `WHERE`, `GROUP BY`, or `ORDER BY`, and a
 
 ---
 
-Next: **[12. Appendix →](13-appendix.md)**
+Next: **[13. Appendix →](13-appendix.md)**
