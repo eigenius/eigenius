@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress. M1–M8 shipped; M9 majority shipped (worked example + life-science integration + user docs + implementation notes), benchmarks pending.
+All milestones shipped (June 2026). Benchmarks landed alongside the implementation notes; the v1 operating envelope is published in [d43-implementation-notes.md](../notes/d43-implementation-notes.md).
 
 | Milestone | Status |
 |---|---|
@@ -14,7 +14,7 @@ In progress. M1–M8 shipped; M9 majority shipped (worked example + life-science
 | M6 — HNSW addition | ✅ Shipped |
 | M7 — Similarity operator + hybrid retrieval | ✅ Shipped (post-surface-reset) |
 | M8 — Consolidation + atomic reindex | ✅ Shipped |
-| M9 — End-to-end validation | ⏳ Mostly shipped — benchmarks pending |
+| M9 — End-to-end validation | ✅ Shipped |
 
 M9 deliverable detail:
 
@@ -22,8 +22,8 @@ M9 deliverable detail:
 |---|---|---|
 | M9.1 D35 §7.4 worked example | ✅ Shipped | [d35_se_retrieval_worked_example.rs](../../kernel/tests/d35_se_retrieval_worked_example.rs) + D35 §7.4 rewrite |
 | M9.2 Life-science integration test | ✅ Shipped | [crates/eigenius-obograph](../../crates/eigenius-obograph/) + [d43_go_subset_integration.rs](../../crates/eigenius-obograph/tests/d43_go_subset_integration.rs) (real GO data, RocksDB backend) |
-| M9.3 HNSW benchmark | ⏳ Pending | Synthetic-vector recall test (algorithm-level) and semantic-recall test (needs real embedder) split — see implementation notes |
-| M9.4 Performance benchmarks | ⏳ Pending | criterion suite + numbers captured into implementation notes |
+| M9.3 HNSW benchmark | ✅ Shipped (algorithm-level) | [d43_hnsw_recall_bench.rs](../../kernel/tests/d43_hnsw_recall_bench.rs). m-sweep at N=10k confirms graph connectivity (not `ef`) is the recall constraint: m=16 → 0.72, m=32 → 0.93, m=48 → 0.89 (non-monotone — neighbour-pruning gap). Build time scales ~O(N²) above 10k; needs profiling. v1 recommendation: declare `vec_hnsw_m = 32` on VectorIndex Resources. Semantic-recall test still needs a real embedder. |
+| M9.4 Performance benchmarks | ✅ Shipped | [d43_perf_bench.rs](../../crates/eigenius-obograph/tests/d43_perf_bench.rs). Cold-start to queryable layer in ~2.3s for 52k GO Resources on RocksDB; 350-400ms per BM25 query (dominated by unfiltered MATCH scan); ~468 MiB net RSS. Numbers captured in implementation notes. |
 | M9.5 User documentation | ✅ Shipped | EigenQL guide [chapter 6](../guides/eigenql/06-text-and-vector-retrieval.md) + ESL guide [§4.4a](../guides/esl/04-declarations.md#44a-text_index-and-vector_index) |
 | M9.6 Implementation notes appendix | ✅ Shipped | [d43-implementation-notes.md](../notes/d43-implementation-notes.md) |
 
