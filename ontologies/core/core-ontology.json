@@ -18,6 +18,12 @@
     ]
   },
   {
+    "@id": "urn:eigenius:core:Resource",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Catch-all class for entities whose more specific class isn't asserted. Used by importers and other tooling for instances that need to participate in pattern matching without a domain-specific Class declaration — OBO `INDIVIDUAL` nodes, anonymous edge targets that no `nodes[]` entry covered, etc. Resource sits at the top of the class lattice as the universal supertype.",
+    "urn:eigenius:core:short_name": "Resource"
+  },
+  {
     "@id": "urn:eigenius:core:Property",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:description": "A property defines a named attribute that resources may carry. Properties declare their data_type and optional constraints (format, pattern, content type, class types).",
@@ -368,6 +374,13 @@
     "urn:eigenius:core:short_name": "source_irl",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:format": "urn:eigenius:core:formats:iri"
+  },
+  {
+    "@id": "urn:eigenius:core:deprecated",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Boolean flag indicating the resource is deprecated by its source authority. Set by importers when the upstream record carried a deprecation marker (OBO `meta.deprecated`, OWL `owl:deprecated`); the resource itself stays in the document for back-reference but downstream consumers can filter it out via a `WHERE NOT ?x.deprecated = true` style guard.",
+    "urn:eigenius:core:short_name": "deprecated",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:boolean"
   },
 
   {
@@ -824,5 +837,215 @@
     "urn:eigenius:core:short_name": "merge_record_restructure_affected_class",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:domain": ["urn:eigenius:core:MergeResolutionRecord"]
+  },
+
+  {
+    "@id": "urn:eigenius:core:TextIndex",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Declares that a target Property's values should be inverted-indexed for chain-aware BM25 retrieval (D43 §3.1). First-class Resource separate from the Property it targets so indexing decisions don't modify the data-model identity; per-deployment indexing of shared schemas; index lifecycle independent of Property lifecycle. Segments are keyed by the TextIndex IRI (not the target Property IRI) so divergent indexing configurations across branches stay storage-safe. v1 multiplicity constraint: at most one active (non-shadowed) TextIndex per target Property per chain head.",
+    "urn:eigenius:core:short_name": "TextIndex",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:target_property",
+      "urn:eigenius:core:text_analyzer"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:VectorIndex",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Declares that a target Property's values should be embedded under a named model and stored for chain-aware vector retrieval (D43 §3.1). First-class Resource separate from the Property it targets; segments are keyed by the VectorIndex IRI so model/strategy changes across branches stay storage-safe. v1 multiplicity constraint: at most one active (non-shadowed) VectorIndex per target Property per chain head. Updating any parameter that affects segment contents (model, dimensionality, distance, HNSW parameters) requires atomic reindex (D43 §5.7), mechanically expressed as a fresh VectorIndex Resource with a new IRI shadowing the prior one.",
+    "urn:eigenius:core:short_name": "VectorIndex",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:target_property",
+      "urn:eigenius:core:vec_model",
+      "urn:eigenius:core:vec_dim"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:vec_distance",
+      "urn:eigenius:core:vec_strategy",
+      "urn:eigenius:core:vec_hnsw_m",
+      "urn:eigenius:core:vec_hnsw_ef_construction",
+      "urn:eigenius:core:vec_embedding_policy"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:target_property",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The Property an Index Resource targets for indexing. The value is the IRI of a Property resource resolved through the visible chain at Load time. Shared by TextIndex and VectorIndex (an Index Resource of either kind references its target Property via this slot).",
+    "urn:eigenius:core:short_name": "target_property",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:TextIndex", "urn:eigenius:core:VectorIndex"]
+  },
+  {
+    "@id": "urn:eigenius:core:text_analyzer",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Names the analyzer that tokenises, lowercases, and stems property values for inverted indexing. v1 ships `en-stem-v1` (Unicode segmentation + lowercase + Porter English stem) and `en-no-stem` (Unicode segmentation + lowercase only). Additional analyzers are additive — registered analyzer IDs are validated at query time against the registry rather than at schema time, so no `allows_only` narrowing here. The analyzer ID is recorded in each segment's `text_stats` so the query-side analyzer matches the index-side analyzer.",
+    "urn:eigenius:core:short_name": "text_analyzer",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:TextIndex"]
+  },
+  {
+    "@id": "urn:eigenius:core:vec_model",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IRI of the Embedder Component (D43 §5.2) whose output dimensionality this index commits to. The kernel verifies at parse time that the IRI references a registered Embedder Component. No `class_types` narrowing here because Component definitions don't live in the core ontology (matching the merge_transformation pattern); validation happens at the Component registry, not at schema load.",
+    "urn:eigenius:core:short_name": "vec_model",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:VectorIndex"]
+  },
+  {
+    "@id": "urn:eigenius:core:vec_dim",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Declared output dimensionality of the embedder model. Statically declared on the VectorIndex Resource so EigenQL can type vector expressions at parse time without runtime probes. Must match the Embedder Component's declared output dimensionality (verified at parse).",
+    "urn:eigenius:core:short_name": "vec_dim",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 1,
+    "urn:eigenius:core:domain": ["urn:eigenius:core:VectorIndex"]
+  },
+  {
+    "@id": "urn:eigenius:core:DistanceMetric",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Names a distance metric used by the vector retrieval kernel. Each registered metric corresponds to a SIMD distance kernel in the kernel implementation. Instances of this class are loaded by the core ontology; v1 ships `cosine`, `l2`, `dot`.",
+    "urn:eigenius:core:short_name": "DistanceMetric",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:description",
+      "urn:eigenius:core:short_name"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:distances:cosine",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:DistanceMetric"],
+    "urn:eigenius:core:description": "Cosine similarity, mapped to a distance via `1 - cos(theta)`. Bounded in [0, 2] for unit vectors. The default for embedding workloads where vector magnitudes are not semantically meaningful.",
+    "urn:eigenius:core:short_name": "cosine"
+  },
+  {
+    "@id": "urn:eigenius:core:distances:l2",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:DistanceMetric"],
+    "urn:eigenius:core:description": "Euclidean (L2) distance. Appropriate when vector magnitudes carry signal.",
+    "urn:eigenius:core:short_name": "l2"
+  },
+  {
+    "@id": "urn:eigenius:core:distances:dot",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:DistanceMetric"],
+    "urn:eigenius:core:description": "Negative dot product (so larger means closer for consistent top-k ordering). Used when the embedder produces vectors whose dot product is calibrated to similarity.",
+    "urn:eigenius:core:short_name": "dot"
+  },
+  {
+    "@id": "urn:eigenius:core:vec_distance",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Distance metric used at index time (segment encoding) and at query time (VECTOR_NEAR / VECTOR_SIM). Fixed per VectorIndex; not overridable per call in v1. Default `urn:eigenius:core:distances:cosine` when omitted.",
+    "urn:eigenius:core:short_name": "vec_distance",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:DistanceMetric"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:core:distances:cosine",
+      "urn:eigenius:core:distances:l2",
+      "urn:eigenius:core:distances:dot"
+    ],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:VectorIndex"]
+  },
+  {
+    "@id": "urn:eigenius:core:VectorStrategy",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Names a per-segment search strategy. Each instance maps to a code path in the vector-index reader/writer. v1 ships `flat`, `hnsw`, `auto`; v2 extensions (IVF, quantisation) will land as additional instances without breaking the property's domain.",
+    "urn:eigenius:core:short_name": "VectorStrategy",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:description",
+      "urn:eigenius:core:short_name"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:strategies:flat",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:VectorStrategy"],
+    "urn:eigenius:core:description": "Always brute-force k-NN over the per-segment vector array. Exact results. Best for segments under ~50K vectors.",
+    "urn:eigenius:core:short_name": "flat"
+  },
+  {
+    "@id": "urn:eigenius:core:strategies:hnsw",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:VectorStrategy"],
+    "urn:eigenius:core:description": "Always HNSW (approximate nearest neighbour). Best for large segments (≥100K vectors). Returns approximate results with a configurable recall/cost tradeoff via `ef`.",
+    "urn:eigenius:core:short_name": "hnsw"
+  },
+  {
+    "@id": "urn:eigenius:core:strategies:auto",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:VectorStrategy"],
+    "urn:eigenius:core:description": "Build HNSW when a segment's vector count exceeds a configurable threshold (default ~50K), brute-force below it. The default for most workloads.",
+    "urn:eigenius:core:short_name": "auto"
+  },
+  {
+    "@id": "urn:eigenius:core:vec_strategy",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Per-segment search strategy for a VectorIndex. Default `urn:eigenius:core:strategies:auto` when omitted.",
+    "urn:eigenius:core:short_name": "vec_strategy",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:VectorStrategy"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:core:strategies:flat",
+      "urn:eigenius:core:strategies:hnsw",
+      "urn:eigenius:core:strategies:auto"
+    ],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:VectorIndex"]
+  },
+  {
+    "@id": "urn:eigenius:core:vec_hnsw_m",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "HNSW graph parameter: maximum number of connections per node per level. Higher M improves recall at the cost of build time and graph storage. Default 16 when omitted. Required to be consistent across all segments of a given VectorIndex (changing it requires the §5.7 atomic-reindex policy).",
+    "urn:eigenius:core:short_name": "vec_hnsw_m",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 2,
+    "urn:eigenius:core:domain": ["urn:eigenius:core:VectorIndex"]
+  },
+  {
+    "@id": "urn:eigenius:core:vec_hnsw_ef_construction",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "HNSW build-time exploration depth. Higher values improve graph quality (and therefore query-time recall at a given `ef`) at the cost of build time. Default 200 when omitted. Required to be consistent across all segments of a given VectorIndex.",
+    "urn:eigenius:core:short_name": "vec_hnsw_ef_construction",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 1,
+    "urn:eigenius:core:domain": ["urn:eigenius:core:VectorIndex"]
+  },
+  {
+    "@id": "urn:eigenius:core:EmbeddingPolicy",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Controls when the post-Load embedding sweep runs for a VectorIndex. v1 ships `eager_on_load` as the only implemented instance; `lazy_on_query` and `manual` are reserved instances for future revisions.",
+    "urn:eigenius:core:short_name": "EmbeddingPolicy",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:description",
+      "urn:eigenius:core:short_name"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:embedding_policies:eager_on_load",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:EmbeddingPolicy"],
+    "urn:eigenius:core:description": "The embedding sweep runs immediately after Layer commit, materialising vec_seg entries for the new content. v1 default.",
+    "urn:eigenius:core:short_name": "eager_on_load"
+  },
+  {
+    "@id": "urn:eigenius:core:embedding_policies:lazy_on_query",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:EmbeddingPolicy"],
+    "urn:eigenius:core:description": "Reserved for a future revision. Embedding deferred until query time, with per-resource materialisation on first access.",
+    "urn:eigenius:core:short_name": "lazy_on_query"
+  },
+  {
+    "@id": "urn:eigenius:core:embedding_policies:manual",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:EmbeddingPolicy"],
+    "urn:eigenius:core:description": "Reserved for a future revision. Embedding triggered only by explicit user action; useful for offline indexing workflows.",
+    "urn:eigenius:core:short_name": "manual"
+  },
+  {
+    "@id": "urn:eigenius:core:vec_embedding_policy",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Controls when the post-Load embedding sweep runs for this VectorIndex. Default `urn:eigenius:core:embedding_policies:eager_on_load` when omitted.",
+    "urn:eigenius:core:short_name": "vec_embedding_policy",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:EmbeddingPolicy"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:core:embedding_policies:eager_on_load",
+      "urn:eigenius:core:embedding_policies:lazy_on_query",
+      "urn:eigenius:core:embedding_policies:manual"
+    ],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:VectorIndex"]
   }
 ]

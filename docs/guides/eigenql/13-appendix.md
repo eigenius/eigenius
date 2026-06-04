@@ -1,6 +1,6 @@
 # 12. Appendix
 
-## 12.1. Grammar reference (EBNF)
+## 13.1. Grammar reference (EBNF)
 
 The authoritative grammar is [D2 §3](../../design/d2-eigenql-specification.md#3-parser-grammar-ebnf). This appendix summarizes it for quick reference and documents the Phase 11e.2 additions (qualified-name function calls).
 
@@ -78,7 +78,7 @@ ArgList           ::= (Expression (',' Expression)*)?
 
 **Notes on the form above**
 
-- `MatchPart` allows any interleaving of `USING` and `USING INSTITUTION` clauses — they're not ordered into two phases. `DefineBody` is the restricted form used in `DEFINE` rules: it permits `USING` but neither `USING INSTITUTION` nor `FIBER` (parser enforces this; see [chapter 9](09-stratification.md)).
+- `MatchPart` allows any interleaving of `USING` and `USING INSTITUTION` clauses — they're not ordered into two phases. `DefineBody` is the restricted form used in `DEFINE` rules: it permits `USING` but neither `USING INSTITUTION` nor `FIBER` (parser enforces this; see [chapter 10](10-stratification.md)).
 - `FIBER` uses `':'` between the institution reference and the query class, not `'.'`.
 - `WHERE` accepts a comma-separated expression list, all implicitly ANDed.
 - `ReturnClause`'s class spec has three forms: bracketed name list (possibly empty), a single bare name, or omitted entirely (braces directly after `RETURN`).
@@ -87,9 +87,9 @@ ArgList           ::= (Expression (',' Expression)*)?
 - `**` is parsed left-associatively in the current implementation despite the precedence table marking it right-associative; this is a known quirk — use parentheses when stacking exponentiation.
 - A bare `Identifier` in expression position evaluates to the identifier text as a string literal (used to pass shortnames as values, e.g., in `RETURN`).
 
-**Phase 11e.2 addition**: the `QualifiedName '(' ArgList ')'` alternative in `PrimaryExpr`. Qualified-name function calls dispatch through the institution registry at evaluate time — see [chapter 8](08-institutions.md).
+**Phase 11e.2 addition**: the `QualifiedName '(' ArgList ')'` alternative in `PrimaryExpr`. Qualified-name function calls dispatch through the institution registry at evaluate time — see [chapter 9](09-institutions.md).
 
-## 12.2. Keyword reference
+## 13.2. Keyword reference
 
 ### Structural keywords
 
@@ -111,7 +111,7 @@ ArgList           ::= (Expression (',' Expression)*)?
 
 None beyond the keywords. Short names (for classes, properties, variables) can be any non-keyword identifier.
 
-## 12.3. Built-in function reference
+## 13.3. Built-in function reference
 
 All case-sensitive UPPERCASE. Listed alphabetically.
 
@@ -129,7 +129,7 @@ All case-sensitive UPPERCASE. Listed alphabetically.
 | `SUM(expr)` | numeric Expression | Integer or Float | Sum over a group. Integer if all inputs integer and sum exact. |
 | `TIMESTAMP(s)` | String | String | Validate ISO 8601 datetime with timezone. Passes through on success. |
 
-## 12.4. Operator precedence table
+## 13.4. Operator precedence table
 
 From tightest (evaluated first) to loosest:
 
@@ -149,7 +149,7 @@ Note: `**` is conventionally right-associative in mathematics (so `2**3**2 = 2**
 
 Use parentheses when in doubt: `(?a + ?b) * ?c` vs `?a + (?b * ?c)`.
 
-## 12.5. Result-document IRIs
+## 13.5. Result-document IRIs
 
 | Constant | IRI |
 |---|---|
@@ -166,7 +166,7 @@ Use parentheses when in doubt: `(?a + ?b) * ?c` vs `?a + (?b * ?c)`.
 
 `<hash>` is 16 hex characters (first 8 bytes of SHA-256 over the query text).
 
-## 12.6. Institution dispatch quick reference
+## 13.6. Institution dispatch quick reference
 
 The kernel maintains two derived structures over the layer chain:
 
@@ -182,9 +182,9 @@ EigenQL classifies a `qualified_call` IRI against the index:
 | `Comorphism` | only inside FIBER param value coercion | `extract_typed → transformation Component → reify` four-step pipeline |
 | Class / property / built-in / aggregate | various | no institution call |
 
-See [chapter 8](08-institutions.md) for the full surface and [D14 §9](../../design/d14-institution-realisation.md) for the protocol.
+See [chapter 9](09-institutions.md) for the full surface and [D14 §9](../../design/d14-institution-realisation.md) for the protocol.
 
-## 12.7. Execution entry points
+## 13.7. Execution entry points
 
 From [`kernel/src/query/mod.rs`](../../../kernel/src/query/mod.rs):
 
@@ -221,14 +221,14 @@ pub struct FiberRuntime<'a> {
 - `ctx` is required for any institution-dispatched call.
 - `overlay` is populated automatically — pass `None`.
 
-## 12.8. Related documents
+## 13.8. Related documents
 
 - [D2 EigenQL specification](../../design/d2-eigenql-specification.md) — authoritative grammar and semantics
 - [D14 Institution Realisation](../../design/d14-institution-realisation.md) — institution-kernel interface (supersedes D10)
 - [D1 Eigon serialization format](../../design/d1-eigon-serialization-format.md) — resource/value model
 - [ESL user guide](../esl/README.md) — the other surface language
 
-## 12.9. Source index
+## 13.9. Source index
 
 All source references in the guide, collected here for easy navigation:
 

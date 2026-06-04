@@ -23,8 +23,11 @@ pub mod evaluate;
 pub mod functions;
 pub mod lexer;
 pub mod parser;
+pub mod rank;
 pub mod stratify;
+pub mod text;
 pub mod type_check;
+pub mod vector;
 
 use crate::layer::Layer;
 use crate::observability::{field, operation};

@@ -166,6 +166,17 @@ fn value_to_cbor(value: &Value) -> ciborium::Value {
         Value::Embedded(resource) => resource_to_cbor(resource),
         Value::Array(arr) => ciborium::Value::Array(arr.iter().map(value_to_cbor).collect()),
         Value::Json(v) => json_value_to_cbor(v),
+        // D43 §4.1 / §5: `Value::Vector` is a transient compute value
+        // (EMBED → VECTOR_NEAR / VECTOR_SIM within a single query).
+        // It must never reach canonical CBOR — vectors are persisted
+        // as `vec_seg:<I>:<L>` blobs per §2.4, not as inline property
+        // values. Reaching this arm is a programming-error invariant.
+        Value::Vector { model_iri, data } => panic!(
+            "Value::Vector is transient and must not reach canonical CBOR; \
+             model={}, dim={}",
+            model_iri.as_str(),
+            data.len()
+        ),
     }
 }
 

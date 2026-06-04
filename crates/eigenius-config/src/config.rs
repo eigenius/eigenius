@@ -14,6 +14,7 @@
 
 //! Top-level [`Config`] aggregating every subsystem schema.
 
+use crate::embedder::EmbedderConfig;
 use crate::substrate::SubstrateConfig;
 use serde::{Deserialize, Serialize};
 
@@ -28,4 +29,5 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct Config {
     pub substrate: SubstrateConfig,
+    pub embedder: EmbedderConfig,
 }

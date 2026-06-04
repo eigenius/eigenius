@@ -5,6 +5,24 @@ build: build-wasm
     cargo build --workspace
     cargo build --manifest-path orchestration/native/Cargo.toml
 
+# Build everything with CUDA support — same as `build` but the
+# `eigenius-cli` binary is compiled with `--features cuda`, which
+# forwards to `eigenius-embedder-candle/cuda` and lights up Candle's
+# CUDA backend. Requires a CUDA 12.x toolkit on PATH (`nvcc`) and a
+# compatible driver visible to the build. Runtime device choice is
+# still the `[embedder].device` knob in `eigenius.toml`.
+build-gpu: build-wasm
+    cargo build --workspace
+    cargo build -p eigenius-cli --features cuda
+    cargo build --manifest-path orchestration/native/Cargo.toml
+
+# Same shape as `build-gpu`, but uses Candle's Metal backend instead
+# of CUDA. Intended for Apple Silicon hosts.
+build-metal: build-wasm
+    cargo build --workspace
+    cargo build -p eigenius-cli --features metal
+    cargo build --manifest-path orchestration/native/Cargo.toml
+
 # Build WASM examples and copy fixtures for tests
 build-wasm:
     cd examples/wasm-cbor-echo && cargo component build

@@ -282,6 +282,12 @@ mod tests {
         fn triple_index_arc(&self) -> Arc<dyn crate::layer::TripleIndex> {
             self.inner.triple_index_arc()
         }
+        fn text_index_arc(&self) -> Arc<dyn crate::layer::TextIndex> {
+            self.inner.text_index_arc()
+        }
+        fn vector_index_arc(&self) -> Arc<dyn crate::layer::VectorIndex> {
+            self.inner.vector_index_arc()
+        }
         fn load_bloom(
             &self,
             layer: &crate::layer::LayerId,

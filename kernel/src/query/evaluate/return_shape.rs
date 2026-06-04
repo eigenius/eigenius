@@ -113,8 +113,6 @@ pub(super) fn sort_results(
 ) {
     resources.sort_by(|a, b| {
         for item in order_by {
-            // Try to evaluate the expression for each resource
-            // For now, handle variable references by looking at resource properties
             let val_a = extract_sort_value(a, &item.expression, fp);
             let val_b = extract_sort_value(b, &item.expression, fp);
 

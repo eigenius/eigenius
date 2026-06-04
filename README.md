@@ -544,6 +544,48 @@ just check        # fmt + clippy + deno lint
 just build-wasm
 ```
 
+### GPU acceleration for vector embeddings (optional)
+
+D43 vector retrieval ships [BGE-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) via [HuggingFace Candle](https://github.com/huggingface/candle), wired into the `eigenius serve` binary so the embedder pool is registered at startup and the post-Load sweep fires automatically against any layer that declares a `core:VectorIndex` Resource. The default build is CPU-only and requires no extra toolchain.
+
+To opt into GPU inference at build time:
+
+```bash
+just build-gpu      # CUDA — needs CUDA 12.x toolkit (`nvcc`) + matching driver
+just build-metal    # Apple Silicon
+cargo build-gpu     # equivalent cargo alias, builds the CLI only
+```
+
+Both forward `--features cuda` (or `metal`) to `eigenius-embedder-candle`. The `select_device()` helper inside the embedder probes the accelerator at construction and falls back to CPU with a stderr warning if the device isn't usable.
+
+At runtime, point the service at the embedder via [`eigenius.toml`](crates/eigenius-config/src/embedder.rs):
+
+```toml
+[embedder]
+enabled = ["bge-small-en-v1.5"]
+device = "auto"      # auto | cpu | cuda | metal — defaults to "auto"
+batch_size = 32
+fail_fast_on_missing_model = true   # refuse to start if a VectorIndex declares an embedder we don't ship
+```
+
+The same knobs are available as env vars (`EIGENIUS_EMBEDDER_ENABLED`, `EIGENIUS_EMBEDDER_DEVICE`, `EIGENIUS_EMBEDDER_BATCH_SIZE`, `EIGENIUS_EMBEDDER_FAIL_FAST_ON_MISSING_MODEL`) — env beats file, file beats schema defaults. With `enabled = []` (default), the service still starts but vector retrieval is unavailable; that's the right shape for deployments that only use text retrieval.
+
+For Docker, an opt-in GPU variant of the kernel image is in [`deploy/Dockerfile.kernel.gpu`](deploy/Dockerfile.kernel.gpu) and a matching compose override in [`docker-compose.gpu.yml`](docker-compose.gpu.yml) reserves a GPU on the host via nvidia-container-toolkit. Bring up the GPU-accelerated stack with:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml build
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
+
+Requirements: an NVIDIA driver, [`nvidia-container-toolkit`](https://github.com/NVIDIA/nvidia-container-toolkit) registered as a Docker runtime (verify with `docker info | grep -i nvidia`), and Docker Compose v2 (Engine ≥ 23). The first boot downloads the BGE-small model files (~130 MB) into a named volume so subsequent boots reuse them.
+
+Measured speedup, 1 007 GO Class corpus, batch=32, RTX 4070 (see [docs/notes/d43-implementation-notes.md](docs/notes/d43-implementation-notes.md) for full timings + caveats):
+
+| device | sweep | per-query |
+|---|---|---|
+| CPU, per-text | 162 s | ~130 ms |
+| **CUDA, batched** | **3.62 s** | **~30 ms** |
+
 ### CLI
 
 ```bash

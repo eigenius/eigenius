@@ -34,6 +34,7 @@ mod expression;
 mod fiber;
 mod pattern;
 mod return_shape;
+mod similarity;
 
 use crate::layer::Layer;
 use crate::ontology::resource::Resource;
@@ -63,6 +64,22 @@ pub fn evaluate(
     fp: &QueryFingerprint,
     runtime: FiberRuntime<'_>,
 ) -> Result<(Vec<Resource>, Vec<Resource>), QueryError> {
+    // D43 §6 — similarity-operator pre-pass: probe every active
+    // similarity index referenced by a `~` operator in the program,
+    // fuse the per-source rankings into a subject → score map, and
+    // hand the resulting context to per-row evaluation. The I/O
+    // cost is paid once per query, not once per row.
+    let similarity_ctx = similarity::SimilarityContext::new(
+        program,
+        layer,
+        runtime.embedders,
+        runtime.vector_segment_cache,
+    )?;
+    let runtime = FiberRuntime {
+        similarity: Some(&similarity_ctx),
+        ..runtime
+    };
+
     let mut derived: BTreeMap<String, Vec<Binding>> = BTreeMap::new();
 
     // 1. Evaluate DEFINE rules with seminaive fixpoint
@@ -139,14 +156,29 @@ pub fn evaluate(
         )?;
     }
 
-    // 4. RETURN shaping
-    let mut results = if program.query.result.is_empty() {
+    // D43 §3.3 — `TOP N` ranks the surviving bindings by their
+    // aggregate similarity score before RETURN shaping, then keeps
+    // the top N. Sorting before shaping is load-bearing: shaped
+    // resources project away the subject-IRI binding the score
+    // lookup needs. Stable sort + descending-score key keeps the
+    // ordering deterministic across runs.
+    if let Some(n) = program.query.top {
+        bindings.sort_by(|a, b| {
+            let sa = similarity_ctx.aggregate_score(a);
+            let sb = similarity_ctx.aggregate_score(b);
+            sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        bindings.truncate(n);
+    }
+
+    // 4. RETURN shaping.
+    let mut results: Vec<Resource> = if program.query.result.is_empty() {
         bindings
             .iter()
             .map(|b| binding_to_resource(b, &program.query.result_classes))
             .collect()
     } else {
-        let mut resources = Vec::new();
+        let mut out = Vec::with_capacity(bindings.len());
         for binding in &bindings {
             let resource = shape_result(
                 binding,
@@ -156,9 +188,9 @@ pub fn evaluate(
                 fp,
                 runtime_with_overlay,
             )?;
-            resources.push(resource);
+            out.push(resource);
         }
-        resources
+        out
     };
 
     // 5. DISTINCT

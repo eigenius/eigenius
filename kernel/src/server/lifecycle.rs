@@ -288,6 +288,38 @@ const REMOTE_COMPONENTS: &[&str] = &[
     "urn:eigenius:program:components:HttpRequest",
 ];
 
+/// Embedder-side configuration handed to [`start_server`] by the
+/// orchestrator. Kept here (not in `eigenius-config`) so the kernel
+/// crate stays config-crate-independent — the CLI's `cmd_serve`
+/// translates the loaded TOML into this struct at the call site.
+pub struct EmbedderStartupConfig {
+    /// Constructed embedders, ready to register. Empty → no
+    /// embedders → vector retrieval is unavailable; the service
+    /// still starts unless `fail_fast_on_missing_model` is set and
+    /// the bootstrap/rehydrated head declares an active VectorIndex.
+    pub embedders: Vec<Arc<dyn crate::program::embedder::Embedder>>,
+    /// Per-sweep batch size — [`crate::query::vector::indexing::DEFAULT_BATCH_SIZE`]
+    /// if unsure. Forwarded to every
+    /// [`crate::task::sweep::VectorSweepDriver`] the
+    /// [`crate::task::sweep_registry::SweepCoordinator`] spawns.
+    pub batch_size: usize,
+    /// If `true`, the service refuses to start when the
+    /// bootstrap/rehydrated head declares any active VectorIndex
+    /// Resource whose `vec_model` IRI is not in `embedders`. If
+    /// `false`, missing models surface at query time.
+    pub fail_fast_on_missing_model: bool,
+}
+
+impl Default for EmbedderStartupConfig {
+    fn default() -> Self {
+        Self {
+            embedders: Vec::new(),
+            batch_size: crate::query::vector::indexing::DEFAULT_BATCH_SIZE,
+            fail_fast_on_missing_model: true,
+        }
+    }
+}
+
 /// Start the gRPC server on the given port.
 ///
 /// If `orchestrator_endpoint` is provided, remote components are registered
@@ -296,11 +328,16 @@ const REMOTE_COMPONENTS: &[&str] = &[
 /// If `backend` is `Some`, the server runs in durable mode: layers, traces
 /// and WASM capabilities survive restart. An empty backend is seeded with
 /// the embedded ontologies; a populated one is rehydrated. See D13.
+///
+/// `embedders` carries the registered Embedder Components (D43 §5.2);
+/// pass [`EmbedderStartupConfig::default`] (empty) when vector
+/// retrieval isn't wanted.
 pub async fn start_server(
     port: u16,
     orchestrator_endpoint: Option<&str>,
     backend: Option<Arc<dyn crate::storage::PersistentBackend>>,
     in_process_institutions: Vec<Arc<dyn crate::institution::runtime::Institution>>,
+    embedders: EmbedderStartupConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("0.0.0.0:{port}").parse()?;
 
@@ -359,6 +396,24 @@ pub async fn start_server(
         service = service.with_orchestrator_client(client);
     }
 
+    // D43 §5.2 — install the configured embedder pool. The
+    // coordinator wraps the registry; subsequent post-Load sweeps
+    // dispatch through it. Empty pool = no coordinator installed, and
+    // the `didPersist` hook becomes a no-op.
+    if !embedders.embedders.is_empty() {
+        let mut registry = crate::program::embedder::EmbedderRegistry::new();
+        for e in embedders.embedders {
+            tracing::info!(
+                { field::OPERATION } = operation::CAPABILITY_INSTALL,
+                model_iri = %e.model_iri(),
+                dim = e.dim(),
+                "registered embedder"
+            );
+            registry.register(e);
+        }
+        service = service.with_embedders(registry, embedders.batch_size);
+    }
+
     // On a persistent backend, walk the rehydrated chain and
     // re-register every WASM capability it finds. Institutions go
     // through `register_rehydrated` (doesn't re-publish classes).
@@ -399,6 +454,39 @@ pub async fn start_server(
         .expect("default branch context");
     let head = Arc::clone(ctx_arc.read().await.head());
     service.rebuild_institution_index(&head).await;
+
+    // D43 §5.2 — fail-fast: refuse to start if any active VectorIndex
+    // Resource visible at the bootstrap / rehydrated head declares a
+    // `vec_model` IRI for which no embedder is registered. A service
+    // that quietly runs without the embedders its schema declares
+    // would be a silent correctness regression; better to error
+    // loudly at startup than at first query. Opt out via
+    // `fail_fast_on_missing_model = false` in `[embedder]` config.
+    if embedders.fail_fast_on_missing_model {
+        let active = crate::layer::resolve_active_vector_indexes(&head);
+        let missing: Vec<String> = active
+            .iter()
+            .filter(|a| service.embedders.get(&a.model).is_none())
+            .map(|a| format!("{} (requires {})", a.iri, a.model))
+            .collect();
+        if !missing.is_empty() {
+            let msg = format!(
+                "fail-fast: {} active VectorIndex Resource(s) declare embedder \
+                 model(s) that aren't registered: [{}]. \
+                 Add entries to `[embedder].enabled` in your eigenius.toml, \
+                 or set `fail_fast_on_missing_model = false` to defer the \
+                 check to query time.",
+                missing.len(),
+                missing.join("; ")
+            );
+            tracing::error!(
+                { field::OPERATION } = operation::SERVER_START,
+                { field::ERROR_KIND } = "missing_embedder",
+                "{msg}"
+            );
+            return Err(msg.into());
+        }
+    }
 
     // Background task resume sweep (D21 §6). Runs detached so the
     // gRPC listener is available immediately; clients can poll

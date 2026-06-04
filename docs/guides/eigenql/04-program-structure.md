@@ -101,7 +101,7 @@ Ancestor(?y) { "urn:eigenius:test:reports_to": ?z }
 
 Multiple rules may define the same relation. Their bindings union. The ancestor example in [chapter 2 §2.4](02-quick-tour.md) uses two rules — a base case and a recursive step.
 
-**Recursion** is allowed through positive dependencies only. If a `DEFINE` body negates a relation that transitively depends on the rule's head, **stratification fails**. See [chapter 9](09-stratification.md).
+**Recursion** is allowed through positive dependencies only. If a `DEFINE` body negates a relation that transitively depends on the rule's head, **stratification fails**. See [chapter 10](10-stratification.md).
 
 **Fiber restriction**: `DEFINE` bodies **cannot** contain `FIBER` clauses. The rule-fixpoint evaluator has no overlay context, so institution dispatch is disallowed by both the parser (`parse_match_part(allow_fiber=false)`) and the evaluator (defensive check in [`evaluate_match_part`](../../../kernel/src/query/evaluate.rs)).
 
@@ -149,7 +149,7 @@ FIBER assay:validate_prediction {
 **What happens at evaluation** (D14 §9):
 
 1. Resolve the QueryClass in the [`InstitutionIndex`](../../../kernel/src/institution/registry.rs); confirm `OnDemand` is in its `dispatch_role` set.
-2. Build an input resource of class `QueryClass.query_class` with each param's value filled in. Comorphism-coerced param values run the four-step extract → transform → reify pipeline (D14 §9.3).
+2. Build an input resource of class `QueryClass.query_class` with each param's value filled in. Comorphism-coerced param values run the four-step extract → transform → reify pipeline (D14 §10.3).
 3. Look up the QueryClass's `institution_ref` in the [`InstitutionRuntime`](../../../kernel/src/institution/runtime.rs) and call `Institution::query(query_handler, input, ctx)`.
 4. Stamp the response with a deterministic transient IRI and attach it to the `FiberOverlay`.
 5. Extend the binding with the AS-named variable → the response IRI (as a `Value::String`).
@@ -166,7 +166,7 @@ Subsequent `MATCH` clauses can pattern-match against the response through the ov
 - `comorphism_coercion_class_mismatch` if a comorphism coercion's `to_class` doesn't satisfy the FIBER input class for that property
 - `comorphism_io_not_supported_in_v1` if a comorphism's transformation Component requires `IO` capability
 
-Full FIBER semantics: [chapter 7](07-fiber-clauses.md).
+Full FIBER semantics: [chapter 8](08-fiber-clauses.md).
 
 ## 4.7. `WHERE` — condition filter
 
@@ -180,7 +180,7 @@ WhereClause ::= 'WHERE' Expression
 WHERE ?age > 18 AND ?country = "DE"
 ```
 
-The expression grammar is a full operator precedence hierarchy (see [chapter 6](06-expressions.md)). Aggregates are not permitted in `WHERE` — the type checker rejects them with `aggregate_in_where`.
+The expression grammar is a full operator precedence hierarchy (see [chapter 7](07-expressions.md)). Aggregates are not permitted in `WHERE` — the type checker rejects them with `aggregate_in_where`.
 
 **Decidable QueryClass predicates** (D14):
 
@@ -211,7 +211,7 @@ RETURN [Prediction, AssayResult] {
 
 - The class list (between `[` and `]`) becomes the `is_a` array on each result row.
 - Each `ReturnItem` is a name-expression pair. The expression is evaluated against the binding to produce a value.
-- Name resolution: a `FullIri` is used verbatim as the property IRI; a `ShortName` is mapped to a synthesized per-query property IRI via [`QueryFingerprint::row_property_iri`](../../../kernel/src/query/document.rs). This keeps every query's result shape self-describing (see [chapter 10](10-result-format.md)).
+- Name resolution: a `FullIri` is used verbatim as the property IRI; a `ShortName` is mapped to a synthesized per-query property IRI via [`QueryFingerprint::row_property_iri`](../../../kernel/src/query/document.rs). This keeps every query's result shape self-describing (see [chapter 11](11-result-format.md)).
 - Aggregate expressions (see §4.9) are only permitted when `GROUP BY` is present or when the entire query has no non-aggregate return items.
 
 **Empty return** (`RETURN [] {}`) produces a guard-style result — one empty row per binding. Useful for counting or existence checks.
@@ -239,21 +239,23 @@ RETURN [] {
 - Every non-aggregate expression in `RETURN` must appear verbatim in `GROUP BY`.
 - If `RETURN` contains only aggregates (and class tags), `GROUP BY` may be empty — the entire binding set is one group.
 
-## 4.10. `ORDER BY`, `LIMIT`, `OFFSET`, `DISTINCT`
+## 4.10. `ORDER BY`, `LIMIT`, `TOP`, `OFFSET`, `DISTINCT`
 
 ```
 OrderByClause ::= 'ORDER' 'BY' OrderItem (',' OrderItem)*
 OrderItem    ::= Expression ('ASC' | 'DESC')?
 LimitClause  ::= 'LIMIT' integer
+TopClause    ::= 'TOP' integer
 OffsetClause ::= 'OFFSET' integer
 ```
 
 - **`DISTINCT`** (just the keyword, no argument) deduplicates result rows after `RETURN` shaping.
 - **`ORDER BY`** sorts the result resources by the given expressions; default direction is `ASC`. Mixed `ASC`/`DESC` per column supported.
 - **`OFFSET n`** skips the first `n` rows.
-- **`LIMIT n`** truncates to `n` rows.
+- **`LIMIT n`** truncates to `n` rows — un-ranked structural cutoff.
+- **`TOP n`** truncates to `n` rows by **similarity ranking** when the query contains `~` operators (D43). Mutually exclusive with `LIMIT` and `ORDER BY`; requires at least one `~` in `WHERE`. See [chapter 6 §6.5](06-text-and-vector-retrieval.md#65-top-n--ranked-truncation) for the full surface and the typecheck rules.
 
-Evaluation order: `RETURN` shape → `DISTINCT` → `ORDER BY` → `OFFSET` → `LIMIT`.
+Evaluation order: `RETURN` shape → `DISTINCT` → `ORDER BY` → `OFFSET` → `LIMIT`. The `TOP` reordering happens earlier — between GROUP BY and RETURN shaping — because it sorts by the per-binding similarity score before the binding-to-resource projection drops the subject IRI needed for the score lookup.
 
 ## 4.11. Typical clause order
 
@@ -269,13 +271,14 @@ MATCH ...      -- one or more clauses, interleaved with FIBER
 FIBER ...
 MATCH ...
 
-WHERE ...      -- optional
+WHERE ...      -- optional, may contain `~` similarity operators (chapter 13)
 
 GROUP BY ...   -- optional
 RETURN [...] { ... }
 
-ORDER BY ...
-LIMIT n
+ORDER BY ...   -- mutually exclusive with TOP
+LIMIT n        -- mutually exclusive with TOP
+TOP n          -- mutually exclusive with LIMIT + ORDER BY; requires ~ in WHERE
 OFFSET m
 DISTINCT
 ```

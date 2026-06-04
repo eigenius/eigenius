@@ -18,12 +18,15 @@
 //! Checks variable binding, USING resolution, and aggregate/GROUP BY consistency.
 
 use crate::institution::registry::{DispatchRole, InstitutionIndex};
-use crate::layer::Layer;
+use crate::layer::{
+    resolve_active_text_indexes, resolve_active_vector_indexes, ActiveTextIndex, ActiveVectorIndex,
+    Layer,
+};
 use crate::ontology::iri::Iri;
 use crate::ontology::well_known as wk;
 use crate::query::ast::*;
 use crate::query::error::QueryError;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Type-check a parsed EigenQL program against a layer.
 ///
@@ -80,12 +83,20 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
         check_verdict_in_expression(&item.expression, &verdict_vars, &index, &mut errors);
     }
 
-    // Collect all bound variables from MATCH patterns
+    // Collect all bound variables from MATCH / FIBER / BIND across
+    // the whole program. This is the "everything bound" set used by
+    // the RETURN / ORDER BY / TOP K BY / GROUP BY check, where
+    // textual order within the WHERE list doesn't matter.
     let bound_vars = collect_bound_variables(program);
 
-    // Check variables used in WHERE are bound
+    // Check variables used in WHERE are bound.
     for condition in &program.query.body.conditions {
         check_expression_variables(condition, &bound_vars, &mut errors);
+    }
+    for def in &program.definitions {
+        for condition in &def.body.conditions {
+            check_expression_variables(condition, &bound_vars, &mut errors);
+        }
     }
 
     // Check variables used in RETURN are bound
@@ -106,7 +117,108 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     // Check aggregate/GROUP BY consistency
     check_aggregate_consistency(program, &mut errors);
 
+    // D43 §4.3 / §4.4 — similarity operator typing rules. Walks
+    // every expression position that can contain a `~` (WHERE,
+    // RETURN, GROUP BY, ORDER BY, and rule bodies' WHERE) and
+    // checks the LHS is property-bound, the property has an active
+    // similarity index of the kind required by `via:` (or any kind
+    // by default), and the hint set is internally consistent.
+    let prop_var_index = build_property_variable_index(program, layer);
+    let text_indexes = resolve_active_text_indexes(layer);
+    let vector_indexes = resolve_active_vector_indexes(layer);
+    let check_in_expr = |expr: &Expression, errs: &mut Vec<QueryError>| {
+        check_similarity(
+            expr,
+            &prop_var_index,
+            &text_indexes,
+            &vector_indexes,
+            layer,
+            errs,
+        );
+    };
+    for cond in &program.query.body.conditions {
+        check_in_expr(cond, &mut errors);
+    }
+    for item in &program.query.result {
+        check_in_expr(&item.expression, &mut errors);
+    }
+    for expr in &program.query.group_by {
+        check_in_expr(expr, &mut errors);
+    }
+    for item in &program.query.order_by {
+        check_in_expr(&item.expression, &mut errors);
+    }
+    for def in &program.definitions {
+        for cond in &def.body.conditions {
+            check_in_expr(cond, &mut errors);
+        }
+    }
+
+    // D43 §3.3 — TOP K structural rules.
+    //
+    //   1. TOP is mutually exclusive with LIMIT (different surfaces:
+    //      LIMIT is un-ranked truncation, TOP is similarity-ranked).
+    //   2. TOP is mutually exclusive with ORDER BY (ranking comes
+    //      from the similarity score, not a user expression).
+    //   3. TOP requires at least one similarity operator in WHERE —
+    //      without `~`, ranking has no source.
+    //   4. TOP N requires N > 0.
+    if let Some(n) = program.query.top {
+        if n == 0 {
+            errors.push(QueryError::type_check(
+                "top_must_be_positive",
+                "TOP N requires N to be a positive integer".to_string(),
+            ));
+        }
+        if program.query.limit.is_some() {
+            errors.push(QueryError::type_check(
+                "top_with_limit",
+                "TOP and LIMIT are mutually exclusive — use TOP for similarity-ranked truncation and LIMIT for un-ranked truncation".to_string(),
+            ));
+        }
+        if !program.query.order_by.is_empty() {
+            errors.push(QueryError::type_check(
+                "top_with_order_by",
+                "TOP and ORDER BY are mutually exclusive — TOP draws its ordering from the similarity score".to_string(),
+            ));
+        }
+        if !any_similarity_in_where(&program.query.body) {
+            errors.push(QueryError::type_check(
+                "top_without_similarity",
+                "TOP N requires at least one `~` similarity operator in WHERE (use LIMIT for un-ranked truncation)".to_string(),
+            ));
+        }
+    }
+
     errors
+}
+
+/// Walk a MatchPart's WHERE conditions looking for a `~` operator
+/// anywhere — including under boolean combinators and other nested
+/// expressions. Used by the TOP K structural check to ensure ranking
+/// has a source.
+fn any_similarity_in_where(part: &MatchPart) -> bool {
+    part.conditions.iter().any(expr_has_similarity)
+}
+
+fn expr_has_similarity(expr: &Expression) -> bool {
+    match expr {
+        Expression::Similarity { .. } => true,
+        Expression::Binary { left, right, .. } => {
+            expr_has_similarity(left) || expr_has_similarity(right)
+        }
+        Expression::Unary { operand, .. } | Expression::VerdictPredicate { operand, .. } => {
+            expr_has_similarity(operand)
+        }
+        Expression::FunctionCall { args, .. } => args.iter().any(expr_has_similarity),
+        Expression::Aggregate { arg, .. } => expr_has_similarity(arg),
+        Expression::Array(es) => es.iter().any(expr_has_similarity),
+        Expression::Object(pairs) => pairs.iter().any(|(_, v)| expr_has_similarity(v)),
+        Expression::Literal(_)
+        | Expression::Variable(_)
+        | Expression::NotExists(_)
+        | Expression::DotPath { .. } => false,
+    }
 }
 
 /// Check a MatchPart: validate USING IRIs resolve to classes.
@@ -133,7 +245,11 @@ fn check_match_part(part: &MatchPart, layer: &Layer, errors: &mut Vec<QueryError
     }
 }
 
-/// Collect all variable names bound in MATCH patterns across the program.
+/// Collect every variable name bound by MATCH patterns, FIBER
+/// clauses, and `BIND` items across the program. The result is the
+/// universe of bindings visible to RETURN / ORDER BY / TOP K BY /
+/// GROUP BY positions.
+///
 fn collect_bound_variables(program: &Program) -> BTreeSet<String> {
     let mut vars = BTreeSet::new();
 
@@ -240,6 +356,20 @@ fn check_expression_variables(
             for (_, value) in pairs {
                 check_expression_variables(value, bound, errors);
             }
+        }
+        Expression::Similarity {
+            property, query, ..
+        } => {
+            if !bound.contains(&property.name) {
+                errors.push(QueryError::type_check(
+                    "unbound_variable",
+                    format!(
+                        "similarity LHS '?{}' is not bound in any MATCH pattern",
+                        property.name
+                    ),
+                ));
+            }
+            check_expression_variables(query, bound, errors);
         }
         Expression::Literal(_) => {}
     }
@@ -793,7 +923,8 @@ fn check_verdict_typing(
     index: &InstitutionIndex,
     errors: &mut Vec<QueryError>,
 ) {
-    for cond in &part.conditions {
+    for item in &part.conditions {
+        let cond = item;
         // Top-level WHERE expression: must NOT itself be a Verdict
         // source (forces explicit projection).
         check_boolean_position(cond, verdict_vars, index, errors);
@@ -936,13 +1067,365 @@ fn query_class_name_display(name: &Name) -> String {
     }
 }
 
+// ─── D43 §4 — similarity-operator typing ─────────────────────────────
+
+/// Schema view a similarity call needs: which property a variable
+/// was bound to. Reused from the deleted D43 §4.6 retrieval-primitive
+/// pass — same shape, smaller surface.
+struct PropertyBinding {
+    property_iri: Iri,
+}
+
+/// Walk every MATCH pattern in the program and build the
+/// `variable → property_iri` map. Property variables bound by
+/// rule-derived patterns are included too — the rule's body is
+/// typed against the same schema view.
+fn build_property_variable_index(
+    program: &Program,
+    layer: &Layer,
+) -> BTreeMap<String, PropertyBinding> {
+    let mut out: BTreeMap<String, PropertyBinding> = BTreeMap::new();
+    let mut visit = |patterns: &[Pattern]| {
+        for pat in patterns {
+            for pp in &pat.properties {
+                if let ValueOrVariable::Variable(var) = &pp.object {
+                    if let Some(property_iri) = resolve_property_name(&pp.property, layer) {
+                        out.entry(var.name.clone())
+                            .or_insert(PropertyBinding { property_iri });
+                    }
+                }
+            }
+        }
+    };
+    let collect = |part: &MatchPart| -> Vec<Pattern> { part.patterns().cloned().collect() };
+    visit(&collect(&program.query.body));
+    for def in &program.definitions {
+        visit(&collect(&def.body));
+    }
+    out
+}
+
+/// Resolve a property `Name` to its IRI. `FullIri` returns the IRI
+/// directly; `ShortName` scans the chain-merged view for a Property
+/// Resource whose `short_name` matches.
+fn resolve_property_name(name: &Name, layer: &Layer) -> Option<Iri> {
+    match name {
+        Name::FullIri(iri) => Some(iri.clone()),
+        Name::ShortName(s) => {
+            use crate::ontology::resource::Value;
+            let prop_class = Iri::parse(wk::PROPERTY).ok()?;
+            let short_prop = Iri::parse(wk::SHORT_NAME).ok()?;
+            for (iri, res) in layer.iter_all_resources() {
+                if !res.is_instance_of(&prop_class) {
+                    continue;
+                }
+                if let Some(Value::String(sn)) = res.get(&short_prop) {
+                    if sn == s {
+                        return Some(iri.clone());
+                    }
+                }
+            }
+            None
+        }
+    }
+}
+
+/// Does the Property Resource at `property_iri` declare
+/// `data_type: core:string`? Defensive: properties without a
+/// `data_type` slot are treated as non-string-typed.
+fn property_is_string_typed(property_iri: &Iri, layer: &Layer) -> bool {
+    use crate::ontology::resource::Value;
+    let resource = match layer.resolve(property_iri) {
+        Some(r) => r,
+        None => return false,
+    };
+    let data_type_prop = match Iri::parse(wk::DATA_TYPE_PROP) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let string_iri = match Iri::parse(wk::STRING) {
+        Ok(i) => i,
+        Err(_) => return false,
+    };
+    match resource.get(&data_type_prop) {
+        Some(Value::ResourceRef(iri)) => *iri == string_iri,
+        Some(v) => v
+            .as_iri_str()
+            .and_then(|s| Iri::parse(s).ok())
+            .map(|iri| iri == string_iri)
+            .unwrap_or(false),
+        None => false,
+    }
+}
+
+/// Recursively walk `expr`, checking every `Similarity` node against
+/// the schema view per D43 §4.3 / §4.4.
+fn check_similarity(
+    expr: &Expression,
+    prop_var_index: &BTreeMap<String, PropertyBinding>,
+    text_indexes: &[ActiveTextIndex],
+    vector_indexes: &[ActiveVectorIndex],
+    layer: &Layer,
+    errors: &mut Vec<QueryError>,
+) {
+    match expr {
+        Expression::Similarity {
+            property,
+            query,
+            hints,
+        } => {
+            check_similarity_node(
+                property,
+                query,
+                hints,
+                prop_var_index,
+                text_indexes,
+                vector_indexes,
+                layer,
+                errors,
+            );
+            check_similarity(
+                query,
+                prop_var_index,
+                text_indexes,
+                vector_indexes,
+                layer,
+                errors,
+            );
+        }
+        Expression::Binary { left, right, .. } => {
+            check_similarity(
+                left,
+                prop_var_index,
+                text_indexes,
+                vector_indexes,
+                layer,
+                errors,
+            );
+            check_similarity(
+                right,
+                prop_var_index,
+                text_indexes,
+                vector_indexes,
+                layer,
+                errors,
+            );
+        }
+        Expression::Unary { operand, .. } | Expression::VerdictPredicate { operand, .. } => {
+            check_similarity(
+                operand,
+                prop_var_index,
+                text_indexes,
+                vector_indexes,
+                layer,
+                errors,
+            );
+        }
+        Expression::FunctionCall { args, .. } => {
+            for a in args {
+                check_similarity(
+                    a,
+                    prop_var_index,
+                    text_indexes,
+                    vector_indexes,
+                    layer,
+                    errors,
+                );
+            }
+        }
+        Expression::Aggregate { arg, .. } => {
+            check_similarity(
+                arg,
+                prop_var_index,
+                text_indexes,
+                vector_indexes,
+                layer,
+                errors,
+            );
+        }
+        Expression::Array(es) => {
+            for e in es {
+                check_similarity(
+                    e,
+                    prop_var_index,
+                    text_indexes,
+                    vector_indexes,
+                    layer,
+                    errors,
+                );
+            }
+        }
+        Expression::Object(pairs) => {
+            for (_, v) in pairs {
+                check_similarity(
+                    v,
+                    prop_var_index,
+                    text_indexes,
+                    vector_indexes,
+                    layer,
+                    errors,
+                );
+            }
+        }
+        Expression::Literal(_)
+        | Expression::Variable(_)
+        | Expression::NotExists(_)
+        | Expression::DotPath { .. } => {}
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn check_similarity_node(
+    property: &Variable,
+    query: &Expression,
+    hints: &HintSet,
+    prop_var_index: &BTreeMap<String, PropertyBinding>,
+    text_indexes: &[ActiveTextIndex],
+    vector_indexes: &[ActiveVectorIndex],
+    layer: &Layer,
+    errors: &mut Vec<QueryError>,
+) {
+    // §4.3.1 — LHS must be bound by a property pattern.
+    let binding = match prop_var_index.get(&property.name) {
+        Some(b) => b,
+        None => {
+            errors.push(QueryError::type_check(
+                "similarity_lhs_not_property_bound",
+                format!(
+                    "left-hand side of `~` must be a property-bound variable (got '?{}')",
+                    property.name
+                ),
+            ));
+            return;
+        }
+    };
+    let property_iri = &binding.property_iri;
+    let property_display = property_iri.as_str();
+
+    // §4.3.3 — property must be string-typed.
+    if !property_is_string_typed(property_iri, layer) {
+        errors.push(QueryError::type_check(
+            "similarity_property_not_string",
+            format!(
+                "property '{property_display}' is not String-typed; similarity requires String-shaped"
+            ),
+        ));
+    }
+
+    let text_active: Option<&ActiveTextIndex> = text_indexes
+        .iter()
+        .find(|i| i.target_property == *property_iri);
+    let vector_active: Option<&ActiveVectorIndex> = vector_indexes
+        .iter()
+        .find(|i| i.target_property == *property_iri);
+
+    // §4.3.2 — at least one active similarity index.
+    if text_active.is_none() && vector_active.is_none() {
+        errors.push(QueryError::type_check(
+            "similarity_no_active_index",
+            format!("property '{property_display}' has no active similarity index at this head"),
+        ));
+    }
+
+    // §4.3.4 — RHS must be a string literal in v1.
+    if !matches!(query, Expression::Literal(Literal::String(_))) {
+        errors.push(QueryError::type_check(
+            "similarity_rhs_not_string_literal",
+            "right-hand side of `~` must be a string literal".to_string(),
+        ));
+    }
+
+    // §4.4 — hint validation.
+    if let Some(via) = hints.via {
+        match via {
+            Via::Text => {
+                if text_active.is_none() {
+                    errors.push(QueryError::type_check(
+                        "similarity_hint_via_text_no_text_index",
+                        format!(
+                            "via: text requires an active TextIndex on property '{property_display}' (none declared at head)"
+                        ),
+                    ));
+                }
+                if hints.model.is_some() {
+                    errors.push(QueryError::type_check(
+                        "similarity_hint_model_with_via_text",
+                        "`model:` is incompatible with `via: text` — the model only applies to the vector path".to_string(),
+                    ));
+                }
+            }
+            Via::Vector => {
+                if vector_active.is_none() {
+                    errors.push(QueryError::type_check(
+                        "similarity_hint_via_vector_no_vector_index",
+                        format!(
+                            "via: vector requires an active VectorIndex on property '{property_display}' (none declared at head)"
+                        ),
+                    ));
+                }
+            }
+            Via::Hybrid => {
+                if text_active.is_none() || vector_active.is_none() {
+                    let have = match (text_active.is_some(), vector_active.is_some()) {
+                        (true, false) => "only TextIndex",
+                        (false, true) => "only VectorIndex",
+                        _ => "neither",
+                    };
+                    errors.push(QueryError::type_check(
+                        "similarity_hint_via_hybrid_missing_index",
+                        format!(
+                            "via: hybrid requires both a TextIndex and a VectorIndex on property '{property_display}' ({have} declared)"
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    if let Some(model) = &hints.model {
+        // model: implicitly forces vector path; in v1 (at most one
+        // VectorIndex per property) we just check it matches.
+        match vector_active {
+            None => {
+                errors.push(QueryError::type_check(
+                    "similarity_hint_model_no_vector_index",
+                    format!(
+                        "`model:` requires an active VectorIndex on property '{property_display}' (none declared at head)"
+                    ),
+                ));
+            }
+            Some(vi) => {
+                if vi.model.as_str() != model {
+                    errors.push(QueryError::type_check(
+                        "similarity_hint_model_mismatch",
+                        format!(
+                            "model '{model}' does not match the active VectorIndex on property '{property_display}' (which declares '{}')",
+                            vi.model.as_str()
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    if let Some(0) = hints.k {
+        errors.push(QueryError::type_check(
+            "similarity_hint_k_not_positive",
+            "`k:` must be a positive integer".to_string(),
+        ));
+    }
+    if let Some(0) = hints.limit {
+        errors.push(QueryError::type_check(
+            "similarity_hint_limit_not_positive",
+            "`limit:` must be a positive integer".to_string(),
+        ));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Imports used above — keep below the public surface to avoid polluting
 // the top.
 // ---------------------------------------------------------------------------
 
 use crate::ontology::resource::Resource;
-use std::collections::BTreeMap;
 
 #[cfg(test)]
 mod tests {
@@ -1387,6 +1870,422 @@ mod tests {
                 .iter()
                 .any(|e| e.rule == "bare_verdict_in_boolean_position"),
             "expected bare_verdict_in_boolean_position under NOT; got {errors:?}"
+        );
+    }
+
+    // ─── D43 §4 — similarity operator typing tests ──────────────────────
+
+    use crate::ontology::resource::{Resource, Value};
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).expect("valid iri")
+    }
+
+    fn make_resource(id: &str, class_iri: &str, props: Vec<(&str, Value)>) -> Resource {
+        let mut r = Resource::new(iri(id));
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::ResourceRef(iri(class_iri))]),
+        );
+        for (k, v) in props {
+            r.set(iri(k), v);
+        }
+        r
+    }
+
+    /// Build a layer carrying a test Property with `data_type: string`
+    /// and (optionally) a TextIndex and/or VectorIndex targeting it.
+    /// Bootstrap loads the core ontology so `is_a` resolves correctly.
+    fn build_indexed_layer(text: bool, vector: bool) -> Arc<Layer> {
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap should succeed");
+        let head = Arc::clone(ctx.head());
+        let storage = head.storage().clone();
+        let mut b = LayerBuilder::new("test-indexes", Some(head));
+
+        // A test Property named "test_body" with data_type=string.
+        b.add_resource(make_resource(
+            "urn:ex:test_body",
+            "urn:eigenius:core:Property",
+            vec![
+                (
+                    "urn:eigenius:core:short_name",
+                    Value::String("test_body".into()),
+                ),
+                (
+                    "urn:eigenius:core:data_type",
+                    Value::ResourceRef(iri("urn:eigenius:core:string")),
+                ),
+            ],
+        ))
+        .unwrap();
+        // Also an int-typed property to test the string-typed check.
+        b.add_resource(make_resource(
+            "urn:ex:test_count",
+            "urn:eigenius:core:Property",
+            vec![
+                (
+                    "urn:eigenius:core:short_name",
+                    Value::String("test_count".into()),
+                ),
+                (
+                    "urn:eigenius:core:data_type",
+                    Value::ResourceRef(iri("urn:eigenius:core:integer")),
+                ),
+            ],
+        ))
+        .unwrap();
+
+        if text {
+            b.add_resource(make_resource(
+                "urn:ex:ti_body",
+                "urn:eigenius:core:TextIndex",
+                vec![
+                    (
+                        "urn:eigenius:core:target_property",
+                        Value::ResourceRef(iri("urn:ex:test_body")),
+                    ),
+                    (
+                        "urn:eigenius:core:text_analyzer",
+                        Value::String("en-stem-v1".into()),
+                    ),
+                ],
+            ))
+            .unwrap();
+        }
+        if vector {
+            b.add_resource(make_resource(
+                "urn:ex:vi_body",
+                "urn:eigenius:core:VectorIndex",
+                vec![
+                    (
+                        "urn:eigenius:core:target_property",
+                        Value::ResourceRef(iri("urn:ex:test_body")),
+                    ),
+                    (
+                        "urn:eigenius:core:vec_model",
+                        Value::ResourceRef(iri("urn:eigenius:embed:m1")),
+                    ),
+                    ("urn:eigenius:core:vec_dim", Value::Integer(8)),
+                    (
+                        "urn:eigenius:core:vec_distance",
+                        Value::ResourceRef(iri("urn:eigenius:core:distances:cosine")),
+                    ),
+                ],
+            ))
+            .unwrap();
+        }
+        Arc::new(b.build(storage))
+    }
+
+    #[test]
+    fn similarity_well_formed_text_passes() {
+        let layer = build_indexed_layer(true, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "WAL truncation"
+            "#,
+        );
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
+    }
+
+    #[test]
+    fn similarity_well_formed_vector_passes() {
+        let layer = build_indexed_layer(false, true);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "kernel chain consolidation"
+            "#,
+        );
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
+    }
+
+    #[test]
+    fn similarity_on_unbound_variable_rejected() {
+        let layer = build_indexed_layer(true, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?other ~ "anything"
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "similarity_lhs_not_property_bound"
+                    || e.rule == "unbound_variable"),
+            "expected lhs-not-property-bound, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn similarity_on_non_string_property_rejected() {
+        let layer = build_indexed_layer(true, false);
+        // Need an active similarity index on test_count too to isolate
+        // the string-typed check from the no-index check.
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap should succeed");
+        let head = Arc::clone(ctx.head());
+        let storage = head.storage().clone();
+        let mut b = LayerBuilder::new("count-text", Some(head));
+        b.add_resource(make_resource(
+            "urn:ex:test_count",
+            "urn:eigenius:core:Property",
+            vec![
+                (
+                    "urn:eigenius:core:short_name",
+                    Value::String("test_count".into()),
+                ),
+                (
+                    "urn:eigenius:core:data_type",
+                    Value::ResourceRef(iri("urn:eigenius:core:integer")),
+                ),
+            ],
+        ))
+        .unwrap();
+        b.add_resource(make_resource(
+            "urn:ex:ti_count",
+            "urn:eigenius:core:TextIndex",
+            vec![
+                (
+                    "urn:eigenius:core:target_property",
+                    Value::ResourceRef(iri("urn:ex:test_count")),
+                ),
+                (
+                    "urn:eigenius:core:text_analyzer",
+                    Value::String("en-stem-v1".into()),
+                ),
+            ],
+        ))
+        .unwrap();
+        let layer_count = Arc::new(b.build(storage));
+        let errors = check(
+            &layer_count,
+            r#"
+            MATCH ?d { test_count: ?c }
+            WHERE ?c ~ "anything"
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "similarity_property_not_string"),
+            "expected similarity_property_not_string, got: {errors:?}"
+        );
+        let _ = layer; // unused but keeps the basic fixture in scope
+    }
+
+    #[test]
+    fn similarity_without_active_index_rejected() {
+        let layer = build_indexed_layer(false, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "query"
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "similarity_no_active_index"),
+            "expected similarity_no_active_index, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn similarity_rhs_must_be_string_literal() {
+        let layer = build_indexed_layer(true, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ 42
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "similarity_rhs_not_string_literal"),
+            "expected similarity_rhs_not_string_literal, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn similarity_via_text_without_text_index_rejected() {
+        let layer = build_indexed_layer(false, true);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "q" { via: text }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "similarity_hint_via_text_no_text_index"),
+            "expected via-text-no-text-index, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn similarity_via_vector_without_vector_index_rejected() {
+        let layer = build_indexed_layer(true, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "q" { via: vector }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "similarity_hint_via_vector_no_vector_index"),
+            "expected via-vector-no-vector-index, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn similarity_via_hybrid_with_one_index_rejected() {
+        let layer = build_indexed_layer(true, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "q" { via: hybrid }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "similarity_hint_via_hybrid_missing_index"),
+            "expected hybrid-missing-index, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn similarity_model_with_via_text_rejected() {
+        let layer = build_indexed_layer(true, true);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "q" { via: text, model: "urn:eigenius:embed:m1" }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "similarity_hint_model_with_via_text"),
+            "expected model-with-via-text, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn similarity_model_mismatch_rejected() {
+        let layer = build_indexed_layer(false, true);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "q" { model: "urn:eigenius:embed:other" }
+            "#,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.rule == "similarity_hint_model_mismatch"),
+            "expected model-mismatch, got: {errors:?}"
+        );
+    }
+
+    // ─── D43 §3.3 — TOP K structural typing tests ──────────────────────
+
+    #[test]
+    fn top_with_similarity_passes() {
+        let layer = build_indexed_layer(true, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "x"
+            TOP 20
+            "#,
+        );
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
+    }
+
+    #[test]
+    fn top_zero_rejected() {
+        let layer = build_indexed_layer(true, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "x"
+            TOP 0
+            "#,
+        );
+        assert!(
+            errors.iter().any(|e| e.rule == "top_must_be_positive"),
+            "expected top_must_be_positive, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn top_with_limit_rejected() {
+        let layer = build_indexed_layer(true, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "x"
+            LIMIT 10
+            TOP 5
+            "#,
+        );
+        assert!(
+            errors.iter().any(|e| e.rule == "top_with_limit"),
+            "expected top_with_limit, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn top_with_order_by_rejected() {
+        let layer = build_indexed_layer(true, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            WHERE ?desc ~ "x"
+            ORDER BY ?desc
+            TOP 5
+            "#,
+        );
+        assert!(
+            errors.iter().any(|e| e.rule == "top_with_order_by"),
+            "expected top_with_order_by, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn top_without_similarity_rejected() {
+        let layer = build_indexed_layer(true, false);
+        let errors = check(
+            &layer,
+            r#"
+            MATCH ?d { test_body: ?desc }
+            TOP 5
+            "#,
+        );
+        assert!(
+            errors.iter().any(|e| e.rule == "top_without_similarity"),
+            "expected top_without_similarity, got: {errors:?}"
         );
     }
 }

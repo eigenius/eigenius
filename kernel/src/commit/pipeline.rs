@@ -38,7 +38,9 @@ use crate::layer::LayerBuilder;
 use crate::observability::{field, operation};
 use crate::validation::CommitWorkingSet;
 
-use super::hooks::{register_wasm_components, CommitHookHost, DidPersistHook};
+use super::hooks::{
+    register_wasm_components, trigger_vector_sweep, CommitHookHost, DidPersistHook,
+};
 use super::outcome::{LayerCommitOutcome, LayerEmission, LayerRole};
 use super::persister::LayerPersister;
 use super::phases::{
@@ -407,7 +409,15 @@ static WITH_INSTITUTIONS_PHASES: &[Phase] = &[
 static STRUCTURAL_FOLLOWUP_PHASES: &[Phase] = &[build, persist];
 
 /// `with_institutions` `didPersist` slice — D41 §3.6 / §5.
-static WITH_INSTITUTIONS_DID_PERSIST: &[DidPersistHook] = &[register_wasm_components];
+///
+/// `trigger_vector_sweep` (D43 §5.5) runs after `register_wasm_components`
+/// because the WASM registration hook may surface institution-class
+/// resources via a Child emission; the sweep operates on the layer
+/// that was persisted *in this pipeline run*, so it doesn't matter
+/// whether the Child layer has landed yet — the sweep targets this
+/// persisted layer's `defined_iris()` only.
+static WITH_INSTITUTIONS_DID_PERSIST: &[DidPersistHook] =
+    &[register_wasm_components, trigger_vector_sweep];
 
 /// Empty `didPersist` slice shared by pipelines without post-persist
 /// hooks.
@@ -464,11 +474,11 @@ mod tests {
 
         // WithInstitutions — [build, structural_validate,
         // retroactive_with_cascade, autoonload_dispatch, persist]
-        // + didPersist: [register_wasm_components]
+        // + didPersist: [register_wasm_components, trigger_vector_sweep]
         let p = CommitPipeline::for_kind(PipelineKind::WithInstitutions);
         assert_eq!(p.kind, PipelineKind::WithInstitutions);
         assert_eq!(p.phases.len(), 5);
-        assert_eq!(p.did_persist.len(), 1);
+        assert_eq!(p.did_persist.len(), 2);
         assert_eq!(
             p.phases.len(),
             CommitPipeline::with_institutions().phases.len()

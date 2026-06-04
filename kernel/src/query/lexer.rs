@@ -73,6 +73,11 @@ pub enum TokenKind {
     MinFn,
     MaxFn,
 
+    // D43 §3.7 — ranked-retrieval clause
+    /// `TOP K BY ?score [DESC|ASC]` (D43 §3.7). Mutually exclusive
+    /// with `ORDER BY` / `LIMIT` in the same query.
+    Top,
+
     // Literals
     StringLit(String),
     NumberInt(i64),
@@ -99,6 +104,7 @@ pub enum TokenKind {
     Percent,    // %
     DoubleStar, // **
     Pipe2,      // ||
+    Tilde,      // ~  (D43 §3.3 similarity operator)
 
     // Structural
     LParen,
@@ -409,6 +415,15 @@ impl<'a> Lexer<'a> {
             });
         }
 
+        // D43 §3.3 similarity operator `~`
+        if ch == b'~' {
+            self.advance();
+            return Ok(Token {
+                kind: TokenKind::Tilde,
+                pos,
+            });
+        }
+
         // String literal
         if ch == b'"' {
             return self.lex_string(pos);
@@ -624,6 +639,8 @@ impl<'a> Lexer<'a> {
             "AVG" => TokenKind::AvgFn,
             "MIN" => TokenKind::MinFn,
             "MAX" => TokenKind::MaxFn,
+            // D43 §3 — retrieval primitives.
+            "TOP" => TokenKind::Top,
             // Booleans
             "true" => TokenKind::BooleanLit(true),
             "false" => TokenKind::BooleanLit(false),
@@ -838,6 +855,54 @@ mod tests {
         assert_eq!(
             kinds("DISTINCT LIMIT OFFSET"),
             vec![TokenKind::Distinct, TokenKind::Limit, TokenKind::Offset,]
+        );
+    }
+
+    // --- D43 §3 retrieval primitives — M1 lexer reservation ---
+
+    /// Each D43 retrieval keyword tokenises to its dedicated TokenKind.
+    /// M1's load-bearing invariant: the keywords are reserved (cannot
+    /// be used as user identifiers) so the surface stays stable through
+    /// to M3 / M5 / M7 implementation.
+    /// Only `TOP` remains as a reserved retrieval-clause keyword
+    /// after the D43 surface reset; the six function-shaped
+    /// primitives (TEXT_MATCH / TEXT_SCORE / VECTOR_NEAR / VECTOR_SIM
+    /// / EMBED / RRF) collapsed into the `~` operator added in
+    /// Phase 5.
+    #[test]
+    fn d43_retrieval_keywords_tokenize() {
+        assert_eq!(kinds("TOP"), vec![TokenKind::Top]);
+    }
+
+    /// D43 §3.3 — the similarity operator `~` tokenises to
+    /// `TokenKind::Tilde`. Standalone and adjacent to identifiers /
+    /// variables / strings, the lexer doesn't merge it into anything.
+    #[test]
+    fn d43_tilde_tokenizes() {
+        assert_eq!(kinds("~"), vec![TokenKind::Tilde]);
+        assert_eq!(
+            kinds("?desc ~ \"q\""),
+            vec![
+                TokenKind::Variable("desc".into()),
+                TokenKind::Tilde,
+                TokenKind::StringLit("q".into()),
+            ]
+        );
+    }
+
+    /// EigenQL keywords are uppercase-only per D2 §2.2. Lowercase
+    /// `top` stays an identifier — keyword status is case-sensitive.
+    #[test]
+    fn d43_retrieval_keywords_are_case_sensitive() {
+        assert_eq!(
+            kinds("text_match vector_near embed rrf top"),
+            vec![
+                TokenKind::Identifier("text_match".into()),
+                TokenKind::Identifier("vector_near".into()),
+                TokenKind::Identifier("embed".into()),
+                TokenKind::Identifier("rrf".into()),
+                TokenKind::Identifier("top".into()),
+            ]
         );
     }
 }

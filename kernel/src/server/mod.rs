@@ -69,7 +69,9 @@ mod tasks;
 pub mod topology;
 
 pub use helpers::DEFAULT_BRANCH;
-pub use lifecycle::{resume_sweep, start_server, ResumeConfig, ResumeInputs, ResumeState};
+pub use lifecycle::{
+    resume_sweep, start_server, EmbedderStartupConfig, ResumeConfig, ResumeInputs, ResumeState,
+};
 
 use proto::eigenius_kernel_server::{EigeniusKernel, EigeniusKernelServer};
 use proto::*;
@@ -193,6 +195,22 @@ pub struct EigeniusService {
     /// D41 Phase E.
     pub(crate) commit_ws_pool: crate::validation::CommitWorkingSetPool,
 
+    /// D43 §5.2 — registry of registered Embedder Components keyed by
+    /// `vec_model` IRI. Installed once at startup by
+    /// [`Self::with_embedders`] (the CLI loads config and builds them
+    /// before calling [`start_server`]); the query handlers clone the
+    /// `Arc` cheaply for each request. `EmbedderRegistry::new()`
+    /// (empty) is the no-vector-retrieval case — the service still
+    /// starts and queries that don't hit VectorIndex Resources work
+    /// normally.
+    pub(crate) embedders: Arc<crate::program::embedder::EmbedderRegistry>,
+
+    /// D43 §5.5 / M5.8 — coordinator owning the per-layer sweep +
+    /// reindex registries and the embedder/cache dispatch surface.
+    /// `None` when no embedders are registered; the `didPersist`
+    /// hook short-circuits in that case (the sweep is a no-op).
+    pub(crate) sweep_coordinator: Option<Arc<crate::task::sweep_registry::SweepCoordinator>>,
+
     /// The [`crate::commit::LayerPersister`] threaded into every
     /// orchestrator run. Owns the anchored-commit cache probe + branch
     /// CAS dispatch (D34 §G.1 / D33 §6). Extracted out of
@@ -237,6 +255,8 @@ impl EigeniusService {
             orchestrator_client: None,
             commit_ws_pool: crate::validation::CommitWorkingSetPool::in_memory(),
             persister: Arc::new(crate::commit::BackendPersister::new(None)),
+            embedders: Arc::new(crate::program::embedder::EmbedderRegistry::new()),
+            sweep_coordinator: None,
         })
     }
 
@@ -288,6 +308,8 @@ impl EigeniusService {
             orchestrator_client: None,
             commit_ws_pool: crate::validation::CommitWorkingSetPool::in_memory(),
             persister: Arc::new(crate::commit::BackendPersister::new(Some(backend))),
+            embedders: Arc::new(crate::program::embedder::EmbedderRegistry::new()),
+            sweep_coordinator: None,
         })
     }
 
@@ -304,6 +326,35 @@ impl EigeniusService {
         >,
     ) -> Self {
         self.orchestrator_client = Some(client);
+        self
+    }
+
+    /// D43 §5.2 — install a populated [`EmbedderRegistry`] and the
+    /// [`SweepCoordinator`] that wraps it. Called by the orchestrator
+    /// startup (the `cmd_serve` path in the CLI) *before* the gRPC
+    /// listener comes up so the post-Load `didPersist` hook can see
+    /// the coordinator the very first time it fires.
+    ///
+    /// `batch_size` is the per-sweep batch passed to
+    /// [`crate::query::vector::indexing::SweepOptions::batch_size`].
+    /// 32 is the v1 default; tune up for GPU sweeps, down if peak RAM
+    /// is a constraint.
+    ///
+    /// When called with an empty registry the coordinator is
+    /// installed anyway so the hook surfaces a consistent diagnostic
+    /// on a per-query miss (vs. silently dropping the sweep).
+    pub fn with_embedders(
+        mut self,
+        embedders: crate::program::embedder::EmbedderRegistry,
+        batch_size: usize,
+    ) -> Self {
+        let embedders = Arc::new(embedders);
+        let coord = Arc::new(
+            crate::task::sweep_registry::SweepCoordinator::new(Arc::clone(&embedders), None)
+                .with_default_batch_size(batch_size),
+        );
+        self.embedders = embedders;
+        self.sweep_coordinator = Some(coord);
         self
     }
 
@@ -349,6 +400,8 @@ impl EigeniusService {
             orchestrator_client: None,
             commit_ws_pool: crate::validation::CommitWorkingSetPool::in_memory(),
             persister: Arc::new(crate::commit::BackendPersister::new(None)),
+            embedders: Arc::new(crate::program::embedder::EmbedderRegistry::new()),
+            sweep_coordinator: None,
         })
     }
 

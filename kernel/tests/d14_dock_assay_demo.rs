@@ -837,6 +837,10 @@ fn eigenql_fiber_coercion_only_produces_verdict_binding() {
         components: Some(&components),
         overlay: None,
         ctx: Some(&exec_ctx),
+        similarity: None,
+        embedders: None,
+        embedding_cache: None,
+        vector_segment_cache: None,
     };
     let source = r#"
         USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
@@ -891,6 +895,10 @@ fn eigenql_fiber_with_comorphism_coercion_and_postfix_holds() {
         components: Some(&components),
         overlay: None,
         ctx: Some(&exec_ctx),
+        similarity: None,
+        embedders: None,
+        embedding_cache: None,
+        vector_segment_cache: None,
     };
 
     let source = r#"
@@ -951,6 +959,10 @@ fn eigenql_fiber_into_collects_response_for_chain_commit() {
         components: Some(&components),
         overlay: None,
         ctx: Some(&exec_ctx),
+        similarity: None,
+        embedders: None,
+        embedding_cache: None,
+        vector_segment_cache: None,
     };
 
     let target = "urn:eigenius:demo:d14:my_validation_verdict";
@@ -1014,6 +1026,10 @@ fn eigenql_postfix_fails_drops_holding_row() {
         components: Some(&components),
         overlay: None,
         ctx: Some(&exec_ctx),
+        similarity: None,
+        embedders: None,
+        embedding_cache: None,
+        vector_segment_cache: None,
     };
 
     let source = r#"

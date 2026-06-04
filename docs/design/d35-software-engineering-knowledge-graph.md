@@ -282,13 +282,14 @@ This is the most distinctive thing the platform offers a coding agent: it makes 
 
 The §7.1 read patterns are mostly structural; the Discovery pattern is not. Many real agent queries begin with a fuzzy concept rather than a known IRI — "find code related to WAL truncation," "find requirements semantically similar to this proposed change description," "find docs discussing the layer-merge invariant." These are retrieval problems against the natural-language content of Resources (descriptions, doc bodies, comments, requirement statements, commit messages) and against embeddings derived from that content.
 
-This proposal depends on EigenQL gaining text and vector retrieval as **built-in primitives**, not as separate institutions invoked through `FIBER`. The rationale is operational rather than philosophical: every read pattern an agent issues benefits from being able to mix structural pattern matching with full-text and semantic search in a single query, and the planner needs to know about indexes to push selective predicates down and reorder joins. Treating retrieval as an institution would force every hybrid query across `FIBER` boundaries, defeat planner-level pushdown, and impose awkward score-as-attribute marshalling on the consumer. The minimum surface required:
+This proposal depends on EigenQL gaining text and vector retrieval as **built-in primitives**, not as separate institutions invoked through `FIBER`. The rationale is operational rather than philosophical: every read pattern an agent issues benefits from being able to mix structural pattern matching with full-text and semantic search in a single query, and the planner needs to know about indexes to push selective predicates down and reorder joins. Treating retrieval as an institution would force every hybrid query across `FIBER` boundaries, defeat planner-level pushdown, and impose awkward score-as-attribute marshalling on the consumer.
 
-- **Field-level text indexing**, marked by an ESL annotation on `Property` declarations. The kernel maintains a layer-aware inverted index per indexed property — additions in a new layer become queryable as of that layer; the index is queryable at any historical layer.
-- **`TEXT_MATCH` / `TEXT_SCORE`** as predicate and function forms in WHERE / RETURN, with configurable analyzer (tokenisation, stemming, language) per index.
-- **Field-level embedding**, marked by a second annotation naming the embedding model. Each indexed Resource gets a derived `VectorEmbedding` Resource (`derived_from: ?source, embedded_by: ?model_iri, dimensionality: N`) materialised at Load time. The embedding model IRI is content-addressed; switching models produces new Embeddings rather than overwriting.
-- **`VECTOR_NEAR` / `VECTOR_SIM`** against an ANN index (HNSW or equivalent) maintained internally by the kernel.
-- **Ranked retrieval primitives**: `TOP K BY ?score` (the rank-aware companion to `LIMIT`) and hybrid scoring functions, at minimum `RRF(?s1, ?s2)` for reciprocal-rank fusion.
+The minimum surface required — as it landed in D43 v1 after the June 2026 surface review:
+
+- **Field-level text indexing**, marked by an ESL `text_index` declaration on a `Property` (or, equivalently, a `core:TextIndex` Resource targeting the Property). The kernel maintains a layer-aware inverted index per indexed property — additions in a new layer become queryable as of that layer; the index is queryable at any historical layer.
+- **Field-level embedding**, marked by an ESL `vector_index` declaration naming the embedder Component IRI. The kernel runs a post-Load sweep against the active Embedder; embeddings are content-addressed by `(source_content_hash, model_iri)` so unchanged input produces cache hits.
+- **A single `~` similarity operator** between a property-bound variable and a string literal (or, with the optional trailing `{ via:, model:, k:, limit: }` hint block, an explicit override). The platform picks the strategy from the active index set: text-only if only a TextIndex is active, vector-only if only a VectorIndex is active, hybrid (RRF-fused internally) if both. The user never names the embedder, never writes `EMBED(...)`, never names a fusion function. See [D43 §3.3 / §3.4](d43-text-and-vector-retrieval.md) for the full surface and the rationale for collapsing the original D35 draft (`TEXT_MATCH` / `VECTOR_NEAR` / `EMBED` / `RRF` / explicit scores) into one operator.
+- **`TOP N`** as the ranked-truncation surface. When `WHERE` contains `~` operators, `TOP N` orders the result by the platform-internal fused similarity score and truncates. `LIMIT N` stays the un-ranked surface for structural-only queries.
 
 A representative hybrid query that an agent might issue when starting work on a previously-unfamiliar area:
 
@@ -298,29 +299,27 @@ USING "urn:eigenius:se:CodeArtifact",
 
 MATCH CodeArtifact(?a) {
     description: ?desc,
-    description_embedding: ?vec,
     contracted_by: ?bc
 }
-WHERE TEXT_MATCH(?desc, "WAL truncation concurrent commit")
-   OR VECTOR_NEAR(?vec,
-                  EMBED("rolling back a partially-written commit under concurrent load"),
-                  k: 50)
+WHERE ?desc ~ "WAL truncation concurrent commit"
+   OR ?desc ~ "rolling back a partially-written commit under concurrent load"
 RETURN [] {
-    artifact:   ?a,
-    contract:   ?bc,
-    text_score: TEXT_SCORE(?desc, "WAL truncation concurrent commit"),
-    vec_score:  VECTOR_SIM(?vec,  EMBED("rolling back a partially-written commit under concurrent load")),
-    fused:      RRF(text_score, vec_score)
+    artifact: ?a,
+    contract: ?bc
 }
-TOP 20 BY ?fused
+TOP 20
 ```
+
+The collapsed shape preserves the original query's intent — find code artifacts whose description is related to either of two phrases, joined with their boundary contract, ranked by relevance, top 20 — while eliminating five surface concepts the user never needed (the embedding vector, two explicit score functions, an explicit fusion function, and the `BY <expr>` ranking key). The platform composes text + vector probes internally, fuses via RRF (k=60 default; overridable per operator via `{ k: ... }`), and feeds the fused score into `TOP`'s ranking.
+
+An end-to-end integration test pinning this shape lives in [`kernel/tests/d35_se_retrieval_worked_example.rs`](../../kernel/tests/d35_se_retrieval_worked_example.rs) (D43 M9.1).
 
 Two operational points worth flagging for the EigenQL implementers:
 
 - **Layer-aware HNSW is the hard part.** Tantivy's segment model is naturally layer-friendly — each new layer adds segments; queries union over the segments visible at the queried layer. HNSW is harder; the obvious approach is per-layer-segment HNSWs with merge-on-compact, paying a query-time fanout cost in exchange for layer correctness. Worth prototyping early.
-- **Embedding generation is `NonDeterministic` across model versions but stable across calls.** Embeddings are content-addressed by `(source_content_hash, model_iri)`, so unchanged input produces cache hits — but agent queries should pin the embedding model IRI explicitly when correctness matters across model upgrades, falling back to a per-context default otherwise.
+- **Embedding generation is `NonDeterministic` across model versions but stable across calls.** Embeddings are content-addressed by `(source_content_hash, model_iri)`, so unchanged input produces cache hits — but agent queries should pin the embedding model IRI explicitly when correctness matters across model upgrades (via the operator's `{ model: ... }` hint), falling back to the active VectorIndex's declared model otherwise.
 
-This is properly D2's territory rather than D35's. What D35 commits to is that the SE knowledge graph cannot deliver the agent read patterns of §7.1 without these primitives in place. Treat it as a hard dependency on the next iteration of EigenQL, not an optional enhancement.
+This is properly D2's territory rather than D35's. What D35 commits to is that the SE knowledge graph cannot deliver the agent read patterns of §7.1 without these primitives in place. Treat it as a hard dependency satisfied by D43 v1.
 
 ## 8. Phased rollout
 

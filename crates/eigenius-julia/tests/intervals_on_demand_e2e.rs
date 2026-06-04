@@ -750,6 +750,10 @@ RETURN [] {{
         components: None,
         overlay: None,
         ctx: Some(&exec_ctx),
+        similarity: None,
+        embedders: None,
+        embedding_cache: None,
+        vector_segment_cache: None,
     };
 
     let document = match eigenius_kernel::query::execute_with(&fiber_query, &head, fiber_runtime) {

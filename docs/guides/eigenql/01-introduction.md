@@ -55,7 +55,7 @@ More complex queries can:
 
 - Interleave `FIBER` clauses that dispatch to an institution `OnDemand` `QueryClass` and bind the response (D14 §9)
 - Invoke **Decidable QueryClasses** registered by institutions: `cap:within_tolerance(delta, 0.1) HOLDS` in a `WHERE` filter — returns a `Verdict` projected to a Boolean by the postfix predicate
-- **Coerce values across institution boundaries** inside FIBER param values: `param: comorphism_iri(source)` runs the four-step extract → transform → reify pipeline (D14 §9.3) inline
+- **Coerce values across institution boundaries** inside FIBER param values: `param: comorphism_iri(source)` runs the four-step extract → transform → reify pipeline (D14 §10.3) inline
 - Derive new relations with `DEFINE ... FROM` (including recursion through stratified negation)
 - Aggregate with `GROUP BY` + `COUNT` / `SUM` / `AVG` / `MIN` / `MAX`
 - Sort, limit, and deduplicate results
@@ -68,13 +68,14 @@ Each chapter is self-contained and linked to the corresponding implementation fi
 - **[3. Lexical structure](03-lexical-structure.md)** — tokens, keywords, literals, identifier forms
 - **[4. Program structure](04-program-structure.md)** — the top-level clauses in order
 - **[5. Pattern matching](05-pattern-matching.md)** — `MATCH`, subjects, property patterns, negation
-- **[6. Expressions](06-expressions.md)** — every `Expression` variant with its evaluation rule
-- **[7. FIBER clauses](07-fiber-clauses.md)** — institution dispatch via the transient overlay
-- **[8. Institutions](08-institutions.md)** — Decidable QueryClasses, postfix Verdict predicates, comorphism coercion, the D14 classification table
-- **[9. Stratification](09-stratification.md)** — recursion + negation semantics
-- **[10. Result format](10-result-format.md)** — how `RETURN` shapes become Eigon documents
-- **[11. Error messages](11-error-messages.md)** — common errors and how to fix them
-- **[12. Appendix](12-appendix.md)** — grammar reference, keyword list, built-in functions
+- **[6. Text and vector retrieval](06-text-and-vector-retrieval.md)** — the `~` similarity operator, `TextIndex` / `VectorIndex` declarations, hint block, `TOP N`, hybrid RRF
+- **[7. Expressions](07-expressions.md)** — every `Expression` variant with its evaluation rule
+- **[8. FIBER clauses](08-fiber-clauses.md)** — institution dispatch via the transient overlay
+- **[9. Institutions](09-institutions.md)** — Decidable QueryClasses, postfix Verdict predicates, comorphism coercion, the D14 classification table
+- **[10. Stratification](10-stratification.md)** — recursion + negation semantics
+- **[11. Result format](11-result-format.md)** — how `RETURN` shapes become Eigon documents
+- **[12. Error messages](12-error-messages.md)** — common errors and how to fix them
+- **[13. Appendix](13-appendix.md)** — grammar reference, keyword list, built-in functions
 
 ## What EigenQL deliberately doesn't do
 

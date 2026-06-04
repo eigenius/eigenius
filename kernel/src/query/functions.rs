@@ -149,6 +149,22 @@ pub fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::ResourceRef(r), Value::String(s)) | (Value::String(s), Value::ResourceRef(r)) => {
             r.as_str() == s
         }
+        // D43 §4.1: two Vector values are equal iff they were produced
+        // by the same Embedder Component (same `model_iri`) AND carry
+        // bit-identical `f32` data. Cross-model equality is rejected
+        // at typecheck (§4.5) so this arm is mostly defensive — and
+        // because `EMBED` is NonDeterministic (§5.2), repeat calls
+        // even with identical inputs don't reliably hit it.
+        (
+            Value::Vector {
+                model_iri: ma,
+                data: da,
+            },
+            Value::Vector {
+                model_iri: mb,
+                data: db,
+            },
+        ) => ma == mb && da == db,
         _ => false,
     }
 }

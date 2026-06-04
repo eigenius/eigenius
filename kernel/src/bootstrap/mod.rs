@@ -175,7 +175,7 @@ fn load_layer(
 
 /// Bootstrap the Eigenius kernel.
 ///
-/// Loads ten ontology layers: core → program → reflection → institution → runtime → formulas → lean-expressions → lean-runtime-classes → lean-institution → notebook.
+/// Loads eleven ontology layers: core → program → reflection → obo → institution → runtime → formulas → lean-expressions → lean-runtime-classes → lean-institution → notebook.
 /// All are validated. Returns an `ExecutionContext` with the
 /// notebook layer as head.
 ///
@@ -213,10 +213,25 @@ pub fn bootstrap_with_storage(
         storage.clone(),
     )?;
 
+    // obo layer — shared OBO meta-vocabulary used by the obograph
+    // importer (M9.2). Declares the four synonym Properties
+    // (`has_exact_synonym`, `has_related_synonym`,
+    // `has_broad_synonym`, `has_narrow_synonym`) and the
+    // `inverseOf` RBox axiom so imported GO / ChEBI / etc. layers
+    // can reference them without re-declaring. Depends on
+    // reflection because the entries themselves carry
+    // `is_a: [DeclaredResource]` and `declared_by`.
+    let obo = load_layer(
+        "obo",
+        include_str!("../../../ontologies/obo/obo-meta-ontology.json"),
+        Some(reflection),
+        storage.clone(),
+    )?;
+
     let institution = load_layer(
         "institution",
         include_str!("../../../ontologies/institution/institution-ontology.json"),
-        Some(reflection),
+        Some(obo),
         storage.clone(),
     )?;
 
@@ -491,7 +506,7 @@ fn check_and_migrate_schema_version(
     Ok(())
 }
 
-fn embedded_ontologies() -> [(&'static str, &'static str); 10] {
+fn embedded_ontologies() -> [(&'static str, &'static str); 11] {
     [
         (
             "core",
@@ -504,6 +519,10 @@ fn embedded_ontologies() -> [(&'static str, &'static str); 10] {
         (
             "reflection",
             include_str!("../../../ontologies/reflection/reflection-ontology.json"),
+        ),
+        (
+            "obo",
+            include_str!("../../../ontologies/obo/obo-meta-ontology.json"),
         ),
         (
             "institution",
@@ -695,7 +714,9 @@ mod tests {
         assert!(!runtime.is_root());
         let institution = runtime.parent().unwrap();
         assert!(!institution.is_root());
-        let reflection = institution.parent().unwrap();
+        let obo = institution.parent().unwrap();
+        assert!(!obo.is_root());
+        let reflection = obo.parent().unwrap();
         assert!(!reflection.is_root());
         let program = reflection.parent().unwrap();
         assert!(!program.is_root());
@@ -776,6 +797,77 @@ mod tests {
         for fmt in ["date", "datetime", "time", "iri", "uuid", "regex"] {
             let iri = Iri::parse(&format!("urn:eigenius:core:formats:{fmt}")).unwrap();
             assert!(ctx.resolve(&iri).is_some(), "should resolve format {fmt}");
+        }
+    }
+
+    /// D43 §3.1 — `core:TextIndex` and `core:VectorIndex` Class
+    /// declarations resolve from the core ontology. M1 deliverable.
+    #[test]
+    fn can_resolve_d43_index_classes() {
+        let ctx = bootstrap().unwrap();
+        for class in ["TextIndex", "VectorIndex"] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:{class}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve D43 index class {class}"
+            );
+        }
+    }
+
+    /// D43 §3.1 — enum Classes that narrow `vec_distance` /
+    /// `vec_strategy` / `vec_embedding_policy` resolve from the core
+    /// ontology, plus each of their declared Resource instances.
+    #[test]
+    fn can_resolve_d43_enum_classes_and_instances() {
+        let ctx = bootstrap().unwrap();
+        for class in ["DistanceMetric", "VectorStrategy", "EmbeddingPolicy"] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:{class}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve D43 enum class {class}"
+            );
+        }
+
+        for (prefix, instance) in [
+            ("distances", "cosine"),
+            ("distances", "l2"),
+            ("distances", "dot"),
+            ("strategies", "flat"),
+            ("strategies", "hnsw"),
+            ("strategies", "auto"),
+            ("embedding_policies", "eager_on_load"),
+            ("embedding_policies", "lazy_on_query"),
+            ("embedding_policies", "manual"),
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:{prefix}:{instance}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve D43 enum instance {prefix}:{instance}"
+            );
+        }
+    }
+
+    /// D43 §3.1 — Properties carried by TextIndex / VectorIndex
+    /// Resources resolve from the core ontology.
+    #[test]
+    fn can_resolve_d43_index_properties() {
+        let ctx = bootstrap().unwrap();
+        for prop in [
+            "target_property",
+            "text_analyzer",
+            "vec_model",
+            "vec_dim",
+            "vec_distance",
+            "vec_strategy",
+            "vec_hnsw_m",
+            "vec_hnsw_ef_construction",
+            "vec_embedding_policy",
+        ] {
+            let iri = Iri::parse(&format!("urn:eigenius:core:{prop}")).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_some(),
+                "should resolve D43 index property {prop}"
+            );
         }
     }
 

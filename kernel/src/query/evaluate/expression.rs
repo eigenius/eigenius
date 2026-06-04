@@ -162,7 +162,48 @@ pub(super) fn eval_expression(
         Expression::Object(_) => Err(QueryError::evaluation(
             "object literals in expressions not yet implemented",
         )),
+        Expression::Similarity { .. } => eval_similarity(expr, binding, runtime),
     }
+}
+
+/// D43 §6 — per-row evaluation of `~`. Resolves the AST node to
+/// its precomputed [`SimilarityProbe`] via pointer identity, looks
+/// up the row's source-subject IRI, and returns `Boolean(true)` iff
+/// the subject appears in the fused score map.
+///
+/// The score itself is held by the probe but not exposed through
+/// the AST in v1 (see D43 §4.3 — the operator's value type is
+/// Boolean; the score feeds ranking but isn't a user-bindable
+/// Float). Future revisions can expose it via an `EXPLAIN`-shaped
+/// surface (§3.7).
+fn eval_similarity(
+    expr: &Expression,
+    binding: &Binding,
+    runtime: FiberRuntime<'_>,
+) -> Result<Value, QueryError> {
+    let ctx = runtime.similarity.ok_or_else(|| {
+        QueryError::evaluation(
+            "similarity operator `~` invoked outside an evaluator pre-pass context",
+        )
+    })?;
+    let probe = ctx.probe_for(expr).ok_or_else(|| {
+        QueryError::evaluation("similarity operator `~` not registered in the pre-pass context")
+    })?;
+    let subject_value = binding.get(&probe.subject_var).ok_or_else(|| {
+        QueryError::evaluation(format!(
+            "similarity row-subject variable '?{}' is unbound at this position",
+            probe.subject_var
+        ))
+    })?;
+    let subject_iri = match subject_value {
+        Value::ResourceRef(iri) => iri.clone(),
+        Value::String(s) => match Iri::parse(s) {
+            Ok(iri) => iri,
+            Err(_) => return Ok(Value::Boolean(false)),
+        },
+        _ => return Ok(Value::Boolean(false)),
+    };
+    Ok(Value::Boolean(probe.scores.contains_key(&subject_iri)))
 }
 
 fn eval_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value, QueryError> {
@@ -773,6 +814,10 @@ mod tests {
             components: None,
             overlay: None,
             ctx: Some(&exec_ctx),
+            similarity: None,
+            embedders: None,
+            embedding_cache: None,
+            vector_segment_cache: None,
         };
 
         // Use FunctionCall directly at eval_expression level for a
@@ -825,6 +870,10 @@ mod tests {
             components: None,
             overlay: None,
             ctx: Some(&exec_ctx),
+            similarity: None,
+            embedders: None,
+            embedding_cache: None,
+            vector_segment_cache: None,
         };
 
         let binding: BTreeMap<String, Value> = BTreeMap::new();
@@ -1012,6 +1061,10 @@ mod tests {
             components: None,
             overlay: None,
             ctx: Some(&exec_ctx),
+            similarity: None,
+            embedders: None,
+            embedding_cache: None,
+            vector_segment_cache: None,
         };
 
         // Pass the IRI as a String literal — same shape MATCH

@@ -57,6 +57,32 @@ pub struct FiberRuntime<'a> {
     /// parts.
     pub overlay: Option<&'a [(Iri, Resource)]>,
     pub ctx: Option<&'a ExecutionContext>,
+    /// D43 §6 — similarity-operator pre-pass results, built once
+    /// per query and threaded through every per-row evaluation so
+    /// `Expression::Similarity` is an O(1) score-map lookup. `None`
+    /// for callers outside [`evaluate`] (e.g. AST-only test
+    /// harnesses); the operator then fails at evaluation with a
+    /// clear "similarity context unavailable" diagnostic.
+    pub similarity: Option<&'a super::similarity::SimilarityContext>,
+    /// D43 §3.5 / §5.2 — registry of Embedder Components dispatched
+    /// by the `~` similarity operator when the active index is a
+    /// VectorIndex. `None` when no vector path is in use; the operator
+    /// then fails at evaluation with a clear "no embedders registered"
+    /// diagnostic.
+    pub embedders: Option<&'a crate::program::embedder::EmbedderRegistry>,
+    /// D43 §5.3 — content-addressed embedding cache shared between
+    /// query-side `EMBED` calls (M4) and the indexing-side sweep
+    /// (M5, deferred). `None` means every `EMBED` dispatch goes
+    /// through to the Embedder; for tests that's the right default,
+    /// for production a single long-lived cache pins repeat-embed
+    /// cost to a hash lookup.
+    pub embedding_cache: Option<&'a crate::program::embedding_cache::EmbeddingCache>,
+    /// D43 §5.9 — vector SegmentCache shared across `VECTOR_NEAR` /
+    /// `VECTOR_SIM` probes (M5.6). `None` means each probe goes
+    /// through to the `VectorIndex` backend; production callers
+    /// pass a kernel-shared cache so repeat probes against the same
+    /// `(index_iri, layer_id)` are an in-memory `BTreeMap` lookup.
+    pub vector_segment_cache: Option<&'a crate::query::vector::cache::SegmentCache>,
 }
 
 /// Resources produced at runtime by FIBER clauses. They live for the
@@ -101,10 +127,10 @@ pub(super) fn evaluate_match_part(
     }
 
     if !part.conditions.is_empty() {
+        // DEFINE bodies have no FIBER access; the institution
+        // surface is unavailable here.
         bindings.retain(|b| {
             part.conditions.iter().all(|cond| {
-                // DEFINE bodies have no FIBER access; the institution
-                // surface is unavailable here.
                 eval_expression(cond, b, layer, FiberRuntime::default())
                     .and_then(|v| {
                         v.as_boolean().ok_or_else(|| {

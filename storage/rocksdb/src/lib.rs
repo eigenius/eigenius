@@ -25,7 +25,9 @@
 //!   trace:<key_hex>                   → ComponentTrace (CBOR)
 //!   meta:<key>                        → Generic metadata KV
 
+mod text_index;
 mod triple_index;
+mod vector_index;
 
 #[cfg(test)]
 use eigenius_kernel::layer::LayerBuilder;
@@ -38,7 +40,9 @@ use eigenius_kernel::ontology::resource::Resource;
 use eigenius_kernel::storage::{ResourceBackend, StorageError};
 use std::path::Path;
 use std::sync::Arc;
+use text_index::RocksTextIndex;
 use triple_index::RocksTripleIndex;
+use vector_index::RocksVectorIndex;
 
 /// Run a sync disk-bound block in a way that doesn't starve the
 /// tokio worker pool.
@@ -112,6 +116,34 @@ const REDIRECT_PREFIX: &str = "redirect:";
 /// chain commit).
 const ANCHORED_COMMIT_PREFIX: &str = "anchored:";
 
+/// Column family for D43's custom layer-aware text inverted index
+/// (D43 §2.3). Holds `text_term:<index_iri>:<term>:<layer>`,
+/// `text_docs:<index_iri>:<layer>`, `text_stats:<index_iri>:<layer>`,
+/// and `text_terms_layer:<layer>:<index_iri>` keys. Isolated from the
+/// default CF so text-segment compaction doesn't interleave with
+/// layer / topology / triple-index churn.
+pub const CF_TEXT: &str = "cf_text";
+
+/// Column family for D43's vector index segments (D43 §2.4). Holds
+/// `vec_seg:<index_iri>:<layer>` CBOR blobs and the
+/// `vec_layer:<layer>:<index_iri>` reverse index. Separate CF because
+/// vector blobs have different size and update profiles than text
+/// postings.
+pub const CF_VEC: &str = "cf_vec";
+
+/// Column family for D43's content-addressed embedding cache
+/// (D43 §5.3). Keys: `(blake3(content), model_iri)` → vector bytes.
+/// Lifecycle independent of layers and traces — survives kernel
+/// restarts and layer GC; evicted by LRU under a configurable budget.
+pub const CF_EMBED_CACHE: &str = "cf_embed_cache";
+
+/// All non-default column families opened by `RocksStore::open`. The
+/// existing single-CF data (`layer:`, `chain:`, `topo:`, `bloom:`,
+/// `branch:`, `idx_pos:`, `idx_layer:`, `meta:`, `trace:`, …) stays
+/// on the default CF; D43 populates the dedicated CFs declared here
+/// once M2 lands.
+const D43_COLUMN_FAMILIES: &[&str] = &[CF_TEXT, CF_VEC, CF_EMBED_CACHE];
+
 // `now_millis` removed — `LayerHandle.created_at` is now sourced from
 // `Layer.created_at()` (stamped at `LayerBuilder::build` time), so the
 // backend no longer generates its own timestamp.
@@ -126,21 +158,59 @@ pub struct RocksStore {
     /// `store_layer` / `delete_layer`'s `WriteBatch` so layer + index
     /// commits stay atomic per D23 §6.3.
     triple_index: Arc<RocksTripleIndex>,
+    /// D43 §2.3 text index (M2.4). RocksDB-backed; shares the same
+    /// `Arc<rocksdb::DB>` as `db` and `triple_index` so commits land
+    /// in the same physical store. Its `extend_into_batch` /
+    /// `drop_into_batch` participate in `store_layer` /
+    /// `delete_layer`'s `WriteBatch` for atomic-with-layer-commit
+    /// semantics (D43 §2.5).
+    text_index: Arc<RocksTextIndex>,
+    /// D43 §2.4 vector index (M2.5). RocksDB-backed; shares the same
+    /// `Arc<rocksdb::DB>` as `db`. Segments are stored as CBOR blobs
+    /// in `cf_vec` with the §2.4 layout (concatenated `vectors`
+    /// bstr). Its `extend_into_batch` / `drop_into_batch` participate
+    /// in `store_layer` / `delete_layer`'s `WriteBatch` (D43 §2.5).
+    vector_index: Arc<RocksVectorIndex>,
 }
 
 impl RocksStore {
     /// Open or create a RocksDB database at the given path.
+    ///
+    /// Opens with the three D43 column families (`cf_text`, `cf_vec`,
+    /// `cf_embed_cache`) declared alongside the default CF. New DBs
+    /// receive the CFs at creation time via
+    /// `create_missing_column_families(true)`. Reads and writes for
+    /// the existing key prefixes continue to target the default CF;
+    /// D43's M2 storage substrate will route the new prefixes to
+    /// their dedicated CFs.
     pub fn open(path: &Path) -> Result<Self, StorageError> {
         let mut opts = rocksdb::Options::default();
         opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
         opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
 
-        let db = rocksdb::DB::open(&opts, path)
+        let cf_descriptors: Vec<rocksdb::ColumnFamilyDescriptor> = D43_COLUMN_FAMILIES
+            .iter()
+            .map(|name| {
+                let mut cf_opts = rocksdb::Options::default();
+                cf_opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
+                rocksdb::ColumnFamilyDescriptor::new(*name, cf_opts)
+            })
+            .collect();
+
+        let db = rocksdb::DB::open_cf_descriptors(&opts, path, cf_descriptors)
             .map_err(|e| StorageError::Internal(format!("failed to open RocksDB: {e}")))?;
         let db = Arc::new(db);
         let triple_index = Arc::new(RocksTripleIndex::new(Arc::clone(&db)));
+        let text_index = Arc::new(RocksTextIndex::new(Arc::clone(&db)));
+        let vector_index = Arc::new(RocksVectorIndex::new(Arc::clone(&db)));
 
-        Ok(Self { db, triple_index })
+        Ok(Self {
+            db,
+            triple_index,
+            text_index,
+            vector_index,
+        })
     }
 
     /// Trigger manual compaction on the entire database.
@@ -687,6 +757,14 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         Arc::clone(&self.triple_index) as Arc<dyn eigenius_kernel::layer::TripleIndex>
     }
 
+    fn text_index_arc(&self) -> Arc<dyn eigenius_kernel::layer::TextIndex> {
+        Arc::clone(&self.text_index) as Arc<dyn eigenius_kernel::layer::TextIndex>
+    }
+
+    fn vector_index_arc(&self) -> Arc<dyn eigenius_kernel::layer::VectorIndex> {
+        Arc::clone(&self.vector_index) as Arc<dyn eigenius_kernel::layer::VectorIndex>
+    }
+
     fn load_bloom(&self, layer: &LayerId) -> Result<Option<BloomFilter>, StorageError> {
         run_blocking(|| {
             let key = format!("{BLOOM_PREFIX}{}", hex::encode(layer.0));
@@ -812,6 +890,15 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             // same atomic batch. Walks the reverse `idx_layer:<L>:` prefix
             // to discover which forward `idx_pos:` entries to delete.
             self.triple_index.drop_into_batch(&mut batch, layer)?;
+
+            // D43 M2.7: drop the per-Index text and vector entries
+            // contributed by this layer in the same atomic batch.
+            // Both walks use their reverse-index prefix
+            // (`text_terms_layer:<L>:` / `vec_layer:<L>:`) so cleanup
+            // cost is proportional to the layer's contributions, not
+            // the total index size.
+            self.text_index.drop_into_batch(&mut batch, layer)?;
+            self.vector_index.drop_into_batch(&mut batch, layer)?;
 
             self.db
                 .write(batch)
@@ -1544,6 +1631,206 @@ mod tests {
         let empty =
             PersistentBackend::lookup_by_content_hash(&store, child_a.content_hash()).unwrap();
         assert!(empty.is_empty());
+    }
+
+    /// D43 M1 — `RocksStore::open` declares the three D43 column
+    /// families (`cf_text`, `cf_vec`, `cf_embed_cache`) so that
+    /// subsequent milestones (M2 storage substrate onward) can route
+    /// their key prefixes to dedicated compaction streams.
+    ///
+    /// Verifies: (a) a freshly-opened store exposes a handle for each
+    /// D43 CF, (b) writes to each CF persist across reopen, and (c)
+    /// data in one CF does not leak into another (each CF is its own
+    /// keyspace).
+    #[test]
+    fn d43_column_families_open_persist_and_isolate() {
+        let dir = TempDir::new().unwrap();
+
+        // Round 1: open, verify CFs exist, write a sentinel value to each.
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            for cf_name in D43_COLUMN_FAMILIES {
+                let cf = store
+                    .db
+                    .cf_handle(cf_name)
+                    .unwrap_or_else(|| panic!("CF {cf_name} should exist after open"));
+                let key = format!("sentinel:{cf_name}");
+                let val = format!("value-in-{cf_name}");
+                store
+                    .db
+                    .put_cf(&cf, key.as_bytes(), val.as_bytes())
+                    .unwrap();
+            }
+        }
+
+        // Round 2: reopen, verify each sentinel persisted and CFs are isolated.
+        {
+            let store = RocksStore::open(dir.path()).unwrap();
+            for cf_name in D43_COLUMN_FAMILIES {
+                let cf = store
+                    .db
+                    .cf_handle(cf_name)
+                    .unwrap_or_else(|| panic!("CF {cf_name} should persist across reopen"));
+                let key = format!("sentinel:{cf_name}");
+                let expected = format!("value-in-{cf_name}");
+                let got = store
+                    .db
+                    .get_cf(&cf, key.as_bytes())
+                    .unwrap()
+                    .expect("sentinel value should persist");
+                assert_eq!(got, expected.as_bytes(), "value in {cf_name} after reopen");
+
+                // Other CFs must not see this sentinel key — CFs are
+                // independent keyspaces.
+                for other in D43_COLUMN_FAMILIES.iter().filter(|n| *n != cf_name) {
+                    let other_cf = store.db.cf_handle(other).unwrap();
+                    let leak = store.db.get_cf(&other_cf, key.as_bytes()).unwrap();
+                    assert!(
+                        leak.is_none(),
+                        "CF {other} should not see sentinel key from {cf_name}"
+                    );
+                }
+            }
+
+            // The default CF should also not see the D43 sentinels —
+            // existing key prefixes continue to target the default CF
+            // unaffected by the new keyspaces.
+            for cf_name in D43_COLUMN_FAMILIES {
+                let key = format!("sentinel:{cf_name}");
+                let default_leak = store.db.get(key.as_bytes()).unwrap();
+                assert!(
+                    default_leak.is_none(),
+                    "default CF should not see D43 sentinel for {cf_name}"
+                );
+            }
+        }
+    }
+
+    /// D43 M2.7 — `RocksStore::delete_layer` participates in the
+    /// atomic-with-layer-drop envelope: the same `WriteBatch` that
+    /// removes the layer's resource rows, topology entry, and
+    /// triple-index entries also removes the layer's text-index
+    /// postings (`text_term:`, `text_docs:`, `text_stats:`,
+    /// `text_terms_layer:`) and vector-index segments (`vec_seg:`,
+    /// `vec_layer:`). Verifies cleanup across both new CFs in one
+    /// commit per D43 §2.5.
+    #[test]
+    fn delete_layer_drops_text_and_vector_indexes_atomically() {
+        use eigenius_kernel::layer::{
+            LayerBuilder, MemoryBloomCache, MemoryResourceBackend, MemoryResourceCache,
+            NoRedirects, TextDoc, VectorDoc,
+        };
+        use eigenius_kernel::ontology::iri::Iri;
+        use eigenius_kernel::storage::PersistentBackend;
+
+        let (store, _dir) = {
+            let dir = TempDir::new().unwrap();
+            let store = RocksStore::open(dir.path()).unwrap();
+            (Arc::new(store), dir)
+        };
+
+        // Use a minimal layer + the store's index Arcs directly.
+        let storage = eigenius_kernel::layer::LayerStorage {
+            cache: Arc::new(MemoryResourceCache::new()),
+            backend: Arc::new(MemoryResourceBackend::new()),
+            bloom_cache: Arc::new(MemoryBloomCache::cache_only()),
+            triple_index: store.triple_index_arc(),
+            text_index: store.text_index_arc(),
+            vector_index: store.vector_index_arc(),
+            redirect_map: Arc::new(NoRedirects),
+            persistent_backend: None,
+        };
+        let builder = LayerBuilder::new("test", None);
+        let layer = builder.build(storage);
+        let layer_id = layer.id().clone();
+        store.store_layer(&layer).unwrap();
+
+        // Populate text + vector indexes against this layer.
+        let index_iri = Iri::parse("urn:eigenius:test:idx").unwrap();
+        let subject = Iri::parse("urn:eigenius:test:s").unwrap();
+        let model_iri = Iri::parse("urn:eigenius:test:embed").unwrap();
+        let tokens = vec!["alpha".to_string(), "beta".to_string()];
+        let vec_data = [1.0f32, 0.5, 0.25];
+
+        store
+            .text_index_arc()
+            .extend_layer(
+                &index_iri,
+                &layer_id,
+                "en-stem-v1",
+                &[TextDoc {
+                    subject: &subject,
+                    tokens: &tokens,
+                }],
+            )
+            .unwrap();
+        store
+            .vector_index_arc()
+            .extend_layer(
+                &index_iri,
+                &layer_id,
+                &model_iri,
+                3,
+                "cosine",
+                &[VectorDoc {
+                    subject: &subject,
+                    vector: &vec_data,
+                }],
+                None,
+            )
+            .unwrap();
+
+        // Sanity: data is present.
+        assert!(store
+            .text_index_arc()
+            .get_layer_stats(&index_iri, &layer_id)
+            .unwrap()
+            .is_some());
+        assert!(store
+            .vector_index_arc()
+            .get_segment(&index_iri, &layer_id)
+            .unwrap()
+            .is_some());
+
+        // delete_layer fires the atomic batch covering all three indexes.
+        store.delete_layer(&layer_id).unwrap();
+
+        // Text-index entries gone.
+        assert!(store
+            .text_index_arc()
+            .get_layer_stats(&index_iri, &layer_id)
+            .unwrap()
+            .is_none());
+        assert!(store
+            .text_index_arc()
+            .get_layer_docs(&index_iri, &layer_id)
+            .unwrap()
+            .is_none());
+        assert!(store
+            .text_index_arc()
+            .get_layer_analyzer(&index_iri, &layer_id)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            store
+                .text_index_arc()
+                .scan_term(&index_iri, "alpha")
+                .count(),
+            0,
+            "text postings dropped"
+        );
+
+        // Vector-index segment gone.
+        assert!(store
+            .vector_index_arc()
+            .get_segment(&index_iri, &layer_id)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            store.vector_index_arc().scan_index(&index_iri).count(),
+            0,
+            "vector segments dropped"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

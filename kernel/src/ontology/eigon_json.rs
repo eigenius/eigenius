@@ -251,6 +251,14 @@ pub fn serialize_resource(resource: &Resource) -> serde_json::Value {
 }
 
 /// Serialize a Value to a JSON value.
+///
+/// `Value::Vector` is treated as a programming-error invariant: the
+/// D43 design (§4.1, §5) makes vectors transient compute values that
+/// flow from `EMBED` into `VECTOR_NEAR` / `VECTOR_SIM` within a single
+/// query and are persisted as `vec_seg:<I>:<L>` blobs (§2.4), never as
+/// inline property values. Reaching this arm means a Vector ended up
+/// on a Resource that's being canonicalised or wire-serialised — that
+/// is structurally wrong and should be caught before this point.
 fn serialize_value(value: &Value) -> serde_json::Value {
     match value {
         Value::String(s) => serde_json::Value::String(s.clone()),
@@ -261,6 +269,12 @@ fn serialize_value(value: &Value) -> serde_json::Value {
         Value::Embedded(resource) => serialize_resource(resource),
         Value::Array(arr) => serde_json::Value::Array(arr.iter().map(serialize_value).collect()),
         Value::Json(v) => v.clone(),
+        Value::Vector { model_iri, data } => panic!(
+            "Value::Vector is transient and must not reach JSON serialisation; \
+             model={}, dim={}",
+            model_iri.as_str(),
+            data.len()
+        ),
     }
 }
 

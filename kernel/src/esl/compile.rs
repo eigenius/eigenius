@@ -186,6 +186,19 @@ impl Compiler {
             ast::Declaration::Codata(c) => self.compile_codata(c),
             ast::Declaration::Data(d) => self.compile_data(d),
             ast::Declaration::MergeComorphism(mc) => self.compile_merge_comorphism(mc),
+            // D43 §3.1 — text_index / vector_index lowering to Resource
+            // (M2+). M1 lands the AST + parser; the compile stage will
+            // synthesise the equivalent `Resource` with class
+            // `core:TextIndex` / `core:VectorIndex` once M2 storage
+            // substrate work begins.
+            ast::Declaration::TextIndex(ti) => Err(EslError::parser(
+                Some(ti.pos.clone()),
+                "text_index lowering not yet implemented (D43 M2)".to_string(),
+            )),
+            ast::Declaration::VectorIndex(vi) => Err(EslError::parser(
+                Some(vi.pos.clone()),
+                "vector_index lowering not yet implemented (D43 M2)".to_string(),
+            )),
         }
     }
 
@@ -3224,6 +3237,62 @@ mod tests {
                 .get(&iri(crate::ontology::well_known::MERGE_TARGET_CLASS))
                 .and_then(|v| v.as_iri_str()),
             Some("urn:project:Patient")
+        );
+    }
+
+    // --- D43 §3.1 — text_index / vector_index compile stub behaviour (M1) ---
+
+    /// M1 lands the AST + parser for `text_index`; the lowering to a
+    /// `core:TextIndex` Resource is M2 work. The compile step emits
+    /// a clear "not yet implemented" error so users get a meaningful
+    /// signal until M2 lands.
+    #[test]
+    fn text_index_compile_emits_not_yet_implemented_until_m2() {
+        let errs = esl::compile(
+            r#"
+            namespace ex = "urn:ex";
+            namespace core = "urn:eigenius:core";
+            text_index ex:description_en {
+                core:target_property = ex:description;
+                core:text_analyzer = "en-stem-v1";
+            }
+            "#,
+        )
+        .expect_err("text_index compilation should fail with M1 stub");
+        let combined = errs
+            .iter()
+            .map(|e| e.message.as_str())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        assert!(
+            combined.contains("text_index") && combined.contains("M2"),
+            "error should reference text_index and D43 M2, got: {combined}"
+        );
+    }
+
+    /// Same shape for `vector_index` — M1 parses, M2 lowers.
+    #[test]
+    fn vector_index_compile_emits_not_yet_implemented_until_m2() {
+        let errs = esl::compile(
+            r#"
+            namespace ex = "urn:ex";
+            namespace core = "urn:eigenius:core";
+            vector_index ex:description_oai {
+                core:target_property = ex:description;
+                core:vec_model = ex:openai_text_embedding_3_large_v3;
+                core:vec_dim = 1536;
+            }
+            "#,
+        )
+        .expect_err("vector_index compilation should fail with M1 stub");
+        let combined = errs
+            .iter()
+            .map(|e| e.message.as_str())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        assert!(
+            combined.contains("vector_index") && combined.contains("M2"),
+            "error should reference vector_index and D43 M2, got: {combined}"
         );
     }
 }

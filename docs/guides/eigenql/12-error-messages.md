@@ -13,7 +13,7 @@ pub struct QueryError {
 
 Errors are grouped by the pipeline phase that produced them. This chapter walks through common errors in each phase with typical messages and how to fix them.
 
-## 11.1. Lexer errors
+## 12.1. Lexer errors
 
 Thrown by [`lexer::tokenize`](../../../kernel/src/query/lexer.rs). Rare in practice; most surface-level typos parse fine at the lexer level and fail later.
 
@@ -41,7 +41,7 @@ Only the five escapes listed above are recognized.
 
 Characters outside the token set ([chapter 3](03-lexical-structure.md)) are rejected. `@` isn't part of EigenQL.
 
-## 11.2. Parser errors
+## 12.2. Parser errors
 
 Thrown during AST construction. These are usually the most common in practice because the grammar is strict about clause order.
 
@@ -74,7 +74,7 @@ The parser expected a specific token shape and got something else. Most common w
 
 The parser ran off the end of the token stream before finishing a structural token. Usually a missing closing brace.
 
-## 11.3. Type-check errors
+## 12.3. Type-check errors
 
 Thrown by [`type_check::type_check`](../../../kernel/src/query/type_check.rs). All type-check errors are collected and returned together — you'll see multiple in one go.
 
@@ -158,7 +158,7 @@ A short-name param must match a `requires` or `recommends` property of the query
 
 Every property in the query class's `requires` must be supplied. Add the missing binding.
 
-## 11.4. Stratification errors
+## 12.4. Stratification errors
 
 Thrown by [`stratify::stratify`](../../../kernel/src/query/stratify.rs) before type-check. Only one rule:
 
@@ -168,9 +168,9 @@ Thrown by [`stratify::stratify`](../../../kernel/src/query/stratify.rs) before t
 [Stratification] negation cycle detected involving relation 'Bad'
 ```
 
-A `DEFINE` rule depends on its own negation, directly or transitively. See [chapter 9](09-stratification.md). Rewrite to separate the "compute" and "negate" steps into different relations.
+A `DEFINE` rule depends on its own negation, directly or transitively. See [chapter 10](10-stratification.md). Rewrite to separate the "compute" and "negate" steps into different relations.
 
-## 11.5. Evaluation errors
+## 12.5. Evaluation errors
 
 Thrown during [`evaluate`](../../../kernel/src/query/evaluate.rs). These are the runtime errors that survive type-check — structurally valid queries that fail at data access.
 
@@ -270,7 +270,7 @@ A `WHERE` expression evaluated to a non-boolean. Typical cause: using `?x` direc
 
 Operand type or value violated. Check the expression with concrete values in mind.
 
-## 11.6. Error phases as a debugging flow
+## 12.6. Error phases as a debugging flow
 
 When a query fails, the phase tells you where to look:
 
@@ -286,4 +286,4 @@ When in doubt, start the query without `WHERE`, `GROUP BY`, or `ORDER BY`, and a
 
 ---
 
-Next: **[12. Appendix →](12-appendix.md)**
+Next: **[13. Appendix →](13-appendix.md)**

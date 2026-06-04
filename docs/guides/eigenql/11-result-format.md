@@ -2,7 +2,7 @@
 
 Query execution produces an **Eigon document** — a `Vec<Resource>` shaped per [D2 Appendix A](../../design/d2-eigenql-specification.md) so it's self-describing: the row schema, row class, and result set all come back together. The shaping code is [`kernel/src/query/document.rs`](../../../kernel/src/query/document.rs); it runs as the final stage of [`execute_with`](../../../kernel/src/query/mod.rs).
 
-## 10.1. The two result shapes
+## 11.1. The two result shapes
 
 Every query returns one of two shapes:
 
@@ -47,7 +47,7 @@ the result vector contains just **one `ResultSet`** resource with:
 
 No Property, no row Class — nothing to describe. Useful for existence checks.
 
-## 10.2. Synthesized IRIs
+## 11.2. Synthesized IRIs
 
 Every query's result resources live under `urn:eigenius:query:gen:<hash>:*`, where `<hash>` is the first 8 bytes (16 hex chars) of SHA-256 over the query text. The construction helper is [`QueryFingerprint`](../../../kernel/src/query/document.rs):
 
@@ -66,7 +66,7 @@ impl QueryFingerprint {
 
 Running the same query text against the same layer produces identical IRIs. Consumers that cache results can key on the query hash directly.
 
-## 10.3. Walk-through: a full result
+## 11.3. Walk-through: a full result
 
 Query:
 
@@ -144,7 +144,7 @@ The row class inherits from the classes named in `RETURN [Prediction]` via `urn:
 
 Each row is an embedded resource tagged with the row class. Property values use the synthesized row-property IRIs as keys.
 
-## 10.4. Why synthesize Property and Class resources?
+## 11.4. Why synthesize Property and Class resources?
 
 EigenQL results aren't generic JSON — they're Eigon resources that describe themselves through the same class/property mechanism the rest of the system uses. Three consequences:
 
@@ -152,7 +152,7 @@ EigenQL results aren't generic JSON — they're Eigon resources that describe th
 2. **Validation**: the synthesized row class obligates the rows to carry the columns named in `RETURN`, which the validator can enforce if needed.
 3. **Stability**: the IRI scheme is reproducible, so caches and traces can reference specific result sets without ambiguity.
 
-## 10.5. Data-type inference for properties
+## 11.5. Data-type inference for properties
 
 When synthesizing each Property resource, the wrapper inspects the `RETURN` expression to pick a `data_type`:
 
@@ -165,7 +165,7 @@ When synthesizing each Property resource, the wrapper inspects the `RETURN` expr
 
 This is a syntactic inference — if a `RETURN` expression's runtime type differs from the static guess, the value is still stored correctly (Eigon's `Value` is dynamic), but the declared `data_type` in the Property resource may be less specific than reality. The inference is good enough for round-tripping through a consumer that reads the Property metadata.
 
-## 10.6. Match-only result details
+## 11.6. Match-only result details
 
 The minimal match-only result:
 
@@ -184,7 +184,7 @@ Use cases:
 - **Counting without shaping**: `row_count` tells you the binding count without needing a GROUP BY.
 - **Debugging**: `RETURN [] {}` is a quick way to confirm a query binds anything before writing the full RETURN.
 
-## 10.7. Consuming results programmatically
+## 11.7. Consuming results programmatically
 
 Server-side Rust code can destructure the `Vec<Resource>`:
 
@@ -204,7 +204,7 @@ let rows = result_set.get(&iri(ROWS_PROP))
 
 For queries with `RETURN` items, the Property resources preceding the ResultSet describe each column and can be used to reflect on result shape without parsing the ResultSet.
 
-## 10.8. Serialization
+## 11.8. Serialization
 
 The result vector is serializable through the standard Eigon pipelines:
 
@@ -213,7 +213,7 @@ The result vector is serializable through the standard Eigon pipelines:
 
 Both preserve the synthesized IRIs and the embedded row structure.
 
-## 10.9. Reference constants
+## 11.9. Reference constants
 
 From [`kernel/src/query/document.rs`](../../../kernel/src/query/document.rs):
 
@@ -229,4 +229,4 @@ These are **ephemeral** — they're not part of the core ontology, they live onl
 
 ---
 
-Next: **[11. Error messages →](11-error-messages.md)**
+Next: **[12. Error messages →](12-error-messages.md)**

@@ -144,6 +144,13 @@ pub struct Query {
     pub limit: Option<usize>,
     pub offset: Option<usize>,
     pub distinct: bool,
+    /// D43 §3.3 — ranked truncation. `TOP N` is the user-facing
+    /// surface for "give me the N most relevant rows." When the
+    /// query contains a similarity operator, ordering is the fused
+    /// similarity score; without `~`, `TOP N` is rejected at parse
+    /// (use `LIMIT` for un-ranked truncation). Mutually exclusive
+    /// with `LIMIT` and with `ORDER BY` in the same query.
+    pub top: Option<usize>,
 }
 
 /// A MATCH pattern.
@@ -257,6 +264,47 @@ pub enum Expression {
     },
     Array(Vec<Expression>),
     Object(Vec<(Name, Expression)>),
+    /// D43 §3.3 — similarity operator `?prop ~ "query" { hints }`.
+    ///
+    /// `property` is the property-bound LHS; `query` is the RHS
+    /// expression (a literal string in v1, more general in later
+    /// revisions); `hints` is the optional trailing-braces hint set
+    /// (§3.4). Returns a boolean at the row level (the row passes the
+    /// platform-chosen relevance threshold); the per-row relevance
+    /// score it contributes is held by the evaluator's fusion table,
+    /// not the AST.
+    Similarity {
+        property: Variable,
+        query: Box<Expression>,
+        hints: HintSet,
+    },
+}
+
+/// D43 §3.4 — optional trailing-braces hints on the `~` operator.
+///
+/// All fields are `Option`; absence means "use the platform default."
+/// Validated at typecheck (§4.4): unknown keys reject; `via`/`model`
+/// combinations are checked for consistency; `k` and `limit` must be
+/// positive integer literals.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HintSet {
+    /// `via: text | vector | hybrid`.
+    pub via: Option<Via>,
+    /// `model: "<iri>"` — overrides the embedder for the vector path.
+    /// Implicitly forces `via: vector` when set.
+    pub model: Option<String>,
+    /// `k: <int>` — RRF smoothing constant (default 60).
+    pub k: Option<usize>,
+    /// `limit: <int>` — probe-side candidate-set cap.
+    pub limit: Option<usize>,
+}
+
+/// D43 §3.4 — strategy selector for the `~` operator's `via:` hint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Via {
+    Text,
+    Vector,
+    Hybrid,
 }
 
 /// Binary operators.
