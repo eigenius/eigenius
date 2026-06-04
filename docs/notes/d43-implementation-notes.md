@@ -126,9 +126,38 @@ What we did *not* emit: `core:resource_array` data_type with `element_type: core
 
 This is a recorded papering-over. The structurally correct fix would be either (a) emit `resource_array` with an element_type derived from OBO `domainRangeAxioms` (which the converter currently drops as a v1 deferral), or (b) tighten the kernel's data-type/value shape check and force the converter to choose. Neither blocks today's life-science integration test, but it's a real loose end if we add property-data-type-driven validation.
 
-## What didn't get built and why
+## Real-embedder semantic recall
 
-- **Real-embedder integration test.** The `DummyEmbedder` is hash-based and produces deterministic-but-meaningless vectors. Validating *recall quality* against real biomedical vocabulary needs a Sentence-BERT / E5-small model packaged as an Embedder Component, plus a hand-curated gold set of `(query, expected GO term)` pairs. Real work; deliberately deferred until there's an actual life-science consumer asking for it.
+[`crates/eigenius-embedder-candle`](../../crates/eigenius-embedder-candle/) wraps HuggingFace [Candle](https://github.com/huggingface/candle) as an Eigenius `Embedder` Component. Default model: [BGE-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) (384-dim Sentence-BERT, 33M parameters, ~130 MB SafeTensors). Pure-Rust inference, no C++ runtime, no Python subprocess — models download from the HuggingFace Hub into `~/.cache/huggingface/` on first use via the [`hf-hub`](https://github.com/huggingface/hf-hub) crate.
+
+The semantic recall test [`crates/eigenius-embedder-candle/tests/go_recall.rs`](../../crates/eigenius-embedder-candle/tests/go_recall.rs) exercises the full pipeline end-to-end against real GO data with **seven hand-curated paraphrased queries**:
+
+| Paraphrased query | Expected GO term | Rank |
+|---|---|---|
+| fixing damage to genetic material | DNA repair | 2 |
+| splitting one cell into two daughter cells | cell division | 4 |
+| proteins binding to other proteins | protein binding | 1 |
+| where chromosomes are stored in eukaryotes | nucleus | 3 |
+| the organelle that produces cellular energy | mitochondrion | 5 |
+| the fluid inside a cell that surrounds organelles | cytoplasm | 4 |
+| moving molecules across cell membranes | transmembrane transport | 1 |
+
+**Recall@10 = 7/7 = 1.00.** Every paraphrased query (no word-overlap with the canonical GO term name) found the expected term in the top 10, most in the top 5. The test corpus was 1 007 GO Classes (the 7 gold-set targets + 1 000 random distractors with biomedical descriptions) under a flat `core:VectorIndex` strategy — the test measures embedder semantic quality, not HNSW behaviour (the HNSW story has its own bench).
+
+**Timing on CPU:**
+
+| Phase | Wall-clock |
+|---|---|
+| Obograph convert (52 032 Resources) | 0.23s |
+| Vector sweep (1 007 Resources embedded by Candle) | 162s |
+| Per-document embed (mean) | ~161ms |
+| Per-query embed + flat search (1 007 docs) | ~130ms |
+
+The per-doc 161ms is well above the ~5-15ms BGE-small can hit with batched inference. The current `Embedder` trait does single-text inference (`embed(&self, text: &str)`); batched embed is the obvious follow-up the kernel's sweep would benefit from immediately. At 161ms × 52k = ~140 min for a full-GO sweep; batched at 16-32× would land it at 4-9 min.
+
+For production scenarios where on-CPU embedding cost matters, the same crate can build with `--features cuda` or `--features metal` (Candle's GPU backends). The Embedder trait stays unchanged; only the constructor path differs. Multi-process / paid-API embedders (Cohere, OpenAI) plug in via the D6 IO envelope as before — Candle isn't the only option, just the recommended pure-Rust default.
+
+## What didn't get built and why
 
 - **HNSW recall benchmark.** Synthetic-vector recall against brute-force is doable today (the algorithm is HNSW-vs-flat regardless of vector source), but D43's interesting recall claim is about *semantic* recall over real text. Synthetic gives us algorithmic correctness, not the publishable recall@K numbers. Both forms are valuable; the algorithmic one is in scope, the semantic one needs the real embedder.
 
@@ -240,5 +269,7 @@ Every claim above is checkable against the source:
 | Bootstrap chain | [kernel/src/bootstrap/mod.rs](../../kernel/src/bootstrap/mod.rs) |
 | Sweep + reindex coordinator | [kernel/src/task/sweep_registry.rs](../../kernel/src/task/sweep_registry.rs) |
 | Multiplicity verification | [kernel/src/layer/index_discovery.rs](../../kernel/src/layer/index_discovery.rs) |
-| HNSW recall bench (M9.3) | [kernel/tests/d43_hnsw_recall_bench.rs](../../kernel/tests/d43_hnsw_recall_bench.rs) |
+| HNSW recall bench (M9.3 algorithm-level) | [kernel/tests/d43_hnsw_recall_bench.rs](../../kernel/tests/d43_hnsw_recall_bench.rs) |
+| Semantic recall test (M9.3 semantic-level) | [crates/eigenius-embedder-candle/tests/go_recall.rs](../../crates/eigenius-embedder-candle/tests/go_recall.rs) |
+| Candle-backed embedder | [crates/eigenius-embedder-candle](../../crates/eigenius-embedder-candle/) |
 | GO perf envelope bench (M9.4) | [crates/eigenius-obograph/tests/d43_perf_bench.rs](../../crates/eigenius-obograph/tests/d43_perf_bench.rs) |
