@@ -90,6 +90,19 @@ fn load_go_or_skip() -> Option<GraphDocument> {
             return None;
         }
     };
+    // Detect a git-lfs pointer file (the real GO dump is ~68 MB; a
+    // pointer is ≤200 bytes starting with `version https://git-lfs.…`).
+    // Treat it the same as "file missing" so contributors who haven't
+    // run `git lfs pull` get a friendly skip instead of a JSON parse
+    // panic.
+    if json.starts_with("version https://git-lfs.") {
+        eprintln!(
+            "skipping GO integration test — `{}` is a git-lfs pointer, \
+             not the actual data. Run `git lfs pull` to fetch the real file.",
+            path.display()
+        );
+        return None;
+    }
     Some(serde_json::from_str(&json).expect("go-basic.json parses"))
 }
 

@@ -133,6 +133,65 @@ Field values can be any of the literal forms: strings, integers, floats, boolean
 
 Source: [`compile_resource`](../../../kernel/src/esl/compile.rs).
 
+## 4.4a. `text_index` and `vector_index`
+
+Sugar over `core:TextIndex` / `core:VectorIndex` Resource declarations from D43. Each declaration commits one Index Resource targeting a property; the kernel's text-search and vector-search dispatchers pick it up via the active-index lookup at the head layer. See **[EigenQL guide chapter 6](../eigenql/06-text-and-vector-retrieval.md)** for the query-side surface (`~` operator) these declarations enable.
+
+### `text_index`
+
+```esl
+text_index ex:description_en {
+    core:target_property = ex:description;
+    core:text_analyzer = "en-stem-v1";
+}
+```
+
+Compiles to a `core:TextIndex` Resource with the body fields preserved as properties. Required slots:
+
+- `core:target_property` — the Property whose values get indexed.
+
+Recommended:
+
+- `core:text_analyzer` — analyzer identifier (default `"en-stem-v1"`); see [`analyzer/registry`](../../../kernel/src/query/text/analyzer.rs) for the shipped set (`en-stem-v1`, `en-no-stem`).
+
+At commit time, [`populate_text_indexes`](../../../kernel/src/query/text/indexing.rs) auto-walks the layer's Resources, tokenises the target property's string values, and writes BM25 posting lists per `(index, layer)` pair.
+
+### `vector_index`
+
+```esl
+namespace cd = "urn:eigenius:core:distances";
+namespace cs = "urn:eigenius:core:strategies";
+
+vector_index ex:description_oai_v3 {
+    core:target_property = ex:description;
+    core:vec_model       = ex:openai_text_embedding_3_large_v3;
+    core:vec_dim         = 1536;
+    core:vec_distance    = cd:cosine;
+    core:vec_strategy    = cs:auto;
+}
+```
+
+Compiles to a `core:VectorIndex` Resource. Required slots:
+
+- `core:target_property` — the Property whose values get embedded and indexed.
+- `core:vec_model` — IRI of an `Embedder` Component that produces the vectors.
+- `core:vec_dim` — embedder output dimensionality (must match the Embedder's declared `dim()`; verified at parse time per the dimensionality recommendation in D43 §3.1).
+
+Recommended:
+
+- `core:vec_distance` — one of `cd:cosine`, `cd:l2`, `cd:dot`. Default `cd:cosine`.
+- `core:vec_strategy` — `cs:flat`, `cs:hnsw`, or `cs:auto` (auto-promotes to HNSW above a segment-size threshold). Default `cs:auto`.
+- `core:vec_hnsw_m`, `core:vec_hnsw_ef_construction` — HNSW build parameters (defaults 16 / 200).
+- `core:vec_embedding_policy` — `eager_on_load` (default) / `lazy_on_query` / `manual`. v1 ships `eager_on_load` only.
+
+**Nested-IRI scopes:** the `urn:eigenius:core:distances:cosine` style of nested URN can't be written as `core:distances:cosine` because ESL's `QualifiedName` is single-colon. Declare an additional namespace alias (`namespace cd = "urn:eigenius:core:distances"`) and use `cd:cosine` instead. Same pattern for strategies (`namespace cs = "urn:eigenius:core:strategies"`).
+
+**Vector-index population** runs through the post-Load sweep ([`sweep_layer_vectors`](../../../kernel/src/query/vector/indexing.rs)) — it needs an Embedder Component the kernel can dispatch. Without one registered, the VectorIndex Resource still commits but no segments exist; queries against it return empty until the sweep completes.
+
+**v1 multiplicity.** At most one TextIndex and at most one VectorIndex per target Property per head — both can coexist on the same Property (the hybrid retrieval case). The constraint is verified by [`verify_text_index_multiplicity`](../../../kernel/src/layer/index_discovery.rs) and `verify_vector_index_multiplicity`.
+
+Parser: [`parse_text_index`](../../../kernel/src/esl/parser.rs) / [`parse_vector_index`](../../../kernel/src/esl/parser.rs). AST: [`TextIndexDecl`](../../../kernel/src/esl/ast.rs) / [`VectorIndexDecl`](../../../kernel/src/esl/ast.rs).
+
 ## 4.5. `data` — inductive types
 
 Inductive type declarations introduce a new type with a finite list of constructors. Recursive references to the type itself are allowed (and are exactly what makes inductives interesting). Sized inductives carry a size parameter and use bounded binders to track strictly-decreasing recursion.

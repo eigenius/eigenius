@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress. M1–M7 shipped (June 2026); M8 and M9 remain.
+In progress. M1–M8 shipped; M9 majority shipped (worked example + life-science integration + user docs + implementation notes), benchmarks pending.
 
 | Milestone | Status |
 |---|---|
@@ -14,11 +14,26 @@ In progress. M1–M7 shipped (June 2026); M8 and M9 remain.
 | M6 — HNSW addition | ✅ Shipped |
 | M7 — Similarity operator + hybrid retrieval | ✅ Shipped (post-surface-reset) |
 | M8 — Consolidation + atomic reindex | ✅ Shipped |
-| M9 — End-to-end validation | ⏳ Pending |
+| M9 — End-to-end validation | ⏳ Mostly shipped — benchmarks pending |
+
+M9 deliverable detail:
+
+| M9 item | Status | Lands at |
+|---|---|---|
+| M9.1 D35 §7.4 worked example | ✅ Shipped | [d35_se_retrieval_worked_example.rs](../../kernel/tests/d35_se_retrieval_worked_example.rs) + D35 §7.4 rewrite |
+| M9.2 Life-science integration test | ✅ Shipped | [crates/eigenius-obograph](../../crates/eigenius-obograph/) + [d43_go_subset_integration.rs](../../crates/eigenius-obograph/tests/d43_go_subset_integration.rs) (real GO data, RocksDB backend) |
+| M9.3 HNSW benchmark | ⏳ Pending | Synthetic-vector recall test (algorithm-level) and semantic-recall test (needs real embedder) split — see implementation notes |
+| M9.4 Performance benchmarks | ⏳ Pending | criterion suite + numbers captured into implementation notes |
+| M9.5 User documentation | ✅ Shipped | EigenQL guide [chapter 6](../guides/eigenql/06-text-and-vector-retrieval.md) + ESL guide [§4.4a](../guides/esl/04-declarations.md#44a-text_index-and-vector_index) |
+| M9.6 Implementation notes appendix | ✅ Shipped | [d43-implementation-notes.md](../notes/d43-implementation-notes.md) |
 
 M7's surface differs from the original M1 plan: the seven function-shaped primitives + BIND + `TOP K BY` were collapsed into a single `~` operator with a `{ via:, model:, k:, limit: }` hint block, ranked by `TOP N` against the platform-internal RRF fusion. See D43 §3.3 / §3.4 for the surface and the surface-reset note in M7 for the rationale.
 
 M8 ships the full set: the consolidation extension point lives in [consolidate.rs](../../kernel/src/layer/consolidate.rs); text-side re-extraction runs inside `LayerBuilder::build` via `populate_text_indexes`; vector-side concatenation + relabel + HNSW rebuild runs in [`consolidate_layer_vectors`](../../kernel/src/query/vector/indexing.rs); the reindex driver lives in [task/reindex.rs](../../kernel/src/task/reindex.rs); the post-build trigger (`detect_reindex_targets` → `SweepCoordinator::trigger_reindex_blocking`) lives in [task/sweep_registry.rs](../../kernel/src/task/sweep_registry.rs); search-equivalence under consolidation has both text and vector integration tests; in-flight reindex cancellation composes through the same registry as the sweep cancellation. The remaining gap is the commit-hook wiring at the server layer that calls `trigger_reindex_blocking` after each `put_branch`; that's an M9 concern.
+
+M9.2 added the obograph importer ([crates/eigenius-obograph](../../crates/eigenius-obograph/)) — converts OBO Graphs JSON dumps (GO, ChEBI, etc.) to Eigon-JSON with HTTP → URN IRI rewriting, `core:source_irl` provenance, `is_a: [..., DeclaredResource]` epistemic tagging, and a synthesised shared OBO meta-vocabulary at [`ontologies/obo/obo-meta-ontology.json`](../../ontologies/obo/obo-meta-ontology.json) loaded by the bootstrap chain. Real GO (52k Classes) converts cleanly, loads into a RocksDB-backed kernel layer in ~3s release, and answers BM25 `~` queries against actual biomedical content.
+
+Pre-existing core-ontology additions to support imports: `urn:eigenius:core:Resource` (catch-all super-class for `INDIVIDUAL`-shaped nodes) and `urn:eigenius:core:deprecated` (Boolean Property for the OBO `meta.deprecated` slot).
 
 ## Scope
 
