@@ -40,14 +40,24 @@ tracing-subscriber.workspace = true
 tokio.workspace = true
 tokio-stream = "0.1"
 tonic.workspace = true
+tonic-prost.workspace = true
 tonic-web.workspace = true
 prost.workspace = true
+# Raw HTTP/1.1 client backing the gRPC-Web transport the kernel uses to
+# reach the orchestrator's `ComponentExecutor` (see
+# `program::remote::OrchestratorTransport`). tonic's own `Channel` is a
+# complete native-gRPC transport and can't be wrapped by the gRPC-Web
+# client adapter, so we drive a plain hyper client underneath it.
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 uuid.workspace = true
 wasmtime.workspace = true
 eigenius-wasm-runtime.workspace = true
 
 [build-dependencies]
-tonic-build = "0.12"
+# tonic 0.14: prost-based message + service codegen lives in
+# `tonic-prost-build` (the core `tonic-build` now only emits the
+# transport-agnostic service scaffolding).
+tonic-prost-build = "0.14"
 
 [dev-dependencies]
 proptest.workspace = true

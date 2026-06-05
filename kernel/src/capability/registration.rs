@@ -40,11 +40,11 @@ use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
 use crate::program::component::ComponentRegistry;
+use crate::program::remote::OrchestratorTransport;
 use crate::server::proto::component_executor_client::ComponentExecutorClient;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tonic::transport::Channel;
 
 /// Protected namespace prefixes. Domain-supplied WASM modules cannot register
 /// IRIs under these (D12 §8.4).
@@ -539,7 +539,7 @@ pub fn register_external_institutions(
     layer: &Layer,
     index: &InstitutionIndex,
     runtime: &mut InstitutionRuntime,
-    client: Arc<Mutex<ComponentExecutorClient<Channel>>>,
+    client: Arc<Mutex<ComponentExecutorClient<OrchestratorTransport>>>,
     report: &mut RegistrationReport,
 ) {
     let (plans, errors) = validate_external_institution_chain(layer, index);

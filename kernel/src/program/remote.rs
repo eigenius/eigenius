@@ -25,9 +25,36 @@ use crate::program::component::{BuiltinComponent, ComponentResult};
 use crate::program::trace::ComponentMetrics;
 use crate::server::proto::component_executor_client::ComponentExecutorClient;
 use crate::server::proto::ComponentRequest;
+use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::client::legacy::Client as HyperClient;
+use hyper_util::rt::TokioExecutor;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tonic::transport::Channel;
+use tonic::body::Body as TonicBody;
+use tonic_web::{GrpcWebCall, GrpcWebClientService};
+
+/// Transport the kernel uses to reach the orchestrator's
+/// `ComponentExecutor` service.
+///
+/// The kernel speaks **gRPC-Web**, not native gRPC, on this hop. The
+/// orchestrator serves the service via connect-es on `Deno.serve`,
+/// whose Fetch `Response` cannot carry HTTP/2 trailers — and native
+/// gRPC delivers its terminal `grpc-status` *as* a trailer. With no
+/// trailer on the wire, a tonic ≥0.14 client treats the stream as
+/// truncated and fails the call with "missing grpc-status trailer"
+/// (confirmed against the running stack: the orchestrator logs the LLM
+/// completion, then the kernel rejects the trailer-less response).
+/// gRPC-Web instead frames the trailing status as the final length-
+/// prefixed frame of the response *body*, which Deno delivers
+/// faithfully. (This mirrors the orchestrator→kernel direction, which
+/// already uses a gRPC-Web transport for the same reason.)
+///
+/// tonic's own `Channel` can't sit underneath the gRPC-Web adapter — it
+/// is itself a complete native-gRPC transport — so the adapter wraps a
+/// bare hyper HTTP/1.1 client. HTTP/1.1 (not h2c) matches the transport
+/// the orchestrator's reverse-direction client already uses.
+pub type OrchestratorTransport =
+    GrpcWebClientService<HyperClient<HttpConnector, GrpcWebCall<TonicBody>>>;
 
 /// Content-type tag emitted on every outbound `ComponentRequest`. The
 /// orchestrator's `component_executor.ts` branches on this to pick its
@@ -40,13 +67,13 @@ pub const EIGON_CBOR_CONTENT_TYPE: &str = "application/eigon+cbor";
 /// via the ComponentExecutor gRPC service.
 pub struct RemoteComponent {
     component_iri: String,
-    client: Arc<Mutex<ComponentExecutorClient<Channel>>>,
+    client: Arc<Mutex<ComponentExecutorClient<OrchestratorTransport>>>,
 }
 
 impl RemoteComponent {
     pub fn new(
         component_iri: String,
-        client: Arc<Mutex<ComponentExecutorClient<Channel>>>,
+        client: Arc<Mutex<ComponentExecutorClient<OrchestratorTransport>>>,
     ) -> Self {
         Self {
             component_iri,
@@ -120,7 +147,7 @@ impl BuiltinComponent for RemoteComponent {
 }
 
 /// Shared gRPC client type alias to reduce boilerplate.
-pub type SharedOrchestratorClient = Arc<Mutex<ComponentExecutorClient<Channel>>>;
+pub type SharedOrchestratorClient = Arc<Mutex<ComponentExecutorClient<OrchestratorTransport>>>;
 
 /// Connect to the orchestrator, returning the shared client and the
 /// built-in remote components registered against it.
@@ -134,16 +161,25 @@ pub async fn connect_orchestrator(
     ),
     String,
 > {
-    // Use `connect_lazy()` so the kernel can start up without requiring the
-    // orchestrator to be ready. The connection is established on the first
-    // RPC call. This matches how production deployments work (services come
-    // up in parallel) and makes local dev less fragile.
-    let channel = Channel::from_shared(endpoint.to_string())
-        .map_err(|e| format!("invalid endpoint: {e}"))?
-        .connect_lazy();
+    // Parse the origin up front so a malformed endpoint fails here
+    // rather than on the first RPC. `with_origin` stamps the scheme +
+    // authority onto every outbound request; the hyper client is lazy
+    // (connects on first use, pools thereafter), preserving the old
+    // `connect_lazy()` property that the kernel can start before the
+    // orchestrator is ready.
+    let origin: tonic::transport::Uri = endpoint
+        .parse()
+        .map_err(|e| format!("invalid endpoint: {e}"))?;
+
+    // Bare HTTP/1.1 client under the gRPC-Web adapter so the terminal
+    // `grpc-status` arrives in the response body rather than as an
+    // HTTP/2 trailer the Deno-hosted orchestrator can't send. See
+    // `OrchestratorTransport`.
+    let http = HyperClient::builder(TokioExecutor::new()).build_http();
+    let transport = GrpcWebClientService::new(http);
 
     let client: SharedOrchestratorClient = Arc::new(Mutex::new(
-        ComponentExecutorClient::new(channel)
+        ComponentExecutorClient::with_origin(transport, origin)
             .max_decoding_message_size(128 * 1024 * 1024)
             .max_encoding_message_size(128 * 1024 * 1024),
     ));

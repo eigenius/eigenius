@@ -43,12 +43,12 @@ use crate::nbe::val::Val;
 use crate::ontology::eigon_cbor;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
+use crate::program::remote::OrchestratorTransport;
 use crate::server::proto::component_executor_client::ComponentExecutorClient;
 use crate::server::proto::DispatchExternalRequest;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tonic::transport::Channel;
 
 /// Per-`query_handler` dispatch metadata captured at registration
 /// time. The orchestrator side of `DispatchExternal` reads
@@ -78,7 +78,7 @@ pub struct ExternalInstitution {
     /// metadata. Populated at registration time when the index is
     /// rebuilt.
     handlers: BTreeMap<Iri, ExternalQueryHandler>,
-    client: Arc<Mutex<ComponentExecutorClient<Channel>>>,
+    client: Arc<Mutex<ComponentExecutorClient<OrchestratorTransport>>>,
 }
 
 impl ExternalInstitution {
@@ -88,7 +88,7 @@ impl ExternalInstitution {
         image_digest: String,
         language: String,
         handlers: BTreeMap<Iri, ExternalQueryHandler>,
-        client: Arc<Mutex<ComponentExecutorClient<Channel>>>,
+        client: Arc<Mutex<ComponentExecutorClient<OrchestratorTransport>>>,
     ) -> Self {
         Self {
             institution_iri,

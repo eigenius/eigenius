@@ -180,7 +180,7 @@ pub struct EigeniusService {
         Arc<
             tokio::sync::Mutex<
                 proto::component_executor_client::ComponentExecutorClient<
-                    tonic::transport::Channel,
+                    crate::program::remote::OrchestratorTransport,
                 >,
             >,
         >,
@@ -320,7 +320,7 @@ impl EigeniusService {
         client: Arc<
             tokio::sync::Mutex<
                 proto::component_executor_client::ComponentExecutorClient<
-                    tonic::transport::Channel,
+                    crate::program::remote::OrchestratorTransport,
                 >,
             >,
         >,

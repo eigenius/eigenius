@@ -53,7 +53,12 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tokio = { version = "1", features = ["full"] }
-tonic = "0.12"
+tonic = "0.14"
+# tonic 0.14 split prost integration out of the core crate: message
+# types + the `include_proto!` macro now live in `tonic-prost`, and
+# the build-time codegen moved to `tonic-prost-build`. The core
+# `tonic` crate carries only the transport + service plumbing.
+tonic-prost = "0.14"
 # `tonic-web` lets the kernel speak the gRPC-Web wire protocol over
 # HTTP/1.1 in addition to native gRPC over HTTP/2 — same RPC surface,
 # different transport. The orchestrator's `KernelClient` (running in
@@ -64,8 +69,8 @@ tonic = "0.12"
 # tonic service, same gRPC semantics; the kernel handles both clients
 # (CLI uses HTTP/2 gRPC, orchestrator uses HTTP/1.1 gRPC-Web) from a
 # single socket.
-tonic-web = "0.12"
-prost = "0.13"
+tonic-web = "0.14"
+prost = "0.14"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # WASM runtime
