@@ -18,7 +18,7 @@ hex = "0.4"
 # `text_term:<index>:<term>:<layer>` value carries after the
 # `varint(df)` prefix.
 roaring = "0.10"
-rocksdb = "0.22"
+rocksdb = "0.24"
 serde.workspace = true
 # D43 §2.4 — serde_bytes lets the CBOR `vectors` payload survive as
 # a CBOR byte string rather than a numeric array, matching the
