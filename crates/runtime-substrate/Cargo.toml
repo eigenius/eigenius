@@ -41,7 +41,7 @@ sha2 = "0.10"
 # Docker-spawner backend (gated). Bollard exposes `default = [http, pipe]`
 # where `pipe` is the Unix-socket / named-pipe transport — needed for the
 # DooD `/var/run/docker.sock` access pattern (D26 §9.5).
-bollard = { version = "0.20", optional = true }
+bollard = { version = "0.21", optional = true }
 # Local Tokio runtime — narrower features than the workspace-wide
 # `tokio = "full"` since DockerSpawner only needs a multi-thread runtime
 # for blocking on Bollard's async API plus timers + UDS for cross-check

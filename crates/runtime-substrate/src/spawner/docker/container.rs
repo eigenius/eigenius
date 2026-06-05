@@ -41,7 +41,7 @@
 use crate::error::SpawnError;
 use crate::spawner::docker::config::NetworkMode;
 use crate::types::WorkerSpec;
-use bollard::models::{HostConfig, Mount, MountTypeEnum};
+use bollard::models::{HostConfig, Mount, MountType};
 use bollard::query_parameters::CreateContainerOptionsBuilder;
 use std::collections::HashMap;
 use std::path::Path;
@@ -138,14 +138,14 @@ fn build_host_config(inputs: &ContainerBuildInputs) -> HostConfig {
         Mount {
             target: Some(tempdir.clone()),
             source: Some(tempdir),
-            typ: Some(MountTypeEnum::BIND),
+            typ: Some(MountType::BIND),
             read_only: Some(false),
             ..Default::default()
         },
         Mount {
             target: Some(depot.clone()),
             source: Some(depot),
-            typ: Some(MountTypeEnum::BIND),
+            typ: Some(MountType::BIND),
             read_only: Some(true),
             ..Default::default()
         },

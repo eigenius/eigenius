@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 eigenius-wasm-sdk = { path = "../../sdk/wasm-sdk" }
-wit-bindgen = "0.41"
+wit-bindgen = "0.57"
 
 [lib]
 crate-type = ["cdylib"]

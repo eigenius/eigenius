@@ -64,8 +64,17 @@ async fn rocks_matches_memory_reference() {
     let mem: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
     let rocks: Arc<dyn PersistentBackend> = Arc::new(RocksStore::open(tmp.path()).unwrap());
 
-    // Build root: defines two IRIs.
-    let mem_root = {
+    // Build the root ONCE and store the same layer into both backends.
+    // `created_at` is stamped a single time at `build()` (see
+    // `LayerBuilder::build` → `now_millis()`), and every backend copies
+    // that one value onto its persisted `LayerHandle`. Building a
+    // separate layer per backend would stamp two wall-clock timestamps
+    // and the reloaded handles would drift by the inter-build interval —
+    // defeating the very mechanism the build-time stamp exists to
+    // provide. The id/content-hash determinism of independent builds is
+    // a kernel-level property covered by kernel tests; this harness is
+    // scoped to backend parity (see module docs).
+    let root = {
         let mut b = LayerBuilder::new("root", None);
         b.add_resource(make_resource(
             "urn:eigenius:demo:A",
@@ -79,33 +88,15 @@ async fn rocks_matches_memory_reference() {
         .unwrap();
         Arc::new(b.build(LayerStorage::in_memory()))
     };
-    // Same layer (deterministic) built against the rocks storage.
-    let rocks_root = {
-        let mut b = LayerBuilder::new("root", None);
-        b.add_resource(make_resource(
-            "urn:eigenius:demo:A",
-            vec![("urn:eigenius:core:description", Value::String("A".into()))],
-        ))
-        .unwrap();
-        b.add_resource(make_resource(
-            "urn:eigenius:demo:B",
-            vec![("urn:eigenius:core:description", Value::String("B".into()))],
-        ))
-        .unwrap();
-        Arc::new(b.build(LayerStorage::in_memory()))
-    };
-    // Same content + same parents (none) → identical IDs.
-    assert_eq!(mem_root.id(), rocks_root.id());
-    assert_eq!(mem_root.content_hash(), rocks_root.content_hash());
 
     // Store and verify observable parity.
-    mem.store_layer(&mem_root).unwrap();
-    rocks.store_layer(&rocks_root).unwrap();
-    assert_observable_eq(mem.as_ref(), rocks.as_ref(), mem_root.id());
+    mem.store_layer(&root).unwrap();
+    rocks.store_layer(&root).unwrap();
+    assert_observable_eq(mem.as_ref(), rocks.as_ref(), root.id());
 
-    // Child layer: tombstones demo:A.
-    let make_child = |parent: Arc<eigenius_kernel::layer::Layer>| {
-        let mut b = LayerBuilder::new("child", Some(parent));
+    // Child layer (built once): tombstones demo:A.
+    let child = {
+        let mut b = LayerBuilder::new("child", Some(Arc::clone(&root)));
         b.add_resource(make_resource(
             "urn:eigenius:demo:C",
             vec![("urn:eigenius:core:description", Value::String("C".into()))],
@@ -114,20 +105,16 @@ async fn rocks_matches_memory_reference() {
         b.tombstone(iri("urn:eigenius:demo:A")).unwrap();
         Arc::new(b.build(LayerStorage::in_memory()))
     };
-    let mem_child = make_child(Arc::clone(&mem_root));
-    let rocks_child = make_child(Arc::clone(&rocks_root));
-    assert_eq!(mem_child.id(), rocks_child.id());
-    assert_eq!(mem_child.content_hash(), rocks_child.content_hash());
 
-    mem.store_layer(&mem_child).unwrap();
-    rocks.store_layer(&rocks_child).unwrap();
-    assert_observable_eq(mem.as_ref(), rocks.as_ref(), mem_child.id());
+    mem.store_layer(&child).unwrap();
+    rocks.store_layer(&child).unwrap();
+    assert_observable_eq(mem.as_ref(), rocks.as_ref(), child.id());
 
     // Branch refs.
-    mem.put_branch("main", mem_root.id()).unwrap();
-    rocks.put_branch("main", rocks_root.id()).unwrap();
-    mem.put_branch("feature", mem_child.id()).unwrap();
-    rocks.put_branch("feature", rocks_child.id()).unwrap();
+    mem.put_branch("main", root.id()).unwrap();
+    rocks.put_branch("main", root.id()).unwrap();
+    mem.put_branch("feature", child.id()).unwrap();
+    rocks.put_branch("feature", child.id()).unwrap();
     assert_eq!(mem.list_branches().unwrap(), rocks.list_branches().unwrap());
     assert_eq!(
         mem.get_branch("main").unwrap(),
@@ -139,34 +126,26 @@ async fn rocks_matches_memory_reference() {
     );
 
     // Tag immutability.
-    assert!(mem.create_tag("v1", mem_root.id()).unwrap());
-    assert!(rocks.create_tag("v1", rocks_root.id()).unwrap());
+    assert!(mem.create_tag("v1", root.id()).unwrap());
+    assert!(rocks.create_tag("v1", root.id()).unwrap());
     // Re-creating the same tag returns false on both.
-    assert!(!mem.create_tag("v1", mem_child.id()).unwrap());
-    assert!(!rocks.create_tag("v1", rocks_child.id()).unwrap());
+    assert!(!mem.create_tag("v1", child.id()).unwrap());
+    assert!(!rocks.create_tag("v1", child.id()).unwrap());
     assert_eq!(mem.list_tags().unwrap(), rocks.list_tags().unwrap());
 
     // Anchored-commit cache: identical (content, supporting) pairs
     // dedup the same way.
     let supporting_content = ContentHash([7u8; 32]);
-    mem.put_anchored_commit(
-        mem_child.content_hash(),
-        &supporting_content,
-        mem_child.id(),
-    )
-    .unwrap();
+    mem.put_anchored_commit(child.content_hash(), &supporting_content, child.id())
+        .unwrap();
     rocks
-        .put_anchored_commit(
-            rocks_child.content_hash(),
-            &supporting_content,
-            rocks_child.id(),
-        )
+        .put_anchored_commit(child.content_hash(), &supporting_content, child.id())
         .unwrap();
     assert_eq!(
-        mem.lookup_anchored_commit(mem_child.content_hash(), &supporting_content)
+        mem.lookup_anchored_commit(child.content_hash(), &supporting_content)
             .unwrap(),
         rocks
-            .lookup_anchored_commit(rocks_child.content_hash(), &supporting_content)
+            .lookup_anchored_commit(child.content_hash(), &supporting_content)
             .unwrap()
     );
     {
@@ -178,34 +157,27 @@ async fn rocks_matches_memory_reference() {
     }
 
     // Content-hash dedup: both impls report the same positions.
-    let mut me = mem
-        .lookup_by_content_hash(mem_child.content_hash())
-        .unwrap();
-    let mut ro = rocks
-        .lookup_by_content_hash(rocks_child.content_hash())
-        .unwrap();
+    let mut me = mem.lookup_by_content_hash(child.content_hash()).unwrap();
+    let mut ro = rocks.lookup_by_content_hash(child.content_hash()).unwrap();
     me.sort();
     ro.sort();
     assert_eq!(me, ro);
 
     // delete_layer: same effect on both. After deleting the child,
     // every read surface that referenced it must agree on absence.
-    mem.delete_layer(mem_child.id()).unwrap();
-    rocks.delete_layer(rocks_child.id()).unwrap();
+    mem.delete_layer(child.id()).unwrap();
+    rocks.delete_layer(child.id()).unwrap();
     assert_eq!(
-        mem.load_handle(mem_child.id()).unwrap(),
-        rocks.load_handle(rocks_child.id()).unwrap()
+        mem.load_handle(child.id()).unwrap(),
+        rocks.load_handle(child.id()).unwrap()
     );
     assert_eq!(
-        mem.load_bloom(mem_child.id()).unwrap(),
-        rocks.load_bloom(rocks_child.id()).unwrap()
+        mem.load_bloom(child.id()).unwrap(),
+        rocks.load_bloom(child.id()).unwrap()
     );
     assert_eq!(
-        mem.lookup_by_content_hash(mem_child.content_hash())
-            .unwrap(),
-        rocks
-            .lookup_by_content_hash(rocks_child.content_hash())
-            .unwrap()
+        mem.lookup_by_content_hash(child.content_hash()).unwrap(),
+        rocks.lookup_by_content_hash(child.content_hash()).unwrap()
     );
 }
 

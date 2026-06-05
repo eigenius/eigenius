@@ -6,7 +6,7 @@ description = "Test fixture: exercises read-access.resolve and query-access.quer
 
 [dependencies]
 eigenius-wasm-sdk = { path = "../../sdk/wasm-sdk" }
-wit-bindgen = "0.41"
+wit-bindgen = "0.57"
 
 [lib]
 crate-type = ["cdylib"]

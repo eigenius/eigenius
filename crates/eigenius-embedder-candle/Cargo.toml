@@ -11,13 +11,13 @@ eigenius-kernel = { path = "../../kernel" }
 # Candle ML stack — pure-Rust BERT inference. Pinned to a recent
 # stable line; adding a new model architecture is a candle-transformers
 # version bump.
-candle-core = "0.8"
-candle-nn = "0.8"
-candle-transformers = "0.8"
+candle-core = "0.10"
+candle-nn = "0.10"
+candle-transformers = "0.10"
 # Tokenizer (HuggingFace Rust). The `onig` regex backend is more
 # robust than `regex` for the rare BPE tokenizer patterns that have
 # unbounded lookarounds.
-tokenizers = "0.20"
+tokenizers = "0.23"
 # Model-file fetcher from the HuggingFace Hub. First call downloads
 # safetensors + tokenizer.json + config.json into the HF cache (default
 # `~/.cache/huggingface/hub`); subsequent calls hit the cache.

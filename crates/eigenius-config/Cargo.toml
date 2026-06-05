@@ -9,4 +9,4 @@ description = "Layered configuration loader for the Eigenius platform. Defaults 
 [dependencies]
 serde = { workspace = true }
 thiserror = { workspace = true }
-toml = "0.8"
+toml = "1"
