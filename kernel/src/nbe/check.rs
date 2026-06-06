@@ -2228,12 +2228,12 @@ fn check_match(
     use std::collections::BTreeMap;
 
     let scrutinee_type = check_infer(ctx, scrutinee)?;
-    let (decl, params) = match &scrutinee_type {
+    let (decl, params, scrutinee_indices) = match &scrutinee_type {
         Val::InductiveType {
             decl,
             params,
-            indices: _,
-        } => (decl.clone(), params.clone()),
+            indices,
+        } => (decl.clone(), params.clone(), indices.clone()),
         other => {
             return Err(format!(
                 "match scrutinee has type {:?}, expected an inductive type",
@@ -2359,6 +2359,68 @@ fn check_match(
                     }
                     arg_env = arg_env.extend(patt.clone(), gen);
                 }
+            }
+        }
+
+        // D48 Phase F — index-coherence check.
+        //
+        // For an indexed decl, this arm's ctor produces a conclusion
+        // `D(params)(ctor_idx_1, …, ctor_idx_m)` where each `ctor_idx_k`
+        // is an expression that may reference the ctor's value
+        // arguments. Evaluate these under `arg_env` (which has the
+        // params and the arm's bindings bound) and unify each against
+        // the scrutinee's corresponding index value. If unification
+        // fails, this arm is unreachable per the scrutinee's index
+        // shape — the user wrote (e.g.) a `nil` arm on `Vec A 1`.
+        //
+        // For non-indexed decls (`decl.indices.is_empty()`), this is a
+        // no-op — scrutinee_indices is empty and the loop body never
+        // runs.
+        if !decl.indices.is_empty() {
+            // Evaluate ctor's conclusion. _ctor_result was discarded
+            // above; re-peel to get it.
+            let (_arg_specs_recheck, ctor_result) =
+                peel_ctor_telescope(&ctor.typ, decl.params.len());
+            let actual_conclusion = arm_ctx
+                .eval(ctor_result, &arg_env)
+                .map_err(|e| e.to_string())?;
+            let actual_indices: &[Val] = match &actual_conclusion {
+                Val::InductiveType { indices, .. } => indices.as_slice(),
+                _ => {
+                    return Err(format!(
+                        "match arm `{}.{}`: ctor conclusion did not evaluate \
+                         to an inductive type",
+                        decl.name, ctor.name
+                    ));
+                }
+            };
+            if actual_indices.len() != scrutinee_indices.len() {
+                return Err(format!(
+                    "match arm `{}.{}`: index arity mismatch \
+                     (ctor produces {}, scrutinee has {})",
+                    decl.name,
+                    ctor.name,
+                    actual_indices.len(),
+                    scrutinee_indices.len()
+                ));
+            }
+            let mut mctx = crate::nbe::unify::MetaCtx::new();
+            for (i, (actual, expected_idx)) in actual_indices
+                .iter()
+                .zip(scrutinee_indices.iter())
+                .enumerate()
+            {
+                crate::nbe::unify::unify(arm_ctx.rho.len(), actual, expected_idx, &mut mctx)
+                    .map_err(|e| {
+                        format!(
+                            "match arm `{}.{}` is unreachable: ctor's index #{i} \
+                         doesn't match scrutinee's index ({e}). If this arm \
+                         should be reachable under a dependent motive, use \
+                         `Exp::InductiveRec` with an explicit `returning T` \
+                         annotation.",
+                            decl.name, ctor.name
+                        )
+                    })?;
             }
         }
 
@@ -5698,6 +5760,155 @@ mod tests {
             indices: Vec::new(),
         };
         check(&mut c, &zero, &expected).unwrap();
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // D48 Phase F — match index-coherence
+    // ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn d48_match_coherent_arms_validate() {
+        // A SimpleVec value with concrete index `()`. Both arms produce
+        // ctor conclusions with index `()`, matching the scrutinee.
+        // The match should type-check.
+        let decl = simple_vec_decl();
+        let scrutinee_typ = Val::InductiveType {
+            decl: decl.clone(),
+            params: vec![Val::Sort(0)],
+            indices: vec![Val::Unit],
+        };
+        // Set up a CheckCtx with `v : SimpleVec Set ()` bound.
+        let c = ctx();
+        let v_val = gen_val(&c.rho);
+        let rho2 = c
+            .rho
+            .clone()
+            .extend(Patt::Var("v".to_string()), v_val.clone());
+        let gamma2 = up_gamma(
+            &c.gamma,
+            &Patt::Var("v".to_string()),
+            &scrutinee_typ,
+            &v_val,
+        )
+        .unwrap();
+        let mut c2 = CheckCtx::new(rho2, gamma2);
+
+        // match v { nil => (); cons _ _ _ => () }
+        let match_exp = Exp::Match {
+            scrutinee: Box::new(Exp::Var("v".to_string())),
+            arms: vec![
+                crate::nbe::term::MatchArm {
+                    ctor_name: "nil".to_string(),
+                    bindings: vec![],
+                    body: Exp::Unit,
+                },
+                crate::nbe::term::MatchArm {
+                    ctor_name: "cons".to_string(),
+                    bindings: vec![Patt::Unit, Patt::Unit, Patt::Unit],
+                    body: Exp::Unit,
+                },
+            ],
+        };
+        check(&mut c2, &match_exp, &Val::One).expect("coherent match should validate");
+    }
+
+    #[test]
+    fn d48_match_incoherent_arm_rejected() {
+        // Construct a "wrong-index" Vec-style decl whose nil ctor
+        // produces `WrongVec A Sort(1)` (instead of the expected
+        // `SimpleVec A ()`). Building it as a *separate* decl with
+        // a non-Unit index in nil's conclusion. Then match a SimpleVec
+        // scrutinee against this synthetic match where the nil-arm
+        // would be unreachable. We construct this by manually building
+        // an arm whose body could only type-check if the scrutinee's
+        // index `()` were really `Sort(1)`, which it isn't.
+        //
+        // Simpler: scrutinee at SimpleVec A Sort(1) (impossible index),
+        // and the nil arm's ctor produces `SimpleVec A ()`. Unification
+        // of () vs Sort(1) fails → arm rejected.
+        let decl = simple_vec_decl();
+        let scrutinee_typ = Val::InductiveType {
+            decl: decl.clone(),
+            params: vec![Val::Sort(0)],
+            indices: vec![Val::Sort(1)], // mismatched: nil produces (), not Sort(1)
+        };
+        let c = ctx();
+        let v_val = gen_val(&c.rho);
+        let rho2 = c
+            .rho
+            .clone()
+            .extend(Patt::Var("v".to_string()), v_val.clone());
+        let gamma2 = up_gamma(
+            &c.gamma,
+            &Patt::Var("v".to_string()),
+            &scrutinee_typ,
+            &v_val,
+        )
+        .unwrap();
+        let mut c2 = CheckCtx::new(rho2, gamma2);
+
+        let match_exp = Exp::Match {
+            scrutinee: Box::new(Exp::Var("v".to_string())),
+            arms: vec![
+                crate::nbe::term::MatchArm {
+                    ctor_name: "nil".to_string(),
+                    bindings: vec![],
+                    body: Exp::Unit,
+                },
+                crate::nbe::term::MatchArm {
+                    ctor_name: "cons".to_string(),
+                    bindings: vec![Patt::Unit, Patt::Unit, Patt::Unit],
+                    body: Exp::Unit,
+                },
+            ],
+        };
+        let err = check(&mut c2, &match_exp, &Val::One).unwrap_err();
+        assert!(
+            err.contains("unreachable") || err.contains("index #"),
+            "expected unreachable-arm diagnostic: {err}"
+        );
+    }
+
+    #[test]
+    fn d48_match_non_indexed_unchanged() {
+        // A non-indexed Nat match still type-checks the same way.
+        let nat = nat_decl();
+        let scrutinee_typ = Val::InductiveType {
+            decl: nat.clone(),
+            params: Vec::new(),
+            indices: Vec::new(),
+        };
+        let c = ctx();
+        let n_val = gen_val(&c.rho);
+        let rho2 = c
+            .rho
+            .clone()
+            .extend(Patt::Var("n".to_string()), n_val.clone());
+        let gamma2 = up_gamma(
+            &c.gamma,
+            &Patt::Var("n".to_string()),
+            &scrutinee_typ,
+            &n_val,
+        )
+        .unwrap();
+        let mut c2 = CheckCtx::new(rho2, gamma2);
+
+        let match_exp = Exp::Match {
+            scrutinee: Box::new(Exp::Var("n".to_string())),
+            arms: vec![
+                crate::nbe::term::MatchArm {
+                    ctor_name: "zero".to_string(),
+                    bindings: vec![],
+                    body: Exp::Unit,
+                },
+                crate::nbe::term::MatchArm {
+                    ctor_name: "succ".to_string(),
+                    bindings: vec![Patt::Unit],
+                    body: Exp::Unit,
+                },
+            ],
+        };
+        check(&mut c2, &match_exp, &Val::One).expect("non-indexed Nat match should still validate");
     }
 
     #[test]
