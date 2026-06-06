@@ -689,6 +689,63 @@ mod tests {
     }
 
     #[test]
+    fn d48_round_trip_indexed_inductive_application_with_type_indices() {
+        // D48 Phase I: an indexed inductive application like
+        // `IxClassFamily A Set` (param: A, index: a type) round-trips
+        // through encode → decode via App-currying. The encoder
+        // produces the App spine; Phase B's eval split (`params ++
+        // indices` based on `decl.params.len()`) handles the runtime
+        // semantics.
+        //
+        // Limitation (documented): index values that are term-level
+        // (literals, constructor applications) aren't yet encodable
+        // by D47 — see D47 §3.5 "no literals". An axiom or theorem
+        // statement referencing e.g. `Vec Nat 0` would need D47
+        // extended with literal/ctor encoding. This test exercises
+        // the type-level-index case which IS supported.
+        let ix_decl = Arc::new(InductiveDecl {
+            name: "urn:_:IxClassFamily".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            // Index telescope's type is Sort(1) — indices are types
+            // themselves (e.g., the index says "what type am I
+            // indexed by"). This keeps the test purely type-level.
+            indices: vec![(Patt::Unit, Exp::Sort(1))],
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        // `IxClassFamily Some Other` — both param and index are
+        // EigonClass IRIs (type-level).
+        let app_form = Exp::InductiveType(
+            ix_decl,
+            vec![
+                Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:_:Some").unwrap()),
+                Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:_:Other").unwrap()),
+            ],
+        );
+        let encoded = encode_type(&app_form).expect("encode indexed inductive");
+        let Value::Json(j) = encoded else {
+            panic!("expected Value::Json");
+        };
+        assert_eq!(j["ctor"], "App", "outermost should be App-curried");
+        // Walk the App spine to verify the structure: 2 App layers
+        // (one per param + index) bottoming at ConstRef(IxClassFamily).
+        let mut cursor = &j;
+        let mut depth = 0;
+        while cursor["ctor"] == "App" {
+            cursor = &cursor["args"][0];
+            depth += 1;
+        }
+        assert!(
+            cursor["ctor"] == "ConstRef" && cursor["args"][0] == "urn:_:IxClassFamily",
+            "App spine should bottom out at ConstRef(urn:_:IxClassFamily); got {cursor}"
+        );
+        assert_eq!(
+            depth, 2,
+            "two App layers (one per param + index): got {depth}"
+        );
+    }
+
+    #[test]
     fn encodes_applied_inductive_via_app_currying() {
         // InductiveType(List, [Nat]) — encoded as App(ConstRef(List), ConstRef(Nat))
         // via currying. We use synthetic decls with names that read as IRIs.

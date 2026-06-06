@@ -1178,22 +1178,42 @@ pub fn large_elim_admitted(decl: &InductiveDecl) -> bool {
     if decl.ctors.len() != 1 {
         return false;
     }
-    ctor_args_all_propositional(&decl.ctors[0].typ, decl.params.len())
+    ctor_args_pass_singleton_b(&decl.ctors[0].typ, decl.params.len(), decl.indices.len())
 }
 
-/// Walk a constructor's Π-telescope past its parameter prefix; return
-/// true iff every non-parameter argument's type is syntactically
-/// propositional.
-fn ctor_args_all_propositional(ctor_typ: &Exp, num_params: usize) -> bool {
+/// Singleton-elim Case B check (D46 §7) for a single-constructor
+/// inductive. Walks the ctor's Π-telescope past the parameter prefix;
+/// each non-parameter argument must be either:
+///
+/// - syntactically propositional (inhabits Prop), **or**
+/// - appear in one of the conclusion's index expressions (D48 Phase H).
+///
+/// The second clause is what admits e.g. `Eq A x y` whose ctor
+/// `refl(a) : Eq A a a` has `a` appearing in both index positions —
+/// large elim is admissible because the eliminator can reconstruct
+/// `a` from the indices of the inductive type.
+///
+/// For non-indexed decls (`num_indices == 0`), the second clause is
+/// vacuous and the check is equivalent to "all args are propositional"
+/// — preserving pre-D48 behavior.
+fn ctor_args_pass_singleton_b(ctor_typ: &Exp, num_params: usize, num_indices: usize) -> bool {
+    // Walk the telescope; collect each non-param arg's (binder name,
+    // type). Anonymous binders get an empty name (which never matches
+    // a Var lookup, so they can only pass the test if propositional).
     let mut current = ctor_typ;
     let mut remaining_params = num_params;
+    let mut non_param_args: Vec<(String, &Exp)> = Vec::new();
     loop {
         match current {
-            Exp::Pi(_patt, dom, body) => {
+            Exp::Pi(patt, dom, body) => {
                 if remaining_params > 0 {
                     remaining_params -= 1;
-                } else if !is_syntactically_propositional_type(dom) {
-                    return false;
+                } else {
+                    let name = match patt {
+                        Patt::Var(n) => n.clone(),
+                        _ => String::new(),
+                    };
+                    non_param_args.push((name, dom));
                 }
                 current = body;
             }
@@ -1201,17 +1221,88 @@ fn ctor_args_all_propositional(ctor_typ: &Exp, num_params: usize) -> bool {
                 // SizedPi binders may appear in the parameter prefix
                 // (size-indexed inductives). Skip those; reject any
                 // SizedPi appearing as a regular ctor argument since
-                // sizes are not propositional.
+                // sizes are not propositional and don't constitute
+                // "appearing in conclusion" for Case B.
                 if remaining_params == 0 {
                     return false;
                 }
                 remaining_params -= 1;
                 current = body;
             }
-            // Reached the conclusion (the `D(params)` shape). All
-            // non-parameter argument types have been verified.
-            _ => return true,
+            _ => break,
         }
+    }
+    // Extract the conclusion's index expressions (trailing
+    // `num_indices` args of the `Exp::InductiveType(_, all_args)`).
+    let index_exps: Vec<&Exp> = match current {
+        Exp::InductiveType(_, all_args) if all_args.len() >= num_params + num_indices => {
+            all_args[num_params..].iter().collect()
+        }
+        _ => Vec::new(),
+    };
+    // Each non-param arg must be propositional OR appear in indices.
+    for (name, typ) in &non_param_args {
+        let propositional = is_syntactically_propositional_type(typ);
+        let in_indices = !name.is_empty() && index_exps.iter().any(|e| exp_mentions_var(e, name));
+        if !propositional && !in_indices {
+            return false;
+        }
+    }
+    true
+}
+
+/// Whether `exp` contains a free reference to `Exp::Var(name)`.
+/// Structural walk; binders that shadow `name` cut off the search
+/// in their bodies. Used by the D48 Phase H singleton-elim extension
+/// to decide whether a ctor arg "appears in the conclusion".
+fn exp_mentions_var(exp: &Exp, name: &str) -> bool {
+    match exp {
+        Exp::Var(n) => n == name,
+        Exp::Lam(patt, body) | Exp::Pi(patt, _, body) | Exp::Sig(patt, _, body) => {
+            // Domain types are checked too (for Pi/Sig); the body is
+            // only checked if the binder doesn't shadow.
+            let dom_or_typ = if let Exp::Lam(_, _) = exp {
+                None
+            } else {
+                Some(match exp {
+                    Exp::Pi(_, dom, _) => dom.as_ref(),
+                    Exp::Sig(_, dom, _) => dom.as_ref(),
+                    _ => unreachable!(),
+                })
+            };
+            let dom_hit = dom_or_typ
+                .map(|d| exp_mentions_var(d, name))
+                .unwrap_or(false);
+            let shadowed = patt_binds(patt, name);
+            let body_hit = !shadowed && exp_mentions_var(body, name);
+            dom_hit || body_hit
+        }
+        Exp::App(h, a) => exp_mentions_var(h, name) || exp_mentions_var(a, name),
+        Exp::Arrow(a, b) | Exp::Times(a, b) => {
+            exp_mentions_var(a, name) || exp_mentions_var(b, name)
+        }
+        Exp::Pair(a, b) => exp_mentions_var(a, name) || exp_mentions_var(b, name),
+        Exp::Fst(e) | Exp::Snd(e) => exp_mentions_var(e, name),
+        Exp::Con(_, e) | Exp::Refl(e) => exp_mentions_var(e, name),
+        Exp::Id(a, x, y) => {
+            exp_mentions_var(a, name) || exp_mentions_var(x, name) || exp_mentions_var(y, name)
+        }
+        Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
+            args.iter().any(|a| exp_mentions_var(a, name))
+        }
+        Exp::CodataType(_, args) => args.iter().any(|a| exp_mentions_var(a, name)),
+        // For other Exp variants (Sort, One, Unit, Set, primitives,
+        // EigonClass, etc.) there's no Var inside to find.
+        _ => false,
+    }
+}
+
+/// Whether `patt` binds `name`, shadowing any outer occurrence.
+fn patt_binds(patt: &Patt, name: &str) -> bool {
+    match patt {
+        Patt::Var(n) => n == name,
+        Patt::Pair(p1, p2) => patt_binds(p1, name) || patt_binds(p2, name),
+        Patt::Unit => false,
     }
 }
 
@@ -2783,6 +2874,138 @@ mod tests {
             }],
         );
         assert!(!large_elim_admitted(&decl));
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // D48 Phase H — singleton-elim Case B "arg appears in conclusion"
+    // ──────────────────────────────────────────────────────────────────
+
+    /// `Eq A x y` (the canonical motivating case for D48 Phase H's
+    /// extension to singleton-elim Case B). Indexed by two values of
+    /// type A; single ctor `refl(a) : Eq A a a` has `a` appearing in
+    /// both index positions.
+    ///
+    /// Built as a Prop-sorted indexed inductive with one param (A : Set)
+    /// and two indices of type A (both unbound type-parameter
+    /// references — but for the singleton-elim test we just need the
+    /// shape, so the index telescope uses `Exp::Var("A")` referring to
+    /// the param).
+    fn eq_decl() -> std::sync::Arc<crate::nbe::term::InductiveDecl> {
+        // Self-ref for the ctor's conclusion.
+        let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            name: "Eq".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![
+                (Patt::Var("x".to_string()), Exp::Var("A".to_string())),
+                (Patt::Var("y".to_string()), Exp::Var("A".to_string())),
+            ],
+            sort: Exp::Sort(0),
+            ctors: Vec::new(),
+        });
+        // refl(a) : Eq A a a — conclusion supplies `a` in both indices.
+        let conclusion = Exp::InductiveType(
+            self_ref.clone(),
+            vec![
+                Exp::Var("A".to_string()),
+                Exp::Var("a".to_string()),
+                Exp::Var("a".to_string()),
+            ],
+        );
+        let ctor_typ = Exp::Pi(
+            Patt::Var("A".to_string()),
+            Box::new(Exp::Sort(1)),
+            Box::new(Exp::Pi(
+                Patt::Var("a".to_string()),
+                Box::new(Exp::Var("A".to_string())),
+                Box::new(conclusion),
+            )),
+        );
+        std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            name: "Eq".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![
+                (Patt::Var("x".to_string()), Exp::Var("A".to_string())),
+                (Patt::Var("y".to_string()), Exp::Var("A".to_string())),
+            ],
+            sort: Exp::Sort(0),
+            ctors: vec![crate::nbe::term::InductiveCtorDecl {
+                name: "refl".to_string(),
+                typ: ctor_typ,
+            }],
+        })
+    }
+
+    #[test]
+    fn d48_singleton_elim_admits_eq_via_indices_in_conclusion() {
+        // `Eq`'s `refl(a)` has a non-Prop arg `a : A` that appears in
+        // both conclusion indices. Pre-D48 this failed singleton-elim
+        // Case B (no indices => "appears in conclusion" was vacuous).
+        // With D48 Phase H, the extended Case B admits it.
+        let decl = eq_decl();
+        assert!(
+            large_elim_admitted(&decl),
+            "Eq must admit large elim under D48 Phase H — refl's `a` arg appears in indices"
+        );
+    }
+
+    #[test]
+    fn d48_singleton_elim_still_rejects_arg_not_in_conclusion() {
+        // A synthetic Prop-sorted indexed inductive whose single ctor
+        // takes a non-Prop arg that does NOT appear in the conclusion's
+        // index expressions. Even with the Phase H extension, this
+        // should still be rejected.
+        let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            name: "BadIxProp".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(0),
+            ctors: Vec::new(),
+        });
+        // Conclusion: BadIxProp () — the index is the constant `()`,
+        // not mentioning any ctor arg.
+        let conclusion = Exp::InductiveType(self_ref.clone(), vec![Exp::Unit]);
+        // Ctor: takes a non-Prop arg `_:1` (Unit type, in Set) that
+        // doesn't appear in conclusion.
+        let ctor_typ = Exp::Pi(
+            Patt::Var("smuggled".to_string()),
+            Box::new(Exp::One),
+            Box::new(conclusion),
+        );
+        let decl = crate::nbe::term::InductiveDecl {
+            name: "BadIxProp".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(0),
+            ctors: vec![crate::nbe::term::InductiveCtorDecl {
+                name: "smuggle".to_string(),
+                typ: ctor_typ,
+            }],
+        };
+        assert!(
+            !large_elim_admitted(&decl),
+            "BadIxProp must NOT admit large elim — the non-Prop arg doesn't appear in indices"
+        );
+    }
+
+    #[test]
+    fn d48_singleton_elim_unchanged_for_non_indexed_props() {
+        // Without indices, the Phase H extension is vacuous — the
+        // pre-D46 behavior holds: every non-param arg must be
+        // syntactically propositional.
+        // (Re-asserts the existing single-ctor-with-Id-arg case
+        // to catch any Phase H regression.)
+        let id_arg = Exp::Id(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
+        let conclusion =
+            Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:_:SingleProp").unwrap());
+        let ctor_typ = Exp::Pi(Patt::Unit, Box::new(id_arg), Box::new(conclusion));
+        let decl = mk_prop_decl(
+            "SingleProp",
+            vec![crate::nbe::term::InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: ctor_typ,
+            }],
+        );
+        assert!(large_elim_admitted(&decl));
     }
 
     #[test]
