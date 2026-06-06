@@ -1,14 +1,14 @@
 # Life-Science Propositions in Eigenius: Mapping, Current Capability, and Required Extensions
 
 **Status:** Draft — working design document
-**Scope:** How claims, propositions, and relationships in biopharmaceutical research are represented in Eigenius; which of these representations the current kernel (Mini-TT as implemented in `nbe/term.rs`, `nbe/eval.rs`, `nbe/check.rs`) already supports; and where extensions are needed. nanoda_lib's Lean 4 kernel is used as a reference for the richer end of the expression language where Mini-TT would need to grow.
+**Scope:** How claims, propositions, and relationships in biopharmaceutical research are represented in Eigenius; which of these representations the current kernel (EigenTT as implemented in `nbe/term.rs`, `nbe/eval.rs`, `nbe/check.rs`) already supports; and where extensions are needed. nanoda_lib's Lean 4 kernel is used as a reference for the richer end of the expression language where EigenTT would need to grow.
 **Related:** `boundary-contracts.md`, `lean4-institution.md`, and the Eigenius institutions paper.
 
 ## 1. Purpose
 
 Life-science research — drug discovery specifically — exercises the full range of epistemic shapes Eigenius is designed to represent. Unlike engineering workflows where mathematical verification plays a central role, drug discovery rests predominantly on *observed* experimental data and *derived* computational predictions, with formal verification confined to structural properties of models rather than to biological claims themselves. This distribution matters for what the expression language needs to do well.
 
-This document has three parts. Part one lays out how research propositions in a pharmaceutical workflow map to type-theoretic shapes and to the four institutions the system supports ($\mathcal{I}_{\text{Dock}}$, $\mathcal{I}_{\text{ADMET}}$, $\mathcal{I}_{\text{Assay}}$, $\mathcal{I}_{\text{PK}}$). Part two audits the current Mini-TT implementation against these shapes and identifies what can already be represented. Part three specifies the extensions the expression language will need, using nanoda_lib as the reference for how richer constructs are typically realized.
+This document has three parts. Part one lays out how research propositions in a pharmaceutical workflow map to type-theoretic shapes and to the four institutions the system supports ($\mathcal{I}_{\text{Dock}}$, $\mathcal{I}_{\text{ADMET}}$, $\mathcal{I}_{\text{Assay}}$, $\mathcal{I}_{\text{PK}}$). Part two audits the current EigenTT implementation against these shapes and identifies what can already be represented. Part three specifies the extensions the expression language will need, using nanoda_lib as the reference for how richer constructs are typically realized.
 
 The goal is to make the gap between "what the framework promises" and "what the current implementation actually supports" explicit and tractable, rather than letting the gap close only through accumulated implementation accidents.
 
@@ -245,11 +245,11 @@ Not the stronger `Π(c : Concentration) → ¬Inhibits(c)` — which the data do
 
 ## Part Two — Audit of Current Kernel Capability
 
-The Mini-TT kernel as currently implemented (`nbe/term.rs`, `nbe/eval.rs`, `nbe/check.rs`) supports a subset of the representations catalogued above. This part identifies what is directly expressible today and what requires the extensions specified in Part Three.
+The EigenTT kernel as currently implemented (`nbe/term.rs`, `nbe/eval.rs`, `nbe/check.rs`) supports a subset of the representations catalogued above. This part identifies what is directly expressible today and what requires the extensions specified in Part Three.
 
 ## 14. Directly representable in the current kernel
 
-The following claim shapes can be represented with the Mini-TT expression forms already implemented, assuming the ontology-as-types layer-chain plumbing (tracked separately) is complete.
+The following claim shapes can be represented with the EigenTT expression forms already implemented, assuming the ontology-as-types layer-chain plumbing (tracked separately) is complete.
 
 ### 14.1 Atomic observations (§3)
 
@@ -277,7 +277,7 @@ The `ConformationalProximity` component is the challenging part — not the Σ-s
 
 ### 14.5 Statistical predictions (§8) at the value level
 
-**Representable** as `Construct` of a `Prediction` class with the ensemble, claim, and interval as fields. The kernel supports this straightforwardly — it's a dependent record. The Mini-TT type system correctly maintains the distinction between a `Prediction(bioavailability = 45%, ...)` and a bare `45%`, so the former cannot be confused with the latter at the type level.
+**Representable** as `Construct` of a `Prediction` class with the ensemble, claim, and interval as fields. The kernel supports this straightforwardly — it's a dependent record. The EigenTT type system correctly maintains the distinction between a `Prediction(bioavailability = 45%, ...)` and a bare `45%`, so the former cannot be confused with the latter at the type level.
 
 **Caveats.** The kernel cannot yet reason about *properties* of the ensemble (bounds on error rates, coverage guarantees). Those require proof-level verification via the Lean institution, not kernel-level type-checking.
 
@@ -289,7 +289,7 @@ The `ConformationalProximity` component is the challenging part — not the Σ-s
 
 ## 15. Representable with straightforward additions
 
-The following require extensions to Mini-TT, but of a kind where the underlying design is understood and the work is additive rather than architecturally novel.
+The following require extensions to EigenTT, but of a kind where the underlying design is understood and the work is additive rather than architecturally novel.
 
 ### 15.1 Universal claims over finite ensembles (§4)
 
@@ -297,7 +297,7 @@ The following require extensions to Mini-TT, but of a kind where the underlying 
 
 **Approach.** Add `Map` and `Reduce` as primitive expression forms (distinct from ordinary function application). When the type checker sees `Map f xs` where `xs : List A`, and `f : Π(a : A) (a ∈ xs) → P a`, the resulting term has type `Π(a : A) (a ∈ xs) → P a` — i.e., the map's result is a proof that the predicate holds for every element. Reduction fires by iterating over the list.
 
-**nanoda_lib reference.** nanoda handles bounded universal quantification via the recursor on `List`, which Lean's kernel generates automatically when the inductive type is declared. The pattern is the same in principle — iterate over the inductive's constructors and discharge the predicate constructor-by-constructor. Adapting this for Mini-TT requires the inductive-type infrastructure from §16.1.
+**nanoda_lib reference.** nanoda handles bounded universal quantification via the recursor on `List`, which Lean's kernel generates automatically when the inductive type is declared. The pattern is the same in principle — iterate over the inductive's constructors and discharge the predicate constructor-by-constructor. Adapting this for EigenTT requires the inductive-type infrastructure from §16.1.
 
 ### 15.2 Conditional claims beyond the trivial shape (§6)
 
@@ -305,7 +305,7 @@ The following require extensions to Mini-TT, but of a kind where the underlying 
 
 **Approach.** Tighten the reducer's handling of neutral terms in conditional reduction. Specifically, the J-on-neutral case should carry all the arguments through the neutral wrapping so that later substitution under known proofs can fire the reduction. Currently the other J arguments (motive, d, x, y) are discarded.
 
-**nanoda_lib reference.** nanoda's reducer handles conditional reduction correctly by maintaining the full spine of the blocked application in the neutral representation. This is the pattern Mini-TT's reducer should adopt. The code in `src/expr.rs` and `src/tc.rs` of nanoda shows the idiom.
+**nanoda_lib reference.** nanoda's reducer handles conditional reduction correctly by maintaining the full spine of the blocked application in the neutral representation. This is the pattern EigenTT's reducer should adopt. The code in `src/expr.rs` and `src/tc.rs` of nanoda shows the idiom.
 
 ### 15.3 Quantitative bounds (§7)
 
@@ -317,7 +317,7 @@ The following require extensions to Mini-TT, but of a kind where the underlying 
 
 **What's missing.** The comorphism itself as a first-class resource. Currently comorphisms are discussed in the architecture paper as mathematical objects but don't have a corresponding Eigon ontology class. A `Comorphism` class with source/target institution references and a typed function body would let `ComorphismApplication` resources be committed and queried.
 
-**Approach.** Specify `Comorphism` and `ComorphismApplication` as ontology classes. The kernel doesn't need to change — the application is a typed resource that references the comorphism's body, which is itself a Mini-TT expression. What *does* need to land first is full type-checking of ontology-class-parameterized expressions, which depends on the ontology-as-types plumbing.
+**Approach.** Specify `Comorphism` and `ComorphismApplication` as ontology classes. The kernel doesn't need to change — the application is a typed resource that references the comorphism's body, which is itself a EigenTT expression. What *does* need to land first is full type-checking of ontology-class-parameterized expressions, which depends on the ontology-as-types plumbing.
 
 ### 15.5 Negative claims (§12)
 
@@ -327,15 +327,15 @@ The following require extensions to Mini-TT, but of a kind where the underlying 
 
 ## 16. Extensions required for full coverage
 
-The following require genuine extensions to Mini-TT — new expression forms, new type-theoretic rules, and corresponding reducer work.
+The following require genuine extensions to EigenTT — new expression forms, new type-theoretic rules, and corresponding reducer work.
 
 ### 16.1 Inductive types for fiber morphisms (§10, deep)
 
-**What's missing.** Mini-TT's current `Data(summands)` form supports sum-of-products (finite sums with pair bodies) but not recursive inductive types with derived eliminators. The `ConformationalProximity`, `ReplicateRelationship`, `ModelAgreement`, and `CompartmentRefinement` morphism types can be represented as flat resource classes (as discussed in §14.4), but the deeper claim — that these are *inductive types* with reduction rules for their eliminators — requires inductive type infrastructure.
+**What's missing.** EigenTT's current `Data(summands)` form supports sum-of-products (finite sums with pair bodies) but not recursive inductive types with derived eliminators. The `ConformationalProximity`, `ReplicateRelationship`, `ModelAgreement`, and `CompartmentRefinement` morphism types can be represented as flat resource classes (as discussed in §14.4), but the deeper claim — that these are *inductive types* with reduction rules for their eliminators — requires inductive type infrastructure.
 
 This matters because several useful queries depend on it. "Is this conformationalProximity the composition of two shorter-range proximities?" is an inductive question over the morphism structure. Without inductive types and eliminators, these questions can only be answered by traversing the trace tree at the resource level, which is slower and less composable.
 
-**Required extensions to Mini-TT:**
+**Required extensions to EigenTT:**
 
 - A new expression form `Inductive` for declaring inductive types with constructors and parameters.
 - A positivity checker that rejects non-strictly-positive declarations (to ensure decidability).
@@ -345,7 +345,7 @@ This matters because several useful queries depend on it. "Is this conformationa
 
 **Scope of work.** Substantial. This is the largest single extension needed for the life-science case. Estimated 4–6 weeks of focused work for a first version covering single (non-mutual, non-nested) strictly-positive inductive types.
 
-**nanoda_lib reference.** nanoda implements this fully, including nested inductives (which lag in some versions — see the Appendix A caveat in `lean4-institution.md`). The relevant code is in `src/inductive.rs`. For Mini-TT, only the single-inductive case is needed initially; the patterns in nanoda for constructor typing, recursor generation, and iota reduction translate cleanly even if the specific term representation differs.
+**nanoda_lib reference.** nanoda implements this fully, including nested inductives (which lag in some versions — see the Appendix A caveat in `lean4-institution.md`). The relevant code is in `src/inductive.rs`. For EigenTT, only the single-inductive case is needed initially; the patterns in nanoda for constructor typing, recursor generation, and iota reduction translate cleanly even if the specific term representation differs.
 
 **Life-science impact.** Unblocks §10 fully. Also improves §4 because bounded universal quantification becomes cleaner once the underlying `List` type is a properly recursive inductive rather than the simplified sum-of-products form currently used in `Exp::list`.
 
@@ -353,7 +353,7 @@ This matters because several useful queries depend on it. "Is this conformationa
 
 **What's missing.** The kernel has `Type(n)` as a term form and the basic `Type(n) : Type(n+1)` rule, but the three-level epistemic stratification ("a trace at level N can only reference resources at level N−1 or below") is not yet enforced. For meta-level claims over traces to be sound, this enforcement has to land.
 
-**Required extensions.** Not to the expression language itself — the enforcement belongs at resource ingestion time and in the layer system, not in Mini-TT term forms. What Mini-TT needs is consistent handling of universe levels in its checker so that attempts to construct self-referential meta-claims are rejected with a clear error.
+**Required extensions.** Not to the expression language itself — the enforcement belongs at resource ingestion time and in the layer system, not in EigenTT term forms. What EigenTT needs is consistent handling of universe levels in its checker so that attempts to construct self-referential meta-claims are rejected with a clear error.
 
 **Scope of work.** Moderate. The enforcement point is elsewhere but the checker's universe rules need to be tightened.
 
@@ -430,11 +430,11 @@ Each step produces independent value. The kernel is never in a state where the l
 
 ## 20. The reference role of nanoda_lib
 
-Throughout the extensions above, nanoda_lib serves as a reference rather than a dependency for Mini-TT itself. The pattern is consistent: when implementing an extension to Mini-TT, consult the analogous construct in nanoda, understand the design decisions and edge-case handling, and implement a simpler version for Mini-TT that respects Eigenius's architectural constraints (capability modes, tracing, ontology-as-types resolution) while not adopting Lean-specific complexity (universe polymorphism, nested inductives, η for structures).
+Throughout the extensions above, nanoda_lib serves as a reference rather than a dependency for EigenTT itself. The pattern is consistent: when implementing an extension to EigenTT, consult the analogous construct in nanoda, understand the design decisions and edge-case handling, and implement a simpler version for EigenTT that respects Eigenius's architectural constraints (capability modes, tracing, ontology-as-types resolution) while not adopting Lean-specific complexity (universe polymorphism, nested inductives, η for structures).
 
 The companion document *Type Checking in Lean 4* (Chris Bailey) is the more valuable artifact than nanoda's source alone — it is an extended specification of kernel design at exactly the right level of abstraction for someone implementing a related kernel. Reading it during the extension work substantially reduces the time spent on "wait, how does this interaction work?" questions.
 
-No code from nanoda is imported into Mini-TT. The reference relationship is one of *consulted design*, not code sharing. This preserves Mini-TT's identity as an Eigenius-specific kernel rather than a derivative of Lean's kernel, while letting the extension work benefit from decades of dependent-type-checker design wisdom.
+No code from nanoda is imported into EigenTT. The reference relationship is one of *consulted design*, not code sharing. This preserves EigenTT's identity as an Eigenius-specific kernel rather than a derivative of Lean's kernel, while letting the extension work benefit from decades of dependent-type-checker design wisdom.
 
 ## 21. Open questions specific to life-science representation
 

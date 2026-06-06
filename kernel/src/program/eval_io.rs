@@ -15,7 +15,7 @@
 //! Program execution via NbE with IO capability mode.
 //!
 //! Replaces the hand-written executor (execute.rs) with NbE evaluation
-//! in IO mode. Programs are parsed to Mini-TT terms, then evaluated
+//! in IO mode. Programs are parsed to EigenTT terms, then evaluated
 //! with component dispatch, trace memoization, and resource conversion.
 
 use crate::layer::Layer;
@@ -93,7 +93,7 @@ pub fn execute_program_nbe_with_institutions_d14(
         _ => return Err(ProgramError::Parse("program has no 'body'".to_string())),
     };
 
-    // Parse the body to a Mini-TT expression
+    // Parse the body to a EigenTT expression
     let body_exp =
         crate::program::expr::parse_expression(body, &layer).map_err(ProgramError::Parse)?;
 

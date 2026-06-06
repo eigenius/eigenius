@@ -7,7 +7,7 @@ Eigon-JSON is a derivation of [**JSON-AD**](https://docs.atomicdata.dev/), the J
 Two design decisions shape the rest of the guide:
 
 1. **ESL is sugar over Eigon-JSON.** Every ESL construct has a 1:1 mapping to an Eigon-JSON resource. The compiler never invents semantics; it only restates the source in resource form. The runtime never sees ESL — only resources.
-2. **The kernel is dependent-typed.** Programs you write in ESL aren't checked by an ad-hoc validator; they're checked by the Mini-TT kernel — a normalization-by-evaluation type-checker for a Π/Σ/Inductive/Coinductive/Universe type theory. ESL is the surface for those types.
+2. **The kernel is dependent-typed.** Programs you write in ESL aren't checked by an ad-hoc validator; they're checked by the EigenTT kernel — a normalization-by-evaluation type-checker for a Π/Σ/Inductive/Coinductive/Universe type theory. ESL is the surface for those types.
 
 These two decisions meet at chapter 6: the resource graph and the type theory are not separate worlds. A class declared in ESL becomes a `Class` resource that the kernel resolves *as a type* during type-check, via the ontology-as-types bridge ([D18](../../design/d18-ontology-as-types-resolution.md)). A property carrying a `data_type` IRI is consulted by the kernel during field access. An institution-registered decide predicate fires automatically when its constraint appears in scope. Internalising this bridge is the single most important precondition for understanding the rest of the language; **chapter 6 explains it directly, and chapters 4, 5, 7, and 9 lean on it heavily**.
 

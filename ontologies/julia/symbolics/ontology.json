@@ -3,7 +3,7 @@
     "@id": "urn:eigenius:julia:symbolics:SymbolicExpression",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:short_name": "SymbolicExpression",
-    "urn:eigenius:core:description": "A Symbolics.jl expression as a typed resource. v1 carries the expression as a Julia source string in `expression_source` plus the list of free variables in `variables` (the institution declares the variables via `Symbolics.@variables` before parsing the source). v2 will lift `expression_source` to a typed Mini-TT inductive shape mirroring `SymbolicUtils.BasicSymbolic` cases (`Sym, Term, Add, Mul, Const`; note `Pow` is folded into other cases in SymbolicUtils 4 — see D27 §4.1.1 verified note).",
+    "urn:eigenius:core:description": "A Symbolics.jl expression as a typed resource. v1 carries the expression as a Julia source string in `expression_source` plus the list of free variables in `variables` (the institution declares the variables via `Symbolics.@variables` before parsing the source). v2 will lift `expression_source` to a typed EigenTT inductive shape mirroring `SymbolicUtils.BasicSymbolic` cases (`Sym, Term, Add, Mul, Const`; note `Pow` is folded into other cases in SymbolicUtils 4 — see D27 §4.1.1 verified note).",
     "urn:eigenius:core:requires": [
       "urn:eigenius:julia:symbolics:expression_source",
       "urn:eigenius:julia:symbolics:variables"

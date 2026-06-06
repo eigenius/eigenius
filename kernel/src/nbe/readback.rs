@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Mini-TT readback: values → normal-form expressions.
+//! EigenTT readback: values → normal-form expressions.
 //!
-//! Ported from `Main.hs` lines 226-255 in the Mini-TT reference.
+//! Ported from `Main.hs` lines 226-255 in the EigenTT reference.
 //! Readback converts semantic values back to syntax, producing
 //! normal forms. Two values are definitionally equal iff their
 //! readbacks at the same level are syntactically equal.
@@ -45,8 +45,7 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
         ),
         Val::Con(c, v) => Exp::Con(c.clone(), Box::new(readback_val(level, v))),
         Val::Unit => Exp::Unit,
-        Val::Set => Exp::Set,
-        Val::Type(n) => Exp::Type(*n),
+        Val::Sort(n) => Exp::Sort(*n),
         Val::Pi(t, g) => {
             let gen = gen_val(level);
             Exp::Pi(
@@ -142,10 +141,22 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
             result
         }
 
-        // Inductive types (Phase 11b, D19)
-        Val::InductiveType { decl, params } => Exp::InductiveType(
+        // Inductive types (Phase 11b, D19; D48 indices).
+        // The `Exp::InductiveType` args slot carries `params ++ indices`,
+        // split on the decoder side by `decl.params.len()` (D48 Phase B).
+        // For non-indexed declarations (`decl.indices` empty), this is
+        // equivalent to the pre-D48 behaviour.
+        Val::InductiveType {
+            decl,
+            params,
+            indices,
+        } => Exp::InductiveType(
             decl.clone(),
-            params.iter().map(|p| readback_val(level, p)).collect(),
+            params
+                .iter()
+                .chain(indices.iter())
+                .map(|p| readback_val(level, p))
+                .collect(),
         ),
         // Parameterised codata types (D19 §8, self-referential codata).
         Val::CodataType { decl, params } => Exp::CodataType(
@@ -186,6 +197,16 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
 pub fn readback_neut(level: usize, neut: &Neut) -> Exp {
     match neut {
         Neut::Gen(j, name) => Exp::Var(format!("{name}{j}")),
+        // D48 Phase C: an unsolved metavariable reads back as a fresh
+        // variable name (`?<id>`) plus the spine applied. Solved metas
+        // are resolved before readback by the unifier (`zonk` step);
+        // a Meta surviving to readback is by definition unsolved.
+        Neut::Meta(id, spine) => {
+            let head = Exp::Var(format!("?{}", id.0));
+            spine.iter().fold(head, |acc, v| {
+                Exp::App(Box::new(acc), Box::new(readback_val(level, v)))
+            })
+        }
         Neut::App(k, m) => Exp::App(
             Box::new(readback_neut(level, k)),
             Box::new(readback_val(level, m)),
@@ -320,7 +341,7 @@ mod tests {
 
     #[test]
     fn readback_set() {
-        assert_eq!(readback_val(0, &Val::Set), Exp::Set);
+        assert_eq!(readback_val(0, &Val::Sort(1)), Exp::Sort(1));
     }
 
     #[test]
@@ -330,7 +351,7 @@ mod tests {
 
     #[test]
     fn readback_pair() {
-        let v = Val::Pair(Box::new(Val::Unit), Box::new(Val::Set));
+        let v = Val::Pair(Box::new(Val::Unit), Box::new(Val::Sort(1)));
         let e = readback_val(0, &v);
         assert!(matches!(e, Exp::Pair(_, _)));
     }
@@ -380,7 +401,7 @@ mod tests {
         let v2 = Val::Unit;
         assert_eq!(readback_val(0, &v1), readback_val(0, &v2));
 
-        let v3 = Val::Set;
+        let v3 = Val::Sort(1);
         assert_ne!(readback_val(0, &v1), readback_val(0, &v3));
     }
 
@@ -436,7 +457,7 @@ mod tests {
 
     #[test]
     fn readback_two_element_list() {
-        let v = Val::List(vec![Val::Unit, Val::Set]);
+        let v = Val::List(vec![Val::Unit, Val::Sort(1)]);
         let e = readback_val(0, &v);
         // Should be Con("cons", Pair(Unit, Con("cons", Pair(Set, Con("nil", Unit)))))
         assert!(matches!(e, Exp::Con(ref c, _) if c == "cons"));
@@ -455,8 +476,8 @@ mod tests {
     #[test]
     fn readback_neutral_reduce() {
         let v = Val::Nt(Neut::NtReduce(
-            Box::new(Val::Unit), // placeholder function
-            Box::new(Val::Set),  // placeholder accumulator
+            Box::new(Val::Unit),    // placeholder function
+            Box::new(Val::Sort(1)), // placeholder accumulator
             Box::new(Neut::Gen(0, "xs".to_string())),
         ));
         let e = readback_val(0, &v);

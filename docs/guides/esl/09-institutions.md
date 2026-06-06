@@ -2,7 +2,7 @@
 
 An **institution** is a domain-specific reasoning system registered with the kernel. Under D14 ([Institution Realisation](../../design/d14-institution-realisation.md), supersedes D10) institutions are declared as ontology resources committed to the layer chain — `Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, and `Comorphism` — plus a runtime that handles the boundary translations and any opaque reasoning. There is no `FiberDeclaration` struct any more: the chain *is* the declaration.
 
-This chapter covers the institution surface from a program-author's perspective in ESL: how qualified-name function calls dispatch to a `Decidable` `QueryClass`, how the resulting `Verdict` flows through Mini-TT, and the worked life-science example that drove the design.
+This chapter covers the institution surface from a program-author's perspective in ESL: how qualified-name function calls dispatch to a `Decidable` `QueryClass`, how the resulting `Verdict` flows through EigenTT, and the worked life-science example that drove the design.
 
 The implementer view (writing a new institution as a WASM binary) lives in [platform §10](../platform/10-wasm-institutions.md). The query-language view of the same surface is [EigenQL §8](../eigenql/08-institutions.md). The protocol spec is [D14](../../design/d14-institution-realisation.md).
 
@@ -16,7 +16,7 @@ Five resource shapes carry the institution surface (D14 §4). All of them are or
 | `ExportFormat` | `from_class`, `payload_type`, `institution_ref`, `procedure`. |
 | `ImportFormat` | `to_class`, `payload_type`, `institution_ref`, `procedure`. |
 | `QueryClass` | `query_class` (input), `result_class`, `dispatch_role` ⊆ `{OnDemand, AutoOnLoad, Decidable}`, `query_handler`, `institution_ref`. |
-| `Comorphism` | `export_format`, `transformation` (a Mini-TT Component), `import_format`, `exact: bool`. |
+| `Comorphism` | `export_format`, `transformation` (a EigenTT Component), `import_format`, `exact: bool`. |
 
 ESL doesn't *require* you to write these by hand — the `eigenius-wasm-sdk::institution` module's [`InstitutionDecl`](../../../sdk/wasm-sdk/src/institution.rs), `ExportFormatDecl`, `ImportFormatDecl`, `QueryClassDecl`, and `ComorphismDecl` builders construct them programmatically. But the resources they produce are ordinary Eigon, and an ESL author can read and reason about them through the layer.
 
@@ -28,13 +28,13 @@ When the ESL compiler encounters a function-call expression with a qualified nam
 
 | Classification | ESL emits |
 |---|---|
-| `Decidable` `QueryClass` | `Exp::NativeDecide(Constraint::Institution { iri, args }, Unit)` — a Mini-TT term that reduces a `Verdict` to either `Refl(v)` (Holds), a failing neutral (Fails), or stays as a passthrough neutral (Undecidable). |
+| `Decidable` `QueryClass` | `Exp::NativeDecide(Constraint::Institution { iri, args }, Unit)` — a EigenTT term that reduces a `Verdict` to either `Refl(v)` (Holds), a failing neutral (Fails), or stays as a passthrough neutral (Undecidable). |
 | Otherwise | Falls through to component dispatch / class constructor / unbound — same as today. If nothing matches, the call fails at compile or evaluate time with `unknown function`. |
 
 Two changes from D10's classifier:
 
-- **No `Comorphism` from expression position.** D10 emitted `Exp::InstitutionInvoke { iri, source }` for `cap:translate(source)` calls. Under D14, comorphisms surface only in EigenQL FIBER param coercion. ESL programs that need a translated resource construct it explicitly (or invoke a derived program over the comorphism Component, which is just a regular Mini-TT Component).
-- **No `OnDemand` `QueryClass` from expression position.** OnDemand QueryClasses are reachable only from EigenQL `FIBER` clauses. ESL programs that need a structured response from an institution embed a FIBER call into an EigenQL query (and feed the bound response back as a Mini-TT value if needed).
+- **No `Comorphism` from expression position.** D10 emitted `Exp::InstitutionInvoke { iri, source }` for `cap:translate(source)` calls. Under D14, comorphisms surface only in EigenQL FIBER param coercion. ESL programs that need a translated resource construct it explicitly (or invoke a derived program over the comorphism Component, which is just a regular EigenTT Component).
+- **No `OnDemand` `QueryClass` from expression position.** OnDemand QueryClasses are reachable only from EigenQL `FIBER` clauses. ESL programs that need a structured response from an institution embed a FIBER call into an EigenQL query (and feed the bound response back as a EigenTT value if needed).
 
 The classifier is consulted only by `compile_with_institutions`. The plain `compile` entry point still works for programs that don't reference institution-dispatched IRIs:
 
@@ -86,7 +86,7 @@ Lam(input,
 
 ## 9.4. Invoking an OnDemand QueryClass — through EigenQL
 
-OnDemand QueryClasses are not directly callable from ESL expressions. They are reached only through an EigenQL `FIBER` clause. ESL programs that need a structured response from an institution typically embed the FIBER call into an EigenQL query and feed the bound response back as a Mini-TT value.
+OnDemand QueryClasses are not directly callable from ESL expressions. They are reached only through an EigenQL `FIBER` clause. ESL programs that need a structured response from an institution typically embed the FIBER call into an EigenQL query and feed the bound response back as a EigenTT value.
 
 This is a deliberate scope decision. Decidable handles the common cap-as-predicate case from program bodies; the FIBER form handles the multi-property-response case from EigenQL. Putting OnDemand calls back into ESL expression position would mean two return shapes (Verdict vs. arbitrary resource) and two dispatch paths in the compiler — the FIBER form covers that surface unambiguously.
 
@@ -97,7 +97,7 @@ Under D14, a `Comorphism` is a typed resource:
 ```
 Comorphism dock_to_assay
   export_format: ef_dock_to_dg          // DockingResult → Float (dock institution)
-  transformation: cm_arrhenius          // Float → Float Mini-TT Component
+  transformation: cm_arrhenius          // Float → Float EigenTT Component
   import_format: if_assay_from_ic50     // Float → AssayPrediction (assay institution)
   exact: false
 ```
@@ -124,7 +124,7 @@ The wrapper program takes a `SymbolicsToJuMPInput` (carrying a typed objective e
 
 1. The kernel resolves the `Comorphism` resource and reads `export_format` / `transformation` / `import_format`.
 2. **Extract.** Calls the source institution's `Institution::extract_typed(export_format.procedure, input, ctx)` → typed payload of the export's `payload_type`.
-3. **Transform.** Applies the transformation Component to the payload via the Mini-TT evaluator → typed payload of the import's `payload_type`.
+3. **Transform.** Applies the transformation Component to the payload via the EigenTT evaluator → typed payload of the import's `payload_type`.
 4. **Reify.** Calls the target institution's `Institution::reify(import_format.procedure, payload, ctx)` → the target-class resource.
 
 **Chain reinsertion.** The reify output commits to the chain at a deterministic content-hash IRI of the form `urn:eigenius:comorphism-output:<comorphism-tail>:<hex16>` (SHA-256 over the canonical Eigon-CBOR of the produced resource, with `@id` cleared). Re-running the same input dedupes to the same IRI — the cross-fibre identity property the Grothendieck construction wants.
@@ -133,7 +133,7 @@ The wrapper program takes a `SymbolicsToJuMPInput` (carrying a typed objective e
 
 **Two alternative shapes** — useful when the program already has the payload, or when chain reinsertion isn't wanted:
 
-1. **Run the constituent Component directly.** The transformation is a regular Mini-TT Component (`cm_arrhenius` in the example). If your ESL program already has the typed payload, it can apply the Component without the extract/reify round trip:
+1. **Run the constituent Component directly.** The transformation is a regular EigenTT Component (`cm_arrhenius` in the example). If your ESL program already has the typed payload, it can apply the Component without the extract/reify round trip:
    ```esl
    let ic50 : core:float = cm_arrhenius(delta_g);
    ```
@@ -165,7 +165,7 @@ The M8 worked example ships with the kernel ([`ontologies/examples/d14-dock-assa
 - `dock` — owns the `DockingResult` class. Declares an `ExportFormat` (`ef_dock_to_dg`) extracting `delta_g` as a `Float`.
 - `assay` — owns the `AssayPrediction` class. Declares an `ImportFormat` (`if_assay_from_ic50`) reifying a `Float` as `ic50`. Also declares three `QueryClass`es: `within_tolerance` (Decidable, three-arg predicate), `assay_prediction_validity` (AutoOnLoad, validates positive IC₅₀ on Load), and `validate_prediction` (OnDemand, FIBER-callable).
 
-A `Comorphism` (`dock_to_assay`) ties them together via a Mini-TT Component (`cm_arrhenius`, the Arrhenius approximation `IC₅₀ ≈ exp(-ΔG/RT)`).
+A `Comorphism` (`dock_to_assay`) ties them together via a EigenTT Component (`cm_arrhenius`, the Arrhenius approximation `IC₅₀ ≈ exp(-ΔG/RT)`).
 
 An ESL program over this surface:
 

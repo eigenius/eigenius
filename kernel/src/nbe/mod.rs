@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Mini-TT type theory and NbE evaluator.
+//! EigenTT type theory and NbE evaluator.
 //!
-//! A Rust port of the Mini-TT reference implementation (Coquand et al.),
+//! A Rust port of the EigenTT reference implementation (Coquand et al.),
 //! extended with Eigon ontology ground types. Provides:
 //! - Dependent function types (Pi), dependent pair types (Sigma), labeled sums
 //! - Normalization by Evaluation (NbE) for type checking and partial evaluation
@@ -29,4 +29,5 @@ pub mod recursor;
 pub mod sized;
 pub mod sized_rigid;
 pub mod term;
+pub mod unify;
 pub mod val;

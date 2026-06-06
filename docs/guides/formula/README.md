@@ -1,6 +1,6 @@
 # Formula language user guide
 
-The formula language is a **chain-mirrored fragment of Mini-TT** that lives at
+The formula language is a **chain-mirrored fragment of EigenTT** that lives at
 `urn:eigenius:formulas:` — a small typed expression-tree language shared by
 every numerical institution on the platform. A single payload shape that
 [`Symbolics.jl`](https://juliasymbolics.org/),
@@ -9,7 +9,7 @@ every numerical institution on the platform. A single payload shape that
 [`OrdinaryDiffEq.jl`](https://docs.sciml.ai/DiffEqDocs/stable/), and
 [`JuMP+HiGHS`](https://jump.dev/) all consume directly.
 
-This guide is grounded in [D32 — Chain-Mirrored Mini-TT
+This guide is grounded in [D32 — Chain-Mirrored EigenTT
 Inductives](../../design/d32-chain-mirrored-mini-tt-inductives.md) and the
 implementation in [`ontologies/formulas/`](../../../ontologies/formulas/),
 [`kernel/src/esl/parser.rs`](../../../kernel/src/esl/parser.rs), and
@@ -24,11 +24,11 @@ other:
 
 1. **[Introduction](01-introduction.md)** — what the formula language is,
    why it exists at `urn:eigenius:formulas:` rather than under any one
-   institution, and the three-surface mental model (Mini-TT fragment /
+   institution, and the three-surface mental model (EigenTT fragment /
    chain encoding / ESL `formula(...)` sublanguage).
-2. **[The Mini-TT fragment](02-mini-tt-fragment.md)** — the six
+2. **[The EigenTT fragment](02-mini-tt-fragment.md)** — the six
    constructors (`Var`, `LitFloat`, `OpRef`, `App`, `Lam`, `Pi`), what they
-   correspond to in Mini-TT, and why two binders (`Lam` / `Pi`) sit
+   correspond to in EigenTT, and why two binders (`Lam` / `Pi`) sit
    alongside the four expression-shaped ones.
 3. **[Eigon-JSON embedding](03-eigon-json-embedding.md)** — the tagged-dict
    shape `{"ctor", "args"}`, left-spined `App` currying for multi-arg
@@ -69,7 +69,7 @@ other:
   — the hosting layer for institutions that consume FormulaTerm.
 - [**Symbolics tutorial**](../platform/julia-institutions/symbolics-institution-tutorial.md)
   — the most thorough worked example of FormulaTerm end-to-end.
-- [**D32 — Chain-Mirrored Mini-TT
+- [**D32 — Chain-Mirrored EigenTT
   Inductives**](../../design/d32-chain-mirrored-mini-tt-inductives.md) —
   the canonical design specification.
 

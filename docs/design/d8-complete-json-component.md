@@ -241,7 +241,7 @@ Each JSON Schema property includes a `description` field from the property defin
 
 ## 4. Type-Level Guarantees
 
-CompleteJson is not just a runtime component — it has a **type-level contract** enforced by the Mini-TT type checker during program validation. When the type checker encounters `Apply(CompleteJson, arg)` with `output_schema: C`, it invokes `schema_for_class(C)` and verifies that the class admits a bijective short-name mapping. If it does not, the program is **ill-typed** and rejected before execution.
+CompleteJson is not just a runtime component — it has a **type-level contract** enforced by the EigenTT type checker during program validation. When the type checker encounters `Apply(CompleteJson, arg)` with `output_schema: C`, it invokes `schema_for_class(C)` and verifies that the class admits a bijective short-name mapping. If it does not, the program is **ill-typed** and rejected before execution.
 
 ### 4.1 What the Type Checker Verifies
 
@@ -269,7 +269,7 @@ In type-theoretic terms: `schema_for_class(C)` produces a witness that the JSON 
 
 ### 4.3 Relationship to CIC
 
-The Mini-TT core implements a fragment of the Calculus of Inductive Constructions. Class definitions with `requires` correspond to dependent record types (Sigma types). The schema generation check extends ground type resolution: when resolving `C` as a ground type for CompleteJson, the type checker additionally verifies the bijectivity condition. This is an **intensional** check on the ground type — it inspects the ontology structure, not just the type's identity.
+The EigenTT core implements a fragment of the Calculus of Inductive Constructions. Class definitions with `requires` correspond to dependent record types (Sigma types). The schema generation check extends ground type resolution: when resolving `C` as a ground type for CompleteJson, the type checker additionally verifies the bijectivity condition. This is an **intensional** check on the ground type — it inspects the ontology structure, not just the type's identity.
 
 ---
 
@@ -625,7 +625,7 @@ The inference algorithm:
 3. Deduplicate and construct the Sigma type
 4. Use this as the input type for type checking the program body
 
-### 8.6 Mini-TT Extensions
+### 8.6 EigenTT Extensions
 
 **New term and value constructors:**
 
@@ -661,7 +661,7 @@ Val::Template(s, refs) => Exp::Template(
 
 ### 8.7 Parsing Templates
 
-Template parsing happens once — when ESL or Eigon-JSON is compiled to Mini-TT terms. The parser:
+Template parsing happens once — when ESL or Eigon-JSON is compiled to EigenTT terms. The parser:
 
 1. Scans the string for `{{...}}` patterns
 2. For each `{{iri}}`, validates the IRI and resolves the property type from the layer chain
@@ -747,7 +747,7 @@ This is the only ontology change. The rest is in the type checker and expression
 
 1. Add `template` data type to core ontology (`ontologies/core/core-ontology.json`)
 2. Update `user_prompt` and `system_prompt` property definitions to `data_type: template`
-3. Add `Exp::Template` and `Val::Template` to Mini-TT terms and values
+3. Add `Exp::Template` and `Val::Template` to EigenTT terms and values
 4. Add template parsing in `expr.rs` — extract `{{iri}}` references, resolve types from layer
 5. Add type checking rule: template literal → `Template { prop₁ : T₁, ... }`
 6. Add combined requirement merging for multiple templates in a component argument
@@ -880,6 +880,6 @@ If the LLM omits a required field, `generateObject()` will retry or fail. The sc
 | Format for ShortNameTable over wire | CBOR | Consistent with other kernel → orchestrator data |
 | Template validation approach | Template as data type (Option B) | Template type carries property requirements; type checker verifies input compatibility; one system, not two |
 | How kernel identifies template properties | `data_type: template` on the property definition | Ontology-driven; no hardcoded knowledge of which properties are templates |
-| Template parsing | At compile time (ESL/JSON → Mini-TT) | Parse once, store in term; type checker sees structured references, not strings |
+| Template parsing | At compile time (ESL/JSON → EigenTT) | Parse once, store in term; type checker sees structured references, not strings |
 | Input type inference from templates | Merge all template requirements across user_prompt + system_prompt | Deduplicate; `{{string}}` subsumes all; inferred type is the minimum Sigma |
 | Applies to which components | Both CompleteText and CompleteJson | Template type validates the input contract; schema generation validates the output contract |

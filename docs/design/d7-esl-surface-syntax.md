@@ -248,6 +248,6 @@ ESL source locations (line, column) are tracked through compilation. When the ke
 | Indentation-sensitive? | No — braces and semicolons | Avoids parser complexity; easier to embed in other formats |
 | Lambda syntax | `\x -> e` and `λx -> e` both accepted | `\` is ASCII-friendly; `λ` is readable |
 | Semicolons | Required after let bindings and definitions | Unambiguous parsing without lookahead |
-| Type annotations | Required on let and program declarations | Explicit types match Mini-TT; aids error messages |
+| Type annotations | Required on let and program declarations | Explicit types match EigenTT; aids error messages |
 | Component resolution | Short names resolved against program ontology | `CompleteText` → `urn:eigenius:program:components:CompleteText` |
 | File extension | `.esl` | Distinct from `.json`, `.eigenql` |

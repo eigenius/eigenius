@@ -83,7 +83,7 @@ A trailing config block on a decide call is a compile error.
 
 Under D14 a `Comorphism` is a typed ontology resource (not a callable function). ESL has no expression-position syntax for comorphism dispatch — `cap:dock_to_assay(input)` is *not* a valid call form. Three ways to use a comorphism from ESL:
 
-1. **Apply the transformation Component directly** — the comorphism's `transformation` is an ordinary Mini-TT Component. If your program already has the typed payload, call it: `let ic50 : core:float = cm_arrhenius(delta_g);`.
+1. **Apply the transformation Component directly** — the comorphism's `transformation` is an ordinary EigenTT Component. If your program already has the typed payload, call it: `let ic50 : core:float = cm_arrhenius(delta_g);`.
 2. **Translate inside an EigenQL `FIBER`** — comorphism coercion in FIBER param values runs the four-step extract → transform → reify pipeline (see [EigenQL §7.5](../eigenql/07-fiber-clauses.md) and [§8.6](../eigenql/08-institutions.md)).
 3. **Wrap as a Component-implemented OnDemand QueryClass and dispatch via FIBER.** A QueryClass whose `implementation` is a Component IRI runs `extract → component → reify` automatically; EigenQL FIBER is the surface that reaches it.
 
@@ -149,6 +149,20 @@ Compiles to either:
 The kernel form is correspondingly `Exp::InductiveRec` or `Exp::Match`.
 
 **`returning` clause.** Always include it when the match's result type isn't obvious from the surrounding context. Without it, the kernel synthesises the motive from the checking-mode expectation; in inference mode (e.g. as the right-hand side of a `let` without an annotation), an unannotated match fails with `"cannot infer type of match — add a returning clause or annotate context"`.
+
+The clause accepts two shapes (eigenius#72 Layer 3):
+
+- **Bare type reference** — `returning ex:Nat`. The kernel wraps it as the constant motive `λ_. ex:Nat`. Use this whenever the scrutinee is non-indexed and the result type doesn't depend on the scrutinee.
+- **Lambda motive** — `returning fun (i : core:Nat) => Vec(A, i)`. The motive abstracts over the scrutinee's indices. **Required** when the scrutinee is an indexed inductive whose result type depends on those indices — the kernel uses the motive to refine each arm's expected type per the constructor's conclusion indices.
+
+```esl
+match v returning fun (i : core:Nat) => Vec(A, i) {
+    nil -> nil;
+    cons(k, x, xs) -> cons(k, x, xs);
+}
+```
+
+Compiles to `program:result_motive` carrying a D47-encoded `λ`-chain rather than the flat `program:result_type` IRI. The kernel decoder type-checks the motive's body at `Sort(n)` against the scrutinee inductive's `Π indices. Sort` signature, then specialises each arm's expected type per the constructor's conclusion indices.
 
 **Sized recursion.** When the scrutinee has a sized inductive type, each arm body sees a hypothesis recording that any recursive call within the arm must be on a strictly smaller size. This is what powers sized termination ([D19 §4](../../design/d19-inductive-types.md)).
 

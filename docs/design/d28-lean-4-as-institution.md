@@ -8,7 +8,7 @@
 - [D26 — Runtime Substrate](d26-runtime-substrate.md) — the substrate the Lean *authoring*-side toolchain runs on. The verification side stays in-process; see §2.3 for the factoring.
 - [D27 — Julia Institutions](d27-julia-institutions.md) — the precedent for a multi-institution language integration. D28 reuses the substrate-mirror-institution pattern D27 settled.
 - [D29 — Eigon → Julia Faithful Translation](d29-eigon-julia-mirror-spec.md) — the precedent for a per-language mirror specification. Lean's equivalent is a sibling document (§10.4).
-- [D32 — Chain-Mirrored Mini-TT Inductives](d32-chain-mirrored-mini-tt-inductives.md) — the precedent for putting a typed term language on the chain. Lean's chain-mirrored expression form (§3.1) follows the same pattern.
+- [D32 — Chain-Mirrored EigenTT Inductives](d32-chain-mirrored-mini-tt-inductives.md) — the precedent for putting a typed term language on the chain. Lean's chain-mirrored expression form (§3.1) follows the same pattern.
 
 ## 1. Purpose and scope
 
@@ -18,13 +18,13 @@ This document specifies what it takes to register **Lean 4** as that institution
 
 ### 1.1 D14 in one paragraph (so the rest of this doc is readable in isolation)
 
-Under D14, an institution is registered by committing five kinds of typed Resources to the layer chain: an `Institution` (identity and runtime kind), `ExportFormat`s (typed extractions of class instances into Mini-TT payloads), `ImportFormat`s (typed constructors of class instances from Mini-TT payloads), `QueryClass`es (typed functions in the institution's fibre with a `dispatch_role` of `OnDemand` / `AutoOnLoad` / `Decidable` and a result class — `Verdict` for the gate-on-commit and decide-procedure roles), and `Comorphism`s (triples `(s, m, t)` where `s` is an ExportFormat, `m` is a Mini-TT Component, and `t` is an ImportFormat). The institution implements an `Institution` Rust trait with three methods: `extract_typed` (boundary out), `reify` (boundary in), and an optional `query` (for QueryClasses whose implementation is institution-runtime rather than a Mini-TT Component). The kernel maintains a derived registry from chain scans, runs `AutoOnLoad` QueryClasses on commit, dispatches `Decidable` QueryClasses from `Exp::NativeDecide`, dispatches `OnDemand` QueryClasses from EigenQL FIBER, and runs Comorphisms via `Exp::InstitutionInvoke`.
+Under D14, an institution is registered by committing five kinds of typed Resources to the layer chain: an `Institution` (identity and runtime kind), `ExportFormat`s (typed extractions of class instances into EigenTT payloads), `ImportFormat`s (typed constructors of class instances from EigenTT payloads), `QueryClass`es (typed functions in the institution's fibre with a `dispatch_role` of `OnDemand` / `AutoOnLoad` / `Decidable` and a result class — `Verdict` for the gate-on-commit and decide-procedure roles), and `Comorphism`s (triples `(s, m, t)` where `s` is an ExportFormat, `m` is a EigenTT Component, and `t` is an ImportFormat). The institution implements an `Institution` Rust trait with three methods: `extract_typed` (boundary out), `reify` (boundary in), and an optional `query` (for QueryClasses whose implementation is institution-runtime rather than a EigenTT Component). The kernel maintains a derived registry from chain scans, runs `AutoOnLoad` QueryClasses on commit, dispatches `Decidable` QueryClasses from `Exp::NativeDecide`, dispatches `OnDemand` QueryClasses from EigenQL FIBER, and runs Comorphisms via `Exp::InstitutionInvoke`.
 
 ### 1.2 Non-goals
 
 - This is not a plan to embed Lean 4's elaborator, tactic framework, or Mathlib into Eigenius. Lean remains Lean; Eigenius integrates with it at the proof-term boundary.
 - This is not a privileged integration. Lean 4 is one verification institution among potentially many (Rocq, Isabelle/HOL, SMT checkers, domain-specific certifiers). The protocol accommodates them all on equal footing.
-- This is not a replacement for the Mini-TT type system in the kernel. Mini-TT continues to check program composition; Lean 4 checks mathematical theorems.
+- This is not a replacement for the EigenTT type system in the kernel. EigenTT continues to check program composition; Lean 4 checks mathematical theorems.
 
 ## 2. Architectural position
 
@@ -36,11 +36,11 @@ Three integration strategies were considered:
 
 - **Option A — Accept Lean's verdict.** Lean says "checks," Eigenius trusts. Simple, but places all of Lean's kernel plus the attestation signer in the trusted computing base, and undermines the "show why it is verified" story the architecture commits to.
 - **Option B — Accept Lean's proof term and re-check.** Lean exports the elaborated proof term via its existing export format. Eigenius has a Rust-native Lean term checker that re-verifies. The proof term becomes a first-class Eigon resource.
-- **Option C — Translate to Mini-TT.** Lean proofs round-trip through Mini-TT. Faithful translation is a research project and fails for most of modern Lean.
+- **Option C — Translate to EigenTT.** Lean proofs round-trip through EigenTT. Faithful translation is a research project and fails for most of modern Lean.
 
 **Option B is the chosen path.** It preserves the "tools that reason, kernel that validates" discipline, keeps Lean stable as an external system, and bounds the verification capability's trusted base to the Lean term checker rather than all of Lean.
 
-In D14 vocabulary, Option B is the choice that the `ProofCheck` QueryClass's `implementation` is **institution-runtime** (a procedure dispatched to `Institution::query`) rather than a Mini-TT Component — Mini-TT's CIC fragment is too small to re-check a Lean proof. The `query` handler is where nanoda_lib lives.
+In D14 vocabulary, Option B is the choice that the `ProofCheck` QueryClass's `implementation` is **institution-runtime** (a procedure dispatched to `Institution::query`) rather than a EigenTT Component — EigenTT's CIC fragment is too small to re-check a Lean proof. The `query` handler is where nanoda_lib lives.
 
 ### 2.2 Trusted computing base
 
@@ -95,7 +95,7 @@ These are ordinary Eigon classes living in the Lean institution's ontology layer
 - **`lean:LeanLevel`** — a chain-resident InductiveType mirroring `Lean.Level` (`Zero`, `Succ`, `Max`, `IMax`, `Param`).
 - **`lean:LeanName`** — a chain-resident shape for Lean's dotted-name hierarchy (`Anon`, `Str`, `Num`).
 
-These follow the D32 pattern (chain-mirrored Mini-TT inductives) applied to Lean. The full faithful-translation spec — how nanoda's `Expr` decodes into chain-CBOR values of this inductive and back — lives in a sibling document (§10.4).
+These follow the D32 pattern (chain-mirrored EigenTT inductives) applied to Lean. The full faithful-translation spec — how nanoda's `Expr` decodes into chain-CBOR values of this inductive and back — lives in a sibling document (§10.4).
 
 **Intra-fibre relation classes:**
 
@@ -537,7 +537,7 @@ The original D28 carried nine. Seven have been answered (five structurally — c
 
 1. **Parallel verification institutions.** If Rocq lands and a proof could be checked by either, which is dispatched? User preference, contract preference, or explicit IRI only? Defer until Rocq is real.
 
-2. **Kernel extension for verification status in types.** Should `EigonClass(iri)` be extended to carry a verification witness ("this `StressResult` was verified under environment E"), lifting epistemic status from runtime provenance to compile-time validation? D28 v1's question #9. The cost is non-trivial Mini-TT extension; the benefit needs a concrete consumer asking for it. Defer until the first pipeline that would benefit from typed verification status exists.
+2. **Kernel extension for verification status in types.** Should `EigonClass(iri)` be extended to carry a verification witness ("this `StressResult` was verified under environment E"), lifting epistemic status from runtime provenance to compile-time validation? D28 v1's question #9. The cost is non-trivial EigenTT extension; the benefit needs a concrete consumer asking for it. Defer until the first pipeline that would benefit from typed verification status exists.
 
 ### Resolved at end of Phase 20a
 

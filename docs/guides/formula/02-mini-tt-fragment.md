@@ -1,7 +1,7 @@
-# 2. The Mini-TT fragment
+# 2. The EigenTT fragment
 
 `FormulaTerm` is a fragment of the kernel's small dependent-type theory
-(Mini-TT) lifted onto the chain. Its six constructors mirror Mini-TT's
+(EigenTT) lifted onto the chain. Its six constructors mirror EigenTT's
 core `Exp` shapes one-for-one (with primitive leaves at `LitFloat` and
 `OpRef`). This chapter introduces them and explains why the binders
 (`Lam`, `Pi`) ship alongside the expression-shaped ones.
@@ -11,11 +11,11 @@ core `Exp` shapes one-for-one (with primitive leaves at `LitFloat` and
 Declared at [`ontologies/formulas/formulas-ontology.json`](../../../ontologies/formulas/formulas-ontology.json)
 as a `core:InductiveType` with six constructors:
 
-| Constructor | Arg slots (typed) | Mini-TT correspondence |
+| Constructor | Arg slots (typed) | EigenTT correspondence |
 |---|---|---|
 | `Var(name)` | `name: String` | `Exp::Var` — a free variable, looked up in an environment |
 | `LitFloat(value)` | `value: Float` | numeric literal (a primitive in the formula fragment) |
-| `OpRef(iri)` | `iri: String` (resolves to a chain `Operator` resource) | named operator reference (extension over plain Mini-TT) |
+| `OpRef(iri)` | `iri: String` (resolves to a chain `Operator` resource) | named operator reference (extension over plain EigenTT) |
 | `App(head, arg)` | `head: FormulaTerm`, `arg: FormulaTerm` | `Exp::App` — function application |
 | `Lam(name, ty, body)` | `name: String`, `ty: FormulaTerm`, `body: FormulaTerm` | `Exp::Lam` — lambda abstraction |
 | `Pi(name, ty, body)` | `name: String`, `ty: FormulaTerm`, `body: FormulaTerm` | `Exp::Pi` — function-type former |
@@ -76,7 +76,7 @@ foundation, not a daily-driver part of the surface.
 
 ## 2.3. The kernel's connection to its own type theory
 
-The kernel's full Mini-TT lives in [`kernel/src/nbe/`](../../../kernel/src/nbe/);
+The kernel's full EigenTT lives in [`kernel/src/nbe/`](../../../kernel/src/nbe/);
 it has more than the six chain-mirrored constructors (variants for
 `Sigma`, `Inductive`, `MapReduce`, `NativeDecide`, etc.). The chain
 fragment is a *subset* — the fragment that's most useful as a typed
@@ -87,7 +87,7 @@ Practically, that means:
 
 - The kernel's NbE evaluator can interpret a `FormulaTerm` value
   directly, without translation. When a comorphism's transformation is
-  `Lam(t. Var(t))` (the identity), the evaluator runs it as a Mini-TT
+  `Lam(t. Var(t))` (the identity), the evaluator runs it as a EigenTT
   reduction step.
 - The validator's inductive-value type-checking rule (D32 §3.5) is the
   same rule it uses for any `core:InductiveType` — `ReductionStrategy`,
@@ -127,7 +127,7 @@ Quick reference for users coming from related places:
 | Haskell algebraic data types | `FormulaTerm` is one such type; the six ctors are its constructors |
 | ATP / TPTP / SMT-LIB terms | Similar function-symbol-plus-argument tree, but typed and chain-resident |
 | Sympy / Symbolics expressions | One faithful representation of the same trees, with explicit binders |
-| Mini-TT / Calculus-of-Constructions terms | Direct subset; `Pi`, `Lam`, `App`, `Var` mean what they mean there |
+| EigenTT / Calculus-of-Constructions terms | Direct subset; `Pi`, `Lam`, `App`, `Var` mean what they mean there |
 
 If none of these are familiar, [chapter 3](03-eigon-json-embedding.md)
 presents the encoding from scratch with no assumed background.

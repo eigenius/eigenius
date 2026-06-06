@@ -1,0 +1,244 @@
+[
+  {
+    "@id": "urn:eigenius:eigentt:TypeExpr",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "TypeExpr",
+    "urn:eigenius:core:description": "Chain-mirrored EigenTT type fragment. Encodes closed EigenTT type expressions (axiom statements, theorem statements, propositional institutional artifacts) as queryable chain values. Covers the type-level subset of EigenTT's Exp — universes, dependent binders, propositional equality, references to chain-declared type formers. The value shape follows D32 §3.7's `{\"ctor\": <name>, \"args\": [...]}` form; the validator checks each value tree against the ctor schema declared here. See D47.",
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Sort",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "level",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:integer"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Var",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "ConstRef",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "iri",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "App",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "head",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "arg",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Pi",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "dom",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "body",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Sig",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "dom",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "body",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Lam",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "name",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "dom",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "body",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "One",
+        "urn:eigenius:core:arg_types": []
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Id",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "ty",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "lhs",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "rhs",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "UnitVal",
+        "urn:eigenius:core:arg_types": []
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "LitInt",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "value",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:integer"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "LitString",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "value",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "LitFloat",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "value",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:float"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "CtorApp",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "decl_iri",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "ctor_name",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Pair",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "fst",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "snd",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          }
+        ]
+      }
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:eigentt:Axiom",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Axiom",
+    "urn:eigenius:core:description": "A named axiom: a closed term whose type the kernel admits without checking the term itself. The `axiom_statement` property carries an EigenTT type expression (typically inhabiting Prop) that the axiom is asserted to inhabit. Conversion treats the axiom IRI as opaque — never delta-unfolded. Voiding the layer that introduces an axiom removes it from the kernel environment for any chain resolution that excludes that layer. See D46 §10.",
+    "urn:eigenius:core:requires": ["urn:eigenius:eigentt:axiom_statement"],
+    "urn:eigenius:core:recommends": ["urn:eigenius:eigentt:axiom_justification"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:axiom_statement",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "axiom_statement",
+    "urn:eigenius:core:description": "The EigenTT type the axiom inhabits — typically a Prop. Encoded as a chain-mirrored EigenTT type expression per D47 (eigentt:TypeExpr).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:TypeExpr"],
+    "urn:eigenius:core:domain": ["urn:eigenius:eigentt:Axiom"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:axiom_justification",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "axiom_justification",
+    "urn:eigenius:core:description": "Free-form note: why this axiom is being admitted, what trust assumption it encodes, what metatheory justifies it. For auditability — axioms are chain-traceable.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:eigentt:Axiom"]
+  }
+]

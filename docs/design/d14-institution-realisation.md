@@ -4,7 +4,7 @@
 
 **Status:** Implemented (Phase 6; WASM + runtime-substrate institutions live)
 **Supersedes:** D10 (Grothendieck Institution Protocol). D14 is the canonical reference for institutions in Eigenius; D10 is retained as a redirect file but carries no content.
-**Depends on:** D1 (Eigon serialisation + structural validator), D9 (NbE / Mini-TT), D12 (WASM extensibility), D19 (inductive types).
+**Depends on:** D1 (Eigon serialisation + structural validator), D9 (NbE / EigenTT), D12 (WASM extensibility), D19 (inductive types).
 **Theoretical foundation:** Diaconescu, *Institution-independent Model Theory*, 2nd ed., Studies in Universal Logic, Springer 2025 (`diaconescu2025`). Chapter 14 is the canonical reference for the comorphism-based Grothendieck construction; cited inline as "Diaconescu 2025, Ch. 14, §X.Y". Goguen and Burstall (1992), "Institutions: Abstract model theory for specification and programming", JACM (`goguen1992`) — the underlying institution notion. The published paper [`docs/papers/eigenius-institutions.tex`](../papers/eigenius-institutions.tex) is the high-level narrative; D14 is the implementation contract.
 
 ---
@@ -29,7 +29,7 @@ D14 fixes all four. The migration is not strictly additive; the existing institu
 The kernel itself is not an institution. Two kernel services provide the fixed foundation:
 
 - **Eigon structural validator** — the 12 validation rules from D1 §5.4. Checks resource well-formedness against class definitions. Fixed, trusted, not extensible via the institution protocol.
-- **Mini-TT type checker** — the NbE-based CIC type checker from D9. Checks program composition, ground types, capability levels. Fixed, trusted, part of the kernel.
+- **EigenTT type checker** — the NbE-based CIC type checker from D9. Checks program composition, ground types, capability levels. Fixed, trusted, part of the kernel.
 
 These are the switchboard — they validate and dispatch. Institutions provide domain-specific reasoning that the kernel mediates.
 
@@ -60,7 +60,7 @@ Concretely:
 
 - **Resources, IRIs, properties, layers** — the Eigon data model is the kernel's native representation. It cannot be replaced or made optional.
 - **The 12 validation rules** — structural satisfaction over the Eigon base. Fixed, not extensible.
-- **Mini-TT** — type checking of programs over Eigon ground types. A kernel service operating on the base.
+- **EigenTT** — type checking of programs over Eigon ground types. A kernel service operating on the base.
 - **Institutions** — domain-specific reasoning systems that register typed morphisms, queries, and satisfaction relations *as Eigon resources*. They build fibres over the base, not alternatives to it.
 
 The relationship: Eigon provides the shared language. Institutions provide the domain-specific meaning. Neither can function without the other. The Grothendieck construction glues them together.
@@ -82,7 +82,7 @@ The move from flat fibres ($\mathrm{Mod}(\Sigma) = \mathbf{Set}$) to structured 
 
 Diaconescu (2025, Ch. 14, §14.1) develops the Grothendieck construction in two equivalent forms: a *morphism-based* variant over an indexed institution $\mathcal{J}: I^{\mathrm{op}} \to \mathbf{Ins}$, and a *comorphism-based* variant over an indexed co-institution $\mathcal{J}: I^{\mathrm{op}} \to \mathbf{coIns}$. Proposition 14.10 shows the two yield isomorphic Grothendieck institutions whenever the indexed (co-)institutions are dual through an adjoint structure.
 
-The Grothendieck construction itself is **not what any single institution does**. It is what emerges from an indexed co-institution — a *system* of institutions linked by comorphisms — when the construction is applied. Concretely in Eigenius: registering one institution gives you one fibre over Eigon; registering many institutions without comorphisms between them gives you many disjoint fibres; only when comorphisms are declared do those fibres become connected, yielding the indexed co-institution whose Grothendieck institution is what the published narrative ([`docs/papers/eigenius-institutions.tex`](../papers/eigenius-institutions.tex)) refers to. The kernel provides the machinery (the registry, the dispatch, the comorphism resource shape, the Mini-TT middle); domain authors decide which fibres are connected, and that determines whether and how the Grothendieck institution exists.
+The Grothendieck construction itself is **not what any single institution does**. It is what emerges from an indexed co-institution — a *system* of institutions linked by comorphisms — when the construction is applied. Concretely in Eigenius: registering one institution gives you one fibre over Eigon; registering many institutions without comorphisms between them gives you many disjoint fibres; only when comorphisms are declared do those fibres become connected, yielding the indexed co-institution whose Grothendieck institution is what the published narrative ([`docs/papers/eigenius-institutions.tex`](../papers/eigenius-institutions.tex)) refers to. The kernel provides the machinery (the registry, the dispatch, the comorphism resource shape, the EigenTT middle); domain authors decide which fibres are connected, and that determines whether and how the Grothendieck institution exists.
 
 Eigenius commits to the **comorphism-based variant** for two reasons:
 
@@ -93,13 +93,13 @@ This is a load-bearing decision. The kernel does not expose institution morphism
 
 ### 2.2 CIC manifestation: Resources are sentences
 
-The Goguen–Burstall presentation is set-theoretic. Eigenius is constructive: the kernel's type theory (Mini-TT) is a fragment of CIC, and the knowledge graph is a Σ-typed bundle of typed terms. The institution-theoretic concepts therefore manifest as constructive analogues.
+The Goguen–Burstall presentation is set-theoretic. Eigenius is constructive: the kernel's type theory (EigenTT) is a fragment of CIC, and the knowledge graph is a Σ-typed bundle of typed terms. The institution-theoretic concepts therefore manifest as constructive analogues.
 
 The load-bearing decision: **a typed `Resource` in the layer chain is a sentence in the institution's logic — a typed claim about the world. It is not a model.** Models are the implicit ground truth those sentences claim things about; the kernel does not represent models explicitly.
 
 This is consistent with how institution theory is used in software engineering (CASL, Hets, the Diaconescu programme generally): the data-level objects in such systems are typed specifications, not interpretations. It is also consistent with our concrete representation: a `DockingResult` resource carries a *prediction* about a binding affinity; an `AssayMeasurement` resource carries an *observation* about an IC₅₀; both are claims, not the underlying molecule. The molecule itself is the model — never a kernel object.
 
-| Component | Set-theoretic form (Goguen–Burstall) | Constructive form (Eigenius / Mini-TT) |
+| Component | Set-theoretic form (Goguen–Burstall) | Constructive form (Eigenius / EigenTT) |
 |---|---|---|
 | Signatures $\mathrm{Sign}$ | Objects of a category | Layer-chain ontology snapshots; classes are inductive types and properties are typed fields |
 | Sentences $\mathrm{Sen}(\Sigma)$ | Sets of formulas over $\Sigma$ | Typed Resources in the layer chain — instances of registered classes, carrying ground claims |
@@ -154,7 +154,7 @@ A typed *outbound* view of one of the institution's resource classes. The instit
 | Property | Type | Meaning |
 |---|---|---|
 | `from_class` | IRI of a Class | The resource class this format extracts from. |
-| `payload_type` | IRI of a Mini-TT type | The Mini-TT type of the extracted payload. May be a primitive (`Float`), a tuple, a record, an inductive type. |
+| `payload_type` | IRI of a EigenTT type | The EigenTT type of the extracted payload. May be a primitive (`Float`), a tuple, a record, an inductive type. |
 | `institution_ref` | IRI of an Institution | Declaring institution. |
 | `procedure` | IRI | The dispatch key the institution's `extract_typed` handler receives (§8). |
 
@@ -162,12 +162,12 @@ A class can have multiple ExportFormats. `DockingResult` might publish three: on
 
 ### 4.3 `ImportFormat`
 
-The dual: a typed *inbound* constructor that lifts a Mini-TT payload into a target-class resource.
+The dual: a typed *inbound* constructor that lifts a EigenTT payload into a target-class resource.
 
 | Property | Type | Meaning |
 |---|---|---|
 | `to_class` | IRI of a Class | The resource class this format constructs. |
-| `payload_type` | IRI of a Mini-TT type | The Mini-TT type of the input payload. |
+| `payload_type` | IRI of a EigenTT type | The EigenTT type of the input payload. |
 | `institution_ref` | IRI of an Institution | Declaring institution. |
 | `procedure` | IRI | The dispatch key the institution's `reify` handler receives. |
 
@@ -182,7 +182,7 @@ A typed function in the institution's fibre — input and output resource classe
 | `query_class` | IRI of a Class | The class of query *input* resources. The kernel dispatches on this class IRI. |
 | `result_class` | IRI of a Class | The class of result resources the query produces. |
 | `dispatch_role` | enum | One of `OnDemand` (explicit FIBER / RPC), `AutoOnLoad` (fired automatically when a resource of `query_class` enters the chain — replaces `validate_morphism`), `Decidable` (referenced from `Exp::NativeDecide`; replaces `decide`). A single QueryClass may declare multiple roles. |
-| `implementation` | IRI | Either a Mini-TT Component IRI (the kernel handles the call entirely via extract → component → reify) or a procedure IRI dispatched to the institution's `query` handler. |
+| `implementation` | IRI | Either a EigenTT Component IRI (the kernel handles the call entirely via extract → component → reify) or a procedure IRI dispatched to the institution's `query` handler. |
 | `institution_ref` | IRI of an Institution | Declaring institution. |
 
 When `dispatch_role` includes `AutoOnLoad`, `result_class` must be a `Verdict` shape (§6.1): the kernel uses the verdict to gate the Load.
@@ -191,12 +191,12 @@ When `dispatch_role` includes `Decidable`, `result_class` must again be a `Verdi
 
 ### 4.5 `Comorphism`
 
-The triadic translation across an institution boundary (§5). Owned by no single institution; aggregates contributions from source, Mini-TT, and target.
+The triadic translation across an institution boundary (§5). Owned by no single institution; aggregates contributions from source, EigenTT, and target.
 
 | Property | Type | Meaning |
 |---|---|---|
 | `export_format` | IRI of an ExportFormat | The source-side $s$ — extracts a typed payload from a source-class resource. |
-| `transformation` | IRI of a Mini-TT expression (typed term) | The middle $m: S \to T$, where $S = \mathrm{payload\_type}(\mathrm{export\_format})$ and $T = \mathrm{payload\_type}(\mathrm{import\_format})$. **The transformation is a Mini-TT *term*, not an opaque Component.** The natural shape is a Lambda whose body is a typed expression — for pure transformations the body is fully transparent (e.g. `λ Δg. exp(-Δg / RT) * 1e9` for Arrhenius); for institution-runtime transformations the body bottoms at a `program:Component` reference (an expression form), which the kernel evaluates by dispatching into the institution's worker. Either way the transformation slot carries an inspectable, type-checkable, composable typed term — the property that lets the kernel reason about $m$ rather than treating it as a black box. |
+| `transformation` | IRI of a EigenTT expression (typed term) | The middle $m: S \to T$, where $S = \mathrm{payload\_type}(\mathrm{export\_format})$ and $T = \mathrm{payload\_type}(\mathrm{import\_format})$. **The transformation is a EigenTT *term*, not an opaque Component.** The natural shape is a Lambda whose body is a typed expression — for pure transformations the body is fully transparent (e.g. `λ Δg. exp(-Δg / RT) * 1e9` for Arrhenius); for institution-runtime transformations the body bottoms at a `program:Component` reference (an expression form), which the kernel evaluates by dispatching into the institution's worker. Either way the transformation slot carries an inspectable, type-checkable, composable typed term — the property that lets the kernel reason about $m$ rather than treating it as a black box. |
 | `import_format` | IRI of an ImportFormat | The target-side $t$ — constructs a target-class resource from a typed payload. |
 | `exact` | boolean | Whether the comorphism preserves model amalgamation in the sense of Diaconescu (2025, Thm. 14.15 + Prop. 14.14). Absent or `false` is the safe default; only an explicit `true` is a claim of exactness. |
 
@@ -214,16 +214,16 @@ $$\rho \;=\; (s,\ m,\ t)$$
 
 where:
 
-- **$s$** is the *source* institution's typed extraction, declared as an ExportFormat. $s$ takes a resource of class $C_S$ (in the source institution's vocabulary) and returns a Mini-TT value of type $S$. The source institution is the only party that knows how to traverse $C_S$'s representational invariants.
-- **$m$** is a *cross-institution* transformation, declared as a Mini-TT term (typed expression) with type $S \to T$. $m$ owns the actual mathematical content of the comorphism. It belongs to neither institution; it is the bridge. The term is evaluable through the kernel's existing Component infrastructure — Lambda body reduction for pure transformations, Component-as-expression-form dispatch at the leaf for institution-runtime transformations — so the same evaluation path covers both.
-- **$t$** is the *target* institution's typed reification, declared as an ImportFormat. $t$ takes a Mini-TT value of type $T$ and constructs a resource of class $C_T$ (in the target institution's vocabulary). The target institution is the only party that knows how to construct well-formed $C_T$ instances.
+- **$s$** is the *source* institution's typed extraction, declared as an ExportFormat. $s$ takes a resource of class $C_S$ (in the source institution's vocabulary) and returns a EigenTT value of type $S$. The source institution is the only party that knows how to traverse $C_S$'s representational invariants.
+- **$m$** is a *cross-institution* transformation, declared as a EigenTT term (typed expression) with type $S \to T$. $m$ owns the actual mathematical content of the comorphism. It belongs to neither institution; it is the bridge. The term is evaluable through the kernel's existing Component infrastructure — Lambda body reduction for pure transformations, Component-as-expression-form dispatch at the leaf for institution-runtime transformations — so the same evaluation path covers both.
+- **$t$** is the *target* institution's typed reification, declared as an ImportFormat. $t$ takes a EigenTT value of type $T$ and constructs a resource of class $C_T$ (in the target institution's vocabulary). The target institution is the only party that knows how to construct well-formed $C_T$ instances.
 
 Reading the comorphism this way:
 
 - **Each institution stays inside its own representational concerns.** The source publishes its typed views; the target publishes its typed constructors. Neither knows the other's resource shape directly.
-- **The cross-institution mathematics is expressible in Mini-TT.** $m$ is an ordinary typed term, evaluable through the kernel's existing Component infrastructure, sharable across multiple comorphisms (the same `λ Δg. exp(-Δg / RT)` could underpin both ρ_{Dock→Assay} and a hypothetical ρ_{Dock→ITC}), and amenable to proof when the comorphism is exact.
+- **The cross-institution mathematics is expressible in EigenTT.** $m$ is an ordinary typed term, evaluable through the kernel's existing Component infrastructure, sharable across multiple comorphisms (the same `λ Δg. exp(-Δg / RT)` could underpin both ρ_{Dock→Assay} and a hypothetical ρ_{Dock→ITC}), and amenable to proof when the comorphism is exact.
 - **The Satisfaction Condition becomes a typing obligation.** Diaconescu's $\rho^{\mathrm{Sen}}$ (sentences forward) is realised by the composition $s ; m ; t$: the kernel verifies at commit time that $m$'s signature matches the export's payload type and the import's payload type, so the three pieces compose by construction. The implicit $\rho^{\mathrm{Mod}}$ (models backward) is the unstated correspondence "the same molecule, viewed through different observational lenses" — never materialised as a kernel verb.
-- **Exactness is a property of $m$.** A comorphism is exact when $m$ is provably correct in some appropriate sense — for instance, when $m$'s Mini-TT term carries a derivation witnessing that the source-side claim's truth implies the target-side claim's truth. The current kernel does not enforce such derivations (Phase 12-era plumbing), but the structural shape supports them. An inexact comorphism (deliberate approximation, e.g. $IC_{50} \approx \exp(-\Delta G / RT)$ ignoring entropy and solvent effects) is honestly marked as such; cross-institution query results that traverse it carry provenance recording the loss of amalgamation guarantees.
+- **Exactness is a property of $m$.** A comorphism is exact when $m$ is provably correct in some appropriate sense — for instance, when $m$'s EigenTT term carries a derivation witnessing that the source-side claim's truth implies the target-side claim's truth. The current kernel does not enforce such derivations (Phase 12-era plumbing), but the structural shape supports them. An inexact comorphism (deliberate approximation, e.g. $IC_{50} \approx \exp(-\Delta G / RT)$ ignoring entropy and solvent effects) is honestly marked as such; cross-institution query results that traverse it carry provenance recording the loss of amalgamation guarantees.
 
 ### 5.1 Worked example — ρ_{Dock→Assay}
 
@@ -289,14 +289,14 @@ A single `QueryClass` may declare multiple roles. A predicate that is auto-fired
 - `Fails` — the kernel emits a failing neutral, or rejects the resource on Load.
 - `Undecidable` — the kernel leaves the constraint as a passthrough, or accepts the resource on Load with no domain commitment.
 
-### 6.2 Mini-TT-implemented vs. institution-implemented queries
+### 6.2 EigenTT-implemented vs. institution-implemented queries
 
-A `QueryClass` declares its `implementation` as either a Mini-TT Component IRI or a procedure IRI dispatched to the institution's runtime. The kernel orchestrates accordingly:
+A `QueryClass` declares its `implementation` as either a EigenTT Component IRI or a procedure IRI dispatched to the institution's runtime. The kernel orchestrates accordingly:
 
 - **Component-implemented**: the kernel extracts the typed payload from the input resource via the matching ExportFormat, applies the Component, reifies the result via the matching ImportFormat. The institution's runtime is never called for this query class.
 - **Institution-implemented**: the kernel calls the institution's `query` trait method (§8) with the input resource and the procedure IRI. The institution returns a result resource directly.
 
-Institutions whose reasoning is expressible in Mini-TT (Pareto-dominance checks, threshold comparisons, simple arithmetic on numeric fields) can declare every QueryClass as Component-implemented and implement no `query` handler at all. Institutions whose reasoning lives in opaque code (a docking-pose generator, an LLM, a Lean 4 server) implement `query`. The trait method is the *escape hatch* for non-Mini-TT reasoning.
+Institutions whose reasoning is expressible in EigenTT (Pareto-dominance checks, threshold comparisons, simple arithmetic on numeric fields) can declare every QueryClass as Component-implemented and implement no `query` handler at all. Institutions whose reasoning lives in opaque code (a docking-pose generator, an LLM, a Lean 4 server) implement `query`. The trait method is the *escape hatch* for non-EigenTT reasoning.
 
 ---
 
@@ -317,12 +317,12 @@ These statuses form a partial order: a resource gains the strongest status whose
 
 ### 7.2 Lean 4 as a verification institution
 
-Lean 4 is an external CIC reasoning system — *not* Mini-TT (which is the kernel's own kernel-level type checker). It is a separate, more powerful type theory exposed to Eigenius as an institution.
+Lean 4 is an external CIC reasoning system — *not* EigenTT (which is the kernel's own kernel-level type checker). It is a separate, more powerful type theory exposed to Eigenius as an institution.
 
 Lean 4 declares (sketch):
 
 - A class `LeanProofTerm` carrying a Lean 4 proof term and the proposition it proves.
-- An `ExportFormat` extracting the proof term + proposition as a Mini-TT-side typed payload.
+- An `ExportFormat` extracting the proof term + proposition as a EigenTT-side typed payload.
 - A `QueryClass` `ProofCheck` with `dispatch_role: AutoOnLoad`, bound to `LeanProofTerm`, returning `Verdict`. The implementation is institution-runtime: the institution's `query` handler dispatches the proof term to a Lean 4 server, accepts the verdict back, and returns `Holds` / `Fails` / `Undecidable`.
 - Optionally: a `QueryClass` `ProofSearch` with `dispatch_role: OnDemand`, taking a proposition resource and returning an inhabited `LeanProofTerm` if Lean finds a proof.
 
@@ -334,7 +334,7 @@ The verification flow:
 4. If the Lean server accepts, the kernel attaches the proof term as the resource's reasoning trace and promotes the resource's epistemic status from derived → verified.
 5. If Lean rejects, Load fails; the kernel surfaces the typed error and the resource never enters the chain.
 
-Mini-TT cannot do this: it checks program *composition* (well-typed reductions in our small CIC fragment), not domain *correctness* (arbitrary mathematical propositions). Lean 4 can express and check arbitrary mathematical propositions about the domain — that is the entire reason it is useful as an institution rather than as a built-in kernel feature.
+EigenTT cannot do this: it checks program *composition* (well-typed reductions in our small CIC fragment), not domain *correctness* (arbitrary mathematical propositions). Lean 4 can express and check arbitrary mathematical propositions about the domain — that is the entire reason it is useful as an institution rather than as a built-in kernel feature.
 
 ---
 
@@ -347,7 +347,7 @@ pub trait Institution: Send + Sync {
     /// The institution's IRI. Used for registry indexing.
     fn institution_iri(&self) -> &Iri;
 
-    /// Boundary: extract a typed Mini-TT value from a resource via a
+    /// Boundary: extract a typed EigenTT value from a resource via a
     /// procedure declared by an `ExportFormat` resource owned by this
     /// institution. Always required.
     fn extract_typed(
@@ -486,7 +486,7 @@ Anything else falls through to non-institution lookups (component registry, clas
 §2.1 commits to the comorphism-based variant. Concretely realised in our system:
 
 - **$\rho^{\mathrm{Sign}}$** — the implicit signature mapping: `from_class` (source-side class) maps to `to_class` (target-side class) under a comorphism. The "category of indices" is the institution registry.
-- **$\rho^{\mathrm{Sen}}$** — the composition $s; m; t$. A source-side sentence (resource) is translated through extraction, Mini-TT transformation, and target reification into a target-side sentence. Type-checked at commit; runtime-checked by the post-translation invariant.
+- **$\rho^{\mathrm{Sen}}$** — the composition $s; m; t$. A source-side sentence (resource) is translated through extraction, EigenTT transformation, and target reification into a target-side sentence. Type-checked at commit; runtime-checked by the post-translation invariant.
 - **$\rho^{\mathrm{Mod}}$** — implicit. The "models" $M$, $M'$ are the ground-truth worlds in which our sentences claim things; the kernel never represents them directly. A model-backward reading is "the same molecule observed through the source's instruments versus the target's instruments." We do not need to evaluate it.
 
 The Satisfaction Condition for a comorphism is
@@ -506,9 +506,9 @@ We cannot check the *truth* of either side (that would require representing $M, 
 
 D14 specifies the *protocol* — the typed dispatch surface, the boundary contract, the well-typedness invariants. It does not specify the *theorems* the institutions reason about. There are two distinguishable levels of demonstration this design supports:
 
-**Plumbing demos.** Institutions whose reasoning is shallow numeric / threshold logic. The QueryClass implementations are simple Mini-TT Components or short institution-runtime checks; comorphisms are Float-to-Float transformations. The protocol round-trips data correctly through typed dispatch. Examples: refinement-delta thresholding, Pareto dominance comparison, replicate-CV ceiling, $IC_{50} \approx \exp(-\Delta G / RT)$ approximation.
+**Plumbing demos.** Institutions whose reasoning is shallow numeric / threshold logic. The QueryClass implementations are simple EigenTT Components or short institution-runtime checks; comorphisms are Float-to-Float transformations. The protocol round-trips data correctly through typed dispatch. Examples: refinement-delta thresholding, Pareto dominance comparison, replicate-CV ceiling, $IC_{50} \approx \exp(-\Delta G / RT)$ approximation.
 
-**Deep demos.** Institutions whose QueryClasses or comorphism transformations carry actual derivations: a Hill-equation fit witnessed in Mini-TT, a refinement-chain Cauchy proof, a compartmental-model identifiability witness, a Lean 4 proof of binding-mode optimality. The transformation Component is no longer a one-line lambda; it is a typed term whose body is a derivation.
+**Deep demos.** Institutions whose QueryClasses or comorphism transformations carry actual derivations: a Hill-equation fit witnessed in EigenTT, a refinement-chain Cauchy proof, a compartmental-model identifiability witness, a Lean 4 proof of binding-mode optimality. The transformation Component is no longer a one-line lambda; it is a typed term whose body is a derivation.
 
 The first crop of demos under D14 will be plumbing-only — landing the typed dispatch surface is necessary before reasoning content can ride on it. The published narratives (the worked-examples paper, the platform-guide chapters) should be honest about which level they exhibit. One demo eventually goes deep; the others stay plumbing showcases.
 
@@ -545,7 +545,7 @@ world eigenius-institution {
 }
 ```
 
-`typed-value` is a CBOR-encoded marshalling of a Mini-TT value; the SDK provides round-trip helpers between Rust types and `typed-value`.
+`typed-value` is a CBOR-encoded marshalling of a EigenTT value; the SDK provides round-trip helpers between Rust types and `typed-value`.
 
 The SDK provides resource builders for `Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, and `Comorphism` resources (so guests can construct their declaration documents in idiomatic Rust). It does *not* provide a `FiberDeclaration` struct — declarations are ordinary typed Resources, not a special metadata type.
 
@@ -581,7 +581,7 @@ The current institution implementation is removed wholesale and rebuilt. A fresh
 - `kernel/src/program/expr.rs::Exp::InstitutionInvoke` — same AST node, new evaluator (§9.3).
 - `Exp::NativeDecide` — same dispatch path, simplified (§9.2).
 - The `EigenQL` FIBER clause grammar — unchanged surface; new dispatch under the hood.
-- The Phase 7 Component infrastructure for the Mini-TT middle of comorphisms (no new mechanism).
+- The Phase 7 Component infrastructure for the EigenTT middle of comorphisms (no new mechanism).
 - Phase 9a rehydration walking the chain — the new registry consumes its output.
 
 ### 13.4 Implementation milestones
@@ -607,7 +607,7 @@ Each milestone is independently reviewable and committable.
 
 2. **Single-artefact vs. dual-artefact shipping for institutions.** The WASM binary returning a declaration document at install is the pragmatic choice and matches the existing pipeline. Separate `*.wasm` + `*.eigon-json` is conceptually cleaner — code and ontology decouple, ontology can evolve independently. Default to single-artefact for now; treat the kernel as receiving the declaration *as ordinary chain data* so the migration to dual-artefact later is a packaging change, not an architectural one.
 
-3. **Verdict as core class vs. inductive type.** A `Verdict` core class with `Holds`, `Fails`, `Undecidable` instances mirrors how other tri-state outcomes appear in the chain. A `Verdict` inductive type lives in Mini-TT and is a true sum type. Component-implemented QueryClasses naturally produce inductive-type values; institution-runtime QueryClasses naturally produce class-instance resources. We need to settle which is canonical and provide a coercion at the boundary.
+3. **Verdict as core class vs. inductive type.** A `Verdict` core class with `Holds`, `Fails`, `Undecidable` instances mirrors how other tri-state outcomes appear in the chain. A `Verdict` inductive type lives in EigenTT and is a true sum type. Component-implemented QueryClasses naturally produce inductive-type values; institution-runtime QueryClasses naturally produce class-instance resources. We need to settle which is canonical and provide a coercion at the boundary.
 
 4. **Multiple ExportFormats per source class with overlapping payload types.** If `DockingResult` declares both `(DockingResult → Float)` (just ΔG) and `(DockingResult → (Float, Float, Float))` (thermodynamic decomposition), and a comorphism wants `Float`, which ExportFormat applies? Either (a) the Comorphism resource references the specific ExportFormat by IRI (no ambiguity), or (b) the Comorphism declares the source class and payload type, and the kernel selects. (a) is simpler and is what §4.5 currently specifies; (b) might be friendlier ergonomically. Default to (a) until we have a use case for (b).
 
@@ -618,7 +618,7 @@ Each milestone is independently reviewable and committable.
 ## 15. References
 
 - D1 — Eigon serialisation format and the 12 structural validation rules.
-- D9 — NbE / Mini-TT. The kernel's type theory used as the cross-institution middle.
+- D9 — NbE / EigenTT. The kernel's type theory used as the cross-institution middle.
 - D12 — WASM extensibility. The runtime mechanism for institution code.
 - D19 — Inductive types. Used for the Verdict shape and arbitrary typed payloads.
 - Diaconescu, R. *Institution-independent Model Theory*, 2nd ed., Studies in Universal Logic, Springer 2025 (`diaconescu2025`). Chapter 14 is the canonical reference for the comorphism-based Grothendieck construction. Specifically: §14.1 (the construction), §14.2 (theory co-limits and model amalgamation, including Thm. 14.15 on semi-exactness), §14.3 (interpolation).

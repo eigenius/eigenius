@@ -43,7 +43,7 @@ exercise FormulaTerm in their own institution's vocabulary:
 
 ## 8.3. Related design documents
 
-- [**D32 — Chain-Mirrored Mini-TT
+- [**D32 — Chain-Mirrored EigenTT
   Inductives**](../../design/d32-chain-mirrored-mini-tt-inductives.md) —
   the canonical specification for the formula language.
 - [**D14 — Institution Realisation**](../../design/d14-institution-realisation.md)

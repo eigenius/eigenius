@@ -134,7 +134,7 @@ IRI).
 Two properties this gives:
 
 1. **Idempotence.** Running the same comorphism with the same input
-   twice produces the same content (because the comorphism is a Mini-TT
+   twice produces the same content (because the comorphism is a EigenTT
    evaluation — pure modulo the institution handlers' purity), which
    produces the same IRI. The second run dedupes to the first.
 2. **Cross-fibre identity.** Two different callers running the same
@@ -297,7 +297,7 @@ no chain bloat. This makes notebook authoring forgiving — cells can be
 re-run without polluting the chain.
 
 The dedup works because:
-1. The comorphism's transformation is a Mini-TT evaluation, which is pure.
+1. The comorphism's transformation is a EigenTT evaluation, which is pure.
 2. The institution handlers (`extract_typed` / `reify`) are required to be
    pure functions of their inputs (D14 §8); deterministic-host runs hash
    to the same bytes.

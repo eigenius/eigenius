@@ -12,7 +12,7 @@ The two worlds are:
 
 **The resource graph.** Eigon resources stored in immutable layers. Every `Class`, `Property`, `InductiveType`, `CodataType` declared in ESL becomes a resource here. Resources have IRIs, properties, and `is_a` lists. They're queryable through EigenQL, persistable through the storage layer, traceable through trace stores.
 
-**The type theory.** A Mini-TT kernel ([D19 §3](../../design/d19-inductive-types.md)) with Π-types, Σ-types, inductive types, coinductive types, sized types, identity types, universes, and normalisation-by-evaluation. The kernel doesn't know about resources directly — it works with `Exp` (terms) and `Val` (values).
+**The type theory.** A EigenTT kernel ([D19 §3](../../design/d19-inductive-types.md)) with Π-types, Σ-types, inductive types, coinductive types, sized types, identity types, universes, and normalisation-by-evaluation. The kernel doesn't know about resources directly — it works with `Exp` (terms) and `Val` (values).
 
 The two worlds talk through one specific kernel construct: **`Exp::EigonClass(iri)`**. When the type-checker encounters an `EigonClass(iri)`, it doesn't try to interpret it abstractly — it calls into the layer, finds the resource at that IRI, and constructs a `Val` from what it finds. That call lives in [`resolve_class_type`](../../../kernel/src/program/ground.rs).
 

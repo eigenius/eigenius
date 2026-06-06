@@ -20,6 +20,7 @@
 
 use crate::esl::ast;
 use crate::esl::error::{EslError, Position};
+use crate::nbe::term::{Exp, InductiveDecl, Patt};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use std::collections::BTreeMap;
@@ -131,15 +132,16 @@ impl Compiler {
             if let ast::Declaration::Data(d) = decl {
                 let parent_iri = self.resolve(&d.name)?;
                 for ctor in &d.ctors {
-                    let ctor_iri = format!("{parent_iri}:{}", ctor.name);
-                    if let Some(existing) = self.ctors.insert(ctor.name.clone(), ctor_iri) {
+                    let ctor_iri = format!("{parent_iri}:{}", ctor.name());
+                    if let Some(existing) = self.ctors.insert(ctor.name().to_string(), ctor_iri) {
                         return Err(EslError::compiler(
-                            Some(ctor.pos.clone()),
+                            Some(ctor.pos().clone()),
                             format!(
                                 "constructor `{}` declared in `{}` collides with an earlier \
                                  declaration whose IRI is `{existing}` — rename one of them \
                                  (qualified ctor references in source are a future addition)",
-                                ctor.name, parent_iri
+                                ctor.name(),
+                                parent_iri
                             ),
                         ));
                     }
@@ -199,6 +201,7 @@ impl Compiler {
                 Some(vi.pos.clone()),
                 "vector_index lowering not yet implemented (D43 M2)".to_string(),
             )),
+            ast::Declaration::Axiom(ax) => self.compile_axiom(ax),
         }
     }
 
@@ -569,6 +572,234 @@ impl Compiler {
                 }
                 Ok(acc)
             }
+            // eigenius#72 — sort literals in type position. For the
+            // existing chain-Value-producing paths (Lambda type slots,
+            // codata observation types, merge_comorphism transformation
+            // signatures), we emit a string representation. None of
+            // those paths currently consume sorts structurally; if a
+            // future use site needs a richer chain shape we'll extend.
+            // The proper Exp-side lowering for `axiom` statements lives
+            // in `lower_type_expr_to_exp` (Layer 1) and reads the AST
+            // directly, bypassing this chain-Value path.
+            ast::TypeExpr::Sort { kind, .. } => {
+                let s = match kind {
+                    ast::SortKind::Prop => "Prop".to_string(),
+                    ast::SortKind::Set => "Set".to_string(),
+                    ast::SortKind::Type(n) => format!("Type({n})"),
+                };
+                Ok(Value::String(s))
+            }
+            ast::TypeExpr::Lambda { pos, .. } => Err(EslError::compiler(
+                Some(pos.clone()),
+                "`fun (…) => …` is only allowed inside `match … returning <motive>` \
+                 motives, axiom statements, and other Exp-encoded contexts — not in \
+                 the chain-value type-expression slots (codata observation types, \
+                 lambda type slots, etc.). If you reached this from a `returning` \
+                 clause, the motive is encoded via the D47 codec instead and this \
+                 branch is not exercised."
+                    .to_string(),
+            )),
+        }
+    }
+
+    // --- Axiom declarations (eigenius#72 Layer 1, D46 §10) ---
+
+    /// Lower an `axiom Name : <type-expr>` declaration to a chain
+    /// `core:Axiom` Resource whose `axiom_statement` is the encoded
+    /// EigenTT type expression. Goes through the D47 codec
+    /// (`encode_type`) after lowering the ESL TypeExpr to a kernel
+    /// `Exp` via [`Self::lower_type_expr_to_exp`].
+    fn compile_axiom(&self, decl: &ast::AxiomDecl) -> Result<Vec<Resource>, EslError> {
+        let empty_scope: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let statement_exp = self.lower_type_expr_to_exp(&decl.statement, &empty_scope)?;
+        let encoded =
+            crate::program::eigentt_type_mirror::encode_type(&statement_exp).map_err(|e| {
+                EslError::compiler(
+                    Some(decl.pos.clone()),
+                    format!("axiom statement encoding failed: {e}"),
+                )
+            })?;
+        let id = self.resolve_iri(&decl.name)?;
+        let mut r = Resource::new(id);
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String(
+                "urn:eigenius:eigentt:Axiom".to_string(),
+            )]),
+        );
+        r.set(iri("urn:eigenius:eigentt:axiom_statement"), encoded);
+        if let Some(j) = &decl.justification {
+            r.set(
+                iri("urn:eigenius:eigentt:axiom_justification"),
+                Value::String(j.clone()),
+            );
+        }
+        stamp_declared(&mut r);
+        Ok(vec![r])
+    }
+
+    /// eigenius#72 — lower an ESL `TypeExpr` to a kernel `Exp`.
+    ///
+    /// Used by Layer 1's `axiom` declaration (statement encoding) and
+    /// Layer 2's indexed `data` ctor result types. Recognises:
+    /// - `Sort(...)` → `Exp::Sort(n)` per the Prop/Set/Type mapping.
+    /// - `Ref(name, args)` → bound-variable `Exp::Var` for in-scope
+    ///   bare names; otherwise resolves the IRI and produces
+    ///   `Exp::EigonClass` (nullary) or `Exp::InductiveType` with a
+    ///   name-only stub decl (applied — args become the InductiveType's
+    ///   args slot, which the D47 codec App-curries on encode and the
+    ///   decoder re-folds at use time).
+    /// - `Arrow(a, b)` → `Exp::Pi(Patt::Unit, a, b)`.
+    /// - `Pi(params, codomain)` → nested `Exp::Pi` chain, threading
+    ///   binder names into scope so later params can reference earlier
+    ///   ones (dependent telescope).
+    /// - `BinderArrow(name, kind, bound, body)` → `Exp::Pi` for non-
+    ///   size kinds; sized binders defer to the existing kernel-side
+    ///   `Exp::SizedPi` handling but are rare in axiom statements.
+    fn lower_type_expr_to_exp(
+        &self,
+        typ: &ast::TypeExpr,
+        scope: &std::collections::HashSet<&str>,
+    ) -> Result<Exp, EslError> {
+        match typ {
+            ast::TypeExpr::Sort { kind, .. } => Ok(Exp::Sort(match kind {
+                ast::SortKind::Prop => 0,
+                ast::SortKind::Set => 1,
+                ast::SortKind::Type(n) => n + 1,
+            })),
+            ast::TypeExpr::Ref { name, args, .. } => {
+                let is_bound = name.namespace.is_none() && scope.contains(name.name.as_str());
+                if is_bound {
+                    if !args.is_empty() {
+                        return Err(EslError::compiler(
+                            Some(name.pos.clone()),
+                            format!(
+                                "bound variable `{}` cannot be applied to args in type \
+                                 position",
+                                name.name
+                            ),
+                        ));
+                    }
+                    return Ok(Exp::Var(name.name.clone()));
+                }
+                let iri_str = self.resolve(name)?;
+                let iri_val = Iri::parse(&iri_str).map_err(|e| {
+                    EslError::compiler(
+                        Some(name.pos.clone()),
+                        format!("invalid IRI `{iri_str}`: {e}"),
+                    )
+                })?;
+                if args.is_empty() {
+                    Ok(Exp::EigonClass(iri_val))
+                } else {
+                    // Stub InductiveDecl for the App-curried encoding.
+                    // The D47 codec produces `App(App(ConstRef(iri),
+                    // a1), a2)…` and the decoder re-resolves the IRI
+                    // against the chain at use time.
+                    let stub = std::sync::Arc::new(InductiveDecl {
+                        name: iri_val.as_str().to_string(),
+                        params: Vec::new(),
+                        indices: Vec::new(),
+                        sort: Exp::Sort(1),
+                        ctors: Vec::new(),
+                    });
+                    let arg_exps: Result<Vec<Exp>, EslError> = args
+                        .iter()
+                        .map(|a| self.lower_type_expr_to_exp(a, scope))
+                        .collect();
+                    Ok(Exp::InductiveType(stub, arg_exps?))
+                }
+            }
+            ast::TypeExpr::Arrow {
+                domain, codomain, ..
+            } => {
+                let dom = self.lower_type_expr_to_exp(domain, scope)?;
+                let body = self.lower_type_expr_to_exp(codomain, scope)?;
+                Ok(Exp::arrow(dom, body))
+            }
+            ast::TypeExpr::Pi {
+                params, codomain, ..
+            } => {
+                // Dependent telescope: thread each binder into scope
+                // before lowering subsequent param types and the body.
+                let mut working: std::collections::HashSet<String> =
+                    scope.iter().map(|s| s.to_string()).collect();
+                let mut compiled_doms: Vec<(String, Exp)> = Vec::with_capacity(params.len());
+                for p in params {
+                    let local: std::collections::HashSet<&str> =
+                        working.iter().map(|s| s.as_str()).collect();
+                    let dom = self.lower_type_expr_to_exp(&p.typ, &local)?;
+                    compiled_doms.push((p.name.clone(), dom));
+                    working.insert(p.name.clone());
+                }
+                let inner_scope: std::collections::HashSet<&str> =
+                    working.iter().map(|s| s.as_str()).collect();
+                let mut body = self.lower_type_expr_to_exp(codomain, &inner_scope)?;
+                for (name, dom) in compiled_doms.into_iter().rev() {
+                    body = Exp::Pi(Patt::Var(name), Box::new(dom), Box::new(body));
+                }
+                Ok(body)
+            }
+            ast::TypeExpr::BinderArrow {
+                name,
+                kind,
+                bound: _,
+                body,
+                ..
+            } => {
+                // Size-binder arrows are typically used in sized
+                // codata; axiom statements rarely involve sizes. v1
+                // lowers as a plain Pi for non-size kinds and a
+                // SizeSort-typed binder for size kinds. Bound
+                // (upper bound for sized) is currently ignored — sized
+                // axiom statements need a follow-on.
+                let kind_str = self.resolve(kind)?;
+                let dom = if kind_str.ends_with(":Size") || kind_str == "Size" {
+                    Exp::SizeSort
+                } else {
+                    let iri_val = Iri::parse(&kind_str).map_err(|e| {
+                        EslError::compiler(
+                            Some(typ.pos().clone()),
+                            format!("invalid kind IRI `{kind_str}`: {e}"),
+                        )
+                    })?;
+                    Exp::EigonClass(iri_val)
+                };
+                let mut inner_scope: std::collections::HashSet<&str> = scope.clone();
+                inner_scope.insert(name.as_str());
+                let body_exp = self.lower_type_expr_to_exp(body, &inner_scope)?;
+                Ok(Exp::Pi(
+                    Patt::Var(name.clone()),
+                    Box::new(dom),
+                    Box::new(body_exp),
+                ))
+            }
+            // eigenius#72 Layer 3 — `fun (i_1 : T_1, …, i_n : T_n) =>
+            // body`. Nests N single-parameter `Exp::Lam` chains,
+            // threading binder names into scope so later params can
+            // reference earlier ones (parallels how Pi lowers).
+            // Parameter type annotations are *not* attached to the
+            // resulting `Exp::Lam` nodes — EigenTT lambdas are untyped
+            // at the term level; the annotation lives in the
+            // accompanying Pi when one exists (in motives, the
+            // matching `Exp::Pi` is the scrutinee's type signature
+            // which the kernel already knows). The ESL surface
+            // requires the annotation for readability and to thread
+            // the binder into scope during further lowering.
+            ast::TypeExpr::Lambda { params, body, .. } => {
+                let mut working: std::collections::HashSet<String> =
+                    scope.iter().map(|s| s.to_string()).collect();
+                for p in params {
+                    working.insert(p.name.clone());
+                }
+                let inner_scope: std::collections::HashSet<&str> =
+                    working.iter().map(|s| s.as_str()).collect();
+                let mut body_exp = self.lower_type_expr_to_exp(body, &inner_scope)?;
+                for p in params.iter().rev() {
+                    body_exp = Exp::Lam(Patt::Var(p.name.clone()), Box::new(body_exp));
+                }
+                Ok(body_exp)
+            }
         }
     }
 
@@ -615,44 +846,109 @@ impl Compiler {
             .collect();
         r.set(iri(wk::TYPE_PARAMS), Value::Array(params?));
 
+        // eigenius#72 Layer 2 — index telescope. Same shape as
+        // `type_params`; absent / empty for non-indexed declarations.
+        // Bare references that match a declared parameter name are
+        // stored verbatim (so the decoder emits `Exp::Var(name)`);
+        // qualified names go through the namespace registry.
+        if !decl.indices.is_empty() {
+            let indices: Result<Vec<Value>, EslError> = decl
+                .indices
+                .iter()
+                .map(|p| {
+                    let mut pr = Resource::new_embedded();
+                    set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
+                    pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
+                    let kind = if p.kind.namespace.is_none()
+                        && param_names.contains(p.kind.name.as_str())
+                    {
+                        p.kind.name.clone()
+                    } else {
+                        self.resolve(&p.kind)?
+                    };
+                    pr.set(iri(wk::PARAM_KIND), Value::String(kind));
+                    Ok(Value::Embedded(Box::new(pr)))
+                })
+                .collect();
+            r.set(iri(wk::INDICES), Value::Array(indices?));
+        }
+
+        // eigenius#72 Layer 2 — explicit result sort. Encoded as a
+        // string; the decoder parses it back into `Exp::Sort(n)`.
+        if let Some(sort) = decl.result_sort {
+            let sort_str = match sort {
+                ast::SortKind::Prop => "Prop".to_string(),
+                ast::SortKind::Set => "Set".to_string(),
+                ast::SortKind::Type(n) => format!("Type:{n}"),
+            };
+            r.set(iri(wk::RESULT_SORT), Value::String(sort_str));
+        }
+
         let parent_iri_str = self.resolve(&decl.name)?;
         let ctors: Result<Vec<Value>, EslError> = decl
             .ctors
             .iter()
             .map(|c| {
-                let ctor_iri_str = format!("{parent_iri_str}:{}", c.name);
+                let ctor_iri_str = format!("{parent_iri_str}:{}", c.name());
                 let ctor_iri = Iri::parse(&ctor_iri_str).map_err(|e| {
                     EslError::compiler(
-                        Some(c.pos.clone()),
+                        Some(c.pos().clone()),
                         format!("invalid ctor IRI `{ctor_iri_str}`: {e}"),
                     )
                 })?;
                 let mut cr = Resource::new(ctor_iri);
                 set_is_a(&mut cr, wk::INDUCTIVE_CTOR);
-                cr.set(iri(wk::CTOR_NAME), Value::String(c.name.clone()));
-                // Compile ctor args left-to-right, threading named
-                // binders into scope as we go so subsequent positional
-                // args can reference them.
-                let mut local_binders: Vec<String> = Vec::new();
-                let mut arg_values: Vec<Value> = Vec::with_capacity(c.args.len());
-                for arg in &c.args {
-                    let mut scope: std::collections::HashSet<&str> = param_names.clone();
-                    for b in &local_binders {
-                        scope.insert(b.as_str());
+                cr.set(iri(wk::CTOR_NAME), Value::String(c.name().to_string()));
+                match c {
+                    ast::CtorDecl::Positional { args, .. } => {
+                        // Legacy positional / named-arg form. The ctor's
+                        // conclusion is implicitly `Self(params)`; the
+                        // chain decoder reassembles the Π-telescope from
+                        // `core:arg_types`.
+                        let mut local_binders: Vec<String> = Vec::new();
+                        let mut arg_values: Vec<Value> = Vec::with_capacity(args.len());
+                        for arg in args {
+                            let mut scope: std::collections::HashSet<&str> = param_names.clone();
+                            for b in &local_binders {
+                                scope.insert(b.as_str());
+                            }
+                            match arg {
+                                ast::CtorArg::Positional(t) => {
+                                    arg_values.push(self.compile_ctor_arg_type(t, &scope)?);
+                                }
+                                ast::CtorArg::Named {
+                                    name, kind, bound, ..
+                                } => {
+                                    arg_values
+                                        .push(self.compile_ctor_binder(name, kind, bound, &scope)?);
+                                    local_binders.push(name.clone());
+                                }
+                            }
+                        }
+                        cr.set(iri(wk::ARG_TYPES), Value::Array(arg_values));
                     }
-                    match arg {
-                        ast::CtorArg::Positional(t) => {
-                            arg_values.push(self.compile_ctor_arg_type(t, &scope)?);
+                    ast::CtorDecl::Typed { typ, pos, .. } => {
+                        // eigenius#72 Layer 2 — the typed form supplies
+                        // the full Π-telescope (including conclusion
+                        // indices) as a single TypeExpr. Lower it to
+                        // `Exp` and stash the D47-encoded payload under
+                        // `core:ctor_type`; the kernel decoder uses it
+                        // directly without going through arg_types.
+                        let mut scope = param_names.clone();
+                        for idx in &decl.indices {
+                            scope.insert(idx.name.as_str());
                         }
-                        ast::CtorArg::Named {
-                            name, kind, bound, ..
-                        } => {
-                            arg_values.push(self.compile_ctor_binder(name, kind, bound, &scope)?);
-                            local_binders.push(name.clone());
-                        }
+                        let ctor_exp = self.lower_type_expr_to_exp(typ, &scope)?;
+                        let encoded = crate::program::eigentt_type_mirror::encode_type(&ctor_exp)
+                            .map_err(|e| {
+                            EslError::compiler(
+                                Some(pos.clone()),
+                                format!("failed to encode ctor type for `{}`: {e}", c.name()),
+                            )
+                        })?;
+                        cr.set(iri(wk::CTOR_TYPE), encoded);
                     }
                 }
-                cr.set(iri(wk::ARG_TYPES), Value::Array(arg_values));
                 Ok(Value::Embedded(Box::new(cr)))
             })
             .collect();
@@ -1550,7 +1846,7 @@ impl Compiler {
 
             ast::Expr::Match {
                 scrutinee,
-                result_type,
+                returning,
                 arms,
                 pos,
             } => {
@@ -1563,17 +1859,85 @@ impl Compiler {
                     Value::Embedded(Box::new(scrutinee_r)),
                 );
 
-                // `result_type` is optional (Phase 11b step 12). When
-                // present, the expression builder desugars to
-                // `Exp::InductiveRec` with motive `λ_. T`. When
-                // absent, it builds `Exp::Match` and the type
-                // checker infers the motive from context.
-                if let Some(rt) = result_type {
-                    let result_iri = self.resolve(rt)?;
-                    r.set(
-                        iri("urn:eigenius:program:result_type"),
-                        Value::String(result_iri),
-                    );
+                // `returning` is optional (Phase 11b step 12). When
+                // present, the kernel decoder desugars to
+                // `Exp::InductiveRec` using the supplied motive. When
+                // absent it builds `Exp::Match` and the type checker
+                // infers the motive from context.
+                //
+                // Two on-chain motive encodings (eigenius#72 Layer 3):
+                // - A bare `TypeExpr::Ref` (qualified name, no args) is
+                //   emitted as an IRI string under
+                //   `program:result_type` — the pre-Layer-3 wire shape;
+                //   kernel decoder wraps it as the constant motive
+                //   `λ_. T`.
+                // - Anything else (Lambda motives over indices, applied
+                //   types, etc.) is lowered to `Exp` via
+                //   `lower_type_expr_to_exp` and encoded via the D47
+                //   codec, then emitted as a `program:result_motive`
+                //   payload. Kernel decoder uses it directly.
+                if let Some(te) = returning {
+                    match te {
+                        ast::TypeExpr::Ref { name, args, .. } if args.is_empty() => {
+                            let result_iri = self.resolve(name)?;
+                            r.set(
+                                iri("urn:eigenius:program:result_type"),
+                                Value::String(result_iri),
+                            );
+                        }
+                        ast::TypeExpr::Lambda { params, body, pos } => {
+                            // Encode the Lambda's binder-type annotations
+                            // explicitly via `encode_lam_chain` — the
+                            // generic `encode_type` rejects bare
+                            // `Exp::Lam` because EigenTT Lams are
+                            // type-erased and the codec needs the dom
+                            // for chain round-trip. Walk params left-to-
+                            // right, threading binder names into scope
+                            // so dependent forms (`fun (a : Nat, b :
+                            // Vec(A, a)) => …`) see earlier binders
+                            // when lowering later ones.
+                            let mut working: std::collections::HashSet<String> =
+                                std::collections::HashSet::new();
+                            let mut binders: Vec<(crate::nbe::term::Patt, Exp)> =
+                                Vec::with_capacity(params.len());
+                            for p in params {
+                                let local: std::collections::HashSet<&str> =
+                                    working.iter().map(|s| s.as_str()).collect();
+                                let dom = self.lower_type_expr_to_exp(&p.typ, &local)?;
+                                binders.push((crate::nbe::term::Patt::Var(p.name.clone()), dom));
+                                working.insert(p.name.clone());
+                            }
+                            let inner_scope: std::collections::HashSet<&str> =
+                                working.iter().map(|s| s.as_str()).collect();
+                            let body_exp = self.lower_type_expr_to_exp(body, &inner_scope)?;
+                            let encoded = crate::program::eigentt_type_mirror::encode_lam_chain(
+                                &binders, &body_exp,
+                            )
+                            .map_err(|e| {
+                                EslError::compiler(
+                                    Some(pos.clone()),
+                                    format!("failed to encode match motive: {e}"),
+                                )
+                            })?;
+                            r.set(iri("urn:eigenius:program:result_motive"), encoded);
+                        }
+                        other => {
+                            // Applied refs, arrows, sorts, etc. — lower
+                            // via the standard type-expr path. These
+                            // contain no Lams so `encode_type` is OK.
+                            let scope = std::collections::HashSet::new();
+                            let motive_exp = self.lower_type_expr_to_exp(other, &scope)?;
+                            let encoded =
+                                crate::program::eigentt_type_mirror::encode_type(&motive_exp)
+                                    .map_err(|e| {
+                                        EslError::compiler(
+                                            Some(other.pos().clone()),
+                                            format!("failed to encode match motive: {e}"),
+                                        )
+                                    })?;
+                            r.set(iri("urn:eigenius:program:result_motive"), encoded);
+                        }
+                    }
                 }
 
                 let arm_resources: Result<Vec<Value>, EslError> = arms
@@ -2847,6 +3211,391 @@ mod tests {
         );
     }
 
+    // --- eigenius#72 Layer 2: indexed data declarations ---
+
+    // --- eigenius#72 Phase 5: end-to-end integration ---
+
+    #[test]
+    fn end_to_end_axiom_indexed_data_match_returning_all_in_one_file() {
+        // Exercises all three Layers together: axiom statement (Layer 1)
+        // referencing an indexed inductive (Layer 2), plus a program
+        // that pattern-matches with a Lambda motive (Layer 3). Verifies
+        // each surface form emits the expected chain shape.
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            data ex:Vec(A : core:Set) : core:Nat -> Set {
+                nil  : ex:Vec(A, ex:zero),
+                cons : forall (n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
+            }
+
+            axiom ex:vec_inhabits_nat_length :
+                forall (A : core:Set, n : core:Nat) => ex:Vec(A, n) -> ex:Nat
+            note: "Every Vec carries a Nat-valued length implicit in its index."
+
+            program ex:identity : ex:Nat -> ex:Nat {
+                match input returning fun (n : core:Nat) => ex:Nat {
+                    zero -> input;
+                    succ(k) -> input;
+                }
+            }
+            "#,
+        );
+
+        // Layer 2: ex:Vec carries indices, result_sort, and typed ctors.
+        let vec = resources
+            .iter()
+            .find(|r| r.id().map(|i| i.as_str()).unwrap_or("").ends_with(":Vec"))
+            .expect("Vec resource");
+        assert!(
+            vec.get(&Iri::parse(crate::ontology::well_known::INDICES).unwrap())
+                .is_some(),
+            "Vec should carry core:indices"
+        );
+        assert_eq!(
+            vec.get(&Iri::parse(crate::ontology::well_known::RESULT_SORT).unwrap())
+                .and_then(|v| if let Value::String(s) = v {
+                    Some(s.as_str())
+                } else {
+                    None
+                }),
+            Some("Set")
+        );
+
+        // Layer 1: axiom resource is an eigentt:Axiom with statement +
+        // justification.
+        let axiom = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str())
+                    .unwrap_or("")
+                    .ends_with(":vec_inhabits_nat_length")
+            })
+            .expect("axiom resource");
+        assert!(
+            axiom
+                .is_a()
+                .iter()
+                .any(|c| c.as_str() == "urn:eigenius:eigentt:Axiom"),
+            "axiom should be is_a eigentt:Axiom"
+        );
+        assert!(
+            axiom
+                .get(&Iri::parse("urn:eigenius:eigentt:axiom_statement").unwrap())
+                .is_some(),
+            "axiom should carry axiom_statement payload"
+        );
+        assert_eq!(
+            axiom
+                .get(&Iri::parse("urn:eigenius:eigentt:axiom_justification").unwrap())
+                .and_then(|v| if let Value::String(s) = v {
+                    Some(s.as_str())
+                } else {
+                    None
+                }),
+            Some("Every Vec carries a Nat-valued length implicit in its index.")
+        );
+
+        // Layer 3: program carries a Match with result_motive (not
+        // result_type).
+        let prog = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str())
+                    .unwrap_or("")
+                    .ends_with(":identity")
+            })
+            .expect("program resource");
+        let body = match prog.get(&Iri::parse("urn:eigenius:program:body").unwrap()) {
+            Some(Value::Embedded(e)) => e.as_ref(),
+            other => panic!("expected program:body, got {other:?}"),
+        };
+        assert!(
+            body.get(&Iri::parse("urn:eigenius:program:result_motive").unwrap())
+                .is_some(),
+            "match should carry program:result_motive"
+        );
+    }
+
+    #[test]
+    fn compile_data_indexed_emits_indices_and_result_sort_and_ctor_type() {
+        use crate::ontology::well_known as wk_local;
+
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Vec(A : core:Set) : core:Nat -> Set {
+                nil : ex:Vec(A, ex:zero),
+                cons : forall (n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
+            }
+            "#,
+        );
+        let r = &resources[0];
+
+        // Indices property — one anonymous index of type `core:Nat`.
+        let indices_iri = Iri::parse(wk_local::INDICES).unwrap();
+        match r.get(&indices_iri) {
+            Some(Value::Array(arr)) => {
+                assert_eq!(arr.len(), 1, "expected one index entry, got {arr:?}");
+                let entry = match &arr[0] {
+                    Value::Embedded(e) => e.as_ref(),
+                    other => panic!("expected embedded InductiveParam, got {other:?}"),
+                };
+                assert_eq!(
+                    entry
+                        .get(&Iri::parse(wk_local::PARAM_NAME).unwrap())
+                        .and_then(|v| if let Value::String(s) = v {
+                            Some(s.as_str())
+                        } else {
+                            None
+                        }),
+                    Some("_")
+                );
+                assert_eq!(
+                    entry
+                        .get(&Iri::parse(wk_local::PARAM_KIND).unwrap())
+                        .and_then(|v| if let Value::String(s) = v {
+                            Some(s.as_str())
+                        } else {
+                            None
+                        }),
+                    Some("urn:eigenius:core:Nat")
+                );
+            }
+            other => panic!("expected `core:indices` array, got {other:?}"),
+        }
+
+        // Result sort — explicitly `Set`.
+        let sort_iri = Iri::parse(wk_local::RESULT_SORT).unwrap();
+        assert_eq!(
+            r.get(&sort_iri).and_then(|v| if let Value::String(s) = v {
+                Some(s.as_str())
+            } else {
+                None
+            }),
+            Some("Set")
+        );
+
+        // Both ctors should carry `core:ctor_type`, none should carry
+        // `core:arg_types` (typed form bypasses arg_types entirely).
+        let ctors_iri = Iri::parse(wk_local::CTORS).unwrap();
+        let ctor_type_iri = Iri::parse(wk_local::CTOR_TYPE).unwrap();
+        let arg_types_iri = Iri::parse(wk_local::ARG_TYPES).unwrap();
+        match r.get(&ctors_iri) {
+            Some(Value::Array(arr)) => {
+                assert_eq!(arr.len(), 2);
+                for (i, ctor_val) in arr.iter().enumerate() {
+                    let cr = match ctor_val {
+                        Value::Embedded(e) => e.as_ref(),
+                        other => panic!("ctor {i}: expected embedded, got {other:?}"),
+                    };
+                    assert!(
+                        cr.get(&ctor_type_iri).is_some(),
+                        "ctor {i} should carry core:ctor_type"
+                    );
+                    assert!(
+                        cr.get(&arg_types_iri).is_none(),
+                        "ctor {i} should NOT carry core:arg_types in typed form"
+                    );
+                }
+            }
+            other => panic!("expected `core:ctors` array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compile_data_indexed_by_parameter_keeps_param_name_in_kind_string() {
+        use crate::ontology::well_known as wk_local;
+
+        // `data Eq(A : Set) : A -> A -> Prop { ... }` — the index kind
+        // is the parameter `A`, which the compiler must preserve as
+        // the bare string `"A"` (not try to namespace-resolve it).
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Eq(A : core:Set) : A -> A -> Prop {
+                refl : forall (a : A) => ex:Eq(A, a, a),
+            }
+            "#,
+        );
+        let r = &resources[0];
+        let indices_iri = Iri::parse(wk_local::INDICES).unwrap();
+        let arr = match r.get(&indices_iri) {
+            Some(Value::Array(a)) => a,
+            other => panic!("expected indices array, got {other:?}"),
+        };
+        assert_eq!(arr.len(), 2);
+        for entry in arr {
+            let pr = match entry {
+                Value::Embedded(e) => e.as_ref(),
+                other => panic!("expected embedded, got {other:?}"),
+            };
+            assert_eq!(
+                pr.get(&Iri::parse(wk_local::PARAM_KIND).unwrap())
+                    .and_then(|v| if let Value::String(s) = v {
+                        Some(s.as_str())
+                    } else {
+                        None
+                    }),
+                Some("A"),
+                "param-typed index should keep bare param name as kind"
+            );
+        }
+        // Result sort should be `Prop`.
+        assert_eq!(
+            r.get(&Iri::parse(wk_local::RESULT_SORT).unwrap())
+                .and_then(|v| if let Value::String(s) = v {
+                    Some(s.as_str())
+                } else {
+                    None
+                }),
+            Some("Prop")
+        );
+    }
+
+    #[test]
+    fn compile_match_lambda_motive_emits_result_motive_payload() {
+        // Layer 3 — `match v returning fun (n : Nat) => Nat { … }`
+        // should emit a `program:result_motive` carrying a D47-encoded
+        // Exp::Lam, *not* the legacy `program:result_type` IRI string.
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+            namespace core = "urn:eigenius:core";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:identity : ex:Nat -> ex:Nat {
+                match input returning fun (n : core:Nat) => ex:Nat {
+                    zero -> input;
+                    succ(k) -> input;
+                }
+            }
+            "#,
+        );
+        // Find the program resource.
+        let prog = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str())
+                    .unwrap_or("")
+                    .ends_with(":identity")
+            })
+            .expect("program resource");
+        // Walk into program:body which holds the Match resource.
+        let body = match prog.get(&Iri::parse("urn:eigenius:program:body").unwrap()) {
+            Some(Value::Embedded(e)) => e.as_ref(),
+            other => panic!("expected program:body Embedded, got {other:?}"),
+        };
+        // Body is the Match resource itself (no wrapping lambda).
+        let match_resource = body;
+        let motive_iri = Iri::parse("urn:eigenius:program:result_motive").unwrap();
+        assert!(
+            match_resource.get(&motive_iri).is_some(),
+            "Lambda-motive match should emit program:result_motive"
+        );
+        let legacy_iri = Iri::parse("urn:eigenius:program:result_type").unwrap();
+        assert!(
+            match_resource.get(&legacy_iri).is_none(),
+            "Lambda-motive match should NOT also emit program:result_type"
+        );
+    }
+
+    #[test]
+    fn compile_match_bare_ref_motive_emits_result_type_iri() {
+        // Pre-Layer-3 path — `match v returning T { … }` with `T` a
+        // bare type ref keeps emitting `program:result_type` as a flat
+        // IRI string (preserving the old wire shape for backward
+        // compatibility).
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:identity : ex:Nat -> ex:Nat {
+                match input returning ex:Nat {
+                    zero -> input;
+                    succ(k) -> input;
+                }
+            }
+            "#,
+        );
+        let prog = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str())
+                    .unwrap_or("")
+                    .ends_with(":identity")
+            })
+            .expect("program resource");
+        let body = match prog.get(&Iri::parse("urn:eigenius:program:body").unwrap()) {
+            Some(Value::Embedded(e)) => e.as_ref(),
+            other => panic!("expected program:body Embedded, got {other:?}"),
+        };
+        let legacy_iri = Iri::parse("urn:eigenius:program:result_type").unwrap();
+        let rt = body
+            .get(&legacy_iri)
+            .expect("bare-ref match should emit program:result_type");
+        match rt {
+            Value::String(s) => assert!(s.ends_with(":Nat")),
+            other => panic!("expected String IRI, got {other:?}"),
+        }
+        let motive_iri = Iri::parse("urn:eigenius:program:result_motive").unwrap();
+        assert!(
+            body.get(&motive_iri).is_none(),
+            "bare-ref match should NOT emit program:result_motive"
+        );
+    }
+
+    #[test]
+    fn compile_data_non_indexed_omits_indices_and_result_sort() {
+        use crate::ontology::well_known as wk_local;
+
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Bool {
+                tt,
+                ff,
+            }
+            "#,
+        );
+        let r = &resources[0];
+        let indices_iri = Iri::parse(wk_local::INDICES).unwrap();
+        assert!(
+            r.get(&indices_iri).is_none(),
+            "non-indexed data should omit `core:indices`"
+        );
+        let sort_iri = Iri::parse(wk_local::RESULT_SORT).unwrap();
+        assert!(
+            r.get(&sort_iri).is_none(),
+            "non-indexed data without explicit `: Set` should omit `core:result_sort`"
+        );
+    }
+
     #[test]
     fn compile_data_is_stamped_as_declared_resource() {
         let resources = compile_esl(
@@ -3294,5 +4043,155 @@ mod tests {
             combined.contains("vector_index") && combined.contains("M2"),
             "error should reference vector_index and D43 M2, got: {combined}"
         );
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // eigenius#72 Layer 1 — `axiom` declarations
+    // ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn compile_trivial_axiom() {
+        // axiom triv : Prop → Prop
+        let resources = compile_esl(
+            r#"
+            namespace eg = "urn:eigenius:test";
+
+            axiom eg:triv : Prop -> Prop;
+            "#,
+        );
+        let ax = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str() == "urn:eigenius:test:triv")
+                    .unwrap_or(false)
+            })
+            .expect("axiom triv should be committed");
+        let is_a = ax.is_a();
+        assert!(
+            is_a.iter()
+                .any(|i| i.as_str() == "urn:eigenius:eigentt:Axiom"),
+            "axiom must be classed as eigentt:Axiom; got is_a = {:?}",
+            is_a.iter().map(|i| i.as_str()).collect::<Vec<_>>()
+        );
+        // The axiom_statement value is the encoded TypeExpr.
+        let stmt = ax
+            .get(&iri("urn:eigenius:eigentt:axiom_statement"))
+            .expect("axiom_statement property must be set");
+        match stmt {
+            Value::Json(j) => {
+                // The outer shape should be a Pi (encoded by the
+                // D47 codec): {ctor: "Pi", args: ["", <Sort 0>, <Sort 0>]}.
+                assert_eq!(j["ctor"], "Pi");
+                let args = j["args"].as_array().expect("Pi has args");
+                assert_eq!(args[0], serde_json::json!(""));
+                assert_eq!(args[1]["ctor"], "Sort");
+                assert_eq!(args[1]["args"][0], 0);
+                assert_eq!(args[2]["ctor"], "Sort");
+                assert_eq!(args[2]["args"][0], 0);
+            }
+            other => panic!("expected Value::Json, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compile_axiom_with_forall() {
+        // axiom myax : forall (P : Prop) => P -> P
+        let resources = compile_esl(
+            r#"
+            namespace eg = "urn:eigenius:test";
+
+            axiom eg:myax : forall (P : Prop) => P -> P;
+            "#,
+        );
+        let ax = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str() == "urn:eigenius:test:myax")
+                    .unwrap_or(false)
+            })
+            .expect("axiom myax should be committed");
+        let stmt = ax
+            .get(&iri("urn:eigenius:eigentt:axiom_statement"))
+            .expect("axiom_statement set");
+        match stmt {
+            Value::Json(j) => {
+                // forall (P : Prop) => P -> P
+                //   lowers to Pi(P : Sort(0), Pi(_ : Var(P), Var(P)))
+                //   encodes as Pi("P", Sort(0), Pi("", Var("P"), Var("P")))
+                assert_eq!(j["ctor"], "Pi");
+                assert_eq!(j["args"][0], "P");
+                assert_eq!(j["args"][1]["ctor"], "Sort");
+                assert_eq!(j["args"][1]["args"][0], 0);
+                let inner = &j["args"][2];
+                assert_eq!(inner["ctor"], "Pi");
+                assert_eq!(inner["args"][0], "");
+                assert_eq!(inner["args"][1]["ctor"], "Var");
+                assert_eq!(inner["args"][1]["args"][0], "P");
+                assert_eq!(inner["args"][2]["ctor"], "Var");
+                assert_eq!(inner["args"][2]["args"][0], "P");
+            }
+            other => panic!("expected Value::Json, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compile_axiom_with_justification_note() {
+        let resources = compile_esl(
+            r#"
+            namespace eg = "urn:eigenius:test";
+
+            axiom eg:noted : Prop -> Prop note: "Methodological convention from working group X";
+            "#,
+        );
+        let ax = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str() == "urn:eigenius:test:noted")
+                    .unwrap_or(false)
+            })
+            .expect("axiom noted committed");
+        let just = ax
+            .get(&iri("urn:eigenius:eigentt:axiom_justification"))
+            .expect("axiom_justification set");
+        match just {
+            Value::String(s) => {
+                assert_eq!(s, "Methodological convention from working group X");
+            }
+            other => panic!("expected Value::String, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn axiom_uses_set_keyword_in_kind_position() {
+        // ESL's `Set` keyword in a `forall` binder kind position must
+        // be recognised as a sort literal, not as an identifier.
+        let resources = compile_esl(
+            r#"
+            namespace eg = "urn:eigenius:test";
+
+            axiom eg:id_at_set : forall (A : Set) => A -> A;
+            "#,
+        );
+        let ax = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str() == "urn:eigenius:test:id_at_set")
+                    .unwrap_or(false)
+            })
+            .expect("axiom id_at_set committed");
+        let stmt = ax
+            .get(&iri("urn:eigenius:eigentt:axiom_statement"))
+            .expect("axiom_statement set");
+        if let Value::Json(j) = stmt {
+            // Outermost Pi, binder "A", binder kind Sort(1) = Set.
+            assert_eq!(j["ctor"], "Pi");
+            assert_eq!(j["args"][0], "A");
+            assert_eq!(j["args"][1]["ctor"], "Sort");
+            assert_eq!(j["args"][1]["args"][0], 1);
+        }
     }
 }

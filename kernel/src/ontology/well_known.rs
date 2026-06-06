@@ -17,6 +17,14 @@
 //! These constants avoid repeated string parsing for frequently used IRIs.
 //! They correspond to the resources defined in `ontologies/core/core-ontology.json`.
 
+use crate::ontology::iri::Iri;
+
+/// Parse a well-known constant into an [`Iri`]. Panics if the constant
+/// isn't a valid IRI — by construction the strings in this module are.
+pub fn iri(s: &str) -> Iri {
+    Iri::parse(s).expect("well-known IRI constants must be valid")
+}
+
 // --- Classes ---
 
 pub const CLASS: &str = "urn:eigenius:core:Class";
@@ -145,6 +153,7 @@ pub const INDUCTIVE_TYPE: &str = "urn:eigenius:core:InductiveType";
 pub const INDUCTIVE_CTOR: &str = "urn:eigenius:core:InductiveCtor";
 pub const INDUCTIVE_ARG_TYPE: &str = "urn:eigenius:core:InductiveArgType";
 pub const INDUCTIVE_PARAM: &str = "urn:eigenius:core:InductiveParam";
+pub const CODATA_TYPE: &str = "urn:eigenius:core:CodataType";
 pub const CTORS: &str = "urn:eigenius:core:ctors";
 pub const TYPE_PARAMS: &str = "urn:eigenius:core:type_params";
 pub const CTOR_NAME: &str = "urn:eigenius:core:ctor_name";
@@ -155,6 +164,22 @@ pub const ARG_NAME: &str = "urn:eigenius:core:arg_name";
 pub const PARAM_NAME: &str = "urn:eigenius:core:param_name";
 pub const PARAM_KIND: &str = "urn:eigenius:core:param_kind";
 pub const SET_KIND: &str = "urn:eigenius:core:Set";
+/// Index telescope on an inductive-type resource (eigenius#72 Layer 2 /
+/// D48). Array of `InductiveParam` resources, parallel to `type_params`
+/// but for the indices that vary per constructor. Absent or empty for
+/// non-indexed declarations (the default).
+pub const INDICES: &str = "urn:eigenius:core:indices";
+/// Result sort of an inductive type former (eigenius#72 Layer 2).
+/// String of the form `"Prop"`, `"Set"`, or `"Type:N"` (with N a
+/// non-negative integer). Absent defaults to `"Set"`.
+pub const RESULT_SORT: &str = "urn:eigenius:core:result_sort";
+/// Typed-ctor full Π-telescope encoded via the D47 type-fragment codec
+/// (eigenius#72 Layer 2). Present on `InductiveCtor` resources that
+/// were authored with the `name : <type-expr>` surface form. When
+/// present, the kernel decoder uses this directly and ignores
+/// `arg_types`. Required for ctors of indexed inductives (the
+/// positional form cannot express conclusion indices).
+pub const CTOR_TYPE: &str = "urn:eigenius:core:ctor_type";
 /// Sized-type parameter kind (Phase 11b step 15h): inductive/codata
 /// parameters typed at `Size` — the sort of size values — resolve to
 /// `Exp::SizeSort` in the kernel, enabling bounded-binder-driven
@@ -174,7 +199,7 @@ pub const COMORPHISM: &str = "urn:eigenius:institution:Comorphism";
 
 /// ExportFormat reference on a Comorphism — the source-side `s`.
 pub const EXPORT_FORMAT: &str = "urn:eigenius:institution:export_format";
-/// Mini-TT Component IRI implementing the comorphism's middle `m: S → T`.
+/// EigenTT Component IRI implementing the comorphism's middle `m: S → T`.
 pub const TRANSFORMATION: &str = "urn:eigenius:institution:transformation";
 /// ImportFormat reference on a Comorphism — the target-side `t`.
 pub const IMPORT_FORMAT: &str = "urn:eigenius:institution:import_format";
@@ -196,7 +221,7 @@ pub const IMPORT_FORMAT_CLASS: &str = "urn:eigenius:institution:ImportFormat";
 pub const FROM_CLASS: &str = "urn:eigenius:institution:from_class";
 /// Target class of an ImportFormat — the resource class it constructs.
 pub const TO_CLASS: &str = "urn:eigenius:institution:to_class";
-/// Mini-TT type IRI of an ExportFormat / ImportFormat payload.
+/// EigenTT type IRI of an ExportFormat / ImportFormat payload.
 pub const PAYLOAD_TYPE: &str = "urn:eigenius:institution:payload_type";
 /// Procedure IRI dispatched to the institution's `extract_typed` /
 /// `reify` handler.

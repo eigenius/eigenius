@@ -53,7 +53,7 @@ Most important chapters: **[14. Notebook](platform/14-notebook.md)** + **[17. Ty
 
 ### [ESL — Eigenius Surface Language →](esl/README.md)
 
-The surface syntax for declaring ontologies, defining typed programs, and constructing resource instances. Compiles to Eigon-JSON resources that the Mini-TT kernel type-checks and evaluates.
+The surface syntax for declaring ontologies, defining typed programs, and constructing resource instances. Compiles to Eigon-JSON resources that the EigenTT kernel type-checks and evaluates.
 
 **Eleven chapters covering**: HCL-style declarations (`namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`); the ML-style expression sublanguage (`let`, lambdas, pattern match, constructor application, projection, `corecord`, etc.); the bridge between the resource graph and the kernel's type theory; the four capability modes (`Pure`/`Read`/`Check`/`IO`); institution-dispatched decide predicates and comorphism program-invocations; common error messages.
 
@@ -67,9 +67,9 @@ The read-only query language over the layered Eigon knowledge graph. Pattern mat
 
 ### [Formula language →](formula/README.md)
 
-The chain-mirrored Mini-TT fragment shared by every numerical institution on the platform. A small typed expression-tree language at `urn:eigenius:formulas:` that Symbolics, IntervalArithmetic, Catalyst, DiffEq, and JuMP-HiGHS all consume directly.
+The chain-mirrored EigenTT fragment shared by every numerical institution on the platform. A small typed expression-tree language at `urn:eigenius:formulas:` that Symbolics, IntervalArithmetic, Catalyst, DiffEq, and JuMP-HiGHS all consume directly.
 
-**Eight chapters covering**: the three-surface mental model (Mini-TT fragment / Eigon-JSON encoding / ESL `formula(...)` sublanguage); the six constructors and why two are binders; the tagged-dict embedding and validator's inductive-value rule; the operator catalog and signature-driven arity check; the Pratt-parsed `formula(...)` ESL sublanguage; identity-comorphism collapse when both endpoints share FormulaTerm; common failure modes; appendix.
+**Eight chapters covering**: the three-surface mental model (EigenTT fragment / Eigon-JSON encoding / ESL `formula(...)` sublanguage); the six constructors and why two are binders; the tagged-dict embedding and validator's inductive-value rule; the operator catalog and signature-driven arity check; the Pratt-parsed `formula(...)` ESL sublanguage; identity-comorphism collapse when both endpoints share FormulaTerm; common failure modes; appendix.
 
 ### [Composing institutions →](composition/README.md)
 
@@ -103,7 +103,7 @@ Spec-first design documents in [`docs/design/`](../design/) cover the underlying
 - [D22 Notebook UX and TypeScript SDK](../design/d22-notebook-and-typescript-sdk.md) — spec for the notebook + `@eigenius/client`, complementary to platform chapters 14 + 15
 - [D26 Runtime Substrate](../design/d26-runtime-substrate.md), [D29 Mirror Generator](../design/d29-runtime-mirror-generator.md), [D31 Institution Lifecycle](../design/d31-runtime-language-substrate-institution-lifecycle.md) — the substrate hosting layer and lifecycle, complementary to platform chapter 11
 - [D27 Julia Institutions](../design/d27-julia-institutions.md) — the v1 Julia institution suite, complementary to the per-institution tutorials under [`platform/julia-institutions/`](platform/julia-institutions/)
-- [D32 Chain-mirrored Mini-TT inductives](../design/d32-chain-mirrored-mini-tt-inductives.md) — the formula-language design spec, complementary to the formula guide
+- [D32 Chain-mirrored EigenTT inductives](../design/d32-chain-mirrored-mini-tt-inductives.md) — the formula-language design spec, complementary to the formula guide
 
 - [D28 Lean 4 as Verification Institution](../design/d28-lean-4-as-institution.md), [D30 Eigon → Lean Faithful Translation](../design/d30-eigon-to-lean-faithful-translation.md), [D40 Chain-Mirrored Lean Expressions](../design/d40-chain-mirrored-lean-expressions.md) — the first verification institution, walked through in [`platform/lean-institution/`](platform/lean-institution/)
 

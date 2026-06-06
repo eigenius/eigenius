@@ -59,6 +59,24 @@ pub enum TokenKind {
     LambdaKw,
     /// D37 §3.5 — `pi x : T => U` value-typed Pi expression.
     Pi,
+    /// eigenius#72 — `forall (P : Prop) => body`. Alias for `pi` with
+    /// proposition-authoring semantics; parses to the same AST.
+    Forall,
+    /// eigenius#72 Layer 3 — `fun (i : T) => body` lambda in type
+    /// position. Used as a motive for `match … returning <motive>`
+    /// over indexed inductives. Compiles to `Exp::Lam`.
+    Fun,
+    /// eigenius#72 — `axiom Name : <type-expr>` top-level declaration.
+    /// Commits a `core:Axiom` chain resource with the type expression
+    /// encoded via the D47 codec.
+    Axiom,
+    /// eigenius#72 — sort literal `Prop` (= `Sort(0)`).
+    Prop,
+    /// eigenius#72 — sort literal `Set` (= `Sort(1)`).
+    SetKw,
+    /// eigenius#72 — sort literal `Type` (followed by an integer level
+    /// in `Type N` parses; `Type 0` is `Sort(1)`, `Type N` is `Sort(N+1)`).
+    TypeKw,
     /// D37 §3.3 — `=>` returns/produces. Used in `lambda` bodies
     /// (after the parameter list) and inline `merge_comorphism`
     /// bodies. Distinct from `Arrow` (`->`) which separates the
@@ -461,6 +479,13 @@ impl<'a> Lexer<'a> {
             // which produce the untyped lambda surface.
             "lambda" => TokenKind::LambdaKw,
             "pi" => TokenKind::Pi,
+            // eigenius#72 — proposition / indexed-type authoring.
+            "forall" => TokenKind::Forall,
+            "fun" => TokenKind::Fun,
+            "axiom" => TokenKind::Axiom,
+            "Prop" => TokenKind::Prop,
+            "Set" => TokenKind::SetKw,
+            "Type" => TokenKind::TypeKw,
             // Literals
             "true" => TokenKind::BoolLit(true),
             "false" => TokenKind::BoolLit(false),

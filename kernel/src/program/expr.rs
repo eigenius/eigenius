@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parse Eigon-JSON expression resources into Mini-TT terms.
+//! Parse Eigon-JSON expression resources into EigenTT terms.
 //!
 //! Each expression form (Let, Apply, Var, Lambda, etc.) maps 1:1
-//! to a Mini-TT term. No translation layer needed.
+//! to a EigenTT term. No translation layer needed.
 
 use crate::layer::Layer;
 use crate::nbe::term::{Branch, Decl, Exp, InductiveDecl, Patt, PrimitiveType};
@@ -45,7 +45,7 @@ const COMORPHISM_INVOKE_APPLY: &str = "urn:eigenius:program:ComorphismInvokeAppl
 /// `f(arg1, arg2, …)` where `f` is a registered decide procedure IRI.
 const DECIDE_APPLY: &str = "urn:eigenius:program:DecideApply";
 
-/// Parse a Program resource into a Mini-TT term with its type.
+/// Parse a Program resource into a EigenTT term with its type.
 ///
 /// Returns (term, type) where:
 /// - term is `Exp::Lam(input, body)`
@@ -73,7 +73,7 @@ pub fn parse_program(resource: &Resource, layer: &Layer) -> Result<(Exp, Exp), S
     Ok((term, typ))
 }
 
-/// D37 §5.1 — decode a `program:type` value into a Mini-TT `Exp`.
+/// D37 §5.1 — decode a `program:type` value into a EigenTT `Exp`.
 ///
 /// The Pi-type for a standalone Lambda resource lives on its
 /// `urn:eigenius:program:type` slot. The slot can hold any of these
@@ -93,7 +93,7 @@ pub fn parse_program(resource: &Resource, layer: &Layer) -> Result<(Exp, Exp), S
 /// - `Value::Embedded(r)` with `is_a` of `TypeArrow` — a non-
 ///   dependent arrow `A -> B`, lowered to an anonymous-binder Pi.
 ///
-/// Returns the Mini-TT `Exp` ready for evaluation via
+/// Returns the EigenTT `Exp` ready for evaluation via
 /// `nbe::eval::eval` and subsequent use as a checking type by
 /// `nbe::check::check`.
 pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> {
@@ -183,7 +183,8 @@ pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> 
                 let stub = Arc::new(InductiveDecl {
                     name: name_of_iri,
                     params: Vec::new(),
-                    sort: Exp::Set,
+                    indices: Vec::new(),
+                    sort: Exp::Sort(1),
                     ctors: Vec::new(),
                 });
                 let sub_args: Result<Vec<Exp>, String> = type_args_arr
@@ -203,7 +204,7 @@ pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> 
     }
 }
 
-/// Parse an expression resource into a Mini-TT term.
+/// Parse an expression resource into a EigenTT term.
 pub fn parse_expression(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     let is_a = resource.is_a();
     let class_str = is_a.first().map(|i| i.as_str()).unwrap_or("");
@@ -536,24 +537,35 @@ fn parse_match(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     // paths (motive-eager `InductiveRec` and motive-deferred `Match`).
     let parsed_arms = decode_match_arms(arms_arr, layer)?;
 
-    // Branch on whether `result_type` was annotated in the source.
-    // Present → eager desugar to `Exp::InductiveRec` with motive
-    // `λ_. result_type` (Phase 11b step 11 path).
-    // Absent → produce `Exp::Match`; the kernel's type checker
-    // synthesises the motive from checking-mode context (Phase 11b
-    // step 12 path, D19 §10).
+    // Branch on whether a motive was annotated in the source:
+    //
+    // - `program:result_motive` (eigenius#72 Layer 3): a D47-encoded
+    //   `Exp` chain — typically `Exp::Lam(idx_1, Exp::Lam(idx_2, …,
+    //   body))` from a `fun (i_1 : T_1, …) => body` motive. Used as
+    //   the motive directly in `Exp::InductiveRec`. Required for
+    //   indexed inductives whose result type depends on the indices.
+    // - `program:result_type` (pre-Layer-3, Phase 11b step 11): a
+    //   resource IRI naming a class. Wrapped as the constant motive
+    //   `λ_. T`. Still supported for non-indexed inductives.
+    // - Neither → produce `Exp::Match`; the kernel's type checker
+    //   synthesises the motive from checking-mode context (Phase 11b
+    //   step 12, D19 §10).
+    let result_motive_prop = Iri::parse("urn:eigenius:program:result_motive").unwrap();
     let result_type_prop = Iri::parse("urn:eigenius:program:result_type").unwrap();
-    // `program:result_type` is `data_type: resource`, so post-
-    // `canonicalise_resource_refs` the value is `ResourceRef`, not
-    // `String`. Read via `as_iri_str` to handle both shapes — the
-    // `String`-only branch silently took the no-result-type path
-    // (`build_match_exp`) for every canonicalised program, which
-    // changed AST shape downstream.
-    if let Some(rt_iri_str) = resource.get(&result_type_prop).and_then(|v| v.as_iri_str()) {
+    if let Some(motive_value) = resource.get(&result_motive_prop) {
+        let motive = crate::program::eigentt_type_mirror::decode_type(motive_value, layer)
+            .map_err(|e| format!("invalid `result_motive` payload: {e:?}"))?;
+        build_inductive_rec(parsed_arms, scrutinee_exp, motive, layer)
+    } else if let Some(rt_iri_str) = resource.get(&result_type_prop).and_then(|v| v.as_iri_str()) {
+        // `program:result_type` is `data_type: resource`, so post-
+        // `canonicalise_resource_refs` the value is `ResourceRef`,
+        // not `String`. `as_iri_str` handles both shapes.
         let result_type_iri = Iri::parse(rt_iri_str)
             .map_err(|e| format!("invalid `result_type` IRI '{rt_iri_str}': {e}"))?;
         let result_type_val = resolve_class_type(&result_type_iri, layer)?;
-        build_inductive_rec(parsed_arms, scrutinee_exp, result_type_val, layer)
+        let motive_body = crate::nbe::readback::readback_val(0, &result_type_val);
+        let motive = Exp::Lam(Patt::Unit, Box::new(motive_body));
+        build_inductive_rec(parsed_arms, scrutinee_exp, motive, layer)
     } else {
         build_match_exp(parsed_arms, scrutinee_exp, layer)
     }
@@ -633,13 +645,15 @@ fn resolve_match_parent(arms: &[ParsedArm], layer: &Layer) -> Result<Arc<Inducti
     }
 }
 
-/// Build `Exp::InductiveRec` from match arms when the source had a
-/// `returning T` annotation. Validates exhaustiveness, binding
-/// counts, and unknown ctors.
+/// Build `Exp::InductiveRec` from match arms with a pre-built motive.
+/// Validates exhaustiveness, binding counts, and unknown ctors. The
+/// motive is supplied by the caller — either a `Lam`-chain over the
+/// scrutinee's indices (Layer 3 `fun (i : T) => body` path) or a
+/// `λ_. T` constant motive (pre-Layer-3 `returning T` path).
 fn build_inductive_rec(
     parsed_arms: Vec<ParsedArm>,
     scrutinee_exp: Exp,
-    result_type_val: Val,
+    motive: Exp,
     layer: &Layer,
 ) -> Result<Exp, String> {
     use std::collections::BTreeMap;
@@ -692,9 +706,6 @@ fn build_inductive_rec(
         }
         minors.push(minor);
     }
-
-    let motive_body = crate::nbe::readback::readback_val(0, &result_type_val);
-    let motive = Exp::Lam(Patt::Unit, Box::new(motive_body));
 
     Ok(Exp::InductiveRec {
         decl,

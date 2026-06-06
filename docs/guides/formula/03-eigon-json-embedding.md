@@ -36,7 +36,7 @@ gives you the full tree.
 ## 3.2. Multi-argument operators curry
 
 The chain doesn't have a variadic `App`. Multi-arg operators are
-**curried via left-spined `App`s**, mirroring Mini-TT's binary application
+**curried via left-spined `App`s**, mirroring EigenTT's binary application
 discipline directly (D32 §4.1).
 
 | Surface | FormulaTerm |

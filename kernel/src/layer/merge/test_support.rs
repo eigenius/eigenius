@@ -159,10 +159,10 @@ pub(crate) fn build_span_arc(
 // ─── Witness fixture helpers ──────────────────────────────────────────────
 //
 // Used by the witness, cascade, and resolve test modules — every
-// witness fixture starts from the same Mini-TT lambda shape, so the
+// witness fixture starts from the same EigenTT lambda shape, so the
 // builders live here.
 
-/// Build an embedded-resource body for a Mini-TT `Var <name>`
+/// Build an embedded-resource body for a EigenTT `Var <name>`
 /// expression. Embedded (no `@id`) — `parse_var` reads
 /// `program:name` from whatever resource it's handed.
 pub(crate) fn make_var_resource(name: &str) -> Resource {
@@ -179,7 +179,7 @@ pub(crate) fn make_var_resource(name: &str) -> Resource {
     r
 }
 
-/// Build an embedded-resource body for a Mini-TT
+/// Build an embedded-resource body for a EigenTT
 /// `Lambda <param> <body>` expression. `parse_lambda` reads
 /// `program:parameter` + `program:body`.
 pub(crate) fn make_lambda_resource(param: &str, body: Resource) -> Resource {

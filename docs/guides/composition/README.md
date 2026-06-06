@@ -92,7 +92,7 @@ The chapters build on each other:
 - **Not the formula language reference.** That's the
   [formula language guide](../formula/README.md). This guide treats
   `FormulaTerm` as a *coordination mechanism* between institutions; the
-  formula guide treats it as a Mini-TT fragment in its own right.
+  formula guide treats it as a EigenTT fragment in its own right.
 - **Not a single-institution tutorial.** Per-institution slow-walks
   live under [`platform/julia-institutions/`](../platform/julia-institutions/).
   This guide assumes you've internalised at least the intervals
@@ -111,7 +111,7 @@ The chapters build on each other:
 - [**EigenQL §7** — FIBER clauses](../eigenql/07-fiber-clauses.md), [**§8** — Institutions in EigenQL](../eigenql/08-institutions.md)
 - [**Formula language guide**](../formula/README.md)
 - [**D14** — Institution Realisation](../../design/d14-institution-realisation.md) — the canonical spec
-- [**D26** — Runtime substrate](../../design/d26-runtime-substrate.md), [**D27** — Julia institutions](../../design/d27-julia-institutions.md), [**D32** — Chain-mirrored Mini-TT inductives](../../design/d32-chain-mirrored-mini-tt-inductives.md)
+- [**D26** — Runtime substrate](../../design/d26-runtime-substrate.md), [**D27** — Julia institutions](../../design/d27-julia-institutions.md), [**D32** — Chain-mirrored EigenTT inductives](../../design/d32-chain-mirrored-mini-tt-inductives.md)
 
 ---
 

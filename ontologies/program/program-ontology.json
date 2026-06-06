@@ -253,7 +253,7 @@
   {
     "@id": "urn:eigenius:program:parameter_type",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Optional type annotation for a Lambda parameter. Accepts a Class or an InductiveType — Mini-TT terms range over both kinds, and a Comorphism's transformation Lambda must be type-annotated with the export-format's payload type, which is frequently a chain-committed InductiveType (e.g. formulas:FormulaTerm).",
+    "urn:eigenius:core:description": "Optional type annotation for a Lambda parameter. Accepts a Class or an InductiveType — EigenTT terms range over both kinds, and a Comorphism's transformation Lambda must be type-annotated with the export-format's payload type, which is frequently a chain-committed InductiveType (e.g. formulas:FormulaTerm).",
     "urn:eigenius:core:short_name": "parameter_type",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:class_types": ["urn:eigenius:core:Class", "urn:eigenius:core:InductiveType"],

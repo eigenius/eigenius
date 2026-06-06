@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Mini-TT syntax terms.
+//! EigenTT syntax terms.
 //!
-//! Ported from `Core/Abs.hs` in the Mini-TT reference implementation,
+//! Ported from `Core/Abs.hs` in the EigenTT reference implementation,
 //! extended with Eigon ground types.
 
 use crate::ontology::iri::Iri;
@@ -23,16 +23,16 @@ use std::sync::{Arc, OnceLock};
 
 pub type Name = String;
 
-/// Expressions — the syntax of Mini-TT.
+/// Expressions — the syntax of EigenTT.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Exp {
     /// Lambda: λ p. e
     Lam(Patt, Box<Exp>),
-    /// Universe: U (the type of types). Level 0 by default.
-    Set,
-    /// Universe at a specific level: Type(n). Type(0) = Set.
-    /// Type(0) : Type(1) : Type(2)
-    Type(usize),
+    /// Universe at a specific level: Sort(n).
+    /// `Sort(0) = Prop`, `Sort(1) = Set` (the universe of small types),
+    /// `Sort(n+1)` corresponds to the former `Type(n)` for `n >= 1`.
+    /// Typing rule: `Sort(n) : Sort(n+1)`. See D46 §3.
+    Sort(usize),
     /// Dependent function type: Π p : A. B
     Pi(Patt, Box<Exp>, Box<Exp>),
     /// Dependent pair type: Σ p : A. B
@@ -382,7 +382,12 @@ pub struct InductiveDecl {
     pub name: Name,
     /// Parameter telescope shared by every constructor: `(x₁ : A₁) … (xₙ : Aₙ)`.
     pub params: Vec<(Patt, Exp)>,
-    /// Universe of the type former — typically `Exp::Set` or `Exp::Type(n)`.
+    /// Index telescope — varies per constructor (D48). Empty for non-
+    /// indexed declarations (the default; matches D19's pre-D48 shape).
+    /// Index expressions in constructor return types are checked against
+    /// these telescope types, after substituting the parameter prefix.
+    pub indices: Vec<(Patt, Exp)>,
+    /// Universe of the type former — `Exp::Sort(n)`.
     pub sort: Exp,
     pub ctors: Vec<InductiveCtorDecl>,
 }
@@ -492,21 +497,23 @@ fn build_list_decl() -> Arc<InductiveDecl> {
     let self_ref = Arc::new(InductiveDecl {
         name: "List".to_string(),
         params: Vec::new(),
-        sort: Exp::Set,
+        indices: Vec::new(),
+        sort: Exp::Sort(1),
         ctors: Vec::new(),
     });
     let list_a_typ = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string())]);
     Arc::new(InductiveDecl {
         name: "List".to_string(),
-        params: vec![(Patt::Var("A".to_string()), Exp::Set)],
-        sort: Exp::Set,
+        params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+        indices: Vec::new(),
+        sort: Exp::Sort(1),
         ctors: vec![
             // nil : Π A:Set. List A
             InductiveCtorDecl {
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Set),
+                    Box::new(Exp::Sort(1)),
                     Box::new(list_a_typ.clone()),
                 ),
             },
@@ -515,7 +522,7 @@ fn build_list_decl() -> Arc<InductiveDecl> {
                 name: "cons".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Set),
+                    Box::new(Exp::Sort(1)),
                     Box::new(Exp::Pi(
                         Patt::Unit,
                         Box::new(Exp::Var("A".to_string())),
@@ -547,21 +554,23 @@ fn build_option_decl() -> Arc<InductiveDecl> {
     let self_ref = Arc::new(InductiveDecl {
         name: "Option".to_string(),
         params: Vec::new(),
-        sort: Exp::Set,
+        indices: Vec::new(),
+        sort: Exp::Sort(1),
         ctors: Vec::new(),
     });
     let option_a_typ = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string())]);
     Arc::new(InductiveDecl {
         name: "Option".to_string(),
-        params: vec![(Patt::Var("A".to_string()), Exp::Set)],
-        sort: Exp::Set,
+        params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+        indices: Vec::new(),
+        sort: Exp::Sort(1),
         ctors: vec![
             // none : Π A:Set. Option A
             InductiveCtorDecl {
                 name: "none".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Set),
+                    Box::new(Exp::Sort(1)),
                     Box::new(option_a_typ.clone()),
                 ),
             },
@@ -570,7 +579,7 @@ fn build_option_decl() -> Arc<InductiveDecl> {
                 name: "some".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Set),
+                    Box::new(Exp::Sort(1)),
                     Box::new(Exp::Pi(
                         Patt::Unit,
                         Box::new(Exp::Var("A".to_string())),
@@ -606,7 +615,7 @@ mod tests {
 
     #[test]
     fn arrow_desugars_to_pi() {
-        let t = Exp::arrow(Exp::One, Exp::Set);
+        let t = Exp::arrow(Exp::One, Exp::Sort(1));
         assert!(matches!(t, Exp::Pi(Patt::Unit, _, _)));
     }
 
@@ -626,7 +635,7 @@ mod tests {
     fn list_uses_canonical_inductive() {
         // Phase 11b step 6: Exp::list() now produces an inductive
         // type application backed by the canonical List declaration.
-        let t = Exp::list(Exp::Set);
+        let t = Exp::list(Exp::Sort(1));
         match t {
             Exp::InductiveType(decl, params) => {
                 assert_eq!(decl.name, "List");
@@ -634,7 +643,7 @@ mod tests {
                 assert_eq!(decl.ctors[0].name, "nil");
                 assert_eq!(decl.ctors[1].name, "cons");
                 assert_eq!(params.len(), 1);
-                assert!(matches!(params[0], Exp::Set));
+                assert!(matches!(params[0], Exp::Sort(1)));
             }
             other => panic!("expected InductiveType, got {other:?}"),
         }

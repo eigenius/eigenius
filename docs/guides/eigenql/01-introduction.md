@@ -10,7 +10,7 @@ The eigenius platform has two surface languages with complementary roles:
 |---|---|---|
 | Role | Declares ontology + programs | Queries and filters |
 | Side effects | Write: new Resources, trace layers | Read: no mutation |
-| Type theory | Fully dependent (Mini-TT) | Relational / first-order |
+| Type theory | Fully dependent (EigenTT) | Relational / first-order |
 | Institutions | Invoke via expression syntax | Invoke via expression syntax + `FIBER` clauses |
 
 EigenQL queries operate against a `Layer` — a chain of immutable resource sets rooted in the core ontology. A query is lexed, parsed, stratified, type-checked, evaluated against the layer chain, and finally wrapped into a self-describing result document per [D2 Appendix A](../../design/d2-eigenql-specification.md). The entry point is [`kernel/src/query/mod.rs::execute_with`](../../../kernel/src/query/mod.rs):

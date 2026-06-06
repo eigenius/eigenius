@@ -40,8 +40,8 @@ three other chain-resident resources:
 
 | Piece | What it carries | Provides |
 |---|---|---|
-| **`ExportFormat`** | `from_class` (source-side resource class), `payload_type` (the typed Mini-TT value the export produces), `institution_ref` (which institution owns the boundary), `procedure` (handler IRI) | The *outbound* boundary of the source institution. |
-| **`transformation`** | A Mini-TT Component with signature `payload_type(export) → payload_type(import)`. May be the identity function. | The structure-preserving translation between the two payloads. |
+| **`ExportFormat`** | `from_class` (source-side resource class), `payload_type` (the typed EigenTT value the export produces), `institution_ref` (which institution owns the boundary), `procedure` (handler IRI) | The *outbound* boundary of the source institution. |
+| **`transformation`** | A EigenTT Component with signature `payload_type(export) → payload_type(import)`. May be the identity function. | The structure-preserving translation between the two payloads. |
 | **`ImportFormat`** | `to_class` (target-side resource class), `payload_type` (the typed value the import consumes), `institution_ref`, `procedure` (handler IRI) | The *inbound* boundary of the target institution. |
 
 The triple is what's chain-resident; the actual handler code (the
@@ -67,13 +67,13 @@ the same pipeline:
                               │  step 1: extract_typed
                               │   (source institution's handler)
                               ▼
-                  typed payload (Mini-TT value)
+                  typed payload (EigenTT value)
                   e.g. FormulaTerm
                               │
                               │  step 2: transformation Component
-                              │   (Mini-TT evaluator)
+                              │   (EigenTT evaluator)
                               ▼
-                  typed payload (Mini-TT value)
+                  typed payload (EigenTT value)
                   e.g. FormulaTerm (unchanged for identity)
                               │
                               │  step 3: reify
@@ -95,7 +95,7 @@ Walking through the kinase notebook's `symbolics_to_jump` comorphism:
    Symbolics's `extract_typed` handler reads the expression's `term` field
    (a `FormulaTerm`) and returns it as the typed payload.
 2. **Transform.** The transformation Component is the identity on
-   `FormulaTerm` — `Lambda(t: FormulaTerm. Var(t))`. The Mini-TT evaluator
+   `FormulaTerm` — `Lambda(t: FormulaTerm. Var(t))`. The EigenTT evaluator
    reduces the application; the payload comes out unchanged.
 3. **Reify.** The target institution is JuMP-HiGHS; the target resource
    class is `OptimisationProblem`. JuMP-HiGHS's `reify` handler takes the
@@ -147,7 +147,7 @@ The chain bytes flow through unchanged. From
 
 What identity transformations buy:
 
-- **Zero runtime cost.** The Mini-TT evaluator reduces `Lam(t. Var(t))`
+- **Zero runtime cost.** The EigenTT evaluator reduces `Lam(t. Var(t))`
   applied to `<payload>` to `<payload>` in one β-step. No work happens at
   the wire.
 - **Trivial type-check.** The transformation's signature is
@@ -352,7 +352,7 @@ linking sentences to models. Comorphisms are the structure-preserving
 translations between institutions in that classical setting.
 
 Eigenius implements this framework in a *constructive* setting. The kernel's
-small dependent-type theory (Mini-TT) plays the role of the meta-language,
+small dependent-type theory (EigenTT) plays the role of the meta-language,
 and an institution's typed `Verdict` becomes a chain-resident witness rather
 than a model-theoretic satisfaction relation. The platform realises enough
 of the structure to work in practice — declared comorphisms, type-checked
@@ -364,7 +364,7 @@ Closing that gap — formulating institution theory cleanly in *constructive
 type theory*, with models replaced by **typed witnesses** under the
 propositions-as-types reading (the Curry–Howard correspondence introduced
 in [formula §2.2](../formula/02-mini-tt-fragment.md#22-why-pi-and-lam-are-chain-resident))
-— is an open research direction. It is widely believed feasible: Mini-TT's
+— is an open research direction. It is widely believed feasible: EigenTT's
 `Pi`-types already correspond to universal quantification, its `Sigma`-types
 to existential quantification, and the kernel already carries typed claims
 and typed verdicts as data. What's missing is the meta-theoretic story

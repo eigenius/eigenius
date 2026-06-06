@@ -106,7 +106,7 @@ pub mod iris {
     pub const PROC_WHICH_AXIOMS: &str = "urn:eigenius:lean:proc:which_axioms";
 
     /// ExportFormat procedure: extract a `LeanProofTerm`'s referenced
-    /// payload bytes as a `core:string`-typed Mini-TT value.
+    /// payload bytes as a `core:string`-typed EigenTT value.
     pub const PROC_EXTRACT_PROOF_PAYLOAD: &str = "urn:eigenius:lean:proc:extract_proof_payload";
 
     /// Property: `LeanProofTerm.proof_payload` (resource ref →

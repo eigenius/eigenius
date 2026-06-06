@@ -175,7 +175,7 @@ fn load_layer(
 
 /// Bootstrap the Eigenius kernel.
 ///
-/// Loads eleven ontology layers: core → program → reflection → obo → institution → runtime → formulas → lean-expressions → lean-runtime-classes → lean-institution → notebook.
+/// Loads twelve ontology layers: core → eigentt-type-fragment → program → reflection → obo → institution → runtime → formulas → lean-expressions → lean-runtime-classes → lean-institution → notebook.
 /// All are validated. Returns an `ExecutionContext` with the
 /// notebook layer as head.
 ///
@@ -199,10 +199,22 @@ pub fn bootstrap_with_storage(
         storage.clone(),
     )?;
 
+    // eigentt-type-fragment layer (D47) — chain-mirrored EigenTT type
+    // language for axiom and theorem statements (D46 §10 axioms,
+    // future propositional institutions). Depends only on core (uses
+    // core:string, core:integer, core:InductiveType, core:InductiveCtor,
+    // core:InductiveArgType).
+    let eigentt_type = load_layer(
+        "eigentt-type-fragment",
+        include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
+        Some(core),
+        storage.clone(),
+    )?;
+
     let program = load_layer(
         "program",
         include_str!("../../../ontologies/program/program-ontology.json"),
-        Some(core),
+        Some(eigentt_type),
         storage.clone(),
     )?;
 
@@ -506,11 +518,15 @@ fn check_and_migrate_schema_version(
     Ok(())
 }
 
-fn embedded_ontologies() -> [(&'static str, &'static str); 11] {
+fn embedded_ontologies() -> [(&'static str, &'static str); 12] {
     [
         (
             "core",
             include_str!("../../../ontologies/core/core-ontology.json"),
+        ),
+        (
+            "eigentt-type-fragment",
+            include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
         ),
         (
             "program",
@@ -720,8 +736,10 @@ mod tests {
         assert!(!reflection.is_root());
         let program = reflection.parent().unwrap();
         assert!(!program.is_root());
-        // Core layer (parent of program) should be root.
-        assert!(program.parent().unwrap().is_root());
+        let eigentt_type = program.parent().unwrap();
+        assert!(!eigentt_type.is_root());
+        // Core layer (parent of eigentt-type-fragment) should be root.
+        assert!(eigentt_type.parent().unwrap().is_root());
     }
 
     #[test]
@@ -732,6 +750,24 @@ mod tests {
         assert!(
             resolved.is_some(),
             "should resolve Class from core ontology"
+        );
+    }
+
+    #[test]
+    fn can_resolve_eigentt_type_expr() {
+        // D47: the chain-mirrored EigenTT type fragment lives at
+        // urn:eigenius:eigentt:TypeExpr and is loaded just above the core
+        // layer.
+        let ctx = bootstrap().unwrap();
+        let iri = Iri::parse("urn:eigenius:eigentt:TypeExpr").unwrap();
+        let resolved = ctx
+            .resolve(&iri)
+            .expect("should resolve eigentt:TypeExpr from the eigentt-type-fragment layer");
+        let is_a = resolved.is_a();
+        let inductive_type_iri = Iri::parse("urn:eigenius:core:InductiveType").unwrap();
+        assert!(
+            is_a.iter().any(|i| i == &inductive_type_iri),
+            "eigentt:TypeExpr should be an InductiveType; is_a = {is_a:?}"
         );
     }
 

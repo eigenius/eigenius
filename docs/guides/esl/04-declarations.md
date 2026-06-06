@@ -133,7 +133,40 @@ Field values can be any of the literal forms: strings, integers, floats, boolean
 
 Source: [`compile_resource`](../../../kernel/src/esl/compile.rs).
 
-## 4.4a. `text_index` and `vector_index`
+## 4.4a. `axiom` — postulated propositions (eigenius#72 Layer 1, D46 §10)
+
+```esl
+axiom ex:propext :
+    forall (P : Prop, Q : Prop) => (P <-> Q) -> Id(Prop, P, Q)
+```
+
+The `axiom` keyword takes a name, a colon, and a type expression in `Prop`. The statement is **postulated** — the kernel admits an inhabitant of the type without requiring a proof term, parallel to how `propext` and `Quot.sound` are admitted as kernel built-ins. The chain validator type-checks the statement at commit and rejects malformed propositions.
+
+The type-expression sub-grammar accepts everything Layer 2 needs for proposition authoring:
+
+- `forall (x : T, y : U) => body` — value-typed Π binders (alias for `pi`).
+- `A -> B` — non-dependent arrow.
+- `Prop` / `Set` / `Type N` — sort literals.
+- `Id(A, x, y)` — equality at type `A`.
+- Constructor references, applied or nullary: `ex:Eq(A, x, y)`, `ex:zero`.
+
+Optional `note: "…"` clause records the human-readable justification:
+
+```esl
+axiom ex:proof_irrelevance :
+    forall (P : Prop, p : P, q : P) => Id(P, p, q)
+note: "Folklore; built into the kernel's Prop universe per D46 §5."
+```
+
+**Wire shape.** Commits a Resource of class `eigentt:Axiom` with:
+- `eigentt:axiom_statement` — the type expression, D47-encoded via the [type-fragment codec](../../../kernel/src/program/eigentt_type_mirror.rs);
+- `eigentt:axiom_justification` (optional) — the `note:` string.
+
+The axiom registers into the layer's axiom environment via `build_axiom_env` at the next environment build and is then citable from `DeclaredEvidence` justifications per D39 §10.
+
+Source: [`parse_axiom`](../../../kernel/src/esl/parser.rs), [`compile_axiom` and `lower_type_expr_to_exp`](../../../kernel/src/esl/compile.rs), [`build_axiom_env`](../../../kernel/src/program/axiom_env.rs).
+
+## 4.4b. `text_index` and `vector_index`
 
 Sugar over `core:TextIndex` / `core:VectorIndex` Resource declarations from D43. Each declaration commits one Index Resource targeting a property; the kernel's text-search and vector-search dispatchers pick it up via the active-index lookup at the head layer. See **[EigenQL guide chapter 6](../eigenql/06-text-and-vector-retrieval.md)** for the query-side surface (`~` operator) these declarations enable.
 
@@ -217,6 +250,33 @@ data ex:List(A : core:Set) {
 ```
 
 `List` is parameterised by the element type `A`. Constructor argument types may reference parameters by bare name (`A`) or by full IRI (`ex:List(A)`).
+
+### Indexed — D48 indexed families (eigenius#72 Layer 2)
+
+Indexed inductives carry an **index telescope** between params and the result sort. Each constructor's conclusion specifies values for the indices, and pattern matching against an indexed scrutinee can refine the expected type per arm.
+
+```esl
+data ex:Vec(A : core:Set) : core:Nat -> Set {
+    nil  : ex:Vec(A, ex:zero),
+    cons : forall (n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
+}
+```
+
+The clause `: core:Nat -> Set` after the params declares the index telescope (one anonymous index of type `core:Nat`) and the result sort (`Set`). Constructors switch to the **typed form** `name : <type-expr>` — required for indexed inductives because the positional form can't express conclusion indices. The full Π-telescope including the conclusion is supplied directly.
+
+A propositional equality, declared in `Prop` rather than `Set`:
+
+```esl
+data ex:Eq(A : core:Set) : A -> A -> Prop {
+    refl : forall (a : A) => ex:Eq(A, a, a),
+}
+```
+
+The index kind can be a parameter reference (`A` here) — the compiler keeps it as a bare name and the kernel decodes it as `Exp::Var(A)` bound by the parameter telescope.
+
+**Wire shape.** Indices land on `core:indices` (array of `InductiveParam` resources, parallel to `type_params`), result sort on `core:result_sort` (string: `Prop` / `Set` / `Type:N`), and each typed ctor on `core:ctor_type` (the full Π-telescope D47-encoded via the [type-fragment codec](../../../kernel/src/program/eigentt_type_mirror.rs)). Non-indexed declarations omit all three fields, preserving the pre-Layer-2 wire shape.
+
+Source: [`parse_data_index_telescope`](../../../kernel/src/esl/parser.rs), [`compile_data`](../../../kernel/src/esl/compile.rs), [`decode_indices` and `decode_result_sort`](../../../kernel/src/program/ground.rs).
 
 ### Sized — bounded binders
 

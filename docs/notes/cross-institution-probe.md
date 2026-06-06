@@ -14,9 +14,9 @@ Test source: [`crates/eigenius-julia/tests/cross_institution_probe.rs`](../../cr
 
 **Mirror generator.** Walks the chain's class declarations and emits a Julia package (`EigeniusMirror`) with a struct per class plus encode/decode functions. Every institution's handler imports `EigeniusMirror` and dispatches on the typed Julia structs — no JSON parsing in handler code, no per-institution boilerplate.
 
-**Mini-TT inductive types on the chain (D32).** The chain's `core:InductiveType` declarations define algebraic-data-type-shaped values (recursive trees with named constructors and typed argument slots). Constructors and their arg types are committed as ordinary chain resources; the validator type-checks values at commit time; the mirror generator emits Julia abstract+per-ctor structs with `decode_<T>` / `encode_<T>` functions.
+**EigenTT inductive types on the chain (D32).** The chain's `core:InductiveType` declarations define algebraic-data-type-shaped values (recursive trees with named constructors and typed argument slots). Constructors and their arg types are committed as ordinary chain resources; the validator type-checks values at commit time; the mirror generator emits Julia abstract+per-ctor structs with `decode_<T>` / `encode_<T>` functions.
 
-**`FormulaTerm` (D32 §4).** A `core:InductiveType` committed under `urn:eigenius:formulas:` — the symbol-algebra-relevant fragment of Mini-TT `Exp`, lifted to the chain. Six constructors:
+**`FormulaTerm` (D32 §4).** A `core:InductiveType` committed under `urn:eigenius:formulas:` — the symbol-algebra-relevant fragment of EigenTT `Exp`, lifted to the chain. Six constructors:
 
 ```
 FormulaTerm ::=
@@ -30,9 +30,9 @@ FormulaTerm ::=
 
 Crucially, `FormulaTerm` is **not** declared under any specific institution. It lives at `urn:eigenius:formulas:`, a layer above the institution-specific layers. Every numerical institution (Symbolics, IntervalArithmetic, JuMP, DiffEq, Catalyst, …) is expected to consume *the same* `FormulaTerm` shape.
 
-**Operator catalog (D32 §5).** A v1 set of `Operator` resources at `urn:eigenius:formulas:ops:*` (`add`, `sub`, `mul`, `div`, `pow`, `sin`, `cos`, `exp`, `log`, `sqrt`, `abs`, `eq`, `lt`, `le`, `derivative`). Each operator carries a typed Mini-TT signature (also expressed as a `FormulaTerm` — the type language dogfoods itself), allowing the chain validator to rank-check `App` invocations at commit time.
+**Operator catalog (D32 §5).** A v1 set of `Operator` resources at `urn:eigenius:formulas:ops:*` (`add`, `sub`, `mul`, `div`, `pow`, `sin`, `cos`, `exp`, `log`, `sqrt`, `abs`, `eq`, `lt`, `le`, `derivative`). Each operator carries a typed EigenTT signature (also expressed as a `FormulaTerm` — the type language dogfoods itself), allowing the chain validator to rank-check `App` invocations at commit time.
 
-**Comorphism (D14).** A typed boundary translation between two institutions, formalised as a triple `(s, m, t)`: a source `ExportFormat`, a Mini-TT Component `m` carrying the typed transformation, and a target `ImportFormat`. The component `m` is what bridges the institutions' typed payloads.
+**Comorphism (D14).** A typed boundary translation between two institutions, formalised as a triple `(s, m, t)`: a source `ExportFormat`, a EigenTT Component `m` carrying the typed transformation, and a target `ImportFormat`. The component `m` is what bridges the institutions' typed payloads.
 
 ## What the probe does, mechanically
 
@@ -78,7 +78,7 @@ end
 
 There is no Symbolics→IntervalArithmetic format conversion. There is no per-institution payload adapter. The `expr.term :: EigeniusMirror.FormulaTerm` value is the same Julia object the Symbolics handler would dispatch `Symbolics.simplify` on — it just happens to be flowing into a different institution's handler this time.
 
-That's [D32 §6.2](../design/d32-chain-mirrored-mini-tt-inductives.md#62-concrete-example---symbolics--intervalarithmetic) in code: a Comorphism `Symbolics → IntervalArithmetic` would carry the **identity function on `FormulaTerm`** as its Mini-TT Component `m`. The probe demonstrates that such a Comorphism is *expressible*: both ends of the boundary speak the same shape, so there's nothing for `m` to translate.
+That's [D32 §6.2](../design/d32-chain-mirrored-mini-tt-inductives.md#62-concrete-example---symbolics--intervalarithmetic) in code: a Comorphism `Symbolics → IntervalArithmetic` would carry the **identity function on `FormulaTerm`** as its EigenTT Component `m`. The probe demonstrates that such a Comorphism is *expressible*: both ends of the boundary speak the same shape, so there's nothing for `m` to translate.
 
 ## What it intentionally does not do
 
@@ -94,7 +94,7 @@ The probe runs. That's the proof point.
 
 ## References
 
-- [D32 — Chain-Mirrored Mini-TT Inductives + the FormulaTerm Language](../design/d32-chain-mirrored-mini-tt-inductives.md). Specifies `FormulaTerm`, the operator catalog, and the typed shared-payload claim this probe demonstrates.
+- [D32 — Chain-Mirrored EigenTT Inductives + the FormulaTerm Language](../design/d32-chain-mirrored-mini-tt-inductives.md). Specifies `FormulaTerm`, the operator catalog, and the typed shared-payload claim this probe demonstrates.
 - [D14 — Institution Realisation](../design/d14-institution-realisation.md). Defines Comorphisms, ExportFormat / ImportFormat, and the typed boundary discipline.
 - [D27 §4 — Reference institutions](../design/d27-julia-institutions.md). The five Julia institutions (Symbolics, JuMP, IntervalArithmetic, Catalyst, DiffEq) that all speak FormulaTerm.
 - [`crates/eigenius-julia/tests/cross_institution_probe.rs`](../../crates/eigenius-julia/tests/cross_institution_probe.rs). The probe itself.

@@ -353,7 +353,7 @@ stream/resumable-execution work into two paired milestones of one phase:
 - **Phase 9a (this document):** durable layers, seeded bootstrap,
   persistent traces, institution + WASM re-registration on RESUME.
   Prerequisite for 9b. ~1 week.
-- **Phase 9b (D11):** codata Mini-TT extension, stream observations,
+- **Phase 9b (D11):** codata EigenTT extension, stream observations,
   concurrent task model, resumable execution on top of the now-durable
   trace store. ~4–6 weeks.
 

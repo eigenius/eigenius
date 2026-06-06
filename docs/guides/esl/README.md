@@ -1,6 +1,6 @@
 # ESL user guide
 
-ESL — the Eigenius Surface Language — is the human-friendly syntax for declaring ontologies, defining typed programs, and constructing resource instances. It compiles to Eigon-JSON resources that the Mini-TT kernel type-checks and evaluates.
+ESL — the Eigenius Surface Language — is the human-friendly syntax for declaring ontologies, defining typed programs, and constructing resource instances. It compiles to Eigon-JSON resources that the EigenTT kernel type-checks and evaluates.
 
 This guide is written against the implementation in [`kernel/src/esl/`](../../../kernel/src/esl/) and the type-theory kernel in [`kernel/src/nbe/`](../../../kernel/src/nbe/) and [`kernel/src/program/`](../../../kernel/src/program/). The specification it complements is [D7](../../design/d7-esl-surface-syntax.md). Every feature described here is grounded in source — chapters link directly to the modules that implement them.
 

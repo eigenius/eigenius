@@ -73,7 +73,7 @@ input. Two `Pi` binders means a 2-argument operator.
 This is **dogfooding** the formula language — operator signatures live
 in the same chain shape they describe. The `Pi` constructor is on the
 chain because operator signatures need it; once it's there, the rest
-of Mini-TT-style typing comes along for free.
+of EigenTT-style typing comes along for free.
 
 (The `Real` reference is itself an `OpRef` for now — a built-in
 typed-as-an-operator-reference. The chain-resident type system for

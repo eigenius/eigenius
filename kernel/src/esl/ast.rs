@@ -67,6 +67,21 @@ pub enum Declaration {
     /// declared body fields populate the Resource's properties; the
     /// class is implicit in the keyword.
     VectorIndex(VectorIndexDecl),
+    /// eigenius#72 — `axiom Name : <type-expr>` declares a named
+    /// chain-resident axiom whose statement is the supplied type
+    /// expression. Lowers to a `core:Axiom` Resource (D46 §10) whose
+    /// `axiom_statement` is the type expression encoded via the D47
+    /// codec. Optional `note: "..."` populates `core:axiom_justification`.
+    Axiom(AxiomDecl),
+}
+
+/// eigenius#72 — `axiom Name : <type-expr> [note: "..."]` declaration.
+#[derive(Debug)]
+pub struct AxiomDecl {
+    pub name: QualifiedName,
+    pub statement: TypeExpr,
+    pub justification: Option<String>,
+    pub pos: Position,
 }
 
 /// `class ex:Dog : ex:Animal { ... }` or
@@ -205,6 +220,14 @@ pub struct DataDecl {
     /// Type parameters: `(A : Set, B : Set, ...)`. Empty for
     /// non-parametric inductives.
     pub params: Vec<DataParam>,
+    /// Index telescope: written after `:` between params and the result
+    /// sort. Example: `data Vec(A : Set) : Nat -> Set { ... }` has one
+    /// index `_ : Nat`. Empty for non-indexed declarations (the default,
+    /// matching the pre-D48 / pre-eigenius#72-Layer-2 surface).
+    pub indices: Vec<DataParam>,
+    /// Result sort declared after the index telescope's arrow chain.
+    /// `None` defaults to `Set` (`Sort(1)`).
+    pub result_sort: Option<SortKind>,
     pub ctors: Vec<CtorDecl>,
     pub pos: Position,
 }
@@ -221,13 +244,59 @@ pub struct DataParam {
     pub pos: Position,
 }
 
-/// A single constructor declaration: `nil` or `cons(A, List(A))`.
+/// A single constructor declaration.
+///
+/// Two surface forms (eigenius#72 Layer 2):
+///
+/// - `Positional` — the legacy form: `nil` (nullary) or
+///   `cons(A, List(A))` (with positional / named arg list).
+///   The constructor's conclusion is implicitly `Self(params)`; this
+///   form cannot express conclusion indices and is therefore only
+///   usable for non-indexed declarations.
+/// - `Typed` — the indexed-aware form: `cons : forall (n : Nat) => A
+///   -> Vec(A, n) -> Vec(A, succ(n))`. The full Π-telescope including
+///   the conclusion (with explicit indices) is supplied as a single
+///   `TypeExpr`. Required when the declaration has indices.
 #[derive(Debug)]
-pub struct CtorDecl {
-    pub name: String,
-    /// Positional or named constructor arguments.
-    pub args: Vec<CtorArg>,
-    pub pos: Position,
+pub enum CtorDecl {
+    Positional {
+        name: String,
+        /// Positional or named constructor arguments.
+        args: Vec<CtorArg>,
+        pos: Position,
+    },
+    Typed {
+        name: String,
+        /// Full Π-telescope of the constructor type, ending in an
+        /// application of the parent inductive to its params and indices.
+        typ: TypeExpr,
+        pos: Position,
+    },
+}
+
+impl CtorDecl {
+    pub fn name(&self) -> &str {
+        match self {
+            CtorDecl::Positional { name, .. } | CtorDecl::Typed { name, .. } => name,
+        }
+    }
+
+    pub fn pos(&self) -> &Position {
+        match self {
+            CtorDecl::Positional { pos, .. } | CtorDecl::Typed { pos, .. } => pos,
+        }
+    }
+
+    /// Test-side convenience: return the positional args list. Panics
+    /// on `Typed` — callers that aren't sure should match the variant
+    /// explicitly.
+    #[cfg(test)]
+    pub fn args(&self) -> &[CtorArg] {
+        match self {
+            CtorDecl::Positional { args, .. } => args,
+            CtorDecl::Typed { .. } => panic!("CtorDecl::args() called on Typed variant"),
+        }
+    }
 }
 
 /// A single constructor argument.
@@ -325,11 +394,51 @@ pub enum TypeExpr {
     /// the general value-typed binder needed for standalone Lambda
     /// resources' `program:type` slot and for `merge_comorphism`
     /// transformation signatures.
+    ///
+    /// eigenius#72: `forall` is an alias for `pi` produced by the
+    /// `Forall` keyword. Both parse into this variant.
     Pi {
         params: Vec<TypedParam>,
         codomain: Box<TypeExpr>,
         pos: Position,
     },
+    /// eigenius#72 — sort literal in type position. `Prop` is
+    /// `Sort(0)`, `Set` is `Sort(1)`, `Type N` is `Sort(N+1)`.
+    /// Used in `axiom` statements, indexed `data` declarations, and
+    /// motives.
+    Sort { kind: SortKind, pos: Position },
+    /// eigenius#72 Layer 3 — type-level lambda introduced by `fun`:
+    /// `fun (i : T) => body`. Used as a motive for `match … returning
+    /// <motive>` over indexed inductives. Compiles to nested
+    /// single-parameter `Exp::Lam` chains, mirroring how `Pi` compiles
+    /// to nested `Exp::Pi` chains.
+    Lambda {
+        params: Vec<TypedParam>,
+        body: Box<TypeExpr>,
+        pos: Position,
+    },
+}
+
+/// Sort literals recognised in type expressions (eigenius#72).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortKind {
+    Prop,
+    Set,
+    Type(usize),
+}
+
+impl TypeExpr {
+    /// Position of the type-expression's root for error reporting.
+    pub fn pos(&self) -> &Position {
+        match self {
+            TypeExpr::Ref { pos, .. }
+            | TypeExpr::Arrow { pos, .. }
+            | TypeExpr::BinderArrow { pos, .. }
+            | TypeExpr::Pi { pos, .. }
+            | TypeExpr::Sort { pos, .. }
+            | TypeExpr::Lambda { pos, .. } => pos,
+        }
+    }
 }
 
 /// A typed binder: `name : type`. Used by `TypeExpr::Pi` and by the
@@ -495,24 +604,31 @@ pub enum Expr {
     /// observations of the target codata type.
     CoRecord { fields: Vec<CoField>, pos: Position },
 
-    /// `match expr [returning T] { ctor -> body; ctor(x, y) -> body; ... }`
-    /// (Phase 11b step 11–12, D19 §10).
+    /// `match expr [returning <motive>] { ctor -> body; ctor(x, y) -> body; ... }`
+    /// (Phase 11b step 11–12, D19 §10; extended in eigenius#72 Layer 3).
     ///
     /// Pattern-matches a value of an inductive type. Each arm names
     /// a constructor and (optionally) binds variables for its
     /// arguments.
     ///
-    /// `result_type` is the optional type annotation for every arm
-    /// body. When present (Phase 11b step 11), the kernel-side
-    /// expression builder desugars to `Exp::InductiveRec` with
-    /// motive `λ_. result_type`. When absent (Phase 11b step 12),
-    /// it produces `Exp::Match`, leaving motive synthesis to the
-    /// type checker — which builds `λ_. expected_type` from the
-    /// checking-mode context. Inference-mode use of an unannotated
-    /// match is a type error with a clear diagnostic.
+    /// `returning` is the optional motive. When present, the
+    /// kernel-side expression builder desugars to `Exp::InductiveRec`
+    /// with the supplied motive. When absent, it produces `Exp::Match`
+    /// and the type checker synthesises the motive from the checking
+    /// context — inference-mode use without `returning` is a type
+    /// error with a clear diagnostic.
+    ///
+    /// Two motive shapes are accepted in source:
+    /// - A bare `TypeExpr::Ref` (qualified name) — desugars to the
+    ///   constant motive `λ_. T`. This is the pre-Layer-3 surface and
+    ///   stays supported for non-indexed inductives.
+    /// - A `TypeExpr::Lambda` (`fun (i : T) => body`) — used as the
+    ///   motive directly, abstracting over the scrutinee's indices.
+    ///   Required when matching on an indexed inductive whose result
+    ///   type depends on those indices.
     Match {
         scrutinee: Box<Expr>,
-        result_type: Option<QualifiedName>,
+        returning: Option<TypeExpr>,
         arms: Vec<MatchArm>,
         pos: Position,
     },

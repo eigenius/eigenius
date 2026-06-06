@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Mini-TT evaluator: terms → values.
+//! EigenTT evaluator: terms → values.
 //!
-//! Ported from `Main.hs` lines 198-217 in the Mini-TT reference.
+//! Ported from `Main.hs` lines 198-217 in the EigenTT reference.
 //! Extended with capability modes (Pure/Read/IO) per D9.
 
 /// Evaluation error — replaces panics in the NbE evaluator (issue #19).
@@ -198,15 +198,14 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
     let ev = |e: &Exp| -> Result<Val, EvalError> { eval_ctx(e, rho, ctx) };
 
     match exp {
-        Exp::Set => Ok(Val::Set),
-        Exp::Type(n) => Ok(Val::Type(*n)),
+        Exp::Sort(n) => Ok(Val::Sort(*n)),
         Exp::One => Ok(Val::One),
         Exp::Unit => Ok(Val::Unit),
 
         Exp::Dec(d, e) => {
             match ctx {
                 EvalCtx::Pure => {
-                    // Pure mode: lazy evaluation via UpDec (standard Mini-TT)
+                    // Pure mode: lazy evaluation via UpDec (standard EigenTT)
                     eval_ctx(e, &Rho::UpDec(Box::new(rho.clone()), d.clone()), ctx)
                 }
                 _ => {
@@ -514,19 +513,59 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
             eval_reduce(f_val, acc, coll_val, ctx)
         }
 
-        // Inductive types (Phase 11b, D19)
+        // Inductive types (Phase 11b, D19; D48 adds indices)
         // Step 1 lands the AST and value shells; Step 2 will add iota
-        // reduction for the recursor.
+        // reduction for the recursor. Pre-D48 callers always have
+        // `indices: Vec::new()` (non-indexed default).
         Exp::Inductive(decl) => Ok(Val::InductiveType {
             decl: decl.clone(),
             params: Vec::new(),
+            indices: Vec::new(),
         }),
-        Exp::InductiveType(decl, params) => {
-            let params: Result<Vec<_>, _> = params.iter().map(&ev).collect();
-            Ok(Val::InductiveType {
-                decl: decl.clone(),
-                params: params?,
-            })
+        Exp::InductiveType(decl, args) => {
+            // D48: `Exp::InductiveType(decl, args)` carries `params ++ indices`
+            // — `decl.params.len()` parameters followed by `decl.indices.len()`
+            // index expressions. For pre-D48 (non-indexed) decls, `indices`
+            // is empty and `args` equals the parameter prefix.
+            //
+            // The kernel uses "stub" InductiveDecls inside ctor type
+            // bodies (self-references with empty `params` / `ctors`,
+            // see `term.rs` around `InductiveDecl::PartialEq` — name-
+            // based equality). Stubs are detected by `decl.indices`
+            // being empty; for those we preserve the pre-D48 behaviour
+            // (all args treated as params, no arity check) so the
+            // stub-Arc pattern keeps working. Genuine indexed decls
+            // (`decl.indices` non-empty) get the strict split.
+            let vals: Result<Vec<_>, _> = args.iter().map(&ev).collect();
+            let mut vals = vals?;
+            if decl.indices.is_empty() {
+                Ok(Val::InductiveType {
+                    decl: decl.clone(),
+                    params: vals,
+                    indices: Vec::new(),
+                })
+            } else {
+                let n_params = decl.params.len();
+                let n_indices = decl.indices.len();
+                let expected = n_params + n_indices;
+                if vals.len() != expected {
+                    return Err(EvalError::InvalidCaseTarget(format!(
+                        "indexed InductiveType `{}`: expected {} arg(s) \
+                         (params + indices: {} + {}), got {}",
+                        decl.name,
+                        expected,
+                        n_params,
+                        n_indices,
+                        vals.len()
+                    )));
+                }
+                let indices = vals.split_off(n_params);
+                Ok(Val::InductiveType {
+                    decl: decl.clone(),
+                    params: vals,
+                    indices,
+                })
+            }
         }
         Exp::CodataType(decl, params) => {
             let params: Result<Vec<_>, _> = params.iter().map(&ev).collect();
@@ -2147,7 +2186,7 @@ fn parse_verdict(
     use crate::ontology::well_known as wk;
 
     // First look for an explicit `ctor_name` property — produced when
-    // a Component returns a Mini-TT Verdict value via the inductive
+    // a Component returns a EigenTT Verdict value via the inductive
     // serialisation.
     if let Some(ctor) = result
         .get(&Iri::parse(wk::CTOR_NAME).expect("well-known IRI"))
@@ -2199,7 +2238,7 @@ fn ground_values_equal(x: &Val, y: &Val) -> bool {
     }
 }
 
-/// Convert an Eigon resource Value to a Mini-TT Val.
+/// Convert an Eigon resource Value to a EigenTT Val.
 ///
 /// Uses a heuristic IRI check: strings starting with "urn:" or "http"
 /// are treated as class references (`Val::EigonClass`). This can
@@ -2233,13 +2272,13 @@ pub fn resource_value_to_val(v: &crate::ontology::resource::Value) -> Val {
         RVal::Json(_) => Val::Unit,
         // D43 §4.1: Vector values are transient compute outputs of
         // EMBED that flow into VECTOR_NEAR / VECTOR_SIM at the query
-        // surface. They have no inhabitant in the Mini-TT type
+        // surface. They have no inhabitant in the EigenTT type
         // system — opaque to NBE.
         RVal::Vector { .. } => Val::Unit,
     }
 }
 
-/// Convert a Mini-TT Val to an Eigon resource Value (for Construct).
+/// Convert a EigenTT Val to an Eigon resource Value (for Construct).
 pub fn val_to_resource_value(val: &Val) -> crate::ontology::resource::Value {
     use crate::ontology::resource::Value as RVal;
     match val {
@@ -2303,8 +2342,8 @@ mod tests {
 
     #[test]
     fn eval_set() -> Result<(), EvalError> {
-        let v = eval(&Exp::Set, &Rho::Nil)?;
-        assert!(matches!(v, Val::Set));
+        let v = eval(&Exp::Sort(1), &Rho::Nil)?;
+        assert!(matches!(v, Val::Sort(1)));
         Ok(())
     }
 
@@ -2333,7 +2372,7 @@ mod tests {
     #[test]
     fn eval_pair() -> Result<(), EvalError> {
         let v = eval(
-            &Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::Set)),
+            &Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::Sort(1))),
             &Rho::Nil,
         )?;
         assert!(matches!(v, Val::Pair(_, _)));
@@ -2343,7 +2382,10 @@ mod tests {
     #[test]
     fn eval_fst() -> Result<(), EvalError> {
         let v = eval(
-            &Exp::Fst(Box::new(Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::Set)))),
+            &Exp::Fst(Box::new(Exp::Pair(
+                Box::new(Exp::Unit),
+                Box::new(Exp::Sort(1)),
+            ))),
             &Rho::Nil,
         )?;
         assert!(matches!(v, Val::Unit));
@@ -2353,10 +2395,13 @@ mod tests {
     #[test]
     fn eval_snd() -> Result<(), EvalError> {
         let v = eval(
-            &Exp::Snd(Box::new(Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::Set)))),
+            &Exp::Snd(Box::new(Exp::Pair(
+                Box::new(Exp::Unit),
+                Box::new(Exp::Sort(1)),
+            ))),
             &Rho::Nil,
         )?;
-        assert!(matches!(v, Val::Set));
+        assert!(matches!(v, Val::Sort(1)));
         Ok(())
     }
 
@@ -2612,7 +2657,7 @@ mod tests {
         // Phase 10c: PropAccess where the target evaluates to a non-resource
         // Val should return Val::Unit instead of panicking.
         let ctx = io_ctx();
-        let rho = Rho::Nil.extend(Patt::Var("x".to_string()), Val::Set);
+        let rho = Rho::Nil.extend(Patt::Var("x".to_string()), Val::Sort(1));
         let exp = Exp::PropAccess(
             Box::new(Exp::Var("x".to_string())),
             Iri::parse("urn:eigenius:test:prop").unwrap(),
@@ -2631,11 +2676,11 @@ mod tests {
         // Phase 10c: Arrow/Times should produce identical results to Pi/Sig
         // with Patt::Unit, but without the re-recursion overhead.
         let arrow_val = eval(
-            &Exp::Arrow(Box::new(Exp::One), Box::new(Exp::Set)),
+            &Exp::Arrow(Box::new(Exp::One), Box::new(Exp::Sort(1))),
             &Rho::Nil,
         )?;
         let pi_val = eval(
-            &Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Set)),
+            &Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Sort(1))),
             &Rho::Nil,
         )?;
         // Both should be Val::Pi
@@ -2646,11 +2691,11 @@ mod tests {
         assert!(matches!(pi_val, Val::Pi(_, _)), "Pi should produce Val::Pi");
 
         let times_val = eval(
-            &Exp::Times(Box::new(Exp::One), Box::new(Exp::Set)),
+            &Exp::Times(Box::new(Exp::One), Box::new(Exp::Sort(1))),
             &Rho::Nil,
         )?;
         let sig_val = eval(
-            &Exp::Sig(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Set)),
+            &Exp::Sig(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Sort(1))),
             &Rho::Nil,
         )?;
         assert!(
@@ -2844,7 +2889,7 @@ mod tests {
     #[test]
     fn map_two_elements() -> Result<(), EvalError> {
         // Map(λx. x, [Unit, Set]) → [Unit, Set]
-        let list = cons_list(vec![Val::Unit, Val::Set]);
+        let list = cons_list(vec![Val::Unit, Val::Sort(1)]);
         let rho = Rho::Nil.extend(Patt::Var("lst".to_string()), list);
         let exp = Exp::Map(Box::new(id_lam()), Box::new(Exp::Var("lst".to_string())));
         let v = eval(&exp, &rho)?;
@@ -2852,7 +2897,7 @@ mod tests {
             Val::List(items) => {
                 assert_eq!(items.len(), 2);
                 assert!(matches!(items[0], Val::Unit));
-                assert!(matches!(items[1], Val::Set));
+                assert!(matches!(items[1], Val::Sort(1)));
             }
             other => panic!("expected List, got {other:?}"),
         }
@@ -2988,7 +3033,8 @@ mod tests {
         Arc::new(InductiveDecl {
             name: name.to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
             ctors: Vec::new(),
         })
     }
@@ -3000,7 +3046,8 @@ mod tests {
         Arc::new(InductiveDecl {
             name: "Nat".to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "zero".to_string(),
@@ -3047,7 +3094,8 @@ mod tests {
         let bool_decl = Arc::new(InductiveDecl {
             name: "Bool".to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "True".to_string(),
@@ -3063,7 +3111,7 @@ mod tests {
         let false_minor = Val::Con("no".to_string(), Box::new(Val::Unit));
         let result = iota_reduce(
             &bool_decl,
-            &Val::Set,
+            &Val::Sort(1),
             &[true_minor, false_minor],
             "True",
             &[],
@@ -3102,7 +3150,7 @@ mod tests {
 
         let result = iota_reduce(
             &nat,
-            &Val::Set,
+            &Val::Sort(1),
             &[zero_minor, succ_minor],
             "succ",
             &[nat_n(&nat, 1)],
@@ -3124,14 +3172,15 @@ mod tests {
         let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
         let list_decl = Arc::new(InductiveDecl {
             name: "List".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Set)],
-            sort: Exp::Set,
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Set),
+                        Box::new(Exp::Sort(1)),
                         Box::new(list_ty.clone()),
                     ),
                 },
@@ -3139,7 +3188,7 @@ mod tests {
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Set),
+                        Box::new(Exp::Sort(1)),
                         Box::new(Exp::Pi(
                             Patt::Unit,
                             Box::new(Exp::Var("A".to_string())),
@@ -3191,7 +3240,7 @@ mod tests {
         };
         let result = iota_reduce(
             &list_decl,
-            &Val::Set,
+            &Val::Sort(1),
             &[nil_minor, cons_minor],
             "cons",
             &three_args,
@@ -3223,7 +3272,7 @@ mod tests {
             .extend(Patt::Var("succ_min".to_string()), succ_minor);
         let exp = Exp::InductiveRec {
             decl: nat.clone(),
-            motive: Box::new(Exp::Set),
+            motive: Box::new(Exp::Sort(1)),
             minors: vec![
                 Exp::Var("zero_min".to_string()),
                 Exp::Var("succ_min".to_string()),
@@ -3285,8 +3334,8 @@ mod tests {
             Exp::Lam(Patt::Unit, Box::new(Exp::Var("acc".to_string()))),
             Rho::Nil,
         ));
-        let result = eval_reduce(f, Val::Set, lst, &EvalCtx::Pure).expect("eval_reduce");
-        assert!(matches!(result, Val::Set));
+        let result = eval_reduce(f, Val::Sort(1), lst, &EvalCtx::Pure).expect("eval_reduce");
+        assert!(matches!(result, Val::Sort(1)));
     }
 
     #[test]
@@ -4007,5 +4056,176 @@ mod tests {
             Val::Nt(Neut::Gen(_, name)) if name == "__constraint_undecidable" => {}
             other => panic!("expected fallback Undecidable, got {other:?}"),
         }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // D48 Phase G — iota reduction on indexed inductives (end-to-end)
+    // ──────────────────────────────────────────────────────────────────
+
+    /// SimpleVec (A : Set) : 1 → Set with nil : SimpleVec A () and
+    /// cons : (h:1) → A → SimpleVec A () → SimpleVec A (). Mirrors the
+    /// check.rs / recursor.rs Phase B/E test fixtures so iota behavior
+    /// can be verified against the same shape.
+    fn simple_vec_decl_for_eval() -> Arc<InductiveDecl> {
+        let self_ref = Arc::new(InductiveDecl {
+            name: "SimpleVec".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        let vec_a_unit =
+            Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string()), Exp::Unit]);
+        Arc::new(InductiveDecl {
+            name: "SimpleVec".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: vec![
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "nil".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Var("A".to_string()),
+                        Box::new(Exp::Sort(1)),
+                        Box::new(vec_a_unit.clone()),
+                    ),
+                },
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "cons".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Var("A".to_string()),
+                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::Pi(
+                            Patt::Unit,
+                            Box::new(Exp::One),
+                            Box::new(Exp::Pi(
+                                Patt::Unit,
+                                Box::new(Exp::Var("A".to_string())),
+                                Box::new(Exp::Pi(
+                                    Patt::Unit,
+                                    Box::new(vec_a_unit.clone()),
+                                    Box::new(vec_a_unit),
+                                )),
+                            )),
+                        )),
+                    ),
+                },
+            ],
+        })
+    }
+
+    #[test]
+    fn d48_iota_indexed_vec_nil_reduces() {
+        // rec(motive, [nil_minor, cons_minor], nil ()) → nil_minor
+        // (after the minor receives any value-args; `nil` has none
+        // beyond the param A, which the recursor consumes during
+        // ctor reconstruction, not at the minor level).
+        //
+        // Build SimpleVec, construct an InductiveVal for nil, and
+        // run InductiveRec on it. With const-unit minors, the
+        // result must reduce to Unit.
+        let decl = simple_vec_decl_for_eval();
+        let nil_val = Val::InductiveVal {
+            decl: decl.clone(),
+            ctor_name: "nil".to_string(),
+            args: Vec::new(),
+        };
+        // Motive: λ_idx. λ_v. 1  (a constant-One motive — the
+        // recursor's result type is Unit regardless of indices).
+        let motive = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Unit,
+            Exp::Lam(Patt::Unit, Box::new(Exp::One)),
+            Rho::Nil,
+        ));
+        // Minors: nil_minor = Unit, cons_minor = λ_h. λ_x. λ_xs. λ_ih. Unit
+        let nil_minor = Val::Unit;
+        let cons_minor = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Unit,
+            Exp::Lam(
+                Patt::Unit,
+                Box::new(Exp::Lam(
+                    Patt::Unit,
+                    Box::new(Exp::Lam(Patt::Unit, Box::new(Exp::Unit))),
+                )),
+            ),
+            Rho::Nil,
+        ));
+        let rho = Rho::Nil
+            .extend(Patt::Var("v".to_string()), nil_val.clone())
+            .extend(Patt::Var("m".to_string()), motive.clone())
+            .extend(Patt::Var("nil_min".to_string()), nil_minor)
+            .extend(Patt::Var("cons_min".to_string()), cons_minor);
+        let rec_exp = Exp::InductiveRec {
+            decl,
+            motive: Box::new(Exp::Var("m".to_string())),
+            minors: vec![
+                Exp::Var("nil_min".to_string()),
+                Exp::Var("cons_min".to_string()),
+            ],
+            major: Box::new(Exp::Var("v".to_string())),
+        };
+        let result = eval_ctx(&rec_exp, &rho, &EvalCtx::Pure).expect("iota nil");
+        // For nil with no value-args, the minor is applied to nothing —
+        // the result is nil_minor itself, which is Unit.
+        assert!(
+            matches!(result, Val::Unit),
+            "expected iota(rec on nil) to reduce to Unit (the nil_minor); got {result:?}"
+        );
+    }
+
+    #[test]
+    fn d48_iota_indexed_vec_cons_reduces_with_ih() {
+        // rec on a 1-element cons should:
+        //   - apply cons_minor to (h, x, xs)
+        //   - then apply an IH for xs (which itself is nil)
+        // With the cons_minor `λ_h. λ_x. λ_xs. λ_ih. Unit`, the
+        // result is Unit regardless of the IH value.
+        let decl = simple_vec_decl_for_eval();
+        let nil_val = Val::InductiveVal {
+            decl: decl.clone(),
+            ctor_name: "nil".to_string(),
+            args: Vec::new(),
+        };
+        let cons_val = Val::InductiveVal {
+            decl: decl.clone(),
+            ctor_name: "cons".to_string(),
+            args: vec![Val::Unit, Val::Unit, nil_val],
+        };
+        let motive = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Unit,
+            Exp::Lam(Patt::Unit, Box::new(Exp::One)),
+            Rho::Nil,
+        ));
+        let nil_minor = Val::Unit;
+        let cons_minor = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Unit,
+            Exp::Lam(
+                Patt::Unit,
+                Box::new(Exp::Lam(
+                    Patt::Unit,
+                    Box::new(Exp::Lam(Patt::Unit, Box::new(Exp::Unit))),
+                )),
+            ),
+            Rho::Nil,
+        ));
+        let rho = Rho::Nil
+            .extend(Patt::Var("v".to_string()), cons_val)
+            .extend(Patt::Var("m".to_string()), motive)
+            .extend(Patt::Var("nil_min".to_string()), nil_minor)
+            .extend(Patt::Var("cons_min".to_string()), cons_minor);
+        let rec_exp = Exp::InductiveRec {
+            decl,
+            motive: Box::new(Exp::Var("m".to_string())),
+            minors: vec![
+                Exp::Var("nil_min".to_string()),
+                Exp::Var("cons_min".to_string()),
+            ],
+            major: Box::new(Exp::Var("v".to_string())),
+        };
+        let result = eval_ctx(&rec_exp, &rho, &EvalCtx::Pure).expect("iota cons");
+        assert!(
+            matches!(result, Val::Unit),
+            "expected iota(rec on cons) to reduce to Unit (const cons_minor); got {result:?}"
+        );
     }
 }

@@ -4,7 +4,7 @@
 
 **Status:** Implemented (Phase 5; Phase 10 extensions)
 **Required before:** Phase 5 implementation
-**Resolves:** Integration of Eigon type system with Mini-TT/CIC, trace persistence, incremental execution, validation/type-checking relationship
+**Resolves:** Integration of Eigon type system with EigenTT/CIC, trace persistence, incremental execution, validation/type-checking relationship
 
 ---
 
@@ -14,12 +14,12 @@ The Eigenius kernel has two disconnected systems for checking correctness:
 
 1. **Ontology validation** (`validation/mod.rs`): checks resources against class definitions. 12 rules covering required properties, type matching, formats, ranges, cardinality, and the open-world assumption. Sound and complete for structural resource correctness.
 
-2. **Mini-TT type checking** (`nbe/check.rs`): checks program expressions against dependent types. Correctly ported from the academic reference for core Mini-TT (Pi, Sigma, Sum, Unit), but stubs for all Eigon-specific extensions.
+2. **EigenTT type checking** (`nbe/check.rs`): checks program expressions against dependent types. Correctly ported from the academic reference for core EigenTT (Pi, Sigma, Sum, Unit), but stubs for all Eigon-specific extensions.
 
 Additionally, the **program executor** (`execute.rs`) ignores both systems entirely — it interprets programs dynamically with no type information at runtime.
 
 This document specifies:
-- How to extend Mini-TT with Lean 4-inspired features to close the type-theoretic gaps
+- How to extend EigenTT with Lean 4-inspired features to close the type-theoretic gaps
 - How to make NbE trace-aware for incremental execution
 - How validation and type checking relate (complementary, not redundant)
 - The migration path from the current architecture
@@ -30,8 +30,8 @@ This document specifies:
 
 ### 2.1 What works
 
-- Mini-TT core: Pi, Sigma, Sum, Unit types with NbE (eval, readback, check)
-- Expression forms map 1:1 from Eigon-JSON to Mini-TT terms
+- EigenTT core: Pi, Sigma, Sum, Unit types with NbE (eval, readback, check)
+- Expression forms map 1:1 from Eigon-JSON to EigenTT terms
 - Ontology validation is sound for the 12 structural rules
 - Trace recording in the executor (Trace enum, TraceStore, memoization)
 - ESL compiler produces valid Eigon-JSON resources
@@ -60,7 +60,7 @@ The validator and type checker don't compose. The executor respects neither.
 
 ## 3. Design Principles
 
-1. **Mini-TT core is correct and stays unchanged.** Extensions are additive — new term formers, new value constructors, new reduction rules. The existing NbE algorithm (eval/readback/check) keeps its structure.
+1. **EigenTT core is correct and stays unchanged.** Extensions are additive — new term formers, new value constructors, new reduction rules. The existing NbE algorithm (eval/readback/check) keeps its structure.
 
 2. **Borrow design patterns from Lean 4, not implementation.** Decidable propositions, native decide, structure inheritance — adapted to our scale.
 
@@ -391,7 +391,7 @@ When the Grothendieck institution framework arrives, the validator becomes the *
 - Models: layers (collections of resources)
 - Satisfaction: the current validation logic
 
-The Mini-TT type checker becomes the **program institution**:
+The EigenTT type checker becomes the **program institution**:
 - Signatures: type contexts (Gamma environments)
 - Sentences: typing judgments
 - Models: well-typed terms
@@ -448,7 +448,7 @@ A program declares its capability level. The kernel invokes `eval` with the matc
 | `program/ground.rs` — ground type resolution | Called by `eval` in Read/IO mode |
 | `program/trace.rs` — trace types | Produced by `eval` in IO mode |
 
-`execute.rs` is not removed — it's absorbed. Its logic (Apply dispatch, Let binding, Construct, Project) moves into `eval` as reduction rules for the Eigon extensions. The existing Mini-TT reduction rules stay unchanged.
+`execute.rs` is not removed — it's absorbed. Its logic (Apply dispatch, Let binding, Construct, Project) moves into `eval` as reduction rules for the Eigon extensions. The existing EigenTT reduction rules stay unchanged.
 
 ### 7.3 What Changes in eval
 
@@ -469,7 +469,7 @@ A program declares its capability level. The kernel invokes `eval` with the matc
 | `App(Lam(p, body), arg)` | Substitute and reduce (standard beta) |
 | `Fst(Pair(a, b))` | Return a |
 | `Case(Con(c, v), branches)` | Select branch c, apply to v |
-| All other Mini-TT rules | Unchanged |
+| All other EigenTT rules | Unchanged |
 
 ### 7.4 Trace Production
 
@@ -498,7 +498,7 @@ This is eigenius/eigenius#5. Ships independently. The existing executor gains pe
 
 ### 8.2 Step 2: Type Theory Extensions (Medium Risk)
 
-Extend Mini-TT with Lean-inspired features. Independently testable additions.
+Extend EigenTT with Lean-inspired features. Independently testable additions.
 
 1. Add `Id` type, `refl`, `J` eliminator
 2. Add `DecEq` for ground types

@@ -37,7 +37,7 @@ machinery a reader uses to follow up on the rest of the guide.
   — closure walker over chain shapes
 - [**D31** — Institution lifecycle](../../design/d31-runtime-language-substrate-institution-lifecycle.md)
   — install + audit lifecycle
-- [**D32** — Chain-mirrored Mini-TT inductives](../../design/d32-chain-mirrored-mini-tt-inductives.md)
+- [**D32** — Chain-mirrored EigenTT inductives](../../design/d32-chain-mirrored-mini-tt-inductives.md)
   — `formulas:FormulaTerm` and the inductive-types-on-the-chain
   mechanism
 
@@ -54,7 +54,7 @@ machinery a reader uses to follow up on the rest of the guide.
 
 - [ESL](../esl/README.md) — surface syntax for ontologies and programs
 - [EigenQL](../eigenql/README.md) — surface syntax for queries
-- [Formula language](../formula/README.md) — chain-mirrored Mini-TT
+- [Formula language](../formula/README.md) — chain-mirrored EigenTT
   fragment used as the v1 cross-institution payload
 
 ### §9.5. Per-host implementer chapters
@@ -79,7 +79,7 @@ reinsertion through both ESL and EigenQL surfaces). Tracked next:
   model-theoretic) into constructive type theory, replacing models with
   typed witnesses under Curry–Howard. Background context in
   [§3.9](03-comorphisms.md). Open research direction; widely believed
-  feasible — the kernel's Mini-TT already carries the load-bearing
+  feasible — the kernel's EigenTT already carries the load-bearing
   pieces (`Pi`/`Sigma` types, typed inductive verdicts), the gap is
   the meta-theoretic equivalence proof.
 

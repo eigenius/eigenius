@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Mini-TT evaluation and type environments.
+//! EigenTT evaluation and type environments.
 //!
-//! Ported from `Main.hs` lines 169-280 in the Mini-TT reference.
+//! Ported from `Main.hs` lines 169-280 in the EigenTT reference.
 
 use crate::nbe::term::{Decl, Name, Patt};
 use crate::nbe::val::Val;
@@ -196,10 +196,10 @@ mod tests {
                 Box::new(Patt::Var("a".to_string())),
                 Box::new(Patt::Var("b".to_string())),
             ),
-            Val::Pair(Box::new(Val::Unit), Box::new(Val::Set)),
+            Val::Pair(Box::new(Val::Unit), Box::new(Val::Sort(1))),
         );
         assert!(matches!(rho.get("a"), Ok(Val::Unit)));
-        assert!(matches!(rho.get("b"), Ok(Val::Set)));
+        assert!(matches!(rho.get("b"), Ok(Val::Sort(1))));
     }
 
     #[test]

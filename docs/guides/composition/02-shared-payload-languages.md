@@ -216,7 +216,7 @@ candidates the platform's structure makes natural:
 
 - **A shared logical-clause language.** An inductive type for typed
   propositions and conditions (`Forall`, `Exists`, `Implies`, `BoundedBy`,
-  `EquivalentTo`) over enterprise quantities. Because the kernel's Mini-TT
+  `EquivalentTo`) over enterprise quantities. Because the kernel's EigenTT
   carries `Pi` and `Lam` natively (the binders that make FormulaTerm do
   double duty as a logical language under
   [Curry-Howard](../formula/02-mini-tt-fragment.md#22-why-pi-and-lam-are-chain-resident)),

@@ -82,7 +82,12 @@ impl<'a> Parser<'a> {
     }
 
     fn expect_ident(&mut self) -> Result<String, EslError> {
-        // Accept keywords as identifiers (e.g., `core:resource`, `core:property`)
+        // Accept keywords as identifiers (e.g., `core:resource`, `core:property`).
+        // The eigenius#72 sort-literal keywords (Prop, Set, Type) are also
+        // accepted because the core ontology has resources at IRIs like
+        // `urn:eigenius:core:Set` whose local name parses as the keyword
+        // token. Same applies to `axiom` / `forall` which a user might
+        // happen to use as a name fragment.
         let name = match self.peek().clone() {
             TokenKind::Ident(name) => name,
             TokenKind::Namespace => "namespace".to_string(),
@@ -95,6 +100,11 @@ impl<'a> Parser<'a> {
             TokenKind::Construct => "Construct".to_string(),
             TokenKind::Map => "map".to_string(),
             TokenKind::Reduce => "reduce".to_string(),
+            TokenKind::Prop => "Prop".to_string(),
+            TokenKind::SetKw => "Set".to_string(),
+            TokenKind::TypeKw => "Type".to_string(),
+            TokenKind::Axiom => "axiom".to_string(),
+            TokenKind::Forall => "forall".to_string(),
             _ => {
                 return Err(EslError::parser(
                     Some(self.current_pos()),
@@ -198,11 +208,14 @@ impl<'a> Parser<'a> {
                 TokenKind::VectorIndex => {
                     declarations.push(Declaration::VectorIndex(self.parse_vector_index()?))
                 }
+                TokenKind::Axiom => {
+                    declarations.push(Declaration::Axiom(self.parse_axiom()?))
+                }
                 _ => {
                     return Err(EslError::parser(
                         Some(self.current_pos()),
                         format!(
-                            "expected top-level declaration (namespace, class, property, resource, program, codata, data, merge_comorphism, text_index, vector_index), found {:?}",
+                            "expected top-level declaration (namespace, class, property, resource, program, codata, data, merge_comorphism, text_index, vector_index, axiom), found {:?}",
                             self.peek()
                         ),
                     ))
@@ -900,8 +913,36 @@ impl<'a> Parser<'a> {
         // (`{j : Size < bound} -> body`, below) which compiles to
         // `Exp::SizedPi` / `Exp::Pi` for size kinds, and from the
         // anonymous arrow `A -> B`.
-        if self.at(&TokenKind::Pi) {
+        //
+        // eigenius#72: `forall` is an alias for `pi` with the same
+        // syntax — natural for proposition authoring.
+        if self.at(&TokenKind::Pi) || self.at(&TokenKind::Forall) {
             return self.parse_pi_type();
+        }
+
+        // eigenius#72 Layer 3 — `fun (i_1 : T_1, …) => body` lambda in
+        // type position. Used as a motive for `match … returning <motive>`
+        // over indexed inductives. Parses through the same typed-param
+        // list machinery as `pi`/`forall`.
+        if self.at(&TokenKind::Fun) {
+            return self.parse_fun_lambda();
+        }
+
+        // eigenius#72 — sort literals at the head of a type
+        // expression: `Prop`, `Set`, or `Type N`. May then be
+        // followed by `-> ...` (an arrow whose domain is a sort).
+        if self.at(&TokenKind::Prop) || self.at(&TokenKind::SetKw) || self.at(&TokenKind::TypeKw) {
+            let sort = self.parse_sort_literal()?;
+            if self.at(&TokenKind::Arrow) {
+                self.advance();
+                let codomain = self.parse_type_expr()?;
+                return Ok(TypeExpr::Arrow {
+                    domain: Box::new(sort),
+                    codomain: Box::new(codomain),
+                    pos,
+                });
+            }
+            return Ok(sort);
         }
 
         // Size-binder arrow form — unambiguous because codata obs
@@ -968,6 +1009,52 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// eigenius#72 — parse a sort literal as a `TypeExpr::Sort`.
+    /// `Prop` / `Set` are nullary; `Type` requires a following
+    /// integer level.
+    fn parse_sort_literal(&mut self) -> Result<TypeExpr, EslError> {
+        let pos = self.current_pos();
+        if self.at(&TokenKind::Prop) {
+            self.advance();
+            return Ok(TypeExpr::Sort {
+                kind: crate::esl::ast::SortKind::Prop,
+                pos,
+            });
+        }
+        if self.at(&TokenKind::SetKw) {
+            self.advance();
+            return Ok(TypeExpr::Sort {
+                kind: crate::esl::ast::SortKind::Set,
+                pos,
+            });
+        }
+        if self.at(&TokenKind::TypeKw) {
+            self.advance();
+            let level = match self.peek().clone() {
+                TokenKind::IntLit(n) if n >= 0 => {
+                    self.advance();
+                    n as usize
+                }
+                other => {
+                    return Err(EslError::parser(
+                        Some(self.current_pos()),
+                        format!(
+                            "expected non-negative integer level after `Type`, found {other:?}"
+                        ),
+                    ));
+                }
+            };
+            return Ok(TypeExpr::Sort {
+                kind: crate::esl::ast::SortKind::Type(level),
+                pos,
+            });
+        }
+        Err(EslError::parser(
+            Some(pos),
+            "expected a sort literal (Prop, Set, or Type N)".to_string(),
+        ))
+    }
+
     fn parse_type_atom(&mut self) -> Result<TypeExpr, EslError> {
         let pos = self.current_pos();
         let name = self.parse_qualified_name()?;
@@ -1006,7 +1093,16 @@ impl<'a> Parser<'a> {
     /// return type.
     fn parse_pi_type(&mut self) -> Result<TypeExpr, EslError> {
         let pos = self.current_pos();
-        self.expect(&TokenKind::Pi)?;
+        // Either `pi` (D37 §3.5) or `forall` (eigenius#72 alias) opens
+        // the binder list. Both lower to the same `TypeExpr::Pi`.
+        if self.at(&TokenKind::Pi) || self.at(&TokenKind::Forall) {
+            self.advance();
+        } else {
+            return Err(EslError::parser(
+                Some(pos.clone()),
+                "expected `pi` or `forall` to open a Pi type".to_string(),
+            ));
+        }
         let params = self.parse_typed_param_list()?;
         self.expect(&TokenKind::FatArrow)?;
         let codomain = self.parse_type_expr()?;
@@ -1017,11 +1113,36 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// eigenius#72 Layer 3 — `fun (i_1 : T_1, …, i_n : T_n) => body`
+    /// lambda in type position. Mirrors `parse_pi_type` exactly except
+    /// for the keyword and the resulting AST variant.
+    fn parse_fun_lambda(&mut self) -> Result<TypeExpr, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Fun)?;
+        let params = self.parse_typed_param_list()?;
+        self.expect(&TokenKind::FatArrow)?;
+        let body = self.parse_type_expr()?;
+        Ok(TypeExpr::Lambda {
+            params,
+            body: Box::new(body),
+            pos,
+        })
+    }
+
     /// `x_1 : T_1, x_2 : T_2, ...` — typed binder list shared by
     /// `pi` (D37 §3.5) and the typed `lambda` literal (D37 §3.1).
     /// Requires at least one binder; the list ends when the parser
     /// sees a non-comma token after a binder (typically `=>`).
     fn parse_typed_param_list(&mut self) -> Result<Vec<TypedParam>, EslError> {
+        // eigenius#72: allow an outer `(...)` wrap around the binder
+        // list — natural for proposition authoring
+        // (`forall (P : Prop) => P -> P`). The existing D37 §3.5 `pi`
+        // form (`pi x : T => U`) without parens stays valid too; we
+        // peek for `(` and parse a parenthesised list when present.
+        let parenthesised = self.at(&TokenKind::LParen);
+        if parenthesised {
+            self.advance();
+        }
         let mut params = Vec::new();
         loop {
             let pos = self.current_pos();
@@ -1033,6 +1154,9 @@ impl<'a> Parser<'a> {
                 break;
             }
             self.advance();
+        }
+        if parenthesised {
+            self.expect(&TokenKind::RParen)?;
         }
         Ok(params)
     }
@@ -1176,6 +1300,44 @@ impl<'a> Parser<'a> {
     /// optional positional argument types in parentheses. Constructor
     /// argument types are parameterised name references; the implicit
     /// result type is the inductive itself applied to its parameters.
+    /// eigenius#72 — `axiom Name : <type-expr> [ note "<justification>" ; ]`.
+    /// Top-level declaration that commits a `core:Axiom` chain resource
+    /// whose `axiom_statement` is the encoded type expression.
+    fn parse_axiom(&mut self) -> Result<AxiomDecl, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Axiom)?;
+        let name = self.parse_qualified_name()?;
+        self.expect(&TokenKind::Colon)?;
+        let statement = self.parse_type_expr()?;
+        // Optional `note: "..."` clause for the justification text.
+        // We accept it before a closing semicolon to avoid relying on
+        // a separate keyword.
+        let justification = if self.at(&TokenKind::Semicolon) {
+            None
+        } else if let TokenKind::Ident(name) = self.peek().clone() {
+            if name == "note" {
+                self.advance();
+                self.expect(&TokenKind::Colon)?;
+                let s = self.expect_string()?;
+                Some(s)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        // Optional trailing semicolon.
+        if self.at(&TokenKind::Semicolon) {
+            self.advance();
+        }
+        Ok(AxiomDecl {
+            name,
+            statement,
+            justification,
+            pos,
+        })
+    }
+
     fn parse_data(&mut self) -> Result<DataDecl, EslError> {
         let pos = self.current_pos();
         self.expect(&TokenKind::Data)?;
@@ -1185,6 +1347,23 @@ impl<'a> Parser<'a> {
             self.parse_data_params()?
         } else {
             Vec::new()
+        };
+
+        // Optional `: <index-telescope> -> <sort>` clause (eigenius#72
+        // Layer 2). Example: `data Vec(A : Set) : Nat -> Set { ... }`
+        // parses one index `_ : Nat` and the result sort `Set`. The
+        // telescope is `T1 -> T2 -> ... -> SortLiteral`; trailing piece
+        // must be a sort literal (Prop / Set / Type N).
+        //
+        // The legacy form `data Name { ... }` and the parametric form
+        // `data Name(params) { ... }` both omit this clause; `indices`
+        // stays empty and `result_sort` stays `None` (compiler defaults
+        // to `Set`).
+        let (indices, result_sort) = if self.at(&TokenKind::Colon) {
+            self.advance();
+            self.parse_data_index_telescope()?
+        } else {
+            (Vec::new(), None)
         };
 
         self.expect(&TokenKind::LBrace)?;
@@ -1215,6 +1394,8 @@ impl<'a> Parser<'a> {
         Ok(DataDecl {
             name,
             params,
+            indices,
+            result_sort,
             ctors,
             pos,
         })
@@ -1254,10 +1435,79 @@ impl<'a> Parser<'a> {
         Ok(params)
     }
 
-    /// `name` (nullary) or `name(arg, arg, ...)` (with positional args).
+    /// Parse the `<index-telescope> -> <sort-literal>` clause that
+    /// appears after the colon in `data Name(params) : ... { ... }`
+    /// (eigenius#72 Layer 2). The colon has already been consumed by
+    /// the caller.
+    ///
+    /// Grammar (v1): one or more anonymous index types separated by
+    /// `->`, terminated by a sort literal. Each index type must be a
+    /// bare qualified-name reference (parameter name, or a class IRI);
+    /// arbitrary type expressions as index kinds are deferred. A bare
+    /// sort literal (no preceding `->`) is also accepted and produces
+    /// an empty index telescope with the sort as `result_sort` — i.e.
+    /// `data Foo : Set { ... }` is equivalent to `data Foo { ... }`
+    /// but with the sort made explicit.
+    fn parse_data_index_telescope(
+        &mut self,
+    ) -> Result<(Vec<DataParam>, Option<SortKind>), EslError> {
+        let mut indices = Vec::new();
+        let te = self.parse_type_expr()?;
+        let mut current = te;
+        loop {
+            match current {
+                TypeExpr::Arrow {
+                    domain, codomain, ..
+                } => {
+                    let (kind, dom_pos) = match *domain {
+                        TypeExpr::Ref { name, args, pos } if args.is_empty() => (name, pos),
+                        other => {
+                            return Err(EslError::parser(
+                                Some(other.pos().clone()),
+                                "data-index telescope (v1): each index type must be a bare \
+                                 qualified-name reference; arbitrary applied or function-typed \
+                                 index kinds are not yet supported"
+                                    .to_string(),
+                            ));
+                        }
+                    };
+                    indices.push(DataParam {
+                        name: "_".to_string(),
+                        kind,
+                        pos: dom_pos,
+                    });
+                    current = *codomain;
+                }
+                TypeExpr::Sort { kind, .. } => {
+                    return Ok((indices, Some(kind)));
+                }
+                other => {
+                    return Err(EslError::parser(
+                        Some(other.pos().clone()),
+                        "data-index telescope must end in a sort literal (Prop / Set / Type N); \
+                         each preceding segment is an anonymous index type separated by `->`"
+                            .to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Three surface forms (eigenius#72 Layer 2):
+    ///
+    /// - `name` — nullary positional.
+    /// - `name(arg, arg, ...)` — positional with arg list.
+    /// - `name : <type-expr>` — typed form carrying the full Π-telescope
+    ///   (required for indexed inductives; optional but allowed for
+    ///   non-indexed too).
     fn parse_ctor_decl(&mut self) -> Result<CtorDecl, EslError> {
         let pos = self.current_pos();
         let name = self.expect_ident()?;
+        if self.at(&TokenKind::Colon) {
+            self.advance();
+            let typ = self.parse_type_expr()?;
+            return Ok(CtorDecl::Typed { name, typ, pos });
+        }
         let args = if self.at(&TokenKind::LParen) {
             self.advance();
             let mut args = Vec::new();
@@ -1288,7 +1538,7 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
-        Ok(CtorDecl { name, args, pos })
+        Ok(CtorDecl::Positional { name, args, pos })
     }
 
     /// A single constructor argument.
@@ -1567,13 +1817,16 @@ impl<'a> Parser<'a> {
         // No-trailing-block: a following `{` opens the match body, not
         // a component config block on the scrutinee.
         let scrutinee = self.parse_apply_or_atom_no_trailing_block()?;
-        // `returning T` is optional. When omitted, the kernel-side
-        // type checker synthesises the motive from the expected type
-        // (Phase 11b step 12). When present, the expression builder
-        // desugars eagerly to `Exp::InductiveRec`.
-        let result_type = if self.at(&TokenKind::Returning) {
+        // `returning <motive>` is optional. When omitted, the
+        // kernel-side type checker synthesises the motive from the
+        // checking-mode expected type (Phase 11b step 12). When present
+        // the expression builder desugars eagerly to
+        // `Exp::InductiveRec` with the supplied motive (eigenius#72
+        // Layer 3 — accepts the full type-expression surface, including
+        // `fun (i : T) => body` motives for indexed inductives).
+        let returning = if self.at(&TokenKind::Returning) {
             self.advance();
-            Some(self.parse_qualified_name()?)
+            Some(self.parse_type_expr()?)
         } else {
             None
         };
@@ -1594,7 +1847,7 @@ impl<'a> Parser<'a> {
 
         Ok(Expr::Match {
             scrutinee: Box::new(scrutinee),
-            result_type,
+            returning,
             arms,
             pos,
         })
@@ -2800,11 +3053,11 @@ mod tests {
                 assert_eq!(d.name.name, "Nat");
                 assert!(d.params.is_empty());
                 assert_eq!(d.ctors.len(), 2);
-                assert_eq!(d.ctors[0].name, "zero");
-                assert!(d.ctors[0].args.is_empty());
-                assert_eq!(d.ctors[1].name, "succ");
-                assert_eq!(d.ctors[1].args.len(), 1);
-                match &d.ctors[1].args[0] {
+                assert_eq!(d.ctors[0].name(), "zero");
+                assert!(d.ctors[0].args().is_empty());
+                assert_eq!(d.ctors[1].name(), "succ");
+                assert_eq!(d.ctors[1].args().len(), 1);
+                match &d.ctors[1].args()[0] {
                     CtorArg::Positional(t) => {
                         assert_eq!(t.name.name, "Nat");
                         assert!(t.params.is_empty());
@@ -2831,8 +3084,8 @@ mod tests {
             Declaration::Data(d) => {
                 assert_eq!(d.name.name, "Bool");
                 assert_eq!(d.ctors.len(), 2);
-                assert!(d.ctors[0].args.is_empty());
-                assert!(d.ctors[1].args.is_empty());
+                assert!(d.ctors[0].args().is_empty());
+                assert!(d.ctors[1].args().is_empty());
             }
             _ => panic!("expected data"),
         }
@@ -2856,12 +3109,12 @@ mod tests {
                 assert_eq!(d.params[0].name, "A");
                 assert_eq!(d.params[0].kind.name, "Set");
                 assert_eq!(d.ctors.len(), 2);
-                assert_eq!(d.ctors[0].name, "nil");
-                assert!(d.ctors[0].args.is_empty());
-                assert_eq!(d.ctors[1].name, "cons");
-                assert_eq!(d.ctors[1].args.len(), 2);
+                assert_eq!(d.ctors[0].name(), "nil");
+                assert!(d.ctors[0].args().is_empty());
+                assert_eq!(d.ctors[1].name(), "cons");
+                assert_eq!(d.ctors[1].args().len(), 2);
                 // First arg: bare `A` (param reference) — positional
-                match &d.ctors[1].args[0] {
+                match &d.ctors[1].args()[0] {
                     CtorArg::Positional(t) => {
                         assert_eq!(t.name.name, "A");
                         assert!(t.params.is_empty());
@@ -2869,7 +3122,7 @@ mod tests {
                     other => panic!("expected Positional, got {other:?}"),
                 }
                 // Second arg: `ex:List(A)` — positional, applied to `A`.
-                match &d.ctors[1].args[1] {
+                match &d.ctors[1].args()[1] {
                     CtorArg::Positional(t) => {
                         assert_eq!(t.name.name, "List");
                         assert_eq!(t.params.len(), 1);
@@ -2902,8 +3155,8 @@ mod tests {
         match &file.declarations[0] {
             Declaration::Data(d) => {
                 let succ = &d.ctors[1];
-                assert_eq!(succ.args.len(), 2);
-                match &succ.args[0] {
+                assert_eq!(succ.args().len(), 2);
+                match &succ.args()[0] {
                     CtorArg::Named {
                         name, kind, bound, ..
                     } => {
@@ -2915,7 +3168,7 @@ mod tests {
                     }
                     other => panic!("expected Named, got {other:?}"),
                 }
-                assert!(matches!(&succ.args[1], CtorArg::Positional(_)));
+                assert!(matches!(&succ.args()[1], CtorArg::Positional(_)));
             }
             _ => panic!("expected data"),
         }
@@ -2937,7 +3190,7 @@ mod tests {
         )
         .unwrap();
         match &file.declarations[0] {
-            Declaration::Data(d) => match &d.ctors[1].args[0] {
+            Declaration::Data(d) => match &d.ctors[1].args()[0] {
                 CtorArg::Named {
                     name, kind, bound, ..
                 } => {
@@ -2967,7 +3220,7 @@ mod tests {
         )
         .unwrap();
         match &file.declarations[0] {
-            Declaration::Data(d) => match &d.ctors[0].args[0] {
+            Declaration::Data(d) => match &d.ctors[0].args()[0] {
                 CtorArg::Named {
                     name, kind, bound, ..
                 } => {
@@ -2978,6 +3231,186 @@ mod tests {
                 other => panic!("expected Named, got {other:?}"),
             },
             _ => panic!("expected data"),
+        }
+    }
+
+    // --- eigenius#72 Layer 2: indexed data declarations ---
+
+    #[test]
+    fn data_vec_indexed_with_typed_ctors() {
+        let file = parse_str(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Vec(A : core:Set) : core:Nat -> Set {
+                nil : ex:Vec(A, ex:zero),
+                cons : forall (n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                assert_eq!(d.name.name, "Vec");
+                assert_eq!(d.params.len(), 1);
+                assert_eq!(d.indices.len(), 1);
+                assert_eq!(d.indices[0].name, "_");
+                assert_eq!(d.indices[0].kind.name, "Nat");
+                assert_eq!(d.result_sort, Some(SortKind::Set));
+                assert_eq!(d.ctors.len(), 2);
+                assert!(matches!(&d.ctors[0], CtorDecl::Typed { name, .. } if name == "nil"));
+                assert!(matches!(&d.ctors[1], CtorDecl::Typed { name, .. } if name == "cons"));
+            }
+            _ => panic!("expected data"),
+        }
+    }
+
+    #[test]
+    fn data_eq_indexed_in_prop_with_two_indices() {
+        let file = parse_str(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Eq(A : core:Set) : A -> A -> Prop {
+                refl : forall (a : A) => ex:Eq(A, a, a),
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                assert_eq!(d.indices.len(), 2);
+                assert_eq!(d.indices[0].kind.name, "A");
+                assert_eq!(d.indices[1].kind.name, "A");
+                assert_eq!(d.result_sort, Some(SortKind::Prop));
+            }
+            _ => panic!("expected data"),
+        }
+    }
+
+    #[test]
+    fn data_indexed_rejects_arrow_in_index_telescope_without_sort() {
+        // Trailing segment must be a sort literal.
+        let err = parse_str(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Bad(A : core:Set) : core:Nat -> core:Nat {
+                mk : ex:Bad(A, ex:zero, ex:zero),
+            }
+            "#,
+        )
+        .unwrap_err();
+        assert!(
+            err.message.contains("sort literal"),
+            "expected sort-literal error, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn data_unindexed_with_result_sort_only() {
+        // `data Foo : Set { ... }` is allowed — empty index telescope,
+        // explicit result sort.
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Unit : Set {
+                tt,
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                assert!(d.indices.is_empty());
+                assert_eq!(d.result_sort, Some(SortKind::Set));
+                assert_eq!(d.ctors.len(), 1);
+                assert!(matches!(&d.ctors[0], CtorDecl::Positional { name, .. } if name == "tt"));
+            }
+            _ => panic!("expected data"),
+        }
+    }
+
+    // --- eigenius#72 Layer 3: match returning with Lambda motive ---
+
+    #[test]
+    fn match_returning_with_fun_lambda_motive_parses() {
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:eigenius:example";
+            namespace core = "urn:eigenius:core";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:identity : ex:Nat -> ex:Nat {
+                match input returning fun (n : core:Nat) => ex:Nat {
+                    zero -> input;
+                    succ(k) -> input;
+                }
+            }
+            "#,
+        )
+        .unwrap();
+        assert_eq!(file.declarations.len(), 2);
+        let prog = match &file.declarations[1] {
+            Declaration::Program(p) => p,
+            _ => panic!("expected program"),
+        };
+        match &prog.body {
+            Expr::Match { returning, .. } => {
+                assert!(
+                    matches!(returning, Some(TypeExpr::Lambda { .. })),
+                    "expected TypeExpr::Lambda motive, got {returning:?}"
+                );
+            }
+            other => panic!("expected Match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn match_returning_with_bare_ref_motive_parses_as_typeexpr_ref() {
+        // The pre-Layer-3 form `returning T` is still accepted; it
+        // now parses as `TypeExpr::Ref` instead of the old
+        // `QualifiedName`.
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:identity : ex:Nat -> ex:Nat {
+                match input returning ex:Nat {
+                    zero -> input;
+                    succ(k) -> input;
+                }
+            }
+            "#,
+        )
+        .unwrap();
+        let prog = match &file.declarations[1] {
+            Declaration::Program(p) => p,
+            _ => panic!("expected program"),
+        };
+        match &prog.body {
+            Expr::Match { returning, .. } => match returning {
+                Some(TypeExpr::Ref { name, args, .. }) => {
+                    assert_eq!(name.name, "Nat");
+                    assert!(args.is_empty());
+                }
+                other => panic!("expected TypeExpr::Ref, got {other:?}"),
+            },
+            other => panic!("expected Match, got {other:?}"),
         }
     }
 

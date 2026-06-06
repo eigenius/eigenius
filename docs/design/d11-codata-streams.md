@@ -65,11 +65,11 @@ The simplest check: **syntactic guardedness** — corecursive calls must appear 
 
 ---
 
-## 3. Codata in Mini-TT
+## 3. Codata in EigenTT
 
 ### 3.1 Extensions Required
 
-Mini-TT currently has: Π, Σ, Sum (finite), Unit, Set, and the Eigenius extensions (Id, DecEq, NativeDecide, Type(n), EigonClass, EigonPrimitive, PropAccess). To add codata:
+EigenTT currently has: Π, Σ, Sum (finite), Unit, Set, and the Eigenius extensions (Id, DecEq, NativeDecide, Type(n), EigonClass, EigonPrimitive, PropAccess). To add codata:
 
 **New term formers:**
 
@@ -146,7 +146,7 @@ Total functional programming guarantees termination — every function call retu
 
 The answer is that termination and productivity are **dual** totality guarantees, and the capability mode boundary already separates them:
 
-**Pure mode — termination guaranteed.** Mini-TT is strongly normalizing. Every pure program terminates. This is the domain of data types (inductive): finite, well-founded, every recursion reaches a base case.
+**Pure mode — termination guaranteed.** EigenTT is strongly normalizing. Every pure program terminates. This is the domain of data types (inductive): finite, well-founded, every recursion reaches a base case.
 
 **IO mode — termination depends on external services.** An IO component call may take arbitrarily long, fail, or never respond. Termination was already not guaranteed when we added IO dispatch to `eval_ctx`. The trace store mitigates this: completed IO steps are recorded and recoverable after crashes, but the system cannot guarantee that an IO step will ever complete.
 
@@ -394,7 +394,7 @@ let second : core:integer = rest.head;
 
 1. Wire `RocksTraceStore` into `start_server` with `--db` flag
 2. Add task table to the kernel (task ID, status, trace count)
-3. Add `Exp::Codata`, `Exp::CoRecord`, `Exp::Observe` to Mini-TT terms
+3. Add `Exp::Codata`, `Exp::CoRecord`, `Exp::Observe` to EigenTT terms
 4. Add `Val::Codata`, `Val::CoRecord` to values
 5. Add eval rules for codata (observation reduction)
 6. Add readback rules for codata

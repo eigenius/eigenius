@@ -1,15 +1,15 @@
-# D32: Chain-Mirrored Mini-TT Inductives + the `FormulaTerm` Language
+# D32: Chain-Mirrored EigenTT Inductives + the `FormulaTerm` Language
 
 **Date:** 2026-05-06
 **Status:** Implemented (Phase 19d.0; `formulas:FormulaTerm` bootstrap layer + ESL `formula(...)` Pratt sublanguage live)
-**Prerequisites:** D14 (Institution Realisation), D19 (Mini-TT Inductive Types), D26 (Runtime Substrate), D27 (Julia Institutions), D29 (Eigon-Julia Mirror)
+**Prerequisites:** D14 (Institution Realisation), D19 (EigenTT Inductive Types), D26 (Runtime Substrate), D27 (Julia Institutions), D29 (Eigon-Julia Mirror)
 **Drives:** Phase 19d (Symbolics institution), the comorphism story across Phase 19e–19h, Phase 20 (Lean) cross-institution surface.
 
 ## 1. Motivation
 
 ### 1.1 The cross-institution formula transfer problem
 
-Phase 19's reference institutions — `Symbolics`, `JuMP`, `IntervalArithmetic`, `Catalyst`, `DiffEq` — all consume and emit *formulas*: trees of operators applied to numeric variables, constants, and other operators. The same formula `x² + sin(x)` must be expressible as a `SymbolicExpression` (input to `qc_symb_simplify`), as the integrand of a `qc_intv_compute_bounds` call (interval extension), as the objective of a `qc_jump_solve`, and as the right-hand side of an `OdeProblem`. D14's Comorphism mechanic — the `(s, m, t)` triple where `m` is a Mini-TT Component — assumes a typed payload language exists that the source `s` extracts into and the target `t` reifies from. Without a shared formula representation, every cross-institution path reinvents its own ad-hoc serialisation; comorphisms become impossible to type-check at the chain boundary; and EigenQL FIBER queries that traverse formulas through multiple institutions can't produce a stable shape.
+Phase 19's reference institutions — `Symbolics`, `JuMP`, `IntervalArithmetic`, `Catalyst`, `DiffEq` — all consume and emit *formulas*: trees of operators applied to numeric variables, constants, and other operators. The same formula `x² + sin(x)` must be expressible as a `SymbolicExpression` (input to `qc_symb_simplify`), as the integrand of a `qc_intv_compute_bounds` call (interval extension), as the objective of a `qc_jump_solve`, and as the right-hand side of an `OdeProblem`. D14's Comorphism mechanic — the `(s, m, t)` triple where `m` is a EigenTT Component — assumes a typed payload language exists that the source `s` extracts into and the target `t` reifies from. Without a shared formula representation, every cross-institution path reinvents its own ad-hoc serialisation; comorphisms become impossible to type-check at the chain boundary; and EigenQL FIBER queries that traverse formulas through multiple institutions can't produce a stable shape.
 
 ### 1.2 Why now: Phase 19d (Symbolics) needs the chain shape
 
@@ -27,13 +27,13 @@ This document specifies the design that closes those three holes, and pins how t
 
 ## 2. Background
 
-### 2.1 Mini-TT inductives in the kernel work today (D19)
+### 2.1 EigenTT inductives in the kernel work today (D19)
 
-The kernel's Mini-TT layer ([`kernel/src/nbe/term.rs`](../../kernel/src/nbe/term.rs)) has full inductive-type support: `Exp::InductiveType(decl, args)`, `Exp::InductiveCtor(decl, ctor_name, args)`, declarations carry typed parameters and ctor arg types via `Exp` shapes, and the NBE recursor ([`kernel/src/nbe/recursor.rs`](../../kernel/src/nbe/recursor.rs)) dispatches case branches against ctors. A user program written in ESL can declare `data Nat = Zero | Succ(Nat)` and pattern-match on it. **Mini-TT itself is not the problem**; the problem is bringing this expressivity onto the chain so chain-committed Resources can carry typed inductive values.
+The kernel's EigenTT layer ([`kernel/src/nbe/term.rs`](../../kernel/src/nbe/term.rs)) has full inductive-type support: `Exp::InductiveType(decl, args)`, `Exp::InductiveCtor(decl, ctor_name, args)`, declarations carry typed parameters and ctor arg types via `Exp` shapes, and the NBE recursor ([`kernel/src/nbe/recursor.rs`](../../kernel/src/nbe/recursor.rs)) dispatches case branches against ctors. A user program written in ESL can declare `data Nat = Zero | Succ(Nat)` and pattern-match on it. **EigenTT itself is not the problem**; the problem is bringing this expressivity onto the chain so chain-committed Resources can carry typed inductive values.
 
-### 2.2 Mini-TT `Exp` is already the right term language
+### 2.2 EigenTT `Exp` is already the right term language
 
-`Exp` ([term.rs:28](../../kernel/src/nbe/term.rs#L28)) is a fully-elaborated dependent term language with `Var(Name)` for variables, `Lam(Patt, body)` and `Pi(Patt, ty, body)` for binders (the binder's type slot is where variable types live — patterns themselves are unannotated, [term.rs:274](../../kernel/src/nbe/term.rs#L274)), `App(head, arg)` for application, plus the codata, identity-type, and Eigon-aware extensions. The "symbol-algebra fragment" (Var, App, Lam, Pi, plus literal and operator-reference primitives) is a structural subset of `Exp`. Defining `FormulaTerm` to mirror that subset means **the formula language is *literally a fragment of Mini-TT*** — no impedance mismatch with the kernel's evaluator, and a comorphism's `m` can be written in actual Mini-TT.
+`Exp` ([term.rs:28](../../kernel/src/nbe/term.rs#L28)) is a fully-elaborated dependent term language with `Var(Name)` for variables, `Lam(Patt, body)` and `Pi(Patt, ty, body)` for binders (the binder's type slot is where variable types live — patterns themselves are unannotated, [term.rs:274](../../kernel/src/nbe/term.rs#L274)), `App(head, arg)` for application, plus the codata, identity-type, and Eigon-aware extensions. The "symbol-algebra fragment" (Var, App, Lam, Pi, plus literal and operator-reference primitives) is a structural subset of `Exp`. Defining `FormulaTerm` to mirror that subset means **the formula language is *literally a fragment of EigenTT*** — no impedance mismatch with the kernel's evaluator, and a comorphism's `m` can be written in actual EigenTT.
 
 ### 2.3 The existing chain ontology
 
@@ -43,7 +43,7 @@ The kernel's Mini-TT layer ([`kernel/src/nbe/term.rs`](../../kernel/src/nbe/term
 
 [`JuliaMirrorGenerator`](../../crates/eigenius-julia/src/mirror_gen.rs) walks the closure of a `Class` resource (following `requires` → `Property` definitions → `data_type` / `class_types` → referenced classes), emitting a Julia `struct` per class with `decode_<C>` and `encode_<C>` functions plus a `_eigenius_decoders` registry. `InductiveType` resources are not visited, and there's no Julia emission story for them. The resource type closure walker would need a parallel branch for `InductiveType` references.
 
-## 3. Design — Mini-TT inductives reach the chain
+## 3. Design — EigenTT inductives reach the chain
 
 ### 3.1 Existing ontology surface — already in place
 
@@ -162,7 +162,7 @@ When a property's `data_type` is `core:inductive` (a new primitive type — see 
 
 #### 3.2.2 Termination
 
-The validator's recursion is structural over the value tree. The chain-side termination guarantee is value-side, not type-side: a value tree with N nodes induces at most N validator calls. Type-level positivity (the kernel-layer guarantee that the recursor terminates) is checked when the value is reified into Mini-TT `Exp` for evaluation — out of scope for the validator, which is purely structural.
+The validator's recursion is structural over the value tree. The chain-side termination guarantee is value-side, not type-side: a value tree with N nodes induces at most N validator calls. Type-level positivity (the kernel-layer guarantee that the recursor terminates) is checked when the value is reified into EigenTT `Exp` for evaluation — out of scope for the validator, which is purely structural.
 
 ### 3.6 Mirror generator extensions
 
@@ -252,7 +252,7 @@ This keeps the wire format JSON-shaped — Eigon-JSON producers can author it by
   "core:is_a": ["core:InductiveType"],
   "core:short_name": "FormulaTerm",
   "core:description":
-    "Symbol-algebra-relevant fragment of Mini-TT Exp, lifted to the chain. The shared formula language across every numerical institution. Constructors mirror Exp::Var, Exp::App, Exp::Lam, Exp::Pi one-for-one. Variables are introduced by Lam/Pi binders whose type slot carries the variable's type — same discipline as Mini-TT itself. Free vars in an open expression are typed by the institution's ambient context (the dispatch's input typing or the operator catalog).",
+    "Symbol-algebra-relevant fragment of EigenTT Exp, lifted to the chain. The shared formula language across every numerical institution. Constructors mirror Exp::Var, Exp::App, Exp::Lam, Exp::Pi one-for-one. Variables are introduced by Lam/Pi binders whose type slot carries the variable's type — same discipline as EigenTT itself. Free vars in an open expression are typed by the institution's ambient context (the dispatch's input typing or the operator catalog).",
   "core:ctors": [
     "urn:eigenius:formulas:ctor:Var",
     "urn:eigenius:formulas:ctor:LitFloat",
@@ -275,16 +275,16 @@ The ctors:
 | `Lam` | `name: string`, `ty: FormulaTerm`, `body: FormulaTerm` | `Exp::Lam(Patt::Var(name), body)` with type carried alongside | Typed binder. The `ty` slot is a `FormulaTerm` rather than a separate `TypeExpr` because operator catalog entries (Real, Int, Real → Real) are themselves FormulaTerms — see §5. |
 | `Pi` | `name: string`, `ty: FormulaTerm`, `body: FormulaTerm` | `Exp::Pi(Patt::Var(name), ty, body)` | Dependent function type. Used to declare operator signatures (`Pi(_, Real, Real)` is `Real → Real`). |
 
-### 4.2 Naming convention follows Mini-TT
+### 4.2 Naming convention follows EigenTT
 
-Variable names are Mini-TT `Name`s — strings. No de Bruijn indices on the chain. `Lam`/`Pi` introduce a name; nested `Var(name)`s in the body are bound by the nearest enclosing binder of the same name (Mini-TT's α-equivalence discipline). This matches what the kernel evaluator expects when it reifies a `FormulaTerm` value into an `Exp` for type-checking or evaluation.
+Variable names are EigenTT `Name`s — strings. No de Bruijn indices on the chain. `Lam`/`Pi` introduce a name; nested `Var(name)`s in the body are bound by the nearest enclosing binder of the same name (EigenTT's α-equivalence discipline). This matches what the kernel evaluator expects when it reifies a `FormulaTerm` value into an `Exp` for type-checking or evaluation.
 
 ### 4.3 Why `FormulaTerm` is not declared under Symbolics
 
 Putting `FormulaTerm` under `urn:eigenius:formulas:` rather than `urn:eigenius:symbolics:` is the comorphism-readiness move:
 
 - Every institution that consumes formulas imports the same ontology layer, gets the same Julia struct after mirror generation, and dispatches on the same typed Julia type. No per-institution mirror translation.
-- A comorphism's `m` (Mini-TT Component) is a function `FormulaTerm → FormulaTerm` — typed input, typed output, both endpoints validated against the same chain-committed `InductiveType`. Without a shared declaration, comorphisms would have to type their `m`s against institution-specific types (Symbolics' `SymbolicTerm`, JuMP's `JumpExpr`, etc.) and the chain validator couldn't cross-check the two ends.
+- A comorphism's `m` (EigenTT Component) is a function `FormulaTerm → FormulaTerm` — typed input, typed output, both endpoints validated against the same chain-committed `InductiveType`. Without a shared declaration, comorphisms would have to type their `m`s against institution-specific types (Symbolics' `SymbolicTerm`, JuMP's `JumpExpr`, etc.) and the chain validator couldn't cross-check the two ends.
 - Future Lean integration (Phase 20) gets the same surface — `FormulaTerm` decodes into Lean's `Expr`-like representation without going through a bespoke Symbolics-specific bridge.
 
 Symbolics-specific resources (`SymbolicExpression`, `SymbolicallyReducesTo`, etc.) live under `urn:eigenius:symbolics:` and reference `formulas:FormulaTerm` for their term carrier. Same pattern for every other formula-consuming institution.
@@ -293,11 +293,11 @@ Symbolics-specific resources (`SymbolicExpression`, `SymbolicallyReducesTo`, etc
 
 ### 5.1 The pinned design question
 
-Should the operator catalog (`formulas:ops:add`, `formulas:ops:mul`, `formulas:ops:sin`, ...) carry on-chain Mini-TT type signatures? Or are operators just IRIs whose semantics each institution's handler interprets opaquely?
+Should the operator catalog (`formulas:ops:add`, `formulas:ops:mul`, `formulas:ops:sin`, ...) carry on-chain EigenTT type signatures? Or are operators just IRIs whose semantics each institution's handler interprets opaquely?
 
 ### 5.2 Pinned answer — yes, operators carry typed signatures
 
-**Yes — operators carry on-chain Mini-TT type signatures.** That's what makes `FormulaTerm` a *typed* term language rather than a naive S-expression. Three concrete benefits:
+**Yes — operators carry on-chain EigenTT type signatures.** That's what makes `FormulaTerm` a *typed* term language rather than a naive S-expression. Three concrete benefits:
 
 - **Validator-side rank check at commit time.** When a `SymbolicExpression.term` arrives carrying `App(App(OpRef("formulas:ops:add"), Var("x")), LitFloat(2.0))`, the validator looks up `formulas:ops:add`, reads its declared signature `Real → Real → Real`, and checks the `App` chain matches: argument 1 has type `Real` (free `Var("x")` deferred to the ambient context's type binding; the validator allows it but flags it), argument 2 has type `Real` (`LitFloat` matches). Mismatched arity (`add(x, y, z)`) and mismatched arg types (`add(x, "hello")`) reject at commit time, not at dispatch time.
 - **Cross-institution type discipline.** A comorphism `Symbolics → IntervalArithmetic` carrying `m : FormulaTerm → FormulaTerm` is type-checked against the operator signatures both institutions declare. If Symbolics' handler produces `App(OpRef("formulas:ops:my_obscure"), x)` and IntervalArithmetic doesn't have an interval-extension for `my_obscure`, the chain validator (or the substrate-side dispatch) catches it before the worker spawns.
@@ -311,7 +311,7 @@ Should the operator catalog (`formulas:ops:add`, `formulas:ops:mul`, `formulas:o
   "core:is_a": ["core:Class"],
   "core:short_name": "Operator",
   "core:description":
-    "A function symbol in the FormulaTerm language. Carries a typed Mini-TT signature so chain validation can rank-check App invocations and so cross-institution comorphisms can type-check at the chain boundary.",
+    "A function symbol in the FormulaTerm language. Carries a typed EigenTT signature so chain validation can rank-check App invocations and so cross-institution comorphisms can type-check at the chain boundary.",
   "core:requires": [
     "core:short_name",
     "formulas:operator_signature"
@@ -329,12 +329,12 @@ Properties:
 
 | Property | Type | Description |
 |---|---|---|
-| `formulas:operator_signature` | `core:inductive`, `class_types: [formulas:FormulaTerm]` | The operator's Mini-TT type, encoded as a `FormulaTerm` value. For `add`: `Pi(_, Real, Pi(_, Real, Real))`. The `Pi` ctor's binders may be unnamed (`_`) when the operator is non-dependent. |
+| `formulas:operator_signature` | `core:inductive`, `class_types: [formulas:FormulaTerm]` | The operator's EigenTT type, encoded as a `FormulaTerm` value. For `add`: `Pi(_, Real, Pi(_, Real, Real))`. The `Pi` ctor's binders may be unnamed (`_`) when the operator is non-dependent. |
 | `formulas:operator_arity` | `core:integer` | Convenience property; redundant with `operator_signature` for non-dependent operators. The validator may use it as a fast-path check before walking the full signature. |
 | `formulas:operator_associativity` | `core:string` (`allows_only: ["left", "right", "none", "n_ary"]`) | Algebraic discipline. `n_ary` lets institutions flatten `App(App(add, x), y), z` into `Add([x, y, z])` internally; the chain shape stays curried. |
 | `formulas:operator_commutativity` | `core:boolean` | Convenience for normal-form computation; not enforced by the validator. |
 
-The signature is itself a `FormulaTerm`. That's intentional — it dogfoods the type language. When the validator looks up `formulas:ops:add.operator_signature` and gets back `Pi(_, OpRef("formulas:types:Real"), Pi(_, OpRef("formulas:types:Real"), OpRef("formulas:types:Real")))`, it walks that signature using the same recursion that validates terms. The "type catalog" (`formulas:types:Real`, `formulas:types:Int`, etc.) is just operators with arity-zero signatures — types are nullary functions in this view, the same trick Mini-TT uses internally.
+The signature is itself a `FormulaTerm`. That's intentional — it dogfoods the type language. When the validator looks up `formulas:ops:add.operator_signature` and gets back `Pi(_, OpRef("formulas:types:Real"), Pi(_, OpRef("formulas:types:Real"), OpRef("formulas:types:Real")))`, it walks that signature using the same recursion that validates terms. The "type catalog" (`formulas:types:Real`, `formulas:types:Int`, etc.) is just operators with arity-zero signatures — types are nullary functions in this view, the same trick EigenTT uses internally.
 
 ### 5.4 Validator's `App` rank check
 
@@ -374,12 +374,12 @@ An institution authoring its handler package commits new `Operator` resources to
 
 ## 6. Comorphism implications
 
-### 6.1 Comorphism `m` becomes a Mini-TT function
+### 6.1 Comorphism `m` becomes a EigenTT function
 
-[D14 §5](d14-institution-realisation.md) defines a comorphism as a triple `(s, m, t)`: source ExportFormat, Mini-TT Component `m`, target ImportFormat. With `FormulaTerm` as the shared payload, `m`'s chain-side type becomes `FormulaTerm → FormulaTerm` — a Mini-TT function written in actual Mini-TT. Two consequences:
+[D14 §5](d14-institution-realisation.md) defines a comorphism as a triple `(s, m, t)`: source ExportFormat, EigenTT Component `m`, target ImportFormat. With `FormulaTerm` as the shared payload, `m`'s chain-side type becomes `FormulaTerm → FormulaTerm` — a EigenTT function written in actual EigenTT. Two consequences:
 
-- **The kernel type-checks `m`.** Since `m` is a `Component` (Mini-TT term), the kernel's existing component-typing machinery handles it; no new boundary-typing rule needed.
-- **Composition is free.** Two comorphisms `m₁: A → B` and `m₂: B → C` compose into `m₂ ∘ m₁: A → C` by Mini-TT's existing function composition. EigenQL FIBER queries that traverse comorphism chains can simply compose the `m`s symbolically.
+- **The kernel type-checks `m`.** Since `m` is a `Component` (EigenTT term), the kernel's existing component-typing machinery handles it; no new boundary-typing rule needed.
+- **Composition is free.** Two comorphisms `m₁: A → B` and `m₂: B → C` compose into `m₂ ∘ m₁: A → C` by EigenTT's existing function composition. EigenQL FIBER queries that traverse comorphism chains can simply compose the `m`s symbolically.
 
 ### 6.2 Concrete example — Symbolics → IntervalArithmetic
 
@@ -440,9 +440,9 @@ These three were carried as open questions through the first design pass and are
 
 ### 8.3 `FormulaTerm` is data; no `quote`/`unquote` in v1
 
-**Decision.** A `FormulaTerm` value is data on the chain. The kernel does not evaluate it directly; institutions decode it into their target language and operate there. Comorphism `m`s are Mini-TT functions over `FormulaTerm` data values (the `Data` shape from §3.7), not over `Exp`.
+**Decision.** A `FormulaTerm` value is data on the chain. The kernel does not evaluate it directly; institutions decode it into their target language and operate there. Comorphism `m`s are EigenTT functions over `FormulaTerm` data values (the `Data` shape from §3.7), not over `Exp`.
 
-**Why.** The data-only stance keeps the chain-side semantics narrow and well-defined: a `FormulaTerm` is exactly what its constructor schema says it is. Adding `quote`/`unquote` would couple `FormulaTerm` to Mini-TT's evaluation discipline (positivity checks, neutral-form handling, NBE termination) and force the chain validator to reason about syntax-vs-value distinctions that aren't load-bearing for the institution dispatch path. Institutions already own evaluation in their target language; the kernel doesn't need a parallel evaluator over `FormulaTerm`.
+**Why.** The data-only stance keeps the chain-side semantics narrow and well-defined: a `FormulaTerm` is exactly what its constructor schema says it is. Adding `quote`/`unquote` would couple `FormulaTerm` to EigenTT's evaluation discipline (positivity checks, neutral-form handling, NBE termination) and force the chain validator to reason about syntax-vs-value distinctions that aren't load-bearing for the institution dispatch path. Institutions already own evaluation in their target language; the kernel doesn't need a parallel evaluator over `FormulaTerm`.
 
 **Revisit when.** A use case appears that genuinely benefits from kernel-side normalisation of `FormulaTerm` values. The most plausible trigger is a `Decidable` QueryClass that wants to reduce a `FormulaTerm`-shaped predicate during type-check evaluation without round-tripping through an institution worker — e.g., constant folding (`add(LitFloat(1.0), LitFloat(2.0))` → `LitFloat(3.0)`) inside `Exp::NativeDecide`. We'd add `quote: Exp → FormulaTerm` and `unquote: FormulaTerm → Exp` then.
 
@@ -450,8 +450,8 @@ These three were carried as open questions through the first design pass and are
 
 ## 9. References
 
-- [D14 — Institution Realisation](d14-institution-realisation.md) — Comorphism mechanic, Mini-TT Component as `m`.
-- [D19 — Inductive Types](d19-inductive-types.md) — Mini-TT inductive support, recursor, positivity.
+- [D14 — Institution Realisation](d14-institution-realisation.md) — Comorphism mechanic, EigenTT Component as `m`.
+- [D19 — Inductive Types](d19-inductive-types.md) — EigenTT inductive support, recursor, positivity.
 - [D26 — Runtime Substrate](d26-runtime-substrate.md) — RuntimePackageMirror, env image, ServiceSpawner.
 - [D27 — Julia Institutions §4.1 — Symbolics](d27-julia-institutions.md) — first consumer's resource classes.
 - [D29 — Eigon-Julia Mirror Spec](d29-eigon-julia-mirror-spec.md) — current Class-only mirror discipline; this design extends it.

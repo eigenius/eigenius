@@ -34,6 +34,11 @@ const FORMULA_TERM_IRI: &str = "urn:eigenius:formulas:FormulaTerm";
 /// operator_signature walk (deferred to a follow-on landing).
 const OPERATOR_ARITY_IRI: &str = "urn:eigenius:formulas:operator_arity";
 
+/// EigenTTType InductiveType IRI (D47 §3). Pinned here so the
+/// `ConstRef` resolution check (D47 §5) can short-circuit when
+/// the inductive being walked isn't `eigentt:TypeExpr`.
+const EIGENTT_TYPE_EXPR_IRI: &str = "urn:eigenius:eigentt:TypeExpr";
+
 /// Walk the left spine of an `App(App(App(head, a₃), a₂), a₁)` tree
 /// and return `(head, [a₁, a₂, a₃])`. Spine args are emitted
 /// **right-to-left** as the spine is traversed; the caller may want
@@ -307,6 +312,203 @@ impl Validator {
                 .unwrap_or("");
             let child_path = format!("{path}.args[{i}]");
             self.check_inductive_arg(arg_value, type_name, child_path, res_id, out);
+        }
+
+        // D47 §5 — EigenTTType-specific check: a `ConstRef` value's `iri`
+        // string must resolve to a chain resource of an admissible class
+        // (Class / DataType / InductiveType / CodataType). Without this
+        // check, malformed axiom statements could be persisted and only
+        // surface when decoded at axiom registration.
+        if inductive_type
+            .id()
+            .map(|i| i.as_str() == EIGENTT_TYPE_EXPR_IRI)
+            .unwrap_or(false)
+        {
+            match ctor_name {
+                "ConstRef" => self.check_eigentt_const_ref(&args_array, &path, res_id, out),
+                "CtorApp" => self.check_eigentt_ctor_app(&args_array, &path, res_id, out),
+                _ => {}
+            }
+        }
+    }
+
+    /// EigenTTType `ConstRef` resolution check (D47 §5). Caller has
+    /// already verified `args[0]` is a string per the ctor schema; we
+    /// take it as the IRI to resolve. A missing or unresolvable IRI,
+    /// or an IRI that resolves to a resource whose `is_a` doesn't
+    /// include an admitted type-former class, emits a structured
+    /// validation error.
+    fn check_eigentt_const_ref(
+        &self,
+        args_array: &[serde_json::Value],
+        path: &str,
+        res_id: &Option<Iri>,
+        out: &mut Vec<ValidationError>,
+    ) {
+        let iri_str = match args_array.first().and_then(serde_json::Value::as_str) {
+            Some(s) => s,
+            None => return, // Already flagged by per-arg shape check above.
+        };
+        let iri_val = match Iri::parse(iri_str) {
+            Ok(i) => i,
+            Err(e) => {
+                out.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: None,
+                    rule: ValidationRule::UnresolvedClassReference,
+                    message: format!(
+                        "{path}.args[0]: ConstRef IRI `{iri_str}` is not a well-formed IRI: {e}"
+                    ),
+                });
+                return;
+            }
+        };
+        let referent = match self.layer.resolve(&iri_val) {
+            Some(r) => r,
+            None => {
+                out.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: None,
+                    rule: ValidationRule::UnresolvedClassReference,
+                    message: format!(
+                        "{path}.args[0]: ConstRef references unresolved IRI `{iri_val}`"
+                    ),
+                });
+                return;
+            }
+        };
+        let admitted = [
+            iri(wk::CLASS),
+            iri(wk::DATA_TYPE),
+            iri(wk::INDUCTIVE_TYPE),
+            iri(wk::CODATA_TYPE),
+        ];
+        if !admitted.iter().any(|c| referent.is_instance_of(c)) {
+            let found: Vec<String> = referent
+                .is_a()
+                .iter()
+                .map(|i| i.as_str().to_string())
+                .collect();
+            out.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: None,
+                rule: ValidationRule::UnresolvedClassReference,
+                message: format!(
+                    "{path}.args[0]: ConstRef IRI `{iri_val}` resolves to a resource whose \
+                     classes {found:?} include none of Class / DataType / InductiveType / \
+                     CodataType (the type-former classes EigenTTType.ConstRef admits)"
+                ),
+            });
+        }
+    }
+
+    /// EigenTTType `CtorApp` resolution check (D48 / eigenius#71).
+    /// Verifies (a) the `decl_iri` resolves to an `InductiveType` in
+    /// the chain, and (b) the named ctor exists on it. Caller has
+    /// already verified `args[0]` (decl_iri) and `args[1]` (ctor_name)
+    /// are strings per the ctor schema.
+    fn check_eigentt_ctor_app(
+        &self,
+        args_array: &[serde_json::Value],
+        path: &str,
+        res_id: &Option<Iri>,
+        out: &mut Vec<ValidationError>,
+    ) {
+        let decl_iri_str = match args_array.first().and_then(serde_json::Value::as_str) {
+            Some(s) => s,
+            None => return,
+        };
+        let ctor_name = match args_array.get(1).and_then(serde_json::Value::as_str) {
+            Some(s) => s,
+            None => return,
+        };
+        let decl_iri = match Iri::parse(decl_iri_str) {
+            Ok(i) => i,
+            Err(e) => {
+                out.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: None,
+                    rule: ValidationRule::UnresolvedClassReference,
+                    message: format!(
+                        "{path}.args[0]: CtorApp decl IRI `{decl_iri_str}` \
+                         is not a well-formed IRI: {e}"
+                    ),
+                });
+                return;
+            }
+        };
+        let referent = match self.layer.resolve(&decl_iri) {
+            Some(r) => r,
+            None => {
+                out.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: None,
+                    rule: ValidationRule::UnresolvedClassReference,
+                    message: format!(
+                        "{path}.args[0]: CtorApp references unresolved inductive IRI `{decl_iri}`"
+                    ),
+                });
+                return;
+            }
+        };
+        if !referent.is_instance_of(&iri(wk::INDUCTIVE_TYPE)) {
+            out.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: None,
+                rule: ValidationRule::UnresolvedClassReference,
+                message: format!(
+                    "{path}.args[0]: CtorApp IRI `{decl_iri}` is not an InductiveType \
+                     ({:?})",
+                    referent
+                        .is_a()
+                        .iter()
+                        .map(|i| i.as_str().to_string())
+                        .collect::<Vec<_>>()
+                ),
+            });
+            return;
+        }
+        // Look up the ctor by name on the resolved inductive's `ctors`
+        // array. The array contains Embedded resources whose
+        // `core:ctor_name` property holds the ctor name.
+        let ctors_value = match referent.get(&iri(wk::CTORS)) {
+            Some(v) => v,
+            None => {
+                out.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: None,
+                    rule: ValidationRule::UnresolvedClassReference,
+                    message: format!(
+                        "{path}: CtorApp target inductive `{decl_iri}` has no `ctors` array"
+                    ),
+                });
+                return;
+            }
+        };
+        let ctor_arr = match ctors_value {
+            Value::Array(a) => a,
+            _ => return,
+        };
+        let names: Vec<String> = ctor_arr
+            .iter()
+            .filter_map(|c| match c {
+                Value::Embedded(r) => r
+                    .get(&iri(wk::CTOR_NAME))
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_string()),
+                _ => None,
+            })
+            .collect();
+        if !names.iter().any(|n| n == ctor_name) {
+            out.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: None,
+                rule: ValidationRule::UnresolvedClassReference,
+                message: format!(
+                    "{path}.args[1]: CtorApp references unknown ctor `{ctor_name}` on \
+                     inductive `{decl_iri}`; available ctors: {names:?}"
+                ),
+            });
         }
     }
 
@@ -1306,6 +1508,408 @@ mod tests {
         assert!(
             path_match,
             "error must include structured path `args[0]`: {mismatches:?}"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // EigenTTType ConstRef resolution (D47 §5 / Phase 4)
+    // ──────────────────────────────────────────────────────────────────
+
+    /// Build a chain with the bootstrap layers (core + eigentt-type-fragment),
+    /// plus a top layer carrying a property `eigentt_value : core:inductive`
+    /// typed at `eigentt:TypeExpr`. The top layer is also seeded with a
+    /// no-op auxiliary `Property` resource at `urn:eigenius:test:wrong_class`
+    /// — used by the wrong-class test as a `ConstRef` target whose primary
+    /// class isn't one of the type-former classes.
+    fn build_eigentt_test_chain() -> Arc<Layer> {
+        let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let mut builder = LayerBuilder::new("test_eigentt_top", Some(head));
+
+        // Property `eigentt_value : core:inductive` typed at eigentt:TypeExpr.
+        let prop = make_resource(
+            "urn:eigenius:test:eigentt_value",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                ),
+                (wk::SHORT_NAME, Value::String("eigentt_value".into())),
+                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::INDUCTIVE))),
+                (
+                    wk::CLASS_TYPES,
+                    Value::Array(vec![Value::ResourceRef(iri(
+                        "urn:eigenius:eigentt:TypeExpr",
+                    ))]),
+                ),
+            ],
+        );
+
+        // A Property-class auxiliary resource used as a "wrong-class ConstRef
+        // target" in the negative test. Its primary class is Property, not
+        // Class/DataType/Inductive/Codata.
+        let wrong_class_target = make_resource(
+            "urn:eigenius:test:wrong_class",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                ),
+                (wk::SHORT_NAME, Value::String("wrong_class".into())),
+                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::STRING))),
+            ],
+        );
+
+        builder.add_resource(prop).unwrap();
+        builder.add_resource(wrong_class_target).unwrap();
+        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    #[test]
+    fn eigentt_constref_to_class_validates() {
+        // ConstRef("urn:eigenius:core:Class") — Class IS a Class.
+        let chain = build_eigentt_test_chain();
+        let mut top = LayerBuilder::new("test_constref_ok", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:ok_constref",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "ConstRef",
+                    "args": ["urn:eigenius:core:Class"]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let constref_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference && e.message.contains("ConstRef")
+            })
+            .collect();
+        assert!(
+            constref_errors.is_empty(),
+            "well-formed ConstRef to a Class must not raise an error; got {constref_errors:?}"
+        );
+    }
+
+    #[test]
+    fn eigentt_constref_unresolved_rejected() {
+        // ConstRef to a non-existent IRI must be rejected at commit.
+        let chain = build_eigentt_test_chain();
+        let mut top = LayerBuilder::new("test_constref_unresolved", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:bad_constref",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "ConstRef",
+                    "args": ["urn:eigenius:nonexistent:Foo"]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let constref_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference && e.message.contains("ConstRef")
+            })
+            .collect();
+        assert_eq!(
+            constref_errors.len(),
+            1,
+            "expected exactly one ConstRef unresolved error; got {errors:?}"
+        );
+        assert!(
+            constref_errors[0]
+                .message
+                .contains("urn:eigenius:nonexistent:Foo"),
+            "error must name the offending IRI: {}",
+            constref_errors[0].message
+        );
+    }
+
+    #[test]
+    fn eigentt_constref_wrong_class_rejected() {
+        // ConstRef to a Property (not a type-former class) must be rejected.
+        let chain = build_eigentt_test_chain();
+        let mut top = LayerBuilder::new("test_constref_wrong_class", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:wrong_class_constref",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "ConstRef",
+                    "args": ["urn:eigenius:test:wrong_class"]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let constref_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference && e.message.contains("ConstRef")
+            })
+            .collect();
+        assert_eq!(
+            constref_errors.len(),
+            1,
+            "expected exactly one ConstRef wrong-class error; got {errors:?}"
+        );
+        let msg = &constref_errors[0].message;
+        assert!(
+            msg.contains("urn:eigenius:test:wrong_class")
+                && (msg.contains("Property") || msg.contains("none of")),
+            "error must mention the target IRI and the wrong-class diagnostic: {msg}"
+        );
+    }
+
+    #[test]
+    fn eigentt_constref_in_app_spine_validates() {
+        // App(ConstRef(Class), ConstRef(Class)) — both ConstRefs must be
+        // resolved. Tests that nested ConstRefs inside App spines also
+        // get the resolution check (since walk_inductive_value recurses
+        // through args).
+        let chain = build_eigentt_test_chain();
+        let mut top = LayerBuilder::new("test_constref_in_app", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:app_constref",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "App",
+                    "args": [
+                        {"ctor": "ConstRef", "args": ["urn:eigenius:core:Class"]},
+                        {"ctor": "ConstRef", "args": ["urn:eigenius:core:Property"]}
+                    ]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let constref_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference && e.message.contains("ConstRef")
+            })
+            .collect();
+        assert!(
+            constref_errors.is_empty(),
+            "nested ConstRefs to valid Class IRIs must validate; got {constref_errors:?}"
+        );
+    }
+
+    #[test]
+    fn eigentt_constref_unresolved_in_app_spine_rejected() {
+        // App(ConstRef(bad), ConstRef(Class)) — the bad sub-ConstRef is
+        // detected by the recursive walk.
+        let chain = build_eigentt_test_chain();
+        let mut top = LayerBuilder::new("test_constref_nested_bad", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:nested_bad",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "App",
+                    "args": [
+                        {"ctor": "ConstRef", "args": ["urn:eigenius:nonexistent:Foo"]},
+                        {"ctor": "ConstRef", "args": ["urn:eigenius:core:Class"]}
+                    ]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let bad_errs: Vec<_> = errors
+            .iter()
+            .filter(|e| e.message.contains("urn:eigenius:nonexistent:Foo"))
+            .collect();
+        assert_eq!(
+            bad_errs.len(),
+            1,
+            "expected one error naming the bad nested IRI; got {errors:?}"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // D48 / eigenius#71 — CtorApp commit-time validation
+    // ──────────────────────────────────────────────────────────────────
+
+    /// Build a chain that has eigentt-type-fragment + a `core:Nat`-like
+    /// InductiveType in scope so CtorApp validation has a target.
+    fn build_eigentt_with_nat() -> Arc<Layer> {
+        let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let mut top = LayerBuilder::new("eigentt_with_nat", Some(head));
+
+        // A minimal Nat-like inductive declaration in the test
+        // namespace. The chain's existing InductiveType machinery
+        // validates the shape on commit.
+        let zero_ctor = make_resource(
+            "urn:eigenius:test:Nat:zero",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_CTOR))]),
+                ),
+                (wk::CTOR_NAME, Value::String("zero".into())),
+                (wk::ARG_TYPES, Value::Array(Vec::new())),
+            ],
+        );
+        let succ_ctor = make_resource(
+            "urn:eigenius:test:Nat:succ",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_CTOR))]),
+                ),
+                (wk::CTOR_NAME, Value::String("succ".into())),
+                (
+                    wk::ARG_TYPES,
+                    Value::Array(vec![Value::Embedded(Box::new(make_resource(
+                        "urn:eigenius:test:Nat:succ:arg0",
+                        vec![
+                            (
+                                wk::IS_A,
+                                Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_ARG_TYPE))]),
+                            ),
+                            (wk::TYPE_NAME, Value::String("urn:eigenius:test:Nat".into())),
+                        ],
+                    )))]),
+                ),
+            ],
+        );
+        let nat = make_resource(
+            "urn:eigenius:test:Nat",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_TYPE))]),
+                ),
+                (wk::SHORT_NAME, Value::String("Nat".into())),
+                (
+                    wk::CTORS,
+                    Value::Array(vec![
+                        Value::Embedded(Box::new(zero_ctor)),
+                        Value::Embedded(Box::new(succ_ctor)),
+                    ]),
+                ),
+            ],
+        );
+        let prop = make_resource(
+            "urn:eigenius:test:eigentt_value",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                ),
+                (wk::SHORT_NAME, Value::String("eigentt_value".into())),
+                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::INDUCTIVE))),
+                (
+                    wk::CLASS_TYPES,
+                    Value::Array(vec![Value::ResourceRef(iri(
+                        "urn:eigenius:eigentt:TypeExpr",
+                    ))]),
+                ),
+            ],
+        );
+        top.add_resource(nat).unwrap();
+        top.add_resource(prop).unwrap();
+        Arc::new(top.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    #[test]
+    fn eigentt_ctor_app_to_existing_ctor_validates() {
+        let chain = build_eigentt_with_nat();
+        let mut top = LayerBuilder::new("ctor_app_ok", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:ok_ctor_app",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "CtorApp",
+                    "args": ["urn:eigenius:test:Nat", "zero"]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let ctor_errs: Vec<_> = errors
+            .iter()
+            .filter(|e| e.message.contains("CtorApp"))
+            .collect();
+        assert!(
+            ctor_errs.is_empty(),
+            "valid CtorApp(Nat, zero) should validate cleanly; got {ctor_errs:?}"
+        );
+    }
+
+    #[test]
+    fn eigentt_ctor_app_to_unknown_ctor_rejected() {
+        let chain = build_eigentt_with_nat();
+        let mut top = LayerBuilder::new("ctor_app_bad_ctor", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:bad_ctor_app",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "CtorApp",
+                    "args": ["urn:eigenius:test:Nat", "nonexistent_ctor"]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let ctor_errs: Vec<_> = errors
+            .iter()
+            .filter(|e| e.message.contains("unknown ctor `nonexistent_ctor`"))
+            .collect();
+        assert_eq!(
+            ctor_errs.len(),
+            1,
+            "expected one error naming unknown ctor; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn eigentt_ctor_app_to_non_inductive_rejected() {
+        // CtorApp pointing at urn:eigenius:core:Class — that's a Class,
+        // not an InductiveType. Rejected.
+        let chain = build_eigentt_with_nat();
+        let mut top = LayerBuilder::new("ctor_app_wrong_kind", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:wrong_kind",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "CtorApp",
+                    "args": ["urn:eigenius:core:Class", "anything"]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let ctor_errs: Vec<_> = errors
+            .iter()
+            .filter(|e| e.message.contains("is not an InductiveType"))
+            .collect();
+        assert!(
+            !ctor_errs.is_empty(),
+            "expected error about non-InductiveType target; got {errors:?}"
         );
     }
 }

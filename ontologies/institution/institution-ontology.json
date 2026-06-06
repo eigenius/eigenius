@@ -192,7 +192,7 @@
   {
     "@id": "urn:eigenius:institution:ExportFormat",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A typed outbound view that an institution publishes for one of its resource classes (D14 §4.2). Pairs a from_class with a Mini-TT payload type and the institution's extract_typed procedure.",
+    "urn:eigenius:core:description": "A typed outbound view that an institution publishes for one of its resource classes (D14 §4.2). Pairs a from_class with a EigenTT payload type and the institution's extract_typed procedure.",
     "urn:eigenius:core:short_name": "ExportFormat",
     "urn:eigenius:core:requires": [
       "urn:eigenius:institution:from_class",
@@ -222,7 +222,7 @@
   {
     "@id": "urn:eigenius:institution:payload_type",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The Mini-TT type of the typed payload an ExportFormat produces or an ImportFormat consumes. May reference a primitive type (e.g. `core:float`), an InductiveType (e.g. `Verdict`), or a CodataType.",
+    "urn:eigenius:core:description": "The EigenTT type of the typed payload an ExportFormat produces or an ImportFormat consumes. May reference a primitive type (e.g. `core:float`), an InductiveType (e.g. `Verdict`), or a CodataType.",
     "urn:eigenius:core:short_name": "payload_type",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:domain": [
@@ -246,7 +246,7 @@
   {
     "@id": "urn:eigenius:institution:ImportFormat",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A typed inbound constructor that an institution publishes for one of its resource classes (D14 §4.3). Pairs a to_class with a Mini-TT payload type and the institution's reify procedure.",
+    "urn:eigenius:core:description": "A typed inbound constructor that an institution publishes for one of its resource classes (D14 §4.3). Pairs a to_class with a EigenTT payload type and the institution's reify procedure.",
     "urn:eigenius:core:short_name": "ImportFormat",
     "urn:eigenius:core:requires": [
       "urn:eigenius:institution:to_class",
@@ -314,7 +314,7 @@
   {
     "@id": "urn:eigenius:institution:Comorphism",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A cross-institution translation realised as the triple (s, m, t) — an ExportFormat from the source institution, a Mini-TT Component as the typed middle, and an ImportFormat from the target institution (D14 §5). Owned by no single institution; aggregates contributions from source, Mini-TT, and target. The kernel statically type-checks the Component's signature against the export and import payload types at commit time.",
+    "urn:eigenius:core:description": "A cross-institution translation realised as the triple (s, m, t) — an ExportFormat from the source institution, a EigenTT Component as the typed middle, and an ImportFormat from the target institution (D14 §5). Owned by no single institution; aggregates contributions from source, EigenTT, and target. The kernel statically type-checks the Component's signature against the export and import payload types at commit time.",
     "urn:eigenius:core:short_name": "Comorphism",
     "urn:eigenius:core:requires": [
       "urn:eigenius:institution:export_format",
@@ -337,7 +337,7 @@
   {
     "@id": "urn:eigenius:institution:transformation",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Reference to the Mini-TT expression (typed term) implementing the comorphism's typed middle m: S → T. **Not an opaque Component IRI — a typed term.** The natural shape is `program:Lambda` whose body is a typed expression: pure transformations (e.g. `λ Δg. exp(-Δg / RT) * 1e9` for Arrhenius) bottom at composed primitive expression forms; institution-runtime transformations bottom at a `program:Component` reference (an expression form, dispatched into the institution's worker). The kernel verifies at commit time that the term's type equals (payload_type(export_format)) → (payload_type(import_format)).",
+    "urn:eigenius:core:description": "Reference to the EigenTT expression (typed term) implementing the comorphism's typed middle m: S → T. **Not an opaque Component IRI — a typed term.** The natural shape is `program:Lambda` whose body is a typed expression: pure transformations (e.g. `λ Δg. exp(-Δg / RT) * 1e9` for Arrhenius) bottom at composed primitive expression forms; institution-runtime transformations bottom at a `program:Component` reference (an expression form, dispatched into the institution's worker). The kernel verifies at commit time that the term's type equals (payload_type(export_format)) → (payload_type(import_format)).",
     "urn:eigenius:core:short_name": "transformation",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:class_types": [

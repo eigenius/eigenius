@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Mini-TT semantic values.
+//! EigenTT semantic values.
 //!
-//! Ported from `Main.hs` lines 80-163 in the Mini-TT reference.
+//! Ported from `Main.hs` lines 80-163 in the EigenTT reference.
 //! Values are the result of evaluation. Neutral terms represent
 //! computations blocked on an unknown variable.
 
@@ -36,10 +36,10 @@ pub enum Val {
     Con(Name, Box<Val>),
     /// Unit value
     Unit,
-    /// Universe of types (level 0)
-    Set,
-    /// Universe at a specific level
-    Type(usize),
+    /// Universe at a specific level: Sort(n).
+    /// `Sort(0) = Prop`, `Sort(1) = Set`, `Sort(n+1)` was `Type(n)` for `n >= 1`.
+    /// See D46 §3.
+    Sort(usize),
     /// Dependent function type: Π(A, x.B)
     Pi(Box<Val>, Clos),
     /// Dependent pair type: Σ(A, x.B)
@@ -101,10 +101,13 @@ pub enum Val {
     List(Vec<Val>),
 
     // --- Inductive types (Phase 11b, D19) ---
-    /// Inductive type former applied to evaluated parameters: `I(p₁, …, pₙ)`.
+    /// Inductive type former applied to evaluated parameters: `I(p₁, …, pₙ)`
+    /// and (D48) evaluated indices: `I(p₁, …, pₙ)(i₁, …, iₘ)`. Indices are
+    /// empty for non-indexed inductives — the D19 default.
     InductiveType {
         decl: Arc<InductiveDecl>,
         params: Vec<Val>,
+        indices: Vec<Val>,
     },
     /// Constructor value: `c(args)` on the named inductive.
     InductiveVal {
@@ -130,11 +133,33 @@ pub enum Val {
     SizedPi(Box<Val>, Clos),
 }
 
+/// Identifier for unification metavariables (D48 Phase C).
+///
+/// Globally unique integers allocated by a `MetaCtx`. Each metavariable
+/// represents a yet-unsolved value the unifier may instantiate to a
+/// concrete `Val`. Solved metavariables are looked up through the
+/// `MetaCtx`; reading back a solved meta substitutes the solution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct MetaId(pub u32);
+
+impl std::fmt::Display for MetaId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "?{}", self.0)
+    }
+}
+
 /// Neutral terms — computations that cannot reduce further.
 #[derive(Debug, Clone)]
 pub enum Neut {
     /// Generated variable (de Bruijn level + name for readback)
     Gen(usize, Name),
+    /// Unification metavariable (D48 Phase C) optionally applied to a
+    /// spine of bound-variable arguments. `Meta(id, spine)` represents
+    /// `?id v₁ v₂ … vₙ` — the metavar `?id` applied to the values in
+    /// `spine` (typically `Val::Nt(Neut::Gen(_, _))` for pattern-style
+    /// unification). The unifier solves the meta against the rest of
+    /// the equation and stores the solution in a `MetaCtx`.
+    Meta(MetaId, Vec<Val>),
     /// Application of a neutral to a value
     App(Box<Neut>, Box<Val>),
     /// First projection of a neutral pair
@@ -478,15 +503,15 @@ mod tests {
 
     #[test]
     fn vfst_pair() -> Result<(), EvalError> {
-        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::Set));
+        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::Sort(1)));
         assert!(matches!(p.vfst()?, Val::Unit));
         Ok(())
     }
 
     #[test]
     fn vsnd_pair() -> Result<(), EvalError> {
-        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::Set));
-        assert!(matches!(p.vsnd()?, Val::Set));
+        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::Sort(1)));
+        assert!(matches!(p.vsnd()?, Val::Sort(1)));
         Ok(())
     }
 
