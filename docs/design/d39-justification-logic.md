@@ -2,7 +2,7 @@
 
 *Status: v2 design proposal · June 2026*
 
-*Companion documents: [D14 institution realisation](d14-institution-realisation.md), [D28 Lean 4 as institution](d28-lean-4-as-institution.md), [D32 chain-mirrored EigenTT inductives](d32-chain-mirrored-mini-tt-inductives.md), [D46 Prop universe + axiom framework](d46-prop-universe-and-proof-irrelevance.md), [D47 chain-mirrored EigenTT type fragment](d47-chain-mirrored-eigentt-type-fragment.md), [D48 indexed inductive families](d48-indexed-inductive-families.md), [D6 execution architecture](d6-execution-architecture.md).*
+*Companion documents: [D14 institution realisation](d14-institution-realisation.md), [D28 Lean 4 as institution](d28-lean-4-as-institution.md), [D32 chain-mirrored EigenTT inductives](d32-chain-mirrored-mini-tt-inductives.md), [D46 Prop universe + axiom framework](d46-prop-universe-and-proof-irrelevance.md), [D47 chain-mirrored EigenTT type fragment](d47-chain-mirrored-eigentt-type-fragment.md), [D48 indexed inductive families](d48-indexed-inductive-families.md), [D49 `ChainWitness` machinery](d49-chainwitness-machinery.md), [D6 execution architecture](d6-execution-architecture.md).*
 
 *Foundation note: this design consumes four substrates that landed before this revision — D46 (impredicative `Prop` universe with proof irrelevance, plus the `eigentt:Axiom` chain class hosting built-in `propext` and `Quot.sound`), D47 (chain-mirrored EigenTT type fragment with the `eigentt:TypeExpr` codec, extended by eigenius#71 for term-level constructors), D48 (indexed inductive families with first-order pattern unification, dependent constructor checking, and singleton-elim for propositional indices), and the existing `reflection` ontology's epistemic-category base classes and Trace event classes. Propositions live in `Prop`; the relation between a `JustificationTerm` and the proposition it justifies is captured by a type-theoretic indexed inductive predicate `JustifiedBy : JustificationTerm → Prop → Type`; the chain-side grounding facts that predicate consumes are projected from the reflection ontology's existing class-membership and Trace-emission events via opaque `ChainWitness` predicates. Earlier drafts of this document sketched a separate procedural-validator path as a v1 fallback; that path is dropped in favour of the unified type-theoretic design throughout.*
 
@@ -28,7 +28,7 @@ In scope:
 - A `ChainWitness` opaque-predicate family that projects the reflection ontology's existing class-membership and Trace-emission facts into the type system. Witnesses are kernel-internal — inhabitants are admitted as a consequence of the corresponding Trace-emitting commit succeeding, never constructed via ESL.
 - A Reasoning institution per D14's three-method trait. Its `ValidateJustification` `AutoOnLoad` gate is implemented by type-checking the embedded `JustifiedBy` certificate against the embedded proposition; no procedural axiom-walking.
 - A `ReasoningSentence` Resource class carrying the proposition, the `JustificationTerm`, the `JustifiedBy` certificate (chain-mirrored), an optional `subject_iri`, and an optional `refutes` pointer for belief revision (full semantics in chain-merge work).
-- Three comorphisms: Reasoning → Lean, Reasoning → numerical institutions, Reasoning → observed-resource fibre.
+- Four comorphisms: Reasoning → Lean (forward, EigenTT → Lean translation per D30), Lean → Reasoning (backward, the v1 inverse of D30; produces the `VerifiedPropositionView` resources that make `ChainWitness.IsVerifiedAs` admissible per D49 §7), Reasoning → numerical institutions, Reasoning → observed-resource fibre.
 - Structural propagation rules that compute the four epistemic categories from `JustificationTerm` shape.
 - One small reflection-ontology extension: an optional `reflection:canonical_proposition` property on `DeclaredResource` / `ObservedResource` / `DerivedResource` for resources advertising an explicit `Prop` statement beyond the default `Asserts(iri)`.
 
@@ -100,17 +100,19 @@ That's the full propositional language, expressible against EigenTT as it stands
 
 ### 4.2 The `ReasoningSentence` Resource
 
-A `ReasoningSentence` is the chain-resident pairing of a proposition `A` with a `JustificationTerm` `t` and a `JustifiedBy t A` certificate — the agent's claim that `t : A`, together with a kernel-checkable proof of that claim. Properties:
+A `ReasoningSentence` is the chain-resident pairing of a proposition `A` with a `JustificationTerm` `t` and a `JustifiedBy t A` certificate — the agent's claim that `t : A`, together with a kernel-checkable proof of that claim. **The class is declared `subclass_of reflection:DerivedResource`** so that prior reasoning sentences are first-class citations: a later sentence's `JustificationTerm` can cite a prior one via `DerivedEvidence(prior_sentence_iri)`, and `IsDerivedAs prior_sentence_iri prop` witnesses are emitted at commit (D49 §6) on exactly the same footing as for any other derived resource. Properties:
 
 | Property | Type | Required? | Reading |
 |---|---|---|---|
-| `proposition` | `eigentt:TypeExpr` payload encoding a `Prop`-typed EigenTT term (D47 codec) | yes | The proposition being asserted (using the grammar in §4.1). |
+| `is_a` (inherited) | `[reflection:DerivedResource, …]` | yes | Subclassing `DerivedResource` is what makes the sentence a citable derived artifact and what triggers `IsDerivedAs` witness emission. |
+| `proposition` | `eigentt:TypeExpr` payload encoding a `Prop`-typed EigenTT term (D47 codec) | yes | The proposition being asserted (using the grammar in §4.1). Also serves as the sentence's `reflection:canonical_proposition` (per D49 §6) so that downstream `DerivedEvidence` citations resolve to the right `P` in the witness key. |
 | `justification` | `JustificationTerm` | yes | The agent's warrant (using the constructors in §3). |
 | `certificate` | `eigentt:TypeExpr` payload encoding a `JustifiedBy justification proposition` proof term | yes | The kernel-checkable certificate that the JustificationTerm justifies the proposition. The `ValidateJustification` gate (§4.3) type-checks it at commit. |
-| `subject_iri` | `core:iri` | optional | For atomic claims, the principal Resource the sentence is *about* — used for query indexing and back-reference. |
+| `derivation` (inherited from `DerivedResource`) | reference to a chain-resident trace | yes (by `DerivedResource`'s `requires` list) | Points at the certificate field above — the certificate *is* the derivation. The reflection-ontology invariant is satisfied without introducing a separate `ReasoningTrace` class. |
+| `subject_iri` | `core:iri` | optional | The principal Resource the sentence is *about*. **First-class EigenQL index** (the Reasoning institution declares it as a primary query key) — agents querying "what have I concluded about subject X?" hit this index directly. For decision-shaped reasoning (§6.4 below), `subject_iri` is the IRI of the decision being made; all alternative-consideration sentences and the final pick-sentence share it. |
 | `refutes` | `core:iri` referencing a prior `ReasoningSentence` | optional | Marks this sentence as a belief-revision step superseding the named prior commitment. Full semantics — including which prior commitment is superseded when multiple cover the same claim, and how chain-merge resolution composes refutation chains — is the subject of the chain-merge work; this document fixes only the structural marker. |
 
-The implicit semantic claim of a `ReasoningSentence` is "this `JustificationTerm` justifies this proposition." The `ValidateJustification` AutoOnLoad gate (§4.3) checks the certificate at commit; no auxiliary procedural step is required.
+The implicit semantic claim of a `ReasoningSentence` is "this `JustificationTerm` justifies this proposition." The `ValidateJustification` AutoOnLoad gate (§4.3) checks the certificate at commit; no auxiliary procedural step is required. Because the sentence is a `DerivedResource`, any reasoning that cites it can flow through the standard `DerivedEvidence` constructor — there is no separate "cite a prior sentence" machinery.
 
 ### 4.3 Models, satisfaction, and query classes
 
@@ -128,6 +130,36 @@ The implicit semantic claim of a `ReasoningSentence` is "this `JustificationTerm
 
 The `AutoOnLoad` gate is the load-bearing piece. Its `Verdict` becomes a first-class chain resource alongside the `ReasoningSentence` it validated, traceable via the same provenance machinery used by every other institution. A `Fails` verdict rejects the commit (consistent with D14 §6's general gating semantics); a `Holds` verdict admits the sentence with the verdict attached as evidence that the gate has spoken.
 
+**Agent-facing dispatch.** The two `OnDemand` / `Decidable` query classes are not exposed as per-query-class MCP tools. Instead, a single generic `eigenius_institution_dispatch(institution_iri, query_class_iri, payload, …)` MCP tool dispatches into the kernel's existing `InstitutionIndex` for any D14 institution. The Reasoning institution's queries thread through the same surface — keeping the MCP tool count lean and forward-compatible for future institutions' query classes. Agent skill documentation (a separate memo, not part of this design) covers the canonical EigenQL patterns for "what have I concluded about subject X?" (`MATCH ReasoningSentence(?s) { subject_iri: <X>, … }`), which is the most common self-recall query and doesn't require an institutional dispatch at all.
+
+### 4.4 The `TaskOutput` Resource
+
+When a `ReasoningSentence` chain is produced to answer a specific task (e.g., a benchmark problem, a user query, an analysis request), the final *deliverable* — the artifact the task asked for — is itself a chain resource that explicitly cites the reasoning that produced it. This is the `TaskOutput` class:
+
+| Property | Type | Required? | Reading |
+|---|---|---|---|
+| `is_a` | `[reflection:DerivedResource, reasoning:TaskOutput]` | yes | A subclass of `DerivedResource` like `ReasoningSentence`. |
+| `task` | `core:iri` | yes | The task IRI this output answers. Provides task-scoped identity for the deliverable. |
+| `deliverable_kind` | enumeration string | yes | What kind of artifact this is. Initial values: `"python_source"`, `"prose"`, `"json"`, `"resource_set"`. New kinds added as needed by future task families. |
+| `payload` | `core:string` (or a class-specific shape for `resource_set`) | yes | The actual artifact content the task asked for. For `python_source` / `prose` / `json` this is a literal; for `resource_set` it's a list of chain IRIs. |
+| `reasoning_chain` | array of `core:iri` referencing `ReasoningSentence`s | yes | The reasoning sentences this output rests on, in commit order. Auditors trace from the deliverable to the warrant. The kernel does not enforce that every line of the payload corresponds to a sentence in the chain — that's a methodological commitment, not a structural one — but commit-time validation checks that every IRI in this array resolves to a `ReasoningSentence` on the chain. |
+| `derivation` (inherited) | reference to a `reflection:ProgramTrace` | yes (by `DerivedResource`'s `requires` list) | Trace of the program (or agent loop) that produced the deliverable from the reasoning chain. |
+
+`TaskOutput` is the artifact handle for the discipline thesis: it makes the chain "complete in itself" — the agent's deliverable explicitly references which reasoning sentences justified its content, so an auditor can ask "for this Python file, which steps in the agent's reasoning produced which behaviour?" and walk the chain to find out. For benchmark scoring, the deliverable that the benchmark eval script consumes is the `payload` field, but the chain that justified it is preserved as a queryable artifact.
+
+### 4.5 The two-phase agent surface: model, then reason
+
+The `ReasoningSentence` shape and the `JustificationTerm` constructor set both presuppose a *vocabulary*: classes and predicates that propositions are framed in, and inference rules that compositions cite. None of this vocabulary is built-in beyond the spanning core / reflection / institution ontologies and the `Asserts(iri) : Prop` default — the agent's first move on any task that requires reasoning is *to author the task's vocabulary*, then commit reasoning sentences using that vocabulary.
+
+Concretely, the agent's structured-reasoning loop has two phases:
+
+1. **Model.** Emit ESL `class`, `property`, `axiom`, and (where useful) indexed `data` declarations for the task-specific entities, predicates, and inference rules. Commit them as a vocabulary layer. The validator catches malformed declarations at this stage.
+2. **Reason.** Commit `ReasoningSentence`s using the declared vocabulary. The `ValidateJustification` gate fires per sentence.
+
+The kernel does not distinguish "vocabulary authoring" from "reasoning" — both are chain commits, both go through validation, both contribute to the audit trail. But the *discipline pattern* the agent skill teaches is explicit about the order: trying to reason in untyped prose first and lift to ESL later would defeat the discipline (the agent would already have made its decisions before the typing constraint engages). For tasks that span an established domain (chemistry, GIS, etc.), per-family base ontologies cover the spanning concepts so the agent only authors the task-specific specifics; see the benchmark approach document for the concrete spanning vocabularies the pilot uses.
+
+This vocabulary-authoring phase is part of what the discipline thesis measures. An agent that authors parsimonious, well-formed task vocabularies and then reasons over them is exercising the discipline at both levels; an agent that floods the vocabulary with thirty ad-hoc predicates is exercising it poorly. Tracking the size and shape of agent-authored ontologies per task is itself a derived experimental metric.
+
 ## 5. What counts as a justification
 
 A `JustificationTerm` is constrained at three independent layers. All three must hold; failure at any level rejects the commit.
@@ -136,7 +168,7 @@ A `JustificationTerm` is constrained at three independent layers. All three must
 
 **Referential constraint.** Each categorical-grounding constructor requires its target IRI to resolve to a resource of the matching reflection-ontology base class. The reflection ontology declares the per-class `requires` lists (`DeclaredResource` requires `declared_by`; `ObservedResource` requires `source`; `VerifiedResource` requires `derivation` and `verification`); the existing class-membership check enforces them at the resource's own commit, before any `JustificationTerm` cites it. The Reasoning institution delegates to this existing enforcement — a justification cannot reference an `ObservedResource` that itself lacks a valid `source`, nor an `eigentt:Axiom` whose statement fails to type-check in `Prop`, because the underlying resource commits would have been rejected first.
 
-The referential constraint surfaces type-theoretically as the `ChainWitness` predicate family. Four `Prop`-typed predicates indexed by IRI and by the asserted proposition:
+The referential constraint surfaces type-theoretically as the `ChainWitness` predicate family ([D49](d49-chainwitness-machinery.md) settles the implementation shape — per-Layer witness index derived from Trace resources, kernel-internal witness synthesis at type-check time, and the EigenTT ↔ Lean consistency check for `IsVerifiedAs`). Four `Prop`-typed predicates indexed by IRI and by the asserted proposition:
 
 ```
 ChainWitness.IsDeclaredAs : core:iri → Prop → Prop
@@ -224,11 +256,65 @@ The conclusion is `Verified` iff the inference rule is itself grounded in `Verif
 
 **Inference rules are recursively grounded.** The "hence" in each pattern is itself a categorically-grounded justification, and the same propagation rule applies to it. A `DeclaredEvidence` inference rule yields a `Derived` conclusion no matter how strong the premise's justification is. A `VerifiedEvidence` inference rule applied to a `VerifiedEvidence` premise yields a `Verified` conclusion. The Reasoning institution validates each rule's grounding just as it validates every other constructor; the recursion is bounded by the chain's finite depth.
 
+### 6.4 Trade-off reasoning as an authoring pattern (not a new ctor)
+
+The benchmark surveys surface a recurring reasoning shape that the three patterns above don't address head-on: *"I considered alternatives A, B, C; picked B because of criteria K."* The temptation is to add a fourth `JustificationTerm` constructor like `Choice(alts, picked, rule)`. The design deliberately resists this — the 6-ctor closed set (4 groundings + `App` + `Sum`) is one of the design's strengths, and `Choice` would collapse to syntactic sugar for the pattern below anyway. Instead, the discipline is encoded as an authoring pattern using existing constructors plus a declared decision-rule axiom:
+
+```
+// Step 1 (vocabulary, Phase 1 of §4.5): declare the decision rule as an axiom.
+axiom decision_rule_K :
+    forall (a : alternatives:T) =>
+        criteria_satisfied_better_by(a) -> is_chosen(a)
+
+// Step 2 (reasoning, one ReasoningSentence per considered alternative):
+ReasoningSentence sentence_A:
+    subject_iri = decision_iri,
+    proposition = "alternative_A has property_P_A",
+    justification = <App-spine grounded in evidence for property_P_A>
+
+ReasoningSentence sentence_B:
+    subject_iri = decision_iri,
+    proposition = "alternative_B has property_P_B",
+    justification = <App-spine grounded in evidence for property_P_B>
+
+ReasoningSentence sentence_C:
+    subject_iri = decision_iri,
+    proposition = "alternative_C has property_P_C",
+    justification = <App-spine grounded in evidence for property_P_C>
+
+// Step 3 (the pick):
+ReasoningSentence pick:
+    subject_iri = decision_iri,
+    proposition = "is_chosen(alternative_B)",
+    justification = App(
+        DeclaredEvidence(decision_rule_K),
+        // the premise: B satisfies the criteria better than A or C —
+        // a derived conclusion grounded in the per-alternative sentences:
+        App( App( <K-comparison-rule>, DerivedEvidence(sentence_A) ),
+             App( DerivedEvidence(sentence_B), DerivedEvidence(sentence_C) ) )
+    )
+```
+
+The `subject_iri = decision_iri` shared across all four sentences is what makes the cluster queryable as a unit. The query "what alternatives did the agent consider for decision D?" is plain EigenQL: `MATCH ReasoningSentence(?s) { subject_iri: <D> } RETURN [] { ?s, proposition }` returns all of `sentence_A` / `sentence_B` / `sentence_C` / `pick`. Auditors see the deliberation; the pick-sentence's `JustificationTerm` records exactly which criteria justified the choice and which alternative-evidence sentences fed in.
+
+Two structural commitments worth noting:
+
+- **`ReasoningSentence` is a `DerivedResource` (§4.2).** This is what lets the pick-sentence cite the per-alternative sentences via `DerivedEvidence(sentence_X_iri)` — no separate mechanism. The witness `IsDerivedAs sentence_X_iri property_P_X` is emitted at each per-alternative commit per D49 §6.
+- **The decision rule lives in the chain as an `eigentt:Axiom`** (D46 §10), authored in Phase 1 of the agent's loop (§4.5). The same axiom is reusable across decisions of the same shape — *if* the agent recognises the reuse opportunity. The discipline thesis predicts that authoring decision rules explicitly (and being able to cite them across tasks) is part of what produces compounding gains.
+
+This pattern is verbose compared to a built-in `Choice` ctor, but it composes: the same machinery handles trade-offs, hypothetical reasoning ("if H, then E follows"), abductive reasoning ("E is observed, H best explains it"), and any future decision shape we haven't anticipated. Adding a per-shape ctor for each would balloon the closed set and tie the chain's audit story to a specific decision vocabulary. The pattern keeps the closed set closed.
+
 ## 7. Comorphisms
 
 The Reasoning institution participates in three comorphisms, each declared per D14's triadic structure. All three have identity-like middles on the constructor that carries the IRI — there is no transformation needed because the `JustificationTerm` constructor already carries the typed reference into the target institution's space.
 
-**Reasoning → Lean.** Source class: `ReasoningSentence` whose `JustificationTerm` is a root `VerifiedEvidence(verified_iri)` referencing a `LeanProofTerm`. Target class: the `LeanProofTerm` referenced by the IRI, with the proved proposition matching the sentence's proposition. The propositional alignment is direct: both institutions speak EigenTT `Prop` terms after D46, so there is no propositional translation to do. The cross-institution delegation is embedded in `ChainWitness.IsVerifiedAs` inhabitation: the Lean term-checker produces the witness when the proof is checked at the underlying `VerifiedResource`'s commit, and `JustifiedBy.verified` consumes it. The comorphism makes explicit a relationship the type system already enforces.
+**Reasoning ↔ Lean (bidirectional comorphism pair).** Two comorphisms — one per direction — together close the loop between EigenTT-native propositions and Lean-native proofs.
+
+*Reasoning → Lean.* Source class: `ReasoningSentence` whose `JustificationTerm` is a root `VerifiedEvidence(verified_iri)` referencing a `LeanProofTerm`. Target class: the `LeanProofTerm` referenced by the IRI, with the proved proposition matching the sentence's proposition. The propositional alignment is direct: both institutions speak EigenTT `Prop` terms after D46, so there is no propositional translation to do. The comorphism's source-export step is the EigenTT → Lean translation specified by D30 (the forward direction).
+
+*Lean → Reasoning.* Source class: any `lean:LeanProofTerm` that the Lean checker has validated. Target class: `reasoning:VerifiedPropositionView` (per D49 §7), reified at a content-hash-derived IRI carrying the Lean-proposition translated back into EigenTT. The comorphism's transformation step is the inverse of D30 — implemented by the Lean institution, restricted in v1 to the trivially-mappable `Prop` fragment. Dispatch role: `AutoOnLoad` on `LeanProofTerm` commits. This is the comorphism that makes `ChainWitness.IsVerifiedAs` admissible: the witness emitter (D49 §6) reads `canonical_proposition` from the reified view exactly as it reads it from any other Trace target. Lean propositions outside the v1 fragment fail the transformation; the resource remains valid as a Lean-native artifact, but no view is reified and no witness becomes admissible, with the failing `Verdict` resource carrying the diagnostic.
+
+Together the pair makes the type-system enforcement bidirectional: Reasoning sentences citing Lean proofs are checked against Lean (forward), and Lean proofs become citable from Reasoning sentences through the EigenTT-form view (backward).
 
 **Reasoning → numerical institutions.** Source class: `ReasoningSentence` whose `JustificationTerm` contains `DerivedEvidence(derived_iri)` constructors referencing resources produced by a numerical institution. Target class: the `DerivedResource`s from the originating institution (Symbolics, IntervalArithmetic, Catalyst, OrdinaryDiffEq, JuMP-HiGHS, and any others registered) — each carries the institution's `Verdict` as provenance, so citing the `DerivedResource` cites the verdict transitively.
 
@@ -299,6 +385,8 @@ This is what the platform's "debugging cycle for thinking" looks like when appli
 
 **Migration of existing data.** Existing `Derived` and `Verified` resources do not carry explicit `JustifiedBy` certificates. A bulk migration would lift their provenance-edge structure into certificates, but is not strictly required — the new mechanism augments the existing one. Whether to invest in a migration is an operational decision separable from this document's structural commitments.
 
+**Vocabulary engineering is part of the agent's discipline.** The two-phase agent surface (§4.5) puts vocabulary authoring on the chain alongside reasoning. This makes vocabulary quality a measurable dimension — agents that author parsimonious, well-formed task vocabularies exercise the discipline well; agents that flood the vocabulary with thirty ad-hoc predicates exercise it poorly. Open empirical questions: does the discipline produce convergence on parsimonious models across independent runs, or does each agent invent a new predicate per claim? Do per-family base ontologies (concrete vocabularies authored once per domain family) suppress drift enough to make cross-run comparison clean, or do agents fight the base ontology and re-invent? These resolve only through pilot runs; the design is intentionally non-prescriptive on the parsimony question so the experiment can measure it.
+
 **No-confusion for indexed families (eigenius#69).** A no-confusion principle for indexed inductive families would give definitionally-correct disjointness for distinct constructors and would let `JustifiedBy`'s eliminator discharge "different inference rules cannot witness the same proposition shape" obligations without an additional explicit lemma. The issue is filed as a kernel enhancement (D48 §7.2 follow-up); it simplifies but does not block this design.
 
 ## 11. Non-goals
@@ -325,6 +413,7 @@ To be explicit:
 - **[D46 Prop universe + axiom framework](d46-prop-universe-and-proof-irrelevance.md)** — D46 lets D39 declare propositions in `Prop`, gives proof irrelevance for free on `Prop`-typed proofs, and supplies the `eigentt:Axiom` chain class that hosts both built-in axioms (`propext`, `Quot.sound`) and the Reasoning institution's declared inference rules (§10).
 - **[D47 chain-mirrored EigenTT type fragment](d47-chain-mirrored-eigentt-type-fragment.md)** — D47 (with eigenius#71's term-level extension) provides the chain-resident encoding for both the propositional language (§4.1) and the `certificate` field of `ReasoningSentence` (§4.2). The codec decodes both back to kernel `Exp`s for type-checking at commit.
 - **[D48 indexed inductive families](d48-indexed-inductive-families.md)** — D48 is what makes the type-theoretic `JustifiedBy : JustificationTerm → Prop → Type` expressible: the first-order pattern unifier handles index unification during certificate type-checking; dependent constructor checking handles the `ChainWitness`-consuming grounding constructors; per-arm index-coherence and singleton-elim (Case B) for propositional indices clean up elaboration. D48's open follow-up (eigenius#69, no-confusion principle) is the one further kernel enhancement that would simplify some `JustifiedBy` eliminator derivations.
+- **[D49 `ChainWitness` machinery](d49-chainwitness-machinery.md)** — implementation memo for the `ChainWitness` predicate family introduced in §5. Settles where the witness table lives (per-`Layer`, derived from the Layer's Trace resources, materialised lazily via `OnceLock`), the witness-synthesis algorithm (parent-chain walk by `(category, iri, prop_hash)` key; first hit wins; misses surface as type errors at type-check time with a precise diagnostic), the trace-emission relationship (no new D41 hooks — witnesses are projections of `DeclarationTrace` / `ObservationTrace` / `ProgramTrace` / `VerificationTrace` resources), and the Lean checker hook for `IsVerifiedAs` (a v1 consistency check between the chain-declared EigenTT proposition and the Lean proposition via the D30 forward translation, with backward translation deferred to v1.1). Required reading for D39 implementation.
 - **`reflection` ontology (`ontologies/reflection/reflection-ontology.json`)** — the load-bearing chain substrate D39 sits on. The four epistemic-category base classes (`DeclaredResource` / `ObservedResource` / `DerivedResource` / `VerifiedResource`, with Verified `subclass_of` Derived), their per-class `requires` invariants, the `EpistemicStatus` value vocabulary, and the parallel Trace event classes (`DeclarationTrace`, `ObservationTrace`, `ProgramTrace`, `VerificationTrace`) are already declared here and are exactly what the Reasoning institution validates against. D39 does *not* introduce a parallel hierarchy: the `ChainWitness` predicate family (§5) is a type-theoretic projection of the reflection ontology's class-membership facts, with witness inhabitation triggered by Trace-emitting commits. The one extension D39 adds is an optional `reflection:canonical_proposition` property on `DeclaredResource` / `ObservedResource` / `DerivedResource` for resources that advertise an explicit `Prop` statement beyond the default `Asserts(iri)`. `EpistemicStatus` (the status-value vocabulary: `declared`, `observed`, `derived`, `verified`) is parallel to but distinct from class membership and remains a property-value vocabulary for trace annotations, not a justification witness.
 - **The four epistemic categories** specified in the architecture documents and realised in the reflection ontology — D39 aligns the `JustificationTerm` interlingua structurally with the four categories: each grounding constructor (`DeclaredEvidence`, `ObservedEvidence`, `DerivedEvidence`, `VerifiedEvidence`) references a resource of the corresponding base class. The propagation rule in §8 computes a sentence's category mechanically by walking the term tree. The categories' meaning is unchanged from the architecture spec; the structural enforcement becomes stricter for resources that commit justification terms.
 
