@@ -407,6 +407,16 @@ pub enum TypeExpr {
     /// Used in `axiom` statements, indexed `data` declarations, and
     /// motives.
     Sort { kind: SortKind, pos: Position },
+    /// eigenius#72 Layer 3 — type-level lambda introduced by `fun`:
+    /// `fun (i : T) => body`. Used as a motive for `match … returning
+    /// <motive>` over indexed inductives. Compiles to nested
+    /// single-parameter `Exp::Lam` chains, mirroring how `Pi` compiles
+    /// to nested `Exp::Pi` chains.
+    Lambda {
+        params: Vec<TypedParam>,
+        body: Box<TypeExpr>,
+        pos: Position,
+    },
 }
 
 /// Sort literals recognised in type expressions (eigenius#72).
@@ -425,7 +435,8 @@ impl TypeExpr {
             | TypeExpr::Arrow { pos, .. }
             | TypeExpr::BinderArrow { pos, .. }
             | TypeExpr::Pi { pos, .. }
-            | TypeExpr::Sort { pos, .. } => pos,
+            | TypeExpr::Sort { pos, .. }
+            | TypeExpr::Lambda { pos, .. } => pos,
         }
     }
 }
@@ -593,24 +604,31 @@ pub enum Expr {
     /// observations of the target codata type.
     CoRecord { fields: Vec<CoField>, pos: Position },
 
-    /// `match expr [returning T] { ctor -> body; ctor(x, y) -> body; ... }`
-    /// (Phase 11b step 11–12, D19 §10).
+    /// `match expr [returning <motive>] { ctor -> body; ctor(x, y) -> body; ... }`
+    /// (Phase 11b step 11–12, D19 §10; extended in eigenius#72 Layer 3).
     ///
     /// Pattern-matches a value of an inductive type. Each arm names
     /// a constructor and (optionally) binds variables for its
     /// arguments.
     ///
-    /// `result_type` is the optional type annotation for every arm
-    /// body. When present (Phase 11b step 11), the kernel-side
-    /// expression builder desugars to `Exp::InductiveRec` with
-    /// motive `λ_. result_type`. When absent (Phase 11b step 12),
-    /// it produces `Exp::Match`, leaving motive synthesis to the
-    /// type checker — which builds `λ_. expected_type` from the
-    /// checking-mode context. Inference-mode use of an unannotated
-    /// match is a type error with a clear diagnostic.
+    /// `returning` is the optional motive. When present, the
+    /// kernel-side expression builder desugars to `Exp::InductiveRec`
+    /// with the supplied motive. When absent, it produces `Exp::Match`
+    /// and the type checker synthesises the motive from the checking
+    /// context — inference-mode use without `returning` is a type
+    /// error with a clear diagnostic.
+    ///
+    /// Two motive shapes are accepted in source:
+    /// - A bare `TypeExpr::Ref` (qualified name) — desugars to the
+    ///   constant motive `λ_. T`. This is the pre-Layer-3 surface and
+    ///   stays supported for non-indexed inductives.
+    /// - A `TypeExpr::Lambda` (`fun (i : T) => body`) — used as the
+    ///   motive directly, abstracting over the scrutinee's indices.
+    ///   Required when matching on an indexed inductive whose result
+    ///   type depends on those indices.
     Match {
         scrutinee: Box<Expr>,
-        result_type: Option<QualifiedName>,
+        returning: Option<TypeExpr>,
         arms: Vec<MatchArm>,
         pos: Position,
     },

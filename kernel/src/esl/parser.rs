@@ -920,6 +920,14 @@ impl<'a> Parser<'a> {
             return self.parse_pi_type();
         }
 
+        // eigenius#72 Layer 3 — `fun (i_1 : T_1, …) => body` lambda in
+        // type position. Used as a motive for `match … returning <motive>`
+        // over indexed inductives. Parses through the same typed-param
+        // list machinery as `pi`/`forall`.
+        if self.at(&TokenKind::Fun) {
+            return self.parse_fun_lambda();
+        }
+
         // eigenius#72 — sort literals at the head of a type
         // expression: `Prop`, `Set`, or `Type N`. May then be
         // followed by `-> ...` (an arrow whose domain is a sort).
@@ -1101,6 +1109,22 @@ impl<'a> Parser<'a> {
         Ok(TypeExpr::Pi {
             params,
             codomain: Box::new(codomain),
+            pos,
+        })
+    }
+
+    /// eigenius#72 Layer 3 — `fun (i_1 : T_1, …, i_n : T_n) => body`
+    /// lambda in type position. Mirrors `parse_pi_type` exactly except
+    /// for the keyword and the resulting AST variant.
+    fn parse_fun_lambda(&mut self) -> Result<TypeExpr, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Fun)?;
+        let params = self.parse_typed_param_list()?;
+        self.expect(&TokenKind::FatArrow)?;
+        let body = self.parse_type_expr()?;
+        Ok(TypeExpr::Lambda {
+            params,
+            body: Box::new(body),
             pos,
         })
     }
@@ -1793,13 +1817,16 @@ impl<'a> Parser<'a> {
         // No-trailing-block: a following `{` opens the match body, not
         // a component config block on the scrutinee.
         let scrutinee = self.parse_apply_or_atom_no_trailing_block()?;
-        // `returning T` is optional. When omitted, the kernel-side
-        // type checker synthesises the motive from the expected type
-        // (Phase 11b step 12). When present, the expression builder
-        // desugars eagerly to `Exp::InductiveRec`.
-        let result_type = if self.at(&TokenKind::Returning) {
+        // `returning <motive>` is optional. When omitted, the
+        // kernel-side type checker synthesises the motive from the
+        // checking-mode expected type (Phase 11b step 12). When present
+        // the expression builder desugars eagerly to
+        // `Exp::InductiveRec` with the supplied motive (eigenius#72
+        // Layer 3 — accepts the full type-expression surface, including
+        // `fun (i : T) => body` motives for indexed inductives).
+        let returning = if self.at(&TokenKind::Returning) {
             self.advance();
-            Some(self.parse_qualified_name()?)
+            Some(self.parse_type_expr()?)
         } else {
             None
         };
@@ -1820,7 +1847,7 @@ impl<'a> Parser<'a> {
 
         Ok(Expr::Match {
             scrutinee: Box::new(scrutinee),
-            result_type,
+            returning,
             arms,
             pos,
         })
@@ -3306,6 +3333,84 @@ mod tests {
                 assert!(matches!(&d.ctors[0], CtorDecl::Positional { name, .. } if name == "tt"));
             }
             _ => panic!("expected data"),
+        }
+    }
+
+    // --- eigenius#72 Layer 3: match returning with Lambda motive ---
+
+    #[test]
+    fn match_returning_with_fun_lambda_motive_parses() {
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:eigenius:example";
+            namespace core = "urn:eigenius:core";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:identity : ex:Nat -> ex:Nat {
+                match input returning fun (n : core:Nat) => ex:Nat {
+                    zero -> input;
+                    succ(k) -> input;
+                }
+            }
+            "#,
+        )
+        .unwrap();
+        assert_eq!(file.declarations.len(), 2);
+        let prog = match &file.declarations[1] {
+            Declaration::Program(p) => p,
+            _ => panic!("expected program"),
+        };
+        match &prog.body {
+            Expr::Match { returning, .. } => {
+                assert!(
+                    matches!(returning, Some(TypeExpr::Lambda { .. })),
+                    "expected TypeExpr::Lambda motive, got {returning:?}"
+                );
+            }
+            other => panic!("expected Match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn match_returning_with_bare_ref_motive_parses_as_typeexpr_ref() {
+        // The pre-Layer-3 form `returning T` is still accepted; it
+        // now parses as `TypeExpr::Ref` instead of the old
+        // `QualifiedName`.
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Nat {
+                zero,
+                succ(ex:Nat),
+            }
+
+            program ex:identity : ex:Nat -> ex:Nat {
+                match input returning ex:Nat {
+                    zero -> input;
+                    succ(k) -> input;
+                }
+            }
+            "#,
+        )
+        .unwrap();
+        let prog = match &file.declarations[1] {
+            Declaration::Program(p) => p,
+            _ => panic!("expected program"),
+        };
+        match &prog.body {
+            Expr::Match { returning, .. } => match returning {
+                Some(TypeExpr::Ref { name, args, .. }) => {
+                    assert_eq!(name.name, "Nat");
+                    assert!(args.is_empty());
+                }
+                other => panic!("expected TypeExpr::Ref, got {other:?}"),
+            },
+            other => panic!("expected Match, got {other:?}"),
         }
     }
 

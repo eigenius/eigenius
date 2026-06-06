@@ -150,6 +150,20 @@ The kernel form is correspondingly `Exp::InductiveRec` or `Exp::Match`.
 
 **`returning` clause.** Always include it when the match's result type isn't obvious from the surrounding context. Without it, the kernel synthesises the motive from the checking-mode expectation; in inference mode (e.g. as the right-hand side of a `let` without an annotation), an unannotated match fails with `"cannot infer type of match — add a returning clause or annotate context"`.
 
+The clause accepts two shapes (eigenius#72 Layer 3):
+
+- **Bare type reference** — `returning ex:Nat`. The kernel wraps it as the constant motive `λ_. ex:Nat`. Use this whenever the scrutinee is non-indexed and the result type doesn't depend on the scrutinee.
+- **Lambda motive** — `returning fun (i : core:Nat) => Vec(A, i)`. The motive abstracts over the scrutinee's indices. **Required** when the scrutinee is an indexed inductive whose result type depends on those indices — the kernel uses the motive to refine each arm's expected type per the constructor's conclusion indices.
+
+```esl
+match v returning fun (i : core:Nat) => Vec(A, i) {
+    nil -> nil;
+    cons(k, x, xs) -> cons(k, x, xs);
+}
+```
+
+Compiles to `program:result_motive` carrying a D47-encoded `λ`-chain rather than the flat `program:result_type` IRI. The kernel decoder type-checks the motive's body at `Sort(n)` against the scrutinee inductive's `Π indices. Sort` signature, then specialises each arm's expected type per the constructor's conclusion indices.
+
 **Sized recursion.** When the scrutinee has a sized inductive type, each arm body sees a hypothesis recording that any recursive call within the arm must be on a strictly smaller size. This is what powers sized termination ([D19 §4](../../design/d19-inductive-types.md)).
 
 **Evaluation.** Iota-reduces — selects the arm matching the constructor and substitutes the bindings.

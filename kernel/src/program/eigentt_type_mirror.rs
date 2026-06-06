@@ -76,6 +76,23 @@ pub fn encode_type(exp: &Exp) -> Result<Value, EncodeError> {
     Ok(Value::Json(encode_type_json(exp)?))
 }
 
+/// Encode a Lambda chain `λ (x_1 : T_1) … (x_n : T_n). body` with the
+/// per-binder type annotations supplied separately, since `Exp::Lam`
+/// itself doesn't carry them. Each `(patt, dom)` pair becomes a `Lam`
+/// ctor in the chain JSON shape; the dom annotation is decoded-and-
+/// discarded by the kernel decoder (D47 §3) but is preserved here for
+/// round-trip fidelity. Used by the ESL compiler when emitting motives
+/// for `match … returning fun (i : T) => body` (eigenius#72 Layer 3).
+pub fn encode_lam_chain(binders: &[(Patt, Exp)], body: &Exp) -> Result<Value, EncodeError> {
+    let body_json = encode_type_json(body)?;
+    let mut acc = body_json;
+    for (patt, dom) in binders.iter().rev() {
+        let dom_json = encode_type_json(dom)?;
+        acc = ctor("Lam", vec![json!(binder_name(patt)), dom_json, acc]);
+    }
+    Ok(Value::Json(acc))
+}
+
 fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
     match exp {
         Exp::Sort(n) => Ok(ctor("Sort", vec![json!(*n as i64)])),

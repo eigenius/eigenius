@@ -62,6 +62,10 @@ pub enum TokenKind {
     /// eigenius#72 — `forall (P : Prop) => body`. Alias for `pi` with
     /// proposition-authoring semantics; parses to the same AST.
     Forall,
+    /// eigenius#72 Layer 3 — `fun (i : T) => body` lambda in type
+    /// position. Used as a motive for `match … returning <motive>`
+    /// over indexed inductives. Compiles to `Exp::Lam`.
+    Fun,
     /// eigenius#72 — `axiom Name : <type-expr>` top-level declaration.
     /// Commits a `core:Axiom` chain resource with the type expression
     /// encoded via the D47 codec.
@@ -477,6 +481,7 @@ impl<'a> Lexer<'a> {
             "pi" => TokenKind::Pi,
             // eigenius#72 — proposition / indexed-type authoring.
             "forall" => TokenKind::Forall,
+            "fun" => TokenKind::Fun,
             "axiom" => TokenKind::Axiom,
             "Prop" => TokenKind::Prop,
             "Set" => TokenKind::SetKw,
