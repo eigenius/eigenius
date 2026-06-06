@@ -20,6 +20,7 @@
 //!
 //! Execution is via NbE in IO mode (eval_io module).
 
+pub mod axiom_env;
 pub mod component;
 pub mod eigentt_type_mirror;
 pub mod embedder;

@@ -25,6 +25,7 @@ use crate::nbe::recursor::derive_minor_types;
 use crate::nbe::term::{Decl, Exp, InductiveDecl, Patt};
 use crate::nbe::val::{Clos, Val};
 use crate::ontology::iri::Iri;
+use crate::ontology::well_known as wk;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -1067,7 +1068,7 @@ fn resolve_full_codata_decl(
         if !resource
             .is_a()
             .iter()
-            .any(|c| c.as_str() == "urn:eigenius:core:CodataType")
+            .any(|c| c.as_str() == wk::CODATA_TYPE)
         {
             continue;
         }

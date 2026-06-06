@@ -321,8 +321,7 @@ fn build_sigma_chain(props: &[(Iri, Val)]) -> Result<Val, String> {
 /// Check whether a resource represents a codata type declaration.
 fn is_codata_type(resource: &crate::ontology::resource::Resource) -> bool {
     let is_a = resource.is_a();
-    is_a.iter()
-        .any(|c| c.as_str() == "urn:eigenius:core:CodataType")
+    is_a.iter().any(|c| c.as_str() == wk::CODATA_TYPE)
 }
 
 /// Resolve a CodataType resource into a `Val` form.

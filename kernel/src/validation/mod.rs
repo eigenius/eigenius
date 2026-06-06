@@ -810,9 +810,11 @@ impl Validator {
 // --- Module-level shared helpers ---
 
 /// Helper: parse a well-known constant into an Iri.
-pub(crate) fn iri(s: &str) -> Iri {
-    Iri::parse(s).expect("well-known IRI constants must be valid")
-}
+///
+/// Re-exported from [`crate::ontology::well_known::iri`] so the existing
+/// validation-internal callers don't need updating. New code should
+/// import directly from `ontology::well_known`.
+pub(crate) use crate::ontology::well_known::iri;
 
 /// Helper: extract a single resource-IRI from a Value. Accepts both
 /// `Value::ResourceRef` (canonical) and `Value::String` (the JSON

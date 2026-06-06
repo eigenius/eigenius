@@ -366,11 +366,12 @@ fn resolve_const_ref(iri: Iri, layer: &Layer) -> Result<Exp, DecodeError> {
     let resource = layer
         .resolve(&iri)
         .ok_or_else(|| DecodeError::UnresolvedConstRef(iri.clone()))?;
+    use crate::ontology::well_known as wk;
     let class_iris: Vec<Iri> = resource.is_a().to_vec();
-    let class_iri = Iri::parse("urn:eigenius:core:Class").unwrap();
-    let datatype_iri = Iri::parse("urn:eigenius:core:DataType").unwrap();
-    let inductive_iri = Iri::parse("urn:eigenius:core:InductiveType").unwrap();
-    let codata_iri = Iri::parse("urn:eigenius:core:CodataType").unwrap();
+    let class_iri = wk::iri(wk::CLASS);
+    let datatype_iri = wk::iri(wk::DATA_TYPE);
+    let inductive_iri = wk::iri(wk::INDUCTIVE_TYPE);
+    let codata_iri = wk::iri(wk::CODATA_TYPE);
     if class_iris.contains(&class_iri) {
         Ok(Exp::EigonClass(iri))
     } else if class_iris.contains(&datatype_iri) {

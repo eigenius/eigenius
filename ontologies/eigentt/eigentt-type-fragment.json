@@ -144,5 +144,31 @@
         ]
       }
     ]
+  },
+
+  {
+    "@id": "urn:eigenius:eigentt:Axiom",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Axiom",
+    "urn:eigenius:core:description": "A named axiom: a closed term whose type the kernel admits without checking the term itself. The `axiom_statement` property carries an EigenTT type expression (typically inhabiting Prop) that the axiom is asserted to inhabit. Conversion treats the axiom IRI as opaque — never delta-unfolded. Voiding the layer that introduces an axiom removes it from the kernel environment for any chain resolution that excludes that layer. See D46 §10.",
+    "urn:eigenius:core:requires": ["urn:eigenius:eigentt:axiom_statement"],
+    "urn:eigenius:core:recommends": ["urn:eigenius:eigentt:axiom_justification"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:axiom_statement",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "axiom_statement",
+    "urn:eigenius:core:description": "The EigenTT type the axiom inhabits — typically a Prop. Encoded as a chain-mirrored EigenTT type expression per D47 (eigentt:TypeExpr).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:TypeExpr"],
+    "urn:eigenius:core:domain": ["urn:eigenius:eigentt:Axiom"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:axiom_justification",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "axiom_justification",
+    "urn:eigenius:core:description": "Free-form note: why this axiom is being admitted, what trust assumption it encodes, what metatheory justifies it. For auditability — axioms are chain-traceable.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:eigentt:Axiom"]
   }
 ]

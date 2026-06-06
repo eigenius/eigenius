@@ -34,6 +34,11 @@ const FORMULA_TERM_IRI: &str = "urn:eigenius:formulas:FormulaTerm";
 /// operator_signature walk (deferred to a follow-on landing).
 const OPERATOR_ARITY_IRI: &str = "urn:eigenius:formulas:operator_arity";
 
+/// EigenTTType InductiveType IRI (D47 §3). Pinned here so the
+/// `ConstRef` resolution check (D47 §5) can short-circuit when
+/// the inductive being walked isn't `eigentt:TypeExpr`.
+const EIGENTT_TYPE_EXPR_IRI: &str = "urn:eigenius:eigentt:TypeExpr";
+
 /// Walk the left spine of an `App(App(App(head, a₃), a₂), a₁)` tree
 /// and return `(head, [a₁, a₂, a₃])`. Spine args are emitted
 /// **right-to-left** as the spine is traversed; the caller may want
@@ -307,6 +312,90 @@ impl Validator {
                 .unwrap_or("");
             let child_path = format!("{path}.args[{i}]");
             self.check_inductive_arg(arg_value, type_name, child_path, res_id, out);
+        }
+
+        // D47 §5 — EigenTTType-specific check: a `ConstRef` value's `iri`
+        // string must resolve to a chain resource of an admissible class
+        // (Class / DataType / InductiveType / CodataType). Without this
+        // check, malformed axiom statements could be persisted and only
+        // surface when decoded at axiom registration.
+        if ctor_name == "ConstRef"
+            && inductive_type
+                .id()
+                .map(|i| i.as_str() == EIGENTT_TYPE_EXPR_IRI)
+                .unwrap_or(false)
+        {
+            self.check_eigentt_const_ref(&args_array, &path, res_id, out);
+        }
+    }
+
+    /// EigenTTType `ConstRef` resolution check (D47 §5). Caller has
+    /// already verified `args[0]` is a string per the ctor schema; we
+    /// take it as the IRI to resolve. A missing or unresolvable IRI,
+    /// or an IRI that resolves to a resource whose `is_a` doesn't
+    /// include an admitted type-former class, emits a structured
+    /// validation error.
+    fn check_eigentt_const_ref(
+        &self,
+        args_array: &[serde_json::Value],
+        path: &str,
+        res_id: &Option<Iri>,
+        out: &mut Vec<ValidationError>,
+    ) {
+        let iri_str = match args_array.first().and_then(serde_json::Value::as_str) {
+            Some(s) => s,
+            None => return, // Already flagged by per-arg shape check above.
+        };
+        let iri_val = match Iri::parse(iri_str) {
+            Ok(i) => i,
+            Err(e) => {
+                out.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: None,
+                    rule: ValidationRule::UnresolvedClassReference,
+                    message: format!(
+                        "{path}.args[0]: ConstRef IRI `{iri_str}` is not a well-formed IRI: {e}"
+                    ),
+                });
+                return;
+            }
+        };
+        let referent = match self.layer.resolve(&iri_val) {
+            Some(r) => r,
+            None => {
+                out.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: None,
+                    rule: ValidationRule::UnresolvedClassReference,
+                    message: format!(
+                        "{path}.args[0]: ConstRef references unresolved IRI `{iri_val}`"
+                    ),
+                });
+                return;
+            }
+        };
+        let admitted = [
+            iri(wk::CLASS),
+            iri(wk::DATA_TYPE),
+            iri(wk::INDUCTIVE_TYPE),
+            iri(wk::CODATA_TYPE),
+        ];
+        if !admitted.iter().any(|c| referent.is_instance_of(c)) {
+            let found: Vec<String> = referent
+                .is_a()
+                .iter()
+                .map(|i| i.as_str().to_string())
+                .collect();
+            out.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: None,
+                rule: ValidationRule::UnresolvedClassReference,
+                message: format!(
+                    "{path}.args[0]: ConstRef IRI `{iri_val}` resolves to a resource whose \
+                     classes {found:?} include none of Class / DataType / InductiveType / \
+                     CodataType (the type-former classes EigenTTType.ConstRef admits)"
+                ),
+            });
         }
     }
 
@@ -1306,6 +1395,238 @@ mod tests {
         assert!(
             path_match,
             "error must include structured path `args[0]`: {mismatches:?}"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // EigenTTType ConstRef resolution (D47 §5 / Phase 4)
+    // ──────────────────────────────────────────────────────────────────
+
+    /// Build a chain with the bootstrap layers (core + eigentt-type-fragment),
+    /// plus a top layer carrying a property `eigentt_value : core:inductive`
+    /// typed at `eigentt:TypeExpr`. The top layer is also seeded with a
+    /// no-op auxiliary `Property` resource at `urn:eigenius:test:wrong_class`
+    /// — used by the wrong-class test as a `ConstRef` target whose primary
+    /// class isn't one of the type-former classes.
+    fn build_eigentt_test_chain() -> Arc<Layer> {
+        let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let mut builder = LayerBuilder::new("test_eigentt_top", Some(head));
+
+        // Property `eigentt_value : core:inductive` typed at eigentt:TypeExpr.
+        let prop = make_resource(
+            "urn:eigenius:test:eigentt_value",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                ),
+                (wk::SHORT_NAME, Value::String("eigentt_value".into())),
+                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::INDUCTIVE))),
+                (
+                    wk::CLASS_TYPES,
+                    Value::Array(vec![Value::ResourceRef(iri(
+                        "urn:eigenius:eigentt:TypeExpr",
+                    ))]),
+                ),
+            ],
+        );
+
+        // A Property-class auxiliary resource used as a "wrong-class ConstRef
+        // target" in the negative test. Its primary class is Property, not
+        // Class/DataType/Inductive/Codata.
+        let wrong_class_target = make_resource(
+            "urn:eigenius:test:wrong_class",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                ),
+                (wk::SHORT_NAME, Value::String("wrong_class".into())),
+                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::STRING))),
+            ],
+        );
+
+        builder.add_resource(prop).unwrap();
+        builder.add_resource(wrong_class_target).unwrap();
+        Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    #[test]
+    fn eigentt_constref_to_class_validates() {
+        // ConstRef("urn:eigenius:core:Class") — Class IS a Class.
+        let chain = build_eigentt_test_chain();
+        let mut top = LayerBuilder::new("test_constref_ok", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:ok_constref",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "ConstRef",
+                    "args": ["urn:eigenius:core:Class"]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let constref_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference && e.message.contains("ConstRef")
+            })
+            .collect();
+        assert!(
+            constref_errors.is_empty(),
+            "well-formed ConstRef to a Class must not raise an error; got {constref_errors:?}"
+        );
+    }
+
+    #[test]
+    fn eigentt_constref_unresolved_rejected() {
+        // ConstRef to a non-existent IRI must be rejected at commit.
+        let chain = build_eigentt_test_chain();
+        let mut top = LayerBuilder::new("test_constref_unresolved", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:bad_constref",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "ConstRef",
+                    "args": ["urn:eigenius:nonexistent:Foo"]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let constref_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference && e.message.contains("ConstRef")
+            })
+            .collect();
+        assert_eq!(
+            constref_errors.len(),
+            1,
+            "expected exactly one ConstRef unresolved error; got {errors:?}"
+        );
+        assert!(
+            constref_errors[0]
+                .message
+                .contains("urn:eigenius:nonexistent:Foo"),
+            "error must name the offending IRI: {}",
+            constref_errors[0].message
+        );
+    }
+
+    #[test]
+    fn eigentt_constref_wrong_class_rejected() {
+        // ConstRef to a Property (not a type-former class) must be rejected.
+        let chain = build_eigentt_test_chain();
+        let mut top = LayerBuilder::new("test_constref_wrong_class", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:wrong_class_constref",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "ConstRef",
+                    "args": ["urn:eigenius:test:wrong_class"]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let constref_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference && e.message.contains("ConstRef")
+            })
+            .collect();
+        assert_eq!(
+            constref_errors.len(),
+            1,
+            "expected exactly one ConstRef wrong-class error; got {errors:?}"
+        );
+        let msg = &constref_errors[0].message;
+        assert!(
+            msg.contains("urn:eigenius:test:wrong_class")
+                && (msg.contains("Property") || msg.contains("none of")),
+            "error must mention the target IRI and the wrong-class diagnostic: {msg}"
+        );
+    }
+
+    #[test]
+    fn eigentt_constref_in_app_spine_validates() {
+        // App(ConstRef(Class), ConstRef(Class)) — both ConstRefs must be
+        // resolved. Tests that nested ConstRefs inside App spines also
+        // get the resolution check (since walk_inductive_value recurses
+        // through args).
+        let chain = build_eigentt_test_chain();
+        let mut top = LayerBuilder::new("test_constref_in_app", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:app_constref",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "App",
+                    "args": [
+                        {"ctor": "ConstRef", "args": ["urn:eigenius:core:Class"]},
+                        {"ctor": "ConstRef", "args": ["urn:eigenius:core:Property"]}
+                    ]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let constref_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference && e.message.contains("ConstRef")
+            })
+            .collect();
+        assert!(
+            constref_errors.is_empty(),
+            "nested ConstRefs to valid Class IRIs must validate; got {constref_errors:?}"
+        );
+    }
+
+    #[test]
+    fn eigentt_constref_unresolved_in_app_spine_rejected() {
+        // App(ConstRef(bad), ConstRef(Class)) — the bad sub-ConstRef is
+        // detected by the recursive walk.
+        let chain = build_eigentt_test_chain();
+        let mut top = LayerBuilder::new("test_constref_nested_bad", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:nested_bad",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "App",
+                    "args": [
+                        {"ctor": "ConstRef", "args": ["urn:eigenius:nonexistent:Foo"]},
+                        {"ctor": "ConstRef", "args": ["urn:eigenius:core:Class"]}
+                    ]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let bad_errs: Vec<_> = errors
+            .iter()
+            .filter(|e| e.message.contains("urn:eigenius:nonexistent:Foo"))
+            .collect();
+        assert_eq!(
+            bad_errs.len(),
+            1,
+            "expected one error naming the bad nested IRI; got {errors:?}"
         );
     }
 }

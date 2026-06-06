@@ -17,6 +17,14 @@
 //! These constants avoid repeated string parsing for frequently used IRIs.
 //! They correspond to the resources defined in `ontologies/core/core-ontology.json`.
 
+use crate::ontology::iri::Iri;
+
+/// Parse a well-known constant into an [`Iri`]. Panics if the constant
+/// isn't a valid IRI — by construction the strings in this module are.
+pub fn iri(s: &str) -> Iri {
+    Iri::parse(s).expect("well-known IRI constants must be valid")
+}
+
 // --- Classes ---
 
 pub const CLASS: &str = "urn:eigenius:core:Class";
@@ -145,6 +153,7 @@ pub const INDUCTIVE_TYPE: &str = "urn:eigenius:core:InductiveType";
 pub const INDUCTIVE_CTOR: &str = "urn:eigenius:core:InductiveCtor";
 pub const INDUCTIVE_ARG_TYPE: &str = "urn:eigenius:core:InductiveArgType";
 pub const INDUCTIVE_PARAM: &str = "urn:eigenius:core:InductiveParam";
+pub const CODATA_TYPE: &str = "urn:eigenius:core:CodataType";
 pub const CTORS: &str = "urn:eigenius:core:ctors";
 pub const TYPE_PARAMS: &str = "urn:eigenius:core:type_params";
 pub const CTOR_NAME: &str = "urn:eigenius:core:ctor_name";
