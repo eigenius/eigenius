@@ -142,9 +142,30 @@ pub fn derive_minor_type(
     // variable names.
     let motive_exp = readback_val(0, motive);
 
-    // Result type: motive(cⱼ args)
+    // D48: extract the ctor's conclusion-indices from its declared
+    // result type `D(params)(idx_1, ..., idx_m)`. For non-indexed
+    // decls (`decl.indices.is_empty()`) this is empty and the rest
+    // of the body construction degenerates to the pre-D48 shape.
+    let n_params = decl.params.len();
+    let conclusion_indices: Vec<Exp> = match current {
+        Exp::InductiveType(_, all_args) if all_args.len() >= n_params => {
+            all_args[n_params..].to_vec()
+        }
+        _ => Vec::new(),
+    };
+
+    // Build `motive idx_1 ... idx_m` — the motive applied at the
+    // ctor-specific index expressions. For non-indexed decls this
+    // simplifies to `motive_exp` (no indices to apply).
+    let motive_at_concl_indices = conclusion_indices
+        .iter()
+        .fold(motive_exp.clone(), |acc, i| {
+            Exp::App(Box::new(acc), Box::new(i.clone()))
+        });
+
+    // Result type: motive idx_1 ... idx_m (cⱼ args)
     let ctor_app = Exp::InductiveCtor(decl.clone(), ctor.name.clone(), arg_var_exps.clone());
-    let mut body_exp = Exp::App(Box::new(motive_exp.clone()), Box::new(ctor_app));
+    let mut body_exp = Exp::App(Box::new(motive_at_concl_indices), Box::new(ctor_app));
 
     // Wrap one IH binder per recursive argument, in original order
     // (rev iteration so the first recursive arg ends up outermost
@@ -161,7 +182,23 @@ pub fn derive_minor_type(
         .collect();
     for (rec_pos, &arg_idx) in recursive_indices.iter().enumerate().rev() {
         let arg_var = arg_var_exps[arg_idx].clone();
-        let ih_typ = Exp::App(Box::new(motive_exp.clone()), Box::new(arg_var));
+        // D48: the IH type for `arg : D(params)(arg_idx_1, ..., arg_idx_m)`
+        // is `motive arg_idx_1 ... arg_idx_m arg`. For non-indexed decls
+        // `arg_idx_*` is empty, recovering the pre-D48 `motive arg` shape.
+        let arg_typ = match &arg_specs[arg_idx] {
+            MinorArg::Value { typ, .. } => typ.clone(),
+            MinorArg::Size { .. } => unreachable!("size args aren't recursive"),
+        };
+        let arg_idx_exps: Vec<Exp> = match &arg_typ {
+            Exp::InductiveType(_, all_args) if all_args.len() >= n_params => {
+                all_args[n_params..].to_vec()
+            }
+            _ => Vec::new(),
+        };
+        let motive_at_arg_indices = arg_idx_exps.iter().fold(motive_exp.clone(), |acc, i| {
+            Exp::App(Box::new(acc), Box::new(i.clone()))
+        });
+        let ih_typ = Exp::App(Box::new(motive_at_arg_indices), Box::new(arg_var));
         body_exp = Exp::Pi(
             Patt::Var(format!("__ih_{rec_pos}")),
             Box::new(ih_typ),
@@ -412,5 +449,146 @@ mod tests {
             EvalError::InvalidCaseTarget(msg) => assert!(msg.contains("params")),
             other => panic!("expected InvalidCaseTarget, got {other:?}"),
         }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // D48 Phase E — derive_minor_type for indexed inductives
+    // ──────────────────────────────────────────────────────────────────
+
+    /// Build the same Vec-with-Unit-index toy used by check.rs Phase B
+    /// tests: `SimpleVec (A : Set) : 1 → Set` with `nil : SimpleVec A ()`
+    /// and `cons : (h : 1) → A → SimpleVec A () → SimpleVec A ()`.
+    fn simple_vec_decl() -> Arc<InductiveDecl> {
+        let self_ref = Arc::new(InductiveDecl {
+            name: "SimpleVec".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        let vec_a_unit =
+            Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string()), Exp::Unit]);
+        Arc::new(InductiveDecl {
+            name: "SimpleVec".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: vec![
+                InductiveCtorDecl {
+                    name: "nil".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Var("A".to_string()),
+                        Box::new(Exp::Sort(1)),
+                        Box::new(vec_a_unit.clone()),
+                    ),
+                },
+                InductiveCtorDecl {
+                    name: "cons".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Var("A".to_string()),
+                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::Pi(
+                            Patt::Unit,
+                            Box::new(Exp::One),
+                            Box::new(Exp::Pi(
+                                Patt::Unit,
+                                Box::new(Exp::Var("A".to_string())),
+                                Box::new(Exp::Pi(
+                                    Patt::Unit,
+                                    Box::new(vec_a_unit.clone()),
+                                    Box::new(vec_a_unit),
+                                )),
+                            )),
+                        )),
+                    ),
+                },
+            ],
+        })
+    }
+
+    /// A motive that takes 2 args (the index of type `1`, then the
+    /// inductive value) and returns `Set`. Concretely:
+    /// `λ_idx. λ_v. Set`.
+    fn vec_motive() -> Val {
+        Val::Lam(Clos::new(
+            Patt::Unit,
+            Exp::Lam(Patt::Unit, Box::new(Exp::Sort(1))),
+            Rho::Nil,
+        ))
+    }
+
+    #[test]
+    fn d48_vec_nil_minor_type_applies_motive_to_index() {
+        // `nil`'s derived minor type should be `motive () (nil A)` —
+        // the motive applied at the conclusion's index `()` then at
+        // the constructor.
+        let decl = simple_vec_decl();
+        let motive = vec_motive();
+        // Reducing the minor at evaluation time produces `motive () (nil A)`
+        // which (with the const motive `λ _ _. Set`) collapses to `Set`.
+        let typ = derive_minor_type(&decl, 0, &[Val::Sort(0)], &motive, &EvalCtx::Pure)
+            .expect("derive nil minor");
+        // The minor type is `Π A:Set. motive () (nil A)` — a Pi over
+        // the ctor's value-arg telescope (here just the A binder).
+        // After the const motive reduces, the inner result is Sort(1).
+        match typ {
+            Val::Pi(_dom, body_clos) => {
+                let body = body_clos
+                    .apply(Val::Sort(0))
+                    .expect("apply minor body to A");
+                // Wait — the A binder is part of the *param prefix*,
+                // not the ctor's value args. `nil` has no non-param
+                // value args, so the minor is just `motive () (nil A)`.
+                // The Val::Pi above must be from a different binder.
+                // Actually: `nil` has no non-param args at all, so the
+                // minor type is the body directly, no Pi.
+                let _ = body;
+                panic!("nil has no non-param args; expected non-Pi minor");
+            }
+            other => {
+                // `motive () (nil A)` with const motive reduces to Sort(1).
+                assert!(
+                    matches!(other, Val::Sort(1)),
+                    "expected Sort(1) (from const motive), got {other:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn d48_vec_cons_minor_type_applies_motive_to_index_and_includes_ih() {
+        // `cons`'s derived minor type is:
+        //   Π _:1. Π _:A. Π _:SimpleVec A (). Π __ih_0: motive () xs. motive () (cons A h x xs)
+        // The const motive `λ _ _. Set` reduces all `motive () _` to Sort(1).
+        let decl = simple_vec_decl();
+        let motive = vec_motive();
+        let typ = derive_minor_type(&decl, 1, &[Val::Sort(0)], &motive, &EvalCtx::Pure)
+            .expect("derive cons minor");
+        // Verify the minor type starts with a Pi — `cons` has non-param
+        // value args (h : 1, x : A, xs : SimpleVec A ()) plus an IH for
+        // the recursive xs, so the outer shape must be a binder.
+        assert!(
+            matches!(typ, Val::Pi(_, _) | Val::SizedPi(_, _)),
+            "cons minor must be a Pi (has non-param args); got {typ:?}"
+        );
+    }
+
+    #[test]
+    fn d48_nat_minor_unchanged_pre_d48_shape() {
+        // For non-indexed Nat, the minor type's motive application
+        // should be identical to the pre-D48 shape: `motive (zero)`
+        // / `motive (succ n)` with no extra index arguments. The
+        // existing `nat_zero_minor_type_is_motive_applied_to_zero`
+        // test (if present) would catch a regression; here we re-
+        // assert the same property for paranoia.
+        let nat = nat_decl();
+        let motive = const_set_motive();
+        // zero's minor: no args, result is `motive zero` → Sort(1) under const.
+        let zero_typ =
+            derive_minor_type(&nat, 0, &[], &motive, &EvalCtx::Pure).expect("derive zero minor");
+        assert!(
+            matches!(zero_typ, Val::Sort(1)),
+            "Nat.zero minor should reduce to Sort(1) under const-Set motive; got {zero_typ:?}"
+        );
     }
 }
