@@ -132,15 +132,16 @@ impl Compiler {
             if let ast::Declaration::Data(d) = decl {
                 let parent_iri = self.resolve(&d.name)?;
                 for ctor in &d.ctors {
-                    let ctor_iri = format!("{parent_iri}:{}", ctor.name);
-                    if let Some(existing) = self.ctors.insert(ctor.name.clone(), ctor_iri) {
+                    let ctor_iri = format!("{parent_iri}:{}", ctor.name());
+                    if let Some(existing) = self.ctors.insert(ctor.name().to_string(), ctor_iri) {
                         return Err(EslError::compiler(
-                            Some(ctor.pos.clone()),
+                            Some(ctor.pos().clone()),
                             format!(
                                 "constructor `{}` declared in `{}` collides with an earlier \
                                  declaration whose IRI is `{existing}` — rename one of them \
                                  (qualified ctor references in source are a future addition)",
-                                ctor.name, parent_iri
+                                ctor.name(),
+                                parent_iri
                             ),
                         ));
                     }
@@ -809,44 +810,109 @@ impl Compiler {
             .collect();
         r.set(iri(wk::TYPE_PARAMS), Value::Array(params?));
 
+        // eigenius#72 Layer 2 — index telescope. Same shape as
+        // `type_params`; absent / empty for non-indexed declarations.
+        // Bare references that match a declared parameter name are
+        // stored verbatim (so the decoder emits `Exp::Var(name)`);
+        // qualified names go through the namespace registry.
+        if !decl.indices.is_empty() {
+            let indices: Result<Vec<Value>, EslError> = decl
+                .indices
+                .iter()
+                .map(|p| {
+                    let mut pr = Resource::new_embedded();
+                    set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
+                    pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
+                    let kind = if p.kind.namespace.is_none()
+                        && param_names.contains(p.kind.name.as_str())
+                    {
+                        p.kind.name.clone()
+                    } else {
+                        self.resolve(&p.kind)?
+                    };
+                    pr.set(iri(wk::PARAM_KIND), Value::String(kind));
+                    Ok(Value::Embedded(Box::new(pr)))
+                })
+                .collect();
+            r.set(iri(wk::INDICES), Value::Array(indices?));
+        }
+
+        // eigenius#72 Layer 2 — explicit result sort. Encoded as a
+        // string; the decoder parses it back into `Exp::Sort(n)`.
+        if let Some(sort) = decl.result_sort {
+            let sort_str = match sort {
+                ast::SortKind::Prop => "Prop".to_string(),
+                ast::SortKind::Set => "Set".to_string(),
+                ast::SortKind::Type(n) => format!("Type:{n}"),
+            };
+            r.set(iri(wk::RESULT_SORT), Value::String(sort_str));
+        }
+
         let parent_iri_str = self.resolve(&decl.name)?;
         let ctors: Result<Vec<Value>, EslError> = decl
             .ctors
             .iter()
             .map(|c| {
-                let ctor_iri_str = format!("{parent_iri_str}:{}", c.name);
+                let ctor_iri_str = format!("{parent_iri_str}:{}", c.name());
                 let ctor_iri = Iri::parse(&ctor_iri_str).map_err(|e| {
                     EslError::compiler(
-                        Some(c.pos.clone()),
+                        Some(c.pos().clone()),
                         format!("invalid ctor IRI `{ctor_iri_str}`: {e}"),
                     )
                 })?;
                 let mut cr = Resource::new(ctor_iri);
                 set_is_a(&mut cr, wk::INDUCTIVE_CTOR);
-                cr.set(iri(wk::CTOR_NAME), Value::String(c.name.clone()));
-                // Compile ctor args left-to-right, threading named
-                // binders into scope as we go so subsequent positional
-                // args can reference them.
-                let mut local_binders: Vec<String> = Vec::new();
-                let mut arg_values: Vec<Value> = Vec::with_capacity(c.args.len());
-                for arg in &c.args {
-                    let mut scope: std::collections::HashSet<&str> = param_names.clone();
-                    for b in &local_binders {
-                        scope.insert(b.as_str());
+                cr.set(iri(wk::CTOR_NAME), Value::String(c.name().to_string()));
+                match c {
+                    ast::CtorDecl::Positional { args, .. } => {
+                        // Legacy positional / named-arg form. The ctor's
+                        // conclusion is implicitly `Self(params)`; the
+                        // chain decoder reassembles the Π-telescope from
+                        // `core:arg_types`.
+                        let mut local_binders: Vec<String> = Vec::new();
+                        let mut arg_values: Vec<Value> = Vec::with_capacity(args.len());
+                        for arg in args {
+                            let mut scope: std::collections::HashSet<&str> = param_names.clone();
+                            for b in &local_binders {
+                                scope.insert(b.as_str());
+                            }
+                            match arg {
+                                ast::CtorArg::Positional(t) => {
+                                    arg_values.push(self.compile_ctor_arg_type(t, &scope)?);
+                                }
+                                ast::CtorArg::Named {
+                                    name, kind, bound, ..
+                                } => {
+                                    arg_values
+                                        .push(self.compile_ctor_binder(name, kind, bound, &scope)?);
+                                    local_binders.push(name.clone());
+                                }
+                            }
+                        }
+                        cr.set(iri(wk::ARG_TYPES), Value::Array(arg_values));
                     }
-                    match arg {
-                        ast::CtorArg::Positional(t) => {
-                            arg_values.push(self.compile_ctor_arg_type(t, &scope)?);
+                    ast::CtorDecl::Typed { typ, pos, .. } => {
+                        // eigenius#72 Layer 2 — the typed form supplies
+                        // the full Π-telescope (including conclusion
+                        // indices) as a single TypeExpr. Lower it to
+                        // `Exp` and stash the D47-encoded payload under
+                        // `core:ctor_type`; the kernel decoder uses it
+                        // directly without going through arg_types.
+                        let mut scope = param_names.clone();
+                        for idx in &decl.indices {
+                            scope.insert(idx.name.as_str());
                         }
-                        ast::CtorArg::Named {
-                            name, kind, bound, ..
-                        } => {
-                            arg_values.push(self.compile_ctor_binder(name, kind, bound, &scope)?);
-                            local_binders.push(name.clone());
-                        }
+                        let ctor_exp = self.lower_type_expr_to_exp(typ, &scope)?;
+                        let encoded = crate::program::eigentt_type_mirror::encode_type(&ctor_exp)
+                            .map_err(|e| {
+                            EslError::compiler(
+                                Some(pos.clone()),
+                                format!("failed to encode ctor type for `{}`: {e}", c.name()),
+                            )
+                        })?;
+                        cr.set(iri(wk::CTOR_TYPE), encoded);
                     }
                 }
-                cr.set(iri(wk::ARG_TYPES), Value::Array(arg_values));
                 Ok(Value::Embedded(Box::new(cr)))
             })
             .collect();
@@ -3038,6 +3104,175 @@ mod tests {
                 .get(&iri("urn:eigenius:core:type_name"))
                 .and_then(|v| v.as_str()),
             Some("A")
+        );
+    }
+
+    // --- eigenius#72 Layer 2: indexed data declarations ---
+
+    #[test]
+    fn compile_data_indexed_emits_indices_and_result_sort_and_ctor_type() {
+        use crate::ontology::well_known as wk_local;
+
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Vec(A : core:Set) : core:Nat -> Set {
+                nil : ex:Vec(A, ex:zero),
+                cons : forall (n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
+            }
+            "#,
+        );
+        let r = &resources[0];
+
+        // Indices property — one anonymous index of type `core:Nat`.
+        let indices_iri = Iri::parse(wk_local::INDICES).unwrap();
+        match r.get(&indices_iri) {
+            Some(Value::Array(arr)) => {
+                assert_eq!(arr.len(), 1, "expected one index entry, got {arr:?}");
+                let entry = match &arr[0] {
+                    Value::Embedded(e) => e.as_ref(),
+                    other => panic!("expected embedded InductiveParam, got {other:?}"),
+                };
+                assert_eq!(
+                    entry
+                        .get(&Iri::parse(wk_local::PARAM_NAME).unwrap())
+                        .and_then(|v| if let Value::String(s) = v {
+                            Some(s.as_str())
+                        } else {
+                            None
+                        }),
+                    Some("_")
+                );
+                assert_eq!(
+                    entry
+                        .get(&Iri::parse(wk_local::PARAM_KIND).unwrap())
+                        .and_then(|v| if let Value::String(s) = v {
+                            Some(s.as_str())
+                        } else {
+                            None
+                        }),
+                    Some("urn:eigenius:core:Nat")
+                );
+            }
+            other => panic!("expected `core:indices` array, got {other:?}"),
+        }
+
+        // Result sort — explicitly `Set`.
+        let sort_iri = Iri::parse(wk_local::RESULT_SORT).unwrap();
+        assert_eq!(
+            r.get(&sort_iri).and_then(|v| if let Value::String(s) = v {
+                Some(s.as_str())
+            } else {
+                None
+            }),
+            Some("Set")
+        );
+
+        // Both ctors should carry `core:ctor_type`, none should carry
+        // `core:arg_types` (typed form bypasses arg_types entirely).
+        let ctors_iri = Iri::parse(wk_local::CTORS).unwrap();
+        let ctor_type_iri = Iri::parse(wk_local::CTOR_TYPE).unwrap();
+        let arg_types_iri = Iri::parse(wk_local::ARG_TYPES).unwrap();
+        match r.get(&ctors_iri) {
+            Some(Value::Array(arr)) => {
+                assert_eq!(arr.len(), 2);
+                for (i, ctor_val) in arr.iter().enumerate() {
+                    let cr = match ctor_val {
+                        Value::Embedded(e) => e.as_ref(),
+                        other => panic!("ctor {i}: expected embedded, got {other:?}"),
+                    };
+                    assert!(
+                        cr.get(&ctor_type_iri).is_some(),
+                        "ctor {i} should carry core:ctor_type"
+                    );
+                    assert!(
+                        cr.get(&arg_types_iri).is_none(),
+                        "ctor {i} should NOT carry core:arg_types in typed form"
+                    );
+                }
+            }
+            other => panic!("expected `core:ctors` array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compile_data_indexed_by_parameter_keeps_param_name_in_kind_string() {
+        use crate::ontology::well_known as wk_local;
+
+        // `data Eq(A : Set) : A -> A -> Prop { ... }` — the index kind
+        // is the parameter `A`, which the compiler must preserve as
+        // the bare string `"A"` (not try to namespace-resolve it).
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Eq(A : core:Set) : A -> A -> Prop {
+                refl : forall (a : A) => ex:Eq(A, a, a),
+            }
+            "#,
+        );
+        let r = &resources[0];
+        let indices_iri = Iri::parse(wk_local::INDICES).unwrap();
+        let arr = match r.get(&indices_iri) {
+            Some(Value::Array(a)) => a,
+            other => panic!("expected indices array, got {other:?}"),
+        };
+        assert_eq!(arr.len(), 2);
+        for entry in arr {
+            let pr = match entry {
+                Value::Embedded(e) => e.as_ref(),
+                other => panic!("expected embedded, got {other:?}"),
+            };
+            assert_eq!(
+                pr.get(&Iri::parse(wk_local::PARAM_KIND).unwrap())
+                    .and_then(|v| if let Value::String(s) = v {
+                        Some(s.as_str())
+                    } else {
+                        None
+                    }),
+                Some("A"),
+                "param-typed index should keep bare param name as kind"
+            );
+        }
+        // Result sort should be `Prop`.
+        assert_eq!(
+            r.get(&Iri::parse(wk_local::RESULT_SORT).unwrap())
+                .and_then(|v| if let Value::String(s) = v {
+                    Some(s.as_str())
+                } else {
+                    None
+                }),
+            Some("Prop")
+        );
+    }
+
+    #[test]
+    fn compile_data_non_indexed_omits_indices_and_result_sort() {
+        use crate::ontology::well_known as wk_local;
+
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Bool {
+                tt,
+                ff,
+            }
+            "#,
+        );
+        let r = &resources[0];
+        let indices_iri = Iri::parse(wk_local::INDICES).unwrap();
+        assert!(
+            r.get(&indices_iri).is_none(),
+            "non-indexed data should omit `core:indices`"
+        );
+        let sort_iri = Iri::parse(wk_local::RESULT_SORT).unwrap();
+        assert!(
+            r.get(&sort_iri).is_none(),
+            "non-indexed data without explicit `: Set` should omit `core:result_sort`"
         );
     }
 

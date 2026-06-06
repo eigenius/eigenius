@@ -1325,6 +1325,23 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
 
+        // Optional `: <index-telescope> -> <sort>` clause (eigenius#72
+        // Layer 2). Example: `data Vec(A : Set) : Nat -> Set { ... }`
+        // parses one index `_ : Nat` and the result sort `Set`. The
+        // telescope is `T1 -> T2 -> ... -> SortLiteral`; trailing piece
+        // must be a sort literal (Prop / Set / Type N).
+        //
+        // The legacy form `data Name { ... }` and the parametric form
+        // `data Name(params) { ... }` both omit this clause; `indices`
+        // stays empty and `result_sort` stays `None` (compiler defaults
+        // to `Set`).
+        let (indices, result_sort) = if self.at(&TokenKind::Colon) {
+            self.advance();
+            self.parse_data_index_telescope()?
+        } else {
+            (Vec::new(), None)
+        };
+
         self.expect(&TokenKind::LBrace)?;
         let mut ctors = Vec::new();
         while !self.at(&TokenKind::RBrace) && !self.at_eof() {
@@ -1353,6 +1370,8 @@ impl<'a> Parser<'a> {
         Ok(DataDecl {
             name,
             params,
+            indices,
+            result_sort,
             ctors,
             pos,
         })
@@ -1392,10 +1411,79 @@ impl<'a> Parser<'a> {
         Ok(params)
     }
 
-    /// `name` (nullary) or `name(arg, arg, ...)` (with positional args).
+    /// Parse the `<index-telescope> -> <sort-literal>` clause that
+    /// appears after the colon in `data Name(params) : ... { ... }`
+    /// (eigenius#72 Layer 2). The colon has already been consumed by
+    /// the caller.
+    ///
+    /// Grammar (v1): one or more anonymous index types separated by
+    /// `->`, terminated by a sort literal. Each index type must be a
+    /// bare qualified-name reference (parameter name, or a class IRI);
+    /// arbitrary type expressions as index kinds are deferred. A bare
+    /// sort literal (no preceding `->`) is also accepted and produces
+    /// an empty index telescope with the sort as `result_sort` — i.e.
+    /// `data Foo : Set { ... }` is equivalent to `data Foo { ... }`
+    /// but with the sort made explicit.
+    fn parse_data_index_telescope(
+        &mut self,
+    ) -> Result<(Vec<DataParam>, Option<SortKind>), EslError> {
+        let mut indices = Vec::new();
+        let te = self.parse_type_expr()?;
+        let mut current = te;
+        loop {
+            match current {
+                TypeExpr::Arrow {
+                    domain, codomain, ..
+                } => {
+                    let (kind, dom_pos) = match *domain {
+                        TypeExpr::Ref { name, args, pos } if args.is_empty() => (name, pos),
+                        other => {
+                            return Err(EslError::parser(
+                                Some(other.pos().clone()),
+                                "data-index telescope (v1): each index type must be a bare \
+                                 qualified-name reference; arbitrary applied or function-typed \
+                                 index kinds are not yet supported"
+                                    .to_string(),
+                            ));
+                        }
+                    };
+                    indices.push(DataParam {
+                        name: "_".to_string(),
+                        kind,
+                        pos: dom_pos,
+                    });
+                    current = *codomain;
+                }
+                TypeExpr::Sort { kind, .. } => {
+                    return Ok((indices, Some(kind)));
+                }
+                other => {
+                    return Err(EslError::parser(
+                        Some(other.pos().clone()),
+                        "data-index telescope must end in a sort literal (Prop / Set / Type N); \
+                         each preceding segment is an anonymous index type separated by `->`"
+                            .to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Three surface forms (eigenius#72 Layer 2):
+    ///
+    /// - `name` — nullary positional.
+    /// - `name(arg, arg, ...)` — positional with arg list.
+    /// - `name : <type-expr>` — typed form carrying the full Π-telescope
+    ///   (required for indexed inductives; optional but allowed for
+    ///   non-indexed too).
     fn parse_ctor_decl(&mut self) -> Result<CtorDecl, EslError> {
         let pos = self.current_pos();
         let name = self.expect_ident()?;
+        if self.at(&TokenKind::Colon) {
+            self.advance();
+            let typ = self.parse_type_expr()?;
+            return Ok(CtorDecl::Typed { name, typ, pos });
+        }
         let args = if self.at(&TokenKind::LParen) {
             self.advance();
             let mut args = Vec::new();
@@ -1426,7 +1514,7 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
-        Ok(CtorDecl { name, args, pos })
+        Ok(CtorDecl::Positional { name, args, pos })
     }
 
     /// A single constructor argument.
@@ -2938,11 +3026,11 @@ mod tests {
                 assert_eq!(d.name.name, "Nat");
                 assert!(d.params.is_empty());
                 assert_eq!(d.ctors.len(), 2);
-                assert_eq!(d.ctors[0].name, "zero");
-                assert!(d.ctors[0].args.is_empty());
-                assert_eq!(d.ctors[1].name, "succ");
-                assert_eq!(d.ctors[1].args.len(), 1);
-                match &d.ctors[1].args[0] {
+                assert_eq!(d.ctors[0].name(), "zero");
+                assert!(d.ctors[0].args().is_empty());
+                assert_eq!(d.ctors[1].name(), "succ");
+                assert_eq!(d.ctors[1].args().len(), 1);
+                match &d.ctors[1].args()[0] {
                     CtorArg::Positional(t) => {
                         assert_eq!(t.name.name, "Nat");
                         assert!(t.params.is_empty());
@@ -2969,8 +3057,8 @@ mod tests {
             Declaration::Data(d) => {
                 assert_eq!(d.name.name, "Bool");
                 assert_eq!(d.ctors.len(), 2);
-                assert!(d.ctors[0].args.is_empty());
-                assert!(d.ctors[1].args.is_empty());
+                assert!(d.ctors[0].args().is_empty());
+                assert!(d.ctors[1].args().is_empty());
             }
             _ => panic!("expected data"),
         }
@@ -2994,12 +3082,12 @@ mod tests {
                 assert_eq!(d.params[0].name, "A");
                 assert_eq!(d.params[0].kind.name, "Set");
                 assert_eq!(d.ctors.len(), 2);
-                assert_eq!(d.ctors[0].name, "nil");
-                assert!(d.ctors[0].args.is_empty());
-                assert_eq!(d.ctors[1].name, "cons");
-                assert_eq!(d.ctors[1].args.len(), 2);
+                assert_eq!(d.ctors[0].name(), "nil");
+                assert!(d.ctors[0].args().is_empty());
+                assert_eq!(d.ctors[1].name(), "cons");
+                assert_eq!(d.ctors[1].args().len(), 2);
                 // First arg: bare `A` (param reference) — positional
-                match &d.ctors[1].args[0] {
+                match &d.ctors[1].args()[0] {
                     CtorArg::Positional(t) => {
                         assert_eq!(t.name.name, "A");
                         assert!(t.params.is_empty());
@@ -3007,7 +3095,7 @@ mod tests {
                     other => panic!("expected Positional, got {other:?}"),
                 }
                 // Second arg: `ex:List(A)` — positional, applied to `A`.
-                match &d.ctors[1].args[1] {
+                match &d.ctors[1].args()[1] {
                     CtorArg::Positional(t) => {
                         assert_eq!(t.name.name, "List");
                         assert_eq!(t.params.len(), 1);
@@ -3040,8 +3128,8 @@ mod tests {
         match &file.declarations[0] {
             Declaration::Data(d) => {
                 let succ = &d.ctors[1];
-                assert_eq!(succ.args.len(), 2);
-                match &succ.args[0] {
+                assert_eq!(succ.args().len(), 2);
+                match &succ.args()[0] {
                     CtorArg::Named {
                         name, kind, bound, ..
                     } => {
@@ -3053,7 +3141,7 @@ mod tests {
                     }
                     other => panic!("expected Named, got {other:?}"),
                 }
-                assert!(matches!(&succ.args[1], CtorArg::Positional(_)));
+                assert!(matches!(&succ.args()[1], CtorArg::Positional(_)));
             }
             _ => panic!("expected data"),
         }
@@ -3075,7 +3163,7 @@ mod tests {
         )
         .unwrap();
         match &file.declarations[0] {
-            Declaration::Data(d) => match &d.ctors[1].args[0] {
+            Declaration::Data(d) => match &d.ctors[1].args()[0] {
                 CtorArg::Named {
                     name, kind, bound, ..
                 } => {
@@ -3105,7 +3193,7 @@ mod tests {
         )
         .unwrap();
         match &file.declarations[0] {
-            Declaration::Data(d) => match &d.ctors[0].args[0] {
+            Declaration::Data(d) => match &d.ctors[0].args()[0] {
                 CtorArg::Named {
                     name, kind, bound, ..
                 } => {
@@ -3115,6 +3203,108 @@ mod tests {
                 }
                 other => panic!("expected Named, got {other:?}"),
             },
+            _ => panic!("expected data"),
+        }
+    }
+
+    // --- eigenius#72 Layer 2: indexed data declarations ---
+
+    #[test]
+    fn data_vec_indexed_with_typed_ctors() {
+        let file = parse_str(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Vec(A : core:Set) : core:Nat -> Set {
+                nil : ex:Vec(A, ex:zero),
+                cons : forall (n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                assert_eq!(d.name.name, "Vec");
+                assert_eq!(d.params.len(), 1);
+                assert_eq!(d.indices.len(), 1);
+                assert_eq!(d.indices[0].name, "_");
+                assert_eq!(d.indices[0].kind.name, "Nat");
+                assert_eq!(d.result_sort, Some(SortKind::Set));
+                assert_eq!(d.ctors.len(), 2);
+                assert!(matches!(&d.ctors[0], CtorDecl::Typed { name, .. } if name == "nil"));
+                assert!(matches!(&d.ctors[1], CtorDecl::Typed { name, .. } if name == "cons"));
+            }
+            _ => panic!("expected data"),
+        }
+    }
+
+    #[test]
+    fn data_eq_indexed_in_prop_with_two_indices() {
+        let file = parse_str(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Eq(A : core:Set) : A -> A -> Prop {
+                refl : forall (a : A) => ex:Eq(A, a, a),
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                assert_eq!(d.indices.len(), 2);
+                assert_eq!(d.indices[0].kind.name, "A");
+                assert_eq!(d.indices[1].kind.name, "A");
+                assert_eq!(d.result_sort, Some(SortKind::Prop));
+            }
+            _ => panic!("expected data"),
+        }
+    }
+
+    #[test]
+    fn data_indexed_rejects_arrow_in_index_telescope_without_sort() {
+        // Trailing segment must be a sort literal.
+        let err = parse_str(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Bad(A : core:Set) : core:Nat -> core:Nat {
+                mk : ex:Bad(A, ex:zero, ex:zero),
+            }
+            "#,
+        )
+        .unwrap_err();
+        assert!(
+            err.message.contains("sort literal"),
+            "expected sort-literal error, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn data_unindexed_with_result_sort_only() {
+        // `data Foo : Set { ... }` is allowed — empty index telescope,
+        // explicit result sort.
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Unit : Set {
+                tt,
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                assert!(d.indices.is_empty());
+                assert_eq!(d.result_sort, Some(SortKind::Set));
+                assert_eq!(d.ctors.len(), 1);
+                assert!(matches!(&d.ctors[0], CtorDecl::Positional { name, .. } if name == "tt"));
+            }
             _ => panic!("expected data"),
         }
     }

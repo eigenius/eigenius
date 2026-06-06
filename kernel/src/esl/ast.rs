@@ -220,6 +220,14 @@ pub struct DataDecl {
     /// Type parameters: `(A : Set, B : Set, ...)`. Empty for
     /// non-parametric inductives.
     pub params: Vec<DataParam>,
+    /// Index telescope: written after `:` between params and the result
+    /// sort. Example: `data Vec(A : Set) : Nat -> Set { ... }` has one
+    /// index `_ : Nat`. Empty for non-indexed declarations (the default,
+    /// matching the pre-D48 / pre-eigenius#72-Layer-2 surface).
+    pub indices: Vec<DataParam>,
+    /// Result sort declared after the index telescope's arrow chain.
+    /// `None` defaults to `Set` (`Sort(1)`).
+    pub result_sort: Option<SortKind>,
     pub ctors: Vec<CtorDecl>,
     pub pos: Position,
 }
@@ -236,13 +244,59 @@ pub struct DataParam {
     pub pos: Position,
 }
 
-/// A single constructor declaration: `nil` or `cons(A, List(A))`.
+/// A single constructor declaration.
+///
+/// Two surface forms (eigenius#72 Layer 2):
+///
+/// - `Positional` — the legacy form: `nil` (nullary) or
+///   `cons(A, List(A))` (with positional / named arg list).
+///   The constructor's conclusion is implicitly `Self(params)`; this
+///   form cannot express conclusion indices and is therefore only
+///   usable for non-indexed declarations.
+/// - `Typed` — the indexed-aware form: `cons : forall (n : Nat) => A
+///   -> Vec(A, n) -> Vec(A, succ(n))`. The full Π-telescope including
+///   the conclusion (with explicit indices) is supplied as a single
+///   `TypeExpr`. Required when the declaration has indices.
 #[derive(Debug)]
-pub struct CtorDecl {
-    pub name: String,
-    /// Positional or named constructor arguments.
-    pub args: Vec<CtorArg>,
-    pub pos: Position,
+pub enum CtorDecl {
+    Positional {
+        name: String,
+        /// Positional or named constructor arguments.
+        args: Vec<CtorArg>,
+        pos: Position,
+    },
+    Typed {
+        name: String,
+        /// Full Π-telescope of the constructor type, ending in an
+        /// application of the parent inductive to its params and indices.
+        typ: TypeExpr,
+        pos: Position,
+    },
+}
+
+impl CtorDecl {
+    pub fn name(&self) -> &str {
+        match self {
+            CtorDecl::Positional { name, .. } | CtorDecl::Typed { name, .. } => name,
+        }
+    }
+
+    pub fn pos(&self) -> &Position {
+        match self {
+            CtorDecl::Positional { pos, .. } | CtorDecl::Typed { pos, .. } => pos,
+        }
+    }
+
+    /// Test-side convenience: return the positional args list. Panics
+    /// on `Typed` — callers that aren't sure should match the variant
+    /// explicitly.
+    #[cfg(test)]
+    pub fn args(&self) -> &[CtorArg] {
+        match self {
+            CtorDecl::Positional { args, .. } => args,
+            CtorDecl::Typed { .. } => panic!("CtorDecl::args() called on Typed variant"),
+        }
+    }
 }
 
 /// A single constructor argument.

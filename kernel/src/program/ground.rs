@@ -624,25 +624,34 @@ pub(crate) fn resolve_inductive_type(
         _ => return Err(format!("inductive type '{class_iri}' missing 'short_name'")),
     };
 
+    let params_telescope = decode_params(class_iri, resource)?;
+    let indices_telescope = decode_indices(class_iri, resource)?;
+    let sort = decode_result_sort(class_iri, resource)?;
+
     // Build the self-reference stub used inside constructor types.
     // Empty `ctors` is fine — name-based lookup is all the kernel
     // needs for inner self-refs (see Phase 11b step 2 notes).
+    //
+    // Stub-Arc preservation (eigenius#72 Layer 2 / D48): the stub
+    // carries the real `indices` telescope so that ctor-internal
+    // self-references like `Vec(A, n)` decode against the same shape
+    // the kernel's check pass expects. `params` stays empty in the
+    // stub since references inside ctor bodies thread params lexically.
     let self_ref = Arc::new(InductiveDecl {
         name: short_name.clone(),
         params: Vec::new(),
-        indices: Vec::new(),
-        sort: Exp::Sort(1),
+        indices: indices_telescope.clone(),
+        sort: sort.clone(),
         ctors: Vec::new(),
     });
 
-    let params_telescope = decode_params(class_iri, resource)?;
     let ctors = decode_ctors(class_iri, resource, &self_ref, &params_telescope, layer)?;
 
     let decl = Arc::new(InductiveDecl {
         name: short_name,
         params: params_telescope,
-        indices: Vec::new(),
-        sort: Exp::Sort(1),
+        indices: indices_telescope,
+        sort,
         ctors,
     });
     Ok(Val::InductiveType {
@@ -650,6 +659,112 @@ pub(crate) fn resolve_inductive_type(
         params: Vec::new(),
         indices: Vec::new(),
     })
+}
+
+/// Decode the optional `core:indices` array on an inductive-type
+/// resource (eigenius#72 Layer 2). Same shape as `core:type_params`.
+/// Returns an empty vector when absent — matching the pre-Layer-2
+/// non-indexed default.
+fn decode_indices(
+    class_iri: &Iri,
+    resource: &crate::ontology::resource::Resource,
+) -> Result<Vec<(Patt, Exp)>, String> {
+    let indices_iri = Iri::parse(wk::INDICES).unwrap();
+    let arr = match resource.get(&indices_iri) {
+        Some(Value::Array(a)) => a,
+        Some(_) => {
+            return Err(format!(
+                "inductive type '{class_iri}' has non-array `indices`"
+            ));
+        }
+        None => return Ok(Vec::new()),
+    };
+    let mut indices = Vec::new();
+    for entry in arr {
+        let pr = match entry {
+            Value::Embedded(r) => r.as_ref(),
+            _ => {
+                return Err(format!(
+                    "inductive type '{class_iri}' `indices` must be embedded InductiveParam resources"
+                ));
+            }
+        };
+        let name = match pr.get(&Iri::parse(wk::PARAM_NAME).unwrap()) {
+            Some(Value::String(s)) => s.clone(),
+            _ => {
+                return Err(format!(
+                    "inductive type '{class_iri}' index missing `param_name`"
+                ));
+            }
+        };
+        let kind_str = match pr.get(&Iri::parse(wk::PARAM_KIND).unwrap()) {
+            Some(Value::String(s)) => s.as_str(),
+            _ => "urn:eigenius:core:Set",
+        };
+        let kind_exp = match kind_str {
+            s if s.ends_with(":Size") || s == "Size" => Exp::SizeSort,
+            s if s.ends_with(":Prop") || s == "Prop" => Exp::Sort(0),
+            _ => {
+                // Bare (un-`urn:`-prefixed) names are parameter
+                // references — the ESL compiler keeps a parameter's
+                // own name verbatim as the kind string when the index
+                // type is a bare parameter ref (e.g. `data Eq(A : Set)
+                // : A -> A -> Prop` records the index kind as `"A"`).
+                // Decode them as `Exp::Var(name)` so they bind into
+                // the parameter telescope. Anything that parses as a
+                // full IRI becomes `Exp::EigonClass`; everything else
+                // falls through to `Sort(1)` as a forward-compat
+                // default.
+                if let Ok(iri) = Iri::parse(kind_str) {
+                    Exp::EigonClass(iri)
+                } else if !kind_str.contains(':') {
+                    Exp::Var(kind_str.to_string())
+                } else {
+                    Exp::Sort(1)
+                }
+            }
+        };
+        // Anonymous-index encoding: the ESL parser uses "_" as the
+        // sentinel name. Honour the encoding by emitting `Patt::Unit`.
+        let patt = if name == "_" {
+            Patt::Unit
+        } else {
+            Patt::Var(name)
+        };
+        indices.push((patt, kind_exp));
+    }
+    Ok(indices)
+}
+
+/// Decode the optional `core:result_sort` string on an inductive-type
+/// resource (eigenius#72 Layer 2). Recognised forms: `"Prop"`,
+/// `"Set"`, `"Type:N"`. Absent or unrecognised → `Sort(1)` (the
+/// pre-Layer-2 default).
+fn decode_result_sort(
+    class_iri: &Iri,
+    resource: &crate::ontology::resource::Resource,
+) -> Result<Exp, String> {
+    let sort_iri = Iri::parse(wk::RESULT_SORT).unwrap();
+    match resource.get(&sort_iri) {
+        Some(Value::String(s)) => match s.as_str() {
+            "Prop" => Ok(Exp::Sort(0)),
+            "Set" => Ok(Exp::Sort(1)),
+            other if other.starts_with("Type:") => {
+                let n: usize = other["Type:".len()..].parse().map_err(|_| {
+                    format!("inductive type '{class_iri}' has malformed `result_sort` '{other}'")
+                })?;
+                Ok(Exp::Sort(n + 1))
+            }
+            other => Err(format!(
+                "inductive type '{class_iri}' has unrecognised `result_sort` '{other}' \
+                 (expected `Prop`, `Set`, or `Type:N`)"
+            )),
+        },
+        Some(_) => Err(format!(
+            "inductive type '{class_iri}' has non-string `result_sort`"
+        )),
+        None => Ok(Exp::Sort(1)),
+    }
 }
 
 fn decode_params(
@@ -735,16 +850,28 @@ fn decode_ctors(
                 ))
             }
         };
-        let arg_types_arr = match cr.get(&Iri::parse(wk::ARG_TYPES).unwrap()) {
-            Some(Value::Array(a)) => a.as_slice(),
-            None => &[],
-            Some(_) => {
-                return Err(format!(
-                    "inductive type '{class_iri}.{name}' has non-array `arg_types`"
-                ))
-            }
+        // eigenius#72 Layer 2 — if the ctor carries a `core:ctor_type`
+        // payload (D47-encoded full Π-telescope), decode it directly
+        // and skip the legacy positional path. The decoded Exp already
+        // includes the params + indices + conclusion shape; the kernel
+        // type checker takes it from there.
+        let ctor_typ_iri = Iri::parse(wk::CTOR_TYPE).unwrap();
+        let ctor_typ = if let Some(ct) = cr.get(&ctor_typ_iri) {
+            crate::program::eigentt_type_mirror::decode_type(ct, layer).map_err(|e| {
+                format!("inductive type '{class_iri}.{name}' has malformed `ctor_type`: {e:?}")
+            })?
+        } else {
+            let arg_types_arr = match cr.get(&Iri::parse(wk::ARG_TYPES).unwrap()) {
+                Some(Value::Array(a)) => a.as_slice(),
+                None => &[],
+                Some(_) => {
+                    return Err(format!(
+                        "inductive type '{class_iri}.{name}' has non-array `arg_types`"
+                    ));
+                }
+            };
+            build_ctor_type(class_iri, self_ref, params, arg_types_arr, layer)?
         };
-        let ctor_typ = build_ctor_type(class_iri, self_ref, params, arg_types_arr, layer)?;
         out.push(InductiveCtorDecl {
             name,
             typ: ctor_typ,
