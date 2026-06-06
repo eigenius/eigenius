@@ -36,10 +36,10 @@ pub enum Val {
     Con(Name, Box<Val>),
     /// Unit value
     Unit,
-    /// Universe of types (level 0)
-    Set,
-    /// Universe at a specific level
-    Type(usize),
+    /// Universe at a specific level: Sort(n).
+    /// `Sort(0) = Prop`, `Sort(1) = Set`, `Sort(n+1)` was `Type(n)` for `n >= 1`.
+    /// See D46 §3.
+    Sort(usize),
     /// Dependent function type: Π(A, x.B)
     Pi(Box<Val>, Clos),
     /// Dependent pair type: Σ(A, x.B)
@@ -478,15 +478,15 @@ mod tests {
 
     #[test]
     fn vfst_pair() -> Result<(), EvalError> {
-        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::Set));
+        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::Sort(1)));
         assert!(matches!(p.vfst()?, Val::Unit));
         Ok(())
     }
 
     #[test]
     fn vsnd_pair() -> Result<(), EvalError> {
-        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::Set));
-        assert!(matches!(p.vsnd()?, Val::Set));
+        let p = Val::Pair(Box::new(Val::Unit), Box::new(Val::Sort(1)));
+        assert!(matches!(p.vsnd()?, Val::Sort(1)));
         Ok(())
     }
 

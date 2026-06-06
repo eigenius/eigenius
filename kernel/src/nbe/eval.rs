@@ -198,8 +198,7 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
     let ev = |e: &Exp| -> Result<Val, EvalError> { eval_ctx(e, rho, ctx) };
 
     match exp {
-        Exp::Set => Ok(Val::Set),
-        Exp::Type(n) => Ok(Val::Type(*n)),
+        Exp::Sort(n) => Ok(Val::Sort(*n)),
         Exp::One => Ok(Val::One),
         Exp::Unit => Ok(Val::Unit),
 
@@ -2303,8 +2302,8 @@ mod tests {
 
     #[test]
     fn eval_set() -> Result<(), EvalError> {
-        let v = eval(&Exp::Set, &Rho::Nil)?;
-        assert!(matches!(v, Val::Set));
+        let v = eval(&Exp::Sort(1), &Rho::Nil)?;
+        assert!(matches!(v, Val::Sort(1)));
         Ok(())
     }
 
@@ -2333,7 +2332,7 @@ mod tests {
     #[test]
     fn eval_pair() -> Result<(), EvalError> {
         let v = eval(
-            &Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::Set)),
+            &Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::Sort(1))),
             &Rho::Nil,
         )?;
         assert!(matches!(v, Val::Pair(_, _)));
@@ -2343,7 +2342,10 @@ mod tests {
     #[test]
     fn eval_fst() -> Result<(), EvalError> {
         let v = eval(
-            &Exp::Fst(Box::new(Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::Set)))),
+            &Exp::Fst(Box::new(Exp::Pair(
+                Box::new(Exp::Unit),
+                Box::new(Exp::Sort(1)),
+            ))),
             &Rho::Nil,
         )?;
         assert!(matches!(v, Val::Unit));
@@ -2353,10 +2355,13 @@ mod tests {
     #[test]
     fn eval_snd() -> Result<(), EvalError> {
         let v = eval(
-            &Exp::Snd(Box::new(Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::Set)))),
+            &Exp::Snd(Box::new(Exp::Pair(
+                Box::new(Exp::Unit),
+                Box::new(Exp::Sort(1)),
+            ))),
             &Rho::Nil,
         )?;
-        assert!(matches!(v, Val::Set));
+        assert!(matches!(v, Val::Sort(1)));
         Ok(())
     }
 
@@ -2612,7 +2617,7 @@ mod tests {
         // Phase 10c: PropAccess where the target evaluates to a non-resource
         // Val should return Val::Unit instead of panicking.
         let ctx = io_ctx();
-        let rho = Rho::Nil.extend(Patt::Var("x".to_string()), Val::Set);
+        let rho = Rho::Nil.extend(Patt::Var("x".to_string()), Val::Sort(1));
         let exp = Exp::PropAccess(
             Box::new(Exp::Var("x".to_string())),
             Iri::parse("urn:eigenius:test:prop").unwrap(),
@@ -2631,11 +2636,11 @@ mod tests {
         // Phase 10c: Arrow/Times should produce identical results to Pi/Sig
         // with Patt::Unit, but without the re-recursion overhead.
         let arrow_val = eval(
-            &Exp::Arrow(Box::new(Exp::One), Box::new(Exp::Set)),
+            &Exp::Arrow(Box::new(Exp::One), Box::new(Exp::Sort(1))),
             &Rho::Nil,
         )?;
         let pi_val = eval(
-            &Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Set)),
+            &Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Sort(1))),
             &Rho::Nil,
         )?;
         // Both should be Val::Pi
@@ -2646,11 +2651,11 @@ mod tests {
         assert!(matches!(pi_val, Val::Pi(_, _)), "Pi should produce Val::Pi");
 
         let times_val = eval(
-            &Exp::Times(Box::new(Exp::One), Box::new(Exp::Set)),
+            &Exp::Times(Box::new(Exp::One), Box::new(Exp::Sort(1))),
             &Rho::Nil,
         )?;
         let sig_val = eval(
-            &Exp::Sig(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Set)),
+            &Exp::Sig(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Sort(1))),
             &Rho::Nil,
         )?;
         assert!(
@@ -2844,7 +2849,7 @@ mod tests {
     #[test]
     fn map_two_elements() -> Result<(), EvalError> {
         // Map(λx. x, [Unit, Set]) → [Unit, Set]
-        let list = cons_list(vec![Val::Unit, Val::Set]);
+        let list = cons_list(vec![Val::Unit, Val::Sort(1)]);
         let rho = Rho::Nil.extend(Patt::Var("lst".to_string()), list);
         let exp = Exp::Map(Box::new(id_lam()), Box::new(Exp::Var("lst".to_string())));
         let v = eval(&exp, &rho)?;
@@ -2852,7 +2857,7 @@ mod tests {
             Val::List(items) => {
                 assert_eq!(items.len(), 2);
                 assert!(matches!(items[0], Val::Unit));
-                assert!(matches!(items[1], Val::Set));
+                assert!(matches!(items[1], Val::Sort(1)));
             }
             other => panic!("expected List, got {other:?}"),
         }
@@ -2988,7 +2993,7 @@ mod tests {
         Arc::new(InductiveDecl {
             name: name.to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: Vec::new(),
         })
     }
@@ -3000,7 +3005,7 @@ mod tests {
         Arc::new(InductiveDecl {
             name: "Nat".to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "zero".to_string(),
@@ -3047,7 +3052,7 @@ mod tests {
         let bool_decl = Arc::new(InductiveDecl {
             name: "Bool".to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "True".to_string(),
@@ -3063,7 +3068,7 @@ mod tests {
         let false_minor = Val::Con("no".to_string(), Box::new(Val::Unit));
         let result = iota_reduce(
             &bool_decl,
-            &Val::Set,
+            &Val::Sort(1),
             &[true_minor, false_minor],
             "True",
             &[],
@@ -3102,7 +3107,7 @@ mod tests {
 
         let result = iota_reduce(
             &nat,
-            &Val::Set,
+            &Val::Sort(1),
             &[zero_minor, succ_minor],
             "succ",
             &[nat_n(&nat, 1)],
@@ -3124,14 +3129,14 @@ mod tests {
         let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
         let list_decl = Arc::new(InductiveDecl {
             name: "List".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Set)],
-            sort: Exp::Set,
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Set),
+                        Box::new(Exp::Sort(1)),
                         Box::new(list_ty.clone()),
                     ),
                 },
@@ -3139,7 +3144,7 @@ mod tests {
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Set),
+                        Box::new(Exp::Sort(1)),
                         Box::new(Exp::Pi(
                             Patt::Unit,
                             Box::new(Exp::Var("A".to_string())),
@@ -3191,7 +3196,7 @@ mod tests {
         };
         let result = iota_reduce(
             &list_decl,
-            &Val::Set,
+            &Val::Sort(1),
             &[nil_minor, cons_minor],
             "cons",
             &three_args,
@@ -3223,7 +3228,7 @@ mod tests {
             .extend(Patt::Var("succ_min".to_string()), succ_minor);
         let exp = Exp::InductiveRec {
             decl: nat.clone(),
-            motive: Box::new(Exp::Set),
+            motive: Box::new(Exp::Sort(1)),
             minors: vec![
                 Exp::Var("zero_min".to_string()),
                 Exp::Var("succ_min".to_string()),
@@ -3285,8 +3290,8 @@ mod tests {
             Exp::Lam(Patt::Unit, Box::new(Exp::Var("acc".to_string()))),
             Rho::Nil,
         ));
-        let result = eval_reduce(f, Val::Set, lst, &EvalCtx::Pure).expect("eval_reduce");
-        assert!(matches!(result, Val::Set));
+        let result = eval_reduce(f, Val::Sort(1), lst, &EvalCtx::Pure).expect("eval_reduce");
+        assert!(matches!(result, Val::Sort(1)));
     }
 
     #[test]

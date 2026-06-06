@@ -267,7 +267,7 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
             }
             check_type(&mut inner, body)
         }
-        Exp::Set | Exp::One | Exp::Type(_) => Ok(()),
+        Exp::Sort(1) | Exp::One | Exp::Sort(_) => Ok(()),
         // `SizeSort` is a type (at the first universe above `Set`).
         // Phase 11b step 14 treats it as a distinguished sort so
         // sized-type parameter annotations (`i : SizeSort`) can
@@ -312,7 +312,7 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
         // just accept, matching `InductiveType`'s behaviour.
         Exp::CodataType(_, _) => Ok(()),
 
-        a => check(ctx, a, &Val::Set),
+        a => check(ctx, a, &Val::Sort(1)),
     }
 }
 
@@ -426,35 +426,35 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         (Exp::Unit, Val::One) => Ok(()),
 
         // One against Set (One is a type)
-        (Exp::One, Val::Set) => Ok(()),
+        (Exp::One, Val::Sort(1)) => Ok(()),
 
         // Sized types (Phase 11b step 14, D19 §8).
         // `SizeSort` is a type — admit it against `Set` / `Type(n)`
         // the same way Pi and Sigma are. Concrete size values —
         // `SizeInf` and `SizeSucc(_)` — inhabit `Val::SizeSort`.
-        (Exp::SizeSort, Val::Set) | (Exp::SizeSort, Val::Type(_)) => Ok(()),
+        (Exp::SizeSort, Val::Sort(1)) | (Exp::SizeSort, Val::Sort(_)) => Ok(()),
         (Exp::SizeInf, Val::SizeSort) => Ok(()),
         (Exp::SizeSucc(s), Val::SizeSort) => check(ctx, s, &Val::SizeSort),
 
         // Pi type against Set
-        (Exp::Pi(p, a, b), Val::Set) | (Exp::Sig(p, a, b), Val::Set) => {
-            check(ctx, a, &Val::Set)?;
+        (Exp::Pi(p, a, b), Val::Sort(1)) | (Exp::Sig(p, a, b), Val::Sort(1)) => {
+            check(ctx, a, &Val::Sort(1))?;
             let gen = gen_val(&ctx.rho);
             let mut inner =
                 ctx.extend(p, &ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?, &gen)?;
-            check(&mut inner, b, &Val::Set)
+            check(&mut inner, b, &Val::Sort(1))
         }
 
         // Bounded size Pi against Set/Type — delegate to `check_type`
         // so the TSO hypothesis-insertion logic runs exactly once.
-        (Exp::SizedPi { .. }, Val::Set) | (Exp::SizedPi { .. }, Val::Type(_)) => {
+        (Exp::SizedPi { .. }, Val::Sort(1)) | (Exp::SizedPi { .. }, Val::Sort(_)) => {
             check_type(ctx, exp)
         }
 
         // Sum type against Set
-        (Exp::Data(summands), Val::Set) => {
+        (Exp::Data(summands), Val::Sort(1)) => {
             for s in summands {
-                check(ctx, &s.typ, &Val::Set)?;
+                check(ctx, &s.typ, &Val::Sort(1))?;
             }
             Ok(())
         }
@@ -483,8 +483,8 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         }
 
         // Id(A, x, y) : Set
-        (Exp::Id(a, x, y), Val::Set) => {
-            check(ctx, a, &Val::Set)?;
+        (Exp::Id(a, x, y), Val::Sort(1)) => {
+            check(ctx, a, &Val::Sort(1))?;
             let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)
@@ -494,30 +494,30 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         // Self-referential meta-claims (e.g. a level-1 trace referencing
         // level-1) are blocked at resource ingestion by the universe
         // stratification validator (Rule 13), not in the term checker.
-        (Exp::Type(n), Val::Type(m)) if *n + 1 == *m => Ok(()),
+        (Exp::Sort(n), Val::Sort(m)) if *n + 1 == *m => Ok(()),
         // Type(n) : Set (Set is the top universe for backward compatibility)
-        (Exp::Type(_), Val::Set) => Ok(()),
+        (Exp::Sort(_), Val::Sort(1)) => Ok(()),
         // Set : Type(1)
-        (Exp::Set, Val::Type(1)) => Ok(()),
+        (Exp::Sort(1), Val::Sort(2)) => Ok(()),
 
         // EigonClass/EigonPrimitive are ground types at level 0 but
         // inhabit all higher universes (cumulative).
-        (Exp::EigonClass(_), Val::Set) | (Exp::EigonPrimitive(_), Val::Set) => Ok(()),
-        (Exp::EigonClass(_), Val::Type(_)) | (Exp::EigonPrimitive(_), Val::Type(_)) => Ok(()),
+        (Exp::EigonClass(_), Val::Sort(1)) | (Exp::EigonPrimitive(_), Val::Sort(1)) => Ok(()),
+        (Exp::EigonClass(_), Val::Sort(_)) | (Exp::EigonPrimitive(_), Val::Sort(_)) => Ok(()),
 
         // Codata type formation: codata { ... } : Set
-        (Exp::Codata(_), Val::Set) => check_type(ctx, exp),
-        (Exp::Codata(_), Val::Type(_)) => check_type(ctx, exp),
+        (Exp::Codata(_), Val::Sort(1)) => check_type(ctx, exp),
+        (Exp::Codata(_), Val::Sort(_)) => check_type(ctx, exp),
         // Parameterised codata — applied codata type expression.
-        (Exp::CodataType(_, _), Val::Set) | (Exp::CodataType(_, _), Val::Type(_)) => {
+        (Exp::CodataType(_, _), Val::Sort(1)) | (Exp::CodataType(_, _), Val::Sort(_)) => {
             check_type(ctx, exp)
         }
 
         // Inductive type formation (Phase 11b, D19).
-        (Exp::Inductive(_), Val::Set) | (Exp::InductiveType(_, _), Val::Set) => {
+        (Exp::Inductive(_), Val::Sort(1)) | (Exp::InductiveType(_, _), Val::Sort(1)) => {
             check_type(ctx, exp)
         }
-        (Exp::Inductive(_), Val::Type(_)) | (Exp::InductiveType(_, _), Val::Type(_)) => {
+        (Exp::Inductive(_), Val::Sort(_)) | (Exp::InductiveType(_, _), Val::Sort(_)) => {
             check_type(ctx, exp)
         }
 
@@ -830,7 +830,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             // is the return type of d applied to x.
             match d_type {
                 Val::Pi(_, g) => g.apply(x_val).map_err(|e| e.to_string()),
-                _ => Ok(Val::Set), // conservative fallback
+                _ => Ok(Val::Sort(1)), // conservative fallback
             }
         }
 
@@ -889,7 +889,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // Inductive types (Phase 11b, D19).
         // Type formers inhabit `Set`. Phase 11b Step 5 will tighten this
         // to track universe levels properly.
-        Exp::Inductive(_) | Exp::InductiveType(_, _) => Ok(Val::Set),
+        Exp::Inductive(_) | Exp::InductiveType(_, _) => Ok(Val::Sort(1)),
 
         // Constructor application — inference works when the inductive
         // has no parameters (the result type is fully determined).
@@ -941,7 +941,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // Sized types (Phase 11b step 14). `SizeSort` is itself a
         // type at universe 1; `SizeInf` and `SizeSucc(_)` inhabit
         // `SizeSort`.
-        Exp::SizeSort => Ok(Val::Type(1)),
+        Exp::SizeSort => Ok(Val::Sort(2)),
         Exp::SizeInf => Ok(Val::SizeSort),
         Exp::SizeSucc(s) => {
             check(ctx, s, &Val::SizeSort)?;
@@ -1369,8 +1369,8 @@ pub fn check_guarded(exp: &Exp, forbidden: &std::collections::HashSet<&str>) -> 
 
         // Leaves — no sub-expressions to check.
         Exp::Var(_)
-        | Exp::Set
-        | Exp::Type(_)
+        | Exp::Sort(1)
+        | Exp::Sort(_)
         | Exp::One
         | Exp::Unit
         | Exp::EigonClass(_)
@@ -1649,7 +1649,7 @@ fn check_infer_inductive_rec(
     };
     let motive_typ = Val::Pi(
         Box::new(motive_dom),
-        Clos::new(Patt::Unit, Exp::Type(1), Rho::Nil),
+        Clos::new(Patt::Unit, Exp::Sort(2), Rho::Nil),
     );
     check(ctx, motive, &motive_typ)?;
 
@@ -1857,12 +1857,12 @@ mod tests {
 
     #[test]
     fn check_one_has_type_set() {
-        check(&mut ctx(), &Exp::One, &Val::Set).unwrap();
+        check(&mut ctx(), &Exp::One, &Val::Sort(1)).unwrap();
     }
 
     #[test]
     fn check_set_is_type() {
-        check_type(&mut ctx(), &Exp::Set).unwrap();
+        check_type(&mut ctx(), &Exp::Sort(1)).unwrap();
     }
 
     #[test]
@@ -1905,7 +1905,7 @@ mod tests {
     #[test]
     fn check_type_mismatch_fails() {
         // () : U should fail (unit is not a type)
-        let result = check(&mut ctx(), &Exp::Unit, &Val::Set);
+        let result = check(&mut ctx(), &Exp::Unit, &Val::Sort(1));
         assert!(result.is_err());
     }
 
@@ -1958,12 +1958,12 @@ mod tests {
     fn eq_nf_equal() {
         eq_nf(0, &Val::One, &Val::One).unwrap();
         eq_nf(0, &Val::Unit, &Val::Unit).unwrap();
-        eq_nf(0, &Val::Set, &Val::Set).unwrap();
+        eq_nf(0, &Val::Sort(1), &Val::Sort(1)).unwrap();
     }
 
     #[test]
     fn eq_nf_not_equal() {
-        assert!(eq_nf(0, &Val::One, &Val::Set).is_err());
+        assert!(eq_nf(0, &Val::One, &Val::Sort(1)).is_err());
         assert!(eq_nf(0, &Val::Unit, &Val::One).is_err());
     }
 
@@ -1980,7 +1980,7 @@ mod tests {
                 typ: Exp::One,
             },
         ]);
-        check(&mut ctx(), &data, &Val::Set).unwrap();
+        check(&mut ctx(), &data, &Val::Sort(1)).unwrap();
     }
 
     #[test]
@@ -2005,7 +2005,7 @@ mod tests {
     fn check_id_is_type() {
         // Id(1, (), ()) : Set
         let id = Exp::Id(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
-        check(&mut ctx(), &id, &Val::Set).unwrap();
+        check(&mut ctx(), &id, &Val::Sort(1)).unwrap();
     }
 
     #[test]
@@ -2037,7 +2037,7 @@ mod tests {
         use crate::nbe::eval::eval;
         let j = Exp::IdJ(Box::new([
             Exp::One,                                                        // A
-            Exp::Set,                                                        // C (placeholder)
+            Exp::Sort(1),                                                    // C (placeholder)
             Exp::Lam(Patt::Var("a".into()), Box::new(Exp::Var("a".into()))), // d = λa. a
             Exp::Unit,                                                       // x
             Exp::Unit,                                                       // y
@@ -2063,7 +2063,11 @@ mod tests {
     fn deceq_unequal_produces_neutral() -> Result<(), Box<dyn std::error::Error>> {
         use crate::nbe::eval::eval;
         // DecEq(Set, 1, Set) — One ≠ Set, produces neutral
-        let deceq = Exp::DecEq(Box::new(Exp::Set), Box::new(Exp::One), Box::new(Exp::Set));
+        let deceq = Exp::DecEq(
+            Box::new(Exp::Sort(1)),
+            Box::new(Exp::One),
+            Box::new(Exp::Sort(1)),
+        );
         let result = eval(&deceq, &Rho::Nil)?;
         assert!(matches!(result, Val::Nt(_)));
         Ok(())
@@ -2074,7 +2078,7 @@ mod tests {
         use crate::nbe::eval::eval;
         let iri = Iri::parse("urn:eigenius:core:string").unwrap();
         let deceq = Exp::DecEq(
-            Box::new(Exp::Set),
+            Box::new(Exp::Sort(1)),
             Box::new(Exp::EigonClass(iri.clone())),
             Box::new(Exp::EigonClass(iri)),
         );
@@ -2089,7 +2093,7 @@ mod tests {
         let iri1 = Iri::parse("urn:eigenius:core:string").unwrap();
         let iri2 = Iri::parse("urn:eigenius:core:integer").unwrap();
         let deceq = Exp::DecEq(
-            Box::new(Exp::Set),
+            Box::new(Exp::Sort(1)),
             Box::new(Exp::EigonClass(iri1)),
             Box::new(Exp::EigonClass(iri2)),
         );
@@ -2104,7 +2108,7 @@ mod tests {
         check(
             &mut ctx(),
             &Exp::EigonPrimitive(PrimitiveType::Integer),
-            &Val::Set,
+            &Val::Sort(1),
         )
         .unwrap();
     }
@@ -2142,7 +2146,7 @@ mod tests {
     #[test]
     fn codata_type_is_a_type() {
         check_type(&mut ctx(), &pair_codata_type()).unwrap();
-        check(&mut ctx(), &pair_codata_type(), &Val::Set).unwrap();
+        check(&mut ctx(), &pair_codata_type(), &Val::Sort(1)).unwrap();
     }
 
     #[test]
@@ -2552,7 +2556,7 @@ mod tests {
     #[test]
     fn find_sigma_field_resolves_eigon_class_with_layer() {
         // With a layer, find_sigma_field on EigonClass should resolve
-        // to actual property types instead of Val::Set.
+        // to actual property types instead of Val::Sort(1).
         use crate::layer::LayerBuilder;
         use crate::ontology::eigon_json;
 
@@ -2579,10 +2583,10 @@ mod tests {
         let mut c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
         let field = find_sigma_field(&mut c, &dog_type, "name");
         assert!(field.is_some(), "should find 'name' on Dog");
-        // The type should NOT be Val::Set (the old broken behavior)
+        // The type should NOT be Val::Sort(1) (the old broken behavior)
         let field_type = field.unwrap();
         assert!(
-            !matches!(field_type, Val::Set),
+            !matches!(field_type, Val::Sort(1)),
             "field type should be resolved, not Set; got {:?}",
             field_type
         );
@@ -2606,7 +2610,7 @@ mod tests {
         Arc::new(InductiveDecl {
             name: name.to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: Vec::new(),
         })
     }
@@ -2617,7 +2621,7 @@ mod tests {
         Arc::new(InductiveDecl {
             name: "Nat".to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "zero".to_string(),
@@ -2641,7 +2645,7 @@ mod tests {
 
     /// Constant `λ_. Set` motive — applied to anything yields `Set`.
     fn const_set_motive_exp() -> Exp {
-        Exp::Lam(Patt::Unit, Box::new(Exp::Set))
+        Exp::Lam(Patt::Unit, Box::new(Exp::Sort(1)))
     }
 
     #[test]
@@ -2675,7 +2679,7 @@ mod tests {
             decl: nat.clone(),
             params: Vec::new(),
         };
-        let bogus = Exp::InductiveCtor(nat.clone(), "succ".to_string(), vec![Exp::Set]);
+        let bogus = Exp::InductiveCtor(nat.clone(), "succ".to_string(), vec![Exp::Sort(1)]);
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
         assert!(check(&mut c, &bogus, &nat_ty).is_err());
     }
@@ -2702,7 +2706,7 @@ mod tests {
         let bool_decl = Arc::new(InductiveDecl {
             name: "Bool".to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "True".to_string(),
                 typ: bool_ty_exp,
@@ -2739,13 +2743,13 @@ mod tests {
         let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
         let list_decl = Arc::new(InductiveDecl {
             name: "List".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Set)],
-            sort: Exp::Set,
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            sort: Exp::Sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
-                    Box::new(Exp::Set),
+                    Box::new(Exp::Sort(1)),
                     Box::new(list_ty),
                 ),
             }],
@@ -2791,7 +2795,7 @@ mod tests {
             major: Box::new(Exp::Var("n".to_string())),
         };
         let typ = check_infer(&mut c, &exp).expect("Nat.rec well-typed");
-        assert!(matches!(typ, Val::Set), "expected Set, got {typ:?}");
+        assert!(matches!(typ, Val::Sort(1)), "expected Set, got {typ:?}");
     }
 
     #[test]
@@ -2859,7 +2863,7 @@ mod tests {
         let bool_decl = Arc::new(InductiveDecl {
             name: "Bool".to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "True".to_string(),
@@ -2907,7 +2911,7 @@ mod tests {
     fn size_sort_inferred_at_type_1() {
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
         let typ = check_infer(&mut c, &Exp::SizeSort).expect("infer SizeSort");
-        assert!(matches!(typ, Val::Type(1)));
+        assert!(matches!(typ, Val::Sort(2)));
     }
 
     #[test]
@@ -2921,7 +2925,7 @@ mod tests {
     fn size_succ_requires_size_sort_argument() {
         // SizeSucc applied to a non-size expression should fail.
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let bogus = Exp::SizeSucc(Box::new(Exp::Set));
+        let bogus = Exp::SizeSucc(Box::new(Exp::Sort(1)));
         assert!(check(&mut c, &bogus, &Val::SizeSort).is_err());
     }
 
@@ -2936,9 +2940,9 @@ mod tests {
             name: "SizedStream".to_string(),
             params: vec![
                 (Patt::Var("i".to_string()), Exp::SizeSort),
-                (Patt::Var("A".to_string()), Exp::Set),
+                (Patt::Var("A".to_string()), Exp::Sort(1)),
             ],
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: vec![],
         })
     }
@@ -2998,7 +3002,7 @@ mod tests {
         // must still be equal.
         let decl = sized_stream_decl();
         let sub = mk_sized_type(decl.clone(), Val::SizeInf, Val::One);
-        let sup = mk_sized_type(decl, Val::SizeInf, Val::Set);
+        let sup = mk_sized_type(decl, Val::SizeInf, Val::Sort(1));
         assert!(
             subtype_of(0, &sub, &sup).is_err(),
             "element type mismatch must be rejected"
@@ -3010,7 +3014,7 @@ mod tests {
         // Simple non-inductive types fall through to `eq_nf` —
         // equal types accept, mismatched types reject.
         subtype_of(0, &Val::One, &Val::One).expect("1 <: 1");
-        assert!(subtype_of(0, &Val::One, &Val::Set).is_err());
+        assert!(subtype_of(0, &Val::One, &Val::Sort(1)).is_err());
     }
 
     #[test]
@@ -3022,7 +3026,7 @@ mod tests {
         let decl_b = Arc::new(InductiveDecl {
             name: "OtherStream".to_string(),
             params: decl_a.params.clone(),
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: vec![],
         });
         let sub = mk_sized_type(decl_a, Val::SizeInf, Val::One);
@@ -3094,7 +3098,7 @@ mod tests {
         let self_ref = Arc::new(InductiveDecl {
             name: "SizedNat".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: Vec::new(),
         });
         let snat_i = Exp::InductiveType(self_ref.clone(), vec![Exp::Var("i".to_string())]);
@@ -3105,7 +3109,7 @@ mod tests {
         Arc::new(InductiveDecl {
             name: "SizedNat".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "zero".to_string(),
@@ -3723,7 +3727,7 @@ mod tests {
         let self_ref = Arc::new(InductiveDecl {
             name: "SizedNatP".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: Vec::new(),
         });
         let snat_i = Exp::InductiveType(self_ref.clone(), vec![Exp::Var("i".to_string())]);
@@ -3731,7 +3735,7 @@ mod tests {
         Arc::new(InductiveDecl {
             name: "SizedNatP".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "zero".to_string(),

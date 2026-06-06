@@ -173,7 +173,7 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
     // pre-canonical `String` shape from intermediate resources.
     let data_type_str = match resource.get(&dt_iri).and_then(|v| v.as_iri()) {
         Some(i) => i.as_str().to_string(),
-        None => return Ok(Val::Set), // Unknown data type
+        None => return Ok(Val::Sort(1)), // Unknown data type
     };
 
     match data_type_str.as_str() {
@@ -205,7 +205,7 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
                 }
             }
 
-            Ok(Val::Set) // Untyped resource reference
+            Ok(Val::Sort(1)) // Untyped resource reference
         }
 
         wk::RESOURCE_ARRAY => {
@@ -226,15 +226,15 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
                     wk::INTEGER => Val::EigonPrimitive(PrimitiveType::Integer),
                     wk::FLOAT => Val::EigonPrimitive(PrimitiveType::Float),
                     wk::BOOLEAN => Val::EigonPrimitive(PrimitiveType::Boolean),
-                    _ => Val::Set,
+                    _ => Val::Sort(1),
                 }
             } else {
-                Val::Set
+                Val::Sort(1)
             };
             Ok(make_list_type(elem_type))
         }
 
-        _ => Ok(Val::Set), // Unknown data type
+        _ => Ok(Val::Sort(1)), // Unknown data type
     }
 }
 
@@ -250,7 +250,7 @@ fn resolve_array_element_type(
             return Ok(Val::EigonClass(first.clone()));
         }
     }
-    Ok(Val::Set)
+    Ok(Val::Sort(1))
 }
 
 /// Make an Option type: Sum(some T | none 1)
@@ -368,7 +368,7 @@ fn resolve_codata_type(
     let self_ref: Arc<CodataDecl> = Arc::new(CodataDecl {
         name: short_name.clone(),
         params: params_telescope.clone(),
-        sort: Exp::Set,
+        sort: Exp::Sort(1),
         observations: Vec::new(),
     });
 
@@ -419,7 +419,7 @@ fn resolve_codata_type(
     let decl = Arc::new(CodataDecl {
         name: short_name,
         params: params_telescope,
-        sort: Exp::Set,
+        sort: Exp::Sort(1),
         observations,
     });
     Ok(Val::CodataType {
@@ -571,7 +571,7 @@ fn decode_codata_observation_type(
                 let dummy = Arc::new(InductiveDecl {
                     name: "__not_a_real_inductive__".to_string(),
                     params: Vec::new(),
-                    sort: Exp::Set,
+                    sort: Exp::Sort(1),
                     ctors: Vec::new(),
                 });
                 decode_arg_type(class_iri, &dummy, value, layer)
@@ -629,7 +629,7 @@ pub(crate) fn resolve_inductive_type(
     let self_ref = Arc::new(InductiveDecl {
         name: short_name.clone(),
         params: Vec::new(),
-        sort: Exp::Set,
+        sort: Exp::Sort(1),
         ctors: Vec::new(),
     });
 
@@ -639,7 +639,7 @@ pub(crate) fn resolve_inductive_type(
     let decl = Arc::new(InductiveDecl {
         name: short_name,
         params: params_telescope,
-        sort: Exp::Set,
+        sort: Exp::Sort(1),
         ctors,
     });
     Ok(Val::InductiveType {
@@ -684,13 +684,13 @@ fn decode_params(
             Some(Value::String(s)) => s.as_str(),
             _ => "urn:eigenius:core:Set",
         };
-        // Recognise the built-in kinds. `Size` lands on `Exp::SizeSort`
-        // so sized inductives/codata declared at the ESL surface flow
-        // through the same machinery as kernel-AST sized types.
-        // Anything else falls back to `Exp::Set` for forward-compat.
+        // Recognise the built-in kinds. `Size` lands on `Exp::SizeSort`;
+        // `Prop` lands on `Exp::Sort(0)` (D46 §3). `Set` and anything else
+        // unrecognised default to `Exp::Sort(1)` for forward-compat.
         let kind_exp = match kind_str {
             s if s.ends_with(":Size") || s == "Size" => Exp::SizeSort,
-            _ => Exp::Set,
+            s if s.ends_with(":Prop") || s == "Prop" => Exp::Sort(0),
+            _ => Exp::Sort(1),
         };
         params.push((Patt::Var(name), kind_exp));
     }
@@ -978,7 +978,7 @@ fn decode_arg_type(
             let stub = Arc::new(InductiveDecl {
                 name: other_name,
                 params: Vec::new(),
-                sort: Exp::Set,
+                sort: Exp::Sort(1),
                 ctors: Vec::new(),
             });
             let sub_args: Result<Vec<Exp>, String> = type_args_arr
@@ -1239,7 +1239,7 @@ mod tests {
                 match &decl.ctors[0].typ {
                     Exp::Pi(Patt::Var(pn), dom, body) => {
                         assert_eq!(pn, "A");
-                        assert!(matches!(dom.as_ref(), Exp::Set));
+                        assert!(matches!(dom.as_ref(), Exp::Sort(1)));
                         match body.as_ref() {
                             Exp::InductiveType(d, args) => {
                                 assert_eq!(d.name, "List");

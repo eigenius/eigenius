@@ -196,10 +196,10 @@ mod tests {
                 Box::new(Patt::Var("a".to_string())),
                 Box::new(Patt::Var("b".to_string())),
             ),
-            Val::Pair(Box::new(Val::Unit), Box::new(Val::Set)),
+            Val::Pair(Box::new(Val::Unit), Box::new(Val::Sort(1))),
         );
         assert!(matches!(rho.get("a"), Ok(Val::Unit)));
-        assert!(matches!(rho.get("b"), Ok(Val::Set)));
+        assert!(matches!(rho.get("b"), Ok(Val::Sort(1))));
     }
 
     #[test]

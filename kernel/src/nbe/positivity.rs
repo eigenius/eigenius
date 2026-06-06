@@ -232,8 +232,7 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
         }
 
         Exp::Var(_)
-        | Exp::Set
-        | Exp::Type(_)
+        | Exp::Sort(_)
         | Exp::One
         | Exp::Unit
         | Exp::EigonClass(_)
@@ -252,7 +251,7 @@ mod tests {
         Arc::new(InductiveDecl {
             name: name.to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: Vec::new(),
         })
     }
@@ -264,7 +263,7 @@ mod tests {
         let decl = InductiveDecl {
             name: "Nat".to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "zero".to_string(),
@@ -285,14 +284,14 @@ mod tests {
         let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
         let decl = InductiveDecl {
             name: "List".to_string(),
-            params: vec![(Patt::Var("A".to_string()), Exp::Set)],
-            sort: Exp::Set,
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Set),
+                        Box::new(Exp::Sort(1)),
                         Box::new(list_ty.clone()),
                     ),
                 },
@@ -300,7 +299,7 @@ mod tests {
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
-                        Box::new(Exp::Set),
+                        Box::new(Exp::Sort(1)),
                         Box::new(Exp::Pi(
                             Patt::Unit,
                             Box::new(Exp::Var("A".to_string())),
@@ -324,7 +323,7 @@ mod tests {
         let decl = InductiveDecl {
             name: "Bool".to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
                     name: "True".to_string(),
@@ -348,7 +347,7 @@ mod tests {
         let decl = InductiveDecl {
             name: "Bad".to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "mk".to_string(),
                 typ: Exp::Pi(
@@ -375,7 +374,7 @@ mod tests {
         let decl = InductiveDecl {
             name: "Foo".to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "mk".to_string(),
                 typ: Exp::Pi(
@@ -403,7 +402,7 @@ mod tests {
         let decl = InductiveDecl {
             name: "Tree".to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "node".to_string(),
                 typ: Exp::Pi(Patt::Unit, Box::new(nested), Box::new(tree_ty)),
@@ -419,13 +418,13 @@ mod tests {
         let decl = InductiveDecl {
             name: "Bogus".to_string(),
             params: Vec::new(),
-            sort: Exp::Set,
+            sort: Exp::Sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "mk".to_string(),
                 typ: Exp::Pi(
                     Patt::Unit,
                     Box::new(Exp::Var("Nat".to_string())),
-                    Box::new(Exp::Set),
+                    Box::new(Exp::Sort(1)),
                 ),
             }],
         };

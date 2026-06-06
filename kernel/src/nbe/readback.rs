@@ -45,8 +45,7 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
         ),
         Val::Con(c, v) => Exp::Con(c.clone(), Box::new(readback_val(level, v))),
         Val::Unit => Exp::Unit,
-        Val::Set => Exp::Set,
-        Val::Type(n) => Exp::Type(*n),
+        Val::Sort(n) => Exp::Sort(*n),
         Val::Pi(t, g) => {
             let gen = gen_val(level);
             Exp::Pi(
@@ -320,7 +319,7 @@ mod tests {
 
     #[test]
     fn readback_set() {
-        assert_eq!(readback_val(0, &Val::Set), Exp::Set);
+        assert_eq!(readback_val(0, &Val::Sort(1)), Exp::Sort(1));
     }
 
     #[test]
@@ -330,7 +329,7 @@ mod tests {
 
     #[test]
     fn readback_pair() {
-        let v = Val::Pair(Box::new(Val::Unit), Box::new(Val::Set));
+        let v = Val::Pair(Box::new(Val::Unit), Box::new(Val::Sort(1)));
         let e = readback_val(0, &v);
         assert!(matches!(e, Exp::Pair(_, _)));
     }
@@ -380,7 +379,7 @@ mod tests {
         let v2 = Val::Unit;
         assert_eq!(readback_val(0, &v1), readback_val(0, &v2));
 
-        let v3 = Val::Set;
+        let v3 = Val::Sort(1);
         assert_ne!(readback_val(0, &v1), readback_val(0, &v3));
     }
 
@@ -436,7 +435,7 @@ mod tests {
 
     #[test]
     fn readback_two_element_list() {
-        let v = Val::List(vec![Val::Unit, Val::Set]);
+        let v = Val::List(vec![Val::Unit, Val::Sort(1)]);
         let e = readback_val(0, &v);
         // Should be Con("cons", Pair(Unit, Con("cons", Pair(Set, Con("nil", Unit)))))
         assert!(matches!(e, Exp::Con(ref c, _) if c == "cons"));
@@ -455,8 +454,8 @@ mod tests {
     #[test]
     fn readback_neutral_reduce() {
         let v = Val::Nt(Neut::NtReduce(
-            Box::new(Val::Unit), // placeholder function
-            Box::new(Val::Set),  // placeholder accumulator
+            Box::new(Val::Unit),    // placeholder function
+            Box::new(Val::Sort(1)), // placeholder accumulator
             Box::new(Neut::Gen(0, "xs".to_string())),
         ));
         let e = readback_val(0, &v);
