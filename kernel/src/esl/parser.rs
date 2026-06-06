@@ -82,7 +82,12 @@ impl<'a> Parser<'a> {
     }
 
     fn expect_ident(&mut self) -> Result<String, EslError> {
-        // Accept keywords as identifiers (e.g., `core:resource`, `core:property`)
+        // Accept keywords as identifiers (e.g., `core:resource`, `core:property`).
+        // The eigenius#72 sort-literal keywords (Prop, Set, Type) are also
+        // accepted because the core ontology has resources at IRIs like
+        // `urn:eigenius:core:Set` whose local name parses as the keyword
+        // token. Same applies to `axiom` / `forall` which a user might
+        // happen to use as a name fragment.
         let name = match self.peek().clone() {
             TokenKind::Ident(name) => name,
             TokenKind::Namespace => "namespace".to_string(),
@@ -95,6 +100,11 @@ impl<'a> Parser<'a> {
             TokenKind::Construct => "Construct".to_string(),
             TokenKind::Map => "map".to_string(),
             TokenKind::Reduce => "reduce".to_string(),
+            TokenKind::Prop => "Prop".to_string(),
+            TokenKind::SetKw => "Set".to_string(),
+            TokenKind::TypeKw => "Type".to_string(),
+            TokenKind::Axiom => "axiom".to_string(),
+            TokenKind::Forall => "forall".to_string(),
             _ => {
                 return Err(EslError::parser(
                     Some(self.current_pos()),
@@ -198,11 +208,14 @@ impl<'a> Parser<'a> {
                 TokenKind::VectorIndex => {
                     declarations.push(Declaration::VectorIndex(self.parse_vector_index()?))
                 }
+                TokenKind::Axiom => {
+                    declarations.push(Declaration::Axiom(self.parse_axiom()?))
+                }
                 _ => {
                     return Err(EslError::parser(
                         Some(self.current_pos()),
                         format!(
-                            "expected top-level declaration (namespace, class, property, resource, program, codata, data, merge_comorphism, text_index, vector_index), found {:?}",
+                            "expected top-level declaration (namespace, class, property, resource, program, codata, data, merge_comorphism, text_index, vector_index, axiom), found {:?}",
                             self.peek()
                         ),
                     ))
@@ -900,8 +913,28 @@ impl<'a> Parser<'a> {
         // (`{j : Size < bound} -> body`, below) which compiles to
         // `Exp::SizedPi` / `Exp::Pi` for size kinds, and from the
         // anonymous arrow `A -> B`.
-        if self.at(&TokenKind::Pi) {
+        //
+        // eigenius#72: `forall` is an alias for `pi` with the same
+        // syntax — natural for proposition authoring.
+        if self.at(&TokenKind::Pi) || self.at(&TokenKind::Forall) {
             return self.parse_pi_type();
+        }
+
+        // eigenius#72 — sort literals at the head of a type
+        // expression: `Prop`, `Set`, or `Type N`. May then be
+        // followed by `-> ...` (an arrow whose domain is a sort).
+        if self.at(&TokenKind::Prop) || self.at(&TokenKind::SetKw) || self.at(&TokenKind::TypeKw) {
+            let sort = self.parse_sort_literal()?;
+            if self.at(&TokenKind::Arrow) {
+                self.advance();
+                let codomain = self.parse_type_expr()?;
+                return Ok(TypeExpr::Arrow {
+                    domain: Box::new(sort),
+                    codomain: Box::new(codomain),
+                    pos,
+                });
+            }
+            return Ok(sort);
         }
 
         // Size-binder arrow form — unambiguous because codata obs
@@ -968,6 +1001,52 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// eigenius#72 — parse a sort literal as a `TypeExpr::Sort`.
+    /// `Prop` / `Set` are nullary; `Type` requires a following
+    /// integer level.
+    fn parse_sort_literal(&mut self) -> Result<TypeExpr, EslError> {
+        let pos = self.current_pos();
+        if self.at(&TokenKind::Prop) {
+            self.advance();
+            return Ok(TypeExpr::Sort {
+                kind: crate::esl::ast::SortKind::Prop,
+                pos,
+            });
+        }
+        if self.at(&TokenKind::SetKw) {
+            self.advance();
+            return Ok(TypeExpr::Sort {
+                kind: crate::esl::ast::SortKind::Set,
+                pos,
+            });
+        }
+        if self.at(&TokenKind::TypeKw) {
+            self.advance();
+            let level = match self.peek().clone() {
+                TokenKind::IntLit(n) if n >= 0 => {
+                    self.advance();
+                    n as usize
+                }
+                other => {
+                    return Err(EslError::parser(
+                        Some(self.current_pos()),
+                        format!(
+                            "expected non-negative integer level after `Type`, found {other:?}"
+                        ),
+                    ));
+                }
+            };
+            return Ok(TypeExpr::Sort {
+                kind: crate::esl::ast::SortKind::Type(level),
+                pos,
+            });
+        }
+        Err(EslError::parser(
+            Some(pos),
+            "expected a sort literal (Prop, Set, or Type N)".to_string(),
+        ))
+    }
+
     fn parse_type_atom(&mut self) -> Result<TypeExpr, EslError> {
         let pos = self.current_pos();
         let name = self.parse_qualified_name()?;
@@ -1006,7 +1085,16 @@ impl<'a> Parser<'a> {
     /// return type.
     fn parse_pi_type(&mut self) -> Result<TypeExpr, EslError> {
         let pos = self.current_pos();
-        self.expect(&TokenKind::Pi)?;
+        // Either `pi` (D37 §3.5) or `forall` (eigenius#72 alias) opens
+        // the binder list. Both lower to the same `TypeExpr::Pi`.
+        if self.at(&TokenKind::Pi) || self.at(&TokenKind::Forall) {
+            self.advance();
+        } else {
+            return Err(EslError::parser(
+                Some(pos.clone()),
+                "expected `pi` or `forall` to open a Pi type".to_string(),
+            ));
+        }
         let params = self.parse_typed_param_list()?;
         self.expect(&TokenKind::FatArrow)?;
         let codomain = self.parse_type_expr()?;
@@ -1022,6 +1110,15 @@ impl<'a> Parser<'a> {
     /// Requires at least one binder; the list ends when the parser
     /// sees a non-comma token after a binder (typically `=>`).
     fn parse_typed_param_list(&mut self) -> Result<Vec<TypedParam>, EslError> {
+        // eigenius#72: allow an outer `(...)` wrap around the binder
+        // list — natural for proposition authoring
+        // (`forall (P : Prop) => P -> P`). The existing D37 §3.5 `pi`
+        // form (`pi x : T => U`) without parens stays valid too; we
+        // peek for `(` and parse a parenthesised list when present.
+        let parenthesised = self.at(&TokenKind::LParen);
+        if parenthesised {
+            self.advance();
+        }
         let mut params = Vec::new();
         loop {
             let pos = self.current_pos();
@@ -1033,6 +1130,9 @@ impl<'a> Parser<'a> {
                 break;
             }
             self.advance();
+        }
+        if parenthesised {
+            self.expect(&TokenKind::RParen)?;
         }
         Ok(params)
     }
@@ -1176,6 +1276,44 @@ impl<'a> Parser<'a> {
     /// optional positional argument types in parentheses. Constructor
     /// argument types are parameterised name references; the implicit
     /// result type is the inductive itself applied to its parameters.
+    /// eigenius#72 — `axiom Name : <type-expr> [ note "<justification>" ; ]`.
+    /// Top-level declaration that commits a `core:Axiom` chain resource
+    /// whose `axiom_statement` is the encoded type expression.
+    fn parse_axiom(&mut self) -> Result<AxiomDecl, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Axiom)?;
+        let name = self.parse_qualified_name()?;
+        self.expect(&TokenKind::Colon)?;
+        let statement = self.parse_type_expr()?;
+        // Optional `note: "..."` clause for the justification text.
+        // We accept it before a closing semicolon to avoid relying on
+        // a separate keyword.
+        let justification = if self.at(&TokenKind::Semicolon) {
+            None
+        } else if let TokenKind::Ident(name) = self.peek().clone() {
+            if name == "note" {
+                self.advance();
+                self.expect(&TokenKind::Colon)?;
+                let s = self.expect_string()?;
+                Some(s)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        // Optional trailing semicolon.
+        if self.at(&TokenKind::Semicolon) {
+            self.advance();
+        }
+        Ok(AxiomDecl {
+            name,
+            statement,
+            justification,
+            pos,
+        })
+    }
+
     fn parse_data(&mut self) -> Result<DataDecl, EslError> {
         let pos = self.current_pos();
         self.expect(&TokenKind::Data)?;

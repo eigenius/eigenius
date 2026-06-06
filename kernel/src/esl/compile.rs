@@ -20,6 +20,7 @@
 
 use crate::esl::ast;
 use crate::esl::error::{EslError, Position};
+use crate::nbe::term::{Exp, InductiveDecl, Patt};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use std::collections::BTreeMap;
@@ -199,6 +200,7 @@ impl Compiler {
                 Some(vi.pos.clone()),
                 "vector_index lowering not yet implemented (D43 M2)".to_string(),
             )),
+            ast::Declaration::Axiom(ax) => self.compile_axiom(ax),
         }
     }
 
@@ -568,6 +570,198 @@ impl Compiler {
                     acc = Value::Embedded(Box::new(ar));
                 }
                 Ok(acc)
+            }
+            // eigenius#72 — sort literals in type position. For the
+            // existing chain-Value-producing paths (Lambda type slots,
+            // codata observation types, merge_comorphism transformation
+            // signatures), we emit a string representation. None of
+            // those paths currently consume sorts structurally; if a
+            // future use site needs a richer chain shape we'll extend.
+            // The proper Exp-side lowering for `axiom` statements lives
+            // in `lower_type_expr_to_exp` (Layer 1) and reads the AST
+            // directly, bypassing this chain-Value path.
+            ast::TypeExpr::Sort { kind, .. } => {
+                let s = match kind {
+                    ast::SortKind::Prop => "Prop".to_string(),
+                    ast::SortKind::Set => "Set".to_string(),
+                    ast::SortKind::Type(n) => format!("Type({n})"),
+                };
+                Ok(Value::String(s))
+            }
+        }
+    }
+
+    // --- Axiom declarations (eigenius#72 Layer 1, D46 §10) ---
+
+    /// Lower an `axiom Name : <type-expr>` declaration to a chain
+    /// `core:Axiom` Resource whose `axiom_statement` is the encoded
+    /// EigenTT type expression. Goes through the D47 codec
+    /// (`encode_type`) after lowering the ESL TypeExpr to a kernel
+    /// `Exp` via [`Self::lower_type_expr_to_exp`].
+    fn compile_axiom(&self, decl: &ast::AxiomDecl) -> Result<Vec<Resource>, EslError> {
+        let empty_scope: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let statement_exp = self.lower_type_expr_to_exp(&decl.statement, &empty_scope)?;
+        let encoded =
+            crate::program::eigentt_type_mirror::encode_type(&statement_exp).map_err(|e| {
+                EslError::compiler(
+                    Some(decl.pos.clone()),
+                    format!("axiom statement encoding failed: {e}"),
+                )
+            })?;
+        let id = self.resolve_iri(&decl.name)?;
+        let mut r = Resource::new(id);
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String(
+                "urn:eigenius:eigentt:Axiom".to_string(),
+            )]),
+        );
+        r.set(iri("urn:eigenius:eigentt:axiom_statement"), encoded);
+        if let Some(j) = &decl.justification {
+            r.set(
+                iri("urn:eigenius:eigentt:axiom_justification"),
+                Value::String(j.clone()),
+            );
+        }
+        stamp_declared(&mut r);
+        Ok(vec![r])
+    }
+
+    /// eigenius#72 — lower an ESL `TypeExpr` to a kernel `Exp`.
+    ///
+    /// Used by Layer 1's `axiom` declaration (statement encoding) and
+    /// Layer 2's indexed `data` ctor result types. Recognises:
+    /// - `Sort(...)` → `Exp::Sort(n)` per the Prop/Set/Type mapping.
+    /// - `Ref(name, args)` → bound-variable `Exp::Var` for in-scope
+    ///   bare names; otherwise resolves the IRI and produces
+    ///   `Exp::EigonClass` (nullary) or `Exp::InductiveType` with a
+    ///   name-only stub decl (applied — args become the InductiveType's
+    ///   args slot, which the D47 codec App-curries on encode and the
+    ///   decoder re-folds at use time).
+    /// - `Arrow(a, b)` → `Exp::Pi(Patt::Unit, a, b)`.
+    /// - `Pi(params, codomain)` → nested `Exp::Pi` chain, threading
+    ///   binder names into scope so later params can reference earlier
+    ///   ones (dependent telescope).
+    /// - `BinderArrow(name, kind, bound, body)` → `Exp::Pi` for non-
+    ///   size kinds; sized binders defer to the existing kernel-side
+    ///   `Exp::SizedPi` handling but are rare in axiom statements.
+    fn lower_type_expr_to_exp(
+        &self,
+        typ: &ast::TypeExpr,
+        scope: &std::collections::HashSet<&str>,
+    ) -> Result<Exp, EslError> {
+        match typ {
+            ast::TypeExpr::Sort { kind, .. } => Ok(Exp::Sort(match kind {
+                ast::SortKind::Prop => 0,
+                ast::SortKind::Set => 1,
+                ast::SortKind::Type(n) => n + 1,
+            })),
+            ast::TypeExpr::Ref { name, args, .. } => {
+                let is_bound = name.namespace.is_none() && scope.contains(name.name.as_str());
+                if is_bound {
+                    if !args.is_empty() {
+                        return Err(EslError::compiler(
+                            Some(name.pos.clone()),
+                            format!(
+                                "bound variable `{}` cannot be applied to args in type \
+                                 position",
+                                name.name
+                            ),
+                        ));
+                    }
+                    return Ok(Exp::Var(name.name.clone()));
+                }
+                let iri_str = self.resolve(name)?;
+                let iri_val = Iri::parse(&iri_str).map_err(|e| {
+                    EslError::compiler(
+                        Some(name.pos.clone()),
+                        format!("invalid IRI `{iri_str}`: {e}"),
+                    )
+                })?;
+                if args.is_empty() {
+                    Ok(Exp::EigonClass(iri_val))
+                } else {
+                    // Stub InductiveDecl for the App-curried encoding.
+                    // The D47 codec produces `App(App(ConstRef(iri),
+                    // a1), a2)…` and the decoder re-resolves the IRI
+                    // against the chain at use time.
+                    let stub = std::sync::Arc::new(InductiveDecl {
+                        name: iri_val.as_str().to_string(),
+                        params: Vec::new(),
+                        indices: Vec::new(),
+                        sort: Exp::Sort(1),
+                        ctors: Vec::new(),
+                    });
+                    let arg_exps: Result<Vec<Exp>, EslError> = args
+                        .iter()
+                        .map(|a| self.lower_type_expr_to_exp(a, scope))
+                        .collect();
+                    Ok(Exp::InductiveType(stub, arg_exps?))
+                }
+            }
+            ast::TypeExpr::Arrow {
+                domain, codomain, ..
+            } => {
+                let dom = self.lower_type_expr_to_exp(domain, scope)?;
+                let body = self.lower_type_expr_to_exp(codomain, scope)?;
+                Ok(Exp::arrow(dom, body))
+            }
+            ast::TypeExpr::Pi {
+                params, codomain, ..
+            } => {
+                // Dependent telescope: thread each binder into scope
+                // before lowering subsequent param types and the body.
+                let mut working: std::collections::HashSet<String> =
+                    scope.iter().map(|s| s.to_string()).collect();
+                let mut compiled_doms: Vec<(String, Exp)> = Vec::with_capacity(params.len());
+                for p in params {
+                    let local: std::collections::HashSet<&str> =
+                        working.iter().map(|s| s.as_str()).collect();
+                    let dom = self.lower_type_expr_to_exp(&p.typ, &local)?;
+                    compiled_doms.push((p.name.clone(), dom));
+                    working.insert(p.name.clone());
+                }
+                let inner_scope: std::collections::HashSet<&str> =
+                    working.iter().map(|s| s.as_str()).collect();
+                let mut body = self.lower_type_expr_to_exp(codomain, &inner_scope)?;
+                for (name, dom) in compiled_doms.into_iter().rev() {
+                    body = Exp::Pi(Patt::Var(name), Box::new(dom), Box::new(body));
+                }
+                Ok(body)
+            }
+            ast::TypeExpr::BinderArrow {
+                name,
+                kind,
+                bound: _,
+                body,
+                ..
+            } => {
+                // Size-binder arrows are typically used in sized
+                // codata; axiom statements rarely involve sizes. v1
+                // lowers as a plain Pi for non-size kinds and a
+                // SizeSort-typed binder for size kinds. Bound
+                // (upper bound for sized) is currently ignored — sized
+                // axiom statements need a follow-on.
+                let kind_str = self.resolve(kind)?;
+                let dom = if kind_str.ends_with(":Size") || kind_str == "Size" {
+                    Exp::SizeSort
+                } else {
+                    let iri_val = Iri::parse(&kind_str).map_err(|e| {
+                        EslError::compiler(
+                            Some(typ.pos().clone()),
+                            format!("invalid kind IRI `{kind_str}`: {e}"),
+                        )
+                    })?;
+                    Exp::EigonClass(iri_val)
+                };
+                let mut inner_scope: std::collections::HashSet<&str> = scope.clone();
+                inner_scope.insert(name.as_str());
+                let body_exp = self.lower_type_expr_to_exp(body, &inner_scope)?;
+                Ok(Exp::Pi(
+                    Patt::Var(name.clone()),
+                    Box::new(dom),
+                    Box::new(body_exp),
+                ))
             }
         }
     }
@@ -3294,5 +3488,155 @@ mod tests {
             combined.contains("vector_index") && combined.contains("M2"),
             "error should reference vector_index and D43 M2, got: {combined}"
         );
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // eigenius#72 Layer 1 — `axiom` declarations
+    // ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn compile_trivial_axiom() {
+        // axiom triv : Prop → Prop
+        let resources = compile_esl(
+            r#"
+            namespace eg = "urn:eigenius:test";
+
+            axiom eg:triv : Prop -> Prop;
+            "#,
+        );
+        let ax = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str() == "urn:eigenius:test:triv")
+                    .unwrap_or(false)
+            })
+            .expect("axiom triv should be committed");
+        let is_a = ax.is_a();
+        assert!(
+            is_a.iter()
+                .any(|i| i.as_str() == "urn:eigenius:eigentt:Axiom"),
+            "axiom must be classed as eigentt:Axiom; got is_a = {:?}",
+            is_a.iter().map(|i| i.as_str()).collect::<Vec<_>>()
+        );
+        // The axiom_statement value is the encoded TypeExpr.
+        let stmt = ax
+            .get(&iri("urn:eigenius:eigentt:axiom_statement"))
+            .expect("axiom_statement property must be set");
+        match stmt {
+            Value::Json(j) => {
+                // The outer shape should be a Pi (encoded by the
+                // D47 codec): {ctor: "Pi", args: ["", <Sort 0>, <Sort 0>]}.
+                assert_eq!(j["ctor"], "Pi");
+                let args = j["args"].as_array().expect("Pi has args");
+                assert_eq!(args[0], serde_json::json!(""));
+                assert_eq!(args[1]["ctor"], "Sort");
+                assert_eq!(args[1]["args"][0], 0);
+                assert_eq!(args[2]["ctor"], "Sort");
+                assert_eq!(args[2]["args"][0], 0);
+            }
+            other => panic!("expected Value::Json, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compile_axiom_with_forall() {
+        // axiom myax : forall (P : Prop) => P -> P
+        let resources = compile_esl(
+            r#"
+            namespace eg = "urn:eigenius:test";
+
+            axiom eg:myax : forall (P : Prop) => P -> P;
+            "#,
+        );
+        let ax = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str() == "urn:eigenius:test:myax")
+                    .unwrap_or(false)
+            })
+            .expect("axiom myax should be committed");
+        let stmt = ax
+            .get(&iri("urn:eigenius:eigentt:axiom_statement"))
+            .expect("axiom_statement set");
+        match stmt {
+            Value::Json(j) => {
+                // forall (P : Prop) => P -> P
+                //   lowers to Pi(P : Sort(0), Pi(_ : Var(P), Var(P)))
+                //   encodes as Pi("P", Sort(0), Pi("", Var("P"), Var("P")))
+                assert_eq!(j["ctor"], "Pi");
+                assert_eq!(j["args"][0], "P");
+                assert_eq!(j["args"][1]["ctor"], "Sort");
+                assert_eq!(j["args"][1]["args"][0], 0);
+                let inner = &j["args"][2];
+                assert_eq!(inner["ctor"], "Pi");
+                assert_eq!(inner["args"][0], "");
+                assert_eq!(inner["args"][1]["ctor"], "Var");
+                assert_eq!(inner["args"][1]["args"][0], "P");
+                assert_eq!(inner["args"][2]["ctor"], "Var");
+                assert_eq!(inner["args"][2]["args"][0], "P");
+            }
+            other => panic!("expected Value::Json, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compile_axiom_with_justification_note() {
+        let resources = compile_esl(
+            r#"
+            namespace eg = "urn:eigenius:test";
+
+            axiom eg:noted : Prop -> Prop note: "Methodological convention from working group X";
+            "#,
+        );
+        let ax = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str() == "urn:eigenius:test:noted")
+                    .unwrap_or(false)
+            })
+            .expect("axiom noted committed");
+        let just = ax
+            .get(&iri("urn:eigenius:eigentt:axiom_justification"))
+            .expect("axiom_justification set");
+        match just {
+            Value::String(s) => {
+                assert_eq!(s, "Methodological convention from working group X");
+            }
+            other => panic!("expected Value::String, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn axiom_uses_set_keyword_in_kind_position() {
+        // ESL's `Set` keyword in a `forall` binder kind position must
+        // be recognised as a sort literal, not as an identifier.
+        let resources = compile_esl(
+            r#"
+            namespace eg = "urn:eigenius:test";
+
+            axiom eg:id_at_set : forall (A : Set) => A -> A;
+            "#,
+        );
+        let ax = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str() == "urn:eigenius:test:id_at_set")
+                    .unwrap_or(false)
+            })
+            .expect("axiom id_at_set committed");
+        let stmt = ax
+            .get(&iri("urn:eigenius:eigentt:axiom_statement"))
+            .expect("axiom_statement set");
+        if let Value::Json(j) = stmt {
+            // Outermost Pi, binder "A", binder kind Sort(1) = Set.
+            assert_eq!(j["ctor"], "Pi");
+            assert_eq!(j["args"][0], "A");
+            assert_eq!(j["args"][1]["ctor"], "Sort");
+            assert_eq!(j["args"][1]["args"][0], 1);
+        }
     }
 }

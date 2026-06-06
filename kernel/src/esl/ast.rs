@@ -67,6 +67,21 @@ pub enum Declaration {
     /// declared body fields populate the Resource's properties; the
     /// class is implicit in the keyword.
     VectorIndex(VectorIndexDecl),
+    /// eigenius#72 — `axiom Name : <type-expr>` declares a named
+    /// chain-resident axiom whose statement is the supplied type
+    /// expression. Lowers to a `core:Axiom` Resource (D46 §10) whose
+    /// `axiom_statement` is the type expression encoded via the D47
+    /// codec. Optional `note: "..."` populates `core:axiom_justification`.
+    Axiom(AxiomDecl),
+}
+
+/// eigenius#72 — `axiom Name : <type-expr> [note: "..."]` declaration.
+#[derive(Debug)]
+pub struct AxiomDecl {
+    pub name: QualifiedName,
+    pub statement: TypeExpr,
+    pub justification: Option<String>,
+    pub pos: Position,
 }
 
 /// `class ex:Dog : ex:Animal { ... }` or
@@ -325,11 +340,40 @@ pub enum TypeExpr {
     /// the general value-typed binder needed for standalone Lambda
     /// resources' `program:type` slot and for `merge_comorphism`
     /// transformation signatures.
+    ///
+    /// eigenius#72: `forall` is an alias for `pi` produced by the
+    /// `Forall` keyword. Both parse into this variant.
     Pi {
         params: Vec<TypedParam>,
         codomain: Box<TypeExpr>,
         pos: Position,
     },
+    /// eigenius#72 — sort literal in type position. `Prop` is
+    /// `Sort(0)`, `Set` is `Sort(1)`, `Type N` is `Sort(N+1)`.
+    /// Used in `axiom` statements, indexed `data` declarations, and
+    /// motives.
+    Sort { kind: SortKind, pos: Position },
+}
+
+/// Sort literals recognised in type expressions (eigenius#72).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortKind {
+    Prop,
+    Set,
+    Type(usize),
+}
+
+impl TypeExpr {
+    /// Position of the type-expression's root for error reporting.
+    pub fn pos(&self) -> &Position {
+        match self {
+            TypeExpr::Ref { pos, .. }
+            | TypeExpr::Arrow { pos, .. }
+            | TypeExpr::BinderArrow { pos, .. }
+            | TypeExpr::Pi { pos, .. }
+            | TypeExpr::Sort { pos, .. } => pos,
+        }
+    }
 }
 
 /// A typed binder: `name : type`. Used by `TypeExpr::Pi` and by the
