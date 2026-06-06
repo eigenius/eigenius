@@ -200,7 +200,7 @@ Meseguer, José (1989). "General logics". In *Logic Colloquium '87*, ed. Ebbingh
 
 ### `minitt`
 
-Coquand, Thierry, Kinoshita, Yoshiki, Nordström, Bengt, and Takeyama, Makoto (2009). "A simple type-theoretic language: Mini-TT". In *From Semantics to Computer Science: Essays in Honour of Gilles Kahn*, ed. Bertot, Yves, Huet, Gérard, Lévy, Jean-Jacques, and Plotkin, Gordon, pp. 139–164, Cambridge University Press.
+Coquand, Thierry, Kinoshita, Yoshiki, Nordström, Bengt, and Takeyama, Makoto (2009). "A simple type-theoretic language: EigenTT". In *From Semantics to Computer Science: Essays in Honour of Gilles Kahn*, ed. Bertot, Yves, Huet, Gérard, Lévy, Jean-Jacques, and Plotkin, Gordon, pp. 139–164, Cambridge University Press.
 
 ### `mossakowski2007hets`
 

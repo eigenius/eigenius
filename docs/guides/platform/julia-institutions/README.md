@@ -14,7 +14,7 @@ plumbing knowledge and focus on what's domain-specific to each institution.
 | Tutorial | Wraps | What's distinctive |
 |---|---|---|
 | [Intervals](intervals-institution-tutorial.md) | [`IntervalArithmetic.jl`](https://juliaintervals.github.io/) | The simplest possible external-runtime institution — one class, one AutoOnLoad gate, one handler. The recommended first read. |
-| [Symbolics](symbolics-institution-tutorial.md) | [`Symbolics.jl`](https://juliasymbolics.org/) | Three dispatch roles in one institution (AutoOnLoad / OnDemand / Decidable); the FormulaTerm-as-Mini-TT-fragment story end-to-end. |
+| [Symbolics](symbolics-institution-tutorial.md) | [`Symbolics.jl`](https://juliasymbolics.org/) | Three dispatch roles in one institution (AutoOnLoad / OnDemand / Decidable); the FormulaTerm-as-EigenTT-fragment story end-to-end. |
 | [Catalyst](catalyst-institution-tutorial.md) | [`Catalyst.jl`](https://docs.sciml.ai/Catalyst/stable/) | Chemical reaction networks; companion to the DiffEq tutorial via the Catalyst → DiffEq comorphism. |
 | [DiffEq](diffeq-institution-tutorial.md) | [`OrdinaryDiffEq.jl`](https://docs.sciml.ai/DiffEqDocs/stable/) | ODE integration; the gate re-integrates the FormulaTerm RHS to verify a claimed solution. |
 | [JuMP-HiGHS](jump-highs-institution-tutorial.md) | [`JuMP`](https://jump.dev/) + [`HiGHS`](https://highs.dev) | LP/QP optimisation; the smart-pow walker rule that keeps quadratic objectives in `QuadExpr` rather than `NonlinearExpr`. |
@@ -40,5 +40,5 @@ for the demo overview.
 - [**D14 — Institution Realisation**](../../../design/d14-institution-realisation.md),
   [**D26 — Runtime Substrate**](../../../design/d26-runtime-substrate.md),
   [**D27 — Julia institutions**](../../../design/d27-julia-institutions.md),
-  [**D32 — Chain-Mirrored Mini-TT Inductives**](../../../design/d32-chain-mirrored-mini-tt-inductives.md)
+  [**D32 — Chain-Mirrored EigenTT Inductives**](../../../design/d32-chain-mirrored-mini-tt-inductives.md)
   — the design specs.

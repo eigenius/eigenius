@@ -401,8 +401,8 @@ Together they form the full audit closure D31 prescribes: every Verdict points a
 
 ## Where to go next
 
-- [Symbolics institution tutorial](symbolics-institution-tutorial.md) — same shape but exercises three dispatch roles (AutoOnLoad / OnDemand / Decidable) over four chain-committable claim types. Goes deep on the FormulaTerm-as-Mini-TT-fragment story from D32.
-- [D32 — Chain-Mirrored Mini-TT Inductives](../../../design/d32-chain-mirrored-mini-tt-inductives.md) — the design doc that pins why FormulaTerm sits at `urn:eigenius:formulas:` rather than under any one institution, and what the typed operator catalog buys you.
+- [Symbolics institution tutorial](symbolics-institution-tutorial.md) — same shape but exercises three dispatch roles (AutoOnLoad / OnDemand / Decidable) over four chain-committable claim types. Goes deep on the FormulaTerm-as-EigenTT-fragment story from D32.
+- [D32 — Chain-Mirrored EigenTT Inductives](../../../design/d32-chain-mirrored-mini-tt-inductives.md) — the design doc that pins why FormulaTerm sits at `urn:eigenius:formulas:` rather than under any one institution, and what the typed operator catalog buys you.
 - [D14 — Institution Realisation](../../../design/d14-institution-realisation.md) — the canonical spec for QueryClass / Comorphism / ExportFormat / ImportFormat. §5 covers comorphisms; §6 covers the three dispatch roles.
 
 ## Common failure modes

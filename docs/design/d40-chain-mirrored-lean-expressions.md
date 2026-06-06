@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-19
 **Status:** Implemented v1 (Phase 20a.0; `lean:LeanExpr` / `lean:LeanLevel` / `lean:LeanName` bootstrap inductives + Lean→chain mirror in production)
-**Prerequisites:** D14 (Institution Realisation), D19 (Mini-TT Inductive Types), D26 (Runtime Substrate), D28 (Lean 4 as Verification Institution), D32 (Chain-Mirrored Mini-TT Inductives + FormulaTerm)
+**Prerequisites:** D14 (Institution Realisation), D19 (EigenTT Inductive Types), D26 (Runtime Substrate), D28 (Lean 4 as Verification Institution), D32 (Chain-Mirrored EigenTT Inductives + FormulaTerm)
 **Drives:** Phase 20a (the first complete Lean institution — `lean:LeanExpr` is the queryable shape of `LeanProofTerm.proposition`).
 
 ## 1. Motivation
@@ -15,7 +15,7 @@ But the Eigenius value proposition is "knowledge graph + typed reasoning over co
 
 The solution: **chain-mirror Lean expressions as a typed InductiveType**. The proposition (the *type* of the target Theorem, one Expr tree) lives on the chain as a `lean:LeanExpr` value alongside the verbatim proof bytes. EigenQL queries traverse the inductive value directly; cross-institution Comorphisms can refer to proposition structure structurally; audit tooling never leaves the graph.
 
-This is the D32 move applied to Lean. D32 brought `FormulaTerm` (a Mini-TT fragment) onto the chain so cross-institution comorphisms could transfer formulas structurally. D40 brings Lean's expression form onto the chain so propositions become first-class queryable resources.
+This is the D32 move applied to Lean. D32 brought `FormulaTerm` (a EigenTT fragment) onto the chain so cross-institution comorphisms could transfer formulas structurally. D40 brings Lean's expression form onto the chain so propositions become first-class queryable resources.
 
 ### 1.2 What gets mirrored — and what doesn't
 
@@ -31,7 +31,7 @@ So D40 specifies four chain inductives: `lean:LeanExpr` (the proposition shape),
 
 ### 1.3 Why D40 is not D32
 
-D32 brought a Mini-TT *fragment* onto the chain — the symbol-algebra-relevant subset (`Var`, `LitFloat`, `OpRef`, `App`, `Lam`, `Pi`). D40 brings Lean's *full term language* onto the chain (modulo `Local`, see §3.3). The difference matters:
+D32 brought a EigenTT *fragment* onto the chain — the symbol-algebra-relevant subset (`Var`, `LitFloat`, `OpRef`, `App`, `Lam`, `Pi`). D40 brings Lean's *full term language* onto the chain (modulo `Local`, see §3.3). The difference matters:
 
 - D32's FormulaTerm is engineered for cross-institution agreement — Symbolics, JuMP, IntervalArithmetic, DiffEq, Catalyst all consume the same shape. The ctor list is the *minimum* common subset.
 - D40's `LeanExpr` is engineered for *Lean's* expressivity. It must round-trip every Lean Expr that can appear in a closed proposition — universes, structure projections, primitive literals, dependent binders with `BinderStyle`.
@@ -357,7 +357,7 @@ Encode flow (query time):
 
 ### 5.2 Cross-institution Comorphisms (D28 §3.4 future work)
 
-The D27 §6.2 Lean ↔ IntervalArithmetic bridge wants to translate `(FormulaTerm, IntervalRepr, IntervalRepr)` triples into Lean proof obligations. The "Lean proof obligation" side is a `lean:LeanExpr` value asserting the bound. The bridge's middle Component (`m` in D14's `(s, m, t)` triple) is a Mini-TT function from the Julia-side triple to a chain `lean:LeanExpr` value — it packages the FormulaTerm + bounds into Lean Prop syntax. No bespoke conversion code in the Comorphism: it's a chain-typed Mini-TT term consuming `formulas:FormulaTerm` and producing `lean:LeanExpr`.
+The D27 §6.2 Lean ↔ IntervalArithmetic bridge wants to translate `(FormulaTerm, IntervalRepr, IntervalRepr)` triples into Lean proof obligations. The "Lean proof obligation" side is a `lean:LeanExpr` value asserting the bound. The bridge's middle Component (`m` in D14's `(s, m, t)` triple) is a EigenTT function from the Julia-side triple to a chain `lean:LeanExpr` value — it packages the FormulaTerm + bounds into Lean Prop syntax. No bespoke conversion code in the Comorphism: it's a chain-typed EigenTT term consuming `formulas:FormulaTerm` and producing `lean:LeanExpr`.
 
 This is why D40 exists. Without a chain-mirrored Lean expression form, the Comorphism would have to emit Lean source as bytes, the Lean side would have to parse + validate the bytes at reify time, and the audit chain would have a bytes-shaped gap. With D40, the Comorphism produces a structured chain value, the validator type-checks it at commit, and the audit chain stays graph-internal.
 
@@ -428,8 +428,8 @@ The four inductives (`lean:LeanName`, `lean:LeanLevel`, `lean:LeanLevelList`, `l
 - [Type Checking in Lean 4](https://ammkrn.github.io/type_checking_in_lean4/) (Chris Bailey) — the canonical specification of Lean's kernel-level semantics, the basis for nanoda's design.
 - [lean4export](https://github.com/leanprover/lean4export) — the official Lean export tool whose JSON output nanoda parses.
 - [D14 — Institution Realisation](d14-institution-realisation.md) — the institution protocol that registers Lean as a verification institution.
-- [D19 — Mini-TT Inductive Types](d19-inductive-types.md) — the kernel mechanism the chain inductives sit on.
+- [D19 — EigenTT Inductive Types](d19-inductive-types.md) — the kernel mechanism the chain inductives sit on.
 - [D26 — Runtime Substrate](d26-runtime-substrate.md) — the substrate that hosts Lean's authoring side.
 - [D28 — Lean 4 as Verification Institution](d28-lean-4-as-institution.md) — the parent integration spec.
 - [D30 — Eigon → Lean Faithful Translation](d30-eigon-to-lean-faithful-translation.md) — the sibling spec for the EigonFFI mirror.
-- [D32 — Chain-Mirrored Mini-TT Inductives + FormulaTerm](d32-chain-mirrored-mini-tt-inductives.md) — the structural precedent this design follows.
+- [D32 — Chain-Mirrored EigenTT Inductives + FormulaTerm](d32-chain-mirrored-mini-tt-inductives.md) — the structural precedent this design follows.

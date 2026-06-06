@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Mini-TT evaluator: terms → values.
+//! EigenTT evaluator: terms → values.
 //!
-//! Ported from `Main.hs` lines 198-217 in the Mini-TT reference.
+//! Ported from `Main.hs` lines 198-217 in the EigenTT reference.
 //! Extended with capability modes (Pure/Read/IO) per D9.
 
 /// Evaluation error — replaces panics in the NbE evaluator (issue #19).
@@ -206,7 +206,7 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
         Exp::Dec(d, e) => {
             match ctx {
                 EvalCtx::Pure => {
-                    // Pure mode: lazy evaluation via UpDec (standard Mini-TT)
+                    // Pure mode: lazy evaluation via UpDec (standard EigenTT)
                     eval_ctx(e, &Rho::UpDec(Box::new(rho.clone()), d.clone()), ctx)
                 }
                 _ => {
@@ -2147,7 +2147,7 @@ fn parse_verdict(
     use crate::ontology::well_known as wk;
 
     // First look for an explicit `ctor_name` property — produced when
-    // a Component returns a Mini-TT Verdict value via the inductive
+    // a Component returns a EigenTT Verdict value via the inductive
     // serialisation.
     if let Some(ctor) = result
         .get(&Iri::parse(wk::CTOR_NAME).expect("well-known IRI"))
@@ -2199,7 +2199,7 @@ fn ground_values_equal(x: &Val, y: &Val) -> bool {
     }
 }
 
-/// Convert an Eigon resource Value to a Mini-TT Val.
+/// Convert an Eigon resource Value to a EigenTT Val.
 ///
 /// Uses a heuristic IRI check: strings starting with "urn:" or "http"
 /// are treated as class references (`Val::EigonClass`). This can
@@ -2233,13 +2233,13 @@ pub fn resource_value_to_val(v: &crate::ontology::resource::Value) -> Val {
         RVal::Json(_) => Val::Unit,
         // D43 §4.1: Vector values are transient compute outputs of
         // EMBED that flow into VECTOR_NEAR / VECTOR_SIM at the query
-        // surface. They have no inhabitant in the Mini-TT type
+        // surface. They have no inhabitant in the EigenTT type
         // system — opaque to NBE.
         RVal::Vector { .. } => Val::Unit,
     }
 }
 
-/// Convert a Mini-TT Val to an Eigon resource Value (for Construct).
+/// Convert a EigenTT Val to an Eigon resource Value (for Construct).
 pub fn val_to_resource_value(val: &Val) -> crate::ontology::resource::Value {
     use crate::ontology::resource::Value as RVal;
     match val {

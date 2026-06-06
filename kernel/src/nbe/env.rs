@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Mini-TT evaluation and type environments.
+//! EigenTT evaluation and type environments.
 //!
-//! Ported from `Main.hs` lines 169-280 in the Mini-TT reference.
+//! Ported from `Main.hs` lines 169-280 in the EigenTT reference.
 
 use crate::nbe::term::{Decl, Name, Patt};
 use crate::nbe::val::Val;

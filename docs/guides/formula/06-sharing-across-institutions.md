@@ -77,7 +77,7 @@ What this buys at scale, from author and operator perspectives:
   ExportFormat, the ImportFormat, and a comorphism declaration linking
   them with `m_id_formula_term`. No transformation code to write,
   test, or audit. (For non-identity transformations, the `transformation`
-  Component is a Mini-TT term — also chain-resident — and the kernel
+  Component is a EigenTT term — also chain-resident — and the kernel
   type-checks the signature alignment.)
 - **Cross-institution dispatch is free at the wire.** When a
   `SymbolicExpression` gets reified as an `IntervalFunction` via the

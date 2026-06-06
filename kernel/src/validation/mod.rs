@@ -233,7 +233,7 @@ impl Validator {
         // For Comorphism resources, verify that `export_format` and
         // `import_format` references resolve to ExportFormat /
         // ImportFormat resources, and that `transformation` resolves
-        // to *some* resource in the chain. The full Mini-TT
+        // to *some* resource in the chain. The full EigenTT
         // signature-equality check between transformation Component
         // and the export/import payload types is deferred until the
         // institution dispatch evaluator lands (M5 of the D14 plan).
@@ -327,7 +327,7 @@ impl Validator {
     /// - `export_format` resolves to a resource of class `ExportFormat`,
     /// - `import_format` resolves to a resource of class `ImportFormat`,
     /// - `transformation` resolves to *some* resource in the chain
-    ///   (the full Mini-TT signature-equality check between the
+    ///   (the full EigenTT signature-equality check between the
     ///   referenced Component and the export/import payload types
     ///   lands when the institution dispatch evaluator does — M5 of
     ///   the D14 plan).
@@ -695,7 +695,7 @@ impl Validator {
                     resource_id: res_id.clone(),
                     property: None,
                     rule: ValidationRule::LambdaTypeMismatch,
-                    message: format!("standalone Lambda body did not parse as Mini-TT: {reason}"),
+                    message: format!("standalone Lambda body did not parse as EigenTT: {reason}"),
                 });
                 return errors;
             }

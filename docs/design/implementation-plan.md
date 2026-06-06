@@ -20,7 +20,7 @@ eigenius/
 │   │   ├── capability/        # Capability protocol, dispatch, sandbox (§9)
 │   │   ├── storage/           # Storage interface traits (§10.6)
 │   │   ├── reflection/        # Reasoning traces, universe stratification (§11)
-│   │   ├── nbe/               # Mini-TT type theory, NbE evaluator (§4.2–4.6)
+│   │   ├── nbe/               # EigenTT type theory, NbE evaluator (§4.2–4.6)
 │   │   ├── bootstrap/         # Foundation Layer loader, capability primer (§2.5)
 │   │   └── api/               # gRPC service definitions (Load/Query/Validate/Reflect)
 │   ├── tests/
@@ -73,7 +73,7 @@ The build is organized into phases. Each phase produces a working system that ca
 |-------|------|--------|----------------|
 | 0 | Foundation | ✓ | Eigon types exist, layers work, storage round-trips |
 | 1 | Query | ✓ | EigenQL v1 evaluates against a layer stack |
-| 2 | Programs | ✓ | Programs type-check and execute via Mini-TT/NbE |
+| 2 | Programs | ✓ | Programs type-check and execute via EigenTT/NbE |
 | 3 | Service | ✓ | Kernel runs as gRPC service with RocksDB |
 | 4 | Intelligence | ✓ | LLM integration, orchestrator, MCP, reasoning traces |
 | 4.5 | ESL | ✓ | Human-friendly surface syntax compiles to Eigon-JSON |
@@ -202,19 +202,19 @@ The following decisions have been made and documented in **design doc D2** (`doc
 
 ## 5. Phase 2 — Pipelines ✓
 
-**Goal:** programs type-check against the Mini-TT dependent type system and execute through the orchestration layer. Partial evaluation works.
+**Goal:** programs type-check against the EigenTT dependent type system and execute through the orchestration layer. Partial evaluation works.
 
-**Duration estimate:** 6–8 weeks. **Completed:** April 12, 2026 (1 day, with Claude Code). Programs represented as typed expressions (not workflow graphs), Mini-TT core ported from Haskell reference, program ontology with 54 resources, end-to-end pipeline: parse → type-check → execute.
+**Duration estimate:** 6–8 weeks. **Completed:** April 12, 2026 (1 day, with Claude Code). Programs represented as typed expressions (not workflow graphs), EigenTT core ported from Haskell reference, program ontology with 54 resources, end-to-end pipeline: parse → type-check → execute.
 
 ### 5.1 Deliverables
 
-- Mini-TT implementation in Rust: Pi types, Sigma types, labeled sums, closures, environments, the `Val`/`Neut` value representation (§4.2). Ported from the Haskell reference implementation.
+- EigenTT implementation in Rust: Pi types, Sigma types, labeled sums, closures, environments, the `Val`/`Neut` value representation (§4.2). Ported from the Haskell reference implementation.
 - NbE evaluator: `eval`, `readback`, `check`/`checkI` (bidirectional type checking), `eqNf` (equality by normalization) (§4.6).
 - program type system: Components, Pipe, Parallel, Select, Map, Retry as typed constructs (§4.3–4.4). Type signatures with `Result<A, E>` for fallibility (§4.5). `NonDeterministic` marker.
 - program validator: takes a program specification and a typing context (derived from the layer stack's class definitions), runs the NbE type checker, reports type errors with source locations.
 - program validator registered as a Foundation Layer capability alongside EigenQL.
 - Partial evaluation: given a program and a subset of its inputs, produce a typed residual program (§4.9). Neutral terms (`Nt Neut`) represent unknown inputs.
-- Ground type resolution interface: the bridge between Eigon ontology types and Mini-TT ground types (§4.10). Class references in program type signatures resolve against the layer stack.
+- Ground type resolution interface: the bridge between Eigon ontology types and EigenTT ground types (§4.10). Class references in program type signatures resolve against the layer stack.
 - Orchestration layer (Deno/TypeScript): program execution engine that walks the validated program, executes Components (initially stub implementations), handles Pipe sequencing, Parallel fan-out, Select branching, Map iteration, Retry logic (§12.1–12.2).
 - CLI `validate` command: takes a program specification file, validates it, prints type checking results.
 - CLI `run` command: takes a validated program and input resources, executes it through the orchestration layer, prints output resources.
@@ -227,7 +227,7 @@ The following decisions have been made and documented in **design doc D2** (`doc
 
 ### 5.3 Test plan
 
-- **Mini-TT core:** Port the Mini-TT test suite from the Haskell implementation. Verify that well-typed terms check, ill-typed terms are rejected, and NbE produces expected normal forms.
+- **EigenTT core:** Port the EigenTT test suite from the Haskell implementation. Verify that well-typed terms check, ill-typed terms are rejected, and NbE produces expected normal forms.
 - **program type checking:** A well-typed pipeline (Component → Pipe → Component) type-checks. A pipeline with a type mismatch (output type of step 1 ≠ input type of step 2) is rejected with a clear error.
 - **Partial evaluation:** Provide 2 of 3 inputs to a program, verify the residual is a valid program with one remaining input. Execute the residual with the final input, verify the result matches full execution.
 - **Select exhaustiveness:** A Select without a default branch is rejected. A Select with a default branch type-checks.
@@ -505,11 +505,11 @@ The phase decomposes into two milestones that are separately reviewable:
 
 ### Phase 9b — Codata, streams, and resumable execution (D11, D21) — ~4–6 weeks
 
-**Status:** Complete (April 2026). Shipped in four sub-milestones — 9b-i (Mini-TT codata + guardedness), 9b-ii (ESL codata/corecord/observation + ontology), 9b-iii (task model: storage primitives, evaluator re-keying, RPCs, CLI, resume sweep), plus issue #16 filed for sized-types follow-up.
+**Status:** Complete (April 2026). Shipped in four sub-milestones — 9b-i (EigenTT codata + guardedness), 9b-ii (ESL codata/corecord/observation + ontology), 9b-iii (task model: storage primitives, evaluator re-keying, RPCs, CLI, resume sweep), plus issue #16 filed for sized-types follow-up.
 
 **Goal:** Extend the execution model with codata (coinductive types) so that data and event streams become first-class. Programs run as tracked tasks that persist across kernel restarts, with per-task positional trace keys for correct streaming and a startup resume sweep for crash recovery.
 
-- Mini-TT gains `Codata` / `CoRecord` / `Observe` terms, matching `Val` variants, eval + readback + type checker arms, and a syntactic guardedness check (Agda-style). See D11.
+- EigenTT gains `Codata` / `CoRecord` / `Observe` terms, matching `Val` variants, eval + readback + type checker arms, and a syntactic guardedness check (Agda-style). See D11.
 - ESL surface syntax: top-level `codata Name { obs : T; ... }` declarations, `corecord { obs = e; ... }` expressions, bare-name `.obs` observations unified with property access via `Exp::PropAccess` dispatch. Ontology gains `CodataType`, `Observation`, `CoRecord`, `CoField` classes with their supporting properties.
 - Task model (D21): `TaskRecord`, `Checkpoint`, `TaskContext`, `TaskStore` + `BackendTaskStore` adapter. Per-task positional trace keys `(session_id, task_id, step_seq)` replace Phase 9a's content-address cache for IO components (determinism-gated — Pure/Read keep the memo for cross-task reuse). `components:Checkpoint` built-in persists program-declared state snapshots atomically via `write_batch`.
 - gRPC surface: `RunProgram` returns a `task_id`; new `ListTasks` / `GetTaskStatus` / `CancelTask` RPCs; `Health` reports `resume_in_progress` / `tasks_resuming`; `Inspect` / `Query` / `GetSchema` gain an optional `at_layer` LayerId (D21 §3.6) for reaching forked task result layers.
@@ -536,13 +536,13 @@ The phase decomposes into two milestones that are separately reviewable:
 
 ## Phase 10 — Kernel Completeness ✓
 
-**Goal:** Close the fundamental kernel correctness gaps that block platform breadth — particularly ontology-as-types resolution, which is a prerequisite for the life-science representation work in Phase 11 and every other domain that typechecks against ontology classes. Framed in `docs/design/life-science-requirements.md` §19 step 1 as "nothing works cleanly until `find_sigma_field` resolves EigonClass to proper dependent records."
+**Goal:** Close the fundamental kernel correctness gaps that block platform breadth — particularly ontology-as-types resolution, which is a prerequisite for the life-science representation work in Phase 11 and every other domain that typechecks against ontology classes. Framed in `docs/design/life-science-requirements.md` §19 step 1 as "nothing works cleanly until `Indexed inductive families` resolves EigonClass to proper dependent records."
 
 **Duration estimate:** 3–5 weeks total, three internal milestones.
 
 **Status:** Complete (April 2026). Ontology-as-types resolution (#18, D18), defence-in-depth for IO-reachable panics, and typed `EvalError` refactor (#19) all shipped. The NbE evaluator returns `Result<Val, EvalError>` throughout — 20 panic sites converted to error returns, all tests use `?` propagation. `catch_unwind` retained as defence-in-depth but the primary error path is now the Result monad.
 
-**Prerequisites:** Phase 5 (Mini-TT/NbE), Phase 8 (WASM).
+**Prerequisites:** Phase 5 (EigenTT/NbE), Phase 8 (WASM).
 
 **Drives:** eigenius/eigenius#12 (high-priority correctness hazards), #13 (medium), #14 (low).
 
@@ -560,12 +560,12 @@ The phase decomposes into two milestones that are separately reviewable:
 
 ### Phase 10b — Universe stratification and meta-level soundness — ~1–2 weeks
 
-**Status:** Deferred — enforcement at the layer-ingestion level is not yet wired. The Mini-TT checker's universe rules are adequate for current use. Will revisit when Phase 12 worked examples exercise multi-level epistemic claims.
+**Status:** Deferred — enforcement at the layer-ingestion level is not yet wired. The EigenTT checker's universe rules are adequate for current use. Will revisit when Phase 12 worked examples exercise multi-level epistemic claims.
 
 **Goal:** Enforce the three-level epistemic stratification (data → derivation → meta) at ingestion time so meta-level claims over traces are sound. Life-science §16.2 names this as unblocking §13 "Meta-level claims (sound)."
 
-- Enforcement point: resource ingestion in the layer system (not Mini-TT term forms). A resource at epistemic level N that references a resource at level ≥ N is rejected with a clear error.
-- Mini-TT checker: tighten universe-rule handling so attempts to construct self-referential meta-claims fail at check time (before runtime).
+- Enforcement point: resource ingestion in the layer system (not EigenTT term forms). A resource at epistemic level N that references a resource at level ≥ N is rejected with a clear error.
+- EigenTT checker: tighten universe-rule handling so attempts to construct self-referential meta-claims fail at check time (before runtime).
 - Integration with D6b trace schema: a ProgramTrace at level 2 references only resources at level ≤ 1.
 - nanoda_lib (see `d28-lean-4-as-institution.md`) as reference for how universe checking integrates with type equality — Eigenius's needs are simpler (three fixed levels vs. Lean's universe polymorphism).
 
@@ -588,7 +588,7 @@ The phase decomposes into two milestones that are separately reviewable:
 ### Phase 10 — References
 
 - `docs/design/life-science-requirements.md` §19 (recommended sequencing), §16.2 (stratification), §16.3 (decision procedures — deferred to Phase 11)
-- `docs/design/d9-nbe-unification-and-type-extensions.md` — Mini-TT surface this extends
+- `docs/design/d9-nbe-unification-and-type-extensions.md` — EigenTT surface this extends
 - `docs/design/d28-lean-4-as-institution.md` — nanoda_lib design references
 - D18 (to be written) — Ontology-as-Types Resolution
 
@@ -689,7 +689,7 @@ The phase decomposes into two milestones that are separately reviewable:
 
 - `docs/design/life-science-requirements.md` §16 (required extensions), §18 (prioritization), §19 (sequencing)
 - `docs/design/d28-lean-4-as-institution.md` — nanoda reference, especially Appendix A
-- D19 (`docs/design/d19-inductive-types.md`) — Inductive Types + Sized Types in Mini-TT
+- D19 (`docs/design/d19-inductive-types.md`) — Inductive Types + Sized Types in EigenTT
 
 ---
 
@@ -1735,9 +1735,9 @@ The 19c letter is preserved (rather than renumbering 19d-19h up) to keep cross-r
 
 - *Production scaling concerns (HPA / KEDA / ACA scale rules) sit in their respective deployment-platform configs, not in the substrate. The platform-managed `ServiceSpawner` backends (`K8sDeploymentSpawner`, `AzureContainerAppsSpawner`) land as a separate phase when production deployment ships.*
 
-### Phase 19d.0 — Chain-mirrored Mini-TT inductives + `FormulaTerm` (~1.5–2 weeks) ✓
+### Phase 19d.0 — Chain-mirrored EigenTT inductives + `FormulaTerm` (~1.5–2 weeks) ✓
 
-**Goal.** Bring Mini-TT inductives onto the chain so cross-institution formulas have a typed shared representation. Spec: [D32](d32-chain-mirrored-mini-tt-inductives.md). Prerequisite for 19d (Symbolics needs `FormulaTerm` to type its `SymbolicExpression.term`) and for the comorphism story across 19e–19h (every numerical institution consumes the same `FormulaTerm` payload).
+**Goal.** Bring EigenTT inductives onto the chain so cross-institution formulas have a typed shared representation. Spec: [D32](d32-chain-mirrored-mini-tt-inductives.md). Prerequisite for 19d (Symbolics needs `FormulaTerm` to type its `SymbolicExpression.term`) and for the comorphism story across 19e–19h (every numerical institution consumes the same `FormulaTerm` payload).
 
 Four independently-shippable landings, dependency-ordered:
 
@@ -2205,7 +2205,7 @@ Per D28 §11.3 — self-contained pieces of work that layer onto the integrated 
 - **Lean4Lean as secondary cross-checker.** Soundness multiplier per the Venn-diagram argument (D28 §8.1). Wired as an alternate `check_proof` backend; `qc_proof_check` runs both and flags disagreements.
 - **WASM-sandboxed checker.** Only if benchmarks justify it (D28 §8.2). Requires nanoda to compile cleanly to WASM and the WASM capability sandbox to handle Mathlib-scale memory.
 - **Bidirectional Lean ↔ Julia bridge.** First concrete cross-institution Comorphism involving Lean ([D27 §6.2](d27-julia-institutions.md#62-verification-of-intervalarithmetic-outputs--concrete-d14-comorphism)). Requires EigonFFI to mirror `formulas:FormulaTerm` so a Lean proposition can quantify over FormulaTerm values; once that exists, the Comorphism is a clean identity-on-`FormulaTerm` plumbing job.
-- **Verified-status type extension** (D28 §12 remaining question / `life-science-requirements.md` §16.4) — kernel extension to express verification status in the type system. Non-trivial Mini-TT extension; defer until a concrete pipeline consumer asks for it.
+- **Verified-status type extension** (D28 §12 remaining question / `life-science-requirements.md` §16.4) — kernel extension to express verification status in the type system. Non-trivial EigenTT extension; defer until a concrete pipeline consumer asks for it.
 
 ### Phase 20 — Open questions (per D28 v2 §12)
 
@@ -2232,7 +2232,7 @@ The original D28 carried nine open questions; D28 v2 resolved five structurally 
 - [D26 — Runtime Substrate](d26-runtime-substrate.md) — substrate the authoring side runs on.
 - [D27 — Julia Institutions](d27-julia-institutions.md) — the multi-institution precedent.
 - [D29 — Eigon → Julia Faithful Translation](d29-eigon-julia-mirror-spec.md) — D30's sibling-pattern reference.
-- [D32 — Chain-Mirrored Mini-TT Inductives](d32-chain-mirrored-mini-tt-inductives.md) — D40's sibling-pattern reference.
+- [D32 — Chain-Mirrored EigenTT Inductives](d32-chain-mirrored-mini-tt-inductives.md) — D40's sibling-pattern reference.
 - [D14 — Institution Realisation](d14-institution-realisation.md) — institution protocol.
 - D30 (to be written in 20a.0b) — Eigon → Lean faithful translation specification.
 - D40 (to be written in 20a.0) — Chain-mirrored Lean expressions specification.
@@ -2284,7 +2284,7 @@ The following design documents must be written and reviewed before the phase tha
 |---|----------|----------|-----------------|-----------------|
 | D1 | **Eigon Serialization Format** | **COMPLETED** — `docs/design/d1-eigon-serialization-format.md`. Eigon-JSON format, IRI identity, three-layer type system (data types/formats/content types), validation rules, canonical form, core ontology in `ontologies/core/core-ontology.json` | Phase 0 | Done |
 | D2 | **EigenQL v1 Specification** | **COMPLETED** — `docs/design/d2-eigenql-specification.md`. Full EBNF grammar, lexer spec, type checking rules, aggregation (COUNT/SUM/AVG/MIN/MAX), GROUP BY, ORDER BY, LIMIT/OFFSET, DISTINCT, NOT EXISTS, dot-path navigation, error format | Phase 1 | Done |
-| D3 | **Program Model and Component Interface** | **COMPLETED** — `docs/design/d3-program-model.md`. Programs as typed expressions (not programs), 12 expression forms mapping 1:1 to Mini-TT, Map/Reduce as language primitives, automatic parallelism from data dependencies, two-tier component model (built-in + WASM), ESL surface syntax (future) | Phase 2 | Done |
+| D3 | **Program Model and Component Interface** | **COMPLETED** — `docs/design/d3-program-model.md`. Programs as typed expressions (not programs), 12 expression forms mapping 1:1 to EigenTT, Map/Reduce as language primitives, automatic parallelism from data dependencies, two-tier component model (built-in + WASM), ESL surface syntax (future) | Phase 2 | Done |
 | D4 | **Storage Key Encoding** | **COMPLETED** — `docs/design/d4-storage-key-encoding.md`. Key encoding for RocksDB/TiKV, column families, layer chain persistence, index layout, TiKV compatibility | Phase 3 | Done |
 | D5 | **gRPC API Specification** | **COMPLETED** — `docs/design/d5-grpc-api-specification.md`. RPC definitions, streaming query, context management, error codes, authentication, CLI/orchestration integration | Phase 3 | Done |
 | D6 | **Execution Architecture and Durability** | **COMPLETED** — `docs/design/d6-execution-architecture.md`. Kernel↔orchestrator boundary, DAPR integration, durable workflows, activity dispatch, reasoning trace ownership, MCP server placement | Phase 4 | Done |
@@ -2292,7 +2292,7 @@ The following design documents must be written and reviewed before the phase tha
 | D7 | **ESL Surface Syntax** | **COMPLETED** — `docs/design/d7-esl-surface-syntax.md`. Two-layer design (HCL-style structural + ML-style expressions), namespace aliases, program/class/property/resource syntax, EBNF grammar | Phase 4.5 | Done |
 | D8 | **CompleteJson Component** | **IMPLEMENTED** — `docs/design/d8-complete-json-component.md`. Structured LLM output via JSON Schema generated from ontology classes. Bijective short-name mapping with bijectivity check in ValidateProgram. Enums (`allows_only`), nested objects (`class_types`), union types (multiple `class_types` with `_type` discriminator). Template data type for prompt validation. `GetSchema` RPC. Patent demo end-to-end | Phase 7 | Done |
 | D9 | **NbE/Executor Unification** | **COMPLETED** — `docs/design/d9-nbe-unification-and-type-extensions.md`. Capability modes (Pure/Read/IO), type theory extensions (Id, DecEq, NativeDecide, universes), complete ground type resolution, trace storage architecture, crash recovery, trace pruning (proofs-as-programs) | Phase 5 | Done |
-| D10 | **Grothendieck Institution Protocol** | **SUPERSEDED by D14** — `docs/design/d10-grothendieck-institution-protocol.md` is a redirect to D14. Original D10 surface (FiberReasoner, InstitutionRegistry, ComorphismRegistry, validator-side morphism dispatch, FiberQuery/DiscoverMorphisms RPCs) retired in Phase 12. Categorical motivation (Eigon as shared signature category, Mini-TT as kernel service, Lean as verification institution) survives in D14. | Phase 6 (orig) / Phase 12 (D14 redo) | Done |
+| D10 | **Grothendieck Institution Protocol** | **SUPERSEDED by D14** — `docs/design/d10-grothendieck-institution-protocol.md` is a redirect to D14. Original D10 surface (FiberReasoner, InstitutionRegistry, ComorphismRegistry, validator-side morphism dispatch, FiberQuery/DiscoverMorphisms RPCs) retired in Phase 12. Categorical motivation (Eigon as shared signature category, EigenTT as kernel service, Lean as verification institution) survives in D14. | Phase 6 (orig) / Phase 12 (D14 redo) | Done |
 | D11 | **Codata, Streams, and Resumable Execution** | **COMPLETED** — `docs/design/d11-codata-streams.md`. Coinductive types via copatterns (Abel et al. 2013), stream semantics, tasks as codata, trace-driven replay, concurrent task model, ESL codata syntax, guardedness checking | Phase 9b | Done |
 | D12 | **WASM Extensibility** | WASM module lifecycle, host function interface (kernel → WASM), resource serialization across the boundary (Eigon-CBOR), capability levels → WASM import sets (pure/read/IO), integration with `ComponentRegistry` and (under D14) the `Institution` trait via the `eigenius-institution-d14` WIT world, registration via ontology resources, fuel/memory limits, SDK crate design. Merges the previously separate D12 (Capability SDK) and D13 (Wire Format) — the interface and wire format are inseparable. Resolves §14 open question on capability protocol | Phase 8 | 14–18 pages |
 | D13 | **Durable Kernel State** | **COMPLETED** — `docs/design/d13-durable-kernel-state.md`. `serve --db` flag, seeded bootstrap with drift-refusal, commit-through to `RocksStore`, WASM + institution re-registration on restart, persistent trace store via `BackendTraceStore`. Prerequisite for D11/Phase 9b. (The previous D13 — Wire Format — was merged into D12.) | Phase 9a | Done |
@@ -2302,7 +2302,7 @@ The following design documents must be written and reviewed before the phase tha
 | D16 | **Observability & Operational Tooling** | Structured metrics, tracing spans, query plan explanation, program execution step-through, reasoning trace streaming for live monitoring (resolves §13.3) | Phase 13 | 6–8 pages |
 | D17 | **Capability Versioning** | How capability implementations are versioned, version mismatch handling, backward compatibility obligations, upgrade path for Foundation capabilities across kernel releases (resolves §14 open question) | Phase 8 | 6–8 pages |
 | D18 | **Ontology-as-Types Resolution** | **COMPLETED** — `docs/design/d18-ontology-as-types-resolution.md`. `find_sigma_field` walks the layer chain through `resolve_class_type` instead of silently collapsing `EigonClass` to `Val::Set`. Introduces `CheckCtx` (bundling `rho`/`gamma`/optional layer/per-check type cache) threaded through all checker entrypoints. Adds inference-mode rules for `Construct`, `EigonResource`, `Template`, `IdJ`, `Refl`, `NativeDecide`, `DecEq`. Rejects no-layer EigonClass resolution explicitly rather than returning a weakened type. Closes the #12 high-priority correctness hazards. Prerequisite for most of D19. | Phase 10a | Done |
-| D19 | **Inductive Types in Mini-TT** | **DRAFT** — `docs/design/d19-inductive-types.md`. Single (non-mutual, non-nested) strictly-positive inductive types + sized types (#16). Declaration form, positivity checker, recursor/eliminator derivation, iota-reduction, sized termination for inductive/coinductive interaction. Deferred: mutual (#20), nested (#21), indexed families (#22). | Phase 11b | Draft |
+| D19 | **Inductive Types in EigenTT** | **DRAFT** — `docs/design/d19-inductive-types.md`. Single (non-mutual, non-nested) strictly-positive inductive types + sized types (#16). Declaration form, positivity checker, recursor/eliminator derivation, iota-reduction, sized termination for inductive/coinductive interaction. Deferred: mutual (#20), nested (#21), indexed families (#22). | Phase 11b | Draft |
 | D20 | **Layer Reconciliation** | **DRAFT** — `docs/design/d20-layer-reconciliation.md`. Pushout-of-a-span framing for layer merge (schema-level pushout in the category of ontology presentations + Σ migration of instance functors). Six typed resolution strategies — `Witness`, `Rename`, `KeepBoth`, `KeepOne`, `KeepNeither`, `Restructure` — each a transformation applied to the input span before pushing out. Three-stage conflict taxonomy (`SchemaConflict`, `EquationConflict`, `InstanceConflict`). Cascade impact analysis with kernel-enforced acknowledgment gates. `MergeComorphism` resource for the `Witness` strategy (sibling to the cross-institution Comorphism; D20 owns the naming-distinction internally). gRPC `submit_resolution` / `preview_cascade`. Supersedes D13's v1 drift-refusal (ontology migration is a degenerate single-resource witnessed merge). Sub-milestones 15a–15g sequenced for incremental delivery. | Phase 15 | Draft |
 | D21 | **Task Traces and Checkpointing** | **COMPLETED** — `docs/design/d21-task-traces-and-checkpointing.md`. Per-task positional `(session_id, task_id, step_seq)` trace keys replace the Phase-9a content-address cache for IO components (determinism-gated — Pure/Read keep the memo for cross-task reuse). `components:Checkpoint` built-in persists program-declared state atomically via `write_batch`. `ListTasks` / `GetTaskStatus` / `CancelTask` RPCs + `at_layer` on read RPCs. Startup resume sweep (`ResumeConfig`, `ResumeState`) rehydrates pinned layer chains and re-executes `Running`/`Suspended` tasks with bounded parallelism. Single hardwired session (`Uuid::nil()`) in 9b-iii with multi-session as a Phase-14 surface expansion. | Phase 9b-iii | Done |
 | D23 | **Out-of-Core Layer Architecture** | Topology / content split, per-layer shadowing bloom + bounded `BloomCache`, two-pool ARC cache, time-travel as standard resolve rooted at the target layer, DAG branching primitive, multi-session writes, reachability-based GC with trace pinning, branch pruning, indexed resource access for queries. The structural rework that lifts the kernel's working-set bound from "graph size" to "cache size." | Phase 14 | 12–16 pages |
@@ -2317,7 +2317,7 @@ The following design documents must be written and reviewed before the phase tha
 | D32 | **Faithful Translation Specification — `eigon-rust-gen`** | The mapping from Eigon class structure to Rust struct / trait / impl form for WASM institution authoring. Tracked in [#41](https://github.com/eigenius/eigenius/issues/41). | TBD | Planned |
 | D33 | **Partial-Order Chains and Commutativity-Aware Semantics** | **DRAFT** — `docs/design/d33-partial-order-chains.md`. Reframes the chain as a partial order of layers rather than a sequence; two-hash identity (position vs content) generalises D25 §11.0; supporting-layer property indexes "what this layer depends on"; **anchored-commit cache** (the v1 deliverable — content-addressed commit reuse keyed on `(content_hash, supporting_content_hash)`) generalises the notebook cell-output reuse pattern to any deterministic content generator. Partial-order operations (linearization-independent reads, distributed-execution forward compatibility) sketched for v2. Anchored-commit cache shipped in support of D34 §6 cell-cache visibility; invalidation on consolidation wired in D34 Phase 6. Full v1 storage path under Phase 20. | Phase 20 | Draft |
 | D34 | **Notebook Chain Workspace** | **COMPLETED** — `docs/design/d34-notebook-chain-workspace.md`. Rail-based workspace shell on top of D22 exposing every kernel chain surface a working operator needs. Eleven phases (§16) — branch picker, branches / history / tags / merge / compaction / tasks / institutions / topology / GC / health rail destinations. Forced kernel gaps §G.1–§G.8: `MergeInfo` honesty fix, tag storage + RPCs (with tag-rooted GC), `MergeBranches` / `PreviewMerge`, `EstimateGc` / `RunGc`, `branch_advanced` consumer surface, branch-scoped cursored history (§G.6, deferred), `^auto-` prefix reservation (§G.7, deferred), enriched `InstitutionInfo` (§G.8). Cross-cutting kernel fixes uncovered during the rollout: `branch_contexts` cache invalidation on consolidation, anchored-commit cache invalidation on consolidation per D33 §3, per-layer `byte_size` on `LayerHandle` for GC reclaim estimates. | Concurrent with Phase 12+ (track parallel to D22) | Done |
-| D40 | **Chain-Mirrored Lean Expressions** | Sibling to D32 (chain-mirrored Mini-TT inductives + FormulaTerm). The `lean:LeanExpr` (10 ctors mirroring nanoda's `Expr` minus `Local`) / `lean:LeanLevel` (5 ctors) / `lean:LeanName` (3 ctors) chain InductiveTypes. Deterministic encoder/decoder semantics between nanoda's parsed `Expr` and the chain-CBOR shape. Version discipline against `lean4export` semver. The queryable-proposition counterpart to the verbatim proof-term bytes carried by `LeanProofTerm`. | Phase 20a.0 | 8–12 pages |
+| D40 | **Chain-Mirrored Lean Expressions** | Sibling to D32 (chain-mirrored EigenTT inductives + FormulaTerm). The `lean:LeanExpr` (10 ctors mirroring nanoda's `Expr` minus `Local`) / `lean:LeanLevel` (5 ctors) / `lean:LeanName` (3 ctors) chain InductiveTypes. Deterministic encoder/decoder semantics between nanoda's parsed `Expr` and the chain-CBOR shape. Version discipline against `lean4export` semver. The queryable-proposition counterpart to the verbatim proof-term bytes carried by `LeanProofTerm`. | Phase 20a.0 | 8–12 pages |
 | D42 | **Out-of-Core Query Execution** | **STUB** — `docs/design/d42-out-of-core-query-execution.md`. Buffer-pool abstraction over the storage backend, hash join with spill, external sort, spillable group-by accumulators, spill-aware cost model, per-query memory budget. The operator-side rewrite that lets EigenQL handle result sets larger than memory. Builds on D23's storage abstractions. Picks up the Phase 16 spec previously sketched as D24 before that number was claimed by Schema Versioning. | Phase 16 | 8–10 pages |
 | D43 | **Text and Vector Retrieval in EigenQL** | **DESIGN COMPLETE** (§§2–7 substantive; §8 resolved) — `docs/design/d43-text-and-vector-retrieval.md`. Implementation plan at `docs/design/d43-implementation-plan.md` (M1–M9, ~12–18 weeks scope). Built-in text and vector retrieval primitives in EigenQL: ESL `text_index` / `vector_index` first-class Resource declarations (`core:TextIndex` / `core:VectorIndex`), `TEXT_MATCH` / `VECTOR_NEAR` / `EMBED` / `RRF` / `TOP K BY` surface, custom layer-aware inverted index in RocksDB (Phase 14h-aligned per-Index keying; chain-aware BM25; ~10 transitive deps via `roaring` + `unicode-segmentation` + `rust-stemmers`), zero-copy CBOR vector segments with per-VectorIndex `strategy: flat | hnsw | auto` and additive HNSW CBOR fields (v1 envelope ~10M vectors/segment, covers life-science ontologies and bounded PubMed extractions; v2 quantisation / IVF / out-of-core HNSW for 100M+), Embedder as a D3 Component with content-addressed cache + post-Load sweep, atomic-reindex policy for embedding-model upgrades. Implementation bundles a RocksDB column-family rollout (`cf_text`, `cf_vec`, `cf_embed_cache`) and a D24 schema-version bump under the no-legacy-DBs policy. Promotes the sketch from D35 §7.4 to a real spec; hard dependency for the SE knowledge-graph rollout. | TBD (D35-dependent) | 30+ pages |
 | D44 | **Automatic Data Lifecycle Management** | **STUB / RESERVED** — `docs/design/d44-automatic-data-lifecycle-management.md`. Policy layer that decides *when* consolidation (D25), garbage collection (D23 §5.7), retrieval-index cache eviction (D43), and trace pruning (D9) fire, plus how the policies interact. Mechanisms already exist across the dependency docs; D44 unifies trigger policies and ties them to observable system state. Deliberately reserved as a stub pending production-observation-driven scoping — pre-emptive specification would lock in shapes for problems we don't yet understand. | TBD (production-observation-driven) | TBD |
@@ -2486,7 +2486,7 @@ Commands:
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | TiKV Rust client maturity gaps | Blocks Phase 3 storage integration | Spike TiKV client early (before Phase 3). Fallback: use TiKV's gRPC API directly. |
-| Mini-TT → Rust port complexity | Delays Phase 2 type system | Port incrementally, test against Haskell reference. Start with a minimal subset (Pi, Sigma, sums). |
+| EigenTT → Rust port complexity | Delays Phase 2 type system | Port incrementally, test against Haskell reference. Start with a minimal subset (Pi, Sigma, sums). |
 | Deno FFI to Rust kernel friction | Complicates Phase 2 orchestration↔kernel communication | Use gRPC even for local development (Phase 2 can start the kernel as a subprocess). |
 | TiKV on Azure operational complexity | Delays Phase 3 deployment | Start with RocksDB in ContainerApps for staging. Defer TiKV to production deployment. |
 | WASM capability interface design | Blocks Phase 5 extensibility | Write design doc D7 early (during Phase 3 or 4) to derisk. |

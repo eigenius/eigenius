@@ -28,10 +28,10 @@
 //!
 //! and analogously for `reify` and `query`.
 //!
-//! The Mini-TT typed-value codec is intentionally minimal at this
+//! The EigenTT typed-value codec is intentionally minimal at this
 //! milestone (M4): a typed-value at the boundary is a CBOR-encoded
 //! Eigon resource, parsed back as `Val::ResourceVal`. M5 extends this
-//! to cover Mini-TT primitives, tuples, and inductive values once the
+//! to cover EigenTT primitives, tuples, and inductive values once the
 //! `Exp::InstitutionInvoke` evaluator actually exercises them. Until
 //! then, an institution's payload types are expressible as resources
 //! carrying the value as a property — sufficient for the smoke-test

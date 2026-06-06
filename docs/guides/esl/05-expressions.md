@@ -83,7 +83,7 @@ A trailing config block on a decide call is a compile error.
 
 Under D14 a `Comorphism` is a typed ontology resource (not a callable function). ESL has no expression-position syntax for comorphism dispatch — `cap:dock_to_assay(input)` is *not* a valid call form. Three ways to use a comorphism from ESL:
 
-1. **Apply the transformation Component directly** — the comorphism's `transformation` is an ordinary Mini-TT Component. If your program already has the typed payload, call it: `let ic50 : core:float = cm_arrhenius(delta_g);`.
+1. **Apply the transformation Component directly** — the comorphism's `transformation` is an ordinary EigenTT Component. If your program already has the typed payload, call it: `let ic50 : core:float = cm_arrhenius(delta_g);`.
 2. **Translate inside an EigenQL `FIBER`** — comorphism coercion in FIBER param values runs the four-step extract → transform → reify pipeline (see [EigenQL §7.5](../eigenql/07-fiber-clauses.md) and [§8.6](../eigenql/08-institutions.md)).
 3. **Wrap as a Component-implemented OnDemand QueryClass and dispatch via FIBER.** A QueryClass whose `implementation` is a Component IRI runs `extract → component → reify` automatically; EigenQL FIBER is the surface that reaches it.
 

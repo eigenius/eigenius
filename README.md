@@ -84,7 +84,7 @@ Four task-first guides plus a consolidated bibliography, all grounded in the imp
 - **[Platform user guide](docs/guides/platform/README.md)** — eighteen chapters on operating the platform: installation, build, CLI reference, running locally, database management, the orchestrator, end-to-end demos, building WASM components and institutions, the runtime substrate (Julia v1) with per-institution slow-walks, deployment, troubleshooting, **the notebook UX**, **tags / branches / history**, **merge resolution**, **the TypeScript SDK**.
 - **[ESL — Eigenius Surface Language](docs/guides/esl/README.md)** — eleven chapters on the declarative surface (`namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`) and the ML-style expression sublanguage. Most important chapter: [chapter 6 — Resources, types, and the layer](docs/guides/esl/06-resources-types-and-the-layer.md), the bridge between the resource graph and the kernel's type theory.
 - **[EigenQL — query language](docs/guides/eigenql/README.md)** — twelve chapters on pattern matching, derived relations, expressions, `FIBER` institution dispatch (with `INTO`-pinned chain reinsertion), stratification, and the result-document format.
-- **[Formula language](docs/guides/formula/README.md)** — eight chapters on the chain-mirrored Mini-TT fragment (`urn:eigenius:formulas:FormulaTerm`) shared by every numerical institution: Symbolics, IntervalArithmetic, Catalyst, DiffEq, JuMP-HiGHS. Covers the six-constructor inductive, Eigon-JSON encoding, operator catalog, the ESL `formula(...)` Pratt-parsed sublanguage, and identity-comorphism collapse across institutions.
+- **[Formula language](docs/guides/formula/README.md)** — eight chapters on the chain-mirrored EigenTT fragment (`urn:eigenius:formulas:FormulaTerm`) shared by every numerical institution: Symbolics, IntervalArithmetic, Catalyst, DiffEq, JuMP-HiGHS. Covers the six-constructor inductive, Eigon-JSON encoding, operator catalog, the ESL `formula(...)` Pratt-parsed sublanguage, and identity-comorphism collapse across institutions.
 - **[References](docs/guides/references/README.md)** — consolidated bibliography for the platform: works actually cited in design docs / papers / guides, foundational works the system relies on, philosophical and methodological precursors, and contemporary related work. Generated from the BibTeX files in [`docs/references/`](docs/references/) by `scripts/bib-to-md.py`; verified against Crossref / arXiv / live URLs by `scripts/verify-citations.py`.
 
 Guides landing page: **[docs/guides/](docs/guides/README.md)**. Full documentation index (guides + design documents + papers): **[docs/](docs/README.md)**.
@@ -104,7 +104,7 @@ The system can:
 - Validate resources against the full ontology constraint system (12 validation rules)
 - Resolve resources through parent-pointer layer chains
 - Query the knowledge graph with EigenQL (typed stratified Datalog with aggregation)
-- Type-check programs using Mini-TT dependent type theory (NbE evaluator)
+- Type-check programs using EigenTT dependent type theory (NbE evaluator)
 - Execute programs with local and remote IO components (LLM calls via orchestrator)
 - Dispatch IO components to the Deno orchestrator via gRPC (ComponentExecutor service)
 - Call LLMs via Vercel AI SDK (Anthropic) with prompt templating and metrics
@@ -153,18 +153,18 @@ Everything in Eigenius is a **Resource** — classes, properties, data types, fo
 - **Eigon-JSON / CBOR** — the canonical serialization formats. `@id` is the only reserved key; all property keys are full IRIs. Three-layer type system: primitive data types, format constraints, and content types. CBOR for storage and gRPC wire format.
 - **Validation** — 12 rules: required properties, inheritance, type checking, format/pattern validation, range/length constraints, class type checking, allowed values, domain checking, conditional requirements, open-world extra properties. Epistemic base classes enforce provenance requirements.
 - **EigenQL** — typed stratified Datalog with aggregation. Supports USING, MATCH (typed/untyped/negated patterns), WHERE, GROUP BY, RETURN (with COUNT/SUM/AVG/MIN/MAX), ORDER BY, LIMIT/OFFSET, DISTINCT, DEFINE (recursive rules with seminaive fixpoint), dot-path navigation, NOT EXISTS. Full pipeline: lex → parse → stratify → type_check → evaluate.
-- **Program Model** — programs are typed expressions (Let, Apply, Lambda, Case, Map, Reduce, etc.) that map 1:1 to Mini-TT terms. Type-checked via NbE (Normalization by Evaluation) with Eigon ontology types as ground types. IO components dispatched to the orchestrator via gRPC with trace recording and memoization.
+- **Program Model** — programs are typed expressions (Let, Apply, Lambda, Case, Map, Reduce, etc.) that map 1:1 to EigenTT terms. Type-checked via NbE (Normalization by Evaluation) with Eigon ontology types as ground types. IO components dispatched to the orchestrator via gRPC with trace recording and memoization.
 - **Epistemic Model** — four categories (declared, observed, derived, verified) enforced via base classes in the reflection ontology. Reasoning traces mirror the expression tree and serve as memoization cache.
-- **Grothendieck Institutions (D14)** — domain-specific reasoning systems contribute structured fibres to the knowledge graph. Each institution is *declared* as ontology resources (`Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`) committed to the layer chain, and *implemented* via the three-method `Institution` trait (`extract_typed` / `reify` / `query`). Comorphisms are triadic — source-side export + cross-institution Mini-TT transformation + target-side import — with optional `exact: bool` Satisfaction-Condition annotation. The category-theoretic Grothendieck construction emerges from declared comorphisms; the kernel provides the dispatch and well-typedness machinery.
+- **Grothendieck Institutions (D14)** — domain-specific reasoning systems contribute structured fibres to the knowledge graph. Each institution is *declared* as ontology resources (`Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`) committed to the layer chain, and *implemented* via the three-method `Institution` trait (`extract_typed` / `reify` / `query`). Comorphisms are triadic — source-side export + cross-institution EigenTT transformation + target-side import — with optional `exact: bool` Satisfaction-Condition annotation. The category-theoretic Grothendieck construction emerges from declared comorphisms; the kernel provides the dispatch and well-typedness machinery.
 - **WASM Extensibility** — untrusted capabilities run sandboxed via Wasmtime. Components and D14 institutions can be delivered as WASM modules with fuel/memory limits. WASM institutions targeting the `eigenius-institution-d14` WIT world auto-register from chain scan when their declaration carries `runtime: wasm` + `wasm_binary`. SDK builders for the five declaration shapes.
 - **Runtime Substrate (D26/D29/D31)** — the second extensibility surface, peer to WASM. Orchestrator-spawned sibling worker containers running full language ecosystems (Julia in v1; Python and others tracked) communicate with the kernel via Eigon-CBOR over UDS. Four chain shapes drive the lifecycle: `RuntimePackageMirror` (auto-generated, content-addressed Julia source mirroring chain classes/inductives), `RuntimeEnvironment` (pinned image digest + runtime version + lockfile), `RuntimeMethodSignature` (typed input/output contracts), `Institution { runtime: external, requires_environment: ... }`. Long-lived per-image worker pools, mirror generator's closure walker discovers cross-institution classes from signature contracts. The right path when an institution wants to use a heavy native library (a SAT solver, an ODE integrator, a quantum-chemistry engine) that doesn't compile to WASM cleanly.
-- **Formula Language (D32)** — `urn:eigenius:formulas:FormulaTerm`, a chain-mirrored fragment of Mini-TT lifted onto the chain as an `InductiveType` with six constructors (`Var`, `LitFloat`, `OpRef`, `App`, `Lam`, `Pi`). Lives in the kernel bootstrap layer alongside `core:`, `program:`, `reflection:`, `institution:`, `notebook:`. Every numerical institution consumes the same shape; comorphisms between FormulaTerm-speaking institutions collapse to identity. Operators carry on-chain `operator_signature` (`Pi`-spine), and the validator rank-checks every `App` spine against the operator's signature at commit. ESL `formula(...)` Pratt-parsed surface for authoring; tagged-dict Eigon-JSON for the wire form.
+- **Formula Language (D32)** — `urn:eigenius:formulas:FormulaTerm`, a chain-mirrored fragment of EigenTT lifted onto the chain as an `InductiveType` with six constructors (`Var`, `LitFloat`, `OpRef`, `App`, `Lam`, `Pi`). Lives in the kernel bootstrap layer alongside `core:`, `program:`, `reflection:`, `institution:`, `notebook:`. Every numerical institution consumes the same shape; comorphisms between FormulaTerm-speaking institutions collapse to identity. Operators carry on-chain `operator_signature` (`Pi`-spine), and the validator rank-checks every `App` spine against the operator's signature at commit. ESL `formula(...)` Pratt-parsed surface for authoring; tagged-dict Eigon-JSON for the wire form.
 - **Durable State** — `eigenius serve --db <path>` persists layers, traces, and WASM capabilities in RocksDB. Restart rebuilds running state; embedded ontologies seeded with SHA-256 manifest and drift-refusal.
 - **Codata and Tasks** — coinductive types (codata/corecord/observation) for streams. Programs run as tracked tasks with checkpointing, positional trace keys, and startup resume sweep for crash recovery.
 
 </details>
 
-Phase 19 complete (19a–19i): D26 runtime substrate landed end-to-end with the Julia v1 instantiation (D27 — five worked institutions: Symbolics, IntervalArithmetic, Catalyst, DiffEq, JuMP-HiGHS); D29 mirror generator with closure walker; D31 install lifecycle; D32 formula language as Mini-TT fragment with the ESL `formula(...)` sublanguage; comorphism chain reinsertion (D14 §9.3) wired through both ESL `Exp::InstitutionInvoke` and EigenQL `FIBER ... INTO`. The kinase-institutions notebook ([`notebooks/examples/kinase-institutions.json`](notebooks/examples/kinase-institutions.json)) exercises the entire stack end-to-end.
+Phase 19 complete (19a–19i): D26 runtime substrate landed end-to-end with the Julia v1 instantiation (D27 — five worked institutions: Symbolics, IntervalArithmetic, Catalyst, DiffEq, JuMP-HiGHS); D29 mirror generator with closure walker; D31 install lifecycle; D32 formula language as EigenTT fragment with the ESL `formula(...)` sublanguage; comorphism chain reinsertion (D14 §9.3) wired through both ESL `Exp::InstitutionInvoke` and EigenQL `FIBER ... INTO`. The kinase-institutions notebook ([`notebooks/examples/kinase-institutions.json`](notebooks/examples/kinase-institutions.json)) exercises the entire stack end-to-end.
 
 Phase 20a complete (20a.0–20a.8): the first verification institution. D28 Lean 4 institution landed end-to-end through the substrate's authoring side (`lean4export` against pinned `LeanEnvironment` images) and an in-process verification side (`nanoda_lib` re-check with axiom-allowlist enforcement); D40 chain-mirrored `lean:LeanExpr` / `lean:LeanLevel` / `lean:LeanName` inductives; D30 faithful translation spec with the substrate `LeanMirrorGenerator` producing baked `EigeniusFFI` Lake packages; three-part correspondence check (D28 §5.5) wired through AutoOnLoad. The lean-verification notebook ([`notebooks/examples/lean-verification.json`](notebooks/examples/lean-verification.json)) walks the closed audit chain D28 §5.7 promises. Phase 20b (Mathlib-scale operational landing per D28 §11.2) is consumer-triggered; not architecturally required.
 
@@ -378,7 +378,7 @@ kernel/          Rust kernel crate
   src/validation/  Validator: 12 commit-time rules (type-check, format, pattern, range, length,
                    class-types, allows-only, domain, conditional, inductive, is_a, ...)
   src/query/       EigenQL: lexer, parser, type checker, stratification, evaluator/
-  src/nbe/         Mini-TT type theory: terms, values, eval, readback, type checker
+  src/nbe/         EigenTT type theory: terms, values, eval, readback, type checker
   src/program/     Program model: expression parser, ground type resolution, executor
   src/esl/         ESL compiler: lexer, parser, compiler to Eigon-JSON (incl. `merge_comorphism`, `lambda`, `pi`)
   src/capability/  WASM capability hosting, ComponentRegistry, WasmInstitution (D14), chain-scan auto-registration
@@ -461,7 +461,7 @@ docs/            Documentation
   references/      BibTeX bibliography
   papers/          Drafts + working papers
 scripts/         License-header application, BibTeX-to-Markdown, citation verification
-references/      Reference implementations consulted during development (e.g. `nanoda_lib` for Mini-TT)
+references/      Reference implementations consulted during development (e.g. `nanoda_lib` for EigenTT)
 ```
 
 </details>
@@ -777,11 +777,11 @@ system spec) and the **[Implementation Plan](docs/design/implementation-plan.md)
 |----------|-------------|
 | [D6b: Reasoning Trace Schema](docs/design/d6b-reasoning-trace-schema.md) | Trace classes, provenance chain, epistemic status, universe stratification |
 | [D8: CompleteJson Component](docs/design/d8-complete-json-component.md) | Structured LLM output via JSON Schema derived from ontology classes |
-| [D9: NbE Unification & Type Extensions](docs/design/d9-nbe-unification-and-type-extensions.md) | Mini-TT NbE, ground-type resolution, capability modes, trace storage |
+| [D9: NbE Unification & Type Extensions](docs/design/d9-nbe-unification-and-type-extensions.md) | EigenTT NbE, ground-type resolution, capability modes, trace storage |
 | [D11: Codata and Streams](docs/design/d11-codata-streams.md) | Coinductive types, tasks as codata, guardedness checking |
 | [D18: Ontology-as-Types Resolution](docs/design/d18-ontology-as-types-resolution.md) | `find_sigma_field` chain resolution, `CheckCtx`, inference-mode rules |
 | [D19: Inductive and Sized Types](docs/design/d19-inductive-types.md) | Inductive types, sized-termination binders, self-referential parameterised codata |
-| [D32: Chain-Mirrored Mini-TT Inductives](docs/design/d32-chain-mirrored-mini-tt-inductives.md) | `formulas:FormulaTerm` and the ESL `formula(...)` Pratt-parsed sublanguage |
+| [D32: Chain-Mirrored EigenTT Inductives](docs/design/d32-chain-mirrored-mini-tt-inductives.md) | `formulas:FormulaTerm` and the ESL `formula(...)` Pratt-parsed sublanguage |
 
 **Storage, lifecycle, commit**
 
@@ -802,7 +802,7 @@ system spec) and the **[Implementation Plan](docs/design/implementation-plan.md)
 |----------|-------------|
 | [D20: Layer Reconciliation](docs/design/d20-layer-reconciliation.md) | Witness / Rename / SchemaQuotient / Restructure strategies, conflict surface |
 | [D36: Merge Resolution UX](docs/design/d36-merge-resolution-ux.md) | Notebook merge flow: six-state machine, cascade gate, on-rail workspace |
-| [D37: Lambda Surface and Typed Merge Comorphisms](docs/design/d37-lambda-surface-and-typed-merge-comorphisms.md) | `merge_comorphism` ESL surface, Mini-TT lambda well-typedness |
+| [D37: Lambda Surface and Typed Merge Comorphisms](docs/design/d37-lambda-surface-and-typed-merge-comorphisms.md) | `merge_comorphism` ESL surface, EigenTT lambda well-typedness |
 | [D38: Merge Provenance and Witness Discovery](docs/design/d38-merge-provenance-and-witness-discovery.md) | Chain-resident `MergeResolutionRecord`, off-span witness search |
 
 **Institutions and verification**

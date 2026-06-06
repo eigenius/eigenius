@@ -24,9 +24,9 @@ The IntervalArithmetic institution has the *same* FormulaTerm machinery availabl
 
 [D32](../../../design/d32-chain-mirrored-mini-tt-inductives.md) is the design doc that makes that work. Its three load-bearing claims:
 
-1. **`FormulaTerm` is a fragment of Mini-TT `Exp`.** Constructors mirror `Exp::Var`, `Exp::App`, `Exp::Lam`, `Exp::Pi` one-for-one (D32 §4.1). The chain doesn't need a separate term language; it lifts a chosen subset of the kernel's existing `Exp` onto the chain via the `core:InductiveType` surface that the chain already had (D32 §3.1).
+1. **`FormulaTerm` is a fragment of EigenTT `Exp`.** Constructors mirror `Exp::Var`, `Exp::App`, `Exp::Lam`, `Exp::Pi` one-for-one (D32 §4.1). The chain doesn't need a separate term language; it lifts a chosen subset of the kernel's existing `Exp` onto the chain via the `core:InductiveType` surface that the chain already had (D32 §3.1).
 2. **`FormulaTerm` is shared across every numerical institution** — it lives at `urn:eigenius:formulas:`, *not* at `urn:eigenius:symbolics:`. A `Comorphism` Symbolics → IntervalArithmetic carries the *identity* function on `FormulaTerm` as its typed middle (D32 §6.2). The cross-institution claim is operationally proven by [`crates/eigenius-julia/tests/cross_institution_probe.rs`](../../../../crates/eigenius-julia/tests/cross_institution_probe.rs) — and chain-formalised by the comorphism resources at [`julia/comorphisms/symbolics-to-intervals.eigon.json`](../../../../julia/comorphisms/symbolics-to-intervals.eigon.json).
-3. **Operators carry on-chain Mini-TT type signatures** (D32 §5.2). `formulas:ops:add` declares `Real → Real → Real` as a chain-committed `FormulaTerm`. The validator rank-checks every `App` invocation in a `FormulaTerm` value against the spine of `Pi` binders in the operator's signature (D32 §5.4). Mismatched arity is rejected at commit, not at dispatch.
+3. **Operators carry on-chain EigenTT type signatures** (D32 §5.2). `formulas:ops:add` declares `Real → Real → Real` as a chain-committed `FormulaTerm`. The validator rank-checks every `App` invocation in a `FormulaTerm` value against the spine of `Pi` binders in the operator's signature (D32 §5.4). Mismatched arity is rejected at commit, not at dispatch.
 
 Everything else in this tutorial is downstream of those three claims.
 
@@ -49,7 +49,7 @@ Before any of the JSON in the upcoming steps will make sense, you need the encod
 | `Lam(name, ty, body)` | `[<string>, <FormulaTerm>, <FormulaTerm>]` |
 | `Pi(name, ty, body)` | `[<string>, <FormulaTerm>, <FormulaTerm>]` |
 
-**Multi-arg operators are curried via left-spined `App`s.** `f(a, b)` is `App(App(OpRef("f"), a), b)`; `g(a, b, c)` is `App(App(App(OpRef("g"), a), b), c)`. The chain doesn't have a variadic `App` — it mirrors Mini-TT's binary application discipline directly (D32 §4.1, §2.2).
+**Multi-arg operators are curried via left-spined `App`s.** `f(a, b)` is `App(App(OpRef("f"), a), b)`; `g(a, b, c)` is `App(App(App(OpRef("g"), a), b), c)`. The chain doesn't have a variadic `App` — it mirrors EigenTT's binary application discipline directly (D32 §4.1, §2.2).
 
 For example, `(x + 0) * 1` expands fully to:
 
@@ -481,7 +481,7 @@ The OnDemand and Decidable invocations (steps 10 and 16) don't commit anything �
 
 Everything in this demo is downstream of the three D32 claims listed at the top:
 
-- **`FormulaTerm` is a fragment of Mini-TT.** Every `term` field on every `SymbolicExpression` is a typed inductive value validated against the `core:InductiveType` schema D32 §3 specifies. Steps 7, 11, 12, 13 commit four different shapes of FormulaTerm and each is type-checked at commit.
+- **`FormulaTerm` is a fragment of EigenTT.** Every `term` field on every `SymbolicExpression` is a typed inductive value validated against the `core:InductiveType` schema D32 §3 specifies. Steps 7, 11, 12, 13 commit four different shapes of FormulaTerm and each is type-checked at commit.
 - **`FormulaTerm` is shared across institutions.** The same FormulaTerm shape that this demo's Symbolics handler decodes is also what the IntervalArithmetic handler in the cross-institution probe ([`crates/eigenius-julia/tests/cross_institution_probe.rs`](../../../../crates/eigenius-julia/tests/cross_institution_probe.rs)) decodes — different institutions, identical chain-side payload. Step 9's pre-committed SymbolicExpression could have been authored in a Catalyst or DiffEq context with the same wire shape.
 - **Operators carry typed signatures.** Every `OpRef` in every FormulaTerm in this demo got rank-checked against an on-chain `Operator.operator_signature` at commit time (D32 §5.4). Authoring `App(App(OpRef("formulas:ops:add"), Var("x")), LitFloat(0.0), LitFloat(1.0))` — an extra arg — gets rejected before the worker ever sees it.
 

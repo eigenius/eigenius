@@ -84,12 +84,12 @@ stay valid against their original env digest.
 
 - [**ESL user guide**](../esl/README.md) — surface syntax for ontologies and programs
 - [**EigenQL user guide**](../eigenql/README.md) — surface syntax for queries
-- [**Formula language guide**](../formula/README.md) — chain-mirrored Mini-TT fragment, shared by every numerical institution
+- [**Formula language guide**](../formula/README.md) — chain-mirrored EigenTT fragment, shared by every numerical institution
 - [**D13 Durable kernel state**](../../design/d13-durable-kernel-state.md) — `serve --db` spec
 - [**D12 WASM extensibility**](../../design/d12-wasm-extensibility.md) — capability levels and host imports
 - [**D14 Institution Realisation**](../../design/d14-institution-realisation.md) — institution model (supersedes D10), the protocol contract for chapters 10 and 11
 - [**D26 Runtime substrate**](../../design/d26-runtime-substrate.md), [**D29 Mirror generator**](../../design/d29-runtime-mirror-generator.md), [**D31 Institution lifecycle**](../../design/d31-runtime-language-substrate-institution-lifecycle.md) — the substrate specs
-- [**D32 Chain-mirrored Mini-TT inductives**](../../design/d32-chain-mirrored-mini-tt-inductives.md) — the formula-language design spec
+- [**D32 Chain-mirrored EigenTT inductives**](../../design/d32-chain-mirrored-mini-tt-inductives.md) — the formula-language design spec
 - [**D6 Execution architecture**](../../design/d6-execution-architecture.md) — kernel ↔ orchestrator boundary
 
 The full design-document set lives in [`docs/design/`](../../design/).

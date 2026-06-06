@@ -133,7 +133,7 @@ Lean 4 is developed in parallel with the Rust kernel as a formal specification a
 
 - Eigon structural type system soundness — well-typed resources satisfy their class constraints
 - EigenQL query semantics — pattern matching is sound with respect to the Eigon type system; variable bindings are type-consistent; evaluation terminates (guaranteed for non-recursive queries trivially, and for recursive rules via seminaive fixpoint over finite fact sets; stratified negation prevents paradoxes)
-- Program type safety — well-typed programs preserve types through execution; termination guaranteed by strong normalization of the Mini-TT type theory
+- Program type safety — well-typed programs preserve types through execution; termination guaranteed by strong normalization of the EigenTT type theory
 - Stratification consistency — the universe level system prevents self-reference paradoxes
 
 **Connection to the Rust kernel:**
@@ -142,7 +142,7 @@ The Lean 4 development serves two distinct roles depending on whether the subjec
 
 For kernel-resident algorithms (Eigon structural type-checking, layer resolution, capability dispatch), the Lean 4 specification directly informs the Rust implementation. Type system rules in Lean become match arms in the Rust type checker. Verus annotations on the Rust kernel enforce that the implementation satisfies the contracts established by the Lean proofs.
 
-For capability-hosted languages (EigenQL, the program expression language), the Lean 4 proofs establish that the language semantics are sound — that well-typed queries terminate, that well-typed programs produce values of the declared type. The program type system is founded on a dependent type theory (Mini-TT) that is a direct fragment of CIC — Lean 4's own core theory — making the formal specification a scaled-up version of the same computational model rather than a translation into a different formalism. The Lean 4 specification serves as the authoritative reference against which capability implementations are verified, but Verus is not the enforcement mechanism — the capability implementations carry their own correctness discipline informed by the Lean proofs.
+For capability-hosted languages (EigenQL, the program expression language), the Lean 4 proofs establish that the language semantics are sound — that well-typed queries terminate, that well-typed programs produce values of the declared type. The program type system is founded on a dependent type theory (EigenTT) that is a direct fragment of CIC — Lean 4's own core theory — making the formal specification a scaled-up version of the same computational model rather than a translation into a different formalism. The Lean 4 specification serves as the authoritative reference against which capability implementations are verified, but Verus is not the enforcement mechanism — the capability implementations carry their own correctness discipline informed by the Lean proofs.
 
 As the ecosystem matures, proved decision procedures in Lean 4 — type unification, and (once EigenQL is extended with recursive rules) stratification checking — may be reimplemented in Rust with the Lean proof as a machine-checked specification, whether those implementations live in the kernel or in capability code.
 
@@ -426,7 +426,7 @@ The following constructs from OWL and related formalisms are **excluded from the
 
 ### 4.1 Programs as Total Functional Expressions
 
-Processing programs in Eigenius are typed expressions in a total functional programming language whose type system is grounded in the Eigon Core Ontology. Programs are represented as Eigon-JSON resources — the same format as everything else in the system — using expression forms (Let, Apply, Lambda, Case, Map, Reduce, etc.) that map directly to Mini-TT terms. See design doc D3 (`docs/design/d3-program-model.md`) for the full specification.
+Processing programs in Eigenius are typed expressions in a total functional programming language whose type system is grounded in the Eigon Core Ontology. Programs are represented as Eigon-JSON resources — the same format as everything else in the system — using expression forms (Let, Apply, Lambda, Case, Map, Reduce, etc.) that map directly to EigenTT terms. See design doc D3 (`docs/design/d3-program-model.md`) for the full specification.
 
 The distinction from conventional workflow engines matters precisely. In a conventional engine, a pipeline is a description that an interpreter executes, with type errors and failures discovered at runtime. In Eigenius, a program that passes validation carries a formal guarantee: it terminates, it is type-safe, and it produces output of the declared type. Validation is not a heuristic check — it is a proof of these properties, performed statically before the first expression evaluates.
 
@@ -444,7 +444,7 @@ Components declare their determinism and fallibility characteristics in their ty
 
 The program language is founded on **total functional programming** — a discipline in which every well-typed program is guaranteed to terminate and produce a value of its declared type. Partial functions — functions that may diverge or fail on some inputs — cannot be expressed in the core language. Failure is represented in types, not as exceptions.
 
-The specific theoretical foundation is a **dependent type theory** based on Mini-TT — a minimal dependent type system with dependent functions (Pi types), dependent pairs (Sigma types), labeled sum types, and a universe of types — extended with Eigon ontology types as ground types. The evaluator uses **normalization by evaluation (NbE)**, which serves double duty as the core of both type checking and partial evaluation.
+The specific theoretical foundation is a **dependent type theory** based on EigenTT — a minimal dependent type system with dependent functions (Pi types), dependent pairs (Sigma types), labeled sum types, and a universe of types — extended with Eigon ontology types as ground types. The evaluator uses **normalization by evaluation (NbE)**, which serves double duty as the core of both type checking and partial evaluation.
 
 This foundation is chosen over System Fω (the polymorphic lambda calculus with type-level functions) for three reasons that are specific to Eigenius's requirements:
 
@@ -452,11 +452,11 @@ This foundation is chosen over System Fω (the polymorphic lambda calculus with 
 
 **Partial evaluation is a consequence, not a feature.** The NbE approach evaluates terms as far as possible, producing *normal forms* — fully reduced terms. When a term contains free variables (unknown values), evaluation does not fail; it produces a normal form containing *neutral terms* that represent computations waiting on the unknown values. This is precisely partial evaluation: a program with some inputs bound and some abstract evaluates to a residual pipeline containing only the dynamic parts. This has direct practical value (see §4.9) and requires no additional machinery beyond the type checker's own evaluation strategy.
 
-**The bridge to formal verification is structural, not an encoding.** Mini-TT is a fragment of the Calculus of Inductive Constructions (CIC), which is Lean 4's core type theory. Both use the same NbE approach for type checking, the same notion of definitional equality via normalization, and the same bidirectional type-checking discipline. The Lean 4 formal specification of the program type system is therefore a direct embedding of the same computational model at a larger scale — not a translation from one type theory into another. Proof terms produced by Lean 4 can be interpreted directly by the program type system's evaluator (with appropriate embedding), creating a seamless path from pipeline validation to formal verification.
+**The bridge to formal verification is structural, not an encoding.** EigenTT is a fragment of the Calculus of Inductive Constructions (CIC), which is Lean 4's core type theory. Both use the same NbE approach for type checking, the same notion of definitional equality via normalization, and the same bidirectional type-checking discipline. The Lean 4 formal specification of the program type system is therefore a direct embedding of the same computational model at a larger scale — not a translation from one type theory into another. Proof terms produced by Lean 4 can be interpreted directly by the program type system's evaluator (with appropriate embedding), creating a seamless path from pipeline validation to formal verification.
 
 **The core type theory provides:**
 
-**Strong normalization.** Every well-typed program reduces to a normal form in a finite number of steps. The proof follows from the standard strong normalization argument for Mini-TT's type theory: all types are strictly positive, and the only recursion available is structural recursion over finite data (via `letrec` restricted to structurally decreasing arguments). There is no possibility of infinite loops in a validated pipeline.
+**Strong normalization.** Every well-typed program reduces to a normal form in a finite number of steps. The proof follows from the standard strong normalization argument for EigenTT's type theory: all types are strictly positive, and the only recursion available is structural recursion over finite data (via `letrec` restricted to structurally decreasing arguments). There is no possibility of infinite loops in a validated pipeline.
 
 **Dependent function types (Pi).** A step from input type A to an output type that depends on the input value has type `Π (x : A). B(x)`. This subsumes both simple function types (`A → B`, when B does not depend on x) and polymorphic types (`Π (α : Class). α → α`, when the type variable ranges over ontology classes). There is no separate polymorphism mechanism — dependent functions provide it natively.
 
@@ -534,7 +534,7 @@ This has several important consequences:
 
 ### 4.6 Program Validation as Type Checking
 
-program validation is **bidirectional type checking** in the dependent type theory, using NbE for type equality. The validator operates in two modes — **checking** (verifying that a term has a given type) and **inference** (synthesizing a type from a term) — following the standard bidirectional discipline of Mini-TT.
+program validation is **bidirectional type checking** in the dependent type theory, using NbE for type equality. The validator operates in two modes — **checking** (verifying that a term has a given type) and **inference** (synthesizing a type from a term) — following the standard bidirectional discipline of EigenTT.
 
 The validation process proceeds in the following phases:
 
@@ -574,7 +574,7 @@ This means:
 
 The program type system has a precise formal account in Lean 4. The dependent type theory underlying the program language is a fragment of the Calculus of Inductive Constructions (CIC) — Lean 4's core type theory. Both use the same computational model: terms, values, neutral terms, normalization by evaluation, and definitional equality via readback to normal forms. The program type system embeds into CIC directly and without encoding — it is a subsystem, not a translation target.
 
-This structural correspondence is significantly tighter than the previous System Fω-based design, where embedding into CIC required encoding System Fω's type-level functions as CIC's dependent functions (a lossy step that obscured the relationship between the two systems). With the Mini-TT foundation, the program type checker's `eval`, `readback`, and `eqNf` operations correspond directly to the same operations in Lean 4's kernel, making the formal specification a scaled-up version of the implementation rather than a different formalism.
+This structural correspondence is significantly tighter than the previous System Fω-based design, where embedding into CIC required encoding System Fω's type-level functions as CIC's dependent functions (a lossy step that obscured the relationship between the two systems). With the EigenTT foundation, the program type checker's `eval`, `readback`, and `eqNf` operations correspond directly to the same operations in Lean 4's kernel, making the formal specification a scaled-up version of the implementation rather than a different formalism.
 
 The Lean 4 formal development for programs covers:
 
@@ -582,7 +582,7 @@ The Lean 4 formal development for programs covers:
 
 **Termination.** Every well-typed program normalizes to a value (or a normal form containing neutral terms, for partial evaluation). The proof proceeds by showing that the type theory's recursion is restricted to structural recursion over finite data, and that all primitive program constructs (Map, Reduce, Select) are definable in the total fragment.
 
-**NbE correctness.** The normalization-by-evaluation algorithm is correct: two terms that are definitionally equal produce the same normal form, and two terms with different normal forms are not equal. This is the central proof obligation, since type equality in the dependent type system is decided by normalization. The proof follows the standard NbE correctness argument for Mini-TT, extended with the Eigon ground type resolution layer.
+**NbE correctness.** The normalization-by-evaluation algorithm is correct: two terms that are definitionally equal produce the same normal form, and two terms with different normal forms are not equal. This is the central proof obligation, since type equality in the dependent type system is decided by normalization. The proof follows the standard NbE correctness argument for EigenTT, extended with the Eigon ground type resolution layer.
 
 **Partial evaluation soundness.** A partially evaluated program (one where some inputs are bound and others are abstract) is a well-typed normal form: it type-checks under an extended context where the abstract inputs are free variables. Executing the residual with the remaining inputs produces the same result as executing the original program with all inputs. This is a consequence of NbE correctness — partial evaluation is just normalization under an open context — but it warrants a separate formal statement because of its practical significance.
 
@@ -594,7 +594,7 @@ The NbE approach used for type checking provides partial evaluation as a direct 
 
 **Mechanism.** The NbE evaluator processes a program term by evaluating it in an environment where some bindings are concrete values and others are *generators* — abstract placeholders representing unknown inputs. Evaluation proceeds as far as possible: concrete computations are reduced, and computations that depend on abstract inputs produce *neutral terms* — a structured representation of the stuck computation. The readback function converts the result to a normal form: a residual program term containing only the computations that depend on the remaining unknowns.
 
-In Mini-TT's implementation, this is the exact mechanism used for type checking under binders: when checking `Π (x : A). B(x)`, the type checker evaluates `B` with `x` bound to a generator (`Gen i`), producing a normal form of the body where `x` appears as a neutral term wherever the result depends on it. The same mechanism, applied to program terms, produces partially evaluated pipelines.
+In EigenTT's implementation, this is the exact mechanism used for type checking under binders: when checking `Π (x : A). B(x)`, the type checker evaluates `B` with `x` bound to a generator (`Gen i`), producing a normal form of the body where `x` appears as a neutral term wherever the result depends on it. The same mechanism, applied to program terms, produces partially evaluated pipelines.
 
 **Practical applications:**
 
@@ -612,7 +612,7 @@ The dependent type theory (§4.2) uses Eigon classes, properties, and datatypes 
 
 #### 4.10.1 Self-Description and Universe Separation
 
-The Core Ontology is self-describing: Class is an instance of Class, Property is an instance of Property. In CIC terms, `Class : Class` — a type inhabiting itself — is precisely what causes Girard's paradox and what CIC's universe hierarchy (`Type 0 : Type 1 : Type 2 : ...`) exists to prevent. Mini-TT's single universe `U` similarly excludes `U : U`.
+The Core Ontology is self-describing: Class is an instance of Class, Property is an instance of Property. In CIC terms, `Class : Class` — a type inhabiting itself — is precisely what causes Girard's paradox and what CIC's universe hierarchy (`Type 0 : Type 1 : Type 2 : ...`) exists to prevent. EigenTT's single universe `U` similarly excludes `U : U`.
 
 This paradox dissolves at the right architectural boundary. The Core Ontology's self-description is *assertional* — it is a metadata statement recorded in the knowledge graph (`Class` has `is_a: [Class]`). The type theory does not need to internalize this as `Class : Class`. Instead, Eigon ground types sit at a fixed level in the type theory's universe: they are opaque base types with known structure that the evaluator resolves from the layer stack. The type theory *uses* ontology types to type program terms; it does not *validate the ontology's self-description*. The kernel's hardcoded bootstrap (§2.5) validates the Core Ontology outside the normal type-checking pipeline — this boundary between ontology self-description and type-theoretic typing already exists architecturally.
 

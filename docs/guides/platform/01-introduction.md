@@ -36,7 +36,7 @@ Eigenius is a small set of cooperating processes:
                                        │              UDS sockets)
 ```
 
-**Kernel** ([`kernel/`](../../../kernel/)) — Rust binary. Holds the layer chain (knowledge graph), type-checks programs via the Mini-TT kernel, evaluates programs and queries, dispatches IO components and external runtimes to the orchestrator. Exposes a gRPC service on port 50051. Optionally persists state to RocksDB via `serve --db <path>`.
+**Kernel** ([`kernel/`](../../../kernel/)) — Rust binary. Holds the layer chain (knowledge graph), type-checks programs via the EigenTT kernel, evaluates programs and queries, dispatches IO components and external runtimes to the orchestrator. Exposes a gRPC service on port 50051. Optionally persists state to RocksDB via `serve --db <path>`.
 
 **Orchestrator** ([`orchestration/`](../../../orchestration/)) — Deno/TypeScript service. Four roles: (a) hosts IO component implementations the kernel cannot embed directly (LLM adapters, HTTP-bearing components); (b) exposes the Model Context Protocol (MCP) server surface for external LLM agents to call kernel operations as tools; (c) serves the notebook SPA at `/notebooks/*` and proxies the kernel's RPC surface to browsers via Connect-RPC under `/eigenius.v1.*`; (d) hosts the **runtime substrate addon** that spawns sibling worker containers for substrate-hosted institutions (Julia in v1; see [chapter 11](11-runtime-substrate.md)). Listens on port 8080.
 
@@ -107,7 +107,7 @@ The chapters in order:
 
 - **ESL syntax / semantics** — see the [ESL user guide](../esl/README.md).
 - **EigenQL syntax / semantics** — see the [EigenQL user guide](../eigenql/README.md).
-- **Formula language** — the chain-mirrored Mini-TT fragment used by every numerical institution; see the [formula language guide](../formula/README.md).
+- **Formula language** — the chain-mirrored EigenTT fragment used by every numerical institution; see the [formula language guide](../formula/README.md).
 - **Kernel internals** — type theory, NbE, ontology-as-types resolution, etc. See the design documents in [`docs/design/`](../../design/).
 
 ---

@@ -2,7 +2,7 @@
 
 **Status: Superseded by [D14 — Institution Realisation](d14-institution-realisation.md).**
 
-D10 is retained as a redirect file so existing cross-references do not break. All canonical content — the foundational framing (kernel and Mini-TT as fixed foundation, Eigon as shared signature category), the institution-theory mapping, the comorphism-based variant choice, the CIC manifestation, the trait surface, the dispatch model, the comorphism realisation, the epistemic-status discussion, and the EigenQL FIBER integration — has been absorbed into D14.
+D10 is retained as a redirect file so existing cross-references do not break. All canonical content — the foundational framing (kernel and EigenTT as fixed foundation, Eigon as shared signature category), the institution-theory mapping, the comorphism-based variant choice, the CIC manifestation, the trait surface, the dispatch model, the comorphism realisation, the epistemic-status discussion, and the EigenQL FIBER integration — has been absorbed into D14.
 
 If you are looking for:
 

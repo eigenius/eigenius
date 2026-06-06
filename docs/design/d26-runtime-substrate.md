@@ -665,7 +665,7 @@ Each substrate component is registered against a specific `BoundaryContract` ver
 
 ### 12.1 Kernel-side changes
 
-- None to Mini-TT, the layer system, or the validation engine.
+- None to EigenTT, the layer system, or the validation engine.
 - Minor: `InstitutionRegistry` already accepts arbitrary registrations; per-language institutions plug in through the existing slot.
 
 ### 12.2 Orchestrator-side additions

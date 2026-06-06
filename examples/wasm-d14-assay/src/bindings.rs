@@ -185,7 +185,7 @@ pub unsafe fn __post_return_query<T: Guest>(arg0: *mut u8) {
     }
 }
 pub trait Guest {
-    /// Boundary: extract a typed Mini-TT value from a resource via a
+    /// Boundary: extract a typed EigenTT value from a resource via a
     /// procedure declared by an `ExportFormat` resource owned by this
     /// institution. The returned `typed-value` must inhabit the type
     /// declared by the matching `ExportFormat.payload_type`.
@@ -258,9 +258,9 @@ pub mod eigenius {
             use super::super::super::_rt;
             /// A CBOR-encoded Eigon resource.
             pub type ResourceData = _rt::Vec<u8>;
-            /// A CBOR-encoded Mini-TT typed value (D14 §11). Distinct from
+            /// A CBOR-encoded EigenTT typed value (D14 §11). Distinct from
             /// `resource-data` even though the wire form is the same: a typed
-            /// value inhabits a Mini-TT type (primitive, tuple, inductive,
+            /// value inhabits a EigenTT type (primitive, tuple, inductive,
             /// codata) and is the payload exchanged between the source-side
             /// extract, the Component middle, and the target-side reify.
             pub type TypedValue = _rt::Vec<u8>;

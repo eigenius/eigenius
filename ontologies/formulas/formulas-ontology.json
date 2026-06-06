@@ -3,7 +3,7 @@
     "@id": "urn:eigenius:formulas:FormulaTerm",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:short_name": "FormulaTerm",
-    "urn:eigenius:core:description": "Symbol-algebra-relevant fragment of Mini-TT Exp, lifted to the chain. The shared formula language across every numerical institution (Symbolics, IntervalArithmetic, JuMP, DiffEq, Catalyst). Constructors mirror Exp::Var / App / Lam / Pi one-for-one. Variables are introduced by Lam/Pi binders whose `ty` slot carries the variable's type — same discipline as Mini-TT itself. Free vars in an open expression are typed by the institution's ambient context (the dispatch's input typing or the operator catalog). See D32.",
+    "urn:eigenius:core:description": "Symbol-algebra-relevant fragment of EigenTT Exp, lifted to the chain. The shared formula language across every numerical institution (Symbolics, IntervalArithmetic, JuMP, DiffEq, Catalyst). Constructors mirror Exp::Var / App / Lam / Pi one-for-one. Variables are introduced by Lam/Pi binders whose `ty` slot carries the variable's type — same discipline as EigenTT itself. Free vars in an open expression are typed by the institution's ambient context (the dispatch's input typing or the operator catalog). See D32.",
     "urn:eigenius:core:ctors": [
       {
         "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
@@ -103,7 +103,7 @@
     "@id": "urn:eigenius:formulas:Operator",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:short_name": "Operator",
-    "urn:eigenius:core:description": "A function symbol in the FormulaTerm language. Carries a typed Mini-TT signature so chain validation can rank-check App invocations at commit time and so cross-institution comorphisms can type-check at the chain boundary. The signature is itself a FormulaTerm value (via `Pi` ctors) so the type language dogfoods its own metasystem — types are nullary functions in this view. See D32 §5.",
+    "urn:eigenius:core:description": "A function symbol in the FormulaTerm language. Carries a typed EigenTT signature so chain validation can rank-check App invocations at commit time and so cross-institution comorphisms can type-check at the chain boundary. The signature is itself a FormulaTerm value (via `Pi` ctors) so the type language dogfoods its own metasystem — types are nullary functions in this view. See D32 §5.",
     "urn:eigenius:core:requires": [
       "urn:eigenius:core:is_a",
       "urn:eigenius:core:short_name",
@@ -121,7 +121,7 @@
     "@id": "urn:eigenius:formulas:operator_signature",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:short_name": "operator_signature",
-    "urn:eigenius:core:description": "The operator's Mini-TT type, encoded as a FormulaTerm value. Non-dependent operators use `Pi` with unnamed binders (`_`) chained left-to-right. Example for binary `add: Real -> Real -> Real`: `Pi(_, OpRef(formulas:types:Real), Pi(_, OpRef(formulas:types:Real), OpRef(formulas:types:Real)))`. The chain validator rank-checks `App(OpRef, args)` invocations against this signature.",
+    "urn:eigenius:core:description": "The operator's EigenTT type, encoded as a FormulaTerm value. Non-dependent operators use `Pi` with unnamed binders (`_`) chained left-to-right. Example for binary `add: Real -> Real -> Real`: `Pi(_, OpRef(formulas:types:Real), Pi(_, OpRef(formulas:types:Real), OpRef(formulas:types:Real)))`. The chain validator rank-checks `App(OpRef, args)` invocations against this signature.",
     "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
     "urn:eigenius:core:class_types": ["urn:eigenius:formulas:FormulaTerm"],
     "urn:eigenius:core:domain": ["urn:eigenius:formulas:Operator"]
@@ -155,7 +155,7 @@
     "@id": "urn:eigenius:formulas:types:Real",
     "urn:eigenius:core:is_a": ["urn:eigenius:formulas:Operator"],
     "urn:eigenius:core:short_name": "Real",
-    "urn:eigenius:core:description": "The type of real-valued FormulaTerm expressions. Encoded as a nullary operator whose signature is itself — `Real : Real`. Same idiom Mini-TT uses internally for `Set : Set` (size-stratified at the kernel layer; flat at v1 of the chain).",
+    "urn:eigenius:core:description": "The type of real-valued FormulaTerm expressions. Encoded as a nullary operator whose signature is itself — `Real : Real`. Same idiom EigenTT uses internally for `Set : Set` (size-stratified at the kernel layer; flat at v1 of the chain).",
     "urn:eigenius:formulas:operator_arity": 0,
     "urn:eigenius:formulas:operator_signature": {
       "ctor": "OpRef",

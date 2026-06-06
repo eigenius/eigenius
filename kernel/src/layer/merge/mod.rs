@@ -140,7 +140,7 @@ pub enum MergeError {
     },
     /// A `MergeComorphism` resource is missing the required
     /// `merge_transformation` property, or the property's value isn't
-    /// a `ResourceRef` to a Mini-TT term. Both shapes are required by
+    /// a `ResourceRef` to a EigenTT term. Both shapes are required by
     /// the core ontology's class declaration; surfacing this as a
     /// typed error keeps the failure mode legible.
     MalformedMergeComorphism {
@@ -168,7 +168,7 @@ pub enum MergeError {
         transformation: Iri,
     },
     /// `parse_expression` failed to convert the transformation
-    /// Resource into a Mini-TT `Exp`. The Resource is malformed
+    /// Resource into a EigenTT `Exp`. The Resource is malformed
     /// against the program ontology — e.g., a Lambda missing its
     /// body, a Var without a binder name. Re-stringifies the parser's
     /// diagnostic for a flat error shape.
@@ -348,7 +348,7 @@ impl std::fmt::Display for MergeError {
                 reason,
             } => write!(
                 f,
-                "transformation {transformation} failed to parse as a Mini-TT term: {reason}"
+                "transformation {transformation} failed to parse as a EigenTT term: {reason}"
             ),
             MergeError::TransformationEvalError {
                 transformation,

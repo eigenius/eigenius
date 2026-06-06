@@ -125,7 +125,7 @@ The `document` carries an array of resources: synthesized row Properties, a row 
 
 ### 3.4 ValidateProgram
 
-Type-check a program against the context's layer chain using Mini-TT.
+Type-check a program against the context's layer chain using EigenTT.
 
 ```protobuf
 message ValidateProgramRequest {

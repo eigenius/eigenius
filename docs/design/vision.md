@@ -52,7 +52,7 @@ These categories are not labels applied by the user. They are computed from the 
 
 ### Typed Processing Pipelines
 
-Processing pipelines in Eigenius are not scripts or prompt chains. They are programs in a typed functional language, validated by a dependent type theory (Mini-TT, a fragment of the Calculus of Inductive Constructions — the same theory that underlies Lean 4). A pipeline that passes type-checking carries a formal guarantee: its bindings are type-compatible, its required inputs are provably available, and its control flow terminates. This is static verification before execution begins.
+Processing pipelines in Eigenius are not scripts or prompt chains. They are programs in a typed functional language, validated by a dependent type theory (EigenTT, a fragment of the Calculus of Inductive Constructions — the same theory that underlies Lean 4). A pipeline that passes type-checking carries a formal guarantee: its bindings are type-compatible, its required inputs are provably available, and its control flow terminates. This is static verification before execution begins.
 
 The type system supports partial evaluation through Normalization by Evaluation (NbE). Given a pipeline and a subset of its inputs, the system produces a well-typed residual — a simplified pipeline that awaits only the remaining inputs. This is not an optimization heuristic; it is a theorem about the type system, and it is a proof target in the formal specification track.
 
@@ -116,7 +116,7 @@ Several principles guide the architecture. They are not aspirational statements;
 
 The architecture comprises a native Rust kernel with formal proof annotations (Verus), a Deno/TypeScript orchestration layer for pipeline execution and LLM integration, and TiKV as the distributed storage engine. The kernel exposes a gRPC service API; the orchestration layer is an API client, not a runtime host. Untrusted domain extensions run in WASM sandboxes managed by the kernel via Wasmtime.
 
-The type system is founded on Mini-TT, a minimal dependent type theory that is a direct fragment of CIC — the Calculus of Inductive Constructions that underlies Lean 4. This alignment is architectural, not incidental: it means the pipeline type checker and the formal verification track operate on the same mathematical foundation, and the path from type-checked to formally proved is continuous rather than requiring a translation between formalisms.
+The type system is founded on EigenTT, a minimal dependent type theory that is a direct fragment of CIC — the Calculus of Inductive Constructions that underlies Lean 4. This alignment is architectural, not incidental: it means the pipeline type checker and the formal verification track operate on the same mathematical foundation, and the path from type-checked to formally proved is continuous rather than requiring a translation between formalisms.
 
 EigenQL, the query language, begins as a typed conjunctive query language (v1) with a documented extension path to recursive Datalog. The v1 language is computationally well-behaved (guaranteed termination, monotonic with respect to the knowledge graph) while remaining expressive enough for the pattern matching and join operations that scientific knowledge graphs require.
 

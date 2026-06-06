@@ -36,7 +36,7 @@ reinsertion).
 
 | Layer | What it is | Chapter |
 |---|---|---|
-| **Shared payload language** | A typed value shape multiple institutions consume directly. `formulas:FormulaTerm` is the v1 instance — a chain-mirrored fragment of Mini-TT every numerical institution speaks. | [Chapter 2](02-shared-payload-languages.md) |
+| **Shared payload language** | A typed value shape multiple institutions consume directly. `formulas:FormulaTerm` is the v1 instance — a chain-mirrored fragment of EigenTT every numerical institution speaks. | [Chapter 2](02-shared-payload-languages.md) |
 | **Declared comorphisms** | Chain-resident bridge declarations that translate from one institution's vocabulary into another's, with the kernel statically type-checking the alignment. | [Chapter 3](03-comorphisms.md) |
 | **Coordinated dispatch roles** | AutoOnLoad gates, OnDemand FIBER calls, and Decidable predicates working together to produce a single user-facing response from a coordinated set of institution dispatches. | [Chapter 4](04-dispatch-roles-in-concert.md) |
 
@@ -106,7 +106,7 @@ elsewhere:
   can read those.
 - **The formula language reference.** [`urn:eigenius:formulas:FormulaTerm`](../formula/README.md)
   has its own guide. This guide treats it as a *coordination mechanism* between
-  institutions; the formula guide treats it as a Mini-TT fragment in its own
+  institutions; the formula guide treats it as a EigenTT fragment in its own
   right.
 - **Single-institution slow-walks.** Per-institution Julia tutorials live under
   [`platform/julia-institutions/`](../platform/julia-institutions/). Read at

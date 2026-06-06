@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Mini-TT semantic values.
+//! EigenTT semantic values.
 //!
-//! Ported from `Main.hs` lines 80-163 in the Mini-TT reference.
+//! Ported from `Main.hs` lines 80-163 in the EigenTT reference.
 //! Values are the result of evaluation. Neutral terms represent
 //! computations blocked on an unknown variable.
 

@@ -209,7 +209,7 @@ other institutions in the kinase notebook (Symbolics, Catalyst, DiffEq,
 JuMP-HiGHS) — each goes one level deeper:
 
 - [Symbolics tutorial](julia-institutions/symbolics-institution-tutorial.md)
-  — three dispatch roles in one institution; the FormulaTerm-as-Mini-TT-fragment
+  — three dispatch roles in one institution; the FormulaTerm-as-EigenTT-fragment
   story end-to-end.
 - [Catalyst tutorial](julia-institutions/catalyst-institution-tutorial.md)
   + [DiffEq tutorial](julia-institutions/diffeq-institution-tutorial.md)

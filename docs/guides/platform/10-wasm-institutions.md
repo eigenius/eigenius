@@ -10,8 +10,8 @@ A WASM institution exports three operations to the kernel:
 
 | Operation | Purpose |
 |---|---|
-| `extract-typed` | Boundary: read a source-class resource and emit a Mini-TT-typed payload (the `S` of a comorphism, or the input side of a Component-implemented QueryClass). |
-| `reify` | Boundary: take a Mini-TT-typed payload and construct a target-class resource (the `T` of a comorphism, or the output side of a Component-implemented QueryClass). |
+| `extract-typed` | Boundary: read a source-class resource and emit a EigenTT-typed payload (the `S` of a comorphism, or the input side of a Component-implemented QueryClass). |
+| `reify` | Boundary: take a EigenTT-typed payload and construct a target-class resource (the `T` of a comorphism, or the output side of a Component-implemented QueryClass). |
 | `query` | Optional escape hatch: answer an institution-defined query by returning a result resource. Required only for QueryClasses whose `query_handler` is the institution's own procedure (not a Component IRI). |
 
 These are the only methods. No `fiber_declaration()`, no `validate-morphism`, no `discover-morphisms` — the four-method D10 trichotomy collapses into "boundary translation + optional reasoning". Operational profile (validates on Load? answers EigenQL FIBER? gets called from `NativeDecide`?) is determined by the QueryClass's `dispatch_role` set on the chain, not by which method the kernel calls.
@@ -60,7 +60,7 @@ The five resource shapes (D14 §4):
 | `ExportFormat` | `from_class`, `payload_type`, `institution_ref`, `procedure` | "When you need a Float-typed view of a `DockingResult`, call procedure `extract_dg`." |
 | `ImportFormat` | `to_class`, `payload_type`, `institution_ref`, `procedure` | "To construct an `AssayPrediction` from a Float, call procedure `reify_ic50`." |
 | `QueryClass` | `query_class`, `result_class`, `dispatch_role`, `query_handler`, `institution_ref` | The institution's typed function. `dispatch_role` is one or more of `OnDemand` (FIBER), `AutoOnLoad` (Load gate), `Decidable` (NativeDecide). |
-| `Comorphism` | `export_format`, `transformation`, `import_format`, `exact` | The triadic translation across an institution boundary; the transformation is a Mini-TT Component IRI. |
+| `Comorphism` | `export_format`, `transformation`, `import_format`, `exact` | The triadic translation across an institution boundary; the transformation is a EigenTT Component IRI. |
 
 The `Comorphism`'s well-typedness is checked at commit time (D14 §4.5): the `transformation`'s signature must equal `(payload_type(export_format)) → (payload_type(import_format))`. Mismatches are rejected by structural validation.
 
@@ -125,7 +125,7 @@ impl Guest for DockInstitution {
             .and_then(|v| v.as_float())
             .ok_or_else(|| "DockingResult missing delta_g".to_string())?;
 
-        // The Mini-TT typed-value carrier shape: a single-Float wrapper resource.
+        // The EigenTT typed-value carrier shape: a single-Float wrapper resource.
         let mut wrapper = Resource::new();
         wrapper.set(VALUE_PROP, Value::Float(delta_g));
         Ok(wrapper.to_cbor())
@@ -178,9 +178,9 @@ fn verdict_resource(ctor: &str) -> Resource {
 }
 ```
 
-### 10.4.2. Mini-TT typed-value carrier shape
+### 10.4.2. EigenTT typed-value carrier shape
 
-`extract_typed` and `reify` exchange CBOR-encoded Mini-TT typed values (`typed-value` in the WIT world — distinct from `resource-data` even though the on-the-wire form is the same). The kernel marshals primitives like `Float` as a single-property wrapper resource carrying the value at `urn:eigenius:core:value`. The dock and assay implementations both work with this shape: dock wraps `Float(delta_g)` into a wrapper on extract; assay reads the wrapper's first Float on reify. The Arrhenius transformation Component ([`examples/wasm-d14-arrhenius/src/lib.rs`](../../../examples/wasm-d14-arrhenius/src/lib.rs)) follows the same convention.
+`extract_typed` and `reify` exchange CBOR-encoded EigenTT typed values (`typed-value` in the WIT world — distinct from `resource-data` even though the on-the-wire form is the same). The kernel marshals primitives like `Float` as a single-property wrapper resource carrying the value at `urn:eigenius:core:value`. The dock and assay implementations both work with this shape: dock wraps `Float(delta_g)` into a wrapper on extract; assay reads the wrapper's first Float on reify. The Arrhenius transformation Component ([`examples/wasm-d14-arrhenius/src/lib.rs`](../../../examples/wasm-d14-arrhenius/src/lib.rs)) follows the same convention.
 
 For richer types — tuples, records, inductive values — the SDK provides round-trip helpers between Rust types and `typed-value`. (See the SDK's `typed_value` module.)
 

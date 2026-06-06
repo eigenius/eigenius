@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Mini-TT readback: values → normal-form expressions.
+//! EigenTT readback: values → normal-form expressions.
 //!
-//! Ported from `Main.hs` lines 226-255 in the Mini-TT reference.
+//! Ported from `Main.hs` lines 226-255 in the EigenTT reference.
 //! Readback converts semantic values back to syntax, producing
 //! normal forms. Two values are definitionally equal iff their
 //! readbacks at the same level are syntactically equal.

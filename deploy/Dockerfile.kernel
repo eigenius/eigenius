@@ -45,7 +45,7 @@ FROM debian:bookworm-slim
 # to the source repository via image.source; Docker Hub / other
 # registries surface description + licenses on the listing page).
 LABEL org.opencontainers.image.title="eigenius-kernel"
-LABEL org.opencontainers.image.description="Eigenius kernel gRPC server — typed knowledge-graph platform with layer chains, Mini-TT type theory, and an institutional dispatch surface."
+LABEL org.opencontainers.image.description="Eigenius kernel gRPC server — typed knowledge-graph platform with layer chains, EigenTT type theory, and an institutional dispatch surface."
 LABEL org.opencontainers.image.source="https://github.com/eigenius/eigenius"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.vendor="Eigenius"

@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Parse Eigon-JSON expression resources into Mini-TT terms.
+//! Parse Eigon-JSON expression resources into EigenTT terms.
 //!
 //! Each expression form (Let, Apply, Var, Lambda, etc.) maps 1:1
-//! to a Mini-TT term. No translation layer needed.
+//! to a EigenTT term. No translation layer needed.
 
 use crate::layer::Layer;
 use crate::nbe::term::{Branch, Decl, Exp, InductiveDecl, Patt, PrimitiveType};
@@ -45,7 +45,7 @@ const COMORPHISM_INVOKE_APPLY: &str = "urn:eigenius:program:ComorphismInvokeAppl
 /// `f(arg1, arg2, …)` where `f` is a registered decide procedure IRI.
 const DECIDE_APPLY: &str = "urn:eigenius:program:DecideApply";
 
-/// Parse a Program resource into a Mini-TT term with its type.
+/// Parse a Program resource into a EigenTT term with its type.
 ///
 /// Returns (term, type) where:
 /// - term is `Exp::Lam(input, body)`
@@ -73,7 +73,7 @@ pub fn parse_program(resource: &Resource, layer: &Layer) -> Result<(Exp, Exp), S
     Ok((term, typ))
 }
 
-/// D37 §5.1 — decode a `program:type` value into a Mini-TT `Exp`.
+/// D37 §5.1 — decode a `program:type` value into a EigenTT `Exp`.
 ///
 /// The Pi-type for a standalone Lambda resource lives on its
 /// `urn:eigenius:program:type` slot. The slot can hold any of these
@@ -93,7 +93,7 @@ pub fn parse_program(resource: &Resource, layer: &Layer) -> Result<(Exp, Exp), S
 /// - `Value::Embedded(r)` with `is_a` of `TypeArrow` — a non-
 ///   dependent arrow `A -> B`, lowered to an anonymous-binder Pi.
 ///
-/// Returns the Mini-TT `Exp` ready for evaluation via
+/// Returns the EigenTT `Exp` ready for evaluation via
 /// `nbe::eval::eval` and subsequent use as a checking type by
 /// `nbe::check::check`.
 pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> {
@@ -203,7 +203,7 @@ pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> 
     }
 }
 
-/// Parse an expression resource into a Mini-TT term.
+/// Parse an expression resource into a EigenTT term.
 pub fn parse_expression(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     let is_a = resource.is_a();
     let class_str = is_a.first().map(|i| i.as_str()).unwrap_or("");

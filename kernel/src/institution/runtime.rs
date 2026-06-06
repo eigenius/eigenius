@@ -81,7 +81,7 @@ impl QueryOutcome {
 /// of which only the two boundary methods are mandatory.
 ///
 /// **Boundary methods** (`extract_typed`, `reify`) translate between
-/// the institution's resource form and the typed Mini-TT `Val` form
+/// the institution's resource form and the typed EigenTT `Val` form
 /// the kernel manipulates internally. Every institution must implement
 /// these — they are how the kernel reaches the institution's data at
 /// all.
@@ -90,7 +90,7 @@ impl QueryOutcome {
 /// for QueryClasses whose implementation is opaque code (e.g. an
 /// LLM, an external prover). QueryClasses whose `query_handler` IRI
 /// resolves to a kernel-registered Component are dispatched entirely
-/// through Mini-TT (extract → component → reify) and never call this
+/// through EigenTT (extract → component → reify) and never call this
 /// method. The default impl returns
 /// [`InstitutionError::NotImplemented`].
 ///
@@ -103,7 +103,7 @@ pub trait Institution: Send + Sync {
     /// [`InstitutionRuntime`].
     fn institution_iri(&self) -> &Iri;
 
-    /// Boundary: extract a typed Mini-TT value from a resource, via a
+    /// Boundary: extract a typed EigenTT value from a resource, via a
     /// procedure declared by an `ExportFormat` resource owned by this
     /// institution. The returned `Val` must inhabit the type declared
     /// by the matching `ExportFormat.payload_type`.

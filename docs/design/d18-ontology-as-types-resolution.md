@@ -137,7 +137,7 @@ The gap is purely inference-mode.
 **Non-goals:**
 
 - Changing the ontology format or the `Class` / `Property` schema.
-- Mini-TT term-form changes. The work is in the checker; everything
+- EigenTT term-form changes. The work is in the checker; everything
   downstream accepts the better-typed output transparently.
 - Universe stratification enforcement (that's Phase 10b — see
   life-science §16.2 and the Phase-10 plan).
@@ -453,7 +453,7 @@ the uncached version. No changes to `ground.rs` required for §5.
 
 - **Array / list typing.** A property declared `data_type:
   resource_array` with `class_types: [Patent]` should resolve to
-  `List(EigonClass(Patent))` — but Mini-TT doesn't have a native list
+  `List(EigonClass(Patent))` — but EigenTT doesn't have a native list
   type yet. `ground::resolve_array_element_type` returns the element
   type directly, which is lossy. *Proposal: Phase 11 tracks the list
   type; for 10a we match the existing behavior (return element type,
@@ -524,7 +524,7 @@ the uncached version. No changes to `ground.rs` required for §5.
 ## 11. References
 
 - `docs/design/d9-nbe-unification-and-type-extensions.md` §5.10 —
-  Mini-TT ground-type support; this is the "ontology-as-types" stub
+  EigenTT ground-type support; this is the "ontology-as-types" stub
   this document completes.
 - `docs/design/life-science-requirements.md` §19 — sequencing that
   names this as Phase 10 step 1.

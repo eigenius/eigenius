@@ -701,7 +701,7 @@
   {
     "@id": "urn:eigenius:core:merge_transformation",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Reference to the Mini-TT term (typed expression) realising the merge witness. The kernel verifies at resolution-submission time (D20 §6.1) that the term's type equals `(A, A, Option<A>) -> A` for the class A of the IRI being resolved — branch_a value, branch_b value, optional ancestor value, merged value. No `class_types` narrowing here because the core ontology loads before `program`, so the Mini-TT expression classes aren't yet in the chain at validation time. The kernel's resolution-submission signature check is what actually enforces the typing discipline; this property's `data_type: resource` keeps the structural shape minimal.",
+    "urn:eigenius:core:description": "Reference to the EigenTT term (typed expression) realising the merge witness. The kernel verifies at resolution-submission time (D20 §6.1) that the term's type equals `(A, A, Option<A>) -> A` for the class A of the IRI being resolved — branch_a value, branch_b value, optional ancestor value, merged value. No `class_types` narrowing here because the core ontology loads before `program`, so the EigenTT expression classes aren't yet in the chain at validation time. The kernel's resolution-submission signature check is what actually enforces the typing discipline; this property's `data_type: resource` keeps the structural shape minimal.",
     "urn:eigenius:core:short_name": "merge_transformation",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:domain": ["urn:eigenius:core:MergeComorphism"]

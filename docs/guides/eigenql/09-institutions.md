@@ -11,10 +11,10 @@ Five resource shapes carry an institution's declared surface (D14 §4):
 | Shape | What it declares |
 |---|---|
 | `Institution` | Identity (`institution_iri`, `name`) and `runtime` kind (`wasm`, `external`, `in_process`). |
-| `ExportFormat` | A typed *outbound* view: extracts a Mini-TT-typed payload (`payload_type`) from a source resource of a given `from_class`, via a procedure handled by the institution. |
+| `ExportFormat` | A typed *outbound* view: extracts a EigenTT-typed payload (`payload_type`) from a source resource of a given `from_class`, via a procedure handled by the institution. |
 | `ImportFormat` | The dual: constructs a target-class resource from a typed payload, via a procedure handled by the institution. |
 | `QueryClass` | A typed function in the institution's fibre. Carries `query_class` (input class), `result_class`, a `dispatch_role` set (`OnDemand` ∪ `AutoOnLoad` ∪ `Decidable`), a `query_handler` procedure IRI, and an `institution_ref`. |
-| `Comorphism` | The triadic translation `(s, m, t)`: `export_format` + `transformation` (a Mini-TT Component) + `import_format`, plus an `exact: bool` Satisfaction-Condition annotation. |
+| `Comorphism` | The triadic translation `(s, m, t)`: `export_format` + `transformation` (a EigenTT Component) + `import_format`, plus an `exact: bool` Satisfaction-Condition annotation. |
 
 EigenQL's parser, type checker, and evaluator consult two derived structures built from those declarations:
 
@@ -110,7 +110,7 @@ WHERE ?check HOLDS
 
 1. Resolve the `Comorphism` resource — read `export_format`, `transformation`, `import_format`.
 2. Look up the source institution from `export_format.institution_ref`. Call `Institution::extract_typed(export_format.procedure, ?d, ctx)` → typed payload of the export's `payload_type`.
-3. Apply the `transformation` Component via the Mini-TT evaluator → typed payload of the import's `payload_type`.
+3. Apply the `transformation` Component via the EigenTT evaluator → typed payload of the import's `payload_type`.
 4. Look up the target institution from `import_format.institution_ref`. Call `Institution::reify(import_format.procedure, payload, ctx)` → the target-class resource.
 
 The coerced resource is set on the input as the property whose short name is `candidate`. The type checker enforces that the comorphism's import-side `to_class` matches (or is a subclass of) the QueryClass's required class type for that property; failures surface as `comorphism_coercion_class_mismatch`.

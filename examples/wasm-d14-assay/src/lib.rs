@@ -63,7 +63,7 @@ fn extract_float(v: Option<&Value>) -> Option<f64> {
         .or_else(|| v.as_integer().map(|n| n as f64))
         .or_else(|| {
             // Nested wrapper resource carrying a single Float (the
-            // Mini-TT typed-value carrier shape).
+            // EigenTT typed-value carrier shape).
             v.as_embedded().and_then(first_float_property)
         })
 }

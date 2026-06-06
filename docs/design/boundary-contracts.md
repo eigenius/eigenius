@@ -117,7 +117,7 @@ The contract includes executable predicates that fire at boundary crossings. Pre
 
 ### 4.4 Type-level
 
-The contract is encoded in Mini-TT types the kernel checks. Violations are impossible to express without being rejected. Uses dependent records for input/output types, `NativeDecide` for constraint predicates, `DecEq` for equality obligations, `Id` types for equations that must hold.
+The contract is encoded in EigenTT types the kernel checks. Violations are impossible to express without being rejected. Uses dependent records for input/output types, `NativeDecide` for constraint predicates, `DecEq` for equality obligations, `Id` types for equations that must hold.
 
 **Cost:** higher — requires the contract's obligations to be expressible in the type theory.
 **Enforcement:** kernel type checking before dispatch; violations caught as compile-time-equivalent errors.
@@ -133,12 +133,12 @@ The contract's satisfaction is demonstrated by a checked proof, produced by a ve
 
 The right discipline is **specify once at the richest level the clause is naturally expressed in, and let the system downgrade to weaker mechanisms where the richer one does not apply**. Guidelines:
 
-- **Syntactic interfaces** — always type-level. This is what Mini-TT type checking is for.
+- **Syntactic interfaces** — always type-level. This is what EigenTT type checking is for.
 - **Structural preconditions and postconditions** (class membership, simple constraints) — type-level where expressible via dependent records and `NativeDecide`, runtime-checked otherwise.
 - **Quantified properties over finite collections** — type-level once `Map` and `Reduce` primitives are wired to support bounded quantification; runtime-checked in the interim.
 - **Determinism and idempotence** — schema-level declarations, enforced structurally by requiring layer-parameterized signatures and runtime cache-key consistency checks.
 - **Error taxonomy** — always type-level. Closed sum types over the error enum.
-- **Resource bounds** — schema-level declarations, runtime-enforced via instrumentation. Not expressible in Mini-TT.
+- **Resource bounds** — schema-level declarations, runtime-enforced via instrumentation. Not expressible in EigenTT.
 - **Probabilistic and timing bounds** — runtime-checked only. Declared as advisory at schema level.
 - **Lifecycle and versioning** — schema-level, enforced by the layer system's immutability guarantees.
 - **Full correctness of algorithms** — proof-level via verification institution. The verification institution's own contract is itself a candidate for proof-level treatment.
@@ -245,7 +245,7 @@ A predicate expressed at some level of formalization. Required properties:
 
 - `formalization_level` — one of `Documentation`, `Schema`, `Runtime`, `TypeLevel`, `ProofLevel`
 - `description` — prose description (always required)
-- `minitt_expression` — Mini-TT term encoding the predicate (required for TypeLevel and above)
+- `minitt_expression` — EigenTT term encoding the predicate (required for TypeLevel and above)
 - `runtime_checker` — IRI to a component implementing the check (required for Runtime and above)
 - `proof_obligation` — reference to a verification institution and proof term (required for ProofLevel)
 
@@ -354,7 +354,7 @@ Implement `ContractPredicate` evaluation at dispatch time. Wire preconditions to
 
 ### Phase D — Type-level lifting for naturally-typed clauses
 
-Move preconditions and postconditions that are expressible in Mini-TT up from runtime to type-level. Hinges on the ontology-as-types work being complete (the `find_sigma_field` layer-chain plumbing). Once complete, class membership preconditions become automatic and many runtime checks collapse.
+Move preconditions and postconditions that are expressible in EigenTT up from runtime to type-level. Hinges on the ontology-as-types work being complete (the `find_sigma_field` layer-chain plumbing). Once complete, class membership preconditions become automatic and many runtime checks collapse.
 
 **Expected cost:** concurrent with the ontology-as-types integration work; primarily additive effort.
 
@@ -386,7 +386,7 @@ The following are questions this draft deliberately leaves open. They should be 
 
 1. **Evolution policy default.** Should contracts default to additive-only evolution, with breaking evolution requiring a new contract class? Or should breaking evolution be allowed within a contract class under a major-version bump, with migration machinery?
 
-2. **Predicate language for `ContractPredicate.minitt_expression`.** Is the predicate a closed Mini-TT term of type `Prop`, or a function from input/output to `Prop`? The latter is more flexible but requires deciding how the function is applied at check time.
+2. **Predicate language for `ContractPredicate.minitt_expression`.** Is the predicate a closed EigenTT term of type `Prop`, or a function from input/output to `Prop`? The latter is more flexible but requires deciding how the function is applied at check time.
 
 3. **Relationship between contract version and institution implementation hash.** Should the implementation hash be part of the trace record, the registration record, or both? Both is probably right, but the semantics need to be spelled out.
 

@@ -235,13 +235,13 @@ Two kernel services operate on the Eigon base and are \emph{not} institutions:
 \textbf{Structural validation} checks resources against class definitions---required properties, type matches, format and range constraints.
 This is the base satisfaction condition of the shared signature category.
 
-\textbf{Mini-TT type checking} via NbE~\cite{minitt,nbe} validates program composition---function types, dependent pairs, pattern matching.
+\textbf{EigenTT type checking} via NbE~\cite{minitt,nbe} validates program composition---function types, dependent pairs, pattern matching.
 It is necessary for the kernel to function; programs must type-check before execution.
 
 A formal verification system such as Lean~4~\cite{lean4}, by contrast, \emph{is} an institution.
 It provides the ``verified'' epistemic level by checking domain-specific mathematical propositions---proofs that a safety factor bound holds, that a binding affinity prediction satisfies a confidence interval, that a PK model is well-posed.
-Mini-TT checks that a program \emph{composes}; Lean~4 checks that a result is \emph{correct}.
-The distinction is operational: the kernel cannot function without Mini-TT; it functions without Lean~4.
+EigenTT checks that a program \emph{composes}; Lean~4 checks that a result is \emph{correct}.
+The distinction is operational: the kernel cannot function without EigenTT; it functions without Lean~4.
 
 \subsection{Capabilities as Institution Registrations}
 
@@ -250,7 +250,7 @@ A capability registration is an institution declaration: for a given signature, 
 
 \subsection{Ground Type Resolution as Comorphism}
 
-The kernel's ground type resolution interface---where Mini-TT type checking resolves class references against the layer stack---is a kernel-internal comorphism from the Eigon structural base to the Mini-TT type system.
+The kernel's ground type resolution interface---where EigenTT type checking resolves class references against the layer stack---is a kernel-internal comorphism from the Eigon structural base to the EigenTT type system.
 Signatures translate forward (classes become dependent record types via NbE); models translate backward (well-typed programs reduce to valid resource instances).
 This comorphism is not registered via the institution protocol---it is fixed infrastructure that all institutions depend on.
 
@@ -375,7 +375,7 @@ A two-compartment PK model, parameterized from ADMET predictions and experimenta
 Five phases of Eigenius are implemented in Rust (kernel) and TypeScript (orchestration).
 The Eigon data model~\cite{atomicdata} provides the shared signature category.
 EigenQL (stratified Datalog with aggregation~\cite{alice}) serves as the query language.
-Mini-TT~\cite{minitt} dependent type checking via NbE~\cite{nbe} provides program validation as a kernel service.
+EigenTT~\cite{minitt} dependent type checking via NbE~\cite{nbe} provides program validation as a kernel service.
 IO components (LLM calls, HTTP requests) are dispatched to an orchestration layer via gRPC.
 Persistent storage uses RocksDB with CBOR~\cite{rfc8949} serialization; the same key encoding supports TiKV for horizontally scalable deployments.
 
@@ -410,7 +410,7 @@ This makes reasoning traces queryable via EigenQL: ``which LLM calls contributed
 
 \subsection{Type Theory Extensions}
 
-Mini-TT has been extended with features inspired by Lean~4~\cite{lean4}:
+EigenTT has been extended with features inspired by Lean~4~\cite{lean4}:
 propositional equality (identity type with reflexivity and J~eliminator),
 decidable equality on ground types,
 native constraint checking (range bounds, string patterns, format validation reduce at type-check time),
@@ -418,7 +418,7 @@ and a three-level universe stratification matching the epistemic levels.
 Ground type resolution maps the full ontology---required properties as dependent pair fields, recommended properties as option types, \code{allows\_only} constraints as enumeration types, and multiple \code{class\_types} as union types.
 Property access type inference walks the dependent pair chain to resolve field types.
 
-These extensions close the gap between the Eigon ontology constraints and the Mini-TT type system without introducing refinement types or subtyping.
+These extensions close the gap between the Eigon ontology constraints and the EigenTT type system without introducing refinement types or subtyping.
 The design follows Lean~4's approach: decidable propositions as types with native decision procedures, closed record types with explicit optional access for undeclared properties.
 
 \subsection{Fiber Extension Path}
@@ -738,7 +738,7 @@ J.~Meindertsma.
 
 \bibitem[Coquand et~al.(2009)]{minitt}
 T.~Coquand, Y.~Kinoshita, B.~Nordstr\"{o}m, and M.~Takeyama.
-\newblock A simple type-theoretic language: {Mini-TT}.
+\newblock A simple type-theoretic language: {EigenTT}.
 \newblock In \emph{From Semantics to Computer Science}, pages 139--164. Cambridge University Press, 2009.
 
 \bibitem[Abel et~al.(2007)]{nbe}

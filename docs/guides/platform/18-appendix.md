@@ -147,7 +147,7 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 - [**D26 — Runtime substrate**](../../design/d26-runtime-substrate.md) — substrate hosting layer, `LanguageRuntime` trait
 - [**D29 — Mirror generator**](../../design/d29-runtime-mirror-generator.md) — closure walker, content-addressed mirror IRIs
 - [**D31 — Runtime-language-substrate institution lifecycle**](../../design/d31-runtime-language-substrate-institution-lifecycle.md) — install flow, env image lifecycle
-- [**D32 — Chain-mirrored Mini-TT inductives**](../../design/d32-chain-mirrored-mini-tt-inductives.md) — `formulas:FormulaTerm` as a Mini-TT fragment on the chain
+- [**D32 — Chain-mirrored EigenTT inductives**](../../design/d32-chain-mirrored-mini-tt-inductives.md) — `formulas:FormulaTerm` as a EigenTT fragment on the chain
 
 The full design-document set lives in [`docs/design/`](../../design/).
 

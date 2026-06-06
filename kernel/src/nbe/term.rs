@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Mini-TT syntax terms.
+//! EigenTT syntax terms.
 //!
-//! Ported from `Core/Abs.hs` in the Mini-TT reference implementation,
+//! Ported from `Core/Abs.hs` in the EigenTT reference implementation,
 //! extended with Eigon ground types.
 
 use crate::ontology::iri::Iri;
@@ -23,7 +23,7 @@ use std::sync::{Arc, OnceLock};
 
 pub type Name = String;
 
-/// Expressions — the syntax of Mini-TT.
+/// Expressions — the syntax of EigenTT.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Exp {
     /// Lambda: λ p. e

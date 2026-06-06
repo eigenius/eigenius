@@ -40,8 +40,8 @@ Use these via `mcp__eigenius__<tool>`.
 - **Branch** — named pointer to a layer head. Default: `main`.
 - **`is_a`** — every resource declares its classes via `urn:eigenius:core:is_a` (array of class IRIs).
 - **Institution** — D14 reasoning system (Julia / Lean / WASM / in-process Rust).
-- **InductiveType** — chain-resident inductives Mini-TT can `Case`-split on. Distinct from `Class` (the ontology-level shape). A few are dual-declared as both (e.g. `Verdict`) when both shapes are needed. Currently loaded: `core:Option`, `formulas:FormulaTerm`, `lean:LeanExpr` / `LeanLevel` / `LeanLevelList` / `LeanName`, `institution:Verdict`.
-- **`FormulaTerm`** — `urn:eigenius:formulas:FormulaTerm`. Chain-mirrored Mini-TT fragment shared by every numerical institution.
+- **InductiveType** — chain-resident inductives EigenTT can `Case`-split on. Distinct from `Class` (the ontology-level shape). A few are dual-declared as both (e.g. `Verdict`) when both shapes are needed. Currently loaded: `core:Option`, `formulas:FormulaTerm`, `lean:LeanExpr` / `LeanLevel` / `LeanLevelList` / `LeanName`, `institution:Verdict`.
+- **`FormulaTerm`** — `urn:eigenius:formulas:FormulaTerm`. Chain-mirrored EigenTT fragment shared by every numerical institution.
 - **Verdict** — `Holds` / `Fails` / `Undecidable`. The chain-resident outcome of an AutoOnLoad or Decidable QueryClass dispatch.
 - **AutoOnLoad** — institution gate fired automatically on commit when a resource of the bound class enters the chain.
 - **FIBER** — EigenQL clause that dispatches to an institution. `FIBER … AS ?var INTO "<iri>"` commits the response as a chain-resident resource.

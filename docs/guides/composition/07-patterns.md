@@ -33,7 +33,7 @@ its preferred form.
 
 1. The institutions you want to bridge already have a common ancestor in
    the literature (e.g. anything that consumes "an algebraic expression
-   over real numbers" lives downstream of a Mini-TT-shaped term language).
+   over real numbers" lives downstream of a EigenTT-shaped term language).
 2. Cross-institution comorphisms are easy to imagine (S → I, S → J, I → J,
    etc. — the combinatorics matter).
 3. The shared shape has a natural home in a *peer namespace* — not under
@@ -149,7 +149,7 @@ same output), `INTO` is safe to use for caching — re-running the cell
 finds the existing committed resource and skips re-execution. When it's
 *non-deterministic* (e.g. uses a random seed; depends on host BLAS
 behaviour), `INTO` overwrites or errors depending on validator state.
-The kinase notebook's comorphism dispatches are deterministic (Mini-TT
+The kinase notebook's comorphism dispatches are deterministic (EigenTT
 evaluation + Pkg-pinned Julia), so `INTO` is safe. The kinase
 notebook's hypothetical Monte-Carlo extensions wouldn't be.
 

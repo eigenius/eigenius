@@ -10,13 +10,13 @@
 
 ## 1. Overview
 
-Programs in Eigenius are typed expressions in a functional language grounded in the Eigon ontology and Mini-TT dependent type theory. A program that passes type checking carries formal guarantees: it terminates, is type-safe, and produces output of the declared type.
+Programs in Eigenius are typed expressions in a functional language grounded in the Eigon ontology and EigenTT dependent type theory. A program that passes type checking carries formal guarantees: it terminates, is type-safe, and produces output of the declared type.
 
 Programs are represented as Eigon-JSON resources — the same format as everything else in the system. They are queryable, validatable, storable, and content-addressable. An optional surface syntax (ESL) provides a human-friendly authoring experience that compiles to Eigon-JSON.
 
 ### 1.1 Design principles
 
-**Programs are expressions, not workflow graphs.** A program is a composition of let-bindings, function applications, case expressions, and collection operations. There is no separate "step" or "binding" indirection — the expression structure directly mirrors the Mini-TT term it represents.
+**Programs are expressions, not workflow graphs.** A program is a composition of let-bindings, function applications, case expressions, and collection operations. There is no separate "step" or "binding" indirection — the expression structure directly mirrors the EigenTT term it represents.
 
 **Components are functions.** A component is a typed function registered in the ontology. Calling a component is function application. No special "step" or "dispatch" mechanism — it's just `Apply(component, arguments)`.
 
@@ -43,11 +43,11 @@ Programs are represented as Eigon-JSON resources — the same format as everythi
 | Reduce | `urn:eigenius:program:Reduce` | Fold: accumulate over a collection |
 | Literal | `urn:eigenius:program:Literal` | Concrete value: string, integer, float, boolean |
 
-### 2.2 Mapping to Mini-TT
+### 2.2 Mapping to EigenTT
 
-Each expression form maps directly to a Mini-TT term:
+Each expression form maps directly to a EigenTT term:
 
-| Expression | Mini-TT term |
+| Expression | EigenTT term |
 |------------|-------------|
 | `Program` | `Exp::Lam(input_param, body)` with Pi type |
 | `Let` | `Exp::Dec(Decl::Def(name, type, value), body)` |
@@ -62,7 +62,7 @@ Each expression form maps directly to a Mini-TT term:
 | `Reduce` | Primitive: `reduce : (Acc → A → Acc) → Acc → List(A) → Acc` |
 | `Literal` | `Exp::EigonResource(value)` |
 
-No translation layer needed — parsing an expression resource directly produces a Mini-TT term.
+No translation layer needed — parsing an expression resource directly produces a EigenTT term.
 
 ---
 
@@ -292,7 +292,7 @@ Fallible components return `Sum(ok : A | err : E)`. The type checker ensures tha
 
 ### 4.3 Type checking
 
-Type checking is bidirectional Mini-TT (as implemented in `nbe/check.rs`):
+Type checking is bidirectional EigenTT (as implemented in `nbe/check.rs`):
 
 1. **Program boundary** — declared input/output types provide the checking context
 2. **Let bindings** — value is checked against declared type; body is checked with extended context
@@ -498,7 +498,7 @@ In this example, `entities` and `summary_text` are independent let-bindings (nei
 
 | Question | Decision | Rationale |
 |----------|----------|-----------|
-| Program representation | Expressions in Eigon-JSON, not workflow graphs | Direct 1:1 mapping to Mini-TT; no translation layer needed |
+| Program representation | Expressions in Eigon-JSON, not workflow graphs | Direct 1:1 mapping to EigenTT; no translation layer needed |
 | Map and Reduce | Language primitives, not components | Enables scheduler to identify parallelism; type checker understands them natively |
 | Parallelism | Automatic from data dependencies + explicit Map | Scheduler infers concurrency from independent let-bindings and Map |
 | Surface syntax | ESL (future); Eigon-JSON is the canonical form | JSON is machine-processable; ESL is for humans |

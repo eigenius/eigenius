@@ -102,7 +102,7 @@ Large language models produce text that reads like knowledge but carries no epis
 A correct derivation and a fluent hallucination are structurally indistinguishable in the output.
 We present Eigenius, an open-source platform that addresses this problem by unifying structured knowledge representation, typed processing pipelines, LLM integration, and reasoning trace capture within a single self-describing knowledge graph.
 Every resource in the system---domain facts, ontology definitions, program specifications, LLM interaction records, and formal proofs---is a typed resource with tracked provenance and queryable epistemic status.
-A dependent type theory (Mini-TT) provides static guarantees for processing pipelines: termination, type safety, and exhaustive error handling.
+A dependent type theory (EigenTT) provides static guarantees for processing pipelines: termination, type safety, and exhaustive error handling.
 Four epistemic categories---\emph{declared}, \emph{observed}, \emph{derived}, and \emph{verified}---are computed from provenance chains and enforced by the type system, making the boundary between verified knowledge and plausible-sounding output a structural property of the system rather than a matter of trust.
 We describe the architecture, report on an implementation covering the kernel, query language, type checker, and persistent storage, and discuss the design's implications for neurosymbolic systems that must maintain epistemic integrity at scale.
 \end{abstract}
@@ -135,7 +135,7 @@ The key technical contributions are:
 \begin{enumerate}
   \item A self-describing data model (\emph{Eigon}) where classes, properties, programs, and reasoning traces are all uniform typed resources;
   \item A query language (\emph{EigenQL}) based on stratified Datalog with aggregation that operates uniformly over domain data and meta-level reasoning traces;
-  \item A program model grounded in Mini-TT~\cite{minitt} dependent type theory providing static guarantees for processing pipelines;
+  \item A program model grounded in EigenTT~\cite{minitt} dependent type theory providing static guarantees for processing pipelines;
   \item A reasoning trace schema where traces mirror the expression tree, serving simultaneously as memoization cache, provenance record, and epistemic status computation substrate.
 \end{enumerate}
 
@@ -234,13 +234,13 @@ For example: ``Which LLM calls consumed more than 500 tokens and used the Anthro
 \section{Typed Program Model}
 \label{sec:programs}
 
-Programs in Eigenius are typed expressions in a functional language grounded in Mini-TT~\cite{minitt}, a minimal dependent type theory that is a direct fragment of CIC---the Calculus of Inductive Constructions underlying Lean~4~\cite{lean4}.
+Programs in Eigenius are typed expressions in a functional language grounded in EigenTT~\cite{minitt}, a minimal dependent type theory that is a direct fragment of CIC---the Calculus of Inductive Constructions underlying Lean~4~\cite{lean4}.
 A program that passes type checking carries formal guarantees: it terminates, is type-safe, and produces output of the declared type.
 
 \subsection{Expression Forms}
 
 Programs are represented as Eigon resources---the same format as everything else.
-Twelve expression forms (Program, Let, Apply, Var, Lambda, Case, Pair, Construct, Project, Map, Reduce, Literal) map directly to Mini-TT terms with no translation layer.
+Twelve expression forms (Program, Let, Apply, Var, Lambda, Case, Pair, Construct, Project, Map, Reduce, Literal) map directly to EigenTT terms with no translation layer.
 Components are typed functions registered in the ontology; calling one is function application.
 Map and Reduce are language primitives (not library functions) so the scheduler has explicit knowledge of parallelism opportunities.
 
@@ -355,7 +355,7 @@ The uniform resource model, Core Ontology (self-describing bootstrap), immutable
 Full EigenQL implementation: lexer, parser, type checker, and evaluator supporting \code{DEFINE} with recursive rules, seminaive fixpoint evaluation, stratified negation, aggregation, \code{GROUP BY}, \code{ORDER BY}, \code{LIMIT}/\code{OFFSET}, \code{DISTINCT}, and dot-path navigation.
 
 \textbf{Phase~2 (Pipelines).}
-Mini-TT dependent type theory ported from the Haskell reference implementation.
+EigenTT dependent type theory ported from the Haskell reference implementation.
 NbE evaluator with bidirectional type checking.
 Program ontology comprising 54 resources.
 End-to-end pipeline: parse, type-check, execute.
@@ -396,7 +396,7 @@ Eigenius's dependent types provide stronger guarantees (termination, partial eva
 
 \textbf{Dependent types in practice.}
 Lean~4~\cite{lean4}, Agda~\cite{agda}, and Idris~\cite{idris} use dependent type theories for formal verification and programming.
-Eigenius uses Mini-TT~\cite{minitt}---a minimal fragment of CIC---not as a general programming language but as the foundation for validating AI processing pipelines against ontology schemas.
+Eigenius uses EigenTT~\cite{minitt}---a minimal fragment of CIC---not as a general programming language but as the foundation for validating AI processing pipelines against ontology schemas.
 
 \textbf{Neurosymbolic architectures.}
 DeepProbLog~\cite{deepproblog}, NeurASP~\cite{neurasp}, and Logic Tensor Networks~\cite{ltn} integrate neural and symbolic computation, typically by embedding differentiable computation within logic programs.
@@ -447,7 +447,7 @@ The architecture provides a concrete path from informal LLM-assisted analysis to
 
 \bibitem[Coquand et~al.(2009)]{minitt}
 T.~Coquand, Y.~Kinoshita, B.~Nordstr{\"o}m, and M.~Takeyama.
-\newblock A simple type-theoretic language: {Mini-TT}.
+\newblock A simple type-theoretic language: {EigenTT}.
 \newblock In \emph{From Semantics to Computer Science: Essays in Honour of Gilles Kahn}, pages 139--164. Cambridge University Press, 2009.
 
 \bibitem[de~Moura and Ullrich(2021)]{lean4}

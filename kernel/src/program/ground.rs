@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Ground type resolution: bridge between Eigon ontology and Mini-TT types.
+//! Ground type resolution: bridge between Eigon ontology and EigenTT types.
 //!
-//! Resolves class IRIs from the layer chain into Mini-TT Sigma types.
+//! Resolves class IRIs from the layer chain into EigenTT Sigma types.
 //! Required properties map to direct Sigma components.
 //! Recommended properties map to Option (Sum(some T | none 1)) components.
 //! Constraints (allows_only, class_types) map to Sum types.
@@ -31,7 +31,7 @@ use crate::ontology::well_known as wk;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-/// Resolve a class IRI to a Mini-TT type.
+/// Resolve a class IRI to a EigenTT type.
 ///
 /// The resulting type is a nested Sigma:
 /// - Required properties: Σ name : T. ...
@@ -157,7 +157,7 @@ fn collect_properties_inner(
     Ok(())
 }
 
-/// Resolve a property's data_type to a Mini-TT Val.
+/// Resolve a property's data_type to a EigenTT Val.
 ///
 /// Handles all data types including resource references (with class_types
 /// and allows_only), arrays, and primitive types.

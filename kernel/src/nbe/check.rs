@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Mini-TT bidirectional type checker.
+//! EigenTT bidirectional type checker.
 //!
-//! Ported from `Main.hs` lines 289-378 in the Mini-TT reference.
+//! Ported from `Main.hs` lines 289-378 in the EigenTT reference.
 //! Uses NbE (eval + readback) for type equality checking.
 
 use crate::layer::Layer;
@@ -152,7 +152,7 @@ impl CheckCtx {
         })
     }
 
-    /// Resolve an EigonClass IRI to a Mini-TT Sigma type, with caching.
+    /// Resolve an EigonClass IRI to a EigenTT Sigma type, with caching.
     fn resolve_class_cached(&mut self, iri: &Iri) -> Result<Val, String> {
         let layer = self.layer.as_ref().ok_or_else(|| {
             format!(
@@ -194,7 +194,7 @@ pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, String> {
             // under a generic binding (gen_val) so the checker sees an
             // opaque variable, not the real recursive value. When the real
             // value is substituted (UpDec below), neutrals that previously
-            // blocked may reduce to something incompatible. Mini-TT
+            // blocked may reduce to something incompatible. EigenTT
             // mitigates this via the guardedness check for codata; data
             // recursion landing safely through `Match` on a sized inductive
             // scrutinee gets termination-by-typing via Phase 11b's sized-
@@ -804,7 +804,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // IdJ([A, C, d, x, y, p]): Martin-Löf J eliminator.
         // Per D18 §6.4, require an explicit motive C and return C(x, y, p).
         // Lean handles this via recursor reduction; we use a direct J-rule
-        // since Mini-TT doesn't have a recursor framework.
+        // since EigenTT doesn't have a recursor framework.
         Exp::IdJ(args) => {
             let [ref a, ref _c, ref d, ref x, ref y, ref p] = **args;
             // A must be a type
@@ -2433,7 +2433,7 @@ mod tests {
     fn guardedness_accepts_non_corecursive_letrec() {
         // letrec f = λx. f(x) — data recursion (not codata), no corecord.
         // Guardedness is a no-op here (data termination is a separate
-        // concern; Mini-TT doesn't check it either).
+        // concern; EigenTT doesn't check it either).
         let body = Exp::Lam(
             Patt::Var("x".to_string()),
             Box::new(Exp::App(

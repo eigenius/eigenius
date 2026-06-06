@@ -3,7 +3,7 @@
     "@id": "urn:eigenius:comorphisms:symbolics_to_intervals:m_id_formula_term",
     "urn:eigenius:core:is_a": ["urn:eigenius:program:Lambda"],
     "urn:eigenius:core:short_name": "m_id_formula_term",
-    "urn:eigenius:core:description": "Identity Mini-TT term on `formulas:FormulaTerm`. Body is a `program:Var` referencing the bound parameter, so this Lambda has type `FormulaTerm → FormulaTerm`. Realises the typed middle `m` of the Symbolics → IntervalArithmetic Comorphism (D32 §6.2): both endpoints speak FormulaTerm natively, so the cross-institution boundary needs no payload translation. The same Lambda will be reused as `m` for every comorphism whose source and target both range over FormulaTerm — Symbolics → DiffEq, Symbolics → JuMP, etc.",
+    "urn:eigenius:core:description": "Identity EigenTT term on `formulas:FormulaTerm`. Body is a `program:Var` referencing the bound parameter, so this Lambda has type `FormulaTerm → FormulaTerm`. Realises the typed middle `m` of the Symbolics → IntervalArithmetic Comorphism (D32 §6.2): both endpoints speak FormulaTerm natively, so the cross-institution boundary needs no payload translation. The same Lambda will be reused as `m` for every comorphism whose source and target both range over FormulaTerm — Symbolics → DiffEq, Symbolics → JuMP, etc.",
     "urn:eigenius:program:parameter": "t",
     "urn:eigenius:program:parameter_type": "urn:eigenius:formulas:FormulaTerm",
     "urn:eigenius:program:body": {

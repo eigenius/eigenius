@@ -174,7 +174,7 @@ pub const COMORPHISM: &str = "urn:eigenius:institution:Comorphism";
 
 /// ExportFormat reference on a Comorphism — the source-side `s`.
 pub const EXPORT_FORMAT: &str = "urn:eigenius:institution:export_format";
-/// Mini-TT Component IRI implementing the comorphism's middle `m: S → T`.
+/// EigenTT Component IRI implementing the comorphism's middle `m: S → T`.
 pub const TRANSFORMATION: &str = "urn:eigenius:institution:transformation";
 /// ImportFormat reference on a Comorphism — the target-side `t`.
 pub const IMPORT_FORMAT: &str = "urn:eigenius:institution:import_format";
@@ -196,7 +196,7 @@ pub const IMPORT_FORMAT_CLASS: &str = "urn:eigenius:institution:ImportFormat";
 pub const FROM_CLASS: &str = "urn:eigenius:institution:from_class";
 /// Target class of an ImportFormat — the resource class it constructs.
 pub const TO_CLASS: &str = "urn:eigenius:institution:to_class";
-/// Mini-TT type IRI of an ExportFormat / ImportFormat payload.
+/// EigenTT type IRI of an ExportFormat / ImportFormat payload.
 pub const PAYLOAD_TYPE: &str = "urn:eigenius:institution:payload_type";
 /// Procedure IRI dispatched to the institution's `extract_typed` /
 /// `reify` handler.

@@ -52,9 +52,9 @@ pub struct MergeComorphismHandle {
     /// The layer where the resource was found. Useful for diagnostics
     /// when a resolution fails at application time.
     pub source_layer: LayerId,
-    /// The IRI of the Mini-TT term realising the universal arrow.
+    /// The IRI of the EigenTT term realising the universal arrow.
     /// Resolves to a resource committed earlier in the chain whose
-    /// `is_a` includes one of the Mini-TT expression classes
+    /// `is_a` includes one of the EigenTT expression classes
     /// (`program:Lambda`, etc.).
     pub transformation: Iri,
 }
@@ -182,7 +182,7 @@ pub fn resolve_merge_comorphism(
         Some(t) => t,
         None => {
             let reason = if resource.get(&merge_transformation_iri).is_some() {
-                "merge_transformation must be an IRI reference to a Mini-TT term"
+                "merge_transformation must be an IRI reference to a EigenTT term"
             } else {
                 "merge_transformation property is required"
             };
@@ -208,11 +208,11 @@ pub fn resolve_merge_comorphism(
 /// Pipeline:
 ///  1. Build an in-memory chain for `handle.source_layer` so the
 ///     parser + evaluator can resolve references through it.
-///  2. Look up the transformation Resource (the Mini-TT term the
+///  2. Look up the transformation Resource (the EigenTT term the
 ///     comorphism points at). The lookup walks the chain — the
 ///     transformation may live at the witness's source layer, an
 ///     ancestor, or any layer reachable from the witness.
-///  3. Parse the Resource into a Mini-TT `Exp` via
+///  3. Parse the Resource into a EigenTT `Exp` via
 ///     [`crate::program::expr::parse_expression`].
 ///  4. Build the expected witness type
 ///     `Π_:A. Π_:A. Π_:Option(A). A` and bidirectionally check the
@@ -269,7 +269,7 @@ pub fn apply_witness_resolution(
         }
     })?;
 
-    // 3. Parse the Resource into a Mini-TT Exp.
+    // 3. Parse the Resource into a EigenTT Exp.
     let exp = crate::program::expr::parse_expression(&transformation_resource, &layer).map_err(
         |reason| MergeError::TransformationParseError {
             transformation: handle.transformation.clone(),
@@ -321,7 +321,7 @@ pub fn apply_witness_resolution(
     //    `λ a. λ b. λ opt. ...` — three curried applications fold the
     //    merged value out. The ancestor lifts to `none A` or `some A r`
     //    on the canonical `option_decl()` so the witness can pattern-
-    //    match it via Mini-TT's standard inductive elimination.
+    //    match it via EigenTT's standard inductive elimination.
     let a_val = Val::EigonClass(class.clone());
     let val_a = Val::ResourceVal(Box::new(branch_a));
     let val_b = Val::ResourceVal(Box::new(branch_b));
@@ -961,7 +961,7 @@ mod tests {
 
     #[test]
     fn apply_witness_resolution_rejects_unparseable_transformation() {
-        // A transformation Resource that ISN'T a Mini-TT term (no
+        // A transformation Resource that ISN'T a EigenTT term (no
         // recognised `is_a`) makes `parse_expression` fail. Surfaces
         // as `TransformationParseError` rather than a panic or
         // generic storage error.

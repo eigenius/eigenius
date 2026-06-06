@@ -2,19 +2,19 @@
 
 *Design document for the Eigenius project — May 2026*
 
-**Status:** Implemented (ESL `merge_comorphism` / `lambda` / `pi` surface live; validator enforces Mini-TT well-typedness)
+**Status:** Implemented (ESL `merge_comorphism` / `lambda` / `pi` surface live; validator enforces EigenTT well-typedness)
 **Builds on:** [D20 — Layer Reconciliation](d20-layer-reconciliation.md), [D36 — Merge Resolution UX](d36-merge-resolution-ux.md), [D7 — ESL Surface Syntax](d7-esl-surface-syntax.md), [D19 — Inductive Types](d19-inductive-types.md).
-**Closes:** D36 §15's note that the witness happy path is gated on an authoring surface for Mini-TT lambdas.
+**Closes:** D36 §15's note that the witness happy path is gated on an authoring surface for EigenTT lambdas.
 
 ---
 
 ## 1. Overview
 
-D20 / D36 give the user a typed witness surface for merge resolution: a `MergeComorphism` resource pins a transformation term of shape `(A, A, Option<A>) -> A`, and the kernel applies it at commit time to produce the merged body. The kernel-side apply path is wired end-to-end and unit-tested. What's missing is the **authoring surface** — there is no ergonomic way to write a witness transformation. The kernel's `MergeComorphism` resource and its embedded Mini-TT lambda term are reachable today only by hand-rolling Eigon-JSON, which is fragile and unverifiable until merge time.
+D20 / D36 give the user a typed witness surface for merge resolution: a `MergeComorphism` resource pins a transformation term of shape `(A, A, Option<A>) -> A`, and the kernel applies it at commit time to produce the merged body. The kernel-side apply path is wired end-to-end and unit-tested. What's missing is the **authoring surface** — there is no ergonomic way to write a witness transformation. The kernel's `MergeComorphism` resource and its embedded EigenTT lambda term are reachable today only by hand-rolling Eigon-JSON, which is fragile and unverifiable until merge time.
 
 D37 closes that gap by adding three ESL surface forms:
 
-1. **`lambda` expression form** — a Mini-TT lambda literal usable inline in any expression position. Carries its parameters' types so the body is type-checkable from the literal alone.
+1. **`lambda` expression form** — a EigenTT lambda literal usable inline in any expression position. Carries its parameters' types so the body is type-checkable from the literal alone.
 2. **Standalone lambda resource declaration** — a top-level `resource ... : urn:eigenius:program:Lambda { ... }` form bound to a stable IRI, so a witness term can be authored, named, queried, and referenced by IRI from multiple sites.
 3. **`merge_comorphism` declaration** — a first-class top-level form analogous to `program`, declaring the comorphism's domain class (`for A`) and either an inline lambda body or a reference to a separately-declared lambda resource. Compiles to the existing `urn:eigenius:core:MergeComorphism` resource shape plus the linked transformation.
 
@@ -106,7 +106,7 @@ lambda a : project:Patient,
     => b : project:Patient
 ```
 
-The literal is a typed Mini-TT lambda. The parameter list gives each binder its type; the body is an expression in the surrounding `lambda` scope. The optional `: <type>` suffix annotates the return type; when omitted, the validator infers it from the body. Allowed in **any expression position** — inside `resource` property assignments, on the right-hand side of `let`, as an argument to `Apply`, anywhere `program` declarations already accept embedded expressions.
+The literal is a typed EigenTT lambda. The parameter list gives each binder its type; the body is an expression in the surrounding `lambda` scope. The optional `: <type>` suffix annotates the return type; when omitted, the validator infers it from the body. Allowed in **any expression position** — inside `resource` property assignments, on the right-hand side of `let`, as an argument to `Apply`, anywhere `program` declarations already accept embedded expressions.
 
 Nesting is left-implicit: a single `lambda` with N parameters compiles to N nested single-parameter `Lambda` resource nodes (matching how the kernel's evaluator unpacks application chains).
 

@@ -31,7 +31,7 @@ The kernel executes programs by walking the expression tree. Pure expressions ev
 │  Kernel (Rust)        │◄─────────│  DAPR    │──────────►│  Orchestrator (Deno)      │
 │                       │──────────►│ sidecars │◄──────────│                           │
 │  • Program evaluation  │           │          │           │  • LLM adapters           │
-│  • Mini-TT type check  │  DAPR     │ • mTLS   │  DAPR     │    (Vercel AI SDK)        │
+│  • EigenTT type check  │  DAPR     │ • mTLS   │  DAPR     │    (Vercel AI SDK)        │
 │  • Trace-based caching │  service  │ • Trace  │  service  │  • Agent framework        │
 │  • Reasoning traces    │  invoke   │ • PubSub │  invoke   │  • MCP server             │
 │  • EigenQL queries     │           │          │           │  • HTTP integrations      │
@@ -111,7 +111,7 @@ Kernel evaluates: Apply(CompleteJson, input, argument)
 
 **Incremental re-evaluation.** Change one component's prompt → only that step re-executes. All other steps use existing traces.
 
-**Partial evaluation connection.** In Mini-TT terms: a trace is a known value. A missing trace is a neutral term (blocked on an unknown). The NbE evaluator naturally handles both — it reduces known values and preserves neutral terms. Trace-based execution is partial evaluation where "known" means "previously computed and traced."
+**Partial evaluation connection.** In EigenTT terms: a trace is a known value. A missing trace is a neutral term (blocked on an unknown). The NbE evaluator naturally handles both — it reduces known values and preserves neutral terms. Trace-based execution is partial evaluation where "known" means "previously computed and traced."
 
 ### 3.4 Trace invalidation
 

@@ -16,7 +16,7 @@
 //!
 //! Programs are composed of expression forms (Let, Apply, Var, Lambda,
 //! Case, Pair, Construct, Project, Map, Reduce, Literal) that map 1:1
-//! to Mini-TT terms. See design doc D3 for the full specification.
+//! to EigenTT terms. See design doc D3 for the full specification.
 //!
 //! Execution is via NbE in IO mode (eval_io module).
 
@@ -78,7 +78,7 @@ mod tests {
         layer
     }
 
-    /// End-to-end: load a program from JSON, parse to Mini-TT, type-check, execute via NbE.
+    /// End-to-end: load a program from JSON, parse to EigenTT, type-check, execute via NbE.
     #[test]
     fn end_to_end_identity_program() -> Result<(), Box<dyn std::error::Error>> {
         let (mut ctx, backend) = bootstrap_with_memory_backend()?;
@@ -93,7 +93,7 @@ mod tests {
         let program_json = include_str!("../../../ontologies/examples/simple-program.json");
         let program = eigon_json::parse_document(program_json).unwrap().remove(0);
 
-        // Parse to Mini-TT terms
+        // Parse to EigenTT terms
         let (term, typ) = parse_program(&program, ctx.head()).unwrap();
 
         // Type-check
@@ -146,7 +146,7 @@ mod tests {
         let program_json = include_str!("../../../ontologies/examples/let-program.json");
         let program = eigon_json::parse_document(program_json).unwrap().remove(0);
 
-        // Parse to Mini-TT
+        // Parse to EigenTT
         let (term, _typ) = parse_program(&program, ctx.head()).unwrap();
         assert!(matches!(term, crate::nbe::term::Exp::Lam(_, _)));
 
@@ -171,7 +171,7 @@ mod tests {
 
     /// End-to-end codata: compile an ESL file that declares a codata
     /// type and a program that constructs a corecord and observes it;
-    /// verify the program parses to Mini-TT and type-checks.
+    /// verify the program parses to EigenTT and type-checks.
     ///
     /// The program is not executed here — execute_program_nbe expects a
     /// ResourceVal input, and codata types for program I/O are a
@@ -223,7 +223,7 @@ mod tests {
             .expect("program in layer")
             .clone();
 
-        // Parse to Mini-TT — exercises parse_corecord + parse_project
+        // Parse to EigenTT — exercises parse_corecord + parse_project
         // paths and resolves ex:Pair to Val::Codata via ground.rs.
         let (term, typ) = parse_program(&program, ctx.head()).unwrap();
         assert!(matches!(term, crate::nbe::term::Exp::Lam(_, _)));

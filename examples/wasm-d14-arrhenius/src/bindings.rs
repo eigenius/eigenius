@@ -131,9 +131,9 @@ pub mod eigenius {
             use super::super::super::_rt;
             /// A CBOR-encoded Eigon resource.
             pub type ResourceData = _rt::Vec<u8>;
-            /// A CBOR-encoded Mini-TT typed value (D14 §11). Distinct from
+            /// A CBOR-encoded EigenTT typed value (D14 §11). Distinct from
             /// `resource-data` even though the wire form is the same: a typed
-            /// value inhabits a Mini-TT type (primitive, tuple, inductive,
+            /// value inhabits a EigenTT type (primitive, tuple, inductive,
             /// codata) and is the payload exchanged between the source-side
             /// extract, the Component middle, and the target-side reify.
             pub type TypedValue = _rt::Vec<u8>;

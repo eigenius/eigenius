@@ -121,7 +121,7 @@ I.rec params C m₁...mₖ (cⱼ args) ↝ mⱼ(args, ih₁, ..., ihₘ)
 where `ih₁, ..., ihₘ` are recursive calls to `I.rec` on the recursive
 sub-arguments of `cⱼ`.
 
-## 4. Mini-TT implementation
+## 4. EigenTT implementation
 
 ### 4.1 New expression forms
 
@@ -474,7 +474,7 @@ because EigonClass never unfolds to expose a negative occurrence.
 - [*Type Checking in Lean 4*, Inductive Types](https://ammkrn.github.io/type_checking_in_lean4/declarations/inductive.html) —
   Lean 4 inductive type specification
 - `docs/design/d11-codata-streams.md` — precedent for adding type forms
-  to the Mini-TT kernel
+  to the EigenTT kernel
 - `docs/design/life-science-requirements.md` §4 (universal claims),
   §10 (fiber morphisms), §16.1 (inductive types)
 - Abel, A. (2010). "MiniAgda: Integrating Sized and Dependent Types" —

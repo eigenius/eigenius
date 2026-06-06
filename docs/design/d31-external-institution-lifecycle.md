@@ -1,7 +1,7 @@
 # External Institution Authoring & Dispatch Lifecycle
 
 **Status:** Implemented v1.1 (Phase 19a.4 carry-over; `mirror create → env build → env create → institution install` lifecycle live in the CLI and orchestrator)
-**Changes from v1 → v1.1:** Multi-input dispatch via Mini-TT Sigma (§6.5); Comorphism evaluation via two boundary `DispatchExternalRequest` calls + in-kernel Mini-TT middle (§6.6); Verdict IRI simplified to `urn:eigenius:invocation:<inv-id>:verdict` (§6.3 — drop the QueryClass-short suffix); substrate handle injection clarified as a napi addon method, not new plumbing.
+**Changes from v1 → v1.1:** Multi-input dispatch via EigenTT Sigma (§6.5); Comorphism evaluation via two boundary `DispatchExternalRequest` calls + in-kernel EigenTT middle (§6.6); Verdict IRI simplified to `urn:eigenius:invocation:<inv-id>:verdict` (§6.3 — drop the QueryClass-short suffix); substrate handle injection clarified as a napi addon method, not new plumbing.
 **Scope:** The end-to-end lifecycle for institutions whose `runtime` is `external` — i.e. dispatched into a substrate-hosted worker (Julia, Lean 4, future Python). Covers mirror generation, registration, and dispatch routing. The pure-evaluation institutions (WASM, in-process Rust) are not in scope; their lifecycle is settled by [D14](d14-institution-realisation.md) and the existing kernel runtime.
 **Related:** [D14 — Institution Realisation](d14-institution-realisation.md) (the institution protocol — typed declarations, trait surface, dispatch model, Verdict, Comorphism), [D26 — Runtime Substrate](d26-runtime-substrate.md) (the language-agnostic substrate for hosting external runtimes), [D29 — Faithful Translation Specification: `eigon-julia-gen`](d29-eigon-julia-mirror-spec.md) (the Julia-specific mirror generator), [D6 — Execution Architecture](d6-execution-architecture.md) (the IO/pure separation between kernel and orchestrator), [D12 — WASM Extensibility](d12-wasm-extensibility.md) (the existing in-kernel WASM institution model).
 
@@ -537,9 +537,9 @@ All three commits are within the same kernel commit transaction. There's no part
 
 The "orchestrator unreachable" path is the only one that doesn't commit a Verdict — by the time the kernel knows the orchestrator is unreachable, it can't dispatch the validator at all, so there's nothing to record. The `Load` request errors out with a transient-ish error code so the caller can retry.
 
-### 6.5 Multi-input dispatch via Mini-TT Sigma
+### 6.5 Multi-input dispatch via EigenTT Sigma
 
-`CallRuntimeMethod` and `OnDemand` QueryClass surfaces take multiple typed inputs (e.g. `compute_selectivity_index(c::Compound, t1::Target, t2::Target)`). In Mini-TT, the input is a Sigma type:
+`CallRuntimeMethod` and `OnDemand` QueryClass surfaces take multiple typed inputs (e.g. `compute_selectivity_index(c::Compound, t1::Target, t2::Target)`). In EigenTT, the input is a Sigma type:
 
 ```
 Σ c:Compound. Σ t1:Target. Σ t2:Target. Unit
@@ -553,7 +553,7 @@ For AutoOnLoad / Decidable QueryClasses, the input is a single resource (the gat
 
 ### 6.6 Comorphism evaluation
 
-D14 §5's `Comorphism(s, m, t)` triple is a cross-institution translation: extract from a source institution via ExportFormat `s`, evaluate the Mini-TT term `m: S → T`, reify into a target institution via ImportFormat `t`. For two external institutions, the kernel orchestrates all three steps:
+D14 §5's `Comorphism(s, m, t)` triple is a cross-institution translation: extract from a source institution via ExportFormat `s`, evaluate the EigenTT term `m: S → T`, reify into a target institution via ImportFormat `t`. For two external institutions, the kernel orchestrates all three steps:
 
 ```
    [kernel commit pipeline]
@@ -566,11 +566,11 @@ D14 §5's `Comorphism(s, m, t)` triple is a cross-institution translation: extra
    [orchestrator → substrate → worker] returns extracted typed payload
             |
             v
-   [kernel] decode result → Mini-TT Val (typed payload of S type)
+   [kernel] decode result → EigenTT Val (typed payload of S type)
             |
             | 2. evaluate `m : S → T` via nbe::eval (in-kernel, pure)
             v
-   [kernel] Mini-TT Val (typed payload of T type)
+   [kernel] EigenTT Val (typed payload of T type)
             |
             v
    [kernel] DispatchExternalRequest { procedure_iri = t.procedure, ... }
@@ -582,7 +582,7 @@ D14 §5's `Comorphism(s, m, t)` triple is a cross-institution translation: extra
    [kernel commit pipeline] commits target resource + RuntimeInvocations
 ```
 
-Two `DispatchExternalRequest` calls per Comorphism traversal — one per institution boundary. The Mini-TT term `m`'s evaluation stays in-kernel (pure, no IO), reusing the existing `nbe::eval` machinery. The orchestrator services only the IO at the boundaries.
+Two `DispatchExternalRequest` calls per Comorphism traversal — one per institution boundary. The EigenTT term `m`'s evaluation stays in-kernel (pure, no IO), reusing the existing `nbe::eval` machinery. The orchestrator services only the IO at the boundaries.
 
 The wire protocol from §6.2 is **already general enough** for this — `procedure_iri` distinguishes `extract_typed` calls from `reify` calls; the kernel knows which to emit at each step. No new RPC, no special "comorphism dispatch" verb.
 
@@ -697,10 +697,10 @@ In production deployments where K8s/ACA owns image lifecycle, the substrate is t
 
 The four open questions raised in the v1 draft are resolved in this revision:
 
-- ~~**Multi-input dispatch.**~~ → Resolved (§6.5). Mini-TT Sigma types in the kernel; lowered to a list of Eigon resources at the boundary. `DispatchExternalRequest.input_resource_cbors` is a list from day one. AutoOnLoad/Decidable are single-element list; OnDemand and CallRuntimeMethod fill multiple components.
+- ~~**Multi-input dispatch.**~~ → Resolved (§6.5). EigenTT Sigma types in the kernel; lowered to a list of Eigon resources at the boundary. `DispatchExternalRequest.input_resource_cbors` is a list from day one. AutoOnLoad/Decidable are single-element list; OnDemand and CallRuntimeMethod fill multiple components.
 - ~~**Verdict resource IRI scheme.**~~ → Resolved (§6.3). `urn:eigenius:invocation:<inv-id>:verdict` is sufficient; the suffix-with-QueryClass-short was unmotivated. Queryability is property-based via `verdict_query_class`, `verdict_subject`, `runtime_invocation`, `ctor_name`.
 - ~~**Substrate handle injection.**~~ → Resolved. The substrate is owned by the existing `runtime-substrate-native` napi addon; the new dispatch surface is an additional addon method (`addon.dispatchExternal(...)`). The TS handler in `orchestration/src/components/` calls it. No new injection plumbing.
-- ~~**Comorphism dispatch.**~~ → Resolved (§6.6). Kernel orchestrates the three-step `extract → m → reify` traversal: two `DispatchExternalRequest` calls per traversal (one per institution boundary), Mini-TT term evaluated in-kernel between. The wire protocol is general enough; no new RPC.
+- ~~**Comorphism dispatch.**~~ → Resolved (§6.6). Kernel orchestrates the three-step `extract → m → reify` traversal: two `DispatchExternalRequest` calls per traversal (one per institution boundary), EigenTT term evaluated in-kernel between. The wire protocol is general enough; no new RPC.
 
 Open items that remain (not blocking v1):
 
