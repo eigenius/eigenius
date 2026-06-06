@@ -319,13 +319,16 @@ impl Validator {
         // (Class / DataType / InductiveType / CodataType). Without this
         // check, malformed axiom statements could be persisted and only
         // surface when decoded at axiom registration.
-        if ctor_name == "ConstRef"
-            && inductive_type
-                .id()
-                .map(|i| i.as_str() == EIGENTT_TYPE_EXPR_IRI)
-                .unwrap_or(false)
+        if inductive_type
+            .id()
+            .map(|i| i.as_str() == EIGENTT_TYPE_EXPR_IRI)
+            .unwrap_or(false)
         {
-            self.check_eigentt_const_ref(&args_array, &path, res_id, out);
+            match ctor_name {
+                "ConstRef" => self.check_eigentt_const_ref(&args_array, &path, res_id, out),
+                "CtorApp" => self.check_eigentt_ctor_app(&args_array, &path, res_id, out),
+                _ => {}
+            }
         }
     }
 
@@ -394,6 +397,116 @@ impl Validator {
                     "{path}.args[0]: ConstRef IRI `{iri_val}` resolves to a resource whose \
                      classes {found:?} include none of Class / DataType / InductiveType / \
                      CodataType (the type-former classes EigenTTType.ConstRef admits)"
+                ),
+            });
+        }
+    }
+
+    /// EigenTTType `CtorApp` resolution check (D48 / eigenius#71).
+    /// Verifies (a) the `decl_iri` resolves to an `InductiveType` in
+    /// the chain, and (b) the named ctor exists on it. Caller has
+    /// already verified `args[0]` (decl_iri) and `args[1]` (ctor_name)
+    /// are strings per the ctor schema.
+    fn check_eigentt_ctor_app(
+        &self,
+        args_array: &[serde_json::Value],
+        path: &str,
+        res_id: &Option<Iri>,
+        out: &mut Vec<ValidationError>,
+    ) {
+        let decl_iri_str = match args_array.first().and_then(serde_json::Value::as_str) {
+            Some(s) => s,
+            None => return,
+        };
+        let ctor_name = match args_array.get(1).and_then(serde_json::Value::as_str) {
+            Some(s) => s,
+            None => return,
+        };
+        let decl_iri = match Iri::parse(decl_iri_str) {
+            Ok(i) => i,
+            Err(e) => {
+                out.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: None,
+                    rule: ValidationRule::UnresolvedClassReference,
+                    message: format!(
+                        "{path}.args[0]: CtorApp decl IRI `{decl_iri_str}` \
+                         is not a well-formed IRI: {e}"
+                    ),
+                });
+                return;
+            }
+        };
+        let referent = match self.layer.resolve(&decl_iri) {
+            Some(r) => r,
+            None => {
+                out.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: None,
+                    rule: ValidationRule::UnresolvedClassReference,
+                    message: format!(
+                        "{path}.args[0]: CtorApp references unresolved inductive IRI `{decl_iri}`"
+                    ),
+                });
+                return;
+            }
+        };
+        if !referent.is_instance_of(&iri(wk::INDUCTIVE_TYPE)) {
+            out.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: None,
+                rule: ValidationRule::UnresolvedClassReference,
+                message: format!(
+                    "{path}.args[0]: CtorApp IRI `{decl_iri}` is not an InductiveType \
+                     ({:?})",
+                    referent
+                        .is_a()
+                        .iter()
+                        .map(|i| i.as_str().to_string())
+                        .collect::<Vec<_>>()
+                ),
+            });
+            return;
+        }
+        // Look up the ctor by name on the resolved inductive's `ctors`
+        // array. The array contains Embedded resources whose
+        // `core:ctor_name` property holds the ctor name.
+        let ctors_value = match referent.get(&iri(wk::CTORS)) {
+            Some(v) => v,
+            None => {
+                out.push(ValidationError {
+                    resource_id: res_id.clone(),
+                    property: None,
+                    rule: ValidationRule::UnresolvedClassReference,
+                    message: format!(
+                        "{path}: CtorApp target inductive `{decl_iri}` has no `ctors` array"
+                    ),
+                });
+                return;
+            }
+        };
+        let ctor_arr = match ctors_value {
+            Value::Array(a) => a,
+            _ => return,
+        };
+        let names: Vec<String> = ctor_arr
+            .iter()
+            .filter_map(|c| match c {
+                Value::Embedded(r) => r
+                    .get(&iri(wk::CTOR_NAME))
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_string()),
+                _ => None,
+            })
+            .collect();
+        if !names.iter().any(|n| n == ctor_name) {
+            out.push(ValidationError {
+                resource_id: res_id.clone(),
+                property: None,
+                rule: ValidationRule::UnresolvedClassReference,
+                message: format!(
+                    "{path}.args[1]: CtorApp references unknown ctor `{ctor_name}` on \
+                     inductive `{decl_iri}`; available ctors: {names:?}"
                 ),
             });
         }
@@ -1627,6 +1740,176 @@ mod tests {
             bad_errs.len(),
             1,
             "expected one error naming the bad nested IRI; got {errors:?}"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // D48 / eigenius#71 — CtorApp commit-time validation
+    // ──────────────────────────────────────────────────────────────────
+
+    /// Build a chain that has eigentt-type-fragment + a `core:Nat`-like
+    /// InductiveType in scope so CtorApp validation has a target.
+    fn build_eigentt_with_nat() -> Arc<Layer> {
+        let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let mut top = LayerBuilder::new("eigentt_with_nat", Some(head));
+
+        // A minimal Nat-like inductive declaration in the test
+        // namespace. The chain's existing InductiveType machinery
+        // validates the shape on commit.
+        let zero_ctor = make_resource(
+            "urn:eigenius:test:Nat:zero",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_CTOR))]),
+                ),
+                (wk::CTOR_NAME, Value::String("zero".into())),
+                (wk::ARG_TYPES, Value::Array(Vec::new())),
+            ],
+        );
+        let succ_ctor = make_resource(
+            "urn:eigenius:test:Nat:succ",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_CTOR))]),
+                ),
+                (wk::CTOR_NAME, Value::String("succ".into())),
+                (
+                    wk::ARG_TYPES,
+                    Value::Array(vec![Value::Embedded(Box::new(make_resource(
+                        "urn:eigenius:test:Nat:succ:arg0",
+                        vec![
+                            (
+                                wk::IS_A,
+                                Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_ARG_TYPE))]),
+                            ),
+                            (wk::TYPE_NAME, Value::String("urn:eigenius:test:Nat".into())),
+                        ],
+                    )))]),
+                ),
+            ],
+        );
+        let nat = make_resource(
+            "urn:eigenius:test:Nat",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_TYPE))]),
+                ),
+                (wk::SHORT_NAME, Value::String("Nat".into())),
+                (
+                    wk::CTORS,
+                    Value::Array(vec![
+                        Value::Embedded(Box::new(zero_ctor)),
+                        Value::Embedded(Box::new(succ_ctor)),
+                    ]),
+                ),
+            ],
+        );
+        let prop = make_resource(
+            "urn:eigenius:test:eigentt_value",
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                ),
+                (wk::SHORT_NAME, Value::String("eigentt_value".into())),
+                (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::INDUCTIVE))),
+                (
+                    wk::CLASS_TYPES,
+                    Value::Array(vec![Value::ResourceRef(iri(
+                        "urn:eigenius:eigentt:TypeExpr",
+                    ))]),
+                ),
+            ],
+        );
+        top.add_resource(nat).unwrap();
+        top.add_resource(prop).unwrap();
+        Arc::new(top.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    #[test]
+    fn eigentt_ctor_app_to_existing_ctor_validates() {
+        let chain = build_eigentt_with_nat();
+        let mut top = LayerBuilder::new("ctor_app_ok", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:ok_ctor_app",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "CtorApp",
+                    "args": ["urn:eigenius:test:Nat", "zero"]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let ctor_errs: Vec<_> = errors
+            .iter()
+            .filter(|e| e.message.contains("CtorApp"))
+            .collect();
+        assert!(
+            ctor_errs.is_empty(),
+            "valid CtorApp(Nat, zero) should validate cleanly; got {ctor_errs:?}"
+        );
+    }
+
+    #[test]
+    fn eigentt_ctor_app_to_unknown_ctor_rejected() {
+        let chain = build_eigentt_with_nat();
+        let mut top = LayerBuilder::new("ctor_app_bad_ctor", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:bad_ctor_app",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "CtorApp",
+                    "args": ["urn:eigenius:test:Nat", "nonexistent_ctor"]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let ctor_errs: Vec<_> = errors
+            .iter()
+            .filter(|e| e.message.contains("unknown ctor `nonexistent_ctor`"))
+            .collect();
+        assert_eq!(
+            ctor_errs.len(),
+            1,
+            "expected one error naming unknown ctor; got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn eigentt_ctor_app_to_non_inductive_rejected() {
+        // CtorApp pointing at urn:eigenius:core:Class — that's a Class,
+        // not an InductiveType. Rejected.
+        let chain = build_eigentt_with_nat();
+        let mut top = LayerBuilder::new("ctor_app_wrong_kind", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:wrong_kind",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "CtorApp",
+                    "args": ["urn:eigenius:core:Class", "anything"]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let ctor_errs: Vec<_> = errors
+            .iter()
+            .filter(|e| e.message.contains("is not an InductiveType"))
+            .collect();
+        assert!(
+            !ctor_errs.is_empty(),
+            "expected error about non-InductiveType target; got {errors:?}"
         );
     }
 }

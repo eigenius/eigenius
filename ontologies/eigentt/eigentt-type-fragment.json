@@ -142,6 +142,76 @@
             "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
           }
         ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "UnitVal",
+        "urn:eigenius:core:arg_types": []
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "LitInt",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "value",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:integer"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "LitString",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "value",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "LitFloat",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "value",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:float"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "CtorApp",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "decl_iri",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "ctor_name",
+            "urn:eigenius:core:type_name": "urn:eigenius:core:string"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Pair",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "fst",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "snd",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          }
+        ]
       }
     ]
   },

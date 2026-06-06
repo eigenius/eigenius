@@ -2,7 +2,7 @@
 
 *Design document for the Eigenius project — June 2026*
 
-**Status:** Draft
+**Status:** Implemented at the kernel + chain-mirror level (Phases A–I + eigenius#71). ESL surface (Phase J) deferred to [eigenius#72](https://github.com/eigenius/eigenius/issues/72) — life-science consumers route through JSON chain commits, not ESL source, so the deferral doesn't block them.
 **Tracking issue:** [eigenius#22](https://github.com/eigenius/eigenius/issues/22)
 **Depends on:** D19 (Inductive Types), D46 (Prop universe + singleton-elim), D47 (chain-mirrored type fragment)
 **Unblocks:** Length-indexed lists (`Vec n`), bounded naturals (`Fin n`), McBride-style dependent pattern matching, full D46 §7 Case B singleton-elim ("ctor arg appears in conclusion"), life-science fiber morphisms with static shape preservation
@@ -337,6 +337,8 @@ Estimated effort: **4–6 weeks** for a single experienced kernel engineer. Larg
 
 **Exit criterion:** workspace builds; all existing tests pass with `indices: vec![]` everywhere.
 
+**Status on landing:** complete. ~169 call sites swept; readback flattens `params ++ indices` into the single args slot; stub-Arc pattern preserved (eval skips arity check when `decl.indices.is_empty()`).
+
 ### 5.2 Phase B — Ctor type elaboration (~3 days)
 
 - Extend the ctor-typ elaborator (currently in [program/ground.rs decode_ctors](../../kernel/src/program/ground.rs)) to recognise index expressions in the ctor's terminal application.
@@ -344,6 +346,8 @@ Estimated effort: **4–6 weeks** for a single experienced kernel engineer. Larg
 - Reject ctor types whose conclusion's argument count doesn't equal `params.len() + indices.len()`.
 
 **Exit criterion:** can declare `Vec A : Nat → Set` and the ctors `nil`/`cons` type-check at declaration time.
+
+**Status on landing:** complete. `validate_indexed_ctor_conclusions` + `ctx_with_param_and_arg_binders` in [kernel/src/nbe/check.rs](../../kernel/src/nbe/check.rs) wired into `check_type`'s `Exp::Inductive` arm; eval splits `params ++ indices` for indexed decls (kept stub-Arc pattern intact for non-indexed). 6 tests covering well-formed `SimpleVec`, arg-count mismatch, index-type mismatch, non-indexed backward-compat.
 
 ### 5.3 Phase C — First-order unifier (~1.5 weeks)
 
@@ -353,6 +357,8 @@ Estimated effort: **4–6 weeks** for a single experienced kernel engineer. Larg
 
 **Exit criterion:** unifier tests pass; can solve `Vec A (succ k) = Vec A ?n` ⇒ `?n := succ k`.
 
+**Status on landing:** complete. `Neut::Meta(MetaId, Vec<Val>)` variant in [nbe/val.rs](../../kernel/src/nbe/val.rs); new module [nbe/unify.rs](../../kernel/src/nbe/unify.rs) with `MetaCtx`, `unify`, `zonk`, occurs check, pattern-spine restriction. v1 only solves bare metas (empty spine) — lambda construction for non-empty spines deferred until a real consumer needs it. 17 tests.
+
 ### 5.4 Phase D — Constructor checking with index unification (~1 week)
 
 - Extend the constructor checking path so applying `cons k x xs` against `Vec A n` runs the unifier and checks the resulting substitution.
@@ -361,12 +367,16 @@ Estimated effort: **4–6 weeks** for a single experienced kernel engineer. Larg
 
 **Exit criterion:** can construct typed Vec values; index mismatches caught at check time.
 
+**Status on landing:** complete. `check_inductive_ctor_args` signature gained `expected_indices: &[Val]`; after `subtype_of_with_hyps` checks params, the new path runs `unify` on each (actual-index, expected-index) pair via a fresh per-call `MetaCtx`. 4 ctor-checking tests + Phase F's coherence tests exercise the same path indirectly.
+
 ### 5.5 Phase E — `derive_minor_type` extension (~3 days)
 
 - Modify [nbe/recursor.rs:derive_minor_type](../../kernel/src/nbe/recursor.rs) to apply the motive at the ctor-specific index expressions, not just the unit motive application.
 - Update tests in `recursor.rs::tests` to cover indexed cases.
 
 **Exit criterion:** the derived minor types for `Vec`'s recursor are correct.
+
+**Status on landing:** complete. `derive_minor_type` extracts conclusion-indices from `current` (residual after Π-peel) and applies the motive at them before the ctor app — `motive idx_1 ... idx_m (c args)` instead of pre-D48's `motive (c args)`. IH binders similarly: each recursive arg of type `D(params)(arg_idx_exprs)` yields IH type `motive arg_idx_1 ... arg_idx_m arg`. 3 tests including `SimpleVec` cons/nil + Nat backward-compat.
 
 ### 5.6 Phase F — Pattern matching with dependent motive (~1 week)
 
@@ -376,12 +386,16 @@ Estimated effort: **4–6 weeks** for a single experienced kernel engineer. Larg
 
 **Exit criterion:** dependent pattern matching works on `Vec` and `Eq`.
 
+**Status on landing:** partial. `check_match` now captures the scrutinee's indices and runs a per-arm **index-coherence check** — if the ctor's conclusion indices fail to unify with the scrutinee's indices, the arm is rejected as unreachable with a structured error pointing the user at `Exp::InductiveRec` with `returning T`. Full **motive-refinement** (rewriting `expected` under index-equation substitutions inside the arm body) is deferred — the constant-motive path already works for the common case (`expected` doesn't depend on scrutinee indices), and the user can hand-write the explicit motive via `Exp::InductiveRec` when refinement is genuinely needed. 3 Phase F tests + the singleton-elim suite exercise the coherence path.
+
 ### 5.7 Phase G — Iota + Match elaboration update (~2 days)
 
 - Verify iota reduction works through indexed recursors (mostly unchanged from D19; the indices are already encoded in the ctor's typ).
 - Update `Match` elaboration tests.
 
 **Exit criterion:** end-to-end `match` programs over indexed types compute correctly.
+
+**Status on landing:** complete. Iota reduction works on indexed inductives without modification — indices were already encoded in the ctor's typ (handled by Phase B's eval split) and minor sequencing is index-agnostic. 2 end-to-end tests in [nbe/eval.rs](../../kernel/src/nbe/eval.rs) (`SimpleVec` nil + cons under `InductiveRec`).
 
 ### 5.8 Phase H — Singleton-elim Case B completion (~2 days)
 
@@ -391,6 +405,8 @@ Estimated effort: **4–6 weeks** for a single experienced kernel engineer. Larg
 
 **Exit criterion:** D46 §7's algorithm matches the doc text without the "EigenTT lacks indices" caveat.
 
+**Status on landing:** complete. `ctor_args_pass_singleton_b` (renamed from `ctor_args_all_propositional`) accepts `num_indices`, extracts conclusion indices, and admits non-Prop args that *appear in the indices*. `exp_mentions_var` + `patt_binds` helpers handle binder shadowing. The canonical `Eq A x y` admits large elim via the proper algorithm; 3 tests verify Eq admitted, BadIxProp (non-Prop arg not in conclusion) rejected, non-indexed backward-compat.
+
 ### 5.9 Phase I — D47 chain mirror update (~3 days)
 
 - Update D47's decoder to handle the new `Val::InductiveType { indices }` field.
@@ -399,16 +415,27 @@ Estimated effort: **4–6 weeks** for a single experienced kernel engineer. Larg
 
 **Exit criterion:** D47 codec round-trips an indexed inductive value.
 
+**Status on landing:** complete (type-level), plus the term-level extension landed under [eigenius#71](https://github.com/eigenius/eigenius/issues/71). The codec round-trips:
+- *Type-level indices* (e.g. `IxClassFamily SomeClass OtherClass`) via the existing App-curried `Exp::InductiveType` ↔ `ConstRef + App` flow.
+- *Term-level indices* (e.g. `AssayShape (succ zero)`) via new `eigentt:TypeExpr` ctors: `UnitVal`, `Pair`, `CtorApp`, plus forward-declared `LitInt`/`LitString`/`LitFloat` (decoder errors until EigenTT's `Exp` adds literal variants).
+- Commit-time validator extension `check_eigentt_ctor_app` verifies `CtorApp`'s decl IRI resolves to an `InductiveType` and the named ctor exists.
+
+9 new tests, including the **`AssayShape (succ zero)` end-to-end round-trip** that unblocks life-science case 3.
+
 ### 5.10 Phase J — ESL surface (~3 days)
 
 - Extend the `data` declaration parser to accept `: I → ... → Sort` index telescope syntax.
 - ESL Pratt syntax for `Vec A 3`, dependent pattern matching with `returning T` annotation.
+
+**Status on landing:** deferred to [eigenius#72](https://github.com/eigenius/eigenius/issues/72). The "~3 days" estimate was optimistic — clean indexed-type ESL needs index-telescope parsing, ctor result-type annotations, *and* a general expression parser for index values in ctor conclusions (~1 week total). Critically, **D48's primary near-term consumers don't need ESL** — life-science institutions commit indexed-shape resources as JSON via the codec (now complete), D39 v2 reads/writes via the codec, Lean institution imports go through Lean's own elaborator. Pick up when an ESL-source consumer arrives.
 
 ### 5.11 Phase K — Validator + documentation (~2 days)
 
 - D32-style chain validator handles the extended `InductiveType` declarations naturally (the new `indices` property declarations follow the existing pattern).
 - Update implementation-plan.md to reference D48 as a new phase.
 - Mark D48 status: Implemented.
+
+**Status on landing:** complete. Validator's `check_eigentt_ctor_app` (under #71) covers the term-level CtorApp resolution check; the existing chain-inductive walker handles indexed `InductiveType` shapes naturally via D32's machinery. This doc now reflects what landed; `implementation-plan.md` update happens in the same commit pass as the doc finalisation.
 
 ---
 

@@ -138,6 +138,28 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
             }
             Ok(current)
         }
+
+        // ── D48 / eigenius#71 — term-level value encoding ─────────
+        // Lets indexed inductive applications with concrete index values
+        // (Vec Nat 3, AssayShape 3, etc.) round-trip through the codec.
+        Exp::Unit => Ok(ctor("UnitVal", vec![])),
+        Exp::Pair(a, b) => Ok(ctor(
+            "Pair",
+            vec![encode_type_json(a)?, encode_type_json(b)?],
+        )),
+        Exp::InductiveCtor(decl, ctor_name, args) => {
+            // Encode `D.c(a1, ..., aN)` as
+            //   App(App(...App(CtorApp(D.iri, c), a1)..., a_{N-1}), aN)
+            let mut current = ctor("CtorApp", vec![json!(decl.name.clone()), json!(ctor_name)]);
+            for arg in args {
+                current = ctor("App", vec![current, encode_type_json(arg)?]);
+            }
+            Ok(current)
+        }
+        // Note: Exp::Con (anonymous Sum constructor) is intentionally
+        // not yet encoded — chain-resident axioms reference declared
+        // inductives via Exp::InductiveCtor; anonymous Sum ctors don't
+        // arise in axiom statements today. Add when a consumer needs it.
         other => Err(EncodeError::NotATypeLevelExp(format!("{other:?}"))),
     }
 }
@@ -195,6 +217,13 @@ pub enum DecodeError {
     /// An `App` was decoded with a head that doesn't admit applications
     /// (e.g., a fully-applied EigonClass that takes no arguments).
     AppOnNonParametric(String),
+    /// A `CtorApp` referenced a ctor name that doesn't exist on the
+    /// resolved inductive type. (D48 / eigenius#71)
+    CtorAppUnknownCtor {
+        decl_iri: Iri,
+        ctor_name: String,
+        available: Vec<String>,
+    },
 }
 
 impl std::fmt::Display for DecodeError {
@@ -228,6 +257,15 @@ impl std::fmt::Display for DecodeError {
             DecodeError::AppOnNonParametric(s) => {
                 write!(f, "App spine applied to non-parametric head: {s}")
             }
+            DecodeError::CtorAppUnknownCtor {
+                decl_iri,
+                ctor_name,
+                available,
+            } => write!(
+                f,
+                "CtorApp references unknown ctor `{ctor_name}` on inductive {decl_iri}; \
+                 available ctors: {available:?}"
+            ),
         }
     }
 }
@@ -331,8 +369,9 @@ fn decode_type_json(v: &serde_json::Value, layer: &Layer) -> Result<Exp, DecodeE
             expect_arg_count("App", 2, args)?;
             let head = decode_type_json(&args[0], layer)?;
             let arg = decode_type_json(&args[1], layer)?;
-            // Spine folding: if head is an InductiveType/CodataType, append
-            // arg to its args list. Otherwise produce a plain App.
+            // Spine folding: if head is an InductiveType / CodataType /
+            // InductiveCtor, append arg to its args list. Otherwise
+            // produce a plain App.
             match head {
                 Exp::InductiveType(decl, mut existing) => {
                     existing.push(arg);
@@ -341,6 +380,14 @@ fn decode_type_json(v: &serde_json::Value, layer: &Layer) -> Result<Exp, DecodeE
                 Exp::CodataType(decl, mut existing) => {
                     existing.push(arg);
                     Ok(Exp::CodataType(decl, existing))
+                }
+                Exp::InductiveCtor(decl, name, mut existing) => {
+                    // D48 / eigenius#71: CtorApp via App-currying. The
+                    // bottom of the App spine is `CtorApp(D, c)`
+                    // (decoded to `Exp::InductiveCtor(decl, c, [])`);
+                    // each enclosing App appends an arg.
+                    existing.push(arg);
+                    Ok(Exp::InductiveCtor(decl, name, existing))
                 }
                 // EigonClass / EigonPrimitive are nullary type-formers;
                 // applying them via App is malformed input.
@@ -358,8 +405,90 @@ fn decode_type_json(v: &serde_json::Value, layer: &Layer) -> Result<Exp, DecodeE
             })?;
             resolve_const_ref(iri, layer)
         }
+
+        // ── D48 / eigenius#71 — term-level value decoding ─────────
+        "UnitVal" => {
+            expect_arg_count("UnitVal", 0, args)?;
+            Ok(Exp::Unit)
+        }
+        "Pair" => {
+            expect_arg_count("Pair", 2, args)?;
+            let fst = decode_type_json(&args[0], layer)?;
+            let snd = decode_type_json(&args[1], layer)?;
+            Ok(Exp::Pair(Box::new(fst), Box::new(snd)))
+        }
+        "CtorApp" => {
+            expect_arg_count("CtorApp", 2, args)?;
+            let decl_iri_str = arg_string("CtorApp", 0, &args[0])?;
+            let ctor_name = arg_string("CtorApp", 1, &args[1])?;
+            let decl_iri = Iri::parse(&decl_iri_str).map_err(|e| {
+                wrong_shape(
+                    "CtorApp",
+                    0,
+                    &format!("invalid decl IRI `{decl_iri_str}`: {e}"),
+                )
+            })?;
+            // Resolve the decl IRI through the layer chain, then
+            // verify the named ctor exists on it. Multi-arg invocations
+            // are layered via App on the decode side (see the "App" arm
+            // above, which folds args into Exp::InductiveCtor's args
+            // vec); CtorApp produces the nullary base.
+            let decl = resolve_inductive_decl_for_ctor(&decl_iri, &ctor_name, layer)?;
+            Ok(Exp::InductiveCtor(decl, ctor_name, Vec::new()))
+        }
+        lit @ ("LitInt" | "LitString" | "LitFloat") => {
+            // Ontology declares these for forward compatibility with
+            // FormulaTerm-style numerical institutions, but EigenTT's
+            // Exp doesn't yet have literal variants. Decoding them
+            // would require AST additions to Exp; punt until a real
+            // consumer of literals lands in the kernel.
+            Err(DecodeError::UnknownCtor(format!(
+                "{lit} literal decoding requires EigenTT Exp to add literal variants — not yet implemented"
+            )))
+        }
+
         other => Err(DecodeError::UnknownCtor(other.to_string())),
     }
+}
+
+fn resolve_inductive_decl_for_ctor(
+    decl_iri: &Iri,
+    ctor_name: &str,
+    layer: &Layer,
+) -> Result<std::sync::Arc<crate::nbe::term::InductiveDecl>, DecodeError> {
+    let resource = layer
+        .resolve(decl_iri)
+        .ok_or_else(|| DecodeError::UnresolvedConstRef(decl_iri.clone()))?;
+    use crate::ontology::well_known as wk;
+    if !resource.is_instance_of(&wk::iri(wk::INDUCTIVE_TYPE)) {
+        return Err(DecodeError::ConstRefWrongClass {
+            iri: decl_iri.clone(),
+            found_classes: resource.is_a().to_vec(),
+        });
+    }
+    let val = crate::program::ground::resolve_inductive_type(decl_iri, &resource, layer).map_err(
+        |e| DecodeError::ConstRefWrongClass {
+            iri: decl_iri.clone(),
+            found_classes: vec![wk::iri(&format!("resolution error: {e}"))],
+        },
+    )?;
+    let decl = match val {
+        crate::nbe::val::Val::InductiveType { decl, .. } => decl,
+        other => {
+            return Err(DecodeError::ConstRefWrongClass {
+                iri: decl_iri.clone(),
+                found_classes: vec![wk::iri(&format!("unexpected resolution: {other:?}"))],
+            });
+        }
+    };
+    if !decl.ctors.iter().any(|c| c.name == ctor_name) {
+        return Err(DecodeError::CtorAppUnknownCtor {
+            decl_iri: decl_iri.clone(),
+            ctor_name: ctor_name.to_string(),
+            available: decl.ctors.iter().map(|c| c.name.clone()).collect(),
+        });
+    }
+    Ok(decl)
 }
 
 fn resolve_const_ref(iri: Iri, layer: &Layer) -> Result<Exp, DecodeError> {
@@ -783,5 +912,145 @@ mod tests {
         let const_list = ctor_obj("ConstRef", vec![json!("urn:_:List")]);
         let expected = ctor_obj("App", vec![const_list, const_nat]);
         assert_eq!(v, Value::Json(expected));
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // D48 / eigenius#71 — term-level encoding (UnitVal, Pair, CtorApp)
+    // ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn encodes_unit_value() {
+        let v = encode_type(&Exp::Unit).unwrap();
+        assert_eq!(v, Value::Json(ctor_obj("UnitVal", vec![])));
+    }
+
+    #[test]
+    fn encodes_pair_value() {
+        let pair = Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::Unit));
+        let v = encode_type(&pair).unwrap();
+        let unit = ctor_obj("UnitVal", vec![]);
+        assert_eq!(v, Value::Json(ctor_obj("Pair", vec![unit.clone(), unit])));
+    }
+
+    #[test]
+    fn encodes_nullary_inductive_ctor() {
+        // Nat.zero — encoded as CtorApp(urn:_:Nat, zero) with no args.
+        let nat_decl = Arc::new(InductiveDecl {
+            name: "urn:_:Nat".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: vec![InductiveCtorDecl {
+                name: "zero".to_string(),
+                typ: Exp::Sort(1),
+            }],
+        });
+        let zero = Exp::InductiveCtor(nat_decl, "zero".to_string(), Vec::new());
+        let v = encode_type(&zero).unwrap();
+        assert_eq!(
+            v,
+            Value::Json(ctor_obj("CtorApp", vec![json!("urn:_:Nat"), json!("zero")]))
+        );
+    }
+
+    #[test]
+    fn encodes_unary_inductive_ctor_via_app_currying() {
+        // Nat.succ(x) — encoded as App(CtorApp(urn:_:Nat, succ), Var(x))
+        let nat_decl = Arc::new(InductiveDecl {
+            name: "urn:_:Nat".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: vec![InductiveCtorDecl {
+                name: "succ".to_string(),
+                typ: Exp::Sort(1),
+            }],
+        });
+        let succ_x = Exp::InductiveCtor(
+            nat_decl,
+            "succ".to_string(),
+            vec![Exp::Var("x".to_string())],
+        );
+        let v = encode_type(&succ_x).unwrap();
+        let ctor_app = ctor_obj("CtorApp", vec![json!("urn:_:Nat"), json!("succ")]);
+        let var_x = ctor_obj("Var", vec![json!("x")]);
+        assert_eq!(v, Value::Json(ctor_obj("App", vec![ctor_app, var_x])));
+    }
+
+    #[test]
+    fn unit_value_round_trips_via_decode() {
+        let v = encode_type(&Exp::Unit).unwrap();
+        let decoded = decode_type(&v, &empty_layer()).unwrap();
+        assert_eq!(decoded, Exp::Unit);
+    }
+
+    #[test]
+    fn pair_value_round_trips_via_decode() {
+        let pair = Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::Unit));
+        let v = encode_type(&pair).unwrap();
+        let decoded = decode_type(&v, &empty_layer()).unwrap();
+        assert_eq!(decoded, pair);
+    }
+
+    #[test]
+    fn encodes_indexed_inductive_with_ctor_app_index() {
+        // The motivating "AssayShape 3"-style case (D48 / #71 closeout):
+        // an indexed inductive whose index is a *value* built from
+        // a ctor application (e.g., `succ (succ (succ zero))`).
+        //
+        // Build:
+        //   - Nat-like inductive with zero/succ ctors
+        //   - AssayShape : Nat → Set indexed inductive
+        //   - The value `AssayShape (succ zero)` as an Exp
+        //
+        // The encoder must produce a nested App spine:
+        //   App(ConstRef(AssayShape), App(CtorApp(Nat, succ), CtorApp(Nat, zero)))
+        let nat_decl = Arc::new(InductiveDecl {
+            name: "urn:_:Nat".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: vec![
+                InductiveCtorDecl {
+                    name: "zero".to_string(),
+                    typ: Exp::Sort(1),
+                },
+                InductiveCtorDecl {
+                    name: "succ".to_string(),
+                    typ: Exp::Sort(1),
+                },
+            ],
+        });
+        let assay_decl = Arc::new(InductiveDecl {
+            name: "urn:_:AssayShape".to_string(),
+            params: Vec::new(),
+            indices: vec![(
+                Patt::Var("n".to_string()),
+                Exp::InductiveType(nat_decl.clone(), Vec::new()),
+            )],
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        let zero = Exp::InductiveCtor(nat_decl.clone(), "zero".to_string(), Vec::new());
+        let succ_zero = Exp::InductiveCtor(nat_decl, "succ".to_string(), vec![zero]);
+        let assay_succ_zero = Exp::InductiveType(assay_decl, vec![succ_zero]);
+
+        let encoded = encode_type(&assay_succ_zero).expect("encode AssayShape (succ zero)");
+        let Value::Json(j) = encoded else {
+            panic!("expected Value::Json");
+        };
+
+        // Walk the outer App to verify shape:
+        //   App(ConstRef(AssayShape), App(CtorApp(Nat, succ), CtorApp(Nat, zero)))
+        assert_eq!(j["ctor"], "App");
+        assert_eq!(j["args"][0]["ctor"], "ConstRef");
+        assert_eq!(j["args"][0]["args"][0], "urn:_:AssayShape");
+        assert_eq!(j["args"][1]["ctor"], "App");
+        assert_eq!(j["args"][1]["args"][0]["ctor"], "CtorApp");
+        assert_eq!(j["args"][1]["args"][0]["args"][0], "urn:_:Nat");
+        assert_eq!(j["args"][1]["args"][0]["args"][1], "succ");
+        assert_eq!(j["args"][1]["args"][1]["ctor"], "CtorApp");
+        assert_eq!(j["args"][1]["args"][1]["args"][0], "urn:_:Nat");
+        assert_eq!(j["args"][1]["args"][1]["args"][1], "zero");
     }
 }
