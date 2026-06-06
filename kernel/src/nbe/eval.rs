@@ -513,18 +513,21 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
             eval_reduce(f_val, acc, coll_val, ctx)
         }
 
-        // Inductive types (Phase 11b, D19)
+        // Inductive types (Phase 11b, D19; D48 adds indices)
         // Step 1 lands the AST and value shells; Step 2 will add iota
-        // reduction for the recursor.
+        // reduction for the recursor. Pre-D48 callers always have
+        // `indices: Vec::new()` (non-indexed default).
         Exp::Inductive(decl) => Ok(Val::InductiveType {
             decl: decl.clone(),
             params: Vec::new(),
+            indices: Vec::new(),
         }),
         Exp::InductiveType(decl, params) => {
             let params: Result<Vec<_>, _> = params.iter().map(&ev).collect();
             Ok(Val::InductiveType {
                 decl: decl.clone(),
                 params: params?,
+                indices: Vec::new(),
             })
         }
         Exp::CodataType(decl, params) => {
@@ -2993,6 +2996,7 @@ mod tests {
         Arc::new(InductiveDecl {
             name: name.to_string(),
             params: Vec::new(),
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: Vec::new(),
         })
@@ -3005,6 +3009,7 @@ mod tests {
         Arc::new(InductiveDecl {
             name: "Nat".to_string(),
             params: Vec::new(),
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
@@ -3052,6 +3057,7 @@ mod tests {
         let bool_decl = Arc::new(InductiveDecl {
             name: "Bool".to_string(),
             params: Vec::new(),
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
@@ -3130,6 +3136,7 @@ mod tests {
         let list_decl = Arc::new(InductiveDecl {
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {

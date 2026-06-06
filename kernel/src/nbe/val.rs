@@ -101,10 +101,13 @@ pub enum Val {
     List(Vec<Val>),
 
     // --- Inductive types (Phase 11b, D19) ---
-    /// Inductive type former applied to evaluated parameters: `I(p₁, …, pₙ)`.
+    /// Inductive type former applied to evaluated parameters: `I(p₁, …, pₙ)`
+    /// and (D48) evaluated indices: `I(p₁, …, pₙ)(i₁, …, iₘ)`. Indices are
+    /// empty for non-indexed inductives — the D19 default.
     InductiveType {
         decl: Arc<InductiveDecl>,
         params: Vec<Val>,
+        indices: Vec<Val>,
     },
     /// Constructor value: `c(args)` on the named inductive.
     InductiveVal {

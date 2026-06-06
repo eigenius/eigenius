@@ -382,6 +382,11 @@ pub struct InductiveDecl {
     pub name: Name,
     /// Parameter telescope shared by every constructor: `(x₁ : A₁) … (xₙ : Aₙ)`.
     pub params: Vec<(Patt, Exp)>,
+    /// Index telescope — varies per constructor (D48). Empty for non-
+    /// indexed declarations (the default; matches D19's pre-D48 shape).
+    /// Index expressions in constructor return types are checked against
+    /// these telescope types, after substituting the parameter prefix.
+    pub indices: Vec<(Patt, Exp)>,
     /// Universe of the type former — `Exp::Sort(n)`.
     pub sort: Exp,
     pub ctors: Vec<InductiveCtorDecl>,
@@ -492,6 +497,7 @@ fn build_list_decl() -> Arc<InductiveDecl> {
     let self_ref = Arc::new(InductiveDecl {
         name: "List".to_string(),
         params: Vec::new(),
+        indices: Vec::new(),
         sort: Exp::Sort(1),
         ctors: Vec::new(),
     });
@@ -499,6 +505,7 @@ fn build_list_decl() -> Arc<InductiveDecl> {
     Arc::new(InductiveDecl {
         name: "List".to_string(),
         params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+        indices: Vec::new(),
         sort: Exp::Sort(1),
         ctors: vec![
             // nil : Π A:Set. List A
@@ -547,6 +554,7 @@ fn build_option_decl() -> Arc<InductiveDecl> {
     let self_ref = Arc::new(InductiveDecl {
         name: "Option".to_string(),
         params: Vec::new(),
+        indices: Vec::new(),
         sort: Exp::Sort(1),
         ctors: Vec::new(),
     });
@@ -554,6 +562,7 @@ fn build_option_decl() -> Arc<InductiveDecl> {
     Arc::new(InductiveDecl {
         name: "Option".to_string(),
         params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+        indices: Vec::new(),
         sort: Exp::Sort(1),
         ctors: vec![
             // none : Π A:Set. Option A

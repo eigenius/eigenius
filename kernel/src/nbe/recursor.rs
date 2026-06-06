@@ -237,6 +237,7 @@ mod tests {
         Arc::new(InductiveDecl {
             name: name.to_string(),
             params: Vec::new(),
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: Vec::new(),
         })
@@ -248,6 +249,7 @@ mod tests {
         Arc::new(InductiveDecl {
             name: "Nat".to_string(),
             params: Vec::new(),
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
@@ -318,6 +320,7 @@ mod tests {
         let list = Arc::new(InductiveDecl {
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
@@ -368,6 +371,7 @@ mod tests {
         let list = Arc::new(InductiveDecl {
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "nil".to_string(),

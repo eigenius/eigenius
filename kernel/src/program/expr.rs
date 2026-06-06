@@ -183,6 +183,7 @@ pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> 
                 let stub = Arc::new(InductiveDecl {
                     name: name_of_iri,
                     params: Vec::new(),
+                    indices: Vec::new(),
                     sort: Exp::Sort(1),
                     ctors: Vec::new(),
                 });

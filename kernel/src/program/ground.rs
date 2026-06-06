@@ -277,6 +277,7 @@ fn make_list_type(elem: Val) -> Val {
     Val::InductiveType {
         decl: crate::nbe::term::list_decl(),
         params: vec![elem],
+        indices: Vec::new(),
     }
 }
 
@@ -570,6 +571,7 @@ fn decode_codata_observation_type(
                 let dummy = Arc::new(InductiveDecl {
                     name: "__not_a_real_inductive__".to_string(),
                     params: Vec::new(),
+                    indices: Vec::new(),
                     sort: Exp::Sort(1),
                     ctors: Vec::new(),
                 });
@@ -628,6 +630,7 @@ pub(crate) fn resolve_inductive_type(
     let self_ref = Arc::new(InductiveDecl {
         name: short_name.clone(),
         params: Vec::new(),
+        indices: Vec::new(),
         sort: Exp::Sort(1),
         ctors: Vec::new(),
     });
@@ -638,12 +641,14 @@ pub(crate) fn resolve_inductive_type(
     let decl = Arc::new(InductiveDecl {
         name: short_name,
         params: params_telescope,
+        indices: Vec::new(),
         sort: Exp::Sort(1),
         ctors,
     });
     Ok(Val::InductiveType {
         decl,
         params: Vec::new(),
+        indices: Vec::new(),
     })
 }
 
@@ -977,6 +982,7 @@ fn decode_arg_type(
             let stub = Arc::new(InductiveDecl {
                 name: other_name,
                 params: Vec::new(),
+                indices: Vec::new(),
                 sort: Exp::Sort(1),
                 ctors: Vec::new(),
             });
@@ -1149,7 +1155,11 @@ mod tests {
         let val = resolve_class_type(&nat_iri, &layer).expect("resolve Nat");
 
         match val {
-            Val::InductiveType { decl, params } => {
+            Val::InductiveType {
+                decl,
+                params,
+                indices: _,
+            } => {
                 assert!(params.is_empty());
                 assert_eq!(decl.name, "Nat");
                 assert!(decl.params.is_empty());
@@ -1198,7 +1208,11 @@ mod tests {
         let bool_iri = Iri::parse("urn:eigenius:example:Bool").unwrap();
         let val = resolve_class_type(&bool_iri, &layer).expect("resolve Bool");
         match val {
-            Val::InductiveType { decl, params } => {
+            Val::InductiveType {
+                decl,
+                params,
+                indices: _,
+            } => {
                 assert!(params.is_empty());
                 assert_eq!(decl.name, "Bool");
                 assert_eq!(decl.ctors.len(), 2);
@@ -1228,7 +1242,11 @@ mod tests {
         let list_iri = Iri::parse("urn:eigenius:example:List").unwrap();
         let val = resolve_class_type(&list_iri, &layer).expect("resolve List");
         match val {
-            Val::InductiveType { decl, params } => {
+            Val::InductiveType {
+                decl,
+                params,
+                indices: _,
+            } => {
                 assert!(params.is_empty());
                 assert_eq!(decl.name, "List");
                 assert_eq!(decl.params.len(), 1);
@@ -1405,6 +1423,7 @@ mod tests {
         let ty = Val::InductiveType {
             decl: decl.clone(),
             params: vec![i_val],
+            indices: Vec::new(),
         };
         let zero = Exp::InductiveCtor(decl.clone(), "zero".to_string(), Vec::new());
         let bad = Exp::InductiveCtor(
@@ -1741,6 +1760,7 @@ mod tests {
         let snat_inf = Val::InductiveType {
             decl: decl.clone(),
             params: vec![Val::SizeInf],
+            indices: Vec::new(),
         };
         let mut c = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
         let zero_exp = Exp::InductiveCtor(decl.clone(), "zero".to_string(), Vec::new());

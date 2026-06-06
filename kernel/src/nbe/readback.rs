@@ -141,10 +141,21 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
             result
         }
 
-        // Inductive types (Phase 11b, D19)
-        Val::InductiveType { decl, params } => Exp::InductiveType(
+        // Inductive types (Phase 11b, D19; D48 indices).
+        // For Phase A of D48, `indices` is always empty (legacy parametric
+        // inductives). Phase B will extend `Exp::InductiveType`'s args slot
+        // to carry params ++ indices once indexed declarations exist.
+        Val::InductiveType {
+            decl,
+            params,
+            indices,
+        } => Exp::InductiveType(
             decl.clone(),
-            params.iter().map(|p| readback_val(level, p)).collect(),
+            params
+                .iter()
+                .chain(indices.iter())
+                .map(|p| readback_val(level, p))
+                .collect(),
         ),
         // Parameterised codata types (D19 §8, self-referential codata).
         Val::CodataType { decl, params } => Exp::CodataType(

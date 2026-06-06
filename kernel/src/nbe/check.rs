@@ -560,6 +560,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
             Val::InductiveType {
                 decl: expected_decl,
                 params,
+                indices: _,
             },
         ) => check_inductive_ctor_args(ctx, decl, ctor_name, args, expected_decl, params),
 
@@ -940,6 +941,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             Ok(Val::InductiveType {
                 decl: decl.clone(),
                 params: Vec::new(),
+                indices: Vec::new(),
             })
         }
 
@@ -1388,10 +1390,12 @@ pub fn subtype_of_with_hyps(
         Val::InductiveType {
             decl: d1,
             params: p1,
+            indices: _,
         },
         Val::InductiveType {
             decl: d2,
             params: p2,
+            indices: _,
         },
     ) = (sub, super_)
     {
@@ -1882,6 +1886,7 @@ fn check_inductive_ctor_args(
     let expected_result = Val::InductiveType {
         decl: expected_decl.clone(),
         params: params.to_vec(),
+        indices: Vec::new(),
     };
     subtype_of_with_hyps(
         ctx.rho.len(),
@@ -1909,7 +1914,11 @@ fn check_infer_inductive_rec(
     // 1. Major must inhabit the inductive being eliminated.
     let major_typ = check_infer(ctx, major)?;
     let (major_decl, params) = match &major_typ {
-        Val::InductiveType { decl: d, params: p } => (d.clone(), p.clone()),
+        Val::InductiveType {
+            decl: d,
+            params: p,
+            indices: _,
+        } => (d.clone(), p.clone()),
         other => {
             return Err(format!(
                 "InductiveRec on `{}`: major has type {:?}, expected an inductive type",
@@ -1939,6 +1948,7 @@ fn check_infer_inductive_rec(
     let motive_dom = Val::InductiveType {
         decl: decl.clone(),
         params: params.clone(),
+        indices: Vec::new(),
     };
     let motive_typ = Val::Pi(
         Box::new(motive_dom),
@@ -2006,7 +2016,11 @@ fn check_match(
 
     let scrutinee_type = check_infer(ctx, scrutinee)?;
     let (decl, params) = match &scrutinee_type {
-        Val::InductiveType { decl, params } => (decl.clone(), params.clone()),
+        Val::InductiveType {
+            decl,
+            params,
+            indices: _,
+        } => (decl.clone(), params.clone()),
         other => {
             return Err(format!(
                 "match scrutinee has type {:?}, expected an inductive type",
@@ -2154,7 +2168,12 @@ fn ext_sig(val: &Val) -> Result<(Val, Clos), String> {
 /// Recognises the canonical `List(A)` inductive type (the form
 /// produced by `Exp::list()` since Phase 11b step 6, D19 §9).
 fn extract_list_element_type(val: &Val) -> Option<Val> {
-    if let Val::InductiveType { decl, params } = val {
+    if let Val::InductiveType {
+        decl,
+        params,
+        indices: _,
+    } = val
+    {
         if decl.name == "List" && params.len() == 1 {
             return Some(params[0].clone());
         }
@@ -2349,12 +2368,14 @@ mod tests {
         let prop_decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
             name: "MyProp".to_string(),
             params: Vec::new(),
+            indices: Vec::new(),
             sort: Exp::Sort(0),
             ctors: Vec::new(),
         });
         let typ = Val::InductiveType {
             decl: prop_decl,
             params: Vec::new(),
+            indices: Vec::new(),
         };
         def_eq_at_type(&mut ctx(), &Val::Sort(1), &Val::Sort(2), &typ).unwrap();
     }
@@ -2365,12 +2386,14 @@ mod tests {
         let set_decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
             name: "MyData".to_string(),
             params: Vec::new(),
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: Vec::new(),
         });
         let typ = Val::InductiveType {
             decl: set_decl,
             params: Vec::new(),
+            indices: Vec::new(),
         };
         assert!(def_eq_at_type(&mut ctx(), &Val::Sort(1), &Val::Sort(2), &typ).is_err());
     }
@@ -2418,6 +2441,7 @@ mod tests {
         crate::nbe::term::InductiveDecl {
             name: name.to_string(),
             params: Vec::new(),
+            indices: Vec::new(),
             sort: Exp::Sort(0),
             ctors,
         }
@@ -2494,6 +2518,7 @@ mod tests {
         let set_decl = crate::nbe::term::InductiveDecl {
             name: "Nat".to_string(),
             params: Vec::new(),
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: vec![
                 crate::nbe::term::InductiveCtorDecl {
@@ -3284,6 +3309,7 @@ mod tests {
         Arc::new(InductiveDecl {
             name: name.to_string(),
             params: Vec::new(),
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: Vec::new(),
         })
@@ -3295,6 +3321,7 @@ mod tests {
         Arc::new(InductiveDecl {
             name: "Nat".to_string(),
             params: Vec::new(),
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
@@ -3328,6 +3355,7 @@ mod tests {
         let nat_ty = Val::InductiveType {
             decl: nat.clone(),
             params: Vec::new(),
+            indices: Vec::new(),
         };
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
         check(&mut c, &nat_zero_exp(&nat), &nat_ty).expect("zero : Nat");
@@ -3339,6 +3367,7 @@ mod tests {
         let nat_ty = Val::InductiveType {
             decl: nat.clone(),
             params: Vec::new(),
+            indices: Vec::new(),
         };
         let exp = nat_succ_exp(&nat, nat_zero_exp(&nat));
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
@@ -3352,6 +3381,7 @@ mod tests {
         let nat_ty = Val::InductiveType {
             decl: nat.clone(),
             params: Vec::new(),
+            indices: Vec::new(),
         };
         let bogus = Exp::InductiveCtor(nat.clone(), "succ".to_string(), vec![Exp::Sort(1)]);
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
@@ -3364,6 +3394,7 @@ mod tests {
         let nat_ty = Val::InductiveType {
             decl: nat.clone(),
             params: Vec::new(),
+            indices: Vec::new(),
         };
         let bogus = Exp::InductiveCtor(nat.clone(), "two".to_string(), Vec::new());
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
@@ -3380,6 +3411,7 @@ mod tests {
         let bool_decl = Arc::new(InductiveDecl {
             name: "Bool".to_string(),
             params: Vec::new(),
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "True".to_string(),
@@ -3390,6 +3422,7 @@ mod tests {
         let nat_ty = Val::InductiveType {
             decl: nat,
             params: Vec::new(),
+            indices: Vec::new(),
         };
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
         let err = check(&mut c, &true_exp, &nat_ty).unwrap_err();
@@ -3403,7 +3436,11 @@ mod tests {
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
         let typ = check_infer(&mut c, &nat_zero_exp(&nat)).expect("infer Nat.zero");
         match typ {
-            Val::InductiveType { decl, params } => {
+            Val::InductiveType {
+                decl,
+                params,
+                indices: _,
+            } => {
                 assert_eq!(decl.name, "Nat");
                 assert!(params.is_empty());
             }
@@ -3418,6 +3455,7 @@ mod tests {
         let list_decl = Arc::new(InductiveDecl {
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: vec![InductiveCtorDecl {
                 name: "nil".to_string(),
@@ -3440,6 +3478,7 @@ mod tests {
         let nat_ty = Val::InductiveType {
             decl: nat.clone(),
             params: Vec::new(),
+            indices: Vec::new(),
         };
         let nat_val = Val::InductiveVal {
             decl: nat.clone(),
@@ -3537,6 +3576,7 @@ mod tests {
         let bool_decl = Arc::new(InductiveDecl {
             name: "Bool".to_string(),
             params: Vec::new(),
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
@@ -3616,6 +3656,7 @@ mod tests {
                 (Patt::Var("i".to_string()), Exp::SizeSort),
                 (Patt::Var("A".to_string()), Exp::Sort(1)),
             ],
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: vec![],
         })
@@ -3625,6 +3666,7 @@ mod tests {
         Val::InductiveType {
             decl,
             params: vec![size, elem],
+            indices: Vec::new(),
         }
     }
 
@@ -3700,6 +3742,7 @@ mod tests {
         let decl_b = Arc::new(InductiveDecl {
             name: "OtherStream".to_string(),
             params: decl_a.params.clone(),
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: vec![],
         });
@@ -3772,6 +3815,7 @@ mod tests {
         let self_ref = Arc::new(InductiveDecl {
             name: "SizedNat".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: Vec::new(),
         });
@@ -3783,6 +3827,7 @@ mod tests {
         Arc::new(InductiveDecl {
             name: "SizedNat".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
@@ -3809,6 +3854,7 @@ mod tests {
         Val::InductiveType {
             decl,
             params: vec![size],
+            indices: Vec::new(),
         }
     }
 
@@ -4401,6 +4447,7 @@ mod tests {
         let self_ref = Arc::new(InductiveDecl {
             name: "SizedNatP".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: Vec::new(),
         });
@@ -4409,6 +4456,7 @@ mod tests {
         Arc::new(InductiveDecl {
             name: "SizedNatP".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
+            indices: Vec::new(),
             sort: Exp::Sort(1),
             ctors: vec![
                 InductiveCtorDecl {
@@ -4449,6 +4497,7 @@ mod tests {
         let ty = Val::InductiveType {
             decl,
             params: vec![Val::SizeInf],
+            indices: Vec::new(),
         };
         check(&mut c, &succ_inf, &ty).expect("succ(∞, zero) : SizedNatP ∞");
     }
@@ -4469,6 +4518,7 @@ mod tests {
         let ty = Val::InductiveType {
             decl,
             params: vec![i_val],
+            indices: Vec::new(),
         };
         let err = check(&mut c, &bad, &ty).unwrap_err();
         assert!(
@@ -4497,6 +4547,7 @@ mod tests {
         let snatp_i = Val::InductiveType {
             decl: decl.clone(),
             params: vec![i_val.clone()],
+            indices: Vec::new(),
         };
         let x_val = gen_val(&c.rho);
         let rho2 = c
@@ -4547,6 +4598,7 @@ mod tests {
         let snat_i = Val::InductiveType {
             decl: decl.clone(),
             params: vec![i_val],
+            indices: Vec::new(),
         };
         let x_val = gen_val(&c.rho);
         let rho2 = c
