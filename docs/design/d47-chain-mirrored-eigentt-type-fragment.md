@@ -99,7 +99,7 @@ D47's `ConstRef(iri)` ctor unifies the three: a single chain ctor that carries a
 |---|---|---|---|
 | `Sort` | `level: integer` | `Exp::Sort(level)` | Universe. Level 0 = Prop, 1 = Set, n+1 = Type(n). Per D46 §3.1. |
 | `Var` | `name: string` | `Exp::Var(name)` | Bound variable reference. Validity (binder is in scope) is checked at decode/type-check, not on chain commit. |
-| `ConstRef` | `iri: iri`, `args: EigenTTType[]` | `Exp::EigonClass(iri)`, `Exp::EigonPrimitive(iri)`, `Exp::InductiveType(decl, args)`, or `Exp::CodataType(decl, args)` depending on the resolved resource's `is_a` | Reference to a chain-declared type former. Empty `args` = nullary. The decoder dispatches on the resolved resource's class. |
+| `ConstRef` | `iri: string` | `Exp::EigonClass(iri)`, `Exp::EigonPrimitive(iri)`, `Exp::InductiveType(decl, [])`, or `Exp::CodataType(decl, [])` depending on the resolved resource's `is_a` | Reference to a chain-declared type former. Always nullary — multi-arg references are built by `App` currying (e.g. `List Nat` = `App(ConstRef("core:List"), ConstRef("core:Nat"))`). The decoder dispatches on the resolved resource's class, and for parameterised types walks the enclosing `App` spine to collect the args. Choosing currying avoids needing a chain-side `core:List<EigenTTType>` declaration — `App` does the work. |
 | `App` | `head: EigenTTType`, `arg: EigenTTType` | `Exp::App(head, arg)` | Type application. Multi-arg via currying (`Iff P Q` = `App(App(Iff, P), Q)`). |
 | `Pi` | `name: string`, `dom: EigenTTType`, `body: EigenTTType` | `Exp::Pi(Patt::Var(name), dom, body)` | Dependent function type. Empty `name` (the zero-length string) → `Patt::Unit` (anonymous binder; equivalent to `Arrow`). |
 | `Sig` | `name: string`, `dom: EigenTTType`, `body: EigenTTType` | `Exp::Sig(Patt::Var(name), dom, body)` | Dependent pair type. Empty `name` → `Patt::Unit`. |
@@ -236,7 +236,7 @@ Each ctor declaration follows D32 §3.4's shape — `core:InductiveCtor` with `c
 
 ## 4. Codec — `Exp ↔ EigenTTType value`
 
-Lives in a new module `kernel/src/program/minitt_type_mirror.rs`.
+Lives in a new module `kernel/src/program/eigentt_type_mirror.rs`.
 
 ### 4.1 Encoder `encode_type(exp: &Exp) -> Result<Value, EncodeError>`
 
@@ -428,7 +428,7 @@ Estimated effort: ~1 week.
 
 ### 8.2 Phase 2 — Encoder (~2 days)
 
-- Implement `encode_type` in `kernel/src/program/minitt_type_mirror.rs`.
+- Implement `encode_type` in `kernel/src/program/eigentt_type_mirror.rs`.
 - Unit tests for each ctor.
 - Sample tests encoding `propext`, `Quot.sound`, and a few D39-flavored statements.
 
@@ -482,4 +482,4 @@ Unlike FormulaTerm's decoder (which resolves `OpRef` names through an operator c
 ### 10.2 Source
 
 - `kernel/src/nbe/term.rs::Exp` — the source language D47 mirrors a subset of.
-- `kernel/src/program/` — where the new `minitt_type_mirror.rs` module lives.
+- `kernel/src/program/` — where the new `eigentt_type_mirror.rs` module lives.

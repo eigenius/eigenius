@@ -21,6 +21,7 @@
 //! Execution is via NbE in IO mode (eval_io module).
 
 pub mod component;
+pub mod eigentt_type_mirror;
 pub mod embedder;
 pub mod embedding_cache;
 pub mod eval_io;

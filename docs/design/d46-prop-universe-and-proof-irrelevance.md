@@ -492,7 +492,7 @@ Estimated effort: 3–6 weeks for a single experienced kernel engineer.
 - Skip reduction of Prop-typed subterms when false.
 - Verify with a pretty-printer test on a term with a large Prop-typed argument.
 
-**Status on landing**: deferred. EigenTT's `readback_val` already reduces all subterms structurally; introducing a `reduce_proofs` flag requires threading type information through readback (which currently doesn't carry it). Per the original §6 framing this is "purely a performance optimization" — disabling it (always reducing) is correct, just slower. With no observed pretty-printing or full-NF performance issues today, we defer the optimization until a concrete need surfaces (likely when D39 v2 commits substantial JustificationTerm proof payloads that get pretty-printed).
+**Status on landing**: deferred — tracked as [eigenius#67](https://github.com/eigenius/eigenius/issues/67). EigenTT's `readback_val` already reduces all subterms structurally; introducing a `reduce_proofs` flag requires threading type information through readback (which currently doesn't carry it). Per the original §6 framing this is "purely a performance optimization" — disabling it (always reducing) is correct, just slower. With no observed pretty-printing or full-NF performance issues today, we defer the optimization until a concrete need surfaces (likely when D39 v2 commits substantial JustificationTerm proof payloads that get pretty-printed).
 
 ### 12.7 Phase G — Reposition Id/Refl/IdJ to Prop (~2 days)
 
