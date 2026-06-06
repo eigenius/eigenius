@@ -300,12 +300,16 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
             Ok(())
         }
 
-        // Inductive type forms (Phase 11b, D19).
+        // Inductive type forms (Phase 11b, D19; D48 indices).
         // The introduction form runs the strict-positivity checker
-        // (Phase 11b step 3); references to an already-introduced
-        // inductive only need to be admitted as types — Phase 11b
-        // step 5 will add parameter telescope verification.
-        Exp::Inductive(decl) => crate::nbe::positivity::check_positivity(decl),
+        // (Phase 11b step 3) and the indexed-ctor-conclusion validator
+        // (D48 Phase B) — verifies each ctor's terminal application has
+        // the right `params ++ indices` shape and each index expression
+        // type-checks against its declared telescope type.
+        Exp::Inductive(decl) => {
+            crate::nbe::positivity::check_positivity(decl)?;
+            validate_indexed_ctor_conclusions(ctx, decl)
+        }
         Exp::InductiveType(_, _) => Ok(()),
         // Applied codata type. Admitted as a type when the decl is
         // already known valid; the declaration-site validation runs
@@ -1753,6 +1757,167 @@ enum CtorArg {
 /// construction — size parameters have type `SizeSort` but the
 /// binder itself is a plain Pi, so `params_to_skip` only ever
 /// applies to `Pi`.
+/// Validate (D48 Phase B) every ctor's terminal application against the
+/// declaration's index telescope.
+///
+/// For each ctor:
+/// 1. Peel the Π-telescope past the parameter prefix, collecting the
+///    constructor's value arguments.
+/// 2. The terminal residual must be `Exp::InductiveType(d, args)` with
+///    `d.name == decl.name` (positivity already checks this) and
+///    `args.len() == decl.params.len() + decl.indices.len()`.
+/// 3. The last `decl.indices.len()` args are the ctor's index expressions.
+///    Each must type-check against the corresponding declared index type
+///    (with the parameter prefix substituted), evaluated under a context
+///    extended with the param binders and the ctor's non-param args.
+///
+/// Pre-D48 (non-indexed) declarations have `decl.indices.is_empty()`
+/// and this validator is a near-no-op — it only verifies the conclusion
+/// arg count equals `decl.params.len()`, which positivity's existing
+/// `check_result_type` does not enforce.
+fn validate_indexed_ctor_conclusions(
+    ctx: &mut CheckCtx,
+    decl: &InductiveDecl,
+) -> Result<(), String> {
+    let n_params = decl.params.len();
+    let n_indices = decl.indices.len();
+    let expected_args = n_params + n_indices;
+
+    for ctor in &decl.ctors {
+        // Peel the telescope to get non-param args + the conclusion.
+        let (ctor_args, residual) = peel_ctor_telescope(&ctor.typ, n_params);
+
+        // The conclusion must be an InductiveType application of `decl`
+        // with the right arg count. Positivity already verified the name
+        // matches; we add the arg-count check here.
+        let conclusion_args = match residual {
+            Exp::InductiveType(d, args) if d.name == decl.name => args,
+            _ => {
+                return Err(format!(
+                    "constructor `{}.{}`: conclusion must be `{}(...)` — \
+                     positivity check should have caught this",
+                    decl.name, ctor.name, decl.name
+                ));
+            }
+        };
+        if conclusion_args.len() != expected_args {
+            return Err(format!(
+                "constructor `{}.{}`: conclusion `{}(...)` has {} arg(s) \
+                 but `{}` declares {} param(s) + {} index/indices = {} total",
+                decl.name,
+                ctor.name,
+                decl.name,
+                conclusion_args.len(),
+                decl.name,
+                n_params,
+                n_indices,
+                expected_args
+            ));
+        }
+
+        if n_indices == 0 {
+            // Non-indexed decl — no index expressions to type-check.
+            // Continue to the next ctor.
+            continue;
+        }
+
+        // Type-check each index expression against the declared index
+        // telescope type. The context is extended with:
+        //   (a) the parameter prefix binders (so the index telescope
+        //       types may refer to them),
+        //   (b) the ctor's non-param value arguments (so index
+        //       expressions may refer to them, like `n+1` in
+        //       `cons : (n : Nat) → A → Vec A n → Vec A (n+1)`).
+        let mut inner_ctx = ctx_with_param_and_arg_binders(ctx, decl, &ctor_args)?;
+
+        // The conclusion's index args sit at conclusion_args[n_params..].
+        let index_args = &conclusion_args[n_params..];
+
+        // The declared index telescope's types reference earlier indices
+        // in scope; for now D48 v1 supports non-dependent index telescopes
+        // (each index's type doesn't reference earlier indices). Walk the
+        // telescope and check each index expression.
+        for (i, (_idx_patt, idx_type_exp)) in decl.indices.iter().enumerate() {
+            let idx_type_val = inner_ctx
+                .eval(idx_type_exp, &inner_ctx.rho.clone())
+                .map_err(|e| {
+                    format!(
+                        "constructor `{}.{}`: index #{i} type evaluation failed: {e}",
+                        decl.name, ctor.name
+                    )
+                })?;
+            check(&mut inner_ctx, &index_args[i], &idx_type_val).map_err(|e| {
+                format!(
+                    "constructor `{}.{}`: index #{i} expression doesn't match \
+                     declared index telescope type: {e}",
+                    decl.name, ctor.name
+                )
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Build a CheckCtx extended with the inductive's parameter binders
+/// and then the ctor's non-param value arguments. Used by
+/// `validate_indexed_ctor_conclusions` so index expressions in a ctor
+/// conclusion may refer to both the params and the ctor's value args.
+///
+/// Size binders (`CtorArg::Size`) bind a variable of type `SizeSort`
+/// without a TSO hypothesis — sufficient for type-checking index
+/// expressions that mention the size, though such expressions are
+/// uncommon in D48 v1.
+fn ctx_with_param_and_arg_binders(
+    ctx: &CheckCtx,
+    decl: &InductiveDecl,
+    ctor_args: &[CtorArg],
+) -> Result<CheckCtx, String> {
+    // Walk the parameter prefix, then the ctor's value/size args,
+    // chaining `extend` to produce successive contexts.
+    //
+    // Note: `extend` returns by value, so we hold each intermediate
+    // ctx via `current` (Option) and replace it as we go. We avoid
+    // cloning the entire ctx — `extend` already does the right shared-
+    // Arc copies for layer / type_cache / size_tso.
+    let mut current: Option<CheckCtx> = None;
+
+    for (patt, type_exp) in &decl.params {
+        let c: &CheckCtx = current.as_ref().unwrap_or(ctx);
+        let typ_val = c.eval(type_exp, &c.rho.clone()).map_err(|e| {
+            format!(
+                "parameter `{patt:?}` of inductive `{}`: type evaluation failed: {e}",
+                decl.name
+            )
+        })?;
+        let gen = gen_val(&c.rho);
+        current = Some(c.extend(patt, &typ_val, &gen)?);
+    }
+    for arg in ctor_args {
+        let c: &CheckCtx = current.as_ref().unwrap_or(ctx);
+        match arg {
+            CtorArg::Value { patt, typ } => {
+                let typ_val = c
+                    .eval(typ, &c.rho.clone())
+                    .map_err(|e| format!("ctor arg `{patt:?}`: type evaluation failed: {e}"))?;
+                let gen = gen_val(&c.rho);
+                current = Some(c.extend(patt, &typ_val, &gen)?);
+            }
+            CtorArg::Size { patt, .. } => {
+                let gen = gen_val(&c.rho);
+                current = Some(c.extend(patt, &Val::SizeSort, &gen)?);
+            }
+        }
+    }
+    // If neither the param prefix nor the ctor args extended the ctx
+    // (a parameter-less, argument-less ctor), fall back to a fresh
+    // child of the outer ctx via a no-op extend on Patt::Unit.
+    Ok(current.unwrap_or_else(|| {
+        ctx.extend(&Patt::Unit, &Val::One, &Val::Unit)
+            .expect("Unit/One extend cannot fail")
+    }))
+}
+
 fn peel_ctor_telescope(ctor_typ: &Exp, params_to_skip: usize) -> (Vec<CtorArg>, &Exp) {
     let mut args: Vec<CtorArg> = Vec::new();
     let mut remaining = params_to_skip;
@@ -5184,6 +5349,215 @@ mod tests {
         assert!(
             fake.last_input().is_some(),
             "institution should have been consulted at check time"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // D48 Phase B — indexed ctor conclusion validation
+    // ──────────────────────────────────────────────────────────────────
+
+    /// Build the canonical `Vec : (A : Set) → Nat → Set` indexed inductive,
+    /// using EigenTT primitives only (no `Nat` library — we use `One` as
+    /// the "index type" so the ctor expressions remain pure-EigenTT).
+    ///
+    /// ```text
+    /// data SimpleVec (A : Set) : 1 → Set {
+    ///   nil  : SimpleVec A ()
+    ///   cons : (h : ()) → A → SimpleVec A () → SimpleVec A ()
+    /// }
+    /// ```
+    ///
+    /// The toy uses `1` (Unit) as the index telescope type and `()`
+    /// (Unit) as the only inhabitable index value. This is enough to
+    /// exercise the Phase B validator's structural and arity checks
+    /// without requiring `Nat`. Phase D will pull in real `Nat` indices.
+    fn simple_vec_decl() -> Arc<InductiveDecl> {
+        let self_ref = Arc::new(InductiveDecl {
+            name: "SimpleVec".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        // `SimpleVec A ()` — the conclusion shape used by both ctors.
+        let vec_a_unit =
+            Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string()), Exp::Unit]);
+        Arc::new(InductiveDecl {
+            name: "SimpleVec".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: vec![
+                // nil : Π A:Set. SimpleVec A ()
+                InductiveCtorDecl {
+                    name: "nil".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Var("A".to_string()),
+                        Box::new(Exp::Sort(1)),
+                        Box::new(vec_a_unit.clone()),
+                    ),
+                },
+                // cons : Π A:Set. () → A → SimpleVec A () → SimpleVec A ()
+                InductiveCtorDecl {
+                    name: "cons".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Var("A".to_string()),
+                        Box::new(Exp::Sort(1)),
+                        Box::new(Exp::Pi(
+                            Patt::Unit,
+                            Box::new(Exp::One),
+                            Box::new(Exp::Pi(
+                                Patt::Unit,
+                                Box::new(Exp::Var("A".to_string())),
+                                Box::new(Exp::Pi(
+                                    Patt::Unit,
+                                    Box::new(vec_a_unit.clone()),
+                                    Box::new(vec_a_unit),
+                                )),
+                            )),
+                        )),
+                    ),
+                },
+            ],
+        })
+    }
+
+    #[test]
+    fn d48_indexed_decl_with_well_formed_ctors_validates() {
+        // Vec-like indexed decl whose ctors produce the correctly-shaped
+        // conclusion (`SimpleVec A ()`). Phase B validator accepts.
+        let decl = simple_vec_decl();
+        let mut c = ctx();
+        let result = validate_indexed_ctor_conclusions(&mut c, &decl);
+        assert!(
+            result.is_ok(),
+            "well-formed indexed decl should validate: {result:?}"
+        );
+    }
+
+    #[test]
+    fn d48_indexed_decl_with_wrong_conclusion_arg_count_rejected() {
+        // SimpleVec declares 1 param + 1 index = 2 args, but the ctor's
+        // conclusion `SimpleVec A` (missing the index) supplies only 1.
+        // Phase B validator rejects.
+        let self_ref = Arc::new(InductiveDecl {
+            name: "BadVec".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        // Conclusion has only 1 arg (the param), missing the index.
+        let bad_conclusion = Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string())]);
+        let decl = Arc::new(InductiveDecl {
+            name: "BadVec".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: vec![InductiveCtorDecl {
+                name: "nil".to_string(),
+                typ: Exp::Pi(
+                    Patt::Var("A".to_string()),
+                    Box::new(Exp::Sort(1)),
+                    Box::new(bad_conclusion),
+                ),
+            }],
+        });
+        let mut c = ctx();
+        let err = validate_indexed_ctor_conclusions(&mut c, &decl).unwrap_err();
+        assert!(
+            err.contains("1 arg(s) but `BadVec` declares 1 param(s) + 1 index"),
+            "error should describe the arg-count mismatch: {err}"
+        );
+    }
+
+    #[test]
+    fn d48_indexed_decl_with_wrong_index_type_rejected() {
+        // The index telescope declares `() : 1` but the ctor's
+        // conclusion supplies a Sort(1) value in the index slot —
+        // type mismatch. Phase B validator rejects.
+        let self_ref = Arc::new(InductiveDecl {
+            name: "MistypedVec".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        // The index slot has Sort(1) instead of Unit — wrong type.
+        let bad_conclusion = Exp::InductiveType(
+            self_ref.clone(),
+            vec![Exp::Var("A".to_string()), Exp::Sort(1)],
+        );
+        let decl = Arc::new(InductiveDecl {
+            name: "MistypedVec".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(1),
+            ctors: vec![InductiveCtorDecl {
+                name: "nil".to_string(),
+                typ: Exp::Pi(
+                    Patt::Var("A".to_string()),
+                    Box::new(Exp::Sort(1)),
+                    Box::new(bad_conclusion),
+                ),
+            }],
+        });
+        let mut c = ctx();
+        let err = validate_indexed_ctor_conclusions(&mut c, &decl).unwrap_err();
+        assert!(
+            err.contains("doesn't match declared index telescope type"),
+            "error should describe the index type mismatch: {err}"
+        );
+    }
+
+    #[test]
+    fn d48_non_indexed_decl_passes_validator_vacuously() {
+        // A pre-D48 (non-indexed) inductive should pass the validator
+        // without any checks — backward-compat with existing decls.
+        let decl = nat_decl();
+        let mut c = ctx();
+        validate_indexed_ctor_conclusions(&mut c, &decl).unwrap();
+    }
+
+    #[test]
+    fn d48_indexed_decl_eval_splits_args_into_params_and_indices() {
+        // Evaluate `SimpleVec A ()` — the resulting Val::InductiveType
+        // should have `params = [A]` and `indices = [Unit]`.
+        let decl = simple_vec_decl();
+        let exp = Exp::InductiveType(
+            decl.clone(),
+            vec![Exp::One, Exp::Unit], // A := 1, index := ()
+        );
+        let c = ctx();
+        let v = c.eval(&exp, &Rho::Nil).unwrap();
+        match v {
+            Val::InductiveType {
+                decl: d,
+                params,
+                indices,
+            } => {
+                assert_eq!(d.name, "SimpleVec");
+                assert_eq!(params.len(), 1, "expected 1 param");
+                assert_eq!(indices.len(), 1, "expected 1 index");
+                assert!(matches!(params[0], Val::One));
+                assert!(matches!(indices[0], Val::Unit));
+            }
+            other => panic!("expected Val::InductiveType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn d48_indexed_decl_eval_rejects_wrong_arg_count() {
+        // Evaluating a SimpleVec InductiveType with too few args
+        // (only the param, no index) should error.
+        let decl = simple_vec_decl();
+        let exp = Exp::InductiveType(decl, vec![Exp::One]); // missing index
+        let c = ctx();
+        let err = c.eval(&exp, &Rho::Nil).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("indexed InductiveType `SimpleVec`") && msg.contains("expected 2"),
+            "error should describe the arity mismatch: {msg}"
         );
     }
 }

@@ -522,13 +522,50 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
             params: Vec::new(),
             indices: Vec::new(),
         }),
-        Exp::InductiveType(decl, params) => {
-            let params: Result<Vec<_>, _> = params.iter().map(&ev).collect();
-            Ok(Val::InductiveType {
-                decl: decl.clone(),
-                params: params?,
-                indices: Vec::new(),
-            })
+        Exp::InductiveType(decl, args) => {
+            // D48: `Exp::InductiveType(decl, args)` carries `params ++ indices`
+            // — `decl.params.len()` parameters followed by `decl.indices.len()`
+            // index expressions. For pre-D48 (non-indexed) decls, `indices`
+            // is empty and `args` equals the parameter prefix.
+            //
+            // The kernel uses "stub" InductiveDecls inside ctor type
+            // bodies (self-references with empty `params` / `ctors`,
+            // see `term.rs` around `InductiveDecl::PartialEq` — name-
+            // based equality). Stubs are detected by `decl.indices`
+            // being empty; for those we preserve the pre-D48 behaviour
+            // (all args treated as params, no arity check) so the
+            // stub-Arc pattern keeps working. Genuine indexed decls
+            // (`decl.indices` non-empty) get the strict split.
+            let vals: Result<Vec<_>, _> = args.iter().map(&ev).collect();
+            let mut vals = vals?;
+            if decl.indices.is_empty() {
+                Ok(Val::InductiveType {
+                    decl: decl.clone(),
+                    params: vals,
+                    indices: Vec::new(),
+                })
+            } else {
+                let n_params = decl.params.len();
+                let n_indices = decl.indices.len();
+                let expected = n_params + n_indices;
+                if vals.len() != expected {
+                    return Err(EvalError::InvalidCaseTarget(format!(
+                        "indexed InductiveType `{}`: expected {} arg(s) \
+                         (params + indices: {} + {}), got {}",
+                        decl.name,
+                        expected,
+                        n_params,
+                        n_indices,
+                        vals.len()
+                    )));
+                }
+                let indices = vals.split_off(n_params);
+                Ok(Val::InductiveType {
+                    decl: decl.clone(),
+                    params: vals,
+                    indices,
+                })
+            }
         }
         Exp::CodataType(decl, params) => {
             let params: Result<Vec<_>, _> = params.iter().map(&ev).collect();

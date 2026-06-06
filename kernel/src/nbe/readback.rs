@@ -142,9 +142,10 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
         }
 
         // Inductive types (Phase 11b, D19; D48 indices).
-        // For Phase A of D48, `indices` is always empty (legacy parametric
-        // inductives). Phase B will extend `Exp::InductiveType`'s args slot
-        // to carry params ++ indices once indexed declarations exist.
+        // The `Exp::InductiveType` args slot carries `params ++ indices`,
+        // split on the decoder side by `decl.params.len()` (D48 Phase B).
+        // For non-indexed declarations (`decl.indices` empty), this is
+        // equivalent to the pre-D48 behaviour.
         Val::InductiveType {
             decl,
             params,
