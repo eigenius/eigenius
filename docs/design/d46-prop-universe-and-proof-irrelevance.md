@@ -484,11 +484,15 @@ Estimated effort: 3–6 weeks for a single experienced kernel engineer.
 - In `infer` for projection: if the projected-from type is in Prop, the result must be in Prop.
 - In `iota_try_eta_struct` analog: skip eta when the structure type is Prop.
 
+**Status on landing**: this phase turned out to be a no-op for EigenTT. (a) §8.1's projection restriction is automatic under Phase B — a Sigma whose both components are in Prop lands in Prop (predicative Sigma rule), and a Sigma with any non-Prop component lands in Set or higher, so projecting "a non-Prop field from a Prop-typed structure" cannot be constructed in the first place. The existing `predicative_sigma_in_prop_requires_both_components_in_prop` test covers this at the construction site. (b) §8.2's eta skip is moot because EigenTT's `eq_nf` is purely readback-based and has no structural eta-expansion to skip.
+
 ### 12.6 Phase F — Strong-reduction skip (~1 day)
 
 - Add `reduce_proofs: bool` flag to the strong-reducer's recursion. Default false.
 - Skip reduction of Prop-typed subterms when false.
 - Verify with a pretty-printer test on a term with a large Prop-typed argument.
+
+**Status on landing**: deferred. EigenTT's `readback_val` already reduces all subterms structurally; introducing a `reduce_proofs` flag requires threading type information through readback (which currently doesn't carry it). Per the original §6 framing this is "purely a performance optimization" — disabling it (always reducing) is correct, just slower. With no observed pretty-printing or full-NF performance issues today, we defer the optimization until a concrete need surfaces (likely when D39 v2 commits substantial JustificationTerm proof payloads that get pretty-printed).
 
 ### 12.7 Phase G — Reposition Id/Refl/IdJ to Prop (~2 days)
 

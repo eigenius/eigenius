@@ -436,6 +436,28 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         (Exp::SizeInf, Val::SizeSort) => Ok(()),
         (Exp::SizeSucc(s), Val::SizeSort) => check(ctx, s, &Val::SizeSort),
 
+        // Impredicative Pi: when the codomain is in Prop, the whole Pi
+        // is in Prop regardless of the domain's universe level. D46 §4.1.
+        // The domain may be at any level (including Type(n) for arbitrary n);
+        // we only require it to be a well-formed type.
+        (Exp::Pi(p, a, b), Val::Sort(0)) => {
+            check_type(ctx, a)?;
+            let gen = gen_val(&ctx.rho);
+            let mut inner =
+                ctx.extend(p, &ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?, &gen)?;
+            check(&mut inner, b, &Val::Sort(0))
+        }
+
+        // Sigma in Prop is predicative — both components must be in Prop.
+        // No impredicativity for Sigma (D46 §3.4, §4).
+        (Exp::Sig(p, a, b), Val::Sort(0)) => {
+            check(ctx, a, &Val::Sort(0))?;
+            let gen = gen_val(&ctx.rho);
+            let mut inner =
+                ctx.extend(p, &ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?, &gen)?;
+            check(&mut inner, b, &Val::Sort(0))
+        }
+
         // Pi type against Set
         (Exp::Pi(p, a, b), Val::Sort(1)) | (Exp::Sig(p, a, b), Val::Sort(1)) => {
             check(ctx, a, &Val::Sort(1))?;
@@ -474,17 +496,24 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
             check(&mut inner, e, t)
         }
 
-        // refl(a) : Id(A, a, a) — check that x and y are both a
+        // refl(a) : Id(A, a, a) — check that x and y are both a.
+        // Uses type-directed equality (D46 §5): if A is itself propositional,
+        // x = a and y = a hold by proof irrelevance regardless of structure.
         (Exp::Refl(a), Val::Id(typ, x, y)) => {
             check(ctx, a, typ)?;
             let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
-            eq_nf(ctx.rho.len(), x, &a_val)?;
-            eq_nf(ctx.rho.len(), y, &a_val)
+            def_eq_at_type(ctx, x, &a_val, typ)?;
+            def_eq_at_type(ctx, y, &a_val, typ)
         }
 
-        // Id(A, x, y) : Set
-        (Exp::Id(a, x, y), Val::Sort(1)) => {
-            check(ctx, a, &Val::Sort(1))?;
+        // Id(A, x, y) : Prop  (D46 §9 — equality is propositional).
+        // Pre-D46 the rule was `Id : Set`; the change is what enables proof
+        // irrelevance on equality witnesses. The Set / Type(n) check sites
+        // continue to work via cumulativity (Prop ⊆ Set ⊆ Type(n)) — see
+        // the universe-hierarchy arms below — so existing callers that
+        // expected Id to live in Set are unaffected.
+        (Exp::Id(a, x, y), Val::Sort(0)) => {
+            check_type(ctx, a)?;
             let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)
@@ -886,10 +915,11 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             Ok(b)
         }
 
-        // Inductive types (Phase 11b, D19).
-        // Type formers inhabit `Set`. Phase 11b Step 5 will tighten this
-        // to track universe levels properly.
-        Exp::Inductive(_) | Exp::InductiveType(_, _) => Ok(Val::Sort(1)),
+        // Inductive types (Phase 11b, D19). Universe inference per D46:
+        // an inductive declared with `sort = Sort(0)` is in Prop; otherwise
+        // its declared sort applies. Handled below alongside other type-
+        // formers — see the `Exp::Inductive(decl)` / `Exp::InductiveType`
+        // arms in the universe-inference section.
 
         // Constructor application — inference works when the inductive
         // has no parameters (the result type is fully determined).
@@ -946,6 +976,55 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         Exp::SizeSucc(s) => {
             check(ctx, s, &Val::SizeSort)?;
             Ok(Val::SizeSort)
+        }
+
+        // Universe inference for type-formers (D46 §3-§4). These rules
+        // let `is_propositional_in_ctx` decide propositionality via
+        // type inference for any well-formed type expression.
+        Exp::Sort(n) => Ok(Val::Sort(n + 1)),
+        Exp::One => Ok(Val::Sort(1)),
+        Exp::Pi(patt, a, b) => {
+            // Pi (a : A) (b : B) lives at Sort(max(m, n)) for non-Prop B,
+            // or Sort(0) impredicatively when B inhabits Sort(0).
+            infer_dependent_sort(ctx, patt, a, b, /*impredicative=*/ true)
+        }
+        Exp::Sig(patt, a, b) => {
+            // Sigma is predicative — always max(m, n).
+            infer_dependent_sort(ctx, patt, a, b, /*impredicative=*/ false)
+        }
+        Exp::Arrow(a, b) => {
+            let pi = Exp::Pi(Patt::Unit, a.clone(), b.clone());
+            check_infer(ctx, &pi)
+        }
+        Exp::Times(a, b) => {
+            let sig = Exp::Sig(Patt::Unit, a.clone(), b.clone());
+            check_infer(ctx, &sig)
+        }
+        Exp::Id(a, x, y) => {
+            // Id lives in Prop (D46 §9). Set / Type(n) callers still work
+            // via cumulativity (Prop ⊆ Set ⊆ Type(n)).
+            check_type(ctx, a)?;
+            let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+            check(ctx, x, &a_val)?;
+            check(ctx, y, &a_val)?;
+            Ok(Val::Sort(0))
+        }
+        Exp::EigonClass(_) | Exp::EigonPrimitive(_) => Ok(Val::Sort(1)),
+        Exp::Codata(_) => {
+            check_type(ctx, exp)?;
+            Ok(Val::Sort(1))
+        }
+        Exp::CodataType(decl, _) => {
+            check_type(ctx, exp)?;
+            ctx.eval(&decl.sort, &ctx.rho).map_err(|e| e.to_string())
+        }
+        Exp::Inductive(decl) => {
+            check_type(ctx, exp)?;
+            ctx.eval(&decl.sort, &ctx.rho).map_err(|e| e.to_string())
+        }
+        Exp::InductiveType(decl, _) => {
+            check_type(ctx, exp)?;
+            ctx.eval(&decl.sort, &ctx.rho).map_err(|e| e.to_string())
         }
 
         e => Err(format!("cannot infer type of: {e:?}")),
@@ -1067,6 +1146,197 @@ pub fn eq_nf(level: usize, v1: &Val, v2: &Val) -> Result<(), String> {
     }
 }
 
+/// Singleton-elimination admissibility test for a Prop-typed inductive
+/// declaration (D46 §7). Returns true iff a Prop-typed inductive may be
+/// eliminated into a non-Prop result type (large elimination).
+///
+/// **Case A** — zero constructors: large elim is vacuously safe (no Prop
+/// inhabitant exists to smuggle information across the Prop/Type boundary).
+/// Examples: `False`, `Asserts(iri)`.
+///
+/// **Case B** — exactly one constructor, *each* of whose non-parameter
+/// arguments is itself propositional. This restriction prevents Hurkens-
+/// style information leakage. EigenTT lacks indexed inductive families
+/// (issue #22), so the variant of case B that admits "arg appears in the
+/// conclusion" does not apply here — every non-Prop ctor argument fails
+/// the test.
+///
+/// Any other shape (≥ 2 ctors, or 1 ctor with a non-Prop argument that
+/// doesn't appear in the conclusion) returns false, restricting motives
+/// of the corresponding recursor / match to Prop.
+pub fn large_elim_admitted(decl: &InductiveDecl) -> bool {
+    if decl.ctors.is_empty() {
+        return true;
+    }
+    if decl.ctors.len() != 1 {
+        return false;
+    }
+    ctor_args_all_propositional(&decl.ctors[0].typ, decl.params.len())
+}
+
+/// Walk a constructor's Π-telescope past its parameter prefix; return
+/// true iff every non-parameter argument's type is syntactically
+/// propositional.
+fn ctor_args_all_propositional(ctor_typ: &Exp, num_params: usize) -> bool {
+    let mut current = ctor_typ;
+    let mut remaining_params = num_params;
+    loop {
+        match current {
+            Exp::Pi(_patt, dom, body) => {
+                if remaining_params > 0 {
+                    remaining_params -= 1;
+                } else if !is_syntactically_propositional_type(dom) {
+                    return false;
+                }
+                current = body;
+            }
+            Exp::SizedPi { body, .. } => {
+                // SizedPi binders may appear in the parameter prefix
+                // (size-indexed inductives). Skip those; reject any
+                // SizedPi appearing as a regular ctor argument since
+                // sizes are not propositional.
+                if remaining_params == 0 {
+                    return false;
+                }
+                remaining_params -= 1;
+                current = body;
+            }
+            // Reached the conclusion (the `D(params)` shape). All
+            // non-parameter argument types have been verified.
+            _ => return true,
+        }
+    }
+}
+
+/// Conservative syntactic test for "this type expression inhabits Prop".
+///
+/// Returns true for known-propositional shapes: `Id(_, _, _)`,
+/// Pi-into-Prop (impredicative), Sigma-of-two-Props, and applied
+/// inductive/codata declarations whose `sort` is `Sort(0)`. Returns
+/// false (conservatively — may reject a valid Prop arg that requires
+/// evaluation to resolve) for variables, applications, neutrals, and
+/// the universe `Sort(0)` itself (which inhabits `Sort(1)`).
+fn is_syntactically_propositional_type(typ: &Exp) -> bool {
+    match typ {
+        Exp::Id(_, _, _) => true,
+        Exp::Pi(_, _, body) => is_syntactically_propositional_type(body),
+        Exp::Arrow(_, body) => is_syntactically_propositional_type(body),
+        Exp::Sig(_, dom, body) | Exp::Times(dom, body) => {
+            is_syntactically_propositional_type(dom) && is_syntactically_propositional_type(body)
+        }
+        Exp::InductiveType(decl, _) => matches!(decl.sort, Exp::Sort(0)),
+        Exp::CodataType(decl, _) => matches!(decl.sort, Exp::Sort(0)),
+        _ => false,
+    }
+}
+
+/// Type-directed definitional equality with proof irrelevance (D46 §5).
+///
+/// If `typ` is propositional (inhabits `Sort(0)`), any two inhabitants are
+/// definitionally equal regardless of structure — proof irrelevance fires
+/// as a short-circuit before structural comparison. Otherwise falls back
+/// to [`eq_nf`].
+///
+/// Propositionality is detected by [`is_propositional_in_ctx`]: a structural
+/// fast-path for the common shapes (`Val::Id`, sort-Sort(0) inductives /
+/// codata), then a full inference-based check that readbacks `typ` and
+/// asks the kernel for its universe. The inference path covers the cases
+/// the fast-path misses (Pi-into-Prop, Sigma-of-Props, neutrals whose
+/// type reduces to Prop, etc.).
+pub fn def_eq_at_type(ctx: &mut CheckCtx, v1: &Val, v2: &Val, typ: &Val) -> Result<(), String> {
+    if is_propositional_in_ctx(ctx, typ)? {
+        return Ok(());
+    }
+    eq_nf(ctx.rho.len(), v1, v2)
+}
+
+/// Infer the universe of a dependent binder (Pi or Sigma). Used by
+/// [`check_infer`] to compute the sort of a type-former for proof-
+/// irrelevance classification (D46 §5.1) and other downstream needs.
+///
+/// `impredicative=true` applies the Pi impredicative rule (D46 §4.1):
+/// when the codomain inhabits `Sort(0)`, the whole binder is in `Sort(0)`
+/// regardless of the domain's level. `impredicative=false` (Sigma) always
+/// takes `Sort(max(m, n))`.
+fn infer_dependent_sort(
+    ctx: &mut CheckCtx,
+    patt: &Patt,
+    a: &Exp,
+    b: &Exp,
+    impredicative: bool,
+) -> Result<Val, String> {
+    let a_sort = check_infer(ctx, a)?;
+    let m = match a_sort {
+        Val::Sort(m) => m,
+        other => {
+            return Err(format!(
+                "binder domain is not a sort: {:?}",
+                readback_val(ctx.rho.len(), &other)
+            ));
+        }
+    };
+    let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+    let gen = gen_val(&ctx.rho);
+    let mut inner = ctx.extend(patt, &a_val, &gen)?;
+    let b_sort = check_infer(&mut inner, b)?;
+    let n = match b_sort {
+        Val::Sort(n) => n,
+        other => {
+            return Err(format!(
+                "binder codomain is not a sort: {:?}",
+                readback_val(inner.rho.len(), &other)
+            ));
+        }
+    };
+    if impredicative && n == 0 {
+        Ok(Val::Sort(0))
+    } else {
+        Ok(Val::Sort(m.max(n)))
+    }
+}
+
+/// Decide whether `typ` is a propositional type (inhabits `Sort(0)`).
+///
+/// Three-stage decision: (1) structural fast-path for shapes whose
+/// propositionality is decidable without inference; (2) if the fast-path
+/// returns `None`, readback `typ` and call [`check_infer`] to classify
+/// its universe; (3) classify `Sort(0)` as propositional, anything else
+/// not. Per D46 §5.3, this is the type-inference path the spec calls
+/// for; cost is one inference per call, memoised by `CheckCtx::type_cache`.
+fn is_propositional_in_ctx(ctx: &mut CheckCtx, typ: &Val) -> Result<bool, String> {
+    if let Some(decided) = is_propositional_type_structural(typ) {
+        return Ok(decided);
+    }
+    let typ_exp = readback_val(ctx.rho.len(), typ);
+    let typ_sort = check_infer(ctx, &typ_exp)?;
+    Ok(matches!(typ_sort, Val::Sort(0)))
+}
+
+/// Three-valued structural fast-path for propositional-type recognition.
+///
+/// - `Some(true)` — definitely propositional (`Val::Id`, sort-Sort(0)
+///   inductive/codata).
+/// - `Some(false)` — definitely not propositional (universes, primitives,
+///   `One`, `SizeSort`, anonymous codata, EigonClass / EigonPrimitive,
+///   inductive/codata at higher sorts).
+/// - `None` — undecidable from shape alone; caller falls back to
+///   inference. Reaches Pi, Sig, neutrals, lambdas/values reachable
+///   through the catch-all.
+fn is_propositional_type_structural(typ: &Val) -> Option<bool> {
+    match typ {
+        Val::Id(_, _, _) => Some(true),
+        Val::InductiveType { decl, .. } => Some(matches!(decl.sort, Exp::Sort(0))),
+        Val::CodataType { decl, .. } => Some(matches!(decl.sort, Exp::Sort(0))),
+        Val::One
+        | Val::Sort(_)
+        | Val::EigonClass(_)
+        | Val::EigonPrimitive(_)
+        | Val::SizeSort
+        | Val::Codata(_, _) => Some(false),
+        _ => None,
+    }
+}
+
 /// Subtyping check: admits `sub <: super` (Phase 11b step 15d, D19 §8.3).
 ///
 /// Calls [`subtype_of_with_hyps`] with an empty TSO — use this variant
@@ -1102,6 +1372,17 @@ pub fn subtype_of_with_hyps(
     super_: &Val,
     tso: &crate::nbe::sized_rigid::Tso,
 ) -> Result<(), String> {
+    // Universe cumulativity: Sort(m) <: Sort(n) iff m <= n.
+    // D46 §3.2 — Prop ⊆ Set ⊆ Type(1) ⊆ Type(2) ⊆ …
+    if let (Val::Sort(m), Val::Sort(n)) = (sub, super_) {
+        if m <= n {
+            return Ok(());
+        } else {
+            return Err(format!(
+                "universe mismatch: Sort({m}) is not a subtype of Sort({n})"
+            ));
+        }
+    }
     if let (
         Val::InductiveType {
             decl: d1,
@@ -1125,6 +1406,11 @@ pub fn subtype_of_with_hyps(
                             readback_val(level, sup_p),
                         ));
                     }
+                } else if matches!(decl_param_ty, Exp::Sort(0)) {
+                    // Proof irrelevance (D46 §5): if the parameter's declared
+                    // type is Prop, any two parameter values are equal as
+                    // inhabitants of a propositional sort.
+                    continue;
                 } else {
                     eq_nf(level, sub_p, sup_p)?;
                 }
@@ -1638,20 +1924,39 @@ fn check_infer_inductive_rec(
         ));
     }
 
-    // 2. Motive : I(params) → Type(1).
-    //    Codomain `Type(1)` admits both `Set` (= Type(0)) and Type(n)
-    //    motive bodies via the existing (Set : Type(1)) and
-    //    (Type(n) : Type(n+1)) rules. Phase 11b extension can
-    //    generalise to arbitrary Sort u with universe inference.
+    // 2. Motive : I(params) → Sort(<codomain>).
+    //    For non-Prop inductives, codomain is Sort(2) — any sort body
+    //    is admitted via cumulativity (Set, Type(n) all inhabit Sort(2)).
+    //    For Prop inductives, singleton-elim (D46 §7) gates large elim:
+    //    if `large_elim_admitted(decl)` then any sort is permitted;
+    //    otherwise the motive must return Prop (Sort(0)).
+    let codomain_sort = if matches!(decl.sort, Exp::Sort(0)) && !large_elim_admitted(decl) {
+        Exp::Sort(0)
+    } else {
+        Exp::Sort(2)
+    };
     let motive_dom = Val::InductiveType {
         decl: decl.clone(),
         params: params.clone(),
     };
     let motive_typ = Val::Pi(
         Box::new(motive_dom),
-        Clos::new(Patt::Unit, Exp::Sort(2), Rho::Nil),
+        Clos::new(Patt::Unit, codomain_sort, Rho::Nil),
     );
-    check(ctx, motive, &motive_typ)?;
+    check(ctx, motive, &motive_typ).map_err(|e| {
+        if matches!(decl.sort, Exp::Sort(0)) && !large_elim_admitted(decl) {
+            format!(
+                "singleton-elim violation: recursor on `{}` (a Prop with {} \
+                 ctor{}, failing the singleton test) requires a Prop-valued \
+                 motive; got: {e}",
+                decl.name,
+                decl.ctors.len(),
+                if decl.ctors.len() == 1 { "" } else { "s" }
+            )
+        } else {
+            e
+        }
+    })?;
 
     // 3. Minors: one per constructor, each against its derived type.
     if minors.len() != decl.ctors.len() {
@@ -1725,6 +2030,22 @@ fn check_match(
                 decl.name
             ));
         }
+    }
+
+    // Singleton-elim (D46 §7): a Prop-typed inductive that fails the
+    // singleton test cannot be matched into a non-Prop result type.
+    if matches!(decl.sort, Exp::Sort(0))
+        && !large_elim_admitted(&decl)
+        && !is_propositional_in_ctx(ctx, expected)?
+    {
+        return Err(format!(
+            "singleton-elim violation: match on `{}` (a Prop with {} \
+             ctor{}, failing the singleton test) requires a Prop-valued \
+             result type",
+            decl.name,
+            decl.ctors.len(),
+            if decl.ctors.len() == 1 { "" } else { "s" }
+        ));
     }
 
     for ctor in &decl.ctors {
@@ -1877,6 +2198,327 @@ mod tests {
         check_type(&mut ctx(), &pi).unwrap();
     }
 
+    // ---------- D46 §4 — impredicative Pi formation tests ----------
+
+    #[test]
+    fn impredicative_pi_codomain_in_prop_lives_in_prop() {
+        // ∀ (_ : 1). Prop : Prop
+        // The codomain `Prop` is in `Sort(1)` (the universe-of-types), not
+        // in `Sort(0)` itself, so this Pi lands in `Sort(1)`, not in Prop —
+        // confirming the impredicative rule fires only on Prop-codomain.
+        let pi = Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Sort(0)));
+        check(&mut ctx(), &pi, &Val::Sort(1)).unwrap();
+    }
+
+    #[test]
+    fn impredicative_pi_with_prop_codomain_in_prop() {
+        // ∀ (_ : 1). 1 → 1 — not in Prop (codomain is `1 : Set`, not Prop)
+        // ∀ (P : Prop). P → P : Prop — IS in Prop (codomain `P` is Prop)
+        // We model the second: outer Pi binds `P : Prop`, inner Pi `_ : P. P`.
+        // Inner Pi's codomain is `Var("P")` which has inferred type `Sort(0)`.
+        let inner = Exp::Pi(
+            Patt::Unit,
+            Box::new(Exp::Var("P".to_string())),
+            Box::new(Exp::Var("P".to_string())),
+        );
+        let outer = Exp::Pi(
+            Patt::Var("P".to_string()),
+            Box::new(Exp::Sort(0)),
+            Box::new(inner),
+        );
+        // The whole thing lives in Prop — that's the impredicative rule.
+        check(&mut ctx(), &outer, &Val::Sort(0)).unwrap();
+    }
+
+    #[test]
+    fn impredicative_pi_quantifying_over_set_still_in_prop() {
+        // ∀ (X : Set). (Π _ : X. 1 → 1) — outer Pi binds X at Set (Sort(1));
+        // inner Pi's codomain is `1 → 1`, in Set (Sort(1)).
+        // The outer Pi is NOT in Prop (codomain not in Prop).
+        // But if we want `∀ (X : Set). False : Prop` then it IS in Prop.
+        // We model the latter using Prop as the codomain (Sort(0) is a Prop
+        // — every closed inhabitant of Sort(0) is propositional).
+        // For a clean test, use ∀ (X : Set). Prop's-codomain — encoded as a Pi
+        // whose body is a Pi `_ : X. X` (which won't typecheck against Prop —
+        // X is in Set). So instead: ∀ (X : Set). (∀ _ : 1. 1 = 1). The inner
+        // `1 = 1 : Prop` then makes the whole thing impredicative.
+        //
+        // Simpler test: ∀ (X : Set). False, where False = ∀ (P : Prop). P.
+        // `∀ (P : Prop). P` lives in Prop (impredicative). Wrapping it in
+        // ∀ X : Set. … keeps it in Prop (impredicative on the outer too).
+        let false_prop = Exp::Pi(
+            Patt::Var("P".to_string()),
+            Box::new(Exp::Sort(0)),
+            Box::new(Exp::Var("P".to_string())),
+        );
+        // First check inner is itself in Prop.
+        check(&mut ctx(), &false_prop, &Val::Sort(0)).unwrap();
+        // Then wrap with `∀ (X : Set). False` — also in Prop.
+        let outer = Exp::Pi(
+            Patt::Var("X".to_string()),
+            Box::new(Exp::Sort(1)),
+            Box::new(false_prop),
+        );
+        check(&mut ctx(), &outer, &Val::Sort(0)).unwrap();
+    }
+
+    #[test]
+    fn predicative_sigma_in_prop_requires_both_components_in_prop() {
+        // Σ (P : Prop) (Q : Prop). 1  — first component is in Prop, second is `1 : Set`.
+        // Per D46 §3.4, Sigma in Prop requires BOTH components in Prop.
+        // Mixed → should be rejected when checked against Sort(0).
+        let mixed = Exp::Sig(
+            Patt::Var("P".to_string()),
+            Box::new(Exp::Sort(0)),
+            Box::new(Exp::One),
+        );
+        assert!(
+            check(&mut ctx(), &mixed, &Val::Sort(0)).is_err(),
+            "Sigma with a non-Prop component should not check against Prop"
+        );
+    }
+
+    #[test]
+    fn predicative_sigma_both_in_prop_lives_in_prop() {
+        // Σ (_ : ∀ P : Prop. P) (_ : ∀ Q : Prop. Q) — both components are
+        // closed propositions (each is `False`-shaped, in Prop via the
+        // impredicative rule). The Sigma of two Props lives in Prop.
+        // The universe `Prop` itself lives in Sort(1), not in Prop, so we
+        // cannot use it directly as a Sigma component.
+        let false_p = Exp::Pi(
+            Patt::Var("P".to_string()),
+            Box::new(Exp::Sort(0)),
+            Box::new(Exp::Var("P".to_string())),
+        );
+        let false_q = Exp::Pi(
+            Patt::Var("Q".to_string()),
+            Box::new(Exp::Sort(0)),
+            Box::new(Exp::Var("Q".to_string())),
+        );
+        let sig = Exp::Sig(Patt::Unit, Box::new(false_p), Box::new(false_q));
+        check(&mut ctx(), &sig, &Val::Sort(0)).unwrap();
+    }
+
+    #[test]
+    fn sort_cumulativity_prop_subtypes_set() {
+        // Prop : Set — both as a check rule (Sort(0) inhabits Sort(1) by
+        // the Sort(n) : Sort(n+1) rule) and as a subtype rule (Sort(0) <:
+        // Sort(1) by D46 §3.2 cumulativity).
+        check(&mut ctx(), &Exp::Sort(0), &Val::Sort(1)).unwrap();
+        subtype_of(0, &Val::Sort(0), &Val::Sort(1)).unwrap();
+    }
+
+    #[test]
+    fn sort_strict_cumulativity_set_not_subtype_of_prop() {
+        // Sort(1) is NOT a subtype of Sort(0). Catches the wrong direction.
+        assert!(subtype_of(0, &Val::Sort(1), &Val::Sort(0)).is_err());
+    }
+
+    // ---------- D46 §5 — proof irrelevance tests ----------
+
+    #[test]
+    fn proof_irrelevance_fires_for_id_type() {
+        // Two structurally distinct values used as inhabitants of an Id type
+        // should be accepted as equal via proof irrelevance — the structural
+        // fast-path recognises Val::Id as a propositional type.
+        let id_typ = Val::Id(Box::new(Val::One), Box::new(Val::Unit), Box::new(Val::Unit));
+        let v1 = Val::Sort(1);
+        let v2 = Val::Sort(2);
+        def_eq_at_type(&mut ctx(), &v1, &v2, &id_typ).unwrap();
+    }
+
+    #[test]
+    fn proof_irrelevance_does_not_fire_for_non_prop_type() {
+        // Two distinct values at type `1` (Unit type) should NOT be accepted
+        // as equal — `1` is not propositional (inhabits Sort(1)), so neither
+        // the structural fast-path nor the inference path admits irrelevance.
+        let one_typ = Val::One;
+        let v1 = Val::Sort(1);
+        let v2 = Val::Sort(2);
+        assert!(
+            def_eq_at_type(&mut ctx(), &v1, &v2, &one_typ).is_err(),
+            "non-Prop type should fall through to structural equality"
+        );
+    }
+
+    #[test]
+    fn proof_irrelevance_fires_for_prop_typed_inductive() {
+        // An inductive declared with sort = Sort(0) is propositional — caught
+        // by the structural fast-path on Val::InductiveType.
+        let prop_decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            name: "MyProp".to_string(),
+            params: Vec::new(),
+            sort: Exp::Sort(0),
+            ctors: Vec::new(),
+        });
+        let typ = Val::InductiveType {
+            decl: prop_decl,
+            params: Vec::new(),
+        };
+        def_eq_at_type(&mut ctx(), &Val::Sort(1), &Val::Sort(2), &typ).unwrap();
+    }
+
+    #[test]
+    fn proof_irrelevance_does_not_fire_for_set_typed_inductive() {
+        // An inductive declared with sort = Sort(1) is NOT propositional.
+        let set_decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            name: "MyData".to_string(),
+            params: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        let typ = Val::InductiveType {
+            decl: set_decl,
+            params: Vec::new(),
+        };
+        assert!(def_eq_at_type(&mut ctx(), &Val::Sort(1), &Val::Sort(2), &typ).is_err());
+    }
+
+    #[test]
+    fn proof_irrelevance_via_inference_for_pi_into_prop() {
+        // Test that the inference path catches a Prop-shaped type that the
+        // structural fast-path misses.
+        // typ = `∀ (P : Prop). P` — a Pi-into-Prop, propositional by the
+        // impredicative rule (D46 §4.1). Structural fast-path doesn't match
+        // Val::Pi, so the inference path must fire: readback to
+        // `Exp::Pi(P, Sort(0), Var(P))`, infer sort, get Sort(0).
+        let false_prop_exp = Exp::Pi(
+            Patt::Var("P".to_string()),
+            Box::new(Exp::Sort(0)),
+            Box::new(Exp::Var("P".to_string())),
+        );
+        let typ = ctx().eval(&false_prop_exp, &Rho::Nil).expect("eval Pi");
+        // Sanity: this is a Val::Pi, not a fast-path shape.
+        assert!(matches!(typ, Val::Pi(_, _)));
+        // Inference path must classify it as propositional.
+        def_eq_at_type(&mut ctx(), &Val::Sort(1), &Val::Sort(2), &typ).unwrap();
+    }
+
+    #[test]
+    fn proof_irrelevance_via_inference_negative_for_pi_into_set() {
+        // Counter-test: `∀ (X : Set). X` lives in Set, not Prop.
+        // The inference path must REJECT proof irrelevance here.
+        let pi_exp = Exp::Pi(
+            Patt::Var("X".to_string()),
+            Box::new(Exp::Sort(1)),
+            Box::new(Exp::Var("X".to_string())),
+        );
+        let typ = ctx().eval(&pi_exp, &Rho::Nil).expect("eval Pi");
+        assert!(matches!(typ, Val::Pi(_, _)));
+        assert!(def_eq_at_type(&mut ctx(), &Val::Sort(1), &Val::Sort(2), &typ).is_err());
+    }
+
+    // ---------- D46 §7 — singleton-elim tests ----------
+
+    fn mk_prop_decl(
+        name: &str,
+        ctors: Vec<crate::nbe::term::InductiveCtorDecl>,
+    ) -> crate::nbe::term::InductiveDecl {
+        crate::nbe::term::InductiveDecl {
+            name: name.to_string(),
+            params: Vec::new(),
+            sort: Exp::Sort(0),
+            ctors,
+        }
+    }
+
+    #[test]
+    fn large_elim_zero_ctors_admitted() {
+        // False : Prop with zero ctors — Case A.
+        let decl = mk_prop_decl("False", Vec::new());
+        assert!(large_elim_admitted(&decl));
+    }
+
+    #[test]
+    fn large_elim_multi_ctor_rejected() {
+        // Multi-ctor Prop — Case B requires exactly one ctor; rejected.
+        let decl = mk_prop_decl(
+            "Either2",
+            vec![
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "left".to_string(),
+                    typ: Exp::EigonClass(
+                        crate::ontology::iri::Iri::parse("urn:_:Either2").unwrap(),
+                    ),
+                },
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "right".to_string(),
+                    typ: Exp::EigonClass(
+                        crate::ontology::iri::Iri::parse("urn:_:Either2").unwrap(),
+                    ),
+                },
+            ],
+        );
+        assert!(!large_elim_admitted(&decl));
+    }
+
+    #[test]
+    fn large_elim_single_ctor_all_prop_args_admitted() {
+        // SingleProp { mk : Id(1, (), ()) → SingleProp } — ctor arg is Id (Prop).
+        let id_arg = Exp::Id(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
+        let conclusion =
+            Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:_:SingleProp").unwrap());
+        let ctor_typ = Exp::Pi(Patt::Unit, Box::new(id_arg), Box::new(conclusion));
+        let decl = mk_prop_decl(
+            "SingleProp",
+            vec![crate::nbe::term::InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: ctor_typ,
+            }],
+        );
+        assert!(large_elim_admitted(&decl));
+    }
+
+    #[test]
+    fn large_elim_single_ctor_with_non_prop_arg_rejected() {
+        // BadProp { mk : 1 → BadProp } — ctor arg is `1 : Set`, not in Prop.
+        let conclusion =
+            Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:_:BadProp").unwrap());
+        let ctor_typ = Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(conclusion));
+        let decl = mk_prop_decl(
+            "BadProp",
+            vec![crate::nbe::term::InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: ctor_typ,
+            }],
+        );
+        assert!(!large_elim_admitted(&decl));
+    }
+
+    #[test]
+    fn large_elim_does_not_apply_to_non_prop_inductives() {
+        // A Set-sorted inductive isn't subject to the singleton restriction
+        // at all — large_elim_admitted is only consulted for Prop decls.
+        // Smoke-test the function returns sensibly regardless.
+        let set_decl = crate::nbe::term::InductiveDecl {
+            name: "Nat".to_string(),
+            params: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: vec![
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "zero".to_string(),
+                    typ: Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap()),
+                },
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "succ".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Unit,
+                        Box::new(Exp::EigonClass(
+                            crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
+                        )),
+                        Box::new(Exp::EigonClass(
+                            crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
+                        )),
+                    ),
+                },
+            ],
+        };
+        // For a non-Prop inductive the singleton test is not load-bearing,
+        // but the algorithm still runs correctly: Nat has 2 ctors, so the
+        // test returns false (as it would for any 2-ctor Prop).
+        assert!(!large_elim_admitted(&set_decl));
+    }
+
     #[test]
     fn check_identity_function() {
         // λx.x : Π x : 1. 1
@@ -2003,9 +2645,40 @@ mod tests {
 
     #[test]
     fn check_id_is_type() {
-        // Id(1, (), ()) : Set
+        // Id(1, (), ()) inhabits Prop, Set, and any Type(n) via cumulativity.
+        // D46 §9 — Id lives in Prop; older callers expecting Set are
+        // unaffected because Prop ⊆ Set.
         let id = Exp::Id(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
+        check(&mut ctx(), &id, &Val::Sort(0)).unwrap();
         check(&mut ctx(), &id, &Val::Sort(1)).unwrap();
+        check(&mut ctx(), &id, &Val::Sort(2)).unwrap();
+    }
+
+    #[test]
+    fn id_inferred_in_prop() {
+        // Phase G: check_infer for Exp::Id now returns Sort(0).
+        let id = Exp::Id(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
+        let inferred = check_infer(&mut ctx(), &id).unwrap();
+        assert!(
+            matches!(inferred, Val::Sort(0)),
+            "Id should infer at Sort(0); got {inferred:?}"
+        );
+    }
+
+    #[test]
+    fn distinct_refl_proofs_equal_by_proof_irrelevance() {
+        // Two distinct-shape proofs of the same Id type should be
+        // definitionally equal via proof irrelevance — refl(()) and
+        // a neutral inhabitant of Id are interchangeable.
+        // We exercise the integration: an Id-typed value compared to
+        // another Id-typed value at type Id(...) succeeds even when
+        // structurally different.
+        let id_typ = Val::Id(Box::new(Val::One), Box::new(Val::Unit), Box::new(Val::Unit));
+        // Two synthetic distinct values; def_eq_at_type at typ=Id sees
+        // the propositional fast-path and accepts.
+        let refl_v = Val::Refl(Box::new(Val::Unit));
+        let neut = Val::Nt(crate::nbe::val::Neut::Gen(0, "h".to_string()));
+        def_eq_at_type(&mut ctx(), &refl_v, &neut, &id_typ).unwrap();
     }
 
     #[test]
