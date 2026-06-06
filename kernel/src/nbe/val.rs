@@ -133,11 +133,33 @@ pub enum Val {
     SizedPi(Box<Val>, Clos),
 }
 
+/// Identifier for unification metavariables (D48 Phase C).
+///
+/// Globally unique integers allocated by a `MetaCtx`. Each metavariable
+/// represents a yet-unsolved value the unifier may instantiate to a
+/// concrete `Val`. Solved metavariables are looked up through the
+/// `MetaCtx`; reading back a solved meta substitutes the solution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct MetaId(pub u32);
+
+impl std::fmt::Display for MetaId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "?{}", self.0)
+    }
+}
+
 /// Neutral terms — computations that cannot reduce further.
 #[derive(Debug, Clone)]
 pub enum Neut {
     /// Generated variable (de Bruijn level + name for readback)
     Gen(usize, Name),
+    /// Unification metavariable (D48 Phase C) optionally applied to a
+    /// spine of bound-variable arguments. `Meta(id, spine)` represents
+    /// `?id v₁ v₂ … vₙ` — the metavar `?id` applied to the values in
+    /// `spine` (typically `Val::Nt(Neut::Gen(_, _))` for pattern-style
+    /// unification). The unifier solves the meta against the rest of
+    /// the equation and stores the solution in a `MetaCtx`.
+    Meta(MetaId, Vec<Val>),
     /// Application of a neutral to a value
     App(Box<Neut>, Box<Val>),
     /// First projection of a neutral pair

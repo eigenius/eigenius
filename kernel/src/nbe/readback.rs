@@ -197,6 +197,16 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
 pub fn readback_neut(level: usize, neut: &Neut) -> Exp {
     match neut {
         Neut::Gen(j, name) => Exp::Var(format!("{name}{j}")),
+        // D48 Phase C: an unsolved metavariable reads back as a fresh
+        // variable name (`?<id>`) plus the spine applied. Solved metas
+        // are resolved before readback by the unifier (`zonk` step);
+        // a Meta surviving to readback is by definition unsolved.
+        Neut::Meta(id, spine) => {
+            let head = Exp::Var(format!("?{}", id.0));
+            spine.iter().fold(head, |acc, v| {
+                Exp::App(Box::new(acc), Box::new(readback_val(level, v)))
+            })
+        }
         Neut::App(k, m) => Exp::App(
             Box::new(readback_neut(level, k)),
             Box::new(readback_val(level, m)),

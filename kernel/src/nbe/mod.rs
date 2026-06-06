@@ -29,4 +29,5 @@ pub mod recursor;
 pub mod sized;
 pub mod sized_rigid;
 pub mod term;
+pub mod unify;
 pub mod val;
