@@ -195,8 +195,12 @@ pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, String> {
             // opaque variable, not the real recursive value. When the real
             // value is substituted (UpDec below), neutrals that previously
             // blocked may reduce to something incompatible. Mini-TT
-            // mitigates this via the guardedness check for codata; full
-            // termination checking is deferred to Phase 11a.
+            // mitigates this via the guardedness check for codata; data
+            // recursion landing safely through `Match` on a sized inductive
+            // scrutinee gets termination-by-typing via Phase 11b's sized-
+            // types machinery (D19 §8). Bare `letrec loop : 1 = loop` at
+            // the Decl level is still accepted by the checker; see the
+            // open issue tracking that residual escape hatch.
             //
             // Check that the type is well-formed
             check_type(ctx, typ)?;
