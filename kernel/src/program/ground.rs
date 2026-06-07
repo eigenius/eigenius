@@ -701,29 +701,7 @@ fn decode_indices(
             Some(Value::String(s)) => s.as_str(),
             _ => "urn:eigenius:core:Set",
         };
-        let kind_exp = match kind_str {
-            s if s.ends_with(":Size") || s == "Size" => Exp::SizeSort,
-            s if s.ends_with(":Prop") || s == "Prop" => Exp::Sort(0),
-            _ => {
-                // Bare (un-`urn:`-prefixed) names are parameter
-                // references — the ESL compiler keeps a parameter's
-                // own name verbatim as the kind string when the index
-                // type is a bare parameter ref (e.g. `data Eq(A : Set)
-                // : A -> A -> Prop` records the index kind as `"A"`).
-                // Decode them as `Exp::Var(name)` so they bind into
-                // the parameter telescope. Anything that parses as a
-                // full IRI becomes `Exp::EigonClass`; everything else
-                // falls through to `Sort(1)` as a forward-compat
-                // default.
-                if let Ok(iri) = Iri::parse(kind_str) {
-                    Exp::EigonClass(iri)
-                } else if !kind_str.contains(':') {
-                    Exp::Var(kind_str.to_string())
-                } else {
-                    Exp::Sort(1)
-                }
-            }
-        };
+        let kind_exp = decode_index_kind_str(kind_str);
         // Anonymous-index encoding: the ESL parser uses "_" as the
         // sentinel name. Honour the encoding by emitting `Patt::Unit`.
         let patt = if name == "_" {
@@ -803,17 +781,64 @@ fn decode_params(
             Some(Value::String(s)) => s.as_str(),
             _ => "urn:eigenius:core:Set",
         };
-        // Recognise the built-in kinds. `Size` lands on `Exp::SizeSort`;
-        // `Prop` lands on `Exp::Sort(0)` (D46 §3). `Set` and anything else
-        // unrecognised default to `Exp::Sort(1)` for forward-compat.
-        let kind_exp = match kind_str {
-            s if s.ends_with(":Size") || s == "Size" => Exp::SizeSort,
-            s if s.ends_with(":Prop") || s == "Prop" => Exp::Sort(0),
-            _ => Exp::Sort(1),
-        };
+        let kind_exp = decode_param_kind_str(kind_str);
         params.push((Patt::Var(name), kind_exp));
     }
     Ok(params)
+}
+
+/// Map a chain-side `param_kind` string from a `core:type_params` entry
+/// to its kernel-side `Exp`. Recognises:
+///
+/// - `core:Size` (and the bare `Size`) → `Exp::SizeSort` (sized binders).
+/// - `core:Prop` (and bare `Prop`) → `Exp::Sort(0)` (D46 §3).
+/// - The four primitive type IRIs `core:string` / `core:integer` /
+///   `core:float` / `core:boolean` → `Exp::EigonPrimitive(...)`. This
+///   is what makes value-parameter inductives like D39 §4.1's
+///   `Asserts(iri) : Prop` decodable — the `iri` parameter is typed
+///   at `core:string` and the chain-resident declaration carries that
+///   IRI verbatim.
+///
+/// Everything else falls through to `Exp::Sort(1)` (Set) — the
+/// forward-compat default that preserves pre-D49 decoder behaviour.
+fn decode_param_kind_str(kind_str: &str) -> Exp {
+    match kind_str {
+        s if s.ends_with(":Size") || s == "Size" => Exp::SizeSort,
+        s if s.ends_with(":Prop") || s == "Prop" => Exp::Sort(0),
+        wk::STRING => Exp::EigonPrimitive(PrimitiveType::String),
+        wk::INTEGER => Exp::EigonPrimitive(PrimitiveType::Integer),
+        wk::FLOAT => Exp::EigonPrimitive(PrimitiveType::Float),
+        wk::BOOLEAN => Exp::EigonPrimitive(PrimitiveType::Boolean),
+        _ => Exp::Sort(1),
+    }
+}
+
+/// Index-kind variant of [`decode_param_kind_str`]. Adds the bare-name
+/// → `Exp::Var(name)` path the ESL compiler uses for index telescopes
+/// whose entries reference a parameter by name (e.g. `data Eq(A) : A
+/// -> A -> Prop` records the index kind as `"A"` — a bare name —
+/// rather than a fully-qualified IRI). Any fully-qualified IRI flows
+/// through the param-kind matcher; un-`urn:`-prefixed names that
+/// don't parse as IRIs and aren't bare names fall through to
+/// `Sort(1)` as a forward-compat default.
+fn decode_index_kind_str(kind_str: &str) -> Exp {
+    match kind_str {
+        s if s.ends_with(":Size") || s == "Size" => Exp::SizeSort,
+        s if s.ends_with(":Prop") || s == "Prop" => Exp::Sort(0),
+        wk::STRING => Exp::EigonPrimitive(PrimitiveType::String),
+        wk::INTEGER => Exp::EigonPrimitive(PrimitiveType::Integer),
+        wk::FLOAT => Exp::EigonPrimitive(PrimitiveType::Float),
+        wk::BOOLEAN => Exp::EigonPrimitive(PrimitiveType::Boolean),
+        _ => {
+            if let Ok(iri) = Iri::parse(kind_str) {
+                Exp::EigonClass(iri)
+            } else if !kind_str.contains(':') {
+                Exp::Var(kind_str.to_string())
+            } else {
+                Exp::Sort(1)
+            }
+        }
+    }
 }
 
 fn decode_ctors(
@@ -1317,6 +1342,76 @@ mod tests {
                 }
             }
             other => panic!("expected Val::InductiveType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_asserts_inductive_from_core_ontology() {
+        // D39 §4.1 — `Asserts(iri) : Prop`. Authored directly in
+        // ontologies/core/core-ontology.json: a uniform-parameter
+        // 0-ctor inductive in Sort(0) whose single parameter `iri`
+        // is typed at `core:string` (the kernel-side rep; the
+        // iri-format constraint is a property-level concern, not a
+        // type-theory concern). This test confirms the decoder picks
+        // up the new declaration end-to-end:
+        // - core ontology loads cleanly with the new resource,
+        // - the new `decode_param_kind_str` arm maps `core:string` to
+        //   `Exp::EigonPrimitive(PrimitiveType::String)`,
+        // - `decode_result_sort` parses "Prop" → `Sort(0)`,
+        // - zero ctors decode to an empty `decl.ctors` (the
+        //   `large_elim_admitted` Case A path makes this admissible
+        //   per D46 §7).
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut core_builder = LayerBuilder::new("core", None);
+        for r in core_resources {
+            core_builder.add_resource(r).unwrap();
+        }
+        let layer = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
+
+        let asserts_iri = Iri::parse("urn:eigenius:core:Asserts").unwrap();
+        let val = resolve_class_type(&asserts_iri, &layer).expect("resolve Asserts");
+
+        match val {
+            Val::InductiveType {
+                decl,
+                params,
+                indices,
+            } => {
+                assert!(
+                    params.is_empty(),
+                    "type former is unapplied; no params bound"
+                );
+                assert!(indices.is_empty(), "Asserts uses parameter, not index");
+                assert_eq!(decl.name, "Asserts");
+                assert_eq!(
+                    decl.params.len(),
+                    1,
+                    "one parameter named iri (uniform across the type former)"
+                );
+                let (patt, kind) = &decl.params[0];
+                assert!(
+                    matches!(patt, Patt::Var(name) if name == "iri"),
+                    "param name must be `iri`; got {:?}",
+                    patt
+                );
+                assert!(
+                    matches!(kind, Exp::EigonPrimitive(PrimitiveType::String)),
+                    "param kind `core:string` must decode to EigonPrimitive(String); got {:?}",
+                    kind
+                );
+                assert!(
+                    matches!(decl.sort, Exp::Sort(0)),
+                    "result_sort `Prop` must decode to Sort(0); got {:?}",
+                    decl.sort
+                );
+                assert!(
+                    decl.ctors.is_empty(),
+                    "Asserts has zero constructors — D39 §4.1; got {} ctors",
+                    decl.ctors.len()
+                );
+            }
+            other => panic!("expected Val::InductiveType for Asserts, got {other:?}"),
         }
     }
 

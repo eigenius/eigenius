@@ -151,6 +151,17 @@ pub const OPTION: &str = "urn:eigenius:core:Option";
 
 pub const INDUCTIVE_TYPE: &str = "urn:eigenius:core:InductiveType";
 pub const INDUCTIVE_CTOR: &str = "urn:eigenius:core:InductiveCtor";
+
+/// D39 §4.1 atomic propositional inductive: `Asserts(iri) : Prop` —
+/// uniform-parameter, zero-constructor inductive type declared in
+/// `Sort(0)`. Different IRIs produce distinct propositions; the only
+/// inhabitation paths are institutional dispatch or `eigentt:Axiom`
+/// introduction (D46 §10). Used by the D49 witness emitter as the
+/// default canonical proposition when a target resource carries no
+/// explicit `reflection:canonical_proposition`. The well-known IRI is
+/// pinned here so emission and the eventual `JustifiedBy.declared`
+/// consumer share one source of truth.
+pub const ASSERTS: &str = "urn:eigenius:core:Asserts";
 pub const INDUCTIVE_ARG_TYPE: &str = "urn:eigenius:core:InductiveArgType";
 pub const INDUCTIVE_PARAM: &str = "urn:eigenius:core:InductiveParam";
 pub const CODATA_TYPE: &str = "urn:eigenius:core:CodataType";
