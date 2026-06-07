@@ -94,9 +94,14 @@ pub fn build_witness_index(layer: &Layer) -> BTreeMap<WitnessKey, ()> {
 }
 
 /// Read a Trace resource's target IRI and the target's
-/// `canonical_proposition`; build a `WitnessKey`. Returns `None` when
-/// either is absent (Phase-4 behaviour — Phase 5 adds the `Asserts(iri)`
-/// default for the missing-proposition case).
+/// `canonical_proposition`; build a `WitnessKey`. When
+/// `canonical_proposition` is absent on the target resource, fall back
+/// to the D39 §4.1 default proposition `Asserts(target_iri)` — built
+/// via [`default_asserts_proposition`]. The fallback path requires the
+/// chain to provide `core:Asserts` (it does once core ontology has
+/// loaded); pre-bootstrap chains where `core:Asserts` doesn't resolve
+/// fail silently (returning `None`) so witness-index construction
+/// can't deadlock the bootstrap path.
 fn emit_from_trace(
     layer: &Layer,
     trace: &Resource,
@@ -105,13 +110,78 @@ fn emit_from_trace(
     let target_iri = resolve_target_iri(trace)?;
     let target_resource = layer.resolve(&target_iri)?;
     let prop_iri = Iri::parse(wk::CANONICAL_PROPOSITION).ok()?;
-    let encoded_prop = target_resource.get(&prop_iri)?;
-    let prop_hash = hash_proposition_value(encoded_prop);
+    let prop_hash = match target_resource.get(&prop_iri) {
+        Some(encoded_prop) => hash_proposition_value(encoded_prop),
+        None => default_asserts_proposition_hash(layer, &target_iri)?,
+    };
     Some(WitnessKey {
         category,
         iri: target_iri,
         prop_hash,
     })
+}
+
+/// Build the default proposition `Asserts(target_iri)` per D39 §4.1
+/// and return its hash. Resolves `core:Asserts` from the layer chain,
+/// constructs `Exp::InductiveType(asserts_decl, [Exp::LitString(target_iri)])`,
+/// encodes via the D47 codec, and hashes.
+///
+/// **Both ends of the witness machinery use the same construction.**
+/// When a future `JustifiedBy.declared(iri, Asserts(iri))` constructor
+/// is type-checked, the consumer side (D49 §5 / `synthesize_chain_witness`)
+/// receives the same `Exp` from the user's proof term, encodes it via
+/// the same `encode_type` path, and arrives at the same hash. The
+/// hash-matching is the soundness guarantee; the explicit shared
+/// helper is the maintainability guarantee.
+///
+/// Returns `None` if `core:Asserts` isn't resolvable in the chain
+/// (typically: pre-bootstrap construction, or a malformed chain).
+/// Callers treat absence as "no witness emitted" — same outer behaviour
+/// as the missing-`canonical_proposition` no-Asserts case.
+pub fn default_asserts_proposition_hash(layer: &Layer, target_iri: &Iri) -> Option<[u8; 32]> {
+    let asserts_iri = Iri::parse(wk::ASSERTS).ok()?;
+    let asserts_resource = layer.resolve(&asserts_iri)?;
+    let val =
+        crate::program::ground::resolve_inductive_type(&asserts_iri, &asserts_resource, layer)
+            .ok()?;
+    let decl = match val {
+        crate::nbe::val::Val::InductiveType { decl, .. } => decl,
+        _ => return None,
+    };
+    let proposition = crate::nbe::term::Exp::InductiveType(
+        decl,
+        vec![crate::nbe::term::Exp::LitString(
+            target_iri.as_str().to_string(),
+        )],
+    );
+    crate::witness::hash_proposition_exp(&proposition).ok()
+}
+
+/// Public synthesis variant of [`default_asserts_proposition_hash`]
+/// that returns the full `Exp` rather than the hash. Used by the
+/// `synthesize_chain_witness` consumer site when the agent's
+/// `JustifiedBy.declared` constructor doesn't carry an explicit
+/// proposition (i.e. the consumer wants the default to compare
+/// against). Same `Asserts(iri)` shape; same Exp; same hash.
+pub fn default_asserts_proposition(
+    layer: &Layer,
+    target_iri: &Iri,
+) -> Option<crate::nbe::term::Exp> {
+    let asserts_iri = Iri::parse(wk::ASSERTS).ok()?;
+    let asserts_resource = layer.resolve(&asserts_iri)?;
+    let val =
+        crate::program::ground::resolve_inductive_type(&asserts_iri, &asserts_resource, layer)
+            .ok()?;
+    let decl = match val {
+        crate::nbe::val::Val::InductiveType { decl, .. } => decl,
+        _ => return None,
+    };
+    Some(crate::nbe::term::Exp::InductiveType(
+        decl,
+        vec![crate::nbe::term::Exp::LitString(
+            target_iri.as_str().to_string(),
+        )],
+    ))
 }
 
 /// Read the `reflection:resource` property from a Trace resource and
@@ -344,6 +414,120 @@ mod tests {
         assert!(
             !lookup_chain_witness(&layer_b, &other_key),
             "lookup must miss when the (iri, prop) pair was never admitted"
+        );
+    }
+
+    // --- D39 Phase 2 — Asserts(iri) default when canonical_proposition is absent ---
+
+    fn layer_with_core_ontology() -> Arc<crate::layer::Layer> {
+        // Load the real core ontology so `core:Asserts` resolves.
+        use crate::ontology::eigon_json;
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut core_builder = LayerBuilder::new("core", None);
+        for r in core_resources {
+            core_builder.add_resource(r).unwrap();
+        }
+        Arc::new(core_builder.build(LayerStorage::in_memory()))
+    }
+
+    #[test]
+    fn default_asserts_proposition_hash_resolves_when_core_loaded() {
+        let core_layer = layer_with_core_ontology();
+        let target = iri("urn:eigenius:example:thing");
+        let hash = default_asserts_proposition_hash(&core_layer, &target)
+            .expect("Asserts default must resolve once core ontology is loaded");
+        // Two calls with the same target produce the same hash.
+        let hash2 = default_asserts_proposition_hash(&core_layer, &target).unwrap();
+        assert_eq!(hash, hash2, "hash must be deterministic");
+        // Different target → different hash.
+        let other_target = iri("urn:eigenius:example:thing-2");
+        let other_hash = default_asserts_proposition_hash(&core_layer, &other_target).unwrap();
+        assert_ne!(hash, other_hash, "different iris hash to different keys");
+    }
+
+    #[test]
+    fn build_witness_index_emits_asserts_default_when_canonical_prop_missing() {
+        // With core ontology loaded, a DeclarationTrace pointing at a
+        // target that lacks canonical_proposition still emits a witness
+        // — the witness key uses Asserts(target_iri) as the proposition.
+        let core_layer = layer_with_core_ontology();
+        let target = "urn:eigenius:example:bare";
+
+        // Build a user layer with the target (no canonical_proposition)
+        // and a DeclarationTrace for it.
+        let mut user = LayerBuilder::new("user", Some(core_layer.clone()));
+        let mut bare = Resource::new(iri(target));
+        bare.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(wk::DECLARED_RESOURCE.to_string())]),
+        );
+        user.add_resource(bare).unwrap();
+        user.add_resource(declaration_trace(
+            target,
+            "urn:eigenius:example:bare-decl-trace",
+        ))
+        .unwrap();
+        let user_layer = user.build(LayerStorage::in_memory());
+
+        let index = user_layer.chain_witness_index();
+        // Witness should now exist with the Asserts(target) default proposition.
+        let expected_hash = default_asserts_proposition_hash(&core_layer, &iri(target))
+            .expect("Asserts default must resolve");
+        let expected = WitnessKey {
+            category: WitnessCategory::Declared,
+            iri: iri(target),
+            prop_hash: expected_hash,
+        };
+        assert!(
+            index.contains_key(&expected),
+            "default Asserts witness must be emitted when canonical_proposition is absent; \
+             got keys {:?}",
+            index.keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn explicit_canonical_proposition_overrides_asserts_default() {
+        // When canonical_proposition IS present, the witness emitter
+        // uses it instead of the Asserts default. The resulting hash
+        // differs from what the default would produce.
+        let core_layer = layer_with_core_ontology();
+        let target = "urn:eigenius:example:explicit";
+        let explicit_prop = Exp::Sort(0); // Prop sort
+
+        let mut user = LayerBuilder::new("user", Some(core_layer.clone()));
+        user.add_resource(target_resource_with_canonical_prop(target, &explicit_prop))
+            .unwrap();
+        user.add_resource(declaration_trace(
+            target,
+            "urn:eigenius:example:explicit-decl-trace",
+        ))
+        .unwrap();
+        let user_layer = user.build(LayerStorage::in_memory());
+
+        let index = user_layer.chain_witness_index();
+        let explicit_key =
+            WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &explicit_prop).unwrap();
+        assert!(
+            index.contains_key(&explicit_key),
+            "explicit canonical_proposition witness must be in index"
+        );
+        // The Asserts default key must NOT be in the index — the
+        // emitter picked the explicit proposition.
+        let default_hash = default_asserts_proposition_hash(&core_layer, &iri(target)).unwrap();
+        let default_key = WitnessKey {
+            category: WitnessCategory::Declared,
+            iri: iri(target),
+            prop_hash: default_hash,
+        };
+        assert_ne!(
+            explicit_key, default_key,
+            "explicit Prop must hash differently from default Asserts(iri)"
+        );
+        assert!(
+            !index.contains_key(&default_key),
+            "default Asserts witness must NOT appear when explicit canonical_proposition is set"
         );
     }
 

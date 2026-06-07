@@ -224,7 +224,13 @@ pub struct DataDecl {
     /// sort. Example: `data Vec(A : Set) : Nat -> Set { ... }` has one
     /// index `_ : Nat`. Empty for non-indexed declarations (the default,
     /// matching the pre-D48 / pre-eigenius#72-Layer-2 surface).
-    pub indices: Vec<DataParam>,
+    ///
+    /// Indices use [`DataIndex`] rather than [`DataParam`] because
+    /// index kinds can be Sort literals (e.g., D39 §5's
+    /// `JustifiedBy : JustificationTerm → Prop → Type` has `Prop` as
+    /// its second index kind). Type params have no such use case in
+    /// v1 — they're always Set-kinded today.
+    pub indices: Vec<DataIndex>,
     /// Result sort declared after the index telescope's arrow chain.
     /// `None` defaults to `Set` (`Sort(1)`).
     pub result_sort: Option<SortKind>,
@@ -242,6 +248,38 @@ pub struct DataParam {
     pub name: String,
     pub kind: QualifiedName,
     pub pos: Position,
+}
+
+/// One entry in an indexed-data declaration's index telescope
+/// (eigenius#72 Layer 2). Differs from [`DataParam`] in that the kind
+/// can be a Sort literal (`Prop` / `Set` / `Type N`) as well as a
+/// qualified-name reference — D39 §5's
+/// `JustifiedBy : JustificationTerm → Prop → Type` has `Prop` as its
+/// second index kind, which `DataParam`'s `QualifiedName`-only kind
+/// field can't express.
+#[derive(Debug)]
+pub struct DataIndex {
+    pub name: String,
+    pub kind: IndexKind,
+    pub pos: Position,
+}
+
+/// The kind of an index in an indexed-data declaration. See
+/// [`DataIndex`].
+#[derive(Debug, Clone)]
+pub enum IndexKind {
+    /// A qualified-name reference — either a bare parameter name
+    /// (resolved against the enclosing `data` declaration's
+    /// `params`) or a class IRI (resolved through the namespace
+    /// registry). The Phase-4 implementation of
+    /// `parse_data_index_telescope` accepted only this shape.
+    Named(QualifiedName),
+    /// A Sort literal — `Prop` / `Set` / `Type N`. Emitted by the
+    /// parser when an intermediate index-telescope segment is itself
+    /// a sort. Encoded in JSON as the literal string (`"Prop"`,
+    /// `"Set"`, `"Type:N"`) that the kernel's `decode_param_kind_str`
+    /// recognises.
+    Sort(SortKind),
 }
 
 /// A single constructor declaration.

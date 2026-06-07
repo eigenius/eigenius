@@ -41,7 +41,10 @@ mod text_index;
 mod vector_index;
 mod witness_index;
 
-pub use witness_index::{build_witness_index, lookup_chain_witness, synthesize_chain_witness};
+pub use witness_index::{
+    build_witness_index, default_asserts_proposition, default_asserts_proposition_hash,
+    lookup_chain_witness, synthesize_chain_witness,
+};
 
 pub use bloom::{BloomFilter, DEFAULT_FPR};
 pub use cache::{

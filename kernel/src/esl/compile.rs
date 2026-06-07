@@ -859,12 +859,25 @@ impl Compiler {
                     let mut pr = Resource::new_embedded();
                     set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
                     pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
-                    let kind = if p.kind.namespace.is_none()
-                        && param_names.contains(p.kind.name.as_str())
-                    {
-                        p.kind.name.clone()
-                    } else {
-                        self.resolve(&p.kind)?
+                    let kind = match &p.kind {
+                        ast::IndexKind::Named(qn) => {
+                            if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
+                                qn.name.clone()
+                            } else {
+                                self.resolve(qn)?
+                            }
+                        }
+                        // Sort literals encode as canonical strings the
+                        // kernel's `decode_param_kind_str` recognises:
+                        // "Prop" → Sort(0), "Set" → Sort(1), "Type:N"
+                        // → Sort(N+1). Needed for D39 §5's JustifiedBy
+                        // and ChainWitness predicates whose intermediate
+                        // index kinds are themselves sorts.
+                        ast::IndexKind::Sort(sk) => match sk {
+                            ast::SortKind::Prop => "Prop".to_string(),
+                            ast::SortKind::Set => "Set".to_string(),
+                            ast::SortKind::Type(n) => format!("Type:{n}"),
+                        },
                     };
                     pr.set(iri(wk::PARAM_KIND), Value::String(kind));
                     Ok(Value::Embedded(Box::new(pr)))
@@ -3566,6 +3579,56 @@ mod tests {
         assert!(
             body.get(&motive_iri).is_none(),
             "bare-ref match should NOT emit program:result_motive"
+        );
+    }
+
+    #[test]
+    fn compile_data_indexed_emits_sort_literal_index_kinds() {
+        // D39 §5 / D49 ChainWitness path: when an intermediate index is
+        // a Sort literal (Prop / Set / Type N), the compiler must emit
+        // the kind string the kernel's `decode_param_kind_str` recognises
+        // ("Prop" → Sort(0), "Set" → Sort(1), "Type:N" → Sort(N+1)).
+        use crate::ontology::well_known as wk_local;
+
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Triple : Prop -> Set -> Type 2 -> Type 3 {
+                mk : forall (p : Prop) => forall (s : Set) => forall (t : Type 2) => ex:Triple(p, s, t),
+            }
+            "#,
+        );
+        let r = &resources[0];
+
+        let indices_iri = Iri::parse(wk_local::INDICES).unwrap();
+        let param_kind_iri = Iri::parse(wk_local::PARAM_KIND).unwrap();
+        let arr = match r.get(&indices_iri) {
+            Some(Value::Array(a)) => a,
+            other => panic!("expected indices array, got {other:?}"),
+        };
+        assert_eq!(arr.len(), 3);
+
+        let kind_strings: Vec<String> = arr
+            .iter()
+            .map(|v| match v {
+                Value::Embedded(e) => match e.get(&param_kind_iri) {
+                    Some(Value::String(s)) => s.clone(),
+                    other => panic!("expected string kind, got {other:?}"),
+                },
+                other => panic!("expected embedded index, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(kind_strings, vec!["Prop", "Set", "Type:2"]);
+
+        let sort_iri = Iri::parse(wk_local::RESULT_SORT).unwrap();
+        assert_eq!(
+            r.get(&sort_iri).and_then(|v| if let Value::String(s) = v {
+                Some(s.as_str())
+            } else {
+                None
+            }),
+            Some("Type:3")
         );
     }
 

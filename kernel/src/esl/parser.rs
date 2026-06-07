@@ -1440,17 +1440,27 @@ impl<'a> Parser<'a> {
     /// (eigenius#72 Layer 2). The colon has already been consumed by
     /// the caller.
     ///
-    /// Grammar (v1): one or more anonymous index types separated by
-    /// `->`, terminated by a sort literal. Each index type must be a
-    /// bare qualified-name reference (parameter name, or a class IRI);
-    /// arbitrary type expressions as index kinds are deferred. A bare
-    /// sort literal (no preceding `->`) is also accepted and produces
-    /// an empty index telescope with the sort as `result_sort` — i.e.
-    /// `data Foo : Set { ... }` is equivalent to `data Foo { ... }`
-    /// but with the sort made explicit.
+    /// Grammar: one or more anonymous index types separated by `->`,
+    /// terminated by a sort literal as the result sort. Each
+    /// intermediate index type can be one of:
+    ///
+    /// - A bare qualified-name reference (parameter name, or a class
+    ///   IRI) — the original v1 shape; carries through as
+    ///   [`IndexKind::Named`].
+    /// - A sort literal (`Prop` / `Set` / `Type N`) — needed for
+    ///   indexed inductives that range over types as values, e.g.
+    ///   D39 §5's `JustifiedBy : JustificationTerm → Prop → Type`
+    ///   and `ChainWitness.IsDeclaredAs : core:string → Prop → Prop`;
+    ///   carries through as [`IndexKind::Sort`].
+    ///
+    /// Arbitrary applied or function-typed index kinds are still
+    /// deferred. A bare sort literal (no preceding `->`) is also
+    /// accepted and produces an empty index telescope with the sort
+    /// as `result_sort` — `data Foo : Set { ... }` is equivalent to
+    /// `data Foo { ... }` but with the sort made explicit.
     fn parse_data_index_telescope(
         &mut self,
-    ) -> Result<(Vec<DataParam>, Option<SortKind>), EslError> {
+    ) -> Result<(Vec<DataIndex>, Option<SortKind>), EslError> {
         let mut indices = Vec::new();
         let te = self.parse_type_expr()?;
         let mut current = te;
@@ -1460,18 +1470,22 @@ impl<'a> Parser<'a> {
                     domain, codomain, ..
                 } => {
                     let (kind, dom_pos) = match *domain {
-                        TypeExpr::Ref { name, args, pos } if args.is_empty() => (name, pos),
+                        TypeExpr::Ref { name, args, pos } if args.is_empty() => {
+                            (IndexKind::Named(name), pos)
+                        }
+                        TypeExpr::Sort { kind, pos } => (IndexKind::Sort(kind), pos),
                         other => {
                             return Err(EslError::parser(
                                 Some(other.pos().clone()),
-                                "data-index telescope (v1): each index type must be a bare \
-                                 qualified-name reference; arbitrary applied or function-typed \
-                                 index kinds are not yet supported"
+                                "data-index telescope: each index type must be a bare \
+                                 qualified-name reference or a sort literal (Prop / Set / \
+                                 Type N); arbitrary applied or function-typed index kinds \
+                                 are not yet supported"
                                     .to_string(),
                             ));
                         }
                     };
-                    indices.push(DataParam {
+                    indices.push(DataIndex {
                         name: "_".to_string(),
                         kind,
                         pos: dom_pos,
@@ -3256,7 +3270,10 @@ mod tests {
                 assert_eq!(d.params.len(), 1);
                 assert_eq!(d.indices.len(), 1);
                 assert_eq!(d.indices[0].name, "_");
-                assert_eq!(d.indices[0].kind.name, "Nat");
+                match &d.indices[0].kind {
+                    IndexKind::Named(qn) => assert_eq!(qn.name, "Nat"),
+                    other => panic!("expected Named index kind, got {other:?}"),
+                }
                 assert_eq!(d.result_sort, Some(SortKind::Set));
                 assert_eq!(d.ctors.len(), 2);
                 assert!(matches!(&d.ctors[0], CtorDecl::Typed { name, .. } if name == "nil"));
@@ -3282,8 +3299,12 @@ mod tests {
         match &file.declarations[0] {
             Declaration::Data(d) => {
                 assert_eq!(d.indices.len(), 2);
-                assert_eq!(d.indices[0].kind.name, "A");
-                assert_eq!(d.indices[1].kind.name, "A");
+                for idx in &d.indices {
+                    match &idx.kind {
+                        IndexKind::Named(qn) => assert_eq!(qn.name, "A"),
+                        other => panic!("expected Named index kind, got {other:?}"),
+                    }
+                }
                 assert_eq!(d.result_sort, Some(SortKind::Prop));
             }
             _ => panic!("expected data"),
@@ -3331,6 +3352,68 @@ mod tests {
                 assert_eq!(d.result_sort, Some(SortKind::Set));
                 assert_eq!(d.ctors.len(), 1);
                 assert!(matches!(&d.ctors[0], CtorDecl::Positional { name, .. } if name == "tt"));
+            }
+            _ => panic!("expected data"),
+        }
+    }
+
+    #[test]
+    fn data_indexed_accepts_sort_literals_in_intermediate_indices() {
+        // D39 §5 JustifiedBy / D49 ChainWitness predicates need Sort
+        // literals (Prop, Set, Type N) as intermediate index kinds, not
+        // just bare names or class IRIs.
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:JustifiedBy : ex:Term -> Prop -> Type 0 {
+                mk : forall (t : ex:Term) => forall (P : Prop) => ex:JustifiedBy(t, P),
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                assert_eq!(d.indices.len(), 2);
+                match &d.indices[0].kind {
+                    IndexKind::Named(qn) => assert_eq!(qn.name, "Term"),
+                    other => panic!("expected Named, got {other:?}"),
+                }
+                match &d.indices[1].kind {
+                    IndexKind::Sort(SortKind::Prop) => {}
+                    other => panic!("expected Sort(Prop), got {other:?}"),
+                }
+                assert_eq!(d.result_sort, Some(SortKind::Type(0)));
+            }
+            _ => panic!("expected data"),
+        }
+    }
+
+    #[test]
+    fn data_indexed_accepts_all_three_sort_literals_in_indices() {
+        // Exercises Prop, Set, and Type N as intermediate index kinds in
+        // a single declaration to confirm the parser/AST/encoder path
+        // handles each shape.
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Triple : Prop -> Set -> Type 2 -> Type 3 {
+                mk : forall (p : Prop) => forall (s : Set) => forall (t : Type 2) => ex:Triple(p, s, t),
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                assert_eq!(d.indices.len(), 3);
+                assert!(matches!(d.indices[0].kind, IndexKind::Sort(SortKind::Prop)));
+                assert!(matches!(d.indices[1].kind, IndexKind::Sort(SortKind::Set)));
+                assert!(matches!(
+                    d.indices[2].kind,
+                    IndexKind::Sort(SortKind::Type(2))
+                ));
+                assert_eq!(d.result_sort, Some(SortKind::Type(3)));
             }
             _ => panic!("expected data"),
         }

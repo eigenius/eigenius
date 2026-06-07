@@ -805,6 +805,11 @@ fn decode_param_kind_str(kind_str: &str) -> Exp {
     match kind_str {
         s if s.ends_with(":Size") || s == "Size" => Exp::SizeSort,
         s if s.ends_with(":Prop") || s == "Prop" => Exp::Sort(0),
+        "Set" => Exp::Sort(1),
+        s if s.starts_with("Type:") => {
+            let n: usize = s["Type:".len()..].parse().unwrap_or(0);
+            Exp::Sort(n + 1)
+        }
         wk::STRING => Exp::EigonPrimitive(PrimitiveType::String),
         wk::INTEGER => Exp::EigonPrimitive(PrimitiveType::Integer),
         wk::FLOAT => Exp::EigonPrimitive(PrimitiveType::Float),
@@ -825,6 +830,11 @@ fn decode_index_kind_str(kind_str: &str) -> Exp {
     match kind_str {
         s if s.ends_with(":Size") || s == "Size" => Exp::SizeSort,
         s if s.ends_with(":Prop") || s == "Prop" => Exp::Sort(0),
+        "Set" => Exp::Sort(1),
+        s if s.starts_with("Type:") => {
+            let n: usize = s["Type:".len()..].parse().unwrap_or(0);
+            Exp::Sort(n + 1)
+        }
         wk::STRING => Exp::EigonPrimitive(PrimitiveType::String),
         wk::INTEGER => Exp::EigonPrimitive(PrimitiveType::Integer),
         wk::FLOAT => Exp::EigonPrimitive(PrimitiveType::Float),
@@ -882,7 +892,19 @@ fn decode_ctors(
         // type checker takes it from there.
         let ctor_typ_iri = Iri::parse(wk::CTOR_TYPE).unwrap();
         let ctor_typ = if let Some(ct) = cr.get(&ctor_typ_iri) {
-            crate::program::eigentt_type_mirror::decode_type(ct, layer).map_err(|e| {
+            // Self-reference threading: the codec needs to know it's
+            // decoding a ctor for the in-construction `class_iri` so
+            // that ConstRef / CtorApp targets matching `class_iri`
+            // short-circuit to the stub `self_ref` instead of
+            // recursively re-entering `resolve_inductive_type`. Without
+            // this, any ctor body that mentions its own decl
+            // (e.g. `cons : ... -> Vec(A, n)`) loops unboundedly.
+            crate::program::eigentt_type_mirror::decode_type_with_self_ref(
+                ct,
+                layer,
+                Some((class_iri, self_ref)),
+            )
+            .map_err(|e| {
                 format!("inductive type '{class_iri}.{name}' has malformed `ctor_type`: {e:?}")
             })?
         } else {
@@ -2062,5 +2084,84 @@ mod tests {
             }
             other => panic!("expected Val::InductiveType, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn resolve_inductive_with_sort_literal_indices_roundtrips() {
+        // D39 §5 / D49 ChainWitness: indices can be Sort literals
+        // (Prop / Set / Type N) in addition to bare-name or class
+        // references. Full ESL → JSON resources → layer →
+        // resolve_class_type round-trip. The ctor body references the
+        // inductive itself (`ex:SortIdx(p)`), which exercises the
+        // codec's self-reference short-circuit — without it,
+        // `decode_type` recurses into `resolve_inductive_type` for the
+        // same IRI and overflows the stack.
+        let layer = build_layer_with_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:SortIdx : Prop -> Set {
+                mk : forall (p : Prop) => ex:SortIdx(p),
+            }
+            "#,
+        );
+        let iri = Iri::parse("urn:eigenius:example:SortIdx").unwrap();
+        let val = resolve_class_type(&iri, &layer).expect("resolve SortIdx");
+        match val {
+            Val::InductiveType { decl, .. } => {
+                assert!(
+                    decl.params.is_empty(),
+                    "expected zero params, got {:?}",
+                    decl.params
+                );
+                assert_eq!(
+                    decl.indices.len(),
+                    1,
+                    "expected one index, got {:?}",
+                    decl.indices
+                );
+                match &decl.indices[0].1 {
+                    Exp::Sort(0) => {}
+                    other => panic!("index 0: expected Sort(0) for Prop, got {other:?}"),
+                }
+                match &decl.sort {
+                    Exp::Sort(1) => {}
+                    other => panic!("expected result Sort(1) for Set, got {other:?}"),
+                }
+                // The ctor body must decode against the stub Arc, not
+                // re-trigger resolve_inductive_type for the same IRI.
+                assert_eq!(decl.ctors.len(), 1);
+                assert_eq!(decl.ctors[0].name, "mk");
+            }
+            other => panic!("expected Val::InductiveType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_param_kind_str_maps_sort_literals() {
+        // D39 §5 / D49 ChainWitness predicates need the kernel decoder
+        // to recognise the Sort-literal kind strings the ESL compiler
+        // emits for intermediate index positions ("Prop" / "Set" /
+        // "Type:N"). Without this mapping, JustifiedBy and similar
+        // sort-indexed predicates can't round-trip through the codec.
+        assert!(matches!(decode_param_kind_str("Prop"), Exp::Sort(0)));
+        assert!(matches!(decode_param_kind_str("Set"), Exp::Sort(1)));
+        assert!(matches!(decode_param_kind_str("Type:0"), Exp::Sort(1)));
+        assert!(matches!(decode_param_kind_str("Type:2"), Exp::Sort(3)));
+        assert!(matches!(decode_param_kind_str("Type:7"), Exp::Sort(8)));
+    }
+
+    #[test]
+    fn decode_index_kind_str_maps_sort_literals() {
+        // Index-kind variant — same Sort-literal coverage as
+        // `decode_param_kind_str` plus the bare-name and qualified-IRI
+        // paths the index telescope can exercise.
+        assert!(matches!(decode_index_kind_str("Prop"), Exp::Sort(0)));
+        assert!(matches!(decode_index_kind_str("Set"), Exp::Sort(1)));
+        assert!(matches!(decode_index_kind_str("Type:0"), Exp::Sort(1)));
+        assert!(matches!(decode_index_kind_str("Type:5"), Exp::Sort(6)));
+        // Confirm the bare-name path still resolves to a variable so the
+        // new Sort-literal arms don't shadow legitimate index references.
+        assert!(matches!(decode_index_kind_str("A"), Exp::Var(ref s) if s == "A"));
     }
 }
