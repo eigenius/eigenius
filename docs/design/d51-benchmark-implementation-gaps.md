@@ -16,7 +16,7 @@ Eight gaps, ordered top-to-bottom by dependency. Items 1–4 are kernel / instit
 |---|---|---|---|---|
 | 1 | D49 `ChainWitness` machinery — witness table, synthesis, trace dispatch (excl. Lean) | Kernel | ~2 weeks | nothing |
 | 2 | Lean → Reasoning comorphism + `VerifiedPropositionView` class (D49 §7) | Ontology + Lean worker | ~1 week | (1) |
-| 3 | D39 v2 institutional artifacts — ontologies (`JustifiedBy`, `ReasoningSentence`, `TaskOutput`, `Asserts(iri)`, `canonical_proposition`) + `crates/eigenius-reasoning/` (new crate parallel to `eigenius-lean`) | Ontology + new crate | ~2 weeks | (1) |
+| 3 | D39 v2 institutional artifacts — ontologies (`JustifiedBy`, `ReasoningSentence`, `Asserts(iri)`, `canonical_proposition`) + `crates/eigenius-reasoning/` (new crate parallel to `eigenius-lean`). The benchmark-scoped `TaskOutput` class lives with the harness (gap 7), not in the reasoning ontology. | Ontology + new crate | ~2 weeks | (1) |
 | 4 | MCP surface extensions — `eigenius_load` ESL parameter, `eigenius_institution_dispatch` generic tool | Orchestrator | ~0.5 weeks | (3) |
 | 5 | Six per-family base ontologies (`bench:chem` / `gis` / `bio` / `psych` / `mfg` / `opt`) | ESL authoring | ~3 days | (3) |
 | 6 | Agent skill update for the model-then-reason discipline | Documentation + worked examples | ~1 week | (3), (4), (5) |
@@ -65,7 +65,7 @@ This gap intentionally adds *no kernel trait surface* — the cross-institution 
 
 ## 4. Gap 3 — D39 v2 institutional artifacts
 
-**Specified in**: D39 v2 §3–§5, §4.4 (`TaskOutput`).
+**Specified in**: D39 v2 §3–§5. (The `TaskOutput` class previously specified in D39 §4.4 was relocated to D50 §5b on review — it is benchmark-scoped, not Reasoning-scoped. Its build moved to gap 7, the benchmark harness.)
 
 **Build sites**:
 
@@ -73,7 +73,7 @@ This gap intentionally adds *no kernel trait surface* — the cross-institution 
   - `JustificationTerm` indexed inductive (6 ctors per D39 §3: 4 groundings + `App` + `Sum`). Authored using the eigenius#72 Layer 2 ESL surface (`data` with indices, typed ctors).
   - `JustifiedBy` indexed inductive over `(JustificationTerm × Prop)` with 6 ctors per D39 §5 (`declared` / `observed` / `derived` / `verified` consuming `ChainWitness` witnesses + `app` / `sum_l` / `sum_r` composition). Same surface.
   - `ReasoningSentence` Resource class. `is_a: [reflection:DerivedResource, reasoning:ReasoningSentence]` per the D39 §4.2 update. Property declarations: `proposition`, `justification`, `certificate`, `subject_iri` (with index hint), `refutes` (optional). The `derivation` invariant from `DerivedResource` is satisfied by pointing at the `certificate`.
-  - `TaskOutput` Resource class per D39 §4.4. Properties: `task`, `deliverable_kind`, `payload`, `reasoning_chain`, `derivation`.
+  - (`TaskOutput` was previously listed here per D39 §4.4. It has been relocated to D50 §5b — it is benchmark-scoped, not Reasoning-scoped — and now lives with the harness in gap 7.)
   - The Reasoning institution declaration (`institution:Institution` resource) with `extract_typed` / `reify` shapes and three query class declarations (`ValidateJustification` AutoOnLoad, `EntailmentQuery` OnDemand, `ConsistencyCheck` Decidable).
 - `ontologies/core/core-ontology.json` — add `Asserts(iri) : Prop` declaration (uniform-parameter no-ctor inductive in `Sort(0)`) per D39 §4.1. Also add `reflection:canonical_proposition` as an optional property on `DeclaredResource` / `ObservedResource` / `DerivedResource` (the latter two carry it as a forward-compat property even when not yet authored on most resources).
 - `kernel/src/bootstrap/mod.rs` — add the reasoning ontology as a new bootstrap layer parent (after `core`, `program`, `reflection`, `institution`, and the `eigentt-type-fragment` layer). Update `embedded_ontologies` count.
@@ -158,9 +158,10 @@ Each base is 5-10 ESL declarations. Total authoring effort ~3 days; can be reduc
 **Build sites**:
 
 - `experiments/benchmark-harness/` (new tree, separate from production code):
+  - `harness-ontology.esl` — declares the benchmark-scoped `benchmark:TaskOutput` class + its properties (`task`, `deliverable_kind`, `payload`, `reasoning_chain`, inherited `derivation`) per D50 §5b. Loaded as a sibling layer to the per-family base ontologies; the Reasoning institution stays unaware of it.
   - `conditions/baseline_runner.py` — wraps SAB's native agent (`agent.py` in `references/ScienceAgentBench/ScienceAgentBench_github/`) for SAB tasks; wraps a direct prompt-the-LLM path for EngiBench. Produces the deliverable in the format the benchmark's eval script expects.
   - `conditions/cot_runner.py` — same agent / direct path, but with a chain-of-thought instruction added to the system prompt. Records the agent's reasoning trace in a separate field alongside the deliverable.
-  - `conditions/eigenius_runner.py` — drives the Eigenius MCP surface for the structured-reasoning condition. Loads the per-family base ontology as a layer parent, loads per-task vocabulary hints into the agent's context, runs the agent loop with access to the MCP tools (`eigenius_load`, `eigenius_query`, `eigenius_inspect`, `eigenius_institution_dispatch`), extracts the final `TaskOutput.payload` as the deliverable.
+  - `conditions/eigenius_runner.py` — drives the Eigenius MCP surface for the structured-reasoning condition. Loads the per-family base ontology as a layer parent, loads per-task vocabulary hints into the agent's context, runs the agent loop with access to the MCP tools (`eigenius_load`, `eigenius_query`, `eigenius_inspect`, `eigenius_institution_dispatch`), extracts the final `benchmark:TaskOutput.payload` as the deliverable.
   - `tasks/sab/<task-id>/{task.json, hints.esl}` — per-task config: task instruction, dataset path, eval script reference, vocabulary hints.
   - `tasks/engibench/<task-id>/{task.json, hints.esl}` — same shape for EngiBench.
   - `scoring/sab_score.py` — wraps the SAB per-task eval scripts (which live under `references/ScienceAgentBench/ScienceAgentBench_github/evaluation/`); produces VER / SR / CBS for each (condition × task × replicate) triple.

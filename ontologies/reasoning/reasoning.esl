@@ -25,9 +25,11 @@
 // (`CHAIN_WITNESS_IS_*_AS`, etc.) — do not rename without updating
 // `kernel/src/ontology/well_known.rs` in lockstep.
 
-namespace core      = "urn:eigenius:core";
-namespace reasoning = "urn:eigenius:reasoning";
-namespace witness   = "urn:eigenius:reasoning:ChainWitness";
+namespace core       = "urn:eigenius:core";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace witness    = "urn:eigenius:reasoning:ChainWitness";
 
 // ── ChainWitness predicates ──────────────────────────────────────────
 //
@@ -113,4 +115,76 @@ data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 0 {
                 j2 : reasoning:JustificationTerm) =>
         reasoning:JustifiedBy(j2, P) ->
         reasoning:JustifiedBy(reasoning:Sum(j1, j2), P),
+}
+
+// ── ReasoningSentence (D39 §4.2) ─────────────────────────────────────
+//
+// The chain-resident pairing of a proposition with a JustificationTerm
+// and a JustifiedBy certificate. `subclass_of reflection:DerivedResource`
+// makes a sentence first-class as evidence: a later sentence's
+// `DerivedEvidence(prior_iri)` lookup resolves to a real DerivedResource
+// and the `IsDerivedAs prior_iri P` witness is emitted at commit on the
+// same footing as for any other derived artifact.
+
+class reasoning:ReasoningSentence : reflection:DerivedResource {
+    description = "A chain-resident reasoning step: proposition + JustificationTerm + JustifiedBy certificate. The ValidateJustification AutoOnLoad gate type-checks the certificate against the proposition at commit (D39 §4.3). Subclassing DerivedResource lets prior sentences be cited via DerivedEvidence; the inherited derivation requirement is satisfied by the certificate field (the certificate IS the derivation).";
+    requires reasoning:proposition,
+             reasoning:justification,
+             reasoning:certificate;
+    recommends reasoning:subject_iri,
+               reasoning:refutes;
+}
+
+property reasoning:proposition : core:resource {
+    description = "The Prop-typed EigenTT proposition this sentence asserts, encoded via the D47 codec. Also serves as the sentence's reflection:canonical_proposition for D49 §6 witness emission, so downstream DerivedEvidence citations resolve to this proposition in the witness key.";
+    class_types eigentt:TypeExpr;
+    domain reasoning:ReasoningSentence;
+}
+
+property reasoning:justification : core:resource {
+    description = "The agent's JustificationTerm warrant for the proposition, encoded as a chain-mirrored inductive value over the six JustificationTerm constructors (D39 §3).";
+    class_types reasoning:JustificationTerm;
+    domain reasoning:ReasoningSentence;
+}
+
+property reasoning:certificate : core:resource {
+    description = "The kernel-checkable JustifiedBy certificate, encoded via the D47 codec. ValidateJustification (D39 §4.3) type-checks it against `JustifiedBy justification proposition` at commit; Fails verdicts reject the sentence.";
+    class_types eigentt:TypeExpr;
+    domain reasoning:ReasoningSentence;
+}
+
+property reasoning:subject_iri : core:string {
+    description = "The principal Resource this sentence is about. First-class EigenQL index for the Reasoning institution — agents querying 'what have I concluded about X?' hit this directly. For decision-shaped reasoning (D39 §6.4), all alternative-consideration sentences and the final pick share the same subject_iri.";
+    format = core:iri;
+    domain reasoning:ReasoningSentence;
+}
+
+property reasoning:refutes : core:string {
+    description = "IRI of a prior ReasoningSentence this sentence supersedes. Marks a belief-revision step; full chain-merge semantics handled by the chain-merge work, this property fixes only the structural marker.";
+    format = core:iri;
+    domain reasoning:ReasoningSentence;
+}
+
+// ── VerifiedPropositionView (D49 §7) ─────────────────────────────────
+//
+// The chain artifact reified by the Lean → Reasoning comorphism. Carries
+// the EigenTT-form proposition that a Lean VerifiedResource inhabits, so
+// the witness emitter for VerificationTrace reads canonical_proposition
+// from a chain resource uniformly with the other three witness families.
+// The user-authored Lean resource stays intact; this view is derived.
+//
+// Created automatically by the lean_to_reasoning comorphism (D49 §7);
+// not user-authored. Phase 8 wires the comorphism; this declaration
+// fixes the contract.
+
+class reasoning:VerifiedPropositionView : reflection:DerivedResource {
+    description = "Comorphism-reified view of a Lean (or future Coq/Agda/Idris) VerifiedResource's proposition, expressed as an EigenTT Prop term. The witness emitter for reflection:VerificationTrace looks up the view by source_verified_resource and reads canonical_proposition to build the IsVerifiedAs witness (D49 §7). Required, not optional: a view without a canonical_proposition is malformed.";
+    requires reasoning:source_verified_resource,
+             reflection:canonical_proposition;
+}
+
+property reasoning:source_verified_resource : core:string {
+    description = "IRI of the user-authored VerifiedResource (typically a lean:LeanProofTerm) whose proposition this view exposes in EigenTT form. The IsVerifiedAs witness key's iri slot uses this value (not the view's own IRI) so that JustifiedBy.verified constructors over the user-authored VerifiedResource resolve successfully.";
+    format = core:iri;
+    domain reasoning:VerifiedPropositionView;
 }

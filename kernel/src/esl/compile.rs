@@ -4287,6 +4287,26 @@ mod tests {
             "expected at least 6 inductive Resources in reasoning.esl, found {ind_count}"
         );
 
+        // Phase 4 added two resource classes (ReasoningSentence +
+        // VerifiedPropositionView) + their property declarations.
+        // TaskOutput is intentionally not here — D39 §4.4 justifies it
+        // entirely by the discipline-thesis benchmark work (D50/D51),
+        // so it lives with the benchmark harness, not in the
+        // foundational Reasoning institution ontology.
+        let class_iri = iri(crate::ontology::well_known::CLASS);
+        for expected in &[
+            "urn:eigenius:reasoning:ReasoningSentence",
+            "urn:eigenius:reasoning:VerifiedPropositionView",
+        ] {
+            assert!(
+                resources
+                    .iter()
+                    .any(|r| r.id().map(|i| i.as_str() == *expected).unwrap_or(false)
+                        && r.is_a().iter().any(|c| c == &class_iri)),
+                "reasoning.esl missing class declaration for {expected}"
+            );
+        }
+
         // Spot-check: the four witness IRIs are present.
         use crate::ontology::well_known as wk_local;
         for expected in &[
@@ -4327,14 +4347,36 @@ mod tests {
         }
         let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
+        // Phase 4 — the resource classes (ReasoningSentence, TaskOutput,
+        // VerifiedPropositionView) declare `subclass_of
+        // reflection:DerivedResource`, so reflection-ontology has to be
+        // in the layer chain before reasoning.esl loads.
+        let reflection_json =
+            include_str!("../../../ontologies/reflection/reflection-ontology.json");
+        let reflection_resources = eigon_json::parse_document(reflection_json).unwrap();
+        let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
+        for r in reflection_resources {
+            reflection_builder.add_resource(r).unwrap();
+        }
+        // eigentt:TypeExpr is referenced from reasoning:proposition /
+        // reasoning:certificate via class_types; load the fragment too.
+        let eigentt_json = include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json");
+        let eigentt_resources = eigon_json::parse_document(eigentt_json).unwrap();
+        for r in eigentt_resources {
+            reflection_builder.add_resource(r).unwrap();
+        }
+        let reflection =
+            Arc::new(reflection_builder.build(crate::layer::LayerStorage::in_memory()));
+
         let source = include_str!("../../../ontologies/reasoning/reasoning.esl");
         let user_resources = esl::compile(source).expect("reasoning.esl must compile");
-        let mut user_builder = LayerBuilder::new("reasoning", Some(core));
+        let mut user_builder = LayerBuilder::new("reasoning", Some(reflection));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
         }
         let layer = Arc::new(user_builder.build(crate::layer::LayerStorage::in_memory()));
 
+        // The six inductive types — Phase 3.
         for iri_str in &[
             "urn:eigenius:reasoning:ChainWitness:IsDeclaredAs",
             "urn:eigenius:reasoning:ChainWitness:IsObservedAs",
@@ -4342,6 +4384,22 @@ mod tests {
             "urn:eigenius:reasoning:ChainWitness:IsVerifiedAs",
             "urn:eigenius:reasoning:JustificationTerm",
             "urn:eigenius:reasoning:JustifiedBy",
+        ] {
+            let class_iri = Iri::parse(iri_str).unwrap();
+            resolve_class_type(&class_iri, &layer)
+                .unwrap_or_else(|e| panic!("failed to resolve {iri_str}: {e}"));
+        }
+
+        // The three resource classes — Phase 4. `resolve_class_type` on
+        // a regular Class returns the Σ-chain of its required +
+        // recommended properties; we just check that resolution
+        // succeeds (the structural contract is "all referenced
+        // properties exist and have decoded types"). A failure here
+        // would mean a property declaration is malformed or references
+        // an unresolved class.
+        for iri_str in &[
+            "urn:eigenius:reasoning:ReasoningSentence",
+            "urn:eigenius:reasoning:VerifiedPropositionView",
         ] {
             let class_iri = Iri::parse(iri_str).unwrap();
             resolve_class_type(&class_iri, &layer)

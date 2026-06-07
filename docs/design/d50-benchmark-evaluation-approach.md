@@ -26,7 +26,7 @@ The reframing has three consequences for evaluation:
 |---|---|---|
 | **A — Baseline** | The benchmark's native agent protocol. SAB: emits a single Python file. EngiBench: emits a single prose response. | The deliverable, nothing else. |
 | **B — Chain-of-thought** | Same agent, but instructed to emit a freeform reasoning trace before the deliverable. The trace is unconstrained prose. | The trace (in a separate field) + the deliverable. |
-| **C — Eigenius justified** | Agent authors typed `ReasoningSentence`s with `JustifiedBy` certificates committed to the chain, plus the deliverable. The MCP surface plus the model-then-reason discipline (D39 §4.5) are the surface. | The reasoning chain (committed ESL vocabulary + `ReasoningSentence` sequence + `TaskOutput` referencing the chain) plus the deliverable (extracted from the `TaskOutput.payload`). |
+| **C — Eigenius justified** | Agent authors typed `ReasoningSentence`s with `JustifiedBy` certificates committed to the chain, plus the deliverable. The MCP surface plus the model-then-reason discipline (D39 §4.5) are the surface. | The reasoning chain (committed ESL vocabulary + `ReasoningSentence` sequence + `benchmark:TaskOutput` referencing the chain — see §5b) plus the deliverable (extracted from the `TaskOutput.payload`). |
 
 The three-condition design lets us separate two effects:
 - **Externalisation effect** (B vs A): does requiring the agent to externalise reasoning at all help?
@@ -136,6 +136,23 @@ benchmark-harness/
 
 The harness is per-pilot infrastructure, not a productised platform feature. It lives in a sibling repo (or under `experiments/` in this repo); production code does not depend on it.
 
+## 5b. The `TaskOutput` Resource
+
+`TaskOutput` is the chain-resident deliverable handle for condition C. It pairs the artifact the task asked for (Python source, prose, JSON, or a resource set) with an explicit pointer chain back to the `ReasoningSentence`s that justified its content. This is what the scoring harness consumes; it is also what makes the chain "complete in itself" — the agent's deliverable explicitly references which reasoning sentences justified its content, so an auditor can ask "for this Python file, which steps in the agent's reasoning produced which behaviour?" and walk the chain to find out.
+
+`TaskOutput` was originally specified in D39 §4.4. On review during D39 Phase 4 implementation, it was relocated here: the class is justified entirely by benchmark evaluation (every property is benchmark-shaped) and putting it in the foundational Reasoning ontology would pollute that ontology with downstream-consumer concerns. The Reasoning institution does not need or reference `TaskOutput`.
+
+| Property | Type | Required? | Reading |
+|---|---|---|---|
+| `is_a` | `[reflection:DerivedResource, benchmark:TaskOutput]` | yes | A subclass of `DerivedResource` like `ReasoningSentence`. |
+| `task` | `core:iri` | yes | The task IRI this output answers. Provides task-scoped identity for the deliverable. |
+| `deliverable_kind` | enumeration string | yes | What kind of artifact this is. Initial values: `"python_source"`, `"prose"`, `"json"`, `"resource_set"`. New kinds added as needed by future task families. |
+| `payload` | `core:string` (or a class-specific shape for `resource_set`) | yes | The actual artifact content the task asked for. For `python_source` / `prose` / `json` this is a literal; for `resource_set` it's a list of chain IRIs. |
+| `reasoning_chain` | array of `core:iri` referencing `ReasoningSentence`s | yes | The reasoning sentences this output rests on, in commit order. Auditors trace from the deliverable to the warrant. The kernel does not enforce that every line of the payload corresponds to a sentence in the chain — that's a methodological commitment, not a structural one — but commit-time validation checks that every IRI in this array resolves to a `ReasoningSentence` on the chain. |
+| `derivation` (inherited) | reference to a `reflection:ProgramTrace` | yes (by `DerivedResource`'s `requires` list) | Trace of the program (or agent loop) that produced the deliverable from the reasoning chain. |
+
+Implementation site: a benchmark-harness ontology (e.g. `experiments/benchmark/harness-ontology.esl`) declaring the `benchmark:TaskOutput` class and its properties, loaded as a sibling layer to the per-family base ontologies. The namespace is `benchmark`, not `reasoning` — the Reasoning institution stays unaware.
+
 ## 6. Scoring and metrics
 
 ### 6.1 Primary metrics (per-benchmark native)
@@ -208,7 +225,7 @@ These are the risks specific to the experimental design. Architectural-soundness
 
 ## 10. Relationship to other documents
 
-- **[D39 v2](d39-justification-logic.md)** — provides the `ReasoningSentence` + `JustifiedBy` + `TaskOutput` substrate the condition-C agent surface uses. §4.5 (model-then-reason) is the methodological commitment the agent skill teaches. §4.4 (`TaskOutput`) is the benchmark-deliverable chain shape.
+- **[D39 v2](d39-justification-logic.md)** — provides the `ReasoningSentence` + `JustifiedBy` substrate the condition-C agent surface uses. §4.5 (model-then-reason) is the methodological commitment the agent skill teaches. (The `TaskOutput` deliverable-handle was originally specified in D39 §4.4 but was relocated to D50 §5b on review — it is benchmark-scoped, not Reasoning-scoped.)
 - **[D49](d49-chainwitness-machinery.md)** — provides the `ChainWitness` machinery that makes `JustifiedBy` certificates type-checkable at commit. Implementation status: design memo; not yet built.
 - **[D51 benchmark implementation gaps](d51-benchmark-implementation-gaps.md)** — companion memo enumerating the implementation work that must close before the pilot can run. Required reading before scheduling Phase 0.
 - **D14 / D26 / D27 / D28** — the existing institutional substrate the discipline is layered on top of. The base ontologies (§4) cite these where relevant (e.g., chemistry tasks that engage Symbolics or Catalyst go through D27's existing institution dispatch).

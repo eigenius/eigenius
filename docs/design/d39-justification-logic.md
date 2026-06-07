@@ -132,20 +132,11 @@ The `AutoOnLoad` gate is the load-bearing piece. Its `Verdict` becomes a first-c
 
 **Agent-facing dispatch.** The two `OnDemand` / `Decidable` query classes are not exposed as per-query-class MCP tools. Instead, a single generic `eigenius_institution_dispatch(institution_iri, query_class_iri, payload, …)` MCP tool dispatches into the kernel's existing `InstitutionIndex` for any D14 institution. The Reasoning institution's queries thread through the same surface — keeping the MCP tool count lean and forward-compatible for future institutions' query classes. Agent skill documentation (a separate memo, not part of this design) covers the canonical EigenQL patterns for "what have I concluded about subject X?" (`MATCH ReasoningSentence(?s) { subject_iri: <X>, … }`), which is the most common self-recall query and doesn't require an institutional dispatch at all.
 
-### 4.4 The `TaskOutput` Resource
+### 4.4 The `TaskOutput` Resource — relocated to D50
 
-When a `ReasoningSentence` chain is produced to answer a specific task (e.g., a benchmark problem, a user query, an analysis request), the final *deliverable* — the artifact the task asked for — is itself a chain resource that explicitly cites the reasoning that produced it. This is the `TaskOutput` class:
+`TaskOutput` was originally specified here as the deliverable-handle for the discipline-thesis benchmark, citing the `ReasoningSentence` chain that justified its content. On review (during D39 Phase 4 implementation), the class is justified entirely by the benchmark-evaluation work (D50/D51) and not by anything the Reasoning institution itself needs — every property (`task`, `deliverable_kind`, `payload`, `reasoning_chain`) is benchmark-shaped. Keeping it here would pollute the foundational Reasoning ontology with downstream-consumer concerns.
 
-| Property | Type | Required? | Reading |
-|---|---|---|---|
-| `is_a` | `[reflection:DerivedResource, reasoning:TaskOutput]` | yes | A subclass of `DerivedResource` like `ReasoningSentence`. |
-| `task` | `core:iri` | yes | The task IRI this output answers. Provides task-scoped identity for the deliverable. |
-| `deliverable_kind` | enumeration string | yes | What kind of artifact this is. Initial values: `"python_source"`, `"prose"`, `"json"`, `"resource_set"`. New kinds added as needed by future task families. |
-| `payload` | `core:string` (or a class-specific shape for `resource_set`) | yes | The actual artifact content the task asked for. For `python_source` / `prose` / `json` this is a literal; for `resource_set` it's a list of chain IRIs. |
-| `reasoning_chain` | array of `core:iri` referencing `ReasoningSentence`s | yes | The reasoning sentences this output rests on, in commit order. Auditors trace from the deliverable to the warrant. The kernel does not enforce that every line of the payload corresponds to a sentence in the chain — that's a methodological commitment, not a structural one — but commit-time validation checks that every IRI in this array resolves to a `ReasoningSentence` on the chain. |
-| `derivation` (inherited) | reference to a `reflection:ProgramTrace` | yes (by `DerivedResource`'s `requires` list) | Trace of the program (or agent loop) that produced the deliverable from the reasoning chain. |
-
-`TaskOutput` is the artifact handle for the discipline thesis: it makes the chain "complete in itself" — the agent's deliverable explicitly references which reasoning sentences justified its content, so an auditor can ask "for this Python file, which steps in the agent's reasoning produced which behaviour?" and walk the chain to find out. For benchmark scoring, the deliverable that the benchmark eval script consumes is the `payload` field, but the chain that justified it is preserved as a queryable artifact.
+The class and its properties are deferred to the benchmark harness, where they belong. See D50 (benchmark evaluation approach) for the up-to-date specification.
 
 ### 4.5 The two-phase agent surface: model, then reason
 
