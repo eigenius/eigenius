@@ -140,7 +140,41 @@ fn load_layer(
     storage: crate::layer::LayerStorage,
 ) -> Result<Arc<Layer>, BootstrapError> {
     let resources = eigon_json::parse_document(json).map_err(BootstrapError::Parse)?;
+    build_layer_from_resources(name, resources, parent, storage)
+}
 
+/// ESL-sourced variant of [`load_layer`]. Compiles the ESL source into
+/// chain resources via `esl::compile`, then runs the same
+/// build-and-validate pipeline. Used by Phase-8 bootstrap to ship
+/// `ontologies/reasoning/reasoning.esl` without committing a parallel
+/// `.json` to keep in sync — single source of truth.
+fn load_esl_layer(
+    name: &str,
+    esl_source: &str,
+    parent: Option<Arc<Layer>>,
+    storage: crate::layer::LayerStorage,
+) -> Result<Arc<Layer>, BootstrapError> {
+    let resources = crate::esl::compile(esl_source).map_err(|errs| {
+        BootstrapError::CoreOntologyInvalid(
+            errs.into_iter()
+                .map(|e| crate::validation::ValidationError {
+                    resource_id: None,
+                    property: None,
+                    rule: crate::validation::ValidationRule::TypeMismatch,
+                    message: format!("ESL compile error in bootstrap layer `{name}`: {e:?}"),
+                })
+                .collect(),
+        )
+    })?;
+    build_layer_from_resources(name, resources, parent, storage)
+}
+
+fn build_layer_from_resources(
+    name: &str,
+    resources: Vec<crate::ontology::resource::Resource>,
+    parent: Option<Arc<Layer>>,
+    storage: crate::layer::LayerStorage,
+) -> Result<Arc<Layer>, BootstrapError> {
     let resource_count = resources.len();
     let mut builder = LayerBuilder::new(name, parent);
     for resource in resources {
@@ -175,7 +209,7 @@ fn load_layer(
 
 /// Bootstrap the Eigenius kernel.
 ///
-/// Loads twelve ontology layers: core → eigentt-type-fragment → program → reflection → obo → institution → runtime → formulas → lean-expressions → lean-runtime-classes → lean-institution → notebook.
+/// Loads thirteen ontology layers: core → eigentt-type-fragment → program → reflection → obo → institution → runtime → formulas → lean-expressions → lean-runtime-classes → lean-institution → reasoning → notebook.
 /// All are validated. Returns an `ExecutionContext` with the
 /// notebook layer as head.
 ///
@@ -314,10 +348,30 @@ pub fn bootstrap_with_storage(
         storage.clone(),
     )?;
 
+    // reasoning layer (D39 Phase 8) — the Justification Logic
+    // institution's chain artifacts: the four `ChainWitness.Is*As`
+    // predicates (D49 §6), `JustificationTerm` + `JustifiedBy`
+    // indexed inductives, `ReasoningSentence` + `VerifiedPropositionView`
+    // resource classes, `EntailmentRequest` + `ConsistencyRequest`
+    // query-input classes, the `reasoning_institution` resource +
+    // three QueryClass declarations + `ef_justification` ExportFormat.
+    // Loaded from ESL source (not JSON) — compiled at bootstrap to
+    // keep `ontologies/reasoning/reasoning.esl` as the single source
+    // of truth. Depends on every layer below it: core (primitives),
+    // eigentt-type-fragment (TypeExpr), reflection (DerivedResource +
+    // canonical_proposition), institution (Institution / QueryClass /
+    // ExportFormat / dispatch roles).
+    let reasoning = load_esl_layer(
+        "reasoning",
+        include_str!("../../../ontologies/reasoning/reasoning.esl"),
+        Some(lean_institution),
+        storage.clone(),
+    )?;
+
     let notebook = load_layer(
         "notebook",
         include_str!("../../../ontologies/notebook/notebook-ontology.json"),
-        Some(lean_institution),
+        Some(reasoning),
         storage.clone(),
     )?;
 
@@ -518,7 +572,7 @@ fn check_and_migrate_schema_version(
     Ok(())
 }
 
-fn embedded_ontologies() -> [(&'static str, &'static str); 12] {
+fn embedded_ontologies() -> [(&'static str, &'static str); 13] {
     [
         (
             "core",
@@ -563,6 +617,15 @@ fn embedded_ontologies() -> [(&'static str, &'static str); 12] {
         (
             "lean-institution",
             include_str!("../../../ontologies/lean/lean-institution.eigon.json"),
+        ),
+        // The reasoning layer is sourced from ESL rather than JSON,
+        // but the manifest's job is content-drift detection — hashing
+        // the raw source bytes is what we want either way. A change
+        // to reasoning.esl bumps the manifest, forcing a SEED rebuild
+        // against a stale persistent DB.
+        (
+            "reasoning",
+            include_str!("../../../ontologies/reasoning/reasoning.esl"),
         ),
         (
             "notebook",
@@ -717,8 +780,12 @@ mod tests {
         // to declare LeanProject / LeanEnvironment subclasses.
         // lean-institution inserted at Phase 20a.4 / D28 to declare
         // the LeanProofTerm class + qc_proof_check QueryClass.
+        // reasoning inserted at D39 Phase 8 to declare the
+        // Justification Logic institution and its chain artifacts.
         assert!(!ctx.head().is_root());
-        let lean_institution = ctx.head().parent().unwrap();
+        let reasoning = ctx.head().parent().unwrap();
+        assert!(!reasoning.is_root());
+        let lean_institution = reasoning.parent().unwrap();
         assert!(!lean_institution.is_root());
         let lean_runtime_classes = lean_institution.parent().unwrap();
         assert!(!lean_runtime_classes.is_root());
@@ -1023,6 +1090,41 @@ mod tests {
             assert!(
                 ctx.resolve(&iri).is_some(),
                 "should resolve dispatch role {role}"
+            );
+        }
+    }
+
+    #[test]
+    fn bootstrap_includes_reasoning_layer_artifacts() {
+        // D39 Phase 8 — confirm the reasoning layer's load_esl_layer
+        // call produced the expected chain artifacts: the 4 ChainWitness
+        // predicates, the 2 indexed inductives (JustificationTerm +
+        // JustifiedBy), the 2 resource classes (ReasoningSentence +
+        // VerifiedPropositionView), the 2 query-request classes
+        // (EntailmentRequest + ConsistencyRequest), the institution
+        // resource, the 3 QueryClasses, and the ExportFormat.
+        let ctx = bootstrap().unwrap();
+        for iri in [
+            "urn:eigenius:reasoning:ChainWitness:IsDeclaredAs",
+            "urn:eigenius:reasoning:ChainWitness:IsObservedAs",
+            "urn:eigenius:reasoning:ChainWitness:IsDerivedAs",
+            "urn:eigenius:reasoning:ChainWitness:IsVerifiedAs",
+            "urn:eigenius:reasoning:JustificationTerm",
+            "urn:eigenius:reasoning:JustifiedBy",
+            "urn:eigenius:reasoning:ReasoningSentence",
+            "urn:eigenius:reasoning:VerifiedPropositionView",
+            "urn:eigenius:reasoning:EntailmentRequest",
+            "urn:eigenius:reasoning:ConsistencyRequest",
+            "urn:eigenius:reasoning:reasoning_institution",
+            "urn:eigenius:reasoning:qc_validate_justification",
+            "urn:eigenius:reasoning:qc_entailment_query",
+            "urn:eigenius:reasoning:qc_consistency_check",
+            "urn:eigenius:reasoning:ef_justification",
+        ] {
+            let parsed = Iri::parse(iri).unwrap();
+            assert!(
+                ctx.resolve(&parsed).is_some(),
+                "bootstrap should resolve reasoning-layer artifact `{iri}`"
             );
         }
     }

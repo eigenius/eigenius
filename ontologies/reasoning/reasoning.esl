@@ -26,6 +26,7 @@
 // `kernel/src/ontology/well_known.rs` in lockstep.
 
 namespace core        = "urn:eigenius:core";
+namespace formats     = "urn:eigenius:core:formats";
 namespace eigentt     = "urn:eigenius:eigentt";
 namespace reflection  = "urn:eigenius:reflection";
 namespace institution = "urn:eigenius:institution";
@@ -159,13 +160,13 @@ property reasoning:certificate : core:resource {
 
 property reasoning:subject_iri : core:string {
     description = "The principal Resource this sentence is about. First-class EigenQL index for the Reasoning institution — agents querying 'what have I concluded about X?' hit this directly. For decision-shaped reasoning (D39 §6.4), all alternative-consideration sentences and the final pick share the same subject_iri.";
-    format = core:iri;
+    format = formats:iri;
     domain reasoning:ReasoningSentence;
 }
 
 property reasoning:refutes : core:string {
     description = "IRI of a prior ReasoningSentence this sentence supersedes. Marks a belief-revision step; full chain-merge semantics handled by the chain-merge work, this property fixes only the structural marker.";
-    format = core:iri;
+    format = formats:iri;
     domain reasoning:ReasoningSentence;
 }
 
@@ -189,7 +190,7 @@ class reasoning:VerifiedPropositionView : reflection:DerivedResource {
 
 property reasoning:source_verified_resource : core:string {
     description = "IRI of the user-authored VerifiedResource (typically a lean:LeanProofTerm) whose proposition this view exposes in EigenTT form. The IsVerifiedAs witness key's iri slot uses this value (not the view's own IRI) so that JustifiedBy.verified constructors over the user-authored VerifiedResource resolve successfully.";
-    format = core:iri;
+    format = formats:iri;
     domain reasoning:VerifiedPropositionView;
 }
 

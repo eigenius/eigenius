@@ -23,6 +23,12 @@ eigenius-julia = { path = "../crates/eigenius-julia" }
 # orchestrator round-trip — so the verification TCB stays bounded by
 # nanoda's acceptance (D28 §2.3 / §10.2).
 eigenius-lean = { path = "../crates/eigenius-lean" }
+# D39 Phase 8: the Reasoning institution's validator is the kernel's
+# own NbE checker — no external runtime — so the verification TCB is
+# bounded by the kernel's type-theory implementation. Linked in
+# alongside Lean so AutoOnLoad ValidateJustification on every
+# ReasoningSentence commit dispatches as a direct function call.
+eigenius-reasoning = { path = "../crates/eigenius-reasoning" }
 eigenius-runtime-substrate = { path = "../crates/runtime-substrate" }
 eigenius-config = { path = "../crates/eigenius-config" }
 # D43: BGE-small Candle embedder. Pulled in by the `serve` path so

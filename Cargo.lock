@@ -1200,6 +1200,7 @@ dependencies = [
  "eigenius-julia",
  "eigenius-kernel",
  "eigenius-lean",
+ "eigenius-reasoning",
  "eigenius-runtime-substrate",
  "eigenius-storage-rocksdb",
  "futures",
