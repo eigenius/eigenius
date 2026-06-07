@@ -103,6 +103,13 @@ pub enum ValidationRule {
     /// return the wrong type, or apply operators with mismatched
     /// arities before the resource lands on the chain.
     LambdaTypeMismatch,
+    /// A `reflection:canonical_proposition` property value (D49 §6)
+    /// fails to decode through the D47 type-fragment codec. The
+    /// resource is rejected at commit so malformed propositions never
+    /// reach the per-Layer witness index; without this gate a malformed
+    /// canonical proposition would silently absent the corresponding
+    /// `ChainWitness` rather than surfacing a diagnostic.
+    CanonicalPropositionMalformed,
 }
 
 impl fmt::Display for ValidationError {
@@ -225,6 +232,14 @@ impl Validator {
 
         // Rule 13: Universe stratification (D6b §7, Phase 10b)
         errors.extend(self.check_universe_stratification(resource, &res_id));
+
+        // Rule 20: `reflection:canonical_proposition` decoder check
+        // (D49 §6). When present on a Declared / Observed / Derived
+        // resource, the value must decode cleanly through the D47
+        // type-fragment codec. Malformed propositions are rejected at
+        // commit so they never silently absent the corresponding
+        // `ChainWitness` from the per-Layer witness index.
+        errors.extend(self.check_canonical_proposition(resource, &res_id));
 
         // Rule 14: Class-definition reference integrity (eigenius#26).
         errors.extend(self.check_class_definition_references(resource, &res_id));

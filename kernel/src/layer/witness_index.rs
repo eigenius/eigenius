@@ -165,6 +165,65 @@ fn check_layer_with_coercion(layer: &Layer, key: &WitnessKey) -> bool {
     false
 }
 
+/// **D49 §5 synthesis algorithm — Phase 6 foundation.** Look up a
+/// `ChainWitness` inhabitant for `(category, iri, proposition)` and, on
+/// hit, return a `Val::ChainWitness(key)` value the kernel's NbE checker
+/// can use as the synthesised witness argument to a `JustifiedBy.*`
+/// constructor. On miss, surface the precise diagnostic D49 §5
+/// specifies — naming the missing predicate family, the IRI, and what
+/// the chain needs to admit for this `JustifiedBy.*` constructor to
+/// become well-typed.
+///
+/// This function is the kernel-side surface the D39 Reasoning
+/// institution's `JustifiedBy` constructor type-checker calls into. The
+/// integration site — where `check_infer` in `nbe/check.rs` recognises a
+/// `JustifiedBy.declared` / `.observed` / `.derived` / `.verified`
+/// constructor and dispatches here — lands during D39 implementation
+/// (per D51 gap 3); this function is the stable contract that integration
+/// can call against starting today.
+///
+/// `proposition` is the EigenTT `Exp` extracted from the constructor's
+/// `P` argument at the call site. The key's `prop_hash` is computed via
+/// D47 encoding + SHA-256 to match what `build_witness_index` produced.
+///
+/// Crate-internal `crate::witness::Val::ChainWitness` is returned wrapped
+/// in `Ok`; callers can pass it directly to where the constructor
+/// expects a `ChainWitness.IsXxAs iri P` inhabitant.
+pub fn synthesize_chain_witness(
+    layer: &Layer,
+    category: WitnessCategory,
+    iri: &Iri,
+    proposition: &crate::nbe::term::Exp,
+) -> Result<crate::nbe::val::Val, String> {
+    let key = WitnessKey::from_exp(category, iri.clone(), proposition).map_err(|e| {
+        format!(
+            "synthesize_chain_witness: failed to encode proposition for {} witness on {}: {e}",
+            category.label(),
+            iri,
+        )
+    })?;
+    if lookup_chain_witness(layer, &key) {
+        Ok(crate::nbe::val::Val::ChainWitness(key))
+    } else {
+        Err(format!(
+            "no admitted {} witness for IRI {} with the supplied proposition; \
+             the resource at {} must be committed with reflection:canonical_proposition \
+             matching the proposition (or the proposition must be Asserts(<iri>) — the \
+             default; the Asserts default lands in Phase 5b once D39's core-ontology \
+             Asserts class is authored) before this JustifiedBy.{} constructor is well-typed",
+            category.label(),
+            iri,
+            iri,
+            match category {
+                WitnessCategory::Declared => "declared",
+                WitnessCategory::Observed => "observed",
+                WitnessCategory::Derived => "derived",
+                WitnessCategory::Verified => "verified",
+            },
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,6 +344,82 @@ mod tests {
         assert!(
             !lookup_chain_witness(&layer_b, &other_key),
             "lookup must miss when the (iri, prop) pair was never admitted"
+        );
+    }
+
+    // --- Phase 6 foundation — synthesize_chain_witness ---
+
+    #[test]
+    fn synthesize_chain_witness_succeeds_when_admitted() {
+        let mut b = LayerBuilder::new("test", None);
+        let target = "urn:eigenius:example:thing";
+        let prop = Exp::Sort(0);
+        b.add_resource(target_resource_with_canonical_prop(target, &prop))
+            .unwrap();
+        b.add_resource(declaration_trace(
+            target,
+            "urn:eigenius:example:thing-decl-trace",
+        ))
+        .unwrap();
+        let layer = b.build(LayerStorage::in_memory());
+        let target_iri = iri(target);
+        let val = synthesize_chain_witness(&layer, WitnessCategory::Declared, &target_iri, &prop)
+            .expect("witness should be admissible");
+        // The returned value carries the synthesised witness.
+        match val {
+            crate::nbe::val::Val::ChainWitness(k) => {
+                assert_eq!(k.category, WitnessCategory::Declared);
+                assert_eq!(k.iri, target_iri);
+            }
+            other => panic!("expected Val::ChainWitness, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn synthesize_chain_witness_fails_with_diagnostic_when_missing() {
+        let layer = LayerBuilder::new("test", None).build(LayerStorage::in_memory());
+        let target_iri = iri("urn:eigenius:example:unfounded");
+        let prop = Exp::Sort(0);
+        let err = synthesize_chain_witness(&layer, WitnessCategory::Declared, &target_iri, &prop)
+            .expect_err("witness must miss when nothing admits it");
+        // Diagnostic shape — names the predicate family, the IRI, what
+        // the user needs to do.
+        assert!(err.contains("IsDeclaredAs"), "diagnostic: {err}");
+        assert!(err.contains(target_iri.as_str()), "diagnostic: {err}");
+        assert!(
+            err.contains("canonical_proposition"),
+            "diagnostic should hint at canonical_proposition: {err}"
+        );
+        assert!(
+            err.contains("JustifiedBy.declared"),
+            "diagnostic should name the consuming constructor: {err}"
+        );
+    }
+
+    #[test]
+    fn synthesize_chain_witness_walks_parent_chain() {
+        let mut parent = LayerBuilder::new("parent", None);
+        let target = "urn:eigenius:example:thing";
+        let prop = Exp::Sort(0);
+        parent
+            .add_resource(target_resource_with_canonical_prop(target, &prop))
+            .unwrap();
+        parent
+            .add_resource(declaration_trace(
+                target,
+                "urn:eigenius:example:thing-decl-trace",
+            ))
+            .unwrap();
+        let parent_layer = Arc::new(parent.build(LayerStorage::in_memory()));
+
+        let child = LayerBuilder::new("child", Some(parent_layer.clone()));
+        let child_layer = child.build(LayerStorage::in_memory());
+
+        let target_iri = iri(target);
+        assert!(
+            synthesize_chain_witness(&child_layer, WitnessCategory::Declared, &target_iri, &prop,)
+                .is_ok(),
+            "synthesis must walk the parent chain to find the witness in parent layer"
         );
     }
 

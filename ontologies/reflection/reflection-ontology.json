@@ -634,5 +634,18 @@
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:class_types": ["urn:eigenius:reflection:ProgramTrace"],
     "urn:eigenius:core:domain": ["urn:eigenius:reflection:VerificationTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:canonical_proposition",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The Prop-typed EigenTT proposition this resource canonically asserts (D49 §6). Optional; absence defaults to the term `Asserts(iri)` at witness-emission time (D39 §4.1). Value carries a D47-encoded `eigentt:TypeExpr` payload. Validated at commit: the value must decode cleanly through the D47 codec and type-check at `Prop`. The four ChainWitness predicate families (D49 §3) project this property onto kernel-internal witness inhabitants admissible at JustifiedBy.declared / .observed / .derived / .verified type-check time.",
+    "urn:eigenius:core:short_name": "canonical_proposition",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:TypeExpr"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:DeclaredResource",
+      "urn:eigenius:reflection:ObservedResource",
+      "urn:eigenius:reflection:DerivedResource"
+    ]
   }
 ]
