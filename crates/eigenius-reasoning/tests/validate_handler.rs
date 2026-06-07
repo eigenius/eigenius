@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Phase 6 smoke tests for `ReasoningInstitution::query(validate_justification)`.
+//! Integration tests for the Reasoning institution's handlers.
 //!
-//! Locks in the validate path's plumbing: property reading, decoder
-//! dispatch, type-check invocation, Verdict resource shape. The full
-//! "Holds" path (a well-formed certificate whose witnesses are
-//! synthesized at type-check time) requires Phase 9's
-//! `synthesize_chain_witness` integration in `nbe::check`; until that
-//! lands, well-formed certificates surface as `Verdict::Fails` with a
-//! missing-witness diagnostic. The Phase 10 end-to-end test will flip
-//! the expected verdict to `Holds` once Phase 9 closes the loop.
+//! Layered by phase:
+//!
+//! - **Phase 6 plumbing** — property reading, decoder dispatch, type-
+//!   check invocation, Verdict resource shape, dispatch routing.
+//! - **Phase 7 query handlers** — EntailmentQuery (lookup-based v1)
+//!   and ConsistencyCheck (Undecidable stub) input parsing + outcomes.
+//! - **Phase 10 end-to-end** — full chain → witness-index →
+//!   kernel-side `synthesize_chain_witness` → ctor-arg admission →
+//!   `Verdict::Holds` path, plus matching soundness-boundary checks
+//!   (proposition mismatch and missing-trace both Fail correctly).
 
 use std::sync::Arc;
 
@@ -402,18 +404,233 @@ fn consistency_check_missing_sentence_set_surfaces_computation_failed() {
     }
 }
 
+// ── Phase 10 — end-to-end Holds path ────────────────────────────────
+
+/// Stand up the standard reasoning chain (core → reflection → eigentt
+/// → institution → reasoning) plus a user layer carrying a
+/// DeclaredResource at `target_iri` (no explicit
+/// `canonical_proposition` — the default `Asserts(target_iri)` from
+/// D49 §6 applies) and a DeclarationTrace pointing at it. The trace
+/// populates the user layer's witness index with a `Declared`
+/// witness for `(target_iri, Asserts(target_iri))`.
+///
+/// Omitting `canonical_proposition` is deliberate: the chain side
+/// (`default_asserts_proposition_hash`) and the synthesis side
+/// (eval+readback of the certificate's proposition) both go through
+/// the resolved `core:Asserts` decl, so the prop_hashes match
+/// byte-for-byte. Setting an explicit `canonical_proposition` via
+/// the D47 encoder using a stub decl would produce different bytes
+/// (ConstRef IRI vs decl.name short-name shape) and the witness
+/// lookup would miss.
+fn build_chain_with_declared_axiom(target_iri_str: &str) -> ExecutionContext {
+    use eigenius_kernel::ontology::well_known as wk_local;
+
+    let base_ctx = build_full_chain();
+    let reasoning_layer = base_ctx.head().clone();
+
+    // The DeclaredResource — minimal shape (is_a only). The default-
+    // Asserts witness emission path triggers when canonical_proposition
+    // is absent.
+    let target_iri = Iri::parse(target_iri_str).unwrap();
+    let mut target = Resource::new(target_iri.clone());
+    target.set(
+        Iri::parse(wk::IS_A).unwrap(),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse(wk_local::DECLARED_RESOURCE).unwrap(),
+        )]),
+    );
+
+    // The DeclarationTrace pointing at the target. Its presence is
+    // what makes `build_witness_index` emit the Declared witness key.
+    let trace_iri_str = format!("{target_iri_str}-decl-trace");
+    let mut trace = Resource::new(Iri::parse(&trace_iri_str).unwrap());
+    trace.set(
+        Iri::parse(wk::IS_A).unwrap(),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse(wk_local::DECLARATION_TRACE).unwrap(),
+        )]),
+    );
+    trace.set(
+        Iri::parse(wk_local::REFLECTION_RESOURCE).unwrap(),
+        Value::ResourceRef(target_iri.clone()),
+    );
+
+    let mut builder = LayerBuilder::new("phase10-axioms", Some(reasoning_layer));
+    builder.add_resource(target).unwrap();
+    builder.add_resource(trace).unwrap();
+    let user_layer = Arc::new(builder.build(LayerStorage::in_memory()));
+
+    // Force the user layer's witness index to populate from the trace.
+    let _ = user_layer.chain_witness_index();
+
+    ExecutionContext::new(
+        user_layer,
+        "phase10-test",
+        ExecutionMode::ReadOnly,
+        LayerStorage::in_memory(),
+    )
+}
+
+/// Build a `JustifiedBy.declared(iri, P, witness_placeholder)` D47
+/// certificate where the witness slot is `UnitVal` — the kernel
+/// ignores the user's value and synthesizes the witness. `P` is
+/// supplied as a pre-encoded D47 sub-tree so callers can mismatch
+/// it against the chain's canonical_proposition to test the
+/// negative path.
+fn justified_by_declared_certificate(
+    iri_str: &str,
+    proposition_subtree: serde_json::Value,
+) -> Value {
+    Value::Json(json!({
+        "ctor": "App",
+        "args": [
+            {"ctor": "App", "args": [
+                {"ctor": "App", "args": [
+                    {"ctor": "CtorApp", "args": [
+                        "urn:eigenius:reasoning:JustifiedBy",
+                        "declared",
+                    ]},
+                    {"ctor": "LitString", "args": [iri_str]},
+                ]},
+                proposition_subtree,
+            ]},
+            {"ctor": "UnitVal", "args": []},
+        ],
+    }))
+}
+
 #[test]
-fn well_formed_inputs_but_no_witnesses_yet_surface_verdict_fails_pending_phase_9() {
-    // The interesting case the smoke test locks in: when every input
-    // decodes cleanly but the certificate's type-check needs ChainWitness
-    // inhabitants the kernel doesn't yet synthesise (Phase 9's
-    // `synthesize_chain_witness` integration), the handler surfaces
-    // Verdict::Fails with the kernel's type-error diagnostic. Phase 10
-    // will flip the expected verdict to `Holds` once Phase 9 lands.
+fn end_to_end_validate_holds_when_certificate_matches_admitted_witness() {
+    // The Phase 10 headline test: a complete justified-reasoning
+    // commit lands as Verdict::Holds. Chain has a DeclarationTrace
+    // emitting an admitted `IsDeclaredAs(target, Asserts(target))`
+    // witness; the certificate's `JustifiedBy.declared` ctor's third
+    // arg slot is filled in by the kernel's Phase 9 synthesis hook;
+    // the type-check succeeds.
+    let target = "urn:test:phase10:axiom";
+    let ctx = build_chain_with_declared_axiom(target);
+
+    let asserts_subtree = json!({
+        "ctor": "App",
+        "args": [
+            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts"]},
+            {"ctor": "LitString", "args": [target]},
+        ],
+    });
+
+    let proposition = Value::Json(asserts_subtree.clone());
+    let justification = Value::Json(json!({
+        "ctor": "DeclaredEvidence",
+        "args": [target],
+    }));
+    let certificate = justified_by_declared_certificate(target, asserts_subtree);
+
+    let sentence = synthetic_sentence(Some(proposition), Some(justification), Some(certificate));
+    let outcome = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx)
+        .expect("handler returns outcome");
+    let ctor = verdict_ctor(&outcome.output);
+    assert_eq!(
+        ctor,
+        wk::VERDICT_HOLDS,
+        "expected Holds verdict; got {ctor}, diagnostic: {:?}",
+        verdict_diagnostic(&outcome.output)
+    );
+}
+
+#[test]
+fn end_to_end_validate_fails_when_proposition_mismatches_admitted_witness() {
+    // Contrast: the chain admits a witness for `Asserts(target)`, but
+    // the certificate claims `Asserts(different_iri)` as the
+    // proposition. The witness lookup misses (the prop_hash differs),
+    // so the synthesis hook surfaces a "no admitted witness" error
+    // which the validate handler lifts into Verdict::Fails. Locks the
+    // soundness boundary: a sentence can't cite a witnessed resource
+    // for the wrong proposition.
+    let target = "urn:test:phase10:axiom";
+    let ctx = build_chain_with_declared_axiom(target);
+
+    // Proposition + certificate claim a *different* iri's assertion —
+    // not what the chain's DeclarationTrace witnesses.
+    let mismatched = "urn:test:phase10:unrelated";
+    let mismatched_subtree = json!({
+        "ctor": "App",
+        "args": [
+            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts"]},
+            {"ctor": "LitString", "args": [mismatched]},
+        ],
+    });
+
+    let proposition = Value::Json(mismatched_subtree.clone());
+    // The justification still cites `target` (a valid DeclaredEvidence
+    // grounding), but the proposition the certificate claims doesn't
+    // match what the chain admits for that resource.
+    let justification = Value::Json(json!({
+        "ctor": "DeclaredEvidence",
+        "args": [target],
+    }));
+    let certificate = justified_by_declared_certificate(target, mismatched_subtree);
+
+    let sentence = synthetic_sentence(Some(proposition), Some(justification), Some(certificate));
+    let outcome = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx)
+        .expect("handler returns outcome");
+    assert_eq!(
+        verdict_ctor(&outcome.output),
+        wk::VERDICT_FAILS,
+        "expected Fails verdict for proposition-mismatch case"
+    );
+    let diag = verdict_diagnostic(&outcome.output).expect("Fails carries diagnostic");
+    assert!(
+        diag.contains("witness") || diag.contains("certificate") || diag.contains("admit"),
+        "diagnostic should mention witness failure, got: {diag}"
+    );
+}
+
+#[test]
+fn end_to_end_validate_fails_when_target_iri_lacks_declaration_trace() {
+    // Contrast: target IRI is named in the certificate but no
+    // DeclarationTrace was committed for it. The witness index has
+    // no key matching the certificate's claim → synthesis fails →
+    // Verdict::Fails. Demonstrates the soundness boundary against
+    // forged citations.
+    let ctx = build_full_chain(); // no axiom chain layer added
+
+    let target = "urn:test:phase10:not_committed";
+    let asserts_subtree = json!({
+        "ctor": "App",
+        "args": [
+            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts"]},
+            {"ctor": "LitString", "args": [target]},
+        ],
+    });
+
+    let proposition = Value::Json(asserts_subtree.clone());
+    let justification = Value::Json(json!({
+        "ctor": "DeclaredEvidence",
+        "args": [target],
+    }));
+    let certificate = justified_by_declared_certificate(target, asserts_subtree);
+
+    let sentence = synthetic_sentence(Some(proposition), Some(justification), Some(certificate));
+    let outcome = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx)
+        .expect("handler returns outcome");
+    assert_eq!(
+        verdict_ctor(&outcome.output),
+        wk::VERDICT_FAILS,
+        "expected Fails verdict for missing-trace case"
+    );
+}
+
+#[test]
+fn arity_mismatch_in_certificate_surfaces_verdict_fails() {
+    // Regression check on the arity-mismatch path: a certificate
+    // whose JustifiedBy.declared application is missing the witness
+    // arg slot (1 App-arg instead of 3) fails the kernel's
+    // `check_inductive_ctor_args` arity assertion. Verdict is Fails
+    // for a different reason than missing-witness — confirms the
+    // upstream check still catches structurally-broken certificates
+    // before the Phase 9 witness-synthesis hook runs.
     let ctx = build_full_chain();
 
-    // Proposition: `Asserts("urn:foo")` — the canonical atomic Prop.
-    // D47 encoding: App(ConstRef("urn:eigenius:core:Asserts"), LitString("urn:foo")).
     let proposition = Value::Json(json!({
         "ctor": "App",
         "args": [
@@ -421,17 +638,12 @@ fn well_formed_inputs_but_no_witnesses_yet_surface_verdict_fails_pending_phase_9
             {"ctor": "LitString", "args": ["urn:foo"]},
         ],
     }));
-    // Justification: `DeclaredEvidence("urn:foo")` in chain inductive shape.
     let justification = Value::Json(json!({
         "ctor": "DeclaredEvidence",
         "args": ["urn:foo"],
     }));
-    // Certificate: `JustifiedBy.declared(<witness>)` — we put a
-    // placeholder Sort literal in the witness slot so the certificate
-    // decodes cleanly; type-check rejects it because the placeholder
-    // doesn't inhabit `ChainWitness.IsDeclaredAs("urn:foo", Asserts("urn:foo"))`.
-    // The exact rejection shape is what Phase 9 changes — for now we
-    // just require Fails.
+    // Certificate with only ONE App-arg — `JustifiedBy.declared`
+    // expects three (iri, P, witness).
     let certificate = Value::Json(json!({
         "ctor": "App",
         "args": [
@@ -446,17 +658,5 @@ fn well_formed_inputs_but_no_witnesses_yet_surface_verdict_fails_pending_phase_9
     let sentence = synthetic_sentence(Some(proposition), Some(justification), Some(certificate));
     let outcome = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx)
         .expect("handler returns outcome");
-    // We only assert Fails here — Phase 10 flips this to Holds.
-    assert_eq!(
-        verdict_ctor(&outcome.output),
-        wk::VERDICT_FAILS,
-        "expected Fails verdict (Phase 9 not yet wired); got verdict={}",
-        verdict_ctor(&outcome.output)
-    );
-    // The diagnostic should mention certificate-side type-check failure.
-    let diag = verdict_diagnostic(&outcome.output).expect("Fails carries diagnostic");
-    assert!(
-        diag.contains("certificate") || diag.contains("type-check") || diag.contains("JustifiedBy"),
-        "diagnostic should explain certificate type-check failure, got: {diag}"
-    );
+    assert_eq!(verdict_ctor(&outcome.output), wk::VERDICT_FAILS);
 }
