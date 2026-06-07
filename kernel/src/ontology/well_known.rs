@@ -391,7 +391,75 @@ pub const ENC_BASE64: &str = "urn:eigenius:core:encodings:base64";
 pub const UNIVERSE_LEVEL: &str = "urn:eigenius:reflection:universe_level";
 pub const DECLARED_RESOURCE: &str = "urn:eigenius:reflection:DeclaredResource";
 pub const DERIVED_RESOURCE: &str = "urn:eigenius:reflection:DerivedResource";
+pub const OBSERVED_RESOURCE: &str = "urn:eigenius:reflection:ObservedResource";
+pub const VERIFIED_RESOURCE: &str = "urn:eigenius:reflection:VerifiedResource";
 pub const DECLARED_BY: &str = "urn:eigenius:reflection:declared_by";
 pub const DERIVATION: &str = "urn:eigenius:reflection:derivation";
 pub const EPISTEMIC_STATUS: &str = "urn:eigenius:reflection:epistemic_status";
 pub const EPISTEMIC_DERIVED: &str = "urn:eigenius:reflection:epistemic:derived";
+
+// --- D49 ChainWitness: Trace event classes + canonical proposition ---
+//
+// The four Trace classes are the chain-side artifacts whose commits the
+// D49 witness emitter projects into the per-Layer witness index. Their
+// IRIs are looked up by class name during `build_witness_index`.
+
+/// Resource recording that a resource was declared by a human/agent.
+/// Carries `reflection:resource` (target IRI). Per D49 §6, a successful
+/// commit emits an `IsDeclaredAs` witness for the target resource.
+pub const DECLARATION_TRACE: &str = "urn:eigenius:reflection:DeclarationTrace";
+/// Resource recording that a resource was observed from external reality.
+/// Carries `reflection:resource` and `reflection:source`. Per D49 §6, a
+/// successful commit emits an `IsObservedAs` witness.
+pub const OBSERVATION_TRACE: &str = "urn:eigenius:reflection:ObservationTrace";
+/// Resource recording a complete program execution. The output resource's
+/// IRI is the witness `iri` key; per D49 §6 commit emits an `IsDerivedAs`
+/// witness.
+pub const PROGRAM_TRACE: &str = "urn:eigenius:reflection:ProgramTrace";
+/// Resource recording that a formal proof was attached to a resource. Per
+/// D49 §6 + §7, the `IsVerifiedAs` witness is admitted only after the
+/// `Lean → Reasoning` comorphism's reify produces a
+/// `reasoning:VerifiedPropositionView` whose `canonical_proposition` is
+/// the EigenTT form of the proved proposition.
+pub const VERIFICATION_TRACE: &str = "urn:eigenius:reflection:VerificationTrace";
+
+/// `reflection:resource` — the target IRI a Trace points at. Common to
+/// all four Trace classes (semantically; for `ProgramTrace` the role is
+/// played by the output resource's own IRI, not a separate property).
+pub const REFLECTION_RESOURCE: &str = "urn:eigenius:reflection:resource";
+
+/// `reflection:canonical_proposition` — the optional `Prop`-typed
+/// proposition a resource asserts (per D49 §6). Carries a D47-encoded
+/// `eigentt:TypeExpr` payload. Absent value defaults to `Asserts(iri)`
+/// at witness-emission time. Type-checked at `Prop` at commit by the
+/// validator extension shipped in D49 Phase 5.
+pub const CANONICAL_PROPOSITION: &str = "urn:eigenius:reflection:canonical_proposition";
+
+// --- D49 ChainWitness: predicate-type IRIs ---
+//
+// The four kernel-internal `ChainWitness.IsXxAs : core:iri → Prop → Prop`
+// predicate types. ESL has no constructors for their inhabitants; the
+// kernel synthesises `Val::ChainWitness` values at `JustifiedBy.*`
+// constructor type-check time via the per-Layer witness-index lookup.
+// The IRIs are referenced from the `reasoning:JustifiedBy` indexed
+// inductive's constructor signatures (D39 §5) and from the witness-
+// synthesis hook in `kernel/src/nbe/check.rs` (D49 §5).
+
+pub const CHAIN_WITNESS_IS_DECLARED_AS: &str = "urn:eigenius:reasoning:ChainWitness:IsDeclaredAs";
+pub const CHAIN_WITNESS_IS_OBSERVED_AS: &str = "urn:eigenius:reasoning:ChainWitness:IsObservedAs";
+pub const CHAIN_WITNESS_IS_DERIVED_AS: &str = "urn:eigenius:reasoning:ChainWitness:IsDerivedAs";
+pub const CHAIN_WITNESS_IS_VERIFIED_AS: &str = "urn:eigenius:reasoning:ChainWitness:IsVerifiedAs";
+
+/// Helper: map a class IRI for one of the four `ChainWitness.IsXxAs`
+/// predicate types to its `WitnessCategory`, or `None` if the IRI is
+/// not a ChainWitness predicate.
+pub fn chain_witness_category_for_iri(iri: &str) -> Option<crate::witness::WitnessCategory> {
+    use crate::witness::WitnessCategory;
+    match iri {
+        CHAIN_WITNESS_IS_DECLARED_AS => Some(WitnessCategory::Declared),
+        CHAIN_WITNESS_IS_OBSERVED_AS => Some(WitnessCategory::Observed),
+        CHAIN_WITNESS_IS_DERIVED_AS => Some(WitnessCategory::Derived),
+        CHAIN_WITNESS_IS_VERIFIED_AS => Some(WitnessCategory::Verified),
+        _ => None,
+    }
+}

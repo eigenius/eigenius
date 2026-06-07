@@ -188,6 +188,19 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
                 )),
             }
         }
+        // D49 §8 — `ChainWitness` values are opaque, kernel-internal
+        // proof-of-existence markers admitted by the per-Layer witness
+        // index. They never appear in surface syntax, so readback into
+        // an `Exp` is a programming error: they should only be produced
+        // by the type checker's synthesis hook at `JustifiedBy.*`
+        // type-check time and consumed within the same type-check; they
+        // do not survive normalisation into a readback-able form.
+        Val::ChainWitness(key) => panic!(
+            "readback_val: ChainWitness {:?} reached readback — witness values are \
+             kernel-internal and should be consumed at JustifiedBy.* type-check time, \
+             never readback into surface syntax",
+            key
+        ),
     }
 }
 

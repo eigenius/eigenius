@@ -39,6 +39,9 @@ mod storage;
 mod supporting;
 mod text_index;
 mod vector_index;
+mod witness_index;
+
+pub use witness_index::{build_witness_index, lookup_chain_witness};
 
 pub use bloom::{BloomFilter, DEFAULT_FPR};
 pub use cache::{
@@ -309,6 +312,15 @@ pub struct Layer {
     /// persist timestamps consistent. Matches D21's `TaskRecord`
     /// convention (i64 millis).
     created_at: i64,
+    /// D49 §3 per-`Layer` witness index — a deterministic projection of
+    /// the Layer's Trace resources into the set of admitted
+    /// `ChainWitness.IsXxAs` keys. Materialised lazily on first lookup
+    /// (most Layers carry no Trace resources; building the index for
+    /// them costs nothing until something actually asks). Recomputable
+    /// from `iter_resources()` at any time, so does not need to be
+    /// persisted — the Layer's content hash transitively covers it via
+    /// the Trace resources themselves.
+    witness_index: std::sync::OnceLock<std::collections::BTreeMap<crate::witness::WitnessKey, ()>>,
 }
 
 impl fmt::Debug for Layer {
@@ -352,6 +364,7 @@ impl Layer {
             storage,
             redirect_target: None,
             created_at: handle.created_at,
+            witness_index: std::sync::OnceLock::new(),
         }
     }
 
@@ -377,6 +390,7 @@ impl Layer {
             storage,
             redirect_target: None,
             created_at: handle.created_at,
+            witness_index: std::sync::OnceLock::new(),
         }
     }
 
@@ -448,6 +462,35 @@ impl Layer {
     /// this is the only parent.
     pub fn parent(&self) -> Option<&Arc<Layer>> {
         self.parents.first()
+    }
+
+    /// D49 §3 per-Layer witness index — the materialised projection of
+    /// this Layer's Trace resources into admitted `ChainWitness` keys.
+    /// Lazily built on first call (most Layers carry no Trace resources;
+    /// don't pay the cost until something asks); cached for subsequent
+    /// calls. The contents are a pure deterministic function of the
+    /// Layer's resources, so the index is recomputable and need not be
+    /// persisted separately — content-addressing covers it transitively
+    /// through the Trace resources.
+    pub fn chain_witness_index(
+        &self,
+    ) -> &std::collections::BTreeMap<crate::witness::WitnessKey, ()> {
+        self.witness_index
+            .get_or_init(|| witness_index::build_witness_index(self))
+    }
+
+    /// Test-only helper that sets the witness index directly instead of
+    /// going through `build_witness_index`. Used by tests that need to
+    /// exercise lookup paths against witness shapes the build path
+    /// doesn't yet support (e.g., D49 §4's `IsVerifiedAs → IsDerivedAs`
+    /// coercion, where `IsVerifiedAs` emission depends on the
+    /// Phase-7 / D49 §7 Lean comorphism that isn't wired yet).
+    #[cfg(test)]
+    pub fn chain_witness_index_for_test_set(
+        &self,
+        index: std::collections::BTreeMap<crate::witness::WitnessKey, ()>,
+    ) -> Result<(), std::collections::BTreeMap<crate::witness::WitnessKey, ()>> {
+        self.witness_index.set(index)
     }
 
     /// Returns all topological parents. Empty for the root layer; one
@@ -888,6 +931,7 @@ impl LayerBuilder {
             // handle can copy it (instead of each backend calling
             // `now_millis()` themselves and drifting from this value).
             created_at: now_millis(),
+            witness_index: std::sync::OnceLock::new(),
         };
         // Phase 14h: pre-populate the triple index from the layer's
         // indexable triples. `extract_indexable_triples` consults each

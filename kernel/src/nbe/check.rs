@@ -1144,6 +1144,35 @@ pub fn lookup_codata_observation(
 /// Port of `eqNf` from the reference: normalize both sides
 /// and compare syntactically.
 pub fn eq_nf(level: usize, v1: &Val, v2: &Val) -> Result<(), String> {
+    // D49 §8 — ChainWitness values are opaque kernel-internal markers
+    // that intentionally do not read back into surface syntax. Equality
+    // on them is key-based: two witnesses with the same `WitnessKey`
+    // are definitionally equal. (D46 proof irrelevance further
+    // collapses *any* two witnesses of the same Prop-typed predicate
+    // type to equal at that type via `def_eq_at_type`; this branch is
+    // the conservative fast path used when the proof-irrelevance
+    // shortcut wasn't reachable — e.g., direct `eq_nf` calls without
+    // a type in hand.)
+    match (v1, v2) {
+        (Val::ChainWitness(k1), Val::ChainWitness(k2)) => {
+            return if k1 == k2 {
+                Ok(())
+            } else {
+                Err(format!(
+                    "ChainWitness keys differ: {} vs {}",
+                    k1.category.label(),
+                    k2.category.label(),
+                ))
+            };
+        }
+        (Val::ChainWitness(k), _) | (_, Val::ChainWitness(k)) => {
+            return Err(format!(
+                "ChainWitness vs non-witness value (witness category {})",
+                k.category.label(),
+            ));
+        }
+        _ => {}
+    }
     let e1 = readback_val(level, v1);
     let e2 = readback_val(level, v2);
     if e1 == e2 {

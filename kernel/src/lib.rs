@@ -42,3 +42,4 @@ pub mod server;
 pub mod storage;
 pub mod task;
 pub mod validation;
+pub mod witness;

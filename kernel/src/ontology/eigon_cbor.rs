@@ -84,6 +84,20 @@ pub fn parse_resource_lenient(cbor: &[u8]) -> Result<Resource, CborError> {
     cbor_to_resource(&value, false)
 }
 
+/// Serialize a single `Value` to deterministic CBOR bytes.
+///
+/// Used by the D49 `ChainWitness` machinery to canonicalise a D47-encoded
+/// proposition (a `Value::Json`-wrapped JSON tree) for hashing into the
+/// witness-key `prop_hash` slot. Determinism follows from `value_to_cbor`'s
+/// shape (map keys come from sorted `BTreeMap` ordering, ints take their
+/// shortest CBOR encoding, etc.).
+pub fn serialize_value(value: &Value) -> Vec<u8> {
+    let cbor_value = value_to_cbor(value);
+    let mut buf = Vec::new();
+    ciborium::into_writer(&cbor_value, &mut buf).expect("CBOR serialization should not fail");
+    buf
+}
+
 /// Serialize a document (array of resources) to CBOR bytes.
 pub fn serialize_document(resources: &[Resource]) -> Vec<u8> {
     if resources.len() == 1 {

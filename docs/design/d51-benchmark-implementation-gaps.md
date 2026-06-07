@@ -16,7 +16,7 @@ Eight gaps, ordered top-to-bottom by dependency. Items 1–4 are kernel / instit
 |---|---|---|---|---|
 | 1 | D49 `ChainWitness` machinery — witness table, synthesis, trace dispatch (excl. Lean) | Kernel | ~2 weeks | nothing |
 | 2 | Lean → Reasoning comorphism + `VerifiedPropositionView` class (D49 §7) | Ontology + Lean worker | ~1 week | (1) |
-| 3 | D39 v2 institutional artifacts — `JustifiedBy` inductive, `ReasoningSentence` class, `TaskOutput`, `Asserts(iri)`, `reflection:canonical_proposition`, Reasoning institution dispatch | Kernel + ontology + institution | ~2 weeks | (1) |
+| 3 | D39 v2 institutional artifacts — ontologies (`JustifiedBy`, `ReasoningSentence`, `TaskOutput`, `Asserts(iri)`, `canonical_proposition`) + `crates/eigenius-reasoning/` (new crate parallel to `eigenius-lean`) | Ontology + new crate | ~2 weeks | (1) |
 | 4 | MCP surface extensions — `eigenius_load` ESL parameter, `eigenius_institution_dispatch` generic tool | Orchestrator | ~0.5 weeks | (3) |
 | 5 | Six per-family base ontologies (`bench:chem` / `gis` / `bio` / `psych` / `mfg` / `opt`) | ESL authoring | ~3 days | (3) |
 | 6 | Agent skill update for the model-then-reason discipline | Documentation + worked examples | ~1 week | (3), (4), (5) |
@@ -76,14 +76,20 @@ This gap intentionally adds *no kernel trait surface* — the cross-institution 
   - `TaskOutput` Resource class per D39 §4.4. Properties: `task`, `deliverable_kind`, `payload`, `reasoning_chain`, `derivation`.
   - The Reasoning institution declaration (`institution:Institution` resource) with `extract_typed` / `reify` shapes and three query class declarations (`ValidateJustification` AutoOnLoad, `EntailmentQuery` OnDemand, `ConsistencyCheck` Decidable).
 - `ontologies/core/core-ontology.json` — add `Asserts(iri) : Prop` declaration (uniform-parameter no-ctor inductive in `Sort(0)`) per D39 §4.1. Also add `reflection:canonical_proposition` as an optional property on `DeclaredResource` / `ObservedResource` / `DerivedResource` (the latter two carry it as a forward-compat property even when not yet authored on most resources).
-- `kernel/src/bootstrap/mod.rs` — add the reasoning ontology as a new bootstrap layer parent. Update `embedded_ontologies` count.
-- `kernel/src/institution/reasoning/` (new) — the Reasoning institution's three-method `Institution` trait implementation:
-  - `extract_typed` — decode `ReasoningSentence` resource → `JustifiedBy J P` typed payload.
-  - `reify` — the inverse.
-  - `query(ValidateJustification, …)` — type-check the certificate against `JustifiedBy justification proposition`; return Verdict. Wired through D14's existing AutoOnLoad dispatch.
-  - `query(EntailmentQuery, …)` — given Γ and A, search for a witness; v1 implementation can be a bounded-depth search over the chain's committed sentences. Returns Verdict.
-  - `query(ConsistencyCheck, …)` — checks the committed sentences are mutually consistent. Decidable for the propositional fragment.
-- `kernel/src/capability/registration.rs` — register the Reasoning institution at chain-scan time using the same auto-registration shape as WASM institutions (D14 §3).
+- `kernel/src/bootstrap/mod.rs` — add the reasoning ontology as a new bootstrap layer parent (after `core`, `program`, `reflection`, `institution`, and the `eigentt-type-fragment` layer). Update `embedded_ontologies` count.
+- `crates/eigenius-reasoning/` (new crate, parallel to `crates/eigenius-lean/`) — the Reasoning institution's `Institution` trait implementation. Single crate (no worker / runtime sub-crates needed) because the validator IS the kernel's NbE checker and there's no external runtime. Cargo deps: `eigenius-kernel` (for the `Institution` trait + `Resource` / `Layer` / `Val` / `Exp` / NbE checker types) plus the usual workspace utilities. File layout mirrors `crates/eigenius-lean/src/`:
+  - `lib.rs` — top-level exports.
+  - `institution.rs` — `ReasoningInstitution` struct + `impl Institution` wiring.
+  - `extract.rs` — `extract_typed`: decode `ReasoningSentence` resource → `JustifiedBy J P` typed payload via the D47 codec.
+  - `reify.rs` — the inverse.
+  - `validate.rs` — `query(ValidateJustification, …)` handler: thin wrapper that type-checks the certificate against `JustifiedBy justification proposition` via the kernel's NbE checker; returns Verdict. Wired through D14's existing AutoOnLoad dispatch.
+  - `entailment.rs` — `query(EntailmentQuery, …)` handler: given Γ and A, bounded-depth search for a `JustificationTerm` whose certificate type-checks; returns Verdict.
+  - `consistency.rs` — `query(ConsistencyCheck, …)` handler: propositional-fragment consistency over the committed-sentence set.
+  - `startup.rs` — chain-scan registration hook (parallel to `eigenius-lean/src/startup.rs`).
+
+  No `chain_mirror.rs` (parallel to `eigenius-lean/src/chain_mirror.rs`) is needed because `JustificationTerm` and `JustifiedBy` are authored via the eigenius#72 Layer 2 ESL surface and decoded by existing kernel inductive machinery. No `checker.rs` is needed because there's no external term checker to delegate to — the validation runs through `eigenius-kernel`'s NbE machinery directly.
+
+- `kernel/src/capability/registration.rs` — register the Reasoning institution at chain-scan time using the same auto-registration shape the Lean institution already uses (D14 §3, plus the existing in-kernel registration path that handles `eigenius-lean`).
 
 **Test surface**: hand-authored `ReasoningSentence` resources with each `JustificationTerm` shape; confirm commit-time validation fires per D39 §4.3; confirm gate firings are recorded as `Verdict` resources alongside the sentences. End-to-end: a small chain (axiom + observed measurement + derived value + reasoning sentence citing them) round-trips through commit / lookup / EntailmentQuery.
 
@@ -193,7 +199,7 @@ If kernel work and infrastructure work can run in parallel (different people, or
 **Week 3** (ontology + Lean worker): Gap 2 (Lean → Reasoning comorphism + `VerifiedPropositionView`). No kernel changes — rides on D14's existing comorphism dispatch.
 **Week 3** (parallel): Gap 7 (harness architecture — scaffolding without the Eigenius condition working).
 
-**Week 4-5** (kernel + ontology): Gap 3 (D39 v2 artifacts). This is the largest gap; the Reasoning institution registration + the `JustifiedBy` inductive authoring are the load-bearing pieces.
+**Week 4-5** (ontology + new crate): Gap 3 (D39 v2 artifacts) — `ontologies/reasoning/reasoning-ontology.json` declares the inductives + Reasoning institution + comorphism; `crates/eigenius-reasoning/` (new, parallel to `crates/eigenius-lean/`) implements the `Institution` trait. Largest gap of the eight; the Reasoning institution registration + the `JustifiedBy` inductive authoring are the load-bearing pieces.
 
 **Week 5** (orchestrator): Gap 4 (MCP extensions).
 
