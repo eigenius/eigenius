@@ -1,0 +1,19 @@
+[package]
+name = "eigenius-reasoning"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Justification Logic institution for Eigenius (D39). Type-checks ReasoningSentence certificates against (justification, proposition) pairs at commit time via the kernel's NbE checker; no external runtime — verification is a direct function call with TCB bounded by the kernel's type-theory implementation."
+
+[dependencies]
+# The validator IS the kernel's NbE checker — no external prover, no
+# IPC, no separate worker crate. All this crate does is decode the
+# three properties off a ReasoningSentence, construct the expected
+# `JustifiedBy(justification, proposition)` type, and call
+# `kernel::nbe::check::check` (with `with_layer` to resolve the
+# JustifiedBy inductive declaration from the chain).
+eigenius-kernel = { path = "../../kernel" }
+
+thiserror.workspace = true
+serde_json.workspace = true

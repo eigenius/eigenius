@@ -10,6 +10,7 @@ members = [
     "crates/eigenius-lean",
     "crates/eigenius-lean-runtime",
     "crates/eigenius-lean-worker",
+    "crates/eigenius-reasoning",
     "crates/wasm-runtime",
     "sdk/wasm-sdk",
     "storage/tikv",

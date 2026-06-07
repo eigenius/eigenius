@@ -4334,6 +4334,18 @@ mod tests {
             );
         }
 
+        // Phase 6 refactor — the ef_justification ExportFormat the
+        // validate handler dispatches through.
+        let ef_class = Iri::parse("urn:eigenius:institution:ExportFormat").unwrap();
+        assert!(
+            resources.iter().any(|r| r
+                .id()
+                .map(|i| i.as_str() == "urn:eigenius:reasoning:ef_justification")
+                .unwrap_or(false)
+                && r.is_a().iter().any(|c| c == &ef_class)),
+            "reasoning.esl missing the ef_justification ExportFormat resource"
+        );
+
         // Spot-check: the four witness IRIs are present.
         use crate::ontology::well_known as wk_local;
         for expected in &[

@@ -227,6 +227,28 @@ resource reasoning:reasoning_institution : institution:Institution {
 //   over a committed-sentence set; reports Undecidable for richer
 //   fragments.
 
+// ── ExportFormats (D14 §5) ───────────────────────────────────────────
+//
+// The Reasoning institution exposes its data to the kernel's term
+// language via `extract_typed` through declared ExportFormats. The
+// one ExportFormat needed in v1 is for `justification` — a D32 §3.7
+// chain inductive value that the validate handler needs to lift into
+// a kernel `Val` to construct `JustifiedBy(j, p)` for type-checking.
+//
+// proposition + certificate don't need ExportFormats: they're D47-
+// encoded EigenTT terms and the kernel's `decode_type` is the right
+// surface for them (D47 has a spec; the codec is a kernel utility,
+// not an institution boundary).
+
+resource reasoning:ef_justification : institution:ExportFormat {
+    core:short_name = "ef_justification";
+    core:description = "Lifts a ReasoningSentence's `justification` property (a D32 §3.7-shaped JustificationTerm chain value) into a `Val::InductiveVal` typed at `reasoning:JustificationTerm`. Used by the ValidateJustification handler to construct the expected certificate type `JustifiedBy(j, p)`; available as a standalone extract route for any future cross-institution consumer.";
+    institution:from_class = reasoning:ReasoningSentence;
+    institution:payload_type = reasoning:JustificationTerm;
+    institution:institution_ref = reasoning:reasoning_institution;
+    institution:procedure = proc:extract_justification;
+}
+
 resource reasoning:qc_validate_justification : institution:QueryClass {
     core:description = "AutoOnLoad gate on every ReasoningSentence commit: decode proposition + certificate via the D47 codec, type-check the proposition at Prop, type-check the certificate against `JustifiedBy justification proposition`. Holds admits the sentence with the Verdict attached as evidence the gate spoke; Fails rejects the commit and pins the diagnostic to a specific subterm.";
     institution:query_class = reasoning:ReasoningSentence;

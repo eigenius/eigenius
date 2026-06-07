@@ -1344,6 +1344,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-reasoning"
+version = "0.1.0"
+dependencies = [
+ "eigenius-kernel",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "eigenius-runtime-substrate"
 version = "0.1.0"
 dependencies = [
