@@ -4307,6 +4307,33 @@ mod tests {
             );
         }
 
+        // Phase 5a — the Reasoning institution resource + three
+        // QueryClass resources. Each carries its declared `is_a`
+        // pointing at the institution-ontology base class.
+        let institution_class = Iri::parse("urn:eigenius:institution:Institution").unwrap();
+        let qc_class = Iri::parse("urn:eigenius:institution:QueryClass").unwrap();
+        assert!(
+            resources.iter().any(|r| r
+                .id()
+                .map(|i| i.as_str() == "urn:eigenius:reasoning:reasoning_institution")
+                .unwrap_or(false)
+                && r.is_a().iter().any(|c| c == &institution_class)),
+            "reasoning.esl missing the reasoning_institution resource"
+        );
+        for expected in &[
+            "urn:eigenius:reasoning:qc_validate_justification",
+            "urn:eigenius:reasoning:qc_entailment_query",
+            "urn:eigenius:reasoning:qc_consistency_check",
+        ] {
+            assert!(
+                resources
+                    .iter()
+                    .any(|r| r.id().map(|i| i.as_str() == *expected).unwrap_or(false)
+                        && r.is_a().iter().any(|c| c == &qc_class)),
+                "reasoning.esl missing QueryClass resource for {expected}"
+            );
+        }
+
         // Spot-check: the four witness IRIs are present.
         use crate::ontology::well_known as wk_local;
         for expected in &[

@@ -25,11 +25,15 @@
 // (`CHAIN_WITNESS_IS_*_AS`, etc.) — do not rename without updating
 // `kernel/src/ontology/well_known.rs` in lockstep.
 
-namespace core       = "urn:eigenius:core";
-namespace eigentt    = "urn:eigenius:eigentt";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace witness    = "urn:eigenius:reasoning:ChainWitness";
+namespace core        = "urn:eigenius:core";
+namespace eigentt     = "urn:eigenius:eigentt";
+namespace reflection  = "urn:eigenius:reflection";
+namespace institution = "urn:eigenius:institution";
+namespace reasoning   = "urn:eigenius:reasoning";
+namespace witness     = "urn:eigenius:reasoning:ChainWitness";
+namespace dispatch    = "urn:eigenius:institution:dispatch_roles";
+namespace runtimes    = "urn:eigenius:institution:runtimes";
+namespace proc        = "urn:eigenius:reasoning:proc";
 
 // ── ChainWitness predicates ──────────────────────────────────────────
 //
@@ -188,3 +192,80 @@ property reasoning:source_verified_resource : core:string {
     format = core:iri;
     domain reasoning:VerifiedPropositionView;
 }
+
+// ── Reasoning institution (D39 §4.3 / D14) ───────────────────────────
+//
+// The institution resource itself — `is_a institution:Institution`.
+// `runtime = in_process` because the validator runs through the
+// kernel's NbE checker directly (no IPC, no orchestrator round-trip).
+// Procedure IRIs (proc:*) are opaque runtime handles bound by
+// `crates/eigenius-reasoning/` at registration time, mirroring how the
+// Lean institution binds `urn:eigenius:lean:proc:proof_check`.
+
+resource reasoning:reasoning_institution : institution:Institution {
+    institution:institution_iri = "urn:eigenius:reasoning:reasoning_institution";
+    institution:institution_name = "Reasoning";
+    institution:runtime = runtimes:in_process;
+    core:description = "Justification Logic institution (D39). Type-checks JustifiedBy certificates against (justification, proposition) pairs at ReasoningSentence commit time via the kernel's NbE checker; queries entailment and consistency on demand. The validator is the kernel — no external runtime — so verification is a direct function call with TCB bounded by the kernel's type-theory implementation.";
+}
+
+// ── Query classes (D39 §4.3) ─────────────────────────────────────────
+//
+// Three dispatch roles, one per class:
+//
+// - ValidateJustification (AutoOnLoad): fires on every ReasoningSentence
+//   commit; decodes proposition + certificate, type-checks at Prop, then
+//   checks `certificate : JustifiedBy justification proposition`. Returns
+//   Verdict::Holds or Verdict::Fails (with subterm-pinned diagnostic).
+//   Fails verdicts reject the commit per D14 §6.
+//
+// - EntailmentQuery (OnDemand): given Γ + candidate proposition A,
+//   bounded-depth search for a JustificationTerm whose certificate
+//   type-checks against `JustifiedBy t A` over Γ.
+//
+// - ConsistencyCheck (Decidable): propositional-fragment consistency
+//   over a committed-sentence set; reports Undecidable for richer
+//   fragments.
+
+resource reasoning:qc_validate_justification : institution:QueryClass {
+    core:description = "AutoOnLoad gate on every ReasoningSentence commit: decode proposition + certificate via the D47 codec, type-check the proposition at Prop, type-check the certificate against `JustifiedBy justification proposition`. Holds admits the sentence with the Verdict attached as evidence the gate spoke; Fails rejects the commit and pins the diagnostic to a specific subterm.";
+    institution:query_class = reasoning:ReasoningSentence;
+    institution:result_class = institution:Verdict;
+    institution:dispatch_role = [dispatch:auto_on_load];
+    institution:query_handler = proc:validate_justification;
+    institution:institution_ref = reasoning:reasoning_institution;
+}
+
+resource reasoning:qc_entailment_query : institution:QueryClass {
+    core:description = "OnDemand: given a set of committed sentences Γ and a candidate Prop-typed proposition A, return whether some JustificationTerm over Γ exists for which `JustifiedBy t A` is inhabited. Used by agents to ask 'does the chain warrant this conclusion?' Bounded-depth search; depth bound is a runtime parameter on the procedure.";
+    institution:query_class = reasoning:ReasoningSentence;
+    institution:result_class = institution:Verdict;
+    institution:dispatch_role = [dispatch:on_demand];
+    institution:query_handler = proc:entailment_query;
+    institution:institution_ref = reasoning:reasoning_institution;
+}
+
+resource reasoning:qc_consistency_check : institution:QueryClass {
+    core:description = "Decidable: return whether a set of committed ReasoningSentences is internally consistent under the Reasoning institution's logic. Decidable for the propositional fragment; reports Verdict::Undecidable (NotImplemented in v1) for richer fragments. The check operates over the chain-resident sentence set, not over external assumptions.";
+    institution:query_class = reasoning:ReasoningSentence;
+    institution:result_class = institution:Verdict;
+    institution:dispatch_role = [dispatch:decidable];
+    institution:query_handler = proc:consistency_check;
+    institution:institution_ref = reasoning:reasoning_institution;
+}
+
+// ── Reasoning → Lean comorphism — deferred to gh #73 ─────────────────
+//
+// Per D39 §7, the Reasoning institution should declare a bidirectional
+// comorphism pair with Lean. The Lean → Reasoning direction (per D49 §7,
+// load-bearing for IsVerifiedAs witness emission) lives in the Lean
+// ontology and is tracked by D51 gap 2. The Reasoning → Lean direction
+// requires a chain-resident `program:Component` implementing the
+// EigenTT → Lean term/type translation, which D30 (current) does not
+// specify — D30 covers the Eigon class → Lean structure mirror, a
+// different translation. See gh #73 for the work item to revise D30
+// with a real term/type translation spec, then author the comorphism
+// transformation Component and the Reasoning → Lean comorphism here.
+// Validation rule 15 (check_comorphism_well_formedness) would reject
+// any stub authoring, so the declaration is correctly absent until the
+// translation Component is built.
