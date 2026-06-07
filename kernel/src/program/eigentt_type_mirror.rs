@@ -145,14 +145,20 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
         Exp::InductiveType(decl, args) => {
             // Encode `I(a1, a2, ...)` as
             //   App(App(...App(ConstRef(I.iri), a1)..., a_{n-1}), a_n)
-            let mut current = ctor("ConstRef", vec![json!(decl.name.clone())]);
+            //
+            // gh #75: read `decl.iri` (the stable identifier) rather
+            // than `decl.name` (the diagnostic label). Using `name`
+            // here produced decoder-incompatible short-name shapes for
+            // chain-resolved decls and silently broke the witness-
+            // index hash equality on Phase 9's synthesize path.
+            let mut current = ctor("ConstRef", vec![json!(decl.iri.as_str())]);
             for arg in args {
                 current = ctor("App", vec![current, encode_type_json(arg)?]);
             }
             Ok(current)
         }
         Exp::CodataType(decl, args) => {
-            let mut current = ctor("ConstRef", vec![json!(decl.name.clone())]);
+            let mut current = ctor("ConstRef", vec![json!(decl.iri.as_str())]);
             for arg in args {
                 current = ctor("App", vec![current, encode_type_json(arg)?]);
             }
@@ -170,7 +176,9 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
         Exp::InductiveCtor(decl, ctor_name, args) => {
             // Encode `D.c(a1, ..., aN)` as
             //   App(App(...App(CtorApp(D.iri, c), a1)..., a_{N-1}), aN)
-            let mut current = ctor("CtorApp", vec![json!(decl.name.clone()), json!(ctor_name)]);
+            // gh #75: read decl.iri (stable identifier) — see the
+            // matching comment on the InductiveType arm above.
+            let mut current = ctor("CtorApp", vec![json!(decl.iri.as_str()), json!(ctor_name)]);
             for arg in args {
                 current = ctor("App", vec![current, encode_type_json(arg)?]);
             }
@@ -1035,6 +1043,7 @@ mod tests {
         // extended with literal/ctor encoding. This test exercises
         // the type-level-index case which IS supported.
         let ix_decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:_:IxClassFamily").unwrap(),
             name: "urn:_:IxClassFamily".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             // Index telescope's type is Sort(1) — indices are types
@@ -1081,6 +1090,7 @@ mod tests {
         // InductiveType(List, [Nat]) — encoded as App(ConstRef(List), ConstRef(Nat))
         // via currying. We use synthetic decls with names that read as IRIs.
         let nat_decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -1088,6 +1098,7 @@ mod tests {
             ctors: Vec::new(),
         });
         let list_decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:_:List").unwrap(),
             name: "urn:_:List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: Vec::new(),
@@ -1096,6 +1107,7 @@ mod tests {
                 name: "nil".to_string(),
                 typ: Exp::InductiveType(
                     Arc::new(InductiveDecl {
+                        iri: crate::ontology::iri::Iri::parse("urn:_:List").unwrap(),
                         name: "urn:_:List".to_string(),
                         params: Vec::new(),
                         indices: Vec::new(),
@@ -1138,6 +1150,7 @@ mod tests {
     fn encodes_nullary_inductive_ctor() {
         // Nat.zero — encoded as CtorApp(urn:_:Nat, zero) with no args.
         let nat_decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -1159,6 +1172,7 @@ mod tests {
     fn encodes_unary_inductive_ctor_via_app_currying() {
         // Nat.succ(x) — encoded as App(CtorApp(urn:_:Nat, succ), Var(x))
         let nat_decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -1208,6 +1222,7 @@ mod tests {
         // The encoder must produce a nested App spine:
         //   App(ConstRef(AssayShape), App(CtorApp(Nat, succ), CtorApp(Nat, zero)))
         let nat_decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
             name: "urn:_:Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -1224,6 +1239,7 @@ mod tests {
             ],
         });
         let assay_decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:_:AssayShape").unwrap(),
             name: "urn:_:AssayShape".to_string(),
             params: Vec::new(),
             indices: vec![(

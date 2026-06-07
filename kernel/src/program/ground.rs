@@ -366,6 +366,7 @@ fn resolve_codata_type(
     // Self-reference stub — mirrors `resolve_inductive_type`'s use of
     // a name-only `InductiveDecl`.
     let self_ref: Arc<CodataDecl> = Arc::new(CodataDecl {
+        iri: class_iri.clone(),
         name: short_name.clone(),
         params: params_telescope.clone(),
         sort: Exp::Sort(1),
@@ -417,6 +418,7 @@ fn resolve_codata_type(
     // full decl carries the decoded observations; consumers apply it
     // via `Exp::CodataType(decl, args)`.
     let decl = Arc::new(CodataDecl {
+        iri: class_iri.clone(),
         name: short_name,
         params: params_telescope,
         sort: Exp::Sort(1),
@@ -569,6 +571,8 @@ fn decode_codata_observation_type(
                     }
                 }
                 let dummy = Arc::new(InductiveDecl {
+                    iri: Iri::parse("urn:eigenius:_internal:__not_a_real_inductive__")
+                        .expect("static sentinel IRI"),
                     name: "__not_a_real_inductive__".to_string(),
                     params: Vec::new(),
                     indices: Vec::new(),
@@ -638,6 +642,7 @@ pub(crate) fn resolve_inductive_type(
     // the kernel's check pass expects. `params` stays empty in the
     // stub since references inside ctor bodies thread params lexically.
     let self_ref = Arc::new(InductiveDecl {
+        iri: class_iri.clone(),
         name: short_name.clone(),
         params: Vec::new(),
         indices: indices_telescope.clone(),
@@ -648,6 +653,7 @@ pub(crate) fn resolve_inductive_type(
     let ctors = decode_ctors(class_iri, resource, &self_ref, &params_telescope, layer)?;
 
     let decl = Arc::new(InductiveDecl {
+        iri: class_iri.clone(),
         name: short_name,
         params: params_telescope,
         indices: indices_telescope,
@@ -1154,6 +1160,7 @@ fn decode_arg_type(
                 _ => arg_iri.local_name().to_string(),
             };
             let stub = Arc::new(InductiveDecl {
+                iri: arg_iri.clone(),
                 name: other_name,
                 params: Vec::new(),
                 indices: Vec::new(),

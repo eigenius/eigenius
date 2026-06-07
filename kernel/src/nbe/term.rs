@@ -398,6 +398,17 @@ pub enum PrimitiveType {
 /// tricks; the name-based `PartialEq` is the proper structural fix.
 #[derive(Debug, Clone)]
 pub struct InductiveDecl {
+    /// Stable chain-resident identifier (gh #75). Same discipline as
+    /// `core:Class`: the IRI uniquely identifies the inductive across
+    /// every construction path (resolver, ESL stubs, test fixtures);
+    /// the [`name`](Self::name) field below is a human-readable label.
+    /// The D47 codec encoder writes this into `ConstRef` / `CtorApp`
+    /// slots — using `name` there would produce decoder-incompatible
+    /// short-name shapes for chain-resolved decls.
+    pub iri: Iri,
+    /// Human-readable short name. Used in diagnostic strings only.
+    /// Same convenience role as `core:short_name` on `core:Class` —
+    /// readable when unambiguous, but never the identifier.
     pub name: Name,
     /// Parameter telescope shared by every constructor: `(x₁ : A₁) … (xₙ : Aₙ)`.
     pub params: Vec<(Patt, Exp)>,
@@ -413,7 +424,7 @@ pub struct InductiveDecl {
 
 impl PartialEq for InductiveDecl {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
+        self.iri == other.iri
     }
 }
 
@@ -430,6 +441,10 @@ impl PartialEq for InductiveDecl {
 /// with the same name.
 #[derive(Debug, Clone)]
 pub struct CodataDecl {
+    /// Stable chain-resident identifier (gh #75). See [`InductiveDecl::iri`]
+    /// for the discipline; same role here.
+    pub iri: Iri,
+    /// Human-readable short name. Diagnostics only.
     pub name: Name,
     /// Parameter telescope shared by every observation.
     pub params: Vec<(Patt, Exp)>,
@@ -440,7 +455,7 @@ pub struct CodataDecl {
 
 impl PartialEq for CodataDecl {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
+        self.iri == other.iri
     }
 }
 
@@ -513,7 +528,9 @@ pub fn list_decl() -> Arc<InductiveDecl> {
 }
 
 fn build_list_decl() -> Arc<InductiveDecl> {
+    let list_iri = Iri::parse("urn:eigenius:core:List").expect("static List IRI");
     let self_ref = Arc::new(InductiveDecl {
+        iri: list_iri.clone(),
         name: "List".to_string(),
         params: Vec::new(),
         indices: Vec::new(),
@@ -522,6 +539,7 @@ fn build_list_decl() -> Arc<InductiveDecl> {
     });
     let list_a_typ = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string())]);
     Arc::new(InductiveDecl {
+        iri: list_iri,
         name: "List".to_string(),
         params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
         indices: Vec::new(),
@@ -570,7 +588,9 @@ pub fn option_decl() -> Arc<InductiveDecl> {
 }
 
 fn build_option_decl() -> Arc<InductiveDecl> {
+    let option_iri = Iri::parse(crate::ontology::well_known::OPTION).expect("static Option IRI");
     let self_ref = Arc::new(InductiveDecl {
+        iri: option_iri.clone(),
         name: "Option".to_string(),
         params: Vec::new(),
         indices: Vec::new(),
@@ -579,6 +599,7 @@ fn build_option_decl() -> Arc<InductiveDecl> {
     });
     let option_a_typ = Exp::InductiveType(self_ref, vec![Exp::Var("A".to_string())]);
     Arc::new(InductiveDecl {
+        iri: option_iri,
         name: "Option".to_string(),
         params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
         indices: Vec::new(),

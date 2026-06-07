@@ -711,8 +711,23 @@ impl Compiler {
                         .rsplit_once(':')
                         .map(|(parent, _)| parent.to_string())
                         .unwrap_or_else(|| ctor_iri_str.clone());
+                    let parent_iri = Iri::parse(&parent_iri_str).map_err(|e| {
+                        EslError::compiler(
+                            Some(name.pos.clone()),
+                            format!(
+                                "invalid parent IRI `{parent_iri_str}` for ctor `{}`: {e}",
+                                name.name
+                            ),
+                        )
+                    })?;
+                    // The stub's `name` field is the short name (the
+                    // human-readable label, per gh #75) — derive it from
+                    // the parent IRI's local part so the diagnostic
+                    // surface reads naturally.
+                    let parent_short_name = parent_iri.local_name().to_string();
                     let stub = std::sync::Arc::new(InductiveDecl {
-                        name: parent_iri_str,
+                        iri: parent_iri,
+                        name: parent_short_name,
                         params: Vec::new(),
                         indices: Vec::new(),
                         sort: Exp::Sort(1),
@@ -732,8 +747,10 @@ impl Compiler {
                     // The D47 codec produces `App(App(ConstRef(iri),
                     // a1), a2)…` and the decoder re-resolves the IRI
                     // against the chain at use time.
+                    let short_name = iri_val.local_name().to_string();
                     let stub = std::sync::Arc::new(InductiveDecl {
-                        name: iri_val.as_str().to_string(),
+                        iri: iri_val.clone(),
+                        name: short_name,
                         params: Vec::new(),
                         indices: Vec::new(),
                         sort: Exp::Sort(1),

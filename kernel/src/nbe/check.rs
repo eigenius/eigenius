@@ -1926,7 +1926,7 @@ fn validate_indexed_ctor_conclusions(
         // with the right arg count. Positivity already verified the name
         // matches; we add the arg-count check here.
         let conclusion_args = match residual {
-            Exp::InductiveType(d, args) if d.name == decl.name => args,
+            Exp::InductiveType(d, args) if d.iri == decl.iri => args,
             _ => {
                 return Err(format!(
                     "constructor `{}.{}`: conclusion must be `{}(...)` — \
@@ -2861,6 +2861,7 @@ mod tests {
         // An inductive declared with sort = Sort(0) is propositional — caught
         // by the structural fast-path on Val::InductiveType.
         let prop_decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:MyProp").unwrap(),
             name: "MyProp".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -2879,6 +2880,7 @@ mod tests {
     fn proof_irrelevance_does_not_fire_for_set_typed_inductive() {
         // An inductive declared with sort = Sort(1) is NOT propositional.
         let set_decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:MyData").unwrap(),
             name: "MyData".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -2934,6 +2936,7 @@ mod tests {
         ctors: Vec<crate::nbe::term::InductiveCtorDecl>,
     ) -> crate::nbe::term::InductiveDecl {
         crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
             name: name.to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -3022,6 +3025,7 @@ mod tests {
     fn eq_decl() -> std::sync::Arc<crate::nbe::term::InductiveDecl> {
         // Self-ref for the ctor's conclusion.
         let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Eq").unwrap(),
             name: "Eq".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![
@@ -3050,6 +3054,7 @@ mod tests {
             )),
         );
         std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Eq").unwrap(),
             name: "Eq".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![
@@ -3084,6 +3089,7 @@ mod tests {
         // index expressions. Even with the Phase H extension, this
         // should still be rejected.
         let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:BadIxProp").unwrap(),
             name: "BadIxProp".to_string(),
             params: Vec::new(),
             indices: vec![(Patt::Unit, Exp::One)],
@@ -3101,6 +3107,7 @@ mod tests {
             Box::new(conclusion),
         );
         let decl = crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:BadIxProp").unwrap(),
             name: "BadIxProp".to_string(),
             params: Vec::new(),
             indices: vec![(Patt::Unit, Exp::One)],
@@ -3143,6 +3150,7 @@ mod tests {
         // at all — large_elim_admitted is only consulted for Prop decls.
         // Smoke-test the function returns sensibly regardless.
         let set_decl = crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
             name: "Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -3934,6 +3942,7 @@ mod tests {
 
     fn ind_self_ref(name: &str) -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
             name: name.to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -3946,6 +3955,7 @@ mod tests {
         let s = ind_self_ref("Nat");
         let nat_ty = Exp::InductiveType(s, Vec::new());
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
             name: "Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -4036,6 +4046,7 @@ mod tests {
         let bs = ind_self_ref("Bool");
         let bool_ty_exp = Exp::InductiveType(bs, Vec::new());
         let bool_decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Bool").unwrap(),
             name: "Bool".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -4080,6 +4091,7 @@ mod tests {
         let s = ind_self_ref("List");
         let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
         let list_decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: Vec::new(),
@@ -4201,6 +4213,7 @@ mod tests {
         let bs = ind_self_ref("Bool");
         let bool_ty = Exp::InductiveType(bs, Vec::new());
         let bool_decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Bool").unwrap(),
             name: "Bool".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -4278,6 +4291,7 @@ mod tests {
         // `PartialEq` on `InductiveDecl` goes by name, so two calls to
         // this helper produce decls that compare equal.
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SizedStream").unwrap(),
             name: "SizedStream".to_string(),
             params: vec![
                 (Patt::Var("i".to_string()), Exp::SizeSort),
@@ -4367,6 +4381,7 @@ mod tests {
         // rejects them.
         let decl_a = sized_stream_decl();
         let decl_b = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:OtherStream").unwrap(),
             name: "OtherStream".to_string(),
             params: decl_a.params.clone(),
             indices: Vec::new(),
@@ -4440,6 +4455,7 @@ mod tests {
         //   zero : Π i:SizeSort. SizedNat i       (exists at every size)
         //   succ : Π i:SizeSort. SizedNat i → SizedNat (↑ i)
         let self_ref = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SizedNat").unwrap(),
             name: "SizedNat".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
             indices: Vec::new(),
@@ -4452,6 +4468,7 @@ mod tests {
             vec![Exp::SizeSucc(Box::new(Exp::Var("i".to_string())))],
         );
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SizedNat").unwrap(),
             name: "SizedNat".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
             indices: Vec::new(),
@@ -5072,6 +5089,7 @@ mod tests {
         //   zero : Π i:SizeSort. SizedNatP i
         //   succ : Π i:SizeSort. {j < i}. SizedNatP j → SizedNatP i
         let self_ref = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SizedNatP").unwrap(),
             name: "SizedNatP".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
             indices: Vec::new(),
@@ -5081,6 +5099,7 @@ mod tests {
         let snat_i = Exp::InductiveType(self_ref.clone(), vec![Exp::Var("i".to_string())]);
         let snat_j = Exp::InductiveType(self_ref, vec![Exp::Var("j".to_string())]);
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SizedNatP").unwrap(),
             name: "SizedNatP".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
             indices: Vec::new(),
@@ -5835,6 +5854,7 @@ mod tests {
     /// without requiring `Nat`. Phase D will pull in real `Nat` indices.
     fn simple_vec_decl() -> Arc<InductiveDecl> {
         let self_ref = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
@@ -5845,6 +5865,7 @@ mod tests {
         let vec_a_unit =
             Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string()), Exp::Unit]);
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
@@ -5903,6 +5924,7 @@ mod tests {
         // conclusion `SimpleVec A` (missing the index) supplies only 1.
         // Phase B validator rejects.
         let self_ref = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:BadVec").unwrap(),
             name: "BadVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
@@ -5912,6 +5934,7 @@ mod tests {
         // Conclusion has only 1 arg (the param), missing the index.
         let bad_conclusion = Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string())]);
         let decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:BadVec").unwrap(),
             name: "BadVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
@@ -5939,6 +5962,7 @@ mod tests {
         // conclusion supplies a Sort(1) value in the index slot —
         // type mismatch. Phase B validator rejects.
         let self_ref = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:MistypedVec").unwrap(),
             name: "MistypedVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
@@ -5951,6 +5975,7 @@ mod tests {
             vec![Exp::Var("A".to_string()), Exp::Sort(1)],
         );
         let decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:MistypedVec").unwrap(),
             name: "MistypedVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
@@ -6307,6 +6332,10 @@ mod tests {
         use crate::nbe::term::{Exp as TermExp, InductiveDecl};
         Val::InductiveType {
             decl: Arc::new(InductiveDecl {
+                iri: crate::ontology::iri::Iri::parse(&format!(
+                    "urn:eigenius:reasoning:ChainWitness:{category_short_name}"
+                ))
+                .expect("test iri"),
                 name: category_short_name.to_string(),
                 params: Vec::new(),
                 indices: Vec::new(),

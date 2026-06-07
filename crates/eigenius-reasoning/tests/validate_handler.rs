@@ -414,14 +414,16 @@ fn consistency_check_missing_sentence_set_surfaces_computation_failed() {
 /// populates the user layer's witness index with a `Declared`
 /// witness for `(target_iri, Asserts(target_iri))`.
 ///
-/// Omitting `canonical_proposition` is deliberate: the chain side
-/// (`default_asserts_proposition_hash`) and the synthesis side
-/// (eval+readback of the certificate's proposition) both go through
-/// the resolved `core:Asserts` decl, so the prop_hashes match
-/// byte-for-byte. Setting an explicit `canonical_proposition` via
-/// the D47 encoder using a stub decl would produce different bytes
-/// (ConstRef IRI vs decl.name short-name shape) and the witness
-/// lookup would miss.
+/// This helper uses the *default* `Asserts(target_iri)` witness
+/// emission path (`canonical_proposition` not set on the target). The
+/// explicit-canonical_proposition variant is exercised by
+/// [`build_chain_with_explicit_canonical_proposition`] below; before
+/// gh #75 it was a soundness hazard because the chain-encoded bytes
+/// (full-IRI `ConstRef` from the D47 encoder against an ESL-stub
+/// decl) didn't match the synthesis-side encoding (short-name
+/// `ConstRef` from the resolved decl). Now that `InductiveDecl`
+/// carries `iri` as the stable identifier, both paths produce
+/// byte-identical encodings.
 fn build_chain_with_declared_axiom(target_iri_str: &str) -> ExecutionContext {
     use eigenius_kernel::ontology::well_known as wk_local;
 
@@ -497,6 +499,124 @@ fn justified_by_declared_certificate(
             {"ctor": "UnitVal", "args": []},
         ],
     }))
+}
+
+/// Variant of [`build_chain_with_declared_axiom`] that stamps
+/// `canonical_proposition` *explicitly* on the target resource (via
+/// the D47 encoder running over a resolved-style decl). The witness
+/// emitter reads the explicit value rather than computing the
+/// `Asserts(iri)` default — different code path, must still hash-
+/// equal the synthesis-side computation.
+///
+/// Before gh #75 this was the broken path: the chain bytes used one
+/// `ConstRef` shape (driven by the test's stub decl), the synthesis
+/// hook used another (driven by the resolved decl), the hashes
+/// differed, the witness lookup missed. Post-fix, both sides read
+/// `decl.iri` and produce the same bytes.
+fn build_chain_with_explicit_canonical_proposition(target_iri_str: &str) -> ExecutionContext {
+    use eigenius_kernel::nbe::term::{Exp, InductiveDecl};
+    use eigenius_kernel::ontology::well_known as wk_local;
+    use eigenius_kernel::program::eigentt_type_mirror::encode_type;
+
+    let base_ctx = build_full_chain();
+    let reasoning_layer = base_ctx.head().clone();
+
+    // Stamp canonical_proposition = `Asserts(target_iri)` using the
+    // D47 encoder. The stub mimics what a chain-author tool would
+    // produce: short name + full IRI on the decl. After gh #75 the
+    // encoder reads decl.iri, so both this shape and the resolver-
+    // built shape produce identical bytes.
+    let asserts_iri = Iri::parse("urn:eigenius:core:Asserts").expect("static Asserts IRI");
+    let stub_decl = std::sync::Arc::new(InductiveDecl {
+        iri: asserts_iri.clone(),
+        name: asserts_iri.local_name().to_string(),
+        params: Vec::new(),
+        indices: Vec::new(),
+        sort: Exp::Sort(0),
+        ctors: Vec::new(),
+    });
+    let prop_exp = Exp::InductiveType(stub_decl, vec![Exp::LitString(target_iri_str.to_string())]);
+    let prop_value = encode_type(&prop_exp).expect("encode Asserts(iri)");
+
+    let target_iri = Iri::parse(target_iri_str).unwrap();
+    let mut target = Resource::new(target_iri.clone());
+    target.set(
+        Iri::parse(wk::IS_A).unwrap(),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse(wk_local::DECLARED_RESOURCE).unwrap(),
+        )]),
+    );
+    target.set(
+        Iri::parse(wk_local::CANONICAL_PROPOSITION).unwrap(),
+        prop_value,
+    );
+
+    let trace_iri_str = format!("{target_iri_str}-decl-trace");
+    let mut trace = Resource::new(Iri::parse(&trace_iri_str).unwrap());
+    trace.set(
+        Iri::parse(wk::IS_A).unwrap(),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse(wk_local::DECLARATION_TRACE).unwrap(),
+        )]),
+    );
+    trace.set(
+        Iri::parse(wk_local::REFLECTION_RESOURCE).unwrap(),
+        Value::ResourceRef(target_iri.clone()),
+    );
+
+    let mut builder = LayerBuilder::new("phase10-axioms-explicit", Some(reasoning_layer));
+    builder.add_resource(target).unwrap();
+    builder.add_resource(trace).unwrap();
+    let user_layer = Arc::new(builder.build(LayerStorage::in_memory()));
+    let _ = user_layer.chain_witness_index();
+
+    ExecutionContext::new(
+        user_layer,
+        "phase10-explicit-canonical-proposition",
+        ExecutionMode::ReadOnly,
+        LayerStorage::in_memory(),
+    )
+}
+
+#[test]
+fn end_to_end_validate_holds_with_explicit_canonical_proposition_after_iri_split() {
+    // gh #75 regression check: a target resource with an *explicit*
+    // canonical_proposition (encoded via the D47 codec) must produce
+    // a witness whose prop_hash matches what the synthesis hook
+    // computes by eval+readback+encode on the certificate's
+    // proposition. Pre-fix the encoder used `decl.name` for the
+    // ConstRef slot — chain-author tools using IRI-shaped names and
+    // resolver-built decls using short names produced different
+    // bytes. Post-fix both read `decl.iri`, the bytes agree, the
+    // witness is admitted, the certificate type-checks, Verdict::Holds.
+    let target = "urn:test:phase10:explicit-axiom";
+    let ctx = build_chain_with_explicit_canonical_proposition(target);
+
+    let asserts_subtree = json!({
+        "ctor": "App",
+        "args": [
+            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts"]},
+            {"ctor": "LitString", "args": [target]},
+        ],
+    });
+    let proposition = Value::Json(asserts_subtree.clone());
+    let justification = Value::Json(json!({
+        "ctor": "DeclaredEvidence",
+        "args": [target],
+    }));
+    let certificate = justified_by_declared_certificate(target, asserts_subtree);
+
+    let sentence = synthetic_sentence(Some(proposition), Some(justification), Some(certificate));
+    let outcome = do_validate_justification(&ReasoningInstitution::new(), &sentence, &ctx)
+        .expect("handler returns outcome");
+    let ctor = verdict_ctor(&outcome.output);
+    assert_eq!(
+        ctor,
+        wk::VERDICT_HOLDS,
+        "explicit canonical_proposition should now produce Holds (gh #75); \
+         got {ctor}, diagnostic: {:?}",
+        verdict_diagnostic(&outcome.output)
+    );
 }
 
 #[test]
