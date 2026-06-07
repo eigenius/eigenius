@@ -2096,6 +2096,76 @@ fn peel_ctor_telescope(ctor_typ: &Exp, params_to_skip: usize) -> (Vec<CtorArg>, 
 ///
 /// Used by both the bidirectional `check` arm and the inference path
 /// for non-parametric constructors.
+/// D49 Phase 6 hook — detect a ChainWitness-predicate expected type
+/// at a constructor-arg position and synthesize the witness via the
+/// layer's witness index. Returns `Some(witness_val)` on a successful
+/// hit, `None` when the expected type isn't a ChainWitness predicate
+/// (callers fall through to the standard type-check), and `Err` when
+/// the expected type *is* a ChainWitness predicate but synthesis
+/// fails (missing layer, missing trace, malformed iri arg).
+fn try_synthesize_chain_witness(ctx: &CheckCtx, expected_typ: &Val) -> Result<Option<Val>, String> {
+    let (decl, indices) = match expected_typ {
+        Val::InductiveType { decl, indices, .. } => (decl, indices),
+        _ => return Ok(None),
+    };
+    let category = match chain_witness_category_for_short_name(&decl.name) {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+
+    // The four ChainWitness predicates all have signature
+    // `core:string -> Prop -> Prop` (2 indices: iri, P). Mismatch
+    // means the chain ontology drifted from the kernel's expectation.
+    if indices.len() != 2 {
+        return Err(format!(
+            "ChainWitness predicate `{}` expected 2 indices (iri, P), got {}",
+            decl.name,
+            indices.len()
+        ));
+    }
+
+    let iri_str = match &indices[0] {
+        Val::LitString(s) => s.clone(),
+        other => {
+            return Err(format!(
+                "ChainWitness predicate `{}` iri index must be LitString, got {other:?}",
+                decl.name
+            ));
+        }
+    };
+    let iri = crate::ontology::iri::Iri::parse(&iri_str)
+        .map_err(|e| format!("ChainWitness `{}`: invalid iri `{iri_str}`: {e}", decl.name))?;
+
+    let prop_exp = readback_val(ctx.rho.len(), &indices[1]);
+
+    let layer = ctx.layer.as_ref().ok_or_else(|| {
+        format!(
+            "ChainWitness synthesis for `{}` requires a layer-attached CheckCtx; \
+             pure-mode contexts cannot admit chain witnesses",
+            decl.name
+        )
+    })?;
+
+    let witness_val = crate::layer::synthesize_chain_witness(layer, category, &iri, &prop_exp)?;
+    Ok(Some(witness_val))
+}
+
+/// Map an inductive's short name to its `WitnessCategory` if it is one
+/// of the four ChainWitness predicates. The IRIs themselves live under
+/// `urn:eigenius:reasoning:ChainWitness:Is*As`; the ESL compiler emits
+/// the local-part short name (`IsDeclaredAs`, etc.) onto the
+/// `InductiveDecl.name` slot, so the matching is by short name here.
+fn chain_witness_category_for_short_name(name: &str) -> Option<crate::witness::WitnessCategory> {
+    use crate::witness::WitnessCategory;
+    match name {
+        "IsDeclaredAs" => Some(WitnessCategory::Declared),
+        "IsObservedAs" => Some(WitnessCategory::Observed),
+        "IsDerivedAs" => Some(WitnessCategory::Derived),
+        "IsVerifiedAs" => Some(WitnessCategory::Verified),
+        _ => None,
+    }
+}
+
 fn check_inductive_ctor_args(
     ctx: &mut CheckCtx,
     decl: &Arc<InductiveDecl>,
@@ -2143,8 +2213,23 @@ fn check_inductive_ctor_args(
         match spec {
             CtorArg::Value { patt, typ } => {
                 let arg_typ_val = ctx.eval(typ, &arg_env).map_err(|e| e.to_string())?;
-                check(ctx, arg_exp, &arg_typ_val)?;
-                let arg_val = ctx.eval(arg_exp, &ctx.rho).map_err(|e| e.to_string())?;
+
+                // D49 Phase 6 hook — when the expected arg type is a
+                // ChainWitness predicate (`IsDeclaredAs` / `IsObservedAs`
+                // / `IsDerivedAs` / `IsVerifiedAs`), synthesize the
+                // witness from the layer's witness index rather than
+                // type-checking the user's arg. ChainWitness predicates
+                // have zero constructors — the user can't construct an
+                // inhabitant — so kernel-side synthesis IS the type-
+                // checking step here. The user's `arg_exp` at this
+                // position is ignored by design.
+                let arg_val = match try_synthesize_chain_witness(ctx, &arg_typ_val)? {
+                    Some(witness_val) => witness_val,
+                    None => {
+                        check(ctx, arg_exp, &arg_typ_val)?;
+                        ctx.eval(arg_exp, &ctx.rho).map_err(|e| e.to_string())?
+                    }
+                };
                 arg_env = arg_env.extend(patt.clone(), arg_val);
             }
             CtorArg::Size { patt, upper } => {
@@ -6210,5 +6295,161 @@ mod tests {
         check(&mut c, &nil_app, &expected).unwrap();
         let _ = mctx; // unused — the per-call internal MetaCtx ate the meta
         let _ = m_id;
+    }
+
+    // ── Phase 9 — D49 ChainWitness synthesis hook ─────────────────────
+
+    /// Build a `Val::InductiveType` whose decl mimics a ChainWitness
+    /// predicate (`IsDeclaredAs` short name, 2 indices: iri + P).
+    /// Production code resolves the real decl from the chain; this
+    /// stub is enough for unit-testing the hook's recognition logic.
+    fn chain_witness_typed_at(category_short_name: &str, iri_val: Val, prop_val: Val) -> Val {
+        use crate::nbe::term::{Exp as TermExp, InductiveDecl};
+        Val::InductiveType {
+            decl: Arc::new(InductiveDecl {
+                name: category_short_name.to_string(),
+                params: Vec::new(),
+                indices: Vec::new(),
+                sort: TermExp::Sort(0),
+                ctors: Vec::new(),
+            }),
+            params: Vec::new(),
+            indices: vec![iri_val, prop_val],
+        }
+    }
+
+    #[test]
+    fn synthesis_hook_returns_none_for_non_chain_witness_type() {
+        // Sanity: a regular inductive type (Sort, Pi, ...) doesn't
+        // trigger the hook. Falls through to the standard check path.
+        let c = ctx();
+        assert!(try_synthesize_chain_witness(&c, &Val::Sort(0))
+            .unwrap()
+            .is_none());
+        // Even an InductiveType whose decl.name isn't a ChainWitness
+        // short name falls through.
+        let stub = chain_witness_typed_at("Vec", Val::LitString("A".into()), Val::Sort(1));
+        assert!(try_synthesize_chain_witness(&c, &stub).unwrap().is_none());
+    }
+
+    #[test]
+    fn synthesis_hook_errors_without_layer() {
+        // CheckCtx without a layer can't reach the witness index;
+        // the hook surfaces this with a clear error rather than
+        // silently passing (which would let the type-check succeed
+        // for the wrong reason).
+        let c = ctx();
+        let expected = chain_witness_typed_at(
+            "IsDeclaredAs",
+            Val::LitString("urn:test:axiom".into()),
+            Val::Sort(0),
+        );
+        let err = try_synthesize_chain_witness(&c, &expected).unwrap_err();
+        assert!(
+            err.contains("requires a layer-attached CheckCtx"),
+            "expected layer-missing diagnostic, got: {err}"
+        );
+    }
+
+    #[test]
+    fn synthesis_hook_errors_when_iri_index_not_litstring() {
+        // The iri index must be a Val::LitString. A bogus shape (e.g.,
+        // Val::Sort) means the chain author or codec produced a
+        // malformed ChainWitness application; the hook surfaces this
+        // before reaching the witness index.
+        let c = ctx();
+        let expected = chain_witness_typed_at(
+            "IsDeclaredAs",
+            Val::Sort(0), // not a LitString
+            Val::Sort(0),
+        );
+        let err = try_synthesize_chain_witness(&c, &expected).unwrap_err();
+        assert!(
+            err.contains("iri index must be LitString"),
+            "expected iri-shape diagnostic, got: {err}"
+        );
+    }
+
+    #[test]
+    fn synthesis_hook_routes_through_layer_witness_index_for_admitted_witness() {
+        // End-to-end: build a layer carrying a DeclarationTrace, which
+        // populates the witness index with the corresponding Declared
+        // witness. Calling the hook with the matching expected type
+        // returns Some(Val::ChainWitness).
+        use crate::layer::{LayerBuilder, LayerStorage};
+        use crate::ontology::resource::{Resource, Value as RVal};
+        use crate::ontology::well_known as wk_local;
+        use crate::program::eigentt_type_mirror::encode_type;
+
+        let target_iri_str = "urn:test:phase9:axiom";
+        let prop_exp = Exp::Sort(0); // any well-typed Prop suffices for index population
+
+        let mut target = Resource::new(Iri::parse(target_iri_str).unwrap());
+        target.set(
+            Iri::parse(wk_local::IS_A).unwrap(),
+            RVal::Array(vec![RVal::String(wk_local::DECLARED_RESOURCE.to_string())]),
+        );
+        target.set(
+            Iri::parse(wk_local::CANONICAL_PROPOSITION).unwrap(),
+            encode_type(&prop_exp).unwrap(),
+        );
+
+        let mut trace = Resource::new(Iri::parse("urn:test:phase9:axiom-trace").unwrap());
+        trace.set(
+            Iri::parse(wk_local::IS_A).unwrap(),
+            RVal::Array(vec![RVal::String(wk_local::DECLARATION_TRACE.to_string())]),
+        );
+        trace.set(
+            Iri::parse(wk_local::REFLECTION_RESOURCE).unwrap(),
+            RVal::ResourceRef(Iri::parse(target_iri_str).unwrap()),
+        );
+
+        let mut builder = LayerBuilder::new("phase9-witness-test", None);
+        builder.add_resource(target).unwrap();
+        builder.add_resource(trace).unwrap();
+        let layer = Arc::new(builder.build(LayerStorage::in_memory()));
+
+        // Force index population so the hook finds the witness.
+        let _ = layer.chain_witness_index();
+
+        let c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
+
+        // Expected type is `IsDeclaredAs(target_iri_str, Sort(0))`.
+        // The eval'd index must match what the witness index was
+        // populated with — prop_exp evaluates to Val::Sort(0).
+        let expected = chain_witness_typed_at(
+            "IsDeclaredAs",
+            Val::LitString(target_iri_str.to_string()),
+            Val::Sort(0),
+        );
+        let synth = try_synthesize_chain_witness(&c, &expected).unwrap();
+        let val = synth.expect("witness should be admitted for declared trace");
+        assert!(
+            matches!(val, Val::ChainWitness(_)),
+            "synthesized value should be Val::ChainWitness, got {val:?}"
+        );
+    }
+
+    #[test]
+    fn synthesis_hook_errors_when_no_witness_admitted() {
+        // Layer with no witness index populated → synthesize_chain_witness
+        // returns a "no admitted witness" diagnostic. The hook surfaces it
+        // as Err so the caller (the ctor type-check loop) can lift it into
+        // a ValidateJustification Verdict::Fails.
+        use crate::layer::{LayerBuilder, LayerStorage};
+        let layer =
+            Arc::new(LayerBuilder::new("phase9-empty", None).build(LayerStorage::in_memory()));
+        let _ = layer.chain_witness_index(); // populate (empty)
+        let c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
+        let expected = chain_witness_typed_at(
+            "IsDeclaredAs",
+            Val::LitString("urn:test:phase9:missing".into()),
+            Val::Sort(0),
+        );
+        let err = try_synthesize_chain_witness(&c, &expected).unwrap_err();
+        assert!(
+            err.contains("no admitted") || err.contains("witness"),
+            "expected missing-witness diagnostic, got: {err}"
+        );
     }
 }
