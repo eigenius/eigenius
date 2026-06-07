@@ -65,6 +65,17 @@ pub enum Val {
     EigonPrimitive(PrimitiveType),
     /// Concrete Eigon resource value
     ResourceVal(Box<Resource>),
+    /// Literal string value (eigenius#71 / D49). Type:
+    /// `Val::EigonPrimitive(PrimitiveType::String)`. Mirrors
+    /// `Exp::LitString` at the value level; values normalise to
+    /// themselves (no reduction; no neutral substructure).
+    LitString(String),
+    /// Literal integer value (eigenius#71). Type:
+    /// `Val::EigonPrimitive(PrimitiveType::Integer)`.
+    LitInt(i64),
+    /// Literal floating-point value (eigenius#71). Type:
+    /// `Val::EigonPrimitive(PrimitiveType::Float)`.
+    LitFloat(f64),
     /// Template value with resolved property type requirements.
     /// Template("literal", [(iri, resolved_type)])
     TemplateVal(String, Vec<(Iri, Val)>),

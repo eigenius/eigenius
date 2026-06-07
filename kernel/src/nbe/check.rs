@@ -1017,6 +1017,18 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             Ok(Val::Sort(0))
         }
         Exp::EigonClass(_) | Exp::EigonPrimitive(_) => Ok(Val::Sort(1)),
+        // eigenius#71 / D49 — literal values infer to their primitive
+        // type (`Val::EigonPrimitive(PrimitiveType::*)`). Round-trips
+        // through D47 as the `LitString` / `LitInt` / `LitFloat` ctors;
+        // the kernel checks equality on them via the standard `Val`
+        // `PartialEq` path (LitFloat uses `PartialEq` on f64 — NaN
+        // compares unequal, but literal NaN propositions are an edge
+        // case the user code is welcome to surface as a diagnostic).
+        Exp::LitString(_) => Ok(Val::EigonPrimitive(crate::nbe::term::PrimitiveType::String)),
+        Exp::LitInt(_) => Ok(Val::EigonPrimitive(
+            crate::nbe::term::PrimitiveType::Integer,
+        )),
+        Exp::LitFloat(_) => Ok(Val::EigonPrimitive(crate::nbe::term::PrimitiveType::Float)),
         Exp::Codata(_) => {
             check_type(ctx, exp)?;
             Ok(Val::Sort(1))
@@ -1790,7 +1802,10 @@ pub fn check_guarded(exp: &Exp, forbidden: &std::collections::HashSet<&str>) -> 
         | Exp::Unit
         | Exp::EigonClass(_)
         | Exp::EigonPrimitive(_)
-        | Exp::EigonResource(_) => Ok(()),
+        | Exp::EigonResource(_)
+        | Exp::LitString(_)
+        | Exp::LitInt(_)
+        | Exp::LitFloat(_) => Ok(()),
     }
 }
 

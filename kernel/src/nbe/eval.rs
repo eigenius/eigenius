@@ -202,6 +202,12 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
         Exp::One => Ok(Val::One),
         Exp::Unit => Ok(Val::Unit),
 
+        // eigenius#71 / D49 — literals normalise to themselves; no
+        // reduction, no neutral substructure.
+        Exp::LitString(s) => Ok(Val::LitString(s.clone())),
+        Exp::LitInt(n) => Ok(Val::LitInt(*n)),
+        Exp::LitFloat(f) => Ok(Val::LitFloat(*f)),
+
         Exp::Dec(d, e) => {
             match ctx {
                 EvalCtx::Pure => {

@@ -88,6 +88,25 @@ pub enum Exp {
     EigonPrimitive(PrimitiveType),
     /// A concrete Eigon resource value
     EigonResource(Box<Resource>),
+    /// Literal string value at the expression level (D49 / eigenius#71).
+    /// Type: `Exp::EigonPrimitive(PrimitiveType::String)`. Distinct from
+    /// `Exp::Template`, which carries embedded property references; a
+    /// `LitString` is a closed string literal with no interpolation.
+    /// Authored to support D39 §4.1's `Asserts(iri)` and any other
+    /// value-parameter inductive that takes string arguments at the
+    /// type level. Round-trips through the D47 codec as the `LitString`
+    /// ctor of `eigentt:TypeExpr` (eigenius#71).
+    LitString(String),
+    /// Literal integer value at the expression level (eigenius#71).
+    /// Type: `Exp::EigonPrimitive(PrimitiveType::Integer)`. Same shape
+    /// as `LitString` — a closed literal that round-trips through D47
+    /// as `LitInt`. Sized at i64 to match `core:integer`'s 53-bit
+    /// safe-integer range with headroom.
+    LitInt(i64),
+    /// Literal floating-point value at the expression level
+    /// (eigenius#71). Type: `Exp::EigonPrimitive(PrimitiveType::Float)`.
+    /// Round-trips through D47 as `LitFloat`.
+    LitFloat(f64),
     /// Property access on a resource: e.property
     PropAccess(Box<Exp>, Iri),
     /// Template literal with extracted property references.

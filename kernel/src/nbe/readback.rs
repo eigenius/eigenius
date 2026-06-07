@@ -173,6 +173,11 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
             args.iter().map(|a| readback_val(level, a)).collect(),
         ),
 
+        // eigenius#71 / D49 — literals round-trip as themselves.
+        Val::LitString(s) => Exp::LitString(s.clone()),
+        Val::LitInt(n) => Exp::LitInt(*n),
+        Val::LitFloat(f) => Exp::LitFloat(*f),
+
         // Sized types (Phase 11b step 14, D19 §8).
         Val::SizeSort => Exp::SizeSort,
         Val::SizeSucc(s) => Exp::SizeSucc(Box::new(readback_val(level, s))),

@@ -173,6 +173,16 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
             }
             Ok(current)
         }
+        // eigenius#71 — literal primitive values. The `LitString` /
+        // `LitInt` / `LitFloat` ctors land on the chain as
+        // `{"ctor": "LitString", "args": [<json-value>]}` etc. and
+        // round-trip with the matching decode arm below. This is what
+        // makes `Asserts(iri_str)` and any other value-parameter
+        // inductive applications encodable end-to-end (D49 §6 / D39
+        // §4.1).
+        Exp::LitString(s) => Ok(ctor("LitString", vec![json!(s)])),
+        Exp::LitInt(n) => Ok(ctor("LitInt", vec![json!(*n)])),
+        Exp::LitFloat(f) => Ok(ctor("LitFloat", vec![json!(*f)])),
         // Note: Exp::Con (anonymous Sum constructor) is intentionally
         // not yet encoded — chain-resident axioms reference declared
         // inductives via Exp::InductiveCtor; anonymous Sum ctors don't
@@ -453,15 +463,49 @@ fn decode_type_json(v: &serde_json::Value, layer: &Layer) -> Result<Exp, DecodeE
             let decl = resolve_inductive_decl_for_ctor(&decl_iri, &ctor_name, layer)?;
             Ok(Exp::InductiveCtor(decl, ctor_name, Vec::new()))
         }
-        lit @ ("LitInt" | "LitString" | "LitFloat") => {
-            // Ontology declares these for forward compatibility with
-            // FormulaTerm-style numerical institutions, but EigenTT's
-            // Exp doesn't yet have literal variants. Decoding them
-            // would require AST additions to Exp; punt until a real
-            // consumer of literals lands in the kernel.
-            Err(DecodeError::UnknownCtor(format!(
-                "{lit} literal decoding requires EigenTT Exp to add literal variants — not yet implemented"
-            )))
+        // eigenius#71 — literal primitive values. The matching encode
+        // arms emit `{"ctor": "LitString", "args": [<json-value>]}`
+        // etc.; here we extract the JSON primitive and wrap it in the
+        // corresponding `Exp::Lit*` variant. The arg is taken
+        // positionally per the codec's standard ctor shape (args[0]
+        // is the literal payload); the JSON type of the payload
+        // determines which arm we landed in, but we still type-check
+        // it defensively in case a malformed payload reached commit
+        // (the validator at canonical_proposition emission time should
+        // already have caught this — D49 Phase 5 — but the codec is
+        // the last line of defence).
+        "LitString" => {
+            expect_arg_count("LitString", 1, args)?;
+            let s = args[0]
+                .as_str()
+                .ok_or_else(|| {
+                    DecodeError::MalformedValue(format!(
+                        "LitString arg must be a JSON string, got {:?}",
+                        args[0]
+                    ))
+                })?
+                .to_string();
+            Ok(Exp::LitString(s))
+        }
+        "LitInt" => {
+            expect_arg_count("LitInt", 1, args)?;
+            let n = args[0].as_i64().ok_or_else(|| {
+                DecodeError::MalformedValue(format!(
+                    "LitInt arg must be a JSON integer, got {:?}",
+                    args[0]
+                ))
+            })?;
+            Ok(Exp::LitInt(n))
+        }
+        "LitFloat" => {
+            expect_arg_count("LitFloat", 1, args)?;
+            let f = args[0].as_f64().ok_or_else(|| {
+                DecodeError::MalformedValue(format!(
+                    "LitFloat arg must be a JSON number, got {:?}",
+                    args[0]
+                ))
+            })?;
+            Ok(Exp::LitFloat(f))
         }
 
         other => Err(DecodeError::UnknownCtor(other.to_string())),
@@ -610,6 +654,76 @@ mod tests {
     fn encodes_sort() {
         let v = encode_type(&Exp::Sort(0)).unwrap();
         assert_eq!(v, Value::Json(ctor_obj("Sort", vec![json!(0)])));
+    }
+
+    // --- eigenius#71 / D49 — literal Exp variants ---
+
+    #[test]
+    fn encodes_lit_string() {
+        let v = encode_type(&Exp::LitString("urn:eigenius:example:thing".to_string())).unwrap();
+        assert_eq!(
+            v,
+            Value::Json(ctor_obj(
+                "LitString",
+                vec![json!("urn:eigenius:example:thing")]
+            ))
+        );
+    }
+
+    #[test]
+    fn encodes_lit_int() {
+        let v = encode_type(&Exp::LitInt(42)).unwrap();
+        assert_eq!(v, Value::Json(ctor_obj("LitInt", vec![json!(42)])));
+    }
+
+    #[test]
+    fn encodes_lit_float() {
+        let v = encode_type(&Exp::LitFloat(1.5)).unwrap();
+        assert_eq!(v, Value::Json(ctor_obj("LitFloat", vec![json!(1.5)])));
+    }
+
+    #[test]
+    fn lit_string_roundtrip() {
+        // No layer chain needed for literals — they decode pure-locally,
+        // never touching the chain.
+        let layer = empty_layer();
+        let original = Exp::LitString("urn:eigenius:example:thing".to_string());
+        let encoded = encode_type(&original).unwrap();
+        let decoded = decode_type(&encoded, &layer).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn lit_int_roundtrip() {
+        let layer = empty_layer();
+        let original = Exp::LitInt(-42);
+        let encoded = encode_type(&original).unwrap();
+        let decoded = decode_type(&encoded, &layer).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn lit_float_roundtrip() {
+        let layer = empty_layer();
+        let original = Exp::LitFloat(1.25);
+        let encoded = encode_type(&original).unwrap();
+        let decoded = decode_type(&encoded, &layer).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn lit_string_decode_rejects_non_string_arg() {
+        let layer = empty_layer();
+        // Authored-by-hand malformed payload: LitString with an int arg.
+        let malformed = Value::Json(ctor_obj("LitString", vec![json!(42)]));
+        let result = decode_type(&malformed, &layer);
+        assert!(result.is_err(), "LitString with int arg must reject");
+        match result.unwrap_err() {
+            DecodeError::MalformedValue(msg) => {
+                assert!(msg.contains("LitString"), "diagnostic: {msg}");
+            }
+            other => panic!("expected MalformedValue, got {other:?}"),
+        }
     }
 
     #[test]

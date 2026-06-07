@@ -237,7 +237,10 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
         | Exp::Unit
         | Exp::EigonClass(_)
         | Exp::EigonPrimitive(_)
-        | Exp::EigonResource(_) => false,
+        | Exp::EigonResource(_)
+        | Exp::LitString(_)
+        | Exp::LitInt(_)
+        | Exp::LitFloat(_) => false,
     }
 }
 
