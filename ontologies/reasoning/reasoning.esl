@@ -1,0 +1,116 @@
+// Reasoning ontology — D39 Phase 3.
+//
+// Declares the EigenTT-level vocabulary the Reasoning institution rests on:
+//
+// - Four `ChainWitness.Is*As` predicates (D49 §6) — zero-ctor inductives
+//   in `Prop`. Kernel-internal opaque: ESL exposes no surface constructor
+//   for their inhabitants. The kernel synthesises `Val::ChainWitness`
+//   values at `JustifiedBy.*` type-check sites via the per-Layer witness
+//   index (D49 §5, kernel/src/layer/witness_index.rs).
+//
+// - `JustificationTerm` (D39 §3) — six-constructor closed inductive:
+//   four categorical groundings (one per epistemic category) plus two
+//   composition operators (Artemov `App`/`Sum`). No further evolution
+//   without a versioned change to the ADT.
+//
+// - `JustifiedBy : JustificationTerm -> Prop -> Type 0` (D39 §5) — the
+//   indexed inductive predicate whose inhabitants are the certificates
+//   `ReasoningSentence` carries. Seven constructors: four grounding
+//   constructors consume the matching `ChainWitness` witness; `app`
+//   realises Artemov's Application; `sum_l` / `sum_r` jointly realise
+//   Artemov's Sum (no eliminator — `Sum` is a packaging operator, not
+//   a decomposable structure).
+//
+// IRIs match the kernel's `well_known` constants
+// (`CHAIN_WITNESS_IS_*_AS`, etc.) — do not rename without updating
+// `kernel/src/ontology/well_known.rs` in lockstep.
+
+namespace core      = "urn:eigenius:core";
+namespace reasoning = "urn:eigenius:reasoning";
+namespace witness   = "urn:eigenius:reasoning:ChainWitness";
+
+// ── ChainWitness predicates ──────────────────────────────────────────
+//
+// Each is `core:string -> Prop -> Prop`: the IRI of the underlying
+// reflection-ontology resource and the proposition that resource carries.
+// Zero ctors enforces opacity — no user-constructible inhabitant exists.
+
+data witness:IsDeclaredAs : core:string -> Prop -> Prop {
+}
+
+data witness:IsObservedAs : core:string -> Prop -> Prop {
+}
+
+data witness:IsDerivedAs : core:string -> Prop -> Prop {
+}
+
+data witness:IsVerifiedAs : core:string -> Prop -> Prop {
+}
+
+// ── JustificationTerm ────────────────────────────────────────────────
+//
+// The interlingua. Six ctors total: four categorical groundings + two
+// composition operators. Adding a constructor is a versioned change.
+
+data reasoning:JustificationTerm {
+    DeclaredEvidence(core:string),
+    ObservedEvidence(core:string),
+    DerivedEvidence(core:string),
+    VerifiedEvidence(core:string),
+    App(reasoning:JustificationTerm, reasoning:JustificationTerm),
+    Sum(reasoning:JustificationTerm, reasoning:JustificationTerm),
+}
+
+// ── JustifiedBy ──────────────────────────────────────────────────────
+//
+// Indexed inductive predicate `JustifiedBy : JustificationTerm -> Prop
+// -> Type 0`. Inhabits `Type 0` (not `Prop`) so certificates are stored
+// and re-checkable — D39 §5 §last-paragraph.
+
+data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 0 {
+    declared :
+        forall (iri : core:string, P : Prop) =>
+        witness:IsDeclaredAs(iri, P) ->
+        reasoning:JustifiedBy(reasoning:DeclaredEvidence(iri), P),
+
+    observed :
+        forall (iri : core:string, P : Prop) =>
+        witness:IsObservedAs(iri, P) ->
+        reasoning:JustifiedBy(reasoning:ObservedEvidence(iri), P),
+
+    derived :
+        forall (iri : core:string, P : Prop) =>
+        witness:IsDerivedAs(iri, P) ->
+        reasoning:JustifiedBy(reasoning:DerivedEvidence(iri), P),
+
+    verified :
+        forall (iri : core:string, P : Prop) =>
+        witness:IsVerifiedAs(iri, P) ->
+        reasoning:JustifiedBy(reasoning:VerifiedEvidence(iri), P),
+
+    // Artemov Application: `j1 : (A -> B)` and `j2 : A` give
+    // `App(j1, j2) : B`.
+    app :
+        forall (A : Prop, B : Prop,
+                j1 : reasoning:JustificationTerm,
+                j2 : reasoning:JustificationTerm) =>
+        reasoning:JustifiedBy(j1, A -> B) ->
+        reasoning:JustifiedBy(j2, A) ->
+        reasoning:JustifiedBy(reasoning:App(j1, j2), B),
+
+    // Artemov Sum (left): `j1 : P` gives `Sum(j1, j2) : P`.
+    sum_l :
+        forall (P : Prop,
+                j1 : reasoning:JustificationTerm,
+                j2 : reasoning:JustificationTerm) =>
+        reasoning:JustifiedBy(j1, P) ->
+        reasoning:JustifiedBy(reasoning:Sum(j1, j2), P),
+
+    // Artemov Sum (right): `j2 : P` gives `Sum(j1, j2) : P`.
+    sum_r :
+        forall (P : Prop,
+                j1 : reasoning:JustificationTerm,
+                j2 : reasoning:JustificationTerm) =>
+        reasoning:JustifiedBy(j2, P) ->
+        reasoning:JustifiedBy(reasoning:Sum(j1, j2), P),
+}

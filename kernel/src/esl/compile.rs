@@ -689,6 +689,42 @@ impl Compiler {
                         format!("invalid IRI `{iri_str}`: {e}"),
                     )
                 })?;
+
+                // Constructor disambiguation: when the local name
+                // matches a declared ctor (from any data decl in this
+                // file), emit `Exp::InductiveCtor` rather than
+                // `Exp::EigonClass` / `InductiveType`. Required for D39
+                // §5 `JustifiedBy.declared : ... -> JustifiedBy
+                // (DeclaredEvidence iri) P` and any similar shape
+                // where a ctor of one inductive appears in another
+                // inductive's index/result-type position. The codec
+                // round-trips `InductiveCtor` via `CtorApp(decl_iri,
+                // ctor_name)`, and the decoder's
+                // `resolve_inductive_decl_for_ctor` consults the layer
+                // (with the self-reference short-circuit covering the
+                // in-construction case).
+                if let Some(ctor_iri_str) = self.ctors.get(&name.name) {
+                    // The ctor IRI shape is `parent_iri:ctor_name` —
+                    // strip the trailing `:<ctor_name>` to recover the
+                    // parent inductive IRI.
+                    let parent_iri_str = ctor_iri_str
+                        .rsplit_once(':')
+                        .map(|(parent, _)| parent.to_string())
+                        .unwrap_or_else(|| ctor_iri_str.clone());
+                    let stub = std::sync::Arc::new(InductiveDecl {
+                        name: parent_iri_str,
+                        params: Vec::new(),
+                        indices: Vec::new(),
+                        sort: Exp::Sort(1),
+                        ctors: Vec::new(),
+                    });
+                    let arg_exps: Result<Vec<Exp>, EslError> = args
+                        .iter()
+                        .map(|a| self.lower_type_expr_to_exp(a, scope))
+                        .collect();
+                    return Ok(Exp::InductiveCtor(stub, name.name.clone(), arg_exps?));
+                }
+
                 if args.is_empty() {
                     Ok(Exp::EigonClass(iri_val))
                 } else {
@@ -4224,6 +4260,92 @@ mod tests {
                 assert_eq!(s, "Methodological convention from working group X");
             }
             other => panic!("expected Value::String, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reasoning_ontology_esl_compiles() {
+        // D39 Phase 3 — the authored reasoning.esl source must compile
+        // cleanly. Locks the structural contract: namespace declarations,
+        // four `ChainWitness.Is*As` zero-ctor predicates, the
+        // `JustificationTerm` six-ctor inductive, and the `JustifiedBy`
+        // seven-ctor indexed inductive predicate. Any future edit to the
+        // file or to the ESL surface that breaks this round-trip needs
+        // to be deliberate.
+        let source = include_str!("../../../ontologies/reasoning/reasoning.esl");
+        let resources = esl::compile(source).expect("reasoning.esl must compile");
+
+        // Expect: 4 ChainWitness predicates + 1 JustificationTerm
+        //         + 1 JustifiedBy = 6 inductive-type Resources.
+        let inductive_iri = iri(crate::ontology::well_known::INDUCTIVE_TYPE);
+        let ind_count = resources
+            .iter()
+            .filter(|r| r.is_a().iter().any(|c| c == &inductive_iri))
+            .count();
+        assert!(
+            ind_count >= 6,
+            "expected at least 6 inductive Resources in reasoning.esl, found {ind_count}"
+        );
+
+        // Spot-check: the four witness IRIs are present.
+        use crate::ontology::well_known as wk_local;
+        for expected in &[
+            wk_local::CHAIN_WITNESS_IS_DECLARED_AS,
+            wk_local::CHAIN_WITNESS_IS_OBSERVED_AS,
+            wk_local::CHAIN_WITNESS_IS_DERIVED_AS,
+            wk_local::CHAIN_WITNESS_IS_VERIFIED_AS,
+        ] {
+            assert!(
+                resources
+                    .iter()
+                    .any(|r| r.id().map(|i| i.as_str() == *expected).unwrap_or(false)),
+                "reasoning.esl missing witness IRI {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn reasoning_ontology_resolves_through_codec() {
+        // End-to-end sanity check: reasoning.esl compiled on top of the
+        // core ontology resolves cleanly through `resolve_class_type`.
+        // Exercises (a) the new Sort-typed-index path (JustifiedBy's
+        // `Prop` index), (b) the codec self-reference short-circuit
+        // (JustifiedBy's ctors reference JustifiedBy itself), and
+        // (c) cross-inductive references (JustifiedBy → ChainWitness +
+        // JustificationTerm). If any of these regress, the full Phase 6
+        // synthesis path breaks.
+        use crate::layer::LayerBuilder;
+        use crate::ontology::eigon_json;
+        use crate::program::ground::resolve_class_type;
+        use std::sync::Arc;
+
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut core_builder = LayerBuilder::new("core", None);
+        for r in core_resources {
+            core_builder.add_resource(r).unwrap();
+        }
+        let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
+
+        let source = include_str!("../../../ontologies/reasoning/reasoning.esl");
+        let user_resources = esl::compile(source).expect("reasoning.esl must compile");
+        let mut user_builder = LayerBuilder::new("reasoning", Some(core));
+        for r in user_resources {
+            user_builder.add_resource(r).unwrap();
+        }
+        let layer = Arc::new(user_builder.build(crate::layer::LayerStorage::in_memory()));
+
+        for iri_str in &[
+            "urn:eigenius:reasoning:ChainWitness:IsDeclaredAs",
+            "urn:eigenius:reasoning:ChainWitness:IsObservedAs",
+            "urn:eigenius:reasoning:ChainWitness:IsDerivedAs",
+            "urn:eigenius:reasoning:ChainWitness:IsVerifiedAs",
+            "urn:eigenius:reasoning:JustificationTerm",
+            "urn:eigenius:reasoning:JustifiedBy",
+        ] {
+            let class_iri = Iri::parse(iri_str).unwrap();
+            resolve_class_type(&class_iri, &layer)
+                .unwrap_or_else(|e| panic!("failed to resolve {iri_str}: {e}"));
         }
     }
 

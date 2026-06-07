@@ -1384,12 +1384,17 @@ impl<'a> Parser<'a> {
         }
         self.expect(&TokenKind::RBrace)?;
 
-        if ctors.is_empty() {
-            return Err(EslError::parser(
-                Some(pos.clone()),
-                "inductive data type must declare at least one constructor".to_string(),
-            ));
-        }
+        // Zero-ctor inductives are valid in the underlying type theory:
+        // in `Set`/`Type N` they're absurd (Void-shaped — inhabitable
+        // only by absurd elimination); in `Prop` they're the canonical
+        // shape for opaque predicates whose inhabitants are admitted by
+        // the kernel rather than constructed by users (D49 §6's
+        // `ChainWitness.IsDeclaredAs / IsObservedAs / IsDerivedAs /
+        // IsVerifiedAs` and D39 §4.1's `core:Asserts` are all of this
+        // shape). The parser does not police this — well-formedness is
+        // a type-theory concern handled by the kernel checker, and
+        // legitimate use cases would otherwise force users to either
+        // declare a junk ctor or author the type in JSON to bypass ESL.
 
         Ok(DataDecl {
             name,
@@ -3498,15 +3503,42 @@ mod tests {
     }
 
     #[test]
-    fn data_no_constructors_rejected() {
-        let err = parse_str(
+    fn data_zero_constructors_accepted() {
+        // Zero-ctor inductives are valid: absurd in `Set`/`Type`, opaque
+        // predicates in `Prop`. Required for D39 §4.1 `core:Asserts`,
+        // D49 §6 `ChainWitness.Is*As`, and any future Void-shaped or
+        // kernel-internal-predicate declaration. The parser does not
+        // policing this; well-formedness is a kernel-checker concern.
+        let file = parse_str(
             r#"
-            data ex:Empty {
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Void : Set {
+            }
+
+            data ex:Opaque : core:string -> Prop {
             }
             "#,
         )
-        .unwrap_err();
-        assert!(err.message.contains("at least one constructor"));
+        .unwrap();
+        assert_eq!(file.declarations.len(), 2);
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                assert_eq!(d.name.name, "Void");
+                assert!(d.ctors.is_empty());
+                assert_eq!(d.result_sort, Some(SortKind::Set));
+            }
+            _ => panic!("expected data"),
+        }
+        match &file.declarations[1] {
+            Declaration::Data(d) => {
+                assert_eq!(d.name.name, "Opaque");
+                assert!(d.ctors.is_empty());
+                assert_eq!(d.result_sort, Some(SortKind::Prop));
+                assert_eq!(d.indices.len(), 1);
+            }
+            _ => panic!("expected data"),
+        }
     }
 
     #[test]

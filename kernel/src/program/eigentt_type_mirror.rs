@@ -130,14 +130,17 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
             ],
         )),
         Exp::EigonClass(iri) => Ok(ctor("ConstRef", vec![json!(iri.as_str())])),
-        Exp::EigonPrimitive(_) => {
-            // EigonPrimitive carries a Rust enum (PrimitiveType), not an IRI
-            // directly. Encoding requires a small PrimitiveType→IRI lookup
-            // table to canonical core: IRIs — add when the first axiom needs
-            // primitive refs.
-            Err(EncodeError::NotATypeLevelExp(format!(
-                "EigonPrimitive encoding requires a primitive-type IRI table (not yet implemented): {exp:?}"
-            )))
+        Exp::EigonPrimitive(p) => {
+            use crate::nbe::term::PrimitiveType;
+            use crate::ontology::well_known as wk;
+            let iri_str = match p {
+                PrimitiveType::String => wk::STRING,
+                PrimitiveType::Integer => wk::INTEGER,
+                PrimitiveType::Float => wk::FLOAT,
+                PrimitiveType::Boolean => wk::BOOLEAN,
+                PrimitiveType::Json => wk::JSON,
+            };
+            Ok(ctor("ConstRef", vec![json!(iri_str)]))
         }
         Exp::InductiveType(decl, args) => {
             // Encode `I(a1, a2, ...)` as
@@ -607,11 +610,25 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
             return Ok(Exp::InductiveType(stub.clone(), Vec::new()));
         }
     }
+    // Primitive IRIs short-circuit to `Exp::EigonPrimitive` ahead of the
+    // layer lookup. The five core primitive `DataType` resources resolve
+    // to the corresponding primitive enum value; without this, the
+    // datatype-rejection branch below would refuse them. Mirrors the
+    // same mapping in `ground::decode_arg_type`.
+    use crate::nbe::term::PrimitiveType;
+    use crate::ontology::well_known as wk;
+    match iri.as_str() {
+        wk::STRING => return Ok(Exp::EigonPrimitive(PrimitiveType::String)),
+        wk::INTEGER => return Ok(Exp::EigonPrimitive(PrimitiveType::Integer)),
+        wk::FLOAT => return Ok(Exp::EigonPrimitive(PrimitiveType::Float)),
+        wk::BOOLEAN => return Ok(Exp::EigonPrimitive(PrimitiveType::Boolean)),
+        wk::JSON => return Ok(Exp::EigonPrimitive(PrimitiveType::Json)),
+        _ => {}
+    }
     let resource = ctx
         .layer
         .resolve(&iri)
         .ok_or_else(|| DecodeError::UnresolvedConstRef(iri.clone()))?;
-    use crate::ontology::well_known as wk;
     let class_iris: Vec<Iri> = resource.is_a().to_vec();
     let class_iri = wk::iri(wk::CLASS);
     let datatype_iri = wk::iri(wk::DATA_TYPE);
