@@ -29,6 +29,8 @@ use eigenius_kernel::nbe::val::Val;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Resource;
 
+use crate::consistency::do_consistency_check;
+use crate::entailment::do_entailment_query;
 use crate::extract::extract_justification;
 use crate::validate::do_validate_justification;
 
@@ -78,6 +80,11 @@ pub mod iris {
     // Inductive type IRIs the certificate type-check builds against.
     pub const JUSTIFICATION_TERM: &str = "urn:eigenius:reasoning:JustificationTerm";
     pub const JUSTIFIED_BY: &str = "urn:eigenius:reasoning:JustifiedBy";
+
+    // EntailmentRequest / ConsistencyRequest property IRIs — used by
+    // the OnDemand / Decidable handlers to read their inputs.
+    pub const PROP_CANDIDATE_PROPOSITION: &str = "urn:eigenius:reasoning:candidate_proposition";
+    pub const PROP_SENTENCE_SET: &str = "urn:eigenius:reasoning:sentence_set";
 }
 
 /// In-process Justification Logic institution.
@@ -148,18 +155,8 @@ impl Institution for ReasoningInstitution {
     ) -> Result<QueryOutcome, InstitutionError> {
         match procedure_iri.as_str() {
             iris::PROC_VALIDATE_JUSTIFICATION => do_validate_justification(self, input, ctx),
-            iris::PROC_ENTAILMENT_QUERY => Err(InstitutionError::NotImplemented(
-                "ReasoningInstitution::query(entailment_query) is not implemented in Phase 6 — \
-                 the QueryClass is declared on chain so the procedure IRI is bound, but the \
-                 bounded-depth search handler lands in Phase 7"
-                    .to_string(),
-            )),
-            iris::PROC_CONSISTENCY_CHECK => Err(InstitutionError::NotImplemented(
-                "ReasoningInstitution::query(consistency_check) is not implemented in Phase 6 — \
-                 the QueryClass is declared on chain so the procedure IRI is bound, but the \
-                 propositional-fragment decision procedure lands in Phase 7"
-                    .to_string(),
-            )),
+            iris::PROC_ENTAILMENT_QUERY => do_entailment_query(input, ctx),
+            iris::PROC_CONSISTENCY_CHECK => do_consistency_check(input, ctx),
             _ => Err(InstitutionError::NotImplemented(format!(
                 "ReasoningInstitution has no query handler for procedure `{procedure_iri}`"
             ))),

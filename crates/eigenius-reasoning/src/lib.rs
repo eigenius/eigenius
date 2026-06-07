@@ -56,6 +56,8 @@
 //! aligned with D14's standard "lift chain resource → typed Val"
 //! shape — same surface every other institution uses.
 
+pub mod consistency;
+pub mod entailment;
 pub mod extract;
 pub mod institution;
 pub mod startup;

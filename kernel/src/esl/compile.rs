@@ -4289,14 +4289,18 @@ mod tests {
 
         // Phase 4 added two resource classes (ReasoningSentence +
         // VerifiedPropositionView) + their property declarations.
-        // TaskOutput is intentionally not here — D39 §4.4 justifies it
-        // entirely by the discipline-thesis benchmark work (D50/D51),
-        // so it lives with the benchmark harness, not in the
-        // foundational Reasoning institution ontology.
+        // Phase 7 added the two query-request classes
+        // (EntailmentRequest + ConsistencyRequest). TaskOutput is
+        // intentionally not here — D39 §4.4 justifies it entirely by
+        // the discipline-thesis benchmark work (D50/D51), so it lives
+        // with the benchmark harness, not in the foundational
+        // Reasoning institution ontology.
         let class_iri = iri(crate::ontology::well_known::CLASS);
         for expected in &[
             "urn:eigenius:reasoning:ReasoningSentence",
             "urn:eigenius:reasoning:VerifiedPropositionView",
+            "urn:eigenius:reasoning:EntailmentRequest",
+            "urn:eigenius:reasoning:ConsistencyRequest",
         ] {
             assert!(
                 resources

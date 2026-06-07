@@ -193,6 +193,34 @@ property reasoning:source_verified_resource : core:string {
     domain reasoning:VerifiedPropositionView;
 }
 
+// ── Query request classes (D39 §4.3 inputs) ──────────────────────────
+//
+// The OnDemand/Decidable QueryClasses take request resources rather
+// than dispatching against existing ReasoningSentences. Each class
+// declares the shape its handler reads.
+
+class reasoning:EntailmentRequest : reflection:DerivedResource {
+    description = "Input to qc_entailment_query (D39 §4.3 OnDemand): ask whether the chain warrants the named candidate proposition. v1 of the handler performs a lookup-based search — it walks the layer chain for committed ReasoningSentences and returns Holds if any sentence's proposition matches the candidate. Undecidable otherwise (absence of evidence is not proof of impossibility). Bounded-depth proof search is follow-on work.";
+    requires reasoning:candidate_proposition;
+}
+
+property reasoning:candidate_proposition : core:resource {
+    description = "The Prop-typed EigenTT proposition the EntailmentRequest is asking the chain to warrant. Encoded via the D47 codec — same shape as ReasoningSentence.proposition.";
+    class_types eigentt:TypeExpr;
+    domain reasoning:EntailmentRequest;
+}
+
+class reasoning:ConsistencyRequest : reflection:DerivedResource {
+    description = "Input to qc_consistency_check (D39 §4.3 Decidable): ask whether the named set of ReasoningSentences is internally consistent. v1 returns Undecidable for any non-trivial input — the propositional-fragment decision procedure is follow-on work. The handler exists so the QueryClass IRI is dispatch-bound; reserved input shape so a richer handler can be plugged in without surface churn.";
+    requires reasoning:sentence_set;
+}
+
+property reasoning:sentence_set : core:resource_array {
+    description = "The ReasoningSentences whose joint consistency is being queried. v1 of the handler does not inspect this beyond a non-empty check.";
+    class_types reasoning:ReasoningSentence;
+    domain reasoning:ConsistencyRequest;
+}
+
 // ── Reasoning institution (D39 §4.3 / D14) ───────────────────────────
 //
 // The institution resource itself — `is_a institution:Institution`.
@@ -259,8 +287,8 @@ resource reasoning:qc_validate_justification : institution:QueryClass {
 }
 
 resource reasoning:qc_entailment_query : institution:QueryClass {
-    core:description = "OnDemand: given a set of committed sentences Γ and a candidate Prop-typed proposition A, return whether some JustificationTerm over Γ exists for which `JustifiedBy t A` is inhabited. Used by agents to ask 'does the chain warrant this conclusion?' Bounded-depth search; depth bound is a runtime parameter on the procedure.";
-    institution:query_class = reasoning:ReasoningSentence;
+    core:description = "OnDemand: given a candidate Prop-typed proposition (carried on an EntailmentRequest), return whether the chain warrants it. v1 of the handler runs a lookup-based search across committed ReasoningSentences; bounded-depth proof search over JustificationTerm constructors is follow-on work. Holds when a matching sentence is found; Undecidable otherwise (absence of evidence is not proof of impossibility).";
+    institution:query_class = reasoning:EntailmentRequest;
     institution:result_class = institution:Verdict;
     institution:dispatch_role = [dispatch:on_demand];
     institution:query_handler = proc:entailment_query;
@@ -268,8 +296,8 @@ resource reasoning:qc_entailment_query : institution:QueryClass {
 }
 
 resource reasoning:qc_consistency_check : institution:QueryClass {
-    core:description = "Decidable: return whether a set of committed ReasoningSentences is internally consistent under the Reasoning institution's logic. Decidable for the propositional fragment; reports Verdict::Undecidable (NotImplemented in v1) for richer fragments. The check operates over the chain-resident sentence set, not over external assumptions.";
-    institution:query_class = reasoning:ReasoningSentence;
+    core:description = "Decidable: return whether a set of committed ReasoningSentences (carried on a ConsistencyRequest) is internally consistent. v1 returns Verdict::Undecidable for any non-trivial input — the propositional-fragment decision procedure is genuinely research-level and is follow-on work. The QueryClass is declared so the dispatch IRI is bound and the input shape is reserved.";
+    institution:query_class = reasoning:ConsistencyRequest;
     institution:result_class = institution:Verdict;
     institution:dispatch_role = [dispatch:decidable];
     institution:query_handler = proc:consistency_check;

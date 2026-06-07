@@ -256,22 +256,149 @@ fn institution_dispatch_rejects_unknown_procedure() {
     assert!(matches!(err, InstitutionError::NotImplemented(_)));
 }
 
+// ── Phase 7 — EntailmentQuery + ConsistencyCheck handlers ───────────
+
+/// Build a synthetic EntailmentRequest carrying the supplied
+/// candidate proposition value.
+fn entailment_request(candidate: Value) -> Resource {
+    let mut r = Resource::new_embedded();
+    r.set(
+        Iri::parse(wk::IS_A).unwrap(),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse("urn:eigenius:reasoning:EntailmentRequest").unwrap(),
+        )]),
+    );
+    r.set(
+        Iri::parse(iris::PROP_CANDIDATE_PROPOSITION).unwrap(),
+        candidate,
+    );
+    r
+}
+
+/// Build a synthetic ConsistencyRequest carrying the supplied
+/// sentence-set array value.
+fn consistency_request(sentence_set: Value) -> Resource {
+    let mut r = Resource::new_embedded();
+    r.set(
+        Iri::parse(wk::IS_A).unwrap(),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse("urn:eigenius:reasoning:ConsistencyRequest").unwrap(),
+        )]),
+    );
+    r.set(Iri::parse(iris::PROP_SENTENCE_SET).unwrap(), sentence_set);
+    r
+}
+
 #[test]
-fn entailment_and_consistency_return_not_implemented_in_phase_6() {
-    // Phase 7 will implement these. The institution's dispatch table
-    // is in place now so the IRIs route, but the handlers return
-    // NotImplemented. Locks the dispatch surface in advance of Phase 7
-    // so the handlers can be plugged in without touching dispatch.
+fn entailment_query_returns_undecidable_when_no_sentence_matches() {
+    // No ReasoningSentences committed in the test layer chain, so the
+    // candidate proposition cannot match any. v1's lookup-based
+    // search returns Undecidable (not Fails — absence of evidence is
+    // not proof of impossibility).
     let ctx = build_full_chain();
     let inst = ReasoningInstitution::new();
-    let sentence = synthetic_sentence(None, None, None);
-    for proc_iri_str in &[iris::PROC_ENTAILMENT_QUERY, iris::PROC_CONSISTENCY_CHECK] {
-        let proc_iri = Iri::parse(proc_iri_str).unwrap();
-        let err = inst.query(&proc_iri, &sentence, &ctx).unwrap_err();
-        assert!(
-            matches!(err, InstitutionError::NotImplemented(_)),
-            "{proc_iri_str} should return NotImplemented, got {err:?}"
-        );
+    let request = entailment_request(Value::Json(json!({"ctor": "Sort", "args": [0]})));
+    let proc_iri = Iri::parse(iris::PROC_ENTAILMENT_QUERY).unwrap();
+    let outcome = inst.query(&proc_iri, &request, &ctx).expect("dispatch");
+    assert_eq!(verdict_ctor(&outcome.output), wk::VERDICT_UNDECIDABLE);
+}
+
+#[test]
+fn entailment_query_undecidable_when_candidate_malformed() {
+    // A malformed candidate (unknown D47 ctor) should surface
+    // Undecidable with a decoder diagnostic — not a hard
+    // ComputationFailed. The QueryClass surface is best-effort.
+    let ctx = build_full_chain();
+    let inst = ReasoningInstitution::new();
+    let request = entailment_request(Value::Json(json!({"ctor": "NotARealCtor", "args": []})));
+    let proc_iri = Iri::parse(iris::PROC_ENTAILMENT_QUERY).unwrap();
+    let outcome = inst.query(&proc_iri, &request, &ctx).expect("dispatch");
+    assert_eq!(verdict_ctor(&outcome.output), wk::VERDICT_UNDECIDABLE);
+    let diag = verdict_diagnostic(&outcome.output).expect("diagnostic");
+    assert!(
+        diag.contains("D47") || diag.contains("decode") || diag.contains("codec"),
+        "diagnostic should mention decoder failure, got: {diag}"
+    );
+}
+
+#[test]
+fn entailment_query_missing_candidate_surfaces_computation_failed() {
+    let ctx = build_full_chain();
+    let inst = ReasoningInstitution::new();
+    let mut request = Resource::new_embedded();
+    request.set(
+        Iri::parse(wk::IS_A).unwrap(),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse("urn:eigenius:reasoning:EntailmentRequest").unwrap(),
+        )]),
+    );
+    let proc_iri = Iri::parse(iris::PROC_ENTAILMENT_QUERY).unwrap();
+    let err = inst.query(&proc_iri, &request, &ctx).unwrap_err();
+    match err {
+        InstitutionError::ComputationFailed(msg) => {
+            assert!(
+                msg.contains("candidate_proposition"),
+                "expected missing-candidate error, got: {msg}"
+            );
+        }
+        other => panic!("expected ComputationFailed, got {other:?}"),
+    }
+}
+
+#[test]
+fn consistency_check_returns_holds_on_empty_set() {
+    // Vacuous: the empty set is consistent by definition. v1 catches
+    // this case so callers probing dispatch don't need a non-trivial
+    // input to confirm routing.
+    let ctx = build_full_chain();
+    let inst = ReasoningInstitution::new();
+    let request = consistency_request(Value::Array(vec![]));
+    let proc_iri = Iri::parse(iris::PROC_CONSISTENCY_CHECK).unwrap();
+    let outcome = inst.query(&proc_iri, &request, &ctx).expect("dispatch");
+    assert_eq!(verdict_ctor(&outcome.output), wk::VERDICT_HOLDS);
+}
+
+#[test]
+fn consistency_check_returns_undecidable_on_nontrivial_set() {
+    // v1 of the handler returns Undecidable for any non-trivial input.
+    // Phase 10's full implementation may upgrade to a real propositional
+    // decision procedure.
+    let ctx = build_full_chain();
+    let inst = ReasoningInstitution::new();
+    let request = consistency_request(Value::Array(vec![Value::ResourceRef(
+        Iri::parse("urn:eigenius:notebook:demo:some_sentence").unwrap(),
+    )]));
+    let proc_iri = Iri::parse(iris::PROC_CONSISTENCY_CHECK).unwrap();
+    let outcome = inst.query(&proc_iri, &request, &ctx).expect("dispatch");
+    assert_eq!(verdict_ctor(&outcome.output), wk::VERDICT_UNDECIDABLE);
+    let diag = verdict_diagnostic(&outcome.output).expect("diagnostic");
+    assert!(
+        diag.contains("v1") || diag.contains("Undecidable") || diag.contains("follow-on"),
+        "diagnostic should explain v1 limitation, got: {diag}"
+    );
+}
+
+#[test]
+fn consistency_check_missing_sentence_set_surfaces_computation_failed() {
+    let ctx = build_full_chain();
+    let inst = ReasoningInstitution::new();
+    let mut request = Resource::new_embedded();
+    request.set(
+        Iri::parse(wk::IS_A).unwrap(),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse("urn:eigenius:reasoning:ConsistencyRequest").unwrap(),
+        )]),
+    );
+    let proc_iri = Iri::parse(iris::PROC_CONSISTENCY_CHECK).unwrap();
+    let err = inst.query(&proc_iri, &request, &ctx).unwrap_err();
+    match err {
+        InstitutionError::ComputationFailed(msg) => {
+            assert!(
+                msg.contains("sentence_set"),
+                "expected missing-sentence-set error, got: {msg}"
+            );
+        }
+        other => panic!("expected ComputationFailed, got {other:?}"),
     }
 }
 

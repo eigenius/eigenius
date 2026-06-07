@@ -167,9 +167,18 @@ fn verdict_fails(diagnostic: String) -> QueryOutcome {
     QueryOutcome::from_output(verdict_resource(wk::VERDICT_FAILS, Some(&diagnostic)))
 }
 
-/// Build the Verdict::Holds | Fails resource shape the kernel's commit
-/// pipeline expects. Mirrors `LeanInstitution::verdict_resource`.
-fn verdict_resource(ctor_name: &str, diagnostic: Option<&str>) -> Resource {
+/// Build the chain-shaped Undecidable verdict carrying a diagnostic
+/// string. Used by EntailmentQuery / ConsistencyCheck handlers when
+/// the v1 implementation can't decide.
+pub(crate) fn verdict_undecidable(diagnostic: String) -> QueryOutcome {
+    QueryOutcome::from_output(verdict_resource(wk::VERDICT_UNDECIDABLE, Some(&diagnostic)))
+}
+
+/// Build the Verdict::Holds | Fails | Undecidable resource shape the
+/// kernel's commit pipeline expects. Mirrors
+/// `LeanInstitution::verdict_resource`. Re-exported to sibling
+/// handlers (entailment, consistency) that surface their own verdicts.
+pub(crate) fn verdict_resource(ctor_name: &str, diagnostic: Option<&str>) -> Resource {
     const DIAGNOSTIC_IRI: &str = "urn:eigenius:institution:diagnostic";
     let mut r = Resource::new_embedded();
     r.set(
