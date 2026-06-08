@@ -52,7 +52,7 @@ use eigenius_kernel::ontology::well_known as wk;
 
 use crate::institution::iris;
 use crate::institution::StatisticsInstitution;
-use crate::numerics::{one_sample_t_test, two_sample_t_test, TwoSampleVariance};
+use crate::numerics::{one_sample_t_test, paired_t_test, two_sample_t_test, TwoSampleVariance};
 
 /// Top-level handler called by `StatisticsInstitution::query`.
 pub fn do_validate_measurement_claim(
@@ -237,6 +237,26 @@ pub fn do_validate_measurement_claim(
             };
             (r.t_statistic, r.p_value_two_sided)
         }
+        DispatchPos::Paired => {
+            // Paired: observations is a flat array `[b0, a0, b1, a1,
+            // ..., bn, an]` of before/after pairs interleaved. Chunk
+            // into (before, after) tuples and run the paired t-test
+            // (= one-sample t-test on the per-pair differences vs 0).
+            let pairs = match decode_paired_observations(&bundle.observations_raw) {
+                Ok(p) => p,
+                Err(diag) => return Ok(verdict_fails(diag)),
+            };
+            let r = match paired_t_test(&pairs) {
+                Some(r) => r,
+                None => {
+                    return Ok(verdict_fails(format!(
+                        "InsufficientReplication: paired t-test requires n_pairs >= 2, got {}",
+                        pairs.len()
+                    )));
+                }
+            };
+            (r.t_statistic, r.p_value_two_sided)
+        }
     };
 
     // ── Step 7: §7.4 epistemic-scope check ────────────────────────────
@@ -327,6 +347,7 @@ enum ReplicationKind {
 enum DispatchPos {
     SingleSampleEstimate,
     IID,
+    Paired,
 }
 
 fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
@@ -406,6 +427,21 @@ fn decode_two_group_observations(j: &serde_json::Value) -> Result<(Vec<f64>, Vec
     Ok((group_a, group_b))
 }
 
+/// Decode the Paired observations payload: a flat float array of
+/// length `2 * n_pairs`, interleaved as `[b0, a0, b1, a1, …, bn, an]`.
+/// Returns the chunked `(before, after)` pairs.
+fn decode_paired_observations(j: &serde_json::Value) -> Result<Vec<(f64, f64)>, String> {
+    let flat = decode_flat_observations(j).map_err(|e| format!("Paired observations: {e}"))?;
+    if flat.len() % 2 != 0 {
+        return Err(format!(
+            "Paired observations must have an even number of floats (got {} — \
+             interleaved `[before_0, after_0, before_1, after_1, …]`)",
+            flat.len()
+        ));
+    }
+    Ok(flat.chunks_exact(2).map(|c| (c[0], c[1])).collect())
+}
+
 fn decode_replication_kind(j: &serde_json::Value) -> Result<ReplicationKind, String> {
     match json_ctor_name(j) {
         Some("BiologicalReplication") => Ok(ReplicationKind::BiologicalReplication),
@@ -438,7 +474,7 @@ fn decode_replication_kind(j: &serde_json::Value) -> Result<ReplicationKind, Str
 
 fn dispatch_product_position(bundle: &DecodedBundle) -> Option<DispatchPos> {
     // Verifier dispatch table per D52 §5.4. Phase 1 wired
-    // SingleSampleEstimate; Phase 1.5 added IID.
+    // SingleSampleEstimate; Phase 1.5 added IID; Phase 2 adds Paired.
     match (
         bundle.randomization.as_str(),
         bundle.blocking.as_str(),
@@ -449,6 +485,9 @@ fn dispatch_product_position(bundle: &DecodedBundle) -> Option<DispatchPos> {
             Some(DispatchPos::SingleSampleEstimate)
         }
         ("CompleteRandom", "Unblocked", "SingleFactor", "CrossSectional") => Some(DispatchPos::IID),
+        ("CompleteRandom", "PairedBlocking", "SingleFactor", "CrossSectional") => {
+            Some(DispatchPos::Paired)
+        }
         _ => None,
     }
 }

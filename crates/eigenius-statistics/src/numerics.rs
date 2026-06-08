@@ -242,6 +242,44 @@ pub struct TwoSampleResult {
     pub sd_b: f64,
 }
 
+/// Paired t-test for matched-pair / pre-post designs.
+///
+/// Reduces to a one-sample t-test on the per-pair differences
+/// `(before_i - after_i)` against H0: mean(diffs) = 0. The
+/// distribution under H0 is Student's t with `n - 1` degrees of
+/// freedom, where `n` is the number of pairs. Two-sided p-value
+/// reported (D52 §7.1 default).
+///
+/// Returns `None` when fewer than 2 pairs are supplied (no degrees of
+/// freedom for the SD estimate); the verifier surfaces this as
+/// `InsufficientReplication`.
+pub fn paired_t_test(pairs: &[(f64, f64)]) -> Option<PairedResult> {
+    if pairs.len() < 2 {
+        return None;
+    }
+    let differences: Vec<f64> = pairs.iter().map(|(before, after)| before - after).collect();
+    let single = one_sample_t_test(&differences, 0.0)?;
+    Some(PairedResult {
+        t_statistic: single.t_statistic,
+        p_value_two_sided: single.p_value_two_sided,
+        n_pairs: pairs.len(),
+        mean_difference: single.computed_mean,
+        sd_difference: single.computed_sd,
+    })
+}
+
+/// Numeric output of a paired t-test. The mean and SD reported are
+/// for the per-pair differences (not the raw before/after values) —
+/// that's what the paired test's H0 is about.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PairedResult {
+    pub t_statistic: f64,
+    pub p_value_two_sided: f64,
+    pub n_pairs: usize,
+    pub mean_difference: f64,
+    pub sd_difference: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,5 +421,56 @@ mod tests {
             r2.p_value_two_sided.to_bits()
         );
         assert_eq!(r1.df.to_bits(), r2.df.to_bits());
+    }
+
+    // ── Paired t-test (Phase 2) ────────────────────────────────────
+
+    /// Reference: R `t.test(c(120, 122, 143, 100, 109), c(110, 115, 138, 95, 101), paired=TRUE)`.
+    /// Differences: [10, 7, 5, 5, 8], mean = 7, sd = 2.121, n = 5,
+    /// se = 0.949, t = 7/0.949 ≈ 7.379, df = 4, p ≈ 0.0018.
+    #[test]
+    fn paired_t_test_matches_r_reference() {
+        let pairs = [
+            (120.0, 110.0),
+            (122.0, 115.0),
+            (143.0, 138.0),
+            (100.0, 95.0),
+            (109.0, 101.0),
+        ];
+        let result = paired_t_test(&pairs).expect("n_pairs >= 2");
+        assert_eq!(result.n_pairs, 5);
+        assert!((result.mean_difference - 7.0).abs() < 1e-9);
+        assert!(
+            (result.sd_difference - 2.1213203).abs() < 1e-4,
+            "got sd_diff = {}",
+            result.sd_difference
+        );
+        assert!(
+            (result.t_statistic - 7.379).abs() < 1e-2,
+            "got t = {}",
+            result.t_statistic
+        );
+        assert!(
+            result.p_value_two_sided < 0.005,
+            "got p = {}",
+            result.p_value_two_sided
+        );
+    }
+
+    /// Zero per-pair differences → t = 0, mean_diff = 0.
+    #[test]
+    fn paired_t_test_zero_differences_yields_t_zero() {
+        let pairs = [(10.0, 10.0), (20.0, 20.0), (30.0, 30.0)];
+        let result = paired_t_test(&pairs).expect("n_pairs >= 2");
+        assert_eq!(result.t_statistic, 0.0);
+        assert_eq!(result.mean_difference, 0.0);
+    }
+
+    #[test]
+    fn paired_t_test_under_two_pairs_returns_none() {
+        let one = [(1.0, 2.0)];
+        assert!(paired_t_test(&one).is_none());
+        let empty: [(f64, f64); 0] = [];
+        assert!(paired_t_test(&empty).is_none());
     }
 }
