@@ -390,13 +390,14 @@ fn check_epistemic_scope(
         return Ok(None);
     }
     // TechnicalWithinRun: the claim is admissible only if the
-    // derived_proposition's predicate is marked MeasurementLevel.
-    let derived_prop = match read_json_property(claim, iris::PROP_DERIVED_PROPOSITION)? {
+    // canonical_proposition's head predicate is marked MeasurementLevel.
+    let derived_prop = match read_json_property(claim, iris::PROP_CANONICAL_PROPOSITION)? {
         Some(j) => j,
         None => {
-            // No derived_proposition — that's a different malformed-claim
-            // error the top-level handler already flagged; treat as
-            // "scope-check inconclusive."
+            // No canonical_proposition — the claim's `requires` clause
+            // catches this as a malformed-resource error before the
+            // institution dispatches; treat here as "scope-check
+            // inconclusive" since we have nothing to scope-check.
             return Ok(None);
         }
     };

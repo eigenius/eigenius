@@ -47,7 +47,12 @@ pub mod iris {
     pub const PROP_NULL_HYPOTHESIS: &str = "urn:eigenius:measurements:null_hypothesis";
     pub const PROP_ALTERNATIVE_HYPOTHESIS: &str =
         "urn:eigenius:measurements:alternative_hypothesis";
-    pub const PROP_DERIVED_PROPOSITION: &str = "urn:eigenius:measurements:derived_proposition";
+    // D52 reads the predicate the claim establishes from the
+    // inherited `reflection:canonical_proposition` slot — the
+    // statistics ontology no longer declares a parallel
+    // `stats:derived_proposition` property (one slot, one source of
+    // truth across the four reflection-ontology resource classes).
+    pub const PROP_CANONICAL_PROPOSITION: &str = "urn:eigenius:reflection:canonical_proposition";
     pub const PROP_ALPHA: &str = "urn:eigenius:measurements:alpha";
     pub const PROP_EFFECT_SIZE: &str = "urn:eigenius:measurements:effect_size";
     pub const PROP_DIRECTIONALITY: &str = "urn:eigenius:measurements:directionality";

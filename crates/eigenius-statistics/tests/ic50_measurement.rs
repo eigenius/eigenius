@@ -195,3 +195,113 @@ fn ic50_measurement_claim_recomputes_to_verdict() {
         "t-statistic should match R's t.test(c(72,85,100), mu=100); got {t_stat}"
     );
 }
+
+#[test]
+fn confirmatory_claim_recomputes_to_holds() {
+    // The confirmatory n=6 dataset (clustered around 85 nM) is what
+    // the screening n=3 reading would hand off to in a real workflow:
+    // generate hypothesis from the screen, confirm in a larger run.
+    // The one-sample t-test against 100 nM here has |t| ≈ 7.5 with
+    // df=5; p ≪ 0.05, so the verdict is Holds — proving the success
+    // path of the verifier's dispatch, complementary to the Fails
+    // path the screening claim exercises.
+    let ctx = build_ic50_chain();
+    let claim_iri = Iri::parse("urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds")
+        .expect("confirmatory claim IRI");
+    let claim_arc = ctx
+        .resolve(&claim_iri)
+        .unwrap_or_else(|| panic!("claim `{claim_iri}` should be on chain"));
+    let claim = (*claim_arc).clone();
+
+    let inst = StatisticsInstitution::new();
+    let proc_iri = Iri::parse(iris::PROC_VALIDATE_MEASUREMENT_CLAIM).expect("proc IRI");
+    let outcome = inst
+        .query(&proc_iri, &claim, &ctx)
+        .expect("validate_measurement_claim returns an outcome");
+
+    let ctor = outcome
+        .output
+        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
+        .and_then(Value::as_str)
+        .expect("verdict carries ctor_name")
+        .to_string();
+    let diagnostic = outcome
+        .output
+        .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+
+    assert_eq!(
+        ctor,
+        wk::VERDICT_HOLDS,
+        "expected Holds on the n=6 confirmatory dataset; \
+         got {ctor}, diagnostic: {diagnostic:?}"
+    );
+
+    // Holds verdicts must also carry the computed numerics so audit
+    // consumers see *why* the test crossed alpha.
+    let p_value = outcome
+        .output
+        .get(&Iri::parse(iris::PROP_COMPUTED_P_VALUE).unwrap())
+        .and_then(|v| {
+            if let Value::Float(f) = v {
+                Some(*f)
+            } else {
+                None
+            }
+        })
+        .expect("verdict carries computed_p_value");
+    assert!(
+        p_value < 0.05,
+        "Holds requires p < alpha = 0.05; got p = {p_value}"
+    );
+}
+
+#[test]
+fn claim_admits_is_derived_as_witness_via_program_trace() {
+    // D52 §8 — once the MeasurementClaim is on chain with both its
+    // canonical_proposition set and a ProgramTrace pointing at it,
+    // D49 §6's witness index must admit an IsDerivedAs witness keyed
+    // on the (claim_iri, canonical_proposition) pair. This is what
+    // makes downstream D39 reasoning's `DerivedEvidence(claim_iri)`
+    // citation type-check — the JustifiedBy.derived ctor consumes the
+    // witness from the index.
+    //
+    // The witness admission is independent of the institution's
+    // verdict outcome — the index is built from chain shapes
+    // (ProgramTrace + canonical_proposition), not from runtime
+    // verifier outputs. A Fails verdict at AutoOnLoad would reject the
+    // commit (preventing the chain artifact from existing in the first
+    // place); the test below commits the claim into a test layer
+    // directly without dispatching the verifier, then confirms the
+    // index sees the witness.
+    use eigenius_kernel::layer::lookup_chain_witness;
+    use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
+
+    let ctx = build_ic50_chain();
+    let claim_iri =
+        Iri::parse("urn:eigenius:demo:screen:claim_eig0291_lowic50").expect("claim IRI");
+    let claim_arc = ctx
+        .resolve(&claim_iri)
+        .unwrap_or_else(|| panic!("claim `{claim_iri}` should be on chain"));
+
+    // Read the claim's canonical_proposition (the same Value the
+    // witness emitter reads at index-build time).
+    let canonical_prop = claim_arc
+        .get(&Iri::parse("urn:eigenius:reflection:canonical_proposition").unwrap())
+        .expect("claim must carry canonical_proposition for witness admission")
+        .clone();
+
+    // Build the lookup key the way D49 §6 builds it from the emitter
+    // side, using the same hash_proposition_value the index uses.
+    let expected_key =
+        WitnessKey::from_encoded(WitnessCategory::Derived, claim_iri.clone(), &canonical_prop);
+
+    assert!(
+        lookup_chain_witness(ctx.head().as_ref(), &expected_key),
+        "IsDerivedAs witness for {claim_iri} with the claim's canonical_proposition \
+         must be in the chain witness index (ProgramTrace points at the claim and \
+         the canonical_proposition slot is set — both preconditions are met in the \
+         fixture)"
+    );
+}

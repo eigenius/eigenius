@@ -24,10 +24,14 @@
 //
 // - `MeasurementClaim` (D52 §3): universal-schema fields the author
 //   asserts (hypothesis, alpha, effect-size, directionality, variance
-//   assumption, outlier exclusion). The institution's
-//   `validate_measurement_claim` query class recomputes the claim
-//   from raw replicates and emits a `DerivedResource` carrying the
-//   `derived_proposition` on Holds.
+//   assumption, outlier exclusion). Subclass of
+//   `reflection:DerivedResource` — its `reflection:canonical_proposition`
+//   carries the predicate the claim establishes when Holds. The
+//   institution's `validate_measurement_claim` query class recomputes
+//   the claim from raw replicates and admits the commit on Holds.
+//   Downstream D39 reasoning cites the claim's IRI via
+//   `DerivedEvidence`; the witness index (D49 §6) admits the
+//   IsDerivedAs witness against the canonical_proposition slot.
 //
 // - Predicate scope-marker classes `PopulationLevel` /
 //   `MeasurementLevel` (D52 §7.4 / §12 #8): each domain predicate
@@ -276,11 +280,11 @@ property stats:sample_set_value : core:resource {
 // contract).
 
 class stats:MeasurementClaim : reflection:DerivedResource {
-    description = "A statistical claim asserted against a SampleSet's raw replicates. The institution's qc_validate_measurement_claim handler recomputes the claim from raw data at commit time; Holds emits a DerivedResource whose canonical_proposition is the derived_proposition field, plus a ProgramTrace admitting the IsDerivedAs witness (D49 §6). Fails rejects the commit with a structured diagnostic (D52 §6).";
+    description = "A statistical claim asserted against a SampleSet's raw replicates. The institution's qc_validate_measurement_claim handler recomputes the claim from raw data at commit time; Holds admits the commit, Fails rejects it with a structured diagnostic (D52 §6). The MeasurementClaim IS itself the chain-resident DerivedResource downstream D39 reasoning cites via DerivedEvidence — its reflection:canonical_proposition field carries the predicate the claim establishes when the test holds, and the witness index hashes it for IsDerivedAs admission (D49 §6). A companion ProgramTrace pointing at the claim's IRI is required to actually emit the witness. (Drops the earlier stats:derived_proposition field per D52 review — canonical_proposition serves both roles, one slot one source of truth.)";
     requires stats:sample_set,
              stats:null_hypothesis,
              stats:alternative_hypothesis,
-             stats:derived_proposition,
+             reflection:canonical_proposition,
              stats:alpha,
              stats:effect_size,
              stats:directionality,
@@ -302,16 +306,17 @@ property stats:null_hypothesis : core:resource {
 }
 
 property stats:alternative_hypothesis : core:resource {
-    description = "The Prop-typed alternative hypothesis. Together with the null this fixes the claim's logical shape; the verifier uses this to validate the derived_proposition's interpretation.";
+    description = "The Prop-typed alternative hypothesis. Together with the null this fixes the claim's logical shape; the verifier reads this for diagnostic reporting and uses it to validate that the asserted canonical_proposition matches the test's structure.";
     class_types eigentt:TypeExpr;
     domain stats:MeasurementClaim;
 }
 
-property stats:derived_proposition : core:resource {
-    description = "The Prop-typed predicate the claim establishes when the test holds. On a Holds verdict the institution emits a DerivedResource whose canonical_proposition is this value, which downstream D39 reasoning sentences cite via DerivedEvidence.";
-    class_types eigentt:TypeExpr;
-    domain stats:MeasurementClaim;
-}
+// The "predicate the claim establishes when the test holds" rides on
+// the inherited `reflection:canonical_proposition` slot (one source
+// of truth across all four reflection-ontology resource subclasses;
+// see D52 §3 / D49 §6). Statistics-domain authoring still describes
+// it as "what the claim derives" — the meta-naming is just unified
+// with the other resource families.
 
 property stats:alpha : core:float {
     description = "Nominal Type-I error threshold, unadjusted. Multiple-testing correction (Bonferroni / Benjamini-Hochberg / etc.) is a higher-level institution that consumes the per-claim alpha + p-value; this field carries the raw threshold the per-claim test uses.";
@@ -371,15 +376,20 @@ class stats:MeasurementLevel {
     description = "Marker class for predicates whose interpretation is local to a single measurement event (e.g. HasLowIC50_OnThisBatch). Admissible from any replication kind including TechnicalWithinRun; doesn't generalize beyond the run.";
 }
 
-// ── DerivedResource shape the institution emits on Holds ─────────────
+// ── MeasurementVerdict shape (companion artifact on Holds) ───────────
 //
-// On a Holds verdict, the institution emits a chain-resident
-// MeasurementVerdict carrying the verdict, the source claim's IRI,
-// the canonical_proposition (= the claim's derived_proposition), and
-// the recomputed numerics. ProgramTrace admits the IsDerivedAs witness.
+// The MeasurementClaim itself IS a DerivedResource — its
+// canonical_proposition is what downstream D39 reasoning cites via
+// DerivedEvidence. MeasurementVerdict is a separate companion artifact
+// carrying the recomputed numerics (statistic + p-value) for audit,
+// related to the claim via source_claim. Phase 1 doesn't yet commit
+// MeasurementVerdict resources to chain (the verdict is the
+// QueryOutcome the dispatch handler returns); the class shape is
+// declared so the chain-storage form is reserved once the dual-verdict
+// commit per §7.2 lands.
 
 class stats:MeasurementVerdict : reflection:DerivedResource {
-    description = "The DerivedResource emitted by the statistics institution on a Holds verdict. Its canonical_proposition is the claim's derived_proposition; ProgramTrace admits an IsDerivedAs witness so D39 reasoning sentences can cite this verdict via DerivedEvidence.";
+    description = "Companion artifact carrying the recomputed numerics for a MeasurementClaim's verdict. Phase 1 leaves this in the QueryOutcome return value; Phase 5 (§7.2 dual-verdict outlier-exclusion commit) materializes it as a chain resource so both `with-exclusion` and `without-exclusion` outcomes have inspectable IRIs. The claim itself is the DerivedResource D39 reasoning cites — this companion holds the audit numerics.";
     requires stats:source_claim,
              reflection:canonical_proposition,
              stats:verdict_ctor,
