@@ -222,6 +222,42 @@ fn rm_data_lands_at_longitudinal_dispatch_position() {
         Some(4),
         "stats:RepeatedMeasures(_, n_timepoints=4, …) should produce Longitudinal(4); got {n_timepoints:?}"
     );
+
+    // args[2] = FullFactorial(0) — RM uses FullFactorial(k_between)
+    // uniformly across the (k=0 / k=1 / k≥2) shapes per the §5.2.3
+    // dispatch-matrix encoding (k=0 is "no between-subjects factor").
+    let factor_ctor = bundle_json["args"][2]["ctor"].as_str();
+    assert_eq!(factor_ctor, Some("FullFactorial"));
+    let k_between = bundle_json["args"][2]["args"][0].as_i64();
+    assert_eq!(
+        k_between,
+        Some(0),
+        "time-only RM fixture should produce FullFactorial(0); got {k_between:?}"
+    );
+
+    // args[8] = [factor_levels, observations] wrapper mirroring
+    // Factorial. For the k=0 fixture, factor_levels = [] and the
+    // inner observations array has 60 floats (3 floats × 5 subjects ×
+    // 4 timepoints).
+    let wrapper = &bundle_json["args"][8];
+    let outer_len = wrapper.as_array().map(Vec::len);
+    assert_eq!(
+        outer_len,
+        Some(2),
+        "observations slot should be a [factor_levels, observations] wrapper"
+    );
+    let factor_levels_len = wrapper[0].as_array().map(Vec::len);
+    assert_eq!(
+        factor_levels_len,
+        Some(0),
+        "k=0 fixture should have factor_levels = []"
+    );
+    let inner_len = wrapper[1].as_array().map(Vec::len);
+    assert_eq!(
+        inner_len,
+        Some(60),
+        "5 subjects × 4 timepoints × 3 floats/row = 60 inner observation floats"
+    );
 }
 
 #[test]

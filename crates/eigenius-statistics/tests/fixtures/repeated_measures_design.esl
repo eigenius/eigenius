@@ -44,6 +44,8 @@ resource pk:clearance_study_2026_05_15 : stats:SampleSetResource {
     stats:sample_set_value = stats:RepeatedMeasures(
         5,    // n_subjects
         4,    // n_timepoints
+        0,    // k_between_factors (time-only RM, no between-subjects fixed factor)
+        [],   // factor_levels (empty because k_between_factors = 0)
         [
             // Patient 0
             0.0, 0.0, 100.0,

@@ -491,46 +491,69 @@ macro stats:SplitPlot(
         observations,
     );
 
-// Repeated-Measures design (time-only / no between-subjects factors,
-// per D52 §5.2.3's `factors = []` case). N subjects each measured at
-// T timepoints — `N * T` observations total, each row is `[subject_id,
-// time_idx, value]` (3 floats per observation). Subject is the
-// random-effect axis; time is the within-subjects fixed factor.
+// Repeated-Measures design per D52 §5.2.3 — N subjects each measured
+// at T timepoints, optionally crossed with K between-subjects fixed
+// factors. Subject is the random-effect axis; time is the within-
+// subjects fixed factor; the `factor_levels` list enumerates per-
+// factor level counts for the between-subjects factors.
 //
-// Lands at product position `(CompleteRandom, Unblocked, SingleFactor,
-// _, Longitudinal(n_timepoints))`. The `Longitudinal(T)` ctor on the
-// repeated-measures axis is what distinguishes this dispatch from the
-// IID position — both have `(CompleteRandom, Unblocked, SingleFactor)`
-// at the first three axes, but IID is CrossSectional while RM is
-// Longitudinal.
+// Three shapes selected by `k_between_factors`:
+//   - `k_between_factors = 0` — pure time-only RM (no between-subjects
+//     treatment). Observation rows: `[subject_idx, time_idx, value]`
+//     (3 floats per observation). `factor_levels = []`.
+//   - `k_between_factors = 1` — single-treatment longitudinal study
+//     (e.g. drug vs placebo measured over time). Observation rows:
+//     `[subject_idx, time_idx, level_0, value]` (4 floats).
+//   - `k_between_factors ≥ 2` — factorial-RM (e.g. drug × dose × time
+//     on the same subjects). Observation rows: `[subject_idx, time_idx,
+//     level_0, …, level_{k-1}, value]` (3 + k floats).
+//
+// Lands at product position `(CompleteRandom, Unblocked,
+// FullFactorial(k_between_factors), _, Longitudinal(n_timepoints))`.
+// The `Longitudinal(T)` ctor on the repeated-measures axis is what
+// distinguishes this dispatch from the cross-sectional Factorial
+// position — both share `(CompleteRandom, Unblocked, FullFactorial(*))`
+// on the first three axes, but only RM has `Longitudinal`. The
+// `FullFactorial(k)` ctor is used uniformly across all three shapes —
+// including `FullFactorial(0)` for the time-only case — as a single-
+// path encoding of "k between-subjects factors"; ESL macros are pure
+// AST substitution and cannot branch on `k_between_factors` to emit
+// `NoFactor` / `SingleFactor` / `FullFactorial(k)` separately, so a
+// uniform `FullFactorial(k)` is the structurally honest choice.
 //
 // The autocorrelation structure (AR(1) / CompoundSymmetry /
 // Unstructured) is asserted on the MeasurementClaim, not encoded on
-// the SampleSet — the claim's `autocorrelation_structure` field
-// per D52 §3 / §12 #5. Phase 4.9 v1 wires only the CompoundSymmetry
-// case (algebraically equivalent to RCBD with subject as block);
-// AR(1) and Unstructured surface "not yet wired" diagnostics until
-// their numerics land in Phase 4.9.5+.
+// the SampleSet — the claim's `autocorrelation_structure` field per
+// D52 §3 / §12 #5. The verifier dispatches across the
+// (autocorrelation_structure × k_between_factors) matrix — see the
+// completeness table in D52 §9. Currently wired: the
+// `(CompoundSymmetry, 0)` cell (univariate RM-ANOVA, algebraically
+// equivalent to RCBD with subject as block). All other cells reject
+// with diagnostics naming the unimplemented combination and the
+// GitHub issue tracking the work.
 //
-// **Within-subjects factorial RM** (D52 §5.2.3's `factors.len() >= 1`
-// case — drug × dose × time on the same subjects) is a separate
-// macro variant deferred to Phase 4.9.5; this v1 macro is time-only.
+// Observations slot follows Factorial's wrapper convention:
+// `[factor_levels, flat_observations]`. The verifier cross-checks
+// `factor_levels.len() == k_between_factors` and that each
+// observation row carries `3 + k_between_factors` floats.
 macro stats:RepeatedMeasures(
-    n_subjects    : core:integer,
-    n_timepoints  : core:integer,
-    observations  : core:value_array,
-    replication   : stats:Replication,
+    n_subjects        : core:integer,
+    n_timepoints      : core:integer,
+    k_between_factors : core:integer,
+    factor_levels     : core:value_array,
+    observations      : core:value_array,
+    replication       : stats:Replication,
 ) : stats:SampleSet =>
     Bundle(
         CompleteRandom(),
         Unblocked(),
-        SingleFactor(),
+        FullFactorial(k_between_factors),
         replication,
         Longitudinal(n_timepoints),
         Units([]),
         Columns([]),
         Entries([]),
-        observations,
+        [factor_levels, observations],
     );
 
 // ── SampleSetResource (chain-resident SampleSet carrier) ─────────────

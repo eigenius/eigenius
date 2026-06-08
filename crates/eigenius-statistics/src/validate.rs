@@ -428,20 +428,18 @@ pub fn do_validate_measurement_claim(
                 (f_stat, p_value, Some(note))
             }
             DispatchPos::RepeatedMeasures => {
-                // RepeatedMeasures: observations is a flat float array
-                // `[subject_0, time_0, value_0, subject_1, time_1,
-                // value_1, ...]` — 3 floats per observation, total
-                // length `3 * n_subjects * n_timepoints`. The
-                // `Longitudinal(n_timepoints)` ctor on the repeated-
-                // measures axis gives n_timepoints; n_subjects is
-                // inferred from observation count.
-                //
-                // The autocorrelation_structure on the claim picks
-                // which numerics arm runs. Phase 4.9 v1 wires only
-                // CompoundSymmetry (algebraically equivalent to
-                // RCBD with subject as block). AR(1) and Unstructured
-                // surface "not yet wired" diagnostics until their
-                // numerics land.
+                // RepeatedMeasures: see the dispatch matrix in D52 §9
+                // for the (autocorrelation × k_between_factors) cell
+                // coverage. The observations slot is the wrapper
+                // `[factor_levels, flat_observations]`; the verifier
+                // cross-checks `factor_levels.len() ==
+                // k_between_factors` from the FullFactorial(k) ctor on
+                // the factor slot, then routes on the (autocorrelation,
+                // k_between_factors) pair. Each unwired cell rejects
+                // with a diagnostic naming the unimplemented
+                // combination and the GitHub issue tracking it; that's
+                // the structural alternative to phase-numbering each
+                // cell as future work.
                 let n_timepoints =
                     match decode_longitudinal_timepoints(&bundle.repeated_measures_raw) {
                         Some(t) => t,
@@ -453,74 +451,108 @@ pub fn do_validate_measurement_claim(
                             ));
                         }
                     };
-                // autocorrelation_structure routing. Read the claim's
-                // optional `autocorrelation_structure` property; default
-                // to CompoundSymmetry if absent (most common assumption;
-                // matches what a flat RM-ANOVA implicitly uses).
+                let k_between = match decode_full_factorial_k(&bundle.factor_raw) {
+                    Some(k) => k,
+                    None => {
+                        return Ok(verdict_fails(
+                            "RepeatedMeasures requires FullFactorial(k_between_factors) in the \
+                             factor slot with k ≥ 0 (k = 0 is the time-only RM case)"
+                                .into(),
+                        ));
+                    }
+                };
+                let (factor_levels, inner_observations_raw) =
+                    match decode_rm_observations_wrapped(&bundle.observations_raw) {
+                        Ok(p) => p,
+                        Err(diag) => return Ok(verdict_fails(diag)),
+                    };
+                if factor_levels.len() != k_between {
+                    return Ok(verdict_fails(format!(
+                        "RepeatedMeasures factor_levels.len() ({}) must equal \
+                         k_between_factors ({k_between}) declared on the FullFactorial ctor",
+                        factor_levels.len()
+                    )));
+                }
+                // Read the claim's `autocorrelation_structure`; absent
+                // defaults to CompoundSymmetry (the assumption a flat
+                // RM-ANOVA implicitly makes).
                 let autocorr = read_json_property(claim, iris::PROP_AUTOCORRELATION_STRUCTURE)?;
                 let autocorr_ctor = autocorr.as_ref().and_then(json_ctor_name);
-                match autocorr_ctor {
-                    Some("CompoundSymmetry") | None => {} // proceed with CS arm
-                    Some("AR1") => {
-                        return Ok(verdict_fails(
-                            "autocorrelation_structure = AR1 not yet wired (Phase 4.9 v1 \
-                             supports only CompoundSymmetry; AR(1) needs the ρ parameter and \
-                             generalized least squares — Phase 4.9.5)"
-                                .into(),
-                        ));
+                let autocorr_name = autocorr_ctor.unwrap_or("CompoundSymmetry");
+                match (autocorr_name, k_between) {
+                    ("CompoundSymmetry", 0) => {
+                        let observations =
+                            match decode_rm_simple_observations(inner_observations_raw) {
+                                Ok(o) => o,
+                                Err(diag) => return Ok(verdict_fails(diag)),
+                            };
+                        if observations.len() % n_timepoints != 0 {
+                            return Ok(verdict_fails(format!(
+                                "RepeatedMeasures observation count ({}) is not a multiple of \
+                                 n_timepoints ({n_timepoints}); each subject must be measured at \
+                                 every timepoint exactly once (complete design)",
+                                observations.len()
+                            )));
+                        }
+                        let n_subjects = observations.len() / n_timepoints;
+                        let res = match repeated_measures_cs_anova(
+                            n_subjects,
+                            n_timepoints,
+                            &observations,
+                        ) {
+                            Some(r) => r,
+                            None => {
+                                return Ok(verdict_fails(format!(
+                                    "RepeatedMeasures (CompoundSymmetry) preconditions failed: \
+                                     complete design requires every (subject, timepoint) cell to \
+                                     have exactly one observation (n_subjects = {n_subjects}, \
+                                     n_timepoints = {n_timepoints}, n_obs = {})",
+                                    observations.len()
+                                )));
+                            }
+                        };
+                        let note = format!(
+                            "RepeatedMeasures (CompoundSymmetry, k_between = 0): time-effect F = \
+                             {:.4}, df = ({}, {}), n_subjects = {}, n_timepoints = {}",
+                            res.f_time,
+                            res.df_time as usize,
+                            res.df_error as usize,
+                            n_subjects,
+                            n_timepoints,
+                        );
+                        (res.f_time, res.p_time, Some(note))
                     }
-                    Some("Unstructured") => {
-                        return Ok(verdict_fails(
-                            "autocorrelation_structure = Unstructured not yet wired (Phase 4.9 \
-                             v1 supports only CompoundSymmetry; Unstructured needs MANOVA-\
-                             style multivariate tests — Phase 4.9.5)"
-                                .into(),
-                        ));
+                    ("CompoundSymmetry", k) => {
+                        return Ok(verdict_fails(format!(
+                            "RepeatedMeasures (CompoundSymmetry, k_between = {k}) not yet wired \
+                             — factorial-RM needs a multi-factor fixed-effect decomposition on \
+                             top of the subject random effect (factor_levels = {factor_levels:?}). \
+                             Tracked in GitHub issue: factorial-RM (CompoundSymmetry covariance)."
+                        )));
                     }
-                    Some(other) => {
+                    ("AR1", k) => {
+                        return Ok(verdict_fails(format!(
+                            "RepeatedMeasures (AR1, k_between = {k}) not yet wired — AR(1) \
+                             covariance needs the ρ parameter and generalized least squares \
+                             rather than the RCBD-equivalent univariate RM-ANOVA path. Tracked \
+                             in GitHub issue: RM with AR(1) covariance."
+                        )));
+                    }
+                    ("Unstructured", k) => {
+                        return Ok(verdict_fails(format!(
+                            "RepeatedMeasures (Unstructured, k_between = {k}) not yet wired — \
+                             Unstructured covariance needs MANOVA-style multivariate tests with \
+                             a free T×T within-subject covariance matrix. Tracked in GitHub \
+                             issue: RM with Unstructured covariance."
+                        )));
+                    }
+                    (other, _) => {
                         return Ok(verdict_fails(format!(
                             "unknown autocorrelation_structure ctor `{other}` (expected \
                              CompoundSymmetry / AR1 / Unstructured)"
                         )));
                     }
                 }
-                let observations = match decode_rm_observations(&bundle.observations_raw) {
-                    Ok(o) => o,
-                    Err(diag) => return Ok(verdict_fails(diag)),
-                };
-                // Infer n_subjects from total observation count.
-                if observations.len() % n_timepoints != 0 {
-                    return Ok(verdict_fails(format!(
-                        "RepeatedMeasures observation count ({}) is not a multiple of \
-                         n_timepoints ({n_timepoints}); each subject must be measured at \
-                         every timepoint exactly once (complete design)",
-                        observations.len()
-                    )));
-                }
-                let n_subjects = observations.len() / n_timepoints;
-                let res = match repeated_measures_cs_anova(n_subjects, n_timepoints, &observations)
-                {
-                    Some(r) => r,
-                    None => {
-                        return Ok(verdict_fails(format!(
-                            "RepeatedMeasures (CompoundSymmetry) preconditions failed: complete \
-                             design requires every (subject, timepoint) cell to have exactly one \
-                             observation (n_subjects = {n_subjects}, n_timepoints = \
-                             {n_timepoints}, n_obs = {})",
-                            observations.len()
-                        )));
-                    }
-                };
-                let note = format!(
-                    "RepeatedMeasures (CompoundSymmetry): time-effect F = {:.4}, df = ({}, {}), \
-                     n_subjects = {}, n_timepoints = {}",
-                    res.f_time,
-                    res.df_time as usize,
-                    res.df_error as usize,
-                    n_subjects,
-                    n_timepoints
-                );
-                (res.f_time, res.p_time, Some(note))
             }
         };
 
@@ -598,6 +630,12 @@ struct DecodedBundle {
     /// extract similarly.
     blocking_raw: serde_json::Value,
     factor: String,
+    /// Raw factor-slot JSON. RepeatedMeasures reads
+    /// `FullFactorial(k_between_factors)`'s integer arg from here to
+    /// route across the (autocorrelation × k_between_factors)
+    /// dispatch matrix; other factor ctors with parameters extract
+    /// similarly.
+    factor_raw: serde_json::Value,
     replication: ReplicationKind,
     repeated_measures: String,
     /// Raw repeated-measures-slot JSON. Phase 4.9's RepeatedMeasures
@@ -685,6 +723,7 @@ fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
     let factor = json_ctor_name(&args[2])
         .ok_or_else(|| "factor slot is not a ctor".to_string())?
         .to_string();
+    let factor_raw = args[2].clone();
     let replication = decode_replication_kind(&args[3])?;
     let repeated_measures = json_ctor_name(&args[4])
         .ok_or_else(|| "repeated_measures slot is not a ctor".to_string())?
@@ -702,6 +741,7 @@ fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
         blocking,
         blocking_raw,
         factor,
+        factor_raw,
         replication,
         repeated_measures,
         repeated_measures_raw,
@@ -936,19 +976,76 @@ fn decode_longitudinal_timepoints(j: &serde_json::Value) -> Option<usize> {
     Some(n as usize)
 }
 
-/// D52 Phase 4.9 — decode the RepeatedMeasures observations payload:
-/// a flat float array of `[subject_0, time_0, value_0, subject_1,
-/// time_1, value_1, ...]` — 3 floats per observation. Returns the
-/// parsed `(subject_idx, time_idx, value)` tuples ready for
-/// [`repeated_measures_cs_anova`]; fractional or negative indices
-/// are decode errors.
-fn decode_rm_observations(j: &serde_json::Value) -> Result<Vec<(usize, usize, f64)>, String> {
-    let flat =
-        decode_flat_observations(j).map_err(|e| format!("RepeatedMeasures observations: {e}"))?;
+/// Extract `k_between_factors` from a `FullFactorial(k)` ctor on the
+/// factor slot. Returns `Some(k)` for `FullFactorial(k)` with `k ≥ 0`
+/// (k=0 is the time-only RM case), `None` otherwise.
+fn decode_full_factorial_k(j: &serde_json::Value) -> Option<usize> {
+    if json_ctor_name(j)? != "FullFactorial" {
+        return None;
+    }
+    let args = j["args"].as_array()?;
+    if args.len() != 1 {
+        return None;
+    }
+    let k = args[0].as_i64()?;
+    if k < 0 {
+        return None;
+    }
+    Some(k as usize)
+}
+
+/// Decode the RepeatedMeasures wrapper `[factor_levels,
+/// inner_observations]` slot. Returns the parsed factor-level counts
+/// and a reference to the inner observations JSON value, which the
+/// matching (autocorrelation × k_between_factors) cell decoder then
+/// parses per its row shape (3 floats for k=0, 3+k for k≥1).
+fn decode_rm_observations_wrapped(
+    j: &serde_json::Value,
+) -> Result<(Vec<usize>, &serde_json::Value), String> {
+    let outer = j
+        .as_array()
+        .ok_or_else(|| format!("RepeatedMeasures observations slot is not an array: {j:?}"))?;
+    if outer.len() != 2 {
+        return Err(format!(
+            "RepeatedMeasures expects observations = [factor_levels, flat_observations] \
+             (got {} outer elements)",
+            outer.len()
+        ));
+    }
+    let factor_levels_flat = decode_flat_observations(&outer[0])
+        .map_err(|e| format!("RepeatedMeasures factor_levels: {e}"))?;
+    let factor_levels: Vec<usize> = factor_levels_flat
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| {
+            if v < 1.0 || v.fract() != 0.0 {
+                Err(format!(
+                    "RepeatedMeasures factor_levels[{i}] must be a positive integer \
+                     (level count ≥ 1), got {v}"
+                ))
+            } else {
+                Ok(v as usize)
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((factor_levels, &outer[1]))
+}
+
+/// Decode the inner observations payload for the time-only RM case
+/// (k_between_factors = 0): a flat float array of `[subject_0,
+/// time_0, value_0, subject_1, time_1, value_1, ...]` — 3 floats per
+/// observation. Returns the parsed `(subject_idx, time_idx, value)`
+/// tuples ready for [`repeated_measures_cs_anova`]; fractional or
+/// negative indices are decode errors.
+fn decode_rm_simple_observations(
+    j: &serde_json::Value,
+) -> Result<Vec<(usize, usize, f64)>, String> {
+    let flat = decode_flat_observations(j)
+        .map_err(|e| format!("RepeatedMeasures inner observations: {e}"))?;
     if flat.len() % 3 != 0 {
         return Err(format!(
-            "RepeatedMeasures observations must have a multiple of 3 floats (got {} — \
-             each row is `[subject_idx, time_idx, value]`)",
+            "RepeatedMeasures (k_between = 0) inner observations must have a multiple of 3 \
+             floats (got {} — each row is `[subject_idx, time_idx, value]`)",
             flat.len()
         ));
     }
@@ -1199,7 +1296,13 @@ fn dispatch_product_position(bundle: &DecodedBundle) -> Option<DispatchPos> {
         ("Restricted", "SplitPlotBlocking", "FullFactorial", "CrossSectional") => {
             Some(DispatchPos::SplitPlot)
         }
-        ("CompleteRandom", "Unblocked", "SingleFactor", "Longitudinal") => {
+        // RepeatedMeasures lives at FullFactorial(k_between_factors) on
+        // the factor slot — k=0 (time-only RM), k=1 (single-treatment
+        // RM), and k≥2 (factorial-RM) all share this dispatch position;
+        // the k value is decoded from the FullFactorial ctor's integer
+        // arg inside the RM arm and routed against the claim's
+        // autocorrelation_structure via the dispatch matrix in D52 §9.
+        ("CompleteRandom", "Unblocked", "FullFactorial", "Longitudinal") => {
             Some(DispatchPos::RepeatedMeasures)
         }
         _ => None,
