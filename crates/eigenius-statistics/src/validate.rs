@@ -53,7 +53,8 @@ use eigenius_kernel::ontology::well_known as wk;
 use crate::institution::iris;
 use crate::institution::StatisticsInstitution;
 use crate::numerics::{
-    factorial_omnibus_anova, one_sample_t_test, paired_t_test, two_sample_t_test, TwoSampleVariance,
+    factorial_omnibus_anova, one_sample_t_test, paired_t_test, rcbd_anova, two_sample_t_test,
+    TwoSampleVariance,
 };
 
 /// Top-level handler called by `StatisticsInstitution::query`.
@@ -289,6 +290,52 @@ pub fn do_validate_measurement_claim(
             };
             (r.f_statistic, r.p_value)
         }
+        DispatchPos::RCBD => {
+            // RCBD: observations is a flat float array `[block_0,
+            // treatment_0, value_0, block_1, treatment_1, value_1,
+            // ...]`. The block-size argument on RCB(k) ctor in the
+            // blocking axis gives n_blocks; n_treatments is read off
+            // the dispatch's parallel state. Verifier runs two-way
+            // ANOVA with block as random and treatment as fixed;
+            // reports the treatment F-test.
+            let n_blocks = match decode_rcb_block_count(&bundle.blocking_raw) {
+                Some(b) => b,
+                None => {
+                    return Ok(verdict_fails(
+                        "RCBD requires RCB(n_blocks) in the blocking slot with n_blocks ≥ 3 \
+                         (PairedBlocking dispatches via stats:Paired)"
+                            .into(),
+                    ));
+                }
+            };
+            let observations = match decode_rcbd_observations(&bundle.observations_raw) {
+                Ok(o) => o,
+                Err(diag) => return Ok(verdict_fails(diag)),
+            };
+            // n_treatments is inferred from observations: total_n /
+            // n_blocks must equal n_treatments and divide evenly.
+            if observations.len() % n_blocks != 0 {
+                return Ok(verdict_fails(format!(
+                    "RCBD observation count ({}) is not a multiple of n_blocks ({n_blocks}); \
+                     each block must contain every treatment exactly once (complete design)",
+                    observations.len()
+                )));
+            }
+            let n_treatments = observations.len() / n_blocks;
+            let r = match rcbd_anova(n_blocks, n_treatments, &observations) {
+                Some(r) => r,
+                None => {
+                    return Ok(verdict_fails(format!(
+                        "RCBD ANOVA preconditions failed: complete design requires every \
+                         (block, treatment) cell to have exactly one observation \
+                         (n_blocks = {n_blocks}, n_treatments = {n_treatments}, \
+                         n_obs = {})",
+                        observations.len()
+                    )));
+                }
+            };
+            (r.f_treatment, r.p_treatment)
+        }
     };
 
     // ── Step 7: §7.4 epistemic-scope check ────────────────────────────
@@ -347,6 +394,11 @@ pub fn do_validate_measurement_claim(
 struct DecodedBundle {
     randomization: String,
     blocking: String,
+    /// Raw blocking-slot JSON. Phase 4's RCBD dispatch reads the
+    /// `RCB(n_blocks)` ctor's integer arg from here; future blocking
+    /// ctors with parameters (e.g., `Incomplete(block_size)`) will
+    /// extract similarly.
+    blocking_raw: serde_json::Value,
     factor: String,
     replication: ReplicationKind,
     repeated_measures: String,
@@ -398,12 +450,13 @@ enum ReplicationKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[allow(clippy::upper_case_acronyms)] // "IID" is the standard statistics term — Independent and Identically Distributed
+#[allow(clippy::upper_case_acronyms)] // "IID" and "RCBD" are the standard statistics terms
 enum DispatchPos {
     SingleSampleEstimate,
     IID,
     Paired,
     Factorial,
+    RCBD,
 }
 
 fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
@@ -423,6 +476,7 @@ fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
     let blocking = json_ctor_name(&args[1])
         .ok_or_else(|| "blocking slot is not a ctor".to_string())?
         .to_string();
+    let blocking_raw = args[1].clone();
     let factor = json_ctor_name(&args[2])
         .ok_or_else(|| "factor slot is not a ctor".to_string())?
         .to_string();
@@ -440,6 +494,7 @@ fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
     Ok(DecodedBundle {
         randomization,
         blocking,
+        blocking_raw,
         factor,
         replication,
         repeated_measures,
@@ -576,6 +631,62 @@ fn decode_factorial_observations(
         })
         .collect();
     Ok((factor_levels, observations?))
+}
+
+/// D52 Phase 4.0 — extract the `RCB(n_blocks)` integer from the
+/// blocking slot. Returns `Some(n_blocks)` only when the blocking
+/// ctor is `RCB`; returns `None` for `PairedBlocking` / `Unblocked`
+/// / `Incomplete` / etc. (which dispatch elsewhere).
+fn decode_rcb_block_count(j: &serde_json::Value) -> Option<usize> {
+    if json_ctor_name(j)? != "RCB" {
+        return None;
+    }
+    let args = j["args"].as_array()?;
+    if args.len() != 1 {
+        return None;
+    }
+    let n_i64 = args[0].as_i64()?;
+    if n_i64 < 2 {
+        return None;
+    }
+    Some(n_i64 as usize)
+}
+
+/// D52 Phase 4.0 — decode the RCBD observations payload: a flat
+/// float array of `[block_0, treatment_0, value_0, block_1,
+/// treatment_1, value_1, ...]` — 3 floats per observation, total
+/// length `3 * n_blocks * n_treatments`. Returns the parsed
+/// `(block_idx, treatment_idx, value)` tuples ready for
+/// [`rcbd_anova`]; treats fractional or negative block/treatment
+/// indices as decode errors (those would silently mask design
+/// errors otherwise).
+fn decode_rcbd_observations(j: &serde_json::Value) -> Result<Vec<(usize, usize, f64)>, String> {
+    let flat = decode_flat_observations(j).map_err(|e| format!("RCBD observations: {e}"))?;
+    if flat.len() % 3 != 0 {
+        return Err(format!(
+            "RCBD observations must have a multiple of 3 floats (got {} — \
+             each row is `[block_idx, treatment_idx, value]`)",
+            flat.len()
+        ));
+    }
+    flat.chunks_exact(3)
+        .enumerate()
+        .map(|(row_idx, chunk)| {
+            let block = chunk[0];
+            let treatment = chunk[1];
+            if block < 0.0 || block.fract() != 0.0 {
+                return Err(format!(
+                    "RCBD row {row_idx} block_idx must be a non-negative integer, got {block}"
+                ));
+            }
+            if treatment < 0.0 || treatment.fract() != 0.0 {
+                return Err(format!(
+                    "RCBD row {row_idx} treatment_idx must be a non-negative integer, got {treatment}"
+                ));
+            }
+            Ok((block as usize, treatment as usize, chunk[2]))
+        })
+        .collect()
 }
 
 /// D52 §5.3 / Phase 3 — decode `BiologicalUnits.Units(iris)` ctor
@@ -748,7 +859,8 @@ fn decode_replication_kind(j: &serde_json::Value) -> Result<ReplicationKind, Str
 
 fn dispatch_product_position(bundle: &DecodedBundle) -> Option<DispatchPos> {
     // Verifier dispatch table per D52 §5.4. Phase 1 wired
-    // SingleSampleEstimate; Phase 1.5 added IID; Phase 2 adds Paired.
+    // SingleSampleEstimate; Phase 1.5 added IID; Phase 2 added Paired;
+    // Phase 2.5 added Factorial; Phase 4.0 adds RCBD.
     match (
         bundle.randomization.as_str(),
         bundle.blocking.as_str(),
@@ -765,6 +877,7 @@ fn dispatch_product_position(bundle: &DecodedBundle) -> Option<DispatchPos> {
         ("CompleteRandom", "Unblocked", "FullFactorial", "CrossSectional") => {
             Some(DispatchPos::Factorial)
         }
+        ("Restricted", "RCB", "SingleFactor", "CrossSectional") => Some(DispatchPos::RCBD),
         _ => None,
     }
 }

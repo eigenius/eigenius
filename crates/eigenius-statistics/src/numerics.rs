@@ -423,6 +423,185 @@ pub struct FactorialAnovaResult {
     pub ss_within: f64,
 }
 
+/// Randomized Complete Block Design (RCBD) two-way ANOVA — D52 Phase
+/// 4.0 / §5.2 `RCBD`.
+///
+/// Tests the *treatment* effect controlling for block-to-block
+/// variation: `H0: all treatment means are equal` against `H1: at
+/// least one treatment mean differs`, with block treated as a random
+/// effect that we marginalize over.
+///
+/// Sum-of-squares decomposition (standard two-way ANOVA without
+/// interaction, since RCBD has one observation per (block, treatment)
+/// cell):
+/// - `SS_total = Σᵢⱼ (yᵢⱼ - ȳ..)²`
+/// - `SS_block = t · Σⱼ (ȳ.ⱼ - ȳ..)²`
+/// - `SS_treatment = b · Σᵢ (ȳᵢ. - ȳ..)²`
+/// - `SS_error = SS_total - SS_block - SS_treatment`
+/// - `df_block = b - 1`
+/// - `df_treatment = t - 1`
+/// - `df_error = (b - 1)(t - 1)`
+/// - `F_treatment = (SS_treatment / df_treatment) / (SS_error / df_error)`
+///   ~ F(df_treatment, df_error) under H0
+///
+/// **Block effect**: also computable here (SS_block / df_block over
+/// MS_error) but typically reported as a variance component rather
+/// than p-tested in RCBD analysis. The treatment effect is what
+/// scientific claims usually assert; v1 verifier reports the
+/// treatment F. Per-block-effect testing lands when a claim shape
+/// distinguishes "treatment matters" from "block matters."
+///
+/// `observations` is a flat list of `(block_idx, treatment_idx,
+/// value)` tuples with `0 ≤ block_idx < n_blocks` and
+/// `0 ≤ treatment_idx < n_treatments`. The complete design requires
+/// every (block, treatment) cell to contain exactly one observation
+/// (`n_blocks · n_treatments` observations total).
+///
+/// Returns `None` when:
+/// - `n_blocks < 2` or `n_treatments < 2` (df_error = 0)
+/// - any cell has != 1 observation (non-complete design — use a
+///   different dispatch arm, e.g. Factorial with replication)
+/// - any cell index is out of range
+pub fn rcbd_anova(
+    n_blocks: usize,
+    n_treatments: usize,
+    observations: &[(usize, usize, f64)],
+) -> Option<RCBDResult> {
+    if n_blocks < 2 || n_treatments < 2 {
+        return None;
+    }
+    let expected_n = n_blocks * n_treatments;
+    if observations.len() != expected_n {
+        return None;
+    }
+    // Build cell value matrix; validate each cell has exactly 1
+    // observation (complete-design discipline).
+    let mut cell: Vec<Vec<Option<f64>>> = (0..n_blocks).map(|_| vec![None; n_treatments]).collect();
+    for &(b, t, v) in observations {
+        if b >= n_blocks || t >= n_treatments {
+            return None;
+        }
+        if cell[b][t].is_some() {
+            return None; // duplicate cell — not a complete RCBD
+        }
+        cell[b][t] = Some(v);
+    }
+    for row in &cell {
+        for c in row {
+            if c.is_none() {
+                return None; // missing cell — not a complete RCBD
+            }
+        }
+    }
+
+    let n = expected_n as f64;
+    let b = n_blocks as f64;
+    let t = n_treatments as f64;
+
+    let grand_mean: f64 = observations.iter().map(|(_, _, v)| v).sum::<f64>() / n;
+
+    // Per-block means (ȳ.ⱼ): average over all treatments within each block.
+    let block_means: Vec<f64> = (0..n_blocks)
+        .map(|j| {
+            let sum: f64 = (0..n_treatments)
+                .map(|i| cell[j][i].expect("validated above"))
+                .sum();
+            sum / t
+        })
+        .collect();
+    // Per-treatment means (ȳᵢ.): average over all blocks within each treatment.
+    let treatment_means: Vec<f64> = (0..n_treatments)
+        .map(|i| {
+            let sum: f64 = (0..n_blocks)
+                .map(|j| cell[j][i].expect("validated above"))
+                .sum();
+            sum / b
+        })
+        .collect();
+
+    let ss_block: f64 = t * block_means
+        .iter()
+        .map(|m| (m - grand_mean).powi(2))
+        .sum::<f64>();
+    let ss_treatment: f64 = b * treatment_means
+        .iter()
+        .map(|m| (m - grand_mean).powi(2))
+        .sum::<f64>();
+    // SS_error computed directly from the per-cell residual under the
+    // no-interaction additive model `ŷᵢⱼ = ȳᵢ. + ȳ.ⱼ - ȳ..`. Avoids
+    // the catastrophic-cancellation trap of `SS_total - SS_block -
+    // SS_treatment` when block (or treatment) variation dominates by
+    // many orders of magnitude — e.g., a blocked design where blocks
+    // have baselines of 100, 200, 50 but a within-block treatment
+    // effect of +10 loses all precision under subtraction.
+    let ss_error: f64 = observations
+        .iter()
+        .map(|(b_idx, t_idx, v)| {
+            let predicted = treatment_means[*t_idx] + block_means[*b_idx] - grand_mean;
+            (v - predicted).powi(2)
+        })
+        .sum();
+
+    let df_block = b - 1.0;
+    let df_treatment = t - 1.0;
+    let df_error = (b - 1.0) * (t - 1.0);
+
+    let ms_treatment = ss_treatment / df_treatment;
+    let ms_error = ss_error / df_error;
+    let f_treatment = if ms_error == 0.0 {
+        if ms_treatment == 0.0 {
+            0.0
+        } else {
+            f64::INFINITY
+        }
+    } else {
+        ms_treatment / ms_error
+    };
+
+    let dist = FisherSnedecor::new(df_treatment, df_error).ok()?;
+    let p_treatment = if f_treatment.is_finite() {
+        1.0 - dist.cdf(f_treatment)
+    } else if f_treatment.is_nan() {
+        f64::NAN
+    } else {
+        0.0
+    };
+
+    Some(RCBDResult {
+        f_treatment,
+        p_treatment,
+        df_treatment,
+        df_block,
+        df_error,
+        n_blocks,
+        n_treatments,
+        grand_mean,
+        ss_block,
+        ss_treatment,
+        ss_error,
+    })
+}
+
+/// Numeric output of a Randomized Complete Block Design ANOVA.
+/// Carries the treatment F-test (the primary reported quantity)
+/// plus the full sum-of-squares + df decomposition for audit
+/// (D52 §6).
+#[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::upper_case_acronyms)] // RCBD is the standard term — Randomized Complete Block Design
+pub struct RCBDResult {
+    pub f_treatment: f64,
+    pub p_treatment: f64,
+    pub df_treatment: f64,
+    pub df_block: f64,
+    pub df_error: f64,
+    pub n_blocks: usize,
+    pub n_treatments: usize,
+    pub grand_mean: f64,
+    pub ss_block: f64,
+    pub ss_treatment: f64,
+    pub ss_error: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -746,6 +925,197 @@ mod tests {
             (vec![1, 1], 40.0),
         ];
         assert!(factorial_omnibus_anova(&factor_levels, &observations).is_none());
+    }
+
+    // ── RCBD two-way ANOVA (Phase 4.0) ────────────────────────────
+
+    /// 3 blocks × 3 treatments RCBD with a clear treatment effect.
+    /// Cell values designed so the per-treatment means are clearly
+    /// separated (means: 10, 20, 30) and per-block means are similar.
+    ///
+    /// Block 0:  [9, 19, 31]   block mean = 19.67
+    /// Block 1:  [11, 21, 29]  block mean = 20.33
+    /// Block 2:  [10, 20, 30]  block mean = 20
+    /// Treatment means: 10, 20, 30
+    /// Grand mean: 20
+    ///
+    /// SS_total = 9 obs × variance → compute directly
+    /// SS_treatment = 3 × ((10-20)² + (20-20)² + (30-20)²) = 3 × 200 = 600
+    /// SS_block = 3 × ((19.67-20)² + (20.33-20)² + (20-20)²) ≈ 3 × 0.222 ≈ 0.67
+    /// SS_error ≈ tiny
+    /// F_treatment huge, p ≪ 0.001.
+    #[test]
+    fn rcbd_3x3_treatment_effect_rejects_h0() {
+        let observations = vec![
+            // (block, treatment, value)
+            (0, 0, 9.0),
+            (0, 1, 19.0),
+            (0, 2, 31.0),
+            (1, 0, 11.0),
+            (1, 1, 21.0),
+            (1, 2, 29.0),
+            (2, 0, 10.0),
+            (2, 1, 20.0),
+            (2, 2, 30.0),
+        ];
+        let result = rcbd_anova(3, 3, &observations).expect("complete 3x3 RCBD");
+        assert_eq!(result.n_blocks, 3);
+        assert_eq!(result.n_treatments, 3);
+        assert_eq!(result.df_treatment, 2.0);
+        assert_eq!(result.df_block, 2.0);
+        assert_eq!(result.df_error, 4.0);
+        assert!(
+            (result.grand_mean - 20.0).abs() < 1e-9,
+            "grand_mean = {}",
+            result.grand_mean
+        );
+        // SS_treatment = 3 * ((10-20)² + (20-20)² + (30-20)²) = 600
+        assert!(
+            (result.ss_treatment - 600.0).abs() < 1e-9,
+            "SS_treatment = {}",
+            result.ss_treatment
+        );
+        assert!(
+            result.f_treatment > 100.0,
+            "F_treatment should be very large (clean treatment effect with tiny error); got F = {}",
+            result.f_treatment
+        );
+        assert!(
+            result.p_treatment < 1e-3,
+            "p_treatment should be ≪ 0.001; got p = {}",
+            result.p_treatment
+        );
+    }
+
+    /// Block-controlled scenario: per-block baselines differ wildly
+    /// (block-to-block variation huge), but within each block the
+    /// treatment effect is consistent. RCBD controls for the block
+    /// variation; an IID t-test on the same data would have its
+    /// power destroyed by the block noise.
+    #[test]
+    fn rcbd_isolates_treatment_from_block_variation() {
+        // Block 0 has baseline 100, block 1 has baseline 200,
+        // block 2 has baseline 50. Within each block, treatment 1
+        // adds +10 over treatment 0. The treatment effect is small
+        // (+10) relative to between-block variation (100s) — RCBD
+        // can detect it; IID can't.
+        let observations = vec![
+            (0, 0, 100.0),
+            (0, 1, 110.0),
+            (1, 0, 200.0),
+            (1, 1, 210.0),
+            (2, 0, 50.0),
+            (2, 1, 60.0),
+        ];
+        let result = rcbd_anova(3, 2, &observations).expect("complete 3x2 RCBD");
+        // Treatment means: 116.67 vs 126.67; difference 10
+        // SS_treatment = 3 * ((116.67-121.67)² + (126.67-121.67)²) ≈ 3 * 50 = 150
+        // SS_block is huge (the 100, 200, 50 baselines) but absorbed into the block term
+        // SS_error should be ~0 because within each block the difference IS exactly +10
+        assert!(
+            result.f_treatment > 100.0,
+            "RCBD should detect the consistent treatment effect controlling for block; \
+             got F_treatment = {}",
+            result.f_treatment
+        );
+        assert!(
+            result.p_treatment < 0.01,
+            "p_treatment should reject H0; got p = {}",
+            result.p_treatment
+        );
+        // SS_block should dominate SS_treatment because the block baselines are wildly different
+        assert!(
+            result.ss_block > result.ss_treatment,
+            "SS_block ({}) should dominate SS_treatment ({}) for this design",
+            result.ss_block,
+            result.ss_treatment
+        );
+    }
+
+    #[test]
+    fn rcbd_null_data_yields_high_p() {
+        // All cells around the same mean (50) — no treatment effect.
+        let observations = vec![
+            (0, 0, 49.0),
+            (0, 1, 51.0),
+            (0, 2, 50.0),
+            (1, 0, 50.0),
+            (1, 1, 51.0),
+            (1, 2, 49.0),
+            (2, 0, 51.0),
+            (2, 1, 49.0),
+            (2, 2, 50.0),
+        ];
+        let result = rcbd_anova(3, 3, &observations).unwrap();
+        assert!(
+            result.p_treatment > 0.3,
+            "p_treatment should be high for null data; got {}",
+            result.p_treatment
+        );
+    }
+
+    #[test]
+    fn rcbd_rejects_incomplete_design() {
+        // 3×3 design but missing the (2,2) cell.
+        let observations = vec![
+            (0, 0, 1.0),
+            (0, 1, 2.0),
+            (0, 2, 3.0),
+            (1, 0, 4.0),
+            (1, 1, 5.0),
+            (1, 2, 6.0),
+            (2, 0, 7.0),
+            (2, 1, 8.0),
+            // missing (2, 2)
+        ];
+        assert!(rcbd_anova(3, 3, &observations).is_none());
+    }
+
+    #[test]
+    fn rcbd_rejects_duplicate_cells() {
+        // 2×2 design but the (0,0) cell has two observations.
+        let observations = vec![
+            (0, 0, 1.0),
+            (0, 0, 2.0),
+            (0, 1, 3.0),
+            (1, 0, 4.0),
+            (1, 1, 5.0),
+        ];
+        assert!(rcbd_anova(2, 2, &observations).is_none());
+    }
+
+    #[test]
+    fn rcbd_rejects_out_of_range_indices() {
+        let observations = vec![(0, 0, 1.0), (0, 1, 2.0), (1, 0, 3.0), (1, 2, 4.0)]; // treatment 2 > 1
+        assert!(rcbd_anova(2, 2, &observations).is_none());
+    }
+
+    #[test]
+    fn rcbd_requires_min_2x2() {
+        let observations = vec![(0, 0, 1.0), (0, 1, 2.0)];
+        assert!(rcbd_anova(1, 2, &observations).is_none());
+    }
+
+    #[test]
+    fn rcbd_deterministic_across_runs() {
+        let observations = vec![
+            (0, 0, 12.3),
+            (0, 1, 18.7),
+            (0, 2, 25.1),
+            (1, 0, 14.1),
+            (1, 1, 20.5),
+            (1, 2, 27.3),
+            (2, 0, 11.8),
+            (2, 1, 19.4),
+            (2, 2, 26.0),
+        ];
+        let a = rcbd_anova(3, 3, &observations).unwrap();
+        let b = rcbd_anova(3, 3, &observations).unwrap();
+        assert_eq!(a.f_treatment.to_bits(), b.f_treatment.to_bits());
+        assert_eq!(a.p_treatment.to_bits(), b.p_treatment.to_bits());
+        assert_eq!(a.ss_treatment.to_bits(), b.ss_treatment.to_bits());
+        assert_eq!(a.ss_block.to_bits(), b.ss_block.to_bits());
+        assert_eq!(a.ss_error.to_bits(), b.ss_error.to_bits());
     }
 
     #[test]

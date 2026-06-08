@@ -402,10 +402,47 @@ macro stats:Factorial(
         [factor_levels, observations],
     );
 
-// Additional Tier 1+2 smart constructors (RCBD, SplitPlot,
-// RepeatedMeasures) land in follow-on commits as the corresponding
-// verifier procedures land in the Rust institution. Each is a one-
-// macro addition over an existing product position.
+// Randomized Complete Block Design (RCBD) — two-way design where each
+// block contains every treatment exactly once. The block factor is
+// random (a nuisance variable to control for: plate, day, patient
+// cohort); the treatment factor is fixed (the scientific quantity of
+// interest). Observations is a flat float array `[block_0, treatment_0,
+// value_0, block_1, treatment_1, value_1, ...]` — 3 floats per
+// observation, total length `3 * n_blocks * n_treatments`.
+//
+// Lands at product position `(Restricted, RCB(n_blocks), SingleFactor,
+// _, CrossSectional)`. The `RCB(n_blocks)` ctor distinguishes this
+// from `PairedBlocking` (which is the n_blocks=2 special case
+// dispatched by `stats:Paired`); `n_blocks` must be ≥ 3 by RCBD
+// convention.
+//
+// Verifier runs a two-way ANOVA controlling for the block effect and
+// reports the treatment F-test (does treatment matter, given the
+// blocking structure?). The block effect's variance component is
+// computed but not p-tested in v1 — that's a Phase 5 hardening when
+// claim shapes distinguish "treatment matters" from "block matters".
+macro stats:RCBD(
+    n_blocks      : core:integer,
+    n_treatments  : core:integer,
+    observations  : core:value_array,
+    replication   : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        Restricted(),
+        RCB(n_blocks),
+        SingleFactor(),
+        replication,
+        CrossSectional(),
+        Units([]),
+        Columns([]),
+        Entries([]),
+        observations,
+    );
+
+// Additional Tier 2 smart constructors (SplitPlot, RepeatedMeasures)
+// land in follow-on commits as the corresponding verifier procedures
+// land in the Rust institution. Each is a one-macro addition over an
+// existing product position.
 
 // ── SampleSetResource (chain-resident SampleSet carrier) ─────────────
 //
