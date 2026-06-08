@@ -925,6 +925,186 @@ pub struct SplitPlotResult {
     pub ss_error: f64,
 }
 
+/// Compound-Symmetry Repeated-Measures ANOVA — D52 Phase 4.9 / §5.2
+/// `RepeatedMeasures` (the simplest autocorrelation case, per the
+/// §12 #5 author-asserted-structure decision).
+///
+/// Tests `H0: all timepoint means are equal` against `H1: at least
+/// one timepoint mean differs`, with subject treated as a random
+/// effect (each subject contributing a baseline that gets averaged
+/// over). Under the compound-symmetry assumption — equal within-
+/// subject variances and equal between-timepoint covariances — this
+/// reduces to the standard univariate RM-ANOVA, which is
+/// algebraically equivalent to RCBD with subject as block and time
+/// as treatment.
+///
+/// **Compound-symmetry caveat**: the verifier doesn't *check* the
+/// assumption (Mauchly's test of sphericity is a future hardening).
+/// Author asserts the structure on the claim per §12 #5; the
+/// verifier honors the assertion and computes the test under it.
+/// AR(1) and Unstructured covariance structures need genuinely
+/// different numerics (GLS with the AR(1) parameter ρ; MANOVA-style
+/// multivariate tests respectively) and dispatch to "not yet wired"
+/// diagnostics in Phase 4.9 v1.
+///
+/// **Sum-of-squares decomposition** (one-way RM-ANOVA, equivalent to
+/// RCBD):
+/// - `SS_subject = T · Σᵢ (ȳᵢ. - ȳ..)²` — between-subject variation
+/// - `SS_time = N · Σⱼ (ȳ.ⱼ - ȳ..)²` — time effect (the quantity of
+///   interest)
+/// - `SS_error = Σᵢⱼ (yᵢⱼ - ȳᵢ. - ȳ.ⱼ + ȳ..)²` — residuals under the
+///   additive subject + time model (computed directly to avoid
+///   catastrophic-cancellation precision loss when subject baselines
+///   vary widely — same rationale as the RCBD `SS_error` formula)
+/// - `df_time = T - 1`
+/// - `df_error = (N - 1)(T - 1)`
+/// - `F_time = MS_time / MS_error ~ F(df_time, df_error)` under H0
+///
+/// `observations` is a flat list of `(subject_idx, time_idx, value)`
+/// tuples with `0 ≤ subject_idx < n_subjects` and `0 ≤ time_idx <
+/// n_timepoints`. Complete design required: every (subject, time)
+/// cell must contain exactly one observation (`n_subjects ·
+/// n_timepoints` observations total).
+///
+/// Returns `None` when:
+/// - `n_subjects < 2` or `n_timepoints < 2` (df_error = 0)
+/// - any cell has != 1 observation
+/// - any cell index is out of range
+pub fn repeated_measures_cs_anova(
+    n_subjects: usize,
+    n_timepoints: usize,
+    observations: &[(usize, usize, f64)],
+) -> Option<RepeatedMeasuresResult> {
+    if n_subjects < 2 || n_timepoints < 2 {
+        return None;
+    }
+    let expected_n = n_subjects * n_timepoints;
+    if observations.len() != expected_n {
+        return None;
+    }
+    // Build cell matrix and validate complete design.
+    let mut cell: Vec<Vec<Option<f64>>> =
+        (0..n_subjects).map(|_| vec![None; n_timepoints]).collect();
+    for &(s, t, v) in observations {
+        if s >= n_subjects || t >= n_timepoints {
+            return None;
+        }
+        if cell[s][t].is_some() {
+            return None;
+        }
+        cell[s][t] = Some(v);
+    }
+    for row in &cell {
+        for c in row {
+            if c.is_none() {
+                return None;
+            }
+        }
+    }
+
+    let n_total = expected_n as f64;
+    let n_subj = n_subjects as f64;
+    let n_time = n_timepoints as f64;
+
+    let grand_mean: f64 = observations.iter().map(|(_, _, v)| v).sum::<f64>() / n_total;
+
+    // Per-subject means (average across timepoints within each subject).
+    let subject_means: Vec<f64> = (0..n_subjects)
+        .map(|s| {
+            let sum: f64 = (0..n_timepoints)
+                .map(|t| cell[s][t].expect("validated"))
+                .sum();
+            sum / n_time
+        })
+        .collect();
+    // Per-timepoint means (average across subjects within each timepoint).
+    let time_means: Vec<f64> = (0..n_timepoints)
+        .map(|t| {
+            let sum: f64 = (0..n_subjects)
+                .map(|s| cell[s][t].expect("validated"))
+                .sum();
+            sum / n_subj
+        })
+        .collect();
+
+    let ss_subject: f64 = n_time
+        * subject_means
+            .iter()
+            .map(|m| (m - grand_mean).powi(2))
+            .sum::<f64>();
+    let ss_time: f64 = n_subj
+        * time_means
+            .iter()
+            .map(|m| (m - grand_mean).powi(2))
+            .sum::<f64>();
+    // SS_error from per-cell residuals under the additive subject+time
+    // model. Same precision-preserving formula as RCBD's SS_error.
+    let ss_error: f64 = observations
+        .iter()
+        .map(|&(s, t, v)| {
+            let predicted = subject_means[s] + time_means[t] - grand_mean;
+            (v - predicted).powi(2)
+        })
+        .sum();
+
+    let df_subject = n_subj - 1.0;
+    let df_time = n_time - 1.0;
+    let df_error = (n_subj - 1.0) * (n_time - 1.0);
+
+    let ms_time = ss_time / df_time;
+    let ms_error = ss_error / df_error;
+    let f_time = if ms_error == 0.0 {
+        if ms_time == 0.0 {
+            0.0
+        } else {
+            f64::INFINITY
+        }
+    } else {
+        ms_time / ms_error
+    };
+
+    let dist = FisherSnedecor::new(df_time, df_error).ok()?;
+    let p_time = if f_time.is_finite() {
+        1.0 - dist.cdf(f_time)
+    } else if f_time.is_nan() {
+        f64::NAN
+    } else {
+        0.0
+    };
+
+    Some(RepeatedMeasuresResult {
+        f_time,
+        p_time,
+        df_time,
+        df_subject,
+        df_error,
+        n_subjects,
+        n_timepoints,
+        grand_mean,
+        ss_subject,
+        ss_time,
+        ss_error,
+    })
+}
+
+/// Numeric output of a compound-symmetry repeated-measures ANOVA.
+/// Carries the time F-test (the primary reported quantity) plus the
+/// sum-of-squares + df decomposition for audit (D52 §6).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepeatedMeasuresResult {
+    pub f_time: f64,
+    pub p_time: f64,
+    pub df_time: f64,
+    pub df_subject: f64,
+    pub df_error: f64,
+    pub n_subjects: usize,
+    pub n_timepoints: usize,
+    pub grand_mean: f64,
+    pub ss_subject: f64,
+    pub ss_time: f64,
+    pub ss_error: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1686,6 +1866,205 @@ mod tests {
         assert_eq!(a.f_ws.to_bits(), b.f_ws.to_bits());
         assert_eq!(a.ss_w.to_bits(), b.ss_w.to_bits());
         assert_eq!(a.ss_wp_within_w.to_bits(), b.ss_wp_within_w.to_bits());
+        assert_eq!(a.ss_error.to_bits(), b.ss_error.to_bits());
+    }
+
+    // ── Compound-Symmetry RM-ANOVA (Phase 4.9) ────────────────────
+
+    /// 5 subjects × 4 timepoints. Monotonic decline at each subject
+    /// (drug-decay shape) with consistent baselines per subject
+    /// modulo small variation.
+    ///
+    /// Per-time means: ~102, ~82.6, ~61.6, ~41.6 (clean monotone
+    /// decline). Subject variation is small (baselines ±~5 around
+    /// each subject's trajectory). F_time enormous.
+    #[test]
+    fn rm_cs_5x4_time_effect_rejects_h0() {
+        let observations = vec![
+            // (subject, time, value)
+            (0, 0, 100.0),
+            (0, 1, 80.0),
+            (0, 2, 60.0),
+            (0, 3, 40.0),
+            (1, 0, 110.0),
+            (1, 1, 88.0),
+            (1, 2, 65.0),
+            (1, 3, 45.0),
+            (2, 0, 95.0),
+            (2, 1, 78.0),
+            (2, 2, 58.0),
+            (2, 3, 38.0),
+            (3, 0, 105.0),
+            (3, 1, 85.0),
+            (3, 2, 63.0),
+            (3, 3, 43.0),
+            (4, 0, 100.0),
+            (4, 1, 82.0),
+            (4, 2, 62.0),
+            (4, 3, 42.0),
+        ];
+        let result = repeated_measures_cs_anova(5, 4, &observations).expect("complete 5x4 RM");
+        assert_eq!(result.n_subjects, 5);
+        assert_eq!(result.n_timepoints, 4);
+        assert_eq!(result.df_time, 3.0);
+        assert_eq!(result.df_subject, 4.0);
+        assert_eq!(result.df_error, 12.0);
+        assert!(
+            result.f_time > 100.0,
+            "F_time should be huge for clean monotone decline; got F = {}",
+            result.f_time
+        );
+        assert!(
+            result.p_time < 1e-6,
+            "p_time should be ≪ 1e-6; got p = {}",
+            result.p_time
+        );
+    }
+
+    /// Subject-controlled scenario: subjects have wildly different
+    /// baselines (50, 100, 200, 75, 150) but the time-effect within
+    /// each subject is consistent (-10 per timepoint). RM-ANOVA
+    /// controls for subject variation; treating these data as IID
+    /// across all 20 observations would have the subject variance
+    /// dominate the time signal.
+    #[test]
+    fn rm_cs_isolates_time_from_subject_variation() {
+        // Each subject's trajectory: baseline + decline of -10/step.
+        let observations = vec![
+            // Subject 0: baseline 50
+            (0, 0, 50.0),
+            (0, 1, 40.0),
+            (0, 2, 30.0),
+            (0, 3, 20.0),
+            // Subject 1: baseline 100
+            (1, 0, 100.0),
+            (1, 1, 90.0),
+            (1, 2, 80.0),
+            (1, 3, 70.0),
+            // Subject 2: baseline 200
+            (2, 0, 200.0),
+            (2, 1, 190.0),
+            (2, 2, 180.0),
+            (2, 3, 170.0),
+            // Subject 3: baseline 75
+            (3, 0, 75.0),
+            (3, 1, 65.0),
+            (3, 2, 55.0),
+            (3, 3, 45.0),
+            // Subject 4: baseline 150
+            (4, 0, 150.0),
+            (4, 1, 140.0),
+            (4, 2, 130.0),
+            (4, 3, 120.0),
+        ];
+        let result = repeated_measures_cs_anova(5, 4, &observations).unwrap();
+        // Time effect is perfectly consistent across subjects, so
+        // SS_error should be near zero and F_time enormous.
+        assert!(
+            result.f_time > 100.0,
+            "F_time should be very large when time-effect is consistent across subjects; got {}",
+            result.f_time
+        );
+        // SS_subject should dominate SS_time because subject baselines vary widely.
+        assert!(
+            result.ss_subject > result.ss_time,
+            "SS_subject ({}) should dominate SS_time ({}) for this design",
+            result.ss_subject,
+            result.ss_time
+        );
+        // SS_error should be near zero (additive structure exact).
+        assert!(
+            result.ss_error < 1e-6,
+            "SS_error should be near zero for additive design; got {}",
+            result.ss_error
+        );
+    }
+
+    #[test]
+    fn rm_cs_null_time_effect_yields_high_p() {
+        // No systematic time effect — all timepoints have similar means.
+        let observations = vec![
+            (0, 0, 50.0),
+            (0, 1, 51.0),
+            (0, 2, 49.0),
+            (0, 3, 50.0),
+            (1, 0, 51.0),
+            (1, 1, 50.0),
+            (1, 2, 51.0),
+            (1, 3, 49.0),
+            (2, 0, 49.0),
+            (2, 1, 51.0),
+            (2, 2, 50.0),
+            (2, 3, 51.0),
+            (3, 0, 50.0),
+            (3, 1, 49.0),
+            (3, 2, 51.0),
+            (3, 3, 50.0),
+        ];
+        let result = repeated_measures_cs_anova(4, 4, &observations).unwrap();
+        assert!(
+            result.p_time > 0.3,
+            "p_time should be high for null data; got {}",
+            result.p_time
+        );
+    }
+
+    #[test]
+    fn rm_cs_rejects_incomplete_design() {
+        // 3 subjects × 3 timepoints but missing (2, 2).
+        let observations = vec![
+            (0, 0, 1.0),
+            (0, 1, 2.0),
+            (0, 2, 3.0),
+            (1, 0, 4.0),
+            (1, 1, 5.0),
+            (1, 2, 6.0),
+            (2, 0, 7.0),
+            (2, 1, 8.0),
+        ];
+        assert!(repeated_measures_cs_anova(3, 3, &observations).is_none());
+    }
+
+    #[test]
+    fn rm_cs_rejects_duplicate_cell() {
+        let observations = vec![
+            (0, 0, 1.0),
+            (0, 0, 2.0),
+            (0, 1, 3.0),
+            (1, 0, 4.0),
+            (1, 1, 5.0),
+        ];
+        assert!(repeated_measures_cs_anova(2, 2, &observations).is_none());
+    }
+
+    #[test]
+    fn rm_cs_requires_min_2x2() {
+        let obs = vec![(0, 0, 1.0), (0, 1, 2.0)];
+        assert!(repeated_measures_cs_anova(1, 2, &obs).is_none());
+    }
+
+    #[test]
+    fn rm_cs_deterministic_across_runs() {
+        let observations = vec![
+            (0, 0, 100.0),
+            (0, 1, 80.0),
+            (0, 2, 60.0),
+            (0, 3, 40.0),
+            (1, 0, 110.0),
+            (1, 1, 88.0),
+            (1, 2, 65.0),
+            (1, 3, 45.0),
+            (2, 0, 95.0),
+            (2, 1, 78.0),
+            (2, 2, 58.0),
+            (2, 3, 38.0),
+        ];
+        let a = repeated_measures_cs_anova(3, 4, &observations).unwrap();
+        let b = repeated_measures_cs_anova(3, 4, &observations).unwrap();
+        assert_eq!(a.f_time.to_bits(), b.f_time.to_bits());
+        assert_eq!(a.p_time.to_bits(), b.p_time.to_bits());
+        assert_eq!(a.ss_subject.to_bits(), b.ss_subject.to_bits());
+        assert_eq!(a.ss_time.to_bits(), b.ss_time.to_bits());
         assert_eq!(a.ss_error.to_bits(), b.ss_error.to_bits());
     }
 }

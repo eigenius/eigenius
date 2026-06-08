@@ -53,8 +53,8 @@ use eigenius_kernel::ontology::well_known as wk;
 use crate::institution::iris;
 use crate::institution::StatisticsInstitution;
 use crate::numerics::{
-    factorial_omnibus_anova, one_sample_t_test, paired_t_test, rcbd_anova, splitplot_anova,
-    two_sample_t_test, TwoSampleVariance,
+    factorial_omnibus_anova, one_sample_t_test, paired_t_test, rcbd_anova,
+    repeated_measures_cs_anova, splitplot_anova, two_sample_t_test, TwoSampleVariance,
 };
 
 /// Top-level handler called by `StatisticsInstitution::query`.
@@ -427,6 +427,101 @@ pub fn do_validate_measurement_claim(
                 );
                 (f_stat, p_value, Some(note))
             }
+            DispatchPos::RepeatedMeasures => {
+                // RepeatedMeasures: observations is a flat float array
+                // `[subject_0, time_0, value_0, subject_1, time_1,
+                // value_1, ...]` — 3 floats per observation, total
+                // length `3 * n_subjects * n_timepoints`. The
+                // `Longitudinal(n_timepoints)` ctor on the repeated-
+                // measures axis gives n_timepoints; n_subjects is
+                // inferred from observation count.
+                //
+                // The autocorrelation_structure on the claim picks
+                // which numerics arm runs. Phase 4.9 v1 wires only
+                // CompoundSymmetry (algebraically equivalent to
+                // RCBD with subject as block). AR(1) and Unstructured
+                // surface "not yet wired" diagnostics until their
+                // numerics land.
+                let n_timepoints =
+                    match decode_longitudinal_timepoints(&bundle.repeated_measures_raw) {
+                        Some(t) => t,
+                        None => {
+                            return Ok(verdict_fails(
+                                "RepeatedMeasures requires Longitudinal(n_timepoints) in the \
+                             repeated_measures slot with n_timepoints ≥ 2"
+                                    .into(),
+                            ));
+                        }
+                    };
+                // autocorrelation_structure routing. Read the claim's
+                // optional `autocorrelation_structure` property; default
+                // to CompoundSymmetry if absent (most common assumption;
+                // matches what a flat RM-ANOVA implicitly uses).
+                let autocorr = read_json_property(claim, iris::PROP_AUTOCORRELATION_STRUCTURE)?;
+                let autocorr_ctor = autocorr.as_ref().and_then(json_ctor_name);
+                match autocorr_ctor {
+                    Some("CompoundSymmetry") | None => {} // proceed with CS arm
+                    Some("AR1") => {
+                        return Ok(verdict_fails(
+                            "autocorrelation_structure = AR1 not yet wired (Phase 4.9 v1 \
+                             supports only CompoundSymmetry; AR(1) needs the ρ parameter and \
+                             generalized least squares — Phase 4.9.5)"
+                                .into(),
+                        ));
+                    }
+                    Some("Unstructured") => {
+                        return Ok(verdict_fails(
+                            "autocorrelation_structure = Unstructured not yet wired (Phase 4.9 \
+                             v1 supports only CompoundSymmetry; Unstructured needs MANOVA-\
+                             style multivariate tests — Phase 4.9.5)"
+                                .into(),
+                        ));
+                    }
+                    Some(other) => {
+                        return Ok(verdict_fails(format!(
+                            "unknown autocorrelation_structure ctor `{other}` (expected \
+                             CompoundSymmetry / AR1 / Unstructured)"
+                        )));
+                    }
+                }
+                let observations = match decode_rm_observations(&bundle.observations_raw) {
+                    Ok(o) => o,
+                    Err(diag) => return Ok(verdict_fails(diag)),
+                };
+                // Infer n_subjects from total observation count.
+                if observations.len() % n_timepoints != 0 {
+                    return Ok(verdict_fails(format!(
+                        "RepeatedMeasures observation count ({}) is not a multiple of \
+                         n_timepoints ({n_timepoints}); each subject must be measured at \
+                         every timepoint exactly once (complete design)",
+                        observations.len()
+                    )));
+                }
+                let n_subjects = observations.len() / n_timepoints;
+                let res = match repeated_measures_cs_anova(n_subjects, n_timepoints, &observations)
+                {
+                    Some(r) => r,
+                    None => {
+                        return Ok(verdict_fails(format!(
+                            "RepeatedMeasures (CompoundSymmetry) preconditions failed: complete \
+                             design requires every (subject, timepoint) cell to have exactly one \
+                             observation (n_subjects = {n_subjects}, n_timepoints = \
+                             {n_timepoints}, n_obs = {})",
+                            observations.len()
+                        )));
+                    }
+                };
+                let note = format!(
+                    "RepeatedMeasures (CompoundSymmetry): time-effect F = {:.4}, df = ({}, {}), \
+                     n_subjects = {}, n_timepoints = {}",
+                    res.f_time,
+                    res.df_time as usize,
+                    res.df_error as usize,
+                    n_subjects,
+                    n_timepoints
+                );
+                (res.f_time, res.p_time, Some(note))
+            }
         };
 
     // ── Step 7: §7.4 epistemic-scope check ────────────────────────────
@@ -505,6 +600,11 @@ struct DecodedBundle {
     factor: String,
     replication: ReplicationKind,
     repeated_measures: String,
+    /// Raw repeated-measures-slot JSON. Phase 4.9's RepeatedMeasures
+    /// dispatch reads the `Longitudinal(n_timepoints)` ctor's integer
+    /// arg from here; future repeated-measures variants with extra
+    /// parameters will extract similarly.
+    repeated_measures_raw: serde_json::Value,
     /// D52 §5.3 / Phase 3 MAE-style biological-unit list.
     /// Empty (`Units([])`) for Tier 1 dispatches where unit identity
     /// is implicit in observation row order. Populated by Phase 4
@@ -561,6 +661,7 @@ enum DispatchPos {
     Factorial,
     RCBD,
     SplitPlot,
+    RepeatedMeasures,
 }
 
 fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
@@ -588,6 +689,7 @@ fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
     let repeated_measures = json_ctor_name(&args[4])
         .ok_or_else(|| "repeated_measures slot is not a ctor".to_string())?
         .to_string();
+    let repeated_measures_raw = args[4].clone();
     let units = decode_biological_units(&args[5])?;
     let columns = decode_assay_columns(&args[6])?;
     let sample_map = decode_sample_map(&args[7])?;
@@ -602,6 +704,7 @@ fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
         factor,
         replication,
         repeated_measures,
+        repeated_measures_raw,
         units,
         columns,
         sample_map,
@@ -812,6 +915,61 @@ fn decode_splitplot_blocking(j: &serde_json::Value) -> Option<(usize, usize)> {
         return None;
     }
     Some((a as usize, r as usize))
+}
+
+/// D52 Phase 4.9 — extract `n_timepoints` from the
+/// `Longitudinal(n_timepoints)` ctor in the repeated-measures slot.
+/// Returns `None` for `CrossSectional` (which dispatches elsewhere)
+/// or when the arg isn't a positive integer ≥ 2.
+fn decode_longitudinal_timepoints(j: &serde_json::Value) -> Option<usize> {
+    if json_ctor_name(j)? != "Longitudinal" {
+        return None;
+    }
+    let args = j["args"].as_array()?;
+    if args.len() != 1 {
+        return None;
+    }
+    let n = args[0].as_i64()?;
+    if n < 2 {
+        return None;
+    }
+    Some(n as usize)
+}
+
+/// D52 Phase 4.9 — decode the RepeatedMeasures observations payload:
+/// a flat float array of `[subject_0, time_0, value_0, subject_1,
+/// time_1, value_1, ...]` — 3 floats per observation. Returns the
+/// parsed `(subject_idx, time_idx, value)` tuples ready for
+/// [`repeated_measures_cs_anova`]; fractional or negative indices
+/// are decode errors.
+fn decode_rm_observations(j: &serde_json::Value) -> Result<Vec<(usize, usize, f64)>, String> {
+    let flat =
+        decode_flat_observations(j).map_err(|e| format!("RepeatedMeasures observations: {e}"))?;
+    if flat.len() % 3 != 0 {
+        return Err(format!(
+            "RepeatedMeasures observations must have a multiple of 3 floats (got {} — \
+             each row is `[subject_idx, time_idx, value]`)",
+            flat.len()
+        ));
+    }
+    flat.chunks_exact(3)
+        .enumerate()
+        .map(|(row_idx, chunk)| {
+            let subject = chunk[0];
+            let time = chunk[1];
+            if subject < 0.0 || subject.fract() != 0.0 {
+                return Err(format!(
+                    "RepeatedMeasures row {row_idx} subject_idx must be a non-negative integer, got {subject}"
+                ));
+            }
+            if time < 0.0 || time.fract() != 0.0 {
+                return Err(format!(
+                    "RepeatedMeasures row {row_idx} time_idx must be a non-negative integer, got {time}"
+                ));
+            }
+            Ok((subject as usize, time as usize, chunk[2]))
+        })
+        .collect()
 }
 
 /// D52 Phase 4.5 — decode the SplitPlot observations payload: a flat
@@ -1040,6 +1198,9 @@ fn dispatch_product_position(bundle: &DecodedBundle) -> Option<DispatchPos> {
         ("Restricted", "RCB", "SingleFactor", "CrossSectional") => Some(DispatchPos::RCBD),
         ("Restricted", "SplitPlotBlocking", "FullFactorial", "CrossSectional") => {
             Some(DispatchPos::SplitPlot)
+        }
+        ("CompleteRandom", "Unblocked", "SingleFactor", "Longitudinal") => {
+            Some(DispatchPos::RepeatedMeasures)
         }
         _ => None,
     }

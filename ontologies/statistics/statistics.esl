@@ -491,10 +491,47 @@ macro stats:SplitPlot(
         observations,
     );
 
-// Additional Tier 2 smart constructors (RepeatedMeasures) land in
-// follow-on commits as the corresponding verifier procedures land in
-// the Rust institution. Each is a one-macro addition over an
-// existing product position.
+// Repeated-Measures design (time-only / no between-subjects factors,
+// per D52 §5.2.3's `factors = []` case). N subjects each measured at
+// T timepoints — `N * T` observations total, each row is `[subject_id,
+// time_idx, value]` (3 floats per observation). Subject is the
+// random-effect axis; time is the within-subjects fixed factor.
+//
+// Lands at product position `(CompleteRandom, Unblocked, SingleFactor,
+// _, Longitudinal(n_timepoints))`. The `Longitudinal(T)` ctor on the
+// repeated-measures axis is what distinguishes this dispatch from the
+// IID position — both have `(CompleteRandom, Unblocked, SingleFactor)`
+// at the first three axes, but IID is CrossSectional while RM is
+// Longitudinal.
+//
+// The autocorrelation structure (AR(1) / CompoundSymmetry /
+// Unstructured) is asserted on the MeasurementClaim, not encoded on
+// the SampleSet — the claim's `autocorrelation_structure` field
+// per D52 §3 / §12 #5. Phase 4.9 v1 wires only the CompoundSymmetry
+// case (algebraically equivalent to RCBD with subject as block);
+// AR(1) and Unstructured surface "not yet wired" diagnostics until
+// their numerics land in Phase 4.9.5+.
+//
+// **Within-subjects factorial RM** (D52 §5.2.3's `factors.len() >= 1`
+// case — drug × dose × time on the same subjects) is a separate
+// macro variant deferred to Phase 4.9.5; this v1 macro is time-only.
+macro stats:RepeatedMeasures(
+    n_subjects    : core:integer,
+    n_timepoints  : core:integer,
+    observations  : core:value_array,
+    replication   : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        CompleteRandom(),
+        Unblocked(),
+        SingleFactor(),
+        replication,
+        Longitudinal(n_timepoints),
+        Units([]),
+        Columns([]),
+        Entries([]),
+        observations,
+    );
 
 // ── SampleSetResource (chain-resident SampleSet carrier) ─────────────
 //

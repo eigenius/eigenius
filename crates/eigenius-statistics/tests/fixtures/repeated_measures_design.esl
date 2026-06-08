@@ -1,0 +1,118 @@
+// D52 Phase 4.9 fixture — Repeated-Measures (CompoundSymmetry).
+//
+// Domain: drug clearance from blood serum measured at multiple
+// timepoints in the same 5 patients. Each patient has a baseline
+// concentration at t=0 followed by a clear monotone decline as
+// the drug is metabolized. The within-patient time effect is what
+// scientifically matters; between-patient baseline variation is
+// nuisance to control for.
+//
+// Setup: 5 subjects × 4 timepoints = 20 observations. Observations
+// encoded as `[subject_id, time_idx, value]` rows (3 floats per
+// observation, 60 floats total). Patient baselines vary slightly
+// (95–110); each patient declines roughly -20 units per timepoint
+// step. The time effect is clean.
+//
+// Autocorrelation structure asserted as CompoundSymmetry on the
+// claim (the v1 RM-ANOVA-supported case). AR(1) and Unstructured
+// land in Phase 4.9.5+ — they need GLS / MANOVA-style numerics.
+//
+// Lands at product position `(CompleteRandom, Unblocked,
+// SingleFactor, _, Longitudinal(4))`. The `Longitudinal(T)` axis
+// distinguishes this dispatch from the cross-sectional IID position
+// — both have `(CompleteRandom, Unblocked, SingleFactor)` on the
+// first three axes but only RM has `Longitudinal(T)`.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace stats      = "urn:eigenius:measurements";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace pk         = "urn:eigenius:demo:pk";
+
+// ─── Domain predicate ──────────────────────────────────────────────
+
+data pk:DrugClearanceOverTime : core:string -> Prop, stats:PopulationLevel {
+}
+
+// ─── SampleSet: 5 patients × 4 timepoints ─────────────────────────
+
+resource pk:clearance_study_2026_05_15 : stats:SampleSetResource {
+    reflection:source      = "clinical-trial-record:pk-clearance-2026-05-15";
+    reflection:observed_at = "2026-05-15T08:00:00Z";
+
+    stats:sample_set_value = stats:RepeatedMeasures(
+        5,    // n_subjects
+        4,    // n_timepoints
+        [
+            // Patient 0
+            0.0, 0.0, 100.0,
+            0.0, 1.0,  80.0,
+            0.0, 2.0,  60.0,
+            0.0, 3.0,  40.0,
+            // Patient 1
+            1.0, 0.0, 110.0,
+            1.0, 1.0,  88.0,
+            1.0, 2.0,  65.0,
+            1.0, 3.0,  45.0,
+            // Patient 2
+            2.0, 0.0,  95.0,
+            2.0, 1.0,  78.0,
+            2.0, 2.0,  58.0,
+            2.0, 3.0,  38.0,
+            // Patient 3
+            3.0, 0.0, 105.0,
+            3.0, 1.0,  85.0,
+            3.0, 2.0,  63.0,
+            3.0, 3.0,  43.0,
+            // Patient 4
+            4.0, 0.0, 100.0,
+            4.0, 1.0,  82.0,
+            4.0, 2.0,  62.0,
+            4.0, 3.0,  42.0,
+        ],
+        BiologicalReplication(),
+    );
+}
+
+resource pk:clearance_study_trace : reflection:ObservationTrace {
+    reflection:resource  = pk:clearance_study_2026_05_15;
+    reflection:source    = "clinical-trial-record:pk-clearance-2026-05-15";
+    reflection:timestamp = "2026-05-15T08:00:00Z";
+}
+
+// ─── The repeated-measures MeasurementClaim ────────────────────────
+
+resource pk:claim_drug_clears_over_time : stats:MeasurementClaim {
+    stats:sample_set = pk:clearance_study_2026_05_15;
+
+    stats:null_hypothesis = type_expr(
+        pk:DrugClearanceOverTime("urn:eigenius:demo:pk:study_2026_05_15")
+    );
+
+    stats:alternative_hypothesis = type_expr(
+        pk:DrugClearanceOverTime("urn:eigenius:demo:pk:study_2026_05_15")
+    );
+
+    reflection:canonical_proposition = type_expr(
+        pk:DrugClearanceOverTime("urn:eigenius:demo:pk:study_2026_05_15")
+    );
+
+    stats:alpha = 0.05;
+    stats:effect_size = Absolute(20.0, "concentration_units_per_timepoint");
+    stats:directionality = TwoSided();
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion = Identity();
+    // The §12 #5 author-asserted autocorrelation structure. v1
+    // RM dispatch wires only CompoundSymmetry; the verifier reads
+    // this field, dispatches the matching numerics arm, and reports
+    // the time-effect F-test from compound-symmetry univariate
+    // RM-ANOVA.
+    stats:autocorrelation_structure = CompoundSymmetry();
+}
+
+resource pk:claim_drug_clears_over_time_trace : reflection:ProgramTrace {
+    reflection:resource  = pk:claim_drug_clears_over_time;
+    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:timestamp = "2026-05-15T08:00:00Z";
+}
