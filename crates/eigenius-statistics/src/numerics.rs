@@ -602,6 +602,329 @@ pub struct RCBDResult {
     pub ss_error: f64,
 }
 
+/// Split-Plot ANOVA — D52 Phase 4.5 / §5.2 `SplitPlot`.
+///
+/// Two-factor design where one factor (the *whole-plot* factor `W`)
+/// is hard to randomize and applied to whole-plot units, and the
+/// other factor (the *subplot* factor `S`) is applied within each
+/// whole-plot to the subplots. The key structural difference from a
+/// flat factorial is that whole-plot-level variation lives in a
+/// *separate, larger* error stratum than subplot-level variation,
+/// and the W main-effect F-test must use the **whole-plot error**,
+/// not the subplot error.
+///
+/// This is the false-positive trap D52 §5.2 calls out: applying a
+/// flat factorial ANOVA to split-plot data uses the smaller subplot
+/// error for every F-test, including the W main effect, and produces
+/// massively inflated F_W values (rejecting H0 when the whole-plot
+/// effect is actually noise).
+///
+/// **Design parameters**:
+/// - `a` — number of whole-plot factor levels
+/// - `b` — number of subplot factor levels
+/// - `r` — number of whole-plot replicates per whole-plot level
+///   (so `a * r` whole plots total, each containing `b` subplot
+///   observations; `n_total = a * b * r`)
+///
+/// **Observations**: each entry is `(whole_plot_id, w_level, s_level,
+/// value)`. Whole-plot ids must form a contiguous `0..a*r` range with
+/// each id appearing in exactly `b` observations (one per subplot
+/// level). The verifier enforces this — a missing or duplicated
+/// (whole_plot, s_level) cell fails the design.
+///
+/// **Sum-of-squares decomposition**:
+/// - `SS_W` = `b·r · Σ_w (ȳ_w.. − ȳ...)²` — whole-plot factor effect
+/// - `SS_WP_within_W` = `b · Σ_wp (ȳ_wp.. − ȳ_w(wp)..)²` — whole-plot
+///   replicate effect nested within W; this IS the whole-plot error
+/// - `SS_S` = `a·r · Σ_s (ȳ_..s − ȳ...)²` — subplot factor effect
+/// - `SS_WS` = `r · Σ_w,s (ȳ_w.s − ȳ_w.. − ȳ_..s + ȳ...)²` — interaction
+/// - `SS_error` (subplot error) = `SS_total − SS_W − SS_WP_within_W
+///   − SS_S − SS_WS` — but as with RCBD, computed directly from
+///   residuals under the additive cell-mean model to avoid
+///   catastrophic cancellation
+///
+/// **F-tests**:
+/// - `F_W = MS_W / MS_WP_within_W` ~ F(a−1, a(r−1))
+/// - `F_S = MS_S / MS_error` ~ F(b−1, a(b−1)(r−1))
+/// - `F_WS = MS_WS / MS_error` ~ F((a−1)(b−1), a(b−1)(r−1))
+///
+/// Returns `None` when:
+/// - `a < 2`, `b < 2`, or `r < 2` (no degrees of freedom available)
+/// - `observations.len() != a*b*r`
+/// - any (whole_plot_id, s_level) cell has != 1 observation
+/// - whole_plot ids are out of `0..a*r` range
+/// - the w_level assigned to a whole_plot is inconsistent across
+///   its subplot observations (each whole plot has one W level)
+pub fn splitplot_anova(
+    a: usize,
+    b: usize,
+    r: usize,
+    observations: &[(usize, usize, usize, f64)],
+) -> Option<SplitPlotResult> {
+    if a < 2 || b < 2 || r < 2 {
+        return None;
+    }
+    let n_total = a * b * r;
+    if observations.len() != n_total {
+        return None;
+    }
+    let n_whole_plots = a * r;
+
+    // Build the (whole_plot × s_level) cell matrix and validate
+    // design discipline along the way.
+    let mut cell: Vec<Vec<Option<f64>>> = (0..n_whole_plots).map(|_| vec![None; b]).collect();
+    // For each whole plot, record its w_level (must be consistent
+    // across the b subplot observations).
+    let mut wp_to_w: Vec<Option<usize>> = vec![None; n_whole_plots];
+    for &(wp, w, s, v) in observations {
+        if wp >= n_whole_plots || w >= a || s >= b {
+            return None;
+        }
+        if cell[wp][s].is_some() {
+            return None; // duplicate (whole_plot, s_level) cell
+        }
+        cell[wp][s] = Some(v);
+        match wp_to_w[wp] {
+            Some(prev) if prev != w => return None, // inconsistent w_level for this whole_plot
+            _ => wp_to_w[wp] = Some(w),
+        }
+    }
+    for row in &cell {
+        for c in row {
+            if c.is_none() {
+                return None; // missing (whole_plot, s_level) cell
+            }
+        }
+    }
+    // Validate each W level has exactly `r` whole plots.
+    let mut wp_per_w = vec![0usize; a];
+    for &maybe_w in &wp_to_w {
+        wp_per_w[maybe_w.expect("validated above")] += 1;
+    }
+    if wp_per_w.iter().any(|&n| n != r) {
+        return None;
+    }
+
+    let n_total_f = n_total as f64;
+    let a_f = a as f64;
+    let b_f = b as f64;
+    let r_f = r as f64;
+
+    let grand_mean: f64 = observations.iter().map(|(_, _, _, v)| v).sum::<f64>() / n_total_f;
+
+    // Per-whole-plot means (ȳ_wp..): average over the b subplot
+    // observations within each whole plot.
+    let wp_means: Vec<f64> = (0..n_whole_plots)
+        .map(|wp| {
+            let sum: f64 = (0..b).map(|s| cell[wp][s].expect("validated")).sum();
+            sum / b_f
+        })
+        .collect();
+
+    // Per-W-level means (ȳ_w..): average over the r whole plots within
+    // each W level (each contributing b subplot observations).
+    let w_means: Vec<f64> = (0..a)
+        .map(|w| {
+            let sum: f64 = wp_to_w
+                .iter()
+                .enumerate()
+                .filter_map(|(wp, mw)| {
+                    if mw.unwrap() == w {
+                        Some(wp_means[wp])
+                    } else {
+                        None
+                    }
+                })
+                .sum();
+            sum / r_f
+        })
+        .collect();
+
+    // Per-S-level means (ȳ_..s): average over a·r observations
+    // (one per whole plot at this s level).
+    let s_means: Vec<f64> = (0..b)
+        .map(|s| {
+            let sum: f64 = (0..n_whole_plots)
+                .map(|wp| cell[wp][s].expect("validated"))
+                .sum();
+            sum / (a_f * r_f)
+        })
+        .collect();
+
+    // Per-(W, S) cell means (ȳ_w.s): average over the r whole plots
+    // at W level w, taking each whole plot's value at s level s.
+    let ws_means: Vec<Vec<f64>> = (0..a)
+        .map(|w| {
+            (0..b)
+                .map(|s| {
+                    let sum: f64 = wp_to_w
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(wp, mw)| {
+                            if mw.unwrap() == w {
+                                Some(cell[wp][s].expect("validated"))
+                            } else {
+                                None
+                            }
+                        })
+                        .sum();
+                    sum / r_f
+                })
+                .collect()
+        })
+        .collect();
+
+    // SS_W: b·r · Σ (ȳ_w.. − ȳ...)²
+    let ss_w: f64 = b_f
+        * r_f
+        * w_means
+            .iter()
+            .map(|m| (m - grand_mean).powi(2))
+            .sum::<f64>();
+
+    // SS_WP_within_W (whole-plot error): b · Σ_wp (ȳ_wp.. − ȳ_w(wp)..)²
+    let ss_wp_within_w: f64 = b_f
+        * wp_to_w
+            .iter()
+            .enumerate()
+            .map(|(wp, mw)| (wp_means[wp] - w_means[mw.unwrap()]).powi(2))
+            .sum::<f64>();
+
+    // SS_S: a·r · Σ (ȳ_..s − ȳ...)²
+    let ss_s: f64 = a_f
+        * r_f
+        * s_means
+            .iter()
+            .map(|m| (m - grand_mean).powi(2))
+            .sum::<f64>();
+
+    // SS_WS interaction: r · Σ_w,s (ȳ_w.s − ȳ_w.. − ȳ_..s + ȳ...)²
+    let ss_ws: f64 = r_f
+        * (0..a)
+            .flat_map(|w| (0..b).map(move |s| (w, s)))
+            .map(|(w, s)| {
+                let residual = ws_means[w][s] - w_means[w] - s_means[s] + grand_mean;
+                residual.powi(2)
+            })
+            .sum::<f64>();
+
+    // SS_error (subplot error): per-observation residual from the
+    // additive subplot model `ŷ_{wp,s} = ȳ_wp.. + ȳ_w(wp).s − ȳ_w(wp)..`
+    // Computed directly to avoid catastrophic cancellation (same
+    // motivation as the RCBD SS_error formula).
+    let ss_error: f64 = observations
+        .iter()
+        .map(|&(wp, _w, s, v)| {
+            let w = wp_to_w[wp].unwrap();
+            let predicted = wp_means[wp] + ws_means[w][s] - w_means[w];
+            (v - predicted).powi(2)
+        })
+        .sum();
+
+    let df_w = a_f - 1.0;
+    let df_wp_within_w = a_f * (r_f - 1.0);
+    let df_s = b_f - 1.0;
+    let df_ws = (a_f - 1.0) * (b_f - 1.0);
+    let df_error = a_f * (b_f - 1.0) * (r_f - 1.0);
+
+    let ms_w = ss_w / df_w;
+    let ms_wp_within_w = ss_wp_within_w / df_wp_within_w;
+    let ms_s = ss_s / df_s;
+    let ms_ws = ss_ws / df_ws;
+    let ms_error = ss_error / df_error;
+
+    // Whole-plot factor F-test: uses whole-plot error (the
+    // load-bearing distinction from a flat factorial ANOVA).
+    let f_w = compute_f(ms_w, ms_wp_within_w);
+    let p_w = f_pvalue(f_w, df_w, df_wp_within_w)?;
+
+    // Subplot factor F-test: uses subplot error.
+    let f_s = compute_f(ms_s, ms_error);
+    let p_s = f_pvalue(f_s, df_s, df_error)?;
+
+    // Interaction F-test: uses subplot error.
+    let f_ws = compute_f(ms_ws, ms_error);
+    let p_ws = f_pvalue(f_ws, df_ws, df_error)?;
+
+    Some(SplitPlotResult {
+        f_w,
+        p_w,
+        f_s,
+        p_s,
+        f_ws,
+        p_ws,
+        df_w,
+        df_wp_within_w,
+        df_s,
+        df_ws,
+        df_error,
+        a,
+        b,
+        r,
+        grand_mean,
+        ss_w,
+        ss_wp_within_w,
+        ss_s,
+        ss_ws,
+        ss_error,
+    })
+}
+
+/// Compute F-statistic with the degenerate-zero-error case handled
+/// consistently across split-plot's three F-tests.
+fn compute_f(ms_num: f64, ms_denom: f64) -> f64 {
+    if ms_denom == 0.0 {
+        if ms_num == 0.0 {
+            0.0
+        } else {
+            f64::INFINITY
+        }
+    } else {
+        ms_num / ms_denom
+    }
+}
+
+/// One-sided F-distribution p-value with NaN / infinite-F handling.
+/// Returns `None` only on FisherSnedecor-construction failure (df
+/// must be > 0 — already validated by the calling design check).
+fn f_pvalue(f_stat: f64, df_num: f64, df_denom: f64) -> Option<f64> {
+    let dist = FisherSnedecor::new(df_num, df_denom).ok()?;
+    Some(if f_stat.is_finite() {
+        1.0 - dist.cdf(f_stat)
+    } else if f_stat.is_nan() {
+        f64::NAN
+    } else {
+        0.0
+    })
+}
+
+/// Numeric output of a split-plot ANOVA. Carries all three F-tests
+/// (whole-plot factor, subplot factor, W×S interaction) plus the full
+/// sum-of-squares + df decomposition for audit (D52 §6).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SplitPlotResult {
+    pub f_w: f64,
+    pub p_w: f64,
+    pub f_s: f64,
+    pub p_s: f64,
+    pub f_ws: f64,
+    pub p_ws: f64,
+    pub df_w: f64,
+    pub df_wp_within_w: f64,
+    pub df_s: f64,
+    pub df_ws: f64,
+    pub df_error: f64,
+    pub a: usize,
+    pub b: usize,
+    pub r: usize,
+    pub grand_mean: f64,
+    pub ss_w: f64,
+    pub ss_wp_within_w: f64,
+    pub ss_s: f64,
+    pub ss_ws: f64,
+    pub ss_error: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1141,5 +1464,228 @@ mod tests {
         assert_eq!(a.p_value.to_bits(), b.p_value.to_bits());
         assert_eq!(a.ss_between.to_bits(), b.ss_between.to_bits());
         assert_eq!(a.ss_within.to_bits(), b.ss_within.to_bits());
+    }
+
+    // ── Split-Plot ANOVA (Phase 4.5) ──────────────────────────────
+
+    /// 2×2 split-plot with 3 whole-plot replicates per W level.
+    /// Whole-plot factor: temperature (2 levels: 37, 30). Subplot
+    /// factor: drug (2 levels: control, drug).
+    ///
+    /// Whole plots:
+    ///   WP 0: W=0 (37°C), reps with (ctrl=50, drug=45)
+    ///   WP 1: W=0,        (ctrl=51, drug=46)
+    ///   WP 2: W=0,        (ctrl=52, drug=47)
+    ///   WP 3: W=1 (30°C), (ctrl=70, drug=65)
+    ///   WP 4: W=1,        (ctrl=71, drug=66)
+    ///   WP 5: W=1,        (ctrl=72, drug=67)
+    ///
+    /// Per-W means: 37°C → 47.5, 30°C → 68.5; difference 21.
+    /// Per-S means: ctrl → 61, drug → 56; difference 5.
+    /// Per-cell means cleanly additive (no interaction).
+    /// Whole-plot error per W is small (within-W whole-plot variance ±1).
+    /// Subplot error is tiny (within-WP additive structure).
+    #[test]
+    fn splitplot_2x2x3_detects_both_main_effects() {
+        let observations = vec![
+            // (whole_plot_id, w_level, s_level, value)
+            (0, 0, 0, 50.0),
+            (0, 0, 1, 45.0),
+            (1, 0, 0, 51.0),
+            (1, 0, 1, 46.0),
+            (2, 0, 0, 52.0),
+            (2, 0, 1, 47.0),
+            (3, 1, 0, 70.0),
+            (3, 1, 1, 65.0),
+            (4, 1, 0, 71.0),
+            (4, 1, 1, 66.0),
+            (5, 1, 0, 72.0),
+            (5, 1, 1, 67.0),
+        ];
+        let result = splitplot_anova(2, 2, 3, &observations).expect("complete 2x2x3 split-plot");
+        assert_eq!(result.a, 2);
+        assert_eq!(result.b, 2);
+        assert_eq!(result.r, 3);
+        // df_W = a-1 = 1; df_WP_within_W = a(r-1) = 4
+        // df_S = b-1 = 1; df_WS = (a-1)(b-1) = 1
+        // df_error = a(b-1)(r-1) = 4
+        assert_eq!(result.df_w, 1.0);
+        assert_eq!(result.df_wp_within_w, 4.0);
+        assert_eq!(result.df_s, 1.0);
+        assert_eq!(result.df_ws, 1.0);
+        assert_eq!(result.df_error, 4.0);
+        // Grand mean = (50+45+51+46+52+47+70+65+71+66+72+67)/12 = 58.5
+        assert!((result.grand_mean - 58.5).abs() < 1e-9);
+
+        // F_W: whole-plot factor with whole-plot error. With temp
+        // means 47.5 vs 68.5 (diff 21) and WP variance ±1 within
+        // each W level, F_W is huge — but it MUST use the whole-plot
+        // error (not the tiny subplot error).
+        assert!(
+            result.p_w < 0.001,
+            "p_w should reject the whole-plot main effect; got {}",
+            result.p_w
+        );
+        // F_S: subplot factor with subplot error. Drug effect of -5
+        // is consistent across all whole plots; subplot error is ~0
+        // (additive model is exact). F_S enormous.
+        assert!(
+            result.p_s < 0.001,
+            "p_s should reject the subplot main effect; got {}",
+            result.p_s
+        );
+        // F_WS: no interaction in this design. p_ws should be high
+        // (the additive structure is exact, so the interaction term
+        // is zero / numerical noise).
+        assert!(
+            result.p_ws > 0.5 || result.ss_ws < 1e-9,
+            "p_ws should be high (or SS_WS near zero) for additive design; got p_ws = {}, SS_WS = {}",
+            result.p_ws,
+            result.ss_ws
+        );
+    }
+
+    /// The false-positive-trap regression test. Same data treated as
+    /// a flat factorial WOULD give a hugely inflated F_W (because
+    /// it'd be computed against the tiny subplot error). The
+    /// correctness check: in the split-plot dispatch, F_W is computed
+    /// against MS_WP_within_W (whole-plot error), which is larger
+    /// than MS_error (subplot error). Verify the relationship.
+    #[test]
+    fn splitplot_uses_correct_error_stratum_for_whole_plot_f() {
+        let observations = vec![
+            (0, 0, 0, 50.0),
+            (0, 0, 1, 45.0),
+            (1, 0, 0, 51.0),
+            (1, 0, 1, 46.0),
+            (2, 0, 0, 52.0),
+            (2, 0, 1, 47.0),
+            (3, 1, 0, 70.0),
+            (3, 1, 1, 65.0),
+            (4, 1, 0, 71.0),
+            (4, 1, 1, 66.0),
+            (5, 1, 0, 72.0),
+            (5, 1, 1, 67.0),
+        ];
+        let r = splitplot_anova(2, 2, 3, &observations).unwrap();
+        let ms_wp_within_w = r.ss_wp_within_w / r.df_wp_within_w;
+        let ms_error = r.ss_error / r.df_error;
+        // The whole-plot error stratum is larger than the subplot
+        // error stratum (this is the structural property of
+        // split-plot designs — whole-plot replicates carry more
+        // variance than within-whole-plot subplot variation).
+        // SS_error here is near zero (additive structure exact)
+        // while SS_WP_within_W reflects the ±1 jitter on whole-plot
+        // means within each W level.
+        assert!(
+            ms_wp_within_w > ms_error,
+            "MS_WP_within_W ({}) must be larger than MS_error ({}) — \
+             the whole-plot error stratum is the structurally larger one",
+            ms_wp_within_w,
+            ms_error
+        );
+    }
+
+    /// Null whole-plot main effect: temperature levels have the same
+    /// means; only subplot factor matters. F_W should be small,
+    /// p_w high.
+    #[test]
+    fn splitplot_null_whole_plot_effect_yields_high_p_w() {
+        // Both W levels have mean ~55; only drug effect matters.
+        let observations = vec![
+            (0, 0, 0, 60.0),
+            (0, 0, 1, 50.0),
+            (1, 0, 0, 61.0),
+            (1, 0, 1, 51.0),
+            (2, 0, 0, 59.0),
+            (2, 0, 1, 49.0),
+            (3, 1, 0, 60.0),
+            (3, 1, 1, 50.0),
+            (4, 1, 0, 61.0),
+            (4, 1, 1, 51.0),
+            (5, 1, 0, 59.0),
+            (5, 1, 1, 49.0),
+        ];
+        let r = splitplot_anova(2, 2, 3, &observations).unwrap();
+        assert!(
+            r.p_w > 0.3,
+            "p_w should be high when whole-plot levels have equal means; got {}",
+            r.p_w
+        );
+        assert!(
+            r.p_s < 0.001,
+            "p_s should reject when subplot factor has a clear effect; got {}",
+            r.p_s
+        );
+    }
+
+    #[test]
+    fn splitplot_rejects_inconsistent_w_level_per_whole_plot() {
+        // Whole plot 0 has both w=0 and w=1 — invalid: each whole
+        // plot must have a single W level.
+        let observations = vec![
+            (0, 0, 0, 1.0),
+            (0, 1, 1, 2.0), // INVALID: WP 0 declared w=1 here, but w=0 above
+            (1, 0, 0, 3.0),
+            (1, 0, 1, 4.0),
+            (2, 1, 0, 5.0),
+            (2, 1, 1, 6.0),
+            (3, 1, 0, 7.0),
+            (3, 1, 1, 8.0),
+        ];
+        assert!(splitplot_anova(2, 2, 2, &observations).is_none());
+    }
+
+    #[test]
+    fn splitplot_rejects_unbalanced_design() {
+        // 3 whole plots at W=0 but only 1 at W=1 → not balanced (r=2 expected).
+        let observations = vec![
+            (0, 0, 0, 1.0),
+            (0, 0, 1, 2.0),
+            (1, 0, 0, 3.0),
+            (1, 0, 1, 4.0),
+            (2, 0, 0, 5.0),
+            (2, 0, 1, 6.0),
+            (3, 1, 0, 7.0),
+            (3, 1, 1, 8.0),
+        ];
+        assert!(splitplot_anova(2, 2, 2, &observations).is_none());
+    }
+
+    #[test]
+    fn splitplot_rejects_min_size_violations() {
+        let obs = vec![(0, 0, 0, 1.0), (0, 0, 1, 2.0)];
+        // r = 1 invalid (no whole-plot replicates)
+        assert!(splitplot_anova(2, 2, 1, &obs).is_none());
+        // a = 1 invalid
+        assert!(splitplot_anova(1, 2, 2, &obs).is_none());
+        // b = 1 invalid
+        assert!(splitplot_anova(2, 1, 2, &obs).is_none());
+    }
+
+    #[test]
+    fn splitplot_deterministic_across_runs() {
+        let observations = vec![
+            (0, 0, 0, 50.0),
+            (0, 0, 1, 45.0),
+            (1, 0, 0, 51.0),
+            (1, 0, 1, 46.0),
+            (2, 0, 0, 52.0),
+            (2, 0, 1, 47.0),
+            (3, 1, 0, 70.0),
+            (3, 1, 1, 65.0),
+            (4, 1, 0, 71.0),
+            (4, 1, 1, 66.0),
+            (5, 1, 0, 72.0),
+            (5, 1, 1, 67.0),
+        ];
+        let a = splitplot_anova(2, 2, 3, &observations).unwrap();
+        let b = splitplot_anova(2, 2, 3, &observations).unwrap();
+        assert_eq!(a.f_w.to_bits(), b.f_w.to_bits());
+        assert_eq!(a.f_s.to_bits(), b.f_s.to_bits());
+        assert_eq!(a.f_ws.to_bits(), b.f_ws.to_bits());
+        assert_eq!(a.ss_w.to_bits(), b.ss_w.to_bits());
+        assert_eq!(a.ss_wp_within_w.to_bits(), b.ss_wp_within_w.to_bits());
+        assert_eq!(a.ss_error.to_bits(), b.ss_error.to_bits());
     }
 }

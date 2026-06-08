@@ -53,8 +53,8 @@ use eigenius_kernel::ontology::well_known as wk;
 use crate::institution::iris;
 use crate::institution::StatisticsInstitution;
 use crate::numerics::{
-    factorial_omnibus_anova, one_sample_t_test, paired_t_test, rcbd_anova, two_sample_t_test,
-    TwoSampleVariance,
+    factorial_omnibus_anova, one_sample_t_test, paired_t_test, rcbd_anova, splitplot_anova,
+    two_sample_t_test, TwoSampleVariance,
 };
 
 /// Top-level handler called by `StatisticsInstitution::query`.
@@ -172,171 +172,262 @@ pub fn do_validate_measurement_claim(
     // `(t_statistic, p_value_two_sided)` tuple the common verdict
     // builder consumes. Per-arm error returns short-circuit with a
     // structured-diagnostic Fails verdict (§6).
-    let (t_statistic, p_value_two_sided) = match dispatch {
-        DispatchPos::SingleSampleEstimate => {
-            // Only `EffectSize.Absolute(magnitude, units)` is wired in
-            // Phase 1. The one-sample test checks whether the
-            // SampleSet's mean falls on the asserted threshold's side.
-            let (magnitude, _units) = match parse_effect_size_absolute(&effect_size) {
-                Some(p) => p,
-                None => {
-                    return Ok(verdict_fails(
-                        "Phase 1 only supports EffectSize.Absolute(magnitude, units); \
+    // Each arm returns `(statistic, p_value, diagnostic_note)`.
+    // The diagnostic_note is `None` for arms with a single F/t-test;
+    // SplitPlot uses it to name which of its three F-tests produced
+    // the reported p-value.
+    let (t_statistic, p_value_two_sided, diagnostic_note): (f64, f64, Option<String>) =
+        match dispatch {
+            DispatchPos::SingleSampleEstimate => {
+                // Only `EffectSize.Absolute(magnitude, units)` is wired in
+                // Phase 1. The one-sample test checks whether the
+                // SampleSet's mean falls on the asserted threshold's side.
+                let (magnitude, _units) = match parse_effect_size_absolute(&effect_size) {
+                    Some(p) => p,
+                    None => {
+                        return Ok(verdict_fails(
+                            "Phase 1 only supports EffectSize.Absolute(magnitude, units); \
                          StandardizedCohensD/HedgesG and Relative not yet wired"
-                            .into(),
-                    ));
-                }
-            };
-            let samples = match decode_flat_observations(&bundle.observations_raw) {
-                Ok(s) => s,
-                Err(diag) => return Ok(verdict_fails(diag)),
-            };
-            let r = match one_sample_t_test(&samples, magnitude) {
-                Some(r) => r,
-                None => {
-                    return Ok(verdict_fails(format!(
+                                .into(),
+                        ));
+                    }
+                };
+                let samples = match decode_flat_observations(&bundle.observations_raw) {
+                    Ok(s) => s,
+                    Err(diag) => return Ok(verdict_fails(diag)),
+                };
+                let r = match one_sample_t_test(&samples, magnitude) {
+                    Some(r) => r,
+                    None => {
+                        return Ok(verdict_fails(format!(
                         "InsufficientReplication: one-sample t-test requires n >= 2, got n = {}",
                         samples.len()
                     )));
-                }
-            };
-            (r.t_statistic, r.p_value_two_sided)
-        }
-        DispatchPos::IID => {
-            // IID two-sample: observations is `[group_a, group_b]`
-            // (nested value-array). The two groups go to the
-            // two-sample t-test under the claim's variance assumption.
-            // EffectSize is read for the verdict's audit trail but the
-            // two-sample H0 (mean_a = mean_b) doesn't carry a
-            // numerical threshold — the "effect size" is the asserted
-            // *minimum* mean difference; v1 dispatches on p < alpha
-            // alone and notes the threshold in the diagnostic.
-            let (group_a, group_b) = match decode_two_group_observations(&bundle.observations_raw) {
-                Ok(pair) => pair,
-                Err(diag) => return Ok(verdict_fails(diag)),
-            };
-            let variance = match variance_assumption.as_ref().and_then(json_ctor_name) {
-                Some("Pooled") => TwoSampleVariance::Pooled,
-                Some("WelchUnequal") => TwoSampleVariance::WelchUnequal,
-                Some(other) => {
-                    return Ok(verdict_fails(format!(
-                        "IID two-sample with variance_assumption `{other}` not yet wired \
+                    }
+                };
+                (r.t_statistic, r.p_value_two_sided, None)
+            }
+            DispatchPos::IID => {
+                // IID two-sample: observations is `[group_a, group_b]`
+                // (nested value-array). The two groups go to the
+                // two-sample t-test under the claim's variance assumption.
+                // EffectSize is read for the verdict's audit trail but the
+                // two-sample H0 (mean_a = mean_b) doesn't carry a
+                // numerical threshold — the "effect size" is the asserted
+                // *minimum* mean difference; v1 dispatches on p < alpha
+                // alone and notes the threshold in the diagnostic.
+                let (group_a, group_b) =
+                    match decode_two_group_observations(&bundle.observations_raw) {
+                        Ok(pair) => pair,
+                        Err(diag) => return Ok(verdict_fails(diag)),
+                    };
+                let variance = match variance_assumption.as_ref().and_then(json_ctor_name) {
+                    Some("Pooled") => TwoSampleVariance::Pooled,
+                    Some("WelchUnequal") => TwoSampleVariance::WelchUnequal,
+                    Some(other) => {
+                        return Ok(verdict_fails(format!(
+                            "IID two-sample with variance_assumption `{other}` not yet wired \
                          (Phase 1.5 supports Pooled / WelchUnequal; NonParametric / RankBased \
                          are follow-on)"
-                    )));
-                }
-                None => TwoSampleVariance::WelchUnequal,
-            };
-            let r = match two_sample_t_test(&group_a, &group_b, variance) {
-                Some(r) => r,
-                None => {
-                    return Ok(verdict_fails(format!(
-                        "InsufficientReplication: two-sample t-test requires n >= 2 in each \
+                        )));
+                    }
+                    None => TwoSampleVariance::WelchUnequal,
+                };
+                let r = match two_sample_t_test(&group_a, &group_b, variance) {
+                    Some(r) => r,
+                    None => {
+                        return Ok(verdict_fails(format!(
+                            "InsufficientReplication: two-sample t-test requires n >= 2 in each \
                          group, got n_a = {}, n_b = {}",
-                        group_a.len(),
-                        group_b.len()
-                    )));
-                }
-            };
-            (r.t_statistic, r.p_value_two_sided)
-        }
-        DispatchPos::Paired => {
-            // Paired: observations is a flat array `[b0, a0, b1, a1,
-            // ..., bn, an]` of before/after pairs interleaved. Chunk
-            // into (before, after) tuples and run the paired t-test
-            // (= one-sample t-test on the per-pair differences vs 0).
-            let pairs = match decode_paired_observations(&bundle.observations_raw) {
-                Ok(p) => p,
-                Err(diag) => return Ok(verdict_fails(diag)),
-            };
-            let r = match paired_t_test(&pairs) {
-                Some(r) => r,
-                None => {
-                    return Ok(verdict_fails(format!(
-                        "InsufficientReplication: paired t-test requires n_pairs >= 2, got {}",
-                        pairs.len()
-                    )));
-                }
-            };
-            (r.t_statistic, r.p_value_two_sided)
-        }
-        DispatchPos::Factorial => {
-            // Factorial: observations is `[factor_levels,
-            // flat_observations]` where flat_observations is a flat
-            // float array `[level_00, level_01, ..., level_0{k-1},
-            // value_0, level_10, ..., value_n]` — k+1 floats per
-            // observation. The verifier chunks it accordingly and
-            // runs the omnibus k-way ANOVA.
-            //
-            // Verdict reports the F-statistic as `computed_statistic`
-            // and the one-sided F-p-value as `computed_p_value`. The
-            // common verdict-builder is agnostic about whether the
-            // statistic is t or F; "computed_statistic" is the
-            // domain-neutral name.
-            let (factor_levels, observations) =
-                match decode_factorial_observations(&bundle.observations_raw) {
+                            group_a.len(),
+                            group_b.len()
+                        )));
+                    }
+                };
+                (r.t_statistic, r.p_value_two_sided, None)
+            }
+            DispatchPos::Paired => {
+                // Paired: observations is a flat array `[b0, a0, b1, a1,
+                // ..., bn, an]` of before/after pairs interleaved. Chunk
+                // into (before, after) tuples and run the paired t-test
+                // (= one-sample t-test on the per-pair differences vs 0).
+                let pairs = match decode_paired_observations(&bundle.observations_raw) {
                     Ok(p) => p,
                     Err(diag) => return Ok(verdict_fails(diag)),
                 };
-            let r = match factorial_omnibus_anova(&factor_levels, &observations) {
-                Some(r) => r,
-                None => {
-                    return Ok(verdict_fails(format!(
-                        "Factorial ANOVA preconditions failed: need ≥ 2 cells observed and \
+                let r = match paired_t_test(&pairs) {
+                    Some(r) => r,
+                    None => {
+                        return Ok(verdict_fails(format!(
+                            "InsufficientReplication: paired t-test requires n_pairs >= 2, got {}",
+                            pairs.len()
+                        )));
+                    }
+                };
+                (r.t_statistic, r.p_value_two_sided, None)
+            }
+            DispatchPos::Factorial => {
+                // Factorial: observations is `[factor_levels,
+                // flat_observations]` where flat_observations is a flat
+                // float array `[level_00, level_01, ..., level_0{k-1},
+                // value_0, level_10, ..., value_n]` — k+1 floats per
+                // observation. The verifier chunks it accordingly and
+                // runs the omnibus k-way ANOVA.
+                //
+                // Verdict reports the F-statistic as `computed_statistic`
+                // and the one-sided F-p-value as `computed_p_value`. The
+                // common verdict-builder is agnostic about whether the
+                // statistic is t or F; "computed_statistic" is the
+                // domain-neutral name.
+                let (factor_levels, observations) =
+                    match decode_factorial_observations(&bundle.observations_raw) {
+                        Ok(p) => p,
+                        Err(diag) => return Ok(verdict_fails(diag)),
+                    };
+                let r = match factorial_omnibus_anova(&factor_levels, &observations) {
+                    Some(r) => r,
+                    None => {
+                        return Ok(verdict_fails(format!(
+                            "Factorial ANOVA preconditions failed: need ≥ 2 cells observed and \
                          ≥ 1 within-cell df (factor_levels = {factor_levels:?}, n_obs = {})",
+                            observations.len()
+                        )));
+                    }
+                };
+                (r.f_statistic, r.p_value, None)
+            }
+            DispatchPos::RCBD => {
+                // RCBD: observations is a flat float array `[block_0,
+                // treatment_0, value_0, block_1, treatment_1, value_1,
+                // ...]`. The block-size argument on RCB(k) ctor in the
+                // blocking axis gives n_blocks; n_treatments is read off
+                // the dispatch's parallel state. Verifier runs two-way
+                // ANOVA with block as random and treatment as fixed;
+                // reports the treatment F-test.
+                let n_blocks = match decode_rcb_block_count(&bundle.blocking_raw) {
+                    Some(b) => b,
+                    None => {
+                        return Ok(verdict_fails(
+                            "RCBD requires RCB(n_blocks) in the blocking slot with n_blocks ≥ 3 \
+                         (PairedBlocking dispatches via stats:Paired)"
+                                .into(),
+                        ));
+                    }
+                };
+                let observations = match decode_rcbd_observations(&bundle.observations_raw) {
+                    Ok(o) => o,
+                    Err(diag) => return Ok(verdict_fails(diag)),
+                };
+                // n_treatments is inferred from observations: total_n /
+                // n_blocks must equal n_treatments and divide evenly.
+                if observations.len() % n_blocks != 0 {
+                    return Ok(verdict_fails(format!(
+                        "RCBD observation count ({}) is not a multiple of n_blocks ({n_blocks}); \
+                     each block must contain every treatment exactly once (complete design)",
                         observations.len()
                     )));
                 }
-            };
-            (r.f_statistic, r.p_value)
-        }
-        DispatchPos::RCBD => {
-            // RCBD: observations is a flat float array `[block_0,
-            // treatment_0, value_0, block_1, treatment_1, value_1,
-            // ...]`. The block-size argument on RCB(k) ctor in the
-            // blocking axis gives n_blocks; n_treatments is read off
-            // the dispatch's parallel state. Verifier runs two-way
-            // ANOVA with block as random and treatment as fixed;
-            // reports the treatment F-test.
-            let n_blocks = match decode_rcb_block_count(&bundle.blocking_raw) {
-                Some(b) => b,
-                None => {
-                    return Ok(verdict_fails(
-                        "RCBD requires RCB(n_blocks) in the blocking slot with n_blocks ≥ 3 \
-                         (PairedBlocking dispatches via stats:Paired)"
-                            .into(),
-                    ));
-                }
-            };
-            let observations = match decode_rcbd_observations(&bundle.observations_raw) {
-                Ok(o) => o,
-                Err(diag) => return Ok(verdict_fails(diag)),
-            };
-            // n_treatments is inferred from observations: total_n /
-            // n_blocks must equal n_treatments and divide evenly.
-            if observations.len() % n_blocks != 0 {
-                return Ok(verdict_fails(format!(
-                    "RCBD observation count ({}) is not a multiple of n_blocks ({n_blocks}); \
-                     each block must contain every treatment exactly once (complete design)",
-                    observations.len()
-                )));
-            }
-            let n_treatments = observations.len() / n_blocks;
-            let r = match rcbd_anova(n_blocks, n_treatments, &observations) {
-                Some(r) => r,
-                None => {
-                    return Ok(verdict_fails(format!(
-                        "RCBD ANOVA preconditions failed: complete design requires every \
+                let n_treatments = observations.len() / n_blocks;
+                let r = match rcbd_anova(n_blocks, n_treatments, &observations) {
+                    Some(r) => r,
+                    None => {
+                        return Ok(verdict_fails(format!(
+                            "RCBD ANOVA preconditions failed: complete design requires every \
                          (block, treatment) cell to have exactly one observation \
                          (n_blocks = {n_blocks}, n_treatments = {n_treatments}, \
                          n_obs = {})",
-                        observations.len()
-                    )));
-                }
-            };
-            (r.f_treatment, r.p_treatment)
-        }
-    };
+                            observations.len()
+                        )));
+                    }
+                };
+                (r.f_treatment, r.p_treatment, None)
+            }
+            DispatchPos::SplitPlot => {
+                // Split-plot: observations is a flat float array
+                // `[whole_plot_0, w_0, s_0, value_0, whole_plot_1, ...]`
+                // — 4 floats per observation. The `SplitPlotBlocking(a, r)`
+                // ctor in the blocking slot carries the whole-plot-factor
+                // level count `a` and the whole-plot-replicates-per-W-level
+                // count `r`. The subplot factor level count `b` is inferred
+                // from `observations.len() / (a * r)`.
+                //
+                // The verifier produces three F-tests (W, S, W×S) with
+                // nested error strata. v1 verdict reports the smallest
+                // p-value across the three with a diagnostic naming which
+                // effect produced it — omnibus-style "any effect
+                // significant." Per-effect claim shapes (D52 §5.2's
+                // false-positive shield in full) are a Phase 5 hardening.
+                let (a, r) = match decode_splitplot_blocking(&bundle.blocking_raw) {
+                    Some(p) => p,
+                    None => {
+                        return Ok(verdict_fails(
+                            "SplitPlot requires SplitPlotBlocking(a, r) in the blocking slot with \
+                         a ≥ 2 and r ≥ 2"
+                                .into(),
+                        ));
+                    }
+                };
+                let observations = match decode_splitplot_observations(&bundle.observations_raw) {
+                    Ok(o) => o,
+                    Err(diag) => return Ok(verdict_fails(diag)),
+                };
+                let n_per_whole_plot = a.checked_mul(r).and_then(|n_wp| {
+                    if n_wp == 0 || observations.len() % n_wp != 0 {
+                        None
+                    } else {
+                        Some(observations.len() / n_wp)
+                    }
+                });
+                let b = match n_per_whole_plot {
+                    Some(b) if b >= 2 => b,
+                    _ => {
+                        return Ok(verdict_fails(format!(
+                            "SplitPlot observation count ({}) is not a*r*b for a={a}, r={r} \
+                         (subplot factor level count b must be ≥ 2 and divide evenly)",
+                            observations.len()
+                        )));
+                    }
+                };
+                let res = match splitplot_anova(a, b, r, &observations) {
+                    Some(r) => r,
+                    None => {
+                        return Ok(verdict_fails(format!(
+                            "SplitPlot ANOVA preconditions failed: each whole plot must have a \
+                         consistent W level and contain every S level exactly once; each W \
+                         level must have exactly r={r} whole-plot replicates \
+                         (a={a}, b={b}, r={r}, n_obs = {})",
+                            observations.len()
+                        )));
+                    }
+                };
+                // Pick the smallest p-value across the three F-tests as
+                // the verdict's primary statistic. Diagnostic names which
+                // effect produced it plus the other two F-tests for
+                // audit. NaN is treated as "no rejection."
+                let candidates = [
+                    ("whole_plot_main_effect", res.f_w, res.p_w),
+                    ("subplot_main_effect", res.f_s, res.p_s),
+                    ("interaction", res.f_ws, res.p_ws),
+                ];
+                let (effect, f_stat, p_value) = candidates
+                    .iter()
+                    .copied()
+                    .filter(|(_, _, p)| !p.is_nan())
+                    .min_by(|(_, _, p1), (_, _, p2)| {
+                        p1.partial_cmp(p2).unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .unwrap_or(("all_nan", f64::NAN, f64::NAN));
+                let note = format!(
+                    "SplitPlot omnibus: reported statistic is `{effect}` (F = {f_stat:.4}, \
+                 p = {p_value:.6}). All three F-tests: \
+                 W (F = {:.4}, p = {:.6}), \
+                 S (F = {:.4}, p = {:.6}), \
+                 W×S (F = {:.4}, p = {:.6})",
+                    res.f_w, res.p_w, res.f_s, res.p_s, res.f_ws, res.p_ws
+                );
+                (f_stat, p_value, Some(note))
+            }
+        };
 
     // ── Step 7: §7.4 epistemic-scope check ────────────────────────────
     //
@@ -370,17 +461,29 @@ pub fn do_validate_measurement_claim(
     // implicitly fixes the direction, and the verifier is honest about
     // the limited inference.
     if p_value_two_sided < alpha {
+        // Holds: include the per-dispatch diagnostic note if present
+        // (currently only SplitPlot uses this — to name which of its
+        // three F-tests produced the reported p-value).
+        let diag = diagnostic_note.as_deref();
         Ok(QueryOutcome::from_output(verdict_resource(
             wk::VERDICT_HOLDS,
-            None,
+            diag,
             Some((t_statistic, p_value_two_sided)),
         )))
     } else {
+        // Fails: combine the AlphaNotCrossed framing with the
+        // per-dispatch note if present.
+        let fail_diag = match diagnostic_note.as_deref() {
+            Some(note) => format!(
+                "AlphaNotCrossed: computed p = {p_value_two_sided:.6}, threshold alpha = {alpha}. {note}"
+            ),
+            None => format!(
+                "AlphaNotCrossed: computed p = {p_value_two_sided:.6}, threshold alpha = {alpha}"
+            ),
+        };
         Ok(QueryOutcome::from_output(verdict_resource(
             wk::VERDICT_FAILS,
-            Some(&format!(
-                "AlphaNotCrossed: computed p = {p_value_two_sided:.6}, threshold alpha = {alpha}"
-            )),
+            Some(&fail_diag),
             Some((t_statistic, p_value_two_sided)),
         )))
     }
@@ -457,6 +560,7 @@ enum DispatchPos {
     Paired,
     Factorial,
     RCBD,
+    SplitPlot,
 }
 
 fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
@@ -689,6 +793,62 @@ fn decode_rcbd_observations(j: &serde_json::Value) -> Result<Vec<(usize, usize, 
         .collect()
 }
 
+/// D52 Phase 4.5 — extract `(a, r)` from the
+/// `SplitPlotBlocking(a, r)` ctor in the blocking slot. Returns
+/// `Some((a, r))` only when the blocking ctor is `SplitPlotBlocking`
+/// and both args are positive integers; returns `None` otherwise
+/// (the dispatch arm surfaces a clean diagnostic).
+fn decode_splitplot_blocking(j: &serde_json::Value) -> Option<(usize, usize)> {
+    if json_ctor_name(j)? != "SplitPlotBlocking" {
+        return None;
+    }
+    let args = j["args"].as_array()?;
+    if args.len() != 2 {
+        return None;
+    }
+    let a = args[0].as_i64()?;
+    let r = args[1].as_i64()?;
+    if a < 2 || r < 2 {
+        return None;
+    }
+    Some((a as usize, r as usize))
+}
+
+/// D52 Phase 4.5 — decode the SplitPlot observations payload: a flat
+/// float array of `[whole_plot_0, w_0, s_0, value_0, whole_plot_1,
+/// w_1, s_1, value_1, ...]` — 4 floats per observation. Returns the
+/// parsed `(whole_plot_idx, w_level, s_level, value)` tuples ready
+/// for [`splitplot_anova`]; fractional or negative indices are decode
+/// errors.
+fn decode_splitplot_observations(
+    j: &serde_json::Value,
+) -> Result<Vec<(usize, usize, usize, f64)>, String> {
+    let flat = decode_flat_observations(j).map_err(|e| format!("SplitPlot observations: {e}"))?;
+    if flat.len() % 4 != 0 {
+        return Err(format!(
+            "SplitPlot observations must have a multiple of 4 floats (got {} — \
+             each row is `[whole_plot_idx, w_level, s_level, value]`)",
+            flat.len()
+        ));
+    }
+    flat.chunks_exact(4)
+        .enumerate()
+        .map(|(row_idx, chunk)| {
+            let wp = chunk[0];
+            let w = chunk[1];
+            let s = chunk[2];
+            for (name, v) in [("whole_plot_idx", wp), ("w_level", w), ("s_level", s)] {
+                if v < 0.0 || v.fract() != 0.0 {
+                    return Err(format!(
+                        "SplitPlot row {row_idx} {name} must be a non-negative integer, got {v}"
+                    ));
+                }
+            }
+            Ok((wp as usize, w as usize, s as usize, chunk[3]))
+        })
+        .collect()
+}
+
 /// D52 §5.3 / Phase 3 — decode `BiologicalUnits.Units(iris)` ctor
 /// into a flat vector of unit-IRI strings. Empty list (`Units([])`)
 /// is the Tier 1 implicit case.
@@ -878,6 +1038,9 @@ fn dispatch_product_position(bundle: &DecodedBundle) -> Option<DispatchPos> {
             Some(DispatchPos::Factorial)
         }
         ("Restricted", "RCB", "SingleFactor", "CrossSectional") => Some(DispatchPos::RCBD),
+        ("Restricted", "SplitPlotBlocking", "FullFactorial", "CrossSectional") => {
+            Some(DispatchPos::SplitPlot)
+        }
         _ => None,
     }
 }

@@ -79,6 +79,16 @@ data stats:Blocking {
     PairedBlocking,
     RCB(core:integer),          // block_size ≥ 3
     Incomplete(core:integer),
+    // D52 Phase 4.5 — split-plot's whole-plot-nested blocking. The
+    // first arg is the whole-plot-factor level count (a); the
+    // second is the number of whole-plot replicates per W level (r).
+    // The total number of whole plots is a*r. Distinct from RCB
+    // because the error stratification is different — split-plot
+    // uses whole-plot error for the whole-plot factor F-test and
+    // subplot error for everything else; D52 §5.2's high-priority
+    // false-positive shield depends on this distinction landing at
+    // the type level.
+    SplitPlotBlocking(core:integer, core:integer),
 }
 
 data stats:FactorDesign {
@@ -439,9 +449,51 @@ macro stats:RCBD(
         observations,
     );
 
-// Additional Tier 2 smart constructors (SplitPlot, RepeatedMeasures)
-// land in follow-on commits as the corresponding verifier procedures
-// land in the Rust institution. Each is a one-macro addition over an
+// Split-Plot design — two-factor design with hard-to-randomize whole-
+// plot factor (W, a levels) and easily-randomized subplot factor
+// (S, b levels) applied within whole plots. Each whole plot receives
+// one W level and contains all b subplot observations; r replicate
+// whole plots per W level (so a*r whole plots total, a*b*r
+// observations). Observations encoded as `[whole_plot_id, w_level,
+// s_level, value]` rows (4 floats per observation).
+//
+// Lands at product position `(Restricted, SplitPlotBlocking(a, r),
+// FullFactorial(2), _, CrossSectional)`. The distinct `SplitPlotBlocking`
+// ctor on the blocking axis is what makes split-plot's nested-error-
+// stratum dispatch unambiguous — D52 §5.2's high-priority false-
+// positive shield: incorrectly routing split-plot data through the
+// flat-factorial arm would use the wrong (smaller subplot) error for
+// the whole-plot F-test and produce inflated significance.
+//
+// Verifier runs three F-tests:
+//   F_W   = MS_W / MS_WP_within_W   (whole-plot main effect, against whole-plot error)
+//   F_S   = MS_S / MS_error          (subplot main effect, against subplot error)
+//   F_WS  = MS_WS / MS_error         (interaction, against subplot error)
+// Verdict reports the smallest p-value across the three with a
+// diagnostic naming which effect produced it. Per-effect claim shapes
+// are a Phase 5 hardening.
+macro stats:SplitPlot(
+    a             : core:integer,
+    b             : core:integer,
+    r             : core:integer,
+    observations  : core:value_array,
+    replication   : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        Restricted(),
+        SplitPlotBlocking(a, r),
+        FullFactorial(2),
+        replication,
+        CrossSectional(),
+        Units([]),
+        Columns([]),
+        Entries([]),
+        observations,
+    );
+
+// Additional Tier 2 smart constructors (RepeatedMeasures) land in
+// follow-on commits as the corresponding verifier procedures land in
+// the Rust institution. Each is a one-macro addition over an
 // existing product position.
 
 // ── SampleSetResource (chain-resident SampleSet carrier) ─────────────
