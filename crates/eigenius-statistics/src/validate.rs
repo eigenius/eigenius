@@ -52,7 +52,9 @@ use eigenius_kernel::ontology::well_known as wk;
 
 use crate::institution::iris;
 use crate::institution::StatisticsInstitution;
-use crate::numerics::{one_sample_t_test, paired_t_test, two_sample_t_test, TwoSampleVariance};
+use crate::numerics::{
+    factorial_omnibus_anova, one_sample_t_test, paired_t_test, two_sample_t_test, TwoSampleVariance,
+};
 
 /// Top-level handler called by `StatisticsInstitution::query`.
 pub fn do_validate_measurement_claim(
@@ -257,6 +259,36 @@ pub fn do_validate_measurement_claim(
             };
             (r.t_statistic, r.p_value_two_sided)
         }
+        DispatchPos::Factorial => {
+            // Factorial: observations is `[factor_levels,
+            // flat_observations]` where flat_observations is a flat
+            // float array `[level_00, level_01, ..., level_0{k-1},
+            // value_0, level_10, ..., value_n]` — k+1 floats per
+            // observation. The verifier chunks it accordingly and
+            // runs the omnibus k-way ANOVA.
+            //
+            // Verdict reports the F-statistic as `computed_statistic`
+            // and the one-sided F-p-value as `computed_p_value`. The
+            // common verdict-builder is agnostic about whether the
+            // statistic is t or F; "computed_statistic" is the
+            // domain-neutral name.
+            let (factor_levels, observations) =
+                match decode_factorial_observations(&bundle.observations_raw) {
+                    Ok(p) => p,
+                    Err(diag) => return Ok(verdict_fails(diag)),
+                };
+            let r = match factorial_omnibus_anova(&factor_levels, &observations) {
+                Some(r) => r,
+                None => {
+                    return Ok(verdict_fails(format!(
+                        "Factorial ANOVA preconditions failed: need ≥ 2 cells observed and \
+                         ≥ 1 within-cell df (factor_levels = {factor_levels:?}, n_obs = {})",
+                        observations.len()
+                    )));
+                }
+            };
+            (r.f_statistic, r.p_value)
+        }
     };
 
     // ── Step 7: §7.4 epistemic-scope check ────────────────────────────
@@ -348,6 +380,7 @@ enum DispatchPos {
     SingleSampleEstimate,
     IID,
     Paired,
+    Factorial,
 }
 
 fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
@@ -442,6 +475,86 @@ fn decode_paired_observations(j: &serde_json::Value) -> Result<Vec<(f64, f64)>, 
     Ok(flat.chunks_exact(2).map(|c| (c[0], c[1])).collect())
 }
 
+/// Per-observation entry the Factorial decoder produces: the cell
+/// index (k-tuple of factor-level indices) paired with the measurement
+/// value. Typed-alias kept local to validate.rs to satisfy clippy's
+/// type-complexity lint on the decoder's return type.
+type FactorialObservation = (Vec<usize>, f64);
+
+/// Decode the Factorial observations payload:
+/// `[factor_levels, flat_observations]` where:
+/// - `factor_levels` is a flat float array `[n_0, n_1, …, n_{k-1}]`
+///   giving per-factor level counts (cast to `usize`)
+/// - `flat_observations` is a flat float array containing `k + 1`
+///   floats per observation: `k` factor-level indices (cast to `usize`)
+///   plus the measurement value
+///
+/// Returns `(factor_levels, observations)` where each observation is a
+/// `(cell_index_tuple, value)` pair ready for
+/// [`factorial_omnibus_anova`].
+fn decode_factorial_observations(
+    j: &serde_json::Value,
+) -> Result<(Vec<usize>, Vec<FactorialObservation>), String> {
+    let outer = j
+        .as_array()
+        .ok_or_else(|| format!("Factorial observations slot is not an array: {j:?}"))?;
+    if outer.len() != 2 {
+        return Err(format!(
+            "Factorial expects observations = [factor_levels, flat_observations] (got {} \
+             outer elements)",
+            outer.len()
+        ));
+    }
+    let factor_levels_flat =
+        decode_flat_observations(&outer[0]).map_err(|e| format!("Factorial factor_levels: {e}"))?;
+    let factor_levels: Vec<usize> = factor_levels_flat
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| {
+            if v < 0.0 || v.fract() != 0.0 {
+                Err(format!(
+                    "factor_levels[{i}] must be a non-negative integer, got {v}"
+                ))
+            } else {
+                Ok(v as usize)
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let k = factor_levels.len();
+    if k == 0 {
+        return Err("Factorial requires at least one factor".to_string());
+    }
+    let flat_obs =
+        decode_flat_observations(&outer[1]).map_err(|e| format!("Factorial observations: {e}"))?;
+    let row_width = k + 1;
+    if flat_obs.len() % row_width != 0 {
+        return Err(format!(
+            "Factorial observations length ({}) must be a multiple of k+1 ({row_width}) \
+             — each row is [level_0, …, level_{}, value]",
+            flat_obs.len(),
+            k - 1
+        ));
+    }
+    let observations: Result<Vec<FactorialObservation>, String> = flat_obs
+        .chunks_exact(row_width)
+        .enumerate()
+        .map(|(row_idx, chunk)| {
+            let mut levels = Vec::with_capacity(k);
+            for (i, &v) in chunk[..k].iter().enumerate() {
+                if v < 0.0 || v.fract() != 0.0 {
+                    return Err(format!(
+                        "observation row {row_idx} factor[{i}] level must be a non-negative \
+                         integer, got {v}"
+                    ));
+                }
+                levels.push(v as usize);
+            }
+            Ok((levels, chunk[k]))
+        })
+        .collect();
+    Ok((factor_levels, observations?))
+}
+
 fn decode_replication_kind(j: &serde_json::Value) -> Result<ReplicationKind, String> {
     match json_ctor_name(j) {
         Some("BiologicalReplication") => Ok(ReplicationKind::BiologicalReplication),
@@ -487,6 +600,9 @@ fn dispatch_product_position(bundle: &DecodedBundle) -> Option<DispatchPos> {
         ("CompleteRandom", "Unblocked", "SingleFactor", "CrossSectional") => Some(DispatchPos::IID),
         ("CompleteRandom", "PairedBlocking", "SingleFactor", "CrossSectional") => {
             Some(DispatchPos::Paired)
+        }
+        ("CompleteRandom", "Unblocked", "FullFactorial", "CrossSectional") => {
+            Some(DispatchPos::Factorial)
         }
         _ => None,
     }

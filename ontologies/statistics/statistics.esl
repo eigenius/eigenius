@@ -285,7 +285,52 @@ macro stats:Paired(
         pairs,
     );
 
-// Additional Tier 1+2 smart constructors (Factorial, RCBD, SplitPlot,
+// k-way factorial — k factors with arbitrary level counts per factor.
+// `factor_levels` is a flat int array `[n_0, n_1, ..., n_{k-1}]`
+// giving the level count for each factor. `observations` is a flat
+// array of `[level_0, level_1, ..., level_{k-1}, value]` per
+// observation — k+1 floats per row (level indices are 0..n_i,
+// represented as floats since `core:value_array` is uniformly typed).
+// The verifier reads `factor_levels.len() = k`, then chunks
+// observations in groups of k+1 to extract per-observation cell index
+// + value.
+//
+// The product position uses `FullFactorial(k)` where k is the number
+// of factors (length of `factor_levels`). For v1 the verifier dispatch
+// matches the `FullFactorial` ctor name regardless of k — `factor_levels`
+// in the macro signature lets the chain author state the design's
+// shape explicitly, and the dispatch uses that shape at recomputation
+// time.
+//
+// Verifier runs an omnibus F-test: "any cell mean differs from the
+// grand mean." Per-effect decomposition (testing main effects and
+// interactions separately) lands in a Phase 5 hardening when claim
+// shapes distinguish those tests.
+macro stats:Factorial(
+    k             : core:integer,
+    factor_levels : core:value_array,
+    observations  : core:value_array,
+    replication   : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        CompleteRandom(),
+        Unblocked(),
+        FullFactorial(k),
+        replication,
+        CrossSectional(),
+        "_implicit_per_unit",
+        "_implicit_per_column",
+        "_implicit",
+        // observations slot is a wrapper [factor_levels, observations]
+        // — the verifier reads observations[0] as the level-counts
+        // metadata and observations[1] as the flat observation array.
+        // The verifier cross-checks that `factor_levels.len() == k`
+        // and that each observation has exactly `k + 1` floats
+        // (k level indices + the value).
+        [factor_levels, observations],
+    );
+
+// Additional Tier 1+2 smart constructors (RCBD, SplitPlot,
 // RepeatedMeasures) land in follow-on commits as the corresponding
 // verifier procedures land in the Rust institution. Each is a one-
 // macro addition over an existing product position.

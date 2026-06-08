@@ -1,0 +1,117 @@
+// D52 Phase 2.5 fixture — 2×2 factorial design (k-way omnibus ANOVA).
+//
+// Domain: kinase-activity readout under crossed drug-treatment +
+// kinase-isoform conditions. Factor 0 is drug (2 levels: control /
+// drug), factor 1 is isoform (2 levels: wild-type / mutant). The
+// design has 2 × 2 = 4 cells; 3 biological replicates per cell;
+// total N = 12.
+//
+// Cell means cleanly separated:
+//   (control, wild_type) ≈ 10
+//   (control, mutant)    ≈ 20
+//   (drug,    wild_type) ≈ 30
+//   (drug,    mutant)    ≈ 40
+//
+// Strong main effects (both factors) AND no interaction — Phase 2.5's
+// omnibus F-test reports a large F (rejecting "all cell means equal")
+// without trying to decompose which effect drives it. Per-effect
+// decomposition (testing drug main effect / isoform main effect /
+// drug×isoform interaction separately) is a Phase 5 hardening.
+//
+// Lands at product position `(CompleteRandom, Unblocked,
+// FullFactorial(2), _, CrossSectional)`.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace stats      = "urn:eigenius:measurements";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace kx         = "urn:eigenius:demo:kx";
+
+// ─── Domain predicate ──────────────────────────────────────────────
+
+data kx:CellMeansDifferAcrossFactors : core:string -> Prop, stats:PopulationLevel {
+}
+
+// ─── SampleSet: 2×2 design, 3 replicates per cell ─────────────────
+//
+// Observations are flattened to a single value-array where each row
+// is `[factor_0_level, factor_1_level, value]` (k+1 = 3 floats per
+// observation). The outer Factorial wrapper bundles
+// `[factor_levels, flat_observations]` — the verifier reads the
+// 2-element wrapper as the factor-level metadata plus the
+// observation payload.
+//
+// Levels are 0-indexed integers stored as floats (since core:value_array
+// is uniformly typed).
+
+resource kx:cross_factorial_2026_04_02 : stats:SampleSetResource {
+    reflection:source      = "instrument-log:kinase-glo-plate-2026-04-02-factorial";
+    reflection:observed_at = "2026-04-02T13:15:00Z";
+
+    stats:sample_set_value = stats:Factorial(
+        2,              // k = 2 factors
+        [2.0, 2.0],     // factor_levels: factor 0 has 2 levels, factor 1 has 2 levels
+        [
+            // cell (control = 0, wild_type = 0) — three replicates
+            0.0, 0.0, 10.0,
+            0.0, 0.0, 11.0,
+            0.0, 0.0,  9.0,
+            // cell (control = 0, mutant = 1)
+            0.0, 1.0, 20.0,
+            0.0, 1.0, 19.0,
+            0.0, 1.0, 21.0,
+            // cell (drug = 1, wild_type = 0)
+            1.0, 0.0, 30.0,
+            1.0, 0.0, 31.0,
+            1.0, 0.0, 29.0,
+            // cell (drug = 1, mutant = 1)
+            1.0, 1.0, 40.0,
+            1.0, 1.0, 39.0,
+            1.0, 1.0, 41.0,
+        ],
+        BiologicalReplication(),
+    );
+}
+
+resource kx:cross_factorial_trace : reflection:ObservationTrace {
+    reflection:resource  = kx:cross_factorial_2026_04_02;
+    reflection:source    = "instrument-log:kinase-glo-plate-2026-04-02-factorial";
+    reflection:timestamp = "2026-04-02T13:15:00Z";
+}
+
+// ─── The factorial MeasurementClaim ────────────────────────────────
+
+resource kx:claim_cell_means_differ : stats:MeasurementClaim {
+    stats:sample_set = kx:cross_factorial_2026_04_02;
+
+    stats:null_hypothesis = type_expr(
+        kx:CellMeansDifferAcrossFactors("urn:eigenius:demo:kx:design_2026_04_02")
+    );
+
+    stats:alternative_hypothesis = type_expr(
+        kx:CellMeansDifferAcrossFactors("urn:eigenius:demo:kx:design_2026_04_02")
+    );
+
+    reflection:canonical_proposition = type_expr(
+        kx:CellMeansDifferAcrossFactors("urn:eigenius:demo:kx:design_2026_04_02")
+    );
+
+    stats:alpha = 0.05;
+    // Asserted between-cell variance threshold. The Phase 2.5 verifier
+    // dispatches on p < alpha alone; the effect-size value is recorded
+    // on the verdict for downstream audit but doesn't gate admission.
+    stats:effect_size = Absolute(50.0, "ss_between");
+    stats:directionality = TwoSided();
+    // Variance-assumption field is consumed by t-tests; the omnibus
+    // ANOVA arm doesn't dispatch on it. Author writes something valid
+    // for the universal-schema requirement.
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion = Identity();
+}
+
+resource kx:claim_cell_means_differ_trace : reflection:ProgramTrace {
+    reflection:resource  = kx:claim_cell_means_differ;
+    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:timestamp = "2026-04-02T13:15:00Z";
+}
