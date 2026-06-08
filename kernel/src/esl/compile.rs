@@ -5200,8 +5200,8 @@ mod tests {
             .filter(|r| r.is_a().iter().any(|c| c == &inductive_iri))
             .count();
         assert!(
-            ind_count >= 11,
-            "expected at least 11 inductive Resources in statistics.esl, found {ind_count}"
+            ind_count >= 15,
+            "expected at least 15 inductive Resources in statistics.esl, found {ind_count}"
         );
 
         // The two smart-constructor macros emit no resources; verify

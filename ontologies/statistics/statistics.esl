@@ -182,12 +182,69 @@ property stats:treatment_level : core:string {
     domain stats:Replicate;
 }
 
+// ── Multi-modal topology types (D52 §5.3, Phase 3) ───────────────────
+//
+// Bioconductor's MultiAssayExperiment lineage: separate the *primary*
+// biological units (patients, mice, plates, cell lines, etc.) from
+// the *assay columns* (per-assay specimen identifiers), connected by
+// a bipartite `SampleMap` that admits non-rectangular multi-modal
+// designs (a patient with RNA-Seq + clinical phenotypes but no
+// proteomics; multiple technical-replicate columns within a single
+// assay all pointing at one biological unit).
+//
+// Phase 3 lands the *types* and refactors the SampleSet to carry
+// them. Tier 1 smart constructors (SingleSampleEstimate, IID, Paired,
+// Factorial) synthesize empty values — those dispatch arms don't
+// need the topology, and the verifier ignores these slots for them.
+// Tier 2 (RCBD, SplitPlot, RepeatedMeasures, landing in Phase 4) is
+// where the verifier starts consuming the SampleMap to identify
+// pseudo-replicates and stratify variance components correctly.
+
+data stats:BiologicalUnits {
+    // List of biological-unit IRIs. Authors typically draw them from
+    // a domain ontology (`urn:eigenius:demo:bp:patient_01`,
+    // `urn:eigenius:demo:lab:cell_line_HEK293_v3`, etc.). Empty list
+    // for Tier 1 cases where unit identity is implicit in the
+    // observation row order.
+    Units(core:value_array),
+}
+
+data stats:AssayColumns {
+    // List of `(assay_id, column_id)` pairs — encoded as a flat
+    // value_array `[assay_0, col_0, assay_1, col_1, ...]`. The
+    // assay_id partitions columns across multi-modal assay layers
+    // (RNA-Seq vs proteomics vs clinical); the column_id identifies
+    // a specific specimen / replicate within its assay.
+    Columns(core:value_array),
+}
+
+data stats:SampleMap {
+    // The bipartite graph linking primary biological units to assay
+    // columns. Each entry is a `SampleMapEntry` ctor application;
+    // the array preserves authoring order so per-observation
+    // dispatch arms can index into it consistently.
+    Entries(core:value_array),
+}
+
+data stats:SampleMapEntry {
+    // A single (assay, primary, column) triple. Many-to-one is
+    // expressed by repeating the `primary` IRI across multiple
+    // entries with different `col_name`s; cross-modal missingness
+    // is expressed by the absence of an entry for a given
+    // (primary, assay) pair.
+    Entry(
+        core:string,  // assay_id   — partitions columns across multi-modal assay layers
+        core:string,  // primary    — biological-unit IRI
+        core:string,  // col_name   — specimen identifier within the assay
+    ),
+}
+
 // ── SampleSet (D52 §4.2 Option B) ────────────────────────────────────
 //
-// Single product constructor. The `units` / `columns` / `sample_map`
-// fields support multi-modal MAE-style topologies (D52 §5.3); v1's
-// smart constructors synthesize implicit values for these in the IID
-// and SingleSampleEstimate cases.
+// Single product constructor over the 5 axes + 3 topology slots +
+// observations. Phase 3 promoted the topology slots from
+// `core:string` placeholders to structured types
+// (`BiologicalUnits`, `AssayColumns`, `SampleMap`).
 
 data stats:SampleSet {
     // Nine-field product. Authors don't call this directly — the
@@ -202,9 +259,9 @@ data stats:SampleSet {
         stats:FactorDesign,         // factor
         stats:Replication,          // replication
         stats:RepeatedMeasuresAxis, // repeated_measures
-        core:string,                // units (serialized — refined in Phase 3 when sampleMap topology lands)
-        core:string,                // columns (serialized)
-        core:string,                // sample_map (serialized)
+        stats:BiologicalUnits,      // units      (Phase 3: was core:string placeholder)
+        stats:AssayColumns,         // columns    (Phase 3: was core:string placeholder)
+        stats:SampleMap,            // sample_map (Phase 3: was core:string placeholder)
         core:value_array,           // observations (inline floats v1; promoted to Replicate-IRI array Phase 1.5+)
     ),
 }
@@ -226,9 +283,13 @@ macro stats:SingleSampleEstimate(
         NoFactor(),
         replication,
         CrossSectional(),
-        "_implicit_single_unit",
-        "_implicit_single_column",
-        "_implicit",
+        // Tier 1: unit identity is implicit in the observation order;
+        // empty topology slots make this explicit without burdening
+        // the author with bookkeeping the verifier ignores for
+        // SingleSampleEstimate dispatch.
+        Units([]),
+        Columns([]),
+        Entries([]),
         measurements,
     );
 
@@ -250,9 +311,12 @@ macro stats:IID(
         SingleFactor(),
         replication,
         CrossSectional(),
-        "_implicit_per_unit",
-        "_implicit_per_column",
-        "_implicit",
+        // Tier 1: groups are partitioned by the observations slot
+        // (the two-element wrapper IS the per-group assay-column
+        // structure for v1); empty topology slots stay implicit.
+        Units([]),
+        Columns([]),
+        Entries([]),
         [group_a, group_b],
     );
 
@@ -279,9 +343,13 @@ macro stats:Paired(
         SingleFactor(),
         replication,
         CrossSectional(),
-        "_implicit_per_pair_unit",
-        "_implicit_per_pair_column",
-        "_implicit",
+        // Tier 1: each pair IS the unit-identification (the before/
+        // after pair is structurally the same biological unit); the
+        // chunking-by-2 in the observations decoder is the implicit
+        // sampleMap. Empty topology slots stay implicit.
+        Units([]),
+        Columns([]),
+        Entries([]),
         pairs,
     );
 
@@ -318,9 +386,13 @@ macro stats:Factorial(
         FullFactorial(k),
         replication,
         CrossSectional(),
-        "_implicit_per_unit",
-        "_implicit_per_column",
-        "_implicit",
+        // Tier 1: cells (k-tuples of factor levels) are the units of
+        // analysis; the omnibus F-test doesn't consult a sampleMap.
+        // Phase 4's per-effect decomposition and Phase 5's nested-
+        // replicate variants will populate these structurally.
+        Units([]),
+        Columns([]),
+        Entries([]),
         // observations slot is a wrapper [factor_levels, observations]
         // — the verifier reads observations[0] as the level-counts
         // metadata and observations[1] as the flat observation array.

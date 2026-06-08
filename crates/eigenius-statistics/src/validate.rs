@@ -350,18 +350,41 @@ struct DecodedBundle {
     factor: String,
     replication: ReplicationKind,
     repeated_measures: String,
+    /// D52 §5.3 / Phase 3 MAE-style biological-unit list.
+    /// Empty (`Units([])`) for Tier 1 dispatches where unit identity
+    /// is implicit in observation row order. Populated by Phase 4
+    /// Tier 2 smart constructors when the verifier needs explicit
+    /// per-observation unit identification.
     #[allow(dead_code)]
-    units: String,
+    units: Vec<String>,
+    /// D52 §5.3 / Phase 3 MAE-style assay columns — flat
+    /// `[assay_0, col_0, assay_1, col_1, …]` pairs. Empty for Tier 1.
     #[allow(dead_code)]
-    columns: String,
+    columns: Vec<String>,
+    /// D52 §5.3 / Phase 3 MAE-style sampleMap entries. Each entry is
+    /// a `(assay_id, primary_iri, col_name)` triple linking a primary
+    /// biological unit to a specific assay column. Empty for Tier 1.
     #[allow(dead_code)]
-    sample_map: String,
+    sample_map: Vec<SampleMapEntry>,
     /// Raw observations slot from the Bundle ctor — each dispatch arm
     /// decodes it per its expected shape:
     ///  - SingleSampleEstimate expects a flat float array
     ///  - IID expects `[group_a, group_b]` (nested float arrays)
-    ///  - Factorial / RCBD / etc. will expect richer shapes when they land
+    ///  - Paired expects a flat interleaved `[b_0, a_0, …]` array
+    ///  - Factorial expects `[factor_levels, flat_observations]`
+    ///  - RCBD / SplitPlot / RepeatedMeasures will expect richer shapes
+    ///    when they land
     observations_raw: serde_json::Value,
+}
+
+/// D52 §5.3 / Phase 3 — decoded `(assay_id, primary_iri, col_name)`
+/// from a `SampleMapEntry` ctor. The MAE bipartite-graph element type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+struct SampleMapEntry {
+    assay_id: String,
+    primary_iri: String,
+    col_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -407,9 +430,9 @@ fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
     let repeated_measures = json_ctor_name(&args[4])
         .ok_or_else(|| "repeated_measures slot is not a ctor".to_string())?
         .to_string();
-    let units = args[5].as_str().unwrap_or("").to_string();
-    let columns = args[6].as_str().unwrap_or("").to_string();
-    let sample_map = args[7].as_str().unwrap_or("").to_string();
+    let units = decode_biological_units(&args[5])?;
+    let columns = decode_assay_columns(&args[6])?;
+    let sample_map = decode_sample_map(&args[7])?;
     // Keep observations raw — the per-dispatch arm decodes per its
     // expected shape (flat float array for SingleSampleEstimate, nested
     // for IID, richer for Tier-2 designs).
@@ -553,6 +576,144 @@ fn decode_factorial_observations(
         })
         .collect();
     Ok((factor_levels, observations?))
+}
+
+/// D52 §5.3 / Phase 3 — decode `BiologicalUnits.Units(iris)` ctor
+/// into a flat vector of unit-IRI strings. Empty list (`Units([])`)
+/// is the Tier 1 implicit case.
+fn decode_biological_units(j: &serde_json::Value) -> Result<Vec<String>, String> {
+    match json_ctor_name(j) {
+        Some("Units") => {
+            let args = j["args"]
+                .as_array()
+                .ok_or_else(|| "BiologicalUnits.Units args missing".to_string())?;
+            if args.len() != 1 {
+                return Err(format!(
+                    "BiologicalUnits.Units expects 1 arg, got {}",
+                    args.len()
+                ));
+            }
+            let arr = args[0]
+                .as_array()
+                .ok_or_else(|| "BiologicalUnits.Units arg 0 must be an array".to_string())?;
+            arr.iter()
+                .enumerate()
+                .map(|(i, v)| {
+                    v.as_str()
+                        .map(|s| s.to_string())
+                        .ok_or_else(|| format!("unit_iris[{i}] must be a string"))
+                })
+                .collect()
+        }
+        Some(other) => Err(format!("expected BiologicalUnits.Units, got `{other}`")),
+        None => Err("BiologicalUnits slot is not a ctor".to_string()),
+    }
+}
+
+/// D52 §5.3 / Phase 3 — decode `AssayColumns.Columns(pairs)` into a
+/// flat vector. The interleaved encoding `[assay_0, col_0, assay_1,
+/// col_1, …]` is preserved as-is here; Phase 4's RCBD / SplitPlot
+/// decoders chunk it into pairs when they need to identify columns
+/// per assay. Empty list for Tier 1.
+fn decode_assay_columns(j: &serde_json::Value) -> Result<Vec<String>, String> {
+    match json_ctor_name(j) {
+        Some("Columns") => {
+            let args = j["args"]
+                .as_array()
+                .ok_or_else(|| "AssayColumns.Columns args missing".to_string())?;
+            if args.len() != 1 {
+                return Err(format!(
+                    "AssayColumns.Columns expects 1 arg, got {}",
+                    args.len()
+                ));
+            }
+            let arr = args[0]
+                .as_array()
+                .ok_or_else(|| "AssayColumns.Columns arg 0 must be an array".to_string())?;
+            arr.iter()
+                .enumerate()
+                .map(|(i, v)| {
+                    v.as_str()
+                        .map(|s| s.to_string())
+                        .ok_or_else(|| format!("assay_columns[{i}] must be a string"))
+                })
+                .collect()
+        }
+        Some(other) => Err(format!("expected AssayColumns.Columns, got `{other}`")),
+        None => Err("AssayColumns slot is not a ctor".to_string()),
+    }
+}
+
+/// D52 §5.3 / Phase 3 — decode `SampleMap.Entries(entries)` into a
+/// vector of `SampleMapEntry` triples. The empty-list shape is the
+/// Tier 1 implicit case; Phase 4 Tier 2 dispatches populate it.
+fn decode_sample_map(j: &serde_json::Value) -> Result<Vec<SampleMapEntry>, String> {
+    match json_ctor_name(j) {
+        Some("Entries") => {
+            let args = j["args"]
+                .as_array()
+                .ok_or_else(|| "SampleMap.Entries args missing".to_string())?;
+            if args.len() != 1 {
+                return Err(format!(
+                    "SampleMap.Entries expects 1 arg, got {}",
+                    args.len()
+                ));
+            }
+            let entries = args[0]
+                .as_array()
+                .ok_or_else(|| "SampleMap.Entries arg 0 must be an array".to_string())?;
+            entries
+                .iter()
+                .enumerate()
+                .map(|(i, entry)| {
+                    decode_sample_map_entry(entry).map_err(|e| format!("entry[{i}]: {e}"))
+                })
+                .collect()
+        }
+        Some(other) => Err(format!("expected SampleMap.Entries, got `{other}`")),
+        None => Err("SampleMap slot is not a ctor".to_string()),
+    }
+}
+
+fn decode_sample_map_entry(j: &serde_json::Value) -> Result<SampleMapEntry, String> {
+    match json_ctor_name(j) {
+        Some("Entry") => {
+            let args = j["args"]
+                .as_array()
+                .ok_or_else(|| "SampleMapEntry.Entry args missing".to_string())?;
+            if args.len() != 3 {
+                return Err(format!(
+                    "SampleMapEntry.Entry expects 3 args (assay_id, primary_iri, col_name), got {}",
+                    args.len()
+                ));
+            }
+            let assay_id = args[0]
+                .as_str()
+                .ok_or_else(|| {
+                    "SampleMapEntry.Entry arg 0 (assay_id) must be a string".to_string()
+                })?
+                .to_string();
+            let primary_iri = args[1]
+                .as_str()
+                .ok_or_else(|| {
+                    "SampleMapEntry.Entry arg 1 (primary_iri) must be a string".to_string()
+                })?
+                .to_string();
+            let col_name = args[2]
+                .as_str()
+                .ok_or_else(|| {
+                    "SampleMapEntry.Entry arg 2 (col_name) must be a string".to_string()
+                })?
+                .to_string();
+            Ok(SampleMapEntry {
+                assay_id,
+                primary_iri,
+                col_name,
+            })
+        }
+        Some(other) => Err(format!("expected SampleMapEntry.Entry, got `{other}`")),
+        None => Err("SampleMapEntry slot is not a ctor".to_string()),
+    }
 }
 
 fn decode_replication_kind(j: &serde_json::Value) -> Result<ReplicationKind, String> {
