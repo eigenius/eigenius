@@ -14,10 +14,17 @@
 
 //! Error types for the ESL compiler pipeline.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A position in ESL source.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Serialize` + `Deserialize` are derived so the AST types that
+/// carry positions (notably `MacroDecl` per D52 §12 #1 cross-file
+/// macro storage) can round-trip through the chain via the D14
+/// resource-Value pipeline. Position info is preserved across the
+/// round-trip for diagnostic locality at re-hydration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Position {
     pub line: usize,
     pub column: usize,

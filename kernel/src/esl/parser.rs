@@ -1469,6 +1469,21 @@ impl<'a> Parser<'a> {
             (Vec::new(), None)
         };
 
+        // D52 §12 #8 — extra `is_a` classes for the emitted
+        // inductive-type resource, written as a comma-separated list
+        // after the result sort: `data X : Prop, stats:PopulationLevel,
+        // OtherMarker { ... }`. Parallels the class-multi-parent
+        // syntax `class X : P1, P2`. The structural terminator for
+        // the type expression is `{` (data body opens) or `,` (next
+        // extra class), so there's no ambiguity even when the result
+        // type is a pi/forall whose binder list also uses commas —
+        // those commas are inside a `=>`-terminated binder context.
+        let mut extra_classes = Vec::new();
+        while self.at(&TokenKind::Comma) {
+            self.advance();
+            extra_classes.push(self.parse_qualified_name()?);
+        }
+
         self.expect(&TokenKind::LBrace)?;
         let mut ctors = Vec::new();
         while !self.at(&TokenKind::RBrace) && !self.at_eof() {
@@ -1504,6 +1519,7 @@ impl<'a> Parser<'a> {
             params,
             indices,
             result_sort,
+            extra_classes,
             ctors,
             pos,
         })

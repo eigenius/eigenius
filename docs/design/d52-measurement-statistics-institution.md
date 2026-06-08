@@ -42,13 +42,14 @@ This is the **decidability boundary**: every statistical claim must be recomputa
 Every `MeasurementClaim` resource — regardless of which SampleSet topology it consumes — must declare the following fields. These are the *intersection* of what CONSORT, ARRIVE, MIQE, MIAME, MIAPE, STROBE, SAMPL, and the CLSI EP-series all require; without them, the claim is not recomputable.
 
 ```esl
-namespace stats = "urn:eigenius:measurements";
+namespace stats      = "urn:eigenius:measurements";
+namespace reflection = "urn:eigenius:reflection";
 
 resource <iri> : stats:MeasurementClaim {
-    stats:sample_set            = <ResourceRef -> stats:SampleSet>;
+    stats:sample_set            = <ResourceRef -> stats:SampleSetResource>;
     stats:null_hypothesis       = type_expr(...);   // Prop
     stats:alternative_hypothesis = type_expr(...);  // Prop
-    stats:derived_proposition   = type_expr(...);   // the predicate the claim establishes
+    reflection:canonical_proposition = type_expr(...);  // the predicate the claim establishes (= what downstream D39 cites via DerivedEvidence)
     stats:alpha                 = <core:float>;     // nominal Type I error, unadjusted
     stats:effect_size           = <stats:EffectSize>;
     stats:directionality        = <stats:Directionality>;
@@ -57,6 +58,8 @@ resource <iri> : stats:MeasurementClaim {
     stats:autocorrelation_structure = <stats:AutocorrelationStructure>;  // required when sample_set.repeated_measures = Longitudinal(_); else ignored
 }
 ```
+
+**Note on the proposition slot.** Earlier D52 drafts named this field `stats:derived_proposition`; Phase 1 implementation review settled on the inherited `reflection:canonical_proposition` slot instead, because that's the slot D49 §6's witness emitter reads from when admitting `IsDerivedAs(claim_iri, proposition)`. Keeping a parallel `stats:derived_proposition` would either duplicate the data (two names, one source of truth) or require institution-specific witness-index logic (breaks the cross-class uniformity D49 §6 was designed for). The slot's class-neutral name ("canonical_proposition" — "this is *the* proposition this resource carries, regardless of which epistemic-category subclass") is exactly what makes it correctly shared across `DeclaredResource` / `ObservedResource` / `DerivedResource` / `VerifiedResource` — renaming to a derivation-flavored name would mislead three of the four.
 
 Autocorrelation-structure sum type (required for longitudinal claims; author-asserted so the verifier is fully deterministic):
 
@@ -150,7 +153,9 @@ Trade-offs:
 
 ### 4.2 Option B — Product over the five orthogonal axes, with smart-constructor wrappers
 
-A single primary constructor `Set` whose record-shaped fields name the 5-axis coordinate plus the cross-cutting properties (biological units, assay columns, sampleMap, observations). The named designs from the literature are recovered as **smart-constructor functions** that desugar to `Set` at the right product position.
+A single primary constructor `Bundle` whose record-shaped fields name the 5-axis coordinate plus the cross-cutting properties (biological units, assay columns, sampleMap, observations). The named designs from the literature are recovered as **smart-constructor functions** (ESL `macro` declarations, per D52 §12 #1) that desugar to `Bundle` at the right product position.
+
+**Note on the ctor name.** Earlier drafts named the product constructor `Set`, but ESL reserves `Set` as a sort-keyword lexer token, so the data declaration `data stats:SampleSet { Set(...) }` fails to parse. Phase 1 implementation settled on `Bundle` ("bundle of axes + topology + observations") which captures the product nature without colliding with the sort keyword. The constructor name appears only in the data-declaration body and inside smart-constructor macro bodies; the surface authors interact with — `stats:SingleSampleEstimate(...)`, `stats:Paired(...)`, etc. — is unaffected.
 
 The axis enums:
 
@@ -187,49 +192,51 @@ The product:
 
 ```esl
 data stats:SampleSet {
-    Set(
-        randomization     : stats:Randomization,
-        blocking          : stats:Blocking,
-        factor            : stats:FactorDesign,
-        replication       : stats:Replication,
-        repeated_measures : stats:RepeatedMeasuresAxis,
-        units             : stats:BiologicalUnits,
-        columns           : stats:AssayColumns,
-        sample_map        : stats:SampleMap,
-        observations      : core:Array<stats:Observation>,
+    Bundle(
+        stats:Randomization,        // randomization
+        stats:Blocking,             // blocking
+        stats:FactorDesign,         // factor
+        stats:Replication,          // replication
+        stats:RepeatedMeasuresAxis, // repeated_measures
+        core:string,                // units (serialized; refined in Phase 3 when sampleMap topology lands)
+        core:string,                // columns (serialized)
+        core:string,                // sample_map (serialized)
+        core:value_array,           // observations (inline floats v1; promoted to Replicate-IRI array Phase 1.5+)
     ),
 }
 ```
 
-The smart constructors (ESL functions producing `Set` values at canonical product positions — what the chain author actually writes):
+Smart constructors (ESL `macro` declarations producing `Bundle` values at canonical product positions — what the chain author actually writes; per D52 §12 #1 implementation these are compile-time AST substitution, not runtime closures):
 
 ```esl
-fun stats:SingleSampleEstimate(
-    measurements    : core:Array<stats:Replicate>,
-    replication     : stats:Replication,
-) : stats:SampleSet => stats:SampleSet.Set(
-    randomization     = CompleteRandom,
-    blocking          = Unblocked,
-    factor            = NoFactor,
-    replication       = replication,
-    repeated_measures = CrossSectional,
-    units             = implicit_single_unit(measurements),
-    columns           = implicit_single_column(measurements),
-    sample_map        = implicit_sample_map(measurements),
-    observations      = lift_to_observations(measurements),
-);
+macro stats:SingleSampleEstimate(
+    measurements : core:value_array,
+    replication  : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        CompleteRandom(),
+        Unblocked(),
+        NoFactor(),
+        replication,
+        CrossSectional(),
+        "_implicit_single_unit",
+        "_implicit_single_column",
+        "_implicit",
+        measurements,
+    );
 
-fun stats:Paired(
-    pairs           : core:Array<stats:PairedObservation>,
-    replication     : stats:Replication,
-) : stats:SampleSet => stats:SampleSet.Set(
-    randomization     = CompleteRandom,
-    blocking          = PairedBlocking,
-    factor            = SingleFactor,
-    replication       = replication,
-    repeated_measures = CrossSectional,
-    /* ... derived from pairs ... */
-);
+macro stats:Paired(
+    pairs       : core:value_array,
+    replication : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        CompleteRandom(),
+        PairedBlocking(),
+        SingleFactor(),
+        replication,
+        CrossSectional(),
+        /* ... derived from pairs ... */
+    );
 
 // ...IID, Factorial, RCBD, SplitPlot, RepeatedMeasures similarly...
 ```
@@ -239,9 +246,9 @@ Trade-offs:
 - **(+)** Axis decomposition is type-level. Misclassification is a type error, not a doc bug.
 - **(+)** Adding the `replication_kind`-on-every-constructor distinction, the factorial-repeated-measures hybrid, and the single-sample case is *free* — they're already product positions.
 - **(+)** Tier 3 designs and future hybrids (RCBD-longitudinal, SplitPlot-longitudinal) slot in by extending an axis enum + adding a smart constructor + adding a verifier arm. No new top-level data type.
-- **(+)** Smart constructors recover the literature's vocabulary at the authoring surface — the chain author writes `stats:Paired(pairs, BiologicalReplication)`, not the full nine-field `Set(...)`.
+- **(+)** Smart constructors recover the literature's vocabulary at the authoring surface — the chain author writes `stats:Paired(pairs, BiologicalReplication())`, not the full nine-field `Bundle(...)`.
 - **(+)** Cross-cutting properties (sampleMap, biological units, assay columns) live in one place rather than repeating across constructors.
-- **(−, mitigated by indexed-inductive upgrade in Phase 1)** The naive product encoding gives observations a uniform top type (`observations : Array<stats:Observation>`), turning shape mismatches into runtime rejections rather than type errors. The principled fix — make `Set` an *indexed* inductive whose observation element-type is computed from the product position via a `stats:ObservationFor(rand, blk, fac, rep, rep_meas)` function — is **landed in Phase 1**, not deferred (per §12 decision). D48 machinery covers the kernel side; the ESL cost is ~30-50 lines for `ObservationFor` plus the indexed `Set` declaration. The "runtime rejection" form documented above is only the fallback if Phase 1 finds the indexed approach unworkable in practice.
+- **(−, mitigated by indexed-inductive upgrade — deferred from Phase 1 to follow-on)** The naive product encoding gives observations a uniform `core:value_array` (or, post-promotion, `core:resource_array` of `Replicate` IRIs), turning shape mismatches into runtime `WrongTestForDesign` rejections rather than type errors. The principled fix — make `Bundle` an *indexed* inductive whose observation element-type is computed from the product position via a `stats:ObservationFor(rand, blk, fac, rep, rep_meas)` function — was the §12 #2 decision target for Phase 1. **Implementation review deferred it** to a post-Phase-1 follow-on: the basic vertical landed faster with runtime rejection, and the indexed-inductive upgrade benefits from a real chain pulling on the shape before being committed to. D48 machinery covers the kernel side; the ~30–50 line ESL cost (`ObservationFor` + indexed `Bundle` decl) is still the budget when the upgrade lands.
 - **(−)** The product type admits nonsense combinations (e.g. `(CompleteRandom, PairedBlocking, FullFactorial, …, Longitudinal)` — what test recomputes that?). The verifier rejects these explicitly with a `WrongTestForDesign` diagnostic; the cost is one wildcard arm rather than one explicit arm per supported position.
 - **(−)** Smart constructors require ESL function support that produces inductive-ctor values. If that pattern isn't ergonomically supported today, this lands as a small parallel lift (§9 Phase 1).
 
@@ -310,7 +317,7 @@ Each subsection records the product position the smart constructor produces, the
 #### `RCBD(block_factor, treatment, observations, replication)`
 
 - **Product position**: `(Restricted, RCB(block_factor.size), SingleFactor, replication, CrossSectional)` where `block_factor.size ≥ 3`.
-- **Observation shape**: each entry is a `stats:BlockedObservation` tagged with its block id and treatment level. The smart constructor enforces that every block contains every treatment level before producing the `Set`.
+- **Observation shape**: each entry is a `stats:BlockedObservation` tagged with its block id and treatment level. The smart constructor enforces that every block contains every treatment level before producing the `Bundle`.
 - **Verifier procedure**: linear mixed-effects model with `block_factor` as a random effect and `treatment` as a fixed effect. Reduces to two-way ANOVA when blocks are treated as fixed.
 - **Common use**: controlling for known nuisance variation (plate position, day-of-experiment, animal cage) without confounding it with treatment.
 
@@ -334,7 +341,7 @@ Each subsection records the product position the smart constructor produces, the
 
 ### 5.3 The sampleMap (cross-cutting)
 
-Every product position whose observations involve a non-rectangular biological-unit × assay-column topology populates the `Set`'s `sample_map` field via the smart constructor. The map shape — modelled on Bioconductor's MultiAssayExperiment `sampleMap` slot:
+Every product position whose observations involve a non-rectangular biological-unit × assay-column topology populates the `Bundle`'s `sample_map` field via the smart constructor. The map shape — modelled on Bioconductor's MultiAssayExperiment `sampleMap` slot:
 
 ```esl
 data stats:SampleMap {
@@ -356,7 +363,7 @@ For `SingleSampleEstimate`, `IID`, and `Paired`, the smart constructor synthesiz
 
 ### 5.4 Verifier dispatch table
 
-The kernel-side verifier consumes a `Set(...)` and dispatches on the product position. The supported cells:
+The kernel-side verifier consumes a `Bundle(...)` and dispatches on the product position. The supported cells:
 
 | Product position (Randomization, Blocking, Factor, RepeatedMeasures) | Procedure |
 |---|---|
@@ -447,11 +454,13 @@ Rationale: CLSI EP09-aligned. OLS assumes the X-axis has zero measurement error,
 
 The SampleSet's `replication` axis is consulted at every verifier dispatch (§5.4) for variance-component stratification. It is *also* consulted at claim-admissibility time:
 
-- **`replication = BiologicalReplication`**: any `derived_proposition` shape is admissible (subject to the other verifier checks).
-- **`replication = TechnicalWithinRun`**: only `derived_proposition` shapes whose interpretation is local to the *measurement event* are admissible. The institution rejects population-level propositions outright with diagnostic `EpistemicScopeViolation { sample_replication: TechnicalWithinRun, proposition_scope: PopulationLevel }`. To assert a population-level proposition from technical-only replicates, the chain author must either gather biological replicates and recommit the `SampleSet`, or commit the claim against a `…_OnThisBatch(...)` / `…_OnThisPlate(...)` measurement-scope predicate that does not generalize beyond the run.
-- **`replication = NestedReplication(biological_n, technical_per_biological)`**: population-level propositions admissible; the verifier uses CLSI EP05-A3 nested ANOVA to stratify within-run vs intermediate-precision variance, and the claim's `derived_proposition` must explicitly cite which precision tier it asserts against.
+- **`replication = BiologicalReplication`**: any `canonical_proposition` shape is admissible (subject to the other verifier checks).
+- **`replication = TechnicalWithinRun`**: only `canonical_proposition` shapes whose interpretation is local to the *measurement event* are admissible. The institution rejects population-level propositions outright with diagnostic `EpistemicScopeViolation { sample_replication: TechnicalWithinRun, proposition_scope: PopulationLevel }`. To assert a population-level proposition from technical-only replicates, the chain author must either gather biological replicates and recommit the `SampleSet`, or commit the claim against a `…_OnThisBatch(...)` / `…_OnThisPlate(...)` measurement-scope predicate that does not generalize beyond the run.
+- **`replication = NestedReplication(biological_n, technical_per_biological)`**: population-level propositions admissible; the verifier uses CLSI EP05-A3 nested ANOVA to stratify within-run vs intermediate-precision variance, and the claim's `canonical_proposition` must explicitly cite which precision tier it asserts against.
 
-The *scope* of a proposition (population-level vs measurement-event-level) is determined from its constituent predicate's class membership: the chain ontology should mark each `HasLowIC50`-style predicate with either `stats:PopulationLevel` or `stats:MeasurementLevel` so the admissibility check is mechanical. Predicates with no scope marker default to population-level (the more restrictive admissibility).
+The *scope* of a proposition (population-level vs measurement-event-level) is determined from its constituent predicate's class membership: the chain ontology should mark each `HasLowIC50`-style predicate with either `stats:PopulationLevel` or `stats:MeasurementLevel` so the admissibility check is mechanical. Predicates with no scope marker default to population-level (the more restrictive admissibility — fail-safe).
+
+**Authoring caveat (v1 implementation finding).** §12 #8 settled the scope-marker shape as class-membership on the predicate's defining resource (`screen:HasLowIC50 is_a stats:PopulationLevel`). ESL's current `data` syntax doesn't admit extra `is_a` entries on the inductive-type resource it generates — only the inductive's primary `is_a InductiveType` is set. Authors could in principle add a companion `resource screen:HasLowIC50 : stats:PopulationLevel {}` declaration at the same IRI, but Phase 1 implementation review found that LayerBuilder's last-wins merge on duplicate IRIs combined with `stamp_declared` causes the companion to overwrite the inductive's `is_a`, which then breaks the D47 codec's `ConstRef` resolution (the predicate no longer parses as an InductiveType reference). Until ESL grows multi-class data declarations (e.g. `data X : Y, Z`), Phase 1 ships with the default-PopulationLevel behavior only: predicates are uniformly treated as PopulationLevel unless the chain has a separate marker layer the verifier knows how to consult. This is the more restrictive default, so it errs in the right direction; `MeasurementLevel` predicates land when the ESL extension is in.
 
 Rationale: the institution exists to prevent the trust-the-summary problem. Silently admitting a population-level claim from three reads of one plate would re-introduce exactly that problem — the chain would attest "EIG_0291 has IC50 < 100 nM" when what was actually established is "this one plate's reading of EIG_0291's IC50 was < 100 nM on this one day." The two propositions have different evidential weight; conflating them is the same epistemic loss as conflating the summary statistic with the raw data. The §7.2 dual-verdict commit shape doesn't help here because there is no transformation between the two; biological replication is structural information the SampleSet either carries or doesn't.
 
@@ -482,9 +491,24 @@ The statistics institution does not know — and explicitly does not need to kno
 
 ## 9. Implementation phasing
 
-**Phase 1 — Universal Claim schema + `SingleSampleEstimate` + `IID`, with the indexed-inductive observation-type discipline from day one.** The minimal end-to-end loop: author commits a `MeasurementClaim` referencing a `SingleSampleEstimate` SampleSet (the IC50-style one-sample threshold case from `drug_screening.esl`); institution recomputes a one-sample test against the asserted threshold; `DerivedResource` emitted; downstream D39 `ReasoningSentence` composes via `DerivedEvidence`. The `IID` two-sample case lands in the same phase since the verifier infrastructure (one-sample test → two-sample test) is a small extension. Includes: the `Set` indexed inductive with `ObservationFor` (per §12 decision), the smart-constructor prototype that settles the §12 ESL ergonomics question, the `ndarray` + `statrs` numerics setup, and the §7.4 epistemic-scope check against the SampleSet's `replication` axis. The §7 opinionated stances land in skeleton form (surfaces defined, defaults wired) but enforcement of §7.2 / §7.3 hardens in Phase 5.
+**Phase 1 — Universal Claim schema + `SingleSampleEstimate`, end-to-end vertical proven. ✅ LANDED.** What actually landed in the first slice:
 
-**Phase 2 — `Paired` + `Factorial`.** Closes Tier 1's comparative-design sextet (less `SingleSampleEstimate` and `IID` which landed in Phase 1). Verifier picks up paired-test and k-way ANOVA dispatch arms. No institution-shape changes; two new smart constructors landing at their product positions, two new verifier arms in §5.4's dispatch table.
+- **ESL `macro` extension** (per §12 #1): `Declaration::Macro(MacroDecl)`, `Value::MacroCall { name, args, pos }`, `TokenKind::Macro`, parser + compile-time AST-substitution machinery. Pure compile-time expansion; no runtime closure / NbE evaluation. Tests cover positive expansion, undeclared-macro errors, and arity mismatches. Surface keyword `macro` (distinct from `fun` which stays for type-level lambdas inside `type_expr(...)`).
+- **Statistics ontology** (`ontologies/statistics/statistics.esl`): all five axis enums, the `SampleSet` product type with the `Bundle` ctor (not `Set` — see §4.2 note), `MeasurementClaim` + `SampleSetResource` + `MeasurementVerdict` classes, all universal-Claim sum types (`EffectSize`, `Directionality`, `VarianceAssumption`, `AutocorrelationStructure`, `OutlierExclusion` with typed `ManualExclusionEntry`), the two scope-marker classes (`PopulationLevel` / `MeasurementLevel`), and the institution + QueryClass resource declarations.
+- **`eigenius-statistics` Rust crate**: `StatisticsInstitution` with full `Institution` trait impl, `ndarray` + `statrs` numerics for the one-sample t-test (deterministic, R-reference-validated, bit-identical-across-runs), validate handler reading the claim → resolving the SampleSet → decoding the `Bundle` product position → dispatching → running the §7.4 epistemic-scope check → emitting the verdict resource with computed numerics attached.
+- **D49 witness admission**: claims declare `reflection:canonical_proposition` (per §3 settled-on naming); companion `ProgramTrace` resources admit the `IsDerivedAs` witness. Test verifies the witness lands in the index via `lookup_chain_witness`.
+- **D52 §8 D39 composition end-to-end**: confirmatory IC50 SampleSet → `MeasurementClaim` Holds → `IsDerivedAs` admitted → `ReasoningSentence` with `App(SpecStr(DeclaredEvidence(rule), EIG_0291), DerivedEvidence(claim))` type-checks against `JustifiedBy(_, StrongInhibitor(EIG_0291))`. Full chain of evidence works.
+
+What deferred from the original Phase 1 scope to follow-on commits:
+
+- **`IID` two-sample dispatch** — smart constructor + ontology pieces are in place; verifier arm not yet wired (Phase 1.5).
+- **Indexed-inductive observation-type discipline** (§12 #2) — current `observations : core:value_array` admits shape mismatches at runtime via `WrongTestForDesign`; the principled `ObservationFor` upgrade deferred until a real chain pulls on it.
+- **Cross-file macro visibility** — Phase 1 fixtures re-declare the smart constructors they call because chain-storing macro decls needs serde derives across the AST. Tracked as the next macro-extension follow-on.
+- **Multi-class `data` declarations** — needed to give predicates explicit `PopulationLevel` / `MeasurementLevel` markers without the dual-decl `is_a` collision (§7.4 caveat). Until that lands, Phase 1 uses the default-PopulationLevel admissibility.
+
+**Phase 1.5 — `IID` two-sample dispatch + cross-file macros + (optional) multi-class data decls.** Closes the Phase 1 deferrals that the smallest vertical didn't need. The IID two-sample case is one new verifier arm plus the Welch/Pooled two-sample t-test against `statrs::distribution::StudentsT`. Cross-file macros need a `core:Macro` chain resource shape carrying the serialized `MacroDecl` AST, plus a `collect_macros_from_layer` analogue to `collect_ctors_from_layer`. Multi-class data decls extend ESL surface to `data X : Y, Z { ... }`.
+
+**Phase 2 — `Paired` + `Factorial`.** Closes Tier 1's comparative-design sextet (less `SingleSampleEstimate` and `IID` which landed in Phase 1 / Phase 1.5). Verifier picks up paired-test and k-way ANOVA dispatch arms. No institution-shape changes; two new smart constructors landing at their product positions, two new verifier arms in §5.4's dispatch table.
 
 **Phase 3 — sampleMap + multi-assay topology.** Refactor the SampleSet shape to embed the bipartite graph as a first-class field on the Tier 2 constructors. Tier 1's `IID` and `Paired` keep the implicit-map form. This phase is structural prep for Tier 2 verifiers that need to identify pseudo-replicates correctly.
 
@@ -508,26 +532,26 @@ Three institutions sit at the boundary of this one and warrant scoping mention s
 - **Assay-quality observation institutions** (below). Verify that the SampleSet's raw replicates are themselves trustworthy *before* the statistics institution operates on them. Examples: MIQE PCR-efficiency verification, microscopy image-quality checks, mass-spec calibration-drift detection. Their output is the `SampleSet` itself, structurally validated. They are observation institutions (Decidable on the bench data shape), not derivation institutions (Decidable on a claim about the data).
 - **Power and design-justification institution** (alongside, design-time). Verifies at SampleSet-authoring time that the planned `N` is sufficient for the target effect size at the asserted `alpha`. Different dispatch shape — consulted *before* a SampleSet has replicate data, against a design spec — so it does not share an institution with the present one.
 
-## 12. Open questions — decisions and remaining items
+## 12. Open questions — decisions, status after Phase 1, and remaining items
 
-The eight open questions identified during D52 review have been walked one-by-one. Decisions are recorded inline; the one item still open is flagged at the end.
+The eight open questions identified during D52 review have been walked one-by-one. Decisions are recorded inline; Phase 1 implementation findings are appended where they shifted the answer.
 
-- **ESL smart-constructor ergonomics — settle empirically in Phase 1.** Option B's authoring-surface argument (§4.3) depends on smart constructors that produce inductive-ctor values with brief, named call syntax. **Plan**: prototype `stats:Paired(pairs, stats:BiologicalReplication)` on day one of Phase 1 and inspect the call-site syntax. If clean, proceed with Option B as documented. If the call site reads materially worse than a direct constructor, that's the §4.4 fallback signal and Option B may need a small ESL extension (or, worst case, we revisit Option A). This is the load-bearing implementation question for the §4 recommendation.
+- **ESL smart-constructor ergonomics — SETTLED, with a new follow-on for cross-file visibility.** Phase 1 added the `macro` declaration + `Value::MacroCall` extension to ESL (`Declaration::Macro(MacroDecl)` + `TokenKind::Macro`; compile-time AST substitution, no runtime closure). Call sites read cleanly: `stats:SingleSampleEstimate([72.0, 85.0, 100.0], BiologicalReplication())`. The macro is named "Macro" rather than "Function" to honestly reflect that it's compile-time substitution, not a runtime callable — leaves the `Function` AST name available for a future real-function addition. **New follow-on**: cross-file macro visibility. Phase 1 fixtures re-declare the macros they call because chain-storing `MacroDecl`s as serializable resources needs serde derives across the AST. The structural fix is a `core:Macro` chain resource carrying the serialized decl + a `collect_macros_from_layer` analogue to `collect_ctors_from_layer`.
 
-- **Indexed-inductive observation-type discipline — DECIDED: indexed inductives from Phase 1.** `Set` is an indexed inductive parameterized by the five axes, with `observations : core:Array<stats:ObservationFor(rand, blk, fac, rep, rep_meas)>` where `ObservationFor` is an ESL function returning the right observation element-type per product position. Adds ~30-50 lines of ESL to Phase 1; D48 infrastructure covers the kernel side. The runtime-rejection fallback path described in §4.2 trade-offs becomes a contingency only if Phase 1 finds the indexed approach unworkable in practice.
+- **Indexed-inductive observation-type discipline — DEFERRED from Phase 1 to a follow-on.** Originally decided "indexed inductives from Phase 1" with ~30–50 line budget. Phase 1 implementation review reversed this: the basic vertical landed faster with runtime rejection (`WrongTestForDesign` from the validator's product-position dispatch), and the indexed-inductive upgrade benefits from a real chain pulling on the shape before being committed to. The kernel infrastructure (D48) is still ready; ESL cost still ~30–50 lines. Lands once a chain author hits a real shape-mismatch friction point or as a planned post-Phase-1.5 hardening.
 
-- **Axis-enum granularity for type-level discrimination — DECIDED: hybrid, driven by `ObservationFor`'s needs.** Split axis-enum ctors exactly where `ObservationFor` needs to discriminate (e.g., `PairedBlocking` already split from `RCB(k)`; add more splits like `FullFactorial2` / `FullFactorial3` / `FullFactorialK(factors)` only if the observation-type per factorial dimension differs); leave parameterized otherwise. Refine the axis enums incrementally as `ObservationFor` is authored.
+- **Axis-enum granularity for type-level discrimination — DECIDED, applied minimally.** Hybrid (split where needed, parameterize otherwise). Phase 1 split `PairedBlocking` from `RCB(k)` so paired-vs-RCBD is a ctor distinction; no other splits required yet (no `ObservationFor` to drive further granularity until the indexed-inductive follow-on lands).
 
-- **EffectSize encoding fidelity — DECIDED: inductive with inputs.** `EffectSize.StandardizedCohensD(mean_diff : core:float, pooled_sd : core:float)`. The verifier checks both the inputs against the SampleSet *and* the derivation `d = mean_diff / pooled_sd`. Stronger audit trail at modest authoring cost. §3 will be updated accordingly.
+- **EffectSize encoding fidelity — DECIDED: inductive with inputs.** `EffectSize.StandardizedCohensD(mean_diff : core:float, pooled_sd : core:float)` shape implemented in the Phase 1 ontology. Verifier currently dispatches only on `Absolute`; the standardized arms' verifier-side input-recovery + derivation check land when the IID two-sample procedure (Phase 1.5) starts using them.
 
-- **RepeatedMeasures autocorrelation structure — DECIDED: claim asserts the structure.** Add `autocorrelation_structure : stats:AutocorrelationStructure` to the `RepeatedMeasures` smart constructor (and as a field on the universal claim schema when the SampleSet is longitudinal). Author burden in exchange for fully deterministic, byte-reproducible verifier output. Lands in Phase 4 alongside the Tier 2 longitudinal verifier.
+- **RepeatedMeasures autocorrelation structure — DECIDED: claim asserts the structure.** Field added to the universal-claim schema in Phase 1 (`stats:autocorrelation_structure : stats:AutocorrelationStructure`), recommended-not-required because cross-sectional claims don't need it. Verifier-side enforcement lands with the Tier 2 longitudinal verifier in Phase 4.
 
-- **Numerics library choice — DECIDED: `ndarray` + `statrs`.** First numerics addition to the kernel sets the precedent; mainstream ecosystem default wins on interop and on the breadth of third-party-stats-crate availability for mixed-effects coverage in Phase 4. `nalgebra` continues to own the linear-algebra work elsewhere in the workspace where its API fits better.
+- **Numerics library choice — DECIDED: `ndarray` + `statrs`.** Both crates added to the `eigenius-statistics` Cargo.toml; one-sample t-test implemented with `statrs::distribution::StudentsT::cdf` against R-reference values, with a bit-identical-across-runs determinism test (D52 §6 reproducibility property). Sets the precedent for any further statistics or mixed-effects crates the institution acquires.
 
-- **`OutlierExclusion.Manual` validation — DECIDED: typed witness only.** `Manual(excluded : core:Array<{unit_id, quality_check_resource_iri}>)`. The kernel verifies the referenced quality-check resource exists, is committed, and its scope covers the excluded unit. Until the assay-quality observation institution (§11) lands, `Manual` is structurally inhabitable but no quality-check resources exist to reference — meaning `Manual` exclusion is effectively unavailable until Phase 5 / the quality-check institution. That's the right shape; §7.2's dual-verdict commit covers the interim.
+- **`OutlierExclusion.Manual` validation — DECIDED: typed witness only.** `Manual(excluded : core:string)` placeholder shape committed in Phase 1; the proper `Manual(excluded : core:Array<ManualExclusionEntry>)` shape with each entry carrying `{unit_id, quality_check_resource_iri}` will be flipped on when the assay-quality observation institutions (§11) provide real quality-check resources to reference. Until then, Phase 1 admits only `Identity` / `PassingBablokResidual` / `ESD`.
 
-- **Population-vs-measurement-scope predicate marking — DECIDED: class-membership + default-to-PopulationLevel.** `screen:HasLowIC50 is_a stats:PopulationLevel` (and the parallel `stats:MeasurementLevel` class for measurement-scope predicates); predicates lacking either marker default to `PopulationLevel`, the more restrictive admissibility. Zero kernel blast radius (no new sort kinds in EigenTT), trivial composability under connectives, fits the existing reflection ontology cleanly, easy to promote to type-signature encoding later if early case studies show cross-institution propagation needs the type-level guarantee. **Revisit trigger**: a downstream consumer (Lean comorphism, future Coq exporter) materializes that needs scope to ride in the type rather than in chain metadata, OR a chain author hits a case where the same predicate genuinely needs to be grounded at different scopes in different contexts (which the (a) "intrinsic to predicate" framing makes awkward).
+- **Population-vs-measurement-scope predicate marking — DECIDED, with a new ESL-extension follow-on.** Settled on class-membership + default-to-PopulationLevel: `screen:HasLowIC50 is_a stats:PopulationLevel`, predicates without a marker default to PopulationLevel. **Phase 1 implementation finding**: ESL's current `data X` syntax produces a chain resource with `is_a [InductiveType]` (plus the universal `DeclaredResource` stamp from `stamp_declared`). Adding a marker via a companion `resource X : stats:PopulationLevel {}` declaration at the same IRI collides — LayerBuilder's last-wins merge drops the inductive's primary `is_a`, breaking the D47 codec's `ConstRef` resolution. **New follow-on**: extend ESL `data` syntax to accept multiple classes (`data X : InductiveType, stats:PopulationLevel { ... }`) so the inductive-type resource's `is_a` array can carry the scope marker without a companion-resource collision. Until then, Phase 1 ships with the default-PopulationLevel behavior — fail-safe but `MeasurementLevel` predicates aren't yet author-able. See §7.4 caveat.
 
 ---
 
-*The architectural commitments this document settles: (a) product-typed `SampleSet` with smart-constructor wrappers for v1, falling back to flat sum if §4.4 conditions fire; (b) the universal Claim schema is the standards-intersection above and nothing more; (c) the institution emits `DerivedResource` + `ProgramTrace` into the existing D39 / D49 pipeline with no upstream changes; (d) the four opinionated stances (two-sided default, dual-verdict outlier exclusion, Passing-Bablok mandatory for method comparison, epistemic-scope guard against technical-replicate-to-population-claim leakage) are non-negotiable defaults; (e) the indexed-inductive observation-type upgrade is the named follow-on for hardening Option B's only structural concession. The phasing plan in §9 is suggestive; the order Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 is the lowest-risk path but can flex on real chain-author pull.*
+*The architectural commitments this document settles, after Phase 1 implementation: (a) product-typed `SampleSet` with `Bundle` constructor + smart-constructor `macro` wrappers — proven viable, working end-to-end; (b) the universal Claim schema is the standards-intersection above, with `reflection:canonical_proposition` carrying the predicate the claim establishes (one slot shared across DerivedResource subclasses); (c) the institution composes into D39 reasoning via `DerivedEvidence(claim_iri)` consuming the IsDerivedAs witness admitted at claim-commit time — no D39 changes needed, proven end-to-end with the IC50 → StrongInhibitor composition test; (d) the four opinionated stances are non-negotiable defaults; (e) the indexed-inductive observation-type upgrade is the named follow-on for hardening the runtime-rejection fallback. Phasing: Phase 1 LANDED; Phase 1.5 (IID two-sample + cross-file macros + multi-class data decls) next; Phase 2+ proceeds per §9. The order Phase 1 → 1.5 → 2 → 3 → 4 → 5 is the lowest-risk path; specific orderings flex on real chain-author pull.*

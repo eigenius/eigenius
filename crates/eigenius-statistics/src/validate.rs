@@ -21,26 +21,27 @@
 //! 2. Read the SampleSetResource's `sample_set_value` — a
 //!    `Value::Json` carrying the `Bundle` ctor over the 5-axis
 //!    product + observations.
-//! 3. Decode the Bundle's args: extract axis values + the inline
-//!    observation float array.
-//! 4. Dispatch on the product position (Phase 1 covers only
-//!    `(CompleteRandom, Unblocked, NoFactor, _, CrossSectional)`
-//!    — SingleSampleEstimate). All other positions return
-//!    `Verdict::Fails(WrongTestForDesign)`.
-//! 5. Read the claim's `alpha`, `effect_size`, `directionality`
-//!    fields; run the matching one-sample test (Phase 1: only the
-//!    `Absolute` effect-size + `TwoSided` directionality combination
-//!    is wired).
+//! 3. Decode the Bundle's axis slots; keep the observations slot
+//!    raw — each dispatch arm decodes per its expected shape.
+//! 4. Dispatch on the product position (D52 §5.4 table). Phase 1
+//!    wired SingleSampleEstimate; Phase 1.5 added IID. Unsupported
+//!    positions return `Verdict::Fails(WrongTestForDesign)`.
+//! 5. Read the claim's `alpha`, `effect_size`, `directionality`,
+//!    `variance_assumption` fields. Run the dispatch arm's numerics
+//!    routine. Each arm reduces to a `(t_statistic, p_value)` tuple
+//!    for the common verdict-building step.
 //! 6. Run the §7.4 epistemic-scope check against the
-//!    `derived_proposition`'s head predicate's `is_a` markers.
-//! 7. Build the verdict resource and return.
+//!    `canonical_proposition`'s head predicate's `is_a` markers.
+//! 7. Build the verdict resource — Holds when p < alpha, Fails with
+//!    structured diagnostic otherwise. Both outcomes carry the
+//!    computed numerics for audit.
 //!
-//! Phase 1 deliberately implements the smallest end-to-end vertical
-//! (one-sample threshold test for the IC50 fixture). Two-sample
-//! (IID), non-Identity outlier exclusion (dual-verdict per §7.2),
-//! method-comparison (Passing-Bablok per §7.3), and one-sided
-//! impossibility-witness validation (§7.1) all land as follow-on
-//! commits once the basic flow is proven.
+//! Phase 1 + 1.5 coverage: SingleSampleEstimate + IID (Welch +
+//! Pooled). Phase 2 adds Paired + Factorial. §7.2 non-Identity
+//! outlier dual-verdict, §7.3 Passing-Bablok for method-comparison,
+//! and §7.1 OneSidedWitnessed impossibility-witness validation are
+//! Phase 5 hardening; the surfaces are in place but enforcement is
+//! deferred until the basic dispatch table is wider.
 
 use eigenius_kernel::context::ExecutionContext;
 use eigenius_kernel::institution::error::InstitutionError;
@@ -51,7 +52,7 @@ use eigenius_kernel::ontology::well_known as wk;
 
 use crate::institution::iris;
 use crate::institution::StatisticsInstitution;
-use crate::numerics::{one_sample_t_test, OneSampleResult};
+use crate::numerics::{one_sample_t_test, two_sample_t_test, TwoSampleVariance};
 
 /// Top-level handler called by `StatisticsInstitution::query`.
 pub fn do_validate_measurement_claim(
@@ -156,13 +157,23 @@ pub fn do_validate_measurement_claim(
         )));
     }
 
+    // Read variance_assumption for the IID dispatch arm (one-sample
+    // dispatch ignores it — there's only one variance parameter to
+    // estimate there).
+    let variance_assumption = read_json_property(claim, iris::PROP_VARIANCE_ASSUMPTION)?;
+
     // ── Step 6: run the test (dispatch-specific) ──────────────────────
-    let result = match dispatch {
+    //
+    // Each arm decodes the observations payload for its expected
+    // shape, runs the matching numerics routine, and reduces to a
+    // `(t_statistic, p_value_two_sided)` tuple the common verdict
+    // builder consumes. Per-arm error returns short-circuit with a
+    // structured-diagnostic Fails verdict (§6).
+    let (t_statistic, p_value_two_sided) = match dispatch {
         DispatchPos::SingleSampleEstimate => {
             // Only `EffectSize.Absolute(magnitude, units)` is wired in
             // Phase 1. The one-sample test checks whether the
-            // SampleSet's mean (or appropriate CI bound) crosses the
-            // asserted absolute threshold.
+            // SampleSet's mean falls on the asserted threshold's side.
             let (magnitude, _units) = match parse_effect_size_absolute(&effect_size) {
                 Some(p) => p,
                 None => {
@@ -173,16 +184,58 @@ pub fn do_validate_measurement_claim(
                     ));
                 }
             };
-            let t_result = match one_sample_t_test(&bundle.observations, magnitude) {
+            let samples = match decode_flat_observations(&bundle.observations_raw) {
+                Ok(s) => s,
+                Err(diag) => return Ok(verdict_fails(diag)),
+            };
+            let r = match one_sample_t_test(&samples, magnitude) {
                 Some(r) => r,
                 None => {
                     return Ok(verdict_fails(format!(
                         "InsufficientReplication: one-sample t-test requires n >= 2, got n = {}",
-                        bundle.observations.len()
+                        samples.len()
                     )));
                 }
             };
-            t_result
+            (r.t_statistic, r.p_value_two_sided)
+        }
+        DispatchPos::IID => {
+            // IID two-sample: observations is `[group_a, group_b]`
+            // (nested value-array). The two groups go to the
+            // two-sample t-test under the claim's variance assumption.
+            // EffectSize is read for the verdict's audit trail but the
+            // two-sample H0 (mean_a = mean_b) doesn't carry a
+            // numerical threshold — the "effect size" is the asserted
+            // *minimum* mean difference; v1 dispatches on p < alpha
+            // alone and notes the threshold in the diagnostic.
+            let (group_a, group_b) = match decode_two_group_observations(&bundle.observations_raw) {
+                Ok(pair) => pair,
+                Err(diag) => return Ok(verdict_fails(diag)),
+            };
+            let variance = match variance_assumption.as_ref().and_then(json_ctor_name) {
+                Some("Pooled") => TwoSampleVariance::Pooled,
+                Some("WelchUnequal") => TwoSampleVariance::WelchUnequal,
+                Some(other) => {
+                    return Ok(verdict_fails(format!(
+                        "IID two-sample with variance_assumption `{other}` not yet wired \
+                         (Phase 1.5 supports Pooled / WelchUnequal; NonParametric / RankBased \
+                         are follow-on)"
+                    )));
+                }
+                None => TwoSampleVariance::WelchUnequal,
+            };
+            let r = match two_sample_t_test(&group_a, &group_b, variance) {
+                Some(r) => r,
+                None => {
+                    return Ok(verdict_fails(format!(
+                        "InsufficientReplication: two-sample t-test requires n >= 2 in each \
+                         group, got n_a = {}, n_b = {}",
+                        group_a.len(),
+                        group_b.len()
+                    )));
+                }
+            };
+            (r.t_statistic, r.p_value_two_sided)
         }
     };
 
@@ -217,20 +270,19 @@ pub fn do_validate_measurement_claim(
     // doesn't tell us *which* side; the author's derived_proposition
     // implicitly fixes the direction, and the verifier is honest about
     // the limited inference.
-    if result.p_value_two_sided < alpha {
+    if p_value_two_sided < alpha {
         Ok(QueryOutcome::from_output(verdict_resource(
             wk::VERDICT_HOLDS,
             None,
-            Some(&result),
+            Some((t_statistic, p_value_two_sided)),
         )))
     } else {
         Ok(QueryOutcome::from_output(verdict_resource(
             wk::VERDICT_FAILS,
             Some(&format!(
-                "AlphaNotCrossed: computed p = {:.6}, threshold alpha = {alpha}",
-                result.p_value_two_sided
+                "AlphaNotCrossed: computed p = {p_value_two_sided:.6}, threshold alpha = {alpha}"
             )),
-            Some(&result),
+            Some((t_statistic, p_value_two_sided)),
         )))
     }
 }
@@ -252,7 +304,12 @@ struct DecodedBundle {
     columns: String,
     #[allow(dead_code)]
     sample_map: String,
-    observations: Vec<f64>,
+    /// Raw observations slot from the Bundle ctor — each dispatch arm
+    /// decodes it per its expected shape:
+    ///  - SingleSampleEstimate expects a flat float array
+    ///  - IID expects `[group_a, group_b]` (nested float arrays)
+    ///  - Factorial / RCBD / etc. will expect richer shapes when they land
+    observations_raw: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -266,8 +323,10 @@ enum ReplicationKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(clippy::upper_case_acronyms)] // "IID" is the standard statistics term — Independent and Identically Distributed
 enum DispatchPos {
     SingleSampleEstimate,
+    IID,
 }
 
 fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
@@ -297,17 +356,10 @@ fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
     let units = args[5].as_str().unwrap_or("").to_string();
     let columns = args[6].as_str().unwrap_or("").to_string();
     let sample_map = args[7].as_str().unwrap_or("").to_string();
-    let observations_json = args[8]
-        .as_array()
-        .ok_or_else(|| "observations slot is not an array".to_string())?;
-    let observations: Vec<f64> = observations_json
-        .iter()
-        .enumerate()
-        .map(|(i, v)| {
-            v.as_f64()
-                .ok_or_else(|| format!("observation index {i} is not a number: {v:?}"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    // Keep observations raw — the per-dispatch arm decodes per its
+    // expected shape (flat float array for SingleSampleEstimate, nested
+    // for IID, richer for Tier-2 designs).
+    let observations_raw = args[8].clone();
     Ok(DecodedBundle {
         randomization,
         blocking,
@@ -317,8 +369,41 @@ fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
         units,
         columns,
         sample_map,
-        observations,
+        observations_raw,
     })
+}
+
+/// Decode the SingleSampleEstimate's observations payload: a flat
+/// JSON array of numbers.
+fn decode_flat_observations(j: &serde_json::Value) -> Result<Vec<f64>, String> {
+    let arr = j
+        .as_array()
+        .ok_or_else(|| format!("observations slot is not an array: {j:?}"))?;
+    arr.iter()
+        .enumerate()
+        .map(|(i, v)| {
+            v.as_f64()
+                .ok_or_else(|| format!("observation index {i} is not a number: {v:?}"))
+        })
+        .collect()
+}
+
+/// Decode the IID two-sample observations payload: `[group_a, group_b]`
+/// where each group is a flat JSON array of numbers. Returns the two
+/// groups as separate Vec<f64>.
+fn decode_two_group_observations(j: &serde_json::Value) -> Result<(Vec<f64>, Vec<f64>), String> {
+    let outer = j
+        .as_array()
+        .ok_or_else(|| format!("IID observations slot is not an array: {j:?}"))?;
+    if outer.len() != 2 {
+        return Err(format!(
+            "IID expects exactly 2 groups in observations (got {})",
+            outer.len()
+        ));
+    }
+    let group_a = decode_flat_observations(&outer[0]).map_err(|e| format!("IID group A: {e}"))?;
+    let group_b = decode_flat_observations(&outer[1]).map_err(|e| format!("IID group B: {e}"))?;
+    Ok((group_a, group_b))
 }
 
 fn decode_replication_kind(j: &serde_json::Value) -> Result<ReplicationKind, String> {
@@ -352,8 +437,8 @@ fn decode_replication_kind(j: &serde_json::Value) -> Result<ReplicationKind, Str
 }
 
 fn dispatch_product_position(bundle: &DecodedBundle) -> Option<DispatchPos> {
-    // Phase 1: only SingleSampleEstimate is wired. Verifier dispatch
-    // table per D52 §5.4.
+    // Verifier dispatch table per D52 §5.4. Phase 1 wired
+    // SingleSampleEstimate; Phase 1.5 added IID.
     match (
         bundle.randomization.as_str(),
         bundle.blocking.as_str(),
@@ -363,6 +448,7 @@ fn dispatch_product_position(bundle: &DecodedBundle) -> Option<DispatchPos> {
         ("CompleteRandom", "Unblocked", "NoFactor", "CrossSectional") => {
             Some(DispatchPos::SingleSampleEstimate)
         }
+        ("CompleteRandom", "Unblocked", "SingleFactor", "CrossSectional") => Some(DispatchPos::IID),
         _ => None,
     }
 }
@@ -544,7 +630,7 @@ fn verdict_fails(diagnostic: String) -> QueryOutcome {
 fn verdict_resource(
     ctor_name: &str,
     diagnostic: Option<&str>,
-    numerics: Option<&OneSampleResult>,
+    numerics: Option<(f64, f64)>,
 ) -> Resource {
     const DIAGNOSTIC_IRI: &str = "urn:eigenius:institution:diagnostic";
     let mut r = Resource::new_embedded();
@@ -564,14 +650,14 @@ fn verdict_resource(
             Value::String(d.to_string()),
         );
     }
-    if let Some(n) = numerics {
+    if let Some((t, p)) = numerics {
         r.set(
             Iri::parse(iris::PROP_COMPUTED_STATISTIC).expect("static IRI"),
-            Value::Float(n.t_statistic),
+            Value::Float(t),
         );
         r.set(
             Iri::parse(iris::PROP_COMPUTED_P_VALUE).expect("static IRI"),
-            Value::Float(n.p_value_two_sided),
+            Value::Float(p),
         );
     }
     r

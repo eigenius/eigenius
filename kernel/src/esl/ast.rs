@@ -18,6 +18,7 @@
 //! to emit Eigon-JSON resources.
 
 use crate::esl::error::Position;
+use serde::{Deserialize, Serialize};
 
 /// A complete ESL file.
 #[derive(Debug)]
@@ -35,7 +36,7 @@ pub struct NamespaceDecl {
 }
 
 /// A qualified name: `ex:Dog` or bare `Dog`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QualifiedName {
     pub namespace: Option<String>,
     pub name: String,
@@ -112,7 +113,7 @@ pub enum Declaration {
 /// - No recursion. The compile-time expansion has no termination
 ///   guarantee for recursive calls and the use case (named-design
 ///   smart constructors) doesn't need it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MacroDecl {
     pub name: QualifiedName,
     pub params: Vec<MacroParam>,
@@ -122,7 +123,7 @@ pub struct MacroDecl {
 }
 
 /// A single parameter in a [`MacroDecl`]'s parameter list.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MacroParam {
     pub name: String,
     pub typ: TypeExpr,
@@ -196,14 +197,14 @@ pub struct ResourceDecl {
 }
 
 /// A field in a resource block: `ex:name = "Rex";`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceField {
     pub property: QualifiedName,
     pub value: Value,
 }
 
 /// A value in structural position.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Value {
     String(String),
     Int(i64),
@@ -319,6 +320,15 @@ pub struct DataDecl {
     /// Result sort declared after the index telescope's arrow chain.
     /// `None` defaults to `Set` (`Sort(1)`).
     pub result_sort: Option<SortKind>,
+    /// Additional `is_a` class memberships for the emitted
+    /// inductive-type resource, beyond the implicit `InductiveType`
+    /// (D52 §12 #8 / §7.4 enabler). Surface syntax:
+    /// `data X : T, Marker1, Marker2 { ctors }`. Used by the
+    /// statistics institution to mark predicates with scope classes
+    /// (`stats:PopulationLevel` / `stats:MeasurementLevel`) without
+    /// the companion-resource workaround that collides with
+    /// `stamp_declared`. Empty for the standard non-marked case.
+    pub extra_classes: Vec<QualifiedName>,
     pub ctors: Vec<CtorDecl>,
     pub pos: Position,
 }
@@ -479,7 +489,7 @@ pub struct ObservationDecl {
 /// Purposely restricted — this isn't a full type-expression grammar,
 /// just enough for the codata observation-type surface. Data ctor
 /// arg types still use the simpler `CtorArgType` shape.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TypeExpr {
     /// Type reference with zero or more type args: `Name` or
     /// `Name(arg, arg, ...)`. Bare identifiers (no namespace) are
@@ -565,7 +575,7 @@ pub enum TypeExpr {
 }
 
 /// Sort literals recognised in type expressions (eigenius#72).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SortKind {
     Prop,
     Set,
@@ -592,7 +602,7 @@ impl TypeExpr {
 /// A typed binder: `name : type`. Used by `TypeExpr::Pi` and by the
 /// new typed `lambda` literal (D37 §3.1). The type can be any
 /// `TypeExpr`, including nested `Pi` / `Ref` / `Arrow` forms.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypedParam {
     pub name: String,
     pub typ: TypeExpr,

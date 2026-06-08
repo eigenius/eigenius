@@ -221,31 +221,39 @@ macro stats:SingleSampleEstimate(
     replication  : stats:Replication,
 ) : stats:SampleSet =>
     Bundle(
-        CompleteRandom,
-        Unblocked,
-        NoFactor,
+        CompleteRandom(),
+        Unblocked(),
+        NoFactor(),
         replication,
-        CrossSectional,
+        CrossSectional(),
         "_implicit_single_unit",
         "_implicit_single_column",
         "_implicit",
         measurements,
     );
 
+// IID two-sample: two groups (typically control + treatment) supplied
+// as separate float arrays. The macro nests them into the observations
+// slot as `[group_a, group_b]` — the verifier reads observations[0]
+// as group_a and observations[1] as group_b and runs the two-sample
+// test under the claim's `variance_assumption`. The richer per-
+// Replicate-resource shape (with explicit `treatment_level` tags)
+// lands when Factorial / multi-group designs need more than two groups.
 macro stats:IID(
-    replicates  : core:value_array,
+    group_a     : core:value_array,
+    group_b     : core:value_array,
     replication : stats:Replication,
 ) : stats:SampleSet =>
     Bundle(
-        CompleteRandom,
-        Unblocked,
-        SingleFactor,
+        CompleteRandom(),
+        Unblocked(),
+        SingleFactor(),
         replication,
-        CrossSectional,
+        CrossSectional(),
         "_implicit_per_unit",
         "_implicit_per_column",
         "_implicit",
-        replicates,
+        [group_a, group_b],
     );
 
 // Additional Tier 1+2 smart constructors (Paired, Factorial, RCBD,

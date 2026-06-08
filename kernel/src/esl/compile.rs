@@ -42,30 +42,31 @@ pub fn compile_file_with_institutions(
     file: &ast::File,
     institutions: Option<std::sync::Arc<crate::institution::registry::InstitutionIndex>>,
 ) -> Result<Vec<Resource>, Vec<EslError>> {
-    compile_file_with_context(file, institutions, BTreeMap::new())
+    compile_file_with_context(file, institutions, BTreeMap::new(), BTreeMap::new())
 }
 
-/// Compile an ESL AST with both institution context AND an external
-/// ctor table seed. The external table maps short ctor names to their
-/// full IRIs (`parent_iri:ctor_name` shape) for chain-resident
-/// inductives that the current file does not redeclare — typically
-/// produced from a [`collect_ctors_from_layer`] walk of the layer
-/// the user file is being committed against.
+/// Compile an ESL AST with institution context plus external ctor
+/// and macro table seeds. The external maps cover chain-resident
+/// inductives and `macro` declarations that the current file does
+/// not redeclare — typically produced from
+/// [`collect_ctors_from_layer`] and [`collect_macros_from_layer`]
+/// walks of the layer the user file is being committed against.
 ///
-/// Without this seed, ctor references like `app(...)` in a
-/// `type_expr(...)` body resolve only against ctors declared in the
-/// current file. With it, bare-name references can reach chain
-/// inductives (e.g. `reasoning:JustifiedBy`'s ctors) without the file
-/// having to re-declare them — the structural answer to "how does a
-/// user-authored ReasoningSentence reference `JustifiedBy.app`?"
+/// Without these seeds, cross-file references (e.g.
+/// `reasoning:JustifiedBy`'s ctors used in a sentence, or a
+/// `stats:IID(...)` macro called in a fixture) resolve only against
+/// decls in the current file. With them, child files cite parent-
+/// layer ctors and macros without re-declaring.
 pub fn compile_file_with_context(
     file: &ast::File,
     institutions: Option<std::sync::Arc<crate::institution::registry::InstitutionIndex>>,
     external_ctors: BTreeMap<String, String>,
+    external_macros: BTreeMap<String, ast::MacroDecl>,
 ) -> Result<Vec<Resource>, Vec<EslError>> {
     let mut compiler = Compiler::new();
     compiler.institutions = institutions;
     compiler.ctors = external_ctors;
+    compiler.macros = external_macros;
 
     // Register namespace aliases.
     for ns in &file.namespaces {
@@ -81,7 +82,8 @@ pub fn compile_file_with_context(
 
     // D52 §12 — collect every `macro` declaration in the file so
     // `Value::MacroCall` expansion can resolve forward references
-    // (a macro declared later in the file referenced earlier).
+    // (a macro declared later in the file referenced earlier). Adds
+    // to (and may shadow) the external seed, matching the ctor pattern.
     if let Err(e) = compiler.collect_macro_table(file) {
         return Err(vec![e]);
     }
@@ -170,6 +172,51 @@ fn ctor_value_short_name(ctor_resource: &Resource) -> String {
             }
         })
         .unwrap_or_default()
+}
+
+/// D52 §12 cross-file macros — walk a layer chain and re-hydrate every
+/// `core:Macro` resource's `MacroDecl` into a `full-IRI → decl` table
+/// suitable for seeding an ESL compile via [`compile_file_with_context`].
+/// Counterpart to [`collect_ctors_from_layer`] for macros.
+///
+/// First-wins on IRI collisions (top-of-chain layers shadow ancestors
+/// in the merged-view walk). Malformed macro resources — missing
+/// `macro_decl_json` or with a payload that doesn't deserialize as a
+/// `MacroDecl` — are silently skipped: the chain shouldn't crash at
+/// `compile_against_layer` time just because a stray malformed
+/// resource exists, and the consuming file's expansion site will
+/// surface a clean "macro not declared" diagnostic if the skip
+/// matters. (The producing-file compile would have already caught
+/// genuine authoring errors.)
+pub fn collect_macros_from_layer(layer: &crate::layer::Layer) -> BTreeMap<String, ast::MacroDecl> {
+    use crate::ontology::iri::Iri;
+    use crate::ontology::well_known as wk;
+    let mut out: BTreeMap<String, ast::MacroDecl> = BTreeMap::new();
+    let macro_class = match Iri::parse(wk::MACRO) {
+        Ok(i) => i,
+        Err(_) => return out,
+    };
+    let decl_json_iri = match Iri::parse(wk::MACRO_DECL_JSON) {
+        Ok(i) => i,
+        Err(_) => return out,
+    };
+    for (iri_key, resource) in layer.iter_all_resources() {
+        if !resource.is_instance_of(&macro_class) {
+            continue;
+        }
+        let decl_json = match resource.get(&decl_json_iri) {
+            Some(Value::Json(j)) => j,
+            _ => continue,
+        };
+        let decl: ast::MacroDecl = match serde_json::from_value(decl_json.clone()) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        // First-wins matches the merged-view walk's top-of-chain
+        // shadowing for ctors.
+        out.entry(iri_key.as_str().to_string()).or_insert(decl);
+    }
+    out
 }
 
 struct Compiler {
@@ -313,19 +360,23 @@ impl Compiler {
     /// in the file may be called earlier) because expansion happens
     /// during the per-declaration compile pass, after this
     /// collection pass populates the table.
+    ///
+    /// In-file decls shadow any external-seed entry at the same IRI
+    /// (matching the ctor behavior — the current file's declaration
+    /// is canonical for the file's compile). Two in-file decls at the
+    /// same IRI is an error.
     fn collect_macro_table(&mut self, file: &ast::File) -> Result<(), EslError> {
+        let mut declared_in_file: std::collections::BTreeSet<String> = Default::default();
         for decl in &file.declarations {
             if let ast::Declaration::Macro(m) = decl {
                 let iri = self.resolve(&m.name)?;
-                if let Some(existing) = self.macros.insert(iri.clone(), m.clone()) {
+                if !declared_in_file.insert(iri.clone()) {
                     return Err(EslError::compiler(
                         Some(m.pos.clone()),
-                        format!(
-                            "macro `{iri}` is declared twice; existing definition at {:?}",
-                            existing.pos
-                        ),
+                        format!("macro `{iri}` is declared twice in this file"),
                     ));
                 }
+                self.macros.insert(iri, m.clone());
             }
         }
         Ok(())
@@ -412,10 +463,14 @@ impl Compiler {
             ast::Declaration::Codata(c) => self.compile_codata(c),
             ast::Declaration::Data(d) => self.compile_data(d),
             ast::Declaration::MergeComorphism(mc) => self.compile_merge_comorphism(mc),
-            // D52 §12 — macros are pure compile-time machinery; the
-            // declaration is registered in `collect_macro_table` and
-            // emits no chain resources.
-            ast::Declaration::Macro(_) => Ok(Vec::new()),
+            // D52 §12 — macros are pure compile-time expansion
+            // machinery, but their declaration ALSO emits a chain
+            // resource so child-file compiles can re-hydrate the
+            // MacroDecl via `collect_macros_from_layer` (cross-file
+            // macro visibility). The expansion still happens at
+            // compile time; the chain resource is just the persisted
+            // declaration that downstream layers can deserialize.
+            ast::Declaration::Macro(m) => self.compile_macro_resource(m),
             // D43 §3.1 — text_index / vector_index lowering to Resource
             // (M2+). M1 lands the AST + parser; the compile stage will
             // synthesise the equivalent `Resource` with class
@@ -847,6 +902,36 @@ impl Compiler {
     /// EigenTT type expression. Goes through the D47 codec
     /// (`encode_type`) after lowering the ESL TypeExpr to a kernel
     /// `Exp` via [`Self::lower_type_expr_to_exp`].
+    /// D52 §12 cross-file macros — emit a `core:Macro` chain resource
+    /// carrying the macro's serialized `MacroDecl` AST. The resource's
+    /// IRI is the macro's canonical name (e.g.
+    /// `urn:eigenius:measurements:IID`); its `core:macro_decl_json`
+    /// property holds the full AST as a `Value::Json` blob (via
+    /// `serde_json::to_value` on the `MacroDecl`). Child-file compiles
+    /// re-hydrate via [`collect_macros_from_layer`].
+    fn compile_macro_resource(&self, decl: &ast::MacroDecl) -> Result<Vec<Resource>, EslError> {
+        let id = self.resolve_iri(&decl.name)?;
+        let mut r = Resource::new(id);
+        r.set(
+            iri(crate::ontology::well_known::IS_A),
+            Value::Array(vec![Value::String(
+                crate::ontology::well_known::MACRO.to_string(),
+            )]),
+        );
+        let decl_json = serde_json::to_value(decl).map_err(|e| {
+            EslError::compiler(
+                Some(decl.pos.clone()),
+                format!("macro `{}` AST serialization failed: {e}", decl.name.name),
+            )
+        })?;
+        r.set(
+            iri(crate::ontology::well_known::MACRO_DECL_JSON),
+            Value::Json(decl_json),
+        );
+        stamp_declared(&mut r);
+        Ok(vec![r])
+    }
+
     fn compile_axiom(&self, decl: &ast::AxiomDecl) -> Result<Vec<Resource>, EslError> {
         let empty_scope: std::collections::HashSet<&str> = std::collections::HashSet::new();
         let statement_exp = self.lower_type_expr_to_exp(&decl.statement, &empty_scope)?;
@@ -1323,10 +1408,20 @@ impl Compiler {
 
         let id = self.resolve_iri(&decl.name)?;
         let mut r = Resource::new(id);
-        r.set(
-            iri(wk::IS_A),
-            Value::Array(vec![Value::String(wk::INDUCTIVE_TYPE.to_string())]),
-        );
+        // D52 §12 #8 — the primary `is_a` is the implicit
+        // `InductiveType` membership; any author-declared extra
+        // classes (header form `data X : T, Marker1, Marker2 { ... }`)
+        // are appended here so a single inductive-type resource can
+        // carry scope markers (`stats:PopulationLevel`, etc.) without
+        // a separate companion `resource X : Marker {}` declaration
+        // (which would collide via `stamp_declared` + LayerBuilder
+        // last-wins).
+        let mut is_a_values: Vec<Value> = vec![Value::String(wk::INDUCTIVE_TYPE.to_string())];
+        for extra in &decl.extra_classes {
+            let extra_iri = self.resolve(extra)?;
+            is_a_values.push(Value::String(extra_iri));
+        }
+        r.set(iri(wk::IS_A), Value::Array(is_a_values));
         r.set(iri(wk::SHORT_NAME), Value::String(decl.name.name.clone()));
 
         let param_names: std::collections::HashSet<&str> =

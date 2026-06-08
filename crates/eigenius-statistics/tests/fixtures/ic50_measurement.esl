@@ -35,49 +35,16 @@ namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace screen     = "urn:eigenius:demo:screen";
 
-// ─── Local re-declaration of smart-constructor macros (Phase 1) ────
-//
-// Cross-file macro visibility (re-hydrating MacroDecls from a parent
-// layer's chain resources) is a structural follow-on to D52 §12 #1's
-// macro extension — it needs serde derives across the AST so macro
-// decls can serialize to / deserialize from chain. For Phase 1's
-// smallest end-to-end proving slice, the fixture re-declares the
-// macros it uses; the duplication is tiny (one macro for the IC50
-// case) and the test proves the macro-expansion mechanism works
-// end-to-end. Once cross-file visibility lands, the re-declaration
-// here goes away.
-
-macro stats:SingleSampleEstimate(
-    measurements : core:value_array,
-    replication  : stats:Replication,
-) : stats:SampleSet =>
-    Bundle(
-        CompleteRandom(),
-        Unblocked(),
-        NoFactor(),
-        replication,
-        CrossSectional(),
-        "_implicit_single_unit",
-        "_implicit_single_column",
-        "_implicit",
-        measurements,
-    );
-
 // ─── Domain predicate (with PopulationLevel scope marker, §7.4) ────
 
-data screen:HasLowIC50 : core:string -> Prop {
+// PopulationLevel scope marker via the multi-class `data` header
+// form (D52 §12 #8): the inductive-type resource carries both
+// `is_a InductiveType` (implicit) and `is_a stats:PopulationLevel`.
+// The §7.4 epistemic-scope check sees the marker and admits
+// population-level propositions only when the SampleSet's replication
+// kind permits (BiologicalReplication or NestedReplication).
+data screen:HasLowIC50 : core:string -> Prop, stats:PopulationLevel {
 }
-
-// Scope marker omitted: ESL's current `data` syntax doesn't support
-// adding extra `is_a` entries (e.g., stats:PopulationLevel) to the
-// inductive-type resource it generates. A companion
-// `resource screen:HasLowIC50 : stats:PopulationLevel {}` declaration
-// would collide with the data declaration (LayerBuilder's last-wins
-// merge drops the `InductiveType` membership from the data decl, which
-// breaks the D47 codec's ConstRef resolution). Per D52 §7.4, predicates
-// without an explicit marker default to PopulationLevel — exactly what
-// this case wants. The proper "add scope class to a data decl"
-// authoring shape is a tracked follow-on (D52 §12 #8 implementation).
 
 // ─── SampleSet: 3 IC50 replicate readings of EIG_0291 ──────────────
 

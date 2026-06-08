@@ -65,5 +65,6 @@ pub fn compile_against_layer(
     let tokens = lexer::tokenize(source).map_err(|e| vec![e])?;
     let file = parser::parse(&tokens).map_err(|e| vec![e])?;
     let external_ctors = compile::collect_ctors_from_layer(layer);
-    compile::compile_file_with_context(&file, None, external_ctors)
+    let external_macros = compile::collect_macros_from_layer(layer);
+    compile::compile_file_with_context(&file, None, external_ctors, external_macros)
 }

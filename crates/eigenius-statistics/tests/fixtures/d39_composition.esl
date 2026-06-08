@@ -35,15 +35,11 @@ namespace screen     = "urn:eigenius:demo:screen";
 // stack); `StrongInhibitor` is the conclusion the literature rule
 // derives. Both are class-marker predicates in `Prop`.
 
-data screen:StrongInhibitor : core:string -> Prop {
+// PopulationLevel scope marker via the multi-class `data` header
+// (D52 §12 #8) — same pattern as `screen:HasLowIC50` in
+// `ic50_measurement.esl`.
+data screen:StrongInhibitor : core:string -> Prop, stats:PopulationLevel {
 }
-
-// Scope marker omitted — per D52 §7.4, predicates without an explicit
-// PopulationLevel/MeasurementLevel `is_a` default to PopulationLevel
-// (the more restrictive admissibility), which is what we want here.
-// The IC50 fixture's dual `data` + `resource` overlay pattern on the
-// same IRI is structurally fragile (see comment there); not repeating
-// it for predicates whose default already lands at the desired scope.
 
 // ─── Universal literature rule ─────────────────────────────────────
 //
