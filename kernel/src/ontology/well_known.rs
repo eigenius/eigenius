@@ -152,6 +152,18 @@ pub const OPTION: &str = "urn:eigenius:core:Option";
 pub const INDUCTIVE_TYPE: &str = "urn:eigenius:core:InductiveType";
 pub const INDUCTIVE_CTOR: &str = "urn:eigenius:core:InductiveCtor";
 
+/// D52 §12 — smart-constructor macro decl persisted as a chain
+/// resource so child-file compiles can re-hydrate it via
+/// `compile_against_layer`. The resource carries the macro's name,
+/// parameter list, return type, and body — all serialized as JSON
+/// blobs of the corresponding AST shapes. Macros emit no chain
+/// resources at *call sites* (the call is fully inlined at compile
+/// time); this resource is only the declaration's persistent form,
+/// not the call expansion.
+pub const MACRO: &str = "urn:eigenius:core:Macro";
+/// Serialized macro-declaration body (JSON of `ast::MacroDecl`).
+pub const MACRO_DECL_JSON: &str = "urn:eigenius:core:macro_decl_json";
+
 /// D39 §4.1 atomic propositional inductive: `Asserts(iri) : Prop` —
 /// uniform-parameter, zero-constructor inductive type declared in
 /// `Sort(0)`. Different IRIs produce distinct propositions; the only

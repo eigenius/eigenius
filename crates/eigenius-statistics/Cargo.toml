@@ -1,0 +1,24 @@
+[package]
+name = "eigenius-statistics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Measurement statistics institution for Eigenius (D52). Recomputes statistical claims from raw replicate data at commit time using deterministic IEEE-754 numerics; emits MeasurementVerdict DerivedResources + ProgramTraces on Holds for downstream D39 reasoning composition via DerivedEvidence."
+
+[dependencies]
+# The verifier is in-process and reads SampleSets from the chain via
+# the kernel's resource/value machinery; no external prover or worker.
+eigenius-kernel = { path = "../../kernel" }
+
+# D52 §12 #6 — `ndarray` is the mainstream Rust scientific-computing
+# array primitive; `statrs` provides the distribution machinery
+# (Student's t CDF, normal CDF, etc.) that the verifier dispatches to
+# for p-value computation. Choice fixed in §12 #6 of D52: this is the
+# first numerics addition to the workspace and sets the precedent for
+# future statistical-test crates.
+ndarray = "0.16"
+statrs = "0.18"
+
+thiserror.workspace = true
+serde_json.workspace = true

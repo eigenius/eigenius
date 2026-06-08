@@ -233,10 +233,7 @@ fn resolve_apply_function(
 /// v1 because the TypeExpr AST has its own name-resolution scope
 /// (bound vs free type-level variables) that would require parallel
 /// substitution machinery. Add if a real use case arrives.
-fn substitute_in_value(
-    body: &ast::Value,
-    env: &BTreeMap<&str, &ast::Value>,
-) -> ast::Value {
+fn substitute_in_value(body: &ast::Value, env: &BTreeMap<&str, &ast::Value>) -> ast::Value {
     match body {
         ast::Value::Ref(qn) if qn.namespace.is_none() => {
             if let Some(arg) = env.get(qn.name.as_str()) {
@@ -245,9 +242,9 @@ fn substitute_in_value(
                 body.clone()
             }
         }
-        ast::Value::Array(items) => ast::Value::Array(
-            items.iter().map(|v| substitute_in_value(v, env)).collect(),
-        ),
+        ast::Value::Array(items) => {
+            ast::Value::Array(items.iter().map(|v| substitute_in_value(v, env)).collect())
+        }
         ast::Value::Block(fields) => ast::Value::Block(
             fields
                 .iter()
@@ -5082,6 +5079,67 @@ mod tests {
     // ────────────────────────────────────────────────────────────────
 
     #[test]
+    fn statistics_ontology_esl_compiles() {
+        // D52 Phase 1 — the authored statistics.esl source must
+        // compile cleanly. Locks the structural contract: five axis
+        // enums, the SampleSet product type, the smart-constructor
+        // macros (SingleSampleEstimate, IID), the MeasurementClaim
+        // resource class with the universal-schema fields, the
+        // PopulationLevel/MeasurementLevel scope markers, and the
+        // statistics-institution + qc_validate_measurement_claim
+        // resources. Any future edit that breaks this needs to be
+        // deliberate.
+        let source = include_str!("../../../ontologies/statistics/statistics.esl");
+        let resources = esl::compile(source).expect("statistics.esl must compile");
+
+        // Expect at least:
+        //  - 5 axis enums (Randomization, Blocking, FactorDesign,
+        //    Replication, RepeatedMeasuresAxis)
+        //  - 5 universal-claim sum types (EffectSize, Directionality,
+        //    VarianceAssumption, AutocorrelationStructure, OutlierExclusion)
+        //  - SampleSet (1)
+        // = 11 inductive Resources.
+        let inductive_iri = iri(crate::ontology::well_known::INDUCTIVE_TYPE);
+        let ind_count = resources
+            .iter()
+            .filter(|r| r.is_a().iter().any(|c| c == &inductive_iri))
+            .count();
+        assert!(
+            ind_count >= 11,
+            "expected at least 11 inductive Resources in statistics.esl, found {ind_count}"
+        );
+
+        // The two smart-constructor macros emit no resources; verify
+        // the count is what we'd get from declarations alone.
+        let has_sample_set = resources.iter().any(|r| {
+            r.id()
+                .map(|i| i.as_str() == "urn:eigenius:measurements:SampleSet")
+                .unwrap_or(false)
+        });
+        assert!(has_sample_set, "stats:SampleSet inductive must be emitted");
+
+        let has_institution = resources.iter().any(|r| {
+            r.id()
+                .map(|i| i.as_str() == "urn:eigenius:measurements:statistics_institution")
+                .unwrap_or(false)
+        });
+        assert!(
+            has_institution,
+            "stats:statistics_institution resource must be emitted"
+        );
+
+        let has_qc = resources.iter().any(|r| {
+            r.id()
+                .map(|i| i.as_str() == "urn:eigenius:measurements:qc_validate_measurement_claim")
+                .unwrap_or(false)
+        });
+        assert!(
+            has_qc,
+            "qc_validate_measurement_claim QueryClass must be emitted"
+        );
+    }
+
+    #[test]
     fn macro_call_expands_into_ctor_app() {
         // Smoke test for the smart-constructor pattern D52 §4.2 needs:
         // a `macro` declaration produces no chain resource on its own,
@@ -5158,7 +5216,8 @@ mod tests {
         );
         let err = result.expect_err("undeclared macro should error");
         assert!(
-            err.iter().any(|e| format!("{e:?}").contains("is not declared")),
+            err.iter()
+                .any(|e| format!("{e:?}").contains("is not declared")),
             "diagnostic should name the undeclared macro: got {err:?}"
         );
     }
@@ -5184,7 +5243,8 @@ mod tests {
         );
         let err = result.expect_err("arity mismatch should error");
         assert!(
-            err.iter().any(|e| format!("{e:?}").contains("expects 2 argument")),
+            err.iter()
+                .any(|e| format!("{e:?}").contains("expects 2 argument")),
             "diagnostic should name the expected vs actual arity: got {err:?}"
         );
     }

@@ -1,0 +1,149 @@
+// D52 Phase 1 — end-to-end IC50 measurement fixture.
+//
+// Replicates the scenario from `drug_screening.esl` (3 IC50 readings
+// of EIG_0291 averaging 85 nM, asserted as < 100 nM strong-inhibitor
+// threshold) but in the new D52 shape:
+//
+//   - The 3 raw replicate values live inside a `stats:SampleSetResource`
+//     as an inline value-array under the SampleSet's `Bundle` ctor.
+//   - The smart-constructor macro `stats:SingleSampleEstimate(...)`
+//     produces the `Bundle` at the canonical product position
+//     `(CompleteRandom, Unblocked, NoFactor, replication, CrossSectional)`.
+//   - The replication kind is `BiologicalReplication` (Phase 1 admits
+//     the population-level `HasLowIC50` predicate from this). The
+//     `TechnicalWithinRun` parallel fixture is a follow-on test that
+//     exercises the §7.4 epistemic-scope rejection path.
+//   - The `stats:MeasurementClaim` references the SampleSetResource by
+//     IRI and asserts the 100 nM threshold.
+//
+// What this exercises that drug_screening.esl didn't:
+//
+// 1. The ESL `macro` extension (compile-time AST substitution); the
+//    `stats:SingleSampleEstimate(...)` call expands to the full nine-
+//    field `Bundle(...)` ctor.
+// 2. The Bundle ctor's product-position dispatch — the verifier reads
+//    args[0..5] to pick the `SingleSampleEstimate` procedure.
+// 3. The one-sample t-test recomputation from raw replicates (statrs
+//    Student's t-CDF) against the asserted threshold.
+// 4. The §7.4 epistemic-scope check: BiologicalReplication admits the
+//    population-level `HasLowIC50` predicate.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace stats      = "urn:eigenius:measurements";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace screen     = "urn:eigenius:demo:screen";
+
+// ─── Local re-declaration of smart-constructor macros (Phase 1) ────
+//
+// Cross-file macro visibility (re-hydrating MacroDecls from a parent
+// layer's chain resources) is a structural follow-on to D52 §12 #1's
+// macro extension — it needs serde derives across the AST so macro
+// decls can serialize to / deserialize from chain. For Phase 1's
+// smallest end-to-end proving slice, the fixture re-declares the
+// macros it uses; the duplication is tiny (one macro for the IC50
+// case) and the test proves the macro-expansion mechanism works
+// end-to-end. Once cross-file visibility lands, the re-declaration
+// here goes away.
+
+macro stats:SingleSampleEstimate(
+    measurements : core:value_array,
+    replication  : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        CompleteRandom(),
+        Unblocked(),
+        NoFactor(),
+        replication,
+        CrossSectional(),
+        "_implicit_single_unit",
+        "_implicit_single_column",
+        "_implicit",
+        measurements,
+    );
+
+// ─── Domain predicate (with PopulationLevel scope marker, §7.4) ────
+
+data screen:HasLowIC50 : core:string -> Prop {
+}
+
+// Mark the predicate as PopulationLevel so the institution's §7.4
+// admissibility check accepts it from BiologicalReplication (and
+// would reject it from TechnicalWithinRun-only sample sets).
+//
+// Note: in v1 the marker rides on a *companion resource* — the
+// `HasLowIC50` data declaration's resource has its own `is_a` array,
+// but ESL's `data` syntax doesn't yet support adding extra class
+// memberships to the inductive-type resource itself. We add the
+// marker via an explicit resource declaration at the same IRI; the
+// chain's class-membership union resolves both is_a entries.
+resource screen:HasLowIC50 : stats:PopulationLevel {
+}
+
+// ─── SampleSet: 3 IC50 replicate readings of EIG_0291 ──────────────
+
+resource screen:m_eig0291_sampleset : stats:SampleSetResource {
+    reflection:source      = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    reflection:observed_at = "2026-03-04T14:22:11Z";
+
+    // The SampleSet value — smart constructor lands at the
+    // `(CompleteRandom, Unblocked, NoFactor, BiologicalReplication,
+    // CrossSectional)` product position. The 3 raw IC50 readings (in
+    // nM) ride inline as a value-array under the Bundle's
+    // observations slot.
+    stats:sample_set_value = stats:SingleSampleEstimate(
+        [72.0, 85.0, 100.0],
+        BiologicalReplication(),
+    );
+}
+
+// ─── ObservationTrace pairing the SampleSetResource with its origin ─
+//
+// Per D49 §6, the trace's commit admits the IsObservedAs witness for
+// the SampleSetResource. Even though the statistics institution
+// doesn't consume that witness directly, the trace is the standard
+// shape for any ObservedResource on chain and downstream D39 reasoning
+// would need it.
+
+resource screen:m_eig0291_trace : reflection:ObservationTrace {
+    reflection:resource  = screen:m_eig0291_sampleset;
+    reflection:source    = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    reflection:timestamp = "2026-03-04T14:22:11Z";
+}
+
+// ─── The MeasurementClaim ──────────────────────────────────────────
+//
+// Universal-Claim schema per D52 §3:
+//   sample_set → IRI of m_eig0291_sampleset
+//   alpha = 0.05
+//   effect_size = Absolute(100.0, "nM")  — the threshold
+//   directionality = TwoSided            (Phase 1; OneSidedWitnessed deferred)
+//   variance_assumption = WelchUnequal
+//   outlier_exclusion = Identity          (no exclusion)
+//   directionality, alternative, null hypotheses authored for
+//   completeness — the Phase 1 verifier reads alpha/effect_size/
+//   directionality/sample_set and ignores the type_expr fields beyond
+//   storing the derived_proposition for D39 downstream consumption.
+
+resource screen:claim_eig0291_lowic50 : stats:MeasurementClaim {
+    stats:sample_set = screen:m_eig0291_sampleset;
+
+    stats:null_hypothesis = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+
+    stats:alternative_hypothesis = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+
+    stats:derived_proposition = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+
+    stats:alpha = 0.05;
+    stats:effect_size = Absolute(100.0, "nM");
+    stats:directionality = TwoSided();
+    stats:variance_assumption = WelchUnequal();
+    stats:outlier_exclusion = Identity();
+}
