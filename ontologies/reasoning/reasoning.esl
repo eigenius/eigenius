@@ -66,6 +66,15 @@ data reasoning:JustificationTerm {
     VerifiedEvidence(core:string),
     App(reasoning:JustificationTerm, reasoning:JustificationTerm),
     Sum(reasoning:JustificationTerm, reasoning:JustificationTerm),
+    // Universal specialization (D39 v2 extension). Pair a
+    // universally-quantified justification term with a specific IRI
+    // value to use as the specialization argument. The matching
+    // `JustifiedBy.spec_str` constructor turns
+    // `JustifiedBy(j, forall x : core:string, P(x))` into
+    // `JustifiedBy(SpecStr(j, t), P(t))`. Monomorphic on
+    // `core:string` for v1; numeric / structural specialization is
+    // future scope tied to the measurement-statistics institution.
+    SpecStr(reasoning:JustificationTerm, core:string),
 }
 
 // ── JustifiedBy ──────────────────────────────────────────────────────
@@ -120,6 +129,19 @@ data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 0 {
                 j2 : reasoning:JustificationTerm) =>
         reasoning:JustifiedBy(j2, P) ->
         reasoning:JustifiedBy(reasoning:Sum(j1, j2), P),
+
+    // Universal specialization (D39 v2 extension). Given a witness
+    // for a universally-quantified proposition `forall x : core:string,
+    // P(x)`, applying it at a specific IRI `t` yields a witness for
+    // `P(t)`. The kernel's NbE beta-reduces `(forall x, P x)(t)` to
+    // `P[t/x]` so the result type matches downstream consumers
+    // expecting `P(t)`. Monomorphic on `core:string` for v1.
+    spec_str :
+        forall (P : core:string -> Prop,
+                j : reasoning:JustificationTerm,
+                t : core:string) =>
+        reasoning:JustifiedBy(j, forall (x : core:string) => P(x)) ->
+        reasoning:JustifiedBy(reasoning:SpecStr(j, t), P(t)),
 }
 
 // ── ReasoningSentence (D39 §4.2) ─────────────────────────────────────

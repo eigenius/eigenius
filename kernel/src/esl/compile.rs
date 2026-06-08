@@ -814,17 +814,24 @@ impl Compiler {
             ast::TypeExpr::Ref { name, args, .. } => {
                 let is_bound = name.namespace.is_none() && scope.contains(name.name.as_str());
                 if is_bound {
-                    if !args.is_empty() {
-                        return Err(EslError::compiler(
-                            Some(name.pos.clone()),
-                            format!(
-                                "bound variable `{}` cannot be applied to args in type \
-                                 position",
-                                name.name
-                            ),
-                        ));
+                    // Bound variable: lowers to `Exp::Var`. If args are
+                    // present, the user is writing a function-application
+                    // shape like `P(x)` where `P : T -> Prop` is a
+                    // forall-bound function. Curry into `Exp::App` chain
+                    // so EigenTT's NbE can beta-reduce at use time —
+                    // required by D39's `JustifiedBy.spec` constructor
+                    // whose result type writes `P(t)` for a forall-bound
+                    // `P` and `t`.
+                    let head = Exp::Var(name.name.clone());
+                    if args.is_empty() {
+                        return Ok(head);
                     }
-                    return Ok(Exp::Var(name.name.clone()));
+                    let mut acc = head;
+                    for arg in args {
+                        let arg_exp = self.lower_type_expr_to_exp(arg, scope)?;
+                        acc = Exp::App(Box::new(acc), Box::new(arg_exp));
+                    }
+                    return Ok(acc);
                 }
 
                 // Bare-name ctor lookup before namespace resolution:
@@ -997,6 +1004,208 @@ impl Compiler {
             ast::TypeExpr::LitString { value, .. } => Ok(Exp::LitString(value.clone())),
             ast::TypeExpr::LitInt { value, .. } => Ok(Exp::LitInt(*value)),
             ast::TypeExpr::LitFloat { value, .. } => Ok(Exp::LitFloat(*value)),
+        }
+    }
+
+    /// Encode an ESL `TypeExpr` directly to the D47 chain-JSON shape,
+    /// preserving `fun (x : T) => body` binder-type annotations.
+    ///
+    /// `lower_type_expr_to_exp` + `encode_type` would otherwise reject
+    /// any Lambda: `Exp::Lam` doesn't carry its binder's type, so the
+    /// generic encoder has nowhere to recover the annotation from. The
+    /// D47 `Lam` ctor expects `[binder_name, dom_json, body_json]` —
+    /// we have the dom directly in the AST, so walking the AST is the
+    /// natural shape.
+    ///
+    /// Required by D39's universal-rule certificates: writing the
+    /// predicate `P : core:string -> Prop` as `fun (x : core:string)
+    /// => HasLowIC50(x) -> StrongInhibitor(x)` inside a `type_expr(...)`
+    /// resource property value.
+    ///
+    /// Cases that can contain nested `Lambda`s (Arrow, Pi, BinderArrow,
+    /// Ref with args) recurse here so the annotation survives at any
+    /// depth. Leaves with no Lambda exposure (Sort, literals) delegate
+    /// to `lower_type_expr_to_exp` + `encode_type`.
+    fn encode_type_expr_to_json(
+        &self,
+        typ: &ast::TypeExpr,
+        scope: &std::collections::HashSet<&str>,
+    ) -> Result<serde_json::Value, EslError> {
+        use crate::program::eigentt_type_mirror::encode_type;
+        use serde_json::json;
+
+        // Wrap a leaf TypeExpr: lower to Exp, encode via the D47
+        // encoder, unwrap to raw JSON. Safe for any subtree whose
+        // lowered Exp contains no `Lam`.
+        let encode_leaf = |this: &Self, t: &ast::TypeExpr| -> Result<serde_json::Value, EslError> {
+            let exp = this.lower_type_expr_to_exp(t, scope)?;
+            let v = encode_type(&exp).map_err(|e| {
+                EslError::compiler(
+                    Some(t.pos().clone()),
+                    format!("type_expr encoding failed: {e}"),
+                )
+            })?;
+            match v {
+                Value::Json(j) => Ok(j),
+                other => Err(EslError::compiler(
+                    Some(t.pos().clone()),
+                    format!("type_expr encoding did not produce JSON: {other:?}"),
+                )),
+            }
+        };
+
+        match typ {
+            ast::TypeExpr::Lambda { params, body, .. } => {
+                // Mirror the lowering's scope-threading so later params
+                // can mention earlier binders. Each dom is encoded
+                // against the scope where prior binders are visible.
+                let mut working: std::collections::HashSet<String> =
+                    scope.iter().map(|s| s.to_string()).collect();
+                let mut binder_doms: Vec<(String, serde_json::Value)> =
+                    Vec::with_capacity(params.len());
+                for p in params {
+                    let local: std::collections::HashSet<&str> =
+                        working.iter().map(|s| s.as_str()).collect();
+                    let dom_json = self.encode_type_expr_to_json(&p.typ, &local)?;
+                    binder_doms.push((p.name.clone(), dom_json));
+                    working.insert(p.name.clone());
+                }
+                let inner_scope: std::collections::HashSet<&str> =
+                    working.iter().map(|s| s.as_str()).collect();
+                let mut acc = self.encode_type_expr_to_json(body, &inner_scope)?;
+                for (name, dom) in binder_doms.into_iter().rev() {
+                    acc = json!({
+                        "ctor": "Lam",
+                        "args": [name, dom, acc],
+                    });
+                }
+                Ok(acc)
+            }
+            ast::TypeExpr::Pi {
+                params, codomain, ..
+            } => {
+                let mut working: std::collections::HashSet<String> =
+                    scope.iter().map(|s| s.to_string()).collect();
+                let mut binder_doms: Vec<(String, serde_json::Value)> =
+                    Vec::with_capacity(params.len());
+                for p in params {
+                    let local: std::collections::HashSet<&str> =
+                        working.iter().map(|s| s.as_str()).collect();
+                    let dom_json = self.encode_type_expr_to_json(&p.typ, &local)?;
+                    binder_doms.push((p.name.clone(), dom_json));
+                    working.insert(p.name.clone());
+                }
+                let inner_scope: std::collections::HashSet<&str> =
+                    working.iter().map(|s| s.as_str()).collect();
+                let mut acc = self.encode_type_expr_to_json(codomain, &inner_scope)?;
+                for (name, dom) in binder_doms.into_iter().rev() {
+                    acc = json!({
+                        "ctor": "Pi",
+                        "args": [name, dom, acc],
+                    });
+                }
+                Ok(acc)
+            }
+            ast::TypeExpr::Arrow {
+                domain, codomain, ..
+            } => {
+                let dom_json = self.encode_type_expr_to_json(domain, scope)?;
+                let cod_json = self.encode_type_expr_to_json(codomain, scope)?;
+                Ok(json!({
+                    "ctor": "Pi",
+                    "args": ["", dom_json, cod_json],
+                }))
+            }
+            ast::TypeExpr::BinderArrow {
+                name,
+                kind,
+                bound: _,
+                body,
+                ..
+            } => {
+                // Size-binder arrows are rare in type_expr — defer to
+                // the leaf path which handles SizeSort correctly.
+                let kind_str = self.resolve(kind)?;
+                if kind_str.ends_with(":Size") || kind_str == "Size" {
+                    return encode_leaf(self, typ);
+                }
+                let dom_json = json!({
+                    "ctor": "ConstRef",
+                    "args": [kind_str],
+                });
+                let mut inner_scope: std::collections::HashSet<&str> = scope.clone();
+                inner_scope.insert(name.as_str());
+                let body_json = self.encode_type_expr_to_json(body, &inner_scope)?;
+                Ok(json!({
+                    "ctor": "Pi",
+                    "args": [name.clone(), dom_json, body_json],
+                }))
+            }
+            ast::TypeExpr::Ref { name, args, .. } => {
+                // Mirror `lower_type_expr_to_exp`'s Ref resolution: bound
+                // variable check first, then bare-name ctor lookup, then
+                // namespace resolution, then post-resolve ctor lookup,
+                // else EigonClass / parametric InductiveType. Args are
+                // App-curried regardless of which head shape applies —
+                // and we recurse into each arg so any nested Lambda
+                // there keeps its annotation.
+                let is_bound = name.namespace.is_none() && scope.contains(name.name.as_str());
+                let head_json = if is_bound {
+                    json!({"ctor": "Var", "args": [name.name.clone()]})
+                } else {
+                    // Pre-resolution bare-name ctor lookup.
+                    let bare_ctor = if name.namespace.is_none() {
+                        self.ctors.get(&name.name).cloned()
+                    } else {
+                        None
+                    };
+                    if let Some(ctor_iri_str) = bare_ctor {
+                        let parent_iri_str = ctor_iri_str
+                            .rsplit_once(':')
+                            .map(|(p, _)| p.to_string())
+                            .unwrap_or(ctor_iri_str);
+                        json!({
+                            "ctor": "CtorApp",
+                            "args": [parent_iri_str, name.name.clone()],
+                        })
+                    } else {
+                        // Namespace-resolve, then post-resolve ctor
+                        // lookup. (Both lookups consult the same `ctors`
+                        // map by short name; this branch fires when the
+                        // user wrote a namespaced ctor reference.)
+                        let iri_str = self.resolve(name)?;
+                        if let Some(ctor_iri_str) = self.ctors.get(&name.name).cloned() {
+                            let parent_iri_str = ctor_iri_str
+                                .rsplit_once(':')
+                                .map(|(p, _)| p.to_string())
+                                .unwrap_or(ctor_iri_str);
+                            json!({
+                                "ctor": "CtorApp",
+                                "args": [parent_iri_str, name.name.clone()],
+                            })
+                        } else {
+                            // Primitive IRIs ride the ConstRef path
+                            // (the D47 decoder maps the five primitive
+                            // IRIs to EigonPrimitive directly).
+                            json!({"ctor": "ConstRef", "args": [iri_str]})
+                        }
+                    }
+                };
+                let mut acc = head_json;
+                for arg in args {
+                    let arg_json = self.encode_type_expr_to_json(arg, scope)?;
+                    acc = json!({
+                        "ctor": "App",
+                        "args": [acc, arg_json],
+                    });
+                }
+                Ok(acc)
+            }
+            // Leaves with no Lambda-exposure: lower + encode.
+            ast::TypeExpr::Sort { .. }
+            | ast::TypeExpr::LitString { .. }
+            | ast::TypeExpr::LitInt { .. }
+            | ast::TypeExpr::LitFloat { .. } => encode_leaf(self, typ),
         }
     }
 
@@ -1491,17 +1700,14 @@ impl Compiler {
             // Used by D39 ReasoningSentence authors so propositions
             // and certificates can be written in EigenTT surface
             // rather than the hand-built D47 tagged-dict tree.
-            ast::Value::TypeExpr { typ, pos } => {
+            ast::Value::TypeExpr { typ, pos: _ } => {
+                // Walk the AST directly so `fun (x : T) => body`
+                // lambdas retain their binder type annotations through
+                // the D47 codec. The generic `encode_type` rejects bare
+                // `Exp::Lam` (no annotation to recover post-lowering).
                 let scope = std::collections::HashSet::new();
-                let exp = self.lower_type_expr_to_exp(typ, &scope)?;
-                let encoded =
-                    crate::program::eigentt_type_mirror::encode_type(&exp).map_err(|e| {
-                        EslError::compiler(
-                            Some(pos.clone()),
-                            format!("type_expr encoding failed: {e}"),
-                        )
-                    })?;
-                Ok(encoded)
+                let json = self.encode_type_expr_to_json(typ, &scope)?;
+                Ok(Value::Json(json))
             }
         }
     }

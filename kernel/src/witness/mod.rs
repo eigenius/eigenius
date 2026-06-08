@@ -126,6 +126,14 @@ impl WitnessKey {
 /// SHA-256 of the deterministic CBOR encoding of an `Exp`'s D47
 /// representation. Combines D47's `encode_type` with
 /// `eigon_cbor::serialize_value` to produce a fixed-size content hash.
+///
+/// The encoded JSON is alpha-canonicalized before CBOR encoding (see
+/// [`alpha_canonicalize_proposition_json`]) so that propositions equal
+/// up to binder renaming hash to the same key. Required because the
+/// kernel's NbE readback freshens binder names (`Pi (c : T) => ...`
+/// reads back as `Pi (G#0 : T) => ...`); without canonicalization, a
+/// `canonical_proposition` stored on the chain with author-supplied
+/// binder names would never match the synthesise-side hash.
 pub fn hash_proposition_exp(proposition: &Exp) -> Result<[u8; 32], EncodeError> {
     let encoded = encode_type(proposition)?;
     Ok(hash_proposition_value(&encoded))
@@ -135,11 +143,109 @@ pub fn hash_proposition_exp(proposition: &Exp) -> Result<[u8; 32], EncodeError> 
 /// proposition `Value` (`Value::Json(...)`). Used when the witness
 /// emitter reads `canonical_proposition` from a chain resource and has
 /// the encoded form in hand.
+///
+/// Alpha-canonicalizes the JSON before hashing — see
+/// [`hash_proposition_exp`] for why.
 pub fn hash_proposition_value(encoded: &Value) -> [u8; 32] {
-    let bytes = eigon_cbor::serialize_value(encoded);
+    let canonical = match encoded {
+        Value::Json(j) => {
+            let normalized = alpha_canonicalize_proposition_json(j);
+            Value::Json(normalized)
+        }
+        // Non-JSON values aren't D47-encoded propositions; hash as-is so
+        // pre-existing call sites (if any) stay byte-stable.
+        other => other.clone(),
+    };
+    let bytes = eigon_cbor::serialize_value(&canonical);
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     hasher.finalize().into()
+}
+
+/// Rewrite a D47-encoded proposition JSON tree to use a canonical
+/// scheme for binder names so that alpha-equivalent propositions hash
+/// to the same value.
+///
+/// Walks the tree maintaining a stack of `(original_name,
+/// canonical_name)` pairs; each `Pi` / `Sig` / `Lam` ctor pushes its
+/// binder (canonical name = `"_b{depth}"` where depth is the binder's
+/// position from the outside), and each `Var` ctor's name is rewritten
+/// to the topmost matching canonical name on the stack (later
+/// binders shadow earlier ones). Empty binder strings (`Patt::Unit`
+/// encoded as `""`) preserve as-is and add no entry to the stack.
+///
+/// Free `Var`s (no matching binder on the stack) are preserved
+/// unchanged — they're either author-level free variables that the
+/// kernel's type-checker will reject independently, or references to
+/// chain identifiers encoded via `ConstRef` rather than `Var`.
+pub fn alpha_canonicalize_proposition_json(value: &serde_json::Value) -> serde_json::Value {
+    let mut env: Vec<(String, String)> = Vec::new();
+    canonicalize_inner(value, &mut env)
+}
+
+fn canonicalize_inner(v: &serde_json::Value, env: &mut Vec<(String, String)>) -> serde_json::Value {
+    use serde_json::json;
+    let obj = match v.as_object() {
+        Some(o) => o,
+        None => return v.clone(),
+    };
+    let ctor = obj.get("ctor").and_then(|c| c.as_str());
+    let args = obj.get("args").and_then(|a| a.as_array());
+    let (ctor, args) = match (ctor, args) {
+        (Some(c), Some(a)) => (c, a),
+        _ => return v.clone(),
+    };
+    match (ctor, args.len()) {
+        ("Pi", 3) | ("Sig", 3) | ("Lam", 3) => {
+            let binder = args[0].as_str().unwrap_or("").to_string();
+            // Dom is evaluated in the *outer* scope (before this binder
+            // is in scope), so canonicalize it first without pushing.
+            let dom_canon = canonicalize_inner(&args[1], env);
+            // Push the binder mapping for the body. Anonymous binders
+            // (empty string) push an empty mapping so the depth counter
+            // still advances — required so a later Var lookup sees the
+            // right scoping even when intermediate binders are
+            // anonymous.
+            let depth = env.len();
+            let canonical_binder = if binder.is_empty() {
+                String::new()
+            } else {
+                format!("_b{depth}")
+            };
+            env.push((binder, canonical_binder.clone()));
+            let body_canon = canonicalize_inner(&args[2], env);
+            env.pop();
+            json!({
+                "ctor": ctor,
+                "args": [canonical_binder, dom_canon, body_canon],
+            })
+        }
+        ("Var", 1) => {
+            let name = args[0].as_str().unwrap_or("");
+            // Search the stack top-down (most recent binder wins for
+            // shadowing). The level we read is the binder's depth from
+            // the outside, so it's stable across the whole tree.
+            let resolved = env
+                .iter()
+                .rev()
+                .find(|(orig, _)| orig == name && !orig.is_empty())
+                .map(|(_, canon)| canon.clone())
+                .unwrap_or_else(|| name.to_string());
+            json!({
+                "ctor": "Var",
+                "args": [resolved],
+            })
+        }
+        _ => {
+            // Other ctors: recurse on each arg without changing the env.
+            let canon_args: Vec<serde_json::Value> =
+                args.iter().map(|a| canonicalize_inner(a, env)).collect();
+            json!({
+                "ctor": ctor,
+                "args": canon_args,
+            })
+        }
+    }
 }
 
 #[cfg(test)]
