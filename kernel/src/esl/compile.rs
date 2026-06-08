@@ -42,18 +42,39 @@ pub fn compile_file_with_institutions(
     file: &ast::File,
     institutions: Option<std::sync::Arc<crate::institution::registry::InstitutionIndex>>,
 ) -> Result<Vec<Resource>, Vec<EslError>> {
+    compile_file_with_context(file, institutions, BTreeMap::new())
+}
+
+/// Compile an ESL AST with both institution context AND an external
+/// ctor table seed. The external table maps short ctor names to their
+/// full IRIs (`parent_iri:ctor_name` shape) for chain-resident
+/// inductives that the current file does not redeclare — typically
+/// produced from a [`collect_ctors_from_layer`] walk of the layer
+/// the user file is being committed against.
+///
+/// Without this seed, ctor references like `app(...)` in a
+/// `type_expr(...)` body resolve only against ctors declared in the
+/// current file. With it, bare-name references can reach chain
+/// inductives (e.g. `reasoning:JustifiedBy`'s ctors) without the file
+/// having to re-declare them — the structural answer to "how does a
+/// user-authored ReasoningSentence reference `JustifiedBy.app`?"
+pub fn compile_file_with_context(
+    file: &ast::File,
+    institutions: Option<std::sync::Arc<crate::institution::registry::InstitutionIndex>>,
+    external_ctors: BTreeMap<String, String>,
+) -> Result<Vec<Resource>, Vec<EslError>> {
     let mut compiler = Compiler::new();
     compiler.institutions = institutions;
+    compiler.ctors = external_ctors;
 
     // Register namespace aliases.
     for ns in &file.namespaces {
         compiler.namespaces.insert(ns.alias.clone(), ns.uri.clone());
     }
 
-    // First pass: collect every declared inductive constructor so that
-    // bare-name references in expression position resolve to the
-    // canonical ctor IRI (Phase 11b step 9). Conflicts within a file
-    // are caught here rather than at use time.
+    // First pass: collect every declared inductive constructor in the
+    // current file. Adds to (and may shadow) the external seed; ctor
+    // conflicts within the current file are caught here.
     if let Err(e) = compiler.collect_ctor_table(file) {
         return Err(vec![e]);
     }
@@ -73,6 +94,75 @@ pub fn compile_file_with_institutions(
     } else {
         Err(errors)
     }
+}
+
+/// Walk a layer chain and collect every chain-resident inductive's
+/// constructors into a short-name → ctor-IRI table suitable for
+/// seeding an ESL compile via [`compile_file_with_context`]. Mirrors
+/// the same `parent_iri:ctor_name` IRI convention `collect_ctor_table`
+/// uses for in-file ctors.
+///
+/// First-wins on name collisions (top-of-chain layers shadow ancestors
+/// in the merged-view walk). The function makes no attempt to resolve
+/// cross-namespace collisions cleanly — that's the same scope limit
+/// the in-file ctor table has, and the right fix is qualified ctor
+/// references in the surface (a separate follow-up).
+pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> BTreeMap<String, String> {
+    use crate::ontology::iri::Iri;
+    use crate::ontology::well_known as wk;
+    let mut out = BTreeMap::new();
+    let inductive_class = match Iri::parse(wk::INDUCTIVE_TYPE) {
+        Ok(i) => i,
+        Err(_) => return out,
+    };
+    let ctor_name_iri = match Iri::parse(wk::CTOR_NAME) {
+        Ok(i) => i,
+        Err(_) => return out,
+    };
+    let ctors_iri = match Iri::parse(wk::CTORS) {
+        Ok(i) => i,
+        Err(_) => return out,
+    };
+    for (parent_iri, resource) in layer.iter_all_resources() {
+        if !resource.is_instance_of(&inductive_class) {
+            continue;
+        }
+        let ctors = match resource.get(&ctors_iri) {
+            Some(Value::Array(a)) => a,
+            _ => continue,
+        };
+        for ctor_value in ctors {
+            let ctor_resource = match ctor_value {
+                Value::Embedded(r) => r.as_ref(),
+                _ => continue,
+            };
+            let name = match ctor_resource.get(&ctor_name_iri) {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            // First-wins so the merged-view walk's top-of-chain
+            // entries shadow ancestors.
+            out.entry(name).or_insert_with(|| {
+                format!("{parent_iri}:{}", ctor_value_short_name(ctor_resource))
+            });
+        }
+    }
+    out
+}
+
+fn ctor_value_short_name(ctor_resource: &Resource) -> String {
+    use crate::ontology::iri::Iri;
+    use crate::ontology::well_known as wk;
+    ctor_resource
+        .get(&Iri::parse(wk::CTOR_NAME).expect("static IRI"))
+        .and_then(|v| {
+            if let Value::String(s) = v {
+                Some(s.clone())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default()
 }
 
 struct Compiler {
@@ -149,6 +239,50 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+
+    /// Construct an `Exp::InductiveCtor` from a ctor short-name + its
+    /// resolved IRI (`parent_iri:ctor_name` shape). Used by both the
+    /// pre-resolve bare-name ctor lookup and the post-resolve
+    /// namespaced lookup in `lower_type_expr_to_exp`; factored out to
+    /// keep the two paths from drifting.
+    fn emit_ctor_app_from_ctor_iri(
+        &self,
+        pos: &crate::esl::error::Position,
+        ctor_name: &str,
+        ctor_iri_str: &str,
+        args: &[ast::TypeExpr],
+        scope: &std::collections::HashSet<&str>,
+    ) -> Result<Exp, EslError> {
+        // The ctor IRI shape is `parent_iri:ctor_name` — strip the
+        // trailing `:<ctor_name>` to recover the parent inductive IRI.
+        let parent_iri_str = ctor_iri_str
+            .rsplit_once(':')
+            .map(|(parent, _)| parent.to_string())
+            .unwrap_or_else(|| ctor_iri_str.to_string());
+        let parent_iri = Iri::parse(&parent_iri_str).map_err(|e| {
+            EslError::compiler(
+                Some(pos.clone()),
+                format!("invalid parent IRI `{parent_iri_str}` for ctor `{ctor_name}`: {e}"),
+            )
+        })?;
+        // Per gh #75 the stub's `name` is the diagnostic label; the
+        // identity is the IRI. Pull the short name from the parent
+        // IRI's local part so error messages read naturally.
+        let parent_short_name = parent_iri.local_name().to_string();
+        let stub = std::sync::Arc::new(InductiveDecl {
+            iri: parent_iri,
+            name: parent_short_name,
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        let arg_exps: Result<Vec<Exp>, EslError> = args
+            .iter()
+            .map(|a| self.lower_type_expr_to_exp(a, scope))
+            .collect();
+        Ok(Exp::InductiveCtor(stub, ctor_name.to_string(), arg_exps?))
     }
 
     /// Resolve a qualified name to a full IRI string.
@@ -599,6 +733,16 @@ impl Compiler {
                  branch is not exercised."
                     .to_string(),
             )),
+            ast::TypeExpr::LitString { pos, .. }
+            | ast::TypeExpr::LitInt { pos, .. }
+            | ast::TypeExpr::LitFloat { pos, .. } => Err(EslError::compiler(
+                Some(pos.clone()),
+                "literal values are not allowed in chain-value type-expression slots \
+                 (codata observation types, etc.); they only appear in Exp-encoded \
+                 contexts (axiom statements, `type_expr(...)` resource fields, \
+                 indexed ctor return types)"
+                    .to_string(),
+            )),
         }
     }
 
@@ -682,6 +826,26 @@ impl Compiler {
                     }
                     return Ok(Exp::Var(name.name.clone()));
                 }
+
+                // Bare-name ctor lookup before namespace resolution:
+                // `app`, `declared`, `observed`, etc. — references to
+                // ctors of in-file or chain-resident inductives (the
+                // latter seeded via `compile_against_layer`). Checked
+                // *before* `self.resolve(name)` because bare names
+                // would otherwise fail namespace resolution and never
+                // reach the post-resolve ctor lookup below.
+                if name.namespace.is_none() {
+                    if let Some(ctor_iri_str) = self.ctors.get(&name.name).cloned() {
+                        return self.emit_ctor_app_from_ctor_iri(
+                            &name.pos,
+                            &name.name,
+                            &ctor_iri_str,
+                            args,
+                            scope,
+                        );
+                    }
+                }
+
                 let iri_str = self.resolve(name)?;
                 let iri_val = Iri::parse(&iri_str).map_err(|e| {
                     EslError::compiler(
@@ -703,41 +867,14 @@ impl Compiler {
                 // `resolve_inductive_decl_for_ctor` consults the layer
                 // (with the self-reference short-circuit covering the
                 // in-construction case).
-                if let Some(ctor_iri_str) = self.ctors.get(&name.name) {
-                    // The ctor IRI shape is `parent_iri:ctor_name` —
-                    // strip the trailing `:<ctor_name>` to recover the
-                    // parent inductive IRI.
-                    let parent_iri_str = ctor_iri_str
-                        .rsplit_once(':')
-                        .map(|(parent, _)| parent.to_string())
-                        .unwrap_or_else(|| ctor_iri_str.clone());
-                    let parent_iri = Iri::parse(&parent_iri_str).map_err(|e| {
-                        EslError::compiler(
-                            Some(name.pos.clone()),
-                            format!(
-                                "invalid parent IRI `{parent_iri_str}` for ctor `{}`: {e}",
-                                name.name
-                            ),
-                        )
-                    })?;
-                    // The stub's `name` field is the short name (the
-                    // human-readable label, per gh #75) — derive it from
-                    // the parent IRI's local part so the diagnostic
-                    // surface reads naturally.
-                    let parent_short_name = parent_iri.local_name().to_string();
-                    let stub = std::sync::Arc::new(InductiveDecl {
-                        iri: parent_iri,
-                        name: parent_short_name,
-                        params: Vec::new(),
-                        indices: Vec::new(),
-                        sort: Exp::Sort(1),
-                        ctors: Vec::new(),
-                    });
-                    let arg_exps: Result<Vec<Exp>, EslError> = args
-                        .iter()
-                        .map(|a| self.lower_type_expr_to_exp(a, scope))
-                        .collect();
-                    return Ok(Exp::InductiveCtor(stub, name.name.clone(), arg_exps?));
+                if let Some(ctor_iri_str) = self.ctors.get(&name.name).cloned() {
+                    return self.emit_ctor_app_from_ctor_iri(
+                        &name.pos,
+                        &name.name,
+                        &ctor_iri_str,
+                        args,
+                        scope,
+                    );
                 }
 
                 if args.is_empty() {
@@ -853,6 +990,13 @@ impl Compiler {
                 }
                 Ok(body_exp)
             }
+            // Literals in type/term position lower to the Phase-2
+            // `Exp::Lit*` constructors. Used as arguments to value-
+            // indexed inductives (e.g. `Asserts("urn:foo")`,
+            // `Vec(3, A)`, etc.) inside `type_expr(...)`.
+            ast::TypeExpr::LitString { value, .. } => Ok(Exp::LitString(value.clone())),
+            ast::TypeExpr::LitInt { value, .. } => Ok(Exp::LitInt(*value)),
+            ast::TypeExpr::LitFloat { value, .. } => Ok(Exp::LitFloat(*value)),
         }
     }
 
@@ -1340,6 +1484,25 @@ impl Compiler {
             // full ctor schema and reports a clean structural error
             // if the name + arg shapes don't match.
             ast::Value::CtorApp { .. } => Ok(Value::Json(self.ctor_value_to_json(value)?)),
+            // `type_expr(<TypeExpr>)` — inline D47-encoded EigenTT
+            // type expression. Lowers via the same path as `axiom`
+            // and `data` ctor types: ESL TypeExpr →
+            // `lower_type_expr_to_exp` → `encode_type` → chain JSON.
+            // Used by D39 ReasoningSentence authors so propositions
+            // and certificates can be written in EigenTT surface
+            // rather than the hand-built D47 tagged-dict tree.
+            ast::Value::TypeExpr { typ, pos } => {
+                let scope = std::collections::HashSet::new();
+                let exp = self.lower_type_expr_to_exp(typ, &scope)?;
+                let encoded =
+                    crate::program::eigentt_type_mirror::encode_type(&exp).map_err(|e| {
+                        EslError::compiler(
+                            Some(pos.clone()),
+                            format!("type_expr encoding failed: {e}"),
+                        )
+                    })?;
+                Ok(encoded)
+            }
         }
     }
 
@@ -1381,6 +1544,12 @@ impl Compiler {
                 obj.insert("args".to_string(), serde_json::Value::Array(json_args?));
                 Ok(serde_json::Value::Object(obj))
             }
+            ast::Value::TypeExpr { .. } => Err(EslError::compiler(
+                None,
+                "`type_expr(...)` cannot appear as an argument inside a chain inductive ctor — \
+                 D32 §3.7 ctor args are flat values or nested ctor applications, not D47-encoded \
+                 type expressions. Lift the type_expr to the property value directly.",
+            )),
         }
     }
 
@@ -4464,6 +4633,58 @@ mod tests {
             let class_iri = Iri::parse(iri_str).unwrap();
             resolve_class_type(&class_iri, &layer)
                 .unwrap_or_else(|e| panic!("failed to resolve {iri_str}: {e}"));
+        }
+    }
+
+    #[test]
+    fn type_expr_value_encodes_d47_inline_on_resource_property() {
+        // `type_expr(<type-expr>)` — inline D47 surface for resource
+        // fields. Mirrors `formula(...)` for D32 inductive values.
+        // The encoded shape on the property must match what an
+        // equivalent top-level `axiom` declaration produces.
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace eg   = "urn:eigenius:test:typeexpr";
+
+            class eg:Holder {
+                requires eg:body;
+            }
+            property eg:body : core:resource {
+                class_types eigentt:TypeExpr;
+            }
+            namespace eigentt = "urn:eigenius:eigentt";
+
+            resource eg:r1 : eg:Holder {
+                eg:body = type_expr(forall (A : Set) => A -> A);
+            }
+            "#,
+        );
+        let holder = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str() == "urn:eigenius:test:typeexpr:r1")
+                    .unwrap_or(false)
+            })
+            .expect("eg:r1 committed");
+        let body = holder
+            .get(&iri("urn:eigenius:test:typeexpr:body"))
+            .expect("eg:body set");
+        match body {
+            Value::Json(j) => {
+                // forall (A : Set) => A -> A
+                //   → Pi("A", Sort(1), Pi("", Var("A"), Var("A")))
+                assert_eq!(j["ctor"], "Pi");
+                assert_eq!(j["args"][0], "A");
+                assert_eq!(j["args"][1]["ctor"], "Sort");
+                assert_eq!(j["args"][1]["args"][0], 1);
+                let inner = &j["args"][2];
+                assert_eq!(inner["ctor"], "Pi");
+                assert_eq!(inner["args"][1]["ctor"], "Var");
+                assert_eq!(inner["args"][1]["args"][0], "A");
+            }
+            other => panic!("expected Value::Json, got {other:?}"),
         }
     }
 

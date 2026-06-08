@@ -173,6 +173,19 @@ pub enum Value {
         args: Vec<Value>,
         pos: Position,
     },
+    /// `type_expr(<type-expr>)` — inline D47-encoded EigenTT type
+    /// expression as a resource-field value. Lowered via
+    /// `lower_type_expr_to_exp` + `encode_type` at compile time;
+    /// the resulting `Value::Json` lands directly on the property,
+    /// matching what a programmatic `encode_type` caller produces.
+    /// Surface counterpart of `formula(...)` for D32 §3.7
+    /// inductive values — same purpose (write the expression
+    /// readably instead of the tagged-dict tree the codec emits),
+    /// different codec.
+    TypeExpr {
+        typ: TypeExpr,
+        pos: Position,
+    },
 }
 
 /// `program ex:summarize : ex:Document -> ex:Summary { expr }`
@@ -444,7 +457,29 @@ pub enum TypeExpr {
     /// `Sort(0)`, `Set` is `Sort(1)`, `Type N` is `Sort(N+1)`.
     /// Used in `axiom` statements, indexed `data` declarations, and
     /// motives.
-    Sort { kind: SortKind, pos: Position },
+    Sort {
+        kind: SortKind,
+        pos: Position,
+    },
+    /// String / integer / float literal in type position. Lowers to
+    /// `Exp::LitString` / `LitInt` / `LitFloat` — Phase-2 term-level
+    /// constructors the kernel admits as arguments to value-indexed
+    /// inductives (e.g. `Asserts(iri : core:string) : Prop` consumes
+    /// a `LitString` at its iri index slot). Surface required by
+    /// `type_expr(...)` so authors can write `Asserts("urn:foo")`
+    /// directly instead of binding the IRI through a separate `Var`.
+    LitString {
+        value: String,
+        pos: Position,
+    },
+    LitInt {
+        value: i64,
+        pos: Position,
+    },
+    LitFloat {
+        value: f64,
+        pos: Position,
+    },
     /// eigenius#72 Layer 3 — type-level lambda introduced by `fun`:
     /// `fun (i : T) => body`. Used as a motive for `match … returning
     /// <motive>` over indexed inductives. Compiles to nested
@@ -474,7 +509,10 @@ impl TypeExpr {
             | TypeExpr::BinderArrow { pos, .. }
             | TypeExpr::Pi { pos, .. }
             | TypeExpr::Sort { pos, .. }
-            | TypeExpr::Lambda { pos, .. } => pos,
+            | TypeExpr::Lambda { pos, .. }
+            | TypeExpr::LitString { pos, .. }
+            | TypeExpr::LitInt { pos, .. }
+            | TypeExpr::LitFloat { pos, .. } => pos,
         }
     }
 }

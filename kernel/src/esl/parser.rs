@@ -564,6 +564,22 @@ impl<'a> Parser<'a> {
                     self.expect(&TokenKind::RParen)?;
                     return Ok(expr);
                 }
+                // `type_expr(...)` — inline D47-encoded EigenTT type
+                // expression. Parses the inner expression with the
+                // same `parse_type_expr` used for `axiom` declarations
+                // and `data` ctor types; the compile-side hook D47-
+                // encodes the lowered Exp. Surface counterpart of
+                // `formula(...)` for D47, used by D39 ReasoningSentence
+                // authors who'd otherwise hand-write the verbose
+                // `{"ctor":"App","args":[...]}` tagged-dict tree.
+                if name == "type_expr" && self.peek_at(1) == &TokenKind::LParen {
+                    let pos = self.current_pos();
+                    self.advance(); // consume `type_expr`
+                    self.expect(&TokenKind::LParen)?;
+                    let typ = self.parse_type_expr()?;
+                    self.expect(&TokenKind::RParen)?;
+                    return Ok(Value::TypeExpr { typ, pos });
+                }
                 let qn = self.parse_qualified_name()?;
                 // Bare `Ident` followed by `(` is an inductive-ctor
                 // application — `Foo(arg1, arg2, ...)` per D32
@@ -1057,6 +1073,28 @@ impl<'a> Parser<'a> {
 
     fn parse_type_atom(&mut self) -> Result<TypeExpr, EslError> {
         let pos = self.current_pos();
+        // Literal in a type position — lowers to Exp::LitString /
+        // LitInt / LitFloat. Required by `type_expr(...)` so authors
+        // can write predicate applications with concrete arguments,
+        // e.g. `Asserts("urn:foo")` or `Vec(3, A)`. Literals at the
+        // head of a type-expression form an atom on their own; they
+        // cannot take type-args, so the qualified-name path below
+        // is bypassed entirely.
+        match self.peek().clone() {
+            TokenKind::StringLit(s) => {
+                self.advance();
+                return Ok(TypeExpr::LitString { value: s, pos });
+            }
+            TokenKind::IntLit(n) => {
+                self.advance();
+                return Ok(TypeExpr::LitInt { value: n, pos });
+            }
+            TokenKind::FloatLit(f) => {
+                self.advance();
+                return Ok(TypeExpr::LitFloat { value: f, pos });
+            }
+            _ => {}
+        }
         let name = self.parse_qualified_name()?;
         let args = if self.at(&TokenKind::LParen) {
             self.advance();

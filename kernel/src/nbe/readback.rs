@@ -47,9 +47,21 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
         Val::Unit => Exp::Unit,
         Val::Sort(n) => Exp::Sort(*n),
         Val::Pi(t, g) => {
+            // Preserve Patt::Unit (anonymous binders) from the original
+            // closure so round-tripping `A -> B` through eval+readback
+            // doesn't introduce a `G#N` binder name that would diverge
+            // from the author's encoding. Critical for D49 witness-key
+            // hashes — chain-stored canonical_proposition encodes
+            // anonymous arrow binders as `Patt::Unit`; the synthesis
+            // hook's readback+encode must produce identical bytes.
             let gen = gen_val(level);
+            let patt = if matches!(g.patt, Patt::Unit) {
+                Patt::Unit
+            } else {
+                gen_patt(level)
+            };
             Exp::Pi(
-                gen_patt(level),
+                patt,
                 Box::new(readback_val(level, t)),
                 Box::new(readback_val(
                     level + 1,
@@ -59,8 +71,13 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
         }
         Val::Sig(t, g) => {
             let gen = gen_val(level);
+            let patt = if matches!(g.patt, Patt::Unit) {
+                Patt::Unit
+            } else {
+                gen_patt(level)
+            };
             Exp::Sig(
-                gen_patt(level),
+                patt,
                 Box::new(readback_val(level, t)),
                 Box::new(readback_val(
                     level + 1,

@@ -50,3 +50,20 @@ pub fn compile_with_institutions(
     let file = parser::parse(&tokens).map_err(|e| vec![e])?;
     compile::compile_file_with_institutions(&file, Some(institutions))
 }
+
+/// Compile an ESL source string against a chain layer, seeding the
+/// compiler's ctor table with every chain-resident inductive's
+/// constructors. Required for D39 ReasoningSentence commits whose
+/// `type_expr(...)` certificates reference chain-resident ctors like
+/// `app` / `declared` / `observed` from `reasoning:JustifiedBy` —
+/// the bare-name ctor disambiguator needs to see those entries to
+/// emit the right `Exp::InductiveCtor` instead of a plain reference.
+pub fn compile_against_layer(
+    source: &str,
+    layer: &crate::layer::Layer,
+) -> Result<Vec<Resource>, Vec<error::EslError>> {
+    let tokens = lexer::tokenize(source).map_err(|e| vec![e])?;
+    let file = parser::parse(&tokens).map_err(|e| vec![e])?;
+    let external_ctors = compile::collect_ctors_from_layer(layer);
+    compile::compile_file_with_context(&file, None, external_ctors)
+}

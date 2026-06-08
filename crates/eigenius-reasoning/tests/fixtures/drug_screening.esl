@@ -1,0 +1,212 @@
+// End-to-end D39 / D49 demo — drug screening.
+//
+// Question: Is compound EIG_0291 a strong CDK2 inhibitor?
+//
+// Three chain commits + one ReasoningSentence:
+//
+// 1. Domain vocabulary — two zero-ctor predicates in `Prop`
+//    parameterised by a compound IRI. These give us
+//    `HasLowIC50(c)` and `StrongInhibitor(c)` propositions.
+// 2. A literature rule as a `DeclaredResource`, with explicit
+//    `canonical_proposition` = `HasLowIC50(EIG_0291) ->
+//    StrongInhibitor(EIG_0291)`. (Specialised to one compound to
+//    keep the scenario tractable; a fully general rule would
+//    universally-quantify over `c`.) A `DeclarationTrace` points
+//    at it so D49's witness emitter admits the IsDeclaredAs
+//    witness for this rule + proposition.
+// 3. A bench measurement as an `ObservedResource`, with explicit
+//    `canonical_proposition` = `HasLowIC50(EIG_0291)`. An
+//    `ObservationTrace` admits the IsObservedAs witness.
+// 4. A `ReasoningSentence` claiming `StrongInhibitor(EIG_0291)`
+//    via `App(DeclaredEvidence(rule_iri),
+//    ObservedEvidence(obs_iri))`. The certificate composes
+//    `JustifiedBy.declared` + `JustifiedBy.observed` via
+//    `JustifiedBy.app`. ChainWitness slots are filled by the
+//    kernel at type-check time (Phase 9 synthesize hook).
+//
+// On commit, ValidateJustification fires AutoOnLoad. The kernel
+// type-checks the certificate against `JustifiedBy(justification,
+// proposition)`, synthesises both ChainWitnesses, and Verdict::Holds.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace screen     = "urn:eigenius:demo:screen";
+
+// ─── Step 1: domain vocabulary ─────────────────────────────────────
+
+// Two zero-ctor opaque predicates in `Prop`. The kernel admits
+// inhabitants only via institution dispatch — they're propositional
+// labels, not data carriers.
+
+data screen:HasLowIC50 : core:string -> Prop {
+}
+
+data screen:StrongInhibitor : core:string -> Prop {
+}
+
+// ─── Properties for the raw measurement (Option A above) ──────────
+
+property screen:ic50_nm : core:float {
+    description = "Half-maximal inhibitory concentration in nM.";
+}
+
+property screen:ci_low_nm : core:float {
+    description = "Lower bound of the 95% confidence interval (nM).";
+}
+
+property screen:ci_high_nm : core:float {
+    description = "Upper bound of the 95% confidence interval (nM).";
+}
+
+property screen:replicate_count : core:integer {
+    description = "Number of replicate measurements averaged into this row.";
+}
+
+property screen:assay_protocol : core:string {
+    description = "Name of the assay protocol — Kinase-Glo, ADP-Glo, TR-FRET, etc. A real chain would `class_types` this against an AssayProtocol resource class; left as a free string here to keep the demo focused on the reasoning layer.";
+}
+
+property screen:target_iri : core:string {
+    description = "IRI of the kinase target this measurement was taken against. As with assay_protocol, would be a resource ref in a production schema.";
+    format = formats:iri;
+}
+
+// ─── Step 2: literature rule + its DeclarationTrace ────────────────
+
+resource screen:rule_strong : reflection:DeclaredResource {
+    reflection:declared_by = "literature:smith_et_al_2024_3.2";
+    reflection:rationale   = "IC50 < 100 nM at a kinase target is the standard strong-inhibitor threshold.";
+
+    // The proposition this rule encodes — an implication between
+    // the two predicates, specialised to EIG_0291.
+    reflection:canonical_proposition = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+        ->
+        screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+    );
+}
+
+resource screen:rule_strong_trace : reflection:DeclarationTrace {
+    reflection:resource    = screen:rule_strong;
+    reflection:declared_by = "literature:smith_et_al_2024_3.2";
+    reflection:timestamp   = "2026-04-10T09:00:00Z";
+}
+
+// ─── Step 3: bench measurement + its ObservationTrace ──────────────
+
+// The measurement carries the actual bench data alongside the
+// chain-resident proposition it commits to. Three layers of fields:
+//
+//   1. Provenance (reflection:source / observed_at) — D49 §6 trace
+//      requirements: who/when/where the observation came from.
+//   2. The raw measurement (ic50_nm + 95% CI bounds + replicate
+//      count) — what the instrument read. Plain `core:float` /
+//      `core:integer` properties; not type-checked propositions.
+//   3. The chain-resident proposition (canonical_proposition) — the
+//      *abstraction* downstream reasoning operates on. The bridge
+//      from "85.0 < 100" to "HasLowIC50 holds" is a methodological
+//      commitment by the chain author: by emitting this resource as
+//      a DeclaredResource + DeclarationTrace pair, the author asserts
+//      that the predicate fits the measurement. Two principled
+//      richer alternatives, not exercised here:
+//
+//      - Option B (value-indexed predicate): make HasIC50 carry the
+//        value as an index (`HasIC50 : string → float → Prop`) and
+//        write the rule with a `<` comparison. Requires built-in
+//        comparison in Prop or an institution that decides it.
+//      - Option C (numerical-institution dispatch): commit the raw
+//        measurement, let an institution (IntervalArithmetic or a
+//        ThresholdComparison) decide the comparison and produce a
+//        DerivedResource whose canonical_proposition is the predicate.
+//        The ReasoningSentence cites that DerivedResource via
+//        `DerivedEvidence`. Cleanest separation; available today,
+//        just more plumbing.
+
+resource screen:m_eig0291 : reflection:ObservedResource {
+    reflection:source      = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    reflection:observed_at = "2026-03-04T14:22:11Z";
+
+    // Raw measurement — what the bench actually read.
+    screen:ic50_nm         = 85.0;
+    screen:ci_low_nm       = 72.0;
+    screen:ci_high_nm      = 100.0;
+    screen:replicate_count = 3;
+    screen:assay_protocol  = "Kinase-Glo";
+    screen:target_iri      = "urn:eigenius:demo:screen:CDK2";
+
+    // Chain-resident proposition — the abstraction the literature
+    // rule and downstream reasoning operate on. Authoring this is the
+    // methodological commitment that the predicate captures what
+    // "ic50_nm = 85 with CI [72, 100]" means for this assay.
+    reflection:canonical_proposition = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+}
+
+resource screen:m_eig0291_trace : reflection:ObservationTrace {
+    reflection:resource  = screen:m_eig0291;
+    reflection:source    = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    reflection:timestamp = "2026-03-04T14:22:11Z";
+}
+
+// ─── Step 4: the ReasoningSentence ─────────────────────────────────
+//
+// The agent's claim: "EIG_0291 is a strong CDK2 inhibitor."
+// Justification: apply the literature rule to the bench observation.
+// Certificate: `JustifiedBy.app` composing `.declared` and `.observed`.
+// Each grounding constructor's witness slot is filled by the kernel
+// synthesise hook at type-check time — we just provide a unit
+// placeholder.
+
+resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
+
+    reasoning:proposition = type_expr(
+        screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+    );
+
+    // Chain-shape inductive value over JustificationTerm constructors.
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
+        ObservedEvidence("urn:eigenius:demo:screen:m_eig0291")
+    );
+
+    // `JustifiedBy.app A B j1 j2 c1 c2` — six args.
+    // A : Prop = HasLowIC50(EIG_0291)
+    // B : Prop = StrongInhibitor(EIG_0291)
+    // j1, j2 : JustificationTerm
+    // c1 : JustifiedBy(j1, A -> B) = JustifiedBy.declared(rule_iri, A -> B, <wit>)
+    // c2 : JustifiedBy(j2, A)      = JustifiedBy.observed(obs_iri, A, <wit>)
+    //
+    // The result has type `JustifiedBy(App(j1, j2), B)` — exactly the
+    // expected certificate type for this sentence's
+    // `(justification, proposition)` pair.
+    reasoning:certificate = type_expr(
+        app(
+            // A
+            screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
+            // B
+            screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
+            // j1
+            DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
+            // j2
+            ObservedEvidence("urn:eigenius:demo:screen:m_eig0291"),
+            // c1: JustifiedBy.declared(rule_iri, A -> B, <witness>)
+            declared(
+                "urn:eigenius:demo:screen:rule_strong",
+                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+                ->
+                screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
+                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+            ),
+            // c2: JustifiedBy.observed(obs_iri, A, <witness>)
+            observed(
+                "urn:eigenius:demo:screen:m_eig0291",
+                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
+                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+            )
+        )
+    );
+}
