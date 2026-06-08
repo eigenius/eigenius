@@ -73,6 +73,60 @@ pub enum Declaration {
     /// `axiom_statement` is the type expression encoded via the D47
     /// codec. Optional `note: "..."` populates `core:axiom_justification`.
     Axiom(AxiomDecl),
+    /// D52 §12 — file-level `macro` declaration. Defines a smart
+    /// constructor `macro ns:Name(p1 : T1, ...) : RetT => body`
+    /// where `body` is a `Value` expression that can reference the
+    /// parameter names. Compile-time AST substitution only: each
+    /// call site substitutes the actual-argument `Value`s into the
+    /// body positionally and recursively compiles the result. No
+    /// runtime closure / lambda value is created, no kernel NbE
+    /// evaluation. The name "Macro" is deliberate — this is *not*
+    /// a function in the runtime-callable sense, and the `Function`
+    /// AST name is reserved for a possible future addition with
+    /// real evaluation semantics.
+    ///
+    /// Lets D52 author `stats:IID(replicates, BiologicalReplication)`
+    /// as a brief surface form that desugars to a fully-positional
+    /// `stats:SampleSet.Set(...)` ctor call.
+    Macro(MacroDecl),
+}
+
+/// D52 §12 — file-level smart-constructor `macro` declaration.
+///
+/// Surface form: `macro ns:Name(p1 : T1, p2 : T2, ...) : RetT => body;`
+///
+/// Compile-time AST substitution only: each call site `ns:Name(arg1,
+/// arg2, ...)` substitutes positional argument `Value`s into the
+/// body and recursively compiles the result. The macro is *not*
+/// lowered to a chain resource — it lives only in the compiler's
+/// per-file `macros` table and disappears at compile time. Parameter
+/// types and return type are stored for diagnostics but the macro
+/// expansion does not type-check at the macro-decl site; type errors
+/// surface at the expanded call site against the body's substituted
+/// shape.
+///
+/// Two restrictions in v1:
+/// - The body must be a `Value` (resource-property value AST), not
+///   a `TypeExpr` or `Expr` (program body). Smart constructors
+///   produce ctor values; that's their use case.
+/// - No recursion. The compile-time expansion has no termination
+///   guarantee for recursive calls and the use case (named-design
+///   smart constructors) doesn't need it.
+#[derive(Debug, Clone)]
+pub struct MacroDecl {
+    pub name: QualifiedName,
+    pub params: Vec<MacroParam>,
+    pub return_type: TypeExpr,
+    pub body: Value,
+    pub pos: Position,
+}
+
+/// A single parameter in a [`MacroDecl`]'s parameter list.
+#[derive(Debug, Clone)]
+pub struct MacroParam {
+    pub name: String,
+    pub typ: TypeExpr,
+    pub pos: Position,
 }
 
 /// eigenius#72 — `axiom Name : <type-expr> [note: "..."]` declaration.
@@ -142,14 +196,14 @@ pub struct ResourceDecl {
 }
 
 /// A field in a resource block: `ex:name = "Rex";`
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResourceField {
     pub property: QualifiedName,
     pub value: Value,
 }
 
 /// A value in structural position.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Value {
     String(String),
     Int(i64),
@@ -184,6 +238,24 @@ pub enum Value {
     /// different codec.
     TypeExpr {
         typ: TypeExpr,
+        pos: Position,
+    },
+    /// D52 §12 — call to a [`MacroDecl`] smart constructor declared
+    /// elsewhere in the same file (or, with the cross-file extension,
+    /// in a parent layer). The compiler resolves `name` to a
+    /// registered macro and expands the call site by substituting
+    /// `args` (positionally) into the macro body's `Value`, then
+    /// recursively compiling the result.
+    ///
+    /// The shape that distinguishes this from `CtorApp` is the
+    /// presence of a namespace qualifier on the name: bare
+    /// `Foo(args)` parses as `CtorApp { ctor: "Foo" }`, while
+    /// `ns:Foo(args)` parses as `MacroCall { name: ns:Foo }`.
+    /// Constructors live in per-inductive scopes (unqualified);
+    /// macros live in file-level qualified namespaces.
+    MacroCall {
+        name: QualifiedName,
+        args: Vec<Value>,
         pos: Position,
     },
 }

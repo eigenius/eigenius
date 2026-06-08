@@ -211,11 +211,14 @@ impl<'a> Parser<'a> {
                 TokenKind::Axiom => {
                     declarations.push(Declaration::Axiom(self.parse_axiom()?))
                 }
+                TokenKind::Macro => {
+                    declarations.push(Declaration::Macro(self.parse_macro()?))
+                }
                 _ => {
                     return Err(EslError::parser(
                         Some(self.current_pos()),
                         format!(
-                            "expected top-level declaration (namespace, class, property, resource, program, codata, data, merge_comorphism, text_index, vector_index, axiom), found {:?}",
+                            "expected top-level declaration (namespace, class, property, resource, program, codata, data, merge_comorphism, text_index, vector_index, axiom, macro), found {:?}",
                             self.peek()
                         ),
                     ))
@@ -611,15 +614,30 @@ impl<'a> Parser<'a> {
                         pos: qn_pos,
                     })
                 } else if qn.namespace.is_some() && self.at(&TokenKind::LParen) {
-                    Err(EslError::parser(
-                        Some(qn_pos),
-                        format!(
-                            "qualified name `{}:{}` cannot be used as a constructor — \
-                             ctor names are unqualified single-segment identifiers",
-                            qn.namespace.as_deref().unwrap_or(""),
-                            qn.name
-                        ),
-                    ))
+                    // D52 §12 — qualified `ns:Name(args)` parses as a
+                    // macro call rather than a constructor application
+                    // (which is unqualified) or a resource reference
+                    // (which has no `(`). The compiler resolves the
+                    // qualified name to a registered `MacroDecl` and
+                    // expands the call site by AST substitution.
+                    self.expect(&TokenKind::LParen)?;
+                    let mut args = Vec::new();
+                    if !self.at(&TokenKind::RParen) {
+                        args.push(self.parse_value()?);
+                        while self.at(&TokenKind::Comma) {
+                            self.advance();
+                            if self.at(&TokenKind::RParen) {
+                                break; // trailing comma
+                            }
+                            args.push(self.parse_value()?);
+                        }
+                    }
+                    self.expect(&TokenKind::RParen)?;
+                    Ok(Value::MacroCall {
+                        name: qn,
+                        args,
+                        pos: qn_pos,
+                    })
                 } else {
                     Ok(Value::Ref(qn))
                 }
@@ -1374,6 +1392,53 @@ impl<'a> Parser<'a> {
             justification,
             pos,
         })
+    }
+
+    /// D52 §12 — `macro ns:Name(p1 : T1, p2 : T2, ...) : RetT => body;`
+    /// Top-level smart-constructor declaration. Parses a parameter
+    /// list, a return-type annotation, and a body `Value` expression
+    /// after `=>`. The body is compile-time-substituted at each call
+    /// site; the macro itself does not lower to a chain resource.
+    fn parse_macro(&mut self) -> Result<MacroDecl, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Macro)?;
+        let name = self.parse_qualified_name()?;
+        self.expect(&TokenKind::LParen)?;
+        let mut params = Vec::new();
+        if !self.at(&TokenKind::RParen) {
+            params.push(self.parse_macro_param()?);
+            while self.at(&TokenKind::Comma) {
+                self.advance();
+                if self.at(&TokenKind::RParen) {
+                    break; // trailing comma
+                }
+                params.push(self.parse_macro_param()?);
+            }
+        }
+        self.expect(&TokenKind::RParen)?;
+        self.expect(&TokenKind::Colon)?;
+        let return_type = self.parse_type_expr()?;
+        self.expect(&TokenKind::FatArrow)?;
+        let body = self.parse_value()?;
+        if self.at(&TokenKind::Semicolon) {
+            self.advance();
+        }
+        Ok(MacroDecl {
+            name,
+            params,
+            return_type,
+            body,
+            pos,
+        })
+    }
+
+    /// Parse a single `name : Type` macro parameter.
+    fn parse_macro_param(&mut self) -> Result<MacroParam, EslError> {
+        let pos = self.current_pos();
+        let name = self.expect_ident()?;
+        self.expect(&TokenKind::Colon)?;
+        let typ = self.parse_type_expr()?;
+        Ok(MacroParam { name, typ, pos })
     }
 
     fn parse_data(&mut self) -> Result<DataDecl, EslError> {
@@ -2599,16 +2664,31 @@ mod tests {
     }
 
     #[test]
-    fn qualified_ctor_name_is_rejected() {
-        // `formulas:App(...)` is not v1 — ctors are unqualified.
-        let result = parse_str(
+    fn qualified_call_parses_as_macro_call() {
+        // D52 §12 — `ns:Name(args)` now parses as a macro call
+        // (compile-time AST substitution), distinct from the
+        // unqualified `Name(args)` shape which remains an inductive
+        // constructor application. The compiler resolves the
+        // qualified name against the per-file macro table and
+        // rejects with a clean diagnostic if no macro is declared
+        // under that IRI; at the parser layer we only confirm the
+        // shape is recognised.
+        let file = parse_str(
             r#"
             resource ex:t : ex:Holder {
                 ex:term = formulas:App(Var("x"), Var("y"));
             }
         "#,
-        );
-        assert!(result.is_err(), "qualified ctor name should error");
+        )
+        .expect("qualified name with `(` should parse as a macro call");
+        match first_field_value(&file) {
+            Value::MacroCall { name, args, .. } => {
+                assert_eq!(name.namespace.as_deref(), Some("formulas"));
+                assert_eq!(name.name, "App");
+                assert_eq!(args.len(), 2);
+            }
+            other => panic!("expected MacroCall, got {other:?}"),
+        }
     }
 
     /// Helper: extract the parsed `Value::CtorApp` from the first

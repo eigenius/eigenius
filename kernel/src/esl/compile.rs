@@ -79,6 +79,13 @@ pub fn compile_file_with_context(
         return Err(vec![e]);
     }
 
+    // D52 §12 — collect every `macro` declaration in the file so
+    // `Value::MacroCall` expansion can resolve forward references
+    // (a macro declared later in the file referenced earlier).
+    if let Err(e) = compiler.collect_macro_table(file) {
+        return Err(vec![e]);
+    }
+
     let mut errors = Vec::new();
     let mut resources = Vec::new();
 
@@ -171,6 +178,13 @@ struct Compiler {
     /// Built in `collect_ctor_table` before any declaration is compiled,
     /// so expression compilation can resolve bare ctor references.
     ctors: BTreeMap<String, String>,
+    /// D52 §12 — per-file smart-constructor macro table: full macro
+    /// IRI → its declaration AST. Built in `collect_macro_table`
+    /// before any value is compiled, so `Value::MacroCall` resolution
+    /// can find macros declared later in the same file. Macros
+    /// disappear at compile time (no resource is emitted); the table
+    /// is purely an in-compiler expansion environment.
+    macros: BTreeMap<String, ast::MacroDecl>,
     /// Optional D14 institution index — when present, drives
     /// compile-time classification of function-call IRIs as a
     /// Decidable QueryClass call or a Comorphism invocation, emitting
@@ -204,11 +218,66 @@ fn resolve_apply_function(
     Some(format!("{uri}:{local}"))
 }
 
+/// D52 §12 — substitute macro-parameter references in a macro body's
+/// `Value` AST with their actual-argument values, returning a new
+/// `Value` with substitutions applied.
+///
+/// Substitution rule: a `Value::Ref` whose qualified name has no
+/// namespace and whose local name appears in `env` is replaced by a
+/// clone of the corresponding arg `Value`. Everything else is
+/// structurally cloned with recursion into compound shapes (`Array`,
+/// `Block`, `CtorApp`, `MacroCall`).
+///
+/// Substitution does *not* descend into `TypeExpr` — parameter
+/// references inside `type_expr(...)` bodies are not supported in
+/// v1 because the TypeExpr AST has its own name-resolution scope
+/// (bound vs free type-level variables) that would require parallel
+/// substitution machinery. Add if a real use case arrives.
+fn substitute_in_value(
+    body: &ast::Value,
+    env: &BTreeMap<&str, &ast::Value>,
+) -> ast::Value {
+    match body {
+        ast::Value::Ref(qn) if qn.namespace.is_none() => {
+            if let Some(arg) = env.get(qn.name.as_str()) {
+                (*arg).clone()
+            } else {
+                body.clone()
+            }
+        }
+        ast::Value::Array(items) => ast::Value::Array(
+            items.iter().map(|v| substitute_in_value(v, env)).collect(),
+        ),
+        ast::Value::Block(fields) => ast::Value::Block(
+            fields
+                .iter()
+                .map(|f| ast::ResourceField {
+                    property: f.property.clone(),
+                    value: substitute_in_value(&f.value, env),
+                })
+                .collect(),
+        ),
+        ast::Value::CtorApp { ctor, args, pos } => ast::Value::CtorApp {
+            ctor: ctor.clone(),
+            args: args.iter().map(|v| substitute_in_value(v, env)).collect(),
+            pos: pos.clone(),
+        },
+        ast::Value::MacroCall { name, args, pos } => ast::Value::MacroCall {
+            name: name.clone(),
+            args: args.iter().map(|v| substitute_in_value(v, env)).collect(),
+            pos: pos.clone(),
+        },
+        // Literals, qualified refs, type expressions: pass through.
+        _ => body.clone(),
+    }
+}
+
 impl Compiler {
     fn new() -> Self {
         Self {
             namespaces: BTreeMap::new(),
             ctors: BTreeMap::new(),
+            macros: BTreeMap::new(),
             institutions: None,
         }
     }
@@ -235,6 +304,30 @@ impl Compiler {
                             ),
                         ));
                     }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// D52 §12 — walk every `macro` declaration in the file and
+    /// register it in the macros table keyed by its fully-resolved
+    /// IRI. Forward references are supported (a macro declared later
+    /// in the file may be called earlier) because expansion happens
+    /// during the per-declaration compile pass, after this
+    /// collection pass populates the table.
+    fn collect_macro_table(&mut self, file: &ast::File) -> Result<(), EslError> {
+        for decl in &file.declarations {
+            if let ast::Declaration::Macro(m) = decl {
+                let iri = self.resolve(&m.name)?;
+                if let Some(existing) = self.macros.insert(iri.clone(), m.clone()) {
+                    return Err(EslError::compiler(
+                        Some(m.pos.clone()),
+                        format!(
+                            "macro `{iri}` is declared twice; existing definition at {:?}",
+                            existing.pos
+                        ),
+                    ));
                 }
             }
         }
@@ -322,6 +415,10 @@ impl Compiler {
             ast::Declaration::Codata(c) => self.compile_codata(c),
             ast::Declaration::Data(d) => self.compile_data(d),
             ast::Declaration::MergeComorphism(mc) => self.compile_merge_comorphism(mc),
+            // D52 §12 — macros are pure compile-time machinery; the
+            // declaration is registered in `collect_macro_table` and
+            // emits no chain resources.
+            ast::Declaration::Macro(_) => Ok(Vec::new()),
             // D43 §3.1 — text_index / vector_index lowering to Resource
             // (M2+). M1 lands the AST + parser; the compile stage will
             // synthesise the equivalent `Resource` with class
@@ -1709,7 +1806,56 @@ impl Compiler {
                 let json = self.encode_type_expr_to_json(typ, &scope)?;
                 Ok(Value::Json(json))
             }
+            // D52 §12 — macro call. Expand by substituting positional
+            // args into the body, then recursively compile the result.
+            // Recursion through `compile_value` lets a macro body itself
+            // contain further macro calls (one level of expansion per
+            // recursion); cycles are forbidden by `expand_macro_call`.
+            ast::Value::MacroCall { name, args, pos } => {
+                let expanded = self.expand_macro_call(name, args, pos)?;
+                self.compile_value(&expanded)
+            }
         }
+    }
+
+    /// D52 §12 — expand a `Value::MacroCall` by looking up the macro,
+    /// validating arity, and substituting the positional `args` into
+    /// a clone of the macro's body. Returns the substituted `Value`
+    /// AST; the caller is responsible for recursively compiling it
+    /// (so the substituted ctor application / further macro calls
+    /// flow through the normal compile path).
+    fn expand_macro_call(
+        &self,
+        name: &ast::QualifiedName,
+        args: &[ast::Value],
+        pos: &crate::esl::error::Position,
+    ) -> Result<ast::Value, EslError> {
+        let iri = self.resolve(name)?;
+        let decl = self.macros.get(&iri).ok_or_else(|| {
+            EslError::compiler(
+                Some(pos.clone()),
+                format!("macro `{iri}` is not declared in this file"),
+            )
+        })?;
+        if args.len() != decl.params.len() {
+            return Err(EslError::compiler(
+                Some(pos.clone()),
+                format!(
+                    "macro `{iri}` expects {} argument(s), got {}",
+                    decl.params.len(),
+                    args.len()
+                ),
+            ));
+        }
+        // Build the substitution environment: param name → arg Value.
+        // Positional binding, no defaults, no named args.
+        let env: BTreeMap<&str, &ast::Value> = decl
+            .params
+            .iter()
+            .map(|p| p.name.as_str())
+            .zip(args.iter())
+            .collect();
+        Ok(substitute_in_value(&decl.body, &env))
     }
 
     /// Recursively convert a ctor-context value into the chain's
@@ -1756,6 +1902,12 @@ impl Compiler {
                  D32 §3.7 ctor args are flat values or nested ctor applications, not D47-encoded \
                  type expressions. Lift the type_expr to the property value directly.",
             )),
+            // D52 §12 — macro call inside a ctor arg position. Expand
+            // the macro first, then recursively serialize the result.
+            ast::Value::MacroCall { name, args, pos } => {
+                let expanded = self.expand_macro_call(name, args, pos)?;
+                self.ctor_value_to_json(&expanded)
+            }
         }
     }
 
@@ -4923,5 +5075,117 @@ mod tests {
             assert_eq!(j["args"][1]["ctor"], "Sort");
             assert_eq!(j["args"][1]["args"][0], 1);
         }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // D52 §12 — macro declarations and call-site expansion
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn macro_call_expands_into_ctor_app() {
+        // Smoke test for the smart-constructor pattern D52 §4.2 needs:
+        // a `macro` declaration produces no chain resource on its own,
+        // but a call site lowers to the substituted ctor application
+        // exactly as if the author had hand-written it.
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace eg   = "urn:eigenius:test:macro";
+
+            data eg:Pair(A : core:Set, B : core:Set) {
+                Both(A, B),
+            }
+
+            class eg:Holder {
+                requires eg:body;
+            }
+            property eg:body : core:resource {
+                class_types eg:Pair;
+            }
+
+            macro eg:swap_both(a : core:string, b : core:string) : eg:Pair =>
+                Both(b, a);
+
+            resource eg:r1 : eg:Holder {
+                eg:body = eg:swap_both("first", "second");
+            }
+            "#,
+        );
+        // Two resources expected: the Pair data declaration emits one
+        // (the inductive type itself) and the eg:r1 holder. Macros emit
+        // nothing on their own.
+        let holder = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str() == "urn:eigenius:test:macro:r1")
+                    .unwrap_or(false)
+            })
+            .expect("eg:r1 committed");
+        let body = holder
+            .get(&iri("urn:eigenius:test:macro:body"))
+            .expect("eg:body set");
+        match body {
+            Value::Json(j) => {
+                // Expansion: swap_both("first", "second") substitutes
+                // into Both(b, a) → Both("second", "first") — the
+                // positional swap is what proves substitution happened.
+                assert_eq!(j["ctor"], "Both");
+                assert_eq!(j["args"][0], "second");
+                assert_eq!(j["args"][1], "first");
+            }
+            other => panic!("expected Value::Json (CtorApp serialization), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn macro_unknown_name_errors_cleanly() {
+        // A call site referencing an undeclared macro IRI must surface
+        // a clear compile error rather than panicking or producing a
+        // confusing downstream diagnostic.
+        let result = esl::compile(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace eg   = "urn:eigenius:test:macro";
+
+            class eg:Holder { requires eg:body; }
+            property eg:body : core:string { }
+
+            resource eg:r1 : eg:Holder {
+                eg:body = eg:undefined_macro("anything");
+            }
+            "#,
+        );
+        let err = result.expect_err("undeclared macro should error");
+        assert!(
+            err.iter().any(|e| format!("{e:?}").contains("is not declared")),
+            "diagnostic should name the undeclared macro: got {err:?}"
+        );
+    }
+
+    #[test]
+    fn macro_arity_mismatch_errors_cleanly() {
+        let result = esl::compile(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace eg   = "urn:eigenius:test:macro";
+
+            data eg:Wrap { Hold(core:string), }
+            class eg:Holder { requires eg:body; }
+            property eg:body : core:resource { class_types eg:Wrap; }
+
+            macro eg:two_args(a : core:string, b : core:string) : eg:Wrap =>
+                Hold(a);
+
+            resource eg:r1 : eg:Holder {
+                eg:body = eg:two_args("only_one");
+            }
+            "#,
+        );
+        let err = result.expect_err("arity mismatch should error");
+        assert!(
+            err.iter().any(|e| format!("{e:?}").contains("expects 2 argument")),
+            "diagnostic should name the expected vs actual arity: got {err:?}"
+        );
     }
 }

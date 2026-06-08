@@ -1,0 +1,533 @@
+# D52 — Measurement Statistics Institution
+
+*Status: design memo · June 2026*
+
+*Companion documents: [D14 institutions framework](d14-institutions.md), [D39 justification logic (v2 draft)](d39-justification-logic.md), [D46 Prop universe + axiom framework](d46-prop-universe-and-proof-irrelevance.md), [D47 chain-mirrored EigenTT type fragment](d47-chain-mirrored-eigentt-type-fragment.md), [D49 ChainWitness machinery](d49-chainwitness-machinery.md).*
+
+*This memo specifies a chain-resident statistics institution that recomputes asserted statistical claims from raw replicate data. The premise is structural: traditional databases store post-summarised statistics and ask consumers to trust the summary; Eigenius commits raw replicates and recomputes every claim at commit time, shifting the epistemic burden from human trust to kernel verification. Getting the SampleSet shape right matters more than getting it done quickly — its constructors will be authored against for as long as the platform handles biomedical data, and a wrong shape will be paid for at every downstream consumer.*
+
+---
+
+## 1. Scope
+
+In scope:
+
+- The universal `MeasurementClaim` schema — the parameters every statistical claim must declare, derived from the intersection of CONSORT / ARRIVE / MIQE / MIAME / MIAPE / STROBE / SAMPL / CLSI-EP requirements.
+- The `SampleSet` sum type for Tier 1 (IID, Paired, Factorial) and Tier 2 (RCBD, Split-Plot, Repeated-Measures) experimental designs.
+- The institution's decidable-recomputation contract: what the kernel runs at commit time, what verdict it returns, what artifacts it emits.
+- Opinionated stances on three field-wide conflicts: hypothesis-test directionality, outlier handling, regression for method comparison.
+- Interaction with D39 reasoning: how the institution's `DerivedResource` output feeds the `JustifiedBy.app` / `JustifiedBy.spec_str` composition pipeline.
+
+Out of scope:
+
+- Tier 3 designs (response-surface, crossover, sequential / group-sequential). Explicit deferral list in §10.
+- Multiple-testing correction (Bonferroni, Benjamini-Hochberg FDR). These operate over *sets* of claims and need a separate higher-level institution that consumes the per-claim institution's output (§11).
+- The numerics-library implementations of the underlying tests. The contract is what the verifier returns; *how* it computes a t-statistic is kernel-internal.
+- Assay-quality validation upstream of the statistics layer (PCR efficiency, microscopy image quality, mass-spec drift). Owned by domain-specific observation institutions that emit the `SampleSet` itself (§11).
+- Power / sample-size justification at *design* time. That is a different dispatch shape (consulted before a SampleSet exists) and belongs in an adjacent institution (§11).
+
+## 2. Where this institution sits
+
+A D14 `Decidable QueryClass` institution. Its dispatch shape:
+
+- **Consumes**: a `MeasurementClaim` resource (committed by the chain author) whose payload references a `SampleSet` ObservedResource holding raw replicate values, plus the asserted claim parameters (null/alternative hypothesis, alpha, effect-size threshold, directionality, etc.).
+- **Recomputes**: the statistic from the SampleSet using the test prescribed by the SampleSet's design topology and the claim's variance assumption.
+- **Returns a Verdict**: `Holds` or `Fails(diagnostic)`. On `Holds`, the kernel emits a `DerivedResource` whose `canonical_proposition` is the threshold predicate the claim establishes (e.g. `screen:HasLowIC50("urn:...:EIG_0291")`), together with a `ProgramTrace` admitting the `IsDerivedAs` witness (D49 §6).
+- **Composability**: the emitted DerivedResource is consumed downstream by D39 reasoning via `DerivedEvidence` in a `JustifiedBy.app` / `JustifiedBy.spec_str` composition. The statistics institution does not know — and does not need to know — what reasoning conclusion the chain author will derive from its output.
+
+This is the **decidability boundary**: every statistical claim must be recomputable from raw data alone in finite time using deterministic numerical procedures. Subjective judgement (whether IC50 < 100 nM is biologically meaningful) lives in declared literature rules at the D39 layer. The statistics institution settles only the arithmetic question.
+
+## 3. The universal Claim schema (intersection of standards)
+
+Every `MeasurementClaim` resource — regardless of which SampleSet topology it consumes — must declare the following fields. These are the *intersection* of what CONSORT, ARRIVE, MIQE, MIAME, MIAPE, STROBE, SAMPL, and the CLSI EP-series all require; without them, the claim is not recomputable.
+
+```esl
+namespace stats = "urn:eigenius:measurements";
+
+resource <iri> : stats:MeasurementClaim {
+    stats:sample_set            = <ResourceRef -> stats:SampleSet>;
+    stats:null_hypothesis       = type_expr(...);   // Prop
+    stats:alternative_hypothesis = type_expr(...);  // Prop
+    stats:derived_proposition   = type_expr(...);   // the predicate the claim establishes
+    stats:alpha                 = <core:float>;     // nominal Type I error, unadjusted
+    stats:effect_size           = <stats:EffectSize>;
+    stats:directionality        = <stats:Directionality>;
+    stats:variance_assumption   = <stats:VarianceAssumption>;
+    stats:outlier_exclusion     = <stats:OutlierExclusion>;  // defaults to Identity
+    stats:autocorrelation_structure = <stats:AutocorrelationStructure>;  // required when sample_set.repeated_measures = Longitudinal(_); else ignored
+}
+```
+
+Autocorrelation-structure sum type (required for longitudinal claims; author-asserted so the verifier is fully deterministic):
+
+```esl
+data stats:AutocorrelationStructure {
+    AR1,                // first-order autoregressive
+    CompoundSymmetry,   // exchangeable correlation across timepoints within unit
+    Unstructured,       // freely estimated full covariance matrix
+}
+```
+
+Effect-size sum type (the literature has not converged; the schema carries the author's choice). Standardized effect sizes carry their *inputs* rather than just the derived value, so the verifier can check both the input recovery against the SampleSet and the derivation arithmetic — stronger audit trail than recording only `d`:
+
+```esl
+data stats:EffectSize {
+    Absolute(magnitude : core:float, units : core:string),
+    Relative(fold_change : core:float),                            // ratio
+    StandardizedCohensD(mean_diff : core:float, pooled_sd : core:float),
+    StandardizedHedgesG(mean_diff : core:float, pooled_sd : core:float, n_total : core:integer),
+}
+```
+
+Variance-assumption sum type (drives which test the verifier dispatches):
+
+```esl
+data stats:VarianceAssumption {
+    Pooled,            // classical equal-variance t-test
+    WelchUnequal,      // Welch–Satterthwaite for unequal variances
+    NonParametric,     // distribution-free (Mann–Whitney / Wilcoxon)
+    RankBased,         // rank-transformed parametric
+}
+```
+
+What is deliberately *not* in the universal schema, and why:
+
+- **Power (1 − β)**. Meaningful only at design time, not at verification time. The kernel cannot recompute power from completed data without re-asserting the design's prior assumptions, and re-asserting prior assumptions defeats the institution's purpose. Carried as a field on the `SampleSet` resource (where it pairs with the sample-size justification), not on the claim.
+- **Drop-out / attrition rates**. Properties of the cohort, not the claim. Live on `SampleSet`.
+- **Variance values themselves** (SD, SE, CV). Derived from raw replicates by recomputation; the author asserts the *hypothesis* and the *threshold*, never the variance.
+- **Confidence-interval endpoints**. Computed, not asserted; the verifier reports them as part of the `Holds` outcome.
+- **Replication kind** (biological vs technical-within-run vs nested). Carried on `SampleSet` via the `replication` axis (§4.2), not on the claim. The distinction is structural to the data (the same three numbers mean different things depending on whether they're independent biological samples or repeated reads of one prep) and the verifier consumes it to select the right variance-component stratification per CLSI EP05-A3. The §7.4 stance further constrains which claim shapes are admissible given the SampleSet's `replication` value.
+
+This is the rigour transposition the institution buys: the author asserts the hypothesis, the threshold, and the direction; the kernel computes everything that depends on the raw data.
+
+## 4. SampleSet shape — the open design choice
+
+Two structurally distinct shapes for the `SampleSet` type are viable. Both are documented here so future scope discussions can refer to a fixed comparison rather than re-deriving the trade-off. The recommendation in §4.3 settles on Option B (product over orthogonal axes, with smart-constructor wrappers for the named designs); §4.4 records the conditions under which Option A becomes preferable instead.
+
+### 4.1 Option A — Flat sum type, one constructor per named design
+
+A top-level sum type whose constructors are named after the literature's named designs (`IID`, `Paired`, `Factorial`, `RCBD`, `SplitPlot`, `RepeatedMeasures`, plus `SingleSampleEstimate` for one-sample threshold cases). Each constructor's docstring records its position in the five-axis experimental-design space (randomization × blocking × factor × replication × repeated-measures) as a *documented* invariant.
+
+```esl
+data stats:SampleSet {
+    SingleSampleEstimate(
+        measurements     : core:Array<stats:Replicate>,
+        replication_kind : stats:ReplicationKind,
+    ),
+    IID(
+        replicates       : core:Array<stats:Replicate>,
+        replication_kind : stats:ReplicationKind,
+    ),
+    Paired(
+        pairs            : core:Array<stats:PairedObservation>,
+        replication_kind : stats:ReplicationKind,
+    ),
+    Factorial(
+        factors          : core:Array<stats:Factor>,
+        observations     : core:Array<stats:FactorialObservation>,
+        replication_kind : stats:ReplicationKind,
+    ),
+    RCBD(...),
+    SplitPlot(...),
+    RepeatedMeasures(
+        unit_axis        : stats:Factor,
+        time_axis        : stats:TimeAxis,
+        factors          : core:Array<stats:Factor>,    // 0..k within-subjects factors
+        observations     : core:Array<stats:LongitudinalObservation>,
+        replication_kind : stats:ReplicationKind,
+    ),
+}
+```
+
+Trade-offs:
+
+- **(+)** Verifier dispatch is direct: `match sample_set with IID(...) => one_way(...) | Paired(...) => paired_test(...) | ...`.
+- **(+)** Surface cardinality matches authoring vocabulary. A biologist reaches for "paired"; the constructor of that name is exactly where they expect it.
+- **(+)** The observation-element type is type-distinguished per constructor (`Array<PairedObservation>` vs `Array<Replicate>`), so mismatched shapes are caught at type-check rather than at verification.
+- **(−)** The axis decomposition lives in docstrings, not in the type. A constructor that mis-labels its coordinates is a doc bug, not a type error.
+- **(−)** Common axis variations leak into individual constructor bodies as varying-length parameters: `factors` on `RepeatedMeasures` (to accommodate factorial-repeated-measures); `replication_kind` on every constructor; potentially `time_axis` on `RCBD`/`SplitPlot` (per §12) for longitudinal variants. Three of the five axes end up parameterized inside constructors, half-recreating Option B with more typing.
+- **(−)** Two constructors whose axis coordinates partially overlap (e.g. `Paired` is structurally `RCBD` with block size two; `SingleSampleEstimate` is `IID` with zero-factor design and one group) cannot share verifier dispatch without manual delegation.
+
+### 4.2 Option B — Product over the five orthogonal axes, with smart-constructor wrappers
+
+A single primary constructor `Set` whose record-shaped fields name the 5-axis coordinate plus the cross-cutting properties (biological units, assay columns, sampleMap, observations). The named designs from the literature are recovered as **smart-constructor functions** that desugar to `Set` at the right product position.
+
+The axis enums:
+
+```esl
+data stats:Randomization { CompleteRandom, Restricted }
+
+data stats:Blocking {
+    Unblocked,
+    PairedBlocking,                                    // block_size = 2 (paired/matched designs)
+    RCB(block_size : core:integer),                    // block_size ≥ 3
+    Incomplete(block_size : core:integer),
+}
+
+data stats:FactorDesign {
+    NoFactor,                                          // single-sample estimation
+    SingleFactor,
+    FullFactorial(k : core:integer),
+    FractionalFactorial(k : core:integer, p : core:integer, generators : core:Array<core:string>),
+}
+
+data stats:Replication {
+    BiologicalReplication,
+    TechnicalWithinRun,
+    NestedReplication(biological_n : core:integer, technical_per_biological : core:integer),
+}
+
+data stats:RepeatedMeasuresAxis {
+    CrossSectional,
+    Longitudinal(n_timepoints : core:integer),
+}
+```
+
+The product:
+
+```esl
+data stats:SampleSet {
+    Set(
+        randomization     : stats:Randomization,
+        blocking          : stats:Blocking,
+        factor            : stats:FactorDesign,
+        replication       : stats:Replication,
+        repeated_measures : stats:RepeatedMeasuresAxis,
+        units             : stats:BiologicalUnits,
+        columns           : stats:AssayColumns,
+        sample_map        : stats:SampleMap,
+        observations      : core:Array<stats:Observation>,
+    ),
+}
+```
+
+The smart constructors (ESL functions producing `Set` values at canonical product positions — what the chain author actually writes):
+
+```esl
+fun stats:SingleSampleEstimate(
+    measurements    : core:Array<stats:Replicate>,
+    replication     : stats:Replication,
+) : stats:SampleSet => stats:SampleSet.Set(
+    randomization     = CompleteRandom,
+    blocking          = Unblocked,
+    factor            = NoFactor,
+    replication       = replication,
+    repeated_measures = CrossSectional,
+    units             = implicit_single_unit(measurements),
+    columns           = implicit_single_column(measurements),
+    sample_map        = implicit_sample_map(measurements),
+    observations      = lift_to_observations(measurements),
+);
+
+fun stats:Paired(
+    pairs           : core:Array<stats:PairedObservation>,
+    replication     : stats:Replication,
+) : stats:SampleSet => stats:SampleSet.Set(
+    randomization     = CompleteRandom,
+    blocking          = PairedBlocking,
+    factor            = SingleFactor,
+    replication       = replication,
+    repeated_measures = CrossSectional,
+    /* ... derived from pairs ... */
+);
+
+// ...IID, Factorial, RCBD, SplitPlot, RepeatedMeasures similarly...
+```
+
+Trade-offs:
+
+- **(+)** Axis decomposition is type-level. Misclassification is a type error, not a doc bug.
+- **(+)** Adding the `replication_kind`-on-every-constructor distinction, the factorial-repeated-measures hybrid, and the single-sample case is *free* — they're already product positions.
+- **(+)** Tier 3 designs and future hybrids (RCBD-longitudinal, SplitPlot-longitudinal) slot in by extending an axis enum + adding a smart constructor + adding a verifier arm. No new top-level data type.
+- **(+)** Smart constructors recover the literature's vocabulary at the authoring surface — the chain author writes `stats:Paired(pairs, BiologicalReplication)`, not the full nine-field `Set(...)`.
+- **(+)** Cross-cutting properties (sampleMap, biological units, assay columns) live in one place rather than repeating across constructors.
+- **(−, mitigated by indexed-inductive upgrade in Phase 1)** The naive product encoding gives observations a uniform top type (`observations : Array<stats:Observation>`), turning shape mismatches into runtime rejections rather than type errors. The principled fix — make `Set` an *indexed* inductive whose observation element-type is computed from the product position via a `stats:ObservationFor(rand, blk, fac, rep, rep_meas)` function — is **landed in Phase 1**, not deferred (per §12 decision). D48 machinery covers the kernel side; the ESL cost is ~30-50 lines for `ObservationFor` plus the indexed `Set` declaration. The "runtime rejection" form documented above is only the fallback if Phase 1 finds the indexed approach unworkable in practice.
+- **(−)** The product type admits nonsense combinations (e.g. `(CompleteRandom, PairedBlocking, FullFactorial, …, Longitudinal)` — what test recomputes that?). The verifier rejects these explicitly with a `WrongTestForDesign` diagnostic; the cost is one wildcard arm rather than one explicit arm per supported position.
+- **(−)** Smart constructors require ESL function support that produces inductive-ctor values. If that pattern isn't ergonomically supported today, this lands as a small parallel lift (§9 Phase 1).
+
+### 4.3 Recommendation — Option B for v1
+
+Reasons:
+
+1. **The Option-A leakage already happened, pre-implementation.** Four axis parameterizations were identified during D52 review: the `factors` field on `RepeatedMeasures` (factorial-repeated-measures), the `replication_kind` field on every constructor (technical vs biological replicates per §3), the `SingleSampleEstimate` case (zero-factor designs that don't fit `IID`), and prospective `time_axis` fields on `RCBD`/`SplitPlot` (per §12). Between them, three of the five axes (Factor, Replication, RepeatedMeasures) end up exposed as parameterized fields *inside* Option A's constructors. At that point the type-level discipline of Option B is paying for itself in coherence, not just future-proofing.
+2. **Authoring vocabulary is preserved via smart constructors.** The "named designs match literature" argument that originally favoured Option A is recoverable in Option B at the authoring surface: `stats:Paired(pairs, BiologicalReplication)` reads the same as Option A's `Paired(pairs)`, but desugars to a typed product position the verifier can dispatch on uniformly.
+3. **Verifier dispatch is the same complexity.** Six or seven supported product positions, same six numerics routines, expressed as a single nested `match` over the product. Nonsense combinations get a wildcard arm returning `WrongTestForDesign` — one arm to write, not one-per-rejected-combination.
+4. **Future hybrids are free additions, not new constructors.** `RCBD`-with-longitudinal-measurements becomes a new smart constructor over an existing product position (`Restricted × RCB(k) × SingleFactor × * × Longitudinal(n)`), not a new top-level `data` ctor that requires updating every helper / verifier table.
+5. **The platform is pre-production.** No deployed chains, no migration cost. The right shape now is the shape that costs less when the institution starts being used in anger; that's Option B with smart constructors.
+
+The remainder of this document specifies Option B.
+
+### 4.4 When Option A would be the better choice
+
+The conditions that would flip the recommendation back to Option A, recorded so future scope discussions can refer to a fixed list:
+
+- **ESL doesn't support smart-constructor functions cleanly.** If a function defined in an ESL file cannot produce an inductive-ctor value with the right ergonomics — e.g. the function call site looks materially worse than an Option A direct constructor call — then the authoring-surface argument for Option B collapses and Option A wins on vocabulary alone. This is the load-bearing implementation question to settle in Phase 1.
+- **The set of named designs stabilises at a small number that doesn't grow.** If after Phases 1–4 we find that the seven Tier 1+2 designs really are the entire authoring surface for the foreseeable future and no hybrids are showing up, the additional structure of Option B becomes pure overhead and Option A's directness wins.
+- **Observation-type discipline turns out to be load-bearing in v1.** If the indexed-inductive `ObservationFor` upgrade (§12) proves infeasible *and* runtime rejection of shape-mismatched observations turns out to be a frequent friction point for chain authors, the per-constructor observation-element typing Option A provides natively becomes more valuable than the axis-decomposition discipline.
+
+Until at least one of these conditions is met, Option B with smart constructors is the right shape.
+
+## 5. SampleSet smart constructors (Tier 1 + Tier 2)
+
+The chain author writes against the smart-constructor functions, not against `stats:SampleSet.Set` directly. Each smart constructor lands at a specific product position and the verifier dispatches off that position; the named designs preserve the literature's vocabulary while the structural discipline lives in the product type.
+
+Each subsection records the product position the smart constructor produces, the shape of its observation payload, the verifier procedure it triggers, and any common-use notes.
+
+### 5.1 Tier 1
+
+#### `SingleSampleEstimate(measurements, replication)`
+
+- **Product position**: `(CompleteRandom, Unblocked, NoFactor, replication, CrossSectional)`.
+- **Observation shape**: each entry is a `stats:Replicate` carrying its value plus its biological-unit id.
+- **Verifier procedure**: one-sample t-test against the claim's threshold (`Pooled`/`WelchUnequal`), Wilcoxon signed-rank against the threshold (`NonParametric`/`RankBased`), or threshold-CI-overlap test for `EffectSize.Absolute` claims. The claim's `derived_proposition` is verified to follow from the one-sample inference.
+- **Epistemic-scope guardrail**: when `replication = TechnicalWithinRun`, the verifier rejects any `derived_proposition` whose interpretation is population-level (see §7.4); the claim is admissible only as a per-batch/per-plate statement.
+- **Common use**: the IC50-threshold case from `drug_screening.esl` — three replicate IC50 readings against a "< 100 nM" threshold; CDx-style cut-off determinations; single-sample assay validation.
+
+#### `IID(replicates, replication)`
+
+- **Product position**: `(CompleteRandom, Unblocked, SingleFactor, replication, CrossSectional)`.
+- **Observation shape**: each entry is a `stats:Replicate` carrying its value, biological-unit id, and the treatment level it received.
+- **Verifier procedure**: dispatched on `variance_assumption` — Student's two-sample t-test (`Pooled`), Welch's t-test (`WelchUnequal`), Mann–Whitney U (`NonParametric`), rank-transformed t-test (`RankBased`). For more than two groups: one-way ANOVA / Kruskal–Wallis.
+- **Common use**: the simplest comparative case — single condition vs control, completely randomized assignment.
+
+#### `Paired(pairs, replication)`
+
+- **Product position**: `(CompleteRandom, PairedBlocking, SingleFactor, replication, CrossSectional)`.
+- **Observation shape**: each entry is a `stats:PairedObservation` carrying `{ unit_id, before, after }` (or analogous matched-case/control structure).
+- **Verifier procedure**: paired t-test (`Pooled`/`WelchUnequal`) or Wilcoxon signed-rank (`NonParametric`/`RankBased`).
+- **Why a distinct smart constructor despite collapsing to `(*, PairedBlocking, SingleFactor, *, CrossSectional)`**: treating paired data as IID is the most common false-positive-inducing error in the biomedical literature. The smart constructor takes a `core:Array<PairedObservation>` parameter (not `core:Array<Replicate>`), so authoring the wrong shape fails at the call site rather than at verification. The `PairedBlocking` ctor on the `Blocking` axis is what makes this distinct from `RCBD` (whose `RCB(k)` requires `k ≥ 3`) at the type level.
+
+#### `Factorial(factors, observations, replication)`
+
+- **Product position**: `(CompleteRandom, Unblocked, FullFactorial(k), replication, CrossSectional)` where `k = factors.len()`.
+- **Observation shape**: each entry is a `stats:FactorialObservation` tagged with the `k`-tuple of factor levels.
+- **Verifier procedure**: k-way ANOVA with all main effects and interaction terms.
+- **Common use**: synergy / antagonism testing in 2×2 or 3×3 layouts — drug × concentration, genotype × treatment, etc.
+- **Scope**: cross-sectional only. The factorial-with-longitudinal-measurements case (same biological units measured at multiple timepoints under all factor-level combinations) is handled by `RepeatedMeasures` with `factors.len() ≥ 2`; see §5.2.3.
+
+### 5.2 Tier 2
+
+#### `RCBD(block_factor, treatment, observations, replication)`
+
+- **Product position**: `(Restricted, RCB(block_factor.size), SingleFactor, replication, CrossSectional)` where `block_factor.size ≥ 3`.
+- **Observation shape**: each entry is a `stats:BlockedObservation` tagged with its block id and treatment level. The smart constructor enforces that every block contains every treatment level before producing the `Set`.
+- **Verifier procedure**: linear mixed-effects model with `block_factor` as a random effect and `treatment` as a fixed effect. Reduces to two-way ANOVA when blocks are treated as fixed.
+- **Common use**: controlling for known nuisance variation (plate position, day-of-experiment, animal cage) without confounding it with treatment.
+
+#### `SplitPlot(whole_plot_factor, subplot_factor, observations, replication)`
+
+- **Product position**: `(Restricted, RCB(whole-plot-nested), FullFactorial(2), replication, CrossSectional)`. The `RCB(whole-plot-nested)` form expresses the constraint that subplots are nested within whole plots; this is a Tier-2-specific shape that the smart constructor produces (the `Blocking` axis enum admits it implicitly via the `block_size` field's contextual interpretation).
+- **Observation shape**: each entry is a `stats:SplitPlotObservation` carrying the whole-plot factor level, the subplot factor level, and the whole-plot id.
+- **Verifier procedure**: mixed-effects model with whole-plot error stratum and subplot error stratum, fitted *separately* and not pooled.
+- **Why high-priority despite Tier 2**: split-plot designs are *frequently misidentified* as factorial. When that mistake gets verified with a flat factorial ANOVA, the whole-plot error term is drastically under-estimated and the institution silently admits false-positive whole-plot claims. Catching exactly this class of bug is one of the institution's primary justifications.
+
+#### `RepeatedMeasures(unit_axis, time_axis, factors, observations, replication)`
+
+- **Product position**: `(CompleteRandom or Restricted depending on the within-unit randomization, blocking-as-implied-by-the-design, FactorDesign-determined-by-factors.len(), replication, Longitudinal(time_axis.size))`.
+- **Observation shape**: each entry is a `stats:LongitudinalObservation` carrying `{ unit_id, timepoint, factor_levels, value, covariates }`.
+- **Verifier procedure**: longitudinal mixed-effects model with unit as a random effect, the entries of `factors` as fixed effects (with interaction terms when `factors.len() ≥ 2`), and an autocorrelation structure on time within unit (AR(1) / compound symmetry / unstructured — see §12 open question).
+- **Three common shapes by `factors.len()`**:
+  - `factors = []` — pure time-series on a panel of units (no treatment; observational longitudinal cohort).
+  - `factors = [f]` — single-treatment longitudinal study; e.g. drug-vs-placebo dose response over time.
+  - `factors = [f1, …, fk]` — **factorial repeated-measures**; e.g. drug × concentration tested on the same biological units across multiple timepoints. One of the most common designs in pharmacology and longitudinal clinical work.
+- **Why one smart constructor across `factors.len() = 0 / 1 / k`**: these cases share the same verifier infrastructure (longitudinal mixed-effects + autocorrelation), the same product-position template, and the same authoring vocabulary in the literature ("repeated measures"); collapsing them into one smart constructor with a varying-length `factors` parameter is more honest about the structural similarity than splitting into named hybrids would be.
+
+### 5.3 The sampleMap (cross-cutting)
+
+Every product position whose observations involve a non-rectangular biological-unit × assay-column topology populates the `Set`'s `sample_map` field via the smart constructor. The map shape — modelled on Bioconductor's MultiAssayExperiment `sampleMap` slot:
+
+```esl
+data stats:SampleMap {
+    Entries(rows : core:Array<stats:SampleMapEntry>),
+}
+
+data stats:SampleMapEntry {
+    Entry(
+        assay     : core:string,    // the assay-id within the SampleSet
+        primary   : core:string,    // the biological-unit IRI
+        col_name  : core:string,    // the specific column-id within the assay
+    ),
+}
+```
+
+This is the load-bearing structural choice from Bioconductor's two-decade evolution: the kernel must not require rectangularity across the assay layers of a multi-modal SampleSet. The bipartite map structurally encodes pseudo-replicates (many columns per unit), cross-modal missingness (a unit with no column in some assay), and many-to-one bench replicates. The recomputation step consumes the map to identify nested variance components correctly and to select the right error stratification.
+
+For `SingleSampleEstimate`, `IID`, and `Paired`, the smart constructor synthesizes an implicit sampleMap (one column per unit). For `Factorial`, `RCBD`, `SplitPlot`, and `RepeatedMeasures`, the chain author passes an explicit sampleMap argument to the smart constructor — without it, the verifier cannot tell pseudo-replicates from true replicates and variance components come out wrong.
+
+### 5.4 Verifier dispatch table
+
+The kernel-side verifier consumes a `Set(...)` and dispatches on the product position. The supported cells:
+
+| Product position (Randomization, Blocking, Factor, RepeatedMeasures) | Procedure |
+|---|---|
+| `(CompleteRandom, Unblocked, NoFactor, CrossSectional)` | one-sample test against threshold |
+| `(CompleteRandom, Unblocked, SingleFactor, CrossSectional)` | two-sample / one-way ANOVA |
+| `(CompleteRandom, PairedBlocking, SingleFactor, CrossSectional)` | paired test |
+| `(CompleteRandom, Unblocked, FullFactorial(k), CrossSectional)` | k-way ANOVA |
+| `(Restricted, RCB(_), SingleFactor, CrossSectional)` | RCBD mixed-effects |
+| `(Restricted, RCB(_), FullFactorial(_), CrossSectional)` | split-plot mixed-effects |
+| `(*, *, *, Longitudinal(_))` | longitudinal mixed-effects (`factors.len()` selects fixed-effect structure) |
+| anything else | `Verdict::Fails(WrongTestForDesign { ... })` |
+
+The `Replication` axis is read inside every arm to select the variance-component stratification (CLSI EP05's repeatability vs intermediate precision) and to drive the §7.4 epistemic-scope check; it doesn't appear in the dispatch table because every supported cell consults it the same way.
+
+## 6. The decidable-recomputation contract
+
+The institution declares itself a D14 `Decidable QueryClass`. At commit time, the kernel invokes its dispatch handler with:
+
+- The `MeasurementClaim` resource (with the universal-schema fields from §3).
+- The resolved `SampleSet` resource (raw replicates + design topology + sampleMap + biological-unit metadata).
+- The current `ExecutionContext` (read-only access to the chain for resolving cross-references like the `derived_proposition`'s constituent predicates).
+
+The handler returns a `Verdict` ∈ `{ Holds, Fails(diagnostic) }`. On `Holds`, the kernel emits:
+
+1. A `DerivedResource` whose IRI is content-addressed from `(claim_iri, sample_set_iri, derived_proposition_hash)` and whose `canonical_proposition` is the claim's `derived_proposition`.
+2. A `ProgramTrace` resource (per D49 §6) pointing at the `DerivedResource`, so the witness index admits an `IsDerivedAs` entry.
+
+The recomputation must satisfy three properties:
+
+- **Deterministic**: identical inputs produce bit-identical Verdicts and bit-identical numerics. The numerics library used must commit to IEEE-754 semantics; no fast-math, no non-deterministic parallel reductions, no time- or RNG-dependent algorithms (use the kernel's seeded RNG if a procedure needs randomness, e.g. for bootstrap CIs).
+- **Bounded**: every Tier 1+2 procedure terminates in time polynomial in N. No iterative procedure can spin without a hard step bound.
+- **Reproducible from chain**: the handler reads only from the SampleSet and the claim resource. No external data sources, no network access, no system time.
+
+The `Verdict::Fails` diagnostic is structured (not a free-form string). It names which clause of the claim failed and reports the computed numerics:
+
+- `AlphaNotCrossed { computed_p : core:float, threshold : core:float }`
+- `EffectSizeBelowThreshold { computed : stats:EffectSize, asserted : stats:EffectSize }`
+- `WrongTestForDesign { sample_set_topology : Iri, claim_assumes_topology : Iri }` (catches the split-plot-as-factorial misidentification)
+- `InsufficientReplication { n : core:integer, minimum_required : core:integer }`
+
+This lets the chain author correct the claim and re-commit without guessing at the cause.
+
+## 7. Opinionated stances
+
+The prior-art survey identified three field-wide conflicts where competing standards disagree. The institution adopts an opinionated default rather than mirroring the disagreement, because mirroring would let the wrong choice ride into the chain unchallenged.
+
+### 7.1 Two-sided tests by default; one-sided requires an impossibility witness
+
+`directionality` defaults to `Two_Sided`. To assert `One_Sided_Witnessed`, the claim must carry an `impossibility_witness` field — a chain-resident proof (an EigenTT type expression, validated against the chain's existing reasoning) that the inverse direction is physically or mathematically impossible within the system under study.
+
+In practice: a clinical author cannot one-sidedly claim "drug X reduces blood pressure" — they must either accept two-sided p-values (the bar most of the literature now publishes) or carry a witness (e.g. for radioactive decay, where negative half-lives are physically meaningless). This is the ARRIVE-aligned stance; legacy software's silent one-sided defaults are rejected.
+
+Rationale: one-sided tests are widely misused to inflate apparent significance. Allowing them by default would let the institution be weaponized for the exact false-positive class it exists to prevent.
+
+### 7.2 Immutable raw data; outlier exclusion as a functor that produces dual verdicts
+
+The `SampleSet` carries every replicate the bench produced. Outlier exclusion is *not* a property of the SampleSet — it is a property of the *claim*:
+
+```esl
+data stats:OutlierExclusion {
+    Identity,
+    PassingBablokResidual(threshold_sigma : core:float),
+    ESD(max_outliers : core:integer, alpha_esd : core:float),
+    Manual(excluded : core:Array<stats:ManualExclusionEntry>),
+}
+
+data stats:ManualExclusionEntry {
+    Entry(
+        unit_id                    : core:string,
+        quality_check_resource_iri : core:string,    // must resolve to a committed assay-quality observation
+    ),
+}
+```
+
+When a claim carries a non-`Identity` exclusion functor, the kernel computes the claim **twice** — once with the functor applied, once with `Identity` — and commits *both* verdicts to the chain (as two `DerivedResource`s related via a `stats:dual_verdict_pair` link). Downstream consumers see both; transparency rides in the data model, not in social trust of the author.
+
+For `Manual` exclusion specifically, the kernel additionally verifies — *before* admitting the exclusion — that each referenced `quality_check_resource_iri` resolves to a committed assay-quality observation (from one of the §11 assay-quality observation institutions) whose scope covers the excluded unit. No free-form justification: `Manual` exclusion is only available once a typed quality-check resource exists for each excluded unit. This makes `Manual` structurally inhabitable but only useful once the assay-quality institutions land; until then, dual-verdict commits via `PassingBablokResidual` or `ESD` are the sensitivity-analysis path.
+
+Rationale: STROBE-aligned sensitivity-analysis stance, structurally hardened. The choice to exclude an outlier is a methodological decision that future readers must be able to second-guess; storing only the post-exclusion result is the same epistemic loss as storing only the summary statistic. Free-form justification strings, the obvious alternative, would let unverifiable claims back in through the back door.
+
+### 7.3 Passing-Bablok for method comparison; OLS rejected
+
+When the claim's hypothesis compares two measurement methods or two assay readouts — i.e. the claim resource's class is `stats:MethodComparisonClaim` (a subclass of `stats:MeasurementClaim`) — the kernel rejects ordinary least-squares regression. The verifier defaults to Passing-Bablok (non-parametric, robust to outliers, errors-in-both-variables). Deming regression is acceptable when the author asserts a known variance ratio between the methods.
+
+Rationale: CLSI EP09-aligned. OLS assumes the X-axis has zero measurement error, which for biological measurements compared against each other is structurally false. Authors who insist on OLS for method comparison are asserting something the institution cannot let stand.
+
+### 7.4 Technical-only replicates cannot support population-level propositions
+
+The SampleSet's `replication` axis is consulted at every verifier dispatch (§5.4) for variance-component stratification. It is *also* consulted at claim-admissibility time:
+
+- **`replication = BiologicalReplication`**: any `derived_proposition` shape is admissible (subject to the other verifier checks).
+- **`replication = TechnicalWithinRun`**: only `derived_proposition` shapes whose interpretation is local to the *measurement event* are admissible. The institution rejects population-level propositions outright with diagnostic `EpistemicScopeViolation { sample_replication: TechnicalWithinRun, proposition_scope: PopulationLevel }`. To assert a population-level proposition from technical-only replicates, the chain author must either gather biological replicates and recommit the `SampleSet`, or commit the claim against a `…_OnThisBatch(...)` / `…_OnThisPlate(...)` measurement-scope predicate that does not generalize beyond the run.
+- **`replication = NestedReplication(biological_n, technical_per_biological)`**: population-level propositions admissible; the verifier uses CLSI EP05-A3 nested ANOVA to stratify within-run vs intermediate-precision variance, and the claim's `derived_proposition` must explicitly cite which precision tier it asserts against.
+
+The *scope* of a proposition (population-level vs measurement-event-level) is determined from its constituent predicate's class membership: the chain ontology should mark each `HasLowIC50`-style predicate with either `stats:PopulationLevel` or `stats:MeasurementLevel` so the admissibility check is mechanical. Predicates with no scope marker default to population-level (the more restrictive admissibility).
+
+Rationale: the institution exists to prevent the trust-the-summary problem. Silently admitting a population-level claim from three reads of one plate would re-introduce exactly that problem — the chain would attest "EIG_0291 has IC50 < 100 nM" when what was actually established is "this one plate's reading of EIG_0291's IC50 was < 100 nM on this one day." The two propositions have different evidential weight; conflating them is the same epistemic loss as conflating the summary statistic with the raw data. The §7.2 dual-verdict commit shape doesn't help here because there is no transformation between the two; biological replication is structural information the SampleSet either carries or doesn't.
+
+## 8. Interaction with D39 reasoning
+
+The statistics institution's output is the *input* to D39 reasoning. The flow is:
+
+1. The chain author commits a `MeasurementClaim` (with universal-schema fields + a Tier 1/2 SampleSet reference).
+2. The statistics institution recomputes the claim from raw replicates. On `Holds`, it emits a `DerivedResource` (say, IRI `urn:org:lab:claim_eig0291_lowic50`) whose `canonical_proposition` is `screen:HasLowIC50("urn:...:EIG_0291")`, plus the matching `ProgramTrace`.
+3. The D49 witness index admits an `IsDerivedAs` entry for that IRI under that proposition.
+4. A `ReasoningSentence` then composes the derived claim with a universal literature rule via the D39 grammar:
+
+   ```esl
+   reasoning:justification = App(
+       SpecStr(
+           DeclaredEvidence("urn:org:lab:rule_strong_inhibitor"),
+           "urn:...:EIG_0291"
+       ),
+       DerivedEvidence("urn:org:lab:claim_eig0291_lowic50")
+   );
+   ```
+
+   The certificate's `derived(...)` JustifiedBy constructor consumes the `IsDerivedAs` witness from step 3; the `spec_str(...)` constructor specializes the rule at `"urn:...:EIG_0291"`; the `app(...)` constructor composes the specialised implication with the observation to derive `StrongInhibitor("urn:...:EIG_0291")`.
+
+The statistics institution does not know — and explicitly does not need to know — what reasoning conclusion the chain author will derive from its output. It certifies only that the `derived_proposition` holds against the raw replicates. The reasoning layer composes from there.
+
+**D39 requires no changes to accommodate this institution.** `DerivedEvidence` already exists; the `IsDerivedAs` witness machinery is already in place. The statistics institution is a downstream producer that fits the existing API.
+
+## 9. Implementation phasing
+
+**Phase 1 — Universal Claim schema + `SingleSampleEstimate` + `IID`, with the indexed-inductive observation-type discipline from day one.** The minimal end-to-end loop: author commits a `MeasurementClaim` referencing a `SingleSampleEstimate` SampleSet (the IC50-style one-sample threshold case from `drug_screening.esl`); institution recomputes a one-sample test against the asserted threshold; `DerivedResource` emitted; downstream D39 `ReasoningSentence` composes via `DerivedEvidence`. The `IID` two-sample case lands in the same phase since the verifier infrastructure (one-sample test → two-sample test) is a small extension. Includes: the `Set` indexed inductive with `ObservationFor` (per §12 decision), the smart-constructor prototype that settles the §12 ESL ergonomics question, the `ndarray` + `statrs` numerics setup, and the §7.4 epistemic-scope check against the SampleSet's `replication` axis. The §7 opinionated stances land in skeleton form (surfaces defined, defaults wired) but enforcement of §7.2 / §7.3 hardens in Phase 5.
+
+**Phase 2 — `Paired` + `Factorial`.** Closes Tier 1's comparative-design sextet (less `SingleSampleEstimate` and `IID` which landed in Phase 1). Verifier picks up paired-test and k-way ANOVA dispatch arms. No institution-shape changes; two new smart constructors landing at their product positions, two new verifier arms in §5.4's dispatch table.
+
+**Phase 3 — sampleMap + multi-assay topology.** Refactor the SampleSet shape to embed the bipartite graph as a first-class field on the Tier 2 constructors. Tier 1's `IID` and `Paired` keep the implicit-map form. This phase is structural prep for Tier 2 verifiers that need to identify pseudo-replicates correctly.
+
+**Phase 4 — Tier 2: `RCBD`, `SplitPlot`, `RepeatedMeasures`.** The mixed-effects verifier infrastructure lands here. Suggested order: `RCBD` first (simplest mixed model), `SplitPlot` second (the high-priority false-positive shield), `RepeatedMeasures` third (most algorithmic complexity due to autocorrelation structure). Order can flex on a real chain author's pull.
+
+**Phase 5 — Opinionated-stance hardening.** Outlier-exclusion dual-verdict commit shape, Passing-Bablok-mandatory for `MethodComparisonClaim`, impossibility-witness validation for `One_Sided_Witnessed`. These were skeletal in Phase 1; this phase makes them load-bearing rejections. Lands once at least Phase 2 is real and we know the surface ergonomics.
+
+## 10. Explicitly deferred (Tier 3)
+
+Recorded here so future scope discussions can refer to a fixed list rather than re-deriving the deferral case.
+
+- **Response-surface designs** (Central Composite, Box-Behnken). Industrial process-optimization shape; verification requires quadratic-surface fitting and stationary-point calculus. The institution can be extended with a new constructor + new verifier procedure if a real use case arrives.
+- **Crossover designs** (A→B / B→A washout). Carryover effects need context-specific assumptions that the kernel cannot generically verify; deferred until a domain-specific institution can encode the carryover model explicitly.
+- **Sequential / group-sequential designs** with alpha-spending (O'Brien-Fleming boundaries etc.). The verifier would need to be aware of historical interim-analysis state, which violates the institution's "verifiable from the SampleSet alone" property. The deferral here is structural, not effort-based — these designs are a poor fit for chain-resident verification full stop and might belong in a separate institution with a different decidability boundary.
+
+## 11. Adjacent institutions (scoped, not specified)
+
+Three institutions sit at the boundary of this one and warrant scoping mention so the boundaries stay clean.
+
+- **Multiple-testing correction institution** (above). Operates over a *set* of `MeasurementClaim` resources, applies Bonferroni / Benjamini-Hochberg FDR / Holm / Šidák, and emits an `AdjustedClaim` whose `canonical_proposition` is `HoldsAfterMultipleTestingCorrection(...)`. Consumes the unadjusted `alpha` and unadjusted p-value the per-claim institution stored. Keeping per-claim and aggregate separate is the architectural decoupling that makes both implementable independently.
+- **Assay-quality observation institutions** (below). Verify that the SampleSet's raw replicates are themselves trustworthy *before* the statistics institution operates on them. Examples: MIQE PCR-efficiency verification, microscopy image-quality checks, mass-spec calibration-drift detection. Their output is the `SampleSet` itself, structurally validated. They are observation institutions (Decidable on the bench data shape), not derivation institutions (Decidable on a claim about the data).
+- **Power and design-justification institution** (alongside, design-time). Verifies at SampleSet-authoring time that the planned `N` is sufficient for the target effect size at the asserted `alpha`. Different dispatch shape — consulted *before* a SampleSet has replicate data, against a design spec — so it does not share an institution with the present one.
+
+## 12. Open questions — decisions and remaining items
+
+The eight open questions identified during D52 review have been walked one-by-one. Decisions are recorded inline; the one item still open is flagged at the end.
+
+- **ESL smart-constructor ergonomics — settle empirically in Phase 1.** Option B's authoring-surface argument (§4.3) depends on smart constructors that produce inductive-ctor values with brief, named call syntax. **Plan**: prototype `stats:Paired(pairs, stats:BiologicalReplication)` on day one of Phase 1 and inspect the call-site syntax. If clean, proceed with Option B as documented. If the call site reads materially worse than a direct constructor, that's the §4.4 fallback signal and Option B may need a small ESL extension (or, worst case, we revisit Option A). This is the load-bearing implementation question for the §4 recommendation.
+
+- **Indexed-inductive observation-type discipline — DECIDED: indexed inductives from Phase 1.** `Set` is an indexed inductive parameterized by the five axes, with `observations : core:Array<stats:ObservationFor(rand, blk, fac, rep, rep_meas)>` where `ObservationFor` is an ESL function returning the right observation element-type per product position. Adds ~30-50 lines of ESL to Phase 1; D48 infrastructure covers the kernel side. The runtime-rejection fallback path described in §4.2 trade-offs becomes a contingency only if Phase 1 finds the indexed approach unworkable in practice.
+
+- **Axis-enum granularity for type-level discrimination — DECIDED: hybrid, driven by `ObservationFor`'s needs.** Split axis-enum ctors exactly where `ObservationFor` needs to discriminate (e.g., `PairedBlocking` already split from `RCB(k)`; add more splits like `FullFactorial2` / `FullFactorial3` / `FullFactorialK(factors)` only if the observation-type per factorial dimension differs); leave parameterized otherwise. Refine the axis enums incrementally as `ObservationFor` is authored.
+
+- **EffectSize encoding fidelity — DECIDED: inductive with inputs.** `EffectSize.StandardizedCohensD(mean_diff : core:float, pooled_sd : core:float)`. The verifier checks both the inputs against the SampleSet *and* the derivation `d = mean_diff / pooled_sd`. Stronger audit trail at modest authoring cost. §3 will be updated accordingly.
+
+- **RepeatedMeasures autocorrelation structure — DECIDED: claim asserts the structure.** Add `autocorrelation_structure : stats:AutocorrelationStructure` to the `RepeatedMeasures` smart constructor (and as a field on the universal claim schema when the SampleSet is longitudinal). Author burden in exchange for fully deterministic, byte-reproducible verifier output. Lands in Phase 4 alongside the Tier 2 longitudinal verifier.
+
+- **Numerics library choice — DECIDED: `ndarray` + `statrs`.** First numerics addition to the kernel sets the precedent; mainstream ecosystem default wins on interop and on the breadth of third-party-stats-crate availability for mixed-effects coverage in Phase 4. `nalgebra` continues to own the linear-algebra work elsewhere in the workspace where its API fits better.
+
+- **`OutlierExclusion.Manual` validation — DECIDED: typed witness only.** `Manual(excluded : core:Array<{unit_id, quality_check_resource_iri}>)`. The kernel verifies the referenced quality-check resource exists, is committed, and its scope covers the excluded unit. Until the assay-quality observation institution (§11) lands, `Manual` is structurally inhabitable but no quality-check resources exist to reference — meaning `Manual` exclusion is effectively unavailable until Phase 5 / the quality-check institution. That's the right shape; §7.2's dual-verdict commit covers the interim.
+
+- **Population-vs-measurement-scope predicate marking — DECIDED: class-membership + default-to-PopulationLevel.** `screen:HasLowIC50 is_a stats:PopulationLevel` (and the parallel `stats:MeasurementLevel` class for measurement-scope predicates); predicates lacking either marker default to `PopulationLevel`, the more restrictive admissibility. Zero kernel blast radius (no new sort kinds in EigenTT), trivial composability under connectives, fits the existing reflection ontology cleanly, easy to promote to type-signature encoding later if early case studies show cross-institution propagation needs the type-level guarantee. **Revisit trigger**: a downstream consumer (Lean comorphism, future Coq exporter) materializes that needs scope to ride in the type rather than in chain metadata, OR a chain author hits a case where the same predicate genuinely needs to be grounded at different scopes in different contexts (which the (a) "intrinsic to predicate" framing makes awkward).
+
+---
+
+*The architectural commitments this document settles: (a) product-typed `SampleSet` with smart-constructor wrappers for v1, falling back to flat sum if §4.4 conditions fire; (b) the universal Claim schema is the standards-intersection above and nothing more; (c) the institution emits `DerivedResource` + `ProgramTrace` into the existing D39 / D49 pipeline with no upstream changes; (d) the four opinionated stances (two-sided default, dual-verdict outlier exclusion, Passing-Bablok mandatory for method comparison, epistemic-scope guard against technical-replicate-to-population-claim leakage) are non-negotiable defaults; (e) the indexed-inductive observation-type upgrade is the named follow-on for hardening Option B's only structural concession. The phasing plan in §9 is suggestive; the order Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 is the lowest-risk path but can flex on real chain-author pull.*
