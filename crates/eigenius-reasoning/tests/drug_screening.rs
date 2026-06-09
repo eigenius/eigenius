@@ -12,29 +12,51 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! End-to-end D39 / D49 demo: a drug-screening scenario authored
-//! entirely in ESL via the new `type_expr(...)` surface.
+//! End-to-end D39 / D49 / D52 demo: a drug-screening scenario authored
+//! entirely in ESL via the `type_expr(...)` surface.
 //!
 //! The fixture at [`tests/fixtures/drug_screening.esl`](fixtures/drug_screening.esl)
-//! commits four artifacts:
+//! commits five artifacts:
 //!
-//! 1. Domain vocabulary (`HasLowIC50`, `StrongInhibitor` predicates).
+//! 1. Domain vocabulary (`HasLowIC50`, `StrongInhibitor` predicates),
+//!    both marked `is_a stats:PopulationLevel` per D52 §7.4 so the
+//!    statistics institution's epistemic-scope check admits the claim
+//!    under BiologicalReplication.
 //! 2. A literature rule as a `DeclaredResource` + `DeclarationTrace`,
-//!    with explicit `canonical_proposition` = `HasLowIC50(EIG_0291)
-//!    -> StrongInhibitor(EIG_0291)`.
-//! 3. A bench measurement as an `ObservedResource` + `ObservationTrace`,
-//!    with explicit `canonical_proposition` = `HasLowIC50(EIG_0291)`.
-//! 4. A `ReasoningSentence` claiming `StrongInhibitor(EIG_0291)`,
-//!    justified by `App(DeclaredEvidence(rule), ObservedEvidence(obs))`,
-//!    with a `JustifiedBy.app` certificate composing the two
-//!    grounding constructors.
+//!    with `canonical_proposition` = `HasLowIC50(EIG_0291) ->
+//!    StrongInhibitor(EIG_0291)`.
+//! 3. A `stats:SampleSetResource` carrying the three raw IC50
+//!    replicate readings (72, 85, 100 nM) + an `ObservationTrace`.
+//! 4. A `stats:MeasurementClaim` referencing the SampleSet with the
+//!    universal-claim schema (alpha = 0.05, effect_size = Absolute(100,
+//!    "nM"), TwoSided, WelchUnequal, Identity exclusion) + a
+//!    `ProgramTrace`. The claim's `canonical_proposition` is
+//!    `HasLowIC50(EIG_0291)` — the proposition `DerivedEvidence` exposes
+//!    to D39 reasoning.
+//! 5. A `ReasoningSentence` claiming `StrongInhibitor(EIG_0291)`,
+//!    justified by `App(DeclaredEvidence(rule), DerivedEvidence(claim))`,
+//!    with a `JustifiedBy.app` certificate composing
+//!    `JustifiedBy.declared` + `JustifiedBy.derived`.
 //!
-//! This test compiles the fixture, builds the layer chain, walks the
-//! D49 witness index, runs the D39 ValidateJustification handler, and
-//! asserts `Verdict::Holds` — proving the full chain
-//! authoring → witness emission → kernel synthesis → certificate
-//! type-check pipeline works end-to-end through the surface syntax
-//! a real chain author would use.
+//! This is the modernization of the original fixture, which committed
+//! the bench measurement as a plain `reflection:ObservedResource` whose
+//! `canonical_proposition` was a methodological assertion ("85.0 < 100
+//! ⇒ HasLowIC50 holds") and cited it via `ObservedEvidence`. The D52
+//! statistics institution turns that author-asserted bridge into a
+//! mechanical recomputation: the SampleSet carries the raw replicates,
+//! the MeasurementClaim asserts the parameters, and the verifier
+//! computes the proposition. The ReasoningSentence then cites the
+//! claim via `DerivedEvidence` and inherits its auditable provenance.
+//!
+//! This test compiles the fixture, builds the layer chain (core →
+//! reflection → reasoning → statistics → fixture), walks the D49
+//! witness index, runs the D39 ValidateJustification handler, and
+//! asserts `Verdict::Holds`. The statistics institution itself is not
+//! registered in the test runtime — D49 §6 admits `IsDerivedAs` from
+//! the MeasurementClaim's ProgramTrace + canonical_proposition pair,
+//! independent of whether AutoOnLoad has fired the verifier. The
+//! verifier's recomputation path is exercised separately in the
+//! eigenius-statistics crate's tests.
 
 use std::sync::Arc;
 
@@ -49,12 +71,15 @@ use eigenius_reasoning::validate::do_validate_justification;
 use eigenius_reasoning::ReasoningInstitution;
 
 /// Stand up the standard reasoning chain (core → reflection → eigentt
-/// → institution → reasoning) plus a user layer compiled from the
-/// drug-screening fixture. The fixture's `type_expr(...)` certificates
-/// reference reasoning-layer ctors (`app`, `declared`, `observed`,
-/// `App`, `DeclaredEvidence`, `ObservedEvidence`), so the user layer
-/// must be compiled with [`esl::compile_against_layer`] — that seeds
-/// the compiler's ctor table from the parent chain.
+/// → institution → reasoning → statistics) plus a user layer compiled
+/// from the drug-screening fixture. The fixture's `type_expr(...)`
+/// certificates reference reasoning-layer ctors (`app`, `declared`,
+/// `derived`, `App`, `DeclaredEvidence`, `DerivedEvidence`) and its
+/// resource bodies reference statistics-layer smart constructors
+/// (`stats:SingleSampleEstimate(...)`, `BiologicalReplication()`,
+/// `Absolute(...)`, etc.), so the fixture must be compiled with
+/// [`esl::compile_against_layer`] — that seeds the compiler's ctor
+/// table from the full parent chain.
 fn build_drug_screening_chain() -> ExecutionContext {
     let core_json = include_str!("../../../ontologies/core/core-ontology.json");
     let core_resources = eigon_json::parse_document(core_json).unwrap();
@@ -91,16 +116,33 @@ fn build_drug_screening_chain() -> ExecutionContext {
     }
     let reasoning = Arc::new(reasoning_builder.build(LayerStorage::in_memory()));
 
-    // The fixture compiles AGAINST the reasoning layer so its
+    // Statistics layer — provides the SampleSet / MeasurementClaim /
+    // axis-enum machinery the fixture's SampleSetResource and
+    // MeasurementClaim reference. Compiled against `reasoning` so the
+    // statistics ontology can pick up reasoning-layer types if it ever
+    // needs to (it currently doesn't, but parking it above keeps the
+    // dependency direction honest: reasoning is a sibling of
+    // statistics, both above reflection).
+    let stats_source = include_str!("../../../ontologies/statistics/statistics.esl");
+    let stats_resources = esl::compile_against_layer(stats_source, &reasoning)
+        .expect("statistics.esl compiles against reasoning layer");
+    let mut stats_builder = LayerBuilder::new("statistics", Some(reasoning));
+    for r in stats_resources {
+        stats_builder.add_resource(r).unwrap();
+    }
+    let stats_layer = Arc::new(stats_builder.build(LayerStorage::in_memory()));
+
+    // The fixture compiles AGAINST the statistics layer so its
     // `type_expr(...)` bodies can reference reasoning-layer ctors
-    // (`app`, `declared`, `observed`, `App`, `DeclaredEvidence`,
-    // `ObservedEvidence`) by their short names. The ctor table seed
-    // is what gh #75's IRI-discipline split makes possible — the
-    // chain's `core:InductiveType` resources carry full IRIs, so
-    // the seed walks the chain unambiguously.
+    // (`app`, `declared`, `derived`, `App`, `DeclaredEvidence`,
+    // `DerivedEvidence`) AND statistics-layer smart constructors
+    // (`SingleSampleEstimate`, `BiologicalReplication`, `Absolute`,
+    // `TwoSided`, `WelchUnequal`, `Identity`) by their short names.
+    // The ctor table seed walks the full chain unambiguously per
+    // gh #75's IRI-discipline split.
     let fixture_source = include_str!("fixtures/drug_screening.esl");
-    let fixture_resources =
-        esl::compile_against_layer(fixture_source, &reasoning).unwrap_or_else(|errs| {
+    let fixture_resources = esl::compile_against_layer(fixture_source, &stats_layer)
+        .unwrap_or_else(|errs| {
             panic!(
                 "drug_screening.esl failed to compile: {}",
                 errs.into_iter()
@@ -109,15 +151,19 @@ fn build_drug_screening_chain() -> ExecutionContext {
                     .join("; ")
             )
         });
-    let mut fixture_builder = LayerBuilder::new("drug-screening-demo", Some(reasoning));
+    let mut fixture_builder = LayerBuilder::new("drug-screening-demo", Some(stats_layer));
     for r in fixture_resources {
         fixture_builder.add_resource(r).unwrap();
     }
     let fixture_layer = Arc::new(fixture_builder.build(LayerStorage::in_memory()));
 
-    // Force the witness index to populate from the two trace resources
-    // the fixture committed. After this, `IsDeclaredAs(rule_iri,
-    // rule_prop)` and `IsObservedAs(obs_iri, obs_prop)` are admissible.
+    // Force the witness index to populate from the three trace
+    // resources the fixture committed: the rule's DeclarationTrace
+    // admits `IsDeclaredAs(rule_iri, rule_prop)`; the SampleSet's
+    // ObservationTrace admits `IsObservedAs(sampleset_iri, …)`; and
+    // the MeasurementClaim's ProgramTrace admits
+    // `IsDerivedAs(claim_iri, HasLowIC50(EIG_0291))` — the witness
+    // the certificate's `derived(...)` constructor consumes.
     let _ = fixture_layer.chain_witness_index();
 
     ExecutionContext::new(
