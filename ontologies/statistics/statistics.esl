@@ -1,0 +1,803 @@
+// Measurement-statistics ontology — D52 Phase 1.
+//
+// Declares the chain-resident vocabulary the measurement-statistics
+// institution rests on:
+//
+// - Five orthogonal axis enums (Randomization, Blocking, FactorDesign,
+//   Replication, RepeatedMeasuresAxis) per D52 §4.2. Each axis is a
+//   distinct sum type with the ctor granularity chosen so design
+//   distinctions live at the type level rather than being decoded from
+//   integer literals.
+//
+// - `SampleSet` (D52 §4.2 Option B): a single `Set` constructor over
+//   the 5-axis product plus units / columns / sampleMap / observations.
+//   v1 leaves `observations` as a uniform `core:resource_array` —
+//   the indexed-inductive observation-type discipline (§12 #2) is the
+//   Phase-5 hardening; runtime-rejection via `WrongTestForDesign`
+//   covers the gap until then.
+//
+// - Smart-constructor macros (D52 §12 #1) recover the literature's
+//   named designs at the authoring surface — `stats:Paired(pairs,
+//   replication)` desugars to a fully-positional `Set(...)` call at
+//   the correct product position. The macros are compile-time AST
+//   substitution only (kernel ESL extension, ast.rs `Declaration::Macro`).
+//
+// - `MeasurementClaim` (D52 §3): universal-schema fields the author
+//   asserts (hypothesis, alpha, effect-size, directionality, variance
+//   assumption, outlier exclusion). Subclass of
+//   `reflection:DerivedResource` — its `reflection:canonical_proposition`
+//   carries the predicate the claim establishes when Holds. The
+//   institution's `validate_measurement_claim` query class recomputes
+//   the claim from raw replicates and admits the commit on Holds.
+//   Downstream D39 reasoning cites the claim's IRI via
+//   `DerivedEvidence`; the witness index (D49 §6) admits the
+//   IsDerivedAs witness against the canonical_proposition slot.
+//
+// - Predicate scope-marker classes `PopulationLevel` /
+//   `MeasurementLevel` (D52 §7.4 / §12 #8): each domain predicate
+//   (`HasLowIC50`, etc.) marks its scope via `is_a` membership;
+//   default is PopulationLevel (the more restrictive admissibility).
+//   The §7.4 epistemic-scope check rejects population-scope claims
+//   from technical-only replicates.
+//
+// - The Statistics institution resource itself + the
+//   `qc_validate_measurement_claim` query class. AutoOnLoad dispatch
+//   fires the verifier at every `MeasurementClaim` commit.
+//
+// IRIs match constants the Rust institution crate references — keep
+// in sync with `crates/eigenius-statistics/src/iris.rs`.
+
+namespace core        = "urn:eigenius:core";
+namespace formats     = "urn:eigenius:core:formats";
+namespace eigentt     = "urn:eigenius:eigentt";
+namespace reflection  = "urn:eigenius:reflection";
+namespace institution = "urn:eigenius:institution";
+namespace stats       = "urn:eigenius:measurements";
+namespace dispatch    = "urn:eigenius:institution:dispatch_roles";
+namespace runtimes    = "urn:eigenius:institution:runtimes";
+namespace proc        = "urn:eigenius:measurements:proc";
+
+// ── Axis enums (D52 §4.2) ────────────────────────────────────────────
+//
+// Five orthogonal axes decomposing experimental designs. The smart
+// constructors below land at specific product positions; the verifier
+// dispatches on the product position to pick the recomputation
+// procedure (D52 §5.4 dispatch table).
+
+data stats:Randomization {
+    CompleteRandom,
+    Restricted,
+}
+
+data stats:Blocking {
+    Unblocked,
+    // D52 §12 #3 — paired blocking split out from RCB(k) so the
+    // paired-vs-RCBD distinction is a ctor identity rather than an
+    // integer-value test. Required for the indexed-inductive
+    // `ObservationFor` follow-on (§12 #2); harmless in the unindexed
+    // v1 verifier.
+    PairedBlocking,
+    RCB(core:integer),          // block_size ≥ 3
+    Incomplete(core:integer),
+    // D52 Phase 4.5 — split-plot's whole-plot-nested blocking. The
+    // first arg is the whole-plot-factor level count (a); the
+    // second is the number of whole-plot replicates per W level (r).
+    // The total number of whole plots is a*r. Distinct from RCB
+    // because the error stratification is different — split-plot
+    // uses whole-plot error for the whole-plot factor F-test and
+    // subplot error for everything else; D52 §5.2's high-priority
+    // false-positive shield depends on this distinction landing at
+    // the type level.
+    SplitPlotBlocking(core:integer, core:integer),
+}
+
+data stats:FactorDesign {
+    // Zero-factor — single-sample estimation (no treatment groups).
+    // Required for the IC50-style one-sample threshold claim.
+    NoFactor,
+    SingleFactor,
+    FullFactorial(core:integer),                                   // k = number of factors
+    FractionalFactorial(core:integer, core:integer, core:string),  // k, p, generators (as a marker string for v1)
+}
+
+data stats:Replication {
+    // Independent biological samples. Variance reflects biological
+    // heterogeneity; population-level propositions admissible.
+    BiologicalReplication,
+    // Same biological prep, multiple instrument reads. Variance
+    // reflects repeatability (within-run); §7.4 rejects population-
+    // level propositions from this replication kind.
+    TechnicalWithinRun,
+    // Nested: N biological × M technical per biological. Variance
+    // stratifies into within-run and intermediate precision (CLSI
+    // EP05-A3); population-level propositions admissible.
+    NestedReplication(core:integer, core:integer),                 // biological_n, technical_per_biological
+}
+
+data stats:RepeatedMeasuresAxis {
+    CrossSectional,
+    Longitudinal(core:integer),                                    // n_timepoints
+}
+
+// ── Universal-claim sum types (D52 §3 / §7) ──────────────────────────
+
+data stats:EffectSize {
+    Absolute(core:float, core:string),                             // magnitude, units
+    Relative(core:float),                                           // fold-change / ratio
+    // D52 §12 #4 — standardized effect sizes carry inputs so the
+    // verifier can check both input recovery against the SampleSet
+    // and the derivation arithmetic. Stronger audit trail than
+    // storing only the derived value.
+    StandardizedCohensD(core:float, core:float),                   // mean_diff, pooled_sd
+    StandardizedHedgesG(core:float, core:float, core:integer),     // mean_diff, pooled_sd, n_total
+}
+
+data stats:Directionality {
+    TwoSided,
+    OneSidedWitnessed(core:string),                                // impossibility_witness IRI (D52 §7.1)
+}
+
+data stats:VarianceAssumption {
+    Pooled,
+    WelchUnequal,
+    NonParametric,
+    RankBased,
+}
+
+data stats:AutocorrelationStructure {
+    AR1,
+    CompoundSymmetry,
+    Unstructured,
+}
+
+data stats:OutlierExclusion {
+    Identity,
+    PassingBablokResidual(core:float),                             // threshold_sigma
+    ESD(core:integer, core:float),                                 // max_outliers, alpha_esd
+    // D52 §12 #7 — manual exclusion takes a typed witness array
+    // referencing committed assay-quality observations. The verifier
+    // checks each `quality_check_resource_iri` resolves to a real
+    // resource whose scope covers the excluded unit. No free-form
+    // justification strings.
+    Manual(core:string),                                           // serialized array of (unit_id, qc_iri) — refined when assay-quality institutions land
+}
+
+// ── Raw observation shape ────────────────────────────────────────────
+//
+// Phase 1 first slice carries observations inline as a value-array of
+// raw scalar floats. Later phases promote to per-replicate chain
+// resources (the `Replicate` class declared below is the placeholder
+// for that shape — Phase 1.5+ wires SampleSetResource fields to
+// reference Replicate IRIs instead of inlining floats).
+
+class stats:Replicate {
+    description = "A single raw measurement, declared here as the shape Phase 1.5+ will promote inline floats to. v1 carries observations inline (value_array of floats) for the SingleSampleEstimate/IID minimal-vertical proof; the per-replicate-resource form lands when factor-arity cases need treatment-level tagging and per-replicate ObservationTraces.";
+    requires stats:value, stats:unit_id;
+    recommends stats:treatment_level;
+}
+
+property stats:value : core:float {
+    description = "The instrument-read scalar measurement value.";
+    domain stats:Replicate;
+}
+
+property stats:unit_id : core:string {
+    description = "IRI of the biological unit this replicate came from. For TechnicalWithinRun replication, the same unit_id appears across multiple replicates from the same prep; for BiologicalReplication, every replicate has a distinct unit_id.";
+    format = formats:iri;
+    domain stats:Replicate;
+}
+
+property stats:treatment_level : core:string {
+    description = "Tag identifying which treatment group this replicate is in (e.g. 'control' / 'drug_X'). Required for IID two-sample tests and Factorial dispatch; absent for SingleSampleEstimate.";
+    domain stats:Replicate;
+}
+
+// ── Multi-modal topology types (D52 §5.3, Phase 3) ───────────────────
+//
+// Bioconductor's MultiAssayExperiment lineage: separate the *primary*
+// biological units (patients, mice, plates, cell lines, etc.) from
+// the *assay columns* (per-assay specimen identifiers), connected by
+// a bipartite `SampleMap` that admits non-rectangular multi-modal
+// designs (a patient with RNA-Seq + clinical phenotypes but no
+// proteomics; multiple technical-replicate columns within a single
+// assay all pointing at one biological unit).
+//
+// Phase 3 lands the *types* and refactors the SampleSet to carry
+// them. Tier 1 smart constructors (SingleSampleEstimate, IID, Paired,
+// Factorial) synthesize empty values — those dispatch arms don't
+// need the topology, and the verifier ignores these slots for them.
+// Tier 2 (RCBD, SplitPlot, RepeatedMeasures, landing in Phase 4) is
+// where the verifier starts consuming the SampleMap to identify
+// pseudo-replicates and stratify variance components correctly.
+
+data stats:BiologicalUnits {
+    // List of biological-unit IRIs. Authors typically draw them from
+    // a domain ontology (`urn:eigenius:demo:bp:patient_01`,
+    // `urn:eigenius:demo:lab:cell_line_HEK293_v3`, etc.). Empty list
+    // for Tier 1 cases where unit identity is implicit in the
+    // observation row order.
+    Units(core:value_array),
+}
+
+data stats:AssayColumns {
+    // List of `(assay_id, column_id)` pairs — encoded as a flat
+    // value_array `[assay_0, col_0, assay_1, col_1, ...]`. The
+    // assay_id partitions columns across multi-modal assay layers
+    // (RNA-Seq vs proteomics vs clinical); the column_id identifies
+    // a specific specimen / replicate within its assay.
+    Columns(core:value_array),
+}
+
+data stats:SampleMap {
+    // The bipartite graph linking primary biological units to assay
+    // columns. Each entry is a `SampleMapEntry` ctor application;
+    // the array preserves authoring order so per-observation
+    // dispatch arms can index into it consistently.
+    Entries(core:value_array),
+}
+
+data stats:SampleMapEntry {
+    // A single (assay, primary, column) triple. Many-to-one is
+    // expressed by repeating the `primary` IRI across multiple
+    // entries with different `col_name`s; cross-modal missingness
+    // is expressed by the absence of an entry for a given
+    // (primary, assay) pair.
+    Entry(
+        core:string,  // assay_id   — partitions columns across multi-modal assay layers
+        core:string,  // primary    — biological-unit IRI
+        core:string,  // col_name   — specimen identifier within the assay
+    ),
+}
+
+// ── SampleSet (D52 §4.2 Option B) ────────────────────────────────────
+//
+// Single product constructor over the 5 axes + 3 topology slots +
+// observations. Phase 3 promoted the topology slots from
+// `core:string` placeholders to structured types
+// (`BiologicalUnits`, `AssayColumns`, `SampleMap`).
+
+data stats:SampleSet {
+    // Nine-field product. Authors don't call this directly — the
+    // smart constructors below land here at canonical positions.
+    // The constructor is named `Bundle` rather than `Set` because
+    // `Set` is a reserved sort keyword in ESL — `Bundle` reads as
+    // "bundle of axes + sample-topology + observations" which
+    // captures the product nature without colliding.
+    Bundle(
+        stats:Randomization,        // randomization
+        stats:Blocking,             // blocking
+        stats:FactorDesign,         // factor
+        stats:Replication,          // replication
+        stats:RepeatedMeasuresAxis, // repeated_measures
+        stats:BiologicalUnits,      // units      (Phase 3: was core:string placeholder)
+        stats:AssayColumns,         // columns    (Phase 3: was core:string placeholder)
+        stats:SampleMap,            // sample_map (Phase 3: was core:string placeholder)
+        core:value_array,           // observations (inline floats v1; promoted to Replicate-IRI array Phase 1.5+)
+    ),
+}
+
+// ── Smart constructors (D52 §5.1, macro-style — §12 #1) ──────────────
+//
+// Each macro lands at a specific product position. The IRI namespace
+// stub strings for units/columns/sample_map ("_implicit") are
+// placeholders for Phase 1; Phase 3 replaces them with the MAE-style
+// `SampleMap` shape per D52 §5.3.
+
+macro stats:SingleSampleEstimate(
+    measurements : core:value_array,
+    replication  : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        CompleteRandom(),
+        Unblocked(),
+        NoFactor(),
+        replication,
+        CrossSectional(),
+        // Tier 1: unit identity is implicit in the observation order;
+        // empty topology slots make this explicit without burdening
+        // the author with bookkeeping the verifier ignores for
+        // SingleSampleEstimate dispatch.
+        Units([]),
+        Columns([]),
+        Entries([]),
+        measurements,
+    );
+
+// IID two-sample: two groups (typically control + treatment) supplied
+// as separate float arrays. The macro nests them into the observations
+// slot as `[group_a, group_b]` — the verifier reads observations[0]
+// as group_a and observations[1] as group_b and runs the two-sample
+// test under the claim's `variance_assumption`. The richer per-
+// Replicate-resource shape (with explicit `treatment_level` tags)
+// lands when Factorial / multi-group designs need more than two groups.
+macro stats:IID(
+    group_a     : core:value_array,
+    group_b     : core:value_array,
+    replication : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        CompleteRandom(),
+        Unblocked(),
+        SingleFactor(),
+        replication,
+        CrossSectional(),
+        // Tier 1: groups are partitioned by the observations slot
+        // (the two-element wrapper IS the per-group assay-column
+        // structure for v1); empty topology slots stay implicit.
+        Units([]),
+        Columns([]),
+        Entries([]),
+        [group_a, group_b],
+    );
+
+// Paired-sample / matched-design: each entry is a `(before, after)`
+// pair (or matched-case/control pair). The Bundle's observations slot
+// stores a flat float array `[b0, a0, b1, a1, ..., bn, an]` —
+// interleaved before/after. The verifier reads pairs by chunking the
+// array in groups of two. The product position uses `PairedBlocking`
+// (a distinct ctor from `RCB(k)`, k≥3) so paired-vs-RCBD is a type-
+// level distinction (D52 §12 #3).
+//
+// Treating paired data as IID is one of the most common false-
+// positive-inducing errors in biomedical literature; a distinct
+// smart constructor with a clearly different surface (`pairs : [...]`
+// rather than `replicates : [...]`) makes the misclassification
+// harder to make accidentally.
+macro stats:Paired(
+    pairs       : core:value_array,
+    replication : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        CompleteRandom(),
+        PairedBlocking(),
+        SingleFactor(),
+        replication,
+        CrossSectional(),
+        // Tier 1: each pair IS the unit-identification (the before/
+        // after pair is structurally the same biological unit); the
+        // chunking-by-2 in the observations decoder is the implicit
+        // sampleMap. Empty topology slots stay implicit.
+        Units([]),
+        Columns([]),
+        Entries([]),
+        pairs,
+    );
+
+// k-way factorial — k factors with arbitrary level counts per factor.
+// `factor_levels` is a flat int array `[n_0, n_1, ..., n_{k-1}]`
+// giving the level count for each factor. `observations` is a flat
+// array of `[level_0, level_1, ..., level_{k-1}, value]` per
+// observation — k+1 floats per row (level indices are 0..n_i,
+// represented as floats since `core:value_array` is uniformly typed).
+// The verifier reads `factor_levels.len() = k`, then chunks
+// observations in groups of k+1 to extract per-observation cell index
+// + value.
+//
+// The product position uses `FullFactorial(k)` where k is the number
+// of factors (length of `factor_levels`). For v1 the verifier dispatch
+// matches the `FullFactorial` ctor name regardless of k — `factor_levels`
+// in the macro signature lets the chain author state the design's
+// shape explicitly, and the dispatch uses that shape at recomputation
+// time.
+//
+// Verifier runs an omnibus F-test: "any cell mean differs from the
+// grand mean." Per-effect decomposition (testing main effects and
+// interactions separately) lands in a Phase 5 hardening when claim
+// shapes distinguish those tests.
+macro stats:Factorial(
+    k             : core:integer,
+    factor_levels : core:value_array,
+    observations  : core:value_array,
+    replication   : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        CompleteRandom(),
+        Unblocked(),
+        FullFactorial(k),
+        replication,
+        CrossSectional(),
+        // Tier 1: cells (k-tuples of factor levels) are the units of
+        // analysis; the omnibus F-test doesn't consult a sampleMap.
+        // Phase 4's per-effect decomposition and Phase 5's nested-
+        // replicate variants will populate these structurally.
+        Units([]),
+        Columns([]),
+        Entries([]),
+        // observations slot is a wrapper [factor_levels, observations]
+        // — the verifier reads observations[0] as the level-counts
+        // metadata and observations[1] as the flat observation array.
+        // The verifier cross-checks that `factor_levels.len() == k`
+        // and that each observation has exactly `k + 1` floats
+        // (k level indices + the value).
+        [factor_levels, observations],
+    );
+
+// Randomized Complete Block Design (RCBD) — two-way design where each
+// block contains every treatment exactly once. The block factor is
+// random (a nuisance variable to control for: plate, day, patient
+// cohort); the treatment factor is fixed (the scientific quantity of
+// interest). Observations is a flat float array `[block_0, treatment_0,
+// value_0, block_1, treatment_1, value_1, ...]` — 3 floats per
+// observation, total length `3 * n_blocks * n_treatments`.
+//
+// Lands at product position `(Restricted, RCB(n_blocks), SingleFactor,
+// _, CrossSectional)`. The `RCB(n_blocks)` ctor distinguishes this
+// from `PairedBlocking` (which is the n_blocks=2 special case
+// dispatched by `stats:Paired`); `n_blocks` must be ≥ 3 by RCBD
+// convention.
+//
+// Verifier runs a two-way ANOVA controlling for the block effect and
+// reports the treatment F-test (does treatment matter, given the
+// blocking structure?). The block effect's variance component is
+// computed but not p-tested in v1 — that's a Phase 5 hardening when
+// claim shapes distinguish "treatment matters" from "block matters".
+macro stats:RCBD(
+    n_blocks      : core:integer,
+    n_treatments  : core:integer,
+    observations  : core:value_array,
+    replication   : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        Restricted(),
+        RCB(n_blocks),
+        SingleFactor(),
+        replication,
+        CrossSectional(),
+        Units([]),
+        Columns([]),
+        Entries([]),
+        observations,
+    );
+
+// Split-Plot design — two-factor design with hard-to-randomize whole-
+// plot factor (W, a levels) and easily-randomized subplot factor
+// (S, b levels) applied within whole plots. Each whole plot receives
+// one W level and contains all b subplot observations; r replicate
+// whole plots per W level (so a*r whole plots total, a*b*r
+// observations). Observations encoded as `[whole_plot_id, w_level,
+// s_level, value]` rows (4 floats per observation).
+//
+// Lands at product position `(Restricted, SplitPlotBlocking(a, r),
+// FullFactorial(2), _, CrossSectional)`. The distinct `SplitPlotBlocking`
+// ctor on the blocking axis is what makes split-plot's nested-error-
+// stratum dispatch unambiguous — D52 §5.2's high-priority false-
+// positive shield: incorrectly routing split-plot data through the
+// flat-factorial arm would use the wrong (smaller subplot) error for
+// the whole-plot F-test and produce inflated significance.
+//
+// Verifier runs three F-tests:
+//   F_W   = MS_W / MS_WP_within_W   (whole-plot main effect, against whole-plot error)
+//   F_S   = MS_S / MS_error          (subplot main effect, against subplot error)
+//   F_WS  = MS_WS / MS_error         (interaction, against subplot error)
+// Verdict reports the smallest p-value across the three with a
+// diagnostic naming which effect produced it. Per-effect claim shapes
+// are a Phase 5 hardening.
+macro stats:SplitPlot(
+    a             : core:integer,
+    b             : core:integer,
+    r             : core:integer,
+    observations  : core:value_array,
+    replication   : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        Restricted(),
+        SplitPlotBlocking(a, r),
+        FullFactorial(2),
+        replication,
+        CrossSectional(),
+        Units([]),
+        Columns([]),
+        Entries([]),
+        observations,
+    );
+
+// Repeated-Measures design per D52 §5.2.3 — N subjects each measured
+// at T timepoints, optionally crossed with K between-subjects fixed
+// factors. Subject is the random-effect axis; time is the within-
+// subjects fixed factor; the `factor_levels` list enumerates per-
+// factor level counts for the between-subjects factors.
+//
+// Three shapes selected by `k_between_factors`:
+//   - `k_between_factors = 0` — pure time-only RM (no between-subjects
+//     treatment). Observation rows: `[subject_idx, time_idx, value]`
+//     (3 floats per observation). `factor_levels = []`.
+//   - `k_between_factors = 1` — single-treatment longitudinal study
+//     (e.g. drug vs placebo measured over time). Observation rows:
+//     `[subject_idx, time_idx, level_0, value]` (4 floats).
+//   - `k_between_factors ≥ 2` — factorial-RM (e.g. drug × dose × time
+//     on the same subjects). Observation rows: `[subject_idx, time_idx,
+//     level_0, …, level_{k-1}, value]` (3 + k floats).
+//
+// Lands at product position `(CompleteRandom, Unblocked,
+// FullFactorial(k_between_factors), _, Longitudinal(n_timepoints))`.
+// The `Longitudinal(T)` ctor on the repeated-measures axis is what
+// distinguishes this dispatch from the cross-sectional Factorial
+// position — both share `(CompleteRandom, Unblocked, FullFactorial(*))`
+// on the first three axes, but only RM has `Longitudinal`. The
+// `FullFactorial(k)` ctor is used uniformly across all three shapes —
+// including `FullFactorial(0)` for the time-only case — as a single-
+// path encoding of "k between-subjects factors"; ESL macros are pure
+// AST substitution and cannot branch on `k_between_factors` to emit
+// `NoFactor` / `SingleFactor` / `FullFactorial(k)` separately, so a
+// uniform `FullFactorial(k)` is the structurally honest choice.
+//
+// The autocorrelation structure (AR(1) / CompoundSymmetry /
+// Unstructured) is asserted on the MeasurementClaim, not encoded on
+// the SampleSet — the claim's `autocorrelation_structure` field per
+// D52 §3 / §12 #5. The verifier dispatches across the
+// (autocorrelation_structure × k_between_factors) matrix — see the
+// completeness table in D52 §9. Currently wired: the
+// `(CompoundSymmetry, 0)` cell (univariate RM-ANOVA, algebraically
+// equivalent to RCBD with subject as block). All other cells reject
+// with diagnostics naming the unimplemented combination and the
+// GitHub issue tracking the work.
+//
+// Observations slot follows Factorial's wrapper convention:
+// `[factor_levels, flat_observations]`. The verifier cross-checks
+// `factor_levels.len() == k_between_factors` and that each
+// observation row carries `3 + k_between_factors` floats.
+macro stats:RepeatedMeasures(
+    n_subjects        : core:integer,
+    n_timepoints      : core:integer,
+    k_between_factors : core:integer,
+    factor_levels     : core:value_array,
+    observations      : core:value_array,
+    replication       : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        CompleteRandom(),
+        Unblocked(),
+        FullFactorial(k_between_factors),
+        replication,
+        Longitudinal(n_timepoints),
+        Units([]),
+        Columns([]),
+        Entries([]),
+        [factor_levels, observations],
+    );
+
+// ── SampleSetResource (chain-resident SampleSet carrier) ─────────────
+//
+// Reflection:ObservedResource subclass that wraps a `SampleSet`
+// inductive value on the chain. The MeasurementClaim's `sample_set`
+// property references one of these by IRI so the raw replicates have
+// their own provenance (ObservationTrace, source, observed_at) and
+// can be cited by multiple claims independently.
+
+class stats:SampleSetResource : reflection:ObservedResource {
+    description = "Chain-resident wrapper carrying a raw SampleSet inductive value. The MeasurementClaim's sample_set property references this resource by IRI; the institution's verifier reads sample_set_value to recompute the claim. Subclassing ObservedResource gives the SampleSet the standard provenance fields (source, observed_at, ObservationTrace witness).";
+    requires stats:sample_set_value;
+}
+
+property stats:sample_set_value : core:resource {
+    description = "The SampleSet inductive value (axis-product + observations) this resource carries. Encoded as a D32 §3.7 chain inductive ctor — typically produced by a smart-constructor macro call like `stats:SingleSampleEstimate(...)`.";
+    class_types stats:SampleSet;
+    domain stats:SampleSetResource;
+}
+
+// ── MeasurementClaim (D52 §3) ────────────────────────────────────────
+//
+// The chain-resident pairing of a SampleSet reference with the
+// universal claim parameters. AutoOnLoad dispatch on every commit
+// triggers the institution's verifier (D52 §6 decidable-recomputation
+// contract).
+
+class stats:MeasurementClaim : reflection:DerivedResource {
+    description = "A statistical claim asserted against a SampleSet's raw replicates. The institution's qc_validate_measurement_claim handler recomputes the claim from raw data at commit time; Holds admits the commit, Fails rejects it with a structured diagnostic (D52 §6). The MeasurementClaim IS itself the chain-resident DerivedResource downstream D39 reasoning cites via DerivedEvidence — its reflection:canonical_proposition field carries the predicate the claim establishes when the test holds, and the witness index hashes it for IsDerivedAs admission (D49 §6). A companion ProgramTrace pointing at the claim's IRI is required to actually emit the witness. (Drops the earlier stats:derived_proposition field per D52 review — canonical_proposition serves both roles, one slot one source of truth.)";
+    requires stats:sample_set,
+             stats:null_hypothesis,
+             stats:alternative_hypothesis,
+             reflection:canonical_proposition,
+             stats:alpha,
+             stats:effect_size,
+             stats:directionality,
+             stats:variance_assumption,
+             stats:outlier_exclusion;
+    recommends stats:autocorrelation_structure;
+}
+
+// §7.3 — method-comparison claims (Phase 5 hardening).
+//
+// MethodComparisonClaim subclasses MeasurementClaim and switches the
+// verifier dispatch onto a Passing-Bablok regression path: non-
+// parametric, robust to outliers, errors-in-both-variables. CLSI EP09
+// alignment. The SampleSet shape is the same `stats:Paired(pairs, …)`
+// authoring surface (each pair is two methods' readings of one
+// specimen), but the claim's class membership is what redirects the
+// verifier away from the paired t-test and toward Passing-Bablok.
+//
+// The "Holds" criterion is CI-based, not p-value-based: 1.0 ∈ slope_CI
+// AND 0.0 ∈ intercept_CI (the CLSI EP09 method-agreement criterion).
+// Ordinary least-squares regression is rejected for method comparison
+// — OLS assumes zero measurement error on the X-axis, which for two
+// biological measurements compared against each other is structurally
+// false. The verifier accepts only PassingBablok via this claim
+// subclass; Deming with an asserted variance ratio is a follow-on.
+
+class stats:MethodComparisonClaim : stats:MeasurementClaim {
+    description = "A MeasurementClaim subclass asserting that two measurement methods or two assay readouts agree (D52 §7.3). The institution dispatches such claims to Passing-Bablok regression instead of the paired t-test; ordinary least-squares regression is rejected outright (OLS assumes zero measurement error on the X-axis, structurally false for method comparison). The SampleSet shape mirrors stats:Paired: each pair is `(method_a_reading, method_b_reading)` for one specimen. The verdict is Holds when both the 95% CI of the slope contains 1.0 AND the 95% CI of the intercept contains 0.0; the computed_statistic field carries the median slope and the diagnostic carries (slope, intercept, slope_CI, intercept_CI) for audit. CLSI EP09 alignment.";
+}
+
+property stats:sample_set : core:string {
+    description = "IRI of the SampleSet ObservedResource holding the raw replicates this claim is computed against. Required for recomputation.";
+    format = formats:iri;
+    domain stats:MeasurementClaim;
+}
+
+property stats:null_hypothesis : core:resource {
+    description = "The Prop-typed null hypothesis the claim is testing against, encoded via the D47 codec. The verifier reads this for diagnostic reporting; the actual statistical test is parameterized by the variance_assumption field.";
+    class_types eigentt:TypeExpr;
+    domain stats:MeasurementClaim;
+}
+
+property stats:alternative_hypothesis : core:resource {
+    description = "The Prop-typed alternative hypothesis. Together with the null this fixes the claim's logical shape; the verifier reads this for diagnostic reporting and uses it to validate that the asserted canonical_proposition matches the test's structure.";
+    class_types eigentt:TypeExpr;
+    domain stats:MeasurementClaim;
+}
+
+// The "predicate the claim establishes when the test holds" rides on
+// the inherited `reflection:canonical_proposition` slot (one source
+// of truth across all four reflection-ontology resource subclasses;
+// see D52 §3 / D49 §6). Statistics-domain authoring still describes
+// it as "what the claim derives" — the meta-naming is just unified
+// with the other resource families.
+
+property stats:alpha : core:float {
+    description = "Nominal Type-I error threshold, unadjusted. Multiple-testing correction (Bonferroni / Benjamini-Hochberg / etc.) is a higher-level institution that consumes the per-claim alpha + p-value; this field carries the raw threshold the per-claim test uses.";
+    domain stats:MeasurementClaim;
+}
+
+property stats:effect_size : core:resource {
+    description = "The effect size the claim asserts (absolute / relative / standardized). Standardized forms carry their input components so the verifier can check both input recovery against the SampleSet and the derivation arithmetic (D52 §12 #4).";
+    class_types stats:EffectSize;
+    domain stats:MeasurementClaim;
+}
+
+property stats:directionality : core:resource {
+    description = "Two-sided by default. OneSidedWitnessed requires a chain-resident impossibility-witness IRI that the verifier checks resolves to a committed proof that the inverse direction is impossible within the system under study (D52 §7.1).";
+    class_types stats:Directionality;
+    domain stats:MeasurementClaim;
+}
+
+property stats:variance_assumption : core:resource {
+    description = "Which statistical test family the verifier dispatches to (Pooled / Welch / NonParametric / RankBased). Author-asserted so the verifier output is fully deterministic — AIC-style automatic test selection would make the verdict non-reproducible by hand.";
+    class_types stats:VarianceAssumption;
+    domain stats:MeasurementClaim;
+}
+
+property stats:outlier_exclusion : core:resource {
+    description = "Identity (no exclusion) for the standard case. Non-Identity exclusions trigger the dual-verdict commit shape (D52 §7.2): the kernel computes the claim both with and without the exclusion functor and commits both DerivedResources, linked via stats:dual_verdict_pair.";
+    class_types stats:OutlierExclusion;
+    domain stats:MeasurementClaim;
+}
+
+property stats:autocorrelation_structure : core:resource {
+    description = "Required when the SampleSet's repeated_measures axis is Longitudinal; absent for cross-sectional claims. Author-asserted (AR1 / CompoundSymmetry / Unstructured) so the verifier is fully deterministic — the verifier rejects with EpistemicScopeViolation if the field is missing for a longitudinal claim.";
+    class_types stats:AutocorrelationStructure;
+    domain stats:MeasurementClaim;
+}
+
+// ── Predicate scope markers (D52 §7.4 / §12 #8) ──────────────────────
+//
+// Domain predicates (`HasLowIC50`, `StrongInhibitor`, etc.) mark their
+// scope via `is_a` membership. The institution's epistemic-scope check
+// at admissibility time decodes the derived_proposition's head
+// predicate, looks up its `is_a` array, and admits/rejects per §7.4's
+// rules:
+//
+//   replication = BiologicalReplication       — any scope admissible
+//   replication = TechnicalWithinRun          — only MeasurementLevel
+//   replication = NestedReplication(_, _)     — any scope admissible
+//
+// Predicates with no explicit scope marker default to PopulationLevel
+// (the more restrictive admissibility — fail-safe).
+
+class stats:PopulationLevel {
+    description = "Marker class for predicates whose interpretation is population-level (a claim generalizes to the underlying biological population, not just the measurement event). Default scope for unmarked predicates. The institution rejects population-level claims from TechnicalWithinRun-only replication (D52 §7.4).";
+}
+
+class stats:MeasurementLevel {
+    description = "Marker class for predicates whose interpretation is local to a single measurement event (e.g. HasLowIC50_OnThisBatch). Admissible from any replication kind including TechnicalWithinRun; doesn't generalize beyond the run.";
+}
+
+// ── §7.1 ImpossibilityWitness marker (Phase 5 hardening) ─────────────
+//
+// A chain resource asserts is_a stats:ImpossibilityWitness when it
+// stands as proof that one direction of a hypothesis is physically or
+// mathematically impossible — e.g., a half-life cannot be negative,
+// a probability cannot exceed 1, a count cannot be fractional. The
+// statistics institution accepts `Directionality.OneSidedWitnessed(w)`
+// on a MeasurementClaim only when `w` resolves to a chain resource
+// carrying this marker; otherwise it rejects the claim with a
+// structured diagnostic. The ARRIVE-aligned stance: one-sided p-values
+// are not a default the chain hands out — they require a witness the
+// chain can name and audit.
+
+class stats:ImpossibilityWitness {
+    description = "Marker class for chain resources that stand as proof that the inverse direction of some hypothesis is impossible within the system under study (D52 §7.1). A MeasurementClaim's Directionality.OneSidedWitnessed(w) field references such a resource by IRI; the verifier admits the one-sided p-value path only when w.is_a contains this marker. The marker itself imposes no structural requirements beyond is_a membership; the chain author asserts the impossibility, and the chain attests that the author named a specific resource as the witness.";
+}
+
+// ── MeasurementVerdict shape (companion artifact on Holds) ───────────
+//
+// The MeasurementClaim itself IS a DerivedResource — its
+// canonical_proposition is what downstream D39 reasoning cites via
+// DerivedEvidence. MeasurementVerdict is a separate companion artifact
+// carrying the recomputed numerics (statistic + p-value) for audit,
+// related to the claim via source_claim. Phase 1 doesn't yet commit
+// MeasurementVerdict resources to chain (the verdict is the
+// QueryOutcome the dispatch handler returns); the class shape is
+// declared so the chain-storage form is reserved once the dual-verdict
+// commit per §7.2 lands.
+
+class stats:MeasurementVerdict : reflection:DerivedResource {
+    description = "Companion artifact carrying the recomputed numerics for a MeasurementClaim's verdict. Phase 1 leaves this in the QueryOutcome return value; Phase 5 (§7.2 dual-verdict outlier-exclusion commit) materializes it as a chain resource so both `with-exclusion` and `without-exclusion` outcomes have inspectable IRIs. The claim itself is the DerivedResource D39 reasoning cites — this companion holds the audit numerics.";
+    requires stats:source_claim,
+             reflection:canonical_proposition,
+             stats:verdict_ctor,
+             stats:computed_statistic,
+             stats:computed_p_value;
+    recommends stats:dual_verdict_pair;
+}
+
+property stats:source_claim : core:string {
+    description = "IRI of the MeasurementClaim that produced this verdict.";
+    format = formats:iri;
+    domain stats:MeasurementVerdict;
+}
+
+property stats:verdict_ctor : core:string {
+    description = "Constructor name from institution:Verdict (Holds / Fails / Undecidable). Mirrors the chain Verdict carried as a separate institution:Verdict resource; this field is the structural shortcut for downstream cheap lookups.";
+    domain stats:MeasurementVerdict;
+}
+
+property stats:computed_statistic : core:float {
+    description = "The test statistic the verifier computed (t-statistic / U / F / etc., depending on variance_assumption). Reported on both Holds and Fails verdicts for transparency.";
+    domain stats:MeasurementVerdict;
+}
+
+property stats:computed_p_value : core:float {
+    description = "The p-value the verifier computed from the test statistic. Unadjusted — multiple-testing correction is a higher-level institution. Reported regardless of verdict outcome.";
+    domain stats:MeasurementVerdict;
+}
+
+property stats:dual_verdict_pair : core:string {
+    description = "When the source claim's outlier_exclusion is non-Identity, the institution emits two DerivedResources (with-exclusion and without-exclusion) and cross-links them via this property pointing at the sibling verdict's IRI (D52 §7.2 dual-verdict commit shape).";
+    format = formats:iri;
+    domain stats:MeasurementVerdict;
+}
+
+// ── Statistics institution (D52 §6 / D14) ────────────────────────────
+
+resource stats:statistics_institution : institution:Institution {
+    institution:institution_iri = "urn:eigenius:measurements:statistics_institution";
+    institution:institution_name = "MeasurementStatistics";
+    institution:runtime = runtimes:in_process;
+    core:description = "Measurement statistics institution (D52). Recomputes statistical claims from raw replicate data at commit time using deterministic IEEE-754 numerics (ndarray + statrs). Emits MeasurementVerdict DerivedResources + ProgramTraces on Holds for downstream D39 reasoning composition via DerivedEvidence. Opinionated stances: two-sided default (§7.1), dual-verdict outlier exclusion (§7.2), Passing-Bablok for method comparison (§7.3), epistemic-scope guard against technical-replicate-to-population-claim leakage (§7.4).";
+}
+
+resource stats:qc_validate_measurement_claim : institution:QueryClass {
+    core:description = "AutoOnLoad gate on every MeasurementClaim commit: read the SampleSet's raw replicates, dispatch on the SampleSet's product position to pick the recomputation procedure, check the asserted effect_size and directionality against the computed statistic, verify the §7.4 epistemic-scope admissibility, emit MeasurementVerdict + ProgramTrace on Holds (with dual-verdict pair on non-Identity outlier exclusion). Fails verdicts reject the commit and pin the diagnostic to the failing clause.";
+    institution:query_class = stats:MeasurementClaim;
+    institution:result_class = institution:Verdict;
+    institution:dispatch_role = [dispatch:auto_on_load];
+    institution:query_handler = proc:validate_measurement_claim;
+    institution:institution_ref = stats:statistics_institution;
+}
+
+// §7.3 — separate QueryClass registration so MethodComparisonClaim
+// instances fire the validator. The kernel's AutoOnLoad dispatch
+// matches resource.is_a() entries directly against registered
+// query_class IRIs (no transitive subclass walk), so a subclass needs
+// its own registration even when the handler is shared. The handler
+// inspects the claim's is_a list internally and routes to the Passing-
+// Bablok path when stats:MethodComparisonClaim is present.
+
+resource stats:qc_validate_method_comparison_claim : institution:QueryClass {
+    core:description = "AutoOnLoad gate on every MethodComparisonClaim commit (D52 §7.3). Dispatches the same validate_measurement_claim handler, which detects the MethodComparisonClaim is_a marker and routes to Passing-Bablok regression instead of the standard SampleSet-shape dispatch. CLSI EP09 alignment; OLS is rejected outright.";
+    institution:query_class = stats:MethodComparisonClaim;
+    institution:result_class = institution:Verdict;
+    institution:dispatch_role = [dispatch:auto_on_load];
+    institution:query_handler = proc:validate_measurement_claim;
+    institution:institution_ref = stats:statistics_institution;
+}

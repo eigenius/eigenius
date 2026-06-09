@@ -76,6 +76,36 @@ commits its own gated resource and inspects its own Verdict) for clarity.
 The structural shape — a single commit triggering a cross-institution
 cascade — is what the platform supports natively.
 
+### The D52 → D39 cascade
+
+The motivating example for the cross-institution cascade in the Layer 2
+reasoning stack is the **statistics → reasoning** pipeline:
+
+1. **D52 fires first.** A commit of a `stats:MeasurementClaim` resource
+   triggers the statistics institution's `validate_measurement_claim`
+   AutoOnLoad gate. The verifier recomputes the claim from the cited
+   `SampleSet`'s raw replicates, returns `Verdict::Holds`, and (as a side
+   effect of the trace + canonical_proposition pair already on the chain)
+   the layer's witness index admits an `IsDerivedAs(claim_iri,
+   canonical_proposition)` entry.
+2. **D39 fires next.** If the same commit also includes a
+   `reasoning:ReasoningSentence` whose certificate cites the just-committed
+   claim via `DerivedEvidence(claim_iri)`, the reasoning institution's
+   `validate_justification` AutoOnLoad gate fires. The kernel's NbE checker
+   walks the certificate's `JustifiedBy.derived` constructor, consults the
+   layer's witness index for the matching `IsDerivedAs` entry — which the
+   D52 commit just admitted — and the certificate type-checks.
+
+The cascade is **mechanical, not coordinated**. D52 doesn't know D39 is
+about to fire; D39 doesn't know D52 ran. They share the chain artifact
+shape — `DerivedResource` + `ProgramTrace` + `canonical_proposition` —
+that the witness index reads from. The composition emerges from each
+institution honouring the shared chain shape independently.
+
+For the operational walkthrough — the full sequence of EigenQL inspection
+calls that surface the cascade's audit trail — see
+[chapter 7](07-stats-and-reasoning-walkthrough.md).
+
 ### What rejection looks like
 
 If any gate in the cascade returns `Fails`, the kernel rejects the entire

@@ -202,6 +202,12 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
         Exp::One => Ok(Val::One),
         Exp::Unit => Ok(Val::Unit),
 
+        // eigenius#71 / D49 — literals normalise to themselves; no
+        // reduction, no neutral substructure.
+        Exp::LitString(s) => Ok(Val::LitString(s.clone())),
+        Exp::LitInt(n) => Ok(Val::LitInt(*n)),
+        Exp::LitFloat(f) => Ok(Val::LitFloat(*f)),
+
         Exp::Dec(d, e) => {
             match ctx {
                 EvalCtx::Pure => {
@@ -1311,7 +1317,7 @@ fn extract_ctor_arg_types<'a>(
 /// have type exactly `Exp::InductiveType(I, _)` for the same inductive.
 /// Higher-order or nested forms are rejected at type-check time.
 fn is_recursive_arg_type(decl: &crate::nbe::term::InductiveDecl, typ: &Exp) -> bool {
-    matches!(typ, Exp::InductiveType(d, _) if d.name == decl.name)
+    matches!(typ, Exp::InductiveType(d, _) if d.iri == decl.iri)
 }
 
 /// Build the induction hypothesis for a recursive constructor argument.
@@ -3031,6 +3037,7 @@ mod tests {
     /// to drive the algorithm without genuinely cyclic Arc allocation.
     fn ind_self_ref(name: &str) -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
             name: name.to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -3044,6 +3051,7 @@ mod tests {
         let s = ind_self_ref("Nat");
         let nat_ty = Exp::InductiveType(s, Vec::new());
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
             name: "Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -3092,6 +3100,7 @@ mod tests {
         let s = ind_self_ref("Bool");
         let bool_ty = Exp::InductiveType(s, Vec::new());
         let bool_decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Bool").unwrap(),
             name: "Bool".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -3171,6 +3180,7 @@ mod tests {
         let s = ind_self_ref("List");
         let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
         let list_decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: Vec::new(),
@@ -4068,6 +4078,7 @@ mod tests {
     /// can be verified against the same shape.
     fn simple_vec_decl_for_eval() -> Arc<InductiveDecl> {
         let self_ref = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
@@ -4077,6 +4088,7 @@ mod tests {
         let vec_a_unit =
             Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string()), Exp::Unit]);
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],

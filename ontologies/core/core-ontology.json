@@ -601,10 +601,13 @@
   {
     "@id": "urn:eigenius:core:ctor_name",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The local name of an InductiveCtor (e.g. `nil`, `cons`).",
+    "urn:eigenius:core:description": "The local name of a constructor — used on InductiveCtor declarations (the constructor's authored name, e.g. `nil`, `cons`) and on chain-resident inductive-value resources (the constructor the value chose at instantiation, e.g. the kernel-emitted Verdict resource's `Holds` / `Fails` / `Undecidable`). The two domains land at the same property because both store the same kind of payload (an unqualified ctor-name string keyed into the parent inductive's ctor set), and downstream consumers (the witness emitter, EigenQL queries projecting verdict ctors) read the property uniformly across both shapes.",
     "urn:eigenius:core:short_name": "ctor_name",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveCtor"]
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:core:InductiveCtor",
+      "urn:eigenius:institution:Verdict"
+    ]
   },
   {
     "@id": "urn:eigenius:core:arg_types",
@@ -655,6 +658,22 @@
     "urn:eigenius:core:short_name": "param_kind",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveParam"]
+  },
+
+  {
+    "@id": "urn:eigenius:core:Asserts",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "Asserts",
+    "urn:eigenius:core:description": "Atomic propositional assertion: `Asserts(iri) : Prop` carries no inhabitants of its own — the type has zero constructors — so different IRIs produce distinct propositions whose only inhabitation paths are institutional dispatch (typically Lean producing a proof term the in-kernel checker validates) or introduction as an `eigentt:Axiom`. The uniform-parameter shape — `iri` as a parameter, not an index — keeps the declaration trivial; with D48 indexed families now landed an alternative `Asserts : core:iri -> Prop` indexed encoding is expressible but not used here, since the parameter shape is the cleaner default. The witness emitter for `DeclarationTrace` / `ObservationTrace` / `ProgramTrace` resources uses `Asserts(target_iri)` as the default canonical proposition when the target carries no explicit `reflection:canonical_proposition`. The witness-emitter integration of that default is staged with D39's `JustifiedBy` consumer-site work so both sides agree on the iri-argument encoding.",
+    "urn:eigenius:core:type_params": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveParam"],
+        "urn:eigenius:core:param_name": "iri",
+        "urn:eigenius:core:param_kind": "urn:eigenius:core:string"
+      }
+    ],
+    "urn:eigenius:core:result_sort": "Prop",
+    "urn:eigenius:core:ctors": []
   },
 
   {

@@ -1,0 +1,148 @@
+// D52 §8 end-to-end composition fixture: stats verdict → D39 reasoning.
+//
+// Picks up the IC50 confirmatory dataset from `ic50_measurement.esl`
+// and composes the resulting `HasLowIC50` derived-evidence with a
+// universal literature rule (`forall c, HasLowIC50(c) ->
+// StrongInhibitor(c)`) via D39's `App(SpecStr(DeclaredEvidence(rule),
+// EIG_0291), DerivedEvidence(claim))` shape. The certificate
+// type-checks against `JustifiedBy(_, StrongInhibitor(EIG_0291))`.
+//
+// What this exercises that the IC50 fixture alone didn't:
+//
+//  1. The DerivedEvidence path: the JustifiedBy.derived ctor consuming
+//     the IsDerivedAs witness admitted by the IC50 confirmatory claim's
+//     ProgramTrace (D49 §6 → §5 lookup).
+//  2. The SpecStr universal-rule specialization, applied at the
+//     compound IRI "urn:eigenius:demo:screen:EIG_0291".
+//  3. The full chain of evidence: bench data → statistics verdict →
+//     reasoning composition → final population-level claim.
+//
+// The IC50 confirmatory claim (and its trace) live in
+// `ic50_measurement.esl`; this fixture compiles against the layer
+// stack that includes it, so the resources referenced here resolve
+// across layers cleanly.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace stats      = "urn:eigenius:measurements";
+namespace screen     = "urn:eigenius:demo:screen";
+
+// ─── Domain target predicate ───────────────────────────────────────
+//
+// `HasLowIC50` lives in the IC50 fixture (loaded into the same chain
+// stack); `StrongInhibitor` is the conclusion the literature rule
+// derives. Both are class-marker predicates in `Prop`.
+
+// PopulationLevel scope marker via the multi-class `data` header
+// (D52 §12 #8) — same pattern as `screen:HasLowIC50` in
+// `ic50_measurement.esl`.
+data screen:StrongInhibitor : core:string -> Prop, stats:PopulationLevel {
+}
+
+// ─── Universal literature rule ─────────────────────────────────────
+//
+// `forall c : core:string, HasLowIC50(c) -> StrongInhibitor(c)` —
+// committed as a DeclaredResource whose canonical_proposition IS the
+// rule. The matching DeclarationTrace admits the IsDeclaredAs witness
+// for `(rule_iri, rule_proposition)` per D49 §6, which the
+// `JustifiedBy.declared` ctor in the certificate consumes.
+
+resource screen:rule_strong : reflection:DeclaredResource {
+    reflection:declared_by = "literature:smith_et_al_2024_3.2";
+    reflection:rationale   = "Universal: any compound with low IC50 at this target is a strong inhibitor at the same target.";
+
+    reflection:canonical_proposition = type_expr(
+        forall (c : core:string) =>
+            screen:HasLowIC50(c) -> screen:StrongInhibitor(c)
+    );
+}
+
+resource screen:rule_strong_trace : reflection:DeclarationTrace {
+    reflection:resource    = screen:rule_strong;
+    reflection:declared_by = "literature:smith_et_al_2024_3.2";
+    reflection:timestamp   = "2026-04-10T09:00:00Z";
+}
+
+// ─── ReasoningSentence: derive StrongInhibitor(EIG_0291) ───────────
+//
+// The agent's claim: "EIG_0291 is a strong CDK2 inhibitor."
+//
+// Justification:
+//   App(
+//     SpecStr(DeclaredEvidence(rule_iri), "urn:eigenius:demo:screen:EIG_0291"),
+//     DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds")
+//   )
+//
+// Certificate: `JustifiedBy.app` composing `JustifiedBy.spec_str`
+// (the rule specialized at EIG_0291 — turns the universal proposition
+// into `HasLowIC50(EIG_0291) -> StrongInhibitor(EIG_0291)`) with
+// `JustifiedBy.derived` (consuming the IsDerivedAs witness for the
+// confirmatory claim's `HasLowIC50(EIG_0291)` proposition). The kernel
+// resolves the witnesses from the per-layer chain index at
+// type-check time.
+
+resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
+
+    reasoning:proposition = type_expr(
+        screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+    );
+
+    reasoning:justification = App(
+        SpecStr(
+            DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
+            "urn:eigenius:demo:screen:EIG_0291"
+        ),
+        DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds")
+    );
+
+    // `JustifiedBy.app A B j1 j2 c1 c2` — six args:
+    //   A  : Prop = HasLowIC50(EIG_0291)
+    //   B  : Prop = StrongInhibitor(EIG_0291)
+    //   j1 : JT   = SpecStr(DeclaredEvidence(rule), EIG_0291)
+    //   j2 : JT   = DerivedEvidence(confirmatory_claim)
+    //   c1 : JustifiedBy(j1, A -> B)
+    //       = spec_str(P, DeclaredEvidence(rule), EIG_0291, declared(...))
+    //   c2 : JustifiedBy(j2, A)
+    //       = derived(confirmatory_claim_iri, A, <Prop sentinel>)
+    reasoning:certificate = type_expr(
+        app(
+            // A
+            screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
+            // B
+            screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
+            // j1
+            SpecStr(
+                DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
+                "urn:eigenius:demo:screen:EIG_0291"
+            ),
+            // j2
+            DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds"),
+            // c1: spec_str(P, j, t, rule_cert)
+            spec_str(
+                // P : core:string -> Prop
+                fun (x : core:string) =>
+                    screen:HasLowIC50(x) -> screen:StrongInhibitor(x),
+                // j : JT
+                DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
+                // t : core:string
+                "urn:eigenius:demo:screen:EIG_0291",
+                // rule_cert : JustifiedBy(j, forall x, P(x))
+                declared(
+                    "urn:eigenius:demo:screen:rule_strong",
+                    forall (x : core:string) =>
+                        screen:HasLowIC50(x) -> screen:StrongInhibitor(x),
+                    Prop
+                )
+            ),
+            // c2: derived(claim_iri, A, <Prop sentinel>)
+            derived(
+                "urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds",
+                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
+                Prop
+            )
+        )
+    );
+}

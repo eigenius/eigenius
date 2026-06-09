@@ -243,7 +243,7 @@ pub fn derive_minor_type(
 /// Duplicated from `eval::is_recursive_arg_type` until Phase 11b's
 /// helpers are deduplicated in a follow-up pass.
 fn is_direct_recursive_ref(decl: &InductiveDecl, typ: &Exp) -> bool {
-    matches!(typ, Exp::InductiveType(d, _) if d.name == decl.name)
+    matches!(typ, Exp::InductiveType(d, _) if d.iri == decl.iri)
 }
 
 /// One constructor arg in the minor-derivation telescope.
@@ -272,6 +272,7 @@ mod tests {
 
     fn self_ref(name: &str) -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
             name: name.to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -284,6 +285,7 @@ mod tests {
         let s = self_ref("Nat");
         let nat_ty = Exp::InductiveType(s, Vec::new());
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
             name: "Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -355,6 +357,7 @@ mod tests {
         let s = self_ref("List");
         let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
         let list = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: Vec::new(),
@@ -406,6 +409,7 @@ mod tests {
         let s = self_ref("List");
         let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
         let list = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: Vec::new(),
@@ -460,6 +464,7 @@ mod tests {
     /// and `cons : (h : 1) → A → SimpleVec A () → SimpleVec A ()`.
     fn simple_vec_decl() -> Arc<InductiveDecl> {
         let self_ref = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
@@ -469,6 +474,7 @@ mod tests {
         let vec_a_unit =
             Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string()), Exp::Unit]);
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],

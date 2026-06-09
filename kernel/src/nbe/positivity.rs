@@ -94,7 +94,7 @@ fn check_arg_positivity(
         return Ok(());
     }
     if let Exp::InductiveType(d, args) = arg_typ {
-        if d.name == decl.name {
+        if d.iri == decl.iri {
             for arg in args {
                 if has_ind_occurrence(decl, arg) {
                     return Err(format!(
@@ -118,7 +118,7 @@ fn check_arg_positivity(
 /// parent inductive.
 fn check_result_type(decl: &InductiveDecl, ctor_name: &str, typ: &Exp) -> Result<(), String> {
     match typ {
-        Exp::InductiveType(d, _) if d.name == decl.name => Ok(()),
+        Exp::InductiveType(d, _) if d.iri == decl.iri => Ok(()),
         _ => Err(format!(
             "constructor `{}.{ctor_name}` must end in an application of `{}`",
             decl.name, decl.name
@@ -134,10 +134,10 @@ fn check_result_type(decl: &InductiveDecl, ctor_name: &str, typ: &Exp) -> Result
 pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
     match exp {
         Exp::InductiveType(d, args) => {
-            d.name == decl.name || args.iter().any(|a| has_ind_occurrence(decl, a))
+            d.iri == decl.iri || args.iter().any(|a| has_ind_occurrence(decl, a))
         }
         Exp::InductiveCtor(d, _, args) => {
-            d.name == decl.name || args.iter().any(|a| has_ind_occurrence(decl, a))
+            d.iri == decl.iri || args.iter().any(|a| has_ind_occurrence(decl, a))
         }
         Exp::InductiveRec {
             decl: d,
@@ -145,7 +145,7 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
             minors,
             major,
         } => {
-            d.name == decl.name
+            d.iri == decl.iri
                 || has_ind_occurrence(decl, motive)
                 || minors.iter().any(|m| has_ind_occurrence(decl, m))
                 || has_ind_occurrence(decl, major)
@@ -237,7 +237,10 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
         | Exp::Unit
         | Exp::EigonClass(_)
         | Exp::EigonPrimitive(_)
-        | Exp::EigonResource(_) => false,
+        | Exp::EigonResource(_)
+        | Exp::LitString(_)
+        | Exp::LitInt(_)
+        | Exp::LitFloat(_) => false,
     }
 }
 
@@ -249,6 +252,7 @@ mod tests {
 
     fn self_ref(name: &str) -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
             name: name.to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -262,6 +266,7 @@ mod tests {
         let s = self_ref("Nat");
         let nat_ty = Exp::InductiveType(s, Vec::new());
         let decl = InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
             name: "Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -285,6 +290,7 @@ mod tests {
         let s = self_ref("List");
         let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
         let decl = InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: Vec::new(),
@@ -324,6 +330,7 @@ mod tests {
         let s = self_ref("Bool");
         let bool_ty = Exp::InductiveType(s, Vec::new());
         let decl = InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Bool").unwrap(),
             name: "Bool".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -349,6 +356,7 @@ mod tests {
         let bad_ty = Exp::InductiveType(s, Vec::new());
         let nat_ty = Exp::Var("Nat".to_string());
         let decl = InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Bad").unwrap(),
             name: "Bad".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -377,6 +385,7 @@ mod tests {
         let foo_ty = Exp::InductiveType(s, Vec::new());
         let nat_ty = Exp::Var("Nat".to_string());
         let decl = InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Foo").unwrap(),
             name: "Foo".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -406,6 +415,7 @@ mod tests {
         let tree_ty = Exp::InductiveType(tree_self, Vec::new());
         let nested = Exp::InductiveType(list_self, vec![tree_ty.clone()]);
         let decl = InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Tree").unwrap(),
             name: "Tree".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -423,6 +433,7 @@ mod tests {
     fn rejects_wrong_result_type() {
         // mk : Nat → Set  — does not return the inductive
         let decl = InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Bogus").unwrap(),
             name: "Bogus".to_string(),
             params: Vec::new(),
             indices: Vec::new(),

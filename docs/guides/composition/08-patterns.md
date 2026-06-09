@@ -1,4 +1,4 @@
-# 7. Composition patterns
+# 8. Composition patterns
 
 This chapter is the decision space: **when X applies, prefer Y**, with the
 reasoning grounded in the trade-offs the previous chapters introduced. The
@@ -13,7 +13,7 @@ patterns will join them.
 > this chapter as a working set of recommendations that will tighten as
 > more compositions land.
 
-## 7.1. Sharing a payload vs. declaring a converter
+## 8.1. Sharing a payload vs. declaring a converter
 
 **Use a shared payload language when** multiple institutions naturally
 operate on the same kind of data (numerical expressions, planning trees,
@@ -49,7 +49,7 @@ its preferred form.
 3. Adding a new institution requires extending the shared type, and
    existing consumers either ignore the extension or break.
 
-## 7.2. Identity vs. structural comorphism
+## 8.2. Identity vs. structural comorphism
 
 **Identity comorphism** when both endpoints share a payload language. The
 transformation Component is `Lam(t. Var(t))`; the chain bytes flow through
@@ -78,7 +78,7 @@ shapes.
 **A useful question to ask:** would two domain experts argue about the
 right way to do the translation? If yes, structural. If no, identity.
 
-## 7.3. AutoOnLoad vs. OnDemand
+## 8.3. AutoOnLoad vs. OnDemand
 
 **AutoOnLoad** when the claim *is* the result you want to record. Every
 commit of the gated class fires the gate; the Verdict + RuntimeInvocation
@@ -121,7 +121,7 @@ the chain has no record of the exploration. OnDemand FIBER is the right
 tool — call it, look at the response, then decide whether to commit a
 claim afterwards.
 
-## 7.4. Chain reinsertion vs. transient overlay
+## 8.4. Chain reinsertion vs. transient overlay
 
 EigenQL `FIBER ... AS ?var` has two flavours: with `INTO` (chain
 reinsertion) and without (transient overlay). The difference matters
@@ -153,7 +153,7 @@ The kinase notebook's comorphism dispatches are deterministic (EigenTT
 evaluation + Pkg-pinned Julia), so `INTO` is safe. The kinase
 notebook's hypothetical Monte-Carlo extensions wouldn't be.
 
-## 7.5. Decidable predicates as constraints
+## 8.5. Decidable predicates as constraints
 
 The "constraint attached to a property" pattern from
 [ESL §9.6](../esl/09-institutions.md#96-constraints-attached-to-properties):
@@ -187,7 +187,7 @@ The shape generalises to multi-step pipelines: each step's output
 participates in the next step's constraint check. The chain's role as
 the source of truth means each step sees a fully-validated upstream.
 
-## 7.6. Multi-step comorphism chains
+## 8.6. Multi-step comorphism chains
 
 When you want a sequence of translations — Catalyst → DiffEq →
 IntervalArithmetic, or Symbolics → JuMP → Solver Verdict — there are two
@@ -235,7 +235,7 @@ back through both `Trace::Comorphism` events. The chain's identity
 property (chapter 5 §5.7) means re-running the program with the same
 input dedupes both intermediate commits *and* the final commit.
 
-## 7.7. Anti-patterns
+## 8.7. Anti-patterns
 
 Three common mistakes worth flagging:
 
@@ -287,4 +287,4 @@ queries actually look up.
 
 ---
 
-Next: **[8. Failure modes across compositions →](08-failure-modes.md)**
+Next: **[9. Failure modes across compositions →](09-failure-modes.md)**

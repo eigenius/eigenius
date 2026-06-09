@@ -1017,6 +1017,18 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             Ok(Val::Sort(0))
         }
         Exp::EigonClass(_) | Exp::EigonPrimitive(_) => Ok(Val::Sort(1)),
+        // eigenius#71 / D49 — literal values infer to their primitive
+        // type (`Val::EigonPrimitive(PrimitiveType::*)`). Round-trips
+        // through D47 as the `LitString` / `LitInt` / `LitFloat` ctors;
+        // the kernel checks equality on them via the standard `Val`
+        // `PartialEq` path (LitFloat uses `PartialEq` on f64 — NaN
+        // compares unequal, but literal NaN propositions are an edge
+        // case the user code is welcome to surface as a diagnostic).
+        Exp::LitString(_) => Ok(Val::EigonPrimitive(crate::nbe::term::PrimitiveType::String)),
+        Exp::LitInt(_) => Ok(Val::EigonPrimitive(
+            crate::nbe::term::PrimitiveType::Integer,
+        )),
+        Exp::LitFloat(_) => Ok(Val::EigonPrimitive(crate::nbe::term::PrimitiveType::Float)),
         Exp::Codata(_) => {
             check_type(ctx, exp)?;
             Ok(Val::Sort(1))
@@ -1144,6 +1156,35 @@ pub fn lookup_codata_observation(
 /// Port of `eqNf` from the reference: normalize both sides
 /// and compare syntactically.
 pub fn eq_nf(level: usize, v1: &Val, v2: &Val) -> Result<(), String> {
+    // D49 §8 — ChainWitness values are opaque kernel-internal markers
+    // that intentionally do not read back into surface syntax. Equality
+    // on them is key-based: two witnesses with the same `WitnessKey`
+    // are definitionally equal. (D46 proof irrelevance further
+    // collapses *any* two witnesses of the same Prop-typed predicate
+    // type to equal at that type via `def_eq_at_type`; this branch is
+    // the conservative fast path used when the proof-irrelevance
+    // shortcut wasn't reachable — e.g., direct `eq_nf` calls without
+    // a type in hand.)
+    match (v1, v2) {
+        (Val::ChainWitness(k1), Val::ChainWitness(k2)) => {
+            return if k1 == k2 {
+                Ok(())
+            } else {
+                Err(format!(
+                    "ChainWitness keys differ: {} vs {}",
+                    k1.category.label(),
+                    k2.category.label(),
+                ))
+            };
+        }
+        (Val::ChainWitness(k), _) | (_, Val::ChainWitness(k)) => {
+            return Err(format!(
+                "ChainWitness vs non-witness value (witness category {})",
+                k.category.label(),
+            ));
+        }
+        _ => {}
+    }
     let e1 = readback_val(level, v1);
     let e2 = readback_val(level, v2);
     if e1 == e2 {
@@ -1761,7 +1802,10 @@ pub fn check_guarded(exp: &Exp, forbidden: &std::collections::HashSet<&str>) -> 
         | Exp::Unit
         | Exp::EigonClass(_)
         | Exp::EigonPrimitive(_)
-        | Exp::EigonResource(_) => Ok(()),
+        | Exp::EigonResource(_)
+        | Exp::LitString(_)
+        | Exp::LitInt(_)
+        | Exp::LitFloat(_) => Ok(()),
     }
 }
 
@@ -1882,7 +1926,7 @@ fn validate_indexed_ctor_conclusions(
         // with the right arg count. Positivity already verified the name
         // matches; we add the arg-count check here.
         let conclusion_args = match residual {
-            Exp::InductiveType(d, args) if d.name == decl.name => args,
+            Exp::InductiveType(d, args) if d.iri == decl.iri => args,
             _ => {
                 return Err(format!(
                     "constructor `{}.{}`: conclusion must be `{}(...)` — \
@@ -2052,6 +2096,76 @@ fn peel_ctor_telescope(ctor_typ: &Exp, params_to_skip: usize) -> (Vec<CtorArg>, 
 ///
 /// Used by both the bidirectional `check` arm and the inference path
 /// for non-parametric constructors.
+/// D49 Phase 6 hook — detect a ChainWitness-predicate expected type
+/// at a constructor-arg position and synthesize the witness via the
+/// layer's witness index. Returns `Some(witness_val)` on a successful
+/// hit, `None` when the expected type isn't a ChainWitness predicate
+/// (callers fall through to the standard type-check), and `Err` when
+/// the expected type *is* a ChainWitness predicate but synthesis
+/// fails (missing layer, missing trace, malformed iri arg).
+fn try_synthesize_chain_witness(ctx: &CheckCtx, expected_typ: &Val) -> Result<Option<Val>, String> {
+    let (decl, indices) = match expected_typ {
+        Val::InductiveType { decl, indices, .. } => (decl, indices),
+        _ => return Ok(None),
+    };
+    let category = match chain_witness_category_for_short_name(&decl.name) {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+
+    // The four ChainWitness predicates all have signature
+    // `core:string -> Prop -> Prop` (2 indices: iri, P). Mismatch
+    // means the chain ontology drifted from the kernel's expectation.
+    if indices.len() != 2 {
+        return Err(format!(
+            "ChainWitness predicate `{}` expected 2 indices (iri, P), got {}",
+            decl.name,
+            indices.len()
+        ));
+    }
+
+    let iri_str = match &indices[0] {
+        Val::LitString(s) => s.clone(),
+        other => {
+            return Err(format!(
+                "ChainWitness predicate `{}` iri index must be LitString, got {other:?}",
+                decl.name
+            ));
+        }
+    };
+    let iri = crate::ontology::iri::Iri::parse(&iri_str)
+        .map_err(|e| format!("ChainWitness `{}`: invalid iri `{iri_str}`: {e}", decl.name))?;
+
+    let prop_exp = readback_val(ctx.rho.len(), &indices[1]);
+
+    let layer = ctx.layer.as_ref().ok_or_else(|| {
+        format!(
+            "ChainWitness synthesis for `{}` requires a layer-attached CheckCtx; \
+             pure-mode contexts cannot admit chain witnesses",
+            decl.name
+        )
+    })?;
+
+    let witness_val = crate::layer::synthesize_chain_witness(layer, category, &iri, &prop_exp)?;
+    Ok(Some(witness_val))
+}
+
+/// Map an inductive's short name to its `WitnessCategory` if it is one
+/// of the four ChainWitness predicates. The IRIs themselves live under
+/// `urn:eigenius:reasoning:ChainWitness:Is*As`; the ESL compiler emits
+/// the local-part short name (`IsDeclaredAs`, etc.) onto the
+/// `InductiveDecl.name` slot, so the matching is by short name here.
+fn chain_witness_category_for_short_name(name: &str) -> Option<crate::witness::WitnessCategory> {
+    use crate::witness::WitnessCategory;
+    match name {
+        "IsDeclaredAs" => Some(WitnessCategory::Declared),
+        "IsObservedAs" => Some(WitnessCategory::Observed),
+        "IsDerivedAs" => Some(WitnessCategory::Derived),
+        "IsVerifiedAs" => Some(WitnessCategory::Verified),
+        _ => None,
+    }
+}
+
 fn check_inductive_ctor_args(
     ctx: &mut CheckCtx,
     decl: &Arc<InductiveDecl>,
@@ -2099,8 +2213,23 @@ fn check_inductive_ctor_args(
         match spec {
             CtorArg::Value { patt, typ } => {
                 let arg_typ_val = ctx.eval(typ, &arg_env).map_err(|e| e.to_string())?;
-                check(ctx, arg_exp, &arg_typ_val)?;
-                let arg_val = ctx.eval(arg_exp, &ctx.rho).map_err(|e| e.to_string())?;
+
+                // D49 Phase 6 hook — when the expected arg type is a
+                // ChainWitness predicate (`IsDeclaredAs` / `IsObservedAs`
+                // / `IsDerivedAs` / `IsVerifiedAs`), synthesize the
+                // witness from the layer's witness index rather than
+                // type-checking the user's arg. ChainWitness predicates
+                // have zero constructors — the user can't construct an
+                // inhabitant — so kernel-side synthesis IS the type-
+                // checking step here. The user's `arg_exp` at this
+                // position is ignored by design.
+                let arg_val = match try_synthesize_chain_witness(ctx, &arg_typ_val)? {
+                    Some(witness_val) => witness_val,
+                    None => {
+                        check(ctx, arg_exp, &arg_typ_val)?;
+                        ctx.eval(arg_exp, &ctx.rho).map_err(|e| e.to_string())?
+                    }
+                };
                 arg_env = arg_env.extend(patt.clone(), arg_val);
             }
             CtorArg::Size { patt, upper } => {
@@ -2732,6 +2861,7 @@ mod tests {
         // An inductive declared with sort = Sort(0) is propositional — caught
         // by the structural fast-path on Val::InductiveType.
         let prop_decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:MyProp").unwrap(),
             name: "MyProp".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -2750,6 +2880,7 @@ mod tests {
     fn proof_irrelevance_does_not_fire_for_set_typed_inductive() {
         // An inductive declared with sort = Sort(1) is NOT propositional.
         let set_decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:MyData").unwrap(),
             name: "MyData".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -2805,6 +2936,7 @@ mod tests {
         ctors: Vec<crate::nbe::term::InductiveCtorDecl>,
     ) -> crate::nbe::term::InductiveDecl {
         crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
             name: name.to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -2893,6 +3025,7 @@ mod tests {
     fn eq_decl() -> std::sync::Arc<crate::nbe::term::InductiveDecl> {
         // Self-ref for the ctor's conclusion.
         let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Eq").unwrap(),
             name: "Eq".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![
@@ -2921,6 +3054,7 @@ mod tests {
             )),
         );
         std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Eq").unwrap(),
             name: "Eq".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![
@@ -2955,6 +3089,7 @@ mod tests {
         // index expressions. Even with the Phase H extension, this
         // should still be rejected.
         let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:BadIxProp").unwrap(),
             name: "BadIxProp".to_string(),
             params: Vec::new(),
             indices: vec![(Patt::Unit, Exp::One)],
@@ -2972,6 +3107,7 @@ mod tests {
             Box::new(conclusion),
         );
         let decl = crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:BadIxProp").unwrap(),
             name: "BadIxProp".to_string(),
             params: Vec::new(),
             indices: vec![(Patt::Unit, Exp::One)],
@@ -3014,6 +3150,7 @@ mod tests {
         // at all — large_elim_admitted is only consulted for Prop decls.
         // Smoke-test the function returns sensibly regardless.
         let set_decl = crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
             name: "Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -3805,6 +3942,7 @@ mod tests {
 
     fn ind_self_ref(name: &str) -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
             name: name.to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -3817,6 +3955,7 @@ mod tests {
         let s = ind_self_ref("Nat");
         let nat_ty = Exp::InductiveType(s, Vec::new());
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
             name: "Nat".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -3907,6 +4046,7 @@ mod tests {
         let bs = ind_self_ref("Bool");
         let bool_ty_exp = Exp::InductiveType(bs, Vec::new());
         let bool_decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Bool").unwrap(),
             name: "Bool".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -3951,6 +4091,7 @@ mod tests {
         let s = ind_self_ref("List");
         let list_ty = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
         let list_decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:List").unwrap(),
             name: "List".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: Vec::new(),
@@ -4072,6 +4213,7 @@ mod tests {
         let bs = ind_self_ref("Bool");
         let bool_ty = Exp::InductiveType(bs, Vec::new());
         let bool_decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Bool").unwrap(),
             name: "Bool".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
@@ -4149,6 +4291,7 @@ mod tests {
         // `PartialEq` on `InductiveDecl` goes by name, so two calls to
         // this helper produce decls that compare equal.
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SizedStream").unwrap(),
             name: "SizedStream".to_string(),
             params: vec![
                 (Patt::Var("i".to_string()), Exp::SizeSort),
@@ -4238,6 +4381,7 @@ mod tests {
         // rejects them.
         let decl_a = sized_stream_decl();
         let decl_b = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:OtherStream").unwrap(),
             name: "OtherStream".to_string(),
             params: decl_a.params.clone(),
             indices: Vec::new(),
@@ -4311,6 +4455,7 @@ mod tests {
         //   zero : Π i:SizeSort. SizedNat i       (exists at every size)
         //   succ : Π i:SizeSort. SizedNat i → SizedNat (↑ i)
         let self_ref = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SizedNat").unwrap(),
             name: "SizedNat".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
             indices: Vec::new(),
@@ -4323,6 +4468,7 @@ mod tests {
             vec![Exp::SizeSucc(Box::new(Exp::Var("i".to_string())))],
         );
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SizedNat").unwrap(),
             name: "SizedNat".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
             indices: Vec::new(),
@@ -4943,6 +5089,7 @@ mod tests {
         //   zero : Π i:SizeSort. SizedNatP i
         //   succ : Π i:SizeSort. {j < i}. SizedNatP j → SizedNatP i
         let self_ref = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SizedNatP").unwrap(),
             name: "SizedNatP".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
             indices: Vec::new(),
@@ -4952,6 +5099,7 @@ mod tests {
         let snat_i = Exp::InductiveType(self_ref.clone(), vec![Exp::Var("i".to_string())]);
         let snat_j = Exp::InductiveType(self_ref, vec![Exp::Var("j".to_string())]);
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SizedNatP").unwrap(),
             name: "SizedNatP".to_string(),
             params: vec![(Patt::Var("i".to_string()), Exp::SizeSort)],
             indices: Vec::new(),
@@ -5706,6 +5854,7 @@ mod tests {
     /// without requiring `Nat`. Phase D will pull in real `Nat` indices.
     fn simple_vec_decl() -> Arc<InductiveDecl> {
         let self_ref = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
@@ -5716,6 +5865,7 @@ mod tests {
         let vec_a_unit =
             Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string()), Exp::Unit]);
         Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:SimpleVec").unwrap(),
             name: "SimpleVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
@@ -5774,6 +5924,7 @@ mod tests {
         // conclusion `SimpleVec A` (missing the index) supplies only 1.
         // Phase B validator rejects.
         let self_ref = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:BadVec").unwrap(),
             name: "BadVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
@@ -5783,6 +5934,7 @@ mod tests {
         // Conclusion has only 1 arg (the param), missing the index.
         let bad_conclusion = Exp::InductiveType(self_ref.clone(), vec![Exp::Var("A".to_string())]);
         let decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:BadVec").unwrap(),
             name: "BadVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
@@ -5810,6 +5962,7 @@ mod tests {
         // conclusion supplies a Sort(1) value in the index slot —
         // type mismatch. Phase B validator rejects.
         let self_ref = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:MistypedVec").unwrap(),
             name: "MistypedVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
@@ -5822,6 +5975,7 @@ mod tests {
             vec![Exp::Var("A".to_string()), Exp::Sort(1)],
         );
         let decl = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:MistypedVec").unwrap(),
             name: "MistypedVec".to_string(),
             params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
             indices: vec![(Patt::Unit, Exp::One)],
@@ -6166,5 +6320,165 @@ mod tests {
         check(&mut c, &nil_app, &expected).unwrap();
         let _ = mctx; // unused — the per-call internal MetaCtx ate the meta
         let _ = m_id;
+    }
+
+    // ── Phase 9 — D49 ChainWitness synthesis hook ─────────────────────
+
+    /// Build a `Val::InductiveType` whose decl mimics a ChainWitness
+    /// predicate (`IsDeclaredAs` short name, 2 indices: iri + P).
+    /// Production code resolves the real decl from the chain; this
+    /// stub is enough for unit-testing the hook's recognition logic.
+    fn chain_witness_typed_at(category_short_name: &str, iri_val: Val, prop_val: Val) -> Val {
+        use crate::nbe::term::{Exp as TermExp, InductiveDecl};
+        Val::InductiveType {
+            decl: Arc::new(InductiveDecl {
+                iri: crate::ontology::iri::Iri::parse(&format!(
+                    "urn:eigenius:reasoning:ChainWitness:{category_short_name}"
+                ))
+                .expect("test iri"),
+                name: category_short_name.to_string(),
+                params: Vec::new(),
+                indices: Vec::new(),
+                sort: TermExp::Sort(0),
+                ctors: Vec::new(),
+            }),
+            params: Vec::new(),
+            indices: vec![iri_val, prop_val],
+        }
+    }
+
+    #[test]
+    fn synthesis_hook_returns_none_for_non_chain_witness_type() {
+        // Sanity: a regular inductive type (Sort, Pi, ...) doesn't
+        // trigger the hook. Falls through to the standard check path.
+        let c = ctx();
+        assert!(try_synthesize_chain_witness(&c, &Val::Sort(0))
+            .unwrap()
+            .is_none());
+        // Even an InductiveType whose decl.name isn't a ChainWitness
+        // short name falls through.
+        let stub = chain_witness_typed_at("Vec", Val::LitString("A".into()), Val::Sort(1));
+        assert!(try_synthesize_chain_witness(&c, &stub).unwrap().is_none());
+    }
+
+    #[test]
+    fn synthesis_hook_errors_without_layer() {
+        // CheckCtx without a layer can't reach the witness index;
+        // the hook surfaces this with a clear error rather than
+        // silently passing (which would let the type-check succeed
+        // for the wrong reason).
+        let c = ctx();
+        let expected = chain_witness_typed_at(
+            "IsDeclaredAs",
+            Val::LitString("urn:test:axiom".into()),
+            Val::Sort(0),
+        );
+        let err = try_synthesize_chain_witness(&c, &expected).unwrap_err();
+        assert!(
+            err.contains("requires a layer-attached CheckCtx"),
+            "expected layer-missing diagnostic, got: {err}"
+        );
+    }
+
+    #[test]
+    fn synthesis_hook_errors_when_iri_index_not_litstring() {
+        // The iri index must be a Val::LitString. A bogus shape (e.g.,
+        // Val::Sort) means the chain author or codec produced a
+        // malformed ChainWitness application; the hook surfaces this
+        // before reaching the witness index.
+        let c = ctx();
+        let expected = chain_witness_typed_at(
+            "IsDeclaredAs",
+            Val::Sort(0), // not a LitString
+            Val::Sort(0),
+        );
+        let err = try_synthesize_chain_witness(&c, &expected).unwrap_err();
+        assert!(
+            err.contains("iri index must be LitString"),
+            "expected iri-shape diagnostic, got: {err}"
+        );
+    }
+
+    #[test]
+    fn synthesis_hook_routes_through_layer_witness_index_for_admitted_witness() {
+        // End-to-end: build a layer carrying a DeclarationTrace, which
+        // populates the witness index with the corresponding Declared
+        // witness. Calling the hook with the matching expected type
+        // returns Some(Val::ChainWitness).
+        use crate::layer::{LayerBuilder, LayerStorage};
+        use crate::ontology::resource::{Resource, Value as RVal};
+        use crate::ontology::well_known as wk_local;
+        use crate::program::eigentt_type_mirror::encode_type;
+
+        let target_iri_str = "urn:test:phase9:axiom";
+        let prop_exp = Exp::Sort(0); // any well-typed Prop suffices for index population
+
+        let mut target = Resource::new(Iri::parse(target_iri_str).unwrap());
+        target.set(
+            Iri::parse(wk_local::IS_A).unwrap(),
+            RVal::Array(vec![RVal::String(wk_local::DECLARED_RESOURCE.to_string())]),
+        );
+        target.set(
+            Iri::parse(wk_local::CANONICAL_PROPOSITION).unwrap(),
+            encode_type(&prop_exp).unwrap(),
+        );
+
+        let mut trace = Resource::new(Iri::parse("urn:test:phase9:axiom-trace").unwrap());
+        trace.set(
+            Iri::parse(wk_local::IS_A).unwrap(),
+            RVal::Array(vec![RVal::String(wk_local::DECLARATION_TRACE.to_string())]),
+        );
+        trace.set(
+            Iri::parse(wk_local::REFLECTION_RESOURCE).unwrap(),
+            RVal::ResourceRef(Iri::parse(target_iri_str).unwrap()),
+        );
+
+        let mut builder = LayerBuilder::new("phase9-witness-test", None);
+        builder.add_resource(target).unwrap();
+        builder.add_resource(trace).unwrap();
+        let layer = Arc::new(builder.build(LayerStorage::in_memory()));
+
+        // Force index population so the hook finds the witness.
+        let _ = layer.chain_witness_index();
+
+        let c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
+
+        // Expected type is `IsDeclaredAs(target_iri_str, Sort(0))`.
+        // The eval'd index must match what the witness index was
+        // populated with — prop_exp evaluates to Val::Sort(0).
+        let expected = chain_witness_typed_at(
+            "IsDeclaredAs",
+            Val::LitString(target_iri_str.to_string()),
+            Val::Sort(0),
+        );
+        let synth = try_synthesize_chain_witness(&c, &expected).unwrap();
+        let val = synth.expect("witness should be admitted for declared trace");
+        assert!(
+            matches!(val, Val::ChainWitness(_)),
+            "synthesized value should be Val::ChainWitness, got {val:?}"
+        );
+    }
+
+    #[test]
+    fn synthesis_hook_errors_when_no_witness_admitted() {
+        // Layer with no witness index populated → synthesize_chain_witness
+        // returns a "no admitted witness" diagnostic. The hook surfaces it
+        // as Err so the caller (the ctor type-check loop) can lift it into
+        // a ValidateJustification Verdict::Fails.
+        use crate::layer::{LayerBuilder, LayerStorage};
+        let layer =
+            Arc::new(LayerBuilder::new("phase9-empty", None).build(LayerStorage::in_memory()));
+        let _ = layer.chain_witness_index(); // populate (empty)
+        let c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
+        let expected = chain_witness_typed_at(
+            "IsDeclaredAs",
+            Val::LitString("urn:test:phase9:missing".into()),
+            Val::Sort(0),
+        );
+        let err = try_synthesize_chain_witness(&c, &expected).unwrap_err();
+        assert!(
+            err.contains("no admitted") || err.contains("witness"),
+            "expected missing-witness diagnostic, got: {err}"
+        );
     }
 }

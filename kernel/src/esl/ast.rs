@@ -18,6 +18,7 @@
 //! to emit Eigon-JSON resources.
 
 use crate::esl::error::Position;
+use serde::{Deserialize, Serialize};
 
 /// A complete ESL file.
 #[derive(Debug)]
@@ -35,7 +36,7 @@ pub struct NamespaceDecl {
 }
 
 /// A qualified name: `ex:Dog` or bare `Dog`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QualifiedName {
     pub namespace: Option<String>,
     pub name: String,
@@ -73,6 +74,60 @@ pub enum Declaration {
     /// `axiom_statement` is the type expression encoded via the D47
     /// codec. Optional `note: "..."` populates `core:axiom_justification`.
     Axiom(AxiomDecl),
+    /// D52 §12 — file-level `macro` declaration. Defines a smart
+    /// constructor `macro ns:Name(p1 : T1, ...) : RetT => body`
+    /// where `body` is a `Value` expression that can reference the
+    /// parameter names. Compile-time AST substitution only: each
+    /// call site substitutes the actual-argument `Value`s into the
+    /// body positionally and recursively compiles the result. No
+    /// runtime closure / lambda value is created, no kernel NbE
+    /// evaluation. The name "Macro" is deliberate — this is *not*
+    /// a function in the runtime-callable sense, and the `Function`
+    /// AST name is reserved for a possible future addition with
+    /// real evaluation semantics.
+    ///
+    /// Lets D52 author `stats:IID(replicates, BiologicalReplication)`
+    /// as a brief surface form that desugars to a fully-positional
+    /// `stats:SampleSet.Set(...)` ctor call.
+    Macro(MacroDecl),
+}
+
+/// D52 §12 — file-level smart-constructor `macro` declaration.
+///
+/// Surface form: `macro ns:Name(p1 : T1, p2 : T2, ...) : RetT => body;`
+///
+/// Compile-time AST substitution only: each call site `ns:Name(arg1,
+/// arg2, ...)` substitutes positional argument `Value`s into the
+/// body and recursively compiles the result. The macro is *not*
+/// lowered to a chain resource — it lives only in the compiler's
+/// per-file `macros` table and disappears at compile time. Parameter
+/// types and return type are stored for diagnostics but the macro
+/// expansion does not type-check at the macro-decl site; type errors
+/// surface at the expanded call site against the body's substituted
+/// shape.
+///
+/// Two restrictions in v1:
+/// - The body must be a `Value` (resource-property value AST), not
+///   a `TypeExpr` or `Expr` (program body). Smart constructors
+///   produce ctor values; that's their use case.
+/// - No recursion. The compile-time expansion has no termination
+///   guarantee for recursive calls and the use case (named-design
+///   smart constructors) doesn't need it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MacroDecl {
+    pub name: QualifiedName,
+    pub params: Vec<MacroParam>,
+    pub return_type: TypeExpr,
+    pub body: Value,
+    pub pos: Position,
+}
+
+/// A single parameter in a [`MacroDecl`]'s parameter list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MacroParam {
+    pub name: String,
+    pub typ: TypeExpr,
+    pub pos: Position,
 }
 
 /// eigenius#72 — `axiom Name : <type-expr> [note: "..."]` declaration.
@@ -142,14 +197,14 @@ pub struct ResourceDecl {
 }
 
 /// A field in a resource block: `ex:name = "Rex";`
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceField {
     pub property: QualifiedName,
     pub value: Value,
 }
 
 /// A value in structural position.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Value {
     String(String),
     Int(i64),
@@ -170,6 +225,37 @@ pub enum Value {
     /// declared `class_types` inductive at commit time.
     CtorApp {
         ctor: String,
+        args: Vec<Value>,
+        pos: Position,
+    },
+    /// `type_expr(<type-expr>)` — inline D47-encoded EigenTT type
+    /// expression as a resource-field value. Lowered via
+    /// `lower_type_expr_to_exp` + `encode_type` at compile time;
+    /// the resulting `Value::Json` lands directly on the property,
+    /// matching what a programmatic `encode_type` caller produces.
+    /// Surface counterpart of `formula(...)` for D32 §3.7
+    /// inductive values — same purpose (write the expression
+    /// readably instead of the tagged-dict tree the codec emits),
+    /// different codec.
+    TypeExpr {
+        typ: TypeExpr,
+        pos: Position,
+    },
+    /// D52 §12 — call to a [`MacroDecl`] smart constructor declared
+    /// elsewhere in the same file (or, with the cross-file extension,
+    /// in a parent layer). The compiler resolves `name` to a
+    /// registered macro and expands the call site by substituting
+    /// `args` (positionally) into the macro body's `Value`, then
+    /// recursively compiling the result.
+    ///
+    /// The shape that distinguishes this from `CtorApp` is the
+    /// presence of a namespace qualifier on the name: bare
+    /// `Foo(args)` parses as `CtorApp { ctor: "Foo" }`, while
+    /// `ns:Foo(args)` parses as `MacroCall { name: ns:Foo }`.
+    /// Constructors live in per-inductive scopes (unqualified);
+    /// macros live in file-level qualified namespaces.
+    MacroCall {
+        name: QualifiedName,
         args: Vec<Value>,
         pos: Position,
     },
@@ -224,10 +310,25 @@ pub struct DataDecl {
     /// sort. Example: `data Vec(A : Set) : Nat -> Set { ... }` has one
     /// index `_ : Nat`. Empty for non-indexed declarations (the default,
     /// matching the pre-D48 / pre-eigenius#72-Layer-2 surface).
-    pub indices: Vec<DataParam>,
+    ///
+    /// Indices use [`DataIndex`] rather than [`DataParam`] because
+    /// index kinds can be Sort literals (e.g., D39 §5's
+    /// `JustifiedBy : JustificationTerm → Prop → Type` has `Prop` as
+    /// its second index kind). Type params have no such use case in
+    /// v1 — they're always Set-kinded today.
+    pub indices: Vec<DataIndex>,
     /// Result sort declared after the index telescope's arrow chain.
     /// `None` defaults to `Set` (`Sort(1)`).
     pub result_sort: Option<SortKind>,
+    /// Additional `is_a` class memberships for the emitted
+    /// inductive-type resource, beyond the implicit `InductiveType`
+    /// (D52 §12 #8 / §7.4 enabler). Surface syntax:
+    /// `data X : T, Marker1, Marker2 { ctors }`. Used by the
+    /// statistics institution to mark predicates with scope classes
+    /// (`stats:PopulationLevel` / `stats:MeasurementLevel`) without
+    /// the companion-resource workaround that collides with
+    /// `stamp_declared`. Empty for the standard non-marked case.
+    pub extra_classes: Vec<QualifiedName>,
     pub ctors: Vec<CtorDecl>,
     pub pos: Position,
 }
@@ -242,6 +343,38 @@ pub struct DataParam {
     pub name: String,
     pub kind: QualifiedName,
     pub pos: Position,
+}
+
+/// One entry in an indexed-data declaration's index telescope
+/// (eigenius#72 Layer 2). Differs from [`DataParam`] in that the kind
+/// can be a Sort literal (`Prop` / `Set` / `Type N`) as well as a
+/// qualified-name reference — D39 §5's
+/// `JustifiedBy : JustificationTerm → Prop → Type` has `Prop` as its
+/// second index kind, which `DataParam`'s `QualifiedName`-only kind
+/// field can't express.
+#[derive(Debug)]
+pub struct DataIndex {
+    pub name: String,
+    pub kind: IndexKind,
+    pub pos: Position,
+}
+
+/// The kind of an index in an indexed-data declaration. See
+/// [`DataIndex`].
+#[derive(Debug, Clone)]
+pub enum IndexKind {
+    /// A qualified-name reference — either a bare parameter name
+    /// (resolved against the enclosing `data` declaration's
+    /// `params`) or a class IRI (resolved through the namespace
+    /// registry). The Phase-4 implementation of
+    /// `parse_data_index_telescope` accepted only this shape.
+    Named(QualifiedName),
+    /// A Sort literal — `Prop` / `Set` / `Type N`. Emitted by the
+    /// parser when an intermediate index-telescope segment is itself
+    /// a sort. Encoded in JSON as the literal string (`"Prop"`,
+    /// `"Set"`, `"Type:N"`) that the kernel's `decode_param_kind_str`
+    /// recognises.
+    Sort(SortKind),
 }
 
 /// A single constructor declaration.
@@ -356,7 +489,7 @@ pub struct ObservationDecl {
 /// Purposely restricted — this isn't a full type-expression grammar,
 /// just enough for the codata observation-type surface. Data ctor
 /// arg types still use the simpler `CtorArgType` shape.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TypeExpr {
     /// Type reference with zero or more type args: `Name` or
     /// `Name(arg, arg, ...)`. Bare identifiers (no namespace) are
@@ -406,7 +539,29 @@ pub enum TypeExpr {
     /// `Sort(0)`, `Set` is `Sort(1)`, `Type N` is `Sort(N+1)`.
     /// Used in `axiom` statements, indexed `data` declarations, and
     /// motives.
-    Sort { kind: SortKind, pos: Position },
+    Sort {
+        kind: SortKind,
+        pos: Position,
+    },
+    /// String / integer / float literal in type position. Lowers to
+    /// `Exp::LitString` / `LitInt` / `LitFloat` — Phase-2 term-level
+    /// constructors the kernel admits as arguments to value-indexed
+    /// inductives (e.g. `Asserts(iri : core:string) : Prop` consumes
+    /// a `LitString` at its iri index slot). Surface required by
+    /// `type_expr(...)` so authors can write `Asserts("urn:foo")`
+    /// directly instead of binding the IRI through a separate `Var`.
+    LitString {
+        value: String,
+        pos: Position,
+    },
+    LitInt {
+        value: i64,
+        pos: Position,
+    },
+    LitFloat {
+        value: f64,
+        pos: Position,
+    },
     /// eigenius#72 Layer 3 — type-level lambda introduced by `fun`:
     /// `fun (i : T) => body`. Used as a motive for `match … returning
     /// <motive>` over indexed inductives. Compiles to nested
@@ -420,7 +575,7 @@ pub enum TypeExpr {
 }
 
 /// Sort literals recognised in type expressions (eigenius#72).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SortKind {
     Prop,
     Set,
@@ -436,7 +591,10 @@ impl TypeExpr {
             | TypeExpr::BinderArrow { pos, .. }
             | TypeExpr::Pi { pos, .. }
             | TypeExpr::Sort { pos, .. }
-            | TypeExpr::Lambda { pos, .. } => pos,
+            | TypeExpr::Lambda { pos, .. }
+            | TypeExpr::LitString { pos, .. }
+            | TypeExpr::LitInt { pos, .. }
+            | TypeExpr::LitFloat { pos, .. } => pos,
         }
     }
 }
@@ -444,7 +602,7 @@ impl TypeExpr {
 /// A typed binder: `name : type`. Used by `TypeExpr::Pi` and by the
 /// new typed `lambda` literal (D37 §3.1). The type can be any
 /// `TypeExpr`, including nested `Pi` / `Ref` / `Arrow` forms.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypedParam {
     pub name: String,
     pub typ: TypeExpr,

@@ -28,7 +28,10 @@ impl EigeniusService {
         req: ReflectRequest,
     ) -> Result<Response<ReflectResponse>, Status> {
         let _guard = RpcGuard::start(operation::RPC_REFLECT);
-        let resources = self.parse_resources(&req.trace, &req.content_type).await?;
+        let branch = resolve_branch_name(&req.branch).to_string();
+        let resources = self
+            .parse_resources(&req.trace, &req.content_type, Some(&branch))
+            .await?;
 
         if resources.is_empty() {
             // No resources to commit — `merge` stays None (no CAS).
@@ -57,7 +60,6 @@ impl EigeniusService {
         // `WithRetroactive` per D41 §10 so cascade tombstoning still
         // applies if a future trace shape touches lower-layer
         // institutional declarations.
-        let branch = resolve_branch_name(&req.branch).to_string();
         let ctx_arc = self.get_branch_context(&branch).await?;
         let mut ctx = ctx_arc.write().await;
         for resource in resources {

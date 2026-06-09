@@ -1,0 +1,229 @@
+// End-to-end D39 / D49 / D52 demo — drug screening.
+//
+// Question: Is compound EIG_0291 a strong CDK2 inhibitor?
+//
+// The migration story this fixture documents: the original drug-
+// screening demo committed the bench measurement as a plain
+// `reflection:ObservedResource` whose `canonical_proposition` was a
+// methodological assertion ("85.0 < 100 ⇒ HasLowIC50 holds"), then
+// cited it with `ObservedEvidence`. That conflated the raw read with
+// the predicate the read was supposed to justify — the author was
+// the only thing standing between an instrument number and a chain-
+// resident proposition. The D52 statistics institution removes that
+// conflation: the SampleSet carries the raw replicates, a
+// MeasurementClaim asserts the universal-claim schema (alpha,
+// effect_size, directionality, …), and the verifier's recomputation
+// turns the raw data into the proposition mechanically. The
+// ReasoningSentence then cites the claim via `DerivedEvidence`, not
+// the raw read via `ObservedEvidence` — the chain-resident
+// derivation has its own provenance and its own auditable numerics.
+//
+// Four chain commits + one ReasoningSentence:
+//
+// 1. Domain vocabulary — two predicates in `Prop`. `HasLowIC50` is
+//    marked `is_a stats:PopulationLevel` per §7.4 so the statistics
+//    epistemic-scope check admits the claim under BiologicalReplication.
+// 2. A literature rule as a `DeclaredResource` whose
+//    `canonical_proposition` is the implication
+//    `HasLowIC50(EIG_0291) -> StrongInhibitor(EIG_0291)`. A
+//    `DeclarationTrace` admits the IsDeclaredAs witness.
+// 3. A SampleSetResource holding the three raw IC50 replicate readings
+//    (72, 85, 100 nM) plus an ObservationTrace pairing it with the
+//    bench instrument log (D49 §6 IsObservedAs witness).
+// 4. A MeasurementClaim asserting the IC50 threshold (`Absolute(100.0,
+//    "nM")`) with the universal-claim parameters, plus a ProgramTrace
+//    pairing it with the statistics-institution validation procedure
+//    (D49 §6 IsDerivedAs witness). The claim's
+//    `canonical_proposition` is `HasLowIC50(EIG_0291)` — that's the
+//    proposition `DerivedEvidence(claim_iri)` exposes to D39 reasoning.
+// 5. A `ReasoningSentence` claiming `StrongInhibitor(EIG_0291)` via
+//    `App(DeclaredEvidence(rule_iri), DerivedEvidence(claim_iri))`.
+//    The certificate composes `JustifiedBy.declared` +
+//    `JustifiedBy.derived` via `JustifiedBy.app`. ChainWitness slots
+//    are filled by the kernel at type-check time (Phase 9 synthesise
+//    hook).
+//
+// On commit, ValidateJustification fires AutoOnLoad on the sentence.
+// The kernel type-checks the certificate against
+// `JustifiedBy(justification, proposition)`, synthesises both
+// ChainWitnesses from the per-layer witness index, and reports
+// Verdict::Holds. The MeasurementClaim's own AutoOnLoad path (running
+// the statistics institution's verifier) is exercised independently
+// in the eigenius-statistics crate's tests; here we only need the
+// witness index admission, which D49 §6 grants from the ProgramTrace
+// + canonical_proposition pair without requiring the verifier to
+// have fired.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace stats      = "urn:eigenius:measurements";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace screen     = "urn:eigenius:demo:screen";
+
+// ─── Step 1: domain vocabulary ─────────────────────────────────────
+
+// HasLowIC50 carries the PopulationLevel scope marker per D52 §7.4 /
+// §12 #8: the multi-class `data` header puts both `is_a InductiveType`
+// (implicit) and `is_a stats:PopulationLevel` on the resource. The
+// statistics institution's epistemic-scope check reads this marker
+// and admits the claim under BiologicalReplication (and rejects it
+// under TechnicalWithinRun).
+
+data screen:HasLowIC50 : core:string -> Prop, stats:PopulationLevel {
+}
+
+data screen:StrongInhibitor : core:string -> Prop, stats:PopulationLevel {
+}
+
+// ─── Step 2: literature rule + its DeclarationTrace ────────────────
+//
+// Specialised to one compound to keep the certificate ergonomics
+// simple — a fully general rule would universally-quantify over `c`
+// (the universal-rule shape lands in `d39_composition.esl` in the
+// statistics crate, where `SpecStr` instantiates the rule at the
+// compound IRI). Here we keep the shape monomorphic so the
+// `JustifiedBy.declared` certificate slot maps directly onto the
+// rule's canonical_proposition without an intermediate SpecStr term.
+
+resource screen:rule_strong : reflection:DeclaredResource {
+    reflection:declared_by = "literature:smith_et_al_2024_3.2";
+    reflection:rationale   = "IC50 < 100 nM at a kinase target is the standard strong-inhibitor threshold.";
+
+    reflection:canonical_proposition = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+        ->
+        screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+    );
+}
+
+resource screen:rule_strong_trace : reflection:DeclarationTrace {
+    reflection:resource    = screen:rule_strong;
+    reflection:declared_by = "literature:smith_et_al_2024_3.2";
+    reflection:timestamp   = "2026-04-10T09:00:00Z";
+}
+
+// ─── Step 3: SampleSetResource carrying the raw replicate readings ──
+//
+// The three IC50 readings the bench produced — 72, 85, 100 nM.
+// `stats:SingleSampleEstimate(observations, replication)` lands the
+// Bundle at the (CompleteRandom, Unblocked, NoFactor, _,
+// CrossSectional) product position. BiologicalReplication asserts the
+// readings come from independent biological prep (vs technical
+// reruns of one prep), which is what the §7.4 admissibility check
+// requires for population-level predicates like HasLowIC50.
+
+resource screen:m_eig0291_sampleset : stats:SampleSetResource {
+    reflection:source      = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    reflection:observed_at = "2026-03-04T14:22:11Z";
+
+    stats:sample_set_value = stats:SingleSampleEstimate(
+        [72.0, 85.0, 100.0],
+        BiologicalReplication(),
+    );
+}
+
+resource screen:m_eig0291_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = screen:m_eig0291_sampleset;
+    reflection:source    = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    reflection:timestamp = "2026-03-04T14:22:11Z";
+}
+
+// ─── Step 4: MeasurementClaim + its ProgramTrace ────────────────────
+//
+// The universal-claim schema (D52 §3) carries everything the verifier
+// needs to recompute the claim deterministically: alpha, effect_size
+// (the threshold), directionality, variance_assumption, outlier_
+// exclusion. The MeasurementClaim itself IS the chain-resident
+// DerivedResource downstream D39 reasoning cites via DerivedEvidence
+// — its reflection:canonical_proposition slot carries
+// `HasLowIC50(EIG_0291)`, which the D49 §6 witness index reads to
+// admit `IsDerivedAs(claim_iri, HasLowIC50(EIG_0291))` from the
+// matching ProgramTrace.
+
+resource screen:claim_eig0291_lowic50 : stats:MeasurementClaim {
+    stats:sample_set = screen:m_eig0291_sampleset;
+
+    stats:null_hypothesis = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+    stats:alternative_hypothesis = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+    reflection:canonical_proposition = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+
+    stats:alpha = 0.05;
+    stats:effect_size = Absolute(100.0, "nM");
+    stats:directionality = TwoSided();
+    stats:variance_assumption = WelchUnequal();
+    stats:outlier_exclusion = Identity();
+}
+
+resource screen:claim_eig0291_lowic50_trace : reflection:ProgramTrace {
+    reflection:resource  = screen:claim_eig0291_lowic50;
+    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:timestamp = "2026-03-04T14:22:11Z";
+}
+
+// ─── Step 5: the ReasoningSentence ─────────────────────────────────
+//
+// The agent's claim: "EIG_0291 is a strong CDK2 inhibitor."
+// Justification: apply the literature rule to the statistics-
+// institution-derived claim.
+// Certificate: `JustifiedBy.app` composing `.declared` and `.derived`.
+// Each grounding constructor's witness slot is filled by the kernel
+// synthesise hook at type-check time — we just provide a unit
+// placeholder.
+
+resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
+
+    reasoning:proposition = type_expr(
+        screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+    );
+
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
+        DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_lowic50")
+    );
+
+    // `JustifiedBy.app A B j1 j2 c1 c2` — six args.
+    // A : Prop = HasLowIC50(EIG_0291)
+    // B : Prop = StrongInhibitor(EIG_0291)
+    // j1, j2 : JustificationTerm
+    // c1 : JustifiedBy(j1, A -> B) = JustifiedBy.declared(rule_iri, A -> B, <wit>)
+    // c2 : JustifiedBy(j2, A)      = JustifiedBy.derived(claim_iri, A, <wit>)
+    //
+    // The result has type `JustifiedBy(App(j1, j2), B)` — exactly the
+    // expected certificate type for this sentence's
+    // `(justification, proposition)` pair.
+    reasoning:certificate = type_expr(
+        app(
+            // A
+            screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
+            // B
+            screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
+            // j1
+            DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
+            // j2
+            DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_lowic50"),
+            // c1: JustifiedBy.declared(rule_iri, A -> B, <witness>)
+            declared(
+                "urn:eigenius:demo:screen:rule_strong",
+                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+                ->
+                screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
+                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+            ),
+            // c2: JustifiedBy.derived(claim_iri, A, <witness>)
+            derived(
+                "urn:eigenius:demo:screen:claim_eig0291_lowic50",
+                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
+                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+            )
+        )
+    );
+}

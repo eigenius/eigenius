@@ -193,6 +193,29 @@ impl EigeniusService {
                 ),
             ]),
         );
+        // ProgramTrace's three required fields, unified with
+        // DeclarationTrace and ObservationTrace around the D49 witness-
+        // emitter contract: `resource` is the target IRI the trace
+        // points at (the program's output here); `source` is a string
+        // naming the producer; `timestamp` is the wall-clock the trace
+        // was emitted (the completion timestamp). The rich execution-
+        // trace metadata (program / started_at / completed_at /
+        // trace_tree / metrics) lives in recommends; this handler
+        // fills every one.
+        if let Some(out_id) = output.id() {
+            trace_resource.set(
+                Iri::parse("urn:eigenius:reflection:resource").unwrap(),
+                crate::ontology::resource::Value::String(out_id.as_str().to_string()),
+            );
+        }
+        trace_resource.set(
+            Iri::parse("urn:eigenius:reflection:source").unwrap(),
+            crate::ontology::resource::Value::String("kernel:run_program".to_string()),
+        );
+        trace_resource.set(
+            Iri::parse("urn:eigenius:reflection:timestamp").unwrap(),
+            crate::ontology::resource::Value::String(millis_to_iso8601(completed_at_ms)),
+        );
         if let Some(prog_id) = program.id() {
             trace_resource.set(
                 Iri::parse("urn:eigenius:reflection:program").unwrap(),
@@ -498,7 +521,7 @@ impl EigeniusService {
     ) -> Result<Response<ValidateProgramResponse>, Status> {
         let _guard = RpcGuard::start(operation::RPC_VALIDATE_PROGRAM);
         let resources = self
-            .parse_resources(&req.program, &req.content_type)
+            .parse_resources(&req.program, &req.content_type, Some(DEFAULT_BRANCH))
             .await?;
         let program = resources
             .into_iter()
@@ -618,21 +641,23 @@ impl EigeniusService {
             { field::CONTENT_TYPE } = %req.content_type,
             "run_program payload"
         );
+        let branch = resolve_branch_name(&req.branch).to_string();
         let program_resources = self
-            .parse_resources(&req.program, &req.content_type)
+            .parse_resources(&req.program, &req.content_type, Some(&branch))
             .await?;
         let program = program_resources
             .into_iter()
             .next()
             .ok_or_else(|| Status::invalid_argument("no program resource"))?;
 
-        let input_resources = self.parse_resources(&req.input, &req.content_type).await?;
+        let input_resources = self
+            .parse_resources(&req.input, &req.content_type, Some(&branch))
+            .await?;
         let input = input_resources
             .into_iter()
             .next()
             .ok_or_else(|| Status::invalid_argument("no input resource"))?;
 
-        let branch = resolve_branch_name(&req.branch).to_string();
         self.execute_program(&branch, program, input).await
     }
 

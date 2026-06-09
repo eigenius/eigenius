@@ -20,6 +20,8 @@ The most-used reference chapters are:
 - **[11. Runtime substrate](11-runtime-substrate.md)** — the language-runtime extension surface (Julia in v1)
 - **[`julia-institutions/`](julia-institutions/)** — slow-walk tutorials for each of the v1 Julia institutions
 - **[`lean-institution/`](lean-institution/)** — the platform's first verification institution: Lean 4 in-process via `nanoda_lib`
+- **[`statistics-institution/`](statistics-institution/)** — D52 measurement-statistics institution: recompute statistical claims from raw replicate data, opinionated stances (one-sided witnessing, dual-verdict outlier exclusion, Passing-Bablok for method comparison, epistemic-scope guard)
+- **[`reasoning-institution/`](reasoning-institution/)** — D39 justification-logic institution: type-check `JustifiedBy` certificates against (justification, proposition) pairs, composing chain artifacts as evidence through the D49 witness-index mechanism
 
 ## Chapters
 
@@ -80,6 +82,29 @@ When bumping the pinned Lean toolchain, follow the checklist at
 a new content-addressed `LeanEnvironment`, so existing verified proofs
 stay valid against their original env digest.
 
+### Statistics institution (D52)
+
+The platform's measurement-statistics institution. In-process; recomputes
+statistical claims from raw replicate data using deterministic IEEE-754
+numerics. Covers seven dispatch positions (SingleSampleEstimate / IID /
+Paired / Factorial / RCBD / SplitPlot / RepeatedMeasures) and four
+opinionated stances (§7.1 OneSidedWitnessed + ImpossibilityWitness,
+§7.2 dual-verdict outlier exclusion, §7.3 MethodComparisonClaim +
+Passing-Bablok, §7.4 epistemic-scope guard). See
+[`statistics-institution/`](statistics-institution/).
+
+### Reasoning institution (D39)
+
+The platform's justification-logic institution. In-process; type-checks
+`JustifiedBy(justification, proposition)` certificates against
+ReasoningSentence resources at commit. Grounding constructors consume
+chain witnesses admitted by the D49 witness index, composing chain
+artifacts (axioms, observations, statistics verdicts, formal proofs)
+into auditable reasoning chains. See
+[`reasoning-institution/`](reasoning-institution/). For the full
+statistics + reasoning composition, see
+[composition guide chapter 7](../composition/07-stats-and-reasoning-walkthrough.md).
+
 ## Related documents
 
 - [**ESL user guide**](../esl/README.md) — surface syntax for ontologies and programs
@@ -91,6 +116,10 @@ stay valid against their original env digest.
 - [**D26 Runtime substrate**](../../design/d26-runtime-substrate.md), [**D29 Mirror generator**](../../design/d29-runtime-mirror-generator.md), [**D31 Institution lifecycle**](../../design/d31-runtime-language-substrate-institution-lifecycle.md) — the substrate specs
 - [**D32 Chain-mirrored EigenTT inductives**](../../design/d32-chain-mirrored-mini-tt-inductives.md) — the formula-language design spec
 - [**D6 Execution architecture**](../../design/d6-execution-architecture.md) — kernel ↔ orchestrator boundary
+- [**D46 Prop universe**](../../design/d46-prop-universe-and-proof-irrelevance.md), [**D47 Chain-mirrored EigenTT type fragment**](../../design/d47-chain-mirrored-eigentt-type-fragment.md), [**D48 Indexed inductive families**](../../design/d48-indexed-inductive-families.md) — the type-theory foundation the reasoning stack rests on
+- [**D49 Chain-witness machinery**](../../design/d49-chainwitness-machinery.md) — the per-layer witness index that bridges D52 and D39
+- [**D39 Justification logic as institution**](../../design/d39-justification-logic.md) — the reasoning institution's design spec
+- [**D52 Measurement-statistics institution**](../../design/d52-measurement-statistics-institution.md) — the statistics institution's design spec
 
 The full design-document set lives in [`docs/design/`](../../design/).
 

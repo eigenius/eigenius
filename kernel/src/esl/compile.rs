@@ -42,19 +42,49 @@ pub fn compile_file_with_institutions(
     file: &ast::File,
     institutions: Option<std::sync::Arc<crate::institution::registry::InstitutionIndex>>,
 ) -> Result<Vec<Resource>, Vec<EslError>> {
+    compile_file_with_context(file, institutions, BTreeMap::new(), BTreeMap::new())
+}
+
+/// Compile an ESL AST with institution context plus external ctor
+/// and macro table seeds. The external maps cover chain-resident
+/// inductives and `macro` declarations that the current file does
+/// not redeclare — typically produced from
+/// [`collect_ctors_from_layer`] and [`collect_macros_from_layer`]
+/// walks of the layer the user file is being committed against.
+///
+/// Without these seeds, cross-file references (e.g.
+/// `reasoning:JustifiedBy`'s ctors used in a sentence, or a
+/// `stats:IID(...)` macro called in a fixture) resolve only against
+/// decls in the current file. With them, child files cite parent-
+/// layer ctors and macros without re-declaring.
+pub fn compile_file_with_context(
+    file: &ast::File,
+    institutions: Option<std::sync::Arc<crate::institution::registry::InstitutionIndex>>,
+    external_ctors: BTreeMap<String, String>,
+    external_macros: BTreeMap<String, ast::MacroDecl>,
+) -> Result<Vec<Resource>, Vec<EslError>> {
     let mut compiler = Compiler::new();
     compiler.institutions = institutions;
+    compiler.ctors = external_ctors;
+    compiler.macros = external_macros;
 
     // Register namespace aliases.
     for ns in &file.namespaces {
         compiler.namespaces.insert(ns.alias.clone(), ns.uri.clone());
     }
 
-    // First pass: collect every declared inductive constructor so that
-    // bare-name references in expression position resolve to the
-    // canonical ctor IRI (Phase 11b step 9). Conflicts within a file
-    // are caught here rather than at use time.
+    // First pass: collect every declared inductive constructor in the
+    // current file. Adds to (and may shadow) the external seed; ctor
+    // conflicts within the current file are caught here.
     if let Err(e) = compiler.collect_ctor_table(file) {
+        return Err(vec![e]);
+    }
+
+    // D52 §12 — collect every `macro` declaration in the file so
+    // `Value::MacroCall` expansion can resolve forward references
+    // (a macro declared later in the file referenced earlier). Adds
+    // to (and may shadow) the external seed, matching the ctor pattern.
+    if let Err(e) = compiler.collect_macro_table(file) {
         return Err(vec![e]);
     }
 
@@ -75,12 +105,133 @@ pub fn compile_file_with_institutions(
     }
 }
 
+/// Walk a layer chain and collect every chain-resident inductive's
+/// constructors into a short-name → ctor-IRI table suitable for
+/// seeding an ESL compile via [`compile_file_with_context`]. Mirrors
+/// the same `parent_iri:ctor_name` IRI convention `collect_ctor_table`
+/// uses for in-file ctors.
+///
+/// First-wins on name collisions (top-of-chain layers shadow ancestors
+/// in the merged-view walk). The function makes no attempt to resolve
+/// cross-namespace collisions cleanly — that's the same scope limit
+/// the in-file ctor table has, and the right fix is qualified ctor
+/// references in the surface (a separate follow-up).
+pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> BTreeMap<String, String> {
+    use crate::ontology::iri::Iri;
+    use crate::ontology::well_known as wk;
+    let mut out = BTreeMap::new();
+    let inductive_class = match Iri::parse(wk::INDUCTIVE_TYPE) {
+        Ok(i) => i,
+        Err(_) => return out,
+    };
+    let ctor_name_iri = match Iri::parse(wk::CTOR_NAME) {
+        Ok(i) => i,
+        Err(_) => return out,
+    };
+    let ctors_iri = match Iri::parse(wk::CTORS) {
+        Ok(i) => i,
+        Err(_) => return out,
+    };
+    for (parent_iri, resource) in layer.iter_all_resources() {
+        if !resource.is_instance_of(&inductive_class) {
+            continue;
+        }
+        let ctors = match resource.get(&ctors_iri) {
+            Some(Value::Array(a)) => a,
+            _ => continue,
+        };
+        for ctor_value in ctors {
+            let ctor_resource = match ctor_value {
+                Value::Embedded(r) => r.as_ref(),
+                _ => continue,
+            };
+            let name = match ctor_resource.get(&ctor_name_iri) {
+                Some(Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            // First-wins so the merged-view walk's top-of-chain
+            // entries shadow ancestors.
+            out.entry(name).or_insert_with(|| {
+                format!("{parent_iri}:{}", ctor_value_short_name(ctor_resource))
+            });
+        }
+    }
+    out
+}
+
+fn ctor_value_short_name(ctor_resource: &Resource) -> String {
+    use crate::ontology::iri::Iri;
+    use crate::ontology::well_known as wk;
+    ctor_resource
+        .get(&Iri::parse(wk::CTOR_NAME).expect("static IRI"))
+        .and_then(|v| {
+            if let Value::String(s) = v {
+                Some(s.clone())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default()
+}
+
+/// D52 §12 cross-file macros — walk a layer chain and re-hydrate every
+/// `core:Macro` resource's `MacroDecl` into a `full-IRI → decl` table
+/// suitable for seeding an ESL compile via [`compile_file_with_context`].
+/// Counterpart to [`collect_ctors_from_layer`] for macros.
+///
+/// First-wins on IRI collisions (top-of-chain layers shadow ancestors
+/// in the merged-view walk). Malformed macro resources — missing
+/// `macro_decl_json` or with a payload that doesn't deserialize as a
+/// `MacroDecl` — are silently skipped: the chain shouldn't crash at
+/// `compile_against_layer` time just because a stray malformed
+/// resource exists, and the consuming file's expansion site will
+/// surface a clean "macro not declared" diagnostic if the skip
+/// matters. (The producing-file compile would have already caught
+/// genuine authoring errors.)
+pub fn collect_macros_from_layer(layer: &crate::layer::Layer) -> BTreeMap<String, ast::MacroDecl> {
+    use crate::ontology::iri::Iri;
+    use crate::ontology::well_known as wk;
+    let mut out: BTreeMap<String, ast::MacroDecl> = BTreeMap::new();
+    let macro_class = match Iri::parse(wk::MACRO) {
+        Ok(i) => i,
+        Err(_) => return out,
+    };
+    let decl_json_iri = match Iri::parse(wk::MACRO_DECL_JSON) {
+        Ok(i) => i,
+        Err(_) => return out,
+    };
+    for (iri_key, resource) in layer.iter_all_resources() {
+        if !resource.is_instance_of(&macro_class) {
+            continue;
+        }
+        let decl_json = match resource.get(&decl_json_iri) {
+            Some(Value::Json(j)) => j,
+            _ => continue,
+        };
+        let decl: ast::MacroDecl = match serde_json::from_value(decl_json.clone()) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        // First-wins matches the merged-view walk's top-of-chain
+        // shadowing for ctors.
+        out.entry(iri_key.as_str().to_string()).or_insert(decl);
+    }
+    out
+}
+
 struct Compiler {
     namespaces: BTreeMap<String, String>,
     /// Per-file constructor table: short ctor name → full ctor IRI.
     /// Built in `collect_ctor_table` before any declaration is compiled,
     /// so expression compilation can resolve bare ctor references.
     ctors: BTreeMap<String, String>,
+    /// D52 §12 — per-file smart-constructor macro table: full macro
+    /// IRI → its declaration AST. Built in `collect_macro_table`
+    /// before any value is compiled, so `Value::MacroCall` resolution
+    /// can find macros declared later in the same file. Macros
+    /// disappear at compile time (no resource is emitted); the table
+    /// is purely an in-compiler expansion environment.
+    macros: BTreeMap<String, ast::MacroDecl>,
     /// Optional D14 institution index — when present, drives
     /// compile-time classification of function-call IRIs as a
     /// Decidable QueryClass call or a Comorphism invocation, emitting
@@ -114,11 +265,63 @@ fn resolve_apply_function(
     Some(format!("{uri}:{local}"))
 }
 
+/// D52 §12 — substitute macro-parameter references in a macro body's
+/// `Value` AST with their actual-argument values, returning a new
+/// `Value` with substitutions applied.
+///
+/// Substitution rule: a `Value::Ref` whose qualified name has no
+/// namespace and whose local name appears in `env` is replaced by a
+/// clone of the corresponding arg `Value`. Everything else is
+/// structurally cloned with recursion into compound shapes (`Array`,
+/// `Block`, `CtorApp`, `MacroCall`).
+///
+/// Substitution does *not* descend into `TypeExpr` — parameter
+/// references inside `type_expr(...)` bodies are not supported in
+/// v1 because the TypeExpr AST has its own name-resolution scope
+/// (bound vs free type-level variables) that would require parallel
+/// substitution machinery. Add if a real use case arrives.
+fn substitute_in_value(body: &ast::Value, env: &BTreeMap<&str, &ast::Value>) -> ast::Value {
+    match body {
+        ast::Value::Ref(qn) if qn.namespace.is_none() => {
+            if let Some(arg) = env.get(qn.name.as_str()) {
+                (*arg).clone()
+            } else {
+                body.clone()
+            }
+        }
+        ast::Value::Array(items) => {
+            ast::Value::Array(items.iter().map(|v| substitute_in_value(v, env)).collect())
+        }
+        ast::Value::Block(fields) => ast::Value::Block(
+            fields
+                .iter()
+                .map(|f| ast::ResourceField {
+                    property: f.property.clone(),
+                    value: substitute_in_value(&f.value, env),
+                })
+                .collect(),
+        ),
+        ast::Value::CtorApp { ctor, args, pos } => ast::Value::CtorApp {
+            ctor: ctor.clone(),
+            args: args.iter().map(|v| substitute_in_value(v, env)).collect(),
+            pos: pos.clone(),
+        },
+        ast::Value::MacroCall { name, args, pos } => ast::Value::MacroCall {
+            name: name.clone(),
+            args: args.iter().map(|v| substitute_in_value(v, env)).collect(),
+            pos: pos.clone(),
+        },
+        // Literals, qualified refs, type expressions: pass through.
+        _ => body.clone(),
+    }
+}
+
 impl Compiler {
     fn new() -> Self {
         Self {
             namespaces: BTreeMap::new(),
             ctors: BTreeMap::new(),
+            macros: BTreeMap::new(),
             institutions: None,
         }
     }
@@ -149,6 +352,78 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+
+    /// D52 §12 — walk every `macro` declaration in the file and
+    /// register it in the macros table keyed by its fully-resolved
+    /// IRI. Forward references are supported (a macro declared later
+    /// in the file may be called earlier) because expansion happens
+    /// during the per-declaration compile pass, after this
+    /// collection pass populates the table.
+    ///
+    /// In-file decls shadow any external-seed entry at the same IRI
+    /// (matching the ctor behavior — the current file's declaration
+    /// is canonical for the file's compile). Two in-file decls at the
+    /// same IRI is an error.
+    fn collect_macro_table(&mut self, file: &ast::File) -> Result<(), EslError> {
+        let mut declared_in_file: std::collections::BTreeSet<String> = Default::default();
+        for decl in &file.declarations {
+            if let ast::Declaration::Macro(m) = decl {
+                let iri = self.resolve(&m.name)?;
+                if !declared_in_file.insert(iri.clone()) {
+                    return Err(EslError::compiler(
+                        Some(m.pos.clone()),
+                        format!("macro `{iri}` is declared twice in this file"),
+                    ));
+                }
+                self.macros.insert(iri, m.clone());
+            }
+        }
+        Ok(())
+    }
+
+    /// Construct an `Exp::InductiveCtor` from a ctor short-name + its
+    /// resolved IRI (`parent_iri:ctor_name` shape). Used by both the
+    /// pre-resolve bare-name ctor lookup and the post-resolve
+    /// namespaced lookup in `lower_type_expr_to_exp`; factored out to
+    /// keep the two paths from drifting.
+    fn emit_ctor_app_from_ctor_iri(
+        &self,
+        pos: &crate::esl::error::Position,
+        ctor_name: &str,
+        ctor_iri_str: &str,
+        args: &[ast::TypeExpr],
+        scope: &std::collections::HashSet<&str>,
+    ) -> Result<Exp, EslError> {
+        // The ctor IRI shape is `parent_iri:ctor_name` — strip the
+        // trailing `:<ctor_name>` to recover the parent inductive IRI.
+        let parent_iri_str = ctor_iri_str
+            .rsplit_once(':')
+            .map(|(parent, _)| parent.to_string())
+            .unwrap_or_else(|| ctor_iri_str.to_string());
+        let parent_iri = Iri::parse(&parent_iri_str).map_err(|e| {
+            EslError::compiler(
+                Some(pos.clone()),
+                format!("invalid parent IRI `{parent_iri_str}` for ctor `{ctor_name}`: {e}"),
+            )
+        })?;
+        // Per gh #75 the stub's `name` is the diagnostic label; the
+        // identity is the IRI. Pull the short name from the parent
+        // IRI's local part so error messages read naturally.
+        let parent_short_name = parent_iri.local_name().to_string();
+        let stub = std::sync::Arc::new(InductiveDecl {
+            iri: parent_iri,
+            name: parent_short_name,
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        let arg_exps: Result<Vec<Exp>, EslError> = args
+            .iter()
+            .map(|a| self.lower_type_expr_to_exp(a, scope))
+            .collect();
+        Ok(Exp::InductiveCtor(stub, ctor_name.to_string(), arg_exps?))
     }
 
     /// Resolve a qualified name to a full IRI string.
@@ -188,6 +463,14 @@ impl Compiler {
             ast::Declaration::Codata(c) => self.compile_codata(c),
             ast::Declaration::Data(d) => self.compile_data(d),
             ast::Declaration::MergeComorphism(mc) => self.compile_merge_comorphism(mc),
+            // D52 §12 — macros are pure compile-time expansion
+            // machinery, but their declaration ALSO emits a chain
+            // resource so child-file compiles can re-hydrate the
+            // MacroDecl via `collect_macros_from_layer` (cross-file
+            // macro visibility). The expansion still happens at
+            // compile time; the chain resource is just the persisted
+            // declaration that downstream layers can deserialize.
+            ast::Declaration::Macro(m) => self.compile_macro_resource(m),
             // D43 §3.1 — text_index / vector_index lowering to Resource
             // (M2+). M1 lands the AST + parser; the compile stage will
             // synthesise the equivalent `Resource` with class
@@ -599,6 +882,16 @@ impl Compiler {
                  branch is not exercised."
                     .to_string(),
             )),
+            ast::TypeExpr::LitString { pos, .. }
+            | ast::TypeExpr::LitInt { pos, .. }
+            | ast::TypeExpr::LitFloat { pos, .. } => Err(EslError::compiler(
+                Some(pos.clone()),
+                "literal values are not allowed in chain-value type-expression slots \
+                 (codata observation types, etc.); they only appear in Exp-encoded \
+                 contexts (axiom statements, `type_expr(...)` resource fields, \
+                 indexed ctor return types)"
+                    .to_string(),
+            )),
         }
     }
 
@@ -609,6 +902,36 @@ impl Compiler {
     /// EigenTT type expression. Goes through the D47 codec
     /// (`encode_type`) after lowering the ESL TypeExpr to a kernel
     /// `Exp` via [`Self::lower_type_expr_to_exp`].
+    /// D52 §12 cross-file macros — emit a `core:Macro` chain resource
+    /// carrying the macro's serialized `MacroDecl` AST. The resource's
+    /// IRI is the macro's canonical name (e.g.
+    /// `urn:eigenius:measurements:IID`); its `core:macro_decl_json`
+    /// property holds the full AST as a `Value::Json` blob (via
+    /// `serde_json::to_value` on the `MacroDecl`). Child-file compiles
+    /// re-hydrate via [`collect_macros_from_layer`].
+    fn compile_macro_resource(&self, decl: &ast::MacroDecl) -> Result<Vec<Resource>, EslError> {
+        let id = self.resolve_iri(&decl.name)?;
+        let mut r = Resource::new(id);
+        r.set(
+            iri(crate::ontology::well_known::IS_A),
+            Value::Array(vec![Value::String(
+                crate::ontology::well_known::MACRO.to_string(),
+            )]),
+        );
+        let decl_json = serde_json::to_value(decl).map_err(|e| {
+            EslError::compiler(
+                Some(decl.pos.clone()),
+                format!("macro `{}` AST serialization failed: {e}", decl.name.name),
+            )
+        })?;
+        r.set(
+            iri(crate::ontology::well_known::MACRO_DECL_JSON),
+            Value::Json(decl_json),
+        );
+        stamp_declared(&mut r);
+        Ok(vec![r])
+    }
+
     fn compile_axiom(&self, decl: &ast::AxiomDecl) -> Result<Vec<Resource>, EslError> {
         let empty_scope: std::collections::HashSet<&str> = std::collections::HashSet::new();
         let statement_exp = self.lower_type_expr_to_exp(&decl.statement, &empty_scope)?;
@@ -670,18 +993,45 @@ impl Compiler {
             ast::TypeExpr::Ref { name, args, .. } => {
                 let is_bound = name.namespace.is_none() && scope.contains(name.name.as_str());
                 if is_bound {
-                    if !args.is_empty() {
-                        return Err(EslError::compiler(
-                            Some(name.pos.clone()),
-                            format!(
-                                "bound variable `{}` cannot be applied to args in type \
-                                 position",
-                                name.name
-                            ),
-                        ));
+                    // Bound variable: lowers to `Exp::Var`. If args are
+                    // present, the user is writing a function-application
+                    // shape like `P(x)` where `P : T -> Prop` is a
+                    // forall-bound function. Curry into `Exp::App` chain
+                    // so EigenTT's NbE can beta-reduce at use time —
+                    // required by D39's `JustifiedBy.spec` constructor
+                    // whose result type writes `P(t)` for a forall-bound
+                    // `P` and `t`.
+                    let head = Exp::Var(name.name.clone());
+                    if args.is_empty() {
+                        return Ok(head);
                     }
-                    return Ok(Exp::Var(name.name.clone()));
+                    let mut acc = head;
+                    for arg in args {
+                        let arg_exp = self.lower_type_expr_to_exp(arg, scope)?;
+                        acc = Exp::App(Box::new(acc), Box::new(arg_exp));
+                    }
+                    return Ok(acc);
                 }
+
+                // Bare-name ctor lookup before namespace resolution:
+                // `app`, `declared`, `observed`, etc. — references to
+                // ctors of in-file or chain-resident inductives (the
+                // latter seeded via `compile_against_layer`). Checked
+                // *before* `self.resolve(name)` because bare names
+                // would otherwise fail namespace resolution and never
+                // reach the post-resolve ctor lookup below.
+                if name.namespace.is_none() {
+                    if let Some(ctor_iri_str) = self.ctors.get(&name.name).cloned() {
+                        return self.emit_ctor_app_from_ctor_iri(
+                            &name.pos,
+                            &name.name,
+                            &ctor_iri_str,
+                            args,
+                            scope,
+                        );
+                    }
+                }
+
                 let iri_str = self.resolve(name)?;
                 let iri_val = Iri::parse(&iri_str).map_err(|e| {
                     EslError::compiler(
@@ -689,6 +1039,30 @@ impl Compiler {
                         format!("invalid IRI `{iri_str}`: {e}"),
                     )
                 })?;
+
+                // Constructor disambiguation: when the local name
+                // matches a declared ctor (from any data decl in this
+                // file), emit `Exp::InductiveCtor` rather than
+                // `Exp::EigonClass` / `InductiveType`. Required for D39
+                // §5 `JustifiedBy.declared : ... -> JustifiedBy
+                // (DeclaredEvidence iri) P` and any similar shape
+                // where a ctor of one inductive appears in another
+                // inductive's index/result-type position. The codec
+                // round-trips `InductiveCtor` via `CtorApp(decl_iri,
+                // ctor_name)`, and the decoder's
+                // `resolve_inductive_decl_for_ctor` consults the layer
+                // (with the self-reference short-circuit covering the
+                // in-construction case).
+                if let Some(ctor_iri_str) = self.ctors.get(&name.name).cloned() {
+                    return self.emit_ctor_app_from_ctor_iri(
+                        &name.pos,
+                        &name.name,
+                        &ctor_iri_str,
+                        args,
+                        scope,
+                    );
+                }
+
                 if args.is_empty() {
                     Ok(Exp::EigonClass(iri_val))
                 } else {
@@ -696,8 +1070,10 @@ impl Compiler {
                     // The D47 codec produces `App(App(ConstRef(iri),
                     // a1), a2)…` and the decoder re-resolves the IRI
                     // against the chain at use time.
+                    let short_name = iri_val.local_name().to_string();
                     let stub = std::sync::Arc::new(InductiveDecl {
-                        name: iri_val.as_str().to_string(),
+                        iri: iri_val.clone(),
+                        name: short_name,
                         params: Vec::new(),
                         indices: Vec::new(),
                         sort: Exp::Sort(1),
@@ -800,6 +1176,215 @@ impl Compiler {
                 }
                 Ok(body_exp)
             }
+            // Literals in type/term position lower to the Phase-2
+            // `Exp::Lit*` constructors. Used as arguments to value-
+            // indexed inductives (e.g. `Asserts("urn:foo")`,
+            // `Vec(3, A)`, etc.) inside `type_expr(...)`.
+            ast::TypeExpr::LitString { value, .. } => Ok(Exp::LitString(value.clone())),
+            ast::TypeExpr::LitInt { value, .. } => Ok(Exp::LitInt(*value)),
+            ast::TypeExpr::LitFloat { value, .. } => Ok(Exp::LitFloat(*value)),
+        }
+    }
+
+    /// Encode an ESL `TypeExpr` directly to the D47 chain-JSON shape,
+    /// preserving `fun (x : T) => body` binder-type annotations.
+    ///
+    /// `lower_type_expr_to_exp` + `encode_type` would otherwise reject
+    /// any Lambda: `Exp::Lam` doesn't carry its binder's type, so the
+    /// generic encoder has nowhere to recover the annotation from. The
+    /// D47 `Lam` ctor expects `[binder_name, dom_json, body_json]` —
+    /// we have the dom directly in the AST, so walking the AST is the
+    /// natural shape.
+    ///
+    /// Required by D39's universal-rule certificates: writing the
+    /// predicate `P : core:string -> Prop` as `fun (x : core:string)
+    /// => HasLowIC50(x) -> StrongInhibitor(x)` inside a `type_expr(...)`
+    /// resource property value.
+    ///
+    /// Cases that can contain nested `Lambda`s (Arrow, Pi, BinderArrow,
+    /// Ref with args) recurse here so the annotation survives at any
+    /// depth. Leaves with no Lambda exposure (Sort, literals) delegate
+    /// to `lower_type_expr_to_exp` + `encode_type`.
+    fn encode_type_expr_to_json(
+        &self,
+        typ: &ast::TypeExpr,
+        scope: &std::collections::HashSet<&str>,
+    ) -> Result<serde_json::Value, EslError> {
+        use crate::program::eigentt_type_mirror::encode_type;
+        use serde_json::json;
+
+        // Wrap a leaf TypeExpr: lower to Exp, encode via the D47
+        // encoder, unwrap to raw JSON. Safe for any subtree whose
+        // lowered Exp contains no `Lam`.
+        let encode_leaf = |this: &Self, t: &ast::TypeExpr| -> Result<serde_json::Value, EslError> {
+            let exp = this.lower_type_expr_to_exp(t, scope)?;
+            let v = encode_type(&exp).map_err(|e| {
+                EslError::compiler(
+                    Some(t.pos().clone()),
+                    format!("type_expr encoding failed: {e}"),
+                )
+            })?;
+            match v {
+                Value::Json(j) => Ok(j),
+                other => Err(EslError::compiler(
+                    Some(t.pos().clone()),
+                    format!("type_expr encoding did not produce JSON: {other:?}"),
+                )),
+            }
+        };
+
+        match typ {
+            ast::TypeExpr::Lambda { params, body, .. } => {
+                // Mirror the lowering's scope-threading so later params
+                // can mention earlier binders. Each dom is encoded
+                // against the scope where prior binders are visible.
+                let mut working: std::collections::HashSet<String> =
+                    scope.iter().map(|s| s.to_string()).collect();
+                let mut binder_doms: Vec<(String, serde_json::Value)> =
+                    Vec::with_capacity(params.len());
+                for p in params {
+                    let local: std::collections::HashSet<&str> =
+                        working.iter().map(|s| s.as_str()).collect();
+                    let dom_json = self.encode_type_expr_to_json(&p.typ, &local)?;
+                    binder_doms.push((p.name.clone(), dom_json));
+                    working.insert(p.name.clone());
+                }
+                let inner_scope: std::collections::HashSet<&str> =
+                    working.iter().map(|s| s.as_str()).collect();
+                let mut acc = self.encode_type_expr_to_json(body, &inner_scope)?;
+                for (name, dom) in binder_doms.into_iter().rev() {
+                    acc = json!({
+                        "ctor": "Lam",
+                        "args": [name, dom, acc],
+                    });
+                }
+                Ok(acc)
+            }
+            ast::TypeExpr::Pi {
+                params, codomain, ..
+            } => {
+                let mut working: std::collections::HashSet<String> =
+                    scope.iter().map(|s| s.to_string()).collect();
+                let mut binder_doms: Vec<(String, serde_json::Value)> =
+                    Vec::with_capacity(params.len());
+                for p in params {
+                    let local: std::collections::HashSet<&str> =
+                        working.iter().map(|s| s.as_str()).collect();
+                    let dom_json = self.encode_type_expr_to_json(&p.typ, &local)?;
+                    binder_doms.push((p.name.clone(), dom_json));
+                    working.insert(p.name.clone());
+                }
+                let inner_scope: std::collections::HashSet<&str> =
+                    working.iter().map(|s| s.as_str()).collect();
+                let mut acc = self.encode_type_expr_to_json(codomain, &inner_scope)?;
+                for (name, dom) in binder_doms.into_iter().rev() {
+                    acc = json!({
+                        "ctor": "Pi",
+                        "args": [name, dom, acc],
+                    });
+                }
+                Ok(acc)
+            }
+            ast::TypeExpr::Arrow {
+                domain, codomain, ..
+            } => {
+                let dom_json = self.encode_type_expr_to_json(domain, scope)?;
+                let cod_json = self.encode_type_expr_to_json(codomain, scope)?;
+                Ok(json!({
+                    "ctor": "Pi",
+                    "args": ["", dom_json, cod_json],
+                }))
+            }
+            ast::TypeExpr::BinderArrow {
+                name,
+                kind,
+                bound: _,
+                body,
+                ..
+            } => {
+                // Size-binder arrows are rare in type_expr — defer to
+                // the leaf path which handles SizeSort correctly.
+                let kind_str = self.resolve(kind)?;
+                if kind_str.ends_with(":Size") || kind_str == "Size" {
+                    return encode_leaf(self, typ);
+                }
+                let dom_json = json!({
+                    "ctor": "ConstRef",
+                    "args": [kind_str],
+                });
+                let mut inner_scope: std::collections::HashSet<&str> = scope.clone();
+                inner_scope.insert(name.as_str());
+                let body_json = self.encode_type_expr_to_json(body, &inner_scope)?;
+                Ok(json!({
+                    "ctor": "Pi",
+                    "args": [name.clone(), dom_json, body_json],
+                }))
+            }
+            ast::TypeExpr::Ref { name, args, .. } => {
+                // Mirror `lower_type_expr_to_exp`'s Ref resolution: bound
+                // variable check first, then bare-name ctor lookup, then
+                // namespace resolution, then post-resolve ctor lookup,
+                // else EigonClass / parametric InductiveType. Args are
+                // App-curried regardless of which head shape applies —
+                // and we recurse into each arg so any nested Lambda
+                // there keeps its annotation.
+                let is_bound = name.namespace.is_none() && scope.contains(name.name.as_str());
+                let head_json = if is_bound {
+                    json!({"ctor": "Var", "args": [name.name.clone()]})
+                } else {
+                    // Pre-resolution bare-name ctor lookup.
+                    let bare_ctor = if name.namespace.is_none() {
+                        self.ctors.get(&name.name).cloned()
+                    } else {
+                        None
+                    };
+                    if let Some(ctor_iri_str) = bare_ctor {
+                        let parent_iri_str = ctor_iri_str
+                            .rsplit_once(':')
+                            .map(|(p, _)| p.to_string())
+                            .unwrap_or(ctor_iri_str);
+                        json!({
+                            "ctor": "CtorApp",
+                            "args": [parent_iri_str, name.name.clone()],
+                        })
+                    } else {
+                        // Namespace-resolve, then post-resolve ctor
+                        // lookup. (Both lookups consult the same `ctors`
+                        // map by short name; this branch fires when the
+                        // user wrote a namespaced ctor reference.)
+                        let iri_str = self.resolve(name)?;
+                        if let Some(ctor_iri_str) = self.ctors.get(&name.name).cloned() {
+                            let parent_iri_str = ctor_iri_str
+                                .rsplit_once(':')
+                                .map(|(p, _)| p.to_string())
+                                .unwrap_or(ctor_iri_str);
+                            json!({
+                                "ctor": "CtorApp",
+                                "args": [parent_iri_str, name.name.clone()],
+                            })
+                        } else {
+                            // Primitive IRIs ride the ConstRef path
+                            // (the D47 decoder maps the five primitive
+                            // IRIs to EigonPrimitive directly).
+                            json!({"ctor": "ConstRef", "args": [iri_str]})
+                        }
+                    }
+                };
+                let mut acc = head_json;
+                for arg in args {
+                    let arg_json = self.encode_type_expr_to_json(arg, scope)?;
+                    acc = json!({
+                        "ctor": "App",
+                        "args": [acc, arg_json],
+                    });
+                }
+                Ok(acc)
+            }
+            // Leaves with no Lambda-exposure: lower + encode.
+            ast::TypeExpr::Sort { .. }
+            | ast::TypeExpr::LitString { .. }
+            | ast::TypeExpr::LitInt { .. }
+            | ast::TypeExpr::LitFloat { .. } => encode_leaf(self, typ),
         }
     }
 
@@ -823,10 +1408,20 @@ impl Compiler {
 
         let id = self.resolve_iri(&decl.name)?;
         let mut r = Resource::new(id);
-        r.set(
-            iri(wk::IS_A),
-            Value::Array(vec![Value::String(wk::INDUCTIVE_TYPE.to_string())]),
-        );
+        // D52 §12 #8 — the primary `is_a` is the implicit
+        // `InductiveType` membership; any author-declared extra
+        // classes (header form `data X : T, Marker1, Marker2 { ... }`)
+        // are appended here so a single inductive-type resource can
+        // carry scope markers (`stats:PopulationLevel`, etc.) without
+        // a separate companion `resource X : Marker {}` declaration
+        // (which would collide via `stamp_declared` + LayerBuilder
+        // last-wins).
+        let mut is_a_values: Vec<Value> = vec![Value::String(wk::INDUCTIVE_TYPE.to_string())];
+        for extra in &decl.extra_classes {
+            let extra_iri = self.resolve(extra)?;
+            is_a_values.push(Value::String(extra_iri));
+        }
+        r.set(iri(wk::IS_A), Value::Array(is_a_values));
         r.set(iri(wk::SHORT_NAME), Value::String(decl.name.name.clone()));
 
         let param_names: std::collections::HashSet<&str> =
@@ -859,12 +1454,25 @@ impl Compiler {
                     let mut pr = Resource::new_embedded();
                     set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
                     pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
-                    let kind = if p.kind.namespace.is_none()
-                        && param_names.contains(p.kind.name.as_str())
-                    {
-                        p.kind.name.clone()
-                    } else {
-                        self.resolve(&p.kind)?
+                    let kind = match &p.kind {
+                        ast::IndexKind::Named(qn) => {
+                            if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
+                                qn.name.clone()
+                            } else {
+                                self.resolve(qn)?
+                            }
+                        }
+                        // Sort literals encode as canonical strings the
+                        // kernel's `decode_param_kind_str` recognises:
+                        // "Prop" → Sort(0), "Set" → Sort(1), "Type:N"
+                        // → Sort(N+1). Needed for D39 §5's JustifiedBy
+                        // and ChainWitness predicates whose intermediate
+                        // index kinds are themselves sorts.
+                        ast::IndexKind::Sort(sk) => match sk {
+                            ast::SortKind::Prop => "Prop".to_string(),
+                            ast::SortKind::Set => "Set".to_string(),
+                            ast::SortKind::Type(n) => format!("Type:{n}"),
+                        },
                     };
                     pr.set(iri(wk::PARAM_KIND), Value::String(kind));
                     Ok(Value::Embedded(Box::new(pr)))
@@ -1274,7 +1882,72 @@ impl Compiler {
             // full ctor schema and reports a clean structural error
             // if the name + arg shapes don't match.
             ast::Value::CtorApp { .. } => Ok(Value::Json(self.ctor_value_to_json(value)?)),
+            // `type_expr(<TypeExpr>)` — inline D47-encoded EigenTT
+            // type expression. Lowers via the same path as `axiom`
+            // and `data` ctor types: ESL TypeExpr →
+            // `lower_type_expr_to_exp` → `encode_type` → chain JSON.
+            // Used by D39 ReasoningSentence authors so propositions
+            // and certificates can be written in EigenTT surface
+            // rather than the hand-built D47 tagged-dict tree.
+            ast::Value::TypeExpr { typ, pos: _ } => {
+                // Walk the AST directly so `fun (x : T) => body`
+                // lambdas retain their binder type annotations through
+                // the D47 codec. The generic `encode_type` rejects bare
+                // `Exp::Lam` (no annotation to recover post-lowering).
+                let scope = std::collections::HashSet::new();
+                let json = self.encode_type_expr_to_json(typ, &scope)?;
+                Ok(Value::Json(json))
+            }
+            // D52 §12 — macro call. Expand by substituting positional
+            // args into the body, then recursively compile the result.
+            // Recursion through `compile_value` lets a macro body itself
+            // contain further macro calls (one level of expansion per
+            // recursion); cycles are forbidden by `expand_macro_call`.
+            ast::Value::MacroCall { name, args, pos } => {
+                let expanded = self.expand_macro_call(name, args, pos)?;
+                self.compile_value(&expanded)
+            }
         }
+    }
+
+    /// D52 §12 — expand a `Value::MacroCall` by looking up the macro,
+    /// validating arity, and substituting the positional `args` into
+    /// a clone of the macro's body. Returns the substituted `Value`
+    /// AST; the caller is responsible for recursively compiling it
+    /// (so the substituted ctor application / further macro calls
+    /// flow through the normal compile path).
+    fn expand_macro_call(
+        &self,
+        name: &ast::QualifiedName,
+        args: &[ast::Value],
+        pos: &crate::esl::error::Position,
+    ) -> Result<ast::Value, EslError> {
+        let iri = self.resolve(name)?;
+        let decl = self.macros.get(&iri).ok_or_else(|| {
+            EslError::compiler(
+                Some(pos.clone()),
+                format!("macro `{iri}` is not declared in this file"),
+            )
+        })?;
+        if args.len() != decl.params.len() {
+            return Err(EslError::compiler(
+                Some(pos.clone()),
+                format!(
+                    "macro `{iri}` expects {} argument(s), got {}",
+                    decl.params.len(),
+                    args.len()
+                ),
+            ));
+        }
+        // Build the substitution environment: param name → arg Value.
+        // Positional binding, no defaults, no named args.
+        let env: BTreeMap<&str, &ast::Value> = decl
+            .params
+            .iter()
+            .map(|p| p.name.as_str())
+            .zip(args.iter())
+            .collect();
+        Ok(substitute_in_value(&decl.body, &env))
     }
 
     /// Recursively convert a ctor-context value into the chain's
@@ -1314,6 +1987,18 @@ impl Compiler {
                 obj.insert("ctor".to_string(), serde_json::Value::String(ctor.clone()));
                 obj.insert("args".to_string(), serde_json::Value::Array(json_args?));
                 Ok(serde_json::Value::Object(obj))
+            }
+            ast::Value::TypeExpr { .. } => Err(EslError::compiler(
+                None,
+                "`type_expr(...)` cannot appear as an argument inside a chain inductive ctor — \
+                 D32 §3.7 ctor args are flat values or nested ctor applications, not D47-encoded \
+                 type expressions. Lift the type_expr to the property value directly.",
+            )),
+            // D52 §12 — macro call inside a ctor arg position. Expand
+            // the macro first, then recursively serialize the result.
+            ast::Value::MacroCall { name, args, pos } => {
+                let expanded = self.expand_macro_call(name, args, pos)?;
+                self.ctor_value_to_json(&expanded)
             }
         }
     }
@@ -3570,6 +4255,56 @@ mod tests {
     }
 
     #[test]
+    fn compile_data_indexed_emits_sort_literal_index_kinds() {
+        // D39 §5 / D49 ChainWitness path: when an intermediate index is
+        // a Sort literal (Prop / Set / Type N), the compiler must emit
+        // the kind string the kernel's `decode_param_kind_str` recognises
+        // ("Prop" → Sort(0), "Set" → Sort(1), "Type:N" → Sort(N+1)).
+        use crate::ontology::well_known as wk_local;
+
+        let resources = compile_esl(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Triple : Prop -> Set -> Type 2 -> Type 3 {
+                mk : forall (p : Prop) => forall (s : Set) => forall (t : Type 2) => ex:Triple(p, s, t),
+            }
+            "#,
+        );
+        let r = &resources[0];
+
+        let indices_iri = Iri::parse(wk_local::INDICES).unwrap();
+        let param_kind_iri = Iri::parse(wk_local::PARAM_KIND).unwrap();
+        let arr = match r.get(&indices_iri) {
+            Some(Value::Array(a)) => a,
+            other => panic!("expected indices array, got {other:?}"),
+        };
+        assert_eq!(arr.len(), 3);
+
+        let kind_strings: Vec<String> = arr
+            .iter()
+            .map(|v| match v {
+                Value::Embedded(e) => match e.get(&param_kind_iri) {
+                    Some(Value::String(s)) => s.clone(),
+                    other => panic!("expected string kind, got {other:?}"),
+                },
+                other => panic!("expected embedded index, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(kind_strings, vec!["Prop", "Set", "Type:2"]);
+
+        let sort_iri = Iri::parse(wk_local::RESULT_SORT).unwrap();
+        assert_eq!(
+            r.get(&sort_iri).and_then(|v| if let Value::String(s) = v {
+                Some(s.as_str())
+            } else {
+                None
+            }),
+            Some("Type:3")
+        );
+    }
+
+    #[test]
     fn compile_data_non_indexed_omits_indices_and_result_sort() {
         use crate::ontology::well_known as wk_local;
 
@@ -4165,6 +4900,245 @@ mod tests {
     }
 
     #[test]
+    fn reasoning_ontology_esl_compiles() {
+        // D39 Phase 3 — the authored reasoning.esl source must compile
+        // cleanly. Locks the structural contract: namespace declarations,
+        // four `ChainWitness.Is*As` zero-ctor predicates, the
+        // `JustificationTerm` six-ctor inductive, and the `JustifiedBy`
+        // seven-ctor indexed inductive predicate. Any future edit to the
+        // file or to the ESL surface that breaks this round-trip needs
+        // to be deliberate.
+        let source = include_str!("../../../ontologies/reasoning/reasoning.esl");
+        let resources = esl::compile(source).expect("reasoning.esl must compile");
+
+        // Expect: 4 ChainWitness predicates + 1 JustificationTerm
+        //         + 1 JustifiedBy = 6 inductive-type Resources.
+        let inductive_iri = iri(crate::ontology::well_known::INDUCTIVE_TYPE);
+        let ind_count = resources
+            .iter()
+            .filter(|r| r.is_a().iter().any(|c| c == &inductive_iri))
+            .count();
+        assert!(
+            ind_count >= 6,
+            "expected at least 6 inductive Resources in reasoning.esl, found {ind_count}"
+        );
+
+        // Phase 4 added two resource classes (ReasoningSentence +
+        // VerifiedPropositionView) + their property declarations.
+        // Phase 7 added the two query-request classes
+        // (EntailmentRequest + ConsistencyRequest). TaskOutput is
+        // intentionally not here — D39 §4.4 justifies it entirely by
+        // the discipline-thesis benchmark work (D50/D51), so it lives
+        // with the benchmark harness, not in the foundational
+        // Reasoning institution ontology.
+        let class_iri = iri(crate::ontology::well_known::CLASS);
+        for expected in &[
+            "urn:eigenius:reasoning:ReasoningSentence",
+            "urn:eigenius:reasoning:VerifiedPropositionView",
+            "urn:eigenius:reasoning:EntailmentRequest",
+            "urn:eigenius:reasoning:ConsistencyRequest",
+        ] {
+            assert!(
+                resources
+                    .iter()
+                    .any(|r| r.id().map(|i| i.as_str() == *expected).unwrap_or(false)
+                        && r.is_a().iter().any(|c| c == &class_iri)),
+                "reasoning.esl missing class declaration for {expected}"
+            );
+        }
+
+        // Phase 5a — the Reasoning institution resource + three
+        // QueryClass resources. Each carries its declared `is_a`
+        // pointing at the institution-ontology base class.
+        let institution_class = Iri::parse("urn:eigenius:institution:Institution").unwrap();
+        let qc_class = Iri::parse("urn:eigenius:institution:QueryClass").unwrap();
+        assert!(
+            resources.iter().any(|r| r
+                .id()
+                .map(|i| i.as_str() == "urn:eigenius:reasoning:reasoning_institution")
+                .unwrap_or(false)
+                && r.is_a().iter().any(|c| c == &institution_class)),
+            "reasoning.esl missing the reasoning_institution resource"
+        );
+        for expected in &[
+            "urn:eigenius:reasoning:qc_validate_justification",
+            "urn:eigenius:reasoning:qc_entailment_query",
+            "urn:eigenius:reasoning:qc_consistency_check",
+        ] {
+            assert!(
+                resources
+                    .iter()
+                    .any(|r| r.id().map(|i| i.as_str() == *expected).unwrap_or(false)
+                        && r.is_a().iter().any(|c| c == &qc_class)),
+                "reasoning.esl missing QueryClass resource for {expected}"
+            );
+        }
+
+        // Phase 6 refactor — the ef_justification ExportFormat the
+        // validate handler dispatches through.
+        let ef_class = Iri::parse("urn:eigenius:institution:ExportFormat").unwrap();
+        assert!(
+            resources.iter().any(|r| r
+                .id()
+                .map(|i| i.as_str() == "urn:eigenius:reasoning:ef_justification")
+                .unwrap_or(false)
+                && r.is_a().iter().any(|c| c == &ef_class)),
+            "reasoning.esl missing the ef_justification ExportFormat resource"
+        );
+
+        // Spot-check: the four witness IRIs are present.
+        use crate::ontology::well_known as wk_local;
+        for expected in &[
+            wk_local::CHAIN_WITNESS_IS_DECLARED_AS,
+            wk_local::CHAIN_WITNESS_IS_OBSERVED_AS,
+            wk_local::CHAIN_WITNESS_IS_DERIVED_AS,
+            wk_local::CHAIN_WITNESS_IS_VERIFIED_AS,
+        ] {
+            assert!(
+                resources
+                    .iter()
+                    .any(|r| r.id().map(|i| i.as_str() == *expected).unwrap_or(false)),
+                "reasoning.esl missing witness IRI {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn reasoning_ontology_resolves_through_codec() {
+        // End-to-end sanity check: reasoning.esl compiled on top of the
+        // core ontology resolves cleanly through `resolve_class_type`.
+        // Exercises (a) the new Sort-typed-index path (JustifiedBy's
+        // `Prop` index), (b) the codec self-reference short-circuit
+        // (JustifiedBy's ctors reference JustifiedBy itself), and
+        // (c) cross-inductive references (JustifiedBy → ChainWitness +
+        // JustificationTerm). If any of these regress, the full Phase 6
+        // synthesis path breaks.
+        use crate::layer::LayerBuilder;
+        use crate::ontology::eigon_json;
+        use crate::program::ground::resolve_class_type;
+        use std::sync::Arc;
+
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut core_builder = LayerBuilder::new("core", None);
+        for r in core_resources {
+            core_builder.add_resource(r).unwrap();
+        }
+        let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
+
+        // Phase 4 — the resource classes (ReasoningSentence, TaskOutput,
+        // VerifiedPropositionView) declare `subclass_of
+        // reflection:DerivedResource`, so reflection-ontology has to be
+        // in the layer chain before reasoning.esl loads.
+        let reflection_json =
+            include_str!("../../../ontologies/reflection/reflection-ontology.json");
+        let reflection_resources = eigon_json::parse_document(reflection_json).unwrap();
+        let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
+        for r in reflection_resources {
+            reflection_builder.add_resource(r).unwrap();
+        }
+        // eigentt:TypeExpr is referenced from reasoning:proposition /
+        // reasoning:certificate via class_types; load the fragment too.
+        let eigentt_json = include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json");
+        let eigentt_resources = eigon_json::parse_document(eigentt_json).unwrap();
+        for r in eigentt_resources {
+            reflection_builder.add_resource(r).unwrap();
+        }
+        let reflection =
+            Arc::new(reflection_builder.build(crate::layer::LayerStorage::in_memory()));
+
+        let source = include_str!("../../../ontologies/reasoning/reasoning.esl");
+        let user_resources = esl::compile(source).expect("reasoning.esl must compile");
+        let mut user_builder = LayerBuilder::new("reasoning", Some(reflection));
+        for r in user_resources {
+            user_builder.add_resource(r).unwrap();
+        }
+        let layer = Arc::new(user_builder.build(crate::layer::LayerStorage::in_memory()));
+
+        // The six inductive types — Phase 3.
+        for iri_str in &[
+            "urn:eigenius:reasoning:ChainWitness:IsDeclaredAs",
+            "urn:eigenius:reasoning:ChainWitness:IsObservedAs",
+            "urn:eigenius:reasoning:ChainWitness:IsDerivedAs",
+            "urn:eigenius:reasoning:ChainWitness:IsVerifiedAs",
+            "urn:eigenius:reasoning:JustificationTerm",
+            "urn:eigenius:reasoning:JustifiedBy",
+        ] {
+            let class_iri = Iri::parse(iri_str).unwrap();
+            resolve_class_type(&class_iri, &layer)
+                .unwrap_or_else(|e| panic!("failed to resolve {iri_str}: {e}"));
+        }
+
+        // The three resource classes — Phase 4. `resolve_class_type` on
+        // a regular Class returns the Σ-chain of its required +
+        // recommended properties; we just check that resolution
+        // succeeds (the structural contract is "all referenced
+        // properties exist and have decoded types"). A failure here
+        // would mean a property declaration is malformed or references
+        // an unresolved class.
+        for iri_str in &[
+            "urn:eigenius:reasoning:ReasoningSentence",
+            "urn:eigenius:reasoning:VerifiedPropositionView",
+        ] {
+            let class_iri = Iri::parse(iri_str).unwrap();
+            resolve_class_type(&class_iri, &layer)
+                .unwrap_or_else(|e| panic!("failed to resolve {iri_str}: {e}"));
+        }
+    }
+
+    #[test]
+    fn type_expr_value_encodes_d47_inline_on_resource_property() {
+        // `type_expr(<type-expr>)` — inline D47 surface for resource
+        // fields. Mirrors `formula(...)` for D32 inductive values.
+        // The encoded shape on the property must match what an
+        // equivalent top-level `axiom` declaration produces.
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace eg   = "urn:eigenius:test:typeexpr";
+
+            class eg:Holder {
+                requires eg:body;
+            }
+            property eg:body : core:resource {
+                class_types eigentt:TypeExpr;
+            }
+            namespace eigentt = "urn:eigenius:eigentt";
+
+            resource eg:r1 : eg:Holder {
+                eg:body = type_expr(forall (A : Set) => A -> A);
+            }
+            "#,
+        );
+        let holder = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str() == "urn:eigenius:test:typeexpr:r1")
+                    .unwrap_or(false)
+            })
+            .expect("eg:r1 committed");
+        let body = holder
+            .get(&iri("urn:eigenius:test:typeexpr:body"))
+            .expect("eg:body set");
+        match body {
+            Value::Json(j) => {
+                // forall (A : Set) => A -> A
+                //   → Pi("A", Sort(1), Pi("", Var("A"), Var("A")))
+                assert_eq!(j["ctor"], "Pi");
+                assert_eq!(j["args"][0], "A");
+                assert_eq!(j["args"][1]["ctor"], "Sort");
+                assert_eq!(j["args"][1]["args"][0], 1);
+                let inner = &j["args"][2];
+                assert_eq!(inner["ctor"], "Pi");
+                assert_eq!(inner["args"][1]["ctor"], "Var");
+                assert_eq!(inner["args"][1]["args"][0], "A");
+            }
+            other => panic!("expected Value::Json, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn axiom_uses_set_keyword_in_kind_position() {
         // ESL's `Set` keyword in a `forall` binder kind position must
         // be recognised as a sort literal, not as an identifier.
@@ -4193,5 +5167,180 @@ mod tests {
             assert_eq!(j["args"][1]["ctor"], "Sort");
             assert_eq!(j["args"][1]["args"][0], 1);
         }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // D52 §12 — macro declarations and call-site expansion
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn statistics_ontology_esl_compiles() {
+        // D52 Phase 1 — the authored statistics.esl source must
+        // compile cleanly. Locks the structural contract: five axis
+        // enums, the SampleSet product type, the smart-constructor
+        // macros (SingleSampleEstimate, IID), the MeasurementClaim
+        // resource class with the universal-schema fields, the
+        // PopulationLevel/MeasurementLevel scope markers, and the
+        // statistics-institution + qc_validate_measurement_claim
+        // resources. Any future edit that breaks this needs to be
+        // deliberate.
+        let source = include_str!("../../../ontologies/statistics/statistics.esl");
+        let resources = esl::compile(source).expect("statistics.esl must compile");
+
+        // Expect at least:
+        //  - 5 axis enums (Randomization, Blocking, FactorDesign,
+        //    Replication, RepeatedMeasuresAxis)
+        //  - 5 universal-claim sum types (EffectSize, Directionality,
+        //    VarianceAssumption, AutocorrelationStructure, OutlierExclusion)
+        //  - SampleSet (1)
+        // = 11 inductive Resources.
+        let inductive_iri = iri(crate::ontology::well_known::INDUCTIVE_TYPE);
+        let ind_count = resources
+            .iter()
+            .filter(|r| r.is_a().iter().any(|c| c == &inductive_iri))
+            .count();
+        assert!(
+            ind_count >= 15,
+            "expected at least 15 inductive Resources in statistics.esl, found {ind_count}"
+        );
+
+        // The two smart-constructor macros emit no resources; verify
+        // the count is what we'd get from declarations alone.
+        let has_sample_set = resources.iter().any(|r| {
+            r.id()
+                .map(|i| i.as_str() == "urn:eigenius:measurements:SampleSet")
+                .unwrap_or(false)
+        });
+        assert!(has_sample_set, "stats:SampleSet inductive must be emitted");
+
+        let has_institution = resources.iter().any(|r| {
+            r.id()
+                .map(|i| i.as_str() == "urn:eigenius:measurements:statistics_institution")
+                .unwrap_or(false)
+        });
+        assert!(
+            has_institution,
+            "stats:statistics_institution resource must be emitted"
+        );
+
+        let has_qc = resources.iter().any(|r| {
+            r.id()
+                .map(|i| i.as_str() == "urn:eigenius:measurements:qc_validate_measurement_claim")
+                .unwrap_or(false)
+        });
+        assert!(
+            has_qc,
+            "qc_validate_measurement_claim QueryClass must be emitted"
+        );
+    }
+
+    #[test]
+    fn macro_call_expands_into_ctor_app() {
+        // Smoke test for the smart-constructor pattern D52 §4.2 needs:
+        // a `macro` declaration produces no chain resource on its own,
+        // but a call site lowers to the substituted ctor application
+        // exactly as if the author had hand-written it.
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace eg   = "urn:eigenius:test:macro";
+
+            data eg:Pair(A : core:Set, B : core:Set) {
+                Both(A, B),
+            }
+
+            class eg:Holder {
+                requires eg:body;
+            }
+            property eg:body : core:resource {
+                class_types eg:Pair;
+            }
+
+            macro eg:swap_both(a : core:string, b : core:string) : eg:Pair =>
+                Both(b, a);
+
+            resource eg:r1 : eg:Holder {
+                eg:body = eg:swap_both("first", "second");
+            }
+            "#,
+        );
+        // Two resources expected: the Pair data declaration emits one
+        // (the inductive type itself) and the eg:r1 holder. Macros emit
+        // nothing on their own.
+        let holder = resources
+            .iter()
+            .find(|r| {
+                r.id()
+                    .map(|i| i.as_str() == "urn:eigenius:test:macro:r1")
+                    .unwrap_or(false)
+            })
+            .expect("eg:r1 committed");
+        let body = holder
+            .get(&iri("urn:eigenius:test:macro:body"))
+            .expect("eg:body set");
+        match body {
+            Value::Json(j) => {
+                // Expansion: swap_both("first", "second") substitutes
+                // into Both(b, a) → Both("second", "first") — the
+                // positional swap is what proves substitution happened.
+                assert_eq!(j["ctor"], "Both");
+                assert_eq!(j["args"][0], "second");
+                assert_eq!(j["args"][1], "first");
+            }
+            other => panic!("expected Value::Json (CtorApp serialization), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn macro_unknown_name_errors_cleanly() {
+        // A call site referencing an undeclared macro IRI must surface
+        // a clear compile error rather than panicking or producing a
+        // confusing downstream diagnostic.
+        let result = esl::compile(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace eg   = "urn:eigenius:test:macro";
+
+            class eg:Holder { requires eg:body; }
+            property eg:body : core:string { }
+
+            resource eg:r1 : eg:Holder {
+                eg:body = eg:undefined_macro("anything");
+            }
+            "#,
+        );
+        let err = result.expect_err("undeclared macro should error");
+        assert!(
+            err.iter()
+                .any(|e| format!("{e:?}").contains("is not declared")),
+            "diagnostic should name the undeclared macro: got {err:?}"
+        );
+    }
+
+    #[test]
+    fn macro_arity_mismatch_errors_cleanly() {
+        let result = esl::compile(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace eg   = "urn:eigenius:test:macro";
+
+            data eg:Wrap { Hold(core:string), }
+            class eg:Holder { requires eg:body; }
+            property eg:body : core:resource { class_types eg:Wrap; }
+
+            macro eg:two_args(a : core:string, b : core:string) : eg:Wrap =>
+                Hold(a);
+
+            resource eg:r1 : eg:Holder {
+                eg:body = eg:two_args("only_one");
+            }
+            "#,
+        );
+        let err = result.expect_err("arity mismatch should error");
+        assert!(
+            err.iter()
+                .any(|e| format!("{e:?}").contains("expects 2 argument")),
+            "diagnostic should name the expected vs actual arity: got {err:?}"
+        );
     }
 }

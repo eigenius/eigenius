@@ -313,6 +313,89 @@ Inside the parens you can write `+ - * / ^`, function calls (`sin(x)`, `pow(a, b
 
 This is the entry point for the platform's typed numerical surface. The full reference — six constructors, operator catalog, validator rule, Eigon-JSON encoding, identity-comorphism collapse across institutions — lives in the [formula language guide](../formula/README.md), specifically [§5 ESL `formula(...)` sublanguage](../formula/05-esl-sublanguage.md).
 
+<a id="5-14a-type_expr-eigentt-type-expressions"></a>
+## 5.14a. `type_expr(...)` — EigenTT type expressions as chain values (D47)
+
+The surface counterpart of `formula(...)` for the [D47 chain-mirrored EigenTT type fragment](../../design/d47-chain-mirrored-eigentt-type-fragment.md). A `type_expr(...)` block lets you embed an EigenTT type expression (a proposition in `Prop`, a function type, an inductive-ctor application, etc.) directly in any value position; the compiler parses it with the same `parse_type_expr` grammar `axiom` and `data` ctor types use, lowers it to a kernel `Exp`, and runs the D47 encoder to produce a chain-resident `core:EigenTTType` value:
+
+```esl
+namespace screen     = "urn:eigenius:demo:screen";
+namespace reflection = "urn:eigenius:reflection";
+namespace stats      = "urn:eigenius:measurements";
+
+resource screen:claim_eig0291_lowic50 : stats:MeasurementClaim {
+    stats:sample_set = screen:m_eig0291_sampleset;
+
+    stats:null_hypothesis = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+    reflection:canonical_proposition = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+
+    stats:alpha = 0.05;
+    stats:effect_size = Absolute(100.0, "nM");
+    stats:directionality = TwoSided();
+    stats:variance_assumption = WelchUnequal();
+    stats:outlier_exclusion = Identity();
+}
+```
+
+The `type_expr(HasLowIC50(...))` expression compiles to a `Value::Json` carrying the tagged-dict tree:
+
+```json
+{
+  "ctor": "App",
+  "args": [
+    {"ctor": "ConstRef", "args": ["urn:eigenius:demo:screen:HasLowIC50"]},
+    {"ctor": "LitString", "args": ["urn:eigenius:demo:screen:EIG_0291"]}
+  ]
+}
+```
+
+…which the chain validator type-checks against `core:EigenTTType`'s ctor schema. Downstream consumers — the [D49 witness index](../../design/d49-chainwitness-machinery.md) computing the witness key for `IsDerivedAs`, the [D39 reasoning institution](../../design/d39-justification-logic.md) reading the predicate to decide the certificate's grounding shape, the [D52 statistics institution](../../design/d52-measurement-statistics-institution.md) checking the predicate's `is_a` scope marker against the SampleSet's replication kind — all decode this same value with the [D47 decoder](../../../kernel/src/program/eigentt_type_mirror.rs) and read out the same kernel `Exp`.
+
+### What grammar the inner expression accepts
+
+The same `parse_type_expr` grammar that powers `axiom` ([§4.4a](04-declarations.md#4-4a-axiom-postulated-propositions-d46-10)) and `data` ctor types ([§4.5](04-declarations.md#4-5-data-inductive-types)):
+
+| Form | Lowers to |
+|---|---|
+| `forall (x : T, y : U) => body` | `Exp::Pi(x, T, Exp::Pi(y, U, body))` |
+| `A -> B` | Non-dependent `Exp::Pi(_, A, B)` |
+| `Prop` / `Set` / `Type N` | `Exp::Sort(...)` |
+| `Id(A, x, y)` | `Exp::EigonClass(core:Id)` applied to args (D46 §7) |
+| `ex:Pred(arg1, arg2, ...)` | `Exp::App(Exp::ConstRef(IRI), arg1, arg2, ...)` |
+| `ex:zero` (nullary ctor) | `Exp::ConstRef(IRI)` |
+| `"literal-iri"` | `Exp::LitString("literal-iri")` |
+
+The `LitString` form is what lets you embed concrete subject IRIs — `screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")` — directly in a proposition without authoring a separate `core:axiom_statement` resource per compound. The kernel treats the literal as an opaque `string` value; downstream institutions consume it by string-equality matching.
+
+### Why this surface vs. the JSON form
+
+Authors *could* hand-write the tagged-dict JSON tree directly as a `Value::Json` literal, but in practice three-nested `App(ConstRef, LitString, …)` shapes get verbose quickly and the syntactic noise drowns out the proposition. `type_expr(...)` is to the D47 type fragment what `formula(...)` is to the D32 formula language: a Pratt-parsed inline sublanguage that compiles to the same wire shape the verifier consumes, with the syntactic shape an author actually reads.
+
+The two sublanguages target different chain types — `formula(...)` produces `formulas:FormulaTerm`, `type_expr(...)` produces `core:EigenTTType` — and they don't overlap: numerical institutions speak FormulaTerm, propositional / reasoning institutions speak EigenTTType. An ESL expression position can host either, depending on what the property's `class_types` constraint demands.
+
+### Compile target
+
+`type_expr(...)` lowers in two steps:
+
+1. The parser produces a `Value::TypeExpr { typ, pos }` AST node carrying the inner `ast::TypeExpr` tree;
+2. The compiler's `encode_type_expr_to_json` walks that tree, calls `lower_type_expr_to_exp` to produce a kernel `Exp`, then `eigentt_type_mirror::encode_type` to produce the tagged-dict JSON shape, and rewraps as `Value::Json`.
+
+The resulting value lands in the resource's property slot just like any other property literal — there's no special chain-storage treatment.
+
+### Where this appears in practice
+
+- `reflection:canonical_proposition` on every `DerivedResource` subclass (MeasurementClaim, ReasoningSentence, custom institution-emitted derived resources) — the proposition the resource asserts.
+- `eigentt:axiom_statement` on every `axiom` declaration ([§4.4a](04-declarations.md#4-4a-axiom-postulated-propositions-d46-10)) — surface-compiled via the same lowering path.
+- `stats:null_hypothesis` / `stats:alternative_hypothesis` on `MeasurementClaim` — the null and alternative the verifier reports in the verdict's audit trail.
+- `reasoning:proposition` on `ReasoningSentence` — the proposition the certificate type-checks against.
+- `core:ctor_type` on the typed-ctor form of indexed inductives — emitted by the compiler from the `data` declaration, not authored as a literal.
+
+Source: [`parse_type_expr`](../../../kernel/src/esl/parser.rs), [`lower_type_expr_to_exp`](../../../kernel/src/esl/compile.rs), [`encode_type_expr_to_json`](../../../kernel/src/esl/compile.rs), [`eigentt_type_mirror::encode_type`](../../../kernel/src/program/eigentt_type_mirror.rs).
+
 ## 5.15. Capability modes — quick reference
 
 [Chapter 8](08-capability-modes.md) covers this in detail. The short version:

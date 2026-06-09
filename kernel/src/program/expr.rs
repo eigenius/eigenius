@@ -181,6 +181,7 @@ pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> 
                     _ => class_iri.local_name().to_string(),
                 };
                 let stub = Arc::new(InductiveDecl {
+                    iri: class_iri.clone(),
                     name: name_of_iri,
                     params: Vec::new(),
                     indices: Vec::new(),

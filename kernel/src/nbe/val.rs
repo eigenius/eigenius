@@ -65,6 +65,17 @@ pub enum Val {
     EigonPrimitive(PrimitiveType),
     /// Concrete Eigon resource value
     ResourceVal(Box<Resource>),
+    /// Literal string value (eigenius#71 / D49). Type:
+    /// `Val::EigonPrimitive(PrimitiveType::String)`. Mirrors
+    /// `Exp::LitString` at the value level; values normalise to
+    /// themselves (no reduction; no neutral substructure).
+    LitString(String),
+    /// Literal integer value (eigenius#71). Type:
+    /// `Val::EigonPrimitive(PrimitiveType::Integer)`.
+    LitInt(i64),
+    /// Literal floating-point value (eigenius#71). Type:
+    /// `Val::EigonPrimitive(PrimitiveType::Float)`.
+    LitFloat(f64),
     /// Template value with resolved property type requirements.
     /// Template("literal", [(iri, resolved_type)])
     TemplateVal(String, Vec<(Iri, Val)>),
@@ -131,6 +142,25 @@ pub enum Val {
     /// `upper` is the evaluated size upper bound; the closure binds
     /// the fresh size variable in the body.
     SizedPi(Box<Val>, Clos),
+
+    // --- D49 ChainWitness (kernel-internal opaque value) ---
+    /// An admitted `ChainWitness` inhabitant. ESL cannot construct one;
+    /// the kernel synthesises it during `JustifiedBy.*` constructor
+    /// type-checking by looking up the per-`Layer` witness index
+    /// populated from `DeclarationTrace` / `ObservationTrace` /
+    /// `ProgramTrace` resources (and the comorphism-reified
+    /// `VerifiedPropositionView` for the `Verified` family). The witness
+    /// has no eliminator and no readback into surface syntax — it exists
+    /// only at value time, in the `Prop`-typed predicate position of a
+    /// `JustifiedBy` grounding constructor's argument list.
+    ///
+    /// Per D49 §8, definitional equality on `ChainWitness` values is
+    /// key-based (two witnesses with the same key are equal); D46 proof
+    /// irrelevance further collapses *any* two witnesses of the same
+    /// `Prop`-typed predicate type to definitionally equal at that type,
+    /// so the key comparison is the conservative fast path used when the
+    /// proof-irrelevance shortcut isn't reachable.
+    ChainWitness(crate::witness::WitnessKey),
 }
 
 /// Identifier for unification metavariables (D48 Phase C).

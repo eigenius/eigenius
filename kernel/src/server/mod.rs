@@ -558,11 +558,22 @@ impl EigeniusService {
     /// D14 §9.5. Without the index, qualified-name function calls
     /// fall through to plain `Apply(Var, ...)` and the comorphism
     /// dispatch path is silently bypassed at runtime.
+    ///
+    /// When `branch` is supplied, the branch's current head layer is
+    /// also fed into the compiler so cross-layer ctor and macro
+    /// references resolve — required for any ESL that invokes a
+    /// chain-resident smart-constructor macro (e.g.
+    /// `stats:SingleSampleEstimate(...)`) or references ctors
+    /// declared in a parent layer's inductive (e.g.
+    /// `reasoning:JustifiedBy.app` consumed from a `type_expr(...)`
+    /// certificate body). When `branch` is None, falls back to
+    /// `compile_with_institutions` (institution-aware, layer-blind).
     #[allow(clippy::result_large_err)]
     pub(super) async fn parse_resources(
         &self,
         data: &[u8],
         content_type: &str,
+        branch: Option<&str>,
     ) -> Result<Vec<Resource>, Status> {
         if content_type.contains("cbor") {
             eigon_cbor::parse_document(data)
@@ -571,7 +582,17 @@ impl EigeniusService {
             let source = std::str::from_utf8(data)
                 .map_err(|e| Status::invalid_argument(format!("invalid UTF-8: {e}")))?;
             let index = Arc::clone(&*self.institution_index.read().await);
-            crate::esl::compile_with_institutions(source, index).map_err(|errors| {
+            let result = match branch {
+                Some(branch_name) => {
+                    let ctx_arc = self.get_branch_context(branch_name).await?;
+                    let ctx = ctx_arc.read().await;
+                    let layer = Arc::clone(ctx.head());
+                    drop(ctx);
+                    crate::esl::compile_full(source, index, &layer)
+                }
+                None => crate::esl::compile_with_institutions(source, index),
+            };
+            result.map_err(|errors| {
                 let msgs: Vec<String> = errors.iter().map(|e| format!("{e}")).collect();
                 Status::invalid_argument(format!("ESL compile error: {}", msgs.join("; ")))
             })

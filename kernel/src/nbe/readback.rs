@@ -47,9 +47,21 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
         Val::Unit => Exp::Unit,
         Val::Sort(n) => Exp::Sort(*n),
         Val::Pi(t, g) => {
+            // Preserve Patt::Unit (anonymous binders) from the original
+            // closure so round-tripping `A -> B` through eval+readback
+            // doesn't introduce a `G#N` binder name that would diverge
+            // from the author's encoding. Critical for D49 witness-key
+            // hashes — chain-stored canonical_proposition encodes
+            // anonymous arrow binders as `Patt::Unit`; the synthesis
+            // hook's readback+encode must produce identical bytes.
             let gen = gen_val(level);
+            let patt = if matches!(g.patt, Patt::Unit) {
+                Patt::Unit
+            } else {
+                gen_patt(level)
+            };
             Exp::Pi(
-                gen_patt(level),
+                patt,
                 Box::new(readback_val(level, t)),
                 Box::new(readback_val(
                     level + 1,
@@ -59,8 +71,13 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
         }
         Val::Sig(t, g) => {
             let gen = gen_val(level);
+            let patt = if matches!(g.patt, Patt::Unit) {
+                Patt::Unit
+            } else {
+                gen_patt(level)
+            };
             Exp::Sig(
-                gen_patt(level),
+                patt,
                 Box::new(readback_val(level, t)),
                 Box::new(readback_val(
                     level + 1,
@@ -173,6 +190,11 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
             args.iter().map(|a| readback_val(level, a)).collect(),
         ),
 
+        // eigenius#71 / D49 — literals round-trip as themselves.
+        Val::LitString(s) => Exp::LitString(s.clone()),
+        Val::LitInt(n) => Exp::LitInt(*n),
+        Val::LitFloat(f) => Exp::LitFloat(*f),
+
         // Sized types (Phase 11b step 14, D19 §8).
         Val::SizeSort => Exp::SizeSort,
         Val::SizeSucc(s) => Exp::SizeSucc(Box::new(readback_val(level, s))),
@@ -188,6 +210,19 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
                 )),
             }
         }
+        // D49 §8 — `ChainWitness` values are opaque, kernel-internal
+        // proof-of-existence markers admitted by the per-Layer witness
+        // index. They never appear in surface syntax, so readback into
+        // an `Exp` is a programming error: they should only be produced
+        // by the type checker's synthesis hook at `JustifiedBy.*`
+        // type-check time and consumed within the same type-check; they
+        // do not survive normalisation into a readback-able form.
+        Val::ChainWitness(key) => panic!(
+            "readback_val: ChainWitness {:?} reached readback — witness values are \
+             kernel-internal and should be consumed at JustifiedBy.* type-check time, \
+             never readback into surface syntax",
+            key
+        ),
     }
 }
 

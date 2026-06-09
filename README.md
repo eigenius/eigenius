@@ -789,6 +789,7 @@ system spec) and the **[Implementation Plan](docs/design/implementation-plan.md)
 | [D46: Prop Universe and Proof Irrelevance](docs/design/d46-prop-universe-and-proof-irrelevance.md) | Impredicative `Prop` (`Sort(0)`), unified sort ladder, proof irrelevance, singleton elimination, `eigentt:Axiom` chain class with built-in `propext` / `Quot.sound` |
 | [D47: Chain-Mirrored EigenTT Type Fragment](docs/design/d47-chain-mirrored-eigentt-type-fragment.md) | `eigentt:TypeExpr` inductive + bidirectional `Exp` ↔ `Value::Json` codec (`encode_type` / `decode_type`); term-level extension via eigenius#71; substrate for D46 axiom statements and D39 propositions |
 | [D48: Indexed Inductive Families](docs/design/d48-indexed-inductive-families.md) | Indexed families (`Vec(A) : Nat → Set`, `Eq(A) : A → A → Prop`), first-order pattern unifier, dependent ctor checking, per-arm index-coherence in match, singleton elimination for propositional indices; K-axiom implicit via D46 proof irrelevance |
+| [D49: `ChainWitness` Machinery](docs/design/d49-chainwitness-machinery.md) | Implementation memo for D39's `ChainWitness` predicate family — per-`Layer` witness index derived from Trace resources, kernel-internal witness synthesis at type-check time, `Lean → Reasoning` comorphism producing `VerifiedPropositionView` for `IsVerifiedAs`; no new D14 trait surface |
 
 **Storage, lifecycle, commit**
 
@@ -847,6 +848,13 @@ system spec) and the **[Implementation Plan](docs/design/implementation-plan.md)
 | [Manifesto](docs/design/manifesto.md) | Project ethos and posture |
 | [Vision](docs/design/vision.md) | Long-horizon target for the platform |
 | [Life Science Requirements](docs/design/life-science-requirements.md) | Driving requirements from clinical / translational use cases |
+
+**Evaluation methodology**
+
+| Document | Description |
+|----------|-------------|
+| [D50: Benchmark Evaluation Approach](docs/design/d50-benchmark-evaluation-approach.md) | Experimental design testing whether forcing the agent to capture reasoning as typed justified propositions improves performance — three conditions (baseline / chain-of-thought / Eigenius-structured), 15 ScienceAgentBench + 11 EngiBench Level 3 tasks, six per-family base ontologies, scoring and pilot phasing |
+| [D51: Benchmark Implementation Gaps](docs/design/d51-benchmark-implementation-gaps.md) | Companion to D50 — the eight implementation gaps ordered along the critical path (D49 machinery, Lean → Reasoning comorphism, D39 v2 artifacts, MCP surface, base ontologies, agent skill, three-condition harness, per-task wiring), per-gap effort sizing and sequencing |
 
 ## Contributing
 

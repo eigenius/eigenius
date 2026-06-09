@@ -1,4 +1,4 @@
-# 8. Failure modes across compositions
+# 9. Failure modes across compositions
 
 Multi-institution flows have failure modes single-institution flows don't.
 Validation cascades through nested resources; comorphism dispatch can fail
@@ -13,7 +13,7 @@ operational failures of the platform itself (kernel won't start, env
 images won't build), see [platform §13](../platform/13-troubleshooting.md).
 This chapter covers the *cross-composition* failure modes those don't.
 
-## 8.1. Validation cascade failures
+## 9.1. Validation cascade failures
 
 Chain validation walks nested resources. When a comorphism's reify output
 is committed, it's validated against the target class's `requires`,
@@ -82,9 +82,9 @@ The first case is the harder one to diagnose because the error is in
 the institution's runtime behaviour, not in the chain's static
 structure. Rule of thumb: if the error fires consistently for the same
 input, it's a reify bug; if it fires non-deterministically, it's a
-race or environment issue (§8.3).
+race or environment issue (§9.3).
 
-## 8.2. Comorphism dispatch failures (extract / transform / reify)
+## 9.2. Comorphism dispatch failures (extract / transform / reify)
 
 Each of the four pipeline steps (chapter 3 §3.2) has its own failure
 shape:
@@ -140,7 +140,7 @@ surfaces a more specific error than the kernel's rejection message).
 ### Reinsert failures
 
 Chain commit of the reified resource fails after reify returned. This
-is the case §8.1 covered: the produced resource passed reify but
+is the case §9.1 covered: the produced resource passed reify but
 fails the chain's structural validation. Rare when the chain ontology
 and the institution implementation are in sync; common when they've
 drifted.
@@ -150,7 +150,7 @@ class (`eigenius inspect <class-iri>`) against the institution's
 build-time view (the env image's mirror, which has a snapshot of the
 class definition the institution was compiled against).
 
-## 8.3. Chain-state races and stale Verdicts
+## 9.3. Chain-state races and stale Verdicts
 
 AutoOnLoad gates fire synchronously per commit, but a multi-cell
 notebook (or a multi-call program) can queue commits faster than
@@ -196,7 +196,7 @@ authoritative. Best practice: include a layer-recency filter in the
 query, or use the kernel's `inspect <iri>` which always returns the
 top-of-stack view.
 
-## 8.4. Provenance gaps under mixed hosting
+## 9.4. Provenance gaps under mixed hosting
 
 A composition can mix WASM-hosted institutions, substrate-hosted
 institutions, and in-process institutions. Each host kind produces
@@ -223,7 +223,7 @@ For research / experimentation workflows, mixed hosting is fine —
 the trace tree is enough to walk back what happened, even if a
 reviewer can't bit-for-bit reproduce the dispatch.
 
-## 8.5. Cross-host failure mode classification
+## 9.5. Cross-host failure mode classification
 
 A quick reference for "which host kind owns this symptom":
 
@@ -244,4 +244,4 @@ failure to a single institution and a single handler call.
 
 ---
 
-Next: **[9. Appendix →](09-appendix.md)**
+Next: **[10. Appendix →](10-appendix.md)**

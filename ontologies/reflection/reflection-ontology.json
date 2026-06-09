@@ -188,14 +188,17 @@
   {
     "@id": "urn:eigenius:reflection:ProgramTrace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "Trace of a complete program execution. Wraps the trace tree.",
+    "urn:eigenius:core:description": "Trace recording that a resource was produced by a program (a kernel-evaluated `program` body or an institution-emitted DerivedResource per D49 §6). The minimum shape mirrors DeclarationTrace and ObservationTrace — `resource` (the target IRI), `source` (the program / procedure / institution that produced the resource, as a string), `timestamp` (when it was produced). The richer execution-trace shape (program/started_at/completed_at/trace_tree/output/metrics/etc.) is recommended optional metadata authored by kernel-emitted traces; user-authored ProgramTraces typically only fill the three required fields, matching the witness-emitter contract that reads `reflection:resource` uniformly across all four trace classes.",
     "urn:eigenius:core:short_name": "ProgramTrace",
     "urn:eigenius:core:requires": [
-      "urn:eigenius:reflection:program",
-      "urn:eigenius:reflection:started_at",
-      "urn:eigenius:reflection:completed_at"
+      "urn:eigenius:reflection:resource",
+      "urn:eigenius:reflection:source",
+      "urn:eigenius:reflection:timestamp"
     ],
     "urn:eigenius:core:recommends": [
+      "urn:eigenius:reflection:program",
+      "urn:eigenius:reflection:started_at",
+      "urn:eigenius:reflection:completed_at",
       "urn:eigenius:reflection:trace_tree",
       "urn:eigenius:reflection:input",
       "urn:eigenius:reflection:output",
@@ -634,5 +637,18 @@
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:class_types": ["urn:eigenius:reflection:ProgramTrace"],
     "urn:eigenius:core:domain": ["urn:eigenius:reflection:VerificationTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:canonical_proposition",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The Prop-typed EigenTT proposition this resource canonically asserts (D49 §6). Optional; absence defaults to the term `Asserts(iri)` at witness-emission time (D39 §4.1). Value carries a D47-encoded `eigentt:TypeExpr` payload. Validated at commit: the value must decode cleanly through the D47 codec and type-check at `Prop`. The four ChainWitness predicate families (D49 §3) project this property onto kernel-internal witness inhabitants admissible at JustifiedBy.declared / .observed / .derived / .verified type-check time.",
+    "urn:eigenius:core:short_name": "canonical_proposition",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:TypeExpr"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:reflection:DeclaredResource",
+      "urn:eigenius:reflection:ObservedResource",
+      "urn:eigenius:reflection:DerivedResource"
+    ]
   }
 ]

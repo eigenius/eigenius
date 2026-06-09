@@ -361,4 +361,4 @@ walkthrough; richer notebooks could exercise the rest.
 
 ---
 
-Next: **[7. Composition patterns →](07-patterns.md)**
+Next: **[7. Statistics + reasoning walkthrough →](07-stats-and-reasoning-walkthrough.md)**

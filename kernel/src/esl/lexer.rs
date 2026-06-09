@@ -70,6 +70,12 @@ pub enum TokenKind {
     /// Commits a `core:Axiom` chain resource with the type expression
     /// encoded via the D47 codec.
     Axiom,
+    /// D52 §12 — `macro ns:Name(p1 : T1, ...) : RetT => body`
+    /// top-level smart-constructor declaration. Compile-time AST
+    /// substitution only; not a runtime function. Distinct from
+    /// `Fun` (`fun (x : T) => body` inside `type_expr(...)` is a
+    /// type-level lambda).
+    Macro,
     /// eigenius#72 — sort literal `Prop` (= `Sort(0)`).
     Prop,
     /// eigenius#72 — sort literal `Set` (= `Sort(1)`).
@@ -483,6 +489,7 @@ impl<'a> Lexer<'a> {
             "forall" => TokenKind::Forall,
             "fun" => TokenKind::Fun,
             "axiom" => TokenKind::Axiom,
+            "macro" => TokenKind::Macro,
             "Prop" => TokenKind::Prop,
             "Set" => TokenKind::SetKw,
             "Type" => TokenKind::TypeKw,

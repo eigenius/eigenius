@@ -1,0 +1,115 @@
+// D52 Phase 4.0 fixture — Randomized Complete Block Design (RCBD).
+//
+// Domain: drug-dose response measured across 3 patient cohorts
+// (blocks) with 3 dose levels (treatments). Each cohort receives
+// every dose exactly once — the "complete" in RCBD.
+//
+// The point of RCBD over a flat IID design: cohort-to-cohort
+// baselines vary substantially (different patient populations, batch
+// effects, day-of-experiment drift) but the WITHIN-cohort dose
+// response is what's of scientific interest. RCBD controls for the
+// nuisance cohort variation and isolates the treatment effect. This
+// is exactly the §5.2 motivation — without blocking, the cohort
+// variance washes out the treatment signal.
+//
+// Lands at product position `(Restricted, RCB(3), SingleFactor, _,
+// CrossSectional)`. Phase 4.0's new dispatch arm.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace stats      = "urn:eigenius:measurements";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace dr         = "urn:eigenius:demo:dr";
+
+// ─── Domain predicate ──────────────────────────────────────────────
+
+data dr:DoseResponseExists : core:string -> Prop, stats:PopulationLevel {
+}
+
+// ─── SampleSet: 3 cohorts × 3 doses RCBD ──────────────────────────
+//
+// Cohort 0: baseline ~10, dose-response slope ~10/dose
+//   (cohort 0, dose 0) → 10
+//   (cohort 0, dose 1) → 20
+//   (cohort 0, dose 2) → 31
+// Cohort 1: baseline ~11, similar slope
+//   (cohort 1, dose 0) → 12
+//   (cohort 1, dose 1) → 22
+//   (cohort 1, dose 2) → 30
+// Cohort 2: baseline ~9, similar slope
+//   (cohort 2, dose 0) → 9
+//   (cohort 2, dose 1) → 19
+//   (cohort 2, dose 2) → 29
+//
+// Per-cohort baselines vary by ~3 units; per-dose effect is ~10 per
+// dose step. Block variance is small here (cohorts are similar) so
+// the design's discriminating power is high. A larger baseline spread
+// (Phase 4 numerics test `rcbd_isolates_treatment_from_block_variation`
+// exercises that case) wouldn't change the verdict.
+//
+// Observations encoded as `[block_idx, treatment_idx, value]` rows
+// flattened — 9 rows × 3 floats = 27 floats.
+
+resource dr:dose_response_2026_04_15 : stats:SampleSetResource {
+    reflection:source      = "instrument-log:dose-response-2026-04-15-RCBD";
+    reflection:observed_at = "2026-04-15T09:30:00Z";
+
+    stats:sample_set_value = stats:RCBD(
+        3,    // n_blocks (cohorts)
+        3,    // n_treatments (doses)
+        [
+            // cohort 0
+            0.0, 0.0, 10.0,
+            0.0, 1.0, 20.0,
+            0.0, 2.0, 31.0,
+            // cohort 1
+            1.0, 0.0, 12.0,
+            1.0, 1.0, 22.0,
+            1.0, 2.0, 30.0,
+            // cohort 2
+            2.0, 0.0,  9.0,
+            2.0, 1.0, 19.0,
+            2.0, 2.0, 29.0,
+        ],
+        BiologicalReplication(),
+    );
+}
+
+resource dr:dose_response_trace : reflection:ObservationTrace {
+    reflection:resource  = dr:dose_response_2026_04_15;
+    reflection:source    = "instrument-log:dose-response-2026-04-15-RCBD";
+    reflection:timestamp = "2026-04-15T09:30:00Z";
+}
+
+// ─── The RCBD MeasurementClaim ─────────────────────────────────────
+
+resource dr:claim_dose_response_exists : stats:MeasurementClaim {
+    stats:sample_set = dr:dose_response_2026_04_15;
+
+    stats:null_hypothesis = type_expr(
+        dr:DoseResponseExists("urn:eigenius:demo:dr:experiment_2026_04_15")
+    );
+
+    stats:alternative_hypothesis = type_expr(
+        dr:DoseResponseExists("urn:eigenius:demo:dr:experiment_2026_04_15")
+    );
+
+    reflection:canonical_proposition = type_expr(
+        dr:DoseResponseExists("urn:eigenius:demo:dr:experiment_2026_04_15")
+    );
+
+    stats:alpha = 0.05;
+    // Asserted minimum treatment-effect magnitude. RCBD reports
+    // SS_treatment + F_treatment; v1 dispatch admits on p < alpha.
+    stats:effect_size = Absolute(15.0, "response_units_per_dose_step");
+    stats:directionality = TwoSided();
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion = Identity();
+}
+
+resource dr:claim_dose_response_exists_trace : reflection:ProgramTrace {
+    reflection:resource  = dr:claim_dose_response_exists;
+    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:timestamp = "2026-04-15T09:30:00Z";
+}

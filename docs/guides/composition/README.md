@@ -57,24 +57,32 @@ The chapters build on each other:
    composition: downstream queries can find and reason about the
    produced resource as a first-class chain entity.
 6. **[Walkthrough: reading the kinase notebook end-to-end](06-kinase-walkthrough.md)**
-   — the canonical example, traced cell by cell. Three parts (flat
-   data, typed institutions, chain reinsertion); how each cell exercises
-   one or more of the mechanics in chapters 2–5.
-7. **[Composition patterns](07-patterns.md)** — when to share a payload
+   — the canonical comorphism-mediated example, traced cell by cell.
+   Three parts (flat data, typed institutions, chain reinsertion); how
+   each cell exercises one or more of the mechanics in chapters 2–5.
+7. **[Statistics + reasoning walkthrough](07-stats-and-reasoning-walkthrough.md)**
+   — the second composition shape, traced end-to-end: raw IC50 readings
+   → D52 `MeasurementClaim` Holds → witness-index admission →
+   D39 `ReasoningSentence` certificate consumes the witness via
+   `DerivedEvidence` → `StrongInhibitor` conclusion. No comorphism
+   between the institutions; the composition runs through the shared
+   `core:EigenTTType` proposition slot.
+8. **[Composition patterns](08-patterns.md)** — when to share a payload
    language, when to declare a comorphism, when an OnDemand FIBER
    suffices, when chain reinsertion matters. Identity comorphisms
    (Symbolics ↔ Intervals) vs. structural ones (Catalyst → DiffEq's
    reaction-network → ODE compilation). When `exact: false` is
    appropriate.
-8. **[Failure modes across compositions](08-failure-modes.md)** — chain
+9. **[Failure modes across compositions](09-failure-modes.md)** — chain
    validation cascades through nested resources; what happens when a
    comorphism's source institution rejects an extract; race conditions
    between AutoOnLoad gates and OnDemand calls; what "stale Verdict"
    means in a composition.
-9. **[Appendix](09-appendix.md)** — references, source index, related
-   design docs (D14 §4–§6 + §9.3, D26, D27, D32), pointer to the
-   [SHACL-comparison note](../../notes/note-for-a-shacl-user.md) for
-   the conceptual pitch.
+10. **[Appendix](10-appendix.md)** — references, source index, related
+    design docs (D14 §4–§6 + §9.3, D26, D27, D32, D39, D46, D47, D48,
+    D49, D52), pointer to the
+    [SHACL-comparison note](../../notes/note-for-a-shacl-user.md) for
+    the conceptual pitch.
 
 ## Most important chapters
 

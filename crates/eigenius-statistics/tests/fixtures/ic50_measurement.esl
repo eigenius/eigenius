@@ -1,0 +1,199 @@
+// D52 Phase 1 — end-to-end IC50 measurement fixture.
+//
+// Replicates the scenario from `drug_screening.esl` (3 IC50 readings
+// of EIG_0291 averaging 85 nM, asserted as < 100 nM strong-inhibitor
+// threshold) but in the new D52 shape:
+//
+//   - The 3 raw replicate values live inside a `stats:SampleSetResource`
+//     as an inline value-array under the SampleSet's `Bundle` ctor.
+//   - The smart-constructor macro `stats:SingleSampleEstimate(...)`
+//     produces the `Bundle` at the canonical product position
+//     `(CompleteRandom, Unblocked, NoFactor, replication, CrossSectional)`.
+//   - The replication kind is `BiologicalReplication` (Phase 1 admits
+//     the population-level `HasLowIC50` predicate from this). The
+//     `TechnicalWithinRun` parallel fixture is a follow-on test that
+//     exercises the §7.4 epistemic-scope rejection path.
+//   - The `stats:MeasurementClaim` references the SampleSetResource by
+//     IRI and asserts the 100 nM threshold.
+//
+// What this exercises that drug_screening.esl didn't:
+//
+// 1. The ESL `macro` extension (compile-time AST substitution); the
+//    `stats:SingleSampleEstimate(...)` call expands to the full nine-
+//    field `Bundle(...)` ctor.
+// 2. The Bundle ctor's product-position dispatch — the verifier reads
+//    args[0..5] to pick the `SingleSampleEstimate` procedure.
+// 3. The one-sample t-test recomputation from raw replicates (statrs
+//    Student's t-CDF) against the asserted threshold.
+// 4. The §7.4 epistemic-scope check: BiologicalReplication admits the
+//    population-level `HasLowIC50` predicate.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace stats      = "urn:eigenius:measurements";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace screen     = "urn:eigenius:demo:screen";
+
+// ─── Domain predicate (with PopulationLevel scope marker, §7.4) ────
+
+// PopulationLevel scope marker via the multi-class `data` header
+// form (D52 §12 #8): the inductive-type resource carries both
+// `is_a InductiveType` (implicit) and `is_a stats:PopulationLevel`.
+// The §7.4 epistemic-scope check sees the marker and admits
+// population-level propositions only when the SampleSet's replication
+// kind permits (BiologicalReplication or NestedReplication).
+data screen:HasLowIC50 : core:string -> Prop, stats:PopulationLevel {
+}
+
+// ─── SampleSet: 3 IC50 replicate readings of EIG_0291 ──────────────
+
+resource screen:m_eig0291_sampleset : stats:SampleSetResource {
+    reflection:source      = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    reflection:observed_at = "2026-03-04T14:22:11Z";
+
+    // The SampleSet value — smart constructor lands at the
+    // `(CompleteRandom, Unblocked, NoFactor, BiologicalReplication,
+    // CrossSectional)` product position. The 3 raw IC50 readings (in
+    // nM) ride inline as a value-array under the Bundle's
+    // observations slot.
+    stats:sample_set_value = stats:SingleSampleEstimate(
+        [72.0, 85.0, 100.0],
+        BiologicalReplication(),
+    );
+}
+
+// ─── ObservationTrace pairing the SampleSetResource with its origin ─
+//
+// Per D49 §6, the trace's commit admits the IsObservedAs witness for
+// the SampleSetResource. Even though the statistics institution
+// doesn't consume that witness directly, the trace is the standard
+// shape for any ObservedResource on chain and downstream D39 reasoning
+// would need it.
+
+resource screen:m_eig0291_trace : reflection:ObservationTrace {
+    reflection:resource  = screen:m_eig0291_sampleset;
+    reflection:source    = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    reflection:timestamp = "2026-03-04T14:22:11Z";
+}
+
+// ─── The MeasurementClaim ──────────────────────────────────────────
+//
+// Universal-Claim schema per D52 §3:
+//   sample_set → IRI of m_eig0291_sampleset
+//   alpha = 0.05
+//   effect_size = Absolute(100.0, "nM")  — the threshold
+//   directionality = TwoSided            (Phase 1; OneSidedWitnessed deferred)
+//   variance_assumption = WelchUnequal
+//   outlier_exclusion = Identity          (no exclusion)
+//   null/alternative hypotheses authored for completeness — the Phase 1
+//   verifier reads alpha/effect_size/directionality/sample_set/
+//   canonical_proposition. The reflection:canonical_proposition slot
+//   carries the predicate the claim establishes when the test holds;
+//   downstream D39 reasoning cites this claim's IRI via DerivedEvidence
+//   and the D49 §6 witness index reads the same slot to admit the
+//   IsDerivedAs witness (provided a ProgramTrace points at this claim).
+
+resource screen:claim_eig0291_lowic50 : stats:MeasurementClaim {
+    stats:sample_set = screen:m_eig0291_sampleset;
+
+    stats:null_hypothesis = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+
+    stats:alternative_hypothesis = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+
+    // The predicate this claim establishes when the test holds. Read
+    // by the §7.4 epistemic-scope check and (on a successful commit)
+    // by the D49 witness index to admit IsDerivedAs.
+    reflection:canonical_proposition = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+
+    stats:alpha = 0.05;
+    stats:effect_size = Absolute(100.0, "nM");
+    stats:directionality = TwoSided();
+    stats:variance_assumption = WelchUnequal();
+    stats:outlier_exclusion = Identity();
+}
+
+// ─── ProgramTrace pointing at the claim ──────────────────────────────
+//
+// Per D49 §6, an IsDerivedAs witness is admitted at commit time when
+// a ProgramTrace whose `reflection:resource` field points at a target
+// resource is on chain — the witness index reads the target's
+// `reflection:canonical_proposition` to compute the witness key. The
+// trace is what triggers the admission; the claim is the witness's
+// target. The test below asserts the witness lands in the index after
+// fixture-layer construction.
+
+resource screen:claim_eig0291_lowic50_trace : reflection:ProgramTrace {
+    reflection:resource  = screen:claim_eig0291_lowic50;
+    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:timestamp = "2026-03-04T14:22:11Z";
+}
+
+// ─── Second SampleSet — larger n, tighter cluster, supports Holds ────
+//
+// Six replicates from an independent dose-response confirmatory run,
+// clustered tightly around mean ≈ 85 nM. With n = 6 and SD ≈ 5, the
+// one-sample test against threshold 100 nM rejects H0: μ = 100
+// confidently (|t| ≈ 7.5, df = 5, p ≪ 0.05). This is the realistic
+// shape for a Holds verdict: the n=3 screening read (above) generated
+// the hypothesis; the n=6 confirmatory run supports it.
+
+resource screen:m_eig0291_confirmatory_sampleset : stats:SampleSetResource {
+    reflection:source      = "instrument-log:kinase-glo-plate-2026-03-11-confirmatory";
+    reflection:observed_at = "2026-03-11T10:18:42Z";
+
+    stats:sample_set_value = stats:SingleSampleEstimate(
+        [78.0, 82.0, 85.0, 88.0, 91.0, 86.0],
+        BiologicalReplication(),
+    );
+}
+
+resource screen:m_eig0291_confirmatory_trace : reflection:ObservationTrace {
+    reflection:resource  = screen:m_eig0291_confirmatory_sampleset;
+    reflection:source    = "instrument-log:kinase-glo-plate-2026-03-11-confirmatory";
+    reflection:timestamp = "2026-03-11T10:18:42Z";
+}
+
+// ─── The Holds-producing claim against the confirmatory SampleSet ───
+//
+// Identical to claim_eig0291_lowic50 in every parameter except its
+// sample_set reference — points at the confirmatory SampleSet instead
+// of the n=3 screening one. The verifier's one-sample t-test against
+// 100 nM rejects H0 (p ≪ 0.05) on this larger / tighter dataset, so
+// the verdict is Holds. The canonical_proposition is the same
+// `HasLowIC50(EIG_0291)` so downstream D39 reasoning citing
+// DerivedEvidence(this_claim) gets exactly that proposition.
+
+resource screen:claim_eig0291_confirmatory_holds : stats:MeasurementClaim {
+    stats:sample_set = screen:m_eig0291_confirmatory_sampleset;
+
+    stats:null_hypothesis = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+
+    stats:alternative_hypothesis = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+
+    reflection:canonical_proposition = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+
+    stats:alpha = 0.05;
+    stats:effect_size = Absolute(100.0, "nM");
+    stats:directionality = TwoSided();
+    stats:variance_assumption = WelchUnequal();
+    stats:outlier_exclusion = Identity();
+}
+
+resource screen:claim_eig0291_confirmatory_trace : reflection:ProgramTrace {
+    reflection:resource  = screen:claim_eig0291_confirmatory_holds;
+    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:timestamp = "2026-03-11T10:18:42Z";
+}

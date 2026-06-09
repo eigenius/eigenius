@@ -211,11 +211,14 @@ impl<'a> Parser<'a> {
                 TokenKind::Axiom => {
                     declarations.push(Declaration::Axiom(self.parse_axiom()?))
                 }
+                TokenKind::Macro => {
+                    declarations.push(Declaration::Macro(self.parse_macro()?))
+                }
                 _ => {
                     return Err(EslError::parser(
                         Some(self.current_pos()),
                         format!(
-                            "expected top-level declaration (namespace, class, property, resource, program, codata, data, merge_comorphism, text_index, vector_index, axiom), found {:?}",
+                            "expected top-level declaration (namespace, class, property, resource, program, codata, data, merge_comorphism, text_index, vector_index, axiom, macro), found {:?}",
                             self.peek()
                         ),
                     ))
@@ -564,6 +567,22 @@ impl<'a> Parser<'a> {
                     self.expect(&TokenKind::RParen)?;
                     return Ok(expr);
                 }
+                // `type_expr(...)` — inline D47-encoded EigenTT type
+                // expression. Parses the inner expression with the
+                // same `parse_type_expr` used for `axiom` declarations
+                // and `data` ctor types; the compile-side hook D47-
+                // encodes the lowered Exp. Surface counterpart of
+                // `formula(...)` for D47, used by D39 ReasoningSentence
+                // authors who'd otherwise hand-write the verbose
+                // `{"ctor":"App","args":[...]}` tagged-dict tree.
+                if name == "type_expr" && self.peek_at(1) == &TokenKind::LParen {
+                    let pos = self.current_pos();
+                    self.advance(); // consume `type_expr`
+                    self.expect(&TokenKind::LParen)?;
+                    let typ = self.parse_type_expr()?;
+                    self.expect(&TokenKind::RParen)?;
+                    return Ok(Value::TypeExpr { typ, pos });
+                }
                 let qn = self.parse_qualified_name()?;
                 // Bare `Ident` followed by `(` is an inductive-ctor
                 // application — `Foo(arg1, arg2, ...)` per D32
@@ -595,15 +614,30 @@ impl<'a> Parser<'a> {
                         pos: qn_pos,
                     })
                 } else if qn.namespace.is_some() && self.at(&TokenKind::LParen) {
-                    Err(EslError::parser(
-                        Some(qn_pos),
-                        format!(
-                            "qualified name `{}:{}` cannot be used as a constructor — \
-                             ctor names are unqualified single-segment identifiers",
-                            qn.namespace.as_deref().unwrap_or(""),
-                            qn.name
-                        ),
-                    ))
+                    // D52 §12 — qualified `ns:Name(args)` parses as a
+                    // macro call rather than a constructor application
+                    // (which is unqualified) or a resource reference
+                    // (which has no `(`). The compiler resolves the
+                    // qualified name to a registered `MacroDecl` and
+                    // expands the call site by AST substitution.
+                    self.expect(&TokenKind::LParen)?;
+                    let mut args = Vec::new();
+                    if !self.at(&TokenKind::RParen) {
+                        args.push(self.parse_value()?);
+                        while self.at(&TokenKind::Comma) {
+                            self.advance();
+                            if self.at(&TokenKind::RParen) {
+                                break; // trailing comma
+                            }
+                            args.push(self.parse_value()?);
+                        }
+                    }
+                    self.expect(&TokenKind::RParen)?;
+                    Ok(Value::MacroCall {
+                        name: qn,
+                        args,
+                        pos: qn_pos,
+                    })
                 } else {
                     Ok(Value::Ref(qn))
                 }
@@ -1057,6 +1091,28 @@ impl<'a> Parser<'a> {
 
     fn parse_type_atom(&mut self) -> Result<TypeExpr, EslError> {
         let pos = self.current_pos();
+        // Literal in a type position — lowers to Exp::LitString /
+        // LitInt / LitFloat. Required by `type_expr(...)` so authors
+        // can write predicate applications with concrete arguments,
+        // e.g. `Asserts("urn:foo")` or `Vec(3, A)`. Literals at the
+        // head of a type-expression form an atom on their own; they
+        // cannot take type-args, so the qualified-name path below
+        // is bypassed entirely.
+        match self.peek().clone() {
+            TokenKind::StringLit(s) => {
+                self.advance();
+                return Ok(TypeExpr::LitString { value: s, pos });
+            }
+            TokenKind::IntLit(n) => {
+                self.advance();
+                return Ok(TypeExpr::LitInt { value: n, pos });
+            }
+            TokenKind::FloatLit(f) => {
+                self.advance();
+                return Ok(TypeExpr::LitFloat { value: f, pos });
+            }
+            _ => {}
+        }
         let name = self.parse_qualified_name()?;
         let args = if self.at(&TokenKind::LParen) {
             self.advance();
@@ -1338,6 +1394,53 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D52 §12 — `macro ns:Name(p1 : T1, p2 : T2, ...) : RetT => body;`
+    /// Top-level smart-constructor declaration. Parses a parameter
+    /// list, a return-type annotation, and a body `Value` expression
+    /// after `=>`. The body is compile-time-substituted at each call
+    /// site; the macro itself does not lower to a chain resource.
+    fn parse_macro(&mut self) -> Result<MacroDecl, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Macro)?;
+        let name = self.parse_qualified_name()?;
+        self.expect(&TokenKind::LParen)?;
+        let mut params = Vec::new();
+        if !self.at(&TokenKind::RParen) {
+            params.push(self.parse_macro_param()?);
+            while self.at(&TokenKind::Comma) {
+                self.advance();
+                if self.at(&TokenKind::RParen) {
+                    break; // trailing comma
+                }
+                params.push(self.parse_macro_param()?);
+            }
+        }
+        self.expect(&TokenKind::RParen)?;
+        self.expect(&TokenKind::Colon)?;
+        let return_type = self.parse_type_expr()?;
+        self.expect(&TokenKind::FatArrow)?;
+        let body = self.parse_value()?;
+        if self.at(&TokenKind::Semicolon) {
+            self.advance();
+        }
+        Ok(MacroDecl {
+            name,
+            params,
+            return_type,
+            body,
+            pos,
+        })
+    }
+
+    /// Parse a single `name : Type` macro parameter.
+    fn parse_macro_param(&mut self) -> Result<MacroParam, EslError> {
+        let pos = self.current_pos();
+        let name = self.expect_ident()?;
+        self.expect(&TokenKind::Colon)?;
+        let typ = self.parse_type_expr()?;
+        Ok(MacroParam { name, typ, pos })
+    }
+
     fn parse_data(&mut self) -> Result<DataDecl, EslError> {
         let pos = self.current_pos();
         self.expect(&TokenKind::Data)?;
@@ -1366,6 +1469,21 @@ impl<'a> Parser<'a> {
             (Vec::new(), None)
         };
 
+        // D52 §12 #8 — extra `is_a` classes for the emitted
+        // inductive-type resource, written as a comma-separated list
+        // after the result sort: `data X : Prop, stats:PopulationLevel,
+        // OtherMarker { ... }`. Parallels the class-multi-parent
+        // syntax `class X : P1, P2`. The structural terminator for
+        // the type expression is `{` (data body opens) or `,` (next
+        // extra class), so there's no ambiguity even when the result
+        // type is a pi/forall whose binder list also uses commas —
+        // those commas are inside a `=>`-terminated binder context.
+        let mut extra_classes = Vec::new();
+        while self.at(&TokenKind::Comma) {
+            self.advance();
+            extra_classes.push(self.parse_qualified_name()?);
+        }
+
         self.expect(&TokenKind::LBrace)?;
         let mut ctors = Vec::new();
         while !self.at(&TokenKind::RBrace) && !self.at_eof() {
@@ -1384,18 +1502,24 @@ impl<'a> Parser<'a> {
         }
         self.expect(&TokenKind::RBrace)?;
 
-        if ctors.is_empty() {
-            return Err(EslError::parser(
-                Some(pos.clone()),
-                "inductive data type must declare at least one constructor".to_string(),
-            ));
-        }
+        // Zero-ctor inductives are valid in the underlying type theory:
+        // in `Set`/`Type N` they're absurd (Void-shaped — inhabitable
+        // only by absurd elimination); in `Prop` they're the canonical
+        // shape for opaque predicates whose inhabitants are admitted by
+        // the kernel rather than constructed by users (D49 §6's
+        // `ChainWitness.IsDeclaredAs / IsObservedAs / IsDerivedAs /
+        // IsVerifiedAs` and D39 §4.1's `core:Asserts` are all of this
+        // shape). The parser does not police this — well-formedness is
+        // a type-theory concern handled by the kernel checker, and
+        // legitimate use cases would otherwise force users to either
+        // declare a junk ctor or author the type in JSON to bypass ESL.
 
         Ok(DataDecl {
             name,
             params,
             indices,
             result_sort,
+            extra_classes,
             ctors,
             pos,
         })
@@ -1440,17 +1564,27 @@ impl<'a> Parser<'a> {
     /// (eigenius#72 Layer 2). The colon has already been consumed by
     /// the caller.
     ///
-    /// Grammar (v1): one or more anonymous index types separated by
-    /// `->`, terminated by a sort literal. Each index type must be a
-    /// bare qualified-name reference (parameter name, or a class IRI);
-    /// arbitrary type expressions as index kinds are deferred. A bare
-    /// sort literal (no preceding `->`) is also accepted and produces
-    /// an empty index telescope with the sort as `result_sort` — i.e.
-    /// `data Foo : Set { ... }` is equivalent to `data Foo { ... }`
-    /// but with the sort made explicit.
+    /// Grammar: one or more anonymous index types separated by `->`,
+    /// terminated by a sort literal as the result sort. Each
+    /// intermediate index type can be one of:
+    ///
+    /// - A bare qualified-name reference (parameter name, or a class
+    ///   IRI) — the original v1 shape; carries through as
+    ///   [`IndexKind::Named`].
+    /// - A sort literal (`Prop` / `Set` / `Type N`) — needed for
+    ///   indexed inductives that range over types as values, e.g.
+    ///   D39 §5's `JustifiedBy : JustificationTerm → Prop → Type`
+    ///   and `ChainWitness.IsDeclaredAs : core:string → Prop → Prop`;
+    ///   carries through as [`IndexKind::Sort`].
+    ///
+    /// Arbitrary applied or function-typed index kinds are still
+    /// deferred. A bare sort literal (no preceding `->`) is also
+    /// accepted and produces an empty index telescope with the sort
+    /// as `result_sort` — `data Foo : Set { ... }` is equivalent to
+    /// `data Foo { ... }` but with the sort made explicit.
     fn parse_data_index_telescope(
         &mut self,
-    ) -> Result<(Vec<DataParam>, Option<SortKind>), EslError> {
+    ) -> Result<(Vec<DataIndex>, Option<SortKind>), EslError> {
         let mut indices = Vec::new();
         let te = self.parse_type_expr()?;
         let mut current = te;
@@ -1460,18 +1594,22 @@ impl<'a> Parser<'a> {
                     domain, codomain, ..
                 } => {
                     let (kind, dom_pos) = match *domain {
-                        TypeExpr::Ref { name, args, pos } if args.is_empty() => (name, pos),
+                        TypeExpr::Ref { name, args, pos } if args.is_empty() => {
+                            (IndexKind::Named(name), pos)
+                        }
+                        TypeExpr::Sort { kind, pos } => (IndexKind::Sort(kind), pos),
                         other => {
                             return Err(EslError::parser(
                                 Some(other.pos().clone()),
-                                "data-index telescope (v1): each index type must be a bare \
-                                 qualified-name reference; arbitrary applied or function-typed \
-                                 index kinds are not yet supported"
+                                "data-index telescope: each index type must be a bare \
+                                 qualified-name reference or a sort literal (Prop / Set / \
+                                 Type N); arbitrary applied or function-typed index kinds \
+                                 are not yet supported"
                                     .to_string(),
                             ));
                         }
                     };
-                    indices.push(DataParam {
+                    indices.push(DataIndex {
                         name: "_".to_string(),
                         kind,
                         pos: dom_pos,
@@ -2542,16 +2680,31 @@ mod tests {
     }
 
     #[test]
-    fn qualified_ctor_name_is_rejected() {
-        // `formulas:App(...)` is not v1 — ctors are unqualified.
-        let result = parse_str(
+    fn qualified_call_parses_as_macro_call() {
+        // D52 §12 — `ns:Name(args)` now parses as a macro call
+        // (compile-time AST substitution), distinct from the
+        // unqualified `Name(args)` shape which remains an inductive
+        // constructor application. The compiler resolves the
+        // qualified name against the per-file macro table and
+        // rejects with a clean diagnostic if no macro is declared
+        // under that IRI; at the parser layer we only confirm the
+        // shape is recognised.
+        let file = parse_str(
             r#"
             resource ex:t : ex:Holder {
                 ex:term = formulas:App(Var("x"), Var("y"));
             }
         "#,
-        );
-        assert!(result.is_err(), "qualified ctor name should error");
+        )
+        .expect("qualified name with `(` should parse as a macro call");
+        match first_field_value(&file) {
+            Value::MacroCall { name, args, .. } => {
+                assert_eq!(name.namespace.as_deref(), Some("formulas"));
+                assert_eq!(name.name, "App");
+                assert_eq!(args.len(), 2);
+            }
+            other => panic!("expected MacroCall, got {other:?}"),
+        }
     }
 
     /// Helper: extract the parsed `Value::CtorApp` from the first
@@ -3256,7 +3409,10 @@ mod tests {
                 assert_eq!(d.params.len(), 1);
                 assert_eq!(d.indices.len(), 1);
                 assert_eq!(d.indices[0].name, "_");
-                assert_eq!(d.indices[0].kind.name, "Nat");
+                match &d.indices[0].kind {
+                    IndexKind::Named(qn) => assert_eq!(qn.name, "Nat"),
+                    other => panic!("expected Named index kind, got {other:?}"),
+                }
                 assert_eq!(d.result_sort, Some(SortKind::Set));
                 assert_eq!(d.ctors.len(), 2);
                 assert!(matches!(&d.ctors[0], CtorDecl::Typed { name, .. } if name == "nil"));
@@ -3282,8 +3438,12 @@ mod tests {
         match &file.declarations[0] {
             Declaration::Data(d) => {
                 assert_eq!(d.indices.len(), 2);
-                assert_eq!(d.indices[0].kind.name, "A");
-                assert_eq!(d.indices[1].kind.name, "A");
+                for idx in &d.indices {
+                    match &idx.kind {
+                        IndexKind::Named(qn) => assert_eq!(qn.name, "A"),
+                        other => panic!("expected Named index kind, got {other:?}"),
+                    }
+                }
                 assert_eq!(d.result_sort, Some(SortKind::Prop));
             }
             _ => panic!("expected data"),
@@ -3331,6 +3491,68 @@ mod tests {
                 assert_eq!(d.result_sort, Some(SortKind::Set));
                 assert_eq!(d.ctors.len(), 1);
                 assert!(matches!(&d.ctors[0], CtorDecl::Positional { name, .. } if name == "tt"));
+            }
+            _ => panic!("expected data"),
+        }
+    }
+
+    #[test]
+    fn data_indexed_accepts_sort_literals_in_intermediate_indices() {
+        // D39 §5 JustifiedBy / D49 ChainWitness predicates need Sort
+        // literals (Prop, Set, Type N) as intermediate index kinds, not
+        // just bare names or class IRIs.
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:JustifiedBy : ex:Term -> Prop -> Type 0 {
+                mk : forall (t : ex:Term) => forall (P : Prop) => ex:JustifiedBy(t, P),
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                assert_eq!(d.indices.len(), 2);
+                match &d.indices[0].kind {
+                    IndexKind::Named(qn) => assert_eq!(qn.name, "Term"),
+                    other => panic!("expected Named, got {other:?}"),
+                }
+                match &d.indices[1].kind {
+                    IndexKind::Sort(SortKind::Prop) => {}
+                    other => panic!("expected Sort(Prop), got {other:?}"),
+                }
+                assert_eq!(d.result_sort, Some(SortKind::Type(0)));
+            }
+            _ => panic!("expected data"),
+        }
+    }
+
+    #[test]
+    fn data_indexed_accepts_all_three_sort_literals_in_indices() {
+        // Exercises Prop, Set, and Type N as intermediate index kinds in
+        // a single declaration to confirm the parser/AST/encoder path
+        // handles each shape.
+        let file = parse_str(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Triple : Prop -> Set -> Type 2 -> Type 3 {
+                mk : forall (p : Prop) => forall (s : Set) => forall (t : Type 2) => ex:Triple(p, s, t),
+            }
+            "#,
+        )
+        .unwrap();
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                assert_eq!(d.indices.len(), 3);
+                assert!(matches!(d.indices[0].kind, IndexKind::Sort(SortKind::Prop)));
+                assert!(matches!(d.indices[1].kind, IndexKind::Sort(SortKind::Set)));
+                assert!(matches!(
+                    d.indices[2].kind,
+                    IndexKind::Sort(SortKind::Type(2))
+                ));
+                assert_eq!(d.result_sort, Some(SortKind::Type(3)));
             }
             _ => panic!("expected data"),
         }
@@ -3415,15 +3637,42 @@ mod tests {
     }
 
     #[test]
-    fn data_no_constructors_rejected() {
-        let err = parse_str(
+    fn data_zero_constructors_accepted() {
+        // Zero-ctor inductives are valid: absurd in `Set`/`Type`, opaque
+        // predicates in `Prop`. Required for D39 §4.1 `core:Asserts`,
+        // D49 §6 `ChainWitness.Is*As`, and any future Void-shaped or
+        // kernel-internal-predicate declaration. The parser does not
+        // policing this; well-formedness is a kernel-checker concern.
+        let file = parse_str(
             r#"
-            data ex:Empty {
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Void : Set {
+            }
+
+            data ex:Opaque : core:string -> Prop {
             }
             "#,
         )
-        .unwrap_err();
-        assert!(err.message.contains("at least one constructor"));
+        .unwrap();
+        assert_eq!(file.declarations.len(), 2);
+        match &file.declarations[0] {
+            Declaration::Data(d) => {
+                assert_eq!(d.name.name, "Void");
+                assert!(d.ctors.is_empty());
+                assert_eq!(d.result_sort, Some(SortKind::Set));
+            }
+            _ => panic!("expected data"),
+        }
+        match &file.declarations[1] {
+            Declaration::Data(d) => {
+                assert_eq!(d.name.name, "Opaque");
+                assert!(d.ctors.is_empty());
+                assert_eq!(d.result_sort, Some(SortKind::Prop));
+                assert_eq!(d.indices.len(), 1);
+            }
+            _ => panic!("expected data"),
+        }
     }
 
     #[test]
