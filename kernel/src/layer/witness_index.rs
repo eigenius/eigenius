@@ -89,8 +89,40 @@ pub fn build_witness_index(layer: &Layer) -> BTreeMap<WitnessKey, ()> {
                 index.insert(key, ());
             }
         }
+        // D52 verdict-as-DerivedResource shape: AutoOnLoad-emitted
+        // Verdicts that carry `reflection:canonical_proposition` are
+        // self-attesting — the kernel produced them deterministically
+        // from a decidable institution, no separate trace is needed
+        // to certify their existence. Walk these directly and admit
+        // `IsDerivedAs(verdict_iri, P)` against the verdict's own IRI.
+        // Verdicts without `canonical_proposition` (Lean / Reasoning
+        // institution verdicts) are skipped — they're audit anchors,
+        // not derivation witnesses.
+        if is_a.iter().any(|c| c.as_str() == wk::VERDICT) {
+            if let Some(key) = emit_from_self_attesting_verdict(&resource) {
+                index.insert(key, ());
+            }
+        }
     }
     index
+}
+
+/// D52 verdict-as-DerivedResource: read `canonical_proposition` directly
+/// off a Verdict resource and build a `WitnessKey` keyed against the
+/// verdict's own IRI. Returns `None` when the verdict has no
+/// `canonical_proposition` set (Lean / Reasoning verdicts skip; only
+/// statistics-institution verdicts populate it under the verdict-as-
+/// DerivedResource convention).
+fn emit_from_self_attesting_verdict(verdict: &Resource) -> Option<WitnessKey> {
+    let verdict_iri = verdict.id().cloned()?;
+    let prop_iri = Iri::parse(wk::CANONICAL_PROPOSITION).ok()?;
+    let encoded_prop = verdict.get(&prop_iri)?;
+    let prop_hash = hash_proposition_value(encoded_prop);
+    Some(WitnessKey {
+        category: WitnessCategory::Derived,
+        iri: verdict_iri,
+        prop_hash,
+    })
 }
 
 /// Read a Trace resource's target IRI and the target's

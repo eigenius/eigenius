@@ -162,6 +162,46 @@ data stats:OutlierExclusion {
     Manual(core:string),                                           // serialized array of (unit_id, qc_iri) — refined when assay-quality institutions land
 }
 
+// ── Parameter symbols + propositional primitives (D52 §3 revision) ───
+//
+// The statistics institution computes the canonical proposition for
+// every MeasurementClaim from the claim's other parameters (effect_
+// size, directionality, dispatch position). To express those derived
+// propositions as chain-resident type-fragment values, the institution
+// needs:
+//
+//   1. Opaque parameter symbols typed (sample_set_iri) -> Float — the
+//      kernel admits these as axioms so they're typed handles to
+//      unobservable population quantities. No reasoning system can
+//      unfold them to numerical values (the population mean is
+//      unobservable by definition); the parameter symbol is the
+//      typed handle the test's H0 / H1 is written against.
+//
+//   2. Numeric ordering predicates Float -> Float -> Prop — admitted
+//      axiomatically. A future numeric-ordering institution could
+//      decide the literal-operand case (e.g. `stats:lt(3.0, 5.0)`
+//      decidable to Holds); for the hypothesis-encoding use case the
+//      operand is a parameter symbol so no decision is required.
+//
+//   3. The False zero-ctor Prop inductive for the `P -> False`
+//      negation idiom used in the two-sided alternative hypothesis.
+//      Case-A singleton-elim shape per D46 §7.2 — the kernel admits
+//      large elimination from absurd inhabitants vacuously.
+
+data stats:False : Prop { }
+
+axiom stats:mean_of      : core:string -> core:float
+axiom stats:variance_of  : core:string -> core:float
+axiom stats:median_of    : core:string -> core:float
+axiom stats:mean_diff_of : core:string -> core:float
+axiom stats:slope_of     : core:string -> core:float
+axiom stats:intercept_of : core:string -> core:float
+
+axiom stats:lt : core:float -> core:float -> Prop
+axiom stats:le : core:float -> core:float -> Prop
+axiom stats:gt : core:float -> core:float -> Prop
+axiom stats:ge : core:float -> core:float -> Prop
+
 // ── Raw observation shape ────────────────────────────────────────────
 //
 // Phase 1 first slice carries observations inline as a value-array of
@@ -575,19 +615,25 @@ property stats:sample_set_value : core:resource {
     domain stats:SampleSetResource;
 }
 
-// ── MeasurementClaim (D52 §3) ────────────────────────────────────────
+// ── MeasurementClaim (D52 §3 — verdict-as-DerivedResource revision) ──
 //
-// The chain-resident pairing of a SampleSet reference with the
-// universal claim parameters. AutoOnLoad dispatch on every commit
-// triggers the institution's verifier (D52 §6 decidable-recomputation
-// contract).
+// The chain-resident author-side request: a SampleSet reference plus
+// the universal claim parameters. The claim itself carries no
+// propositional slots — the statistics institution computes the
+// canonical proposition mechanically from (effect_size, directionality,
+// dispatch's product position, parameter symbol set) at AutoOnLoad
+// firing time and emits it on the chain-committed Verdict resource at
+// `{claim_iri}:verdict`. Downstream `DerivedEvidence` consumers cite
+// the verdict IRI, not the claim IRI; the chain-witness index keys
+// `IsDerivedAs(verdict_iri, P)` accordingly.
+//
+// The claim is not itself a DerivedResource. It is the *question* the
+// chain commits an author asked; the *answer* (with its derived
+// proposition + numerics) is the Verdict the institution emits.
 
-class stats:MeasurementClaim : reflection:DerivedResource {
-    description = "A statistical claim asserted against a SampleSet's raw replicates. The institution's qc_validate_measurement_claim handler recomputes the claim from raw data at commit time; Holds admits the commit, Fails rejects it with a structured diagnostic (D52 §6). The MeasurementClaim IS itself the chain-resident DerivedResource downstream D39 reasoning cites via DerivedEvidence — its reflection:canonical_proposition field carries the predicate the claim establishes when the test holds, and the witness index hashes it for IsDerivedAs admission (D49 §6). A companion ProgramTrace pointing at the claim's IRI is required to actually emit the witness. (Drops the earlier stats:derived_proposition field per D52 review — canonical_proposition serves both roles, one slot one source of truth.)";
+class stats:MeasurementClaim {
+    description = "A statistical claim asserted against a SampleSet's raw replicates: the chain-resident pre-registration of a test (the SAP). Pairs a SampleSet reference with the universal claim parameters (alpha, effect_size, directionality, variance assumption, outlier rule). The statistics institution's qc_validate_measurement_claim handler fires AutoOnLoad at commit, derives the canonical proposition from the parameters (H1 in the population-parameter language using the stats:mean_of / stats:lt / etc. axioms), recomputes the test from raw data, and emits a MeasurementVerdict resource at `{claim_iri}:verdict` carrying the derived proposition + the numerics. Holds admits the commit; Fails rejects with a structured diagnostic (D52 §6). The Verdict is the DerivedResource downstream D39 reasoning cites via DerivedEvidence — the chain attests only propositions the institution actually constructed, not pre-asserted by the author.";
     requires stats:sample_set,
-             stats:null_hypothesis,
-             stats:alternative_hypothesis,
-             reflection:canonical_proposition,
              stats:alpha,
              stats:effect_size,
              stats:directionality,

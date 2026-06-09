@@ -82,6 +82,26 @@ pub mod iris {
     pub const PROP_COMPUTED_STATISTIC: &str = "urn:eigenius:measurements:computed_statistic";
     pub const PROP_COMPUTED_P_VALUE: &str = "urn:eigenius:measurements:computed_p_value";
     pub const PROP_DUAL_VERDICT_PAIR: &str = "urn:eigenius:measurements:dual_verdict_pair";
+
+    // ── Parameter-symbol axioms + propositional primitives (D52 §3) ──
+    //
+    // Used by the canonical-proposition derivation: the institution
+    // builds a chain-resident D47 type-fragment value whose ConstRef
+    // leaves point at these declared resources. The hash of that value
+    // is what the D49 witness index keys on; the consumer side
+    // (D39 reasoning) constructs the matching Exp from a proof term
+    // and arrives at the same hash via `encode_type → hash_proposition_value`.
+    pub const STATS_FALSE: &str = "urn:eigenius:measurements:False";
+    pub const STATS_MEAN_OF: &str = "urn:eigenius:measurements:mean_of";
+    pub const STATS_VARIANCE_OF: &str = "urn:eigenius:measurements:variance_of";
+    pub const STATS_MEDIAN_OF: &str = "urn:eigenius:measurements:median_of";
+    pub const STATS_MEAN_DIFF_OF: &str = "urn:eigenius:measurements:mean_diff_of";
+    pub const STATS_SLOPE_OF: &str = "urn:eigenius:measurements:slope_of";
+    pub const STATS_INTERCEPT_OF: &str = "urn:eigenius:measurements:intercept_of";
+    pub const STATS_LT: &str = "urn:eigenius:measurements:lt";
+    pub const STATS_LE: &str = "urn:eigenius:measurements:le";
+    pub const STATS_GT: &str = "urn:eigenius:measurements:gt";
+    pub const STATS_GE: &str = "urn:eigenius:measurements:ge";
 }
 
 /// In-process measurement-statistics institution.

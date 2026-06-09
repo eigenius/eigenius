@@ -69,6 +69,16 @@ pub struct AutoOnLoadDispatch {
     pub signature_iri: Iri,
     /// The verdict the institution returned.
     pub verdict: VerdictReading,
+    /// The institution's full output Resource. Carries the
+    /// `ctor_name` the kernel reads via [`parse_verdict`], plus any
+    /// institution-specific properties the kernel preserves onto the
+    /// chain-committed Verdict via [`build_verdict_resource`]'s merge
+    /// step. Statistics-institution Verdicts carry
+    /// `reflection:canonical_proposition` + `computed_statistic` +
+    /// `computed_p_value` here so the chain-witness index can admit
+    /// `IsDerivedAs(verdict_iri, P)` against the verdict directly
+    /// (D52 verdict-as-DerivedResource shape).
+    pub output: Resource,
     /// Substrate-captured partial `RuntimeInvocation` (D26 §5.5).
     /// `None` for in-process / WASM institutions whose dispatch
     /// happens entirely inside the kernel host process — the kernel
@@ -242,6 +252,7 @@ pub fn dispatch_auto_on_load_for_resource(
                         query_class_iri: query_class_iri.clone(),
                         signature_iri: query_class.query_handler.clone(),
                         verdict,
+                        output: out.output,
                         partial_invocation: out.partial_invocation,
                         environment_iri,
                     });
@@ -307,10 +318,7 @@ pub fn build_verdict_resource(
     use crate::ontology::well_known as wk;
 
     let subject_iri = dispatch.subject_iri.as_ref()?;
-    let verdict_iri = match runtime_invocation_iri {
-        Some(inv) => Iri::parse(&format!("{}:verdict", inv.as_str())).expect("derived IRI"),
-        None => fallback_verdict_iri(&dispatch.query_class_iri, subject_iri),
-    };
+    let verdict_iri = derive_verdict_iri_for(runtime_invocation_iri, subject_iri);
     let mut r = Resource::new(verdict_iri);
     r.set(
         Iri::parse(wk::IS_A).expect("static IRI"),
@@ -349,7 +357,67 @@ pub fn build_verdict_resource(
             Value::String(diag.to_string()),
         );
     }
+    // Merge institution-output properties onto the chain-committed
+    // Verdict. The kernel sets is_a, ctor_name, verdict_subject,
+    // verdict_query_class, runtime_invocation, dispatched_to,
+    // diagnostic; any other property the institution returned on its
+    // output Resource (e.g. statistics-institution's
+    // canonical_proposition, computed_statistic, computed_p_value) is
+    // copied through so the Verdict carries the full audit-anchor
+    // shape the institution computed.
+    let protected = protected_verdict_properties();
+    for (prop_iri, value) in dispatch.output.properties() {
+        if protected.contains(prop_iri.as_str()) {
+            continue;
+        }
+        // Skip if already set (kernel-set properties take precedence).
+        if r.has(prop_iri) {
+            continue;
+        }
+        r.set(prop_iri.clone(), value.clone());
+    }
     Some(r)
+}
+
+/// IRIs the kernel's `build_verdict_resource` sets itself — institution-
+/// output properties at the same IRI are NOT merged through, because the
+/// kernel's values are the source of truth. Other institution outputs
+/// (computed_statistic, computed_p_value, canonical_proposition, etc.)
+/// flow through.
+fn protected_verdict_properties() -> std::collections::HashSet<&'static str> {
+    use crate::ontology::well_known as wk;
+    [
+        wk::IS_A,
+        wk::CTOR_NAME,
+        VERDICT_SUBJECT_PROP,
+        VERDICT_QUERY_CLASS_PROP,
+        RUNTIME_INVOCATION_PROP,
+        VERDICT_DIAGNOSTIC_PROP,
+        "urn:eigenius:runtime:dispatched_to",
+    ]
+    .into_iter()
+    .collect()
+}
+
+/// Compute the chain-committable Verdict IRI per D31 §6.3 + the
+/// D52 verdict-as-DerivedResource shape:
+///
+/// - If a `RuntimeInvocation` accompanies the Verdict (external /
+///   substrate-hosted institutions), the Verdict IRI is
+///   `{invocation_iri}:verdict` — preserves the existing scheme so
+///   D28 / Julia institutions keep their per-invocation Verdict IRIs.
+/// - Otherwise (in-process / WASM institutions where the verdict is
+///   a deterministic function of the subject), the Verdict IRI is
+///   `{subject_iri}:verdict` — a deterministic, 1:1 derivation that
+///   lets downstream `DerivedEvidence` consumers cite the Verdict
+///   directly without a UUID-indirection lookup. Re-runs against the
+///   same claim produce the same Verdict IRI; the chain's append-only
+///   discipline collapses idempotent re-emission to a no-op.
+pub fn derive_verdict_iri_for(runtime_invocation_iri: Option<&Iri>, subject_iri: &Iri) -> Iri {
+    match runtime_invocation_iri {
+        Some(inv) => Iri::parse(&format!("{}:verdict", inv.as_str())).expect("derived IRI"),
+        None => fallback_verdict_iri(subject_iri),
+    }
 }
 
 /// Build the full chain-committable `RuntimeInvocation` resource by
@@ -423,19 +491,19 @@ const RUNTIME_INVOCATION_PROP: &str = "urn:eigenius:institution:runtime_invocati
 /// Property IRI for `Verdict.diagnostic`.
 const VERDICT_DIAGNOSTIC_PROP: &str = "urn:eigenius:institution:diagnostic";
 
-/// Best-effort Verdict IRI when there's no companion RuntimeInvocation
-/// to derive from (in-process / WASM dispatches). Uses the QueryClass
-/// short name plus the subject short name as a stable discriminator;
-/// collisions across re-runs are acceptable since the chain is
-/// append-only and the Verdict IRI carries no causal claim by itself.
-fn fallback_verdict_iri(query_class: &Iri, subject: &Iri) -> Iri {
-    let qc_short = query_class.as_str().rsplit(':').next().unwrap_or("qc");
-    let sub_short = subject.as_str().rsplit(':').next().unwrap_or("sub");
-    Iri::parse(&format!(
-        "urn:eigenius:verdict:{qc_short}:{sub_short}:{}",
-        uuid::Uuid::new_v4()
-    ))
-    .expect("uuid-derived IRI parses")
+/// Deterministic Verdict IRI when there's no companion RuntimeInvocation
+/// to derive from (in-process / WASM dispatches). Uses the gated
+/// subject's IRI plus a `:verdict` suffix — the verdict is a
+/// deterministic function of the subject (no UUID indirection
+/// required for institutions whose verdicts are reproducible from
+/// the subject alone, like D52's statistics institution under its
+/// decidable-recomputation contract). Re-running an AutoOnLoad-gated
+/// commit against the same subject produces the same verdict IRI;
+/// the chain's append-only discipline collapses re-emission to a
+/// no-op when the verdict's content is also idempotent (which it
+/// must be for any decidable institution).
+fn fallback_verdict_iri(subject: &Iri) -> Iri {
+    Iri::parse(&format!("{}:verdict", subject.as_str())).expect("derived verdict IRI parses")
 }
 
 /// Result of reading a Verdict off a result resource. Mirrors the

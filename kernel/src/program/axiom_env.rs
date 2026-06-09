@@ -217,13 +217,23 @@ mod tests {
     }
 
     #[test]
-    fn empty_env_when_no_axioms() {
-        // Bootstrap chain has no axioms; env is empty.
+    fn bootstrap_env_has_only_statistics_axioms() {
+        // Bootstrap chain ships the D52 parameter-symbol + ordering
+        // axiom set (stats:mean_of / stats:variance_of / stats:median_of
+        // / stats:mean_diff_of / stats:slope_of / stats:intercept_of /
+        // stats:lt / stats:le / stats:gt / stats:ge — ten axioms).
+        // Every entry should be in the stats namespace.
         let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
         let env = build_axiom_env(&head).unwrap();
+        let unexpected: Vec<&Iri> = env
+            .iter()
+            .map(|(iri, _)| iri)
+            .filter(|iri| !iri.as_str().starts_with("urn:eigenius:measurements:"))
+            .collect();
         assert!(
-            env.is_empty(),
-            "bootstrap chain should have no axioms by default"
+            unexpected.is_empty(),
+            "bootstrap axioms should only be the D52 statistics axiom set; \
+             unexpected non-stats axioms: {unexpected:?}"
         );
     }
 
@@ -255,10 +265,11 @@ mod tests {
             Some("Propositional extensionality (D46 §10.1)"),
         )]);
         let env = build_axiom_env(&chain).unwrap();
-        assert_eq!(env.len(), 1, "expected one registered axiom");
+        // Bootstrap ships the D52 parameter-symbol + ordering axioms
+        // (10 entries) plus the one we just registered = 11 total.
         let entry = env
             .get(&iri("urn:eigenius:test:propext"))
-            .expect("propext should be registered");
+            .expect("propext should be registered alongside the bootstrap axiom set");
         // propext's type should inhabit Prop (the impredicative Pi rule
         // collapses everything quantifying over Prop into Prop).
         assert!(

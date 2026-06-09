@@ -739,6 +739,30 @@ pub fn do_validate_measurement_claim(
             }
         };
 
+    // ── Step 6.5: derive the canonical proposition ────────────────────
+    //
+    // The verifier — not the author — constructs the canonical
+    // proposition the verdict attests. The author supplies the
+    // statistical parameters (effect_size, directionality, dispatch
+    // position); the verifier derives the Prop expression from those
+    // parameters via the §3 parameter-symbol axioms (stats:mean_of,
+    // stats:lt, stats:False, ...). One source of truth: the alternative
+    // hypothesis IS the canonical proposition, derivable deterministically
+    // from (dispatch, effect_size, directionality). When the derivation
+    // shape isn't yet wired for a dispatch arm, this returns `None` —
+    // the verdict skips the canonical_proposition slot and the D49
+    // witness emitter won't admit `IsDerivedAs` against it, which is
+    // the correct fail-closed behaviour until those arms' derivations
+    // land.
+    let derived_proposition: Option<serde_json::Value> = match dispatch {
+        DispatchPos::SingleSampleEstimate => derive_canonical_proposition_singlesample(
+            &sample_set_iri_str,
+            &effect_size,
+            &directionality,
+        ),
+        _ => None,
+    };
+
     // ── Step 7: §7.4 epistemic-scope check ────────────────────────────
     //
     // Decode the derived_proposition's head predicate IRI, look up its
@@ -750,7 +774,7 @@ pub fn do_validate_measurement_claim(
     // Phase 1 implements the simple form: read the predicate's class
     // memberships and check for the marker. A predicate with no scope
     // marker defaults to PopulationLevel (the more restrictive admissibility).
-    let scope_diag = check_epistemic_scope(claim, &bundle.replication, ctx)?;
+    let scope_diag = check_epistemic_scope(derived_proposition.as_ref(), &bundle.replication, ctx)?;
     if let Some(d) = scope_diag {
         return Ok(verdict_fails(d));
     }
@@ -804,6 +828,7 @@ pub fn do_validate_measurement_claim(
             wk::VERDICT_HOLDS,
             combined_diag.as_deref(),
             Some((t_statistic, p_value_for_alpha)),
+            derived_proposition.as_ref(),
         )))
     } else {
         let fail_diag = match combined_diag.as_deref() {
@@ -818,6 +843,7 @@ pub fn do_validate_measurement_claim(
             wk::VERDICT_FAILS,
             Some(&fail_diag),
             Some((t_statistic, p_value_for_alpha)),
+            None,
         )))
     }
 }
@@ -926,10 +952,18 @@ fn recompute_method_comparison_claim(
     } else {
         format!("MethodComparisonDisagreement: {diag}")
     };
+    // MethodComparison: canonical_proposition derivation is not yet
+    // wired — the §7.3 Phase 5 v1 hardening lands when this dispatch
+    // gets its (slope = 1.0 ∧ intercept = 0.0) Prop derivation, at
+    // which point the Holds verdict will carry the matching D47-
+    // encoded Pi/And/Id tree. Today the verdict is an audit anchor
+    // only; the D49 witness emitter will skip it (no
+    // canonical_proposition ⇒ no Derived witness key).
     Ok(QueryOutcome::from_output(verdict_resource(
         ctor,
         Some(&diag_string),
         Some((res.slope, p_indicator)),
+        None,
     )))
 }
 
@@ -1694,16 +1728,22 @@ fn check_impossibility_witness(
 // §7.4 epistemic-scope check
 // ────────────────────────────────────────────────────────────────────
 
-/// Decode the claim's `derived_proposition`, extract its head predicate
-/// IRI, look up that predicate's `is_a` markers, and check
-/// admissibility against the SampleSet's replication kind.
+/// Extract the canonical proposition's head predicate IRI, look up its
+/// `is_a` markers, and check admissibility against the SampleSet's
+/// replication kind.
+///
+/// `derived_proposition` is the JSON D47 value the verifier just
+/// constructed (the verdict's canonical_proposition slot). When the
+/// dispatch arm hasn't yet wired derivation, the parameter is `None`
+/// and the scope check treats it as inconclusive — the dispatch arm's
+/// own rejection diagnostic is the load-bearing one in that case.
 ///
 /// Returns `Ok(None)` if the scope is admissible; `Ok(Some(diag))` with
 /// a diagnostic string if the institution must reject the claim per
 /// §7.4. `Err(_)` only for genuine institutional failures (resolution
 /// errors etc.), not scope mismatches.
 fn check_epistemic_scope(
-    claim: &Resource,
+    derived_proposition: Option<&serde_json::Value>,
     replication: &ReplicationKind,
     ctx: &ExecutionContext,
 ) -> Result<Option<String>, InstitutionError> {
@@ -1714,17 +1754,17 @@ fn check_epistemic_scope(
     }
     // TechnicalWithinRun: the claim is admissible only if the
     // canonical_proposition's head predicate is marked MeasurementLevel.
-    let derived_prop = match read_json_property(claim, iris::PROP_CANONICAL_PROPOSITION)? {
+    let derived_prop = match derived_proposition {
         Some(j) => j,
         None => {
-            // No canonical_proposition — the claim's `requires` clause
-            // catches this as a malformed-resource error before the
-            // institution dispatches; treat here as "scope-check
-            // inconclusive" since we have nothing to scope-check.
+            // No derived canonical_proposition — the dispatch arm
+            // didn't wire its derivation, so there's nothing to scope-
+            // check. The arm's own rejection diagnostic carries the
+            // load-bearing reason; this branch returns "inconclusive."
             return Ok(None);
         }
     };
-    let predicate_iri = match extract_head_predicate_iri(&derived_prop) {
+    let predicate_iri = match extract_head_predicate_iri(derived_prop) {
         Some(iri) => iri,
         None => {
             // Couldn't extract the head predicate (e.g., the prop is a
@@ -1771,6 +1811,97 @@ fn check_epistemic_scope(
              scope predicate (e.g., `HasLowIC50_OnThisBatch`)."
         )))
     }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Canonical-proposition derivation (D52 §3 revision)
+// ────────────────────────────────────────────────────────────────────
+//
+// The verifier — not the author — constructs the alternative
+// hypothesis from the claim's statistical parameters. One canonical
+// proposition per (dispatch, effect_size, directionality) triple.
+// Each value is a D47 chain-mirrored type-fragment JSON tree whose
+// hash the D49 witness index keys on; consumer-side reasoning
+// (D39 reasoning institution + ESL `DerivedEvidence`) reconstructs
+// the same Exp from a proof term, encodes via the same `encode_type`
+// path, and arrives at the same hash. The hash equality is the
+// soundness guarantee tying chain-resident verdict to chain-resident
+// citation.
+
+/// Derive the canonical proposition for a `SingleSampleEstimate`
+/// dispatch. Returns `None` for parameter shapes that aren't yet wired
+/// (the verdict skips its `canonical_proposition` slot in that case).
+///
+/// `TwoSided + Absolute(T)`           ⇒  `¬(stats:mean_of(s) = T)`
+///                                     ≡ `Pi(_, Id(core:float, mean_of(s), T), stats:False)`
+/// `OneSidedWitnessed + Absolute(T)`  ⇒  `stats:lt(stats:mean_of(s), T)`
+///                                     ≡ `App(App(ConstRef(stats:lt), mean_of(s)), T)`
+///
+/// The OneSidedWitnessed arm defaults to `stats:lt` (less-than)
+/// because the `Directionality.OneSidedWitnessed(witness_iri)` ctor
+/// doesn't yet carry the direction. The running IC50 example is a
+/// `< T` claim, so this default is consistent with the only
+/// OneSidedWitnessed shape exercised in v1. When the ctor gets a
+/// direction parameter, this arm reads it and routes to `stats:lt`
+/// vs `stats:gt` accordingly.
+fn derive_canonical_proposition_singlesample(
+    sample_set_iri: &str,
+    effect_size: &serde_json::Value,
+    directionality: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    use crate::institution::iris as i;
+    let (magnitude, _units) = parse_effect_size_absolute(effect_size)?;
+    let mean_of_s = encode_app(
+        encode_const_ref(i::STATS_MEAN_OF),
+        encode_lit_string(sample_set_iri),
+    );
+    let threshold = encode_lit_float(magnitude);
+    match json_ctor_name(directionality)? {
+        "TwoSided" => {
+            // ¬(mean_of(s) = T) ≡ (mean_of(s) = T) → False
+            // ≡ Pi("", Id(core:float, mean_of(s), T), False)
+            let eq = encode_id(encode_const_ref(wk::FLOAT), mean_of_s, threshold);
+            let false_ = encode_const_ref(i::STATS_FALSE);
+            Some(encode_pi("", eq, false_))
+        }
+        "OneSidedWitnessed" => {
+            // stats:lt(mean_of(s), T) — see fn-level note on the
+            // direction default.
+            Some(encode_app(
+                encode_app(encode_const_ref(i::STATS_LT), mean_of_s),
+                threshold,
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn encode_const_ref(iri: &str) -> serde_json::Value {
+    serde_json::json!({"ctor": "ConstRef", "args": [iri]})
+}
+
+fn encode_lit_string(s: &str) -> serde_json::Value {
+    serde_json::json!({"ctor": "LitString", "args": [s]})
+}
+
+fn encode_lit_float(f: f64) -> serde_json::Value {
+    serde_json::json!({"ctor": "LitFloat", "args": [f]})
+}
+
+fn encode_app(head: serde_json::Value, arg: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({"ctor": "App", "args": [head, arg]})
+}
+
+fn encode_pi(binder: &str, dom: serde_json::Value, body: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({"ctor": "Pi", "args": [binder, dom, body]})
+}
+
+fn encode_id(
+    ty: serde_json::Value,
+    lhs: serde_json::Value,
+    rhs: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({"ctor": "Id", "args": [ty, lhs, rhs]})
 }
 
 /// Extract the head predicate's IRI from a D47-encoded proposition.
@@ -1854,9 +1985,16 @@ fn read_json_property(
 }
 
 /// Build a Fails verdict carrying a diagnostic string. No computed
-/// numerics (the failure happened before we ran the test).
+/// numerics (the failure happened before we ran the test). No
+/// canonical_proposition either — the witness emitter must not key
+/// `IsDerivedAs` against a verdict that didn't succeed.
 fn verdict_fails(diagnostic: String) -> QueryOutcome {
-    QueryOutcome::from_output(verdict_resource(wk::VERDICT_FAILS, Some(&diagnostic), None))
+    QueryOutcome::from_output(verdict_resource(
+        wk::VERDICT_FAILS,
+        Some(&diagnostic),
+        None,
+        None,
+    ))
 }
 
 /// Build the Verdict::Holds | Fails resource shape the kernel's commit
@@ -1864,10 +2002,21 @@ fn verdict_fails(diagnostic: String) -> QueryOutcome {
 /// ran), the numerics are attached so downstream consumers see the
 /// computed statistic + p-value alongside the outcome (D52 §6 — verdict
 /// carries the full intermediate state for audit).
+///
+/// `canonical_proposition` is the derived chain-resident D47 type-
+/// fragment value for the claim — set ONLY on Holds verdicts, since
+/// the D49 witness index reads it directly off the verdict to admit
+/// `IsDerivedAs(verdict_iri, P)` and a Fails verdict must not entitle
+/// a downstream `DerivedEvidence` citation. (The dispatch arms that
+/// haven't yet wired derivation pass `None` here — their Holds
+/// verdicts won't be witness-emitted, which is exactly the correct
+/// behaviour until those arms supply the canonical-proposition shape
+/// for their parameter shapes.)
 fn verdict_resource(
     ctor_name: &str,
     diagnostic: Option<&str>,
     numerics: Option<(f64, f64)>,
+    canonical_proposition: Option<&serde_json::Value>,
 ) -> Resource {
     const DIAGNOSTIC_IRI: &str = "urn:eigenius:institution:diagnostic";
     let mut r = Resource::new_embedded();
@@ -1895,6 +2044,12 @@ fn verdict_resource(
         r.set(
             Iri::parse(iris::PROP_COMPUTED_P_VALUE).expect("static IRI"),
             Value::Float(p),
+        );
+    }
+    if let Some(prop) = canonical_proposition {
+        r.set(
+            Iri::parse(iris::PROP_CANONICAL_PROPOSITION).expect("static IRI"),
+            Value::Json(prop.clone()),
         );
     }
     r
