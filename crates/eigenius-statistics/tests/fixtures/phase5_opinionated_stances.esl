@@ -1,0 +1,276 @@
+// D52 Phase 5 fixture — Opinionated-stance hardening end-to-end.
+//
+// Covers the three §7 hardenings landed in Phase 5:
+//   §7.1 — OneSidedWitnessed directionality with an ImpossibilityWitness
+//   §7.2 — Dual-verdict ESD outlier exclusion on SingleSampleEstimate
+//   §7.3 — MethodComparisonClaim + Passing-Bablok dispatch
+//
+// Domain framing: a small in-vitro radioligand-decay study (§7.1's
+// half-life-is-positive impossibility witness lives naturally here),
+// a small assay-noise sample with two clear outliers (§7.2), and a
+// two-method comparison of compound-concentration readouts (§7.3).
+// The fixtures are minimal but exercise the load-bearing rejection
+// paths.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace stats      = "urn:eigenius:measurements";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace decay      = "urn:eigenius:demo:decay";
+namespace methods    = "urn:eigenius:demo:methods";
+namespace assay      = "urn:eigenius:demo:assay";
+
+// ── §7.1 fixtures ───────────────────────────────────────────────────
+
+// PopulationLevel-marker predicate for the half-life claim. The
+// asserted-direction implicit semantics: "half-life is less than X
+// minutes", with the impossibility witness saying the inverse
+// ("negative half-life") is physically impossible.
+data decay:HasShortHalfLife : core:string -> Prop, stats:PopulationLevel {
+}
+
+// The impossibility witness — a chain resource asserting that the
+// inverse-direction proposition (negative half-life) is impossible.
+// The marker class membership is what the institution checks; the
+// resource's content is opaque to the verifier (audit only).
+resource decay:half_life_positivity_witness : stats:ImpossibilityWitness {
+    reflection:source      = "physics-textbook:radioactive-decay-axiom";
+    reflection:observed_at = "2026-01-01T00:00:00Z";
+}
+
+// Half-life readings from a small in-vitro decay assay — 6 replicates
+// clustered around 8 minutes (claim asserts < 12 min one-sidedly,
+// witnessed by the half_life_positivity_witness).
+resource decay:half_life_sampleset : stats:SampleSetResource {
+    reflection:source      = "decay-assay:lab-2026-04-01";
+    reflection:observed_at = "2026-04-01T10:00:00Z";
+
+    stats:sample_set_value = stats:SingleSampleEstimate(
+        [7.5, 8.2, 7.8, 8.5, 8.0, 8.1],
+        BiologicalReplication(),
+    );
+}
+
+resource decay:half_life_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = decay:half_life_sampleset;
+    reflection:source    = "decay-assay:lab-2026-04-01";
+    reflection:timestamp = "2026-04-01T10:00:00Z";
+}
+
+// The OneSidedWitnessed claim — should Holds with halved p-value
+// (raw two-sided p is small enough that the alpha comparison passes
+// either way, but the §7.1 witness validation must accept and the
+// diagnostic must mention the one-sided derivation).
+resource decay:claim_short_half_life_onesided : stats:MeasurementClaim {
+    stats:sample_set = decay:half_life_sampleset;
+
+    stats:null_hypothesis = type_expr(
+        decay:HasShortHalfLife("urn:eigenius:demo:decay:compound_A")
+    );
+    stats:alternative_hypothesis = type_expr(
+        decay:HasShortHalfLife("urn:eigenius:demo:decay:compound_A")
+    );
+    reflection:canonical_proposition = type_expr(
+        decay:HasShortHalfLife("urn:eigenius:demo:decay:compound_A")
+    );
+
+    stats:alpha = 0.05;
+    stats:effect_size = Absolute(12.0, "minutes");
+    stats:directionality = OneSidedWitnessed(
+        "urn:eigenius:demo:decay:half_life_positivity_witness"
+    );
+    stats:variance_assumption = WelchUnequal();
+    stats:outlier_exclusion = Identity();
+}
+
+resource decay:claim_short_half_life_onesided_trace : reflection:ProgramTrace {
+    reflection:resource  = decay:claim_short_half_life_onesided;
+    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:timestamp = "2026-04-01T10:00:00Z";
+}
+
+// Sibling claim with a witness that does NOT exist on chain — the
+// verifier must reject with the §7.1 "witness not committed on chain"
+// diagnostic.
+resource decay:claim_short_half_life_bad_witness : stats:MeasurementClaim {
+    stats:sample_set = decay:half_life_sampleset;
+
+    stats:null_hypothesis = type_expr(
+        decay:HasShortHalfLife("urn:eigenius:demo:decay:compound_A")
+    );
+    stats:alternative_hypothesis = type_expr(
+        decay:HasShortHalfLife("urn:eigenius:demo:decay:compound_A")
+    );
+    reflection:canonical_proposition = type_expr(
+        decay:HasShortHalfLife("urn:eigenius:demo:decay:compound_A")
+    );
+
+    stats:alpha = 0.05;
+    stats:effect_size = Absolute(12.0, "minutes");
+    stats:directionality = OneSidedWitnessed(
+        "urn:eigenius:demo:decay:nonexistent_witness"
+    );
+    stats:variance_assumption = WelchUnequal();
+    stats:outlier_exclusion = Identity();
+}
+
+resource decay:claim_short_half_life_bad_witness_trace : reflection:ProgramTrace {
+    reflection:resource  = decay:claim_short_half_life_bad_witness;
+    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:timestamp = "2026-04-01T10:00:00Z";
+}
+
+// ── §7.2 fixtures ───────────────────────────────────────────────────
+
+data assay:HasLowReadout : core:string -> Prop, stats:PopulationLevel {
+}
+
+// Assay-noise SampleSet — 10 readings tightly clustered around 50
+// plus 2 extreme outliers (200, 250). ESD(max_outliers=3, alpha=0.05)
+// should flag the two extreme values; the with-exclusion test gives a
+// tight cluster around 50 (clearly < threshold), the without-exclusion
+// raw mean is inflated by the outliers (closer to the threshold).
+resource assay:noisy_readout_sampleset : stats:SampleSetResource {
+    reflection:source      = "assay-plate:noisy-2026-04-02";
+    reflection:observed_at = "2026-04-02T11:00:00Z";
+
+    stats:sample_set_value = stats:SingleSampleEstimate(
+        [48.0, 50.0, 49.5, 51.0, 50.5, 49.0, 50.0, 51.5, 49.0, 50.5,
+         200.0, 250.0],
+        BiologicalReplication(),
+    );
+}
+
+resource assay:noisy_readout_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = assay:noisy_readout_sampleset;
+    reflection:source    = "assay-plate:noisy-2026-04-02";
+    reflection:timestamp = "2026-04-02T11:00:00Z";
+}
+
+resource assay:claim_low_readout_esd : stats:MeasurementClaim {
+    stats:sample_set = assay:noisy_readout_sampleset;
+
+    stats:null_hypothesis = type_expr(
+        assay:HasLowReadout("urn:eigenius:demo:assay:plate_X")
+    );
+    stats:alternative_hypothesis = type_expr(
+        assay:HasLowReadout("urn:eigenius:demo:assay:plate_X")
+    );
+    reflection:canonical_proposition = type_expr(
+        assay:HasLowReadout("urn:eigenius:demo:assay:plate_X")
+    );
+
+    stats:alpha = 0.05;
+    stats:effect_size = Absolute(100.0, "rfu");
+    stats:directionality = TwoSided();
+    stats:variance_assumption = WelchUnequal();
+    stats:outlier_exclusion = ESD(3, 0.05);
+}
+
+resource assay:claim_low_readout_esd_trace : reflection:ProgramTrace {
+    reflection:resource  = assay:claim_low_readout_esd;
+    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:timestamp = "2026-04-02T11:00:00Z";
+}
+
+// ── §7.3 fixtures ───────────────────────────────────────────────────
+
+data methods:MethodsAgree : core:string -> Prop, stats:PopulationLevel {
+}
+
+// Two methods measuring compound concentrations on the same 12
+// specimens. Method B = Method A + small measurement noise (no
+// systematic bias) — the PB regression should find slope ≈ 1.0 and
+// intercept ≈ 0.0 with CIs containing 1.0 and 0.0 respectively.
+resource methods:concordance_sampleset : stats:SampleSetResource {
+    reflection:source      = "concordance-study:2026-04-03";
+    reflection:observed_at = "2026-04-03T12:00:00Z";
+
+    // Paired layout: [method_a_0, method_b_0, method_a_1, method_b_1, ...]
+    stats:sample_set_value = stats:Paired(
+        [10.0, 10.2,  20.0, 19.8,  30.0, 30.3,  40.0, 39.7,
+         50.0, 50.1,  60.0, 60.2,  70.0, 69.9,  80.0, 80.1,
+         90.0, 90.0, 100.0, 99.9, 110.0, 110.1, 120.0, 119.8],
+        BiologicalReplication(),
+    );
+}
+
+resource methods:concordance_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = methods:concordance_sampleset;
+    reflection:source    = "concordance-study:2026-04-03";
+    reflection:timestamp = "2026-04-03T12:00:00Z";
+}
+
+resource methods:claim_methods_agree : stats:MethodComparisonClaim {
+    stats:sample_set = methods:concordance_sampleset;
+
+    stats:null_hypothesis = type_expr(
+        methods:MethodsAgree("urn:eigenius:demo:methods:assay_vs_LCMS")
+    );
+    stats:alternative_hypothesis = type_expr(
+        methods:MethodsAgree("urn:eigenius:demo:methods:assay_vs_LCMS")
+    );
+    reflection:canonical_proposition = type_expr(
+        methods:MethodsAgree("urn:eigenius:demo:methods:assay_vs_LCMS")
+    );
+
+    stats:alpha = 0.05;
+    stats:effect_size = Absolute(1.0, "slope_ratio");
+    stats:directionality = TwoSided();
+    stats:variance_assumption = NonParametric();
+    stats:outlier_exclusion = Identity();
+}
+
+resource methods:claim_methods_agree_trace : reflection:ProgramTrace {
+    reflection:resource  = methods:claim_methods_agree;
+    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:timestamp = "2026-04-03T12:00:00Z";
+}
+
+// Sibling MethodComparison claim where Method B has a clear 1.5×
+// proportional bias — the PB regression's slope CI should exclude
+// 1.0 and the verifier should report MethodComparisonDisagreement.
+resource methods:disagreement_sampleset : stats:SampleSetResource {
+    reflection:source      = "concordance-study:disagreeing-2026-04-04";
+    reflection:observed_at = "2026-04-04T13:00:00Z";
+
+    stats:sample_set_value = stats:Paired(
+        [10.0, 15.0,  20.0, 30.0,  30.0, 45.0,  40.0, 60.0,
+         50.0, 75.0,  60.0, 90.0,  70.0,105.0,  80.0,120.0,
+         90.0,135.0, 100.0,150.0, 110.0,165.0, 120.0,180.0],
+        BiologicalReplication(),
+    );
+}
+
+resource methods:disagreement_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = methods:disagreement_sampleset;
+    reflection:source    = "concordance-study:disagreeing-2026-04-04";
+    reflection:timestamp = "2026-04-04T13:00:00Z";
+}
+
+resource methods:claim_methods_disagree : stats:MethodComparisonClaim {
+    stats:sample_set = methods:disagreement_sampleset;
+
+    stats:null_hypothesis = type_expr(
+        methods:MethodsAgree("urn:eigenius:demo:methods:biased_assay_vs_LCMS")
+    );
+    stats:alternative_hypothesis = type_expr(
+        methods:MethodsAgree("urn:eigenius:demo:methods:biased_assay_vs_LCMS")
+    );
+    reflection:canonical_proposition = type_expr(
+        methods:MethodsAgree("urn:eigenius:demo:methods:biased_assay_vs_LCMS")
+    );
+
+    stats:alpha = 0.05;
+    stats:effect_size = Absolute(1.0, "slope_ratio");
+    stats:directionality = TwoSided();
+    stats:variance_assumption = NonParametric();
+    stats:outlier_exclusion = Identity();
+}
+
+resource methods:claim_methods_disagree_trace : reflection:ProgramTrace {
+    reflection:resource  = methods:claim_methods_disagree;
+    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:timestamp = "2026-04-04T13:00:00Z";
+}

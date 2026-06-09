@@ -53,8 +53,9 @@ use eigenius_kernel::ontology::well_known as wk;
 use crate::institution::iris;
 use crate::institution::StatisticsInstitution;
 use crate::numerics::{
-    factorial_omnibus_anova, one_sample_t_test, paired_t_test, rcbd_anova,
-    repeated_measures_cs_anova, splitplot_anova, two_sample_t_test, TwoSampleVariance,
+    esd_filter, factorial_omnibus_anova, one_sample_t_test, paired_t_test,
+    passing_bablok_regression, rcbd_anova, repeated_measures_cs_anova, splitplot_anova,
+    two_sample_t_test, TwoSampleVariance,
 };
 
 /// Top-level handler called by `StatisticsInstitution::query`.
@@ -117,6 +118,19 @@ pub fn do_validate_measurement_claim(
         Err(diag) => return Ok(verdict_fails(diag)),
     };
 
+    // ── §7.3 class-based early dispatch: MethodComparisonClaim ────────
+    //
+    // When the claim's is_a list contains stats:MethodComparisonClaim,
+    // skip the SampleSet-shape dispatch and route to Passing-Bablok
+    // regression. OLS regression is rejected for method comparison —
+    // it assumes zero measurement error on the X-axis, which is
+    // structurally false for two biological measurements compared
+    // against each other (CLSI EP09).
+    let method_comparison_iri = Iri::parse(iris::METHOD_COMPARISON_CLAIM).expect("static IRI");
+    if claim.is_instance_of(&method_comparison_iri) {
+        return recompute_method_comparison_claim(claim, &bundle, ctx);
+    }
+
     // ── Step 4: dispatch on the product position ──────────────────────
     let dispatch = match dispatch_product_position(&bundle) {
         Some(d) => d,
@@ -148,22 +162,133 @@ pub fn do_validate_measurement_claim(
         Some(j) => j,
         None => return Ok(verdict_fails("claim missing `effect_size`".into())),
     };
-    // Phase 1 supports only TwoSided directionality. OneSidedWitnessed
-    // requires §7.1 impossibility-witness validation, deferred to a
-    // follow-on.
+    // §7.1 directionality routing. TwoSided proceeds with the standard
+    // two-sided p-value path. OneSidedWitnessed(witness_iri) requires:
+    //   (a) the dispatch produces a signed test statistic (t-based
+    //       dispatches only — F-based ANOVA omnibus tests reject);
+    //   (b) the witness IRI resolves to a chain resource marked
+    //       `is_a stats:ImpossibilityWitness` (the §7.1 ARRIVE-aligned
+    //       proof-of-inverse-direction-impossibility surface).
+    // When both gates pass, the verifier halves the two-sided p-value
+    // for the alpha comparison; the witness's structural existence is
+    // what justifies the halving, not the test statistic's sign.
     let directionality_ctor = json_ctor_name(&directionality);
-    if directionality_ctor != Some("TwoSided") {
-        return Ok(verdict_fails(format!(
-            "directionality `{directionality_ctor:?}` not supported in Phase 1 \
-             (only TwoSided wired; OneSidedWitnessed requires §7.1 impossibility-witness \
-             validation, deferred)"
-        )));
-    }
+    let one_sided_witnessed = match directionality_ctor {
+        Some("TwoSided") => false,
+        Some("OneSidedWitnessed") => {
+            if !dispatch.supports_one_sided_directionality() {
+                return Ok(verdict_fails(format!(
+                    "directionality = OneSidedWitnessed is incompatible with the {dispatch:?} \
+                     dispatch — F-based omnibus ANOVA tests produce intrinsically non-negative \
+                     statistics and the one-sided/two-sided distinction does not refine them \
+                     (D52 §7.1). Use TwoSided directionality, or assert per-effect t-tests when \
+                     the per-effect verdict shape lands."
+                )));
+            }
+            let witness_iri_str = match directionality["args"]
+                .get(0)
+                .and_then(serde_json::Value::as_str)
+            {
+                Some(s) => s.to_string(),
+                None => {
+                    return Ok(verdict_fails(
+                        "directionality = OneSidedWitnessed requires a witness IRI as its first \
+                         argument (D52 §7.1)"
+                            .into(),
+                    ));
+                }
+            };
+            if let Some(diag) = check_impossibility_witness(&witness_iri_str, ctx)? {
+                return Ok(verdict_fails(diag));
+            }
+            true
+        }
+        other => {
+            return Ok(verdict_fails(format!(
+                "unknown directionality ctor `{other:?}` (expected TwoSided / OneSidedWitnessed)"
+            )));
+        }
+    };
 
     // Read variance_assumption for the IID dispatch arm (one-sample
     // dispatch ignores it — there's only one variance parameter to
     // estimate there).
     let variance_assumption = read_json_property(claim, iris::PROP_VARIANCE_ASSUMPTION)?;
+
+    // §7.2 outlier-exclusion dispatch matrix. Phase 5 v1 wires the
+    // `(SingleSampleEstimate, ESD(k, alpha))` cell — the cell that
+    // matches the running IC50 example and exercises the dual-verdict
+    // commit shape end-to-end. All other (dispatch × non-Identity-
+    // exclusion) combinations reject up front with a diagnostic
+    // referencing the tracked follow-on. Identity exclusion takes the
+    // standard single-verdict path on any dispatch.
+    let outlier_exclusion = read_json_property(claim, iris::PROP_OUTLIER_EXCLUSION)?;
+    let exclusion_ctor = outlier_exclusion
+        .as_ref()
+        .and_then(json_ctor_name)
+        .unwrap_or("Identity");
+    let esd_params: Option<(usize, f64)> = match (dispatch, exclusion_ctor) {
+        (_, "Identity") => None,
+        (DispatchPos::SingleSampleEstimate, "ESD") => {
+            let args = outlier_exclusion
+                .as_ref()
+                .and_then(|j| j["args"].as_array());
+            let (k, alpha_esd) = match args {
+                Some(a) if a.len() == 2 => {
+                    let k = a[0].as_f64();
+                    let alpha = a[1].as_f64();
+                    match (k, alpha) {
+                        (Some(k), Some(alpha)) if k.fract() == 0.0 && k >= 0.0 => {
+                            (k as usize, alpha)
+                        }
+                        _ => {
+                            return Ok(verdict_fails(format!(
+                                "outlier_exclusion = ESD requires (max_outliers : integer, \
+                                 alpha : float); got args = {a:?}"
+                            )));
+                        }
+                    }
+                }
+                other => {
+                    return Ok(verdict_fails(format!(
+                        "outlier_exclusion = ESD requires exactly 2 args (max_outliers, alpha); \
+                         got args = {other:?}"
+                    )));
+                }
+            };
+            Some((k, alpha_esd))
+        }
+        (DispatchPos::SingleSampleEstimate, "PassingBablokResidual") => {
+            return Ok(verdict_fails(
+                "outlier_exclusion = PassingBablokResidual is meaningful only on method-\
+                 comparison data and is not wired for the SingleSampleEstimate dispatch \
+                 (D52 §7.2 / §7.3 — use MethodComparisonClaim for that path)"
+                    .into(),
+            ));
+        }
+        (DispatchPos::SingleSampleEstimate, "Manual") => {
+            return Ok(verdict_fails(
+                "outlier_exclusion = Manual requires §11 assay-quality observation \
+                 institutions to validate each excluded unit's typed quality-check witness; \
+                 those institutions have not landed yet (D52 §7.2 deferral)"
+                    .into(),
+            ));
+        }
+        (_, "ESD") | (_, "PassingBablokResidual") | (_, "Manual") => {
+            return Ok(verdict_fails(format!(
+                "outlier_exclusion = `{exclusion_ctor}` is not yet wired for the {dispatch:?} \
+                 dispatch (D52 §7.2 Phase 5 v1 wires only the SingleSampleEstimate + ESD cell; \
+                 other (dispatch, exclusion) cells are tracked as follow-on GitHub issues). \
+                 Use outlier_exclusion = Identity for this dispatch."
+            )));
+        }
+        (_, other) => {
+            return Ok(verdict_fails(format!(
+                "unknown outlier_exclusion ctor `{other}` (expected Identity / ESD / \
+                 PassingBablokResidual / Manual)"
+            )));
+        }
+    };
 
     // ── Step 6: run the test (dispatch-specific) ──────────────────────
     //
@@ -196,16 +321,74 @@ pub fn do_validate_measurement_claim(
                     Ok(s) => s,
                     Err(diag) => return Ok(verdict_fails(diag)),
                 };
-                let r = match one_sample_t_test(&samples, magnitude) {
-                    Some(r) => r,
-                    None => {
-                        return Ok(verdict_fails(format!(
-                        "InsufficientReplication: one-sample t-test requires n >= 2, got n = {}",
-                        samples.len()
-                    )));
-                    }
-                };
-                (r.t_statistic, r.p_value_two_sided, None)
+                if let Some((max_outliers, alpha_esd)) = esd_params {
+                    // §7.2 dual-verdict: compute the test twice — once
+                    // with the ESD filter applied (the verdict the
+                    // claim's exclusion functor asserts), once on the
+                    // raw samples (the Identity comparator). Primary
+                    // numerics are with-exclusion; the diagnostic
+                    // carries the comparator numerics + excluded
+                    // indices for audit visibility into both branches.
+                    let excluded = esd_filter(&samples, max_outliers, alpha_esd);
+                    let filtered: Vec<f64> = samples
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| !excluded.contains(i))
+                        .map(|(_, &x)| x)
+                        .collect();
+                    let r_with = match one_sample_t_test(&filtered, magnitude) {
+                        Some(r) => r,
+                        None => {
+                            return Ok(verdict_fails(format!(
+                                "InsufficientReplication: ESD-filtered one-sample t-test \
+                                 requires n_filtered >= 2 (got n_raw = {}, excluded = {}, \
+                                 n_filtered = {})",
+                                samples.len(),
+                                excluded.len(),
+                                filtered.len(),
+                            )));
+                        }
+                    };
+                    let r_without = match one_sample_t_test(&samples, magnitude) {
+                        Some(r) => r,
+                        None => {
+                            return Ok(verdict_fails(format!(
+                                "InsufficientReplication: comparator one-sample t-test \
+                                 requires n_raw >= 2, got n = {}",
+                                samples.len()
+                            )));
+                        }
+                    };
+                    let note = format!(
+                        "DualVerdict (ESD max_outliers = {}, alpha = {:.4}): with-exclusion \
+                         t = {:.4}, p = {:.6} (n = {} after excluding {} index{} {:?}); \
+                         without-exclusion t = {:.4}, p = {:.6} (n = {})",
+                        max_outliers,
+                        alpha_esd,
+                        r_with.t_statistic,
+                        r_with.p_value_two_sided,
+                        filtered.len(),
+                        excluded.len(),
+                        if excluded.len() == 1 { "" } else { "es" },
+                        excluded,
+                        r_without.t_statistic,
+                        r_without.p_value_two_sided,
+                        samples.len(),
+                    );
+                    (r_with.t_statistic, r_with.p_value_two_sided, Some(note))
+                } else {
+                    let r = match one_sample_t_test(&samples, magnitude) {
+                        Some(r) => r,
+                        None => {
+                            return Ok(verdict_fails(format!(
+                                "InsufficientReplication: one-sample t-test requires n >= 2, \
+                                 got n = {}",
+                                samples.len()
+                            )));
+                        }
+                    };
+                    (r.t_statistic, r.p_value_two_sided, None)
+                }
             }
             DispatchPos::IID => {
                 // IID two-sample: observations is `[group_a, group_b]`
@@ -581,39 +764,173 @@ pub fn do_validate_measurement_claim(
     // "< 100 nM" IC50 claim, the asserted side is mean < threshold.
     //
     // Phase 1 simplification: we only check p < alpha, not the
-    // direction. The directional refinement lands when the §7.1
-    // OneSidedWitnessed path is wired (since direction matters most
-    // for one-sided claims). Two-sided rejection of "mean = threshold"
-    // doesn't tell us *which* side; the author's derived_proposition
-    // implicitly fixes the direction, and the verifier is honest about
-    // the limited inference.
-    if p_value_two_sided < alpha {
-        // Holds: include the per-dispatch diagnostic note if present
-        // (currently only SplitPlot uses this — to name which of its
-        // three F-tests produced the reported p-value).
-        let diag = diagnostic_note.as_deref();
+    // direction. The directional refinement lands when richer claim
+    // shapes carry explicit signed effect-size assertions; two-sided
+    // rejection of "mean = threshold" doesn't tell us *which* side, and
+    // the author's derived_proposition implicitly fixes the direction.
+    //
+    // §7.1 Phase 5 hardening: when directionality = OneSidedWitnessed
+    // (and the dispatch is t-based and the witness validated above),
+    // halve the two-sided p-value for the alpha comparison. The
+    // witness's existence on chain is what authorizes the halving;
+    // chain-resident proof-of-inverse-direction-impossibility replaces
+    // the silent one-sided-by-default of legacy software.
+    let p_value_for_alpha = if one_sided_witnessed {
+        p_value_two_sided / 2.0
+    } else {
+        p_value_two_sided
+    };
+    // The verdict's `computed_p_value` reports the p-value the alpha
+    // decision was made against — the halved one-sided value when
+    // OneSidedWitnessed is in force, the raw two-sided value otherwise.
+    // Per-dispatch diagnostic notes and the one-sided derivation note
+    // are concatenated for the human-readable diagnostic field.
+    let one_sided_note = if one_sided_witnessed {
+        Some(format!(
+            "OneSidedWitnessed: alpha comparison used p_one_sided = {p_value_for_alpha:.6} \
+             (= p_two_sided / 2; raw two-sided p = {p_value_two_sided:.6})"
+        ))
+    } else {
+        None
+    };
+    let combined_diag = match (diagnostic_note.as_deref(), one_sided_note.as_deref()) {
+        (Some(a), Some(b)) => Some(format!("{a}. {b}")),
+        (Some(a), None) => Some(a.to_string()),
+        (None, Some(b)) => Some(b.to_string()),
+        (None, None) => None,
+    };
+    if p_value_for_alpha < alpha {
         Ok(QueryOutcome::from_output(verdict_resource(
             wk::VERDICT_HOLDS,
-            diag,
-            Some((t_statistic, p_value_two_sided)),
+            combined_diag.as_deref(),
+            Some((t_statistic, p_value_for_alpha)),
         )))
     } else {
-        // Fails: combine the AlphaNotCrossed framing with the
-        // per-dispatch note if present.
-        let fail_diag = match diagnostic_note.as_deref() {
+        let fail_diag = match combined_diag.as_deref() {
             Some(note) => format!(
-                "AlphaNotCrossed: computed p = {p_value_two_sided:.6}, threshold alpha = {alpha}. {note}"
+                "AlphaNotCrossed: computed p = {p_value_for_alpha:.6}, threshold alpha = {alpha}. {note}"
             ),
             None => format!(
-                "AlphaNotCrossed: computed p = {p_value_two_sided:.6}, threshold alpha = {alpha}"
+                "AlphaNotCrossed: computed p = {p_value_for_alpha:.6}, threshold alpha = {alpha}"
             ),
         };
         Ok(QueryOutcome::from_output(verdict_resource(
             wk::VERDICT_FAILS,
             Some(&fail_diag),
-            Some((t_statistic, p_value_two_sided)),
+            Some((t_statistic, p_value_for_alpha)),
         )))
     }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// §7.3 — MethodComparisonClaim / Passing-Bablok dispatch
+// ────────────────────────────────────────────────────────────────────
+
+/// Recompute a `stats:MethodComparisonClaim` via Passing-Bablok
+/// regression. The bundle must be at the Paired position (PairedBlocking
+/// blocking, SingleFactor factor, CrossSectional) — that's the same
+/// authoring surface as `stats:Paired(...)`. Pairs are decoded with the
+/// existing `decode_paired_observations` helper (the `[method_a_0,
+/// method_b_0, method_a_1, method_b_1, ...]` interleaved layout).
+///
+/// Verdict: Holds when both the 95% slope CI contains 1.0 AND the 95%
+/// intercept CI contains 0.0 (CLSI EP09 method-agreement criterion).
+/// The verdict's `computed_statistic` field reports the median slope;
+/// `computed_p_value` reports a binary disagreement indicator (0.0 on
+/// agreement, 1.0 on disagreement) so the field stays load-bearing for
+/// downstream consumers while the structural verdict is the CI check.
+/// The diagnostic carries (slope, intercept, slope_CI, intercept_CI)
+/// for audit. OneSidedWitnessed directionality is rejected for this
+/// dispatch — Passing-Bablok is a CI-based agreement test, not a
+/// sign-of-effect test. Outlier-exclusion functors other than Identity
+/// are deferred to the §7.2 dual-verdict path (a separate GitHub
+/// issue tracks PassingBablokResidual exclusion landing here).
+fn recompute_method_comparison_claim(
+    claim: &Resource,
+    bundle: &DecodedBundle,
+    _ctx: &ExecutionContext,
+) -> Result<QueryOutcome, InstitutionError> {
+    if bundle.blocking != "PairedBlocking" {
+        return Ok(verdict_fails(format!(
+            "MethodComparisonClaim requires a Paired SampleSet (blocking = PairedBlocking, \
+             factor = SingleFactor, repeated_measures = CrossSectional); got blocking = `{}`, \
+             factor = `{}`, repeated_measures = `{}` (D52 §7.3 CLSI EP09)",
+            bundle.blocking, bundle.factor, bundle.repeated_measures,
+        )));
+    }
+    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY)? {
+        Some(j) => j,
+        None => return Ok(verdict_fails("claim missing `directionality`".into())),
+    };
+    if json_ctor_name(&directionality) != Some("TwoSided") {
+        return Ok(verdict_fails(
+            "MethodComparisonClaim requires directionality = TwoSided — Passing-Bablok is a \
+             CI-based agreement test, not a sign-of-effect test, and OneSidedWitnessed does \
+             not refine it (D52 §7.3)"
+                .into(),
+        ));
+    }
+    let outlier = read_json_property(claim, iris::PROP_OUTLIER_EXCLUSION)?;
+    if let Some(ctor) = outlier.as_ref().and_then(json_ctor_name) {
+        if ctor != "Identity" {
+            return Ok(verdict_fails(format!(
+                "MethodComparisonClaim with outlier_exclusion = `{ctor}` not yet wired — the \
+                 §7.2 dual-verdict outlier-exclusion path is implemented for the \
+                 SingleSampleEstimate dispatch in Phase 5 v1; PassingBablokResidual /  ESD on \
+                 method-comparison data is tracked as a follow-on issue"
+            )));
+        }
+    }
+    let pairs = match decode_paired_observations(&bundle.observations_raw) {
+        Ok(p) => p,
+        Err(diag) => return Ok(verdict_fails(diag)),
+    };
+    let method_a: Vec<f64> = pairs.iter().map(|&(a, _b)| a).collect();
+    let method_b: Vec<f64> = pairs.iter().map(|&(_a, b)| b).collect();
+    let res = match passing_bablok_regression(&method_a, &method_b) {
+        Some(r) => r,
+        None => {
+            return Ok(verdict_fails(format!(
+                "Passing-Bablok regression preconditions failed: need n ≥ 3 samples with at \
+                 least one defined pairwise slope (no constant method-A column); got n = {}",
+                pairs.len(),
+            )));
+        }
+    };
+    let methods_agree = res.slope_ci_low <= 1.0
+        && 1.0 <= res.slope_ci_high
+        && res.intercept_ci_low <= 0.0
+        && 0.0 <= res.intercept_ci_high;
+    let diag = format!(
+        "Passing-Bablok regression: slope = {:.6} [95% CI {:.6}, {:.6}], intercept = {:.6} \
+         [95% CI {:.6}, {:.6}], n_samples = {}, n_slopes = {}. Methods {} (Holds requires \
+         1.0 ∈ slope_CI AND 0.0 ∈ intercept_CI per CLSI EP09)",
+        res.slope,
+        res.slope_ci_low,
+        res.slope_ci_high,
+        res.intercept,
+        res.intercept_ci_low,
+        res.intercept_ci_high,
+        res.n_samples,
+        res.n_slopes,
+        if methods_agree { "agree" } else { "disagree" },
+    );
+    let p_indicator = if methods_agree { 0.0 } else { 1.0 };
+    let ctor = if methods_agree {
+        wk::VERDICT_HOLDS
+    } else {
+        wk::VERDICT_FAILS
+    };
+    let diag_string = if methods_agree {
+        diag
+    } else {
+        format!("MethodComparisonDisagreement: {diag}")
+    };
+    Ok(QueryOutcome::from_output(verdict_resource(
+        ctor,
+        Some(&diag_string),
+        Some((res.slope, p_indicator)),
+    )))
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -700,6 +1017,23 @@ enum DispatchPos {
     RCBD,
     SplitPlot,
     RepeatedMeasures,
+}
+
+impl DispatchPos {
+    /// Whether this dispatch's test statistic carries a meaningful sign
+    /// (t-based: SingleSampleEstimate, IID, Paired) — these support the
+    /// §7.1 OneSidedWitnessed directionality routing. F-based dispatches
+    /// (Factorial / RCBD / SplitPlot / RepeatedMeasures) produce
+    /// intrinsically non-negative F-statistics; "one-sided" is not a
+    /// refinement available to them and the verifier rejects
+    /// OneSidedWitnessed on those dispatches with a structured
+    /// diagnostic.
+    fn supports_one_sided_directionality(self) -> bool {
+        matches!(
+            self,
+            DispatchPos::SingleSampleEstimate | DispatchPos::IID | DispatchPos::Paired
+        )
+    }
 }
 
 fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
@@ -1306,6 +1640,53 @@ fn dispatch_product_position(bundle: &DecodedBundle) -> Option<DispatchPos> {
             Some(DispatchPos::RepeatedMeasures)
         }
         _ => None,
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// §7.1 impossibility-witness validation (OneSidedWitnessed gate)
+// ────────────────────────────────────────────────────────────────────
+
+/// Validate that a `Directionality.OneSidedWitnessed(witness_iri)`
+/// claim's witness resolves to a chain resource carrying
+/// `is_a stats:ImpossibilityWitness`. Returns `Ok(None)` if the witness
+/// is admissible, `Ok(Some(diag))` if the claim must be rejected, and
+/// `Err(_)` only for genuine institutional failures.
+fn check_impossibility_witness(
+    witness_iri_str: &str,
+    ctx: &ExecutionContext,
+) -> Result<Option<String>, InstitutionError> {
+    let witness_iri = match Iri::parse(witness_iri_str) {
+        Ok(i) => i,
+        Err(e) => {
+            return Ok(Some(format!(
+                "OneSidedWitnessed witness IRI `{witness_iri_str}` does not parse: {e:?} \
+                 (D52 §7.1 requires a chain-resident impossibility witness)"
+            )));
+        }
+    };
+    let witness_res = match ctx.resolve(&witness_iri) {
+        Some(r) => r,
+        None => {
+            return Ok(Some(format!(
+                "OneSidedWitnessed witness `{witness_iri_str}` is not committed on chain \
+                 (D52 §7.1 — the one-sided p-value path requires a chain-resident proof that \
+                 the inverse direction is impossible within the system under study)"
+            )));
+        }
+    };
+    let marker_iri = Iri::parse(iris::IMPOSSIBILITY_WITNESS).expect("static IRI");
+    let has_marker = witness_res.is_a().iter().any(|c| c == &marker_iri);
+    if has_marker {
+        Ok(None)
+    } else {
+        Ok(Some(format!(
+            "OneSidedWitnessed witness `{witness_iri_str}` exists on chain but does not carry \
+             `is_a stats:ImpossibilityWitness` — the verifier admits the one-sided p-value \
+             path only when the witness resource is explicitly marked as an impossibility \
+             witness (D52 §7.1). Mark the resource with the ImpossibilityWitness class, or \
+             use Directionality.TwoSided"
+        )))
     }
 }
 

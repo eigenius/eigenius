@@ -73,6 +73,8 @@ pub mod iris {
     pub const MEASUREMENT_VERDICT: &str = "urn:eigenius:measurements:MeasurementVerdict";
     pub const POPULATION_LEVEL: &str = "urn:eigenius:measurements:PopulationLevel";
     pub const MEASUREMENT_LEVEL: &str = "urn:eigenius:measurements:MeasurementLevel";
+    pub const IMPOSSIBILITY_WITNESS: &str = "urn:eigenius:measurements:ImpossibilityWitness";
+    pub const METHOD_COMPARISON_CLAIM: &str = "urn:eigenius:measurements:MethodComparisonClaim";
 
     // ── MeasurementVerdict property IRIs (Holds-output shape) ────────
     pub const PROP_SOURCE_CLAIM: &str = "urn:eigenius:measurements:source_claim";

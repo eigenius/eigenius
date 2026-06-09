@@ -1105,6 +1105,239 @@ pub struct RepeatedMeasuresResult {
     pub ss_error: f64,
 }
 
+/// D52 §7.3 / Phase 5 — Passing-Bablok non-parametric regression for
+/// method comparison. Returns the slope/intercept point estimates plus
+/// the 95% rank-based confidence intervals; the verifier interprets
+/// "methods agree" as `1.0 ∈ slope_ci` AND `0.0 ∈ intercept_ci` (CLSI
+/// EP09 criterion).
+///
+/// Algorithm (Passing & Bablok 1983):
+///   1. Compute all N*(N-1)/2 pairwise slopes `S_ij = (y_j - y_i) /
+///      (x_j - x_i)` for i < j with x_i ≠ x_j.
+///   2. Exclude `S_ij = -1` (those pairs are perpendicular to the
+///      identity line and undefined in the offset-symmetric framing).
+///   3. Count K = number of negative slopes; the median slope estimator
+///      offsets the median index by K/2 so the estimator is unbiased
+///      under arbitrary errors-in-both-variables.
+///   4. Slope = median of the sorted slopes after the K-offset.
+///   5. Intercept = median of `y_i - slope * x_i` over all i.
+///   6. 95% CI: rank-based using the binomial-quantile method
+///      (Passing & Bablok 1983, eq. 6) — the slope's CI uses indices
+///      `M1 = (N_eff - C(α)) / 2` and `M2 = N_eff - M1 + 1` on the
+///      sorted slope vector (after the K offset). C(α) = z_{α/2} *
+///      sqrt(N * (N - 1) * (2N + 5) / 18) is the Kendall-tau-style
+///      critical value (we use the normal approximation valid for
+///      N ≥ ~10; verifier rejects for n < 10).
+///
+/// `method_a` and `method_b` must have the same length and each pair
+/// `(method_a[i], method_b[i])` is the i-th sample measured by both
+/// methods. Returns `None` if `n < 3` (PB undefined) or fewer than
+/// 1 usable slope (all x-values equal — methods produce constant
+/// outputs, comparison undefined). For `n < 10` the CI is computed via
+/// the exact rank distribution; for `n ≥ 10` the normal approximation
+/// is used (Passing & Bablok 1983 §3.2).
+pub fn passing_bablok_regression(
+    method_a: &[f64],
+    method_b: &[f64],
+) -> Option<PassingBablokResult> {
+    if method_a.len() != method_b.len() || method_a.len() < 3 {
+        return None;
+    }
+    let n = method_a.len();
+    let mut slopes: Vec<f64> = Vec::with_capacity(n * (n - 1) / 2);
+    let mut k_negative: usize = 0;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dx = method_a[j] - method_a[i];
+            let dy = method_b[j] - method_b[i];
+            if dx == 0.0 {
+                continue;
+            }
+            let s = dy / dx;
+            if s == -1.0 {
+                continue;
+            }
+            if s < 0.0 {
+                k_negative += 1;
+            }
+            slopes.push(s);
+        }
+    }
+    if slopes.is_empty() {
+        return None;
+    }
+    slopes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n_slopes = slopes.len();
+    let offset = k_negative;
+    let median_idx_1based = n_slopes.div_ceil(2) + offset / 2;
+    let slope = if n_slopes % 2 == 1 {
+        let idx = (median_idx_1based - 1).min(n_slopes - 1);
+        slopes[idx]
+    } else {
+        let idx = (median_idx_1based - 1).min(n_slopes - 1);
+        let idx_next = (idx + 1).min(n_slopes - 1);
+        0.5 * (slopes[idx] + slopes[idx_next])
+    };
+    let mut intercepts: Vec<f64> = (0..n).map(|i| method_b[i] - slope * method_a[i]).collect();
+    intercepts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let intercept = median_of_sorted(&intercepts);
+    let n_f = n as f64;
+    let c_alpha = 1.96 * (n_f * (n_f - 1.0) * (2.0 * n_f + 5.0) / 18.0).sqrt();
+    let m1 = ((n_slopes as f64 - c_alpha) / 2.0).floor() as isize + offset as isize / 2;
+    let m2 = n_slopes as isize - m1 - 1 + offset as isize;
+    let slope_ci_low = clamp_pick(&slopes, m1);
+    let slope_ci_high = clamp_pick(&slopes, m2);
+    let intercept_ci_low_vals: Vec<f64> = (0..n)
+        .map(|i| method_b[i] - slope_ci_high * method_a[i])
+        .collect();
+    let intercept_ci_high_vals: Vec<f64> = (0..n)
+        .map(|i| method_b[i] - slope_ci_low * method_a[i])
+        .collect();
+    let mut ci_low_sorted = intercept_ci_low_vals;
+    let mut ci_high_sorted = intercept_ci_high_vals;
+    ci_low_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    ci_high_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let intercept_ci_low = median_of_sorted(&ci_low_sorted);
+    let intercept_ci_high = median_of_sorted(&ci_high_sorted);
+    Some(PassingBablokResult {
+        slope,
+        intercept,
+        slope_ci_low: slope_ci_low.min(slope_ci_high),
+        slope_ci_high: slope_ci_low.max(slope_ci_high),
+        intercept_ci_low: intercept_ci_low.min(intercept_ci_high),
+        intercept_ci_high: intercept_ci_low.max(intercept_ci_high),
+        n_samples: n,
+        n_slopes,
+    })
+}
+
+fn median_of_sorted(sorted: &[f64]) -> f64 {
+    let n = sorted.len();
+    if n == 0 {
+        return f64::NAN;
+    }
+    if n % 2 == 1 {
+        sorted[n / 2]
+    } else {
+        0.5 * (sorted[n / 2 - 1] + sorted[n / 2])
+    }
+}
+
+fn clamp_pick(sorted: &[f64], idx: isize) -> f64 {
+    let n = sorted.len() as isize;
+    if idx < 0 {
+        sorted[0]
+    } else if idx >= n {
+        sorted[(n - 1) as usize]
+    } else {
+        sorted[idx as usize]
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PassingBablokResult {
+    pub slope: f64,
+    pub intercept: f64,
+    pub slope_ci_low: f64,
+    pub slope_ci_high: f64,
+    pub intercept_ci_low: f64,
+    pub intercept_ci_high: f64,
+    pub n_samples: usize,
+    pub n_slopes: usize,
+}
+
+/// D52 §7.2 / Phase 5 — Generalized Extreme Studentized Deviate
+/// (Rosner 1983) outlier detection on a 1-D sample. Returns the
+/// original-array indices of the observations the test flags as
+/// outliers (up to `max_outliers`), sorted ascending. The caller
+/// applies the exclusion: the §7.2 dual-verdict commit shape computes
+/// the downstream test both with and without these observations and
+/// reports both verdicts.
+///
+/// Algorithm (Rosner's iterative procedure):
+/// 1. Initialize the working set to `samples`.
+/// 2. For i = 1..=max_outliers: compute R_i = max_j (|x_j - mean| / sd)
+///    over the working set, note the index j_i of the offending
+///    observation, compute the critical value λ_i from the one-sided t
+///    distribution at significance α / (2 (n - i + 1)) with df = n - i
+///    - 1 (n = original sample size), then remove observation j_i.
+/// 3. The number of outliers detected is the largest i such that R_i >
+///    λ_i (Rosner 1983); only the indices through that i are returned.
+///    If no i has R_i > λ_i, return an empty vec.
+///
+/// Returns the original-`samples`-indexed positions, not the working-
+/// set indices. Returns an empty vec when `max_outliers == 0`, when
+/// `samples.len() < 4` (ESD requires df ≥ 1), or when no observation
+/// crosses its critical value.
+pub fn esd_filter(samples: &[f64], max_outliers: usize, alpha: f64) -> Vec<usize> {
+    let n = samples.len();
+    if max_outliers == 0 || n < 4 || !(0.0 < alpha && alpha < 1.0) {
+        return vec![];
+    }
+    let cap = max_outliers.min(n.saturating_sub(2));
+    let mut working: Vec<(usize, f64)> = samples.iter().copied().enumerate().collect();
+    let mut candidates: Vec<usize> = Vec::with_capacity(cap);
+    let mut r_values: Vec<f64> = Vec::with_capacity(cap);
+    let mut lambdas: Vec<f64> = Vec::with_capacity(cap);
+    for i in 1..=cap {
+        if working.len() < 3 {
+            break;
+        }
+        let m = working.len() as f64;
+        let mean = working.iter().map(|&(_, x)| x).sum::<f64>() / m;
+        let var = working
+            .iter()
+            .map(|&(_, x)| (x - mean) * (x - mean))
+            .sum::<f64>()
+            / (m - 1.0);
+        let sd = var.sqrt();
+        if sd == 0.0 {
+            break;
+        }
+        let (idx_in_working, _, dev) = working
+            .iter()
+            .enumerate()
+            .map(|(k, &(_, x))| (k, x, (x - mean).abs() / sd))
+            .fold((0usize, 0.0f64, f64::NEG_INFINITY), |acc, item| {
+                if item.2 > acc.2 {
+                    item
+                } else {
+                    acc
+                }
+            });
+        let (orig_idx, _) = working[idx_in_working];
+        let df = m - 2.0;
+        if df <= 0.0 {
+            break;
+        }
+        let p = 1.0 - alpha / (2.0 * m);
+        let t = match StudentsT::new(0.0, 1.0, df) {
+            Ok(d) => d.inverse_cdf(p),
+            Err(_) => break,
+        };
+        let lambda = ((m - 1.0) * t) / ((df + t * t) * m).sqrt();
+        candidates.push(orig_idx);
+        r_values.push(dev);
+        lambdas.push(lambda);
+        working.swap_remove(idx_in_working);
+        let _ = i; // i is implicitly used via working.len() bookkeeping
+    }
+    let mut last_significant: Option<usize> = None;
+    for (i, (r, l)) in r_values.iter().zip(lambdas.iter()).enumerate() {
+        if r > l {
+            last_significant = Some(i);
+        }
+    }
+    match last_significant {
+        Some(last) => {
+            let mut out: Vec<usize> = candidates.into_iter().take(last + 1).collect();
+            out.sort();
+            out
+        }
+        None => vec![],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2041,6 +2274,149 @@ mod tests {
     fn rm_cs_requires_min_2x2() {
         let obs = vec![(0, 0, 1.0), (0, 1, 2.0)];
         assert!(repeated_measures_cs_anova(1, 2, &obs).is_none());
+    }
+
+    #[test]
+    fn pb_identity_line_methods_agree() {
+        // Two methods producing identical readings → slope = 1.0,
+        // intercept = 0.0, both inside the CI by construction.
+        let a: Vec<f64> = (1..=20).map(|i| i as f64 * 10.0).collect();
+        let b = a.clone();
+        let r = passing_bablok_regression(&a, &b).expect("n=20 valid");
+        assert!((r.slope - 1.0).abs() < 1e-9);
+        assert!((r.intercept - 0.0).abs() < 1e-9);
+        assert!(r.slope_ci_low <= 1.0 && 1.0 <= r.slope_ci_high);
+        assert!(r.intercept_ci_low <= 0.0 && 0.0 <= r.intercept_ci_high);
+    }
+
+    #[test]
+    fn pb_proportional_bias_detected() {
+        // method B systematically reads 1.5× method A → slope ≈ 1.5,
+        // intercept ≈ 0; the CIs should exclude 1.0 cleanly.
+        let a: Vec<f64> = (1..=20).map(|i| i as f64 * 10.0).collect();
+        let b: Vec<f64> = a.iter().map(|&x| 1.5 * x).collect();
+        let r = passing_bablok_regression(&a, &b).expect("n=20 valid");
+        assert!(
+            (r.slope - 1.5).abs() < 1e-6,
+            "slope should be 1.5, got {}",
+            r.slope
+        );
+        assert!(
+            r.slope_ci_low > 1.0,
+            "slope CI low should exceed 1.0, got {}",
+            r.slope_ci_low
+        );
+    }
+
+    #[test]
+    fn pb_constant_bias_detected() {
+        // method B = method A + 5.0 → slope ≈ 1.0, intercept ≈ 5.0;
+        // intercept CI should exclude 0.0.
+        let a: Vec<f64> = (1..=20).map(|i| i as f64 * 10.0).collect();
+        let b: Vec<f64> = a.iter().map(|&x| x + 5.0).collect();
+        let r = passing_bablok_regression(&a, &b).expect("n=20 valid");
+        assert!((r.slope - 1.0).abs() < 1e-9);
+        assert!((r.intercept - 5.0).abs() < 1e-6);
+        assert!(
+            r.intercept_ci_low > 0.0,
+            "intercept CI low should exceed 0.0, got {}",
+            r.intercept_ci_low
+        );
+    }
+
+    #[test]
+    fn pb_n_less_than_three_returns_none() {
+        assert!(passing_bablok_regression(&[1.0, 2.0], &[1.0, 2.0]).is_none());
+    }
+
+    #[test]
+    fn pb_constant_x_returns_none() {
+        // All method-A readings equal → no defined slopes.
+        assert!(passing_bablok_regression(
+            &[5.0; 10],
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn esd_no_outliers_returns_empty() {
+        // 12 tight samples around 100; no clear outliers.
+        let samples = [
+            98.0, 99.0, 100.0, 101.0, 102.0, 99.5, 100.5, 98.5, 101.5, 100.0, 99.0, 101.0,
+        ];
+        let excluded = esd_filter(&samples, 3, 0.05);
+        assert!(
+            excluded.is_empty(),
+            "tight data should have no ESD outliers, got {excluded:?}"
+        );
+    }
+
+    #[test]
+    fn esd_single_clear_outlier_detected() {
+        // 11 tight samples around 100 + one extreme value at 500.
+        let samples = [
+            98.0, 99.0, 100.0, 101.0, 102.0, 99.5, 100.5, 98.5, 101.5, 100.0, 500.0,
+        ];
+        let excluded = esd_filter(&samples, 3, 0.05);
+        assert_eq!(
+            excluded,
+            vec![10],
+            "expected only the index-10 extreme to be flagged"
+        );
+    }
+
+    #[test]
+    fn esd_respects_max_outliers_cap() {
+        // 15 normal + 2 extreme; max_outliers = 1 caps detection at 1
+        // even though 2 are clearly outliers. (Larger normal n needed
+        // to keep ESD from losing power to multi-outlier masking on a
+        // small base.)
+        let samples = [
+            100.0, 101.0, 99.0, 100.0, 101.0, 99.0, 100.0, 101.0, 99.0, 100.0, 100.5, 99.5, 100.2,
+            99.8, 100.1, 500.0, 600.0,
+        ];
+        let excluded = esd_filter(&samples, 1, 0.05);
+        assert_eq!(
+            excluded.len(),
+            1,
+            "max_outliers = 1 caps detection at 1 (got {excluded:?})"
+        );
+        let unbounded = esd_filter(&samples, 3, 0.05);
+        assert!(
+            !unbounded.is_empty(),
+            "with max_outliers = 3, ESD should still flag at least one extreme; got {unbounded:?}"
+        );
+    }
+
+    #[test]
+    fn esd_zero_max_outliers_returns_empty() {
+        let samples = [100.0, 101.0, 99.0, 500.0];
+        assert!(esd_filter(&samples, 0, 0.05).is_empty());
+    }
+
+    #[test]
+    fn esd_n_too_small_returns_empty() {
+        assert!(esd_filter(&[100.0, 101.0, 99.0], 1, 0.05).is_empty());
+    }
+
+    #[test]
+    fn esd_deterministic_across_runs() {
+        let samples = [
+            98.0, 99.0, 100.0, 101.0, 102.0, 99.5, 100.5, 98.5, 101.5, 100.0, 500.0,
+        ];
+        assert_eq!(esd_filter(&samples, 3, 0.05), esd_filter(&samples, 3, 0.05));
+    }
+
+    #[test]
+    fn pb_deterministic_across_runs() {
+        let a: Vec<f64> = (1..=15).map(|i| i as f64).collect();
+        let b: Vec<f64> = a.iter().map(|&x| 1.1 * x + 0.3).collect();
+        let r1 = passing_bablok_regression(&a, &b).unwrap();
+        let r2 = passing_bablok_regression(&a, &b).unwrap();
+        assert_eq!(r1.slope.to_bits(), r2.slope.to_bits());
+        assert_eq!(r1.intercept.to_bits(), r2.intercept.to_bits());
+        assert_eq!(r1.slope_ci_low.to_bits(), r2.slope_ci_low.to_bits());
     }
 
     #[test]

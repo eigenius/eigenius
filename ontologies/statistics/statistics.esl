@@ -596,6 +596,28 @@ class stats:MeasurementClaim : reflection:DerivedResource {
     recommends stats:autocorrelation_structure;
 }
 
+// §7.3 — method-comparison claims (Phase 5 hardening).
+//
+// MethodComparisonClaim subclasses MeasurementClaim and switches the
+// verifier dispatch onto a Passing-Bablok regression path: non-
+// parametric, robust to outliers, errors-in-both-variables. CLSI EP09
+// alignment. The SampleSet shape is the same `stats:Paired(pairs, …)`
+// authoring surface (each pair is two methods' readings of one
+// specimen), but the claim's class membership is what redirects the
+// verifier away from the paired t-test and toward Passing-Bablok.
+//
+// The "Holds" criterion is CI-based, not p-value-based: 1.0 ∈ slope_CI
+// AND 0.0 ∈ intercept_CI (the CLSI EP09 method-agreement criterion).
+// Ordinary least-squares regression is rejected for method comparison
+// — OLS assumes zero measurement error on the X-axis, which for two
+// biological measurements compared against each other is structurally
+// false. The verifier accepts only PassingBablok via this claim
+// subclass; Deming with an asserted variance ratio is a follow-on.
+
+class stats:MethodComparisonClaim : stats:MeasurementClaim {
+    description = "A MeasurementClaim subclass asserting that two measurement methods or two assay readouts agree (D52 §7.3). The institution dispatches such claims to Passing-Bablok regression instead of the paired t-test; ordinary least-squares regression is rejected outright (OLS assumes zero measurement error on the X-axis, structurally false for method comparison). The SampleSet shape mirrors stats:Paired: each pair is `(method_a_reading, method_b_reading)` for one specimen. The verdict is Holds when both the 95% CI of the slope contains 1.0 AND the 95% CI of the intercept contains 0.0; the computed_statistic field carries the median slope and the diagnostic carries (slope, intercept, slope_CI, intercept_CI) for audit. CLSI EP09 alignment.";
+}
+
 property stats:sample_set : core:string {
     description = "IRI of the SampleSet ObservedResource holding the raw replicates this claim is computed against. Required for recomputation.";
     format = formats:iri;
@@ -679,6 +701,23 @@ class stats:MeasurementLevel {
     description = "Marker class for predicates whose interpretation is local to a single measurement event (e.g. HasLowIC50_OnThisBatch). Admissible from any replication kind including TechnicalWithinRun; doesn't generalize beyond the run.";
 }
 
+// ── §7.1 ImpossibilityWitness marker (Phase 5 hardening) ─────────────
+//
+// A chain resource asserts is_a stats:ImpossibilityWitness when it
+// stands as proof that one direction of a hypothesis is physically or
+// mathematically impossible — e.g., a half-life cannot be negative,
+// a probability cannot exceed 1, a count cannot be fractional. The
+// statistics institution accepts `Directionality.OneSidedWitnessed(w)`
+// on a MeasurementClaim only when `w` resolves to a chain resource
+// carrying this marker; otherwise it rejects the claim with a
+// structured diagnostic. The ARRIVE-aligned stance: one-sided p-values
+// are not a default the chain hands out — they require a witness the
+// chain can name and audit.
+
+class stats:ImpossibilityWitness {
+    description = "Marker class for chain resources that stand as proof that the inverse direction of some hypothesis is impossible within the system under study (D52 §7.1). A MeasurementClaim's Directionality.OneSidedWitnessed(w) field references such a resource by IRI; the verifier admits the one-sided p-value path only when w.is_a contains this marker. The marker itself imposes no structural requirements beyond is_a membership; the chain author asserts the impossibility, and the chain attests that the author named a specific resource as the witness.";
+}
+
 // ── MeasurementVerdict shape (companion artifact on Holds) ───────────
 //
 // The MeasurementClaim itself IS a DerivedResource — its
@@ -740,6 +779,23 @@ resource stats:statistics_institution : institution:Institution {
 resource stats:qc_validate_measurement_claim : institution:QueryClass {
     core:description = "AutoOnLoad gate on every MeasurementClaim commit: read the SampleSet's raw replicates, dispatch on the SampleSet's product position to pick the recomputation procedure, check the asserted effect_size and directionality against the computed statistic, verify the §7.4 epistemic-scope admissibility, emit MeasurementVerdict + ProgramTrace on Holds (with dual-verdict pair on non-Identity outlier exclusion). Fails verdicts reject the commit and pin the diagnostic to the failing clause.";
     institution:query_class = stats:MeasurementClaim;
+    institution:result_class = institution:Verdict;
+    institution:dispatch_role = [dispatch:auto_on_load];
+    institution:query_handler = proc:validate_measurement_claim;
+    institution:institution_ref = stats:statistics_institution;
+}
+
+// §7.3 — separate QueryClass registration so MethodComparisonClaim
+// instances fire the validator. The kernel's AutoOnLoad dispatch
+// matches resource.is_a() entries directly against registered
+// query_class IRIs (no transitive subclass walk), so a subclass needs
+// its own registration even when the handler is shared. The handler
+// inspects the claim's is_a list internally and routes to the Passing-
+// Bablok path when stats:MethodComparisonClaim is present.
+
+resource stats:qc_validate_method_comparison_claim : institution:QueryClass {
+    core:description = "AutoOnLoad gate on every MethodComparisonClaim commit (D52 §7.3). Dispatches the same validate_measurement_claim handler, which detects the MethodComparisonClaim is_a marker and routes to Passing-Bablok regression instead of the standard SampleSet-shape dispatch. CLSI EP09 alignment; OLS is rejected outright.";
+    institution:query_class = stats:MethodComparisonClaim;
     institution:result_class = institution:Verdict;
     institution:dispatch_role = [dispatch:auto_on_load];
     institution:query_handler = proc:validate_measurement_claim;
