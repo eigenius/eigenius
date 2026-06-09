@@ -91,6 +91,14 @@ impl From<CborError> for FacadeError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DispatchOutcome {
     pub output_cbor: Vec<u8>,
+    /// Side-effect resources the language runtime emitted as artefacts
+    /// of dispatch — each Eigon-CBOR-encoded. The kernel's
+    /// `ExternalInstitution::query` decodes these into
+    /// `QueryOutcome.derivations`, which the commit pipeline then
+    /// emits as chain-resident
+    /// `reflection:InstitutionEmittedDerivation` resources under the
+    /// gated subject (D52 §6).
+    pub derivations_cbor: Vec<Vec<u8>>,
     pub partial_invocation_cbor: Vec<u8>,
 }
 
@@ -227,6 +235,7 @@ impl SubstrateDispatcher {
 fn build_outcome(outcome: RunOutcome, language: &str) -> DispatchOutcome {
     let RunOutcome {
         mut output,
+        derivations,
         image_digest,
         started_at,
         completed_at,
@@ -250,8 +259,13 @@ fn build_outcome(outcome: RunOutcome, language: &str) -> DispatchOutcome {
         dispatched_to,
     };
     let partial = trace.into_partial_invocation();
+    let derivations_cbor = derivations
+        .iter()
+        .map(eigon_cbor::serialize_resource)
+        .collect();
     DispatchOutcome {
         output_cbor: eigon_cbor::serialize_resource(&output),
+        derivations_cbor,
         partial_invocation_cbor: eigon_cbor::serialize_resource(&partial),
     }
 }

@@ -416,6 +416,20 @@ pub const DECLARED_RESOURCE: &str = "urn:eigenius:reflection:DeclaredResource";
 pub const DERIVED_RESOURCE: &str = "urn:eigenius:reflection:DerivedResource";
 pub const OBSERVED_RESOURCE: &str = "urn:eigenius:reflection:ObservedResource";
 pub const VERIFIED_RESOURCE: &str = "urn:eigenius:reflection:VerifiedResource";
+/// `reflection:InstitutionEmittedDerivation` — marker subclass of
+/// `DerivedResource` for resources the kernel commits as side-effects of
+/// AutoOnLoad institution dispatches. The witness emitter walks these
+/// directly (no ProgramTrace required) to admit
+/// `IsDerivedAs(derivation_iri, canonical_proposition)` per D49 §6.
+pub const INSTITUTION_EMITTED_DERIVATION: &str =
+    "urn:eigenius:reflection:InstitutionEmittedDerivation";
+/// `reflection:from_subject` — the analysis/claim IRI that triggered
+/// the emission of an `InstitutionEmittedDerivation`. Bidirectional
+/// navigability between an analysis and its derivations.
+pub const FROM_SUBJECT: &str = "urn:eigenius:reflection:from_subject";
+/// `reflection:runtime_invocation` — back-pointer to the producing
+/// `RuntimeInvocation` on an `InstitutionEmittedDerivation`.
+pub const RUNTIME_INVOCATION: &str = "urn:eigenius:reflection:runtime_invocation";
 pub const DECLARED_BY: &str = "urn:eigenius:reflection:declared_by";
 pub const DERIVATION: &str = "urn:eigenius:reflection:derivation";
 pub const EPISTEMIC_STATUS: &str = "urn:eigenius:reflection:epistemic_status";

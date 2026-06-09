@@ -69,16 +69,22 @@ pub struct AutoOnLoadDispatch {
     pub signature_iri: Iri,
     /// The verdict the institution returned.
     pub verdict: VerdictReading,
-    /// The institution's full output Resource. Carries the
-    /// `ctor_name` the kernel reads via [`parse_verdict`], plus any
-    /// institution-specific properties the kernel preserves onto the
-    /// chain-committed Verdict via [`build_verdict_resource`]'s merge
-    /// step. Statistics-institution Verdicts carry
-    /// `reflection:canonical_proposition` + `computed_statistic` +
-    /// `computed_p_value` here so the chain-witness index can admit
-    /// `IsDerivedAs(verdict_iri, P)` against the verdict directly
-    /// (D52 verdict-as-DerivedResource shape).
+    /// The institution's output `Resource` — the institution-level
+    /// Verdict. Carries the `ctor_name` the kernel reads via
+    /// [`parse_verdict`] plus any institution-set properties the
+    /// kernel preserves onto the chain-committed Verdict via
+    /// [`build_verdict_resource`]'s merge step. This resource is the
+    /// pass/fail gate; per-derivation propositions live separately on
+    /// [`derivations`].
     pub output: Resource,
+    /// Side-effect resources the institution emitted as artefacts of
+    /// validation — committed alongside the Verdict when it Holds,
+    /// dropped when it Fails. Each derivation is marked
+    /// `reflection:InstitutionEmittedDerivation` and carries a
+    /// `canonical_proposition` the chain attests; the witness emitter
+    /// walks these directly to admit `IsDerivedAs(derivation_iri, P)`.
+    /// Empty for institutions whose only job is the pass/fail gate.
+    pub derivations: Vec<Resource>,
     /// Substrate-captured partial `RuntimeInvocation` (D26 §5.5).
     /// `None` for in-process / WASM institutions whose dispatch
     /// happens entirely inside the kernel host process — the kernel
@@ -253,6 +259,7 @@ pub fn dispatch_auto_on_load_for_resource(
                         signature_iri: query_class.query_handler.clone(),
                         verdict,
                         output: out.output,
+                        derivations: out.derivations,
                         partial_invocation: out.partial_invocation,
                         environment_iri,
                     });
@@ -480,6 +487,67 @@ pub fn build_runtime_invocation_resource(
 pub fn allocate_invocation_iri() -> Iri {
     Iri::parse(&format!("urn:eigenius:invocation:{}", uuid::Uuid::new_v4()))
         .expect("uuid-derived IRI parses")
+}
+
+/// Stamp the kernel-set linkage properties on each institution-emitted
+/// derivation resource: add
+/// `reflection:InstitutionEmittedDerivation` + `reflection:DerivedResource`
+/// to the `is_a` list, set `reflection:from_subject` to the gated
+/// subject IRI, and set `reflection:runtime_invocation` to the producing
+/// RuntimeInvocation IRI (when one was allocated for this dispatch).
+///
+/// The institution sets the derivation's `@id` (typically a suffix off
+/// the gated subject, e.g. `{analysis_iri}:result:{effect_name}`) and
+/// the domain-specific properties (canonical_proposition, numerics,
+/// per-effect ctor). The kernel adds only the linkage + marker class.
+///
+/// Returns `None` for derivations the kernel can't link (no
+/// `@id` on the derivation, or no `subject_iri` on the dispatch — both
+/// indicate an embedded-resource path that doesn't get a chain commit).
+pub fn finalize_emitted_derivation(
+    dispatch: &AutoOnLoadDispatch,
+    runtime_invocation_iri: Option<&Iri>,
+    mut derivation: Resource,
+) -> Option<Resource> {
+    use crate::ontology::well_known as wk;
+
+    derivation.id()?;
+    let subject_iri = dispatch.subject_iri.as_ref()?;
+
+    let is_a_iri = Iri::parse(wk::IS_A).expect("static IRI");
+    let mut classes: Vec<Value> = match derivation.get(&is_a_iri) {
+        Some(Value::Array(arr)) => arr.clone(),
+        Some(other) => vec![other.clone()],
+        None => Vec::new(),
+    };
+    let has_class = |classes: &[Value], iri: &str| {
+        classes.iter().any(|v| match v {
+            Value::String(s) => s == iri,
+            Value::ResourceRef(i) => i.as_str() == iri,
+            _ => false,
+        })
+    };
+    if !has_class(&classes, wk::DERIVED_RESOURCE) {
+        classes.push(Value::String(wk::DERIVED_RESOURCE.to_string()));
+    }
+    if !has_class(&classes, wk::INSTITUTION_EMITTED_DERIVATION) {
+        classes.push(Value::String(
+            wk::INSTITUTION_EMITTED_DERIVATION.to_string(),
+        ));
+    }
+    derivation.set(is_a_iri, Value::Array(classes));
+
+    derivation.set(
+        Iri::parse(wk::FROM_SUBJECT).expect("static IRI"),
+        Value::ResourceRef(subject_iri.clone()),
+    );
+    if let Some(inv) = runtime_invocation_iri {
+        derivation.set(
+            Iri::parse(wk::RUNTIME_INVOCATION).expect("static IRI"),
+            Value::ResourceRef(inv.clone()),
+        );
+    }
+    Some(derivation)
 }
 
 /// Property IRI for `Verdict.verdict_subject` (D31 §6.3).

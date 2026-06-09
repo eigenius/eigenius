@@ -514,6 +514,7 @@ impl LanguageRuntime for LeanLanguageRuntime {
 
         Ok(RunOutcome {
             output,
+            derivations: Vec::new(),
             image_digest,
             started_at,
             completed_at,

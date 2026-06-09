@@ -119,15 +119,17 @@ fn rm_compound_symmetry_recomputes_to_holds() {
     let outcome = inst
         .query(&proc_iri, &claim, &ctx)
         .expect("validate_measurement_claim returns an outcome");
+    let result = outcome
+        .derivations
+        .first()
+        .expect("statistics emits a MeasurementResult when the SAP ran");
 
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
+    let ctor = result
+        .get(&Iri::parse(iris::PROP_VERDICT_CTOR).unwrap())
         .and_then(Value::as_str)
         .expect("verdict carries ctor_name")
         .to_string();
-    let diagnostic = outcome
-        .output
+    let diagnostic = result
         .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
         .and_then(Value::as_str)
         .map(str::to_owned);
@@ -140,8 +142,7 @@ fn rm_compound_symmetry_recomputes_to_holds() {
          got {ctor}, diagnostic: {diagnostic:?}"
     );
 
-    let p_value = outcome
-        .output
+    let p_value = result
         .get(&Iri::parse(iris::PROP_COMPUTED_P_VALUE).unwrap())
         .and_then(|v| {
             if let Value::Float(f) = v {
@@ -156,8 +157,7 @@ fn rm_compound_symmetry_recomputes_to_holds() {
         "RM-ANOVA time F-test should give p ≪ 1e-6; got p = {p_value}"
     );
 
-    let f_stat = outcome
-        .output
+    let f_stat = result
         .get(&Iri::parse(iris::PROP_COMPUTED_STATISTIC).unwrap())
         .and_then(|v| {
             if let Value::Float(f) = v {
@@ -285,11 +285,18 @@ fn rm_ar1_returns_not_yet_wired_diagnostic() {
         .query(&proc_iri, &claim, &ctx)
         .expect("validate handler returns an outcome");
 
+    // AR1 is structurally not wired — the SAP can't run, so the gate
+    // verdict Fails and no MeasurementResult derivation is emitted.
+    assert!(
+        outcome.derivations.is_empty(),
+        "gate Fails (SAP couldn't run) must not emit derivations; got {} derivations",
+        outcome.derivations.len()
+    );
     let ctor = outcome
         .output
         .get(&Iri::parse(wk::CTOR_NAME).unwrap())
         .and_then(KV::as_str)
-        .expect("verdict carries ctor_name")
+        .expect("gate verdict carries ctor_name")
         .to_string();
     let diagnostic = outcome
         .output
@@ -297,7 +304,7 @@ fn rm_ar1_returns_not_yet_wired_diagnostic() {
         .and_then(KV::as_str)
         .map(str::to_owned);
     assert_eq!(ctor, wk::VERDICT_FAILS);
-    let diag = diagnostic.expect("Fails verdict carries a diagnostic");
+    let diag = diagnostic.expect("gate Fails carries a diagnostic");
     assert!(
         diag.contains("AR1") && diag.contains("not yet wired"),
         "diagnostic should explain AR1 is not yet wired; got: {diag}"

@@ -28,10 +28,14 @@
 //!   Reads the claim's `sample_set` reference, decodes the SampleSet's
 //!   product position (5 axis values from the `Bundle` ctor),
 //!   dispatches to a recomputation procedure, runs the §7.4 epistemic-
-//!   scope admissibility check, and returns `Verdict::Holds | Fails`.
-//!   On Holds, emits a `MeasurementVerdict` DerivedResource carrying
-//!   the claim's `derived_proposition` as `canonical_proposition`, plus
-//!   the ProgramTrace so D49 §6 admits the IsDerivedAs witness.
+//!   scope admissibility check, and returns a gate `Verdict::Holds`
+//!   (the SAP ran) plus one or more `MeasurementResult`
+//!   `InstitutionEmittedDerivation`s carrying the derived
+//!   `canonical_proposition` + numerics per effect. The D49 §6 witness
+//!   emitter walks the result resources directly to admit the
+//!   IsDerivedAs witnesses. Gate Fails covers structural failures
+//!   (missing field, unwired dispatch, scope violation) — no result is
+//!   emitted in those cases.
 //! - `extract_typed`, `reify` — `NotImplemented` in Phase 1. Future
 //!   ExportFormats (e.g., a Measurement → Reasoning extract that lifts
 //!   the DerivedResource shape into a typed value for downstream

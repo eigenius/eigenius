@@ -113,18 +113,39 @@ fn validate_claim(ctx: &ExecutionContext, claim_iri: &str) -> (String, Option<St
     let outcome = inst
         .query(&proc_iri, &claim, ctx)
         .expect("validate handler returns an outcome");
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
-        .and_then(Value::as_str)
-        .expect("verdict carries ctor_name")
-        .to_string();
-    let diagnostic = outcome
-        .output
-        .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    (ctor, diagnostic)
+    // Composite (ctor, diagnostic) — when the SAP ran, both come from
+    // the per-effect MeasurementResult derivation (the verdict_ctor +
+    // its diagnostic). When the SAP couldn't run (structural Fails),
+    // they come from the gate verdict — no derivation was emitted.
+    let diag_iri = Iri::parse("urn:eigenius:institution:diagnostic").unwrap();
+    match outcome.derivations.first() {
+        Some(result) => {
+            let ctor = result
+                .get(&Iri::parse(iris::PROP_VERDICT_CTOR).unwrap())
+                .and_then(Value::as_str)
+                .expect("MeasurementResult carries verdict_ctor")
+                .to_string();
+            let diagnostic = result
+                .get(&diag_iri)
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            (ctor, diagnostic)
+        }
+        None => {
+            let ctor = outcome
+                .output
+                .get(&Iri::parse(wk::CTOR_NAME).unwrap())
+                .and_then(Value::as_str)
+                .expect("gate verdict carries ctor_name")
+                .to_string();
+            let diagnostic = outcome
+                .output
+                .get(&diag_iri)
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            (ctor, diagnostic)
+        }
+    }
 }
 
 // ── §7.1 OneSidedWitnessed ────────────────────────────────────────────

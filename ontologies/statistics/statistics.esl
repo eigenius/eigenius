@@ -632,7 +632,7 @@ property stats:sample_set_value : core:resource {
 // proposition + numerics) is the Verdict the institution emits.
 
 class stats:MeasurementClaim {
-    description = "A statistical claim asserted against a SampleSet's raw replicates: the chain-resident pre-registration of a test (the SAP). Pairs a SampleSet reference with the universal claim parameters (alpha, effect_size, directionality, variance assumption, outlier rule). The statistics institution's qc_validate_measurement_claim handler fires AutoOnLoad at commit, derives the canonical proposition from the parameters (H1 in the population-parameter language using the stats:mean_of / stats:lt / etc. axioms), recomputes the test from raw data, and emits a MeasurementVerdict resource at `{claim_iri}:verdict` carrying the derived proposition + the numerics. Holds admits the commit; Fails rejects with a structured diagnostic (D52 §6). The Verdict is the DerivedResource downstream D39 reasoning cites via DerivedEvidence — the chain attests only propositions the institution actually constructed, not pre-asserted by the author.";
+    description = "A pre-registered Statistical Analysis Plan (SAP) tied to a specific SampleSet — the chain-resident specification of how a test will be run. Pairs a SampleSet reference with the universal SAP parameters (alpha, effect_size, directionality, variance assumption, outlier rule). The MeasurementClaim itself carries no proposition; the chain attests propositions through the MeasurementResult derivations the institution emits at validation time. On AutoOnLoad, the statistics institution validates the SAP and emits one MeasurementResult per effect (one for single-effect dispatches; 2^k − 1 for k-factor factorial; W/S/W×S for split-plot, etc.) at IRIs `{claim_iri}:result:{effect_name}`. Each MeasurementResult is the chain-resident DerivedResource downstream D39 reasoning cites via DerivedEvidence.";
     requires stats:sample_set,
              stats:alpha,
              stats:effect_size,
@@ -764,53 +764,66 @@ class stats:ImpossibilityWitness {
     description = "Marker class for chain resources that stand as proof that the inverse direction of some hypothesis is impossible within the system under study (D52 §7.1). A MeasurementClaim's Directionality.OneSidedWitnessed(w) field references such a resource by IRI; the verifier admits the one-sided p-value path only when w.is_a contains this marker. The marker itself imposes no structural requirements beyond is_a membership; the chain author asserts the impossibility, and the chain attests that the author named a specific resource as the witness.";
 }
 
-// ── MeasurementVerdict shape (companion artifact on Holds) ───────────
+// ── MeasurementResult shape (the institution-emitted derivation) ─────
 //
-// The MeasurementClaim itself IS a DerivedResource — its
-// canonical_proposition is what downstream D39 reasoning cites via
-// DerivedEvidence. MeasurementVerdict is a separate companion artifact
-// carrying the recomputed numerics (statistic + p-value) for audit,
-// related to the claim via source_claim. Phase 1 doesn't yet commit
-// MeasurementVerdict resources to chain (the verdict is the
-// QueryOutcome the dispatch handler returns); the class shape is
-// declared so the chain-storage form is reserved once the dual-verdict
-// commit per §7.2 lands.
+// The MeasurementClaim is the SAP — a pre-registered analysis
+// specification with no propositional content of its own. On
+// AutoOnLoad the statistics institution validates the SAP (returning
+// the gate Verdict) AND emits one MeasurementResult per ANOVA effect
+// (one per dispatch arm in the single-effect cases). Each
+// MeasurementResult IS the chain-resident DerivedResource carrying
+// the proposition the chain attests:
+//
+//   - reflection:canonical_proposition — the derived alternative
+//     hypothesis as a chain-resident D47 type-fragment value
+//     (e.g. `¬(stats:mean_of(s) = T)` for the TwoSided one-sample case)
+//   - stats:computed_statistic / stats:computed_p_value — the
+//     recomputed numerics
+//   - stats:verdict_ctor — the per-effect Holds/Fails decision
+//     (independent of the institutional gate Verdict, which attests
+//     "the SAP was well-formed and runnable")
+//   - reflection:from_subject — back-pointer to the MeasurementClaim
+//     (stamped by the kernel via `reflection:InstitutionEmittedDerivation`)
+//   - reflection:runtime_invocation — back-pointer to the producing
+//     RuntimeInvocation (also kernel-stamped)
+//
+// Per-effect IRI scheme: `{analysis_iri}:result:{effect_name}`. For
+// single-effect dispatches that's `:result:main_effect`; for
+// factorial it's `:result:main_A`, `:result:interaction_AB`, etc.
 
-class stats:MeasurementVerdict : reflection:DerivedResource {
-    description = "Companion artifact carrying the recomputed numerics for a MeasurementClaim's verdict. Phase 1 leaves this in the QueryOutcome return value; Phase 5 (§7.2 dual-verdict outlier-exclusion commit) materializes it as a chain resource so both `with-exclusion` and `without-exclusion` outcomes have inspectable IRIs. The claim itself is the DerivedResource D39 reasoning cites — this companion holds the audit numerics.";
-    requires stats:source_claim,
-             reflection:canonical_proposition,
-             stats:verdict_ctor,
+class stats:MeasurementResult : reflection:InstitutionEmittedDerivation {
+    description = "Per-effect derived resource the statistics institution emits as an artefact of validating a MeasurementClaim. Carries the canonical_proposition the chain attests (the derived alternative hypothesis), the recomputed numerics, and the per-effect Holds/Fails decision. Linked back to the analysis spec via reflection:from_subject and to its RuntimeInvocation via reflection:runtime_invocation (both stamped by the kernel). Downstream D39 reasoning cites this resource via DerivedEvidence; the D49 §6 witness emitter walks it directly to admit IsDerivedAs(result_iri, canonical_proposition).";
+    requires stats:verdict_ctor,
              stats:computed_statistic,
              stats:computed_p_value;
-    recommends stats:dual_verdict_pair;
-}
-
-property stats:source_claim : core:string {
-    description = "IRI of the MeasurementClaim that produced this verdict.";
-    format = formats:iri;
-    domain stats:MeasurementVerdict;
+    recommends stats:dual_verdict_pair,
+               stats:effect_name;
 }
 
 property stats:verdict_ctor : core:string {
-    description = "Constructor name from institution:Verdict (Holds / Fails / Undecidable). Mirrors the chain Verdict carried as a separate institution:Verdict resource; this field is the structural shortcut for downstream cheap lookups.";
-    domain stats:MeasurementVerdict;
+    description = "Per-effect decision constructor (Holds / Fails / Undecidable). Independent of the institutional gate Verdict — the gate attests SAP-well-formedness; this attests the per-effect statistical decision under the SAP's alpha (and family-wise correction when applicable).";
+    domain stats:MeasurementResult;
 }
 
 property stats:computed_statistic : core:float {
-    description = "The test statistic the verifier computed (t-statistic / U / F / etc., depending on variance_assumption). Reported on both Holds and Fails verdicts for transparency.";
-    domain stats:MeasurementVerdict;
+    description = "The test statistic the verifier computed for this effect (t-statistic / U / F / etc., depending on the dispatch and variance_assumption). Reported on both Holds and Fails for audit transparency.";
+    domain stats:MeasurementResult;
 }
 
 property stats:computed_p_value : core:float {
-    description = "The p-value the verifier computed from the test statistic. Unadjusted — multiple-testing correction is a higher-level institution. Reported regardless of verdict outcome.";
-    domain stats:MeasurementVerdict;
+    description = "The p-value the verifier computed from the test statistic for this effect. Reflects any multiple-comparison correction the analysis spec requested; the raw uncorrected value lives in the diagnostic.";
+    domain stats:MeasurementResult;
 }
 
 property stats:dual_verdict_pair : core:string {
-    description = "When the source claim's outlier_exclusion is non-Identity, the institution emits two DerivedResources (with-exclusion and without-exclusion) and cross-links them via this property pointing at the sibling verdict's IRI (D52 §7.2 dual-verdict commit shape).";
+    description = "When the source analysis's outlier_exclusion is non-Identity, the institution emits two MeasurementResults (with-exclusion and without-exclusion) and cross-links them via this property pointing at the sibling result's IRI (D52 §7.2 dual-verdict commit shape).";
     format = formats:iri;
-    domain stats:MeasurementVerdict;
+    domain stats:MeasurementResult;
+}
+
+property stats:effect_name : core:string {
+    description = "Symbolic name of the effect this result covers: `main_effect` for single-effect dispatches, `main_A` / `main_B` / `interaction_AB` / `whole_plot` / `subplot` / etc. for the multi-effect dispatches. Also encoded in the IRI suffix (e.g. `{analysis_iri}:result:main_A`), but the explicit property makes downstream filtering by effect cheap without IRI parsing.";
+    domain stats:MeasurementResult;
 }
 
 // ── Statistics institution (D52 §6 / D14) ────────────────────────────
@@ -819,11 +832,11 @@ resource stats:statistics_institution : institution:Institution {
     institution:institution_iri = "urn:eigenius:measurements:statistics_institution";
     institution:institution_name = "MeasurementStatistics";
     institution:runtime = runtimes:in_process;
-    core:description = "Measurement statistics institution (D52). Recomputes statistical claims from raw replicate data at commit time using deterministic IEEE-754 numerics (ndarray + statrs). Emits MeasurementVerdict DerivedResources + ProgramTraces on Holds for downstream D39 reasoning composition via DerivedEvidence. Opinionated stances: two-sided default (§7.1), dual-verdict outlier exclusion (§7.2), Passing-Bablok for method comparison (§7.3), epistemic-scope guard against technical-replicate-to-population-claim leakage (§7.4).";
+    core:description = "Measurement statistics institution (D52). On AutoOnLoad against a MeasurementClaim: validates the SAP (sample_set resolves, parameters are well-typed, dispatch matches the SampleSet's product position, the test runs without precondition failures) and emits per-effect MeasurementResult derivations carrying the canonical proposition + recomputed numerics. The gate Verdict attests SAP-well-formedness; the MeasurementResults are what downstream D39 reasoning cites via DerivedEvidence. Opinionated stances: two-sided default (§7.1), dual-verdict outlier exclusion (§7.2), Passing-Bablok for method comparison (§7.3), epistemic-scope guard against technical-replicate-to-population-claim leakage (§7.4).";
 }
 
 resource stats:qc_validate_measurement_claim : institution:QueryClass {
-    core:description = "AutoOnLoad gate on every MeasurementClaim commit: read the SampleSet's raw replicates, dispatch on the SampleSet's product position to pick the recomputation procedure, check the asserted effect_size and directionality against the computed statistic, verify the §7.4 epistemic-scope admissibility, emit MeasurementVerdict + ProgramTrace on Holds (with dual-verdict pair on non-Identity outlier exclusion). Fails verdicts reject the commit and pin the diagnostic to the failing clause.";
+    core:description = "AutoOnLoad gate on every MeasurementClaim commit: read the SampleSet's raw replicates, dispatch on the SampleSet's product position to pick the recomputation procedure, verify the §7.4 epistemic-scope admissibility, and emit per-effect MeasurementResult derivations carrying the derived canonical proposition + recomputed numerics. The gate Verdict attests the SAP itself is runnable; the MeasurementResults attest each per-effect statistical decision. Fails on the gate rejects the commit (the SAP couldn't run); per-effect Fails on a MeasurementResult is recorded but doesn't itself reject the commit (a non-significant effect is still a chain-attested negative result).";
     institution:query_class = stats:MeasurementClaim;
     institution:result_class = institution:Verdict;
     institution:dispatch_role = [dispatch:auto_on_load];

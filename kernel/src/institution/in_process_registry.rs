@@ -213,6 +213,7 @@ impl Institution for EchoInstitution {
         );
         Ok(crate::institution::runtime::QueryOutcome {
             output: r,
+            derivations: Vec::new(),
             partial_invocation: None,
         })
     }

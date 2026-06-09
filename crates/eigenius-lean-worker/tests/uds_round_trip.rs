@@ -196,6 +196,7 @@ fn worker_listen_binds_uds_and_round_trips_lean_export() {
         Response::DispatchOk {
             invocation_id,
             output,
+            derivations: _,
             dispatched_to,
         } => {
             assert_eq!(invocation_id, "uds-inv-1");

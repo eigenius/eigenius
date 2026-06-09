@@ -105,7 +105,7 @@ pub fn one_sample_t_test(samples: &[f64], null_mean: f64) -> Option<OneSampleRes
 }
 
 /// The full numeric output of a one-sample t-test, suitable for
-/// embedding in a `MeasurementVerdict`'s field set.
+/// embedding in a `MeasurementResult`'s field set.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OneSampleResult {
     pub t_statistic: f64,

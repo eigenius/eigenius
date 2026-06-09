@@ -115,15 +115,17 @@ fn factorial_2x2_omnibus_recomputes_to_holds() {
     let outcome = inst
         .query(&proc_iri, &claim, &ctx)
         .expect("validate_measurement_claim returns an outcome");
+    let result = outcome
+        .derivations
+        .first()
+        .expect("statistics emits a MeasurementResult when the SAP ran");
 
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
+    let ctor = result
+        .get(&Iri::parse(iris::PROP_VERDICT_CTOR).unwrap())
         .and_then(Value::as_str)
         .expect("verdict carries ctor_name")
         .to_string();
-    let diagnostic = outcome
-        .output
+    let diagnostic = result
         .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
         .and_then(Value::as_str)
         .map(str::to_owned);
@@ -137,8 +139,7 @@ fn factorial_2x2_omnibus_recomputes_to_holds() {
          got {ctor}, diagnostic: {diagnostic:?}"
     );
 
-    let p_value = outcome
-        .output
+    let p_value = result
         .get(&Iri::parse(iris::PROP_COMPUTED_P_VALUE).unwrap())
         .and_then(|v| {
             if let Value::Float(f) = v {
@@ -153,8 +154,7 @@ fn factorial_2x2_omnibus_recomputes_to_holds() {
         "omnibus F on this design should give p ≪ 1e-6; got p = {p_value}"
     );
 
-    let f_stat = outcome
-        .output
+    let f_stat = result
         .get(&Iri::parse(iris::PROP_COMPUTED_STATISTIC).unwrap())
         .and_then(|v| {
             if let Value::Float(f) = v {

@@ -220,6 +220,7 @@ mod tests {
                 &Response::DispatchOk {
                     invocation_id,
                     output: serde_bytes::ByteBuf::from(combined),
+                    derivations: Vec::new(),
                     dispatched_to: Some("urn:eigenius:test:method:echo".to_string()),
                 },
             )
@@ -242,6 +243,7 @@ mod tests {
             Response::DispatchOk {
                 invocation_id,
                 output,
+                derivations: _,
                 dispatched_to,
             } => {
                 assert_eq!(invocation_id, "inv-7");

@@ -401,6 +401,7 @@ impl LanguageRuntime for JuliaLanguageRuntime {
 
         Ok(RunOutcome {
             output: build_output_resource(&invocation_id, stdout),
+            derivations: Vec::new(),
             image_digest,
             started_at,
             completed_at,
@@ -460,7 +461,7 @@ impl LanguageRuntime for JuliaLanguageRuntime {
             .ensure_service(digest)
             .map_err(|e| RunError::WorkerRpcFailed(format!("ensure_service: {e}")))?;
         let (numerical_metadata, image_digest) = self.capture_health(&service);
-        let (output_bytes, dispatched_to) =
+        let (output_bytes, derivation_byte_lists, dispatched_to) =
             self.dispatch_typed_method(&service, target_cbor, input_payloads, invocation_id)?;
 
         let completed_at = DispatchTrace::now_rfc3339();
@@ -472,8 +473,22 @@ impl LanguageRuntime for JuliaLanguageRuntime {
             RunError::WorkerRpcFailed(format!("decode worker output as Eigon resource: {e}"))
         })?;
 
+        // 4. Decode each per-effect derivation the Julia institution
+        // emitted (D52 §6 — InstitutionEmittedDerivation). Empty for
+        // institutions whose only job is the pass/fail gate.
+        let mut derivations = Vec::with_capacity(derivation_byte_lists.len());
+        for (i, bytes) in derivation_byte_lists.iter().enumerate() {
+            let r = eigon_cbor::parse_resource_lenient(bytes).map_err(|e| {
+                RunError::WorkerRpcFailed(format!(
+                    "decode worker derivation #{i} as Eigon resource: {e}"
+                ))
+            })?;
+            derivations.push(r);
+        }
+
         Ok(RunOutcome {
             output,
+            derivations,
             image_digest,
             started_at,
             completed_at,
@@ -706,7 +721,7 @@ impl JuliaLanguageRuntime {
         target_cbor: Vec<u8>,
         input_payloads: Vec<ByteBuf>,
         invocation_id: String,
-    ) -> Result<(Vec<u8>, Option<String>), RunError> {
+    ) -> Result<(Vec<u8>, Vec<Vec<u8>>, Option<String>), RunError> {
         let stream = self.spawner.attach_uds(service).map_err(|e| {
             RunError::WorkerRpcFailed(format!(
                 "attach_uds for call_method on service {}: {e}",
@@ -725,9 +740,13 @@ impl JuliaLanguageRuntime {
         let result = match resp {
             Response::DispatchOk {
                 output,
+                derivations,
                 dispatched_to,
                 ..
-            } => Ok((output.into_vec(), dispatched_to)),
+            } => {
+                let derivation_bytes = derivations.into_iter().map(ByteBuf::into_vec).collect();
+                Ok((output.into_vec(), derivation_bytes, dispatched_to))
+            }
             Response::DispatchFailed {
                 error_kind,
                 message,

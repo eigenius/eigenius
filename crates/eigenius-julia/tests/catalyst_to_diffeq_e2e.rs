@@ -433,6 +433,7 @@ impl Institution for SubstrateBackedInstitution {
             .map_err(|e| InstitutionError::ComputationFailed(format!("decode output_cbor: {e}")))?;
         Ok(QueryOutcome {
             output,
+            derivations: Vec::new(),
             partial_invocation: None,
         })
     }

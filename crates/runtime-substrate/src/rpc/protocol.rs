@@ -132,6 +132,14 @@ pub enum Response {
     DispatchOk {
         invocation_id: String,
         output: ByteBuf,
+        /// Side-effect resources the language runtime emitted as
+        /// artefacts of validation — each a CBOR-encoded Eigon
+        /// resource that becomes a chain-resident
+        /// `reflection:InstitutionEmittedDerivation` under the
+        /// gated subject. Empty Vec for institutions whose only job
+        /// is the pass/fail gate (D52 §6).
+        #[serde(default)]
+        derivations: Vec<ByteBuf>,
         /// The specific `RuntimeMethodSignature` IRI that handled the
         /// invocation (multiple-dispatch languages like Julia). Echoed
         /// onto `RuntimeInvocation.dispatched_to`.
@@ -309,6 +317,7 @@ mod tests {
         let resp = Response::DispatchOk {
             invocation_id: "inv-42".to_string(),
             output: ByteBuf::from(vec![0xff, 0xfe, 0xfd]),
+            derivations: Vec::new(),
             dispatched_to: Some("urn:eigenius:test:method:foo".to_string()),
         };
         let after: Response = cbor_round_trip(&resp);

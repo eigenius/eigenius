@@ -19,7 +19,7 @@
 //! mirrors the kernel's Eigon data model but has no kernel dependency —
 //! it compiles cleanly for `wasm32-unknown-unknown`.
 //!
-//! # Example
+//! # Example — boundary call (extract / reify)
 //!
 //! ```ignore
 //! use eigenius_wasm_sdk::{Resource, Value};
@@ -31,6 +31,28 @@
 //!     let mut output = Resource::new();
 //!     output.set("urn:example:greeting", Value::String(format!("Hello, {name}")));
 //!     Ok(output.to_cbor())
+//! }
+//! ```
+//!
+//! # Example — query call (AutoOnLoad / Decidable / OnDemand)
+//!
+//! Query handlers return a [`QueryResponse`] wrapping the gate Verdict
+//! and zero-or-more side-effect derivations. Each derivation becomes a
+//! chain-resident `reflection:InstitutionEmittedDerivation` under the
+//! gated subject (D52 §6). The kernel reads `output` as the
+//! Holds/Fails gate, and each `derivations` entry as a per-effect
+//! result the downstream witness emitter walks.
+//!
+//! ```ignore
+//! use eigenius_wasm_sdk::{QueryResponse, Resource};
+//!
+//! fn execute(input: Vec<u8>, _argument: Vec<u8>) -> Result<Vec<u8>, String> {
+//!     let input = Resource::from_cbor(&input)?;
+//!     // ... validate input, compute verdict + derivations ...
+//!     let verdict = Resource::new();   // institutional Holds/Fails
+//!     let result = Resource::with_id("urn:example:input:result:main_effect");
+//!     let response = QueryResponse::from_verdict(verdict).with_derivation(result);
+//!     Ok(response.to_cbor())
 //! }
 //! ```
 
@@ -209,6 +231,102 @@ impl Resource {
     }
 }
 
+/// Response shape for WASM institution query handlers
+/// (AutoOnLoad / Decidable / OnDemand QueryClasses).
+///
+/// Wraps the gate Verdict resource (Holds / Fails / Undecidable —
+/// what the kernel reads to admit or reject the commit) and zero-or-
+/// more side-effect derivations. Each derivation becomes a chain-
+/// resident `reflection:InstitutionEmittedDerivation` under the gated
+/// subject; the kernel stamps the `is_a` marker and the
+/// `reflection:from_subject` / `reflection:runtime_invocation`
+/// linkage properties before committing. Authors set only the
+/// derivation's `@id` (typically `{subject_iri}:result:{effect_name}`)
+/// and its domain-specific payload (including
+/// `reflection:canonical_proposition` when the derivation should be
+/// admitted as an `IsDerivedAs` witness target).
+///
+/// Wire format: CBOR map `{"output": <Resource>, "derivations": [<Resource>, ...]}`.
+/// The kernel's `WasmInstitution::query` decodes this shape directly.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct QueryResponse {
+    pub output: Resource,
+    pub derivations: Vec<Resource>,
+}
+
+impl QueryResponse {
+    /// New response carrying just the gate verdict; no derivations.
+    pub fn from_verdict(output: Resource) -> Self {
+        Self {
+            output,
+            derivations: Vec::new(),
+        }
+    }
+
+    /// Append a derivation. Chainable.
+    pub fn with_derivation(mut self, d: Resource) -> Self {
+        self.derivations.push(d);
+        self
+    }
+
+    /// Serialize to the wire format the kernel decodes.
+    pub fn to_cbor(&self) -> Vec<u8> {
+        let entries: Vec<(ciborium::Value, ciborium::Value)> = vec![
+            (
+                ciborium::Value::Text("output".to_string()),
+                self.output.to_cbor_value(),
+            ),
+            (
+                ciborium::Value::Text("derivations".to_string()),
+                ciborium::Value::Array(
+                    self.derivations.iter().map(|d| d.to_cbor_value()).collect(),
+                ),
+            ),
+        ];
+        let value = ciborium::Value::Map(entries);
+        let mut buf = Vec::new();
+        ciborium::into_writer(&value, &mut buf).expect("CBOR serialization should not fail");
+        buf
+    }
+
+    /// Decode a wire-format response. Used by the kernel's
+    /// `WasmInstitution::query` decoder; also useful for testing.
+    pub fn from_cbor(cbor: &[u8]) -> Result<Self, String> {
+        let value: ciborium::Value =
+            ciborium::from_reader(cbor).map_err(|e| format!("CBOR decode error: {e}"))?;
+        let map = match value {
+            ciborium::Value::Map(m) => m,
+            _ => return Err("expected CBOR map for QueryResponse".to_string()),
+        };
+        let mut output: Option<Resource> = None;
+        let mut derivations: Vec<Resource> = Vec::new();
+        for (k, v) in map {
+            let key = match k {
+                ciborium::Value::Text(s) => s,
+                _ => return Err("expected text key in QueryResponse map".to_string()),
+            };
+            match key.as_str() {
+                "output" => output = Some(cbor_to_resource(&v)?),
+                "derivations" => match v {
+                    ciborium::Value::Array(arr) => {
+                        for item in arr {
+                            derivations.push(cbor_to_resource(&item)?);
+                        }
+                    }
+                    _ => return Err("`derivations` must be a CBOR array".to_string()),
+                },
+                other => {
+                    return Err(format!("unexpected QueryResponse key `{other}`"));
+                }
+            }
+        }
+        Ok(Self {
+            output: output.ok_or_else(|| "QueryResponse missing `output`".to_string())?,
+            derivations,
+        })
+    }
+}
+
 fn value_to_cbor(value: &Value) -> ciborium::Value {
     match value {
         Value::String(s) => ciborium::Value::Text(s.clone()),
@@ -344,5 +462,78 @@ mod tests {
         );
         let classes = r.is_a();
         assert_eq!(classes, vec!["urn:example:Dog"]);
+    }
+
+    #[test]
+    fn query_response_no_derivations_round_trip() {
+        let mut verdict = Resource::new();
+        verdict.set("urn:eigenius:core:ctor_name", Value::String("Holds".into()));
+        let response = QueryResponse::from_verdict(verdict);
+
+        let cbor = response.to_cbor();
+        let parsed = QueryResponse::from_cbor(&cbor).expect("decode");
+
+        assert!(parsed.derivations.is_empty(), "no derivations expected");
+        assert_eq!(
+            parsed
+                .output
+                .get("urn:eigenius:core:ctor_name")
+                .and_then(Value::as_string),
+            Some("Holds")
+        );
+    }
+
+    #[test]
+    fn query_response_with_derivations_round_trip() {
+        let mut verdict = Resource::new();
+        verdict.set("urn:eigenius:core:ctor_name", Value::String("Holds".into()));
+
+        let mut d1 = Resource::with_id("urn:example:analysis:result:main_A");
+        d1.set("urn:example:effect_name", Value::String("main_A".into()));
+        d1.set("urn:example:p_value", Value::Float(0.001));
+
+        let mut d2 = Resource::with_id("urn:example:analysis:result:interaction_AB");
+        d2.set(
+            "urn:example:effect_name",
+            Value::String("interaction_AB".into()),
+        );
+        d2.set("urn:example:p_value", Value::Float(0.04));
+
+        let response = QueryResponse::from_verdict(verdict)
+            .with_derivation(d1)
+            .with_derivation(d2);
+
+        let cbor = response.to_cbor();
+        let parsed = QueryResponse::from_cbor(&cbor).expect("decode");
+
+        assert_eq!(parsed.derivations.len(), 2);
+        assert_eq!(
+            parsed.derivations[0].id(),
+            Some("urn:example:analysis:result:main_A")
+        );
+        assert_eq!(
+            parsed.derivations[0]
+                .get("urn:example:effect_name")
+                .and_then(Value::as_string),
+            Some("main_A")
+        );
+        assert_eq!(
+            parsed.derivations[1].id(),
+            Some("urn:example:analysis:result:interaction_AB")
+        );
+    }
+
+    #[test]
+    fn query_response_decode_rejects_missing_output() {
+        // Hand-craft a CBOR map with only `derivations`, no `output`.
+        let bad = ciborium::Value::Map(vec![(
+            ciborium::Value::Text("derivations".into()),
+            ciborium::Value::Array(Vec::new()),
+        )]);
+        let mut buf = Vec::new();
+        ciborium::into_writer(&bad, &mut buf).unwrap();
+
+        let err = QueryResponse::from_cbor(&buf).unwrap_err();
+        assert!(err.contains("missing `output`"), "diagnostic: {err}");
     }
 }

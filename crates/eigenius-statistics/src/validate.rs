@@ -68,7 +68,7 @@ pub fn do_validate_measurement_claim(
     let sample_set_iri_str = match read_iri_property(claim, iris::PROP_SAMPLE_SET)? {
         Some(s) => s,
         None => {
-            return Ok(verdict_fails(
+            return Ok(gate_fails(
                 "MeasurementClaim missing required `sample_set` property".into(),
             ));
         }
@@ -76,7 +76,7 @@ pub fn do_validate_measurement_claim(
     let sample_set_iri = match Iri::parse(&sample_set_iri_str) {
         Ok(i) => i,
         Err(e) => {
-            return Ok(verdict_fails(format!(
+            return Ok(gate_fails(format!(
                 "MeasurementClaim's sample_set value `{sample_set_iri_str}` is not a valid IRI: {e}"
             )));
         }
@@ -86,7 +86,7 @@ pub fn do_validate_measurement_claim(
     let sample_set_res = match ctx.resolve(&sample_set_iri) {
         Some(r) => r,
         None => {
-            return Ok(verdict_fails(format!(
+            return Ok(gate_fails(format!(
                 "SampleSetResource `{sample_set_iri}` not found on chain"
             )));
         }
@@ -96,7 +96,7 @@ pub fn do_validate_measurement_claim(
     let bundle_value = match sample_set_res.get(&sample_set_value_iri) {
         Some(v) => v,
         None => {
-            return Ok(verdict_fails(format!(
+            return Ok(gate_fails(format!(
                 "SampleSetResource `{sample_set_iri}` missing required \
                  `sample_set_value` property"
             )));
@@ -105,7 +105,7 @@ pub fn do_validate_measurement_claim(
     let bundle_json = match bundle_value {
         Value::Json(j) => j,
         other => {
-            return Ok(verdict_fails(format!(
+            return Ok(gate_fails(format!(
                 "SampleSetResource `{sample_set_iri}`'s sample_set_value is not a chain \
                  inductive value (got {other:?})"
             )));
@@ -115,7 +115,7 @@ pub fn do_validate_measurement_claim(
     // ── Step 3: decode the Bundle ctor's args ─────────────────────────
     let bundle = match decode_bundle(bundle_json) {
         Ok(b) => b,
-        Err(diag) => return Ok(verdict_fails(diag)),
+        Err(diag) => return Ok(gate_fails(diag)),
     };
 
     // ── §7.3 class-based early dispatch: MethodComparisonClaim ────────
@@ -135,7 +135,7 @@ pub fn do_validate_measurement_claim(
     let dispatch = match dispatch_product_position(&bundle) {
         Some(d) => d,
         None => {
-            return Ok(verdict_fails(format!(
+            return Ok(gate_fails(format!(
                 "WrongTestForDesign: product position {:?} has no Phase 1 verifier procedure \
                  (Phase 1 implements only SingleSampleEstimate; other Tier 1+2 designs land \
                  in follow-on commits)",
@@ -152,15 +152,15 @@ pub fn do_validate_measurement_claim(
     // ── Step 5: read claim parameters ─────────────────────────────────
     let alpha = match read_float_property(claim, iris::PROP_ALPHA)? {
         Some(a) => a,
-        None => return Ok(verdict_fails("claim missing `alpha`".into())),
+        None => return Ok(gate_fails("claim missing `alpha`".into())),
     };
     let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY)? {
         Some(j) => j,
-        None => return Ok(verdict_fails("claim missing `directionality`".into())),
+        None => return Ok(gate_fails("claim missing `directionality`".into())),
     };
     let effect_size = match read_json_property(claim, iris::PROP_EFFECT_SIZE)? {
         Some(j) => j,
-        None => return Ok(verdict_fails("claim missing `effect_size`".into())),
+        None => return Ok(gate_fails("claim missing `effect_size`".into())),
     };
     // §7.1 directionality routing. TwoSided proceeds with the standard
     // two-sided p-value path. OneSidedWitnessed(witness_iri) requires:
@@ -177,7 +177,7 @@ pub fn do_validate_measurement_claim(
         Some("TwoSided") => false,
         Some("OneSidedWitnessed") => {
             if !dispatch.supports_one_sided_directionality() {
-                return Ok(verdict_fails(format!(
+                return Ok(gate_fails(format!(
                     "directionality = OneSidedWitnessed is incompatible with the {dispatch:?} \
                      dispatch — F-based omnibus ANOVA tests produce intrinsically non-negative \
                      statistics and the one-sided/two-sided distinction does not refine them \
@@ -191,7 +191,7 @@ pub fn do_validate_measurement_claim(
             {
                 Some(s) => s.to_string(),
                 None => {
-                    return Ok(verdict_fails(
+                    return Ok(gate_fails(
                         "directionality = OneSidedWitnessed requires a witness IRI as its first \
                          argument (D52 §7.1)"
                             .into(),
@@ -199,12 +199,12 @@ pub fn do_validate_measurement_claim(
                 }
             };
             if let Some(diag) = check_impossibility_witness(&witness_iri_str, ctx)? {
-                return Ok(verdict_fails(diag));
+                return Ok(gate_fails(diag));
             }
             true
         }
         other => {
-            return Ok(verdict_fails(format!(
+            return Ok(gate_fails(format!(
                 "unknown directionality ctor `{other:?}` (expected TwoSided / OneSidedWitnessed)"
             )));
         }
@@ -242,7 +242,7 @@ pub fn do_validate_measurement_claim(
                             (k as usize, alpha)
                         }
                         _ => {
-                            return Ok(verdict_fails(format!(
+                            return Ok(gate_fails(format!(
                                 "outlier_exclusion = ESD requires (max_outliers : integer, \
                                  alpha : float); got args = {a:?}"
                             )));
@@ -250,7 +250,7 @@ pub fn do_validate_measurement_claim(
                     }
                 }
                 other => {
-                    return Ok(verdict_fails(format!(
+                    return Ok(gate_fails(format!(
                         "outlier_exclusion = ESD requires exactly 2 args (max_outliers, alpha); \
                          got args = {other:?}"
                     )));
@@ -259,7 +259,7 @@ pub fn do_validate_measurement_claim(
             Some((k, alpha_esd))
         }
         (DispatchPos::SingleSampleEstimate, "PassingBablokResidual") => {
-            return Ok(verdict_fails(
+            return Ok(gate_fails(
                 "outlier_exclusion = PassingBablokResidual is meaningful only on method-\
                  comparison data and is not wired for the SingleSampleEstimate dispatch \
                  (D52 §7.2 / §7.3 — use MethodComparisonClaim for that path)"
@@ -267,7 +267,7 @@ pub fn do_validate_measurement_claim(
             ));
         }
         (DispatchPos::SingleSampleEstimate, "Manual") => {
-            return Ok(verdict_fails(
+            return Ok(gate_fails(
                 "outlier_exclusion = Manual requires §11 assay-quality observation \
                  institutions to validate each excluded unit's typed quality-check witness; \
                  those institutions have not landed yet (D52 §7.2 deferral)"
@@ -275,7 +275,7 @@ pub fn do_validate_measurement_claim(
             ));
         }
         (_, "ESD") | (_, "PassingBablokResidual") | (_, "Manual") => {
-            return Ok(verdict_fails(format!(
+            return Ok(gate_fails(format!(
                 "outlier_exclusion = `{exclusion_ctor}` is not yet wired for the {dispatch:?} \
                  dispatch (D52 §7.2 Phase 5 v1 wires only the SingleSampleEstimate + ESD cell; \
                  other (dispatch, exclusion) cells are tracked as follow-on GitHub issues). \
@@ -283,7 +283,7 @@ pub fn do_validate_measurement_claim(
             )));
         }
         (_, other) => {
-            return Ok(verdict_fails(format!(
+            return Ok(gate_fails(format!(
                 "unknown outlier_exclusion ctor `{other}` (expected Identity / ESD / \
                  PassingBablokResidual / Manual)"
             )));
@@ -310,7 +310,7 @@ pub fn do_validate_measurement_claim(
                 let (magnitude, _units) = match parse_effect_size_absolute(&effect_size) {
                     Some(p) => p,
                     None => {
-                        return Ok(verdict_fails(
+                        return Ok(gate_fails(
                             "Phase 1 only supports EffectSize.Absolute(magnitude, units); \
                          StandardizedCohensD/HedgesG and Relative not yet wired"
                                 .into(),
@@ -319,7 +319,7 @@ pub fn do_validate_measurement_claim(
                 };
                 let samples = match decode_flat_observations(&bundle.observations_raw) {
                     Ok(s) => s,
-                    Err(diag) => return Ok(verdict_fails(diag)),
+                    Err(diag) => return Ok(gate_fails(diag)),
                 };
                 if let Some((max_outliers, alpha_esd)) = esd_params {
                     // §7.2 dual-verdict: compute the test twice — once
@@ -339,7 +339,7 @@ pub fn do_validate_measurement_claim(
                     let r_with = match one_sample_t_test(&filtered, magnitude) {
                         Some(r) => r,
                         None => {
-                            return Ok(verdict_fails(format!(
+                            return Ok(gate_fails(format!(
                                 "InsufficientReplication: ESD-filtered one-sample t-test \
                                  requires n_filtered >= 2 (got n_raw = {}, excluded = {}, \
                                  n_filtered = {})",
@@ -352,7 +352,7 @@ pub fn do_validate_measurement_claim(
                     let r_without = match one_sample_t_test(&samples, magnitude) {
                         Some(r) => r,
                         None => {
-                            return Ok(verdict_fails(format!(
+                            return Ok(gate_fails(format!(
                                 "InsufficientReplication: comparator one-sample t-test \
                                  requires n_raw >= 2, got n = {}",
                                 samples.len()
@@ -380,7 +380,7 @@ pub fn do_validate_measurement_claim(
                     let r = match one_sample_t_test(&samples, magnitude) {
                         Some(r) => r,
                         None => {
-                            return Ok(verdict_fails(format!(
+                            return Ok(gate_fails(format!(
                                 "InsufficientReplication: one-sample t-test requires n >= 2, \
                                  got n = {}",
                                 samples.len()
@@ -402,13 +402,13 @@ pub fn do_validate_measurement_claim(
                 let (group_a, group_b) =
                     match decode_two_group_observations(&bundle.observations_raw) {
                         Ok(pair) => pair,
-                        Err(diag) => return Ok(verdict_fails(diag)),
+                        Err(diag) => return Ok(gate_fails(diag)),
                     };
                 let variance = match variance_assumption.as_ref().and_then(json_ctor_name) {
                     Some("Pooled") => TwoSampleVariance::Pooled,
                     Some("WelchUnequal") => TwoSampleVariance::WelchUnequal,
                     Some(other) => {
-                        return Ok(verdict_fails(format!(
+                        return Ok(gate_fails(format!(
                             "IID two-sample with variance_assumption `{other}` not yet wired \
                          (Phase 1.5 supports Pooled / WelchUnequal; NonParametric / RankBased \
                          are follow-on)"
@@ -419,7 +419,7 @@ pub fn do_validate_measurement_claim(
                 let r = match two_sample_t_test(&group_a, &group_b, variance) {
                     Some(r) => r,
                     None => {
-                        return Ok(verdict_fails(format!(
+                        return Ok(gate_fails(format!(
                             "InsufficientReplication: two-sample t-test requires n >= 2 in each \
                          group, got n_a = {}, n_b = {}",
                             group_a.len(),
@@ -436,12 +436,12 @@ pub fn do_validate_measurement_claim(
                 // (= one-sample t-test on the per-pair differences vs 0).
                 let pairs = match decode_paired_observations(&bundle.observations_raw) {
                     Ok(p) => p,
-                    Err(diag) => return Ok(verdict_fails(diag)),
+                    Err(diag) => return Ok(gate_fails(diag)),
                 };
                 let r = match paired_t_test(&pairs) {
                     Some(r) => r,
                     None => {
-                        return Ok(verdict_fails(format!(
+                        return Ok(gate_fails(format!(
                             "InsufficientReplication: paired t-test requires n_pairs >= 2, got {}",
                             pairs.len()
                         )));
@@ -465,12 +465,12 @@ pub fn do_validate_measurement_claim(
                 let (factor_levels, observations) =
                     match decode_factorial_observations(&bundle.observations_raw) {
                         Ok(p) => p,
-                        Err(diag) => return Ok(verdict_fails(diag)),
+                        Err(diag) => return Ok(gate_fails(diag)),
                     };
                 let r = match factorial_omnibus_anova(&factor_levels, &observations) {
                     Some(r) => r,
                     None => {
-                        return Ok(verdict_fails(format!(
+                        return Ok(gate_fails(format!(
                             "Factorial ANOVA preconditions failed: need ≥ 2 cells observed and \
                          ≥ 1 within-cell df (factor_levels = {factor_levels:?}, n_obs = {})",
                             observations.len()
@@ -490,7 +490,7 @@ pub fn do_validate_measurement_claim(
                 let n_blocks = match decode_rcb_block_count(&bundle.blocking_raw) {
                     Some(b) => b,
                     None => {
-                        return Ok(verdict_fails(
+                        return Ok(gate_fails(
                             "RCBD requires RCB(n_blocks) in the blocking slot with n_blocks ≥ 3 \
                          (PairedBlocking dispatches via stats:Paired)"
                                 .into(),
@@ -499,12 +499,12 @@ pub fn do_validate_measurement_claim(
                 };
                 let observations = match decode_rcbd_observations(&bundle.observations_raw) {
                     Ok(o) => o,
-                    Err(diag) => return Ok(verdict_fails(diag)),
+                    Err(diag) => return Ok(gate_fails(diag)),
                 };
                 // n_treatments is inferred from observations: total_n /
                 // n_blocks must equal n_treatments and divide evenly.
                 if observations.len() % n_blocks != 0 {
-                    return Ok(verdict_fails(format!(
+                    return Ok(gate_fails(format!(
                         "RCBD observation count ({}) is not a multiple of n_blocks ({n_blocks}); \
                      each block must contain every treatment exactly once (complete design)",
                         observations.len()
@@ -514,7 +514,7 @@ pub fn do_validate_measurement_claim(
                 let r = match rcbd_anova(n_blocks, n_treatments, &observations) {
                     Some(r) => r,
                     None => {
-                        return Ok(verdict_fails(format!(
+                        return Ok(gate_fails(format!(
                             "RCBD ANOVA preconditions failed: complete design requires every \
                          (block, treatment) cell to have exactly one observation \
                          (n_blocks = {n_blocks}, n_treatments = {n_treatments}, \
@@ -543,7 +543,7 @@ pub fn do_validate_measurement_claim(
                 let (a, r) = match decode_splitplot_blocking(&bundle.blocking_raw) {
                     Some(p) => p,
                     None => {
-                        return Ok(verdict_fails(
+                        return Ok(gate_fails(
                             "SplitPlot requires SplitPlotBlocking(a, r) in the blocking slot with \
                          a ≥ 2 and r ≥ 2"
                                 .into(),
@@ -552,7 +552,7 @@ pub fn do_validate_measurement_claim(
                 };
                 let observations = match decode_splitplot_observations(&bundle.observations_raw) {
                     Ok(o) => o,
-                    Err(diag) => return Ok(verdict_fails(diag)),
+                    Err(diag) => return Ok(gate_fails(diag)),
                 };
                 let n_per_whole_plot = a.checked_mul(r).and_then(|n_wp| {
                     if n_wp == 0 || observations.len() % n_wp != 0 {
@@ -564,7 +564,7 @@ pub fn do_validate_measurement_claim(
                 let b = match n_per_whole_plot {
                     Some(b) if b >= 2 => b,
                     _ => {
-                        return Ok(verdict_fails(format!(
+                        return Ok(gate_fails(format!(
                             "SplitPlot observation count ({}) is not a*r*b for a={a}, r={r} \
                          (subplot factor level count b must be ≥ 2 and divide evenly)",
                             observations.len()
@@ -574,7 +574,7 @@ pub fn do_validate_measurement_claim(
                 let res = match splitplot_anova(a, b, r, &observations) {
                     Some(r) => r,
                     None => {
-                        return Ok(verdict_fails(format!(
+                        return Ok(gate_fails(format!(
                             "SplitPlot ANOVA preconditions failed: each whole plot must have a \
                          consistent W level and contain every S level exactly once; each W \
                          level must have exactly r={r} whole-plot replicates \
@@ -627,7 +627,7 @@ pub fn do_validate_measurement_claim(
                     match decode_longitudinal_timepoints(&bundle.repeated_measures_raw) {
                         Some(t) => t,
                         None => {
-                            return Ok(verdict_fails(
+                            return Ok(gate_fails(
                                 "RepeatedMeasures requires Longitudinal(n_timepoints) in the \
                              repeated_measures slot with n_timepoints ≥ 2"
                                     .into(),
@@ -637,7 +637,7 @@ pub fn do_validate_measurement_claim(
                 let k_between = match decode_full_factorial_k(&bundle.factor_raw) {
                     Some(k) => k,
                     None => {
-                        return Ok(verdict_fails(
+                        return Ok(gate_fails(
                             "RepeatedMeasures requires FullFactorial(k_between_factors) in the \
                              factor slot with k ≥ 0 (k = 0 is the time-only RM case)"
                                 .into(),
@@ -647,10 +647,10 @@ pub fn do_validate_measurement_claim(
                 let (factor_levels, inner_observations_raw) =
                     match decode_rm_observations_wrapped(&bundle.observations_raw) {
                         Ok(p) => p,
-                        Err(diag) => return Ok(verdict_fails(diag)),
+                        Err(diag) => return Ok(gate_fails(diag)),
                     };
                 if factor_levels.len() != k_between {
-                    return Ok(verdict_fails(format!(
+                    return Ok(gate_fails(format!(
                         "RepeatedMeasures factor_levels.len() ({}) must equal \
                          k_between_factors ({k_between}) declared on the FullFactorial ctor",
                         factor_levels.len()
@@ -667,10 +667,10 @@ pub fn do_validate_measurement_claim(
                         let observations =
                             match decode_rm_simple_observations(inner_observations_raw) {
                                 Ok(o) => o,
-                                Err(diag) => return Ok(verdict_fails(diag)),
+                                Err(diag) => return Ok(gate_fails(diag)),
                             };
                         if observations.len() % n_timepoints != 0 {
-                            return Ok(verdict_fails(format!(
+                            return Ok(gate_fails(format!(
                                 "RepeatedMeasures observation count ({}) is not a multiple of \
                                  n_timepoints ({n_timepoints}); each subject must be measured at \
                                  every timepoint exactly once (complete design)",
@@ -685,7 +685,7 @@ pub fn do_validate_measurement_claim(
                         ) {
                             Some(r) => r,
                             None => {
-                                return Ok(verdict_fails(format!(
+                                return Ok(gate_fails(format!(
                                     "RepeatedMeasures (CompoundSymmetry) preconditions failed: \
                                      complete design requires every (subject, timepoint) cell to \
                                      have exactly one observation (n_subjects = {n_subjects}, \
@@ -706,7 +706,7 @@ pub fn do_validate_measurement_claim(
                         (res.f_time, res.p_time, Some(note))
                     }
                     ("CompoundSymmetry", k) => {
-                        return Ok(verdict_fails(format!(
+                        return Ok(gate_fails(format!(
                             "RepeatedMeasures (CompoundSymmetry, k_between = {k}) not yet wired \
                              — factorial-RM needs a multi-factor fixed-effect decomposition on \
                              top of the subject random effect (factor_levels = {factor_levels:?}). \
@@ -714,7 +714,7 @@ pub fn do_validate_measurement_claim(
                         )));
                     }
                     ("AR1", k) => {
-                        return Ok(verdict_fails(format!(
+                        return Ok(gate_fails(format!(
                             "RepeatedMeasures (AR1, k_between = {k}) not yet wired — AR(1) \
                              covariance needs the ρ parameter and generalized least squares \
                              rather than the RCBD-equivalent univariate RM-ANOVA path. Tracked \
@@ -722,7 +722,7 @@ pub fn do_validate_measurement_claim(
                         )));
                     }
                     ("Unstructured", k) => {
-                        return Ok(verdict_fails(format!(
+                        return Ok(gate_fails(format!(
                             "RepeatedMeasures (Unstructured, k_between = {k}) not yet wired — \
                              Unstructured covariance needs MANOVA-style multivariate tests with \
                              a free T×T within-subject covariance matrix. Tracked in GitHub \
@@ -730,7 +730,7 @@ pub fn do_validate_measurement_claim(
                         )));
                     }
                     (other, _) => {
-                        return Ok(verdict_fails(format!(
+                        return Ok(gate_fails(format!(
                             "unknown autocorrelation_structure ctor `{other}` (expected \
                              CompoundSymmetry / AR1 / Unstructured)"
                         )));
@@ -776,7 +776,7 @@ pub fn do_validate_measurement_claim(
     // marker defaults to PopulationLevel (the more restrictive admissibility).
     let scope_diag = check_epistemic_scope(derived_proposition.as_ref(), &bundle.replication, ctx)?;
     if let Some(d) = scope_diag {
-        return Ok(verdict_fails(d));
+        return Ok(gate_fails(d));
     }
 
     // ── Step 8: compare computed statistic against asserted threshold ─
@@ -823,29 +823,48 @@ pub fn do_validate_measurement_claim(
         (None, Some(b)) => Some(b.to_string()),
         (None, None) => None,
     };
-    if p_value_for_alpha < alpha {
-        Ok(QueryOutcome::from_output(verdict_resource(
-            wk::VERDICT_HOLDS,
-            combined_diag.as_deref(),
-            Some((t_statistic, p_value_for_alpha)),
-            derived_proposition.as_ref(),
-        )))
+    // The SAP itself ran (well-formed parameters, dispatch matched,
+    // test executed) — gate Holds regardless of whether the test
+    // rejected H0. The per-effect statistical decision lives on the
+    // MeasurementResult derivation. `result_ctor` reflects the per-
+    // effect Holds/Fails under the SAP's alpha; `canonical_proposition`
+    // attaches only on per-effect Holds (the chain attests a positive
+    // statistical claim) — a per-effect Fails carries no
+    // canonical_proposition, matching the D49 witness emitter's
+    // structural filter.
+    let test_rejected = p_value_for_alpha < alpha;
+    let result_ctor = if test_rejected {
+        wk::VERDICT_HOLDS
     } else {
-        let fail_diag = match combined_diag.as_deref() {
+        wk::VERDICT_FAILS
+    };
+    let result_diag = if test_rejected {
+        combined_diag.clone()
+    } else {
+        Some(match combined_diag.as_deref() {
             Some(note) => format!(
-                "AlphaNotCrossed: computed p = {p_value_for_alpha:.6}, threshold alpha = {alpha}. {note}"
+                "AlphaNotCrossed: computed p = {p_value_for_alpha:.6}, \
+                 threshold alpha = {alpha}. {note}"
             ),
             None => format!(
-                "AlphaNotCrossed: computed p = {p_value_for_alpha:.6}, threshold alpha = {alpha}"
+                "AlphaNotCrossed: computed p = {p_value_for_alpha:.6}, \
+                 threshold alpha = {alpha}"
             ),
-        };
-        Ok(QueryOutcome::from_output(verdict_resource(
-            wk::VERDICT_FAILS,
-            Some(&fail_diag),
-            Some((t_statistic, p_value_for_alpha)),
-            None,
-        )))
-    }
+        })
+    };
+    let canonical_for_result = if test_rejected {
+        derived_proposition.as_ref()
+    } else {
+        None
+    };
+    Ok(gate_holds_with_result(
+        claim.id(),
+        "main_effect",
+        result_ctor,
+        result_diag.as_deref(),
+        (t_statistic, p_value_for_alpha),
+        canonical_for_result,
+    ))
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -877,7 +896,7 @@ fn recompute_method_comparison_claim(
     _ctx: &ExecutionContext,
 ) -> Result<QueryOutcome, InstitutionError> {
     if bundle.blocking != "PairedBlocking" {
-        return Ok(verdict_fails(format!(
+        return Ok(gate_fails(format!(
             "MethodComparisonClaim requires a Paired SampleSet (blocking = PairedBlocking, \
              factor = SingleFactor, repeated_measures = CrossSectional); got blocking = `{}`, \
              factor = `{}`, repeated_measures = `{}` (D52 §7.3 CLSI EP09)",
@@ -886,10 +905,10 @@ fn recompute_method_comparison_claim(
     }
     let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY)? {
         Some(j) => j,
-        None => return Ok(verdict_fails("claim missing `directionality`".into())),
+        None => return Ok(gate_fails("claim missing `directionality`".into())),
     };
     if json_ctor_name(&directionality) != Some("TwoSided") {
-        return Ok(verdict_fails(
+        return Ok(gate_fails(
             "MethodComparisonClaim requires directionality = TwoSided — Passing-Bablok is a \
              CI-based agreement test, not a sign-of-effect test, and OneSidedWitnessed does \
              not refine it (D52 §7.3)"
@@ -899,7 +918,7 @@ fn recompute_method_comparison_claim(
     let outlier = read_json_property(claim, iris::PROP_OUTLIER_EXCLUSION)?;
     if let Some(ctor) = outlier.as_ref().and_then(json_ctor_name) {
         if ctor != "Identity" {
-            return Ok(verdict_fails(format!(
+            return Ok(gate_fails(format!(
                 "MethodComparisonClaim with outlier_exclusion = `{ctor}` not yet wired — the \
                  §7.2 dual-verdict outlier-exclusion path is implemented for the \
                  SingleSampleEstimate dispatch in Phase 5 v1; PassingBablokResidual /  ESD on \
@@ -909,14 +928,14 @@ fn recompute_method_comparison_claim(
     }
     let pairs = match decode_paired_observations(&bundle.observations_raw) {
         Ok(p) => p,
-        Err(diag) => return Ok(verdict_fails(diag)),
+        Err(diag) => return Ok(gate_fails(diag)),
     };
     let method_a: Vec<f64> = pairs.iter().map(|&(a, _b)| a).collect();
     let method_b: Vec<f64> = pairs.iter().map(|&(_a, b)| b).collect();
     let res = match passing_bablok_regression(&method_a, &method_b) {
         Some(r) => r,
         None => {
-            return Ok(verdict_fails(format!(
+            return Ok(gate_fails(format!(
                 "Passing-Bablok regression preconditions failed: need n ≥ 3 samples with at \
                  least one defined pairwise slope (no constant method-A column); got n = {}",
                 pairs.len(),
@@ -952,19 +971,21 @@ fn recompute_method_comparison_claim(
     } else {
         format!("MethodComparisonDisagreement: {diag}")
     };
-    // MethodComparison: canonical_proposition derivation is not yet
-    // wired — the §7.3 Phase 5 v1 hardening lands when this dispatch
-    // gets its (slope = 1.0 ∧ intercept = 0.0) Prop derivation, at
-    // which point the Holds verdict will carry the matching D47-
-    // encoded Pi/And/Id tree. Today the verdict is an audit anchor
-    // only; the D49 witness emitter will skip it (no
-    // canonical_proposition ⇒ no Derived witness key).
-    Ok(QueryOutcome::from_output(verdict_resource(
+    // MethodComparison: gate Holds (the SAP ran). The per-effect
+    // MeasurementResult carries the agreement decision under
+    // `methods_agree` and the slope / intercept numerics; canonical-
+    // proposition derivation isn't wired yet for this dispatch — the
+    // §7.3 Phase 5 v1 hardening lands when this gets its
+    // `(slope = 1.0 ∧ intercept = 0.0)` Prop derivation. Without
+    // canonical_proposition the witness emitter skips this result.
+    Ok(gate_holds_with_result(
+        claim.id(),
+        "methods_agree",
         ctor,
         Some(&diag_string),
-        Some((res.slope, p_indicator)),
+        (res.slope, p_indicator),
         None,
-    )))
+    ))
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1984,40 +2005,52 @@ fn read_json_property(
     }
 }
 
-/// Build a Fails verdict carrying a diagnostic string. No computed
-/// numerics (the failure happened before we ran the test). No
-/// canonical_proposition either — the witness emitter must not key
-/// `IsDerivedAs` against a verdict that didn't succeed.
-fn verdict_fails(diagnostic: String) -> QueryOutcome {
-    QueryOutcome::from_output(verdict_resource(
-        wk::VERDICT_FAILS,
-        Some(&diagnostic),
-        None,
-        None,
-    ))
+/// Build a gate-Fails QueryOutcome — the SAP couldn't run (missing
+/// field, malformed bundle, unwired dispatch, scope violation, etc.).
+/// No MeasurementResult derivations are emitted because no test ran.
+fn gate_fails(diagnostic: String) -> QueryOutcome {
+    QueryOutcome::from_output(gate_verdict_resource(wk::VERDICT_FAILS, Some(&diagnostic)))
 }
 
-/// Build the Verdict::Holds | Fails resource shape the kernel's commit
-/// pipeline expects. On Holds (and on Fails where the test actually
-/// ran), the numerics are attached so downstream consumers see the
-/// computed statistic + p-value alongside the outcome (D52 §6 — verdict
-/// carries the full intermediate state for audit).
+/// Build a gate-Holds QueryOutcome carrying a single MeasurementResult
+/// derivation — the SAP ran successfully and produced a per-effect
+/// statistical decision. The per-effect decision lives on the
+/// MeasurementResult (`verdict_ctor` property), independent of the
+/// gate verdict which attests only "the SAP was structurally
+/// runnable." Non-rejecting tests (AlphaNotCrossed) still gate-Hold;
+/// the chain attests the negative result as a typed artefact.
 ///
-/// `canonical_proposition` is the derived chain-resident D47 type-
-/// fragment value for the claim — set ONLY on Holds verdicts, since
-/// the D49 witness index reads it directly off the verdict to admit
-/// `IsDerivedAs(verdict_iri, P)` and a Fails verdict must not entitle
-/// a downstream `DerivedEvidence` citation. (The dispatch arms that
-/// haven't yet wired derivation pass `None` here — their Holds
-/// verdicts won't be witness-emitted, which is exactly the correct
-/// behaviour until those arms supply the canonical-proposition shape
-/// for their parameter shapes.)
-fn verdict_resource(
-    ctor_name: &str,
+/// `analysis_iri` is `None` for embedded subjects (post-translation
+/// validation) — in that case no derivation is emitted because there's
+/// no chain IRI to attach to, but the gate verdict still goes through.
+fn gate_holds_with_result(
+    analysis_iri: Option<&Iri>,
+    effect_name: &str,
+    result_ctor: &str,
     diagnostic: Option<&str>,
-    numerics: Option<(f64, f64)>,
+    numerics: (f64, f64),
     canonical_proposition: Option<&serde_json::Value>,
-) -> Resource {
+) -> QueryOutcome {
+    let mut out = QueryOutcome::from_output(gate_verdict_resource(wk::VERDICT_HOLDS, None));
+    if let Some(iri) = analysis_iri {
+        out.derivations.push(measurement_result_resource(
+            iri,
+            effect_name,
+            result_ctor,
+            diagnostic,
+            numerics,
+            canonical_proposition,
+        ));
+    }
+    out
+}
+
+/// Build the minimal institutional gate Verdict resource. The kernel
+/// stamps `verdict_subject`, `verdict_query_class`,
+/// `runtime_invocation`, `is_a [Verdict, DerivedResource]`,
+/// `dispatched_to`; we set only the per-Verdict-instance fields:
+/// `ctor_name` (Holds / Fails / Undecidable) and optional diagnostic.
+fn gate_verdict_resource(ctor_name: &str, diagnostic: Option<&str>) -> Resource {
     const DIAGNOSTIC_IRI: &str = "urn:eigenius:institution:diagnostic";
     let mut r = Resource::new_embedded();
     r.set(
@@ -2036,14 +2069,52 @@ fn verdict_resource(
             Value::String(d.to_string()),
         );
     }
-    if let Some((t, p)) = numerics {
+    r
+}
+
+/// Build the MeasurementResult derivation for one effect. IRI is
+/// `{analysis_iri}:result:{effect_name}` — deterministic from the
+/// (analysis, effect) pair so re-runs collapse idempotently. The
+/// kernel adds `is_a [DerivedResource, InstitutionEmittedDerivation]`
+/// + `reflection:from_subject` + `reflection:runtime_invocation`; we
+/// set the domain class (`stats:MeasurementResult`) plus the per-effect
+/// payload.
+fn measurement_result_resource(
+    analysis_iri: &Iri,
+    effect_name: &str,
+    result_ctor: &str,
+    diagnostic: Option<&str>,
+    (t_statistic, p_value): (f64, f64),
+    canonical_proposition: Option<&serde_json::Value>,
+) -> Resource {
+    const DIAGNOSTIC_IRI: &str = "urn:eigenius:institution:diagnostic";
+    let result_iri = Iri::parse(&format!("{}:result:{}", analysis_iri.as_str(), effect_name))
+        .expect("result IRI parses");
+    let mut r = Resource::new(result_iri);
+    r.set(
+        Iri::parse(wk::IS_A).expect("well-known IRI"),
+        Value::Array(vec![Value::String(iris::MEASUREMENT_RESULT.to_string())]),
+    );
+    r.set(
+        Iri::parse(iris::PROP_VERDICT_CTOR).expect("static IRI"),
+        Value::String(result_ctor.to_string()),
+    );
+    r.set(
+        Iri::parse(iris::PROP_EFFECT_NAME).expect("static IRI"),
+        Value::String(effect_name.to_string()),
+    );
+    r.set(
+        Iri::parse(iris::PROP_COMPUTED_STATISTIC).expect("static IRI"),
+        Value::Float(t_statistic),
+    );
+    r.set(
+        Iri::parse(iris::PROP_COMPUTED_P_VALUE).expect("static IRI"),
+        Value::Float(p_value),
+    );
+    if let Some(d) = diagnostic {
         r.set(
-            Iri::parse(iris::PROP_COMPUTED_STATISTIC).expect("static IRI"),
-            Value::Float(t),
-        );
-        r.set(
-            Iri::parse(iris::PROP_COMPUTED_P_VALUE).expect("static IRI"),
-            Value::Float(p),
+            Iri::parse(DIAGNOSTIC_IRI).expect("static IRI"),
+            Value::String(d.to_string()),
         );
     }
     if let Some(prop) = canonical_proposition {

@@ -117,6 +117,13 @@ pub struct DispatchTrace {
 pub struct RunOutcome {
     /// The output resource produced by the dispatch.
     pub output: eigenius_kernel::ontology::resource::Resource,
+    /// Side-effect resources the language runtime emitted as artefacts
+    /// of the dispatch (per D52 §6 / institution-emitted derivations).
+    /// Each becomes a chain-resident
+    /// `reflection:InstitutionEmittedDerivation` carrying its own
+    /// `canonical_proposition`. Empty for substrate-hosted institutions
+    /// whose only job is the pass/fail gate.
+    pub derivations: Vec<eigenius_kernel::ontology::resource::Resource>,
     /// Image digest the worker actually ran against. `None` under
     /// host-subprocess backends with no built image.
     pub image_digest: Option<ImageDigest>,

@@ -70,18 +70,18 @@ pub mod iris {
     pub const SAMPLE_SET: &str = "urn:eigenius:measurements:SampleSet";
     pub const REPLICATE: &str = "urn:eigenius:measurements:Replicate";
     pub const MEASUREMENT_CLAIM: &str = "urn:eigenius:measurements:MeasurementClaim";
-    pub const MEASUREMENT_VERDICT: &str = "urn:eigenius:measurements:MeasurementVerdict";
+    pub const MEASUREMENT_RESULT: &str = "urn:eigenius:measurements:MeasurementResult";
     pub const POPULATION_LEVEL: &str = "urn:eigenius:measurements:PopulationLevel";
     pub const MEASUREMENT_LEVEL: &str = "urn:eigenius:measurements:MeasurementLevel";
     pub const IMPOSSIBILITY_WITNESS: &str = "urn:eigenius:measurements:ImpossibilityWitness";
     pub const METHOD_COMPARISON_CLAIM: &str = "urn:eigenius:measurements:MethodComparisonClaim";
 
-    // ── MeasurementVerdict property IRIs (Holds-output shape) ────────
-    pub const PROP_SOURCE_CLAIM: &str = "urn:eigenius:measurements:source_claim";
+    // ── MeasurementResult property IRIs (per-effect derivation shape) ─
     pub const PROP_VERDICT_CTOR: &str = "urn:eigenius:measurements:verdict_ctor";
     pub const PROP_COMPUTED_STATISTIC: &str = "urn:eigenius:measurements:computed_statistic";
     pub const PROP_COMPUTED_P_VALUE: &str = "urn:eigenius:measurements:computed_p_value";
     pub const PROP_DUAL_VERDICT_PAIR: &str = "urn:eigenius:measurements:dual_verdict_pair";
+    pub const PROP_EFFECT_NAME: &str = "urn:eigenius:measurements:effect_name";
 
     // ── Parameter-symbol axioms + propositional primitives (D52 §3) ──
     //

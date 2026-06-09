@@ -89,17 +89,21 @@ pub fn build_witness_index(layer: &Layer) -> BTreeMap<WitnessKey, ()> {
                 index.insert(key, ());
             }
         }
-        // D52 verdict-as-DerivedResource shape: AutoOnLoad-emitted
-        // Verdicts that carry `reflection:canonical_proposition` are
+        // D52 institution-emitted-derivation shape: AutoOnLoad-emitted
+        // derivations (`reflection:InstitutionEmittedDerivation`) are
         // self-attesting — the kernel produced them deterministically
-        // from a decidable institution, no separate trace is needed
-        // to certify their existence. Walk these directly and admit
-        // `IsDerivedAs(verdict_iri, P)` against the verdict's own IRI.
-        // Verdicts without `canonical_proposition` (Lean / Reasoning
-        // institution verdicts) are skipped — they're audit anchors,
-        // not derivation witnesses.
-        if is_a.iter().any(|c| c.as_str() == wk::VERDICT) {
-            if let Some(key) = emit_from_self_attesting_verdict(&resource) {
+        // from a decidable institution running against the gated
+        // subject, no separate ProgramTrace is needed to certify their
+        // existence. Walk these directly and admit
+        // `IsDerivedAs(derivation_iri, P)` against the derivation's
+        // own IRI. The verdict resource itself doesn't carry a
+        // canonical_proposition under the new shape — only derivations
+        // do (D52 verdict-vs-derivation split).
+        if is_a
+            .iter()
+            .any(|c| c.as_str() == wk::INSTITUTION_EMITTED_DERIVATION)
+        {
+            if let Some(key) = emit_from_institution_derivation(&resource) {
                 index.insert(key, ());
             }
         }
@@ -107,20 +111,19 @@ pub fn build_witness_index(layer: &Layer) -> BTreeMap<WitnessKey, ()> {
     index
 }
 
-/// D52 verdict-as-DerivedResource: read `canonical_proposition` directly
-/// off a Verdict resource and build a `WitnessKey` keyed against the
-/// verdict's own IRI. Returns `None` when the verdict has no
-/// `canonical_proposition` set (Lean / Reasoning verdicts skip; only
-/// statistics-institution verdicts populate it under the verdict-as-
-/// DerivedResource convention).
-fn emit_from_self_attesting_verdict(verdict: &Resource) -> Option<WitnessKey> {
-    let verdict_iri = verdict.id().cloned()?;
+/// D52 institution-emitted derivation: read `canonical_proposition`
+/// directly off a kernel-emitted derivation resource and build a
+/// `WitnessKey` keyed against the derivation's own IRI. Returns `None`
+/// when the derivation has no `canonical_proposition` set (kernel
+/// merge dropped it, or the institution didn't supply one).
+fn emit_from_institution_derivation(derivation: &Resource) -> Option<WitnessKey> {
+    let derivation_iri = derivation.id().cloned()?;
     let prop_iri = Iri::parse(wk::CANONICAL_PROPOSITION).ok()?;
-    let encoded_prop = verdict.get(&prop_iri)?;
+    let encoded_prop = derivation.get(&prop_iri)?;
     let prop_hash = hash_proposition_value(encoded_prop);
     Some(WitnessKey {
         category: WitnessCategory::Derived,
-        iri: verdict_iri,
+        iri: derivation_iri,
         prop_hash,
     })
 }

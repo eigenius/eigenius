@@ -58,8 +58,29 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone)]
 pub struct QueryOutcome {
     /// The institution-side dispatch result (e.g. a Verdict for an
-    /// AutoOnLoad / Decidable QueryClass).
+    /// AutoOnLoad / Decidable QueryClass). This is the pass/fail gate
+    /// the commit pipeline reads via [`parse_verdict`] — Holds admits
+    /// the gated commit, Fails rejects it. The institution-level
+    /// Verdict carries no `canonical_proposition`; derivations are
+    /// separate.
     pub output: Resource,
+    /// Side-effect resources the institution produced *as artefacts
+    /// of validation*. Empty for institutions whose only job is the
+    /// pass/fail gate (e.g. Reasoning / Lean). Statistics emits one
+    /// `MeasurementResult` per ANOVA effect; each derivation is a
+    /// `reflection:InstitutionEmittedDerivation` whose
+    /// `canonical_proposition` the chain ends up attesting (D49
+    /// §6 IsDerivedAs witness target). The kernel commits each
+    /// derivation alongside the gate-Verdict when the gate Holds;
+    /// derivations are dropped when the gate Fails.
+    ///
+    /// The institution sets each derivation's `@id` to its intended
+    /// chain IRI (typically suffixed off the gated subject — e.g.
+    /// `{analysis_iri}:result:main_A`), and sets the domain-specific
+    /// properties. The kernel stamps the cross-resource linkage
+    /// properties (`reflection:from_subject`, `reflection:runtime_invocation`)
+    /// so every derivation can navigate back to its producer.
+    pub derivations: Vec<Resource>,
     /// Substrate-captured provenance fields, ready to be folded into a
     /// full `RuntimeInvocation` by the kernel commit pipeline. Always
     /// `None` from non-external runtimes.
@@ -68,10 +89,12 @@ pub struct QueryOutcome {
 
 impl QueryOutcome {
     /// Plain `output`-only outcome — what every non-external
-    /// institution returns. Keeps the call site short.
+    /// institution returns when it has no derivations to emit. Keeps
+    /// the call site short.
     pub fn from_output(output: Resource) -> Self {
         Self {
             output,
+            derivations: Vec::new(),
             partial_invocation: None,
         }
     }
