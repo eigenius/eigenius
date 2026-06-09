@@ -1,4 +1,4 @@
-# 9. Appendix
+# 10. Appendix
 
 > **STATUS:** outline only. To be filled in.
 
@@ -9,7 +9,7 @@ machinery a reader uses to follow up on the rest of the guide.
 
 ## Section outline
 
-### §9.1. Source index
+### §10.1. Source index
 
 - [`kernel/src/institution/`](../../../kernel/src/institution/) — `Institution`
   trait, `InstitutionRuntime`, `InstitutionIndex`, AutoOnLoad dispatch
@@ -24,7 +24,7 @@ machinery a reader uses to follow up on the rest of the guide.
 - [`notebooks/examples/kinase-institutions.json`](../../../notebooks/examples/kinase-institutions.json)
   — the canonical worked example
 
-### §9.2. Related design documents
+### §10.2. Related design documents
 
 - [**D14** — Institution Realisation](../../design/d14-institution-realisation.md)
   — institution mechanism (supersedes D10); §4 the resource shapes,
@@ -41,7 +41,7 @@ machinery a reader uses to follow up on the rest of the guide.
   — `formulas:FormulaTerm` and the inductive-types-on-the-chain
   mechanism
 
-### §9.3. Companion notes
+### §10.3. Companion notes
 
 - [Note for a SHACL user](../../notes/note-for-a-shacl-user.md) — the
   conceptual pitch for someone coming from the W3C semantic-web
@@ -50,21 +50,21 @@ machinery a reader uses to follow up on the rest of the guide.
   — the same machinery applied to an enterprise setting; useful as a
   domain-transfer exercise.
 
-### §9.4. Cross-language guides
+### §10.4. Cross-language guides
 
 - [ESL](../esl/README.md) — surface syntax for ontologies and programs
 - [EigenQL](../eigenql/README.md) — surface syntax for queries
 - [Formula language](../formula/README.md) — chain-mirrored EigenTT
   fragment used as the v1 cross-institution payload
 
-### §9.5. Per-host implementer chapters
+### §10.5. Per-host implementer chapters
 
 - [Platform §10 — Building WASM institutions](../platform/10-wasm-institutions.md)
 - [Platform §11 — Runtime substrate](../platform/11-runtime-substrate.md)
 - [`platform/julia-institutions/`](../platform/julia-institutions/) —
   per-institution Julia tutorials
 
-### §9.6. Phase status
+### §10.6. Phase status
 
 The composition surface is complete through Phase 19i (D14 §9.3 chain
 reinsertion through both ESL and EigenQL surfaces). Tracked next:

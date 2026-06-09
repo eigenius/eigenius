@@ -165,6 +165,67 @@ The structural payoff at scale:
   against `add`'s 2-argument signature gets rejected the same way whether it
   landed via Symbolics, JuMP, or hand-authored Eigon-JSON.
 
+## 2.4a. A second shared payload landed: `core:EigenTTType` propositions (D47)
+
+`FormulaTerm` covers the numerical institutions. The reasoning + statistics stack (D52 + D39) sits on a *different* shared payload: chain-mirrored EigenTT type expressions, declared at `core:EigenTTType` per [D47](../../../design/d47-chain-mirrored-eigentt-type-fragment.md). Same general mechanism — a chain-resident inductive type that multiple institutions consume directly — but a different semantic domain (typed propositions and dependent types, not numerical expressions) and a different bridge mechanism (the [D49 chain-witness index](../platform/reasoning-institution/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses), not a comorphism extract-transform-reify pipeline).
+
+The shape:
+
+```esl
+data core:EigenTTType : Type 0 {
+    ConstRef(core:string),                  // qualified name of a class or primitive
+    App(core:EigenTTType, core:EigenTTType), // application
+    Pi(core:EigenTTType, core:EigenTTType),  // dependent function type
+    LitString(core:string),                  // string literal as a Prop argument
+    LitInt(core:integer),
+    Sort(core:integer),                      // universe level
+    // ...
+}
+```
+
+A chain-resident value of `core:EigenTTType` IS a typed proposition (when it lives in `Prop` per [D46](../../../design/d46-prop-universe-and-proof-irrelevance.md)) or a type expression. The author surface is [`type_expr(...)`](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) — the syntactic counterpart of `formula(...)` for the proposition language:
+
+```esl
+reflection:canonical_proposition = type_expr(
+    screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+);
+```
+
+This lowers to a `Value::Json` carrying the tagged-dict tree:
+
+```json
+{
+  "ctor": "App",
+  "args": [
+    {"ctor": "ConstRef", "args": ["urn:eigenius:demo:screen:HasLowIC50"]},
+    {"ctor": "LitString", "args": ["urn:eigenius:demo:screen:EIG_0291"]}
+  ]
+}
+```
+
+### Which institutions consume it
+
+| Institution | What it reads `core:EigenTTType` for |
+|---|---|
+| **D52 statistics** ([tutorial](../platform/statistics-institution/README.md)) | The `MeasurementClaim`'s `null_hypothesis` / `alternative_hypothesis` / `canonical_proposition` slots carry chain-mirrored propositions. The §7.4 epistemic-scope check walks the proposition's head predicate to look up its `is_a` scope markers. |
+| **D39 reasoning** ([tutorial](../platform/reasoning-institution/README.md)) | The `ReasoningSentence`'s `proposition` slot. The certificate's `JustifiedBy(j, P)` indices read it. The grounding constructors (`declared`/`observed`/`derived`/`verified`) hash it to compute the witness-index key. |
+| **D49 chain-witness index** ([§6.4a](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state)) | Reads `canonical_proposition` from every chain-resident `DeclaredResource` / `ObservedResource` / `DerivedResource` / `VerifiedResource` and computes a SHA-256 hash to key the witness-admission table. |
+| **Lean institution** ([tutorial](../platform/lean-institution/README.md)) | The `lean_to_reasoning` comorphism reifies a Lean proof's proposition as a `reasoning:VerifiedPropositionView` with a `canonical_proposition` slot — same chain shape, written by the comorphism instead of by the original author. |
+
+### The bridge mechanism is different
+
+For `FormulaTerm`, institutions coordinate through declared **comorphisms** — chain-resident bridges that translate one institution's view of a `FormulaTerm` value into another's, with the kernel statically type-checking the alignment ([chapter 3](03-comorphisms.md)). The transformation is *active*: one institution's runtime is invoked, output is reified back into the chain.
+
+For `core:EigenTTType`, institutions coordinate through the **witness index** ([§6.4a](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state)). Each institution that emits a chain-resident `DerivedResource` (or `ObservedResource` / `DeclaredResource` / `VerifiedResource`) with a `canonical_proposition` slot automatically populates the per-layer witness index at construction. Each institution that consumes a proposition (notably D39, but in principle any institution that wants to admit a `ChainWitness` predicate at type-check time) reads from the same index. The composition is *passive* — D39 doesn't call D52; it just reads what D52 emitted.
+
+This is the load-bearing structural difference between the two composition shapes. Comorphisms are explicit translation handlers; witness-index composition is implicit through a shared chain artifact shape. Both work; which one applies depends on whether the downstream institution needs the input *value translated* (comorphism, `FormulaTerm` shape) or just *cited as evidence* (witness index, `core:EigenTTType` shape).
+
+### Identity-comorphism collapse, witness-index edition
+
+The `FormulaTerm` story includes the identity-comorphism collapse: when both institutions speak the same payload, the comorphism's transformation step is a no-op and the bridge collapses to a pure dispatch route ([§2.4](#2-4-identity-comorphism-collapse-the-structural-payoff)). The witness-index analog: when two institutions share the `core:EigenTTType` proposition shape and the `canonical_proposition` slot, *no bridge code at all is required*. The producer institution emits the resource with `canonical_proposition` set; the consumer institution looks up the proposition by hash in the witness index. There is no comorphism to declare, no transformation to write — the shape itself is the protocol.
+
+The drug-screening fixture at [`crates/eigenius-reasoning/tests/fixtures/drug_screening.esl`](../../../crates/eigenius-reasoning/tests/fixtures/drug_screening.esl) exercises this: the `claim_eig0291_lowic50` MeasurementClaim's `canonical_proposition = HasLowIC50("urn:...:EIG_0291")` becomes available to the downstream `concl_eig0291_strong` ReasoningSentence's `derived(claim_iri, HasLowIC50(...), ...)` certificate constructor *without any bridge code on either side* — D52 emits the proposition into a chain slot D39 already reads from. See [chapter 7](07-stats-and-reasoning-walkthrough.md) for the full walkthrough.
+
 ## 2.5. When *not* to share a payload
 
 Shared payloads are not free. They require all participating institutions to
@@ -198,9 +259,14 @@ declaration ([chapter 3](03-comorphisms.md)).
 
 ## 2.6. What other shared payloads might look like
 
-`FormulaTerm` is v1's only shared payload. The principle generalises: any
-chain-mirrored inductive type can play the same role. Two near-term
-candidates the platform's structure makes natural:
+`FormulaTerm` and `core:EigenTTType` are v1's two shared payloads —
+the first coordinates numerical institutions via comorphisms ([§2.2-§2.4](#2-2-formulaterm-as-a-coordination-mechanism)),
+the second coordinates statistics + reasoning via the witness index
+([§2.4a](#2-4a-a-second-shared-payload-landed-coreeigentttype-propositions-d47)).
+The shared-payload principle generalises further: any chain-mirrored
+inductive type at a peer namespace can play the same role for a third
+or fourth institution family. One near-term candidate the platform's
+structure makes natural:
 
 - **A shared planning-tree language.** An inductive type whose constructors
   describe a planned action (`Procure`, `Move`, `Transform`, `Sell`,
@@ -214,20 +280,15 @@ candidates the platform's structure makes natural:
   [enterprise supply-chain scenario note](../../notes/enterprise-supply-chain-scenario.md)
   explores this shape in a non-science domain.
 
-- **A shared logical-clause language.** An inductive type for typed
-  propositions and conditions (`Forall`, `Exists`, `Implies`, `BoundedBy`,
-  `EquivalentTo`) over enterprise quantities. Because the kernel's EigenTT
-  carries `Pi` and `Lam` natively (the binders that make FormulaTerm do
-  double duty as a logical language under
-  [Curry-Howard](../formula/02-mini-tt-fragment.md#22-why-pi-and-lam-are-chain-resident)),
-  a covenant condition like "for all rolling 12-month windows,
-  debt-service-coverage ratio ≥ 1.25" is a typed value the receiving
-  institution can introspect, simplify, and discharge.
-
-Neither of these has been built yet. The point is that the *machinery* for
-shared-payload composition is generic — once an inductive type is on the
-chain at a peer namespace, every institution that consumes it can compose
-through identity comorphisms, and the structural payoff in §2.4 transfers.
+The structural payoff documented in [§2.4](#2-4-identity-comorphism-collapse-the-structural-payoff)
+(identity collapse for the comorphism shape) and the equivalent
+zero-bridge-code property documented in [§2.4a](#2-4a-a-second-shared-payload-landed-coreeigentttype-propositions-d47)
+(shared chain slot for the witness-index shape) both transfer to any
+future shared payload — once the inductive is on the chain at a peer
+namespace, every institution that consumes it composes either through
+identity comorphisms (if the runtime needs to read the value) or through
+the appropriate witness/admission mechanism (if the value is being cited
+as evidence rather than processed).
 
 ---
 

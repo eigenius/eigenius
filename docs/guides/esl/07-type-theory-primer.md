@@ -8,17 +8,52 @@ The Eigenius kernel **expands substantially beyond the teaching presentation**. 
 
 The implementation is in [`kernel/src/nbe/`](../../../kernel/src/nbe/). Two key files: [`term.rs`](../../../kernel/src/nbe/term.rs) defines `Exp` (syntactic terms), [`val.rs`](../../../kernel/src/nbe/val.rs) defines `Val` (semantic values).
 
-## 7.1. Universes
+## 7.1. Universes — the unified `Sort(n)` ladder with `Prop` at the bottom
 
-`Set` is the universe of small types. `Type(n)` is the universe at level `n` — `Type(0)` contains `Set`, `Type(1)` contains `Type(0)`, and so on. The hierarchy is cumulative (Russell-style) — `Set : Type(0) : Type(1) : ...` — which lets you write `T : Set` without thinking about levels in most cases.
+The kernel encodes every universe as a single `Sort(n)` constructor with a `usize` level. The level semantics:
 
-In ESL surface syntax, the universes appear as `core:Set` and (rarely) `core:Type`. You see them most often in `data` and `codata` parameter declarations:
+```
+Sort(0)   = Prop
+Sort(1)   = Set         (= Type(0) under the surface naming)
+Sort(n+1) = Type(n)     for n >= 1
+```
+
+Typing rule: `Sort(n) : Sort(n+1)`. Cumulativity is positional: `Sort(m) ⊆ Sort(n)` iff `m ≤ n`. The full cumulative chain is
+
+```
+Prop  ⊆  Set  ⊆  Type(1)  ⊆  Type(2)  ⊆  ...
+```
+
+— **`Prop` cumulates into `Set`**, matching Lean 4's variant. (Coq's predicative-Set tradition keeps Prop as a non-cumulative side branch; the kernel takes the simpler unified view.) A proposition can be coerced into a type when its propositional content is forgotten; the reverse is not admissible.
+
+ESL surface syntax keeps `Set` and `Type(n)` as sugar for `Sort(1)` and `Sort(n+1)` respectively, and adds `Prop` as sugar for `Sort(0)`. You see all three in `data`/`codata` parameter declarations and result-sort clauses:
 
 ```esl
 data ex:List(A : core:Set) { ... }
+
+data screen:HasLowIC50 : core:string -> Prop, stats:PopulationLevel {
+}
+
+data screen:Eq(A : core:Set) : A -> A -> Prop {
+    refl : forall (a : A) => screen:Eq(A, a, a),
+}
 ```
 
-Here `A : core:Set` says `A` is a small type. Cross-link to chapter 6: when the kernel resolves `core:Set`, it produces `Val::Set` directly.
+`HasLowIC50` is a **zero-constructor opaque predicate** in `Prop` — its inhabitants are admitted by chain mechanism (a [D49 chain witness](../../design/d49-chainwitness-machinery.md) for an `IsObservedAs` / `IsDerivedAs` / `IsDeclaredAs` triple, or a D39 reasoning sentence's grounding constructor) rather than constructed by users. `Eq` is propositional equality with its single `refl` constructor (the indexing forces both indices to match — see [§7.3a](#7-3a-indexed-inductive-families) for the type-theory of indices).
+
+### Three kernel-level disciplines specific to `Prop`
+
+D46 introduces three rules that distinguish `Prop` from `Set` / `Type(n)` operationally:
+
+1. **Proof irrelevance.** Two inhabitants `p, q : P` of the same `Prop` are judgmentally equal — the kernel's `def_eq` returns true for `(p, q)` whenever it can decide `P : Prop`. Computationally: the kernel never needs to compare the *structure* of two proofs; it just checks that the type they inhabit is in `Prop`. This is what makes propositions about chain artifacts — "this measurement Holds at α = 0.05", "this rule grounds this assertion" — equal regardless of how they were derived. The audit invariant becomes: the chain attests *that* a proposition holds, not *which* proof was used.
+2. **Singleton elimination.** Pattern-matching a `Prop`-typed scrutinee into a `Set` / `Type(n)` motive (so-called *large elimination*) is restricted to two shapes: (a) **zero-constructor** inductives (vacuous match); (b) **single-constructor** inductives where each constructor argument either lives in `Prop` itself or appears in the conclusion's indices (so the eliminator can reconstruct it from the type alone). `Eq(A, x, y)` fits Case (b) via the indices clause — `refl`'s argument `a` is bound to both indices, so any motive can recover `a` from the scrutinee's type. `True` fits Case (b) trivially (no arguments). Rejections surface as `cannot eliminate Prop-typed scrutinee into Set` errors. See [§7.3a](#7-3a-indexed-inductive-families) for the full Case A / Case B rules and [D46 §7](../../design/d46-prop-universe-and-proof-irrelevance.md) for the soundness story (the rule blocks the Hurkens construction without losing the useful singletons).
+3. **Impredicative Π formation.** `Π (x : A), B` lives in `Prop` whenever the codomain `B` lives in `Prop`, regardless of where the domain `A` lives. This is what lets you write `forall (P Q : Prop), (P <-> Q) -> Id(Prop, P, Q)` (propext) as a member of `Prop` even though it quantifies over the entire propositional universe — the codomain is propositional, so the whole Π is. The `Type(n)` ladder is *predicative*: `Π (x : Sort(m)), B : Sort(n)` lives in `Sort(max(m, n))` when `n ≥ 1`, so non-Prop universe levels accumulate. Only `Prop` formation collapses them. Sigma, sum, and the other type formers follow the standard `max`-rule symmetrically — a Σ of two Prop fields is in Prop, a Σ mixing a Prop and a Set field is in Set.
+
+### Why this matters
+
+Without `Prop`, every proposition would be a `Set`-typed inductive, distinct proofs of the same proposition would be distinct values, and the audit invariant would have to be "this chain artifact is the canonical proof of *P*" — which is not a thing the chain can adjudicate. With `Prop` + proof irrelevance, the invariant is "this chain artifact has type *P*", and it doesn't matter how the inhabitant was produced. Two reasoning sentences with completely different `JustifiedBy` proof structures both attest the same final proposition, and the chain treats them as equal. This is what makes the D39 grounding constructors (`DeclaredEvidence` / `ObservedEvidence` / `DerivedEvidence` / `VerifiedEvidence`) compose freely — distinct evidence chains for the same conclusion produce judgmentally-equal certificates.
+
+The unified-ladder, impredicative-Prop design follows the Lean 4 kernel and Calculus of Inductive Constructions tradition. See [D46](../../design/d46-prop-universe-and-proof-irrelevance.md) for the full universe-formation rules, the proof-irrelevance soundness argument, the strong-reduction skip optimization that takes advantage of irrelevance to avoid evaluating `Prop`-typed subterms, and the [validation rule 13 stratification](../../design/d46-prop-universe-and-proof-irrelevance.md) that prevents Prop-level resources from forward-referencing higher-level ones.
 
 ## 7.2. Π-types — dependent functions
 
@@ -51,6 +86,38 @@ Exp::Pair(Box<Exp>, Box<Exp>)       // (a, b) — inhabitant of Sig
 Σ-types are how `class` declarations are encoded ([chapter 6](06-resources-types-and-the-layer.md)). A class with required properties `p1 : T1, p2 : T2` becomes `Sig(p1 : T1, Sig(p2 : T2, One))` — a right-nested chain of Σ-types terminated by the unit type `One`. Each `Construct ex:C { ... }` builds the corresponding pair value.
 
 The "field name" lives in the `Patt` (which is the property IRI for class-derived Σ-types). The kernel uses it for `find_sigma_field` lookups during projection type-checking.
+
+## 7.3a. Indexed inductive families (D48)
+
+Inductive types ([§7.4](#7-4-inductive-types)) split their telescope between **parameters** and **indices**:
+
+- **Parameters** are fixed across all constructors. `data List(A : Set) { nil; cons(A, List(A)) }` has one parameter `A` — every constructor uses the same `A`.
+- **Indices** may vary per constructor. `data Vec(A : Set) : Nat -> Set` has one parameter `A` and one index of type `Nat`; the `nil` constructor concludes at `Vec(A, zero)` and the `cons` constructor concludes at `Vec(A, succ(n))`. The conclusion shape's *value* depends on which constructor you used.
+
+The distinction matters operationally because of **dependent pattern matching**. When you scrutinize a value of type `Vec(A, n)`, the type-checker can refine `n` based on which constructor the arm matched: in the `nil` arm `n` is known to be `zero`, in the `cons` arm `n` is `succ(m)` for some fresh `m`. The motive (the return type of the match) can mention `n` and the checker will substitute the refined value per arm.
+
+This is what makes indexed families like `screen:Eq(A, x, y)` load-bearing for reasoning. With one constructor `refl : forall (a : A) => Eq(A, a, a)`, pattern-matching on a value of type `Eq(A, x, y)` forces `x = y = a` for some fresh `a` — there's no `mismatch` arm to write because no constructor produces an `Eq` between distinct things. The type system rejects, at elaboration time, the cases that would observe distinct equal values.
+
+### Singleton elimination — Prop-indexed families
+
+When an indexed family lives in `Prop` ([§7.1](#7-1-universes-the-unified-sortn-ladder-with-prop-at-the-bottom)), large elimination — pattern matching on its values into a `Set` / `Type(n)` motive — is restricted by the **singleton-elim rule** (D46 §7.2, lifted from nanoda_lib). The kernel admits the elimination iff the family fits one of two cases:
+
+- **Case A — zero constructors.** A `Prop`-typed inductive with no constructors is vacuously inhabited only by absurd elimination; pattern matching is admissible to any motive because there are no arms to define. This is the shape of [D49's chain-witness predicates](../../design/d49-chainwitness-machinery.md) (`IsObservedAs`, `IsDeclaredAs`, `IsDerivedAs`, `IsVerifiedAs`) and [D39's `core:Asserts`](../../design/d39-justification-logic.md) — the proposition exists structurally, its inhabitant is admitted by chain mechanism, and there's nothing to destructure.
+- **Case B — exactly one constructor, with restrictions.** The single constructor takes some arguments; for each argument, the kernel requires either:
+  - the argument is itself in `Prop` (no computational content the larger universe could observe), **or**
+  - the argument appears in the *conclusion's indices* (after the parameters), so the eliminator can reconstruct it from the type alone.
+
+  `Eq(A, x, y)` passes: `refl`'s only argument is `(a : A)` with `A : Set`, but `a` appears in both indices of the conclusion (`Eq(A, a, a)`), so it's reconstructible from the scrutinee's type. `True` passes trivially (no arguments). Existential singletons whose witness lives in `Type` and is *not* visible in the result type fail Case B and are rejected.
+
+Pattern-matching shapes that fit neither case are rejected with `cannot eliminate Prop-typed scrutinee into Set` (or analogous). This is what blocks the Hurkens construction — a multi-constructor `Prop` being case-analyzed into `Type` would let proofs decide propositions about types, breaking consistency — while preserving the four useful singletons (equality, `True`, `And` of two Props, parameter-only Props like `Asserts`). See [D46 §7.4](../../design/d46-prop-universe-and-proof-irrelevance.md) for the soundness argument.
+
+### Wire shape for indexed declarations
+
+The compiler emits the constructor's full Π-telescope (parameters + indices + arguments + conclusion) as a chain-resident `core:EigenTTType` value on the constructor resource's `core:ctor_type` property; the kernel reads it back at type-check time via the [D47 decoder](../../design/d47-chain-mirrored-eigentt-type-fragment.md). This is why indexed inductives can express dependencies the surface grammar doesn't directly cover — the dependency is encoded in the type expression, which is data the kernel decodes from the layer rather than implicit elaboration. See [§4.5 "Indexed"](04-declarations.md#indexed-d48-indexed-families) for the ESL surface and the wire-shape pointer.
+
+### Pattern unification
+
+Constructor conclusions like `cons : forall (n : Nat) => A -> Vec(A, n) -> Vec(A, succ(n))` declare the index value as a structural template (`succ(n)`). When the elaborator matches the scrutinee's index against a constructor's conclusion template, it unifies the two — `succ(n)` against the scrutinee's actual index, binding `n` to the result. The kernel's pattern unification is restricted to the **Miller fragment** (each free variable in the template applied to distinct bound variables, no projections); patterns outside that fragment surface as `cannot solve unification problem` errors. See [D48 §3.1](../../design/d48-indexed-inductive-families.md) for the algorithm.
 
 ## 7.4. Inductive types
 

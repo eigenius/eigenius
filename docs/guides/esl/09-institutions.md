@@ -244,6 +244,170 @@ Cross-link: [EigenQL chapter 8](../eigenql/08-institutions.md) covers the same t
 | [`kernel/src/capability/registration.rs`](../../../kernel/src/capability/registration.rs) | `build_wasm_institution_runtime` — auto-registration from chain scan |
 | [`kernel/src/capability/wasm_institution_d14.rs`](../../../kernel/src/capability/wasm_institution_d14.rs) | `WasmInstitution` host bridge to the `eigenius-institution-d14` WIT world |
 
+## 9.10. The reasoning institution — D39 Justification Logic
+
+The reasoning institution lets chain authors commit **reasoning sentences**: triples of (proposition in `Prop`, justification term, type-checked certificate) where the certificate is a `JustifiedBy(justification, proposition)` term the kernel verifies at commit time. It is the surface that turns Eigenius's four epistemic categories ([Declared / Observed / Derived / Verified](../../../docs/guides/README.md)) into composable evidence inside the type theory — distinct evidence chains for the same proposition produce judgmentally-equal certificates ([§7.1 proof irrelevance](07-type-theory-primer.md#7-1-universes-the-unified-sortn-ladder-with-prop-at-the-bottom)), and the audit trail from "this reasoning sentence Holds" to "these chain artifacts admitted these witnesses" cannot be broken because the [D49 chain-witness](../../design/d49-chainwitness-machinery.md) admission mechanism is the only path to the grounding constructors. Design: [D39](../../design/d39-justification-logic.md); implementation: [`crates/eigenius-reasoning/`](../../../crates/eigenius-reasoning/); ontology: [`ontologies/reasoning/reasoning.esl`](../../../ontologies/reasoning/reasoning.esl).
+
+### 9.10.1. The six `JustificationTerm` constructors
+
+`JustificationTerm` is a closed (non-indexed) inductive in `Type 0` — six constructors, no recursive references to extend it without a versioned ontology change:
+
+```esl
+data reasoning:JustificationTerm {
+    DeclaredEvidence(core:string),                              // axiom / literature rule, by IRI
+    ObservedEvidence(core:string),                              // bench measurement, by IRI
+    DerivedEvidence(core:string),                               // institution-computed derivation, by IRI
+    VerifiedEvidence(core:string),                              // formal-proof verification, by IRI
+    App(reasoning:JustificationTerm, reasoning:JustificationTerm),       // Artemov Application — modus ponens
+    Sum(reasoning:JustificationTerm, reasoning:JustificationTerm),       // Artemov Sum — choice of evidence
+    SpecStr(reasoning:JustificationTerm, core:string),                   // universal-quantifier specialization at an IRI value
+}
+```
+
+Each constructor has a precise epistemic role:
+
+- **`DeclaredEvidence(iri)`** — cite an `axiom` declaration ([§4.4a](04-declarations.md#4-4a-axiom-postulated-propositions-d46-10)) or any other `DeclaredResource` (a literature rule asserted by an author, an admitted proof principle). The chain attests *that the author asserted it*, not that it's been independently verified.
+- **`ObservedEvidence(iri)`** — cite an `ObservedResource` (bench measurement, instrument log entry, recorded fact). The chain attests *that it was observed with the named provenance*, not what its semantic interpretation is.
+- **`DerivedEvidence(iri)`** — cite a `DerivedResource` (institution-computed verdict — typically a [D52 MeasurementClaim](../../design/d52-measurement-statistics-institution.md) whose verifier returned Holds, or a prior `ReasoningSentence` since `ReasoningSentence : DerivedResource`). The chain attests *that the derivation procedure produced the asserted result on the cited input*.
+- **`VerifiedEvidence(iri)`** — cite a `VerifiedResource` (formal-proof artifact from the Lean institution or any future verification institution). The chain attests *that a formal proof checker accepted the proof*. Cumulates into `DerivedEvidence` through the `VerifiedResource subclass_of DerivedResource` coercion in the witness index ([§6.4a](06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state)).
+- **`App(j1, j2)`** — Artemov Application: if `j1` justifies `A -> B` and `j2` justifies `A`, then `App(j1, j2)` justifies `B`. The reasoning-layer modus-ponens combinator, used to apply a literature rule (`HasLowIC50(c) -> StrongInhibitor(c)`) to a derived fact (`HasLowIC50(EIG_0291)`).
+- **`Sum(j1, j2)`** — Artemov Sum: if either `j1` or `j2` justifies `P`, then `Sum(j1, j2)` justifies `P`. Models "we have multiple independent grounds for the same conclusion." The `JustifiedBy.sum_l` / `JustifiedBy.sum_r` certificate constructors realize the two directional choices.
+- **`SpecStr(j, t)`** — universal-quantifier specialization: if `j` justifies `forall (x : core:string) => P(x)`, then `SpecStr(j, t)` justifies `P(t)`. Used to apply a universal literature rule (`forall (c : core:string), HasLowIC50(c) -> StrongInhibitor(c)`) at a specific compound IRI (`SpecStr(DeclaredEvidence(rule), "urn:...:EIG_0291")`). Monomorphic on `core:string` for v1; numeric / structural specialization is future work tied to D52.
+
+### 9.10.2. The `JustifiedBy` certificate predicate
+
+`JustifiedBy : JustificationTerm -> Prop -> Type 0` is an [indexed inductive family](04-declarations.md#indexed-d48-indexed-families): its two indices are the justification and the proposition, and each constructor produces an inhabitant at a specific (justification, proposition) pair. It lives in `Type 0`, not `Prop`, so certificates are stored and re-checkable — a downstream consumer can re-run the type-check against the committed certificate value.
+
+Seven constructors, one per `JustificationTerm` ctor (plus the two `Sum` arms):
+
+```esl
+data reasoning:JustifiedBy : reasoning:JustificationTerm -> Prop -> Type 0 {
+    declared :
+        forall (iri : core:string, P : Prop) =>
+        witness:IsDeclaredAs(iri, P) ->
+        reasoning:JustifiedBy(reasoning:DeclaredEvidence(iri), P),
+
+    observed : forall (iri, P) => witness:IsObservedAs(iri, P) -> JustifiedBy(ObservedEvidence(iri), P),
+    derived  : forall (iri, P) => witness:IsDerivedAs(iri, P)  -> JustifiedBy(DerivedEvidence(iri), P),
+    verified : forall (iri, P) => witness:IsVerifiedAs(iri, P) -> JustifiedBy(VerifiedEvidence(iri), P),
+
+    app : forall (A, B, j1, j2) =>
+        JustifiedBy(j1, A -> B) -> JustifiedBy(j2, A) -> JustifiedBy(App(j1, j2), B),
+
+    sum_l : forall (P, j1, j2) => JustifiedBy(j1, P) -> JustifiedBy(Sum(j1, j2), P),
+    sum_r : forall (P, j1, j2) => JustifiedBy(j2, P) -> JustifiedBy(Sum(j1, j2), P),
+
+    spec_str : forall (P : core:string -> Prop, j, t) =>
+        JustifiedBy(j, forall (x : core:string) => P(x)) ->
+        JustifiedBy(SpecStr(j, t), P(t)),
+}
+```
+
+The four grounding constructors each consume a [`ChainWitness.Is*As`](06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) — a `Prop`-typed witness the kernel admits at type-check time from the layer's witness index. The author never writes the witness explicitly; the kernel synthesizes it from the cited IRI and proposition via the [D49 synthesis algorithm](../../design/d49-chainwitness-machinery.md). If no admitted witness matches the (category, iri, proposition) triple, type-checking fails with a `NoAdmittedChainWitness` diagnostic naming the missing trace shape.
+
+The three composition constructors (`app`, `sum_l`, `sum_r`, `spec_str`) are pure type-theoretic combinators — no witness lookup, just standard inductive-family pattern matching.
+
+### 9.10.3. The `ReasoningSentence` resource
+
+The chain-resident pairing of (proposition, justification, certificate). Subclass of `reflection:DerivedResource` so a sentence is first-class evidence: a later sentence's `DerivedEvidence(prior_iri)` lookup resolves to the prior sentence's resource, and the `IsDerivedAs(prior_iri, P)` witness is admitted at commit on the same footing as for any other derived artifact.
+
+```esl
+class reasoning:ReasoningSentence : reflection:DerivedResource {
+    requires reasoning:proposition,
+             reasoning:justification,
+             reasoning:certificate;
+    recommends reasoning:subject_iri,
+               reasoning:refutes;
+}
+```
+
+Property shapes:
+
+- **`reasoning:proposition`** — the `Prop`-typed proposition the sentence asserts, encoded via the [D47 codec](../../design/d47-chain-mirrored-eigentt-type-fragment.md) — author surface is [`type_expr(...)`](05-expressions.md#5-14a-type_expr-eigentt-type-expressions). Also serves as the sentence's `reflection:canonical_proposition` so downstream `DerivedEvidence` citations resolve to this proposition in the witness key.
+- **`reasoning:justification`** — the agent's `JustificationTerm` warrant, encoded as a chain-mirrored inductive value over the six constructors.
+- **`reasoning:certificate`** — the `JustifiedBy` certificate, encoded via the D47 codec. The `ValidateJustification` AutoOnLoad gate type-checks it against `JustifiedBy(justification, proposition)` at commit; Fails verdicts reject the sentence.
+- **`reasoning:subject_iri`** (recommended) — the principal Resource this sentence is about. First-class EigenQL index for "what have I concluded about X?" queries.
+- **`reasoning:refutes`** (recommended) — IRI of a prior `ReasoningSentence` this one supersedes. Marks a belief-revision step.
+
+### 9.10.4. Worked example — composing two evidence chains via `App`
+
+The agent claims `StrongInhibitor(EIG_0291)`. The justification: apply a specialized literature rule (`HasLowIC50(EIG_0291) -> StrongInhibitor(EIG_0291)`) to a derived measurement claim (`HasLowIC50(EIG_0291)`). The certificate composes `JustifiedBy.declared` and `JustifiedBy.derived` via `JustifiedBy.app`:
+
+```esl
+resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
+
+    reasoning:proposition = type_expr(
+        screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+    );
+
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
+        DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_lowic50")
+    );
+
+    reasoning:certificate = type_expr(
+        app(
+            // A : Prop
+            screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
+            // B : Prop
+            screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
+            // j1 : JustificationTerm
+            DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
+            // j2 : JustificationTerm
+            DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_lowic50"),
+            // c1 : JustifiedBy(DeclaredEvidence(rule), HasLowIC50 -> StrongInhibitor)
+            declared(
+                "urn:eigenius:demo:screen:rule_strong",
+                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+                ->
+                screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
+                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+            ),
+            // c2 : JustifiedBy(DerivedEvidence(claim), HasLowIC50)
+            derived(
+                "urn:eigenius:demo:screen:claim_eig0291_lowic50",
+                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
+                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+            )
+        )
+    );
+}
+```
+
+At commit, the `ValidateJustification` AutoOnLoad gate fires:
+
+1. Decode `proposition`, `justification`, `certificate` from the three property slots.
+2. Type-check `proposition` at `Prop`.
+3. Type-check `certificate` against `JustifiedBy(justification, proposition)`. This walks the `JustifiedBy.app` rule, which requires sub-certificates for `JustifiedBy(j1, A -> B)` and `JustifiedBy(j2, A)`.
+4. The sub-certificates `declared(...)` and `derived(...)` each require a chain witness. The kernel synthesizes:
+   - `IsDeclaredAs("urn:...:rule_strong", HasLowIC50 -> StrongInhibitor)` — admitted from the layer's witness index if `rule_strong` was committed as a `DeclaredResource` with matching `canonical_proposition` and a paired `DeclarationTrace`.
+   - `IsDerivedAs("urn:...:claim_eig0291_lowic50", HasLowIC50)` — admitted similarly via the claim's `ProgramTrace` and `canonical_proposition`.
+5. If both witnesses admit, the certificate type-checks; verdict is Holds and the sentence is admitted. Otherwise the verdict is Fails with a `NoAdmittedChainWitness` diagnostic.
+
+The full fixture this snippet is drawn from lives at [`crates/eigenius-reasoning/tests/fixtures/drug_screening.esl`](../../../crates/eigenius-reasoning/tests/fixtures/drug_screening.esl); the matching test exercises the AutoOnLoad pipeline end-to-end.
+
+### 9.10.5. Query classes (D39 §4.3)
+
+The institution registers three QueryClasses:
+
+| QueryClass | Dispatch role | Input | Behavior |
+|---|---|---|---|
+| `qc_validate_justification` | **AutoOnLoad** | A `ReasoningSentence` resource | Type-checks the certificate at commit; Holds → admit, Fails → reject with structured diagnostic. |
+| `qc_entailment_query` | **OnDemand** | An `EntailmentRequest` carrying a candidate proposition | v1 lookup-based: walks the layer chain for committed `ReasoningSentence`s whose proposition matches the candidate; Holds on hit, Undecidable on miss. Bounded-depth proof search is follow-on work. |
+| `qc_consistency_check` | **Decidable** | A `ConsistencyRequest` carrying a `sentence_set` | v1 returns Undecidable for any non-trivial input — the propositional-fragment decision procedure is follow-on work. The QueryClass IRI is dispatch-bound so a richer handler can plug in without surface churn. |
+
+The AutoOnLoad gate is what makes reasoning sentences load-bearing: every commit fires it, and the chain only admits sentences whose certificates type-check. The OnDemand `qc_entailment_query` is what agents call when asking "does the chain warrant this proposition?" The Decidable `qc_consistency_check` is wired structurally for a future propositional-consistency decider.
+
+### 9.10.6. Cross-references
+
+- [`crates/eigenius-reasoning/`](../../../crates/eigenius-reasoning/) — institution implementation (the validator is the kernel's NbE checker; no external runtime).
+- [`ontologies/reasoning/reasoning.esl`](../../../ontologies/reasoning/reasoning.esl) — full ontology source: ChainWitness predicates, JustificationTerm, JustifiedBy, ReasoningSentence, QueryClass declarations.
+- [D39 §3-§5](../../design/d39-justification-logic.md) — design rationale, the Justification Logic foundation, and the soundness story.
+- [D49](../../design/d49-chainwitness-machinery.md) — chain-witness machinery the grounding constructors consume.
+- [`platform/reasoning-institution/`](../platform/reasoning-institution/) — operational walkthrough: how to commit reasoning sentences, inspect verdicts, compose with the D52 statistics institution.
+- [Composition guide §1](../composition/01-introduction.md) — where the reasoning institution sits in the composition story.
+
 ---
 
 Next: **[10. Error messages →](10-error-messages.md)**
