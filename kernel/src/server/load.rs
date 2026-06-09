@@ -45,7 +45,7 @@ impl EigeniusService {
             "load payload"
         );
         let resources = self
-            .parse_resources(&req.resources, &req.content_type)
+            .parse_resources(&req.resources, &req.content_type, Some(&branch))
             .await?;
         let count = resources.len() as u32;
 

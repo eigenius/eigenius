@@ -1563,17 +1563,18 @@ async fn cmd_serve(port: u16, orchestrator: Option<&str>, db: Option<&str>) {
         None => None,
     };
 
-    // 20a.4 + D39 Phase 8: link in-process institutions the kernel
-    // binary ships. `start_server` registers each before rebuilding
-    // the institution index, so AutoOnLoad QueryClasses declared on
-    // the bootstrapped chain dispatch into the matching Rust impl as
-    // a direct function call (per D28 §2.3 / §10.2 for Lean, D39
-    // §4.3 / D14 for Reasoning).
+    // 20a.4 + D39 Phase 8 + D52 Phase 5: link in-process institutions
+    // the kernel binary ships. `start_server` registers each before
+    // rebuilding the institution index, so AutoOnLoad QueryClasses
+    // declared on the bootstrapped chain dispatch into the matching
+    // Rust impl as a direct function call (per D28 §2.3 / §10.2 for
+    // Lean, D39 §4.3 / D14 for Reasoning, D52 §6 for Statistics).
     let in_process_institutions: Vec<
         std::sync::Arc<dyn eigenius_kernel::institution::runtime::Institution>,
     > = vec![
         eigenius_lean::LeanInstitution::arc(),
         eigenius_reasoning::ReasoningInstitution::arc(),
+        eigenius_statistics::StatisticsInstitution::arc(),
     ];
 
     // D43 §5.2 — load eigenius.toml's `[embedder]` section and

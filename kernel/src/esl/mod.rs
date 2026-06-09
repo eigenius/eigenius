@@ -68,3 +68,27 @@ pub fn compile_against_layer(
     let external_macros = compile::collect_macros_from_layer(layer);
     compile::compile_file_with_context(&file, None, external_ctors, external_macros)
 }
+
+/// Compile an ESL source string with both a D14 [`InstitutionIndex`]
+/// AND a chain layer's external ctor + macro tables. This is the
+/// shape the running server reaches for when handling `eigenius load`
+/// or notebook-cell ESL — function-call IRIs need to classify against
+/// the live institution index (D14 §9.5), AND cross-file references
+/// to ctors / macros declared in parent layers (like
+/// `stats:SingleSampleEstimate` smart constructors or
+/// `reasoning:JustifiedBy.app` ctors) need to resolve against the
+/// chain. Falls back to `compile_with_institutions` if no layer is
+/// available; `compile_against_layer` if no institution index is.
+///
+/// [`InstitutionIndex`]: crate::institution::registry::InstitutionIndex
+pub fn compile_full(
+    source: &str,
+    institutions: std::sync::Arc<crate::institution::registry::InstitutionIndex>,
+    layer: &crate::layer::Layer,
+) -> Result<Vec<Resource>, Vec<error::EslError>> {
+    let tokens = lexer::tokenize(source).map_err(|e| vec![e])?;
+    let file = parser::parse(&tokens).map_err(|e| vec![e])?;
+    let external_ctors = compile::collect_ctors_from_layer(layer);
+    let external_macros = compile::collect_macros_from_layer(layer);
+    compile::compile_file_with_context(&file, Some(institutions), external_ctors, external_macros)
+}

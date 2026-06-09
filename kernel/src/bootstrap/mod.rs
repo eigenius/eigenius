@@ -368,10 +368,30 @@ pub fn bootstrap_with_storage(
         storage.clone(),
     )?;
 
+    // D52 Phase 5: measurement-statistics ontology — universal claim
+    // schema, SampleSet sum-types, seven smart-constructor macros
+    // (SingleSampleEstimate, IID, Paired, Factorial, RCBD, SplitPlot,
+    // RepeatedMeasures), MeasurementClaim + MethodComparisonClaim
+    // classes, the four §7 opinionated-stance marker classes
+    // (PopulationLevel / MeasurementLevel / ImpossibilityWitness), and
+    // two QueryClass registrations bound to the matching in-process
+    // StatisticsInstitution (linked via cli/src/main.rs). Stacked
+    // above reasoning so the notebook layer sees both the reasoning
+    // and statistics ontologies in its parent chain — the D52 → D39
+    // composition the docs describe (D52 emits canonical_proposition,
+    // D39 cites via DerivedEvidence + JustifiedBy.derived consuming
+    // the D49 IsDerivedAs witness) works out of the box.
+    let statistics = load_esl_layer(
+        "statistics",
+        include_str!("../../../ontologies/statistics/statistics.esl"),
+        Some(reasoning),
+        storage.clone(),
+    )?;
+
     let notebook = load_layer(
         "notebook",
         include_str!("../../../ontologies/notebook/notebook-ontology.json"),
-        Some(reasoning),
+        Some(statistics),
         storage.clone(),
     )?;
 
@@ -572,7 +592,7 @@ fn check_and_migrate_schema_version(
     Ok(())
 }
 
-fn embedded_ontologies() -> [(&'static str, &'static str); 13] {
+fn embedded_ontologies() -> [(&'static str, &'static str); 14] {
     [
         (
             "core",
@@ -622,10 +642,15 @@ fn embedded_ontologies() -> [(&'static str, &'static str); 13] {
         // but the manifest's job is content-drift detection — hashing
         // the raw source bytes is what we want either way. A change
         // to reasoning.esl bumps the manifest, forcing a SEED rebuild
-        // against a stale persistent DB.
+        // against a stale persistent DB. Same applies to the
+        // statistics layer below.
         (
             "reasoning",
             include_str!("../../../ontologies/reasoning/reasoning.esl"),
+        ),
+        (
+            "statistics",
+            include_str!("../../../ontologies/statistics/statistics.esl"),
         ),
         (
             "notebook",
@@ -782,8 +807,12 @@ mod tests {
         // the LeanProofTerm class + qc_proof_check QueryClass.
         // reasoning inserted at D39 Phase 8 to declare the
         // Justification Logic institution and its chain artifacts.
+        // statistics inserted at D52 Phase 5 to declare the
+        // Measurement Statistics institution and its chain artifacts.
         assert!(!ctx.head().is_root());
-        let reasoning = ctx.head().parent().unwrap();
+        let statistics = ctx.head().parent().unwrap();
+        assert!(!statistics.is_root());
+        let reasoning = statistics.parent().unwrap();
         assert!(!reasoning.is_root());
         let lean_institution = reasoning.parent().unwrap();
         assert!(!lean_institution.is_root());
@@ -1274,6 +1303,107 @@ mod tests {
         assert!(
             matches!(err, BootstrapError::SchemaVersionCorrupt(_)),
             "expected SchemaVersionCorrupt, got {err:?}"
+        );
+    }
+
+    /// Confirm that a kernel-emitted Verdict resource (the shape
+    /// AutoOnLoad fires-and-emits at every MeasurementClaim /
+    /// ReasoningSentence commit per D14 §5.6) validates cleanly. The
+    /// resource carries `core:ctor_name` to record which Verdict ctor
+    /// (Holds / Fails / Undecidable) the institution returned — same
+    /// property declared on InductiveCtor for declared-ctor names.
+    /// The property's `domain` must include `Verdict` so the
+    /// retroactive-validate pass (which walks the merged chain view
+    /// looking for property carriers) doesn't trip on the AutoOnLoad-
+    /// emitted Verdict the second time the same notebook cell runs.
+    #[test]
+    fn kernel_emitted_verdict_validates_cleanly() {
+        use crate::ontology::resource::Value;
+        use crate::ontology::well_known as wk;
+        use crate::validation::Validator;
+        use std::sync::Arc;
+
+        let ctx = bootstrap().unwrap();
+        let mut builder =
+            crate::layer::LayerBuilder::new("test-verdict", Some(Arc::clone(ctx.head())));
+        let mut r = crate::ontology::resource::Resource::new(
+            Iri::parse("urn:eigenius:verdict:test:abc").unwrap(),
+        );
+        r.set(
+            Iri::parse(wk::IS_A).unwrap(),
+            Value::Array(vec![
+                Value::String(wk::VERDICT.to_string()),
+                Value::String(wk::DERIVED_RESOURCE.to_string()),
+            ]),
+        );
+        r.set(
+            Iri::parse(wk::CTOR_NAME).unwrap(),
+            Value::String("Holds".to_string()),
+        );
+        r.set(
+            Iri::parse("urn:eigenius:institution:verdict_subject").unwrap(),
+            Value::String("urn:eigenius:test:subject".to_string()),
+        );
+        builder.add_resource(r).unwrap();
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let validator = Validator::new(Arc::clone(&layer));
+        let errors = validator.validate();
+        let domain_violations: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == crate::validation::ValidationRule::DomainViolation)
+            .collect();
+        assert!(
+            domain_violations.is_empty(),
+            "Verdict resource must not trigger DomainViolation on `core:ctor_name` — the \
+             AutoOnLoad-emitted Verdict reaches every commit's retroactive-validate pass; \
+             got: {domain_violations:#?}"
+        );
+    }
+
+    /// D52 Phase 5 — confirm the statistics-layer macros (smart
+    /// constructors like `stats:SingleSampleEstimate`) are reachable
+    /// from notebook-cell ESL via `esl::compile_full`. This is the
+    /// load-bearing path for the [stats-and-reasoning notebook]
+    /// (../../../notebooks/examples/stats-and-reasoning.json): the
+    /// server-side `parse_resources` calls `compile_full` with the
+    /// branch's head layer, which seeds the compiler's macro table
+    /// from `collect_macros_from_layer` walking parent layers. If
+    /// statistics.esl's macros didn't land in the bootstrap, or if
+    /// the server's compile path bypassed the layer, this would
+    /// reject with `macro X is not declared in this file`.
+    #[test]
+    fn notebook_can_invoke_statistics_macros_via_compile_full() {
+        use std::sync::Arc;
+        let ctx = bootstrap().unwrap();
+        let head = ctx.head();
+        let index = Arc::new(crate::institution::registry::InstitutionIndex::default());
+
+        let sample_set_cell = r#"
+namespace reflection = "urn:eigenius:reflection";
+namespace stats      = "urn:eigenius:measurements";
+namespace screen     = "urn:eigenius:demo:screen";
+
+resource screen:m_eig0291_sampleset : stats:SampleSetResource {
+    reflection:source      = "instrument-log:kinase-glo-plate-2026-03-11";
+    reflection:observed_at = "2026-03-11T10:18:42Z";
+
+    stats:sample_set_value = stats:SingleSampleEstimate(
+        [78.0, 82.0, 85.0, 88.0, 91.0, 86.0],
+        BiologicalReplication(),
+    );
+}
+"#;
+
+        let resources =
+            crate::esl::compile_full(sample_set_cell, index, head).unwrap_or_else(|errs| {
+                panic!(
+                    "stats:SingleSampleEstimate macro should resolve from the bootstrapped \
+                     statistics layer via compile_full; got: {errs:?}"
+                )
+            });
+        assert!(
+            !resources.is_empty(),
+            "should compile to at least one resource"
         );
     }
 }

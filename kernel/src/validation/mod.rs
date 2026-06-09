@@ -1434,14 +1434,24 @@ mod tests {
         );
     }
 
-    // --- ProgramTrace validation tests (Phase 10b) ---
+    // --- ProgramTrace validation tests ---
+    //
+    // ProgramTrace's requires list was unified with DeclarationTrace
+    // and ObservationTrace around the D49 witness-emitter contract:
+    // every trace carries `resource` (the target IRI), `source` (a
+    // human-readable string naming the program/procedure/institution
+    // that produced the resource), and `timestamp`. Rich execution-
+    // trace metadata (program / started_at / completed_at / trace_tree
+    // / output / metrics) lives in `recommends` — kernel-emitted
+    // traces typically fill them; user-authored ProgramTraces wired
+    // alongside MeasurementClaim / ReasoningSentence / etc. typically
+    // don't need them.
 
     #[test]
     fn program_trace_with_all_required_fields_passes() {
         let base = build_full_bootstrap_layer();
         let mut builder = LayerBuilder::new("test", Some(base));
 
-        // A ProgramTrace with all four required fields
         builder
             .add_resource(make_resource(
                 "urn:eigenius:test:good_trace",
@@ -1453,20 +1463,16 @@ mod tests {
                         )]),
                     ),
                     (
-                        "urn:eigenius:reflection:program",
-                        Value::String("urn:eigenius:test:some_program".to_string()),
+                        "urn:eigenius:reflection:resource",
+                        Value::String("urn:eigenius:test:target_resource".to_string()),
                     ),
                     (
-                        "urn:eigenius:reflection:trace_tree",
-                        Value::Embedded(Box::new(Resource::new_embedded())),
+                        "urn:eigenius:reflection:source",
+                        Value::String("test-institution:validate".to_string()),
                     ),
                     (
-                        "urn:eigenius:reflection:started_at",
+                        "urn:eigenius:reflection:timestamp",
                         Value::String("2026-04-23T12:00:00Z".to_string()),
-                    ),
-                    (
-                        "urn:eigenius:reflection:completed_at",
-                        Value::String("2026-04-23T12:00:01Z".to_string()),
                     ),
                 ],
             ))
@@ -1485,7 +1491,7 @@ mod tests {
             .collect();
         assert!(
             trace_errors.is_empty(),
-            "ProgramTrace with all required fields should pass: {trace_errors:?}"
+            "ProgramTrace with resource/source/timestamp should pass: {trace_errors:?}"
         );
     }
 
@@ -1494,11 +1500,10 @@ mod tests {
         let base = build_full_bootstrap_layer();
         let mut builder = LayerBuilder::new("test", Some(base));
 
-        // A ProgramTrace missing started_at and completed_at. (Note:
-        // `trace_tree` is *recommended*, not required — pure-leaf
-        // programs like a `Var`-body identity produce no trace tree,
-        // and the reflection ontology accepts traces without one. See
-        // `Trace` enum's leaf comment in kernel/src/program/trace.rs.)
+        // A ProgramTrace missing `source` and `timestamp`. Carries
+        // `program` and `started_at` (which are now recommended, not
+        // required) to confirm that recommended fields don't satisfy
+        // the requires check.
         builder
             .add_resource(make_resource(
                 "urn:eigenius:test:bad_trace",
@@ -1510,10 +1515,17 @@ mod tests {
                         )]),
                     ),
                     (
+                        "urn:eigenius:reflection:resource",
+                        Value::String("urn:eigenius:test:target_resource".to_string()),
+                    ),
+                    (
                         "urn:eigenius:reflection:program",
                         Value::String("urn:eigenius:test:some_program".to_string()),
                     ),
-                    // Missing: started_at, completed_at
+                    (
+                        "urn:eigenius:reflection:started_at",
+                        Value::String("2026-04-23T12:00:00Z".to_string()),
+                    ),
                 ],
             ))
             .unwrap();
@@ -1529,31 +1541,33 @@ mod tests {
                     && e.rule == ValidationRule::MissingRequired
             })
             .collect();
-        // Two required fields are missing: started_at, completed_at.
+        // Two required fields are missing: source, timestamp.
         assert!(
             missing_errors.len() >= 2,
             "ProgramTrace missing 2 required fields should have >= 2 errors, got {}: {missing_errors:?}",
             missing_errors.len()
         );
-        // Pin which fields are actually flagged — guards against a
-        // regression where `trace_tree` accidentally moves back to
-        // `requires` (or where started_at / completed_at quietly
-        // disappear from the requires list).
         let missing_props: std::collections::BTreeSet<&str> = missing_errors
             .iter()
             .filter_map(|e| e.property.as_ref().map(|i| i.as_str()))
             .collect();
         assert!(
-            missing_props.contains("urn:eigenius:reflection:started_at"),
-            "expected `started_at` to be flagged missing; flagged set = {missing_props:?}",
+            missing_props.contains("urn:eigenius:reflection:source"),
+            "expected `source` to be flagged missing; flagged set = {missing_props:?}",
         );
         assert!(
-            missing_props.contains("urn:eigenius:reflection:completed_at"),
-            "expected `completed_at` to be flagged missing; flagged set = {missing_props:?}",
+            missing_props.contains("urn:eigenius:reflection:timestamp"),
+            "expected `timestamp` to be flagged missing; flagged set = {missing_props:?}",
+        );
+        // started_at is now recommended, not required — a trace with
+        // started_at but missing timestamp must not flag started_at.
+        assert!(
+            !missing_props.contains("urn:eigenius:reflection:started_at"),
+            "`started_at` is recommended, not required: {missing_props:?}",
         );
         assert!(
-            !missing_props.contains("urn:eigenius:reflection:trace_tree"),
-            "`trace_tree` is recommended, not required — a missing trace_tree must not surface as a MissingRequired error: {missing_props:?}",
+            !missing_props.contains("urn:eigenius:reflection:program"),
+            "`program` is recommended, not required: {missing_props:?}",
         );
     }
 

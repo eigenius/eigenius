@@ -29,6 +29,16 @@ eigenius-lean = { path = "../crates/eigenius-lean" }
 # alongside Lean so AutoOnLoad ValidateJustification on every
 # ReasoningSentence commit dispatches as a direct function call.
 eigenius-reasoning = { path = "../crates/eigenius-reasoning" }
+# D52: the measurement-statistics institution's validator runs
+# in-process — deterministic IEEE-754 numerics (ndarray + statrs); no
+# IPC, no orchestrator round-trip. Linked in alongside Reasoning so
+# AutoOnLoad validate_measurement_claim on every MeasurementClaim
+# commit recomputes the claim and emits Holds/Fails as a direct
+# function call. Composes with Reasoning via the D49 chain-witness
+# index: the emitted DerivedResource's canonical_proposition becomes
+# the IsDerivedAs witness any downstream ReasoningSentence's
+# DerivedEvidence ctor consumes.
+eigenius-statistics = { path = "../crates/eigenius-statistics" }
 eigenius-runtime-substrate = { path = "../crates/runtime-substrate" }
 eigenius-config = { path = "../crates/eigenius-config" }
 # D43: BGE-small Candle embedder. Pulled in by the `serve` path so

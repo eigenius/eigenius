@@ -1211,6 +1211,7 @@ dependencies = [
  "eigenius-lean",
  "eigenius-reasoning",
  "eigenius-runtime-substrate",
+ "eigenius-statistics",
  "eigenius-storage-rocksdb",
  "futures",
  "humantime",
