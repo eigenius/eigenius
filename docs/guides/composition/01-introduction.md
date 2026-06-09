@@ -83,7 +83,7 @@ The kinase notebook covers cross-numerical-institution composition: five Julia i
 | Composition shape | Bridge mechanism | Worked example |
 |---|---|---|
 | **Numerical → numerical** | Declared comorphisms over `formulas:FormulaTerm` (extract → transformation → reify pipeline). | Kinase notebook — Symbolics → JuMP, Catalyst → DiffEq, Symbolics → IntervalArithmetic. |
-| **Statistics → reasoning** | Per-layer chain-witness index over `core:EigenTTType` propositions. | D52 `MeasurementClaim` verdict emits a `DerivedResource` with `canonical_proposition`; a D39 `ReasoningSentence` cites it via `DerivedEvidence` and the witness index admits the grounding. See [chapter 7](07-stats-and-reasoning-walkthrough.md). |
+| **Statistics → reasoning** | Per-layer chain-witness index over `core:EigenTTType` propositions. | D52 `StatisticalAnalysisPlan` verdict emits a `DerivedResource` with `canonical_proposition`; a D39 `ReasoningSentence` cites it via `DerivedEvidence` and the witness index admits the grounding. See [chapter 7](07-stats-and-reasoning-walkthrough.md). |
 
 The two shapes are structurally different: comorphisms are *active* translations (one institution's runtime is invoked, output is reified back into the chain), while the witness-index path is *passive* — D39 doesn't call D52, it just reads the chain artifact D52 emitted. Both are first-class composition mechanisms; which one applies depends on whether the downstream institution needs the input *value translated* (comorphism) or just *cited as evidence* (witness index).
 
@@ -103,7 +103,7 @@ If any are unfamiliar, the cross-link is the right entry point.
 | `type_expr(...)` ESL sublanguage and `core:EigenTTType` (D47) | [ESL §5.14a](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) |
 | `Prop` universe and proof irrelevance (D46) | [ESL §7.1](../esl/07-type-theory-primer.md#7-1-universes-the-unified-sortn-ladder-with-prop-at-the-bottom) |
 | `ChainWitness.Is*As` predicates and the witness index (D49) | [ESL §6.4a](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) |
-| `MeasurementClaim` / `SampleSet` (D52) | [Statistics institution tutorial](../platform/statistics-institution/README.md) |
+| `StatisticalAnalysisPlan` / `SampleSet` (D52) | [Statistics institution tutorial](../platform/statistics-institution/README.md) |
 | `JustifiedBy` / `JustificationTerm` / `ReasoningSentence` (D39) | [ESL §9.10](../esl/09-institutions.md#9-10-the-reasoning-institution-d39-justification-logic), [reasoning institution tutorial](../platform/reasoning-institution/README.md) |
 | `FIBER ... AS ?var INTO "<iri>"` | [EigenQL §7.6](../eigenql/07-fiber-clauses.md#76-into--pinning-the-response-iri) |
 | Comorphism program-invoke (`comorphisms:foo(input)` in ESL) | [ESL §9.5](../esl/09-institutions.md#95-invoking-comorphisms-from-esl-programs) |

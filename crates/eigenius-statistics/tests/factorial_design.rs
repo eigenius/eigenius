@@ -111,14 +111,14 @@ fn factorial_2x2_omnibus_recomputes_to_holds() {
     let claim = (*claim_arc).clone();
 
     let inst = StatisticsInstitution::new();
-    let proc_iri = Iri::parse(iris::PROC_VALIDATE_MEASUREMENT_CLAIM).expect("proc IRI");
+    let proc_iri = Iri::parse(iris::PROC_VALIDATE_ANALYSIS_PLAN).expect("proc IRI");
     let outcome = inst
         .query(&proc_iri, &claim, &ctx)
-        .expect("validate_measurement_claim returns an outcome");
+        .expect("validate_analysis_plan returns an outcome");
     let result = outcome
         .derivations
         .first()
-        .expect("statistics emits a MeasurementResult when the SAP ran");
+        .expect("statistics emits a StatisticalAnalysisResult when the SAP ran");
 
     let ctor = result
         .get(&Iri::parse(iris::PROP_VERDICT_CTOR).unwrap())
@@ -167,6 +167,42 @@ fn factorial_2x2_omnibus_recomputes_to_holds() {
     assert!(
         f_stat > 100.0,
         "F-statistic should be very large for this design; got F = {f_stat}"
+    );
+
+    // Per-effect shape: 2×2 → 3 derivations (main_A, main_B,
+    // interaction_A_B). Main effects reject (Holds); interaction is
+    // zero so its result Fails.
+    assert_eq!(
+        outcome.derivations.len(),
+        3,
+        "2×2 factorial yields 3 derivations"
+    );
+
+    let effect_names: Vec<String> = outcome
+        .derivations
+        .iter()
+        .map(|d| {
+            d.get(&Iri::parse(iris::PROP_EFFECT_NAME).unwrap())
+                .and_then(Value::as_str)
+                .expect("each result carries effect_name")
+                .to_string()
+        })
+        .collect();
+    assert_eq!(effect_names, vec!["main_A", "main_B", "interaction_A_B"]);
+
+    let effect_ctors: Vec<String> = outcome
+        .derivations
+        .iter()
+        .map(|d| {
+            d.get(&Iri::parse(iris::PROP_VERDICT_CTOR).unwrap())
+                .and_then(Value::as_str)
+                .expect("each result carries verdict_ctor")
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        effect_ctors,
+        vec![wk::VERDICT_HOLDS, wk::VERDICT_HOLDS, wk::VERDICT_FAILS]
     );
 }
 

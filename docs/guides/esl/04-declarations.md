@@ -386,12 +386,12 @@ The inductive-type resource's `core:is_a` array carries both the implicit `core:
 
 Institutions that need to attach **scope** or **policy** metadata to predicates use this surface to encode that metadata at the predicate's declaration site. The reading institution then walks `predicate_resource.is_a()` and decides admissibility from the markers it finds — no companion resource, no separate property, no out-of-band convention. The two motivating examples ride together:
 
-- **D52 §7.4 epistemic-scope check.** Predicates ride one of two scope markers, and the statistics institution's epistemic-scope gate consults them at MeasurementClaim admissibility time:
+- **D52 §7.4 epistemic-scope check.** Predicates ride one of two scope markers, and the statistics institution's epistemic-scope gate consults them at StatisticalAnalysisPlan admissibility time:
   - `stats:PopulationLevel` — generalizes to the underlying biological population. Admissible from `BiologicalReplication` and `NestedReplication`; rejected from `TechnicalWithinRun` (the institution refuses to attest population claims from technical-only replicates).
   - `stats:MeasurementLevel` — local to a single measurement event (e.g., `HasLowIC50_OnThisBatch`). Admissible from any replication kind including `TechnicalWithinRun`.
   - Predicates with **no** explicit scope marker default to `PopulationLevel` (the more restrictive admissibility — fail-safe). See [D52 §7.4](../../design/d52-measurement-statistics-institution.md) for the full admissibility table.
 
-- **D52 §7.1 impossibility witnesses.** A resource (not necessarily an inductive — `class` instances can use the same `is_a`-marker pattern via multi-parent `class` syntax) carrying `is_a stats:ImpossibilityWitness` stands as proof that the inverse direction of some hypothesis is physically impossible within the system under study. The statistics institution accepts `Directionality.OneSidedWitnessed(witness_iri)` on a MeasurementClaim only when the witness IRI resolves to a chain resource carrying this marker; otherwise it rejects the claim with a structured diagnostic.
+- **D52 §7.1 impossibility witnesses.** A resource (not necessarily an inductive — `class` instances can use the same `is_a`-marker pattern via multi-parent `class` syntax) carrying `is_a stats:ImpossibilityWitness` stands as proof that the inverse direction of some hypothesis is physically impossible within the system under study. The statistics institution accepts `Directionality.OneSidedWitnessed(witness_iri)` on a StatisticalAnalysisPlan only when the witness IRI resolves to a chain resource carrying this marker; otherwise it rejects the claim with a structured diagnostic.
 
 ### Why this syntax
 

@@ -5178,10 +5178,10 @@ mod tests {
         // D52 Phase 1 — the authored statistics.esl source must
         // compile cleanly. Locks the structural contract: five axis
         // enums, the SampleSet product type, the smart-constructor
-        // macros (SingleSampleEstimate, IID), the MeasurementClaim
+        // macros (SingleSampleEstimate, IID), the StatisticalAnalysisPlan
         // resource class with the universal-schema fields, the
         // PopulationLevel/MeasurementLevel scope markers, and the
-        // statistics-institution + qc_validate_measurement_claim
+        // statistics-institution + qc_validate_analysis_plan
         // resources. Any future edit that breaks this needs to be
         // deliberate.
         let source = include_str!("../../../ontologies/statistics/statistics.esl");
@@ -5225,12 +5225,12 @@ mod tests {
 
         let has_qc = resources.iter().any(|r| {
             r.id()
-                .map(|i| i.as_str() == "urn:eigenius:measurements:qc_validate_measurement_claim")
+                .map(|i| i.as_str() == "urn:eigenius:measurements:qc_validate_analysis_plan")
                 .unwrap_or(false)
         });
         assert!(
             has_qc,
-            "qc_validate_measurement_claim QueryClass must be emitted"
+            "qc_validate_analysis_plan QueryClass must be emitted"
         );
     }
 

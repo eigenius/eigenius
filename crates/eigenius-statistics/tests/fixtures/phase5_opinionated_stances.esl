@@ -3,7 +3,7 @@
 // Covers the three §7 hardenings landed in Phase 5:
 //   §7.1 — OneSidedWitnessed directionality with an ImpossibilityWitness
 //   §7.2 — Dual-verdict ESD outlier exclusion on SingleSampleEstimate
-//   §7.3 — MethodComparisonClaim + Passing-Bablok dispatch
+//   §7.3 — MethodComparisonAnalysisPlan + Passing-Bablok dispatch
 //
 // Domain framing: a small in-vitro radioligand-decay study (§7.1's
 // half-life-is-positive impossibility witness lives naturally here),
@@ -62,15 +62,9 @@ resource decay:half_life_sampleset_trace : reflection:ObservationTrace {
 // (raw two-sided p is small enough that the alpha comparison passes
 // either way, but the §7.1 witness validation must accept and the
 // diagnostic must mention the one-sided derivation).
-resource decay:claim_short_half_life_onesided : stats:MeasurementClaim {
+resource decay:claim_short_half_life_onesided : stats:StatisticalAnalysisPlan {
     stats:sample_set = decay:half_life_sampleset;
 
-    stats:null_hypothesis = type_expr(
-        decay:HasShortHalfLife("urn:eigenius:demo:decay:compound_A")
-    );
-    stats:alternative_hypothesis = type_expr(
-        decay:HasShortHalfLife("urn:eigenius:demo:decay:compound_A")
-    );
     reflection:canonical_proposition = type_expr(
         decay:HasShortHalfLife("urn:eigenius:demo:decay:compound_A")
     );
@@ -86,22 +80,16 @@ resource decay:claim_short_half_life_onesided : stats:MeasurementClaim {
 
 resource decay:claim_short_half_life_onesided_trace : reflection:ProgramTrace {
     reflection:resource  = decay:claim_short_half_life_onesided;
-    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:source    = "statistics-institution:validate_analysis_plan";
     reflection:timestamp = "2026-04-01T10:00:00Z";
 }
 
 // Sibling claim with a witness that does NOT exist on chain — the
 // verifier must reject with the §7.1 "witness not committed on chain"
 // diagnostic.
-resource decay:claim_short_half_life_bad_witness : stats:MeasurementClaim {
+resource decay:claim_short_half_life_bad_witness : stats:StatisticalAnalysisPlan {
     stats:sample_set = decay:half_life_sampleset;
 
-    stats:null_hypothesis = type_expr(
-        decay:HasShortHalfLife("urn:eigenius:demo:decay:compound_A")
-    );
-    stats:alternative_hypothesis = type_expr(
-        decay:HasShortHalfLife("urn:eigenius:demo:decay:compound_A")
-    );
     reflection:canonical_proposition = type_expr(
         decay:HasShortHalfLife("urn:eigenius:demo:decay:compound_A")
     );
@@ -117,7 +105,7 @@ resource decay:claim_short_half_life_bad_witness : stats:MeasurementClaim {
 
 resource decay:claim_short_half_life_bad_witness_trace : reflection:ProgramTrace {
     reflection:resource  = decay:claim_short_half_life_bad_witness;
-    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:source    = "statistics-institution:validate_analysis_plan";
     reflection:timestamp = "2026-04-01T10:00:00Z";
 }
 
@@ -148,15 +136,9 @@ resource assay:noisy_readout_sampleset_trace : reflection:ObservationTrace {
     reflection:timestamp = "2026-04-02T11:00:00Z";
 }
 
-resource assay:claim_low_readout_esd : stats:MeasurementClaim {
+resource assay:claim_low_readout_esd : stats:StatisticalAnalysisPlan {
     stats:sample_set = assay:noisy_readout_sampleset;
 
-    stats:null_hypothesis = type_expr(
-        assay:HasLowReadout("urn:eigenius:demo:assay:plate_X")
-    );
-    stats:alternative_hypothesis = type_expr(
-        assay:HasLowReadout("urn:eigenius:demo:assay:plate_X")
-    );
     reflection:canonical_proposition = type_expr(
         assay:HasLowReadout("urn:eigenius:demo:assay:plate_X")
     );
@@ -170,7 +152,7 @@ resource assay:claim_low_readout_esd : stats:MeasurementClaim {
 
 resource assay:claim_low_readout_esd_trace : reflection:ProgramTrace {
     reflection:resource  = assay:claim_low_readout_esd;
-    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:source    = "statistics-institution:validate_analysis_plan";
     reflection:timestamp = "2026-04-02T11:00:00Z";
 }
 
@@ -202,15 +184,9 @@ resource methods:concordance_sampleset_trace : reflection:ObservationTrace {
     reflection:timestamp = "2026-04-03T12:00:00Z";
 }
 
-resource methods:claim_methods_agree : stats:MethodComparisonClaim {
+resource methods:claim_methods_agree : stats:MethodComparisonAnalysisPlan {
     stats:sample_set = methods:concordance_sampleset;
 
-    stats:null_hypothesis = type_expr(
-        methods:MethodsAgree("urn:eigenius:demo:methods:assay_vs_LCMS")
-    );
-    stats:alternative_hypothesis = type_expr(
-        methods:MethodsAgree("urn:eigenius:demo:methods:assay_vs_LCMS")
-    );
     reflection:canonical_proposition = type_expr(
         methods:MethodsAgree("urn:eigenius:demo:methods:assay_vs_LCMS")
     );
@@ -224,7 +200,7 @@ resource methods:claim_methods_agree : stats:MethodComparisonClaim {
 
 resource methods:claim_methods_agree_trace : reflection:ProgramTrace {
     reflection:resource  = methods:claim_methods_agree;
-    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:source    = "statistics-institution:validate_analysis_plan";
     reflection:timestamp = "2026-04-03T12:00:00Z";
 }
 
@@ -249,15 +225,9 @@ resource methods:disagreement_sampleset_trace : reflection:ObservationTrace {
     reflection:timestamp = "2026-04-04T13:00:00Z";
 }
 
-resource methods:claim_methods_disagree : stats:MethodComparisonClaim {
+resource methods:claim_methods_disagree : stats:MethodComparisonAnalysisPlan {
     stats:sample_set = methods:disagreement_sampleset;
 
-    stats:null_hypothesis = type_expr(
-        methods:MethodsAgree("urn:eigenius:demo:methods:biased_assay_vs_LCMS")
-    );
-    stats:alternative_hypothesis = type_expr(
-        methods:MethodsAgree("urn:eigenius:demo:methods:biased_assay_vs_LCMS")
-    );
     reflection:canonical_proposition = type_expr(
         methods:MethodsAgree("urn:eigenius:demo:methods:biased_assay_vs_LCMS")
     );
@@ -271,6 +241,6 @@ resource methods:claim_methods_disagree : stats:MethodComparisonClaim {
 
 resource methods:claim_methods_disagree_trace : reflection:ProgramTrace {
     reflection:resource  = methods:claim_methods_disagree;
-    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:source    = "statistics-institution:validate_analysis_plan";
     reflection:timestamp = "2026-04-04T13:00:00Z";
 }

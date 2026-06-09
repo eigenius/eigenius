@@ -371,7 +371,7 @@ pub fn bootstrap_with_storage(
     // D52 Phase 5: measurement-statistics ontology — universal claim
     // schema, SampleSet sum-types, seven smart-constructor macros
     // (SingleSampleEstimate, IID, Paired, Factorial, RCBD, SplitPlot,
-    // RepeatedMeasures), MeasurementClaim + MethodComparisonClaim
+    // RepeatedMeasures), StatisticalAnalysisPlan + MethodComparisonAnalysisPlan
     // classes, the four §7 opinionated-stance marker classes
     // (PopulationLevel / MeasurementLevel / ImpossibilityWitness), and
     // two QueryClass registrations bound to the matching in-process
@@ -1307,7 +1307,7 @@ mod tests {
     }
 
     /// Confirm that a kernel-emitted Verdict resource (the shape
-    /// AutoOnLoad fires-and-emits at every MeasurementClaim /
+    /// AutoOnLoad fires-and-emits at every StatisticalAnalysisPlan /
     /// ReasoningSentence commit per D14 §5.6) validates cleanly. The
     /// resource carries `core:ctor_name` to record which Verdict ctor
     /// (Holds / Fails / Undecidable) the institution returned — same

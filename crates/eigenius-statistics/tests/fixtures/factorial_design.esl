@@ -80,18 +80,10 @@ resource kx:cross_factorial_trace : reflection:ObservationTrace {
     reflection:timestamp = "2026-04-02T13:15:00Z";
 }
 
-// ─── The factorial MeasurementClaim ────────────────────────────────
+// ─── The factorial StatisticalAnalysisPlan ────────────────────────────────
 
-resource kx:claim_cell_means_differ : stats:MeasurementClaim {
+resource kx:claim_cell_means_differ : stats:StatisticalAnalysisPlan {
     stats:sample_set = kx:cross_factorial_2026_04_02;
-
-    stats:null_hypothesis = type_expr(
-        kx:CellMeansDifferAcrossFactors("urn:eigenius:demo:kx:design_2026_04_02")
-    );
-
-    stats:alternative_hypothesis = type_expr(
-        kx:CellMeansDifferAcrossFactors("urn:eigenius:demo:kx:design_2026_04_02")
-    );
 
     reflection:canonical_proposition = type_expr(
         kx:CellMeansDifferAcrossFactors("urn:eigenius:demo:kx:design_2026_04_02")
@@ -112,6 +104,6 @@ resource kx:claim_cell_means_differ : stats:MeasurementClaim {
 
 resource kx:claim_cell_means_differ_trace : reflection:ProgramTrace {
     reflection:resource  = kx:claim_cell_means_differ;
-    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:source    = "statistics-institution:validate_analysis_plan";
     reflection:timestamp = "2026-04-02T13:15:00Z";
 }

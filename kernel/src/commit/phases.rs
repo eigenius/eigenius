@@ -460,7 +460,7 @@ pub fn autoonload_dispatch(state: &mut CommitState<'_>) -> Result<PhaseControl, 
         // commit chain artefacts; the orchestrator just doesn't admit
         // the gated subject's commit). On Fails, the per-effect
         // derivations are dropped — a failed analysis attests nothing
-        // statistically, so its would-be MeasurementResults must not
+        // statistically, so its would-be StatisticalAnalysisResults must not
         // pollute the witness index.
         if !matches!(dispatch.verdict, VerdictReading::Fails) {
             for raw_derivation in &dispatch.derivations {

@@ -21,7 +21,7 @@
 //!  - §7.2 Dual-verdict ESD outlier exclusion on SingleSampleEstimate:
 //!    primary numerics are the with-exclusion verdict; diagnostic
 //!    enumerates both branches.
-//!  - §7.3 MethodComparisonClaim + Passing-Bablok dispatch: Holds when
+//!  - §7.3 MethodComparisonAnalysisPlan + Passing-Bablok dispatch: Holds when
 //!    methods agree (slope CI ∋ 1.0 AND intercept CI ∋ 0.0); Fails
 //!    with the MethodComparisonDisagreement diagnostic on proportional
 //!    bias.
@@ -109,12 +109,12 @@ fn validate_claim(ctx: &ExecutionContext, claim_iri: &str) -> (String, Option<St
         .unwrap_or_else(|| panic!("claim `{claim_iri}` should be on chain"));
     let claim = (*claim_arc).clone();
     let inst = StatisticsInstitution::new();
-    let proc_iri = Iri::parse(iris::PROC_VALIDATE_MEASUREMENT_CLAIM).expect("proc IRI");
+    let proc_iri = Iri::parse(iris::PROC_VALIDATE_ANALYSIS_PLAN).expect("proc IRI");
     let outcome = inst
         .query(&proc_iri, &claim, ctx)
         .expect("validate handler returns an outcome");
     // Composite (ctor, diagnostic) — when the SAP ran, both come from
-    // the per-effect MeasurementResult derivation (the verdict_ctor +
+    // the per-effect StatisticalAnalysisResult derivation (the verdict_ctor +
     // its diagnostic). When the SAP couldn't run (structural Fails),
     // they come from the gate verdict — no derivation was emitted.
     let diag_iri = Iri::parse("urn:eigenius:institution:diagnostic").unwrap();
@@ -123,7 +123,7 @@ fn validate_claim(ctx: &ExecutionContext, claim_iri: &str) -> (String, Option<St
             let ctor = result
                 .get(&Iri::parse(iris::PROP_VERDICT_CTOR).unwrap())
                 .and_then(Value::as_str)
-                .expect("MeasurementResult carries verdict_ctor")
+                .expect("StatisticalAnalysisResult carries verdict_ctor")
                 .to_string();
             let diagnostic = result
                 .get(&diag_iri)
@@ -216,7 +216,7 @@ fn esd_outlier_exclusion_emits_dual_verdict_diagnostic() {
     );
 }
 
-// ── §7.3 MethodComparisonClaim + Passing-Bablok ───────────────────────
+// ── §7.3 MethodComparisonAnalysisPlan + Passing-Bablok ───────────────────────
 
 #[test]
 fn method_comparison_agreement_holds() {

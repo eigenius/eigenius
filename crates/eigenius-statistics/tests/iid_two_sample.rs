@@ -110,14 +110,14 @@ fn iid_two_sample_recomputes_to_holds() {
     let claim = (*claim_arc).clone();
 
     let inst = StatisticsInstitution::new();
-    let proc_iri = Iri::parse(iris::PROC_VALIDATE_MEASUREMENT_CLAIM).expect("proc IRI");
+    let proc_iri = Iri::parse(iris::PROC_VALIDATE_ANALYSIS_PLAN).expect("proc IRI");
     let outcome = inst
         .query(&proc_iri, &claim, &ctx)
-        .expect("validate_measurement_claim returns an outcome");
+        .expect("validate_analysis_plan returns an outcome");
     let result = outcome
         .derivations
         .first()
-        .expect("statistics emits a MeasurementResult when the SAP ran");
+        .expect("statistics emits a StatisticalAnalysisResult when the SAP ran");
 
     let ctor = result
         .get(&Iri::parse(iris::PROP_VERDICT_CTOR).unwrap())
@@ -196,14 +196,14 @@ fn iid_pooled_variance_dispatches_correctly() {
     );
 
     let inst = StatisticsInstitution::new();
-    let proc_iri = Iri::parse(iris::PROC_VALIDATE_MEASUREMENT_CLAIM).expect("proc IRI");
+    let proc_iri = Iri::parse(iris::PROC_VALIDATE_ANALYSIS_PLAN).expect("proc IRI");
     let outcome = inst
         .query(&proc_iri, &claim, &ctx)
         .expect("validate handler returns an outcome");
     let result = outcome
         .derivations
         .first()
-        .expect("statistics emits a MeasurementResult when the SAP ran");
+        .expect("statistics emits a StatisticalAnalysisResult when the SAP ran");
 
     let ctor = result
         .get(&Iri::parse(iris::PROP_VERDICT_CTOR).unwrap())

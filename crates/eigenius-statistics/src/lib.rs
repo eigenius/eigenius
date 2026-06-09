@@ -24,12 +24,12 @@
 //!
 //! ## Phase 1 surface (D52 §9)
 //!
-//! - `query(validate_measurement_claim, MeasurementClaim)` — **load-bearing**.
+//! - `query(validate_analysis_plan, StatisticalAnalysisPlan)` — **load-bearing**.
 //!   Reads the claim's `sample_set` reference, decodes the SampleSet's
 //!   product position (5 axis values from the `Bundle` ctor),
 //!   dispatches to a recomputation procedure, runs the §7.4 epistemic-
 //!   scope admissibility check, and returns a gate `Verdict::Holds`
-//!   (the SAP ran) plus one or more `MeasurementResult`
+//!   (the SAP ran) plus one or more `StatisticalAnalysisResult`
 //!   `InstitutionEmittedDerivation`s carrying the derived
 //!   `canonical_proposition` + numerics per effect. The D49 §6 witness
 //!   emitter walks the result resources directly to admit the

@@ -11,7 +11,7 @@
 // the only thing standing between an instrument number and a chain-
 // resident proposition. The D52 statistics institution removes that
 // conflation: the SampleSet carries the raw replicates, a
-// MeasurementClaim asserts the universal-claim schema (alpha,
+// StatisticalAnalysisPlan asserts the universal-claim schema (alpha,
 // effect_size, directionality, …), and the verifier's recomputation
 // turns the raw data into the proposition mechanically. The
 // ReasoningSentence then cites the claim via `DerivedEvidence`, not
@@ -30,7 +30,7 @@
 // 3. A SampleSetResource holding the three raw IC50 replicate readings
 //    (72, 85, 100 nM) plus an ObservationTrace pairing it with the
 //    bench instrument log (D49 §6 IsObservedAs witness).
-// 4. A MeasurementClaim asserting the IC50 threshold (`Absolute(100.0,
+// 4. A StatisticalAnalysisPlan asserting the IC50 threshold (`Absolute(100.0,
 //    "nM")`) with the universal-claim parameters, plus a ProgramTrace
 //    pairing it with the statistics-institution validation procedure
 //    (D49 §6 IsDerivedAs witness). The claim's
@@ -47,7 +47,7 @@
 // The kernel type-checks the certificate against
 // `JustifiedBy(justification, proposition)`, synthesises both
 // ChainWitnesses from the per-layer witness index, and reports
-// Verdict::Holds. The MeasurementClaim's own AutoOnLoad path (running
+// Verdict::Holds. The StatisticalAnalysisPlan's own AutoOnLoad path (running
 // the statistics institution's verifier) is exercised independently
 // in the eigenius-statistics crate's tests; here we only need the
 // witness index admission, which D49 §6 grants from the ProgramTrace
@@ -130,27 +130,35 @@ resource screen:m_eig0291_sampleset_trace : reflection:ObservationTrace {
     reflection:timestamp = "2026-03-04T14:22:11Z";
 }
 
-// ─── Step 4: MeasurementClaim + its ProgramTrace ────────────────────
+// ─── Step 4: StatisticalAnalysisPlan + its ProgramTrace ────────────────────
 //
-// The universal-claim schema (D52 §3) carries everything the verifier
-// needs to recompute the claim deterministically: alpha, effect_size
-// (the threshold), directionality, variance_assumption, outlier_
-// exclusion. The MeasurementClaim itself IS the chain-resident
-// DerivedResource downstream D39 reasoning cites via DerivedEvidence
-// — its reflection:canonical_proposition slot carries
-// `HasLowIC50(EIG_0291)`, which the D49 §6 witness index reads to
-// admit `IsDerivedAs(claim_iri, HasLowIC50(EIG_0291))` from the
-// matching ProgramTrace.
+// The universal-SAP schema (D52 §3) carries the parameters the
+// verifier needs to recompute the analysis deterministically: alpha,
+// effect_size (the threshold), directionality, variance_assumption,
+// outlier_exclusion. The SAP itself has NO propositional content —
+// the proposition the chain attests lives on the
+// `StatisticalAnalysisResult` derivation the institution emits at
+// `{plan_iri}:result:main_effect` once the test runs. Downstream D39
+// reasoning cites that derivation via `DerivedEvidence`, not the SAP
+// itself.
+//
+// In this fixture the statistics institution is not actually
+// dispatched (the test loads the chain witness index directly to
+// exercise the D49 path), so the fixture pre-authors the ProgramTrace
+// with the canonical_proposition the verifier WOULD produce. This is
+// the legacy path; once the AutoOnLoad gate runs in this test the
+// `StatisticalAnalysisResult` derivation makes the ProgramTrace
+// redundant. Tracked as a follow-on cleanup: restructure to compose
+// `DerivedEvidence(verdict_iri) → DeclaredEvidence(stats_to_domain_bridge) → DeclaredEvidence(literature_rule)`
+// once a bridge resource lands.
 
-resource screen:claim_eig0291_lowic50 : stats:MeasurementClaim {
+resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
     stats:sample_set = screen:m_eig0291_sampleset;
 
-    stats:null_hypothesis = type_expr(
-        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
-    );
-    stats:alternative_hypothesis = type_expr(
-        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
-    );
+    // The canonical_proposition slot is set here for the legacy
+    // ProgramTrace witness path the D49 emitter walks. After the full
+    // structural revision lands, this slot is empty on the SAP and
+    // the verifier emits the proposition on the result derivation.
     reflection:canonical_proposition = type_expr(
         screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
     );
@@ -164,7 +172,7 @@ resource screen:claim_eig0291_lowic50 : stats:MeasurementClaim {
 
 resource screen:claim_eig0291_lowic50_trace : reflection:ProgramTrace {
     reflection:resource  = screen:claim_eig0291_lowic50;
-    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:source    = "statistics-institution:validate_analysis_plan";
     reflection:timestamp = "2026-03-04T14:22:11Z";
 }
 

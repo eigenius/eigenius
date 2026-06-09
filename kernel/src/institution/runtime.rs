@@ -67,7 +67,7 @@ pub struct QueryOutcome {
     /// Side-effect resources the institution produced *as artefacts
     /// of validation*. Empty for institutions whose only job is the
     /// pass/fail gate (e.g. Reasoning / Lean). Statistics emits one
-    /// `MeasurementResult` per ANOVA effect; each derivation is a
+    /// `StatisticalAnalysisResult` per ANOVA effect; each derivation is a
     /// `reflection:InstitutionEmittedDerivation` whose
     /// `canonical_proposition` the chain ends up attesting (D49
     /// §6 IsDerivedAs witness target). The kernel commits each

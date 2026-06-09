@@ -13,7 +13,7 @@
 //     the population-level `HasLowIC50` predicate from this). The
 //     `TechnicalWithinRun` parallel fixture is a follow-on test that
 //     exercises the §7.4 epistemic-scope rejection path.
-//   - The `stats:MeasurementClaim` references the SampleSetResource by
+//   - The `stats:StatisticalAnalysisPlan` references the SampleSetResource by
 //     IRI and asserts the 100 nM threshold.
 //
 // What this exercises that drug_screening.esl didn't:
@@ -77,7 +77,7 @@ resource screen:m_eig0291_trace : reflection:ObservationTrace {
     reflection:timestamp = "2026-03-04T14:22:11Z";
 }
 
-// ─── The MeasurementClaim ──────────────────────────────────────────
+// ─── The StatisticalAnalysisPlan ──────────────────────────────────────────
 //
 // Universal-Claim schema per D52 §3:
 //   sample_set → IRI of m_eig0291_sampleset
@@ -94,16 +94,8 @@ resource screen:m_eig0291_trace : reflection:ObservationTrace {
 //   and the D49 §6 witness index reads the same slot to admit the
 //   IsDerivedAs witness (provided a ProgramTrace points at this claim).
 
-resource screen:claim_eig0291_lowic50 : stats:MeasurementClaim {
+resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
     stats:sample_set = screen:m_eig0291_sampleset;
-
-    stats:null_hypothesis = type_expr(
-        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
-    );
-
-    stats:alternative_hypothesis = type_expr(
-        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
-    );
 
     // The predicate this claim establishes when the test holds. Read
     // by the §7.4 epistemic-scope check and (on a successful commit)
@@ -131,7 +123,7 @@ resource screen:claim_eig0291_lowic50 : stats:MeasurementClaim {
 
 resource screen:claim_eig0291_lowic50_trace : reflection:ProgramTrace {
     reflection:resource  = screen:claim_eig0291_lowic50;
-    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:source    = "statistics-institution:validate_analysis_plan";
     reflection:timestamp = "2026-03-04T14:22:11Z";
 }
 
@@ -170,16 +162,8 @@ resource screen:m_eig0291_confirmatory_trace : reflection:ObservationTrace {
 // `HasLowIC50(EIG_0291)` so downstream D39 reasoning citing
 // DerivedEvidence(this_claim) gets exactly that proposition.
 
-resource screen:claim_eig0291_confirmatory_holds : stats:MeasurementClaim {
+resource screen:claim_eig0291_confirmatory_holds : stats:StatisticalAnalysisPlan {
     stats:sample_set = screen:m_eig0291_confirmatory_sampleset;
-
-    stats:null_hypothesis = type_expr(
-        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
-    );
-
-    stats:alternative_hypothesis = type_expr(
-        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
-    );
 
     reflection:canonical_proposition = type_expr(
         screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
@@ -194,6 +178,6 @@ resource screen:claim_eig0291_confirmatory_holds : stats:MeasurementClaim {
 
 resource screen:claim_eig0291_confirmatory_trace : reflection:ProgramTrace {
     reflection:resource  = screen:claim_eig0291_confirmatory_holds;
-    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:source    = "statistics-institution:validate_analysis_plan";
     reflection:timestamp = "2026-03-11T10:18:42Z";
 }

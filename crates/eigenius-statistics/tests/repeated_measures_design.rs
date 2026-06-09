@@ -115,14 +115,14 @@ fn rm_compound_symmetry_recomputes_to_holds() {
     let claim = (*claim_arc).clone();
 
     let inst = StatisticsInstitution::new();
-    let proc_iri = Iri::parse(iris::PROC_VALIDATE_MEASUREMENT_CLAIM).expect("proc IRI");
+    let proc_iri = Iri::parse(iris::PROC_VALIDATE_ANALYSIS_PLAN).expect("proc IRI");
     let outcome = inst
         .query(&proc_iri, &claim, &ctx)
-        .expect("validate_measurement_claim returns an outcome");
+        .expect("validate_analysis_plan returns an outcome");
     let result = outcome
         .derivations
         .first()
-        .expect("statistics emits a MeasurementResult when the SAP ran");
+        .expect("statistics emits a StatisticalAnalysisResult when the SAP ran");
 
     let ctor = result
         .get(&Iri::parse(iris::PROP_VERDICT_CTOR).unwrap())
@@ -280,13 +280,13 @@ fn rm_ar1_returns_not_yet_wired_diagnostic() {
     );
 
     let inst = StatisticsInstitution::new();
-    let proc_iri = Iri::parse(iris::PROC_VALIDATE_MEASUREMENT_CLAIM).expect("proc IRI");
+    let proc_iri = Iri::parse(iris::PROC_VALIDATE_ANALYSIS_PLAN).expect("proc IRI");
     let outcome = inst
         .query(&proc_iri, &claim, &ctx)
         .expect("validate handler returns an outcome");
 
     // AR1 is structurally not wired — the SAP can't run, so the gate
-    // verdict Fails and no MeasurementResult derivation is emitted.
+    // verdict Fails and no StatisticalAnalysisResult derivation is emitted.
     assert!(
         outcome.derivations.is_empty(),
         "gate Fails (SAP couldn't run) must not emit derivations; got {} derivations",

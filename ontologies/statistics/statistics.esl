@@ -22,12 +22,12 @@
 //   the correct product position. The macros are compile-time AST
 //   substitution only (kernel ESL extension, ast.rs `Declaration::Macro`).
 //
-// - `MeasurementClaim` (D52 §3): universal-schema fields the author
+// - `StatisticalAnalysisPlan` (D52 §3): universal-schema fields the author
 //   asserts (hypothesis, alpha, effect-size, directionality, variance
 //   assumption, outlier exclusion). Subclass of
 //   `reflection:DerivedResource` — its `reflection:canonical_proposition`
 //   carries the predicate the claim establishes when Holds. The
-//   institution's `validate_measurement_claim` query class recomputes
+//   institution's `validate_analysis_plan` query class recomputes
 //   the claim from raw replicates and admits the commit on Holds.
 //   Downstream D39 reasoning cites the claim's IRI via
 //   `DerivedEvidence`; the witness index (D49 §6) admits the
@@ -41,8 +41,8 @@
 //   from technical-only replicates.
 //
 // - The Statistics institution resource itself + the
-//   `qc_validate_measurement_claim` query class. AutoOnLoad dispatch
-//   fires the verifier at every `MeasurementClaim` commit.
+//   `qc_validate_analysis_plan` query class. AutoOnLoad dispatch
+//   fires the verifier at every `StatisticalAnalysisPlan` commit.
 //
 // IRIs match constants the Rust institution crate references — keep
 // in sync with `crates/eigenius-statistics/src/iris.rs`.
@@ -130,6 +130,17 @@ data stats:EffectSize {
     // storing only the derived value.
     StandardizedCohensD(core:float, core:float),                   // mean_diff, pooled_sd
     StandardizedHedgesG(core:float, core:float, core:integer),     // mean_diff, pooled_sd, n_total
+    // ANOVA-shaped effect-size measures (per-effect threshold). The
+    // verifier emits a StatisticalAnalysisResult Holds for each effect whose
+    // empirical statistic crosses the configured threshold.
+    EtaSquared(core:float),                                        // eta² threshold (0..1)
+    OmegaSquared(core:float),                                      // omega² threshold (-Inf..1)
+    // Omnibus "any non-zero effect rejects H0" — no minimum effect-
+    // size constraint; the test uses only p < alpha. Required for
+    // pre-registration shape compliance when authors have no
+    // a-priori effect-size estimate (e.g. exploratory factorial
+    // ANOVA in early-phase pharmacology screens).
+    NoneSpecified,
 }
 
 data stats:Directionality {
@@ -150,6 +161,39 @@ data stats:AutocorrelationStructure {
     Unstructured,
 }
 
+// ── Multiple-comparison correction policy (D52 §3 / ICH E9 R1) ───────
+//
+// For SAPs that produce more than one statistical decision (factorial
+// designs with 2^k − 1 effects, split-plot with three, repeated-
+// measures with multiple effects), the family-wise alpha must be
+// controlled. ICH E9(R1) requires the correction policy be pre-
+// registered in the SAP — the verifier reads this slot and adjusts
+// each per-effect decision accordingly. SAPs with single-effect
+// dispatches (SingleSampleEstimate, IID, Paired, RCBD, MethodComparison,
+// RepeatedMeasures CompoundSymmetry k=0) ignore this slot (the
+// correction is a no-op with N=1).
+//
+//   NoCorrection       — each effect compared to raw alpha. Use only
+//                        when the family-wise error rate is irrelevant
+//                        (e.g. exploratory analysis with all effects
+//                        reported as exploratory).
+//   Bonferroni         — each effect compared to alpha/N. Most
+//                        conservative; controls FWER strictly under
+//                        any dependence structure.
+//   Holm               — step-down: sort p-values ascending; the k-th
+//                        compared to alpha/(N-k+1). Uniformly more
+//                        powerful than Bonferroni; controls FWER.
+//   BenjaminiHochberg  — step-up: controls the false discovery rate
+//                        (FDR) rather than FWER. Most powerful when
+//                        many effects are expected to be non-null.
+
+data stats:MultipleComparisonCorrection {
+    NoCorrection,
+    Bonferroni,
+    Holm,
+    BenjaminiHochberg,
+}
+
 data stats:OutlierExclusion {
     Identity,
     PassingBablokResidual(core:float),                             // threshold_sigma
@@ -165,7 +209,7 @@ data stats:OutlierExclusion {
 // ── Parameter symbols + propositional primitives (D52 §3 revision) ───
 //
 // The statistics institution computes the canonical proposition for
-// every MeasurementClaim from the claim's other parameters (effect_
+// every StatisticalAnalysisPlan from the claim's other parameters (effect_
 // size, directionality, dispatch position). To express those derived
 // propositions as chain-resident type-fragment values, the institution
 // needs:
@@ -201,6 +245,36 @@ axiom stats:lt : core:float -> core:float -> Prop
 axiom stats:le : core:float -> core:float -> Prop
 axiom stats:gt : core:float -> core:float -> Prop
 axiom stats:ge : core:float -> core:float -> Prop
+
+// ── ANOVA effect predicates ──────────────────────────────────────────
+//
+// For factorial / split-plot / repeated-measures designs the verifier
+// emits one StatisticalAnalysisResult per effect. Each result's
+// canonical_proposition asserts a non-zero effect for that specific
+// factor or interaction on the SampleSet. The predicates take the
+// sample-set IRI and an effect key:
+//
+//   - `factor_effect_of(s, "A")` — factor A has a non-zero main effect
+//   - `interaction_effect_of(s, "A:B")` — A×B interaction is non-zero
+//   - `interaction_effect_of(s, "A:B:C")` — three-way interaction
+//
+// The interaction-key naming convention is colon-separated factor
+// names in lexicographic order — same convention used in the
+// StatisticalAnalysisResult IRI suffix (`{analysis_iri}:result:interaction_AB`).
+// Both ends of the witness machinery hash the same Exp; the convention
+// makes the producer↔consumer encoding match.
+//
+// SplitPlot's whole-plot / subplot / interaction effects use the
+// dispatch's structural names: `factor_effect_of(s, "whole_plot")`,
+// `factor_effect_of(s, "subplot")`, `interaction_effect_of(s, "whole_plot:subplot")`.
+
+axiom stats:factor_effect_of      : core:string -> core:string -> Prop
+axiom stats:interaction_effect_of : core:string -> core:string -> Prop
+
+// MethodComparison / Passing-Bablok — the §7.3 hardening uses this
+// when the verdict's canonical proposition lands. Asserts the two
+// methods agree per CLSI EP09 (1.0 ∈ slope_CI ∧ 0.0 ∈ intercept_CI).
+axiom stats:methods_agree : core:string -> Prop
 
 // ── Raw observation shape ────────────────────────────────────────────
 //
@@ -562,7 +636,7 @@ macro stats:SplitPlot(
 // uniform `FullFactorial(k)` is the structurally honest choice.
 //
 // The autocorrelation structure (AR(1) / CompoundSymmetry /
-// Unstructured) is asserted on the MeasurementClaim, not encoded on
+// Unstructured) is asserted on the StatisticalAnalysisPlan, not encoded on
 // the SampleSet — the claim's `autocorrelation_structure` field per
 // D52 §3 / §12 #5. The verifier dispatches across the
 // (autocorrelation_structure × k_between_factors) matrix — see the
@@ -599,13 +673,13 @@ macro stats:RepeatedMeasures(
 // ── SampleSetResource (chain-resident SampleSet carrier) ─────────────
 //
 // Reflection:ObservedResource subclass that wraps a `SampleSet`
-// inductive value on the chain. The MeasurementClaim's `sample_set`
+// inductive value on the chain. The StatisticalAnalysisPlan's `sample_set`
 // property references one of these by IRI so the raw replicates have
 // their own provenance (ObservationTrace, source, observed_at) and
 // can be cited by multiple claims independently.
 
 class stats:SampleSetResource : reflection:ObservedResource {
-    description = "Chain-resident wrapper carrying a raw SampleSet inductive value. The MeasurementClaim's sample_set property references this resource by IRI; the institution's verifier reads sample_set_value to recompute the claim. Subclassing ObservedResource gives the SampleSet the standard provenance fields (source, observed_at, ObservationTrace witness).";
+    description = "Chain-resident wrapper carrying a raw SampleSet inductive value. The StatisticalAnalysisPlan's sample_set property references this resource by IRI; the institution's verifier reads sample_set_value to recompute the claim. Subclassing ObservedResource gives the SampleSet the standard provenance fields (source, observed_at, ObservationTrace witness).";
     requires stats:sample_set_value;
 }
 
@@ -615,7 +689,7 @@ property stats:sample_set_value : core:resource {
     domain stats:SampleSetResource;
 }
 
-// ── MeasurementClaim (D52 §3 — verdict-as-DerivedResource revision) ──
+// ── StatisticalAnalysisPlan (D52 §3 — verdict-as-DerivedResource revision) ──
 //
 // The chain-resident author-side request: a SampleSet reference plus
 // the universal claim parameters. The claim itself carries no
@@ -631,20 +705,21 @@ property stats:sample_set_value : core:resource {
 // chain commits an author asked; the *answer* (with its derived
 // proposition + numerics) is the Verdict the institution emits.
 
-class stats:MeasurementClaim {
-    description = "A pre-registered Statistical Analysis Plan (SAP) tied to a specific SampleSet — the chain-resident specification of how a test will be run. Pairs a SampleSet reference with the universal SAP parameters (alpha, effect_size, directionality, variance assumption, outlier rule). The MeasurementClaim itself carries no proposition; the chain attests propositions through the MeasurementResult derivations the institution emits at validation time. On AutoOnLoad, the statistics institution validates the SAP and emits one MeasurementResult per effect (one for single-effect dispatches; 2^k − 1 for k-factor factorial; W/S/W×S for split-plot, etc.) at IRIs `{claim_iri}:result:{effect_name}`. Each MeasurementResult is the chain-resident DerivedResource downstream D39 reasoning cites via DerivedEvidence.";
+class stats:StatisticalAnalysisPlan {
+    description = "A pre-registered Statistical Analysis Plan (SAP) tied to a specific SampleSet — the chain-resident specification of how a test will be run. Pairs a SampleSet reference with the universal SAP parameters (alpha, effect_size, directionality, variance assumption, outlier rule). The StatisticalAnalysisPlan itself carries no proposition; the chain attests propositions through the StatisticalAnalysisResult derivations the institution emits at validation time. On AutoOnLoad, the statistics institution validates the SAP and emits one StatisticalAnalysisResult per effect (one for single-effect dispatches; 2^k − 1 for k-factor factorial; W/S/W×S for split-plot, etc.) at IRIs `{claim_iri}:result:{effect_name}`. Each StatisticalAnalysisResult is the chain-resident DerivedResource downstream D39 reasoning cites via DerivedEvidence.";
     requires stats:sample_set,
              stats:alpha,
              stats:effect_size,
              stats:directionality,
              stats:variance_assumption,
              stats:outlier_exclusion;
-    recommends stats:autocorrelation_structure;
+    recommends stats:autocorrelation_structure,
+               stats:multiple_comparison_correction;
 }
 
 // §7.3 — method-comparison claims (Phase 5 hardening).
 //
-// MethodComparisonClaim subclasses MeasurementClaim and switches the
+// MethodComparisonAnalysisPlan subclasses StatisticalAnalysisPlan and switches the
 // verifier dispatch onto a Passing-Bablok regression path: non-
 // parametric, robust to outliers, errors-in-both-variables. CLSI EP09
 // alignment. The SampleSet shape is the same `stats:Paired(pairs, …)`
@@ -660,26 +735,14 @@ class stats:MeasurementClaim {
 // false. The verifier accepts only PassingBablok via this claim
 // subclass; Deming with an asserted variance ratio is a follow-on.
 
-class stats:MethodComparisonClaim : stats:MeasurementClaim {
-    description = "A MeasurementClaim subclass asserting that two measurement methods or two assay readouts agree (D52 §7.3). The institution dispatches such claims to Passing-Bablok regression instead of the paired t-test; ordinary least-squares regression is rejected outright (OLS assumes zero measurement error on the X-axis, structurally false for method comparison). The SampleSet shape mirrors stats:Paired: each pair is `(method_a_reading, method_b_reading)` for one specimen. The verdict is Holds when both the 95% CI of the slope contains 1.0 AND the 95% CI of the intercept contains 0.0; the computed_statistic field carries the median slope and the diagnostic carries (slope, intercept, slope_CI, intercept_CI) for audit. CLSI EP09 alignment.";
+class stats:MethodComparisonAnalysisPlan : stats:StatisticalAnalysisPlan {
+    description = "A StatisticalAnalysisPlan subclass asserting that two measurement methods or two assay readouts agree (D52 §7.3). The institution dispatches such claims to Passing-Bablok regression instead of the paired t-test; ordinary least-squares regression is rejected outright (OLS assumes zero measurement error on the X-axis, structurally false for method comparison). The SampleSet shape mirrors stats:Paired: each pair is `(method_a_reading, method_b_reading)` for one specimen. The verdict is Holds when both the 95% CI of the slope contains 1.0 AND the 95% CI of the intercept contains 0.0; the computed_statistic field carries the median slope and the diagnostic carries (slope, intercept, slope_CI, intercept_CI) for audit. CLSI EP09 alignment.";
 }
 
 property stats:sample_set : core:string {
     description = "IRI of the SampleSet ObservedResource holding the raw replicates this claim is computed against. Required for recomputation.";
     format = formats:iri;
-    domain stats:MeasurementClaim;
-}
-
-property stats:null_hypothesis : core:resource {
-    description = "The Prop-typed null hypothesis the claim is testing against, encoded via the D47 codec. The verifier reads this for diagnostic reporting; the actual statistical test is parameterized by the variance_assumption field.";
-    class_types eigentt:TypeExpr;
-    domain stats:MeasurementClaim;
-}
-
-property stats:alternative_hypothesis : core:resource {
-    description = "The Prop-typed alternative hypothesis. Together with the null this fixes the claim's logical shape; the verifier reads this for diagnostic reporting and uses it to validate that the asserted canonical_proposition matches the test's structure.";
-    class_types eigentt:TypeExpr;
-    domain stats:MeasurementClaim;
+    domain stats:StatisticalAnalysisPlan;
 }
 
 // The "predicate the claim establishes when the test holds" rides on
@@ -691,37 +754,43 @@ property stats:alternative_hypothesis : core:resource {
 
 property stats:alpha : core:float {
     description = "Nominal Type-I error threshold, unadjusted. Multiple-testing correction (Bonferroni / Benjamini-Hochberg / etc.) is a higher-level institution that consumes the per-claim alpha + p-value; this field carries the raw threshold the per-claim test uses.";
-    domain stats:MeasurementClaim;
+    domain stats:StatisticalAnalysisPlan;
 }
 
 property stats:effect_size : core:resource {
     description = "The effect size the claim asserts (absolute / relative / standardized). Standardized forms carry their input components so the verifier can check both input recovery against the SampleSet and the derivation arithmetic (D52 §12 #4).";
     class_types stats:EffectSize;
-    domain stats:MeasurementClaim;
+    domain stats:StatisticalAnalysisPlan;
 }
 
 property stats:directionality : core:resource {
     description = "Two-sided by default. OneSidedWitnessed requires a chain-resident impossibility-witness IRI that the verifier checks resolves to a committed proof that the inverse direction is impossible within the system under study (D52 §7.1).";
     class_types stats:Directionality;
-    domain stats:MeasurementClaim;
+    domain stats:StatisticalAnalysisPlan;
 }
 
 property stats:variance_assumption : core:resource {
     description = "Which statistical test family the verifier dispatches to (Pooled / Welch / NonParametric / RankBased). Author-asserted so the verifier output is fully deterministic — AIC-style automatic test selection would make the verdict non-reproducible by hand.";
     class_types stats:VarianceAssumption;
-    domain stats:MeasurementClaim;
+    domain stats:StatisticalAnalysisPlan;
 }
 
 property stats:outlier_exclusion : core:resource {
     description = "Identity (no exclusion) for the standard case. Non-Identity exclusions trigger the dual-verdict commit shape (D52 §7.2): the kernel computes the claim both with and without the exclusion functor and commits both DerivedResources, linked via stats:dual_verdict_pair.";
     class_types stats:OutlierExclusion;
-    domain stats:MeasurementClaim;
+    domain stats:StatisticalAnalysisPlan;
 }
 
 property stats:autocorrelation_structure : core:resource {
     description = "Required when the SampleSet's repeated_measures axis is Longitudinal; absent for cross-sectional claims. Author-asserted (AR1 / CompoundSymmetry / Unstructured) so the verifier is fully deterministic — the verifier rejects with EpistemicScopeViolation if the field is missing for a longitudinal claim.";
     class_types stats:AutocorrelationStructure;
-    domain stats:MeasurementClaim;
+    domain stats:StatisticalAnalysisPlan;
+}
+
+property stats:multiple_comparison_correction : core:resource {
+    description = "Family-wise alpha control policy for multi-effect dispatches (factorial, split-plot, repeated-measures with multiple effects). Read by the verifier when emitting per-effect StatisticalAnalysisResults — each effect's per-effect Holds/Fails is determined after the correction is applied. Defaults to NoCorrection when absent (acceptable for single-effect dispatches and for exploratory analyses with no FWER constraint). Pre-registration of this slot is required by ICH E9(R1) for confirmatory analyses.";
+    class_types stats:MultipleComparisonCorrection;
+    domain stats:StatisticalAnalysisPlan;
 }
 
 // ── Predicate scope markers (D52 §7.4 / §12 #8) ──────────────────────
@@ -754,24 +823,24 @@ class stats:MeasurementLevel {
 // mathematically impossible — e.g., a half-life cannot be negative,
 // a probability cannot exceed 1, a count cannot be fractional. The
 // statistics institution accepts `Directionality.OneSidedWitnessed(w)`
-// on a MeasurementClaim only when `w` resolves to a chain resource
+// on a StatisticalAnalysisPlan only when `w` resolves to a chain resource
 // carrying this marker; otherwise it rejects the claim with a
 // structured diagnostic. The ARRIVE-aligned stance: one-sided p-values
 // are not a default the chain hands out — they require a witness the
 // chain can name and audit.
 
 class stats:ImpossibilityWitness {
-    description = "Marker class for chain resources that stand as proof that the inverse direction of some hypothesis is impossible within the system under study (D52 §7.1). A MeasurementClaim's Directionality.OneSidedWitnessed(w) field references such a resource by IRI; the verifier admits the one-sided p-value path only when w.is_a contains this marker. The marker itself imposes no structural requirements beyond is_a membership; the chain author asserts the impossibility, and the chain attests that the author named a specific resource as the witness.";
+    description = "Marker class for chain resources that stand as proof that the inverse direction of some hypothesis is impossible within the system under study (D52 §7.1). A StatisticalAnalysisPlan's Directionality.OneSidedWitnessed(w) field references such a resource by IRI; the verifier admits the one-sided p-value path only when w.is_a contains this marker. The marker itself imposes no structural requirements beyond is_a membership; the chain author asserts the impossibility, and the chain attests that the author named a specific resource as the witness.";
 }
 
-// ── MeasurementResult shape (the institution-emitted derivation) ─────
+// ── StatisticalAnalysisResult shape (the institution-emitted derivation) ─────
 //
-// The MeasurementClaim is the SAP — a pre-registered analysis
+// The StatisticalAnalysisPlan is the SAP — a pre-registered analysis
 // specification with no propositional content of its own. On
 // AutoOnLoad the statistics institution validates the SAP (returning
-// the gate Verdict) AND emits one MeasurementResult per ANOVA effect
+// the gate Verdict) AND emits one StatisticalAnalysisResult per ANOVA effect
 // (one per dispatch arm in the single-effect cases). Each
-// MeasurementResult IS the chain-resident DerivedResource carrying
+// StatisticalAnalysisResult IS the chain-resident DerivedResource carrying
 // the proposition the chain attests:
 //
 //   - reflection:canonical_proposition — the derived alternative
@@ -782,7 +851,7 @@ class stats:ImpossibilityWitness {
 //   - stats:verdict_ctor — the per-effect Holds/Fails decision
 //     (independent of the institutional gate Verdict, which attests
 //     "the SAP was well-formed and runnable")
-//   - reflection:from_subject — back-pointer to the MeasurementClaim
+//   - reflection:from_subject — back-pointer to the StatisticalAnalysisPlan
 //     (stamped by the kernel via `reflection:InstitutionEmittedDerivation`)
 //   - reflection:runtime_invocation — back-pointer to the producing
 //     RuntimeInvocation (also kernel-stamped)
@@ -791,8 +860,8 @@ class stats:ImpossibilityWitness {
 // single-effect dispatches that's `:result:main_effect`; for
 // factorial it's `:result:main_A`, `:result:interaction_AB`, etc.
 
-class stats:MeasurementResult : reflection:InstitutionEmittedDerivation {
-    description = "Per-effect derived resource the statistics institution emits as an artefact of validating a MeasurementClaim. Carries the canonical_proposition the chain attests (the derived alternative hypothesis), the recomputed numerics, and the per-effect Holds/Fails decision. Linked back to the analysis spec via reflection:from_subject and to its RuntimeInvocation via reflection:runtime_invocation (both stamped by the kernel). Downstream D39 reasoning cites this resource via DerivedEvidence; the D49 §6 witness emitter walks it directly to admit IsDerivedAs(result_iri, canonical_proposition).";
+class stats:StatisticalAnalysisResult : reflection:InstitutionEmittedDerivation {
+    description = "Per-effect derived resource the statistics institution emits as an artefact of validating a StatisticalAnalysisPlan. Carries the canonical_proposition the chain attests (the derived alternative hypothesis), the recomputed numerics, and the per-effect Holds/Fails decision. Linked back to the analysis spec via reflection:from_subject and to its RuntimeInvocation via reflection:runtime_invocation (both stamped by the kernel). Downstream D39 reasoning cites this resource via DerivedEvidence; the D49 §6 witness emitter walks it directly to admit IsDerivedAs(result_iri, canonical_proposition).";
     requires stats:verdict_ctor,
              stats:computed_statistic,
              stats:computed_p_value;
@@ -802,28 +871,28 @@ class stats:MeasurementResult : reflection:InstitutionEmittedDerivation {
 
 property stats:verdict_ctor : core:string {
     description = "Per-effect decision constructor (Holds / Fails / Undecidable). Independent of the institutional gate Verdict — the gate attests SAP-well-formedness; this attests the per-effect statistical decision under the SAP's alpha (and family-wise correction when applicable).";
-    domain stats:MeasurementResult;
+    domain stats:StatisticalAnalysisResult;
 }
 
 property stats:computed_statistic : core:float {
     description = "The test statistic the verifier computed for this effect (t-statistic / U / F / etc., depending on the dispatch and variance_assumption). Reported on both Holds and Fails for audit transparency.";
-    domain stats:MeasurementResult;
+    domain stats:StatisticalAnalysisResult;
 }
 
 property stats:computed_p_value : core:float {
     description = "The p-value the verifier computed from the test statistic for this effect. Reflects any multiple-comparison correction the analysis spec requested; the raw uncorrected value lives in the diagnostic.";
-    domain stats:MeasurementResult;
+    domain stats:StatisticalAnalysisResult;
 }
 
 property stats:dual_verdict_pair : core:string {
-    description = "When the source analysis's outlier_exclusion is non-Identity, the institution emits two MeasurementResults (with-exclusion and without-exclusion) and cross-links them via this property pointing at the sibling result's IRI (D52 §7.2 dual-verdict commit shape).";
+    description = "When the source analysis's outlier_exclusion is non-Identity, the institution emits two StatisticalAnalysisResults (with-exclusion and without-exclusion) and cross-links them via this property pointing at the sibling result's IRI (D52 §7.2 dual-verdict commit shape).";
     format = formats:iri;
-    domain stats:MeasurementResult;
+    domain stats:StatisticalAnalysisResult;
 }
 
 property stats:effect_name : core:string {
     description = "Symbolic name of the effect this result covers: `main_effect` for single-effect dispatches, `main_A` / `main_B` / `interaction_AB` / `whole_plot` / `subplot` / etc. for the multi-effect dispatches. Also encoded in the IRI suffix (e.g. `{analysis_iri}:result:main_A`), but the explicit property makes downstream filtering by effect cheap without IRI parsing.";
-    domain stats:MeasurementResult;
+    domain stats:StatisticalAnalysisResult;
 }
 
 // ── Statistics institution (D52 §6 / D14) ────────────────────────────
@@ -832,31 +901,31 @@ resource stats:statistics_institution : institution:Institution {
     institution:institution_iri = "urn:eigenius:measurements:statistics_institution";
     institution:institution_name = "MeasurementStatistics";
     institution:runtime = runtimes:in_process;
-    core:description = "Measurement statistics institution (D52). On AutoOnLoad against a MeasurementClaim: validates the SAP (sample_set resolves, parameters are well-typed, dispatch matches the SampleSet's product position, the test runs without precondition failures) and emits per-effect MeasurementResult derivations carrying the canonical proposition + recomputed numerics. The gate Verdict attests SAP-well-formedness; the MeasurementResults are what downstream D39 reasoning cites via DerivedEvidence. Opinionated stances: two-sided default (§7.1), dual-verdict outlier exclusion (§7.2), Passing-Bablok for method comparison (§7.3), epistemic-scope guard against technical-replicate-to-population-claim leakage (§7.4).";
+    core:description = "Measurement statistics institution (D52). On AutoOnLoad against a StatisticalAnalysisPlan: validates the SAP (sample_set resolves, parameters are well-typed, dispatch matches the SampleSet's product position, the test runs without precondition failures) and emits per-effect StatisticalAnalysisResult derivations carrying the canonical proposition + recomputed numerics. The gate Verdict attests SAP-well-formedness; the StatisticalAnalysisResults are what downstream D39 reasoning cites via DerivedEvidence. Opinionated stances: two-sided default (§7.1), dual-verdict outlier exclusion (§7.2), Passing-Bablok for method comparison (§7.3), epistemic-scope guard against technical-replicate-to-population-claim leakage (§7.4).";
 }
 
-resource stats:qc_validate_measurement_claim : institution:QueryClass {
-    core:description = "AutoOnLoad gate on every MeasurementClaim commit: read the SampleSet's raw replicates, dispatch on the SampleSet's product position to pick the recomputation procedure, verify the §7.4 epistemic-scope admissibility, and emit per-effect MeasurementResult derivations carrying the derived canonical proposition + recomputed numerics. The gate Verdict attests the SAP itself is runnable; the MeasurementResults attest each per-effect statistical decision. Fails on the gate rejects the commit (the SAP couldn't run); per-effect Fails on a MeasurementResult is recorded but doesn't itself reject the commit (a non-significant effect is still a chain-attested negative result).";
-    institution:query_class = stats:MeasurementClaim;
+resource stats:qc_validate_analysis_plan : institution:QueryClass {
+    core:description = "AutoOnLoad gate on every StatisticalAnalysisPlan commit: read the SampleSet's raw replicates, dispatch on the SampleSet's product position to pick the recomputation procedure, verify the §7.4 epistemic-scope admissibility, and emit per-effect StatisticalAnalysisResult derivations carrying the derived canonical proposition + recomputed numerics. The gate Verdict attests the SAP itself is runnable; the StatisticalAnalysisResults attest each per-effect statistical decision. Fails on the gate rejects the commit (the SAP couldn't run); per-effect Fails on a StatisticalAnalysisResult is recorded but doesn't itself reject the commit (a non-significant effect is still a chain-attested negative result).";
+    institution:query_class = stats:StatisticalAnalysisPlan;
     institution:result_class = institution:Verdict;
     institution:dispatch_role = [dispatch:auto_on_load];
-    institution:query_handler = proc:validate_measurement_claim;
+    institution:query_handler = proc:validate_analysis_plan;
     institution:institution_ref = stats:statistics_institution;
 }
 
-// §7.3 — separate QueryClass registration so MethodComparisonClaim
+// §7.3 — separate QueryClass registration so MethodComparisonAnalysisPlan
 // instances fire the validator. The kernel's AutoOnLoad dispatch
 // matches resource.is_a() entries directly against registered
 // query_class IRIs (no transitive subclass walk), so a subclass needs
 // its own registration even when the handler is shared. The handler
 // inspects the claim's is_a list internally and routes to the Passing-
-// Bablok path when stats:MethodComparisonClaim is present.
+// Bablok path when stats:MethodComparisonAnalysisPlan is present.
 
 resource stats:qc_validate_method_comparison_claim : institution:QueryClass {
-    core:description = "AutoOnLoad gate on every MethodComparisonClaim commit (D52 §7.3). Dispatches the same validate_measurement_claim handler, which detects the MethodComparisonClaim is_a marker and routes to Passing-Bablok regression instead of the standard SampleSet-shape dispatch. CLSI EP09 alignment; OLS is rejected outright.";
-    institution:query_class = stats:MethodComparisonClaim;
+    core:description = "AutoOnLoad gate on every MethodComparisonAnalysisPlan commit (D52 §7.3). Dispatches the same validate_analysis_plan handler, which detects the MethodComparisonAnalysisPlan is_a marker and routes to Passing-Bablok regression instead of the standard SampleSet-shape dispatch. CLSI EP09 alignment; OLS is rejected outright.";
+    institution:query_class = stats:MethodComparisonAnalysisPlan;
     institution:result_class = institution:Verdict;
     institution:dispatch_role = [dispatch:auto_on_load];
-    institution:query_handler = proc:validate_measurement_claim;
+    institution:query_handler = proc:validate_analysis_plan;
     institution:institution_ref = stats:statistics_institution;
 }

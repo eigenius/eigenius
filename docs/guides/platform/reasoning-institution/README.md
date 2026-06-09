@@ -15,7 +15,7 @@ D39 is a *reasoning* institution: chain authors commit a triple of (proposition,
 Two consequences of this difference shape the rest of the tutorial:
 
 1. **The validator is the kernel.** No bundled external checker. No mirror-anchor consistency check. The validator for a D39 reasoning sentence is a direct call to the kernel's NbE checker — the same one that type-checks every other ESL program. Implementation lives in [`crates/eigenius-reasoning/src/validate.rs`](../../../../crates/eigenius-reasoning/src/validate.rs) and is ~200 lines: decode three properties from the sentence resource, construct the expected `JustifiedBy(justification, proposition)` type, call `check`. TCB is bounded by the kernel.
-2. **Composition is the point.** A reasoning sentence's `App` and `SpecStr` combinators let one chain artifact's verdict ground a downstream conclusion. The motivating composition: a [D52 MeasurementClaim](../statistics-institution/README.md) verdict (`HasLowIC50(EIG_0291)`) grounds a `DerivedEvidence` ctor, a literature rule (`HasLowIC50(c) -> StrongInhibitor(c)`) grounds a `DeclaredEvidence` ctor, and `App` composes them into `StrongInhibitor(EIG_0291)`. The composition is mechanical — every step type-checks against the kernel, no out-of-band convention bridges the layers.
+2. **Composition is the point.** A reasoning sentence's `App` and `SpecStr` combinators let one chain artifact's verdict ground a downstream conclusion. The motivating composition: a [D52 StatisticalAnalysisPlan](../statistics-institution/README.md) verdict (`HasLowIC50(EIG_0291)`) grounds a `DerivedEvidence` ctor, a literature rule (`HasLowIC50(c) -> StrongInhibitor(c)`) grounds a `DeclaredEvidence` ctor, and `App` composes them into `StrongInhibitor(EIG_0291)`. The composition is mechanical — every step type-checks against the kernel, no out-of-band convention bridges the layers.
 
 This means a reasoning institution is registered with `runtime: in_process`. There is no env-image build, no orchestrator round-trip; the verifier runs synchronously inside the kernel process at commit time.
 
@@ -28,7 +28,7 @@ Reasoning leaves a typed audit trail. The institution itself emits only the verd
 | `axiom` declaration → `eigentt:Axiom` | Author-asserted propositional statement ([ESL §4.4a](../../esl/04-declarations.md#4-4a-axiom-postulated-propositions-d46-10)). Paired with a `DeclarationTrace` to admit `IsDeclaredAs`. |
 | `reflection:DeclaredResource` + `DeclarationTrace` | Any chain-resident declared assertion (literature rule, asserted theorem, marker resource). The matching trace admits `IsDeclaredAs(iri, canonical_proposition)`. |
 | `reflection:ObservedResource` + `ObservationTrace` | Bench measurement, instrument log entry. The matching trace admits `IsObservedAs(iri, canonical_proposition)`. |
-| `reflection:DerivedResource` + `ProgramTrace` | Institution-computed derivation — typically a [D52 MeasurementClaim](../statistics-institution/README.md) whose verifier returned Holds, or a prior `ReasoningSentence` (which is itself a `DerivedResource`). Admits `IsDerivedAs(iri, canonical_proposition)`. |
+| `reflection:DerivedResource` + `ProgramTrace` | Institution-computed derivation — typically a [D52 StatisticalAnalysisPlan](../statistics-institution/README.md) whose verifier returned Holds, or a prior `ReasoningSentence` (which is itself a `DerivedResource`). Admits `IsDerivedAs(iri, canonical_proposition)`. |
 | `reflection:VerifiedResource` + `ProgramTrace` | Formal-proof artifact (e.g., from the [Lean institution](../lean-institution/README.md)). Admits `IsVerifiedAs(iri, canonical_proposition)`, which cumulates into `IsDerivedAs` via the subclass coercion. |
 
 The reasoning institution then emits a sixth shape:
@@ -114,7 +114,7 @@ rule_strong                                [DeclaredResource — literature rule
   │  rule_strong_trace                     [DeclarationTrace — admits IsDeclaredAs]
   │
   ↑ canonical_proposition
-claim_eig0291_lowic50                      [MeasurementClaim (DerivedResource subclass)]
+claim_eig0291_lowic50                      [StatisticalAnalysisPlan (DerivedResource subclass)]
   │ ↑ resource
   │  claim_eig0291_lowic50_trace           [ProgramTrace — admits IsDerivedAs]
   │ ↑ sample_set
@@ -167,7 +167,7 @@ The high-level shape, modeled on the drug-screening fixture:
    }
    ```
 
-   For a `DerivedEvidence` target, a [D52 MeasurementClaim](../statistics-institution/README.md) is the typical shape; its `canonical_proposition` is what the witness key hashes.
+   For a `DerivedEvidence` target, a [D52 StatisticalAnalysisPlan](../statistics-institution/README.md) is the typical shape; its `canonical_proposition` is what the witness key hashes.
 
 3. **Author the reasoning sentence.** Three required slots — proposition, justification, certificate — all D47-encoded via [`type_expr(...)`](../../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions):
 
@@ -211,7 +211,7 @@ The high-level shape, modeled on the drug-screening fixture:
 
 ## Composition with the statistics institution
 
-The `DerivedEvidence(claim_iri)` ctor in the example above cites a [D52 MeasurementClaim](../statistics-institution/README.md). The statistics institution's `validate_measurement_claim` AutoOnLoad gate has already fired on the claim at commit, recomputed it from raw replicates, and emitted a `Verdict::Holds`. The claim resource carries `canonical_proposition = HasLowIC50(EIG_0291)`; its `ProgramTrace` admits the `IsDerivedAs` witness in the witness index; the reasoning sentence's `derived(...)` certificate constructor consumes that witness mechanically.
+The `DerivedEvidence(claim_iri)` ctor in the example above cites a [D52 StatisticalAnalysisPlan](../statistics-institution/README.md). The statistics institution's `validate_analysis_plan` AutoOnLoad gate has already fired on the claim at commit, recomputed it from raw replicates, and emitted a `Verdict::Holds`. The claim resource carries `canonical_proposition = HasLowIC50(EIG_0291)`; its `ProgramTrace` admits the `IsDerivedAs` witness in the witness index; the reasoning sentence's `derived(...)` certificate constructor consumes that witness mechanically.
 
 No bridge code, no manual handoff. The composition works because D52's emitted artifact is shaped like every other chain-resident derived resource — it carries `canonical_proposition` in the same slot, gets a `ProgramTrace` of the same shape, lands in the witness index by the same path. The reasoning institution doesn't know D52 exists; it just sees an `IsDerivedAs` witness with the right hash.
 
