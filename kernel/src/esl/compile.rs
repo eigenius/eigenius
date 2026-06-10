@@ -42,7 +42,7 @@ pub fn compile_file_with_institutions(
     file: &ast::File,
     institutions: Option<std::sync::Arc<crate::institution::registry::InstitutionIndex>>,
 ) -> Result<Vec<Resource>, Vec<EslError>> {
-    compile_file_with_context(file, institutions, BTreeMap::new(), BTreeMap::new())
+    compile_file_with_context(file, institutions, CtorSeed::default(), BTreeMap::new())
 }
 
 /// Compile an ESL AST with institution context plus external ctor
@@ -60,12 +60,13 @@ pub fn compile_file_with_institutions(
 pub fn compile_file_with_context(
     file: &ast::File,
     institutions: Option<std::sync::Arc<crate::institution::registry::InstitutionIndex>>,
-    external_ctors: BTreeMap<String, String>,
+    external_ctors: CtorSeed,
     external_macros: BTreeMap<String, ast::MacroDecl>,
 ) -> Result<Vec<Resource>, Vec<EslError>> {
     let mut compiler = Compiler::new();
     compiler.institutions = institutions;
-    compiler.ctors = external_ctors;
+    compiler.ctors_by_iri = external_ctors.by_iri;
+    compiler.ctors_by_short_name = external_ctors.by_short_name;
     compiler.macros = external_macros;
 
     // Register namespace aliases.
@@ -105,21 +106,33 @@ pub fn compile_file_with_context(
     }
 }
 
-/// Walk a layer chain and collect every chain-resident inductive's
-/// constructors into a short-name → ctor-IRI table suitable for
-/// seeding an ESL compile via [`compile_file_with_context`]. Mirrors
-/// the same `parent_iri:ctor_name` IRI convention `collect_ctor_table`
-/// uses for in-file ctors.
+/// Ctor seed harvested from a layer chain: every chain-resident
+/// inductive's constructors, indexed both by full IRI (for qualified
+/// references) and by short name (for unqualified references plus
+/// ambiguity detection).
 ///
-/// First-wins on name collisions (top-of-chain layers shadow ancestors
-/// in the merged-view walk). The function makes no attempt to resolve
-/// cross-namespace collisions cleanly — that's the same scope limit
-/// the in-file ctor table has, and the right fix is qualified ctor
-/// references in the surface (a separate follow-up).
-pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> BTreeMap<String, String> {
+/// Both indices accumulate across the entire chain — no first-wins
+/// shadowing. When two chain-resident inductives in different
+/// namespaces declare a ctor with the same short name (e.g.
+/// `eigentt:TypeExpr.App` and `reasoning:JustificationTerm.App`),
+/// both land in `by_short_name[name]`. The ESL surface's bare-name
+/// lookup turns that into an "ambiguous — qualify as one of [...]"
+/// error rather than picking one silently.
+#[derive(Debug, Default, Clone)]
+pub struct CtorSeed {
+    pub by_iri: std::collections::BTreeSet<String>,
+    pub by_short_name: BTreeMap<String, Vec<String>>,
+}
+
+/// Walk a layer chain and collect every chain-resident inductive's
+/// constructors into a [`CtorSeed`] suitable for seeding an ESL
+/// compile via [`compile_file_with_context`]. Mirrors the same
+/// `parent_iri:ctor_name` IRI convention `collect_ctor_table` uses
+/// for in-file ctors.
+pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> CtorSeed {
     use crate::ontology::iri::Iri;
     use crate::ontology::well_known as wk;
-    let mut out = BTreeMap::new();
+    let mut out = CtorSeed::default();
     let inductive_class = match Iri::parse(wk::INDUCTIVE_TYPE) {
         Ok(i) => i,
         Err(_) => return out,
@@ -149,11 +162,17 @@ pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> BTreeMap<String,
                 Some(Value::String(s)) => s.clone(),
                 _ => continue,
             };
-            // First-wins so the merged-view walk's top-of-chain
-            // entries shadow ancestors.
-            out.entry(name).or_insert_with(|| {
-                format!("{parent_iri}:{}", ctor_value_short_name(ctor_resource))
-            });
+            let ctor_iri = format!("{parent_iri}:{}", ctor_value_short_name(ctor_resource));
+            if out.by_iri.insert(ctor_iri.clone()) {
+                // First time we see this exact ctor IRI; also index it
+                // by short name. Duplicate IRIs (same ctor visible via
+                // a merged-view walk that hits two layers carrying it)
+                // are deduplicated by `by_iri.insert` returning false.
+                let bucket = out.by_short_name.entry(name).or_default();
+                if !bucket.contains(&ctor_iri) {
+                    bucket.push(ctor_iri);
+                }
+            }
         }
     }
     out
@@ -221,10 +240,26 @@ pub fn collect_macros_from_layer(layer: &crate::layer::Layer) -> BTreeMap<String
 
 struct Compiler {
     namespaces: BTreeMap<String, String>,
-    /// Per-file constructor table: short ctor name → full ctor IRI.
-    /// Built in `collect_ctor_table` before any declaration is compiled,
-    /// so expression compilation can resolve bare ctor references.
-    ctors: BTreeMap<String, String>,
+    /// Per-file constructor index. Two views over the same set of
+    /// chain-resident + in-file ctors:
+    ///
+    /// - `ctors_by_iri`: the canonical "is this IRI a constructor?" set.
+    ///   IRI is the stable identifier (gh #75 extended to the ESL
+    ///   surface). Qualified references (`reasoning:App(...)`) resolve
+    ///   the namespace prefix to an IRI and check membership here.
+    /// - `ctors_by_short_name`: short name → list of qualifying ctor
+    ///   IRIs, for bare-name lookup with ambiguity detection. Two
+    ///   inductives that share a ctor short name (e.g.
+    ///   `eigentt:TypeExpr.App` and `reasoning:JustificationTerm.App`)
+    ///   are both recorded; a bare `App(...)` reference becomes a hard
+    ///   "ambiguous — qualify as one of [...]" error instead of
+    ///   silently picking the chain-order-first one.
+    ///
+    /// Both are built in `collect_ctor_table` (in-file decls) plus
+    /// `collect_ctors_from_layer` (chain seed) before any declaration
+    /// is compiled.
+    ctors_by_iri: std::collections::BTreeSet<String>,
+    ctors_by_short_name: BTreeMap<String, Vec<String>>,
     /// D52 §12 — per-file smart-constructor macro table: full macro
     /// IRI → its declaration AST. Built in `collect_macro_table`
     /// before any value is compiled, so `Value::MacroCall` resolution
@@ -320,33 +355,43 @@ impl Compiler {
     fn new() -> Self {
         Self {
             namespaces: BTreeMap::new(),
-            ctors: BTreeMap::new(),
+            ctors_by_iri: std::collections::BTreeSet::new(),
+            ctors_by_short_name: BTreeMap::new(),
             macros: BTreeMap::new(),
             institutions: None,
         }
     }
 
     /// Walk every `data` declaration in the file and register its
-    /// constructors in the ctor table. Each ctor's IRI is derived from
+    /// constructors in both indices. Each ctor's IRI is derived from
     /// the parent inductive's IRI plus its local name (`urn:…:Nat:succ`).
-    /// Duplicate ctor names within a file are an error.
+    ///
+    /// Two ctors with the same short name across different parent
+    /// inductives are allowed — both go into `ctors_by_short_name[name]`,
+    /// and a bare reference must qualify to disambiguate. Two ctors
+    /// at the same full IRI is a hard error (would mean the same
+    /// inductive declared two ctors with one name, which is malformed).
     fn collect_ctor_table(&mut self, file: &ast::File) -> Result<(), EslError> {
         for decl in &file.declarations {
             if let ast::Declaration::Data(d) = decl {
                 let parent_iri = self.resolve(&d.name)?;
                 for ctor in &d.ctors {
                     let ctor_iri = format!("{parent_iri}:{}", ctor.name());
-                    if let Some(existing) = self.ctors.insert(ctor.name().to_string(), ctor_iri) {
+                    if !self.ctors_by_iri.insert(ctor_iri.clone()) {
                         return Err(EslError::compiler(
                             Some(ctor.pos().clone()),
                             format!(
-                                "constructor `{}` declared in `{}` collides with an earlier \
-                                 declaration whose IRI is `{existing}` — rename one of them \
-                                 (qualified ctor references in source are a future addition)",
-                                ctor.name(),
-                                parent_iri
+                                "constructor `{}` declared twice at IRI `{ctor_iri}`",
+                                ctor.name()
                             ),
                         ));
+                    }
+                    let bucket = self
+                        .ctors_by_short_name
+                        .entry(ctor.name().to_string())
+                        .or_default();
+                    if !bucket.contains(&ctor_iri) {
+                        bucket.push(ctor_iri);
                     }
                 }
             }
@@ -380,6 +425,104 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+
+    /// Resolve a `QualifiedName` to a constructor IRI, if any.
+    ///
+    /// IRI conventions:
+    /// - Surface form (what the author writes): `<ns>:<CtorName>`,
+    ///   e.g. `reasoning:DeclaredEvidence`. This resolves to
+    ///   `<ns_uri>:<CtorName>` via the standard namespace table.
+    /// - Canonical chain IRI (what `ctors_by_iri` stores):
+    ///   `<parent_inductive_iri>:<CtorName>`, e.g.
+    ///   `urn:eigenius:reasoning:JustificationTerm:DeclaredEvidence`.
+    ///
+    /// The two never match by string equality, so the resolution
+    /// strategy is short-name-based with namespace filtering:
+    ///
+    /// - **Qualified** `ns:Name` → look up `Name` in `ctors_by_short_name`,
+    ///   filter the candidate ctor IRIs to those whose parent IRI
+    ///   starts with `ns_uri:`. If exactly one match, use it. The
+    ///   namespace prefix is what disambiguates between
+    ///   `eigentt:App` (= `eigentt:TypeExpr:App`) and `reasoning:App`
+    ///   (= `reasoning:JustificationTerm:App`).
+    /// - **Bare** `Name` → look up the short name in
+    ///   `ctors_by_short_name`. If exactly one ctor IRI matches, use
+    ///   it. If two or more, error with an "ambiguous" message that
+    ///   lists the candidate IRIs so the author can pick a qualifier.
+    ///
+    /// Returns `Ok(None)` when the name doesn't match any known ctor
+    /// — caller falls through to its non-ctor paths (variable
+    /// lookup, EigonClass, etc.).
+    fn resolve_ctor_iri(&self, qn: &ast::QualifiedName) -> Result<Option<String>, EslError> {
+        let bucket = match self.ctors_by_short_name.get(&qn.name) {
+            Some(b) => b,
+            None => return Ok(None),
+        };
+        match &qn.namespace {
+            Some(ns_alias) => {
+                let ns_uri = match self.namespaces.get(ns_alias) {
+                    Some(u) => u,
+                    None => {
+                        return Err(EslError::compiler(
+                            Some(qn.pos.clone()),
+                            format!("unknown namespace alias `{ns_alias}`"),
+                        ));
+                    }
+                };
+                // A ctor IRI matches a `ns:Name` reference iff its
+                // parent inductive's IRI lives inside `ns_uri`. The
+                // parent IRI is `iri.rsplit_once(':')` (the ctor short
+                // name is the trailing segment).
+                let prefix = format!("{ns_uri}:");
+                let matches: Vec<&String> = bucket
+                    .iter()
+                    .filter(|ctor_iri| {
+                        ctor_iri
+                            .rsplit_once(':')
+                            .map(|(parent, _)| parent.starts_with(&prefix) || parent == ns_uri)
+                            .unwrap_or(false)
+                    })
+                    .collect();
+                match matches.as_slice() {
+                    [single] => Ok(Some((*single).clone())),
+                    [] => Ok(None),
+                    multiple => Err(EslError::compiler(
+                        Some(qn.pos.clone()),
+                        format!(
+                            "qualified constructor `{ns_alias}:{}` is still ambiguous — two or \
+                             more inductives in `{ns_uri}` declare a constructor with this short \
+                             name: [{}]. The fully-disambiguated form (per-inductive ctor \
+                             qualifier) is not yet supported in the surface; rename one of the \
+                             ctors as a workaround.",
+                            qn.name,
+                            multiple
+                                .iter()
+                                .map(|s| s.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                        ),
+                    )),
+                }
+            }
+            None => match bucket.as_slice() {
+                [single] => Ok(Some(single.clone())),
+                multiple => Err(EslError::compiler(
+                    Some(qn.pos.clone()),
+                    format!(
+                        "bare constructor reference `{}` is ambiguous — multiple chain-resident \
+                         inductives declare a constructor with this short name: [{}]. \
+                         Qualify with a namespace prefix to pick one.",
+                        qn.name,
+                        multiple
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ),
+                )),
+            },
+        }
     }
 
     /// Construct an `Exp::InductiveCtor` from a ctor short-name + its
@@ -1019,9 +1162,11 @@ impl Compiler {
                 // latter seeded via `compile_against_layer`). Checked
                 // *before* `self.resolve(name)` because bare names
                 // would otherwise fail namespace resolution and never
-                // reach the post-resolve ctor lookup below.
+                // reach the post-resolve ctor lookup below. Ambiguity
+                // (two ctors sharing the short name across inductives)
+                // surfaces here as a hard error from `resolve_ctor_iri`.
                 if name.namespace.is_none() {
-                    if let Some(ctor_iri_str) = self.ctors.get(&name.name).cloned() {
+                    if let Some(ctor_iri_str) = self.resolve_ctor_iri(name)? {
                         return self.emit_ctor_app_from_ctor_iri(
                             &name.pos,
                             &name.name,
@@ -1040,20 +1185,21 @@ impl Compiler {
                     )
                 })?;
 
-                // Constructor disambiguation: when the local name
-                // matches a declared ctor (from any data decl in this
-                // file), emit `Exp::InductiveCtor` rather than
-                // `Exp::EigonClass` / `InductiveType`. Required for D39
-                // §5 `JustifiedBy.declared : ... -> JustifiedBy
-                // (DeclaredEvidence iri) P` and any similar shape
-                // where a ctor of one inductive appears in another
-                // inductive's index/result-type position. The codec
-                // round-trips `InductiveCtor` via `CtorApp(decl_iri,
-                // ctor_name)`, and the decoder's
-                // `resolve_inductive_decl_for_ctor` consults the layer
-                // (with the self-reference short-circuit covering the
-                // in-construction case).
-                if let Some(ctor_iri_str) = self.ctors.get(&name.name).cloned() {
+                // Constructor disambiguation: when the qualified name
+                // matches a declared ctor (in-file or chain-resident),
+                // emit `Exp::InductiveCtor` rather than
+                // `Exp::EigonClass` / `InductiveType`. Required for
+                // D39 §5 `JustifiedBy.declared : ... ->
+                // JustifiedBy(DeclaredEvidence iri) P` and any similar
+                // shape where a ctor of one inductive appears in
+                // another inductive's index/result-type position.
+                //
+                // `resolve_ctor_iri` walks `ctors_by_short_name` and
+                // filters by namespace prefix, so `reasoning:App(...)`
+                // unambiguously picks the `reasoning` namespace's
+                // `App` ctor even when `eigentt:TypeExpr:App` shares
+                // the short name.
+                if let Some(ctor_iri_str) = self.resolve_ctor_iri(name)? {
                     return self.emit_ctor_app_from_ctor_iri(
                         &name.pos,
                         &name.name,
@@ -1332,9 +1478,10 @@ impl Compiler {
                 let head_json = if is_bound {
                     json!({"ctor": "Var", "args": [name.name.clone()]})
                 } else {
-                    // Pre-resolution bare-name ctor lookup.
+                    // Pre-resolution bare-name ctor lookup (with
+                    // ambiguity detection via `resolve_ctor_iri`).
                     let bare_ctor = if name.namespace.is_none() {
-                        self.ctors.get(&name.name).cloned()
+                        self.resolve_ctor_iri(name)?
                     } else {
                         None
                     };
@@ -1348,12 +1495,11 @@ impl Compiler {
                             "args": [parent_iri_str, name.name.clone()],
                         })
                     } else {
-                        // Namespace-resolve, then post-resolve ctor
-                        // lookup. (Both lookups consult the same `ctors`
-                        // map by short name; this branch fires when the
-                        // user wrote a namespaced ctor reference.)
+                        // Namespace-resolve, then check via
+                        // `resolve_ctor_iri` (which walks the
+                        // short-name bucket filtered by namespace).
                         let iri_str = self.resolve(name)?;
-                        if let Some(ctor_iri_str) = self.ctors.get(&name.name).cloned() {
+                        if let Some(ctor_iri_str) = self.resolve_ctor_iri(name)? {
                             let parent_iri_str = ctor_iri_str
                                 .rsplit_once(':')
                                 .map(|(p, _)| p.to_string())
@@ -1898,12 +2044,22 @@ impl Compiler {
                 let json = self.encode_type_expr_to_json(typ, &scope)?;
                 Ok(Value::Json(json))
             }
-            // D52 §12 — macro call. Expand by substituting positional
-            // args into the body, then recursively compile the result.
-            // Recursion through `compile_value` lets a macro body itself
-            // contain further macro calls (one level of expansion per
-            // recursion); cycles are forbidden by `expand_macro_call`.
+            // The parser routes any `ns:Name(args)` to `MacroCall`
+            // because it can't tell at parse time whether `Name` is a
+            // ctor or a macro. The compiler disambiguates here: try
+            // the qualified-ctor lookup first (which surfaces the
+            // ambiguity-aware diagnostic when needed), then fall
+            // through to D52 §12 macro expansion only if it's not a
+            // ctor. This is what makes
+            // `reasoning:App(...)` resolve to the
+            // `reasoning:JustificationTerm.App` ctor inside a value
+            // slot — the disambiguator authors need when bare `App`
+            // collides with another inductive's ctor short name.
             ast::Value::MacroCall { name, args, pos } => {
+                if self.resolve_ctor_iri(name)?.is_some() {
+                    let json = self.qualified_ctor_to_json(&name.name, args)?;
+                    return Ok(Value::Json(json));
+                }
                 let expanded = self.expand_macro_call(name, args, pos)?;
                 self.compile_value(&expanded)
             }
@@ -1994,13 +2150,40 @@ impl Compiler {
                  D32 §3.7 ctor args are flat values or nested ctor applications, not D47-encoded \
                  type expressions. Lift the type_expr to the property value directly.",
             )),
-            // D52 §12 — macro call inside a ctor arg position. Expand
-            // the macro first, then recursively serialize the result.
+            // Same disambiguation as `compile_value`: try ctor
+            // resolution first (qualified ctor refs reach this site
+            // when an outer ctor's arg is `reasoning:App(...)`),
+            // fall back to macro expansion otherwise.
             ast::Value::MacroCall { name, args, pos } => {
+                if self.resolve_ctor_iri(name)?.is_some() {
+                    return self.qualified_ctor_to_json(&name.name, args);
+                }
                 let expanded = self.expand_macro_call(name, args, pos)?;
                 self.ctor_value_to_json(&expanded)
             }
         }
+    }
+
+    /// Encode a qualified ctor call to the same `{ctor, args}` JSON
+    /// shape as a bare `Value::CtorApp`. The "ctor" field carries the
+    /// short name (the inductive's per-ctor identifier inside its
+    /// decl); chain consumers disambiguate by the expected inductive
+    /// at extract time, so the qualifier doesn't need to land in the
+    /// serialised form.
+    fn qualified_ctor_to_json(
+        &self,
+        ctor_short_name: &str,
+        args: &[ast::Value],
+    ) -> Result<serde_json::Value, EslError> {
+        let json_args: Result<Vec<_>, _> =
+            args.iter().map(|v| self.ctor_value_to_json(v)).collect();
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "ctor".to_string(),
+            serde_json::Value::String(ctor_short_name.to_string()),
+        );
+        obj.insert("args".to_string(), serde_json::Value::Array(json_args?));
+        Ok(serde_json::Value::Object(obj))
     }
 
     // --- Program ---
@@ -2093,34 +2276,36 @@ impl Compiler {
                 // application accepts any arity ≥ 0; the kernel-side
                 // type checker validates against the declared
                 // constructor's expected arg count.
-                if function.namespace.is_none() {
-                    if let Some(ctor_iri) = self.ctors.get(&function.name) {
-                        if component_argument.is_some() {
-                            return Err(EslError::compiler(
-                                Some(pos.clone()),
-                                format!(
-                                    "constructor `{}` cannot take a configuration block — \
-                                     constructors are pure data",
-                                    function.name
-                                ),
-                            ));
-                        }
-                        let mut r = Resource::new_embedded();
-                        set_is_a(&mut r, "urn:eigenius:program:CtorApply");
-                        r.set(
-                            iri("urn:eigenius:program:function"),
-                            Value::String(ctor_iri.clone()),
-                        );
-                        let arg_resources: Result<Vec<Value>, EslError> = args
-                            .iter()
-                            .map(|a| Ok(Value::Embedded(Box::new(self.compile_expr(a)?))))
-                            .collect();
-                        r.set(
-                            iri("urn:eigenius:program:arguments"),
-                            Value::Array(arg_resources?),
-                        );
-                        return Ok(r);
+                // Bare or qualified ctor reference. The ambiguity-aware
+                // `resolve_ctor_iri` handles both: bare names trigger
+                // "ambiguous" diagnostics when two inductives share a
+                // short name, qualified names resolve to the unique IRI.
+                if let Some(ctor_iri) = self.resolve_ctor_iri(function)? {
+                    if component_argument.is_some() {
+                        return Err(EslError::compiler(
+                            Some(pos.clone()),
+                            format!(
+                                "constructor `{}` cannot take a configuration block — \
+                                 constructors are pure data",
+                                function.name
+                            ),
+                        ));
                     }
+                    let mut r = Resource::new_embedded();
+                    set_is_a(&mut r, "urn:eigenius:program:CtorApply");
+                    r.set(
+                        iri("urn:eigenius:program:function"),
+                        Value::String(ctor_iri),
+                    );
+                    let arg_resources: Result<Vec<Value>, EslError> = args
+                        .iter()
+                        .map(|a| Ok(Value::Embedded(Box::new(self.compile_expr(a)?))))
+                        .collect();
+                    r.set(
+                        iri("urn:eigenius:program:arguments"),
+                        Value::Array(arg_resources?),
+                    );
+                    return Ok(r);
                 }
 
                 // D14 institution capability classification (D14 §6.2,
@@ -2285,18 +2470,32 @@ impl Compiler {
                 Ok(r)
             }
 
-            ast::Expr::Var { name, .. } => {
+            ast::Expr::Var { name, pos } => {
                 let mut r = Resource::new_embedded();
                 set_is_a(&mut r, "urn:eigenius:program:Var");
                 // Bare name matching a declared ctor → ctor IRI as the
                 // var name (Phase 11b step 9). The expression builder
                 // recognises the IRI shape and produces an
                 // `Exp::InductiveCtor` with no arguments.
-                let resolved = self
-                    .ctors
-                    .get(name)
-                    .cloned()
-                    .unwrap_or_else(|| name.clone());
+                //
+                // Bare-name lookup is ambiguity-aware: one match → use
+                // it, multiple → ambiguous error, none → leave the
+                // name as-is for normal variable binding.
+                let resolved = match self.ctors_by_short_name.get(name) {
+                    Some(iris) if iris.len() == 1 => iris[0].clone(),
+                    Some(iris) => {
+                        return Err(EslError::compiler(
+                            Some(pos.clone()),
+                            format!(
+                                "bare reference `{}` is ambiguous between multiple chain-resident \
+                                 constructors: [{}]. Qualify with a namespace prefix to pick one.",
+                                name,
+                                iris.join(", "),
+                            ),
+                        ));
+                    }
+                    None => name.clone(),
+                };
                 r.set(iri("urn:eigenius:program:name"), Value::String(resolved));
                 Ok(r)
             }
@@ -2628,16 +2827,38 @@ impl Compiler {
                 let arm_resources: Result<Vec<Value>, EslError> = arms
                     .iter()
                     .map(|arm| {
-                        let ctor_iri = self.ctors.get(&arm.ctor_name).ok_or_else(|| {
-                            EslError::compiler(
-                                Some(arm.pos.clone()),
-                                format!(
-                                    "match arm references unknown constructor `{}` — \
-                                     not declared in any `data` block in this file",
-                                    arm.ctor_name
-                                ),
-                            )
-                        })?;
+                        // Match arms today carry a bare short ctor
+                        // name (no namespace prefix in the surface).
+                        // Ambiguity surfaces here as a hard error too;
+                        // qualifying match-arm ctors needs a parser
+                        // extension and isn't on the critical path.
+                        let ctor_iri = match self.ctors_by_short_name.get(&arm.ctor_name) {
+                            Some(iris) if iris.len() == 1 => iris[0].clone(),
+                            Some(iris) => {
+                                return Err(EslError::compiler(
+                                    Some(arm.pos.clone()),
+                                    format!(
+                                        "match arm constructor `{}` is ambiguous — multiple \
+                                         chain-resident inductives declare a constructor with \
+                                         this short name: [{}]. Qualifying match-arm ctors with \
+                                         a namespace prefix is not yet supported in the surface; \
+                                         rename one of the colliding ctors as a workaround.",
+                                        arm.ctor_name,
+                                        iris.join(", "),
+                                    ),
+                                ))
+                            }
+                            None => {
+                                return Err(EslError::compiler(
+                                    Some(arm.pos.clone()),
+                                    format!(
+                                        "match arm references unknown constructor `{}` — \
+                                         not declared in any `data` block in this file",
+                                        arm.ctor_name
+                                    ),
+                                ))
+                            }
+                        };
                         let mut ar = Resource::new_embedded();
                         set_is_a(&mut ar, "urn:eigenius:program:MatchArm");
                         ar.set(
@@ -4352,10 +4573,15 @@ mod tests {
     }
 
     #[test]
-    fn ctor_name_collision_within_a_file_is_rejected() {
-        // Two inductives both declaring `mk` — the per-file ctor table
-        // catches the collision at compile time so bare references can
-        // be unambiguously resolved later.
+    fn ctor_name_collision_is_accepted_at_declaration_time() {
+        // Two inductives declaring `mk` are now both admitted into
+        // the ctor index; the surface uses qualified-or-ambiguous
+        // resolution at REFERENCE time instead of forbidding the
+        // declaration. Bare `mk(...)` at use time becomes an
+        // "ambiguous" error; `ex:mk(...)` is still ambiguous (both
+        // ctors share the namespace), so a use site has to rename
+        // one inductive or rely on per-inductive qualifier (the
+        // latter not yet supported in the surface — tracked).
         let result = esl::compile(
             r#"
             namespace ex = "urn:eigenius:example";
@@ -4369,12 +4595,69 @@ mod tests {
             }
             "#,
         );
-        let err = result.expect_err("collision must be rejected");
-        let msg = err[0].message.clone();
+        result.expect("two inductives may share a ctor short name");
+    }
+
+    #[test]
+    fn bare_ctor_reference_to_ambiguous_short_name_errors_at_use_site() {
+        // Same two-inductive setup, but with a use site: bare `mk`
+        // can't pick between `ex:Foo.mk` and `ex:Bar.mk`, so it
+        // errors at the reference, not at the declaration.
+        let result = esl::compile(
+            r#"
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Foo { mk, }
+            data ex:Bar { mk, }
+
+            axiom ex:use : ex:Foo -> Prop;
+            axiom ex:use_with_arg : ex:use(mk);
+            "#,
+        );
+        let err = result.expect_err("ambiguous bare `mk` use must error");
+        let msg = err
+            .iter()
+            .map(|e| e.message.clone())
+            .collect::<Vec<_>>()
+            .join("; ");
         assert!(
-            msg.contains("constructor `mk`") && msg.contains("collides"),
+            msg.contains("ambiguous") && msg.contains("mk"),
             "unexpected error: {msg}"
         );
+    }
+
+    #[test]
+    fn qualified_ctor_in_value_slot_resolves_to_ctor_not_macro() {
+        // The parser routes `ns:Name(args)` to `Value::MacroCall`
+        // because at parse time it can't distinguish ctor from macro.
+        // The compiler disambiguates by trying `resolve_ctor_iri`
+        // first; only when no ctor matches does it fall through to
+        // macro expansion. Without that order, `reasoning:App(...)`
+        // in a `reasoning:justification = ...` slot errors with
+        // "macro not declared" instead of resolving to the
+        // `reasoning:JustificationTerm.App` ctor.
+        let resources = esl::compile(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex   = "urn:eigenius:example";
+
+            data ex:Foo {
+                Mk(core:string),
+                Compose(ex:Foo, ex:Foo),
+            }
+
+            resource ex:my_resource : ex:Foo {
+                ex:slot = ex:Compose(
+                    ex:Mk("a"),
+                    ex:Mk("b")
+                );
+            }
+            "#,
+        )
+        .expect("qualified ctor in value slot must resolve as a ctor, not a macro");
+        // The resource should commit (no error); we don't introspect
+        // the encoded value further — the success path is the contract.
+        assert!(!resources.is_empty());
     }
 
     // --- D37: lambda / pi / merge_comorphism lowering ---

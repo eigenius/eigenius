@@ -2515,8 +2515,8 @@ fn gate_verdict_resource(ctor_name: &str, diagnostic: Option<&str>) -> Resource 
 /// (analysis, effect) pair so re-runs collapse idempotently. The
 /// kernel adds `is_a [DerivedResource, InstitutionEmittedDerivation]`
 /// + `reflection:from_subject` + `reflection:runtime_invocation`; we
-/// set the domain class (`stats:StatisticalAnalysisResult`) plus the per-effect
-/// payload.
+///   set the domain class (`stats:StatisticalAnalysisResult`) plus the per-effect
+///   payload.
 fn measurement_result_resource(
     analysis_iri: &Iri,
     effect_name: &str,

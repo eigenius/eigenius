@@ -60,6 +60,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 static INVOCATION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Return shape of [`JuliaRuntime::dispatch_typed_method`]:
+/// `(output_cbor, derivations_cbor, dispatched_to)`.
+type DispatchTypedMethodOutput = (Vec<u8>, Vec<Vec<u8>>, Option<String>);
+
 /// `LanguageRuntime` impl that runs the Julia worker as a long-lived
 /// **service** (D26 §8.1 Service lifecycle). The substrate calls this
 /// through the language registry whenever a `RuntimeScript` /
@@ -713,15 +717,16 @@ impl JuliaLanguageRuntime {
 
     /// Dispatch a typed method call through the warm service. Returns
     /// the raw output bytes (a CBOR-encoded mirror dict that the
-    /// caller decodes against the signature's `output_type`) and the
-    /// `dispatched_to` string captured by the worker via `which()`.
+    /// caller decodes against the signature's `output_type`) plus
+    /// per-derivation payloads and the `dispatched_to` string
+    /// captured by the worker via `which()`.
     fn dispatch_typed_method(
         &self,
         service: &ServiceHandle,
         target_cbor: Vec<u8>,
         input_payloads: Vec<ByteBuf>,
         invocation_id: String,
-    ) -> Result<(Vec<u8>, Vec<Vec<u8>>, Option<String>), RunError> {
+    ) -> Result<DispatchTypedMethodOutput, RunError> {
         let stream = self.spawner.attach_uds(service).map_err(|e| {
             RunError::WorkerRpcFailed(format!(
                 "attach_uds for call_method on service {}: {e}",

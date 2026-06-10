@@ -61,17 +61,6 @@ pub enum Val {
 
     /// Eigon class ground type (resolved from layer chain)
     EigonClass(Iri),
-    /// Reference to a chain-resident `eigentt:Axiom` (D46 §10) — an
-    /// opaque typed constant identified by IRI. Values normalise to
-    /// themselves: axioms have no reduction rules, so eval/whnf treat
-    /// `Val::EigonAxiom` as already in normal form. Two axioms are
-    /// definitionally equal iff their IRIs are equal — different
-    /// axioms with the same registered type are NOT identified
-    /// (parallels CIC's treatment of `Axiom name : T.`). The type
-    /// `check_infer` produces for `Exp::EigonAxiom(iri)` comes from
-    /// the layer's cached `axiom_env()` lookup, not stored here on the
-    /// value.
-    EigonAxiom(Iri),
     /// Eigon primitive type
     EigonPrimitive(PrimitiveType),
     /// Concrete Eigon resource value
@@ -211,6 +200,17 @@ pub enum Neut {
     NtFun(Vec<(Name, Exp)>, Rho, Box<Neut>),
 
     // --- Eigenius extension ---
+    /// Reference to a chain-resident `eigentt:Axiom` (D46 §10) — an
+    /// opaque typed constant identified by IRI. Wrapped as `Neut`
+    /// (not bare `Val`) so the existing `Neut::App` spine machinery
+    /// handles applications uniformly: `axiom_a x y` evaluates to
+    /// `Val::Nt(Neut::App(Neut::App(Neut::EigonAxiom(iri), x), y))`,
+    /// a normal form that compares structurally with another such
+    /// spine via IRI equality + arg equality. Without the Neut
+    /// wrapping, `Val::EigonAxiom(iri).app(arg)` would error with
+    /// `NotAFunction` — axioms have no reduction rules and there's
+    /// no `Val::Lam` to apply.
+    EigonAxiom(Iri),
     /// Property access on a neutral resource
     PropAccess(Box<Neut>, Iri),
 

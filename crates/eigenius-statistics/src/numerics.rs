@@ -487,7 +487,7 @@ pub fn factorial_anova_per_effect(
 
     let n_total = observations.len();
     let n_cells_expected: usize = factor_levels.iter().product();
-    if n_total % n_cells_expected != 0 {
+    if !n_total.is_multiple_of(n_cells_expected) {
         return None;
     }
     let n_per_cell = n_total / n_cells_expected;
@@ -568,7 +568,7 @@ pub fn factorial_anova_per_effect(
                     })
                     .collect();
                 let mu_sp = marginals[sp_u][&l_sp];
-                let sign = if (s_card - sp_card) % 2 == 0 {
+                let sign = if (s_card - sp_card).is_multiple_of(2) {
                     1.0
                 } else {
                     -1.0
