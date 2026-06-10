@@ -2,34 +2,48 @@
 //
 // Picks up the IC50 confirmatory SAR from `ic50_measurement.esl` and
 // composes its strictly-statistical proposition `stats:lt(mean_of(s),
-// 100.0)` with a **monomorphic statistical-to-domain bridge** and a
-// **universal literature rule** via D39's nested `App` shape.
+// 100.0)` with a **polymorphic statistical-to-domain bridge**, a
+// **per-pair `sample_for` witness**, and a **universal literature
+// rule** via D39's nested `App` shape.
 //
-// What this exercises that the IC50 fixture alone didn't:
+// What this exercises that drug_screening.esl didn't:
 //
 //  1. The DerivedEvidence path: `JustifiedBy.derived` consuming the
 //     IsDerivedAs witness admitted off the pre-authored SAR's
-//     `InstitutionEmittedDerivation` marker (D49 §6 → §5 lookup,
-//     post-step-1E).
-//  2. The statistical-to-domain bridge: a `DeclaredResource` whose
-//     `canonical_proposition` lifts `stats:lt(mean_of(s), T)` into
-//     `screen:HasLowIC50(c)`. Without it the chain has no path from
-//     the verifier-emitted statistical claim to the domain-predicate
-//     language the literature rule reads.
-//  3. The SpecStr universal-rule specialization at the compound IRI
-//     `urn:eigenius:demo:screen:EIG_0291`.
-//  4. The full chain of evidence: bench data → statistics verdict →
-//     bridge → literature rule → final population-level claim.
+//     `InstitutionEmittedDerivation` marker (D49 §6 → §5 lookup).
+//
+//  2. The polymorphic bridge — universal-quantified over both sample
+//     set and compound:
+//
+//       forall (s c : core:string),
+//           sample_for(s, c) ->
+//           stats:lt(stats:mean_of(s), 100.0) ->
+//           screen:HasLowIC50(c)
+//
+//     One bridge resource serves the whole screening campaign. The
+//     per-pair specialisation lands at certificate-author time via
+//     nested `SpecStr`. The methodology + threshold (100.0 nM) ride
+//     baked into the bridge's identity — different thresholds →
+//     different bridges. D39's `SpecStr` is string-only so we can't
+//     polymorphise over `T` without a kernel extension.
+//
+//  3. The `sample_for(s, c)` linking predicate — a domain-level
+//     declaration that this sample set was drawn from this compound.
+//     One `DeclaredResource` per (sample_set, compound) pair, with
+//     its `DeclarationTrace` admitting the IsDeclaredAs witness the
+//     bridge's antecedent consumes.
+//
+//  4. The universal literature rule, specialised at the compound IRI
+//     via `SpecStr` (same shape as before; what differs is the
+//     bridge structure).
+//
+//  5. The full chain of evidence: bench data → statistics verdict →
+//     sample_for relationship → bridge → literature rule → final
+//     population-level claim.
 //
 // The IC50 confirmatory SAP + its pre-authored SAR (and the
 // impossibility witness the SAP cites) live in `ic50_measurement.esl`;
 // this fixture compiles against the layer stack that includes it.
-//
-// The bridge here is monomorphic — one resource per
-// (sample_set, compound) pair. The polymorphic shape
-// (`forall (s c : core:string), sample_for(s, c) -> stats:lt(...) ->
-// HasLowIC50(c)`) is a follow-on and would pair naturally with the
-// universal-rule pattern already used here.
 
 namespace core       = "urn:eigenius:core";
 namespace formats    = "urn:eigenius:core:formats";
@@ -38,52 +52,80 @@ namespace reasoning  = "urn:eigenius:reasoning";
 namespace stats      = "urn:eigenius:measurements";
 namespace screen     = "urn:eigenius:demo:screen";
 
-// ─── Domain target predicate ───────────────────────────────────────
+// ─── Domain vocabulary ─────────────────────────────────────────────
 //
-// `HasLowIC50` lives in the IC50 fixture (loaded into the same chain
-// stack); `StrongInhibitor` is the conclusion the literature rule
-// derives. Both are class-marker predicates in `Prop`.
+// `HasLowIC50` lives in the IC50 fixture; `StrongInhibitor` is the
+// conclusion the literature rule derives; `sample_for(s, c)` is the
+// linking predicate (this sample set s was drawn from compound c).
+//
+// `sample_for` is a class-marker predicate in `Prop` — no
+// constructors. The relationship is admitted on chain by committing
+// a `DeclaredResource` whose `canonical_proposition` IS the
+// `sample_for(s_iri, c_iri)` application. The companion
+// `DeclarationTrace` admits the IsDeclaredAs witness.
 
 data screen:StrongInhibitor : core:string -> Prop, stats:PopulationLevel {
 }
 
-// ─── Statistical-to-domain bridge + its DeclarationTrace ───────────
-//
-// Translates the verifier's statistical proposition into the
-// domain-predicate language. The bridge is monomorphic: specialised
-// to the (confirmatory sample-set, EIG_0291 compound) pair. Without
-// this resource the certificate would have no path from
-// `DerivedEvidence(SAR)`'s `stats:lt(mean_of(s), 100.0)` to the
-// literature rule's antecedent `HasLowIC50(EIG_0291)`.
+data screen:sample_for : core:string -> core:string -> Prop {
+}
 
-resource screen:bridge_eig0291_confirmatory_lowic50 : reflection:DeclaredResource {
-    reflection:declared_by = "methodology:ic50-classification-convention";
-    reflection:rationale   = "The medicinal-chemistry convention that a sample's mean IC50 being statistically below 100 nM justifies classifying the underlying compound as HasLowIC50 at the assayed target. Specialised to the EIG_0291 confirmatory sample-set / compound pair; the polymorphic shape would universally-quantify over (sample_set, compound) with an explicit `sample_for(s, c)` premise.";
+// ─── Per-pair sample_for witness ───────────────────────────────────
+//
+// Declares that the confirmatory sample set IS a measurement of the
+// EIG_0291 compound. One such resource per (sample_set, compound)
+// pair the screening campaign cares about. Authoring effort scales
+// linearly with the pair count, BUT each resource is a pure
+// relationship fact (no methodological reasoning) — cheap to commit.
+// The polymorphic bridge then serves all such pairs uniformly.
+
+resource screen:sample_for_eig0291_confirmatory : reflection:DeclaredResource {
+    reflection:declared_by = "lab-bookkeeping:plate-2026-03-11-confirmatory";
+    reflection:rationale   = "The confirmatory SampleSet at urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset was prepared from compound EIG_0291 — recorded by the assay technician at plate-load time. Pure relationship fact; no methodological reasoning.";
 
     reflection:canonical_proposition = type_expr(
-        stats:lt(
-            stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"),
-            100.0
+        screen:sample_for(
+            "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset",
+            "urn:eigenius:demo:screen:EIG_0291"
         )
-        ->
-        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
     );
 }
 
-resource screen:bridge_eig0291_confirmatory_lowic50_trace : reflection:DeclarationTrace {
-    reflection:resource    = screen:bridge_eig0291_confirmatory_lowic50;
-    reflection:declared_by = "methodology:ic50-classification-convention";
+resource screen:sample_for_eig0291_confirmatory_trace : reflection:DeclarationTrace {
+    reflection:resource    = screen:sample_for_eig0291_confirmatory;
+    reflection:declared_by = "lab-bookkeeping:plate-2026-03-11-confirmatory";
     reflection:timestamp   = "2026-03-11T10:18:42Z";
 }
 
-// ─── Universal literature rule ─────────────────────────────────────
+// ─── Polymorphic statistical-to-domain bridge ──────────────────────
 //
-// `forall c : core:string, HasLowIC50(c) -> StrongInhibitor(c)` —
-// committed as a DeclaredResource whose canonical_proposition IS the
-// rule. The matching DeclarationTrace admits the IsDeclaredAs witness
-// for `(rule_iri, rule_proposition)` per D49 §6, which the
-// `JustifiedBy.spec_str` ctor in the certificate consumes after
-// specialising the rule at EIG_0291.
+// One resource for the whole "IC50 < 100 nM ⇒ HasLowIC50" methodology.
+// Universally-quantified over (sample_set, compound) pairs. The
+// `sample_for(s, c)` premise is what makes the universal closure
+// type-sound: without it, the bridge would assert that ANY sample
+// set's mean being below threshold implies that ANY compound is a
+// low-IC50 inhibitor, which is structurally wrong.
+
+resource screen:bridge_lowic50 : reflection:DeclaredResource {
+    reflection:declared_by = "methodology:ic50-classification-convention";
+    reflection:rationale   = "Universal: for any sample set s drawn from compound c, if s's mean IC50 is statistically below 100 nM, classify c as HasLowIC50 at the assayed target. Methodology + threshold are baked into the bridge's identity; a different threshold needs a different bridge.";
+
+    reflection:canonical_proposition = type_expr(
+        forall (s : core:string) =>
+        forall (c : core:string) =>
+            screen:sample_for(s, c)
+            -> stats:lt(stats:mean_of(s), 100.0)
+            -> screen:HasLowIC50(c)
+    );
+}
+
+resource screen:bridge_lowic50_trace : reflection:DeclarationTrace {
+    reflection:resource    = screen:bridge_lowic50;
+    reflection:declared_by = "methodology:ic50-classification-convention";
+    reflection:timestamp   = "2026-04-10T09:00:00Z";
+}
+
+// ─── Universal literature rule ─────────────────────────────────────
 
 resource screen:rule_strong : reflection:DeclaredResource {
     reflection:declared_by = "literature:smith_et_al_2024_3.2";
@@ -103,33 +145,24 @@ resource screen:rule_strong_trace : reflection:DeclarationTrace {
 
 // ─── ReasoningSentence: derive StrongInhibitor(EIG_0291) ───────────
 //
-// Three-step composition:
+// Five-step composition (four `App`s + two nested `SpecStr`s):
 //
-//   stats:lt(mean_of(confirmatory_s), 100.0)   ← verifier-emitted SAR
-//        |  bridge: statistical → domain
+//   bridge : forall s c, sample_for(s,c) -> stats:lt(mean_of(s), 100.0) -> HasLowIC50(c)
+//        |  SpecStr at s = confirmatory_sample_set
+//        v
+//   forall c, sample_for(confirmatory_s, c) -> stats:lt(mean_of(confirmatory_s), 100.0) -> HasLowIC50(c)
+//        |  SpecStr at c = EIG_0291
+//        v
+//   sample_for(confirmatory_s, EIG_0291) -> stats:lt(mean_of(confirmatory_s), 100.0) -> HasLowIC50(EIG_0291)
+//        |  apply to DeclaredEvidence(sample_for_witness)
+//        v
+//   stats:lt(mean_of(confirmatory_s), 100.0) -> HasLowIC50(EIG_0291)
+//        |  apply to DerivedEvidence(SAR)
 //        v
 //   HasLowIC50(EIG_0291)
-//        |  SpecStr(literature rule, EIG_0291): universal → specific
+//        |  SpecStr(literature rule, EIG_0291) + apply
 //        v
 //   StrongInhibitor(EIG_0291)
-//
-// Justification (nested App):
-//   App(
-//     SpecStr(DeclaredEvidence(rule_iri), "urn:...:EIG_0291"),
-//     reasoning:App(
-//       DeclaredEvidence(bridge_iri),
-//       DerivedEvidence(SAR_iri)
-//     )
-//   )
-//
-// The qualified `reasoning:App(...)` for the inner composition picks
-// `reasoning:JustificationTerm.App` unambiguously (the bare `App`
-// short name collides with `eigentt:TypeExpr.App`).
-//
-// Certificate: nested `app(...)`. Outer `app` composes the
-// SpecStr-specialised rule with the inner `app` (bridge applied to
-// verdict); inner `app` composes the bridge with the SAR-cited
-// statistical claim.
 
 resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
     reasoning:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
@@ -144,7 +177,16 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
             "urn:eigenius:demo:screen:EIG_0291"
         ),
         reasoning:App(
-            DeclaredEvidence("urn:eigenius:demo:screen:bridge_eig0291_confirmatory_lowic50"),
+            reasoning:App(
+                SpecStr(
+                    SpecStr(
+                        DeclaredEvidence("urn:eigenius:demo:screen:bridge_lowic50"),
+                        "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"
+                    ),
+                    "urn:eigenius:demo:screen:EIG_0291"
+                ),
+                DeclaredEvidence("urn:eigenius:demo:screen:sample_for_eig0291_confirmatory")
+            ),
             DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds:result:main_effect")
         )
     );
@@ -160,65 +202,137 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
                 DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
                 "urn:eigenius:demo:screen:EIG_0291"
             ),
-            // outer j2 = App(bridge, derived(SAR))
+            // outer j2 = App(App(SpecStr·SpecStr(bridge), sample_for), derived)
             reasoning:App(
-                DeclaredEvidence("urn:eigenius:demo:screen:bridge_eig0291_confirmatory_lowic50"),
+                reasoning:App(
+                    SpecStr(
+                        SpecStr(
+                            DeclaredEvidence("urn:eigenius:demo:screen:bridge_lowic50"),
+                            "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"
+                        ),
+                        "urn:eigenius:demo:screen:EIG_0291"
+                    ),
+                    DeclaredEvidence("urn:eigenius:demo:screen:sample_for_eig0291_confirmatory")
+                ),
                 DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds:result:main_effect")
             ),
             // outer c1 : JustifiedBy(j1, A -> B) — specialise the
-            // universal rule at EIG_0291 via spec_str(P, j, t, rule_cert).
+            // literature rule at EIG_0291.
             spec_str(
-                // P : core:string -> Prop
                 fun (x : core:string) =>
                     screen:HasLowIC50(x) -> screen:StrongInhibitor(x),
-                // j : JustificationTerm
                 DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
-                // t : core:string
                 "urn:eigenius:demo:screen:EIG_0291",
-                // rule_cert : JustifiedBy(j, forall x, P(x)) — the
-                // universal rule's grounding certificate.
                 declared(
                     "urn:eigenius:demo:screen:rule_strong",
                     forall (x : core:string) =>
-                        screen:HasLowIC50(x) -> screen:StrongInhibitor(x),
-                    Prop
+                        screen:HasLowIC50(x) -> screen:StrongInhibitor(x)
                 )
             ),
-            // outer c2 : JustifiedBy(j2, A) — inner app composing the
-            // bridge with the per-effect verdict.
+            // outer c2 : JustifiedBy(j2, A) — middle app composes the
+            // partially-applied bridge (after sample_for) with the
+            // per-effect verdict.
             app(
-                // inner A' : Prop = stats:lt(mean_of(confirmatory_s), 100.0)
+                // middle A' : stats:lt(mean_of(confirmatory_s), 100.0)
                 stats:lt(
                     stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"),
                     100.0
                 ),
-                // inner B' : Prop = HasLowIC50(EIG_0291)
+                // middle B' : HasLowIC50(EIG_0291)
                 screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
-                // inner j1' = DeclaredEvidence(bridge)
-                DeclaredEvidence("urn:eigenius:demo:screen:bridge_eig0291_confirmatory_lowic50"),
-                // inner j2' = DerivedEvidence(SAR)
+                // middle j1' = App(SpecStr·SpecStr(bridge), sample_for)
+                reasoning:App(
+                    SpecStr(
+                        SpecStr(
+                            DeclaredEvidence("urn:eigenius:demo:screen:bridge_lowic50"),
+                            "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"
+                        ),
+                        "urn:eigenius:demo:screen:EIG_0291"
+                    ),
+                    DeclaredEvidence("urn:eigenius:demo:screen:sample_for_eig0291_confirmatory")
+                ),
+                // middle j2' = DerivedEvidence(SAR)
                 DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds:result:main_effect"),
-                // inner c1' : JustifiedBy(j1', A' -> B')
-                declared(
-                    "urn:eigenius:demo:screen:bridge_eig0291_confirmatory_lowic50",
+                // middle c1' : inner app composes the fully-specialised
+                // bridge with the sample_for witness.
+                app(
+                    // inner A'' : sample_for(confirmatory_s, EIG_0291)
+                    screen:sample_for(
+                        "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset",
+                        "urn:eigenius:demo:screen:EIG_0291"
+                    ),
+                    // inner B'' : stats:lt(...) -> HasLowIC50(EIG_0291)
                     stats:lt(
                         stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"),
                         100.0
                     )
                     -> screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
-                    stats:lt(
-                        stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"),
-                        100.0
+                    // inner j1'' = SpecStr(SpecStr(bridge, s), c)
+                    SpecStr(
+                        SpecStr(
+                            DeclaredEvidence("urn:eigenius:demo:screen:bridge_lowic50"),
+                            "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"
+                        ),
+                        "urn:eigenius:demo:screen:EIG_0291"
+                    ),
+                    // inner j2'' = DeclaredEvidence(sample_for_witness)
+                    DeclaredEvidence("urn:eigenius:demo:screen:sample_for_eig0291_confirmatory"),
+                    // inner c1'' : nested spec_str — specialise the
+                    // bridge at s, then at c.
+                    spec_str(
+                        // inner P : core:string -> Prop = fun c => P_inner(s_specific, c)
+                        fun (c : core:string) =>
+                            screen:sample_for(
+                                "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset",
+                                c
+                            )
+                            -> stats:lt(
+                                stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"),
+                                100.0
+                            )
+                            -> screen:HasLowIC50(c),
+                        // inner j (the once-specialised bridge ref)
+                        SpecStr(
+                            DeclaredEvidence("urn:eigenius:demo:screen:bridge_lowic50"),
+                            "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"
+                        ),
+                        // inner t = compound IRI
+                        "urn:eigenius:demo:screen:EIG_0291",
+                        // inner cert : the outer spec_str output
+                        spec_str(
+                            // outer P : core:string -> Prop = fun s => forall c, P_inner(s, c)
+                            fun (s : core:string) =>
+                                forall (c : core:string) =>
+                                    screen:sample_for(s, c)
+                                    -> stats:lt(stats:mean_of(s), 100.0)
+                                    -> screen:HasLowIC50(c),
+                            // outer j (the un-specialised bridge ref)
+                            DeclaredEvidence("urn:eigenius:demo:screen:bridge_lowic50"),
+                            // outer t = sample set IRI
+                            "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset",
+                            // outer cert : the bridge's grounding declared
+                            declared(
+                                "urn:eigenius:demo:screen:bridge_lowic50",
+                                forall (s : core:string) =>
+                                forall (c : core:string) =>
+                                    screen:sample_for(s, c)
+                                    -> stats:lt(stats:mean_of(s), 100.0)
+                                    -> screen:HasLowIC50(c)
+                            )
+                        )
+                    ),
+                    // inner c2'' : the sample_for witness
+                    declared(
+                        "urn:eigenius:demo:screen:sample_for_eig0291_confirmatory",
+                        screen:sample_for(
+                            "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset",
+                            "urn:eigenius:demo:screen:EIG_0291"
+                        )
                     )
-                    -> screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
                 ),
-                // inner c2' : JustifiedBy(j2', A') — the verdict
+                // middle c2' : the verifier-emitted statistical result
                 derived(
                     "urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds:result:main_effect",
-                    stats:lt(
-                        stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"),
-                        100.0
-                    ),
                     stats:lt(
                         stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"),
                         100.0
