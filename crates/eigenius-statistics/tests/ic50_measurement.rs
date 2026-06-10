@@ -259,50 +259,50 @@ fn confirmatory_claim_recomputes_to_holds() {
 }
 
 #[test]
-fn claim_admits_is_derived_as_witness_via_program_trace() {
-    // D52 §8 — once the StatisticalAnalysisPlan is on chain with both its
-    // canonical_proposition set and a ProgramTrace pointing at it,
-    // D49 §6's witness index must admit an IsDerivedAs witness keyed
-    // on the (claim_iri, canonical_proposition) pair. This is what
-    // makes downstream D39 reasoning's `DerivedEvidence(claim_iri)`
-    // citation type-check — the JustifiedBy.derived ctor consumes the
-    // witness from the index.
+fn sar_admits_is_derived_as_witness_via_institution_emitted_marker() {
+    // Post-step-1E: the IsDerivedAs witness is admitted off the
+    // `StatisticalAnalysisResult` derivation's
+    // `reflection:InstitutionEmittedDerivation` marker, NOT off a
+    // separate ProgramTrace. The witness emitter walks every
+    // `InstitutionEmittedDerivation` and indexes by
+    // `(resource_iri, canonical_proposition)`.
     //
     // The witness admission is independent of the institution's
     // verdict outcome — the index is built from chain shapes
-    // (ProgramTrace + canonical_proposition), not from runtime
-    // verifier outputs. A Fails verdict at AutoOnLoad would reject the
-    // commit (preventing the chain artifact from existing in the first
-    // place); the test below commits the claim into a test layer
-    // directly without dispatching the verifier, then confirms the
-    // index sees the witness.
+    // (`is_a InstitutionEmittedDerivation` + `canonical_proposition`),
+    // not from runtime verifier outputs. The test below commits the
+    // pre-authored confirmatory SAR (via fixture load) and confirms
+    // the index sees the witness keyed on the SAR's IRI.
     use eigenius_kernel::layer::lookup_chain_witness;
     use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
 
     let ctx = build_ic50_chain();
-    let claim_iri =
-        Iri::parse("urn:eigenius:demo:screen:claim_eig0291_lowic50").expect("claim IRI");
-    let claim_arc = ctx
-        .resolve(&claim_iri)
-        .unwrap_or_else(|| panic!("claim `{claim_iri}` should be on chain"));
+    let sar_iri =
+        Iri::parse("urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds:result:main_effect")
+            .expect("SAR IRI");
+    let sar_arc = ctx
+        .resolve(&sar_iri)
+        .unwrap_or_else(|| panic!("pre-authored SAR `{sar_iri}` should be on chain"));
 
-    // Read the claim's canonical_proposition (the same Value the
-    // witness emitter reads at index-build time).
-    let canonical_prop = claim_arc
+    // Read the SAR's canonical_proposition — the strictly-statistical
+    // claim the verifier emits for SingleSampleEstimate +
+    // OneSidedWitnessed + Absolute(T), pre-authored here to match
+    // what the institution would produce.
+    let canonical_prop = sar_arc
         .get(&Iri::parse("urn:eigenius:reflection:canonical_proposition").unwrap())
-        .expect("claim must carry canonical_proposition for witness admission")
+        .expect("SAR must carry canonical_proposition for witness admission")
         .clone();
 
     // Build the lookup key the way D49 §6 builds it from the emitter
     // side, using the same hash_proposition_value the index uses.
     let expected_key =
-        WitnessKey::from_encoded(WitnessCategory::Derived, claim_iri.clone(), &canonical_prop);
+        WitnessKey::from_encoded(WitnessCategory::Derived, sar_iri.clone(), &canonical_prop);
 
     assert!(
         lookup_chain_witness(ctx.head().as_ref(), &expected_key),
-        "IsDerivedAs witness for {claim_iri} with the claim's canonical_proposition \
-         must be in the chain witness index (ProgramTrace points at the claim and \
-         the canonical_proposition slot is set — both preconditions are met in the \
-         fixture)"
+        "IsDerivedAs witness for {sar_iri} with the SAR's canonical_proposition \
+         must be in the chain witness index (the pre-authored SAR carries both \
+         `is_a InstitutionEmittedDerivation` and `canonical_proposition` — the \
+         two preconditions the D49 emitter requires)"
     );
 }
