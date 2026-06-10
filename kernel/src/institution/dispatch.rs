@@ -389,8 +389,19 @@ pub fn build_verdict_resource(
 /// IRIs the kernel's `build_verdict_resource` sets itself — institution-
 /// output properties at the same IRI are NOT merged through, because the
 /// kernel's values are the source of truth. Other institution outputs
-/// (computed_statistic, computed_p_value, canonical_proposition, etc.)
-/// flow through.
+/// (computed_statistic, computed_p_value, the institution's own
+/// diagnostic, etc.) flow through.
+///
+/// `VERDICT_DIAGNOSTIC_PROP` is intentionally NOT in this set:
+/// although the kernel exposes a `diagnostic` parameter on
+/// [`build_verdict_resource`], every kernel call site today passes
+/// `None`. Protecting the IRI would silently swallow institution-set
+/// diagnostics (every institution puts its own diagnostic on the
+/// returned Verdict's `institution:diagnostic` property), making
+/// AutoOnLoad Fails verdicts on the chain unreadable. Once the
+/// kernel grows its own diagnostic-set callers we can reintroduce
+/// the guard with a "kernel preempts" merge semantic instead of an
+/// "everything-or-nothing" filter.
 fn protected_verdict_properties() -> std::collections::HashSet<&'static str> {
     use crate::ontology::well_known as wk;
     [
@@ -399,7 +410,6 @@ fn protected_verdict_properties() -> std::collections::HashSet<&'static str> {
         VERDICT_SUBJECT_PROP,
         VERDICT_QUERY_CLASS_PROP,
         RUNTIME_INVOCATION_PROP,
-        VERDICT_DIAGNOSTIC_PROP,
         "urn:eigenius:runtime:dispatched_to",
     ]
     .into_iter()

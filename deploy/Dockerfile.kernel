@@ -26,6 +26,7 @@ COPY ontologies/ ontologies/
 # eigenius-julia (transitive dep of the CLI's `env build` command) does
 # `include_str!`s of julia/common/EigeniusJuliaCommon/ at compile time.
 COPY julia/ julia/
+COPY patches/ patches/
 
 # Build the CLI binary (includes serve command). Cargo cache mounts persist
 # the dependency build across buildkit invocations of the same context;

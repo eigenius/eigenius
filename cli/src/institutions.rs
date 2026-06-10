@@ -1281,12 +1281,22 @@ impl ChainAccessor for RemoteChainAccessor {
         {
             return cached;
         }
-        // Fetch via the kernel's Inspect RPC. The async-bridge here is
-        // clunky but acceptable for a CLI command that issues
-        // O(closure-size) lookups during mirror generation.
-        let resource = futures::executor::block_on(async {
-            let mut c = self.client.lock().expect("client mutex poisoned").clone();
-            fetch_resource(&mut c, &target_str).await
+        // Fetch via the kernel's Inspect RPC. We're called
+        // synchronously from inside the closure walker, which itself
+        // runs inside the CLI's `#[tokio::main]` async context. Use
+        // tokio's `block_in_place + Handle::current().block_on`
+        // rather than `futures::executor::block_on`: the latter
+        // doesn't drive tokio's reactor, so tonic's `tower::buffer`
+        // worker task never gets polled and the gRPC future hangs
+        // indefinitely while the calling thread spins at 100% CPU on
+        // `ThreadNotify::wake_by_ref`. Confirmed by samply profile —
+        // 100% of samples in `oneshot::Inner::poll_recv` with the
+        // sender task never scheduled.
+        let resource = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                let mut c = self.client.lock().expect("client mutex poisoned").clone();
+                fetch_resource(&mut c, &target_str).await
+            })
         });
         self.cache
             .lock()
