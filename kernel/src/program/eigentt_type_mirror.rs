@@ -130,6 +130,12 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
             ],
         )),
         Exp::EigonClass(iri) => Ok(ctor("ConstRef", vec![json!(iri.as_str())])),
+        // D46 §10 — axiom reference. Same on-wire shape as `EigonClass`:
+        // a bare `ConstRef(iri)`. Decode discriminates between them by
+        // querying the layer for the IRI's class (eigentt:Axiom vs
+        // core:Class), so the encoder need not introduce a different
+        // ctor name.
+        Exp::EigonAxiom(iri) => Ok(ctor("ConstRef", vec![json!(iri.as_str())])),
         Exp::EigonPrimitive(p) => {
             use crate::nbe::term::PrimitiveType;
             use crate::ontology::well_known as wk;
@@ -642,6 +648,15 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
     let datatype_iri = wk::iri(wk::DATA_TYPE);
     let inductive_iri = wk::iri(wk::INDUCTIVE_TYPE);
     let codata_iri = wk::iri(wk::CODATA_TYPE);
+    // D46 §10 axiom IRI — an opaque chain-resident `eigentt:Axiom`
+    // resource. Its registered type is looked up at `check_infer`
+    // time via the layer's cached `axiom_env`; here we just emit the
+    // reference so the decoded `Exp` carries the IRI through.
+    let axiom_iri = Iri::parse("urn:eigenius:eigentt:Axiom")
+        .expect("urn:eigenius:eigentt:Axiom is a valid IRI");
+    if class_iris.contains(&axiom_iri) {
+        return Ok(Exp::EigonAxiom(iri));
+    }
     if class_iris.contains(&class_iri) {
         Ok(Exp::EigonClass(iri))
     } else if class_iris.contains(&datatype_iri) {

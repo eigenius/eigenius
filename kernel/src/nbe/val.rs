@@ -61,6 +61,17 @@ pub enum Val {
 
     /// Eigon class ground type (resolved from layer chain)
     EigonClass(Iri),
+    /// Reference to a chain-resident `eigentt:Axiom` (D46 §10) — an
+    /// opaque typed constant identified by IRI. Values normalise to
+    /// themselves: axioms have no reduction rules, so eval/whnf treat
+    /// `Val::EigonAxiom` as already in normal form. Two axioms are
+    /// definitionally equal iff their IRIs are equal — different
+    /// axioms with the same registered type are NOT identified
+    /// (parallels CIC's treatment of `Axiom name : T.`). The type
+    /// `check_infer` produces for `Exp::EigonAxiom(iri)` comes from
+    /// the layer's cached `axiom_env()` lookup, not stored here on the
+    /// value.
+    EigonAxiom(Iri),
     /// Eigon primitive type
     EigonPrimitive(PrimitiveType),
     /// Concrete Eigon resource value

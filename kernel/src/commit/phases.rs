@@ -466,7 +466,7 @@ pub fn autoonload_dispatch(state: &mut CommitState<'_>) -> Result<PhaseControl, 
             for raw_derivation in &dispatch.derivations {
                 if let Some(stamped) = finalize_emitted_derivation(
                     dispatch,
-                    invocation.as_ref().and_then(|_| Some(&invocation_iri)),
+                    invocation.as_ref().map(|_| &invocation_iri),
                     raw_derivation.clone(),
                 ) {
                     provenance.push(stamped);

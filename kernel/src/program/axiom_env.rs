@@ -174,13 +174,26 @@ fn is_axiom(resource: &Resource, axiom_class: &Iri) -> bool {
     resource.is_a().iter().any(|c| c == axiom_class)
 }
 
-/// Type-check the decoded axiom statement to verify it inhabits some
-/// sort (i.e., is a well-formed type). Returns the inferred universe.
+/// Type-check the decoded axiom statement (verifying it inhabits some
+/// sort, i.e. is a well-formed type) and return the statement
+/// **evaluated** as a `Val` — i.e., the type that any reference to
+/// this axiom inhabits.
+///
+/// The distinction matters: `check_infer(exp)` returns the universe
+/// the statement inhabits (e.g. `Sort(0)` for `string → Prop`), but
+/// what we want stored on `AxiomEntry.typ` is the type any *reference*
+/// to the axiom has — which is the statement itself, as a `Val`.
+/// Without the eval, `check_infer(Exp::EigonAxiom(iri))` would return
+/// `Sort(0)` instead of `Pi(string, Prop)`, and the App rule in
+/// `crate::nbe::check::check_infer` couldn't extract a Pi from it,
+/// blocking any proof term that applies the axiom to arguments.
 fn type_check_axiom_statement(exp: &Exp, layer: &Arc<Layer>) -> Result<Val, String> {
-    use crate::nbe::check::{check_infer, CheckCtx};
+    use crate::nbe::check::{check_type, CheckCtx};
     use crate::nbe::env::Rho;
+    use crate::nbe::eval::eval;
     let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(layer));
-    check_infer(&mut ctx, exp)
+    check_type(&mut ctx, exp)?;
+    eval(exp, &ctx.rho).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -270,11 +283,16 @@ mod tests {
         let entry = env
             .get(&iri("urn:eigenius:test:propext"))
             .expect("propext should be registered alongside the bootstrap axiom set");
-        // propext's type should inhabit Prop (the impredicative Pi rule
-        // collapses everything quantifying over Prop into Prop).
+        // `entry.typ` is the type a *reference* to propext has — i.e.,
+        // the statement evaluated as a `Val`. propext is universally
+        // quantified, so the top-level shape is `Val::Pi`. The
+        // statement's own universe inhabitation (Prop, via the
+        // impredicative Pi rule) is what `type_check_axiom_statement`
+        // verifies before evaluating, but it doesn't appear in
+        // `entry.typ`.
         assert!(
-            matches!(entry.typ, Val::Sort(0)),
-            "propext should inhabit Prop (Sort(0)); got {:?}",
+            matches!(entry.typ, Val::Pi(_, _)),
+            "a reference to propext has its statement as type — a Pi; got {:?}",
             entry.typ
         );
         assert_eq!(
@@ -301,6 +319,49 @@ mod tests {
         assert!(matches!(err, AxiomEnvError::MissingStatement(_)));
     }
 
+    /// End-to-end exercise of the D46 §10 reference-resolution path:
+    /// commit an axiom on chain, encode a proposition that references
+    /// the axiom, round-trip it through `decode_type`, and `check_infer`
+    /// the result. Without [`crate::nbe::term::Exp::EigonAxiom`] +
+    /// the layer's cached `axiom_env()` accessor, `decode_type` would
+    /// fail at `ConstRefWrongClass` and the bridge-resource fixture
+    /// pattern in `crates/eigenius-reasoning/tests/fixtures/` would
+    /// have no path to compose statistical → domain propositions.
+    #[test]
+    fn axiom_reference_decodes_and_type_checks() {
+        use crate::nbe::check::{check_infer, CheckCtx};
+        use crate::nbe::env::Rho;
+        use crate::program::eigentt_type_mirror::{decode_type, encode_type};
+
+        let core_string = Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::String);
+        let pred_type = Exp::Arrow(Box::new(core_string), Box::new(Exp::Sort(0)));
+        let chain = chain_with_axioms(vec![(
+            "urn:eigenius:test:pred",
+            pred_type,
+            Some("test predicate :: string → Prop"),
+        )]);
+
+        let application = Exp::App(
+            Box::new(Exp::EigonAxiom(iri("urn:eigenius:test:pred"))),
+            Box::new(Exp::LitString("urn:eigenius:test:subject".to_string())),
+        );
+
+        let encoded = encode_type(&application).expect("encode proposition");
+        let decoded = decode_type(&encoded, &chain).expect("decode round-trips");
+        assert_eq!(
+            decoded, application,
+            "decoded Exp should equal the original — axiom reference round-trips structurally"
+        );
+
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&chain));
+        let inferred =
+            check_infer(&mut ctx, &decoded).expect("check_infer succeeds for axiom application");
+        assert!(
+            matches!(inferred, Val::Sort(0)),
+            "pred(\"urn:...\") should infer as Prop = Sort(0); got {inferred:?}"
+        );
+    }
+
     #[test]
     fn registers_id_axiom_inhabiting_prop() {
         // Trivial axiom: ∀ (x : 1). ∀ (y : 1). Id 1 x y
@@ -325,6 +386,9 @@ mod tests {
         let chain = chain_with_axioms(vec![("urn:eigenius:test:trivial_id_axiom", outer_pi, None)]);
         let env = build_axiom_env(&chain).unwrap();
         let entry = env.get(&iri("urn:eigenius:test:trivial_id_axiom")).unwrap();
-        assert!(matches!(entry.typ, Val::Sort(0)));
+        // `entry.typ` is the statement evaluated as a `Val` — the
+        // outermost Pi binder is what a reference to the axiom
+        // exposes as its type.
+        assert!(matches!(entry.typ, Val::Pi(_, _)));
     }
 }

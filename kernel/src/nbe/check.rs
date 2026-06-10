@@ -1017,6 +1017,25 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             Ok(Val::Sort(0))
         }
         Exp::EigonClass(_) | Exp::EigonPrimitive(_) => Ok(Val::Sort(1)),
+        // D46 §10 — axiom reference. The IRI denotes an opaque typed
+        // constant declared by `axiom NAME : T;` and lifted onto the
+        // chain as a `eigentt:Axiom` resource carrying the encoded
+        // type T as `axiom_statement`. The layer's cached `axiom_env`
+        // holds the decoded type as a `Val`; `check_infer` returns
+        // that registered type. Absent layer ⇒ no chain to consult ⇒
+        // error: closed-term type-checking has no environment to
+        // resolve axioms against. Absent IRI ⇒ unresolved axiom
+        // reference (the chain was supposed to admit it but didn't),
+        // also an error.
+        Exp::EigonAxiom(iri) => {
+            let layer = ctx.layer.as_ref().ok_or_else(|| {
+                format!("Exp::EigonAxiom({iri}): no layer context available for axiom resolution")
+            })?;
+            let env = layer.axiom_env();
+            env.get(iri)
+                .map(|entry| entry.typ.clone())
+                .ok_or_else(|| format!("axiom `{iri}` not registered in chain axiom environment"))
+        }
         // eigenius#71 / D49 — literal values infer to their primitive
         // type (`Val::EigonPrimitive(PrimitiveType::*)`). Round-trips
         // through D47 as the `LitString` / `LitInt` / `LitFloat` ctors;
@@ -1801,6 +1820,7 @@ pub fn check_guarded(exp: &Exp, forbidden: &std::collections::HashSet<&str>) -> 
         | Exp::One
         | Exp::Unit
         | Exp::EigonClass(_)
+        | Exp::EigonAxiom(_)
         | Exp::EigonPrimitive(_)
         | Exp::EigonResource(_)
         | Exp::LitString(_)

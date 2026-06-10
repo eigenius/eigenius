@@ -236,6 +236,7 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
         | Exp::One
         | Exp::Unit
         | Exp::EigonClass(_)
+        | Exp::EigonAxiom(_)
         | Exp::EigonPrimitive(_)
         | Exp::EigonResource(_)
         | Exp::LitString(_)

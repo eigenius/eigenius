@@ -84,6 +84,16 @@ pub enum Exp {
     Times(Box<Exp>, Box<Exp>),
     /// Eigon class ground type: resolved from layer chain
     EigonClass(Iri),
+    /// Reference to a chain-resident `eigentt:Axiom` resource. An axiom
+    /// is an opaque typed constant — the IRI carries no body, only the
+    /// type registered in the chain's [`crate::program::axiom_env::AxiomEnv`].
+    /// `check_infer` looks the IRI up in the layer's cached
+    /// `axiom_env()` to recover the registered type; `eval` /
+    /// `readback` are identity (axioms have no reduction rules), and
+    /// the D47 codec round-trips it as `ConstRef(iri)` exactly like
+    /// `EigonClass`. Parallels D46 §10 + the encoding-probe in
+    /// `crates/eigenius-statistics/tests/axiom_encoding_probe.rs`.
+    EigonAxiom(Iri),
     /// Eigon primitive type
     EigonPrimitive(PrimitiveType),
     /// A concrete Eigon resource value

@@ -108,6 +108,7 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
 
         // Eigenius extensions
         Val::EigonClass(iri) => Exp::EigonClass(iri.clone()),
+        Val::EigonAxiom(iri) => Exp::EigonAxiom(iri.clone()),
         Val::EigonPrimitive(p) => Exp::EigonPrimitive(*p),
         Val::ResourceVal(r) => Exp::EigonResource(r.clone()),
 
