@@ -157,7 +157,12 @@ const fallbackThumb = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
     display: none;
   }
 
-  .youtube-embed iframe {
+  /* The iframe is injected at runtime by the script below.
+     Dynamically-created elements don't get Astro's scoped-style
+     data attribute, so we use :global() to make these rules
+     unscoped — otherwise the iframe falls back to the browser
+     default 300×150 instead of filling the .youtube-embed box. */
+  .youtube-embed :global(iframe) {
     width: 100%;
     aspect-ratio: 16 / 9;
     border: none;
@@ -165,7 +170,7 @@ const fallbackThumb = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
     display: block;
   }
 
-  .youtube-embed[data-aspect="4:3"] iframe {
+  .youtube-embed[data-aspect="4:3"] :global(iframe) {
     aspect-ratio: 4 / 3;
   }
 </style>

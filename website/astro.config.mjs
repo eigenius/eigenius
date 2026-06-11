@@ -9,7 +9,7 @@ import starlight from "@astrojs/starlight";
 // dark-mode handling come for free.
 
 export default defineConfig({
-  site: "https://eigenius.org",
+  site: "https://eigenius.io",
   integrations: [
     starlight({
       title: "Eigenius",
