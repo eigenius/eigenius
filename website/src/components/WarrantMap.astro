@@ -8,9 +8,10 @@ import WarrantTile from "./WarrantTile.astro";
 
 <div class="warrant-map">
   <div class="warrant-group">
-    <span class="warrant-group-label">
-      Mechanical warrants <em>— re-executable</em>
-    </span>
+    <div class="warrant-group-label">
+      <span class="warrant-group-name">Mechanical warrants</span>
+      <span class="warrant-group-qualifier">re-executable</span>
+    </div>
     <div class="warrant-row">
       <WarrantTile
         category="observed"
@@ -40,9 +41,10 @@ import WarrantTile from "./WarrantTile.astro";
   </div>
 
   <div class="warrant-group">
-    <span class="warrant-group-label">
-      Authoritative warrant <em>— examinable</em>
-    </span>
+    <div class="warrant-group-label">
+      <span class="warrant-group-name">Authoritative warrant</span>
+      <span class="warrant-group-qualifier">examinable</span>
+    </div>
     <div class="warrant-row warrant-row-single">
       <WarrantTile
         category="declared"
@@ -76,7 +78,17 @@ import WarrantTile from "./WarrantTile.astro";
     gap: 0.5rem;
   }
 
+  /* Two-line label: bold uppercase name on the first line, lighter
+     qualifier on the second. Always two lines regardless of
+     viewport — eliminates the mid-line wrap that happens when the
+     qualifier sits inline with the name. */
   .warrant-group-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .warrant-group-name {
     text-transform: uppercase;
     letter-spacing: 0.14em;
     font-size: 0.7rem;
@@ -84,12 +96,10 @@ import WarrantTile from "./WarrantTile.astro";
     color: var(--sl-color-gray-3);
   }
 
-  .warrant-group-label em {
-    text-transform: none;
-    letter-spacing: 0;
-    font-style: normal;
-    opacity: 0.7;
-    font-weight: 400;
+  .warrant-group-qualifier {
+    font-size: 0.8rem;
+    font-style: italic;
+    color: var(--sl-color-gray-4);
   }
 
   .warrant-row {
