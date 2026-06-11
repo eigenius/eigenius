@@ -15,6 +15,23 @@ jobs:
     name: Rust checks
     runs-on: ubuntu-latest
     steps:
+      # Reclaim ~30 GB on the GitHub-hosted runner by removing
+      # pre-installed tooling the Rust workspace doesn't use (Android
+      # SDK, .NET, Haskell, swap). The stacked footprint of the Lean
+      # toolchain + Rust+wasm toolchains + workspace target/ + five
+      # WASM example target/s otherwise overflows the runner's 80 GB
+      # disk. Run before checkout so the cleanup happens with no
+      # contention from the workspace.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          swap-storage: true
+
       - uses: actions/checkout@v4
 
       - name: Install system dependencies
