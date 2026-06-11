@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "sync-docs": "node scripts/sync-docs.mjs",
+    "audit-links": "node scripts/audit-links.mjs",
     "predev": "node scripts/sync-docs.mjs",
     "dev": "astro dev",
     "start": "astro dev",

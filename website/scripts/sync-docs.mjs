@@ -57,7 +57,23 @@ function rewriteHref(href, sourceFilePath) {
   const resolved = path.resolve(sourceDir, pathPart);
 
   if (resolved === GUIDES_SRC || resolved.startsWith(GUIDES_SRC + path.sep)) {
-    return href; // stays within guides; Starlight handles it
+    // Stays within guides. Convert to an absolute /docs/... URL —
+    // relative resolution is fragile because Starlight serves each
+    // `X.md` as URL `X/` (a virtual directory), which shifts the
+    // base for every sibling link. Computing the URL directly from
+    // the resolved file path avoids that whole class of bug.
+    let rel = path
+      .relative(GUIDES_SRC, resolved)
+      .split(path.sep)
+      .join("/");
+    // README.md / index.md → the directory itself.
+    rel = rel.replace(/(^|\/)(README|index)\.md$/, "$1");
+    // Other .md → strip extension and treat as a directory.
+    if (rel.endsWith(".md")) rel = rel.slice(0, -3);
+    // Always end with a slash for directory-style URLs.
+    if (rel && !rel.endsWith("/")) rel += "/";
+    const url = "/docs/" + rel;
+    return `${url}${anchorPart}`;
   }
 
   const fromRepo = path.relative(REPO_ROOT, resolved).split(path.sep).join("/");
@@ -93,7 +109,12 @@ async function processMarkdown(srcPath) {
   const rel = path.relative(GUIDES_SRC, srcPath);
   if (SKIP_RELATIVE.has(rel)) return false;
 
-  const dstPath = path.join(DOCS_DST, rel);
+  // Starlight only routes index.{md,mdx} as a section index — not
+  // README.md. Rename each subsection's README.md to index.md on the
+  // way in so /docs/<section>/ resolves to its overview page.
+  const dstRel = rel.replace(/(^|\/)README\.md$/, "$1index.md");
+  const dstPath = path.join(DOCS_DST, dstRel);
+
   let content = await fs.readFile(srcPath, "utf8");
   content = rewriteLinks(content, srcPath);
   content = addFrontmatter(content);
