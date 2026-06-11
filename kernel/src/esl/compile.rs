@@ -351,6 +351,133 @@ fn substitute_in_value(body: &ast::Value, env: &BTreeMap<&str, &ast::Value>) -> 
     }
 }
 
+/// Expand all `TypeExpr::Alias` forms by substituting each binding's
+/// value into the body at the names it introduces. The result is an
+/// alias-free `TypeExpr` ready for the standard compile passes
+/// (`lower_type_expr_to_exp` / `encode_type_expr_to_json` /
+/// `compile_type_expr`).
+///
+/// Substitution rules:
+///
+/// - `Ref { namespace: None, name, args: [] }` → if `name` is bound
+///   in `env`, replace with the bound `TypeExpr`. Otherwise leave
+///   alone. The empty-args check is intentional: name-with-args is
+///   either a chain-resident ctor call (`screen:HasLowIC50(c)`) or a
+///   forall-bound variable application (`P(x)`), neither of which an
+///   alias should silently capture. Authors who want application
+///   sugar bind the fully-applied form.
+/// - `Pi` / `Lambda` / `BinderArrow` introduce binders that shadow
+///   alias names in their bodies — the binder name is removed from
+///   the env when recursing into the body. (Each `Pi`/`Lambda` param
+///   shadows from its declaration site onward.)
+/// - `Alias { bindings, body }` extends the env sequentially: each
+///   later binding is substituted with prior bindings already in env,
+///   then added to env for subsequent bindings + the body.
+/// - All other variants (`Sort`, `LitString`, `LitInt`, `LitFloat`,
+///   `Arrow`) recurse into their children unchanged.
+fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) -> ast::TypeExpr {
+    match typ {
+        ast::TypeExpr::Ref { name, args, pos } => {
+            if name.namespace.is_none() && args.is_empty() {
+                if let Some(bound) = env.get(&name.name) {
+                    return bound.clone();
+                }
+            }
+            ast::TypeExpr::Ref {
+                name: name.clone(),
+                args: args.iter().map(|a| expand_aliases(a, env)).collect(),
+                pos: pos.clone(),
+            }
+        }
+        ast::TypeExpr::Arrow {
+            domain,
+            codomain,
+            pos,
+        } => ast::TypeExpr::Arrow {
+            domain: Box::new(expand_aliases(domain, env)),
+            codomain: Box::new(expand_aliases(codomain, env)),
+            pos: pos.clone(),
+        },
+        ast::TypeExpr::BinderArrow {
+            name,
+            kind,
+            bound,
+            body,
+            pos,
+        } => {
+            let mut inner = env.clone();
+            inner.remove(name);
+            ast::TypeExpr::BinderArrow {
+                name: name.clone(),
+                kind: kind.clone(),
+                bound: bound.clone(),
+                body: Box::new(expand_aliases(body, &inner)),
+                pos: pos.clone(),
+            }
+        }
+        ast::TypeExpr::Pi {
+            params,
+            codomain,
+            pos,
+        } => {
+            let mut inner = env.clone();
+            let new_params: Vec<_> = params
+                .iter()
+                .map(|p| {
+                    let new_typ = expand_aliases(&p.typ, &inner);
+                    inner.remove(&p.name);
+                    ast::TypedParam {
+                        name: p.name.clone(),
+                        typ: new_typ,
+                        pos: p.pos.clone(),
+                    }
+                })
+                .collect();
+            ast::TypeExpr::Pi {
+                params: new_params,
+                codomain: Box::new(expand_aliases(codomain, &inner)),
+                pos: pos.clone(),
+            }
+        }
+        ast::TypeExpr::Lambda { params, body, pos } => {
+            let mut inner = env.clone();
+            let new_params: Vec<_> = params
+                .iter()
+                .map(|p| {
+                    let new_typ = expand_aliases(&p.typ, &inner);
+                    inner.remove(&p.name);
+                    ast::TypedParam {
+                        name: p.name.clone(),
+                        typ: new_typ,
+                        pos: p.pos.clone(),
+                    }
+                })
+                .collect();
+            ast::TypeExpr::Lambda {
+                params: new_params,
+                body: Box::new(expand_aliases(body, &inner)),
+                pos: pos.clone(),
+            }
+        }
+        ast::TypeExpr::Alias {
+            bindings,
+            body,
+            pos: _,
+        } => {
+            let mut inner = env.clone();
+            for binding in bindings {
+                let substituted = expand_aliases(&binding.value, &inner);
+                inner.insert(binding.name.clone(), substituted);
+            }
+            expand_aliases(body, &inner)
+        }
+        ast::TypeExpr::Sort { .. }
+        | ast::TypeExpr::LitString { .. }
+        | ast::TypeExpr::LitInt { .. }
+        | ast::TypeExpr::LitFloat { .. } => typ.clone(),
+    }
+}
+
 impl Compiler {
     fn new() -> Self {
         Self {
@@ -871,6 +998,12 @@ impl Compiler {
         scope: &std::collections::HashSet<&str>,
     ) -> Result<Value, EslError> {
         use crate::ontology::well_known as wk;
+        // `alias` sugar — expand bindings into the body and recurse.
+        // The expanded body is alias-free, so the recursion terminates.
+        if let ast::TypeExpr::Alias { .. } = typ {
+            let expanded = expand_aliases(typ, &BTreeMap::new());
+            return self.compile_type_expr(&expanded, scope);
+        }
         match typ {
             ast::TypeExpr::Ref { name, args, .. } => {
                 let resolved = if name.namespace.is_none() {
@@ -1035,6 +1168,8 @@ impl Compiler {
                  indexed ctor return types)"
                     .to_string(),
             )),
+            // Eliminated by the early-return at the top of this fn.
+            ast::TypeExpr::Alias { .. } => unreachable!("alias expanded above"),
         }
     }
 
@@ -1127,6 +1262,11 @@ impl Compiler {
         typ: &ast::TypeExpr,
         scope: &std::collections::HashSet<&str>,
     ) -> Result<Exp, EslError> {
+        // `alias` sugar — expand bindings into the body and recurse.
+        if let ast::TypeExpr::Alias { .. } = typ {
+            let expanded = expand_aliases(typ, &BTreeMap::new());
+            return self.lower_type_expr_to_exp(&expanded, scope);
+        }
         match typ {
             ast::TypeExpr::Sort { kind, .. } => Ok(Exp::Sort(match kind {
                 ast::SortKind::Prop => 0,
@@ -1329,6 +1469,8 @@ impl Compiler {
             ast::TypeExpr::LitString { value, .. } => Ok(Exp::LitString(value.clone())),
             ast::TypeExpr::LitInt { value, .. } => Ok(Exp::LitInt(*value)),
             ast::TypeExpr::LitFloat { value, .. } => Ok(Exp::LitFloat(*value)),
+            // Eliminated by the early-return at the top of this fn.
+            ast::TypeExpr::Alias { .. } => unreachable!("alias expanded above"),
         }
     }
 
@@ -1358,6 +1500,11 @@ impl Compiler {
     ) -> Result<serde_json::Value, EslError> {
         use crate::program::eigentt_type_mirror::encode_type;
         use serde_json::json;
+        // `alias` sugar — expand bindings into the body and recurse.
+        if let ast::TypeExpr::Alias { .. } = typ {
+            let expanded = expand_aliases(typ, &BTreeMap::new());
+            return self.encode_type_expr_to_json(&expanded, scope);
+        }
 
         // Wrap a leaf TypeExpr: lower to Exp, encode via the D47
         // encoder, unwrap to raw JSON. Safe for any subtree whose
@@ -1531,6 +1678,8 @@ impl Compiler {
             | ast::TypeExpr::LitString { .. }
             | ast::TypeExpr::LitInt { .. }
             | ast::TypeExpr::LitFloat { .. } => encode_leaf(self, typ),
+            // Eliminated by the early-return at the top of this fn.
+            ast::TypeExpr::Alias { .. } => unreachable!("alias expanded above"),
         }
     }
 
@@ -4658,6 +4807,114 @@ mod tests {
         // The resource should commit (no error); we don't introspect
         // the encoded value further — the success path is the contract.
         assert!(!resources.is_empty());
+    }
+
+    #[test]
+    fn alias_substitution_in_type_expr_produces_same_encoding_as_inlined_form() {
+        // The `alias ... in body` form is pure compile-time
+        // substitution. Two resources — one using `alias` and one
+        // with the bindings inlined — must produce byte-identical
+        // `canonical_proposition` encodings. If they don't, the
+        // alias is leaking into the D47 shape, which would break the
+        // chain-witness hashing contract.
+        let resources = esl::compile(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex   = "urn:eigenius:example";
+            namespace ref  = "urn:eigenius:reflection";
+
+            data ex:HasLowIC50 : core:string -> Prop {
+            }
+
+            resource ex:with_alias : ref:DeclaredResource {
+                ref:declared_by = "test:alias";
+                ref:canonical_proposition = type_expr(
+                    alias EIG = "urn:ex:EIG_0291"
+                    in
+                    ex:HasLowIC50(EIG)
+                );
+            }
+
+            resource ex:without_alias : ref:DeclaredResource {
+                ref:declared_by = "test:alias";
+                ref:canonical_proposition = type_expr(
+                    ex:HasLowIC50("urn:ex:EIG_0291")
+                );
+            }
+            "#,
+        )
+        .expect("both forms compile");
+
+        let prop_iri = iri("urn:eigenius:reflection:canonical_proposition");
+        let with_alias = resources
+            .iter()
+            .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:example:with_alias"))
+            .expect("with_alias resource present");
+        let without_alias = resources
+            .iter()
+            .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:example:without_alias"))
+            .expect("without_alias resource present");
+        assert_eq!(
+            with_alias.get(&prop_iri),
+            without_alias.get(&prop_iri),
+            "alias-expanded form must produce the same canonical_proposition \
+             JSON as the inlined form — the alias is pure compile-time sugar."
+        );
+    }
+
+    #[test]
+    fn alias_lexical_scope_shadows_forall_binders_when_appropriate() {
+        // Sequential lexical scope check: each later binding can
+        // reference earlier ones, and forall/fun binders shadow alias
+        // names in their own bodies.
+        //
+        // The body uses `forall (x : core:string) => ex:HasLowIC50(x)` —
+        // here `x` is the forall-bound variable, NOT the alias `x`.
+        // The alias substitution must NOT replace the forall-bound `x`.
+        let resources = esl::compile(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex   = "urn:eigenius:example";
+            namespace ref  = "urn:eigenius:reflection";
+
+            data ex:HasLowIC50 : core:string -> Prop {
+            }
+
+            resource ex:scope_test : ref:DeclaredResource {
+                ref:declared_by = "test:scope";
+                ref:canonical_proposition = type_expr(
+                    alias x = "urn:ex:SHOULD_NOT_LEAK"
+                    in
+                    forall (x : core:string) => ex:HasLowIC50(x)
+                );
+            }
+
+            resource ex:scope_expected : ref:DeclaredResource {
+                ref:declared_by = "test:scope";
+                ref:canonical_proposition = type_expr(
+                    forall (x : core:string) => ex:HasLowIC50(x)
+                );
+            }
+            "#,
+        )
+        .expect("scope-shadowing form compiles");
+
+        let prop_iri = iri("urn:eigenius:reflection:canonical_proposition");
+        let scope_test = resources
+            .iter()
+            .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:example:scope_test"))
+            .unwrap();
+        let scope_expected = resources
+            .iter()
+            .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:example:scope_expected"))
+            .unwrap();
+        assert_eq!(
+            scope_test.get(&prop_iri),
+            scope_expected.get(&prop_iri),
+            "the forall binder `x` must shadow the alias `x` in its body — \
+             the alias must not leak its `urn:ex:SHOULD_NOT_LEAK` value into \
+             the forall-bound proposition."
+        );
     }
 
     // --- D37: lambda / pi / merge_comorphism lowering ---

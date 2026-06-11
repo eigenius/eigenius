@@ -192,151 +192,86 @@ resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
     );
 
     reasoning:certificate = type_expr(
+        alias
+            EIG    = "urn:eigenius:demo:screen:EIG_0291",
+            SS     = "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset",
+            SAR    = "urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds:result:main_effect",
+            BRIDGE = "urn:eigenius:demo:screen:bridge_lowic50",
+            RULE   = "urn:eigenius:demo:screen:rule_strong",
+            SFW    = "urn:eigenius:demo:screen:sample_for_eig0291_confirmatory",
+
+            // Reusable propositions
+            STAT    = stats:lt(stats:mean_of(SS), 100.0),
+            HAS_LOW = screen:HasLowIC50(EIG),
+            STRONG  = screen:StrongInhibitor(EIG),
+            S_FOR   = screen:sample_for(SS, EIG),
+
+            // Universal propositions for rule + bridge
+            RULE_P   = forall (x : core:string) =>
+                          screen:HasLowIC50(x) -> screen:StrongInhibitor(x),
+            BRIDGE_P = forall (s : core:string) =>
+                       forall (c : core:string) =>
+                          screen:sample_for(s, c)
+                          -> stats:lt(stats:mean_of(s), 100.0)
+                          -> screen:HasLowIC50(c),
+
+            // Justification spine pieces — reused inside the cert
+            rule_j      = SpecStr(DeclaredEvidence(RULE), EIG),
+            bridge_s    = SpecStr(DeclaredEvidence(BRIDGE), SS),
+            bridge_full = SpecStr(bridge_s, EIG),
+            sf_j        = DeclaredEvidence(SFW),
+            derived_j   = DerivedEvidence(SAR),
+            bridge_app  = reasoning:App(bridge_full, sf_j),
+            full_app    = reasoning:App(bridge_app, derived_j)
+        in
         app(
-            // outer A : Prop = HasLowIC50(EIG_0291)
-            screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
-            // outer B : Prop = StrongInhibitor(EIG_0291)
-            screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
-            // outer j1 = SpecStr(DeclaredEvidence(rule), EIG_0291)
-            SpecStr(
-                DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
-                "urn:eigenius:demo:screen:EIG_0291"
-            ),
-            // outer j2 = App(App(SpecStr·SpecStr(bridge), sample_for), derived)
-            reasoning:App(
-                reasoning:App(
-                    SpecStr(
-                        SpecStr(
-                            DeclaredEvidence("urn:eigenius:demo:screen:bridge_lowic50"),
-                            "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"
-                        ),
-                        "urn:eigenius:demo:screen:EIG_0291"
-                    ),
-                    DeclaredEvidence("urn:eigenius:demo:screen:sample_for_eig0291_confirmatory")
-                ),
-                DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds:result:main_effect")
-            ),
-            // outer c1 : JustifiedBy(j1, A -> B) — specialise the
-            // literature rule at EIG_0291.
+            // outer A, B
+            HAS_LOW, STRONG,
+            // outer j1, j2
+            rule_j, full_app,
+            // outer c1 : specialise the literature rule at EIG_0291.
             spec_str(
                 fun (x : core:string) =>
                     screen:HasLowIC50(x) -> screen:StrongInhibitor(x),
-                DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
-                "urn:eigenius:demo:screen:EIG_0291",
-                declared(
-                    "urn:eigenius:demo:screen:rule_strong",
-                    forall (x : core:string) =>
-                        screen:HasLowIC50(x) -> screen:StrongInhibitor(x)
-                )
+                DeclaredEvidence(RULE),
+                EIG,
+                declared(RULE, RULE_P)
             ),
-            // outer c2 : JustifiedBy(j2, A) — middle app composes the
-            // partially-applied bridge (after sample_for) with the
-            // per-effect verdict.
+            // outer c2 : middle app composes the partially-applied bridge
+            // (after sample_for) with the per-effect verdict.
             app(
-                // middle A' : stats:lt(mean_of(confirmatory_s), 100.0)
-                stats:lt(
-                    stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"),
-                    100.0
-                ),
-                // middle B' : HasLowIC50(EIG_0291)
-                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
-                // middle j1' = App(SpecStr·SpecStr(bridge), sample_for)
-                reasoning:App(
-                    SpecStr(
-                        SpecStr(
-                            DeclaredEvidence("urn:eigenius:demo:screen:bridge_lowic50"),
-                            "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"
-                        ),
-                        "urn:eigenius:demo:screen:EIG_0291"
-                    ),
-                    DeclaredEvidence("urn:eigenius:demo:screen:sample_for_eig0291_confirmatory")
-                ),
-                // middle j2' = DerivedEvidence(SAR)
-                DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds:result:main_effect"),
+                STAT, HAS_LOW,
+                bridge_app, derived_j,
                 // middle c1' : inner app composes the fully-specialised
                 // bridge with the sample_for witness.
                 app(
-                    // inner A'' : sample_for(confirmatory_s, EIG_0291)
-                    screen:sample_for(
-                        "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset",
-                        "urn:eigenius:demo:screen:EIG_0291"
-                    ),
-                    // inner B'' : stats:lt(...) -> HasLowIC50(EIG_0291)
-                    stats:lt(
-                        stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"),
-                        100.0
-                    )
-                    -> screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
-                    // inner j1'' = SpecStr(SpecStr(bridge, s), c)
-                    SpecStr(
-                        SpecStr(
-                            DeclaredEvidence("urn:eigenius:demo:screen:bridge_lowic50"),
-                            "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"
-                        ),
-                        "urn:eigenius:demo:screen:EIG_0291"
-                    ),
-                    // inner j2'' = DeclaredEvidence(sample_for_witness)
-                    DeclaredEvidence("urn:eigenius:demo:screen:sample_for_eig0291_confirmatory"),
+                    S_FOR, STAT -> HAS_LOW,
+                    bridge_full, sf_j,
                     // inner c1'' : nested spec_str — specialise the
                     // bridge at s, then at c.
                     spec_str(
-                        // inner P : core:string -> Prop = fun c => P_inner(s_specific, c)
                         fun (c : core:string) =>
-                            screen:sample_for(
-                                "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset",
-                                c
-                            )
-                            -> stats:lt(
-                                stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"),
-                                100.0
-                            )
+                            screen:sample_for(SS, c)
+                            -> stats:lt(stats:mean_of(SS), 100.0)
                             -> screen:HasLowIC50(c),
-                        // inner j (the once-specialised bridge ref)
-                        SpecStr(
-                            DeclaredEvidence("urn:eigenius:demo:screen:bridge_lowic50"),
-                            "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"
-                        ),
-                        // inner t = compound IRI
-                        "urn:eigenius:demo:screen:EIG_0291",
-                        // inner cert : the outer spec_str output
+                        bridge_s,
+                        EIG,
                         spec_str(
-                            // outer P : core:string -> Prop = fun s => forall c, P_inner(s, c)
                             fun (s : core:string) =>
                                 forall (c : core:string) =>
                                     screen:sample_for(s, c)
                                     -> stats:lt(stats:mean_of(s), 100.0)
                                     -> screen:HasLowIC50(c),
-                            // outer j (the un-specialised bridge ref)
-                            DeclaredEvidence("urn:eigenius:demo:screen:bridge_lowic50"),
-                            // outer t = sample set IRI
-                            "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset",
-                            // outer cert : the bridge's grounding declared
-                            declared(
-                                "urn:eigenius:demo:screen:bridge_lowic50",
-                                forall (s : core:string) =>
-                                forall (c : core:string) =>
-                                    screen:sample_for(s, c)
-                                    -> stats:lt(stats:mean_of(s), 100.0)
-                                    -> screen:HasLowIC50(c)
-                            )
+                            DeclaredEvidence(BRIDGE),
+                            SS,
+                            declared(BRIDGE, BRIDGE_P)
                         )
                     ),
                     // inner c2'' : the sample_for witness
-                    declared(
-                        "urn:eigenius:demo:screen:sample_for_eig0291_confirmatory",
-                        screen:sample_for(
-                            "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset",
-                            "urn:eigenius:demo:screen:EIG_0291"
-                        )
-                    )
+                    declared(SFW, S_FOR)
                 ),
                 // middle c2' : the verifier-emitted statistical result
-                derived(
-                    "urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds:result:main_effect",
-                    stats:lt(
-                        stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"),
-                        100.0
-                    )
+                derived(SAR, STAT
                 )
             )
         )

@@ -45,6 +45,20 @@ pub enum TokenKind {
 
     // Expression keywords
     Let,
+    /// `alias name = expr, name = expr, ... in body` —
+    /// compile-time substitution form in `type_expr(...)` position.
+    /// Distinct from `Let` which marks a kernel-level definitional
+    /// binding (`Decl::Def` in NbE; the `let x : T = e; body` form
+    /// in the program-body parser). Aliases inline at lowering time
+    /// and never appear in `Exp`. Future type-position kernel-let
+    /// (real δ-binding) would reuse `Let`; reserving `alias` now
+    /// keeps the two distinguishable forever.
+    Alias,
+    /// `in` keyword — terminates the binding list of an
+    /// `alias name = expr, ... in body` form. Two letters; not used
+    /// as an identifier anywhere in the existing ESL codebase, so the
+    /// reservation costs nothing.
+    In,
     Case,
     Match,
     Returning,
@@ -473,6 +487,8 @@ impl<'a> Lexer<'a> {
             "vector_index" => TokenKind::VectorIndex,
             // Expression keywords
             "let" => TokenKind::Let,
+            "alias" => TokenKind::Alias,
+            "in" => TokenKind::In,
             "case" => TokenKind::Case,
             "match" => TokenKind::Match,
             "returning" => TokenKind::Returning,
