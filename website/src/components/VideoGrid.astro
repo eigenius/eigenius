@@ -1,0 +1,74 @@
+---
+// A grid layout for a curated set of explainer videos.
+// Each video is a lazy-loaded YouTubeEmbed.
+import YouTubeEmbed from "./YouTubeEmbed.astro";
+
+interface Video {
+  videoId: string;
+  title: string;
+  description?: string;
+}
+
+interface Props {
+  videos: Video[];
+  columns?: 2 | 3;
+  playlistHref?: string;
+}
+
+const { videos, columns = 2, playlistHref } = Astro.props;
+---
+
+<div class="video-grid" data-columns={columns}>
+  {videos.map((v) => (
+    <YouTubeEmbed
+      videoId={v.videoId}
+      title={v.title}
+      description={v.description}
+    />
+  ))}
+</div>
+
+{playlistHref && (
+  <p class="video-grid-cta">
+    <a href={playlistHref}>See the full playlist on YouTube ↗</a>
+  </p>
+)}
+
+<style>
+  .video-grid {
+    display: grid;
+    gap: 1.5rem;
+    margin-top: 1rem;
+  }
+
+  .video-grid[data-columns="2"] {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .video-grid[data-columns="3"] {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  @media (max-width: 60rem) {
+    .video-grid[data-columns="2"],
+    .video-grid[data-columns="3"] {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .video-grid-cta {
+    text-align: right;
+    margin-top: 0.8rem;
+    font-size: 0.9rem;
+  }
+
+  .video-grid-cta a {
+    color: var(--sl-color-text-accent);
+    text-decoration: none;
+    font-weight: 600;
+  }
+
+  .video-grid-cta a:hover {
+    text-decoration: underline;
+  }
+</style>

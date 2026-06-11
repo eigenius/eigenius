@@ -1,0 +1,66 @@
+---
+title: Documentation
+description: The full Eigenius user guide — surface languages, the query language, the formula payload language, institution composition, the platform, and references.
+---
+
+The user guide is split by surface and concern: each section is a
+self-contained guide that you can read sequentially or use as
+reference. Every chapter cites the implementation it describes,
+so the docs and the code stay aligned.
+
+## Surface languages
+
+- **[ESL — Eigenius Surface Language](/docs/esl/)** — the human-friendly
+  syntax for declaring ontologies, defining typed programs, and
+  constructing resource instances. Compiles to Eigon-JSON resources
+  that the EigenTT kernel type-checks and evaluates.
+
+- **[EigenQL — query language](/docs/eigenql/)** — the read-only
+  query language for the layered Eigon graph. Pattern-match against
+  resources, derive relations with `DEFINE`, dispatch to institution
+  reasoners via `FIBER` clauses, and shape results into self-describing
+  Eigon documents.
+
+- **[Formula language](/docs/formula/)** — the chain-mirrored fragment
+  of EigenTT used as the shared expression-tree payload across every
+  numerical institution. One shape that `Symbolics.jl`,
+  `IntervalArithmetic.jl`, `Catalyst.jl`, `OrdinaryDiffEq.jl`, and
+  `JuMP+HiGHS` all consume directly.
+
+## Composition
+
+- **[Composing institutions](/docs/composition/)** — what the system
+  looks like when several institutions cooperate via declared
+  comorphisms. The kinase walkthrough is the canonical worked example.
+
+## The platform
+
+- **[Platform user guide](/docs/platform/)** — install, run, manage,
+  and extend. CLI, kernel server, orchestrator, persistence, the
+  notebook UX, WASM and substrate extensions, deployment. The
+  practical companion to the surface-language guides.
+
+## References
+
+- **[Bibliography](/docs/references/)** — the full citation set:
+  works cited from design docs and papers, foundational works the
+  system relies on, philosophical precursors, and contemporary
+  related work.
+
+## Recommended starting points
+
+- **New to the platform?** Read [Platform §1–5](/docs/platform/01-introduction/),
+  then jump straight to the [Notebook chapter](/docs/platform/14-notebook/)
+  — the most accessible UX.
+- **Coming from a typed-functional or knowledge-graph background?**
+  Skim [ESL §1–3](/docs/esl/01-introduction/), then internalise
+  [ESL §6 — Resources, types, and the layer](/docs/esl/06-resources-types-and-the-layer/);
+  that chapter is the bridge between the resource graph and the type
+  system.
+- **Coming from SQL, Cypher, or Datalog?** Skim
+  [EigenQL §2 — Quick tour](/docs/eigenql/02-quick-tour/) to
+  calibrate, then jump to the chapter for your question.
+- **Looking for the conceptual story rather than reference?**
+  The [Concepts](/concepts/) section is the right entry point, and
+  the worked [Examples](/examples/) walk end-to-end through the
+  drug-screening and kinase scenarios.

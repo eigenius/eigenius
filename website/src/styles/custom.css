@@ -1,0 +1,165 @@
+/* =====================================================================
+ * Eigenius — site palette derived from the logo
+ *
+ * The logo is a metallic steel-blue logomark on a dark navy charcoal
+ * background. The site picks up the same colour vocabulary:
+ *   - Steel-blue as the brand accent (links, focus, primary actions)
+ *   - Dark navy as the dark-mode surface
+ *   - A muted cool-grey ramp for borders, dividers, and body text
+ *
+ * The four warrant categories stay distinct (they are the conceptual
+ * spine of the framework, used in figures and in the papers), but
+ * the Observed blue is tuned slightly toward the brand steel-blue so
+ * the figures feel of-a-piece with the rest of the site.
+ * ===================================================================== */
+
+:root {
+  /* ---------- Brand ----------
+   * Eigenius steel-blue: an analytical, slightly industrial blue
+   * that picks up the metallic logomark. Used for accents, links,
+   * focus rings. */
+  --eigenius-brand:       #5C7A9E;    /* core brand */
+  --eigenius-brand-bright:#7B9DC0;    /* hover / hi-contrast */
+  --eigenius-brand-deep:  #3A4F6B;    /* pressed / shadow */
+  --eigenius-brand-bg:    #5C7A9E18;  /* subtle wash */
+
+  /* ---------- Navy ramp ----------
+   * Pulled from the logo's gradient background, used as the dark-mode
+   * surface system. */
+  --eigenius-navy-1: #14181F;  /* deepest */
+  --eigenius-navy-2: #1A1F2A;  /* page bg */
+  --eigenius-navy-3: #232938;  /* surface 1 */
+  --eigenius-navy-4: #2D3447;  /* surface 2 — sidebars, cards */
+  --eigenius-navy-5: #3A4257;  /* border / divider */
+
+  /* ---------- Cool grey ramp ----------
+   * Used for body text, muted captions, and borders in light mode. */
+  --eigenius-grey-1: #FBFCFD;
+  --eigenius-grey-2: #F1F3F6;
+  --eigenius-grey-3: #E1E5EA;
+  --eigenius-grey-4: #B8BFCA;
+  --eigenius-grey-5: #8A95A5;
+  --eigenius-grey-6: #5A6478;
+  --eigenius-grey-7: #2D3447;
+
+  /* ---------- Warrant categories ----------
+   * These appear in figures, code snippets, and conceptual diagrams.
+   * Tuned to read well on both dark and light surfaces. */
+  --warrant-observed: #3A7CA5;      /* tuned toward the brand */
+  --warrant-derived:  #D98C5F;      /* slightly desaturated amber */
+  --warrant-verified: #2E9D5D;      /* slightly muted green */
+  --warrant-declared: #8B5CB0;      /* tuned slightly cooler purple */
+
+  /* Soft fills for backgrounds inside warrant components. */
+  --warrant-observed-bg: #3A7CA51A;
+  --warrant-derived-bg:  #D98C5F1A;
+  --warrant-verified-bg: #2E9D5D1A;
+  --warrant-declared-bg: #8B5CB01A;
+}
+
+/* =====================================================================
+ * Starlight theme mapping
+ * Starlight reads --sl-color-accent-* for the primary accent. Map
+ * Eigenius brand colours onto the Starlight tokens for both dark and
+ * light modes.
+ * ===================================================================== */
+
+/* Dark mode (Starlight default) */
+:root {
+  --sl-color-accent-low:  var(--eigenius-brand-deep);
+  --sl-color-accent:      var(--eigenius-brand);
+  --sl-color-accent-high: var(--eigenius-brand-bright);
+
+  --sl-color-bg:          var(--eigenius-navy-2);
+  --sl-color-bg-nav:      var(--eigenius-navy-1);
+  --sl-color-bg-sidebar:  var(--eigenius-navy-1);
+  --sl-color-bg-inline-code: var(--eigenius-navy-4);
+
+  --sl-color-text:        var(--eigenius-grey-2);
+  --sl-color-text-accent: var(--eigenius-brand-bright);
+  --sl-color-white:       #FFFFFF;
+  --sl-color-gray-1:      #F8F9FB;
+  --sl-color-gray-2:      var(--eigenius-grey-3);
+  --sl-color-gray-3:      var(--eigenius-grey-4);
+  --sl-color-gray-4:      var(--eigenius-grey-5);
+  --sl-color-gray-5:      var(--eigenius-grey-6);
+  --sl-color-gray-6:      var(--eigenius-navy-4);
+  --sl-color-gray-7:      var(--eigenius-navy-3);
+  --sl-color-black:       var(--eigenius-navy-1);
+
+  --sl-color-hairline:    var(--eigenius-navy-5);
+}
+
+/* Light mode */
+:root[data-theme="light"] {
+  --sl-color-accent-low:  #BCCBDC;
+  --sl-color-accent:      var(--eigenius-brand);
+  --sl-color-accent-high: var(--eigenius-brand-deep);
+
+  --sl-color-bg:          var(--eigenius-grey-1);
+  --sl-color-bg-nav:      #FFFFFF;
+  --sl-color-bg-sidebar:  #FFFFFF;
+  --sl-color-bg-inline-code: var(--eigenius-grey-2);
+
+  --sl-color-text:        var(--eigenius-grey-7);
+  --sl-color-text-accent: var(--eigenius-brand-deep);
+  --sl-color-white:       var(--eigenius-grey-7);
+  --sl-color-gray-1:      var(--eigenius-navy-2);
+  --sl-color-gray-2:      var(--eigenius-grey-7);
+  --sl-color-gray-3:      var(--eigenius-grey-6);
+  --sl-color-gray-4:      var(--eigenius-grey-5);
+  --sl-color-gray-5:      var(--eigenius-grey-4);
+  --sl-color-gray-6:      var(--eigenius-grey-3);
+  --sl-color-gray-7:      var(--eigenius-grey-2);
+  --sl-color-black:       #FFFFFF;
+
+  --sl-color-hairline:    var(--eigenius-grey-3);
+}
+
+/* =====================================================================
+ * Landing-page typography polish
+ * ===================================================================== */
+
+.hero-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.75rem;
+  color: var(--eigenius-grey-5);
+  font-weight: 600;
+}
+
+.hero-copy {
+  max-width: 36ch;
+  line-height: 1.2;
+}
+
+.hero-headline {
+  font-size: clamp(2.4rem, 5vw, 3.6rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.hero-pitch {
+  font-size: clamp(1.05rem, 1.6vw, 1.25rem);
+  color: var(--sl-color-gray-3);
+  max-width: 56ch;
+  line-height: 1.5;
+}
+
+/* Shared two-column card grid used by Research's paper-grid block
+   inside an MDX page. Defined here (rather than inline in the MDX)
+   so the MDX parser doesn't try to interpret media-query braces
+   as JSX expressions. */
+.paper-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+@media (max-width: 50rem) {
+  .paper-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,123 @@
+---
+title: Domain bridges
+description: The declarative first move in crossing between domains. A chain-resident, citable, refutable artifact that formulates the entities and propositions of a specific domain and states the implications that link them to a neighbouring vocabulary.
+---
+
+Crossing between two domains happens in two stages. The **first**
+stage is declarative and data-shaped: formulate the *entities*
+and *propositions* of a specific domain, and state the
+*implications* that link them to a neighbouring vocabulary. This
+is what a **domain bridge** does. A domain bridge is a
+chain-resident, citable, refutable artifact that says *what
+holds between two vocabularies as a matter of definition*. The
+type-checker confirms it is well-formed, the layer stores it,
+and every downstream user cites it.
+
+The **second** stage is where [institutions](/concepts/institutions/)
+earn their keep: they take that declarative material and lift it
+into live computation and reasoning — actually running the
+analysis, actually composing the proof. The bridge says *what
+follows from what*; the institutions *do the work*.
+
+A statistician says *"the sample's mean is below 100 nM"*; a
+medicinal chemist says *"the compound has low IC₅₀"*. These are
+different statements in different vocabularies, and the move
+from one to the other is normally hidden in author judgement —
+exactly where reproducibility failures and AI hallucinations
+hide. The domain-bridge primitive forces that move onto the
+record as a first-class object.
+
+## What a domain bridge is
+
+A domain bridge is a chain-resident `DeclaredResource` whose
+`canonical_proposition` is an implication from one user-defined
+vocabulary into another. In the drug-screening example, the
+bridge formulates the medicinal-chemistry predicate
+`HasLowIC50` and states the implication that links it to the
+statistics vocabulary:
+
+```
+∀ (s : sample-set, c : compound),
+  sample_for(s, c)
+  → stats:lt(stats:mean_of(s), 100 nM)
+  → screen:HasLowIC50(c)
+```
+
+The left of the implication is the language of the statistics
+institution: *"the sample's mean is below 100 nM"*. The right is
+the language of medicinal chemistry: *"the compound has low
+IC₅₀"*. These are different statements; nothing in the chain
+connects them by default. The bridge **is** that connection, on
+the record as a first-class object.
+
+Domain bridges are authored at the **domain layer**, by users —
+they are how a research team writes down its own methodology.
+They are distinct from the institution-level analogue
+([comorphisms](/concepts/institutions/)) which mediate between
+*runtimes* and are declared at institution registration time,
+not by domain users.
+
+## Why it matters
+
+Three structural consequences fall out of making the translation
+a typed chain object:
+
+1. **The translation becomes audit-separate.** A reviewer who
+   disputes the bridge edits the bridge — without disputing the
+   statistics or the literature rule that uses the translated
+   claim. Three independent disputes instead of one tangled one.
+
+2. **One bridge serves the whole campaign.** The bridge above is
+   universal over both sample sets and compounds. A single
+   methodology resource is referenced by every screening sentence
+   in the campaign; specialisation to a particular
+   `(sample-set, compound)` pair happens at certificate-author
+   time.
+
+3. **AI agents cannot route around it.** The kernel's type
+   discipline rejects any composition that takes a statistical
+   conclusion to a domain claim without a typed translation
+   artifact. An AI agent that wants to make the leap must either
+   cite a chain-resident bridge or commit a new one as a
+   `Declared` resource — at which point the bridge is on the
+   record, the agent is the declarer, and a reviewer can examine
+   the asserted methodology directly.
+
+## Where domain bridges sit in the stack
+
+A domain bridge is **declarative**: it states a relationship
+between vocabularies as data. No computation runs at the moment
+the bridge lands on the chain — the kernel only confirms that
+the implication is well-typed against the entities each side
+mentions. The runtime stage, in which the statistical claim
+actually gets computed and the translated domain claim actually
+gets composed with a literature rule into a final conclusion, is
+mediated by [institutions](/concepts/institutions/).
+
+Together the two stages are the **typed integration protocol**:
+
+- **Domain bridges** declare what holds between vocabularies, as
+  flat data the chain stores and the type-checker checks.
+- **Institutions** run the procedures within each vocabulary and
+  dispatch the typed crossings between them.
+
+The drug-screening walkthrough exercises both stages end-to-end:
+the statistics institution emits a statistical claim; the
+chain-resident domain bridge translates it into the
+medicinal-chemistry vocabulary; the reasoning institution
+composes the resulting domain claim with a literature rule.
+
+## In practice
+
+The full drug-screening example uses a polymorphic domain bridge
+with both the `sample_for` premise and the threshold built in.
+Walking the worked example end-to-end shows how the bridge
+composes with the verifier's result, the literature rule, and
+the per-pair sample-for witness to produce a chain-checkable
+conclusion.
+
+- **[Read the drug-screening walkthrough →](/examples/drug-screening/)**
+- **[Institutions](/concepts/institutions/)** — the runtime-side
+  counterpart: how institutions lift domain bridges into live
+  computation and reasoning
+- **[Back to Concepts →](/concepts/)**

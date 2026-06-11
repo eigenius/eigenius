@@ -1,0 +1,157 @@
+---
+// A card for one of the papers (CACM, Science).
+//
+// Props:
+//   - venue: e.g. "CACM"
+//   - title: full paper title
+//   - abstract: one or two sentence summary (omitted when comingSoon)
+//   - href: destination — typically a /research/papers/... slug
+//   - downloadHref: optional direct PDF link (suppressed when comingSoon)
+//   - status: short pill, e.g. "Submission draft"
+//   - comingSoon: if true, suppresses the abstract and download link and
+//     forces a distinguishing "Coming soon" pill. Use when the paper is
+//     still in preparation and we don't want a draft circulating.
+
+interface Props {
+  venue: string;
+  title: string;
+  abstract?: string;
+  href: string;
+  downloadHref?: string;
+  status?: string;
+  comingSoon?: boolean;
+}
+
+const {
+  venue,
+  title,
+  abstract,
+  href,
+  downloadHref,
+  status,
+  comingSoon = false,
+} = Astro.props;
+---
+
+<article class="paper-card">
+  <header>
+    <span class="paper-venue">{venue}</span>
+    {comingSoon ? (
+      <span class="paper-status paper-status-soon">Coming soon</span>
+    ) : (
+      status && <span class="paper-status">{status}</span>
+    )}
+  </header>
+  <h3 class="paper-title">
+    <a href={href}>{title}</a>
+  </h3>
+  {comingSoon ? (
+    <p class="paper-abstract paper-abstract-soon">
+      Abstract, manuscript, and submission details will be posted here
+      when the paper lands at its target venue.
+    </p>
+  ) : (
+    abstract && <p class="paper-abstract">{abstract}</p>
+  )}
+  <footer class="paper-actions">
+    <a class="paper-action paper-action-primary" href={href}>
+      {comingSoon ? "Read what's planned →" : "Abstract & details"}
+    </a>
+    {!comingSoon && downloadHref && (
+      <a class="paper-action" href={downloadHref}>
+        Download PDF
+      </a>
+    )}
+  </footer>
+</article>
+
+<style>
+  .paper-card {
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 0.5rem;
+    background: var(--sl-color-bg-nav);
+    padding: 1.25rem 1.25rem 1rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .paper-card header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .paper-venue {
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--sl-color-text-accent);
+  }
+
+  .paper-status {
+    font-size: 0.7rem;
+    color: var(--sl-color-gray-3);
+    background: var(--sl-color-bg-inline-code);
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+  }
+
+  /* The "Coming soon" pill uses the brand accent at low intensity so
+     it reads as a distinct status — not a draft, not published yet. */
+  .paper-status-soon {
+    color: var(--sl-color-text-accent);
+    background: var(--eigenius-brand-bg);
+    border: 1px solid var(--eigenius-brand-deep);
+    font-weight: 600;
+  }
+
+  .paper-abstract-soon {
+    font-style: italic;
+    color: var(--sl-color-gray-4);
+  }
+
+  .paper-title {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  .paper-title a {
+    color: var(--sl-color-text);
+    text-decoration: none;
+  }
+
+  .paper-title a:hover {
+    color: var(--sl-color-text-accent);
+  }
+
+  .paper-abstract {
+    margin: 0;
+    font-size: 0.88rem;
+    color: var(--sl-color-gray-3);
+    line-height: 1.5;
+  }
+
+  .paper-actions {
+    display: flex;
+    gap: 0.8rem;
+    font-size: 0.85rem;
+  }
+
+  .paper-action {
+    color: var(--sl-color-text-accent);
+    text-decoration: none;
+    font-weight: 500;
+  }
+
+  .paper-action:hover {
+    text-decoration: underline;
+  }
+
+  .paper-action-primary {
+    font-weight: 600;
+  }
+</style>

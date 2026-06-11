@@ -1,0 +1,86 @@
+---
+// One of the three "For X" audience cards on the landing page.
+//
+// Props:
+//   - audience: short label, \eg "For scientists"
+//   - tagline: one-line pitch
+//   - bullets: 2-3 short bullets, what the audience gets out of it
+//   - href: the link's destination
+//   - linkLabel: \eg "Read the worked example →"
+
+interface Props {
+  audience: string;
+  tagline: string;
+  bullets: string[];
+  href: string;
+  linkLabel: string;
+}
+
+const { audience, tagline, bullets, href, linkLabel } = Astro.props;
+---
+
+<a class="audience-card" href={href}>
+  <span class="audience-label">{audience}</span>
+  <p class="audience-tagline">{tagline}</p>
+  <ul class="audience-bullets">
+    {bullets.map((b) => <li>{b}</li>)}
+  </ul>
+  <span class="audience-cta">{linkLabel}</span>
+</a>
+
+<style>
+  .audience-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 1.25rem 1.25rem 1.1rem 1.25rem;
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 0.5rem;
+    background: var(--sl-color-bg-nav);
+    color: var(--sl-color-text);
+    text-decoration: none;
+    transition: border-color 0.15s ease,
+                transform 0.15s ease,
+                background 0.15s ease;
+    min-height: 14rem;
+  }
+
+  .audience-card:hover {
+    border-color: var(--sl-color-accent);
+    transform: translateY(-2px);
+  }
+
+  .audience-label {
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--sl-color-text-accent);
+  }
+
+  .audience-tagline {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  .audience-bullets {
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: 0.88rem;
+    line-height: 1.5;
+    color: var(--sl-color-gray-3);
+  }
+
+  .audience-bullets li + li {
+    margin-top: 0.2rem;
+  }
+
+  .audience-cta {
+    margin-top: auto;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--sl-color-text-accent);
+  }
+</style>

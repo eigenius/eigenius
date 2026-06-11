@@ -1,0 +1,227 @@
+---
+title: Institutions
+description: The seam between two reasoning systems as a first-class formal object. Goguen-Burstall institutions, comorphisms, and the Satisfaction Condition as a typing obligation the kernel discharges at commit.
+---
+
+import YouTubeEmbed from "../../../components/YouTubeEmbed.astro";
+
+When two reasoning systems with different internal vocabularies
+have to cooperate — software with physics, statistics with
+medicinal chemistry, formal proof with simulation — the place
+where they meet is a **seam**. Most systems leave the seam
+implicit: somewhere a user, an export script, or an LLM
+reconstructs the warranty for the crossing on the fly, and the
+warranty exists only as ad-hoc evidence that has to be
+re-derived every time the boundary is crossed. Eigenius treats
+the seam as a first-class formal object instead.
+
+In the sense of [Goguen and
+Burstall](/docs/references/01-cited/#goguen1992), each reasoning
+system plugs in as an **institution** — a logical system with
+its own signatures, sentences, and satisfaction. A seam between two
+systems is then precisely a boundary between two institutions,
+and crossing it is a **comorphism**: a typed,
+structure-preserving translation whose *Satisfaction Condition*
+is exactly the correctness criterion for the crossing. The
+kernel type-checks comorphisms at commit, so the Satisfaction
+Condition becomes a typing obligation the validator discharges,
+not a property the author is trusted to maintain.
+
+<YouTubeEmbed
+  videoId="GC-F1lrDZ8A"
+  title="Eigenius — Bridging the Languages of Truth"
+  description="Combining software, physics, and chemistry requires coordinating runtimes that don't speak the same language. Institutions are the modular dispatch surfaces that let each runtime contribute its discipline without any of them mediating the others."
+/>
+
+## What an institution is
+
+An institution is a packaged dispatch surface that takes a typed
+input and emits a typed verdict. Each "the chain ran a procedure"
+event is mediated by exactly one institution: it owns the
+procedure, it owns the input/output type discipline, and it signs
+the verdict it emits.
+
+An institution declares itself on the chain with:
+
+- ontology resources for its registration,
+- typed `ExportFormat`s and `ImportFormat`s for the boundary,
+- `QueryClass`es for the operations it responds to,
+- `Comorphism`s for typed bridges to other institutions.
+
+The kernel implements three trait methods per institution
+(`extract_typed`, `reify`, `query`) and provides dispatch +
+well-typedness machinery. The category-theoretic Grothendieck
+construction over the diagram of institutions emerges from the
+declarations themselves — the multi-seam fabric appears as a
+single uniform query surface, with the planner routing each
+`FIBER` clause by the *type* of its payload.
+
+The running institutions today:
+
+- **Statistics** — recomputes analysis plans deterministically and
+  emits per-effect derivations with the verifier's computed
+  numerics.
+- **Reasoning** — type-checks proof terms expressed in the
+  reasoning institution's `JustifiedBy` calculus, verifying that
+  compositions of `Declared`, `Observed`, and `Derived` evidence
+  type-check against the proposition the agent claims.
+- **Symbolics / DifferentialEquations / NonlinearSolve / JuMP-HiGHS / Catalyst**
+  — five Julia-runtime institutions that compose to handle
+  kinetic-curve symbolisation, numerical integration, regression
+  fitting, and constraint optimisation respectively.
+- **Lean** (forthcoming) — discharges formal-proof obligations for
+  artifacts that need to land as `Verified` rather than `Derived`.
+
+Each institution is added by chain commit, not by kernel
+modification. The kernel sees only the institution's typed
+dispatch contract; whether the institution's internals are
+written in Rust, Julia, Python, or Lean is invisible to anything
+downstream.
+
+## Comorphisms: the Satisfaction Condition as a typing obligation
+
+A comorphism is **triadic**:
+
+1. an `export_format` that extracts a typed payload of type `S`
+   from a source-class resource,
+2. a transformation `m : S → T` written as a typed EigenTT term,
+3. an `import_format` that reifies a payload of type `T` as a
+   target-class resource.
+
+The kernel statically checks at commit that `m`'s type equals
+`payload(export) → payload(import)`. A type-incorrect comorphism
+never enters the chain.
+
+This is the institution-theoretic Satisfaction Condition taken
+inside the kernel: the correctness criterion for the crossing is
+discharged by the validator as a typing obligation, not by the
+author as a written argument. The warranty for the crossing then
+lives as **content-addressed data** — a hash that uniquely names
+the typed translation — rather than as evidence reconstructed
+every time the boundary is crossed.
+
+The kinase walkthrough showcases comorphism-mediated composition:
+five Julia institutions cooperate via four declared comorphisms,
+each one a typed translation that the chain checks at commit
+time.
+
+**[See the kinase walkthrough →](/examples/kinase-institutions/)**
+
+## How this differs from a knowledge graph
+
+The Grothendieck construction is structurally Codd's move applied
+to institutions rather than to relations — the unification that
+lets one query language range over every domain. Two axes
+separate Eigenius from "yet another knowledge graph":
+
+- **Fibers carry structure.** Where an RDF node is a structureless
+  point, an Eigenius fiber is itself a category with its own
+  internal morphisms — mesh refinement, conformational proximity,
+  proof reduction.
+- **Values carry types.** RDF and the relational model put simple
+  types in the value position, so the planner sees no dependence
+  among values. Eigenius's value position carries EigenTT
+  dependent type information, and the planner dispatches on it:
+  it routes a `FIBER` by the *type* of its payload, which a
+  simply-typed planner cannot see.
+
+In categorical terms RDF is the discretised, **Set**-valued
+Grothendieck construction; Spivak-style categorical databases are
+**Cat**-valued but simply-typed. Eigenius is the corner that is
+both **Cat**-valued (fibers are categories) and dependently typed.
+
+## How institutions lift domain bridges
+
+Crossing between two domains happens in two stages.
+
+The **first stage** is declarative. A [domain
+bridge](/concepts/domain-bridges/) is a chain-resident
+`DeclaredResource` whose canonical proposition states an
+implication between two user-defined vocabularies — for example,
+that a sample-set whose mean is below 100 nM licenses the
+medicinal-chemistry claim *the compound has low IC₅₀*. The
+bridge formulates the entities of the new domain (the predicate
+`HasLowIC50`) and states the implication that links them back to
+the source vocabulary, all as flat data the chain stores and the
+type-checker confirms is well-typed. No computation runs at this
+stage; the bridge just declares *what holds between two
+vocabularies as a matter of definition*.
+
+The **second stage** is where institutions earn their keep. They
+lift that declarative material into live computation and
+reasoning: the statistics institution actually runs the analysis
+plan and emits the verified statistical claim; the reasoning
+institution then composes that claim with the domain bridge to
+produce the medicinal-chemistry conclusion as a typed proof term
+the kernel checks. The bridge said *what follows from what*; the
+institutions *did the work*.
+
+The drug-screening walkthrough exercises both stages end-to-end.
+
+**[See the drug-screening walkthrough →](/examples/drug-screening/)**
+
+The two seam shapes the chain handles, then, are:
+
+- **Vocabularies** — translated by **domain bridges**, authored
+  by users at the domain layer, declared as data.
+- **Runtimes** — translated by **comorphisms**, authored by
+  institution authors at registration time, run as typed
+  transformations on payloads.
+
+Both are first-class chain artifacts; both are checked by the
+kernel at commit; both make the warranty for the crossing live
+as content-addressed data rather than as evidence reconstructed
+each time the seam is crossed.
+
+## Two extensibility paths
+
+An institution runs in one of two host environments, chosen by
+the institution author at registration time:
+
+- **Wasm component**, sandboxed by Wasmtime. Suitable for
+  reasoners that compile cleanly. Components are admitted at one
+  of three **capability levels**: *Pure* (no host imports beyond
+  the core type machinery), *Read* (adds resolution of resources
+  from the layer chain), and *Io* (adds query and IO access,
+  orchestrator-hosted only). An untrusted reasoner can be granted
+  exactly the chain access its job requires and no more.
+- **Content-addressed runtime substrate**, hosting a language
+  ecosystem in a sibling container with typed RPC over
+  Unix-domain sockets. Suitable for institutions wrapping heavy
+  native libraries — ODE integrators, theorem provers,
+  computer-algebra systems. The substrate lifecycle is the same
+  four steps for every institution: *mirror create*, *env build*,
+  *env create*, *institution install*. The five Julia
+  institutions take this path; the authoring side of the Lean 4
+  institution uses it for proof export.
+
+The kernel does not care which path an institution takes — only
+that its typed dispatch contract is honoured.
+
+## Why this matters for AI
+
+The institution boundary is the modularity surface for AI
+tooling. An AI agent that wants to integrate a new kind of
+reasoning — Bayesian inference, ML surrogates, simulation-based
+methods — does not modify the agent or the kernel. It commits a
+new institution. The institution's type discipline says exactly
+what the new reasoning can produce and consume; everything else
+composes through it.
+
+The kernel does not know whether the institution's verdict came
+from a deterministic procedure, a Lean proof, a Monte-Carlo
+simulation, or an LLM acting as an oracle. It knows only that
+the institution emitted a typed verdict and signed it. Anything
+downstream composes through the typed contract; if the contract
+is honoured, the composition type-checks regardless of what
+happened inside the institution.
+
+## What to read next
+
+- **[Domain bridges](/concepts/domain-bridges/)** — the
+  declarative first stage of crossing between domains, that
+  institutions lift into computation and reasoning
+- **[Drug-screening example](/examples/drug-screening/)** — the
+  statistics and reasoning institutions in concert
+- **[Kinase walkthrough](/examples/kinase-institutions/)** — five
+  Julia institutions cooperating via comorphisms

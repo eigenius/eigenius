@@ -1,0 +1,569 @@
+---
+// Landing page — hand-authored, NOT a Starlight docs page.
+//
+// This is what visitors see at the root. It introduces the platform,
+// shows the four-warrant taxonomy, and routes readers to the docs,
+// concepts, examples, or research sections via the audience cards
+// and CTAs.
+//
+// Starlight's <Page> wrapper is intentionally NOT used here — we
+// want full control over the hero and section structure.
+
+import "../styles/custom.css";
+import WarrantMap from "../components/WarrantMap.astro";
+import AudienceCard from "../components/AudienceCard.astro";
+import PaperCard from "../components/PaperCard.astro";
+import YouTubeEmbed from "../components/YouTubeEmbed.astro";
+import logo from "../assets/eigenius_logo_400x400.png";
+import heroBgSrc from "../assets/hero_background.png";
+import { Image, getImage } from "astro:assets";
+
+// Optimise the hero background through Astro's image pipeline.
+// The source PNG is ~5.8 MB; the WebP at display width is a small
+// fraction of that. We pick 2400px so HiDPI laptops at common
+// viewport widths get a sharp render without serving 4K assets.
+const heroBg = await getImage({
+  src: heroBgSrc,
+  format: "webp",
+  width: 2400,
+});
+
+// The landing-page Watch section highlights the platform pitch video.
+// Subsequent videos in the playlist are embedded on the concept
+// pages they correspond to ("Bridging Languages" on /concepts/institutions/,
+// "Feedback Loop" on /concepts/).
+//
+// Source playlist:
+// https://www.youtube.com/playlist?list=PL-qRvF3MpNEfyYnjtM6bhpcrgF6v27BUA
+const PLAYLIST_URL =
+  "https://www.youtube.com/playlist?list=PL-qRvF3MpNEfyYnjtM6bhpcrgF6v27BUA";
+---
+
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Eigenius — a compiler for AI thought</title>
+    <meta
+      name="description"
+      content="A typed knowledge graph that records how scientific claims are reached, not just what is claimed. The chain, not the narrative, carries the warranty."
+    />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+  </head>
+  <body>
+    <!-- ───────── Top nav ───────── -->
+    <nav class="topnav">
+      <a class="topnav-brand" href="/">
+        <Image
+          src={logo}
+          alt="Eigenius"
+          width={28}
+          height={28}
+          loading="eager"
+        />
+        <span>Eigenius</span>
+      </a>
+      <ul class="topnav-links">
+        <li><a href="/concepts/">Concepts</a></li>
+        <li><a href="/examples/">Examples</a></li>
+        <li><a href="/docs/">Docs</a></li>
+        <li><a href="/research/">Research</a></li>
+        <li>
+          <a
+            href="https://github.com/eigenius/eigenius"
+            class="topnav-external"
+          >
+            GitHub <span aria-hidden="true">↗</span>
+          </a>
+        </li>
+      </ul>
+    </nav>
+
+    <!-- ───────── Hero ───────── -->
+    <section
+      class="hero"
+      style={`--hero-bg-image: url(${heroBg.src})`}
+    >
+      <div class="hero-inner">
+        <div class="hero-content">
+          <span class="hero-eyebrow">A compiler for AI thought</span>
+          <h1 class="hero-headline">
+            The chain,<br />not the narrative,<br />carries the warranty.
+          </h1>
+          <p class="hero-pitch">
+            We are handing the keys of science and engineering to autonomous
+            AI agents, but there is a fatal flaw in the architecture:
+            a brilliant analysis and a confident hallucination look exactly
+            the same. Eigenius is a typed knowledge graph that records
+            <em>how</em> something is known &mdash; not just <em>what</em> is known.
+          </p>
+          <div class="hero-actions">
+            <a class="cta cta-primary" href="/examples/drug-screening/">
+              See a worked example
+            </a>
+            <a
+              class="cta cta-secondary"
+              href="https://github.com/eigenius/eigenius"
+            >
+              View on GitHub <span aria-hidden="true">↗</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── The trust gap ───────── -->
+    <section class="section section-trust-gap">
+      <div class="section-inner">
+        <span class="section-eyebrow">The trust gap</span>
+        <h2 class="section-title">
+          Every scientific claim has a reasoning chain.<br />
+          Most of it is invisible.
+        </h2>
+        <p class="section-prose">
+          Consider the sentence <em>&ldquo;EIG_0291 was identified as
+          a strong CDK2 inhibitor (IC₅₀ = 85 ± 5 nM, n = 6).&rdquo;</em>
+          Whether drafted by a human author or by an AI agent, that
+          sentence carries five distinct implicit assertions about
+          measurement, statistics, vocabulary translation, decision
+          rule, and sample attribution. None are visible in the
+          published sentence. Each is load-bearing. Each is where a
+          hallucination or unjustified assumption can hide while
+          looking exactly like the correct article.
+        </p>
+        <p class="section-prose">
+          The accountability surface is binary: either you trust the
+          author, or you don&rsquo;t use the result. At human authoring
+          speed that trade-off was tractable. At LLM authoring speed
+          it is not.
+        </p>
+      </div>
+    </section>
+
+    <!-- ───────── Four warrants ───────── -->
+    <section class="section section-warrants">
+      <div class="section-inner">
+        <span class="section-eyebrow">The structural answer</span>
+        <h2 class="section-title">
+          Every claim lands in one of four warrant categories.
+        </h2>
+        <p class="section-prose">
+          The chain records <em>how</em> a claim is justified. Three
+          warrant kinds are mechanically warranted &mdash; an instrument
+          run, a deterministic computation, or a formal proof &mdash;
+          and can be independently re-executed by anyone with read
+          access. The fourth carries an authoritative warrant: a named
+          declarer is on record, and the citation chain is examinable.
+        </p>
+        <WarrantMap />
+        <p class="section-footnote">
+          The four categories are <em>peers</em>, not a hierarchy.
+          None is more &ldquo;true&rdquo; than the others; they differ
+          in <em>what kind of warrant they carry</em>. The chain
+          doesn&rsquo;t prevent an AI from declaring something false,
+          but it does prevent the AI from passing a declaration off as
+          a mechanical warrant.
+        </p>
+      </div>
+    </section>
+
+    <!-- ───────── Audience cards ───────── -->
+    <section class="section section-audiences">
+      <div class="section-inner">
+        <span class="section-eyebrow">Where to start</span>
+        <h2 class="section-title">
+          Three ways into the platform.
+        </h2>
+        <div class="audience-grid">
+          <AudienceCard
+            audience="For scientists"
+            tagline="A reasoning chain you can walk backward to raw data."
+            bullets={[
+              "Every step from instrument to designation is a typed artifact",
+              "Counterfactual analyses become localised chain edits",
+              "FAIR and ALCOA+ alignment falls out structurally",
+            ]}
+            href="/examples/drug-screening/"
+            linkLabel="Read the worked example →"
+          />
+          <AudienceCard
+            audience="For AI developers"
+            tagline="A type system your agent must justify against."
+            bullets={[
+              "The kernel refuses to commit ill-typed reasoning",
+              "Hallucinations land as Declared evidence, not derivations",
+              "Audit closure becomes a tree-walk, not a re-derivation",
+            ]}
+            href="/concepts/"
+            linkLabel="Read the concepts →"
+          />
+          <AudienceCard
+            audience="For platform engineers"
+            tagline="A modular institution architecture for typed verifiers."
+            bullets={[
+              "Add a new dispatch surface without touching the kernel",
+              "Content-addressed layers, deterministic by construction",
+              "Open source kernel + ESL surface + EigenQL queries",
+            ]}
+            href="/docs/"
+            linkLabel="Read the docs →"
+          />
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── Watch: the platform pitch ───────── -->
+    <section class="section section-watch">
+      <div class="section-inner">
+        <span class="section-eyebrow">Watch</span>
+        <h2 class="section-title">
+          Three minutes on what Eigenius is.
+        </h2>
+        <p class="section-prose">
+          The infrastructure-for-truth pitch in video form.
+          Additional explainers covering specific concepts
+          (cross-vocabulary bridges, AI reasoning verification, kernel
+          design) are embedded on the relevant
+          <a href="/concepts/">Concepts</a> pages, and the
+          <a href={PLAYLIST_URL}>full playlist on YouTube ↗</a> walks
+          through everything.
+        </p>
+        <div class="watch-single">
+          <YouTubeEmbed
+            videoId="33jgEGcPBhs"
+            title="Eigenius — The Infrastructure for Truth"
+            description="The platform pitch: a typed knowledge graph that records how scientific claims are reached, not just what is claimed. The chain, not the narrative, carries the warranty."
+          />
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── Research ───────── -->
+    <section class="section section-research">
+      <div class="section-inner">
+        <span class="section-eyebrow">Research</span>
+        <h2 class="section-title">
+          The case in long form.
+        </h2>
+        <div class="paper-grid">
+          <PaperCard
+            venue="CACM"
+            title="A Compiler for AI Thought: Typed Knowledge Graphs as the Substrate for Auditable Scientific Reasoning"
+            href="/research/papers/cacm-typed-reasoning/"
+            comingSoon
+          />
+          <PaperCard
+            venue="Science"
+            title="Auditing the Conclusion: Making the Reasoning Behind a Scientific Claim Chain-Resident, Machine-Checkable, and Reproducible"
+            href="/research/papers/science-audit-closure/"
+            comingSoon
+          />
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── Footer ───────── -->
+    <footer class="site-footer">
+      <div class="site-footer-inner">
+        <div class="site-footer-brand">
+          <Image src={logo} alt="" width={24} height={24} />
+          <span>Eigenius</span>
+        </div>
+        <ul class="site-footer-links">
+          <li><a href="/concepts/">Concepts</a></li>
+          <li><a href="/examples/">Examples</a></li>
+          <li><a href="/docs/">Docs</a></li>
+          <li><a href="/research/">Research</a></li>
+          <li>
+            <a href="https://github.com/eigenius/eigenius">GitHub ↗</a>
+          </li>
+        </ul>
+        <p class="site-footer-fineprint">
+          Eigenius is open source under the Apache 2.0 license.
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>
+
+<style>
+  /* ───────── Page baseline ───────── */
+  :global(html, body) {
+    margin: 0;
+    padding: 0;
+  }
+
+  :global(body) {
+    background: var(--sl-color-bg);
+    color: var(--sl-color-text);
+    font-family:
+      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif, "Apple Color Emoji",
+      "Segoe UI Emoji";
+    line-height: 1.5;
+  }
+
+  /* ───────── Top nav ───────── */
+  .topnav {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    backdrop-filter: blur(8px);
+    background: color-mix(in srgb, var(--sl-color-bg-nav) 80%, transparent);
+    border-bottom: 1px solid var(--sl-color-hairline);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.8rem 1.5rem;
+  }
+
+  .topnav-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: var(--sl-color-text);
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 1rem;
+    letter-spacing: -0.01em;
+  }
+
+  .topnav-links {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    gap: 1.4rem;
+    align-items: center;
+  }
+
+  .topnav-links a {
+    color: var(--sl-color-gray-3);
+    text-decoration: none;
+    font-size: 0.92rem;
+    font-weight: 500;
+  }
+
+  .topnav-links a:hover {
+    color: var(--sl-color-text-accent);
+  }
+
+  /* ───────── Hero ───────── */
+  .hero {
+    position: relative;
+    border-bottom: 1px solid var(--sl-color-hairline);
+    /* Left-weighted dark gradient on top of the background image:
+       the headline sits on the left and needs near-opaque navy
+       behind it; the right edge can show more of the image so the
+       chain-graph imagery comes through. */
+    background-image:
+      linear-gradient(
+        to right,
+        rgba(20, 24, 31, 0.95) 0%,
+        rgba(20, 24, 31, 0.85) 35%,
+        rgba(20, 24, 31, 0.55) 75%,
+        rgba(20, 24, 31, 0.40) 100%
+      ),
+      var(--hero-bg-image);
+    background-size: cover;
+    background-position: center right;
+    background-repeat: no-repeat;
+  }
+
+  .hero-inner {
+    padding: 5rem 1.5rem 6rem 1.5rem;
+    max-width: 72rem;
+    margin: 0 auto;
+  }
+
+  .hero-content {
+    max-width: 40rem;
+  }
+
+  /* On narrow viewports the headline collides with the right edge
+     of the image — strengthen the overlay so text remains legible. */
+  @media (max-width: 50rem) {
+    .hero {
+      background-image:
+        linear-gradient(
+          to right,
+          rgba(20, 24, 31, 0.92) 0%,
+          rgba(20, 24, 31, 0.78) 100%
+        ),
+        var(--hero-bg-image);
+    }
+  }
+
+  .hero-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1.8rem;
+    flex-wrap: wrap;
+  }
+
+  .cta {
+    display: inline-block;
+    padding: 0.65rem 1.2rem;
+    border-radius: 0.4rem;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.92rem;
+    transition: transform 0.15s ease, background 0.15s ease,
+                border-color 0.15s ease;
+  }
+
+  .cta-primary {
+    background: var(--sl-color-accent);
+    color: white;
+    border: 1px solid var(--sl-color-accent);
+  }
+  .cta-primary:hover {
+    background: var(--sl-color-accent-high);
+    transform: translateY(-1px);
+  }
+
+  .cta-secondary {
+    color: var(--sl-color-text);
+    border: 1px solid var(--sl-color-hairline);
+    background: transparent;
+  }
+  .cta-secondary:hover {
+    border-color: var(--sl-color-accent);
+    color: var(--sl-color-text-accent);
+  }
+
+  /* ───────── Sections ───────── */
+  .section {
+    padding: 4rem 1.5rem;
+    border-top: 1px solid var(--sl-color-hairline);
+  }
+
+  .section-trust-gap {
+    background: color-mix(in srgb, var(--sl-color-bg-nav) 50%, transparent);
+  }
+
+  .section-inner {
+    max-width: 72rem;
+    margin: 0 auto;
+  }
+
+  .section-eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--sl-color-text-accent);
+  }
+
+  .section-title {
+    font-size: clamp(1.6rem, 3vw, 2.2rem);
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    line-height: 1.2;
+    margin: 0.4rem 0 1.4rem 0;
+    max-width: 36ch;
+  }
+
+  .section-prose {
+    font-size: 1.02rem;
+    line-height: 1.65;
+    color: var(--sl-color-gray-3);
+    max-width: 56ch;
+  }
+
+  .section-prose + .section-prose {
+    margin-top: 1rem;
+  }
+
+  .section-footnote {
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--sl-color-gray-3);
+    max-width: 56ch;
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px dashed var(--sl-color-hairline);
+  }
+
+  /* ───────── Audience grid ───────── */
+  .audience-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+
+  @media (max-width: 60rem) {
+    .audience-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  /* ───────── Watch (single centered video) ───────── */
+  .watch-single {
+    max-width: 48rem;
+    margin: 1.4rem auto 0 auto;
+  }
+
+  /* ───────── Paper grid ───────── */
+  .paper-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+
+  @media (max-width: 50rem) {
+    .paper-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  /* ───────── Footer ───────── */
+  .site-footer {
+    border-top: 1px solid var(--sl-color-hairline);
+    padding: 2rem 1.5rem 3rem 1.5rem;
+    background: var(--sl-color-bg-nav);
+  }
+
+  .site-footer-inner {
+    max-width: 72rem;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    align-items: flex-start;
+  }
+
+  .site-footer-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 700;
+  }
+
+  .site-footer-links {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    gap: 1.4rem;
+    flex-wrap: wrap;
+  }
+
+  .site-footer-links a {
+    color: var(--sl-color-gray-3);
+    text-decoration: none;
+    font-size: 0.9rem;
+  }
+
+  .site-footer-links a:hover {
+    color: var(--sl-color-text-accent);
+  }
+
+  .site-footer-fineprint {
+    margin: 0;
+    color: var(--sl-color-gray-4);
+    font-size: 0.85rem;
+  }
+</style>

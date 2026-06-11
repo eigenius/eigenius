@@ -1,0 +1,240 @@
+---
+title: Drug-screening walkthrough
+description: A medicinal chemist takes six IC50 plate readings of EIG_0291 and asks the chain to attest that the compound is a strong CDK2 inhibitor — mechanically, with every premise traceable back to the raw data.
+---
+
+import WarrantMap from "../../../components/WarrantMap.astro";
+
+A medicinal chemist runs a kinase-selectivity screen against CDK2.
+A confirmatory plate produces six IC₅₀ readings of compound
+EIG_0291: 78, 82, 85, 88, 91, and 86 nM. The chemist wants the
+chain to attest *"EIG_0291 is a strong CDK2 inhibitor"* — and to
+attest it **mechanically**, with every premise traceable back to
+the raw plate readings.
+
+This walkthrough shows how that conclusion lands as a chain
+commit with a typed audit closure. The chemist commits raw data,
+methodology, and a literature rule; the platform's institutions
+do the rest. The conclusion is then independently verifiable by
+any reviewer with read access — no trust in the author required.
+
+## The audit gap
+
+Without the chain, the conclusion *"EIG_0291 is a strong CDK2
+inhibitor (IC₅₀ = 85 ± 5 nM, n = 6)"* hides five load-bearing
+assertions in a single sentence:
+
+| # | Implicit assertion | What goes wrong if it's wrong |
+|---|---|---|
+| 1 | The six readings actually exist | Fabricated or copy-pasted data |
+| 2 | A statistical test ran with appropriate α and directionality | Inappropriate test selection or p-hacking |
+| 3 | "Sample mean below 100 nM" was translated to "low IC₅₀" | The translation may not hold for this assay |
+| 4 | A literature rule that "low IC₅₀ ⇒ strong inhibitor" was cited | Wrong citation, or rule doesn't apply to this target |
+| 5 | The six readings actually correspond to compound EIG_0291 | Sample mix-up at plate-load time |
+
+The published sentence is silent on all five. A reviewer can only
+re-derive the chain by hand — typically by reading the lab
+notebook, hunting down the assay protocol, finding the original
+plate-reader file, asking the author which review article was
+intended, and chasing every step in sequence. This is the audit
+gap the chain replaces with a mechanical tree-walk.
+
+## The chain commits
+
+Six chain artifacts (plus a few traces) together make the
+conclusion mechanically reachable. Each carries one of the four
+warrant categories:
+
+<WarrantMap />
+
+The seven commits are:
+
+### 1. Domain vocabulary
+
+The chemist declares two predicates the chain will compose over:
+`HasLowIC50(c)` and `StrongInhibitor(c)`, both as
+*population-level* properties. The `PopulationLevel` mark is what
+licenses the statistics institution to admit claims about these
+properties under biological replication (the experimental
+discipline that makes a sample-mean estimate a meaningful
+population statement). A third predicate, `sample_for(s, c)`,
+declares the relationship between a sample-set identifier and a
+compound identifier — the lab-bookkeeping fact that ties a row of
+plate readings to a particular molecule.
+
+These are **Declared** artifacts: the chemist is on record as the
+declarer, and the predicates are now part of the chain's shared
+vocabulary.
+
+### 2. The raw plate readings
+
+Six IC₅₀ readings (78, 82, 85, 88, 91, 86 nM) commit to the chain
+as a `SampleSet` resource, paired with an *observation trace*
+linking to the Kinase-Glo plate-reader instrument log. The trace
+is the audit fingerprint: instrument identifier, run timestamp,
+operator.
+
+This is the **Observed** artifact — warranted by the instrument
+run. Any reviewer can pull the original plate file and confirm
+the readings byte-for-byte.
+
+### 3. The impossibility witness
+
+Why one-sided statistical inference is licensed for this assay.
+A *methodology argument* — encoded as a `DeclaredResource` — that
+the Kinase-Glo E\_max plateau biologically excludes the inverse
+direction (mean IC₅₀ above the assay-class threshold). Without
+this witness on chain, the statistics institution would reject
+the one-sided test as structurally inadmissible. The argument is
+authored once per assay class; every screen using the same assay
+protocol references it.
+
+This is a **Declared** artifact whose authority chain is the
+methodology document the lab follows.
+
+### 4. The statistical analysis plan (SAP)
+
+A `StatisticalAnalysisPlan` resource carries the analysis recipe:
+α = 0.05, threshold = 100 nM, one-sided directionality (citing the
+impossibility witness above), Welch variance assumption,
+identity outlier exclusion. The SAP **does not** state the
+conclusion — it states the procedure that will determine the
+conclusion.
+
+When the SAP commits, the statistics institution's automatic
+verifier runs. It deterministically re-runs the analysis on the
+raw readings and emits a per-effect `StatisticalAnalysisResult`
+derivation whose `canonical_proposition` is the strictly
+statistical claim *"the sample mean of `m_eig0291_sampleset` is
+below 100 nM"*. The verdict is `Holds`.
+
+This is the **Derived** artifact — warranted by the deterministic
+procedure. Any reviewer can independently re-run the verifier on
+the same SAP plus the same readings and reach the same
+byte-identical result.
+
+### 5. The sample-for fact
+
+A per-pair `DeclaredResource` recording that
+`sample_for(m_eig0291_sampleset, EIG_0291)` — the assay
+technician confirms at plate-load time that this sample set is a
+measurement of this compound. Pure relationship fact; no
+methodology, no statistics. Lifts the lab-bookkeeping out of the
+author's head and onto the chain with the technician on record.
+
+Another **Declared** artifact, this time at the per-pair scale.
+One such resource per (sample-set, compound) pair the campaign
+considers; mechanically cheap to author.
+
+### 6. The domain bridge
+
+The statistics institution's output is a *strictly statistical*
+claim — about a sample set's mean. The literature decision rule
+speaks the *domain* vocabulary — about a compound's
+classification. The **domain bridge** translates between them: a
+polymorphic `DeclaredResource` whose canonical proposition reads
+
+```
+∀ (s : sample-set, c : compound),
+  sample_for(s, c)
+  → stats:lt(stats:mean_of(s), 100 nM)
+  → screen:HasLowIC50(c)
+```
+
+The bridge is universal — one resource serves the whole campaign.
+Its authority chain is the medicinal-chemistry convention that
+*"a sample's mean IC₅₀ being statistically below 100 nM at this
+target classifies the compound as having low IC₅₀."* A reviewer
+who disputes this bridge — who thinks the threshold should be
+50 nM, or that the translation requires additional premises —
+edits the bridge without disputing either the statistics or the
+literature rule. The three are now audit-separate concerns.
+
+The domain bridge is the load-bearing structural move the chain
+offers over conventional publication: this translation is
+normally buried in author judgement. The chain makes it citable
+and refutable on its own terms.
+[Read more about the domain-bridge concept →](/concepts/domain-bridges/)
+
+### 7. The literature rule
+
+The standard pharmacology decision rule, as a `DeclaredResource`:
+*"for any compound, if it has low IC₅₀ at this kinase target, then
+it is a strong inhibitor."* Universal over compounds. The
+methodology citation lives on the artifact's `declared_by` slot.
+Same rule applies to every compound the campaign considers.
+
+A **Declared** artifact whose authority chain is the cited
+review article.
+
+### 8. The reasoning sentence
+
+The chemist commits a `ReasoningSentence` whose proposition is
+*"EIG_0291 is a strong CDK2 inhibitor"* and whose certificate is
+the explicit composition of all of the above: the verifier's
+statistical result is applied to the bridge (specialised at the
+sample-set and compound); the resulting domain claim is applied
+to the literature rule (specialised at the compound); the
+conclusion follows. The reasoning institution type-checks the
+composition at commit time. Every link must be on chain; every
+type must fit. If any step is missing or wrong, the commit
+rejects.
+
+The resulting verdict is **Derived** — warranted by the kernel's
+type-checking. The audit closure of *"EIG_0291 is a strong CDK2
+inhibitor"* is now the backward tree-walk through the seven
+commits above, ending at the six raw plate readings.
+
+## What the conclusion now carries
+
+Three things a reviewer (or another AI agent, or a regulator) can
+do that they could not do with the published sentence:
+
+1. **Walk back to the raw data in six steps.** Each commit is one
+   tree-edge backward. No interpretation; the trail *is* the
+   chain.
+2. **Re-execute any single step.** The statistical verifier is
+   deterministic. The instrument run is logged. The reviewer can
+   independently rerun any `Derived` step or audit any `Declared`
+   step's authority chain.
+3. **Refute any single premise without disputing the rest.** If
+   the reviewer thinks the threshold should be 50 nM, they commit
+   a new bridge with the new threshold; the rest of the chain
+   composes against the new bridge. No need to redo the
+   statistics or re-author the literature rule. The dispute is
+   localised.
+
+The chain doesn't make the chemist right; it makes the chemist's
+reasoning machine-checkable. If the chemist (or an AI agent
+contributing to the campaign) is wrong, the wrongness localises
+to a specific commit with a specific declarer on record.
+
+## Try it
+
+The full worked example is the end-to-end notebook at
+`notebooks/examples/stats-and-reasoning.json`. Bring the docker
+compose stack up, run the notebook cells in order, and watch
+each commit fire — including the AutoOnLoad cascades that emit
+the verifier's verdict and the reasoning institution's
+type-check verdict.
+
+The integration test that exercises the same fixture
+deterministically (without the docker stack) is
+`crates/eigenius-statistics/tests/d39_composition.rs`. Run
+`cargo test -p eigenius-statistics --test d39_composition` from
+the repo root to confirm the cert type-checks and the conclusion
+commits.
+
+## What to read next
+
+- **[Domain bridges (concepts) →](/concepts/domain-bridges/)** —
+  the cross-vocabulary translation primitive in depth: the
+  declarative first stage of crossing between two domains
+- **[Institutions (concepts) →](/concepts/institutions/)** — how
+  institutions lift domain bridges from declarative data into
+  live computation and reasoning
+- **[Kinase walkthrough →](/examples/kinase-institutions/)** —
+  the same composition discipline at the runtime seam
+  (comorphisms instead of domain bridges)
+- **[Concepts overview →](/concepts/)** — the four-warrant
+  taxonomy and the broader framework
