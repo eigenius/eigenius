@@ -12,7 +12,7 @@ Five chain commits accomplish this:
 
 1. Declare the domain predicates (`HasLowIC50`, `StrongInhibitor`) in the chain ontology, both marked `is_a stats:PopulationLevel` per [D52 §7.4](../platform/statistics-institution/README.md#7-4-opinionated-stance-technicalonly-replicates-cannot-support-populationlevel-propositions).
 2. Commit a `stats:SampleSetResource` carrying the three raw IC50 readings via `stats:SingleSampleEstimate(...)`, paired with an `ObservationTrace`.
-3. Commit a `stats:MeasurementClaim` against the SampleSet asserting the 100 nM threshold (alpha = 0.05, TwoSided, WelchUnequal, Identity exclusion), paired with a `ProgramTrace`. The D52 institution's AutoOnLoad gate recomputes the claim and emits a `Verdict::Holds`; the chain-witness index admits `IsDerivedAs(claim_iri, HasLowIC50(EIG_0291))`.
+3. Commit a `stats:StatisticalAnalysisPlan` against the SampleSet asserting the 100 nM threshold (alpha = 0.05, TwoSided, WelchUnequal, Identity exclusion), paired with a `ProgramTrace`. The D52 institution's AutoOnLoad gate recomputes the claim and emits a `Verdict::Holds`; the chain-witness index admits `IsDerivedAs(claim_iri, HasLowIC50(EIG_0291))`.
 4. Commit the literature rule as a `reflection:DeclaredResource` whose `canonical_proposition` is `HasLowIC50(EIG_0291) -> StrongInhibitor(EIG_0291)`, paired with a `DeclarationTrace`. The chain-witness index admits `IsDeclaredAs(rule_iri, HasLowIC50 -> StrongInhibitor)`.
 5. Commit a `reasoning:ReasoningSentence` whose justification is `App(DeclaredEvidence(rule_iri), DerivedEvidence(claim_iri))` and whose certificate is the matching `JustifiedBy.app` term. The D39 institution's AutoOnLoad gate type-checks the certificate against `JustifiedBy(justification, StrongInhibitor(EIG_0291))`; both grounding constructors consume the admitted witnesses; verdict is Holds; the sentence is admitted.
 
@@ -25,7 +25,7 @@ No comorphism is declared between the two institutions. No bridge code runs to t
 | `screen:HasLowIC50`, `screen:StrongInhibitor` (`data : ... -> Prop, stats:PopulationLevel`) | Domain predicates. The multi-class header puts both `is_a InductiveType` (implicit) and `is_a stats:PopulationLevel` on the resource so D52's §7.4 check admits the claim under BiologicalReplication. |
 | `screen:m_eig0291_sampleset` (`stats:SampleSetResource`) | Holds the three raw IC50 reads. `stats:SingleSampleEstimate([72.0, 85.0, 100.0], BiologicalReplication())` lands at the SingleSampleEstimate dispatch position. |
 | `screen:m_eig0291_sampleset_trace` (`reflection:ObservationTrace`) | Pairs the SampleSet with its bench provenance. Admits `IsObservedAs` for downstream auditability (D49 §6). |
-| `screen:claim_eig0291_lowic50` (`stats:MeasurementClaim`) | The universal-claim schema: alpha, effect_size, directionality, variance_assumption, outlier_exclusion. Its `canonical_proposition` is `HasLowIC50(EIG_0291)`. AutoOnLoad-gated by D52. |
+| `screen:claim_eig0291_lowic50` (`stats:StatisticalAnalysisPlan`) | The universal-claim schema: alpha, effect_size, directionality, variance_assumption, outlier_exclusion. Its `canonical_proposition` is `HasLowIC50(EIG_0291)`. AutoOnLoad-gated by D52. |
 | `screen:claim_eig0291_lowic50_trace` (`reflection:ProgramTrace`) | Pairs the claim with the statistics-institution validator. Admits `IsDerivedAs(claim_iri, HasLowIC50(EIG_0291))` once the claim's canonical_proposition is on chain. |
 | `screen:rule_strong` (`reflection:DeclaredResource`) | The literature rule. `canonical_proposition` is `HasLowIC50 -> StrongInhibitor`. |
 | `screen:rule_strong_trace` (`reflection:DeclarationTrace`) | Admits `IsDeclaredAs(rule_iri, HasLowIC50 -> StrongInhibitor)`. |
@@ -44,7 +44,7 @@ data screen:StrongInhibitor : core:string -> Prop, stats:PopulationLevel { }
 
 Each `data` declaration commits a `core:InductiveType` resource whose `core:is_a` array carries `[core:InductiveType, stats:PopulationLevel]`. No AutoOnLoad fires — these are pure ontology declarations.
 
-The `stats:PopulationLevel` marker is what D52's §7.4 epistemic-scope check will read at MeasurementClaim admissibility time to decide whether a `TechnicalWithinRun` replication would be rejected. (Here the SampleSet uses `BiologicalReplication`, so the check passes regardless of the marker; the marker is load-bearing in the parallel `TechnicalWithinRun` fixture variant.)
+The `stats:PopulationLevel` marker is what D52's §7.4 epistemic-scope check will read at StatisticalAnalysisPlan admissibility time to decide whether a `TechnicalWithinRun` replication would be rejected. (Here the SampleSet uses `BiologicalReplication`, so the check passes regardless of the marker; the marker is load-bearing in the parallel `TechnicalWithinRun` fixture variant.)
 
 ### Step 2 — SampleSet + ObservationTrace land in the layer
 
@@ -68,12 +68,12 @@ resource screen:m_eig0291_sampleset_trace : reflection:ObservationTrace {
 
 `stats:SingleSampleEstimate(...)` is a [macro](../esl/04-declarations.md#4-9-macro-compile-time-smart-constructors-d52-12) declared in the statistics ontology layer; the compiler picks it up via `compile_against_layer` ([§6.5.4](../esl/06-resources-types-and-the-layer.md#6-5-4-cross-file-macro-and-axiom-visibility-compile_against_layer)) and expands it at compile time to a `Bundle(CompleteRandom(), Unblocked(), NoFactor(), BiologicalReplication(), CrossSectional(), Units([]), Columns([]), Entries([]), [72.0, 85.0, 100.0])`. That's the chain wire shape the SampleSetResource carries.
 
-No AutoOnLoad fires on the SampleSetResource itself — D52's gate is on `MeasurementClaim`, not on `SampleSetResource`. The trace pairing it admits `IsObservedAs(sampleset_iri, ...)` in the witness index, but no D39 sentence in this fixture cites the SampleSet directly via `ObservedEvidence` (the reasoning chain goes through the claim's `DerivedEvidence` instead), so the IsObservedAs witness is unused.
+No AutoOnLoad fires on the SampleSetResource itself — D52's gate is on `StatisticalAnalysisPlan`, not on `SampleSetResource`. The trace pairing it admits `IsObservedAs(sampleset_iri, ...)` in the witness index, but no D39 sentence in this fixture cites the SampleSet directly via `ObservedEvidence` (the reasoning chain goes through the claim's `DerivedEvidence` instead), so the IsObservedAs witness is unused.
 
-### Step 3 — MeasurementClaim + ProgramTrace land; D52 AutoOnLoad fires
+### Step 3 — StatisticalAnalysisPlan + ProgramTrace land; D52 AutoOnLoad fires
 
 ```esl
-resource screen:claim_eig0291_lowic50 : stats:MeasurementClaim {
+resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
     stats:sample_set = screen:m_eig0291_sampleset;
 
     stats:null_hypothesis = type_expr(
@@ -95,12 +95,12 @@ resource screen:claim_eig0291_lowic50 : stats:MeasurementClaim {
 
 resource screen:claim_eig0291_lowic50_trace : reflection:ProgramTrace {
     reflection:resource  = screen:claim_eig0291_lowic50;
-    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:source    = "statistics-institution:validate_analysis_plan";
     reflection:timestamp = "2026-03-04T14:22:11Z";
 }
 ```
 
-The MeasurementClaim commit triggers D52's `validate_measurement_claim` AutoOnLoad gate. The gate runs the [four-step check](../platform/statistics-institution/README.md#the-four-step-validate_measurement_claim-check):
+The StatisticalAnalysisPlan commit triggers D52's `validate_analysis_plan` AutoOnLoad gate. The gate runs the [four-step check](../platform/statistics-institution/README.md#the-four-step-validate_analysis_plan-check):
 
 1. Resolve `sample_set` → `m_eig0291_sampleset` → decode the `Bundle(...)` ctor.
 2. Read claim parameters; `OneSidedWitnessed` not asserted, so no impossibility-witness lookup.
@@ -210,7 +210,7 @@ The reasoning sentence is itself a `DerivedResource` (the `ReasoningSentence : D
 
 Two AutoOnLoad gates fire in this commit sequence:
 
-1. **D52 fires on MeasurementClaim commit (step 3).** Recomputes the claim, emits Verdict + RuntimeInvocation. As a side effect of the trace + canonical_proposition pair being on chain, the witness index admits the `IsDerivedAs` entry.
+1. **D52 fires on StatisticalAnalysisPlan commit (step 3).** Recomputes the claim, emits Verdict + RuntimeInvocation. As a side effect of the trace + canonical_proposition pair being on chain, the witness index admits the `IsDerivedAs` entry.
 2. **D39 fires on ReasoningSentence commit (step 5).** Type-checks the certificate, consults the witness index for the `IsDeclaredAs` (from step 4) and `IsDerivedAs` (from step 3) entries, finds both, admits the certificate, emits Verdict + RuntimeInvocation.
 
 The cascade is mechanical, not coordinated. D52 doesn't know D39 is about to fire; D39 doesn't know D52 ran. They share the chain artifact shape (`DerivedResource` + `ProgramTrace` + `canonical_proposition`) that the witness index reads from. The composition emerges from each institution honouring the shared chain shape independently. See [§4.2 "The D52 → D39 cascade"](04-dispatch-roles-in-concert.md#the-d52--d39-cascade) for the dispatch-role framing of this.
@@ -273,7 +273,7 @@ RETURN [] { verdict: ?c, t: ?t, p: ?p }
 
 ```eigenql
 // Walk back to the raw IC50 readings
-MATCH "urn:eigenius:measurements:MeasurementClaim"(?c) {
+MATCH "urn:eigenius:measurements:StatisticalAnalysisPlan"(?c) {
     "@id": "urn:eigenius:demo:screen:claim_eig0291_lowic50",
     "urn:eigenius:measurements:sample_set": ?ss
 }
@@ -301,7 +301,7 @@ Each of the next chapter's patterns ([chapter 8](08-patterns.md)) has a concrete
 
 - **Sharing a payload vs. declaring a converter** ([§8.1](08-patterns.md#8-1-sharing-a-payload-vs-declaring-a-converter)) — `core:EigenTTType` as a shared payload between D52 and D39; no comorphism declared.
 - **AutoOnLoad vs. OnDemand** ([§8.3](08-patterns.md#8-3-autoonload-vs-ondemand)) — both D52 and D39 fire AutoOnLoad; the cascade is the composition.
-- **Chain reinsertion vs. transient overlay** ([§8.4](08-patterns.md#8-4-chain-reinsertion-vs-transient-overlay)) — the D52 verdict is reinserted as a chain resource (the MeasurementClaim is itself the DerivedResource), making it citable by D39. Without reinsertion, the witness index would have nothing to read.
+- **Chain reinsertion vs. transient overlay** ([§8.4](08-patterns.md#8-4-chain-reinsertion-vs-transient-overlay)) — the D52 verdict is reinserted as a chain resource (the StatisticalAnalysisPlan is itself the DerivedResource), making it citable by D39. Without reinsertion, the witness index would have nothing to read.
 
 The corresponding failure modes ([chapter 9](09-failure-modes.md)) also have direct instances:
 

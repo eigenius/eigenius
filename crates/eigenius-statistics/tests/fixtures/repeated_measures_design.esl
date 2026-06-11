@@ -83,18 +83,10 @@ resource pk:clearance_study_trace : reflection:ObservationTrace {
     reflection:timestamp = "2026-05-15T08:00:00Z";
 }
 
-// ─── The repeated-measures MeasurementClaim ────────────────────────
+// ─── The repeated-measures StatisticalAnalysisPlan ────────────────────────
 
-resource pk:claim_drug_clears_over_time : stats:MeasurementClaim {
+resource pk:claim_drug_clears_over_time : stats:StatisticalAnalysisPlan {
     stats:sample_set = pk:clearance_study_2026_05_15;
-
-    stats:null_hypothesis = type_expr(
-        pk:DrugClearanceOverTime("urn:eigenius:demo:pk:study_2026_05_15")
-    );
-
-    stats:alternative_hypothesis = type_expr(
-        pk:DrugClearanceOverTime("urn:eigenius:demo:pk:study_2026_05_15")
-    );
 
     reflection:canonical_proposition = type_expr(
         pk:DrugClearanceOverTime("urn:eigenius:demo:pk:study_2026_05_15")
@@ -115,6 +107,6 @@ resource pk:claim_drug_clears_over_time : stats:MeasurementClaim {
 
 resource pk:claim_drug_clears_over_time_trace : reflection:ProgramTrace {
     reflection:resource  = pk:claim_drug_clears_over_time;
-    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:source    = "statistics-institution:validate_analysis_plan";
     reflection:timestamp = "2026-05-15T08:00:00Z";
 }

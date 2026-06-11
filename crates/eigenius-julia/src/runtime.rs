@@ -60,6 +60,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 static INVOCATION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Return shape of [`JuliaRuntime::dispatch_typed_method`]:
+/// `(output_cbor, derivations_cbor, dispatched_to)`.
+type DispatchTypedMethodOutput = (Vec<u8>, Vec<Vec<u8>>, Option<String>);
+
 /// `LanguageRuntime` impl that runs the Julia worker as a long-lived
 /// **service** (D26 §8.1 Service lifecycle). The substrate calls this
 /// through the language registry whenever a `RuntimeScript` /
@@ -401,6 +405,7 @@ impl LanguageRuntime for JuliaLanguageRuntime {
 
         Ok(RunOutcome {
             output: build_output_resource(&invocation_id, stdout),
+            derivations: Vec::new(),
             image_digest,
             started_at,
             completed_at,
@@ -460,7 +465,7 @@ impl LanguageRuntime for JuliaLanguageRuntime {
             .ensure_service(digest)
             .map_err(|e| RunError::WorkerRpcFailed(format!("ensure_service: {e}")))?;
         let (numerical_metadata, image_digest) = self.capture_health(&service);
-        let (output_bytes, dispatched_to) =
+        let (output_bytes, derivation_byte_lists, dispatched_to) =
             self.dispatch_typed_method(&service, target_cbor, input_payloads, invocation_id)?;
 
         let completed_at = DispatchTrace::now_rfc3339();
@@ -472,8 +477,22 @@ impl LanguageRuntime for JuliaLanguageRuntime {
             RunError::WorkerRpcFailed(format!("decode worker output as Eigon resource: {e}"))
         })?;
 
+        // 4. Decode each per-effect derivation the Julia institution
+        // emitted (D52 §6 — InstitutionEmittedDerivation). Empty for
+        // institutions whose only job is the pass/fail gate.
+        let mut derivations = Vec::with_capacity(derivation_byte_lists.len());
+        for (i, bytes) in derivation_byte_lists.iter().enumerate() {
+            let r = eigon_cbor::parse_resource_lenient(bytes).map_err(|e| {
+                RunError::WorkerRpcFailed(format!(
+                    "decode worker derivation #{i} as Eigon resource: {e}"
+                ))
+            })?;
+            derivations.push(r);
+        }
+
         Ok(RunOutcome {
             output,
+            derivations,
             image_digest,
             started_at,
             completed_at,
@@ -698,15 +717,16 @@ impl JuliaLanguageRuntime {
 
     /// Dispatch a typed method call through the warm service. Returns
     /// the raw output bytes (a CBOR-encoded mirror dict that the
-    /// caller decodes against the signature's `output_type`) and the
-    /// `dispatched_to` string captured by the worker via `which()`.
+    /// caller decodes against the signature's `output_type`) plus
+    /// per-derivation payloads and the `dispatched_to` string
+    /// captured by the worker via `which()`.
     fn dispatch_typed_method(
         &self,
         service: &ServiceHandle,
         target_cbor: Vec<u8>,
         input_payloads: Vec<ByteBuf>,
         invocation_id: String,
-    ) -> Result<(Vec<u8>, Option<String>), RunError> {
+    ) -> Result<DispatchTypedMethodOutput, RunError> {
         let stream = self.spawner.attach_uds(service).map_err(|e| {
             RunError::WorkerRpcFailed(format!(
                 "attach_uds for call_method on service {}: {e}",
@@ -725,9 +745,13 @@ impl JuliaLanguageRuntime {
         let result = match resp {
             Response::DispatchOk {
                 output,
+                derivations,
                 dispatched_to,
                 ..
-            } => Ok((output.into_vec(), dispatched_to)),
+            } => {
+                let derivation_bytes = derivations.into_iter().map(ByteBuf::into_vec).collect();
+                Ok((output.into_vec(), derivation_bytes, dispatched_to))
+            }
             Response::DispatchFailed {
                 error_kind,
                 message,

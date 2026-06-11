@@ -324,6 +324,13 @@ pub struct Layer {
     /// persisted — the Layer's content hash transitively covers it via
     /// the Trace resources themselves.
     witness_index: std::sync::OnceLock<std::collections::BTreeMap<crate::witness::WitnessKey, ()>>,
+    /// D46 §10 axiom environment — the materialised projection of this
+    /// Layer's `eigentt:Axiom` chain resources into typed bindings.
+    /// Lazily built on first call to `axiom_env()`. Pure deterministic
+    /// function of the layer's resources, so the env is recomputable and
+    /// not persisted separately. Parallels `witness_index` in shape and
+    /// rationale.
+    axiom_env: std::sync::OnceLock<std::sync::Arc<crate::program::axiom_env::AxiomEnv>>,
 }
 
 impl fmt::Debug for Layer {
@@ -368,6 +375,7 @@ impl Layer {
             redirect_target: None,
             created_at: handle.created_at,
             witness_index: std::sync::OnceLock::new(),
+            axiom_env: std::sync::OnceLock::new(),
         }
     }
 
@@ -394,6 +402,7 @@ impl Layer {
             redirect_target: None,
             created_at: handle.created_at,
             witness_index: std::sync::OnceLock::new(),
+            axiom_env: std::sync::OnceLock::new(),
         }
     }
 
@@ -480,6 +489,38 @@ impl Layer {
     ) -> &std::collections::BTreeMap<crate::witness::WitnessKey, ()> {
         self.witness_index
             .get_or_init(|| witness_index::build_witness_index(self))
+    }
+
+    /// D46 §10 — axiom environment for this layer chain. Walks the
+    /// chain, collects every `eigentt:Axiom` resource, decodes its
+    /// `axiom_statement` to an `Exp`, type-checks the statement to
+    /// recover a `Val`, and returns the `IRI → AxiomEntry` mapping.
+    /// Lazily built on first call; subsequent calls hand back the same
+    /// `Arc`. Same lifecycle as `chain_witness_index` — pure function
+    /// of chain contents, not persisted, recomputable.
+    ///
+    /// `build_axiom_env` needs `&Arc<Layer>` (it calls `decode_type` /
+    /// `check_infer`, which both plumb the layer through recursive
+    /// invocations). We therefore require the method receiver to be
+    /// `&Arc<Self>` rather than `&Self` — same shape `Layer` already
+    /// uses in `ExecutionContext::head`.
+    ///
+    /// On a malformed axiom (decode failure, statement that doesn't
+    /// type-check), this returns an `AxiomEnv` containing only the
+    /// axioms that DID admit. The malformed axioms are dropped; chain
+    /// validation should have caught them at ingest time, so reaching
+    /// this code path with a bad axiom is a defensive fallback. Callers
+    /// that need the strict error-surfaced view call
+    /// `crate::program::axiom_env::build_axiom_env(self)` directly.
+    pub fn axiom_env(
+        self: &std::sync::Arc<Self>,
+    ) -> std::sync::Arc<crate::program::axiom_env::AxiomEnv> {
+        let env = self.axiom_env.get_or_init(|| {
+            std::sync::Arc::new(
+                crate::program::axiom_env::build_axiom_env(self).unwrap_or_default(),
+            )
+        });
+        std::sync::Arc::clone(env)
     }
 
     /// Test-only helper that sets the witness index directly instead of
@@ -935,6 +976,7 @@ impl LayerBuilder {
             // `now_millis()` themselves and drifting from this value).
             created_at: now_millis(),
             witness_index: std::sync::OnceLock::new(),
+            axiom_env: std::sync::OnceLock::new(),
         };
         // Phase 14h: pre-populate the triple index from the layer's
         // indexable triples. `extract_indexable_triples` consults each

@@ -56,18 +56,10 @@ resource bp:trial_trace : reflection:ObservationTrace {
     reflection:timestamp = "2026-03-20T09:00:00Z";
 }
 
-// ─── The paired-design MeasurementClaim ────────────────────────────
+// ─── The paired-design StatisticalAnalysisPlan ────────────────────────────
 
-resource bp:claim_treatment_lowers_bp : stats:MeasurementClaim {
+resource bp:claim_treatment_lowers_bp : stats:StatisticalAnalysisPlan {
     stats:sample_set = bp:trial_2026_03_20;
-
-    stats:null_hypothesis = type_expr(
-        bp:TreatmentChangesBP("urn:eigenius:demo:bp:drug_Y")
-    );
-
-    stats:alternative_hypothesis = type_expr(
-        bp:TreatmentChangesBP("urn:eigenius:demo:bp:drug_Y")
-    );
 
     reflection:canonical_proposition = type_expr(
         bp:TreatmentChangesBP("urn:eigenius:demo:bp:drug_Y")
@@ -89,6 +81,6 @@ resource bp:claim_treatment_lowers_bp : stats:MeasurementClaim {
 
 resource bp:claim_treatment_lowers_bp_trace : reflection:ProgramTrace {
     reflection:resource  = bp:claim_treatment_lowers_bp;
-    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:source    = "statistics-institution:validate_analysis_plan";
     reflection:timestamp = "2026-03-20T09:00:00Z";
 }

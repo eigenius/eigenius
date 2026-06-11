@@ -89,7 +89,7 @@ statistical claims from raw replicate data using deterministic IEEE-754
 numerics. Covers seven dispatch positions (SingleSampleEstimate / IID /
 Paired / Factorial / RCBD / SplitPlot / RepeatedMeasures) and four
 opinionated stances (§7.1 OneSidedWitnessed + ImpossibilityWitness,
-§7.2 dual-verdict outlier exclusion, §7.3 MethodComparisonClaim +
+§7.2 dual-verdict outlier exclusion, §7.3 MethodComparisonAnalysisPlan +
 Passing-Bablok, §7.4 epistemic-scope guard). See
 [`statistics-institution/`](statistics-institution/).
 

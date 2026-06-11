@@ -93,18 +93,10 @@ resource tx:incubator_split_trace : reflection:ObservationTrace {
     reflection:timestamp = "2026-05-03T08:45:00Z";
 }
 
-// ─── The split-plot MeasurementClaim ──────────────────────────────
+// ─── The split-plot StatisticalAnalysisPlan ──────────────────────────────
 
-resource tx:claim_effect_exists : stats:MeasurementClaim {
+resource tx:claim_effect_exists : stats:StatisticalAnalysisPlan {
     stats:sample_set = tx:incubator_split_2026_05_03;
-
-    stats:null_hypothesis = type_expr(
-        tx:TemperatureOrDrugEffectExists("urn:eigenius:demo:tx:experiment_2026_05_03")
-    );
-
-    stats:alternative_hypothesis = type_expr(
-        tx:TemperatureOrDrugEffectExists("urn:eigenius:demo:tx:experiment_2026_05_03")
-    );
 
     reflection:canonical_proposition = type_expr(
         tx:TemperatureOrDrugEffectExists("urn:eigenius:demo:tx:experiment_2026_05_03")
@@ -119,6 +111,6 @@ resource tx:claim_effect_exists : stats:MeasurementClaim {
 
 resource tx:claim_effect_exists_trace : reflection:ProgramTrace {
     reflection:resource  = tx:claim_effect_exists;
-    reflection:source    = "statistics-institution:validate_measurement_claim";
+    reflection:source    = "statistics-institution:validate_analysis_plan";
     reflection:timestamp = "2026-05-03T08:45:00Z";
 }

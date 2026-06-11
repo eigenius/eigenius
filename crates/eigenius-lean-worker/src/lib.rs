@@ -788,6 +788,7 @@ pub unsafe extern "C" fn worker_send_dispatch_ok(
     let response = Response::DispatchOk {
         invocation_id,
         output: serde_bytes::ByteBuf::from(output_vec),
+        derivations: Vec::new(),
         dispatched_to: dispatched_to_resolved,
     };
     send_response(handle, response, RequestKindMatch::DispatchMethod)
@@ -1150,6 +1151,7 @@ mod tests {
             Response::DispatchOk {
                 invocation_id,
                 output,
+                derivations: _,
                 dispatched_to,
             } => {
                 assert_eq!(invocation_id, "inv-1");

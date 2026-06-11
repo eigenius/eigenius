@@ -962,6 +962,15 @@ impl<'a> Parser<'a> {
             return self.parse_fun_lambda();
         }
 
+        // Compile-time aliases in type-expression position:
+        // `alias name = expr, name = expr, ... in body`. The compiler
+        // substitutes each name's bound expression at lowering time;
+        // no D47 encoding is produced for the bindings themselves.
+        // Distinct from `let` which marks a kernel-level binding.
+        if self.at(&TokenKind::Alias) {
+            return self.parse_alias_in_type_expr();
+        }
+
         // eigenius#72 — sort literals at the head of a type
         // expression: `Prop`, `Set`, or `Type N`. May then be
         // followed by `-> ...` (an arrow whose domain is a sort).
@@ -1165,6 +1174,59 @@ impl<'a> Parser<'a> {
         Ok(TypeExpr::Pi {
             params,
             codomain: Box::new(codomain),
+            pos,
+        })
+    }
+
+    /// Compile-time aliases in `type_expr(...)` position:
+    ///
+    /// ```text
+    /// alias NAME1 = expr1,
+    ///       NAME2 = expr2,
+    ///       ...
+    /// in body
+    /// ```
+    ///
+    /// Each binding's value is a full `TypeExpr` (an IRI literal, a
+    /// proposition, a sub-justification term, anything). The compiler
+    /// substitutes the bindings into the body at lowering time —
+    /// purely surface sugar; the kernel's NbE never sees the `Alias`
+    /// form. Sequential lexical scope: each later binding's value
+    /// can reference earlier bindings.
+    ///
+    /// Used to factor out repeated IRI strings, propositions, and
+    /// sub-justification spines in large certificate terms.
+    ///
+    /// Distinct from kernel-level `let` (`Decl::Def` in NbE; surface
+    /// `let x : T = e; body` in the program-body parser). The two
+    /// have separate keywords intentionally — `alias` is pure
+    /// compile-time substitution, `let` is a real definitional
+    /// binding the type theory sees.
+    fn parse_alias_in_type_expr(&mut self) -> Result<TypeExpr, EslError> {
+        let pos = self.current_pos();
+        self.expect(&TokenKind::Alias)?;
+        let mut bindings = Vec::new();
+        loop {
+            let binding_pos = self.current_pos();
+            let name = self.expect_ident()?;
+            self.expect(&TokenKind::Eq)?;
+            let value = self.parse_type_expr()?;
+            bindings.push(AliasBinding {
+                name,
+                value,
+                pos: binding_pos,
+            });
+            if self.at(&TokenKind::Comma) {
+                self.advance();
+                continue;
+            }
+            break;
+        }
+        self.expect(&TokenKind::In)?;
+        let body = self.parse_type_expr()?;
+        Ok(TypeExpr::Alias {
+            bindings,
+            body: Box::new(body),
             pos,
         })
     }

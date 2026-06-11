@@ -12,7 +12,7 @@
 
 In scope:
 
-- The universal `MeasurementClaim` schema — the parameters every statistical claim must declare, derived from the intersection of CONSORT / ARRIVE / MIQE / MIAME / MIAPE / STROBE / SAMPL / CLSI-EP requirements.
+- The universal `StatisticalAnalysisPlan` schema — the parameters every statistical claim must declare, derived from the intersection of CONSORT / ARRIVE / MIQE / MIAME / MIAPE / STROBE / SAMPL / CLSI-EP requirements.
 - The `SampleSet` sum type for Tier 1 (IID, Paired, Factorial) and Tier 2 (RCBD, Split-Plot, Repeated-Measures) experimental designs.
 - The institution's decidable-recomputation contract: what the kernel runs at commit time, what verdict it returns, what artifacts it emits.
 - Opinionated stances on three field-wide conflicts: hypothesis-test directionality, outlier handling, regression for method comparison.
@@ -30,7 +30,7 @@ Out of scope:
 
 A D14 `Decidable QueryClass` institution. Its dispatch shape:
 
-- **Consumes**: a `MeasurementClaim` resource (committed by the chain author) whose payload references a `SampleSet` ObservedResource holding raw replicate values, plus the asserted claim parameters (null/alternative hypothesis, alpha, effect-size threshold, directionality, etc.).
+- **Consumes**: a `StatisticalAnalysisPlan` resource (committed by the chain author) whose payload references a `SampleSet` ObservedResource holding raw replicate values, plus the asserted claim parameters (null/alternative hypothesis, alpha, effect-size threshold, directionality, etc.).
 - **Recomputes**: the statistic from the SampleSet using the test prescribed by the SampleSet's design topology and the claim's variance assumption.
 - **Returns a Verdict**: `Holds` or `Fails(diagnostic)`. On `Holds`, the kernel emits a `DerivedResource` whose `canonical_proposition` is the threshold predicate the claim establishes (e.g. `screen:HasLowIC50("urn:...:EIG_0291")`), together with a `ProgramTrace` admitting the `IsDerivedAs` witness (D49 §6).
 - **Composability**: the emitted DerivedResource is consumed downstream by D39 reasoning via `DerivedEvidence` in a `JustifiedBy.app` / `JustifiedBy.spec_str` composition. The statistics institution does not know — and does not need to know — what reasoning conclusion the chain author will derive from its output.
@@ -39,13 +39,13 @@ This is the **decidability boundary**: every statistical claim must be recomputa
 
 ## 3. The universal Claim schema (intersection of standards)
 
-Every `MeasurementClaim` resource — regardless of which SampleSet topology it consumes — must declare the following fields. These are the *intersection* of what CONSORT, ARRIVE, MIQE, MIAME, MIAPE, STROBE, SAMPL, and the CLSI EP-series all require; without them, the claim is not recomputable.
+Every `StatisticalAnalysisPlan` resource — regardless of which SampleSet topology it consumes — must declare the following fields. These are the *intersection* of what CONSORT, ARRIVE, MIQE, MIAME, MIAPE, STROBE, SAMPL, and the CLSI EP-series all require; without them, the claim is not recomputable.
 
 ```esl
 namespace stats      = "urn:eigenius:measurements";
 namespace reflection = "urn:eigenius:reflection";
 
-resource <iri> : stats:MeasurementClaim {
+resource <iri> : stats:StatisticalAnalysisPlan {
     stats:sample_set            = <ResourceRef -> stats:SampleSetResource>;
     stats:null_hypothesis       = type_expr(...);   // Prop
     stats:alternative_hypothesis = type_expr(...);  // Prop
@@ -382,7 +382,7 @@ The `Replication` axis is read inside every arm to select the variance-component
 
 The institution declares itself a D14 `Decidable QueryClass`. At commit time, the kernel invokes its dispatch handler with:
 
-- The `MeasurementClaim` resource (with the universal-schema fields from §3).
+- The `StatisticalAnalysisPlan` resource (with the universal-schema fields from §3).
 - The resolved `SampleSet` resource (raw replicates + design topology + sampleMap + biological-unit metadata).
 - The current `ExecutionContext` (read-only access to the chain for resolving cross-references like the `derived_proposition`'s constituent predicates).
 
@@ -446,7 +446,7 @@ Rationale: STROBE-aligned sensitivity-analysis stance, structurally hardened. Th
 
 ### 7.3 Passing-Bablok for method comparison; OLS rejected
 
-When the claim's hypothesis compares two measurement methods or two assay readouts — i.e. the claim resource's class is `stats:MethodComparisonClaim` (a subclass of `stats:MeasurementClaim`) — the kernel rejects ordinary least-squares regression. The verifier defaults to Passing-Bablok (non-parametric, robust to outliers, errors-in-both-variables). Deming regression is acceptable when the author asserts a known variance ratio between the methods.
+When the claim's hypothesis compares two measurement methods or two assay readouts — i.e. the claim resource's class is `stats:MethodComparisonAnalysisPlan` (a subclass of `stats:StatisticalAnalysisPlan`) — the kernel rejects ordinary least-squares regression. The verifier defaults to Passing-Bablok (non-parametric, robust to outliers, errors-in-both-variables). Deming regression is acceptable when the author asserts a known variance ratio between the methods.
 
 Rationale: CLSI EP09-aligned. OLS assumes the X-axis has zero measurement error, which for biological measurements compared against each other is structurally false. Authors who insist on OLS for method comparison are asserting something the institution cannot let stand.
 
@@ -478,7 +478,7 @@ Rationale: the institution exists to prevent the trust-the-summary problem. Sile
 
 The statistics institution's output is the *input* to D39 reasoning. The flow is:
 
-1. The chain author commits a `MeasurementClaim` (with universal-schema fields + a Tier 1/2 SampleSet reference).
+1. The chain author commits a `StatisticalAnalysisPlan` (with universal-schema fields + a Tier 1/2 SampleSet reference).
 2. The statistics institution recomputes the claim from raw replicates. On `Holds`, it emits a `DerivedResource` (say, IRI `urn:org:lab:claim_eig0291_lowic50`) whose `canonical_proposition` is `screen:HasLowIC50("urn:...:EIG_0291")`, plus the matching `ProgramTrace`.
 3. The D49 witness index admits an `IsDerivedAs` entry for that IRI under that proposition.
 4. A `ReasoningSentence` then composes the derived claim with a universal literature rule via the D39 grammar:
@@ -504,10 +504,10 @@ The statistics institution does not know — and explicitly does not need to kno
 **Phase 1 — Universal Claim schema + `SingleSampleEstimate`, end-to-end vertical proven. ✅ LANDED.** What actually landed in the first slice:
 
 - **ESL `macro` extension** (per §12 #1): `Declaration::Macro(MacroDecl)`, `Value::MacroCall { name, args, pos }`, `TokenKind::Macro`, parser + compile-time AST-substitution machinery. Pure compile-time expansion; no runtime closure / NbE evaluation. Tests cover positive expansion, undeclared-macro errors, and arity mismatches. Surface keyword `macro` (distinct from `fun` which stays for type-level lambdas inside `type_expr(...)`).
-- **Statistics ontology** (`ontologies/statistics/statistics.esl`): all five axis enums, the `SampleSet` product type with the `Bundle` ctor (not `Set` — see §4.2 note), `MeasurementClaim` + `SampleSetResource` + `MeasurementVerdict` classes, all universal-Claim sum types (`EffectSize`, `Directionality`, `VarianceAssumption`, `AutocorrelationStructure`, `OutlierExclusion` with typed `ManualExclusionEntry`), the two scope-marker classes (`PopulationLevel` / `MeasurementLevel`), and the institution + QueryClass resource declarations.
+- **Statistics ontology** (`ontologies/statistics/statistics.esl`): all five axis enums, the `SampleSet` product type with the `Bundle` ctor (not `Set` — see §4.2 note), `StatisticalAnalysisPlan` + `SampleSetResource` + `MeasurementVerdict` classes, all universal-Claim sum types (`EffectSize`, `Directionality`, `VarianceAssumption`, `AutocorrelationStructure`, `OutlierExclusion` with typed `ManualExclusionEntry`), the two scope-marker classes (`PopulationLevel` / `MeasurementLevel`), and the institution + QueryClass resource declarations.
 - **`eigenius-statistics` Rust crate**: `StatisticsInstitution` with full `Institution` trait impl, `ndarray` + `statrs` numerics for the one-sample t-test (deterministic, R-reference-validated, bit-identical-across-runs), validate handler reading the claim → resolving the SampleSet → decoding the `Bundle` product position → dispatching → running the §7.4 epistemic-scope check → emitting the verdict resource with computed numerics attached.
 - **D49 witness admission**: claims declare `reflection:canonical_proposition` (per §3 settled-on naming); companion `ProgramTrace` resources admit the `IsDerivedAs` witness. Test verifies the witness lands in the index via `lookup_chain_witness`.
-- **D52 §8 D39 composition end-to-end**: confirmatory IC50 SampleSet → `MeasurementClaim` Holds → `IsDerivedAs` admitted → `ReasoningSentence` with `App(SpecStr(DeclaredEvidence(rule), EIG_0291), DerivedEvidence(claim))` type-checks against `JustifiedBy(_, StrongInhibitor(EIG_0291))`. Full chain of evidence works.
+- **D52 §8 D39 composition end-to-end**: confirmatory IC50 SampleSet → `StatisticalAnalysisPlan` Holds → `IsDerivedAs` admitted → `ReasoningSentence` with `App(SpecStr(DeclaredEvidence(rule), EIG_0291), DerivedEvidence(claim))` type-checks against `JustifiedBy(_, StrongInhibitor(EIG_0291))`. Full chain of evidence works.
 
 What deferred from the original Phase 1 scope to follow-on commits:
 
@@ -561,14 +561,14 @@ Order can flex on real chain-author pull; Phase 4.0 is the prerequisite for both
 
 - **§7.2 Dual-verdict outlier exclusion.** New `esd_filter(samples, max_outliers, alpha)` numerics implementing Rosner's generalized ESD test (1983) — iteratively flags up to `max_outliers` observations using Studentized deviates against critical values from the one-sided t distribution. The `(SingleSampleEstimate, ESD)` cell of the (dispatch × exclusion) matrix is wired: the verifier computes the test twice (with the exclusion functor applied and on the raw samples), reports the with-exclusion numerics as the primary verdict, and emits a `DualVerdict` diagnostic enumerating both branches plus the excluded original-array indices. All other matrix cells (`PassingBablokResidual` on any dispatch, `Manual` on any dispatch, `ESD` on dispatches other than SingleSampleEstimate) reject with structured diagnostics referencing the tracked follow-on GitHub issue. v1 carries the dual-verdict in the diagnostic string rather than committing two `DerivedResource`s linked via `stats:dual_verdict_pair` — that fuller commit shape is the natural Phase 5.1 follow-on once the institution API supports multi-resource output cleanly.
 
-- **§7.3 MethodComparisonClaim + Passing-Bablok.** New `stats:MethodComparisonClaim : stats:MeasurementClaim` subclass + a second `QueryClass` registration bound to the new subclass (the kernel's AutoOnLoad dispatch matches resource is_a entries directly against registered query_class IRIs — no transitive subclass walk — so subclasses need their own registration even when sharing a handler). New `passing_bablok_regression(method_a, method_b)` numerics: all N·(N−1)/2 pairwise slopes, K-offset median estimator, rank-based 95% CIs via the normal approximation (Passing & Bablok 1983). The validator branches on `claim.is_a` early: when MethodComparisonClaim is present, it skips the SampleSet-shape dispatch and runs PB regression on the bundle's paired observations (the same `stats:Paired(...)` authoring surface). Verdict: Holds iff `1.0 ∈ slope_CI ∧ 0.0 ∈ intercept_CI` (the CLSI EP09 method-agreement criterion); Fails with `MethodComparisonDisagreement` diagnostic naming both CIs otherwise. `computed_statistic` carries the median slope; `computed_p_value` carries a binary disagreement indicator (0.0 on agreement, 1.0 on disagreement) so the verdict shape stays uniform across dispatches while the structural decision is the CI check. OneSidedWitnessed directionality is rejected for this dispatch (PB is a CI-based agreement test, not a sign-of-effect test), and non-Identity outlier exclusion is rejected pending the §7.2 follow-on (filed as a GitHub issue) that wires `PassingBablokResidual` on method-comparison data.
+- **§7.3 MethodComparisonAnalysisPlan + Passing-Bablok.** New `stats:MethodComparisonAnalysisPlan : stats:StatisticalAnalysisPlan` subclass + a second `QueryClass` registration bound to the new subclass (the kernel's AutoOnLoad dispatch matches resource is_a entries directly against registered query_class IRIs — no transitive subclass walk — so subclasses need their own registration even when sharing a handler). New `passing_bablok_regression(method_a, method_b)` numerics: all N·(N−1)/2 pairwise slopes, K-offset median estimator, rank-based 95% CIs via the normal approximation (Passing & Bablok 1983). The validator branches on `claim.is_a` early: when MethodComparisonAnalysisPlan is present, it skips the SampleSet-shape dispatch and runs PB regression on the bundle's paired observations (the same `stats:Paired(...)` authoring surface). Verdict: Holds iff `1.0 ∈ slope_CI ∧ 0.0 ∈ intercept_CI` (the CLSI EP09 method-agreement criterion); Fails with `MethodComparisonDisagreement` diagnostic naming both CIs otherwise. `computed_statistic` carries the median slope; `computed_p_value` carries a binary disagreement indicator (0.0 on agreement, 1.0 on disagreement) so the verdict shape stays uniform across dispatches while the structural decision is the CI check. OneSidedWitnessed directionality is rejected for this dispatch (PB is a CI-based agreement test, not a sign-of-effect test), and non-Identity outlier exclusion is rejected pending the §7.2 follow-on (filed as a GitHub issue) that wires `PassingBablokResidual` on method-comparison data.
 
 Five integration tests in [`phase5_opinionated_stances.rs`](../../crates/eigenius-statistics/tests/phase5_opinionated_stances.rs) cover the load-bearing rejection paths: OneSidedWitnessed Holds with valid witness, OneSidedWitnessed Fails with missing witness, ESD dual-verdict diagnostic with two clear outliers, PB Holds on concordant methods, PB Fails on a 1.5× proportional bias.
 
 The remaining outlier-exclusion matrix cells are tracked as GitHub issues against the (dispatch × exclusion) matrix rather than as Phase 5.x sub-numbers — same structural posture the RM completeness matrix took for the (autocorrelation × k_between) dispatch cells:
 
 - [#80](https://github.com/eigenius/eigenius/issues/80) — ESD on multi-dispatch positions (IID / Paired / Factorial / RCBD / SplitPlot / RM)
-- [#81](https://github.com/eigenius/eigenius/issues/81) — PassingBablokResidual exclusion on MethodComparisonClaim
+- [#81](https://github.com/eigenius/eigenius/issues/81) — PassingBablokResidual exclusion on MethodComparisonAnalysisPlan
 - [#82](https://github.com/eigenius/eigenius/issues/82) — materialized two-resource dual-verdict commit shape (current v1 carries dual-verdict in the diagnostic string)
 - `Manual` exclusion remains gated on the §11 assay-quality observation institutions (decided in §12 — typed witness validation, no free-form justification).
 
@@ -584,7 +584,7 @@ Recorded here so future scope discussions can refer to a fixed list rather than 
 
 Three institutions sit at the boundary of this one and warrant scoping mention so the boundaries stay clean.
 
-- **Multiple-testing correction institution** (above). Operates over a *set* of `MeasurementClaim` resources, applies Bonferroni / Benjamini-Hochberg FDR / Holm / Šidák, and emits an `AdjustedClaim` whose `canonical_proposition` is `HoldsAfterMultipleTestingCorrection(...)`. Consumes the unadjusted `alpha` and unadjusted p-value the per-claim institution stored. Keeping per-claim and aggregate separate is the architectural decoupling that makes both implementable independently.
+- **Multiple-testing correction institution** (above). Operates over a *set* of `StatisticalAnalysisPlan` resources, applies Bonferroni / Benjamini-Hochberg FDR / Holm / Šidák, and emits an `AdjustedClaim` whose `canonical_proposition` is `HoldsAfterMultipleTestingCorrection(...)`. Consumes the unadjusted `alpha` and unadjusted p-value the per-claim institution stored. Keeping per-claim and aggregate separate is the architectural decoupling that makes both implementable independently.
 - **Assay-quality observation institutions** (below). Verify that the SampleSet's raw replicates are themselves trustworthy *before* the statistics institution operates on them. Examples: MIQE PCR-efficiency verification, microscopy image-quality checks, mass-spec calibration-drift detection. Their output is the `SampleSet` itself, structurally validated. They are observation institutions (Decidable on the bench data shape), not derivation institutions (Decidable on a claim about the data).
 - **Power and design-justification institution** (alongside, design-time). Verifies at SampleSet-authoring time that the planned `N` is sufficient for the target effect size at the asserted `alpha`. Different dispatch shape — consulted *before* a SampleSet has replicate data, against a design spec — so it does not share an institution with the present one.
 

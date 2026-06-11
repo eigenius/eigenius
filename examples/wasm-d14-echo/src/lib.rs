@@ -31,7 +31,7 @@
 //! fixture from the InstitutionInvoke evaluator; M8 will add a
 //! worked institution example alongside it.
 
-use eigenius_wasm_sdk::{Resource, Value};
+use eigenius_wasm_sdk::{QueryResponse, Resource, Value};
 
 wit_bindgen::generate!({
     path: "../../wit",
@@ -62,7 +62,7 @@ impl Guest for EchoInstitution {
         let mut r = Resource::from_cbor(&input).map_err(|e| format!("parse input: {e}"))?;
         r.set(PROVENANCE_PROP, Value::String(procedure_iri));
         r.set(STAGE_PROP, Value::String("query".into()));
-        Ok(r.to_cbor())
+        Ok(QueryResponse::from_verdict(r).to_cbor())
     }
 }
 

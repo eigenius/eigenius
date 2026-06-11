@@ -114,50 +114,47 @@ fn splitplot_2x2x3_recomputes_to_holds_with_effect_diagnostic() {
     let claim = (*claim_arc).clone();
 
     let inst = StatisticsInstitution::new();
-    let proc_iri = Iri::parse(iris::PROC_VALIDATE_MEASUREMENT_CLAIM).expect("proc IRI");
+    let proc_iri = Iri::parse(iris::PROC_VALIDATE_ANALYSIS_PLAN).expect("proc IRI");
     let outcome = inst
         .query(&proc_iri, &claim, &ctx)
-        .expect("validate_measurement_claim returns an outcome");
+        .expect("validate_analysis_plan returns an outcome");
+    let result = outcome
+        .derivations
+        .first()
+        .expect("statistics emits a StatisticalAnalysisResult when the SAP ran");
 
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
+    let ctor = result
+        .get(&Iri::parse(iris::PROP_VERDICT_CTOR).unwrap())
         .and_then(Value::as_str)
         .expect("verdict carries ctor_name")
         .to_string();
-    let diagnostic = outcome
-        .output
+    let diagnostic = result
         .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
         .and_then(Value::as_str)
         .map(str::to_owned);
 
     // 2×2×3 split-plot: both temperature (whole-plot) and drug
-    // (subplot) main effects are clean and detectable. Verdict
-    // is Holds; diagnostic identifies which effect was reported.
+    // (subplot) main effects are clean and detectable. The first
+    // result derivation in canonical order is main_whole_plot.
     assert_eq!(
         ctor,
         wk::VERDICT_HOLDS,
-        "expected Holds — split-plot ANOVA should reject at least one effect; \
-         got {ctor}, diagnostic: {diagnostic:?}"
+        "expected Holds on main_whole_plot — split-plot's whole-plot \
+         effect should reject; got {ctor}, diagnostic: {diagnostic:?}"
     );
 
-    // Holds verdict carries the SplitPlot omnibus diagnostic naming
-    // which effect produced the smallest p plus all three F/p pairs
-    // for audit.
-    let diag = diagnostic.expect("SplitPlot verdict must carry an effect-naming diagnostic");
+    // Per-effect diagnostic carries the effect name + F/p numerics.
+    let diag = diagnostic.expect("StatisticalAnalysisResult must carry a per-effect diagnostic");
     assert!(
-        diag.contains("SplitPlot omnibus"),
-        "diagnostic should be the SplitPlot omnibus shape; got: {diag}"
+        diag.contains("SplitPlot effect"),
+        "diagnostic should name the per-effect shape; got: {diag}"
     );
     assert!(
-        diag.contains("whole_plot_main_effect")
-            || diag.contains("subplot_main_effect")
-            || diag.contains("interaction"),
-        "diagnostic should name which effect was reported; got: {diag}"
+        diag.contains("main_whole_plot"),
+        "first derivation should be main_whole_plot; got: {diag}"
     );
 
-    let p_value = outcome
-        .output
+    let p_value = result
         .get(&Iri::parse(iris::PROP_COMPUTED_P_VALUE).unwrap())
         .and_then(|v| {
             if let Value::Float(f) = v {
@@ -169,7 +166,32 @@ fn splitplot_2x2x3_recomputes_to_holds_with_effect_diagnostic() {
         .expect("verdict carries computed_p_value");
     assert!(
         p_value < 0.05,
-        "SplitPlot omnibus p should reject at α = 0.05; got p = {p_value}"
+        "SplitPlot main_whole_plot p should reject at α = 0.05; got p = {p_value}"
+    );
+
+    // Per-effect shape: 3 derivations (whole_plot, subplot, interaction).
+    assert_eq!(
+        outcome.derivations.len(),
+        3,
+        "SplitPlot emits exactly 3 per-effect StatisticalAnalysisResults"
+    );
+    let effect_names: Vec<String> = outcome
+        .derivations
+        .iter()
+        .map(|d| {
+            d.get(&Iri::parse(iris::PROP_EFFECT_NAME).unwrap())
+                .and_then(Value::as_str)
+                .expect("each result carries effect_name")
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        effect_names,
+        vec![
+            "main_whole_plot",
+            "main_subplot",
+            "interaction_whole_plot_subplot"
+        ]
     );
 }
 

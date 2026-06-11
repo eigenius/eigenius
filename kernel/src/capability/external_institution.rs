@@ -157,10 +157,11 @@ impl Institution for ExternalInstitution {
         input: &Resource,
         _ctx: &ExecutionContext,
     ) -> Result<QueryOutcome, InstitutionError> {
-        let (output, partial_invocation) =
+        let (output, derivations, partial_invocation) =
             self.dispatch_substrate_with_invocation(procedure_iri, input)?;
         Ok(QueryOutcome {
             output,
+            derivations,
             partial_invocation,
         })
     }
@@ -179,7 +180,7 @@ impl ExternalInstitution {
         input: &Resource,
     ) -> Result<Resource, InstitutionError> {
         self.dispatch_substrate_with_invocation(procedure_iri, input)
-            .map(|(output, _)| output)
+            .map(|(output, _, _)| output)
     }
 
     /// Same as [`Self::dispatch_substrate`] but also returns the
@@ -192,7 +193,7 @@ impl ExternalInstitution {
         &self,
         procedure_iri: &Iri,
         input: &Resource,
-    ) -> Result<(Resource, Option<Resource>), InstitutionError> {
+    ) -> Result<(Resource, Vec<Resource>, Option<Resource>), InstitutionError> {
         let handler = self.handlers.get(procedure_iri).ok_or_else(|| {
             InstitutionError::UnknownType(format!(
                 "external institution `{}` has no registered handler for procedure \
@@ -266,6 +267,25 @@ impl ExternalInstitution {
             }
         };
 
-        Ok((output, partial_invocation))
+        // Decode each derivation CBOR into a chain-shaped Resource.
+        // The kernel commit pipeline stamps the
+        // `reflection:InstitutionEmittedDerivation` marker and the
+        // linkage properties before committing — institutions are
+        // responsible only for the domain-specific shape +
+        // `canonical_proposition`. Empty list when the institution
+        // emitted no derivations, which is the common case for
+        // pass/fail-only gates (D52 §6).
+        let mut derivations = Vec::with_capacity(resp.derivations_cbor.len());
+        for (i, cbor) in resp.derivations_cbor.iter().enumerate() {
+            let r = eigon_cbor::parse_resource_lenient(cbor).map_err(|e| {
+                InstitutionError::ComputationFailed(format!(
+                    "external dispatch returned non-Eigon derivation #{i} for \
+                     `{procedure_iri}`: {e}"
+                ))
+            })?;
+            derivations.push(r);
+        }
+
+        Ok((output, derivations, partial_invocation))
     }
 }

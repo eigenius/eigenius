@@ -1444,7 +1444,7 @@ mod tests {
     // trace metadata (program / started_at / completed_at / trace_tree
     // / output / metrics) lives in `recommends` — kernel-emitted
     // traces typically fill them; user-authored ProgramTraces wired
-    // alongside MeasurementClaim / ReasoningSentence / etc. typically
+    // alongside StatisticalAnalysisPlan / ReasoningSentence / etc. typically
     // don't need them.
 
     #[test]

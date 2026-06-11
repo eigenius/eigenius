@@ -421,6 +421,10 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
 
         // Eigenius extensions
         Exp::EigonClass(iri) => Ok(Val::EigonClass(iri.clone())),
+        // Axiom references evaluate to a neutral spine head — the
+        // existing `Neut::App` machinery then handles applications
+        // (`stats:lt(a, b)` → `Val::Nt(Neut::App(Neut::App(Neut::EigonAxiom(lt), a), b))`).
+        Exp::EigonAxiom(iri) => Ok(Val::Nt(crate::nbe::val::Neut::EigonAxiom(iri.clone()))),
         Exp::EigonPrimitive(p) => Ok(Val::EigonPrimitive(*p)),
         Exp::EigonResource(r) => Ok(Val::ResourceVal(r.clone())),
 

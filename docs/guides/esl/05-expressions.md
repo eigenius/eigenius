@@ -323,7 +323,7 @@ namespace screen     = "urn:eigenius:demo:screen";
 namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 
-resource screen:claim_eig0291_lowic50 : stats:MeasurementClaim {
+resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
     stats:sample_set = screen:m_eig0291_sampleset;
 
     stats:null_hypothesis = type_expr(
@@ -388,9 +388,9 @@ The resulting value lands in the resource's property slot just like any other pr
 
 ### Where this appears in practice
 
-- `reflection:canonical_proposition` on every `DerivedResource` subclass (MeasurementClaim, ReasoningSentence, custom institution-emitted derived resources) — the proposition the resource asserts.
+- `reflection:canonical_proposition` on every `DerivedResource` subclass (StatisticalAnalysisPlan, ReasoningSentence, custom institution-emitted derived resources) — the proposition the resource asserts.
 - `eigentt:axiom_statement` on every `axiom` declaration ([§4.4a](04-declarations.md#4-4a-axiom-postulated-propositions-d46-10)) — surface-compiled via the same lowering path.
-- `stats:null_hypothesis` / `stats:alternative_hypothesis` on `MeasurementClaim` — the null and alternative the verifier reports in the verdict's audit trail.
+- `stats:null_hypothesis` / `stats:alternative_hypothesis` on `StatisticalAnalysisPlan` — the null and alternative the verifier reports in the verdict's audit trail.
 - `reasoning:proposition` on `ReasoningSentence` — the proposition the certificate type-checks against.
 - `core:ctor_type` on the typed-ctor form of indexed inductives — emitted by the compiler from the `data` declaration, not authored as a literal.
 

@@ -105,7 +105,7 @@ pub fn one_sample_t_test(samples: &[f64], null_mean: f64) -> Option<OneSampleRes
 }
 
 /// The full numeric output of a one-sample t-test, suitable for
-/// embedding in a `MeasurementVerdict`'s field set.
+/// embedding in a `StatisticalAnalysisResult`'s field set.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OneSampleResult {
     pub t_statistic: f64,
@@ -421,6 +421,256 @@ pub struct FactorialAnovaResult {
     pub grand_mean: f64,
     pub ss_between: f64,
     pub ss_within: f64,
+}
+
+/// Per-effect ANOVA decomposition for a balanced k-factor full
+/// factorial design. Returns a [`FactorialAnovaPerEffect`] bundling
+/// one [`FactorialEffectResult`] per non-empty subset of factors —
+/// `k` main effects, `C(k,2)` two-way interactions, ..., 1 k-way
+/// interaction. Total: `2^k − 1` effects.
+///
+/// Uses Möbius-inverted hierarchical (Type-I-equivalent for balanced
+/// designs) sum-of-squares decomposition:
+///
+/// - For each non-empty subset `S ⊆ {0..k-1}`:
+///   - Compute the marginal mean `μ_S(l_S)` at each level-tuple `l_S`
+///     by averaging cell means over factors not in `S`.
+///   - Möbius invert: `α_S(l_S) = Σ_{S' ⊆ S} (-1)^(|S|-|S'|) μ_S'(l_S↾S')`
+///     (the projection `l_S↾S'` restricts the level-tuple to S').
+///   - `SS_S = n_per_S_combo · Σ_{l_S} α_S(l_S)²` where
+///     `n_per_S_combo = N / ∏_{i ∈ S} L_i`.
+///   - `df_S = ∏_{i ∈ S} (L_i − 1)`.
+///   - `F_S = (SS_S / df_S) / MS_within`, `MS_within = SS_within / df_within`.
+///
+/// Within-cell error term:
+/// - `SS_within = Σ (obs − cell_mean)²`
+/// - `df_within = N − ∏ L_i`
+///
+/// Effects are ordered by ascending subset cardinality (main effects
+/// first), then lexicographically within each cardinality. The
+/// ordering is part of the D52 §6 reproducibility contract — verifier
+/// re-runs produce verdict resources at the same `{analysis_iri}:result:{key}`
+/// IRIs.
+///
+/// Returns `None` (the design isn't supported for per-effect
+/// decomposition) when:
+/// - `factor_levels` is empty
+/// - any cell-index in `observations` is out of range
+/// - the design isn't balanced (each cell must have the same number
+///   of observations; unbalanced designs would need Type-II / III
+///   non-orthogonal SS — deferred)
+/// - `df_within < 1` (every cell has exactly one observation; no
+///   within-cell variance to estimate `MS_within`)
+/// - any factor has only 1 level (its main effect has `df = 0`)
+pub fn factorial_anova_per_effect(
+    factor_levels: &[usize],
+    observations: &[(Vec<usize>, f64)],
+) -> Option<FactorialAnovaPerEffect> {
+    let k = factor_levels.len();
+    if k == 0 || k > 16 || observations.is_empty() {
+        return None;
+    }
+    if factor_levels.iter().any(|&l| l < 2) {
+        return None;
+    }
+    // Validate cell-index shape + range.
+    for (levels, _) in observations {
+        if levels.len() != k {
+            return None;
+        }
+        for (i, &lvl) in levels.iter().enumerate() {
+            if lvl >= factor_levels[i] {
+                return None;
+            }
+        }
+    }
+
+    let n_total = observations.len();
+    let n_cells_expected: usize = factor_levels.iter().product();
+    if !n_total.is_multiple_of(n_cells_expected) {
+        return None;
+    }
+    let n_per_cell = n_total / n_cells_expected;
+    if n_per_cell == 0 {
+        return None;
+    }
+
+    // Aggregate per-cell sums + counts; verify balanced.
+    let mut cell_sums: BTreeMap<Vec<usize>, f64> = BTreeMap::new();
+    let mut cell_counts: BTreeMap<Vec<usize>, usize> = BTreeMap::new();
+    for (levels, value) in observations {
+        *cell_sums.entry(levels.clone()).or_insert(0.0) += *value;
+        *cell_counts.entry(levels.clone()).or_insert(0) += 1;
+    }
+    if cell_counts.len() != n_cells_expected {
+        return None;
+    }
+    for c in cell_counts.values() {
+        if *c != n_per_cell {
+            return None;
+        }
+    }
+    let cell_means: BTreeMap<Vec<usize>, f64> = cell_sums
+        .iter()
+        .map(|(k, s)| (k.clone(), *s / n_per_cell as f64))
+        .collect();
+    let grand_mean = observations.iter().map(|(_, v)| *v).sum::<f64>() / n_total as f64;
+
+    // Within-cell sum of squares (error term).
+    let ss_within: f64 = observations
+        .iter()
+        .map(|(levels, v)| (v - cell_means[levels]).powi(2))
+        .sum();
+    let df_within_int = n_total - n_cells_expected;
+    if df_within_int < 1 {
+        return None;
+    }
+    let df_within = df_within_int as f64;
+    let ms_within = ss_within / df_within;
+
+    let num_subsets = 1usize << k;
+
+    // Marginal mean μ_S(l_S) for every subset S (including ∅).
+    let mut marginals: Vec<BTreeMap<Vec<usize>, f64>> = vec![BTreeMap::new(); num_subsets];
+    for (s, table) in marginals.iter_mut().enumerate() {
+        let in_s: Vec<usize> = (0..k).filter(|i| (s >> i) & 1 == 1).collect();
+        let mut sums: BTreeMap<Vec<usize>, f64> = BTreeMap::new();
+        let mut cnts: BTreeMap<Vec<usize>, f64> = BTreeMap::new();
+        for (cell_levels, mean) in &cell_means {
+            let key: Vec<usize> = in_s.iter().map(|i| cell_levels[*i]).collect();
+            *sums.entry(key.clone()).or_insert(0.0) += mean;
+            *cnts.entry(key).or_insert(0.0) += 1.0;
+        }
+        for (k, sum) in sums {
+            let mean = sum / cnts[&k];
+            table.insert(k, mean);
+        }
+    }
+
+    // Möbius invert: α_S(l_S) = Σ_{S' ⊆ S} (-1)^(|S|-|S'|) μ_{S'}(l_S↾S').
+    let mut alphas: Vec<BTreeMap<Vec<usize>, f64>> = vec![BTreeMap::new(); num_subsets];
+    for s in 0..num_subsets {
+        let in_s: Vec<usize> = (0..k).filter(|i| (s >> i) & 1 == 1).collect();
+        let s_card = in_s.len();
+        let keys: Vec<Vec<usize>> = marginals[s].keys().cloned().collect();
+        for l_s in keys {
+            let mut acc = 0.0;
+            let mut sp = s as i64;
+            loop {
+                let sp_u = sp as usize;
+                let in_sp: Vec<usize> = (0..k).filter(|i| (sp_u >> i) & 1 == 1).collect();
+                let sp_card = in_sp.len();
+                let l_sp: Vec<usize> = in_sp
+                    .iter()
+                    .map(|j| {
+                        let idx_in_s = in_s.iter().position(|i| i == j).expect("S' ⊆ S");
+                        l_s[idx_in_s]
+                    })
+                    .collect();
+                let mu_sp = marginals[sp_u][&l_sp];
+                let sign = if (s_card - sp_card).is_multiple_of(2) {
+                    1.0
+                } else {
+                    -1.0
+                };
+                acc += sign * mu_sp;
+                if sp == 0 {
+                    break;
+                }
+                sp = (sp - 1) & s as i64;
+            }
+            alphas[s].insert(l_s, acc);
+        }
+    }
+
+    // Build the per-effect results, ordered by ascending cardinality
+    // then lex (so main effects come first, then two-way interactions,
+    // then three-way, ...).
+    let mut subset_order: Vec<usize> = (1..num_subsets).collect();
+    subset_order.sort_by_key(|s| (s.count_ones(), *s));
+    let mut effects: Vec<FactorialEffectResult> = Vec::with_capacity(num_subsets - 1);
+    for s in subset_order {
+        let in_s: Vec<usize> = (0..k).filter(|i| (s >> i) & 1 == 1).collect();
+        let n_per_s_combo: f64 = n_total as f64
+            / in_s
+                .iter()
+                .map(|i| factor_levels[*i] as f64)
+                .product::<f64>();
+        let ss_s: f64 = alphas[s].values().map(|a| a * a).sum::<f64>() * n_per_s_combo;
+        let df_s: f64 = in_s
+            .iter()
+            .map(|i| (factor_levels[*i] - 1) as f64)
+            .product();
+        if df_s < 1.0 {
+            continue;
+        }
+        let ms_s = ss_s / df_s;
+        let f_statistic = if ms_within == 0.0 {
+            if ms_s == 0.0 {
+                0.0
+            } else {
+                f64::INFINITY
+            }
+        } else {
+            ms_s / ms_within
+        };
+        let p_value = if !f_statistic.is_finite() {
+            if f_statistic.is_nan() {
+                f64::NAN
+            } else {
+                0.0
+            }
+        } else {
+            let dist = FisherSnedecor::new(df_s, df_within).ok()?;
+            1.0 - dist.cdf(f_statistic)
+        };
+        effects.push(FactorialEffectResult {
+            factor_indices: in_s,
+            f_statistic,
+            p_value,
+            df_effect: df_s,
+            df_error: df_within,
+            ss_effect: ss_s,
+        });
+    }
+
+    Some(FactorialAnovaPerEffect {
+        effects,
+        grand_mean,
+        n_per_cell,
+        ss_within,
+        df_within,
+    })
+}
+
+/// Per-effect F-test result from a balanced factorial ANOVA. One
+/// `FactorialEffectResult` per non-empty subset of factor indices.
+/// Combined into a [`FactorialAnovaPerEffect`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct FactorialEffectResult {
+    /// Factor indices participating in this effect, ascending order.
+    /// `[0]` is the main effect of factor 0; `[0, 1]` is the A×B
+    /// interaction; `[0, 1, 2]` is the A×B×C three-way interaction.
+    pub factor_indices: Vec<usize>,
+    pub f_statistic: f64,
+    pub p_value: f64,
+    pub df_effect: f64,
+    pub df_error: f64,
+    pub ss_effect: f64,
+}
+
+/// Bundle of per-effect F-test results for a balanced k-factor
+/// factorial ANOVA. Includes the grand mean and within-cell error
+/// stratum the F-tests share.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FactorialAnovaPerEffect {
+    /// Effects in canonical order: main effects first (ascending by
+    /// factor index), then two-way interactions, then three-way, etc.
+    pub effects: Vec<FactorialEffectResult>,
+    pub grand_mean: f64,
+    pub n_per_cell: usize,
+    pub ss_within: f64,
+    pub df_within: f64,
 }
 
 /// Randomized Complete Block Design (RCBD) two-way ANOVA — D52 Phase
@@ -1661,6 +1911,153 @@ mod tests {
             (vec![1, 1], 40.0),
         ];
         assert!(factorial_omnibus_anova(&factor_levels, &observations).is_none());
+    }
+
+    // ── Per-effect factorial ANOVA decomposition ─────────────────────
+
+    #[test]
+    fn factorial_per_effect_2x2_decomposes_to_main_and_interaction() {
+        // Same 2×2 fixture as the omnibus test — cells (10, 20, 30, 40)
+        // with within-cell SD ≈ 1. Per-effect decomposition expects:
+        // - main_A: SS = 6·((-10)² + 10²) = 1200, df = 1, F = 1200/(8/8) = 1200
+        // - main_B: SS = 6·((-5)² + 5²)  = 300,  df = 1, F = 300
+        // - interaction_AB: α = 0 everywhere → SS = 0, F = 0
+        let factor_levels = [2, 2];
+        let observations = vec![
+            (vec![0, 0], 10.0),
+            (vec![0, 0], 11.0),
+            (vec![0, 0], 9.0),
+            (vec![0, 1], 20.0),
+            (vec![0, 1], 19.0),
+            (vec![0, 1], 21.0),
+            (vec![1, 0], 30.0),
+            (vec![1, 0], 31.0),
+            (vec![1, 0], 29.0),
+            (vec![1, 1], 40.0),
+            (vec![1, 1], 39.0),
+            (vec![1, 1], 41.0),
+        ];
+        let result =
+            factorial_anova_per_effect(&factor_levels, &observations).expect("valid balanced 2x2");
+
+        // Three effects in canonical order: [0], [1], [0,1].
+        assert_eq!(result.effects.len(), 3);
+        assert_eq!(result.effects[0].factor_indices, vec![0]);
+        assert_eq!(result.effects[1].factor_indices, vec![1]);
+        assert_eq!(result.effects[2].factor_indices, vec![0, 1]);
+
+        let main_a = &result.effects[0];
+        assert!((main_a.ss_effect - 1200.0).abs() < 1e-9);
+        assert_eq!(main_a.df_effect, 1.0);
+        assert_eq!(main_a.df_error, 8.0);
+        assert!((main_a.f_statistic - 1200.0).abs() < 1e-6);
+        // F = 1200 with df=(1, 8) — p is vanishingly small but the
+        // FisherSnedecor::cdf saturates at numerical 1.0; the
+        // computation `1.0 - cdf` can return 0.0 exactly for these
+        // extreme F's. Either way the test rejects.
+        assert!(main_a.p_value < 1e-6);
+
+        let main_b = &result.effects[1];
+        assert!((main_b.ss_effect - 300.0).abs() < 1e-9);
+        assert!((main_b.f_statistic - 300.0).abs() < 1e-6);
+        assert!(main_b.p_value < 1e-6);
+
+        let inter = &result.effects[2];
+        assert!(inter.ss_effect.abs() < 1e-9);
+        assert!(inter.f_statistic.abs() < 1e-9);
+        assert!(
+            inter.p_value > 0.99,
+            "interaction with α = 0 should fail to reject; got p = {}",
+            inter.p_value
+        );
+    }
+
+    #[test]
+    fn factorial_per_effect_2x3_yields_three_effects() {
+        // 2×3 design with main A clear (means 10 vs 30) and zero
+        // main-B / interaction. Use 2 reps per cell → 12 observations.
+        let factor_levels = [2, 3];
+        let mut observations = Vec::new();
+        for a in 0..2 {
+            for b in 0..3 {
+                let cell_mean = if a == 0 { 10.0 } else { 30.0 };
+                observations.push((vec![a, b], cell_mean - 0.5));
+                observations.push((vec![a, b], cell_mean + 0.5));
+            }
+        }
+        let result =
+            factorial_anova_per_effect(&factor_levels, &observations).expect("valid balanced 2x3");
+        // Three effects: main_A (df=1), main_B (df=2), inter_AB (df=2)
+        assert_eq!(result.effects.len(), 3);
+        assert_eq!(result.effects[0].factor_indices, vec![0]);
+        assert_eq!(result.effects[0].df_effect, 1.0);
+        assert_eq!(result.effects[1].factor_indices, vec![1]);
+        assert_eq!(result.effects[1].df_effect, 2.0);
+        assert_eq!(result.effects[2].factor_indices, vec![0, 1]);
+        assert_eq!(result.effects[2].df_effect, 2.0);
+        // Main A: hugely significant.
+        assert!(result.effects[0].p_value < 1e-6);
+        // Main B + interaction: should be near 1 (no actual effect).
+        assert!(result.effects[1].p_value > 0.5);
+        assert!(result.effects[2].p_value > 0.5);
+    }
+
+    #[test]
+    fn factorial_per_effect_rejects_unbalanced() {
+        // 2x2 with unbalanced cell counts — one cell has 4 obs, the
+        // others have 2 each. Per-effect decomposition is undefined
+        // for unbalanced (non-orthogonal) designs.
+        let factor_levels = [2, 2];
+        let observations = vec![
+            (vec![0, 0], 10.0),
+            (vec![0, 0], 11.0),
+            (vec![0, 0], 9.0),
+            (vec![0, 0], 12.0),
+            (vec![0, 1], 20.0),
+            (vec![0, 1], 21.0),
+            (vec![1, 0], 30.0),
+            (vec![1, 0], 31.0),
+            (vec![1, 1], 40.0),
+            (vec![1, 1], 41.0),
+        ];
+        assert!(factorial_anova_per_effect(&factor_levels, &observations).is_none());
+    }
+
+    #[test]
+    fn factorial_per_effect_rejects_single_level_factor() {
+        let factor_levels = [2, 1];
+        let observations = vec![
+            (vec![0, 0], 10.0),
+            (vec![0, 0], 11.0),
+            (vec![1, 0], 20.0),
+            (vec![1, 0], 21.0),
+        ];
+        assert!(factorial_anova_per_effect(&factor_levels, &observations).is_none());
+    }
+
+    #[test]
+    fn factorial_per_effect_deterministic_across_runs() {
+        // Same fixture twice must produce bitwise-identical effect
+        // statistics — D52 §6 reproducibility.
+        let factor_levels = [2, 2];
+        let observations = vec![
+            (vec![0, 0], 10.0),
+            (vec![0, 0], 11.5),
+            (vec![0, 0], 9.5),
+            (vec![0, 1], 20.0),
+            (vec![0, 1], 19.5),
+            (vec![0, 1], 21.5),
+            (vec![1, 0], 30.0),
+            (vec![1, 0], 31.0),
+            (vec![1, 0], 29.0),
+            (vec![1, 1], 40.0),
+            (vec![1, 1], 39.5),
+            (vec![1, 1], 41.5),
+        ];
+        let r1 =
+            factorial_anova_per_effect(&factor_levels, &observations).expect("valid balanced 2x2");
+        let r2 = factorial_anova_per_effect(&factor_levels, &observations).expect("rerun valid");
+        assert_eq!(r1, r2);
     }
 
     // ── RCBD two-way ANOVA (Phase 4.0) ────────────────────────────

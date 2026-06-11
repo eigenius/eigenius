@@ -96,3 +96,6 @@ codegen-units = 256
 debug = false
 incremental = false
 strip = "debuginfo"
+
+[patch.crates-io]
+tonic-web = { path = "patches/tonic-web" }

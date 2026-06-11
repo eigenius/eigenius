@@ -27,11 +27,11 @@ use eigenius_kernel::nbe::val::Val;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Resource;
 
-use crate::validate::do_validate_measurement_claim;
+use crate::validate::do_validate_analysis_plan;
 
 /// Canonical IRIs the statistics institution dispatches on. Pinned
 /// here so a downstream caller (the bootstrap registration hook, a
-/// test harness building synthetic MeasurementClaims) reaches for the
+/// test harness building synthetic StatisticalAnalysisPlans) reaches for the
 /// same strings the chain ontology declared.
 ///
 /// Matches the resource declarations in
@@ -39,19 +39,16 @@ use crate::validate::do_validate_measurement_claim;
 pub mod iris {
     // ── Institution + procedure ──────────────────────────────────────
     pub const INSTITUTION: &str = "urn:eigenius:measurements:statistics_institution";
-    pub const PROC_VALIDATE_MEASUREMENT_CLAIM: &str =
-        "urn:eigenius:measurements:proc:validate_measurement_claim";
+    pub const PROC_VALIDATE_ANALYSIS_PLAN: &str =
+        "urn:eigenius:measurements:proc:validate_analysis_plan";
 
-    // ── MeasurementClaim property IRIs (D52 §3) ──────────────────────
+    // ── StatisticalAnalysisPlan property IRIs (D52 §3) ──────────────────────
     pub const PROP_SAMPLE_SET: &str = "urn:eigenius:measurements:sample_set";
-    pub const PROP_NULL_HYPOTHESIS: &str = "urn:eigenius:measurements:null_hypothesis";
-    pub const PROP_ALTERNATIVE_HYPOTHESIS: &str =
-        "urn:eigenius:measurements:alternative_hypothesis";
-    // D52 reads the predicate the claim establishes from the
-    // inherited `reflection:canonical_proposition` slot — the
-    // statistics ontology no longer declares a parallel
-    // `stats:derived_proposition` property (one slot, one source of
-    // truth across the four reflection-ontology resource classes).
+    // D52 reads the predicate the SAP's analysis attests from the
+    // inherited `reflection:canonical_proposition` slot on the
+    // per-effect `StatisticalAnalysisResult` derivation, not from the
+    // SAP itself — the verifier derives the proposition from the
+    // SAP's parameters at validation time.
     pub const PROP_CANONICAL_PROPOSITION: &str = "urn:eigenius:reflection:canonical_proposition";
     pub const PROP_ALPHA: &str = "urn:eigenius:measurements:alpha";
     pub const PROP_EFFECT_SIZE: &str = "urn:eigenius:measurements:effect_size";
@@ -60,6 +57,8 @@ pub mod iris {
     pub const PROP_OUTLIER_EXCLUSION: &str = "urn:eigenius:measurements:outlier_exclusion";
     pub const PROP_AUTOCORRELATION_STRUCTURE: &str =
         "urn:eigenius:measurements:autocorrelation_structure";
+    pub const PROP_MULTIPLE_COMPARISON_CORRECTION: &str =
+        "urn:eigenius:measurements:multiple_comparison_correction";
 
     // ── Replicate property IRIs ──────────────────────────────────────
     pub const PROP_VALUE: &str = "urn:eigenius:measurements:value";
@@ -69,19 +68,46 @@ pub mod iris {
     // ── Inductive type / class IRIs ──────────────────────────────────
     pub const SAMPLE_SET: &str = "urn:eigenius:measurements:SampleSet";
     pub const REPLICATE: &str = "urn:eigenius:measurements:Replicate";
-    pub const MEASUREMENT_CLAIM: &str = "urn:eigenius:measurements:MeasurementClaim";
-    pub const MEASUREMENT_VERDICT: &str = "urn:eigenius:measurements:MeasurementVerdict";
+    pub const STATISTICAL_ANALYSIS_PLAN: &str = "urn:eigenius:measurements:StatisticalAnalysisPlan";
+    pub const STATISTICAL_ANALYSIS_RESULT: &str =
+        "urn:eigenius:measurements:StatisticalAnalysisResult";
     pub const POPULATION_LEVEL: &str = "urn:eigenius:measurements:PopulationLevel";
     pub const MEASUREMENT_LEVEL: &str = "urn:eigenius:measurements:MeasurementLevel";
     pub const IMPOSSIBILITY_WITNESS: &str = "urn:eigenius:measurements:ImpossibilityWitness";
-    pub const METHOD_COMPARISON_CLAIM: &str = "urn:eigenius:measurements:MethodComparisonClaim";
+    pub const METHOD_COMPARISON_ANALYSIS_PLAN: &str =
+        "urn:eigenius:measurements:MethodComparisonAnalysisPlan";
 
-    // ── MeasurementVerdict property IRIs (Holds-output shape) ────────
-    pub const PROP_SOURCE_CLAIM: &str = "urn:eigenius:measurements:source_claim";
+    // ── StatisticalAnalysisResult property IRIs (per-effect derivation shape) ─
     pub const PROP_VERDICT_CTOR: &str = "urn:eigenius:measurements:verdict_ctor";
     pub const PROP_COMPUTED_STATISTIC: &str = "urn:eigenius:measurements:computed_statistic";
     pub const PROP_COMPUTED_P_VALUE: &str = "urn:eigenius:measurements:computed_p_value";
     pub const PROP_DUAL_VERDICT_PAIR: &str = "urn:eigenius:measurements:dual_verdict_pair";
+    pub const PROP_EFFECT_NAME: &str = "urn:eigenius:measurements:effect_name";
+
+    // ── Parameter-symbol axioms + propositional primitives (D52 §3) ──
+    //
+    // Used by the canonical-proposition derivation: the institution
+    // builds a chain-resident D47 type-fragment value whose ConstRef
+    // leaves point at these declared resources. The hash of that value
+    // is what the D49 witness index keys on; the consumer side
+    // (D39 reasoning) constructs the matching Exp from a proof term
+    // and arrives at the same hash via `encode_type → hash_proposition_value`.
+    pub const STATS_FALSE: &str = "urn:eigenius:measurements:False";
+    pub const STATS_MEAN_OF: &str = "urn:eigenius:measurements:mean_of";
+    pub const STATS_VARIANCE_OF: &str = "urn:eigenius:measurements:variance_of";
+    pub const STATS_MEDIAN_OF: &str = "urn:eigenius:measurements:median_of";
+    pub const STATS_MEAN_DIFF_OF: &str = "urn:eigenius:measurements:mean_diff_of";
+    pub const STATS_SLOPE_OF: &str = "urn:eigenius:measurements:slope_of";
+    pub const STATS_INTERCEPT_OF: &str = "urn:eigenius:measurements:intercept_of";
+    pub const STATS_LT: &str = "urn:eigenius:measurements:lt";
+    pub const STATS_LE: &str = "urn:eigenius:measurements:le";
+    pub const STATS_GT: &str = "urn:eigenius:measurements:gt";
+    pub const STATS_GE: &str = "urn:eigenius:measurements:ge";
+
+    // ── ANOVA effect predicates + method-comparison predicate ────────
+    pub const STATS_FACTOR_EFFECT_OF: &str = "urn:eigenius:measurements:factor_effect_of";
+    pub const STATS_INTERACTION_EFFECT_OF: &str = "urn:eigenius:measurements:interaction_effect_of";
+    pub const STATS_METHODS_AGREE: &str = "urn:eigenius:measurements:methods_agree";
 }
 
 /// In-process measurement-statistics institution.
@@ -147,9 +173,7 @@ impl Institution for StatisticsInstitution {
         ctx: &ExecutionContext,
     ) -> Result<QueryOutcome, InstitutionError> {
         match procedure_iri.as_str() {
-            iris::PROC_VALIDATE_MEASUREMENT_CLAIM => {
-                do_validate_measurement_claim(self, input, ctx)
-            }
+            iris::PROC_VALIDATE_ANALYSIS_PLAN => do_validate_analysis_plan(self, input, ctx),
             _ => Err(InstitutionError::NotImplemented(format!(
                 "StatisticsInstitution has no query handler for procedure `{procedure_iri}`"
             ))),

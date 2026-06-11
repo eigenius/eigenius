@@ -253,6 +253,7 @@ pub fn readback_neut(level: usize, neut: &Neut) -> Exp {
             Exp::App(Box::new(fun_exp), Box::new(readback_neut(level, k)))
         }
         // Eigenius extension
+        Neut::EigonAxiom(iri) => Exp::EigonAxiom(iri.clone()),
         Neut::PropAccess(k, prop) => {
             Exp::PropAccess(Box::new(readback_neut(level, k)), prop.clone())
         }

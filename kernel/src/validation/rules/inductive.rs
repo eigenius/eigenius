@@ -377,11 +377,23 @@ impl Validator {
                 return;
             }
         };
+        // D46 §10 — `eigentt:Axiom` resources are admissible referents
+        // too. An axiom reference carries the same `ConstRef(iri)`
+        // on-wire shape as a class reference; the decoder + NbE
+        // type-checker resolve it via the layer's `axiom_env()`
+        // (`Exp::EigonAxiom` arm in `eigentt_type_mirror.rs` /
+        // `check.rs`). The structural validator must mirror that
+        // admission, else any proposition citing an axiom in its
+        // encoded form (e.g. a bridge `DeclaredResource` whose
+        // `canonical_proposition` is
+        // `stats:lt(stats:mean_of(s), T) -> P(c)`) gets rejected at
+        // commit time before the type-checker ever sees it.
         let admitted = [
             iri(wk::CLASS),
             iri(wk::DATA_TYPE),
             iri(wk::INDUCTIVE_TYPE),
             iri(wk::CODATA_TYPE),
+            iri("urn:eigenius:eigentt:Axiom"),
         ];
         if !admitted.iter().any(|c| referent.is_instance_of(c)) {
             let found: Vec<String> = referent
@@ -396,7 +408,8 @@ impl Validator {
                 message: format!(
                     "{path}.args[0]: ConstRef IRI `{iri_val}` resolves to a resource whose \
                      classes {found:?} include none of Class / DataType / InductiveType / \
-                     CodataType (the type-former classes EigenTTType.ConstRef admits)"
+                     CodataType / Axiom (the type-former + axiom classes EigenTTType.ConstRef \
+                     admits)"
                 ),
             });
         }
@@ -1669,6 +1682,45 @@ mod tests {
             msg.contains("urn:eigenius:test:wrong_class")
                 && (msg.contains("Property") || msg.contains("none of")),
             "error must mention the target IRI and the wrong-class diagnostic: {msg}"
+        );
+    }
+
+    #[test]
+    fn eigentt_constref_to_axiom_validates() {
+        // D46 §10 — ConstRef to an `eigentt:Axiom` resource is
+        // admissible. Without this admission the bridge fixture's
+        // `canonical_proposition` (which cites `stats:lt(...)` and
+        // `stats:mean_of(...)`) gets rejected at commit time, before
+        // the NbE type-checker ever sees the encoded form.
+        //
+        // Uses the D52 stats axioms shipped in the bootstrap chain —
+        // `stats:lt` is registered as an `eigentt:Axiom` by
+        // statistics.esl + `build_axiom_env`.
+        let chain = build_eigentt_test_chain();
+        let mut top = LayerBuilder::new("test_constref_axiom", Some(chain));
+        let holder = make_resource(
+            "urn:eigenius:test:axiom_constref",
+            vec![(
+                "urn:eigenius:test:eigentt_value",
+                Value::Json(serde_json::json!({
+                    "ctor": "ConstRef",
+                    "args": ["urn:eigenius:measurements:lt"]
+                })),
+            )],
+        );
+        top.add_resource(holder).unwrap();
+        let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
+
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let constref_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference && e.message.contains("ConstRef")
+            })
+            .collect();
+        assert!(
+            constref_errors.is_empty(),
+            "ConstRef to `eigentt:Axiom` must validate; got {constref_errors:?}"
         );
     }
 

@@ -31,7 +31,7 @@
 //!
 //! `extract_typed` is a stub — Assay is target-side only.
 
-use eigenius_wasm_sdk::{Resource, Value};
+use eigenius_wasm_sdk::{QueryResponse, Resource, Value};
 
 wit_bindgen::generate!({
     path: "../../wit",
@@ -168,7 +168,7 @@ impl Guest for AssayInstitution {
                 ));
             }
         };
-        Ok(verdict_resource(ctor).to_cbor())
+        Ok(QueryResponse::from_verdict(verdict_resource(ctor)).to_cbor())
     }
 }
 

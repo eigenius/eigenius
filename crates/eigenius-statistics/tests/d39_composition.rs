@@ -18,7 +18,7 @@
 //!   → statistics → ic50-fixture → d39-composition-fixture.
 //!
 //! Validates that:
-//!  1. The IC50 confirmatory MeasurementClaim's IsDerivedAs witness
+//!  1. The IC50 confirmatory StatisticalAnalysisPlan's IsDerivedAs witness
 //!     (admitted via its ProgramTrace, exercised in
 //!     `ic50_measurement.rs`) is visible to the D39 reasoning
 //!     validator when it processes a sentence using
@@ -82,7 +82,7 @@ fn build_composition_chain() -> ExecutionContext {
     }
     let reasoning = Arc::new(reasoning_builder.build(LayerStorage::in_memory()));
 
-    // Statistics layer — provides MeasurementClaim, SampleSet, axis
+    // Statistics layer — provides StatisticalAnalysisPlan, SampleSet, axis
     // enums, and the PopulationLevel scope marker class the
     // composition fixture references.
     let stats_source = include_str!("../../../ontologies/statistics/statistics.esl");
@@ -95,7 +95,7 @@ fn build_composition_chain() -> ExecutionContext {
     let stats_layer = Arc::new(stats_builder.build(LayerStorage::in_memory()));
 
     // IC50 fixture layer — provides the screening + confirmatory
-    // SampleSets + claims + traces. The confirmatory MeasurementClaim
+    // SampleSets + claims + traces. The confirmatory StatisticalAnalysisPlan
     // is the IsDerivedAs witness target for the DerivedEvidence used
     // by the composition fixture's ReasoningSentence.
     let ic50_source = include_str!("fixtures/ic50_measurement.esl");

@@ -235,6 +235,7 @@ fn dispatch_bash(invocation_id: String, target: ByteBuf) -> Response {
     Response::DispatchOk {
         invocation_id,
         output: ByteBuf::from(output_cbor),
+        derivations: Vec::new(),
         dispatched_to: None,
     }
 }

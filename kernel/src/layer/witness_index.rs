@@ -89,8 +89,43 @@ pub fn build_witness_index(layer: &Layer) -> BTreeMap<WitnessKey, ()> {
                 index.insert(key, ());
             }
         }
+        // D52 institution-emitted-derivation shape: AutoOnLoad-emitted
+        // derivations (`reflection:InstitutionEmittedDerivation`) are
+        // self-attesting — the kernel produced them deterministically
+        // from a decidable institution running against the gated
+        // subject, no separate ProgramTrace is needed to certify their
+        // existence. Walk these directly and admit
+        // `IsDerivedAs(derivation_iri, P)` against the derivation's
+        // own IRI. The verdict resource itself doesn't carry a
+        // canonical_proposition under the new shape — only derivations
+        // do (D52 verdict-vs-derivation split).
+        if is_a
+            .iter()
+            .any(|c| c.as_str() == wk::INSTITUTION_EMITTED_DERIVATION)
+        {
+            if let Some(key) = emit_from_institution_derivation(&resource) {
+                index.insert(key, ());
+            }
+        }
     }
     index
+}
+
+/// D52 institution-emitted derivation: read `canonical_proposition`
+/// directly off a kernel-emitted derivation resource and build a
+/// `WitnessKey` keyed against the derivation's own IRI. Returns `None`
+/// when the derivation has no `canonical_proposition` set (kernel
+/// merge dropped it, or the institution didn't supply one).
+fn emit_from_institution_derivation(derivation: &Resource) -> Option<WitnessKey> {
+    let derivation_iri = derivation.id().cloned()?;
+    let prop_iri = Iri::parse(wk::CANONICAL_PROPOSITION).ok()?;
+    let encoded_prop = derivation.get(&prop_iri)?;
+    let prop_hash = hash_proposition_value(encoded_prop);
+    Some(WitnessKey {
+        category: WitnessCategory::Derived,
+        iri: derivation_iri,
+        prop_hash,
+    })
 }
 
 /// Read a Trace resource's target IRI and the target's

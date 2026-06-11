@@ -572,6 +572,34 @@ pub enum TypeExpr {
         body: Box<TypeExpr>,
         pos: Position,
     },
+    /// Compile-time aliases in type-expression position:
+    /// `alias name1 = expr1, name2 = expr2, ... in body`. The
+    /// bindings are textual substitutions resolved at lowering time
+    /// — they shadow no chain-resident identifier and produce no D47
+    /// encoding of their own. The body's free references to each
+    /// binding name (as bare `TypeExpr::Ref`) inline the bound
+    /// expression. Earlier bindings are in scope inside later
+    /// bindings (sequential lexical scoping). Pure ESL surface
+    /// sugar; the kernel's NbE never sees these.
+    ///
+    /// Distinct from kernel-level `let` (`Decl::Def` in NbE; surface
+    /// `let x : T = e; body` in the program-body parser). Reserving
+    /// the `alias` keyword keeps the two semantics distinguishable
+    /// even when a future type-position `let` with real δ-binding
+    /// lands.
+    Alias {
+        bindings: Vec<AliasBinding>,
+        body: Box<TypeExpr>,
+        pos: Position,
+    },
+}
+
+/// Single binding in an `alias name = expr, ... in body` block.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AliasBinding {
+    pub name: String,
+    pub value: TypeExpr,
+    pub pos: Position,
 }
 
 /// Sort literals recognised in type expressions (eigenius#72).
@@ -592,6 +620,7 @@ impl TypeExpr {
             | TypeExpr::Pi { pos, .. }
             | TypeExpr::Sort { pos, .. }
             | TypeExpr::Lambda { pos, .. }
+            | TypeExpr::Alias { pos, .. }
             | TypeExpr::LitString { pos, .. }
             | TypeExpr::LitInt { pos, .. }
             | TypeExpr::LitFloat { pos, .. } => pos,

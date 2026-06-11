@@ -200,6 +200,17 @@ pub enum Neut {
     NtFun(Vec<(Name, Exp)>, Rho, Box<Neut>),
 
     // --- Eigenius extension ---
+    /// Reference to a chain-resident `eigentt:Axiom` (D46 §10) — an
+    /// opaque typed constant identified by IRI. Wrapped as `Neut`
+    /// (not bare `Val`) so the existing `Neut::App` spine machinery
+    /// handles applications uniformly: `axiom_a x y` evaluates to
+    /// `Val::Nt(Neut::App(Neut::App(Neut::EigonAxiom(iri), x), y))`,
+    /// a normal form that compares structurally with another such
+    /// spine via IRI equality + arg equality. Without the Neut
+    /// wrapping, `Val::EigonAxiom(iri).app(arg)` would error with
+    /// `NotAFunction` — axioms have no reduction rules and there's
+    /// no `Val::Lam` to apply.
+    EigonAxiom(Iri),
     /// Property access on a neutral resource
     PropAccess(Box<Neut>, Iri),
 

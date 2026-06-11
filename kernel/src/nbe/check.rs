@@ -1017,6 +1017,25 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             Ok(Val::Sort(0))
         }
         Exp::EigonClass(_) | Exp::EigonPrimitive(_) => Ok(Val::Sort(1)),
+        // D46 §10 — axiom reference. The IRI denotes an opaque typed
+        // constant declared by `axiom NAME : T;` and lifted onto the
+        // chain as a `eigentt:Axiom` resource carrying the encoded
+        // type T as `axiom_statement`. The layer's cached `axiom_env`
+        // holds the decoded type as a `Val`; `check_infer` returns
+        // that registered type. Absent layer ⇒ no chain to consult ⇒
+        // error: closed-term type-checking has no environment to
+        // resolve axioms against. Absent IRI ⇒ unresolved axiom
+        // reference (the chain was supposed to admit it but didn't),
+        // also an error.
+        Exp::EigonAxiom(iri) => {
+            let layer = ctx.layer.as_ref().ok_or_else(|| {
+                format!("Exp::EigonAxiom({iri}): no layer context available for axiom resolution")
+            })?;
+            let env = layer.axiom_env();
+            env.get(iri)
+                .map(|entry| entry.typ.clone())
+                .ok_or_else(|| format!("axiom `{iri}` not registered in chain axiom environment"))
+        }
         // eigenius#71 / D49 — literal values infer to their primitive
         // type (`Val::EigonPrimitive(PrimitiveType::*)`). Round-trips
         // through D47 as the `LitString` / `LitInt` / `LitFloat` ctors;
@@ -1801,6 +1820,7 @@ pub fn check_guarded(exp: &Exp, forbidden: &std::collections::HashSet<&str>) -> 
         | Exp::One
         | Exp::Unit
         | Exp::EigonClass(_)
+        | Exp::EigonAxiom(_)
         | Exp::EigonPrimitive(_)
         | Exp::EigonResource(_)
         | Exp::LitString(_)
@@ -2194,7 +2214,26 @@ fn check_inductive_ctor_args(
     let ctor = &decl.ctors[ctor_idx];
 
     let (arg_specs, current) = peel_ctor_telescope(&ctor.typ, decl.params.len());
-    if arg_specs.len() != args.len() {
+
+    // Permitted arity shapes:
+    //
+    //   args.len() == arg_specs.len()  — fully specified by the user
+    //   args.len() <  arg_specs.len()  — trailing `ChainWitness`-typed
+    //                                    slots elided in the surface
+    //                                    form. The synthesize hook
+    //                                    (`try_synthesize_chain_witness`)
+    //                                    populates each missing slot
+    //                                    from the layer's witness
+    //                                    index. Non-ChainWitness gaps
+    //                                    error below.
+    //   args.len() >  arg_specs.len()  — error (too many args)
+    //
+    // The elision is what lets ESL authors write
+    // `declared(iri, P)` instead of `declared(iri, P, <sentinel>)`.
+    // The synthesize hook never reads the user's expression at a
+    // ChainWitness slot, so eliding it is equivalent to providing a
+    // sentinel — but with no boilerplate at the call site.
+    if args.len() > arg_specs.len() {
         return Err(format!(
             "InductiveCtor `{}.{ctor_name}` expects {} args, got {}",
             decl.name,
@@ -2209,7 +2248,8 @@ fn check_inductive_ctor_args(
     for ((patt, _), val) in decl.params.iter().zip(params.iter()) {
         arg_env = arg_env.extend(patt.clone(), val.clone());
     }
-    for (spec, arg_exp) in arg_specs.iter().zip(args.iter()) {
+    for (i, spec) in arg_specs.iter().enumerate() {
+        let user_arg = args.get(i);
         match spec {
             CtorArg::Value { patt, typ } => {
                 let arg_typ_val = ctx.eval(typ, &arg_env).map_err(|e| e.to_string())?;
@@ -2221,11 +2261,20 @@ fn check_inductive_ctor_args(
                 // type-checking the user's arg. ChainWitness predicates
                 // have zero constructors — the user can't construct an
                 // inhabitant — so kernel-side synthesis IS the type-
-                // checking step here. The user's `arg_exp` at this
-                // position is ignored by design.
+                // checking step here. The user's `arg_exp` (if any) at
+                // this position is ignored by design.
                 let arg_val = match try_synthesize_chain_witness(ctx, &arg_typ_val)? {
                     Some(witness_val) => witness_val,
                     None => {
+                        let arg_exp = user_arg.ok_or_else(|| {
+                            format!(
+                                "InductiveCtor `{}.{ctor_name}`: arg {i} is missing and \
+                                 its expected type is not a ChainWitness predicate. Only \
+                                 trailing ChainWitness-typed slots may be elided in the \
+                                 surface form.",
+                                decl.name
+                            )
+                        })?;
                         check(ctx, arg_exp, &arg_typ_val)?;
                         ctx.eval(arg_exp, &ctx.rho).map_err(|e| e.to_string())?
                     }
@@ -2233,6 +2282,12 @@ fn check_inductive_ctor_args(
                 arg_env = arg_env.extend(patt.clone(), arg_val);
             }
             CtorArg::Size { patt, upper } => {
+                let arg_exp = user_arg.ok_or_else(|| {
+                    format!(
+                        "InductiveCtor `{}.{ctor_name}`: sized arg {i} cannot be elided",
+                        decl.name
+                    )
+                })?;
                 // Bounded size arg: user's expression must be a
                 // size value strictly below the upper bound
                 // (evaluated in `arg_env` so it can reference the

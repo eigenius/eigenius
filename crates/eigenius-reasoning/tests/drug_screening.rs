@@ -27,7 +27,7 @@
 //!    StrongInhibitor(EIG_0291)`.
 //! 3. A `stats:SampleSetResource` carrying the three raw IC50
 //!    replicate readings (72, 85, 100 nM) + an `ObservationTrace`.
-//! 4. A `stats:MeasurementClaim` referencing the SampleSet with the
+//! 4. A `stats:StatisticalAnalysisPlan` referencing the SampleSet with the
 //!    universal-claim schema (alpha = 0.05, effect_size = Absolute(100,
 //!    "nM"), TwoSided, WelchUnequal, Identity exclusion) + a
 //!    `ProgramTrace`. The claim's `canonical_proposition` is
@@ -44,7 +44,7 @@
 //! ⇒ HasLowIC50 holds") and cited it via `ObservedEvidence`. The D52
 //! statistics institution turns that author-asserted bridge into a
 //! mechanical recomputation: the SampleSet carries the raw replicates,
-//! the MeasurementClaim asserts the parameters, and the verifier
+//! the StatisticalAnalysisPlan asserts the parameters, and the verifier
 //! computes the proposition. The ReasoningSentence then cites the
 //! claim via `DerivedEvidence` and inherits its auditable provenance.
 //!
@@ -53,7 +53,7 @@
 //! witness index, runs the D39 ValidateJustification handler, and
 //! asserts `Verdict::Holds`. The statistics institution itself is not
 //! registered in the test runtime — D49 §6 admits `IsDerivedAs` from
-//! the MeasurementClaim's ProgramTrace + canonical_proposition pair,
+//! the StatisticalAnalysisPlan's ProgramTrace + canonical_proposition pair,
 //! independent of whether AutoOnLoad has fired the verifier. The
 //! verifier's recomputation path is exercised separately in the
 //! eigenius-statistics crate's tests.
@@ -116,9 +116,9 @@ fn build_drug_screening_chain() -> ExecutionContext {
     }
     let reasoning = Arc::new(reasoning_builder.build(LayerStorage::in_memory()));
 
-    // Statistics layer — provides the SampleSet / MeasurementClaim /
+    // Statistics layer — provides the SampleSet / StatisticalAnalysisPlan /
     // axis-enum machinery the fixture's SampleSetResource and
-    // MeasurementClaim reference. Compiled against `reasoning` so the
+    // StatisticalAnalysisPlan reference. Compiled against `reasoning` so the
     // statistics ontology can pick up reasoning-layer types if it ever
     // needs to (it currently doesn't, but parking it above keeps the
     // dependency direction honest: reasoning is a sibling of
@@ -161,7 +161,7 @@ fn build_drug_screening_chain() -> ExecutionContext {
     // resources the fixture committed: the rule's DeclarationTrace
     // admits `IsDeclaredAs(rule_iri, rule_prop)`; the SampleSet's
     // ObservationTrace admits `IsObservedAs(sampleset_iri, …)`; and
-    // the MeasurementClaim's ProgramTrace admits
+    // the StatisticalAnalysisPlan's ProgramTrace admits
     // `IsDerivedAs(claim_iri, HasLowIC50(EIG_0291))` — the witness
     // the certificate's `derived(...)` constructor consumes.
     let _ = fixture_layer.chain_witness_index();

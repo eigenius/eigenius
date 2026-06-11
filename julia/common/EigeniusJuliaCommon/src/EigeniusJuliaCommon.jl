@@ -165,6 +165,43 @@ function validate_format(field::Symbol, value::AbstractString, fmt::Symbol)
     end
 end
 
+# --- QueryResponse -----------------------------------------------------
+#
+# Return shape for institution query handlers (AutoOnLoad / Decidable
+# / OnDemand QueryClasses) that want to emit per-effect derivations
+# alongside the gate Verdict. Authors return a `QueryResponse(verdict,
+# results)` instead of a bare verdict; the JuliaWorker detects this
+# type at the encoder step, encodes each derivation as its own
+# Eigon-CBOR resource, and threads them through the substrate wire
+# protocol so the kernel commits them as
+# `reflection:InstitutionEmittedDerivation`s under the gated subject
+# (D52 §6).
+#
+# Bare-verdict handlers continue to work unchanged — they return the
+# output resource directly and emit zero derivations.
+
+"""
+    QueryResponse(output, derivations=[])
+
+Wraps an institution query handler's gate Verdict (`output`) and zero-
+or-more side-effect derivation resources. The JuliaWorker recognises
+this type and threads both halves across the substrate boundary; the
+kernel stamps the `reflection:InstitutionEmittedDerivation` marker and
+the `from_subject` / `runtime_invocation` linkage properties on each
+derivation before committing.
+
+Each derivation should carry its own `@id` (typically suffixed off the
+gated subject, e.g. `{subject_iri}:result:{effect_name}`) and a
+`reflection:canonical_proposition` if it should be admitted as an
+`IsDerivedAs` witness target.
+"""
+struct QueryResponse{O,V<:AbstractVector}
+    output::O
+    derivations::V
+end
+
+QueryResponse(output) = QueryResponse(output, Any[])
+
 # --- Exports -----------------------------------------------------------
 
 export validate_min_value,
@@ -172,6 +209,7 @@ export validate_min_value,
        validate_min_length,
        validate_max_length,
        validate_pattern,
-       validate_format
+       validate_format,
+       QueryResponse
 
 end # module EigeniusJuliaCommon

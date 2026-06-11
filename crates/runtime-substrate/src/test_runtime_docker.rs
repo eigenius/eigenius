@@ -322,6 +322,7 @@ impl LanguageRuntime for TestLanguageRuntimeDocker {
 
         Ok(RunOutcome {
             output: build_output_resource(&invocation_id, stdout),
+            derivations: Vec::new(),
             image_digest,
             started_at,
             completed_at,

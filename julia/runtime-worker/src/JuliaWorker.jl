@@ -26,7 +26,7 @@
 #   - Request::Health → {"verb": "health"}
 #   - Request::DispatchMethod{...} → {"verb": "dispatch_method", "invocation_id": ..., "target": <bytes>, "inputs": [...]}
 #   - Response::Health(HealthInfo) → {"verb": "health", "manifest_hash_in_image": ..., "env_digest_in_image": ..., "numerical_metadata": {...}}
-#   - Response::DispatchOk{...} → {"verb": "dispatch_ok", "invocation_id": ..., "output": <bytes>, "dispatched_to": ...}
+#   - Response::DispatchOk{...} → {"verb": "dispatch_ok", "invocation_id": ..., "output": <bytes>, "derivations": [<bytes>, ...], "dispatched_to": ...}
 #   - Response::Evicted → {"verb": "evicted"}
 #
 # Length-prefixed framing: 4-byte big-endian length || CBOR body.
@@ -204,6 +204,7 @@ function dispatch_julia(invocation_id::AbstractString, target_bytes::Vector{UInt
         "verb" => "dispatch_ok",
         "invocation_id" => invocation_id,
         "output" => output_bytes,
+        "derivations" => Vector{Vector{UInt8}}(),
         "dispatched_to" => nothing,
     )
 end
@@ -396,22 +397,48 @@ function dispatch_typed_method(
     end
 
     # 6. Encode the result. Multiple cases:
+    #    - Result is a `QueryResponse` (D52 §6 institution-emitted
+    #      derivation shape): split into (output, derivations) and
+    #      encode each half via the discovered encoders.
     #    - Result is a mirror struct: dispatch via _eigenius_encoders
     #      (keyed on typeof) to its encode_<C>.
     #    - Result is a primitive: pass through (the caller decodes
     #      based on RuntimeMethodSignature.output_type).
     encoders = discover_encoders()
-    output_payload = if haskey(encoders, typeof(result))
-        try
-            Base.invokelatest(encoders[typeof(result)], result)
-        catch e
-            return failure(invocation_id, "runtime_error",
-                "encoder for $(typeof(result)) failed: $e")
+    encode_one = function (value)
+        if haskey(encoders, typeof(value))
+            try
+                return Base.invokelatest(encoders[typeof(value)], value)
+            catch e
+                throw(ErrorException("encoder for $(typeof(value)) failed: $e"))
+            end
+        else
+            # Primitive (or anything without an encoder) — emit as-is.
+            return value
         end
-    else
-        # Primitive (or anything we don't have an encoder for) — emit
-        # as-is. The substrate decodes by the signature's output_type.
-        result
+    end
+
+    # Duck-type detection of a query-response shape: any value with
+    # both `output` and `derivations` fields, where `derivations` is
+    # iterable. Covers `EigeniusJuliaCommon.QueryResponse` (the
+    # canonical author surface), NamedTuple `(output=..., derivations=[...])`,
+    # and any other struct following the same shape. The worker
+    # intentionally doesn't `using EigeniusJuliaCommon` itself — its
+    # Project.toml stays minimal (CBOR + Sockets only) — and detects
+    # by structure rather than nominal type.
+    output_value = result
+    derivation_values = Any[]
+    if hasproperty(result, :output) &&
+       hasproperty(result, :derivations) &&
+       applicable(iterate, getproperty(result, :derivations))
+        output_value = getproperty(result, :output)
+        derivation_values = collect(getproperty(result, :derivations))
+    end
+
+    output_payload = try
+        encode_one(output_value)
+    catch e
+        return failure(invocation_id, "runtime_error", string(e))
     end
     output_bytes = try
         CBOR.encode(output_payload)
@@ -420,10 +447,30 @@ function dispatch_typed_method(
             "could not CBOR-encode output: $e")
     end
 
+    derivation_bytes_list = Vector{Vector{UInt8}}()
+    for (i, dv) in enumerate(derivation_values)
+        local payload
+        payload = try
+            encode_one(dv)
+        catch e
+            return failure(invocation_id, "runtime_error",
+                "encoder for derivation #$i: $e")
+        end
+        local bytes
+        bytes = try
+            CBOR.encode(payload)
+        catch e
+            return failure(invocation_id, "runtime_error",
+                "could not CBOR-encode derivation #$i: $e")
+        end
+        push!(derivation_bytes_list, bytes)
+    end
+
     return Dict(
         "verb" => "dispatch_ok",
         "invocation_id" => invocation_id,
         "output" => output_bytes,
+        "derivations" => derivation_bytes_list,
         "dispatched_to" => dispatched_to_str,
     )
 end

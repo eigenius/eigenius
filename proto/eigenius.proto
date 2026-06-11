@@ -687,6 +687,15 @@ message DispatchExternalResponse {
   // image_digest, started_at / completed_at (RFC3339), and
   // numerical_metadata (host kernel, FMA flag, BLAS version).
   bytes runtime_invocation_partial_cbor = 2;
+
+  // Side-effect resources the substrate-hosted institution emitted as
+  // artefacts of validation (D52 §6 institution-emitted derivations).
+  // Each entry is a CBOR-encoded Eigon resource that the kernel commits
+  // alongside the gate Verdict as a chain-resident
+  // `reflection:InstitutionEmittedDerivation` under the gated subject.
+  // Empty for substrate-hosted institutions whose only job is the
+  // pass/fail gate (i.e. zero-or-more semantics, not exactly-one).
+  repeated bytes derivations_cbor = 3;
 }
 
 // --- Institution Protocol (D14) ---

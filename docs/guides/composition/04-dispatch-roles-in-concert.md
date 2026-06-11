@@ -81,8 +81,8 @@ cascade — is what the platform supports natively.
 The motivating example for the cross-institution cascade in the Layer 2
 reasoning stack is the **statistics → reasoning** pipeline:
 
-1. **D52 fires first.** A commit of a `stats:MeasurementClaim` resource
-   triggers the statistics institution's `validate_measurement_claim`
+1. **D52 fires first.** A commit of a `stats:StatisticalAnalysisPlan` resource
+   triggers the statistics institution's `validate_analysis_plan`
    AutoOnLoad gate. The verifier recomputes the claim from the cited
    `SampleSet`'s raw replicates, returns `Verdict::Holds`, and (as a side
    effect of the trace + canonical_proposition pair already on the chain)

@@ -126,19 +126,21 @@ fn ic50_measurement_claim_recomputes_to_verdict() {
     let claim = (*claim_arc).clone();
 
     let inst = StatisticsInstitution::new();
-    let proc_iri = Iri::parse(iris::PROC_VALIDATE_MEASUREMENT_CLAIM).expect("proc IRI");
+    let proc_iri = Iri::parse(iris::PROC_VALIDATE_ANALYSIS_PLAN).expect("proc IRI");
     let outcome = inst
         .query(&proc_iri, &claim, &ctx)
-        .expect("validate_measurement_claim returns an outcome");
+        .expect("validate_analysis_plan returns an outcome");
+    let result = outcome
+        .derivations
+        .first()
+        .expect("statistics emits a StatisticalAnalysisResult when the SAP ran");
 
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
+    let ctor = result
+        .get(&Iri::parse(iris::PROP_VERDICT_CTOR).unwrap())
         .and_then(Value::as_str)
         .expect("verdict carries ctor_name")
         .to_string();
-    let diagnostic = outcome
-        .output
+    let diagnostic = result
         .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
         .and_then(Value::as_str)
         .map(str::to_owned);
@@ -163,8 +165,7 @@ fn ic50_measurement_claim_recomputes_to_verdict() {
     // The verdict's computed numerics must be attached (D52 §6 — Holds
     // *and* Fails verdicts that actually ran the test carry the
     // intermediate numerics for audit).
-    let p_value = outcome
-        .output
+    let p_value = result
         .get(&Iri::parse(iris::PROP_COMPUTED_P_VALUE).unwrap())
         .and_then(|v| {
             if let Value::Float(f) = v {
@@ -179,8 +180,7 @@ fn ic50_measurement_claim_recomputes_to_verdict() {
         "computed p-value should be in (0.05, 0.5) for the IC50 case; got {p_value}"
     );
 
-    let t_stat = outcome
-        .output
+    let t_stat = result
         .get(&Iri::parse(iris::PROP_COMPUTED_STATISTIC).unwrap())
         .and_then(|v| {
             if let Value::Float(f) = v {
@@ -214,19 +214,21 @@ fn confirmatory_claim_recomputes_to_holds() {
     let claim = (*claim_arc).clone();
 
     let inst = StatisticsInstitution::new();
-    let proc_iri = Iri::parse(iris::PROC_VALIDATE_MEASUREMENT_CLAIM).expect("proc IRI");
+    let proc_iri = Iri::parse(iris::PROC_VALIDATE_ANALYSIS_PLAN).expect("proc IRI");
     let outcome = inst
         .query(&proc_iri, &claim, &ctx)
-        .expect("validate_measurement_claim returns an outcome");
+        .expect("validate_analysis_plan returns an outcome");
+    let result = outcome
+        .derivations
+        .first()
+        .expect("statistics emits a StatisticalAnalysisResult when the SAP ran");
 
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
+    let ctor = result
+        .get(&Iri::parse(iris::PROP_VERDICT_CTOR).unwrap())
         .and_then(Value::as_str)
         .expect("verdict carries ctor_name")
         .to_string();
-    let diagnostic = outcome
-        .output
+    let diagnostic = result
         .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
         .and_then(Value::as_str)
         .map(str::to_owned);
@@ -240,8 +242,7 @@ fn confirmatory_claim_recomputes_to_holds() {
 
     // Holds verdicts must also carry the computed numerics so audit
     // consumers see *why* the test crossed alpha.
-    let p_value = outcome
-        .output
+    let p_value = result
         .get(&Iri::parse(iris::PROP_COMPUTED_P_VALUE).unwrap())
         .and_then(|v| {
             if let Value::Float(f) = v {
@@ -258,50 +259,50 @@ fn confirmatory_claim_recomputes_to_holds() {
 }
 
 #[test]
-fn claim_admits_is_derived_as_witness_via_program_trace() {
-    // D52 §8 — once the MeasurementClaim is on chain with both its
-    // canonical_proposition set and a ProgramTrace pointing at it,
-    // D49 §6's witness index must admit an IsDerivedAs witness keyed
-    // on the (claim_iri, canonical_proposition) pair. This is what
-    // makes downstream D39 reasoning's `DerivedEvidence(claim_iri)`
-    // citation type-check — the JustifiedBy.derived ctor consumes the
-    // witness from the index.
+fn sar_admits_is_derived_as_witness_via_institution_emitted_marker() {
+    // Post-step-1E: the IsDerivedAs witness is admitted off the
+    // `StatisticalAnalysisResult` derivation's
+    // `reflection:InstitutionEmittedDerivation` marker, NOT off a
+    // separate ProgramTrace. The witness emitter walks every
+    // `InstitutionEmittedDerivation` and indexes by
+    // `(resource_iri, canonical_proposition)`.
     //
     // The witness admission is independent of the institution's
     // verdict outcome — the index is built from chain shapes
-    // (ProgramTrace + canonical_proposition), not from runtime
-    // verifier outputs. A Fails verdict at AutoOnLoad would reject the
-    // commit (preventing the chain artifact from existing in the first
-    // place); the test below commits the claim into a test layer
-    // directly without dispatching the verifier, then confirms the
-    // index sees the witness.
+    // (`is_a InstitutionEmittedDerivation` + `canonical_proposition`),
+    // not from runtime verifier outputs. The test below commits the
+    // pre-authored confirmatory SAR (via fixture load) and confirms
+    // the index sees the witness keyed on the SAR's IRI.
     use eigenius_kernel::layer::lookup_chain_witness;
     use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
 
     let ctx = build_ic50_chain();
-    let claim_iri =
-        Iri::parse("urn:eigenius:demo:screen:claim_eig0291_lowic50").expect("claim IRI");
-    let claim_arc = ctx
-        .resolve(&claim_iri)
-        .unwrap_or_else(|| panic!("claim `{claim_iri}` should be on chain"));
+    let sar_iri =
+        Iri::parse("urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds:result:main_effect")
+            .expect("SAR IRI");
+    let sar_arc = ctx
+        .resolve(&sar_iri)
+        .unwrap_or_else(|| panic!("pre-authored SAR `{sar_iri}` should be on chain"));
 
-    // Read the claim's canonical_proposition (the same Value the
-    // witness emitter reads at index-build time).
-    let canonical_prop = claim_arc
+    // Read the SAR's canonical_proposition — the strictly-statistical
+    // claim the verifier emits for SingleSampleEstimate +
+    // OneSidedWitnessed + Absolute(T), pre-authored here to match
+    // what the institution would produce.
+    let canonical_prop = sar_arc
         .get(&Iri::parse("urn:eigenius:reflection:canonical_proposition").unwrap())
-        .expect("claim must carry canonical_proposition for witness admission")
+        .expect("SAR must carry canonical_proposition for witness admission")
         .clone();
 
     // Build the lookup key the way D49 §6 builds it from the emitter
     // side, using the same hash_proposition_value the index uses.
     let expected_key =
-        WitnessKey::from_encoded(WitnessCategory::Derived, claim_iri.clone(), &canonical_prop);
+        WitnessKey::from_encoded(WitnessCategory::Derived, sar_iri.clone(), &canonical_prop);
 
     assert!(
         lookup_chain_witness(ctx.head().as_ref(), &expected_key),
-        "IsDerivedAs witness for {claim_iri} with the claim's canonical_proposition \
-         must be in the chain witness index (ProgramTrace points at the claim and \
-         the canonical_proposition slot is set — both preconditions are met in the \
-         fixture)"
+        "IsDerivedAs witness for {sar_iri} with the SAR's canonical_proposition \
+         must be in the chain witness index (the pre-authored SAR carries both \
+         `is_a InstitutionEmittedDerivation` and `canonical_proposition` — the \
+         two preconditions the D49 emitter requires)"
     );
 }

@@ -194,17 +194,71 @@ impl Institution for WasmInstitution {
     ) -> Result<crate::institution::runtime::QueryOutcome, InstitutionError> {
         let payload = eigon_cbor::serialize_resource(input);
         let out = self.call_iri_bytes("query", procedure_iri, payload, ctx)?;
-        let output = eigon_cbor::parse_resource_lenient(&out).map_err(|e| {
+        // WASM query handlers return a `QueryResponse`-wrapped CBOR map
+        // carrying the gate Verdict plus zero-or-more side-effect
+        // derivations — see `sdk/wasm-sdk/src/lib.rs` for the
+        // canonical shape. The kernel decodes both halves and the
+        // commit pipeline stamps the
+        // `reflection:InstitutionEmittedDerivation` marker on each
+        // derivation before committing.
+        let (output, derivations) = parse_wasm_query_response(&out).map_err(|e| {
             InstitutionError::ComputationFailed(format!("query output parse failed: {e}"))
         })?;
         // WASM institutions run inside the kernel's Wasmtime host; the
         // kernel records its own program-trace provenance for these
         // dispatches, so no chain-committed RuntimeInvocation is
         // produced from the institution side.
-        Ok(crate::institution::runtime::QueryOutcome::from_output(
+        Ok(crate::institution::runtime::QueryOutcome {
             output,
-        ))
+            derivations,
+            partial_invocation: None,
+        })
     }
+}
+
+/// Decode the `QueryResponse` wire format produced by the wasm-sdk's
+/// `QueryResponse::to_cbor()`. Returns `(output, derivations)`.
+fn parse_wasm_query_response(bytes: &[u8]) -> Result<(Resource, Vec<Resource>), String> {
+    let value: ciborium::value::Value =
+        ciborium::from_reader(bytes).map_err(|e| format!("CBOR decode error: {e}"))?;
+    let map = match value {
+        ciborium::value::Value::Map(m) => m,
+        _ => return Err("expected CBOR map for QueryResponse".to_string()),
+    };
+    let mut output_value: Option<ciborium::value::Value> = None;
+    let mut derivation_values: Vec<ciborium::value::Value> = Vec::new();
+    for (k, v) in map {
+        let key = match k {
+            ciborium::value::Value::Text(s) => s,
+            _ => return Err("expected text key in QueryResponse map".to_string()),
+        };
+        match key.as_str() {
+            "output" => output_value = Some(v),
+            "derivations" => match v {
+                ciborium::value::Value::Array(arr) => derivation_values = arr,
+                _ => return Err("`derivations` must be a CBOR array".to_string()),
+            },
+            other => return Err(format!("unexpected QueryResponse key `{other}`")),
+        }
+    }
+    let output_value = output_value.ok_or("QueryResponse missing `output`")?;
+    let output_bytes = encode_cbor_value(&output_value);
+    let output = eigon_cbor::parse_resource_lenient(&output_bytes)
+        .map_err(|e| format!("decode `output` resource: {e}"))?;
+    let mut derivations = Vec::with_capacity(derivation_values.len());
+    for (i, v) in derivation_values.iter().enumerate() {
+        let d_bytes = encode_cbor_value(v);
+        let r = eigon_cbor::parse_resource_lenient(&d_bytes)
+            .map_err(|e| format!("decode derivation #{i}: {e}"))?;
+        derivations.push(r);
+    }
+    Ok((output, derivations))
+}
+
+fn encode_cbor_value(value: &ciborium::value::Value) -> Vec<u8> {
+    let mut buf = Vec::new();
+    ciborium::into_writer(value, &mut buf).expect("CBOR re-encode infallible");
+    buf
 }
 
 // ─── Wasmtime linker / boundary helpers ────────────────────────────────

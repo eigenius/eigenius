@@ -2,7 +2,7 @@
 
 Slow-walk worked example of D52, the platform's measurement-statistics institution. Walks the full chain from raw replicate readings on the chain to a typed Holds/Fails verdict mechanically derived from those readings.
 
-Read this if you want to know what a `MeasurementClaim` commit does, how the seven dispatch positions split across the experimental-design space, what each opinionated stance (one-sided witnessing, dual-verdict outlier exclusion, Passing-Bablok for method comparison, epistemic-scope guard) actually enforces, or how the institution's emitted `DerivedResource` becomes a citable evidence node for the [D39 reasoning institution](../reasoning-institution/README.md).
+Read this if you want to know what a `StatisticalAnalysisPlan` commit does, how the seven dispatch positions split across the experimental-design space, what each opinionated stance (one-sided witnessing, dual-verdict outlier exclusion, Passing-Bablok for method comparison, epistemic-scope guard) actually enforces, or how the institution's emitted `DerivedResource` becomes a citable evidence node for the [D39 reasoning institution](../reasoning-institution/README.md).
 
 Design spec: [**D52 Measurement Statistics Institution**](../../../design/d52-measurement-statistics-institution.md). Implementation: [`crates/eigenius-statistics/`](../../../../crates/eigenius-statistics/). Ontology: [`ontologies/statistics/statistics.esl`](../../../../ontologies/statistics/statistics.esl).
 
@@ -20,7 +20,7 @@ The institution lives in-process: the verifier runs synchronously inside the ker
 
 ## The universal claim schema
 
-Every `stats:MeasurementClaim` resource carries the same seven slots, plus an optional autocorrelation structure for longitudinal designs:
+Every `stats:StatisticalAnalysisPlan` resource carries the same seven slots, plus an optional autocorrelation structure for longitudinal designs:
 
 | Property | Type | What it asserts |
 |---|---|---|
@@ -51,19 +51,19 @@ Each `stats:SampleSet` value is a `Bundle(...)` ctor at a specific position in t
 | `stats:SplitPlot(a, b, r, observations, replication)` | `(Restricted, SplitPlotBlocking(a, r), FullFactorial(2), _, CrossSectional)` | Split-plot mixed-effects with **nested error strata** — whole-plot factor tested against whole-plot error, subplot factor and interaction tested against subplot error. The distinct `SplitPlotBlocking(a, r)` ctor makes the nested dispatch unambiguous; otherwise routing split-plot data through flat `Factorial` would use the smaller subplot error for the whole-plot F-test and silently produce inflated significance. This false-positive shield is one of the institution's primary justifications. |
 | `stats:RepeatedMeasures(n_subjects, n_timepoints, k_between_factors, factor_levels, observations, replication)` | `(CompleteRandom, Unblocked, FullFactorial(k_between_factors), _, Longitudinal(n_timepoints))` | Longitudinal mixed-effects with subject as random effect, time as within-subjects fixed factor, optional between-subjects factorial overlay. Phase 4.9 wires the `(CompoundSymmetry, k=0)` cell (univariate RM-ANOVA); other cells of the (autocorrelation × k_between_factors) matrix reject with diagnostics referencing tracked GitHub issues. |
 
-A `MethodComparisonClaim` subclass dispatches differently: it bypasses the SampleSet-shape table and routes to Passing-Bablok regression on the cited `Paired` SampleSet's observations ([§7.3](#7-3-opinionated-stance-passingbablok-mandatory-for-methodcomparisonclaim)).
+A `MethodComparisonAnalysisPlan` subclass dispatches differently: it bypasses the SampleSet-shape table and routes to Passing-Bablok regression on the cited `Paired` SampleSet's observations ([§7.3](#7-3-opinionated-stance-passingbablok-mandatory-for-methodcomparisonclaim)).
 
 The full dispatch table is at [D52 §5.4](../../../design/d52-measurement-statistics-institution.md). The verifier's per-dispatch arm implementations live in [`crates/eigenius-statistics/src/validate.rs`](../../../../crates/eigenius-statistics/src/validate.rs); the numerics routines live in [`crates/eigenius-statistics/src/numerics.rs`](../../../../crates/eigenius-statistics/src/numerics.rs).
 
-## The four-step `validate_measurement_claim` check
+## The four-step `validate_analysis_plan` check
 
-AutoOnLoad fires `validate_measurement_claim` on every `MeasurementClaim` commit. The kernel rejects the commit if any step fails.
+AutoOnLoad fires `validate_analysis_plan` on every `StatisticalAnalysisPlan` commit. The kernel rejects the commit if any step fails.
 
 1. **Resolve + decode the SampleSet.** Read the claim's `sample_set` IRI, resolve to a `SampleSetResource` on the chain, read its `sample_set_value` (a chain-mirrored `Bundle(...)` inductive), decode the 9 args into a typed `DecodedBundle` Rust struct (randomization, blocking, factor, replication, repeated_measures, units, columns, sample_map, observations). Malformed bundles produce structured diagnostics naming the offending slot.
 
 2. **Read claim parameters.** Read `alpha`, `directionality`, `effect_size`, `variance_assumption`, `outlier_exclusion`, optional `autocorrelation_structure`. Validate directionality (TwoSided allowed always; OneSidedWitnessed requires the chain-witness check from [§7.1](#7-1-opinionated-stance-onesidedwitnessed-requires-an-impossibility-witness) for t-based dispatches only). Validate outlier-exclusion routing (per the dispatch matrix in [§7.2](#7-2-opinionated-stance-dualverdict-outlier-exclusion)).
 
-3. **Dispatch on the product position.** Match on the bundle's `(randomization, blocking, factor, repeated_measures)` ctor names, pick one of the seven dispatch arms (or fall through to `MethodComparisonClaim` if the claim's `is_a` carries that marker). Each arm decodes the observations payload per its expected shape, runs the matching numerics routine, and returns a `(statistic, p_value, diagnostic_note)` tuple.
+3. **Dispatch on the product position.** Match on the bundle's `(randomization, blocking, factor, repeated_measures)` ctor names, pick one of the seven dispatch arms (or fall through to `MethodComparisonAnalysisPlan` if the claim's `is_a` carries that marker). Each arm decodes the observations payload per its expected shape, runs the matching numerics routine, and returns a `(statistic, p_value, diagnostic_note)` tuple.
 
 4. **Check the §7.4 epistemic-scope and emit the verdict.** Walk the claim's `canonical_proposition`'s head predicate, look up its `is_a` markers (`PopulationLevel` / `MeasurementLevel`), and confirm the SampleSet's replication kind admits propositions of that scope ([§7.4](#7-4-opinionated-stance-technicalonly-replicates-cannot-support-populationlevel-propositions)). Compare the test's p-value against `alpha` (halved if OneSidedWitnessed). Emit a `Verdict::Holds` resource if `p < alpha`, else `Verdict::Fails` with a structured `AlphaNotCrossed` diagnostic.
 
@@ -91,18 +91,18 @@ Three exclusion functors are exposed:
 
 - **`Identity()`** — no exclusion. Standard single-verdict path.
 - **`ESD(max_outliers, alpha_esd)`** — Rosner's generalized Extreme Studentized Deviate test (1983). Iteratively flags up to `max_outliers` observations using Studentized deviates against critical values from the one-sided t distribution.
-- **`PassingBablokResidual(threshold_sigma)`** — residuals from a Passing-Bablok regression, used in CLSI EP09 method-comparison. Only meaningful for `MethodComparisonClaim` dispatches.
+- **`PassingBablokResidual(threshold_sigma)`** — residuals from a Passing-Bablok regression, used in CLSI EP09 method-comparison. Only meaningful for `MethodComparisonAnalysisPlan` dispatches.
 - **`Manual(witnesses)`** — typed exclusion witnesses referencing committed assay-quality observations. Deferred to the §11 assay-quality institutions; v1 rejects.
 
 Phase 5 v1 wires the `(SingleSampleEstimate, ESD)` cell completely; other (dispatch × non-Identity exclusion) combinations reject up front with structured diagnostics referencing the [tracked GitHub issues](https://github.com/eigenius/eigenius/issues/80) per the (dispatch × exclusion) matrix in [D52 §9 Phase 5](../../../design/d52-measurement-statistics-institution.md). STROBE-aligned sensitivity-analysis stance; storing only the post-exclusion result is the same epistemic loss as storing only the summary statistic, structurally prevented.
 
-### 7.3. Opinionated stance: Passing-Bablok mandatory for `MethodComparisonClaim`
+### 7.3. Opinionated stance: Passing-Bablok mandatory for `MethodComparisonAnalysisPlan`
 
-`stats:MethodComparisonClaim : stats:MeasurementClaim` is a subclass that triggers a class-based early dispatch: when the claim's `is_a` contains the marker, the verifier bypasses the SampleSet-shape table and routes to **Passing-Bablok regression** (non-parametric, robust to outliers, errors-in-both-variables). Ordinary least-squares regression is rejected outright — OLS assumes zero measurement error on the X-axis, which for two biological measurements compared against each other is structurally false. Deming regression with an asserted variance ratio is acceptable but a follow-on.
+`stats:MethodComparisonAnalysisPlan : stats:StatisticalAnalysisPlan` is a subclass that triggers a class-based early dispatch: when the claim's `is_a` contains the marker, the verifier bypasses the SampleSet-shape table and routes to **Passing-Bablok regression** (non-parametric, robust to outliers, errors-in-both-variables). Ordinary least-squares regression is rejected outright — OLS assumes zero measurement error on the X-axis, which for two biological measurements compared against each other is structurally false. Deming regression with an asserted variance ratio is acceptable but a follow-on.
 
 The SampleSet shape mirrors `stats:Paired(pairs, replication)`: each pair is `(method_a_reading, method_b_reading)` for one specimen. The verdict criterion is **CI-based, not p-value-based**: Holds iff `1.0 ∈ slope_CI ∧ 0.0 ∈ intercept_CI` (CLSI EP09 method-agreement criterion). The verdict's `computed_statistic` carries the median slope; `computed_p_value` carries a binary disagreement indicator (0.0 on agreement, 1.0 on disagreement); the diagnostic enumerates both CIs.
 
-A second `QueryClass` resource binds `stats:MethodComparisonClaim` to the same `validate_measurement_claim` handler so AutoOnLoad fires on subclass instances — the kernel's dispatch matches `resource.is_a()` entries directly against registered query_class IRIs without transitive subclass walks, so the subclass needs its own registration. CLSI EP09-aligned.
+A second `QueryClass` resource binds `stats:MethodComparisonAnalysisPlan` to the same `validate_analysis_plan` handler so AutoOnLoad fires on subclass instances — the kernel's dispatch matches `resource.is_a()` entries directly against registered query_class IRIs without transitive subclass walks, so the subclass needs its own registration. CLSI EP09-aligned.
 
 ### 7.4. Opinionated stance: technical-only replicates cannot support population-level propositions
 
@@ -140,7 +140,7 @@ m_eig0291_sampleset                        [SampleSetResource]
   │  m_eig0291_sampleset_trace             [ObservationTrace — admits IsObservedAs]
   │
   ↑ sample_set
-claim_eig0291_lowic50                      [MeasurementClaim]
+claim_eig0291_lowic50                      [StatisticalAnalysisPlan]
   │ alpha = 0.05
   │ effect_size = Absolute(100.0, "nM")
   │ directionality = TwoSided()
@@ -148,7 +148,7 @@ claim_eig0291_lowic50                      [MeasurementClaim]
   │ outlier_exclusion = Identity()
   │ canonical_proposition = HasLowIC50("urn:...:EIG_0291")
   │
-  ↑ validate_measurement_claim AutoOnLoad
+  ↑ validate_analysis_plan AutoOnLoad
   │   1. Resolve SampleSet → decode Bundle
   │   2. Read claim params; no impossibility witness needed (TwoSided)
   │   3. Dispatch on (CompleteRandom, Unblocked, NoFactor, CrossSectional)
@@ -162,7 +162,7 @@ Verdict("Fails", AlphaNotCrossed: computed p = 0.218..., threshold alpha = 0.05)
 
 The IC50 from three replicate readings doesn't cross the threshold at α = 0.05 — the standard deviation across (72, 85, 100) is too large for the n = 3 sample to reject the null. The same fixture commits a *confirmatory* SampleSet with n = 6 tightly clustered around 85 nM and a corresponding claim; that one produces Holds with p ≪ 0.05. The cycle closes through the `canonical_proposition` slot: the verdict's resource carries the predicate `HasLowIC50("urn:...:EIG_0291")`; the [D49 witness index](../reasoning-institution/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses) reads it to admit `IsDerivedAs(claim_iri, HasLowIC50(...))`; downstream [D39 reasoning sentences](../reasoning-institution/README.md) cite the claim via `DerivedEvidence` and consume the witness via `JustifiedBy.derived`.
 
-Every byte that went into the verification — the three raw IC50 readings, the asserted parameters, the recomputation procedure, the resulting verdict — sits on the chain as a typed, queryable, content-addressed resource. The verdict is reproducible: you can re-run `validate_measurement_claim` against the same chain state and get bit-identical numerics, because the institution uses deterministic IEEE-754 arithmetic.
+Every byte that went into the verification — the three raw IC50 readings, the asserted parameters, the recomputation procedure, the resulting verdict — sits on the chain as a typed, queryable, content-addressed resource. The verdict is reproducible: you can re-run `validate_analysis_plan` against the same chain state and get bit-identical numerics, because the institution uses deterministic IEEE-754 arithmetic.
 
 ## Authoring your own claim
 
@@ -194,10 +194,10 @@ The high-level shape, modeled on the IC50 fixture:
    }
    ```
 
-3. **Author the MeasurementClaim.** Fill in the universal-claim schema. Use [`type_expr(...)`](../../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) for the `Prop`-typed proposition slots; literal ctors (`Absolute`, `TwoSided`, etc.) for the sum-typed parameter slots:
+3. **Author the StatisticalAnalysisPlan.** Fill in the universal-claim schema. Use [`type_expr(...)`](../../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) for the `Prop`-typed proposition slots; literal ctors (`Absolute`, `TwoSided`, etc.) for the sum-typed parameter slots:
 
    ```esl
-   resource screen:claim_eig0291_lowic50 : stats:MeasurementClaim {
+   resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
        stats:sample_set = screen:m_eig0291_sampleset;
 
        stats:null_hypothesis = type_expr(
@@ -219,16 +219,16 @@ The high-level shape, modeled on the IC50 fixture:
 
    resource screen:claim_eig0291_lowic50_trace : reflection:ProgramTrace {
        reflection:resource  = screen:claim_eig0291_lowic50;
-       reflection:source    = "statistics-institution:validate_measurement_claim";
+       reflection:source    = "statistics-institution:validate_analysis_plan";
        reflection:timestamp = "2026-03-04T14:22:11Z";
    }
    ```
 
-4. **Commit.** Load the fixture (`eigenius load <doc>`). The statistics institution's `validate_measurement_claim` AutoOnLoad gate fires automatically on every `MeasurementClaim` commit; the verdict is admitted as a new `Verdict` resource on chain. Failed claims are rejected at commit with a structured diagnostic.
+4. **Commit.** Load the fixture (`eigenius load <doc>`). The statistics institution's `validate_analysis_plan` AutoOnLoad gate fires automatically on every `StatisticalAnalysisPlan` commit; the verdict is admitted as a new `Verdict` resource on chain. Failed claims are rejected at commit with a structured diagnostic.
 
 ## Phase-completeness matrix
 
-D52 lands the verifier across the seven dispatch positions in phases. The Phase 5 hardenings (§7.1 OneSidedWitnessed, §7.2 dual-verdict ESD, §7.3 MethodComparisonClaim+PB) are landed. Remaining dispatch coverage is tracked as a completeness matrix rather than as cascading sub-phase numbers — see [D52 §9 Phase 4.9 RepeatedMeasures matrix](../../../design/d52-measurement-statistics-institution.md) for the (autocorrelation × k_between_factors) table and the GitHub issues tracking the unwired cells.
+D52 lands the verifier across the seven dispatch positions in phases. The Phase 5 hardenings (§7.1 OneSidedWitnessed, §7.2 dual-verdict ESD, §7.3 MethodComparisonAnalysisPlan+PB) are landed. Remaining dispatch coverage is tracked as a completeness matrix rather than as cascading sub-phase numbers — see [D52 §9 Phase 4.9 RepeatedMeasures matrix](../../../design/d52-measurement-statistics-institution.md) for the (autocorrelation × k_between_factors) table and the GitHub issues tracking the unwired cells.
 
 | Dispatch position | Status | Phase |
 |---|---|---|
@@ -245,7 +245,7 @@ D52 lands the verifier across the seven dispatch positions in phases. The Phase 
 | OneSidedWitnessed + ImpossibilityWitness | ✅ Wired | 5 (§7.1) |
 | Dual-verdict ESD on SingleSampleEstimate | ✅ Wired | 5 (§7.2) |
 | Dual-verdict ESD on grouped dispatches | ❌ Tracked | [#80](https://github.com/eigenius/eigenius/issues/80) |
-| MethodComparisonClaim + Passing-Bablok | ✅ Wired | 5 (§7.3) |
+| MethodComparisonAnalysisPlan + Passing-Bablok | ✅ Wired | 5 (§7.3) |
 | PassingBablokResidual exclusion on MethodComparison | ❌ Tracked | [#81](https://github.com/eigenius/eigenius/issues/81) |
 | Materialized dual-verdict commit shape (two DerivedResources via `stats:dual_verdict_pair`) | ❌ Tracked | [#82](https://github.com/eigenius/eigenius/issues/82) |
 
@@ -253,11 +253,11 @@ Wired cells run on the [`crates/eigenius-statistics/`](../../../../crates/eigeni
 
 ## Composition with the reasoning institution
 
-The statistics institution's emitted verdict — specifically the claim resource itself, since `MeasurementClaim IS the chain-resident DerivedResource` — becomes a citable evidence node for D39 reasoning sentences. The composition pattern:
+The statistics institution's emitted verdict — specifically the claim resource itself, since `StatisticalAnalysisPlan IS the chain-resident DerivedResource` — becomes a citable evidence node for D39 reasoning sentences. The composition pattern:
 
 ```text
 raw IC50 readings (ObservedResource + ObservationTrace)
-  → D52 validate_measurement_claim AutoOnLoad fires
+  → D52 validate_analysis_plan AutoOnLoad fires
   → Verdict::Holds; claim_eig0291_lowic50 is committed as DerivedResource
   → ProgramTrace pairs → witness index admits IsDerivedAs(claim_iri, HasLowIC50(...))
   → D39 ReasoningSentence cites claim_iri via DerivedEvidence
@@ -278,7 +278,7 @@ Full walkthrough: [composition guide §7 stats+reasoning](../../composition/07-s
 - **`Verdict::Fails` with `WrongTestForDesign`** — the bundle's product position has no dispatch arm. Either the SampleSet smart constructor produces a position the verifier doesn't yet support (check the [phase-completeness matrix](#phase-completeness-matrix)), or the macro is being misused (e.g., a `Bundle(...)` literal with the wrong axis ctors). The diagnostic prints the actual position tuple.
 - **`Verdict::Fails` with `MalformedSampleSet`** — the SampleSet's `sample_set_value` couldn't be decoded as a `Bundle(...)`. Usually means a smart constructor was used incorrectly (wrong number of args, wrong axis ctor names). Compare against the smart-constructor signatures in [`ontologies/statistics/statistics.esl`](../../../../ontologies/statistics/statistics.esl).
 - **`Verdict::Fails` with `OutlierExclusion not yet wired for {dispatch}`** — you asserted a non-`Identity` exclusion functor on a dispatch position that doesn't yet support it. Either use `Identity()` for now, or follow the GitHub issue link in the diagnostic to track the extension.
-- **Claim accepted but downstream D39 sentence fails with `NoAdmittedChainWitness`** — the `MeasurementClaim` commit succeeded but the witness index doesn't have the expected `IsDerivedAs` entry. Check that the claim's `ProgramTrace` companion was committed in the same layer (D49 requires both the resource and the trace for witness admission).
+- **Claim accepted but downstream D39 sentence fails with `NoAdmittedChainWitness`** — the `StatisticalAnalysisPlan` commit succeeded but the witness index doesn't have the expected `IsDerivedAs` entry. Check that the claim's `ProgramTrace` companion was committed in the same layer (D49 requires both the resource and the trace for witness admission).
 
 ## Cross-references
 
