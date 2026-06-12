@@ -3,8 +3,7 @@ title: "A Compiler for AI Thought"
 description: "Typed knowledge graphs as the substrate for auditable scientific reasoning. Currently in preparation for submission to Communications of the ACM."
 ---
 
-> **Coming soon.** This paper is in active preparation for submission
-> to *Communications of the ACM*. We are not circulating the
+> **Coming soon.** We are not circulating the
 > manuscript or abstract yet. This page will be updated with the
 > submission draft, abstract, and reading guide as soon as the
 > paper is ready to share.

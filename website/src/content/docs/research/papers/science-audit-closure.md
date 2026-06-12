@@ -3,8 +3,7 @@ title: "Auditing the Conclusion"
 description: "Making the reasoning behind a scientific claim chain-resident, machine-checkable, and reproducible. Currently in preparation for submission to Science or Science Advances."
 ---
 
-> **Coming soon.** This paper is in active preparation for submission
-> to *Science* or *Science Advances*. We are not circulating the
+> **Coming soon.** This paper is in active preparation. We are not circulating the
 > manuscript or abstract yet. This page will be updated with the
 > submission draft, abstract, and reading guide as soon as the
 > paper is ready to share.
