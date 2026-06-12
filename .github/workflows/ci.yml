@@ -9,6 +9,12 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  # CI always starts from a cold cache, so incremental compilation
+  # buys no rebuild speed-up and just inflates target/ with per-crate
+  # intermediate artifacts. Disabling it typically halves target/
+  # size on a workspace this big — relevant because we've hit the
+  # GitHub-hosted runner's disk ceiling more than once.
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   rust:
@@ -149,19 +155,27 @@ jobs:
         if: steps.wasm-fixtures-cache.outputs.cache-hit != 'true'
         # Each example is its own workspace; build from inside the
         # crate dir, then copy the artifact into the kernel's
-        # gitignored fixtures directory.
+        # gitignored fixtures directory. After every copy, drop the
+        # example's `target/` — the WASM fixture cache covers the
+        # `.wasm` artifacts on subsequent runs, and the per-example
+        # build trees (~1 GB each) are not needed for the main
+        # workspace clippy + test runs that follow. Reclaiming ~5 GB
+        # here gives the rest of the job real headroom on the
+        # GitHub-hosted runner's disk.
         run: |
-          (cd examples/wasm-doc-validator && cargo component build)
-          (cd examples/wasm-d14-echo && cargo component build)
-          (cd examples/wasm-d14-dock && cargo component build)
-          (cd examples/wasm-d14-assay && cargo component build)
-          (cd examples/wasm-d14-arrhenius && cargo component build)
+          set -euo pipefail
           mkdir -p kernel/tests/fixtures
-          cp examples/wasm-doc-validator/target/wasm32-unknown-unknown/debug/eigenius_wasm_doc_validator.wasm kernel/tests/fixtures/
-          cp examples/wasm-d14-echo/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_echo.wasm kernel/tests/fixtures/
-          cp examples/wasm-d14-dock/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_dock.wasm kernel/tests/fixtures/
-          cp examples/wasm-d14-assay/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_assay.wasm kernel/tests/fixtures/
-          cp examples/wasm-d14-arrhenius/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_arrhenius.wasm kernel/tests/fixtures/
+          for ex in \
+              wasm-doc-validator \
+              wasm-d14-echo \
+              wasm-d14-dock \
+              wasm-d14-assay \
+              wasm-d14-arrhenius; do
+            (cd "examples/$ex" && cargo component build)
+            cp "examples/$ex/target/wasm32-unknown-unknown/debug/eigenius_${ex//-/_}.wasm" \
+               kernel/tests/fixtures/
+            rm -rf "examples/$ex/target"
+          done
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets
