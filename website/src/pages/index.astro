@@ -10,13 +10,14 @@
 // want full control over the hero and section structure.
 
 import "../styles/custom.css";
+import TopNav from "../components/TopNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
 import WarrantMap from "../components/WarrantMap.astro";
 import AudienceCard from "../components/AudienceCard.astro";
 import PaperCard from "../components/PaperCard.astro";
 import YouTubeEmbed from "../components/YouTubeEmbed.astro";
-import logo from "../assets/eigenius_logo_400x400.png";
 import heroBgSrc from "../assets/hero_background.png";
-import { Image, getImage } from "astro:assets";
+import { getImage } from "astro:assets";
 
 // Optimise the hero background through Astro's image pipeline.
 // The source PNG is ~5.8 MB; the WebP at display width is a small
@@ -51,33 +52,7 @@ const PLAYLIST_URL =
     <link rel="icon" type="image/png" href="/favicon.png" />
   </head>
   <body>
-    <!-- ───────── Top nav ───────── -->
-    <nav class="topnav">
-      <a class="topnav-brand" href="/">
-        <Image
-          src={logo}
-          alt="Eigenius"
-          width={28}
-          height={28}
-          loading="eager"
-        />
-        <span>Eigenius</span>
-      </a>
-      <ul class="topnav-links">
-        <li><a href="/concepts/">Concepts</a></li>
-        <li><a href="/examples/">Examples</a></li>
-        <li><a href="/docs/">Docs</a></li>
-        <li><a href="/research/">Research</a></li>
-        <li>
-          <a
-            href="https://github.com/eigenius/eigenius"
-            class="topnav-external"
-          >
-            GitHub <span aria-hidden="true">↗</span>
-          </a>
-        </li>
-      </ul>
-    </nav>
+    <TopNav />
 
     <!-- ───────── Hero ───────── -->
     <section
@@ -266,93 +241,16 @@ const PLAYLIST_URL =
       </div>
     </section>
 
-    <!-- ───────── Footer ───────── -->
-    <footer class="site-footer">
-      <div class="site-footer-inner">
-        <div class="site-footer-brand">
-          <Image src={logo} alt="" width={24} height={24} />
-          <span>Eigenius</span>
-        </div>
-        <ul class="site-footer-links">
-          <li><a href="/concepts/">Concepts</a></li>
-          <li><a href="/examples/">Examples</a></li>
-          <li><a href="/docs/">Docs</a></li>
-          <li><a href="/research/">Research</a></li>
-          <li>
-            <a href="https://github.com/eigenius/eigenius">GitHub ↗</a>
-          </li>
-        </ul>
-        <p class="site-footer-fineprint">
-          Eigenius is open source under the Apache 2.0 license.
-        </p>
-      </div>
-    </footer>
+    <SiteFooter />
   </body>
 </html>
 
 <style>
-  /* ───────── Page baseline ───────── */
-  :global(html, body) {
-    margin: 0;
-    padding: 0;
-  }
+  /* Page-unique styles. The shared chrome (sections, CTAs, audience
+     grid, body baseline) lives in src/styles/custom.css; the topnav
+     and footer are in their own components. */
 
-  :global(body) {
-    background: var(--sl-color-bg);
-    color: var(--sl-color-text);
-    font-family:
-      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-      Helvetica, Arial, sans-serif, "Apple Color Emoji",
-      "Segoe UI Emoji";
-    line-height: 1.5;
-  }
-
-  /* ───────── Top nav ───────── */
-  .topnav {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    backdrop-filter: blur(8px);
-    background: color-mix(in srgb, var(--sl-color-bg-nav) 80%, transparent);
-    border-bottom: 1px solid var(--sl-color-hairline);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.8rem 1.5rem;
-  }
-
-  .topnav-brand {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    color: var(--sl-color-text);
-    text-decoration: none;
-    font-weight: 700;
-    font-size: 1rem;
-    letter-spacing: -0.01em;
-  }
-
-  .topnav-links {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    gap: 1.4rem;
-    align-items: center;
-  }
-
-  .topnav-links a {
-    color: var(--sl-color-gray-3);
-    text-decoration: none;
-    font-size: 0.92rem;
-    font-weight: 500;
-  }
-
-  .topnav-links a:hover {
-    color: var(--sl-color-text-accent);
-  }
-
-  /* ───────── Hero ───────── */
+  /* ───────── Hero with background image ───────── */
   .hero {
     position: relative;
     border-bottom: 1px solid var(--sl-color-hairline);
@@ -398,176 +296,14 @@ const PLAYLIST_URL =
     }
   }
 
-  .hero-actions {
-    display: flex;
-    gap: 1rem;
-    margin-top: 1.8rem;
-    flex-wrap: wrap;
-  }
-
-  .cta {
-    display: inline-block;
-    padding: 0.65rem 1.2rem;
-    border-radius: 0.4rem;
-    text-decoration: none;
-    font-weight: 600;
-    font-size: 0.92rem;
-    transition: transform 0.15s ease, background 0.15s ease,
-                border-color 0.15s ease;
-  }
-
-  .cta-primary {
-    background: var(--sl-color-accent);
-    color: white;
-    border: 1px solid var(--sl-color-accent);
-  }
-  .cta-primary:hover {
-    background: var(--sl-color-accent-high);
-    transform: translateY(-1px);
-  }
-
-  .cta-secondary {
-    color: var(--sl-color-text);
-    border: 1px solid var(--sl-color-hairline);
-    background: transparent;
-  }
-  .cta-secondary:hover {
-    border-color: var(--sl-color-accent);
-    color: var(--sl-color-text-accent);
-  }
-
-  /* ───────── Sections ───────── */
-  .section {
-    padding: 4rem 1.5rem;
-    border-top: 1px solid var(--sl-color-hairline);
-  }
-
+  /* ───────── Trust-gap section variant ───────── */
   .section-trust-gap {
     background: color-mix(in srgb, var(--sl-color-bg-nav) 50%, transparent);
   }
 
-  .section-inner {
-    max-width: 72rem;
-    margin: 0 auto;
-  }
-
-  .section-eyebrow {
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
-    font-size: 0.75rem;
-    font-weight: 700;
-    color: var(--sl-color-text-accent);
-  }
-
-  .section-title {
-    font-size: clamp(1.6rem, 3vw, 2.2rem);
-    font-weight: 700;
-    letter-spacing: -0.015em;
-    line-height: 1.2;
-    margin: 0.4rem 0 1.4rem 0;
-    max-width: 36ch;
-  }
-
-  .section-prose {
-    font-size: 1.02rem;
-    line-height: 1.65;
-    color: var(--sl-color-gray-3);
-    max-width: 56ch;
-  }
-
-  .section-prose + .section-prose {
-    margin-top: 1rem;
-  }
-
-  .section-footnote {
-    font-size: 0.9rem;
-    line-height: 1.6;
-    color: var(--sl-color-gray-3);
-    max-width: 56ch;
-    margin-top: 1.5rem;
-    padding-top: 1.5rem;
-    border-top: 1px dashed var(--sl-color-hairline);
-  }
-
-  /* ───────── Audience grid ───────── */
-  .audience-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1rem;
-    margin-top: 1rem;
-  }
-
-  @media (max-width: 60rem) {
-    .audience-grid {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  /* ───────── Watch (single centered video) ───────── */
+  /* ───────── Watch section (single centered video) ───────── */
   .watch-single {
     max-width: 48rem;
     margin: 1.4rem auto 0 auto;
-  }
-
-  /* ───────── Paper grid ───────── */
-  .paper-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 1rem;
-    margin-top: 1rem;
-  }
-
-  @media (max-width: 50rem) {
-    .paper-grid {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  /* ───────── Footer ───────── */
-  .site-footer {
-    border-top: 1px solid var(--sl-color-hairline);
-    padding: 2rem 1.5rem 3rem 1.5rem;
-    background: var(--sl-color-bg-nav);
-  }
-
-  .site-footer-inner {
-    max-width: 72rem;
-    margin: 0 auto;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    align-items: flex-start;
-  }
-
-  .site-footer-brand {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-weight: 700;
-  }
-
-  .site-footer-links {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    gap: 1.4rem;
-    flex-wrap: wrap;
-  }
-
-  .site-footer-links a {
-    color: var(--sl-color-gray-3);
-    text-decoration: none;
-    font-size: 0.9rem;
-  }
-
-  .site-footer-links a:hover {
-    color: var(--sl-color-text-accent);
-  }
-
-  .site-footer-fineprint {
-    margin: 0;
-    color: var(--sl-color-gray-4);
-    font-size: 0.85rem;
   }
 </style>
