@@ -76,6 +76,14 @@ pub mod iris {
     pub const IMPOSSIBILITY_WITNESS: &str = "urn:eigenius:measurements:ImpossibilityWitness";
     pub const METHOD_COMPARISON_ANALYSIS_PLAN: &str =
         "urn:eigenius:measurements:MethodComparisonAnalysisPlan";
+    pub const CLASSIFICATION_ANALYSIS_PLAN: &str =
+        "urn:eigenius:measurements:ClassificationAnalysisPlan";
+
+    // ── ClassificationAnalysisPlan property IRIs (D52 §2.2) ──────────────
+    pub const PROP_CLASSIFICATION_THRESHOLD: &str =
+        "urn:eigenius:measurements:classification_threshold";
+    pub const PROP_MIN_PPV: &str = "urn:eigenius:measurements:min_ppv";
+    pub const PROP_MIN_SENSITIVITY: &str = "urn:eigenius:measurements:min_sensitivity";
 
     // ── StatisticalAnalysisResult property IRIs (per-effect derivation shape) ─
     pub const PROP_VERDICT_CTOR: &str = "urn:eigenius:measurements:verdict_ctor";
@@ -99,6 +107,9 @@ pub mod iris {
     pub const STATS_MEAN_DIFF_OF: &str = "urn:eigenius:measurements:mean_diff_of";
     pub const STATS_SLOPE_OF: &str = "urn:eigenius:measurements:slope_of";
     pub const STATS_INTERCEPT_OF: &str = "urn:eigenius:measurements:intercept_of";
+    pub const STATS_SPEARMAN_RHO: &str = "urn:eigenius:measurements:spearman_rho";
+    pub const STATS_PPV: &str = "urn:eigenius:measurements:ppv";
+    pub const STATS_SENSITIVITY: &str = "urn:eigenius:measurements:sensitivity";
     pub const STATS_LT: &str = "urn:eigenius:measurements:lt";
     pub const STATS_LE: &str = "urn:eigenius:measurements:le";
     pub const STATS_GT: &str = "urn:eigenius:measurements:gt";

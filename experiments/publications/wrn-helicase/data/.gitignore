@@ -1,0 +1,6 @@
+# Vendored data slices are gitignored; provenance lives in data/MANIFEST.md
+data/slices/
+*.rds
+*.gz
+*.tsv
+*.csv

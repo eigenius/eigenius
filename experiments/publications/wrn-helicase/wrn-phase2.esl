@@ -1,0 +1,258 @@
+// WRN Helicase paper — Phase-2 wet-lab validation chain.
+//
+// Stacks on top of the Phase-1 chain (onco → wrn-phase1-recompute →
+// wrn-phase1 → wrn-phase2). Encodes C-VAL, D-ONTARGET, D-HELICASE.
+//
+// Phase-2 statistics are the authors' OWN wet-lab assays (luciferase
+// competitive-growth / viability, two-way ANOVA; IF quantification,
+// contrast-test-of-least-squares-means). Their raw data is in no public
+// slice we hold (only Supp Table 1, the Phase-1 annotation, is vendored), so
+// each readout is a LINKED-EXTERNAL bench:ToolArtifact citing the reported
+// value — exactly the boundary dd_achilles/dd_drive occupy for limma. They
+// are NOT kernel-recomputed.
+//
+// The encodable contribution of Phase 2 is the DECLARED experimental-design
+// reasoning — the rescue / control logic that lifts the readouts into the
+// conclusions, made kernel-checkable:
+//   - D-ONTARGET: sgWRN-EIJ silences endogenous WRN but not exogenous cDNA;
+//     WRN cDNA rescues sgWRN-EIJ but NOT sgWRN2 (which hits both) ⇒ the
+//     viability loss is on-target (attributable to WRN inactivation).
+//   - D-HELICASE: WT + exonuclease-dead (E84A) cDNA rescue; helicase-dead
+//     (K577M) fails to rescue ⇒ helicase activity required, exonuclease
+//     dispensable.
+//   - C-VAL: WRN depletion impairs MSI but not MSS viability (multi-assay).
+//
+// Validated by crates/eigenius-reasoning/tests/wrn_phase2.rs.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace bench      = "urn:eigenius:benchmark";
+namespace onco       = "urn:eigenius:benchmark:onco";
+namespace wrn        = "urn:eigenius:pub:wrn";
+
+// ════════════════════════════════════════════════════════════════════
+// Observed (linked-external): the wet-lab readouts
+// ════════════════════════════════════════════════════════════════════
+// Each is a typed tool boundary: the chain attests "this assay produced
+// this proposition", with a ProgramTrace admitting IsDerivedAs. The raw
+// data lives with the authors (not vendored), so these are linked, not
+// recomputed — the Phase-2.x frontier (parallel to limma for D-DIFF).
+
+// C-VAL evidence: competitive-growth + viability assays show MSI-selective
+// WRN dependence. ED Fig. 3b two-way ANOVA (sgWRNs vs negative controls,
+// day 10): MSI lines significant (2.7e-19, 1.2e-7), MSS lines n.s. (0.37,
+// 0.23); n = 6 biological replicates.
+resource wrn:va_competition : bench:ToolArtifact {
+    bench:tool            = "luciferase competitive-growth + viability assay (two-way ANOVA)";
+    bench:produced_from   = ["wrn-paper:ED-Fig-3b", "wrn-paper:Fig-2a"];
+    bench:tool_parameters = "sgWRN vs intergenic negative controls across MSI {KM12, OVK18, SW48, …} and MSS {ES2, SW620, SW837} lines; day-10 two-way ANOVA P: MSI 2.7e-19 / 1.2e-7 (significant), MSS 0.37 / 0.23 (n.s.); n = 6 biological replicates. MSI-selective viability loss; LINKED-EXTERNAL (authors' assay, raw data not vendored).";
+    reflection:derivation = wrn:va_competition_trace;
+    reflection:canonical_proposition = type_expr(
+        onco:SelectiveViabilityDependence("WRN", "MSI")
+    );
+}
+resource wrn:va_competition_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:va_competition;
+    reflection:source    = "wrn-paper:wet-lab competitive-growth/viability assay (linked-external)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// D-ONTARGET evidence: WRN cDNA (silencing-resistant to sgWRN-EIJ) rescues
+// the viability loss from sgWRN-EIJ in KM12 (Fig. 2b, c).
+resource wrn:va_rescue_wt : bench:ToolArtifact {
+    bench:tool            = "sgWRN-EIJ rescue assay (KM12 + ectopic WRN cDNA)";
+    bench:produced_from   = ["wrn-paper:Fig-2b", "wrn-paper:Fig-2c"];
+    bench:tool_parameters = "WT WRN cDNA rescues KM12 viability from sgWRN-EIJ (which silences endogenous but not exogenous WRN); the same cDNA does NOT rescue sgWRN2 (targets both). LINKED-EXTERNAL.";
+    reflection:derivation = wrn:va_rescue_wt_trace;
+    reflection:canonical_proposition = type_expr(
+        onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
+    );
+}
+resource wrn:va_rescue_wt_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:va_rescue_wt;
+    reflection:source    = "wrn-paper:Fig-2b,c rescue assay (linked-external)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// D-HELICASE evidence (exonuclease dispensable): exonuclease-dead (E84A)
+// WRN cDNA still rescues sgWRN-EIJ (Fig. 2b, c).
+resource wrn:va_rescue_e84a : bench:ToolArtifact {
+    bench:tool            = "sgWRN-EIJ rescue assay (KM12 + E84A WRN cDNA)";
+    bench:produced_from   = ["wrn-paper:Fig-2b", "wrn-paper:Fig-2c"];
+    bench:tool_parameters = "Exonuclease-dead (E84A) WRN cDNA rescues KM12 viability from sgWRN-EIJ (rescue not attenuated). LINKED-EXTERNAL.";
+    reflection:derivation = wrn:va_rescue_e84a_trace;
+    reflection:canonical_proposition = type_expr(
+        onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")
+    );
+}
+resource wrn:va_rescue_e84a_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:va_rescue_e84a;
+    reflection:source    = "wrn-paper:Fig-2b,c rescue assay (linked-external)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// D-HELICASE evidence (helicase required): helicase-dead (K577M) WRN cDNA
+// FAILS to rescue sgWRN-EIJ — a measured non-rescue, not absence of data
+// (Fig. 2b, c). The dual E84A/K577M also fails (helicase loss is sufficient).
+resource wrn:va_fail_k577m : bench:ToolArtifact {
+    bench:tool            = "sgWRN-EIJ rescue assay (KM12 + K577M WRN cDNA)";
+    bench:produced_from   = ["wrn-paper:Fig-2b", "wrn-paper:Fig-2c"];
+    bench:tool_parameters = "Helicase-dead (K577M) WRN cDNA FAILS to rescue KM12 viability from sgWRN-EIJ (viability stayed impaired — a measured non-rescue); dual E84A/K577M also fails. LINKED-EXTERNAL.";
+    reflection:derivation = wrn:va_fail_k577m_trace;
+    reflection:canonical_proposition = type_expr(
+        onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ")
+    );
+}
+resource wrn:va_fail_k577m_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:va_fail_k577m;
+    reflection:source    = "wrn-paper:Fig-2b,c rescue assay (linked-external)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Declared: the experimental-design inference rules (the contribution)
+// ════════════════════════════════════════════════════════════════════
+
+// On-target rule. The rescue construct is silencing-resistant to the EIJ
+// reagent (sgWRN-EIJ hits the endogenous exon-intron junction, absent from
+// the cDNA). Rescue by re-expressing WRN — together with the specificity
+// control that sgWRN2 (targeting BOTH endogenous and exogenous WRN) is NOT
+// rescued — attributes the viability loss to WRN inactivation, ruling out
+// off-target effects of the silencing reagent.
+resource wrn:ontarget_rule : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:on-target-rescue-logic";
+    reflection:rationale   = "sgWRN-EIJ silences endogenous WRN but not exogenous WRN cDNA. If re-expressing WRN cDNA rescues the viability loss from sgWRN-EIJ — while a reagent targeting both endogenous and exogenous WRN (sgWRN2) is not rescued — the phenotype is attributable to loss of WRN, not to an off-target effect of the silencing reagent. Hence the depletion phenotype is on-target.";
+    reflection:canonical_proposition = type_expr(
+        onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
+        ->
+        onco:OnTarget("WRN", "MSI_viability")
+    );
+}
+resource wrn:ontarget_rule_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:ontarget_rule;
+    reflection:declared_by = "wrn-paper:on-target-rescue-logic";
+    reflection:timestamp   = "2026-06-13T02:00:00Z";
+}
+
+// Helicase-required rule. A catalytic-dead construct that fails to rescue
+// localises the essential activity: helicase-dead (K577M) failing to rescue
+// means the helicase activity is required for the phenotype.
+resource wrn:helicase_rule : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:structure-function-dissection";
+    reflection:rationale   = "WRN is both a 3'-5' exonuclease and a 3'-5' helicase. Rescuing sgWRN-EIJ with catalytic-dead constructs localises the essential activity. A helicase-dead (K577M) cDNA that FAILS to rescue (while WT does) shows the helicase activity is required for the MSI viability phenotype.";
+    reflection:canonical_proposition = type_expr(
+        onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ")
+        ->
+        onco:RequiresActivity("WRN", "helicase")
+    );
+}
+resource wrn:helicase_rule_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:helicase_rule;
+    reflection:declared_by = "wrn-paper:structure-function-dissection";
+    reflection:timestamp   = "2026-06-13T02:00:00Z";
+}
+
+// Exonuclease-dispensable rule. A catalytic-dead construct that STILL
+// rescues shows that activity is dispensable: exonuclease-dead (E84A)
+// rescuing means the exonuclease activity is not required.
+resource wrn:exo_rule : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:structure-function-dissection";
+    reflection:rationale   = "An exonuclease-dead (E84A) WRN cDNA that still rescues sgWRN-EIJ (rescue not attenuated) shows the exonuclease activity is dispensable for the MSI viability phenotype.";
+    reflection:canonical_proposition = type_expr(
+        onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")
+        ->
+        onco:DispensableActivity("WRN", "exonuclease")
+    );
+}
+resource wrn:exo_rule_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:exo_rule;
+    reflection:declared_by = "wrn-paper:structure-function-dissection";
+    reflection:timestamp   = "2026-06-13T02:00:00Z";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Conclusions
+// ════════════════════════════════════════════════════════════════════
+
+// C-VAL: WRN depletion selectively impairs MSI viability (warranted directly
+// by the multi-assay readout).
+resource wrn:concl_val : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:SelectiveViabilityDependence("WRN", "MSI")
+    );
+    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:va_competition");
+    reasoning:certificate = type_expr(
+        derived("urn:eigenius:pub:wrn:va_competition",
+                onco:SelectiveViabilityDependence("WRN", "MSI"))
+    );
+}
+
+// D-ONTARGET: the viability loss is attributable to WRN inactivation.
+resource wrn:concl_ontarget : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:OnTarget("WRN", "MSI_viability")
+    );
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:ontarget_rule"),
+        DerivedEvidence("urn:eigenius:pub:wrn:va_rescue_wt")
+    );
+    reasoning:certificate = type_expr(
+        alias
+            RULE = "urn:eigenius:pub:wrn:ontarget_rule",
+            ART  = "urn:eigenius:pub:wrn:va_rescue_wt",
+            RES  = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ"),
+            OT   = onco:OnTarget("WRN", "MSI_viability")
+        in
+        app(RES, OT, DeclaredEvidence(RULE), DerivedEvidence(ART),
+            declared(RULE, RES -> OT), derived(ART, RES))
+    );
+}
+
+// D-HELICASE (a): helicase activity is required.
+resource wrn:concl_helicase_required : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:RequiresActivity("WRN", "helicase")
+    );
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:helicase_rule"),
+        DerivedEvidence("urn:eigenius:pub:wrn:va_fail_k577m")
+    );
+    reasoning:certificate = type_expr(
+        alias
+            RULE = "urn:eigenius:pub:wrn:helicase_rule",
+            ART  = "urn:eigenius:pub:wrn:va_fail_k577m",
+            FR   = onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ"),
+            RA   = onco:RequiresActivity("WRN", "helicase")
+        in
+        app(FR, RA, DeclaredEvidence(RULE), DerivedEvidence(ART),
+            declared(RULE, FR -> RA), derived(ART, FR))
+    );
+}
+
+// D-HELICASE (b): exonuclease activity is dispensable.
+resource wrn:concl_exo_dispensable : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:DispensableActivity("WRN", "exonuclease")
+    );
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:exo_rule"),
+        DerivedEvidence("urn:eigenius:pub:wrn:va_rescue_e84a")
+    );
+    reasoning:certificate = type_expr(
+        alias
+            RULE = "urn:eigenius:pub:wrn:exo_rule",
+            ART  = "urn:eigenius:pub:wrn:va_rescue_e84a",
+            RES  = onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ"),
+            DA   = onco:DispensableActivity("WRN", "exonuclease")
+        in
+        app(RES, DA, DeclaredEvidence(RULE), DerivedEvidence(ART),
+            declared(RULE, RES -> DA), derived(ART, RES))
+    );
+}

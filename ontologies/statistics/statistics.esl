@@ -240,6 +240,13 @@ axiom stats:median_of    : core:string -> core:float
 axiom stats:mean_diff_of : core:string -> core:float
 axiom stats:slope_of     : core:string -> core:float
 axiom stats:intercept_of : core:string -> core:float
+axiom stats:spearman_rho : core:string -> core:float
+// Classifier-quality functionals over a two-group SampleSet (D52 §2.2).
+// stats:ppv(s) = TP/(TP+FP); stats:sensitivity(s) = TP/(TP+FN), where the
+// two groups are read as test outcomes and condition-positive = value below
+// the plan's classification_threshold.
+axiom stats:ppv         : core:string -> core:float
+axiom stats:sensitivity : core:string -> core:float
 
 axiom stats:lt : core:float -> core:float -> Prop
 axiom stats:le : core:float -> core:float -> Prop
@@ -739,6 +746,42 @@ class stats:MethodComparisonAnalysisPlan : stats:StatisticalAnalysisPlan {
     description = "A StatisticalAnalysisPlan subclass asserting that two measurement methods or two assay readouts agree (D52 §7.3). The institution dispatches such claims to Passing-Bablok regression instead of the paired t-test; ordinary least-squares regression is rejected outright (OLS assumes zero measurement error on the X-axis, structurally false for method comparison). The SampleSet shape mirrors stats:Paired: each pair is `(method_a_reading, method_b_reading)` for one specimen. The verdict is Holds when both the 95% CI of the slope contains 1.0 AND the 95% CI of the intercept contains 0.0; the computed_statistic field carries the median slope and the diagnostic carries (slope, intercept, slope_CI, intercept_CI) for audit. CLSI EP09 alignment.";
 }
 
+// §2.2 — classifier-quality claims (PPV / sensitivity at a threshold).
+//
+// ClassificationAnalysisPlan is a standalone plan (NOT a StatisticalAnalysisPlan
+// subclass — a threshold classifier's PPV/sensitivity is a deterministic
+// count, with no alpha / effect_size / directionality / variance
+// assumption). It reuses the two-group `stats:IID(group_a, group_b, …)`
+// SampleSet authoring surface, reading group_a as the test-positive group
+// (the predictor flags these) and group_b as the test-negative rest. A
+// unit is condition-positive when its value is below classification_threshold.
+// On AutoOnLoad the institution emits two StatisticalAnalysisResults
+// (`:result:ppv` and `:result:sensitivity`), each Holds iff its metric
+// meets the declared minimum and carrying `stats:ge(stats:<metric>(s), min)`.
+
+class stats:ClassificationAnalysisPlan {
+    description = "A plan evaluating a threshold classifier's positive predictive value and sensitivity over a two-group SampleSet (D52 §2.2). Reuses the stats:IID(group_a, group_b, …) authoring surface: group_a is the test-positive group (flagged by the predictor under evaluation), group_b the test-negative rest; a unit is condition-positive when its value is below classification_threshold (e.g. dependency score < −0.5). The institution emits two StatisticalAnalysisResult derivations — `{plan}:result:ppv` carrying `stats:ge(stats:ppv(s), min_ppv)` and `{plan}:result:sensitivity` carrying `stats:ge(stats:sensitivity(s), min_sensitivity)` — each Holds iff its metric meets the declared minimum. Unlike a hypothesis test this is a deterministic count and carries no alpha / effect_size / directionality.";
+    requires stats:sample_set,
+             stats:classification_threshold,
+             stats:min_ppv,
+             stats:min_sensitivity;
+}
+
+property stats:classification_threshold : core:float {
+    description = "The decision threshold defining condition-positive: a unit is condition-positive when its SampleSet value is strictly below this threshold (dependency scores: lower = more dependent, so e.g. −0.5).";
+    domain stats:ClassificationAnalysisPlan;
+}
+
+property stats:min_ppv : core:float {
+    description = "The author-declared minimum positive predictive value for the `:result:ppv` derivation to Hold. The criterion is part of the methodological decision (what counts as a 'strong' biomarker) and appears literally in the canonical proposition `stats:ge(stats:ppv(s), min_ppv)`.";
+    domain stats:ClassificationAnalysisPlan;
+}
+
+property stats:min_sensitivity : core:float {
+    description = "The author-declared minimum sensitivity for the `:result:sensitivity` derivation to Hold; appears literally in `stats:ge(stats:sensitivity(s), min_sensitivity)`.";
+    domain stats:ClassificationAnalysisPlan;
+}
+
 property stats:sample_set : core:string {
     description = "IRI of the SampleSet ObservedResource holding the raw replicates this claim is computed against. Required for recomputation.";
     format = formats:iri;
@@ -924,6 +967,22 @@ resource stats:qc_validate_analysis_plan : institution:QueryClass {
 resource stats:qc_validate_method_comparison_claim : institution:QueryClass {
     core:description = "AutoOnLoad gate on every MethodComparisonAnalysisPlan commit (D52 §7.3). Dispatches the same validate_analysis_plan handler, which detects the MethodComparisonAnalysisPlan is_a marker and routes to Passing-Bablok regression instead of the standard SampleSet-shape dispatch. CLSI EP09 alignment; OLS is rejected outright.";
     institution:query_class = stats:MethodComparisonAnalysisPlan;
+    institution:result_class = institution:Verdict;
+    institution:dispatch_role = [dispatch:auto_on_load];
+    institution:query_handler = proc:validate_analysis_plan;
+    institution:institution_ref = stats:statistics_institution;
+}
+
+// §2.2 — separate QueryClass registration so ClassificationAnalysisPlan
+// instances fire the validator. As with MethodComparisonAnalysisPlan, the
+// kernel matches is_a entries directly against registered query_class
+// IRIs, so the standalone classification plan needs its own registration;
+// the shared handler detects the ClassificationAnalysisPlan marker and
+// routes to the PPV/sensitivity emitter.
+
+resource stats:qc_validate_classification_claim : institution:QueryClass {
+    core:description = "AutoOnLoad gate on every ClassificationAnalysisPlan commit (D52 §2.2). Dispatches the same validate_analysis_plan handler, which detects the ClassificationAnalysisPlan is_a marker and routes to the threshold-classifier PPV/sensitivity emitter (two StatisticalAnalysisResults: :result:ppv and :result:sensitivity) instead of a hypothesis test.";
+    institution:query_class = stats:ClassificationAnalysisPlan;
     institution:result_class = institution:Verdict;
     institution:dispatch_role = [dispatch:auto_on_load];
     institution:query_handler = proc:validate_analysis_plan;

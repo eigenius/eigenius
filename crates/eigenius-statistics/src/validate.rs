@@ -53,8 +53,9 @@ use eigenius_kernel::ontology::well_known as wk;
 use crate::institution::iris;
 use crate::institution::StatisticsInstitution;
 use crate::numerics::{
-    esd_filter, one_sample_t_test, paired_t_test, passing_bablok_regression, rcbd_anova,
-    repeated_measures_cs_anova, splitplot_anova, two_sample_t_test, TwoSampleVariance,
+    classification_metrics, esd_filter, one_sample_t_test, paired_t_test,
+    passing_bablok_regression, rcbd_anova, repeated_measures_cs_anova, spearman_correlation,
+    splitplot_anova, two_sample_t_test, wilcoxon_rank_sum, TwoSampleVariance,
 };
 
 /// Top-level handler called by `StatisticsInstitution::query`.
@@ -129,6 +130,17 @@ pub fn do_validate_analysis_plan(
         Iri::parse(iris::METHOD_COMPARISON_ANALYSIS_PLAN).expect("static IRI");
     if claim.is_instance_of(&method_comparison_iri) {
         return recompute_method_comparison_claim(claim, &bundle, ctx);
+    }
+
+    // ── §2.2 class-based early dispatch: ClassificationAnalysisPlan ──────────
+    //
+    // A threshold classifier's PPV/sensitivity is a deterministic count
+    // over a two-group SampleSet, not an inferential test — it has no
+    // alpha / effect_size / directionality. Route it to its own emitter
+    // before the hypothesis-test parameter reads below.
+    let classification_iri = Iri::parse(iris::CLASSIFICATION_ANALYSIS_PLAN).expect("static IRI");
+    if claim.is_instance_of(&classification_iri) {
+        return recompute_classification_quality_claim(claim, &bundle, &sample_set_iri_str);
     }
 
     // ── Step 4: dispatch on the product position ──────────────────────
@@ -420,30 +432,57 @@ pub fn do_validate_analysis_plan(
                         Ok(pair) => pair,
                         Err(diag) => return Ok(gate_fails(diag)),
                     };
-                let variance = match variance_assumption.as_ref().and_then(json_ctor_name) {
-                    Some("Pooled") => TwoSampleVariance::Pooled,
-                    Some("WelchUnequal") => TwoSampleVariance::WelchUnequal,
-                    Some(other) => {
-                        return Ok(gate_fails(format!(
-                            "IID two-sample with variance_assumption `{other}` not yet wired \
-                         (Phase 1.5 supports Pooled / WelchUnequal; NonParametric / RankBased \
-                         are follow-on)"
-                        )));
+                match variance_assumption.as_ref().and_then(json_ctor_name) {
+                    // Rank-based / distribution-free two-sample: the
+                    // Wilcoxon rank-sum (Mann–Whitney U) test. Reported
+                    // statistic is the normal-approximation z; the note
+                    // carries U + the group medians for audit. Same H1
+                    // shape as the t-test (group A vs group B central
+                    // tendency), so Step 6.5 derives the same two-sample
+                    // proposition for it.
+                    Some("RankBased") | Some("NonParametric") => {
+                        let r = match wilcoxon_rank_sum(&group_a, &group_b) {
+                            Some(r) => r,
+                            None => {
+                                return Ok(gate_fails(
+                                    "InsufficientReplication: Wilcoxon rank-sum requires \
+                                     non-empty groups"
+                                        .into(),
+                                ));
+                            }
+                        };
+                        let note = format!(
+                            "Wilcoxon rank-sum (Mann–Whitney): U = {:.1}, z = {:.4}, \
+                             n_a = {}, n_b = {}, median_a = {:.4}, median_b = {:.4}",
+                            r.u_statistic, r.z_statistic, r.n_a, r.n_b, r.median_a, r.median_b
+                        );
+                        (r.z_statistic, r.p_value_two_sided, Some(note))
                     }
-                    None => TwoSampleVariance::WelchUnequal,
-                };
-                let r = match two_sample_t_test(&group_a, &group_b, variance) {
-                    Some(r) => r,
-                    None => {
-                        return Ok(gate_fails(format!(
-                            "InsufficientReplication: two-sample t-test requires n >= 2 in each \
-                         group, got n_a = {}, n_b = {}",
-                            group_a.len(),
-                            group_b.len()
-                        )));
+                    other => {
+                        let variance = match other {
+                            Some("Pooled") => TwoSampleVariance::Pooled,
+                            Some("WelchUnequal") | None => TwoSampleVariance::WelchUnequal,
+                            Some(o) => {
+                                return Ok(gate_fails(format!(
+                                    "IID two-sample with variance_assumption `{o}` not recognised \
+                                     (expected Pooled / WelchUnequal / RankBased / NonParametric)"
+                                )));
+                            }
+                        };
+                        let r = match two_sample_t_test(&group_a, &group_b, variance) {
+                            Some(r) => r,
+                            None => {
+                                return Ok(gate_fails(format!(
+                                    "InsufficientReplication: two-sample t-test requires n >= 2 \
+                                     in each group, got n_a = {}, n_b = {}",
+                                    group_a.len(),
+                                    group_b.len()
+                                )));
+                            }
+                        };
+                        (r.t_statistic, r.p_value_two_sided, None)
                     }
-                };
-                (r.t_statistic, r.p_value_two_sided, None)
+                }
             }
             DispatchPos::Paired => {
                 // Paired: observations is a flat array `[b0, a0, b1, a1,
@@ -454,16 +493,42 @@ pub fn do_validate_analysis_plan(
                     Ok(p) => p,
                     Err(diag) => return Ok(gate_fails(diag)),
                 };
-                let r = match paired_t_test(&pairs) {
-                    Some(r) => r,
-                    None => {
-                        return Ok(gate_fails(format!(
-                            "InsufficientReplication: paired t-test requires n_pairs >= 2, got {}",
-                            pairs.len()
-                        )));
+                match variance_assumption.as_ref().and_then(json_ctor_name) {
+                    // Rank-based bivariate: Spearman rank correlation. The
+                    // Paired pairs are read as (x, y) observations; the
+                    // reported statistic is the t-approximation, the note
+                    // carries rho.
+                    Some("RankBased") | Some("NonParametric") => {
+                        let r = match spearman_correlation(&pairs) {
+                            Some(r) => r,
+                            None => {
+                                return Ok(gate_fails(format!(
+                                    "InsufficientReplication: Spearman correlation requires \
+                                     n_pairs >= 3, got {}",
+                                    pairs.len()
+                                )));
+                            }
+                        };
+                        let note = format!(
+                            "Spearman rank correlation: rho = {:.4}, t = {:.4}, n_pairs = {}",
+                            r.rho, r.t_statistic, r.n_pairs
+                        );
+                        (r.t_statistic, r.p_value_two_sided, Some(note))
                     }
-                };
-                (r.t_statistic, r.p_value_two_sided, None)
+                    _ => {
+                        let r = match paired_t_test(&pairs) {
+                            Some(r) => r,
+                            None => {
+                                return Ok(gate_fails(format!(
+                                    "InsufficientReplication: paired t-test requires \
+                                     n_pairs >= 2, got {}",
+                                    pairs.len()
+                                )));
+                            }
+                        };
+                        (r.t_statistic, r.p_value_two_sided, None)
+                    }
+                }
             }
             DispatchPos::Factorial => {
                 // Unreachable: the Factorial dispatch short-circuits at
@@ -691,6 +756,17 @@ pub fn do_validate_analysis_plan(
             &effect_size,
             &directionality,
         ),
+        DispatchPos::IID => {
+            derive_canonical_proposition_twosample(&sample_set_iri_str, &directionality)
+        }
+        DispatchPos::Paired => match variance_assumption.as_ref().and_then(json_ctor_name) {
+            // RankBased Paired = Spearman correlation; derive the rho prop.
+            // (The paired t-test's difference proposition is a follow-on.)
+            Some("RankBased") | Some("NonParametric") => {
+                derive_canonical_proposition_correlation(&sample_set_iri_str, &directionality)
+            }
+            _ => None,
+        },
         _ => None,
     };
 
@@ -917,6 +993,145 @@ fn recompute_method_comparison_claim(
         (res.slope, p_indicator),
         None,
     ))
+}
+
+// ────────────────────────────────────────────────────────────────────
+// §2.2 — ClassificationAnalysisPlan / PPV-sensitivity dispatch
+// ────────────────────────────────────────────────────────────────────
+
+/// Recompute a `stats:ClassificationAnalysisPlan` — the PPV/sensitivity of
+/// a threshold classifier over a two-group (IID) SampleSet (D52 §2.2).
+///
+/// `group_a` is the **test-positive** group (the predictor under
+/// evaluation flags these — e.g. MSI cell lines), `group_b` the
+/// **test-negative** rest (MSS). A unit is **condition-positive** (the
+/// trait predicted — e.g. WRN-dependent) when its value is below the
+/// declared `classification_threshold` (dependency scores: lower = more
+/// dependent).
+///
+/// Emits two `StatisticalAnalysisResult` derivations:
+///   - `{plan}:result:ppv`         carrying `stats:ge(stats:ppv(s), min_ppv)`
+///   - `{plan}:result:sensitivity` carrying `stats:ge(stats:sensitivity(s), min_sensitivity)`
+///
+/// Each result Holds iff its metric meets the author-declared minimum;
+/// the canonical proposition (and thus the D49 `IsDerivedAs`) attaches
+/// only on Holds. Downstream D39 reasoning composes both via a declared
+/// statistical→domain bridge into a domain biomarker conclusion.
+fn recompute_classification_quality_claim(
+    claim: &Resource,
+    bundle: &DecodedBundle,
+    sample_set_iri_str: &str,
+) -> Result<QueryOutcome, InstitutionError> {
+    let (group_a, group_b) = match decode_two_group_observations(&bundle.observations_raw) {
+        Ok(pair) => pair,
+        Err(diag) => return Ok(gate_fails(diag)),
+    };
+    let threshold = match read_float_property(claim, iris::PROP_CLASSIFICATION_THRESHOLD)? {
+        Some(t) => t,
+        None => {
+            return Ok(gate_fails(
+                "ClassificationAnalysisPlan missing required `classification_threshold`".into(),
+            ))
+        }
+    };
+    let min_ppv = match read_float_property(claim, iris::PROP_MIN_PPV)? {
+        Some(v) => v,
+        None => {
+            return Ok(gate_fails(
+                "ClassificationAnalysisPlan missing required `min_ppv`".into(),
+            ))
+        }
+    };
+    let min_sensitivity = match read_float_property(claim, iris::PROP_MIN_SENSITIVITY)? {
+        Some(v) => v,
+        None => {
+            return Ok(gate_fails(
+                "ClassificationAnalysisPlan missing required `min_sensitivity`".into(),
+            ))
+        }
+    };
+    if group_a.is_empty() {
+        return Ok(gate_fails(
+            "ClassificationAnalysisPlan: test-positive group (group A) is empty — \
+             PPV is undefined"
+                .into(),
+        ));
+    }
+    let m = classification_metrics(&group_a, &group_b, threshold);
+
+    // PPV result: stats:ge(stats:ppv(s), min_ppv)
+    let ppv_holds = m.ppv >= min_ppv;
+    let ppv_prop = encode_classification_proposition(iris::STATS_PPV, sample_set_iri_str, min_ppv);
+    let ppv_diag = format!(
+        "Classification @ threshold {threshold}: PPV = {:.4} ({}/{} test-positive are \
+         condition-positive); criterion PPV >= {min_ppv}",
+        m.ppv, m.tp, m.n_test_positive,
+    );
+    // Sensitivity result: stats:ge(stats:sensitivity(s), min_sensitivity)
+    let sens_holds = m.sensitivity >= min_sensitivity;
+    let sens_prop = encode_classification_proposition(
+        iris::STATS_SENSITIVITY,
+        sample_set_iri_str,
+        min_sensitivity,
+    );
+    let sens_diag = format!(
+        "Classification @ threshold {threshold}: sensitivity = {:.4} ({}/{} condition-positive \
+         are test-positive; FN = {}); criterion sensitivity >= {min_sensitivity}",
+        m.sensitivity, m.tp, m.n_condition_positive, m.fn_,
+    );
+
+    let results = vec![
+        PerEffectResult {
+            effect_name: "ppv".to_string(),
+            result_ctor: if ppv_holds {
+                wk::VERDICT_HOLDS
+            } else {
+                wk::VERDICT_FAILS
+            },
+            diagnostic: Some(if ppv_holds {
+                ppv_diag
+            } else {
+                format!("CriterionNotMet: {ppv_diag}")
+            }),
+            numerics: (m.ppv, 1.0 - m.ppv),
+            canonical_proposition: if ppv_holds { Some(ppv_prop) } else { None },
+        },
+        PerEffectResult {
+            effect_name: "sensitivity".to_string(),
+            result_ctor: if sens_holds {
+                wk::VERDICT_HOLDS
+            } else {
+                wk::VERDICT_FAILS
+            },
+            diagnostic: Some(if sens_holds {
+                sens_diag
+            } else {
+                format!("CriterionNotMet: {sens_diag}")
+            }),
+            numerics: (m.sensitivity, 1.0 - m.sensitivity),
+            canonical_proposition: if sens_holds { Some(sens_prop) } else { None },
+        },
+    ];
+    Ok(gate_holds_with_results(claim.id(), results))
+}
+
+/// Build `stats:ge(stats:<metric>(s), threshold)` as a D47 type-fragment
+/// JSON tree — the canonical proposition a ClassificationAnalysisPlan
+/// result carries. `metric_iri` is `stats:ppv` or `stats:sensitivity`.
+fn encode_classification_proposition(
+    metric_iri: &str,
+    sample_set_iri: &str,
+    threshold: f64,
+) -> serde_json::Value {
+    use crate::institution::iris as i;
+    let metric_of_s = encode_app(
+        encode_const_ref(metric_iri),
+        encode_lit_string(sample_set_iri),
+    );
+    encode_app(
+        encode_app(encode_const_ref(i::STATS_GE), metric_of_s),
+        encode_lit_float(threshold),
+    )
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -2222,6 +2437,76 @@ fn derive_canonical_proposition_singlesample(
                 threshold,
             ))
         }
+        _ => None,
+    }
+}
+
+/// Derive the canonical proposition for a two-sample (IID) comparison —
+/// shared by the t-test and Wilcoxon rank-sum paths (same H1 shape). The
+/// proposition is about the sample set's group mean-difference
+/// `stats:mean_diff_of(s)` = mean(group_a) − mean(group_b):
+///
+///   TwoSided          → ¬(mean_diff_of(s) = 0)
+///   OneSidedWitnessed → stats:lt(mean_diff_of(s), 0)   (group A below group B)
+///
+/// Authoring convention: place the hypothesised-lower group first
+/// (`group_a`) so the one-sided `lt` reads in the asserted direction.
+/// (As with the one-sample case, v1's verdict checks p < alpha but not
+/// the sign of the observed difference — the directional refinement is a
+/// shared follow-on; the WRN MSI<MSS direction holds regardless.)
+fn derive_canonical_proposition_twosample(
+    sample_set_iri: &str,
+    directionality: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    use crate::institution::iris as i;
+    let mean_diff = encode_app(
+        encode_const_ref(i::STATS_MEAN_DIFF_OF),
+        encode_lit_string(sample_set_iri),
+    );
+    let zero = encode_lit_float(0.0);
+    match json_ctor_name(directionality)? {
+        "TwoSided" => {
+            // ¬(mean_diff_of(s) = 0) ≡ (mean_diff_of(s) = 0) → False
+            let eq = encode_id(encode_const_ref(wk::FLOAT), mean_diff, zero);
+            Some(encode_pi("", eq, encode_const_ref(i::STATS_FALSE)))
+        }
+        "OneSidedWitnessed" => Some(encode_app(
+            encode_app(encode_const_ref(i::STATS_LT), mean_diff),
+            zero,
+        )),
+        _ => None,
+    }
+}
+
+/// Derive the canonical proposition for a Spearman rank correlation
+/// (Paired + RankBased) over `stats:spearman_rho(s)`:
+///
+///   TwoSided          → ¬(spearman_rho(s) = 0)   (some monotone association)
+///   OneSidedWitnessed → stats:lt(spearman_rho(s), 0)   (negative correlation)
+///
+/// Authoring convention: the one-sided form asserts *anti*-correlation
+/// (rho < 0); the WRN dependency ~ #MS-deletions claim is of this form.
+/// (As elsewhere, v1's verdict checks p < alpha but not the sign of the
+/// observed rho — a shared directional follow-on; the WRN rho < 0 holds.)
+fn derive_canonical_proposition_correlation(
+    sample_set_iri: &str,
+    directionality: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    use crate::institution::iris as i;
+    let rho = encode_app(
+        encode_const_ref(i::STATS_SPEARMAN_RHO),
+        encode_lit_string(sample_set_iri),
+    );
+    let zero = encode_lit_float(0.0);
+    match json_ctor_name(directionality)? {
+        "TwoSided" => {
+            let eq = encode_id(encode_const_ref(wk::FLOAT), rho, zero);
+            Some(encode_pi("", eq, encode_const_ref(i::STATS_FALSE)))
+        }
+        "OneSidedWitnessed" => Some(encode_app(
+            encode_app(encode_const_ref(i::STATS_LT), rho),
+            zero,
+        )),
         _ => None,
     }
 }

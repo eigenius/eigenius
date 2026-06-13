@@ -26,7 +26,7 @@
 //! one-sample tests. Two-sample, ANOVA, and mixed-effects come later.
 
 use ndarray::Array1;
-use statrs::distribution::{ContinuousCDF, FisherSnedecor, StudentsT};
+use statrs::distribution::{ContinuousCDF, FisherSnedecor, Normal, StudentsT};
 use std::collections::BTreeMap;
 
 /// One-sample t-test statistic and two-sided p-value.
@@ -241,6 +241,452 @@ pub struct TwoSampleResult {
     pub mean_b: f64,
     pub sd_a: f64,
     pub sd_b: f64,
+}
+
+/// Two-sample Wilcoxon rank-sum (Mann–Whitney U) test — the
+/// distribution-free / rank-based two-sample comparison selected when a
+/// claim asserts `variance_assumption = RankBased` on an IID design.
+///
+/// Tests `H0: the two groups have the same distribution` against the
+/// two-sided alternative, via the rank-sum of `group_a` over the pooled
+/// ranking. Uses the normal approximation with tie correction and a
+/// continuity correction — appropriate for the moderate-to-large samples
+/// this targets (e.g. the WRN MSI-vs-MSS dependency comparison, n = 37 vs
+/// 91). Deterministic: average ranks for ties, total-order sort, no RNG.
+///
+/// Returns `(u_statistic for group_a, z, two_sided_p, n_a, n_b, median_a,
+/// median_b)`. The medians are reported so the verdict can express a
+/// directional claim (`median_a < median_b`).
+///
+/// Returns `None` when either group is empty.
+pub fn wilcoxon_rank_sum(group_a: &[f64], group_b: &[f64]) -> Option<WilcoxonResult> {
+    if group_a.is_empty() || group_b.is_empty() {
+        return None;
+    }
+    let n_a = group_a.len();
+    let n_b = group_b.len();
+    let n = n_a + n_b;
+
+    // Pool with a group tag, then assign average (mid-)ranks for ties.
+    let mut pooled: Vec<(f64, u8)> = Vec::with_capacity(n);
+    for &x in group_a {
+        pooled.push((x, 0));
+    }
+    for &x in group_b {
+        pooled.push((x, 1));
+    }
+    pooled.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut ranks = vec![0.0_f64; n];
+    let mut tie_term = 0.0_f64; // Σ (t³ − t) over tie groups
+    let mut i = 0;
+    while i < n {
+        let mut j = i;
+        while j + 1 < n && pooled[j + 1].0 == pooled[i].0 {
+            j += 1;
+        }
+        let t = (j - i + 1) as f64;
+        // 1-based ranks; average rank of the tie block.
+        let avg_rank = ((i + 1) as f64 + (j + 1) as f64) / 2.0;
+        for r in ranks.iter_mut().take(j + 1).skip(i) {
+            *r = avg_rank;
+        }
+        tie_term += t * t * t - t;
+        i = j + 1;
+    }
+
+    let r_a: f64 = (0..n).filter(|&k| pooled[k].1 == 0).map(|k| ranks[k]).sum();
+    let na = n_a as f64;
+    let nb = n_b as f64;
+    let nn = n as f64;
+    let u_a = r_a - na * (na + 1.0) / 2.0;
+    let mean_u = na * nb / 2.0;
+    // Tie-corrected variance of U.
+    let var_u = (na * nb / 12.0) * ((nn + 1.0) - tie_term / (nn * (nn - 1.0)));
+
+    let z = if var_u <= 0.0 {
+        0.0
+    } else {
+        let diff = u_a - mean_u;
+        // Continuity correction toward the mean.
+        let corrected = if diff.abs() < 0.5 {
+            0.0
+        } else {
+            diff - diff.signum() * 0.5
+        };
+        corrected / var_u.sqrt()
+    };
+
+    let normal = Normal::new(0.0, 1.0).expect("standard normal is well-defined");
+    let p_two_sided = if z.is_nan() {
+        f64::NAN
+    } else {
+        (2.0 * (1.0 - normal.cdf(z.abs()))).clamp(0.0, 1.0)
+    };
+
+    Some(WilcoxonResult {
+        u_statistic: u_a,
+        z_statistic: z,
+        p_value_two_sided: p_two_sided,
+        n_a,
+        n_b,
+        median_a: median(group_a),
+        median_b: median(group_b),
+    })
+}
+
+/// Numeric output of a two-sample Wilcoxon rank-sum test. Carries the
+/// U-statistic, the normal-approximation z, and both group medians so the
+/// audit trail captures the full intermediate state (D52 §6) and the
+/// verdict can express a directional (`median_a < median_b`) claim.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WilcoxonResult {
+    pub u_statistic: f64,
+    pub z_statistic: f64,
+    pub p_value_two_sided: f64,
+    pub n_a: usize,
+    pub n_b: usize,
+    pub median_a: f64,
+    pub median_b: f64,
+}
+
+/// Average (mid-)ranks of `values`, ties resolved by the mean of the
+/// tied positions. Deterministic (total-order sort). 1-based ranks.
+fn average_ranks(values: &[f64]) -> Vec<f64> {
+    let n = values.len();
+    let mut idx: Vec<usize> = (0..n).collect();
+    idx.sort_by(|&a, &b| {
+        values[a]
+            .partial_cmp(&values[b])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut ranks = vec![0.0_f64; n];
+    let mut i = 0;
+    while i < n {
+        let mut j = i;
+        while j + 1 < n && values[idx[j + 1]] == values[idx[i]] {
+            j += 1;
+        }
+        let avg = ((i + 1) as f64 + (j + 1) as f64) / 2.0;
+        for k in i..=j {
+            ranks[idx[k]] = avg;
+        }
+        i = j + 1;
+    }
+    ranks
+}
+
+/// Spearman rank correlation between paired `(x, y)` observations — the
+/// rank-based correlation selected when a claim asserts
+/// `variance_assumption = RankBased` on a Paired (bivariate) design.
+///
+/// Spearman's ρ = Pearson correlation of the mid-ranks of `x` and `y`
+/// (ties handled); two-sided p-value via the t-approximation
+/// `t = ρ·√((n−2)/(1−ρ²))` ~ Student-t with `n−2` df. Deterministic;
+/// appropriate for the moderate n this targets (e.g. WRN dependency ~
+/// #MS-deletions, n = 51).
+///
+/// Returns `None` for fewer than 3 pairs (no df for the approximation).
+pub fn spearman_correlation(pairs: &[(f64, f64)]) -> Option<SpearmanResult> {
+    let n = pairs.len();
+    if n < 3 {
+        return None;
+    }
+    let xs: Vec<f64> = pairs.iter().map(|p| p.0).collect();
+    let ys: Vec<f64> = pairs.iter().map(|p| p.1).collect();
+    let rx = average_ranks(&xs);
+    let ry = average_ranks(&ys);
+
+    let nn = n as f64;
+    let mx = rx.iter().sum::<f64>() / nn;
+    let my = ry.iter().sum::<f64>() / nn;
+    let (mut sxy, mut sxx, mut syy) = (0.0, 0.0, 0.0);
+    for k in 0..n {
+        let dx = rx[k] - mx;
+        let dy = ry[k] - my;
+        sxy += dx * dy;
+        sxx += dx * dx;
+        syy += dy * dy;
+    }
+    let denom = (sxx * syy).sqrt();
+    let rho = if denom == 0.0 { 0.0 } else { sxy / denom };
+
+    let df = nn - 2.0;
+    let one_minus = 1.0 - rho * rho;
+    let t = if one_minus <= 0.0 {
+        if rho > 0.0 {
+            f64::INFINITY
+        } else if rho < 0.0 {
+            f64::NEG_INFINITY
+        } else {
+            0.0
+        }
+    } else {
+        rho * (df / one_minus).sqrt()
+    };
+    let dist = StudentsT::new(0.0, 1.0, df).expect("Student's t with df = n-2 > 0 for n >= 3");
+    let p_two_sided = if t.is_finite() {
+        2.0 * (1.0 - dist.cdf(t.abs()))
+    } else if t.is_nan() {
+        f64::NAN
+    } else {
+        0.0
+    };
+
+    Some(SpearmanResult {
+        rho,
+        t_statistic: t,
+        p_value_two_sided: p_two_sided,
+        n_pairs: n,
+    })
+}
+
+/// Numeric output of a Spearman rank correlation. Carries ρ, the
+/// t-approximation statistic, and the pair count for audit (D52 §6).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpearmanResult {
+    pub rho: f64,
+    pub t_statistic: f64,
+    pub p_value_two_sided: f64,
+    pub n_pairs: usize,
+}
+
+/// Binary classification-quality metrics for a *threshold classifier*
+/// over a two-group SampleSet (D52 §2.2 "PPV/sensitivity at a threshold").
+///
+/// The two groups are read as **test outcomes**: `test_positive` is the
+/// group flagged by the predictor under evaluation (e.g. MSI cell lines),
+/// `test_negative` the rest (MSS). A unit is **condition-positive** (the
+/// trait being predicted — e.g. WRN-dependent) when its value is *below*
+/// `threshold` (dependency scores: more negative = more dependent).
+///
+/// From the resulting confusion counts:
+///   - PPV          = TP / (TP + FP) = TP / |test_positive|
+///   - sensitivity  = TP / (TP + FN) = TP / |condition-positive overall|
+///
+/// This is a deterministic count, not an inferential test — no p-value.
+/// The institution Holds each metric against an author-declared minimum.
+pub fn classification_metrics(
+    test_positive: &[f64],
+    test_negative: &[f64],
+    threshold: f64,
+) -> ClassificationMetrics {
+    let tp = test_positive.iter().filter(|&&x| x < threshold).count();
+    let n_test_positive = test_positive.len();
+    let fp = n_test_positive - tp;
+    let condition_in_negatives = test_negative.iter().filter(|&&x| x < threshold).count();
+    let n_condition_positive = tp + condition_in_negatives;
+    let ppv = if n_test_positive > 0 {
+        tp as f64 / n_test_positive as f64
+    } else {
+        f64::NAN
+    };
+    let sensitivity = if n_condition_positive > 0 {
+        tp as f64 / n_condition_positive as f64
+    } else {
+        f64::NAN
+    };
+    ClassificationMetrics {
+        ppv,
+        sensitivity,
+        tp,
+        fp,
+        fn_: condition_in_negatives,
+        n_test_positive,
+        n_condition_positive,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClassificationMetrics {
+    pub ppv: f64,
+    pub sensitivity: f64,
+    pub tp: usize,
+    pub fp: usize,
+    /// False negatives = condition-positive units that fell in the
+    /// `test_negative` group.
+    pub fn_: usize,
+    pub n_test_positive: usize,
+    pub n_condition_positive: usize,
+}
+
+#[cfg(test)]
+mod spearman_wrn_tests {
+    use super::*;
+
+    // Real (ms_deletions_normed, avg_WRN_dep) pairs for the 51 MSI cell
+    // lines (Supplementary Table 1, pinned snapshot). R's
+    // cor.test(method="spearman") gives rho = -0.7412 — WRN dependency
+    // (more negative = more dependent) tracks mutator load. This is the
+    // corrected n = 51 (finding F1; the paper reports n = 54).
+    const PAIRS: [(f64, f64); 51] = [
+        (6333.018312, -0.207237),
+        (6736.623661, 0.102046),
+        (7640.575026, -0.145768),
+        (8617.577078, -0.069051),
+        (9734.055723, -0.341651),
+        (11256.854980, -0.086113),
+        (12451.560360, -0.209223),
+        (12630.440360, -0.479516),
+        (13098.608110, 0.045767),
+        (13277.460910, 0.069459),
+        (13294.656540, 0.057511),
+        (13442.668810, 0.033271),
+        (13747.108330, -0.236841),
+        (14264.487880, -0.012400),
+        (14722.380060, -0.347907),
+        (14774.607890, -0.604023),
+        (14868.332690, 0.128328),
+        (15178.087230, -0.198382),
+        (15511.633250, 0.188472),
+        (15832.092350, -0.674509),
+        (15871.132070, -0.738790),
+        (17143.573850, 0.020318),
+        (18329.297720, -0.395224),
+        (18623.038150, -0.765442),
+        (18786.574140, -1.826026),
+        (18859.835510, -0.744374),
+        (19110.269510, -0.677736),
+        (19474.573610, -1.477463),
+        (20059.566700, -0.810157),
+        (21891.525960, -0.697405),
+        (22909.233030, -1.492430),
+        (23555.302970, -0.199727),
+        (24418.901440, -0.415037),
+        (25052.190390, -1.801462),
+        (26190.594690, -1.344363),
+        (26285.633570, -2.225778),
+        (26365.640900, -1.775366),
+        (26645.944790, -0.910127),
+        (28286.570940, -1.184914),
+        (28464.156320, -1.274070),
+        (28657.759730, -1.570166),
+        (28690.554970, -1.505872),
+        (29014.202540, -1.096147),
+        (29690.956800, -2.056004),
+        (30207.990280, -0.830779),
+        (30614.307280, -0.618785),
+        (31020.320740, -0.520890),
+        (31025.611280, -2.623081),
+        (33443.370800, -0.993197),
+        (34447.654600, -1.047139),
+        (38325.306740, -0.770493),
+    ];
+
+    #[test]
+    fn reproduces_wrn_dependency_mutator_load_correlation() {
+        let r = spearman_correlation(&PAIRS).expect("n >= 3");
+        assert_eq!(r.n_pairs, 51);
+        // rho = -0.7412 (R); negative — more deletions, more WRN-dependent.
+        assert!(
+            (r.rho - (-0.7412)).abs() < 0.01,
+            "expected rho ~ -0.74; got {}",
+            r.rho
+        );
+        assert!(
+            r.p_value_two_sided > 0.0 && r.p_value_two_sided < 1e-6,
+            "anti-correlation should be highly significant; got {:e}",
+            r.p_value_two_sided
+        );
+    }
+
+    #[test]
+    fn perfect_and_zero_correlation() {
+        let up: Vec<(f64, f64)> = (0..10).map(|i| (i as f64, (2 * i) as f64)).collect();
+        assert!((spearman_correlation(&up).unwrap().rho - 1.0).abs() < 1e-9);
+        let down: Vec<(f64, f64)> = (0..10).map(|i| (i as f64, -(i as f64))).collect();
+        assert!((spearman_correlation(&down).unwrap().rho - (-1.0)).abs() < 1e-9);
+    }
+}
+
+/// Deterministic median (average of the two middle order statistics for
+/// even n). Used by the rank-based tests to report central tendency.
+fn median(values: &[f64]) -> f64 {
+    let mut v = values.to_vec();
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let m = v.len();
+    if m == 0 {
+        f64::NAN
+    } else if m % 2 == 1 {
+        v[m / 2]
+    } else {
+        (v[m / 2 - 1] + v[m / 2]) / 2.0
+    }
+}
+
+#[cfg(test)]
+mod wilcoxon_wrn_tests {
+    use super::*;
+
+    // The actual WRN dependency scores (avg of CRISPR-CERES + RNAi-DEMETER2)
+    // for the 37 MSI and 91 MSS common-MSI-lineage cell lines, from the
+    // paper's Supplementary Table 1 (pinned snapshot, data/MANIFEST.md).
+    // The paper reports this comparison at P = 4.2e-13 (Wilcoxon rank-sum);
+    // R's wilcox.test on these exact values gives 4.219e-13.
+    const MSI: [f64; 37] = [
+        -2.623081, -2.225778, -2.056004, -1.826026, -1.801462, -1.775366, -1.570166, -1.505872,
+        -1.492430, -1.477463, -1.344363, -1.274070, -1.184914, -1.096147, -1.047139, -0.993197,
+        -0.910127, -0.830779, -0.810157, -0.770493, -0.744374, -0.738790, -0.697405, -0.677736,
+        -0.674509, -0.618785, -0.520890, -0.415037, -0.395224, -0.347907, -0.236841, -0.209223,
+        -0.199727, -0.145768, -0.012400, 0.020318, 0.128328,
+    ];
+    const MSS: [f64; 91] = [
+        -0.355546, -0.353888, -0.352529, -0.320391, -0.318409, -0.304129, -0.290073, -0.269563,
+        -0.258723, -0.257041, -0.245021, -0.244267, -0.241807, -0.241384, -0.210512, -0.208758,
+        -0.207016, -0.206909, -0.205790, -0.205265, -0.177701, -0.175114, -0.174864, -0.167826,
+        -0.159125, -0.151440, -0.149299, -0.134245, -0.132432, -0.129745, -0.123319, -0.116815,
+        -0.116629, -0.116322, -0.114192, -0.108169, -0.108043, -0.107132, -0.104000, -0.102705,
+        -0.094210, -0.093614, -0.090988, -0.085417, -0.076764, -0.070082, -0.069146, -0.068466,
+        -0.068314, -0.066562, -0.059598, -0.051638, -0.045905, -0.042263, -0.040483, -0.038843,
+        -0.036078, -0.027051, -0.026841, -0.025989, -0.024593, -0.022725, -0.022585, -0.019797,
+        -0.017345, -0.014836, -0.004199, -0.003123, 0.007673, 0.008101, 0.009901, 0.011089,
+        0.033948, 0.033989, 0.035979, 0.038609, 0.040102, 0.048724, 0.057215, 0.057330, 0.065760,
+        0.067765, 0.069531, 0.076837, 0.089501, 0.114439, 0.125352, 0.160587, 0.175678, 0.220103,
+        0.291802,
+    ];
+
+    #[test]
+    fn reproduces_wrn_msi_vs_mss_headline() {
+        let r = wilcoxon_rank_sum(&MSI, &MSS).expect("non-empty groups");
+        assert_eq!(r.n_a, 37);
+        assert_eq!(r.n_b, 91);
+        // MSI lines are far more WRN-dependent (more negative scores).
+        assert!(
+            r.median_a < r.median_b,
+            "MSI median {} should be below MSS median {}",
+            r.median_a,
+            r.median_b
+        );
+        // Paper: P = 4.2e-13. Normal approximation reproduces the same
+        // order of magnitude (§5.1 Class-C tolerance: log-scale agreement);
+        // far below any reasonable alpha.
+        assert!(
+            r.p_value_two_sided < 1e-10 && r.p_value_two_sided > 0.0,
+            "expected P ~ 4e-13 (paper); got {:e}",
+            r.p_value_two_sided
+        );
+    }
+
+    #[test]
+    fn handles_ties_and_trivial_separation() {
+        // Perfectly separated groups with internal ties.
+        let a = [1.0, 1.0, 2.0];
+        let b = [10.0, 10.0, 11.0];
+        let r = wilcoxon_rank_sum(&a, &b).expect("non-empty");
+        assert!(r.median_a < r.median_b);
+        assert!(
+            r.p_value_two_sided < 0.2,
+            "small-n separation, got {}",
+            r.p_value_two_sided
+        );
+        // Identical groups → no separation → large p.
+        let same = wilcoxon_rank_sum(&[1.0, 2.0, 3.0], &[1.0, 2.0, 3.0]).expect("non-empty");
+        assert!(
+            same.p_value_two_sided > 0.9,
+            "identical groups, got {}",
+            same.p_value_two_sided
+        );
+    }
 }
 
 /// Paired t-test for matched-pair / pre-post designs.
@@ -1591,6 +2037,24 @@ pub fn esd_filter(samples: &[f64], max_outliers: usize, alpha: f64) -> Vec<usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classification_metrics_threshold_classifier() {
+        // test-positive (group A): 3 of 4 below threshold 0.0 → TP=3, FP=1
+        // test-negative (group B): 0 below threshold → FN=0, TN=3
+        let a = [-2.0, -1.0, -0.5, 0.5];
+        let b = [0.1, 0.2, 0.3];
+        let m = classification_metrics(&a, &b, 0.0);
+        assert_eq!((m.tp, m.fp, m.fn_), (3, 1, 0));
+        assert_eq!((m.n_test_positive, m.n_condition_positive), (4, 3));
+        assert!((m.ppv - 0.75).abs() < 1e-12);
+        assert!((m.sensitivity - 1.0).abs() < 1e-12);
+        // a condition-positive unit in the negative group lowers sensitivity
+        let b2 = [-0.4, 0.2, 0.3];
+        let m2 = classification_metrics(&a, &b2, 0.0);
+        assert_eq!((m2.tp, m2.fn_, m2.n_condition_positive), (3, 1, 4));
+        assert!((m2.sensitivity - 0.75).abs() < 1e-12);
+    }
 
     /// Reference values from R: `t.test(c(72, 85, 100), mu = 100)`.
     /// Mean = 85.667; SD = 14.012; SE = 8.090; t = -1.776; p ≈ 0.218.

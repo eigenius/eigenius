@@ -1,0 +1,66 @@
+// Institution-recompute fixture — WRN dependency ~ mutator load, Spearman.
+//
+// The Paired dispatch with variance_assumption = RankBased runs the
+// Spearman rank correlation (instead of a paired t-test). The pairs are
+// the REAL (ms_deletions_normed, avg_WRN_dep) values for the 51 MSI cell
+// lines (Supplementary Table 1, pinned snapshot) — the corrected n = 51
+// (finding F1; the paper reports n = 54). R gives rho = -0.7412. The
+// institution recomputes it and emits a Holds StatisticalAnalysisResult
+// carrying ¬(spearman_rho(s) = 0).
+//
+// Each consecutive pair is (x = ms_deletions, y = avg_WRN_dep).
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace stats      = "urn:eigenius:measurements";
+namespace wrn        = "urn:eigenius:demo:wrncorr";
+
+resource wrn:wrn_dep_vs_deletions : stats:SampleSetResource {
+    reflection:source      = "depmap:18Q4 MSI lines — ms_deletions vs avg WRN dependency (Supp Table 1)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    stats:sample_set_value = stats:Paired(
+        [
+            6333.018312, -0.207237,   6736.623661, 0.102046,    7640.575026, -0.145768,
+            8617.577078, -0.069051,   9734.055723, -0.341651,   11256.854980, -0.086113,
+            12451.560360, -0.209223,  12630.440360, -0.479516,  13098.608110, 0.045767,
+            13277.460910, 0.069459,   13294.656540, 0.057511,   13442.668810, 0.033271,
+            13747.108330, -0.236841,  14264.487880, -0.012400,  14722.380060, -0.347907,
+            14774.607890, -0.604023,  14868.332690, 0.128328,   15178.087230, -0.198382,
+            15511.633250, 0.188472,   15832.092350, -0.674509,  15871.132070, -0.738790,
+            17143.573850, 0.020318,   18329.297720, -0.395224,  18623.038150, -0.765442,
+            18786.574140, -1.826026,  18859.835510, -0.744374,  19110.269510, -0.677736,
+            19474.573610, -1.477463,  20059.566700, -0.810157,  21891.525960, -0.697405,
+            22909.233030, -1.492430,  23555.302970, -0.199727,  24418.901440, -0.415037,
+            25052.190390, -1.801462,  26190.594690, -1.344363,  26285.633570, -2.225778,
+            26365.640900, -1.775366,  26645.944790, -0.910127,  28286.570940, -1.184914,
+            28464.156320, -1.274070,  28657.759730, -1.570166,  28690.554970, -1.505872,
+            29014.202540, -1.096147,  29690.956800, -2.056004,  30207.990280, -0.830779,
+            30614.307280, -0.618785,  31020.320740, -0.520890,  31025.611280, -2.623081,
+            33443.370800, -0.993197,  34447.654600, -1.047139,  38325.306740, -0.770493,
+        ],
+        BiologicalReplication(),
+    );
+}
+
+resource wrn:wrn_dep_vs_deletions_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:wrn_dep_vs_deletions;
+    reflection:source    = "depmap:18Q4 (Supp Table 1)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:claim_wrn_dep_tracks_mutator_load : stats:StatisticalAnalysisPlan {
+    stats:sample_set = wrn:wrn_dep_vs_deletions;
+
+    stats:alpha               = 0.05;
+    stats:effect_size         = Absolute(0.0, "spearman_rho");
+    stats:directionality      = TwoSided();
+    stats:variance_assumption = RankBased();
+    stats:outlier_exclusion   = Identity();
+}
+
+resource wrn:claim_wrn_dep_tracks_mutator_load_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:claim_wrn_dep_tracks_mutator_load;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}

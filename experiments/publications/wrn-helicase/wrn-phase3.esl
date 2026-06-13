@@ -1,0 +1,225 @@
+// WRN Helicase paper — Phase-3 in-vivo validation + mechanism chain.
+//
+// Stacks on the Phase-2 chain (… → wrn-phase1 → wrn-phase2 → wrn-phase3).
+// Encodes C-VIVO and C-MECH.
+//
+// As in Phase 2, the wet-lab statistics are the authors' own (xenograft
+// growth via lme4 likelihood-ratio test; DSB/IF foci; GSEA) and are NOT in
+// any public slice we hold, so the readouts are LINKED-EXTERNAL
+// bench:ToolArtifacts. The one Phase-3 sub-claim that IS recomputable from
+// the pinned slice — p53 status modulates WRN dependence (Wilcoxon, 23 vs
+// 13, P=0.02) — is kernel-recomputed in the statistics layer
+// (wrn-phase1-recompute.esl :: concl_p53_modulates).
+//
+// The encodable contribution here is again the Declared reasoning:
+//   - C-VIVO: the C911 seed-control logic — shWRN1 impairs KM12 xenograft
+//     growth while the seed-matched control shWRN1-C911 (nt 9-11 complemented
+//     to preserve the off-target seed) is inert ⇒ the in-vivo effect is
+//     on-target, not shRNA seed off-target.
+//   - C-MECH: the DSB → DDR(p53)/apoptosis/arrest mechanism, and the
+//     explicitly tested-and-REJECTED telomere-defect hypothesis (FISH:
+//     diffuse chromosomal DSBs, no telomeric fusions / signal loss).
+//
+// Validated by crates/eigenius-reasoning/tests/wrn_phase3.rs.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace bench      = "urn:eigenius:benchmark";
+namespace onco       = "urn:eigenius:benchmark:onco";
+namespace wrn        = "urn:eigenius:pub:wrn";
+
+// ════════════════════════════════════════════════════════════════════
+// C-VIVO — in vivo + patient-derived validation
+// ════════════════════════════════════════════════════════════════════
+
+// Linked-external: KM12 dox-inducible shWRN1 xenograft growth (lme4 LRT)
+// + MSI patient-derived organoid (Fig. 2d-g).
+resource wrn:vivo_xenograft : bench:ToolArtifact {
+    bench:tool            = "KM12 xenograft growth (linear mixed model, lme4 likelihood-ratio test) + MSI patient-derived organoid viability";
+    bench:produced_from   = ["wrn-paper:Fig-2d", "wrn-paper:Fig-2f", "wrn-paper:Fig-2g"];
+    bench:tool_parameters = "Dox-inducible shWRN1 in KM12 (MSI) significantly impairs xenograft tumor growth (% volume increase ~ time, random slope per mouse; LRT); shWRN also impairs a novel MSI colon patient-derived organoid (CCLF_CORE_0001_T). LINKED-EXTERNAL (authors' in vivo data not vendored).";
+    reflection:derivation = wrn:vivo_xenograft_trace;
+    reflection:canonical_proposition = type_expr(
+        onco:InVivoDependence("WRN", "MSI")
+    );
+}
+resource wrn:vivo_xenograft_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:vivo_xenograft;
+    reflection:source    = "wrn-paper:Fig-2d-g in vivo / organoid assays (linked-external)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// Linked-external: the C911 seed-matched control is inert in vivo.
+resource wrn:vivo_seed_control : bench:ToolArtifact {
+    bench:tool            = "C911 seed-control xenograft (shWRN1 vs shWRN1-C911)";
+    bench:produced_from   = ["wrn-paper:Fig-2d"];
+    bench:tool_parameters = "shWRN1-C911 (nt 9-11 of shWRN1 mutated to complement, preserving the off-target 'seed') does NOT impair KM12 xenograft growth, whereas on-target shWRN1 does. The seed-matched control is inert. LINKED-EXTERNAL.";
+    reflection:derivation = wrn:vivo_seed_control_trace;
+    reflection:canonical_proposition = type_expr(
+        onco:SeedControlInert("WRN", "xenograft_growth")
+    );
+}
+resource wrn:vivo_seed_control_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:vivo_seed_control;
+    reflection:source    = "wrn-paper:Fig-2d C911 seed control (linked-external)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// Declared: the seed-control inference. An shRNA's off-target activity is
+// driven by its 'seed'; a seed-matched but on-target-disrupted control
+// (C911) that is inert isolates the on-target effect.
+resource wrn:seed_control_rule : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:c911-seed-control-logic";
+    reflection:rationale   = "shRNA off-target effects are mediated by the 'seed' sequence. shWRN1-C911 preserves the seed (only nt 9-11 are complemented) but loses on-target silencing. If this seed-matched control is INERT while shWRN1 impairs growth, the phenotype cannot be a seed-driven off-target effect — it is on-target for WRN.";
+    reflection:canonical_proposition = type_expr(
+        onco:SeedControlInert("WRN", "xenograft_growth")
+        ->
+        onco:OnTarget("WRN", "xenograft_growth")
+    );
+}
+resource wrn:seed_control_rule_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:seed_control_rule;
+    reflection:declared_by = "wrn-paper:c911-seed-control-logic";
+    reflection:timestamp   = "2026-06-13T03:30:00Z";
+}
+
+resource wrn:concl_vivo : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:InVivoDependence("WRN", "MSI")
+    );
+    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:vivo_xenograft");
+    reasoning:certificate = type_expr(
+        derived("urn:eigenius:pub:wrn:vivo_xenograft",
+                onco:InVivoDependence("WRN", "MSI"))
+    );
+}
+
+resource wrn:concl_vivo_ontarget : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:OnTarget("WRN", "xenograft_growth")
+    );
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:seed_control_rule"),
+        DerivedEvidence("urn:eigenius:pub:wrn:vivo_seed_control")
+    );
+    reasoning:certificate = type_expr(
+        alias
+            RULE = "urn:eigenius:pub:wrn:seed_control_rule",
+            ART  = "urn:eigenius:pub:wrn:vivo_seed_control",
+            SC   = onco:SeedControlInert("WRN", "xenograft_growth"),
+            OT   = onco:OnTarget("WRN", "xenograft_growth")
+        in
+        app(SC, OT, DeclaredEvidence(RULE), DerivedEvidence(ART),
+            declared(RULE, SC -> OT), derived(ART, SC))
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// C-MECH — mechanism: WRN loss ⇒ MSI-selective DSBs ⇒ DDR-driven lethality
+// ════════════════════════════════════════════════════════════════════
+
+// Linked-external: DSB induction in MSI (γH2AX/53BP1 foci; pATM(S1981) +
+// Chk2(T68) corroboration), MSI-selective.
+resource wrn:mech_dsb : bench:ToolArtifact {
+    bench:tool            = "DSB-marker immunofluorescence (γH2AX, 53BP1, pATM-S1981, Chk2-T68 foci)";
+    bench:produced_from   = ["wrn-paper:Fig-4a-c", "wrn-paper:ED-Fig-6", "wrn-paper:ED-Fig-7"];
+    bench:tool_parameters = "WRN silencing substantially increased γH2AX and 53BP1 foci (DSB markers) in MSI but not MSS cells; corroborated by increased phospho-ATM(S1981) foci and Chk2(T68) phosphorylation; confirmed with shRNA in vitro and in vivo (not a CRISPR/Cas9 artifact). LINKED-EXTERNAL.";
+    reflection:derivation = wrn:mech_dsb_trace;
+    reflection:canonical_proposition = type_expr(
+        onco:CausesDSBs("WRN", "MSI")
+    );
+}
+resource wrn:mech_dsb_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:mech_dsb;
+    reflection:source    = "wrn-paper:Fig-4 / ED-Fig-6,7 DSB-marker IF (linked-external)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// Declared: the DSB-driven-lethality mechanism. DSBs activate the DNA-damage
+// response (ATM/ATR → p53; G2/M & E2F down, apoptosis up by GSEA; annexin V
+// death; p53-S15 & p21 IF) and are directly toxic — independent of p53 status
+// (explaining why p53-impaired MSI cells are also sensitive).
+resource wrn:mech_rule : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:dsb-ddr-mechanism";
+    reflection:rationale   = "MSI-selective DSBs on WRN loss activate the DNA-damage response: GSEA shows downregulated G2/M-checkpoint and E2F-target signatures and upregulated apoptosis + p53 signatures; annexin V/PI confirms apoptosis/death; p53-S15 phosphorylation and p21 rise (p53 activation) in MSI not MSS. DSBs are also directly toxic independent of p53 status, explaining the sensitivity of p53-impaired MSI cells. Hence WRN loss drives MSI-selective lethality through DSB-induced DNA-damage response.";
+    reflection:canonical_proposition = type_expr(
+        onco:CausesDSBs("WRN", "MSI")
+        ->
+        onco:DSBDrivenLethality("WRN", "MSI")
+    );
+}
+resource wrn:mech_rule_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:mech_rule;
+    reflection:declared_by = "wrn-paper:dsb-ddr-mechanism";
+    reflection:timestamp   = "2026-06-13T03:30:00Z";
+}
+
+resource wrn:concl_dsb : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:CausesDSBs("WRN", "MSI")
+    );
+    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:mech_dsb");
+    reasoning:certificate = type_expr(
+        derived("urn:eigenius:pub:wrn:mech_dsb",
+                onco:CausesDSBs("WRN", "MSI"))
+    );
+}
+
+resource wrn:concl_mech : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:DSBDrivenLethality("WRN", "MSI")
+    );
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:mech_rule"),
+        DerivedEvidence("urn:eigenius:pub:wrn:mech_dsb")
+    );
+    reasoning:certificate = type_expr(
+        alias
+            RULE = "urn:eigenius:pub:wrn:mech_rule",
+            ART  = "urn:eigenius:pub:wrn:mech_dsb",
+            DSB  = onco:CausesDSBs("WRN", "MSI"),
+            DL   = onco:DSBDrivenLethality("WRN", "MSI")
+        in
+        app(DSB, DL, DeclaredEvidence(RULE), DerivedEvidence(ART),
+            declared(RULE, DSB -> DL), derived(ART, DSB))
+    );
+}
+
+// ── Telomere-defect hypothesis: tested and REJECTED ──────────────────
+// Linked-external: telomere-FISH of metaphase spreads (2 MSI, 2 MSS) 96 h
+// after shWRN1 induction directly showed diffuse chromosomal DSBs WITHOUT
+// telomeric end-to-end fusions or signal loss — ruling out a telomere defect
+// as the basis of the synthetic lethality.
+resource wrn:fish_readout : bench:ToolArtifact {
+    bench:tool            = "telomere PNA-FISH of metaphase spreads (± shWRN1)";
+    bench:produced_from   = ["wrn-paper:Fig-4d", "wrn-paper:Fig-4e", "wrn-paper:ED-Fig-8a"];
+    bench:tool_parameters = "WRN silencing induced DSB/fragmentation throughout chromosomes in MSI but not MSS cells, with NO specific telomeric defects (no increased end-to-end fusions, no telomeric signal loss). The synthetic lethality is not via a telomere defect — an explicitly tested-and-rejected hypothesis. LINKED-EXTERNAL.";
+    reflection:derivation = wrn:fish_readout_trace;
+    reflection:canonical_proposition = type_expr(
+        onco:NotViaTelomereDefect("WRN", "MSI")
+    );
+}
+resource wrn:fish_readout_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:fish_readout;
+    reflection:source    = "wrn-paper:Fig-4d,e / ED-Fig-8a telomere-FISH (linked-external)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:concl_not_telomere : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:NotViaTelomereDefect("WRN", "MSI")
+    );
+    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:fish_readout");
+    reasoning:certificate = type_expr(
+        derived("urn:eigenius:pub:wrn:fish_readout",
+                onco:NotViaTelomereDefect("WRN", "MSI"))
+    );
+}

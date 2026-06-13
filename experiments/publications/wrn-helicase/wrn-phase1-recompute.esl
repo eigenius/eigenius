@@ -1,0 +1,637 @@
+// WRN Phase-1 — institution-recomputed statistical warrants.
+//
+// The kernel-recomputed layer of the WRN Phase-1 chain: the statistics
+// institution RECOMPUTES every headline statistic from chain-resident
+// data (the pinned public-data snapshot, inlined as SampleSets) and emits
+// StatisticalAnalysisResults whose IsDerivedAs the reasoning certificates
+// consume. Declared statistical→domain bridges lift each statistical claim
+// to its domain conclusion. This replaces the recorded bench:ToolArtifacts
+// (agent-attested) of the narrative layer (wrn-phase1.esl, which stacks on
+// top of this one) for the institution-recomputable tier (D50 §2.2):
+//
+//   C-WRN     SelectivelyEssential(WRN, MSI)                — Wilcoxon (37 vs 91)
+//   D-REFINE  DependencyCorrelatesWithMutatorLoad(WRN, MSI) — Spearman (51 pairs)
+//   D-RECQ    OnlyMSISelectiveInFamily(WRN, RecQ_helicases) — Wilcoxon (32 vs 413)
+//                                                             + declared uniqueness
+//   D-BIOM    StrongBiomarker(MSI, WRN_dependency)          — PPV/sensitivity classifier
+//
+// Only the limma moderated-t differential-dependency (D-DIFF) stays a
+// linked-external bench:ToolArtifact in the narrative layer (Phase 2.5).
+//
+// Two institutions compose through the shared chain (the stats-and-
+// reasoning.json pattern): statistics writes the IsDerivedAs witness;
+// reasoning reads it. The result resource is emitted by the statistics
+// institution at commit and added to the chain by the test
+// (crates/eigenius-reasoning/tests/wrn_phase1_recompute.rs).
+//
+// Directionality: the SampleSet places MSI first (group_a), so
+// mean_diff_of(s) = mean(MSI) − mean(MSS); the OneSidedWitnessed test
+// (licensed by the synthetic-lethal directionality witness below) yields
+// stats:lt(mean_diff_of(s), 0) — MSI strictly more WRN-dependent.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace stats      = "urn:eigenius:measurements";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace onco       = "urn:eigenius:benchmark:onco";
+namespace bench      = "urn:eigenius:benchmark";
+namespace wrn        = "urn:eigenius:pub:wrn";
+
+// ─── Directionality witness (D52 §7.1) ───────────────────────────────
+// Licenses the one-sided test: the synthetic-lethal hypothesis is
+// specifically that MSI cells are MORE WRN-dependent; the inverse
+// direction (MSS more dependent) is not the biological claim under test.
+
+resource wrn:msi_directionality_witness : stats:ImpossibilityWitness {
+    reflection:declared_by = "wrn-paper:synthetic-lethal-directionality";
+    reflection:rationale   = "Synthetic lethality predicts MSI-specific WRN dependence: the directional claim is that MSI cells are more WRN-dependent than MSS. The inverse direction (MSS more dependent than MSI) is not the hypothesis, licensing the one-sided p-value.";
+}
+
+// ─── Observed: the WRN dependency SampleSet (MSI vs MSS) ──────────────
+// Real avg WRN dependency (CRISPR-CERES + RNAi-DEMETER2) for the 37 MSI
+// and 91 MSS common-MSI-lineage cell lines (Supplementary Table 1, pinned
+// snapshot). Group A = MSI, Group B = MSS.
+
+resource wrn:wrn_dep_sampleset : stats:SampleSetResource {
+    reflection:source      = "depmap:18Q4 avg WRN dependency, common-MSI lineages (Supp Table 1)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    // Tier-1 extraction pin (verified by extract/extract_samplesets.py).
+    bench:extracted_from_slice  = "data/slices/wrn_supplementary_table_1.csv";
+    bench:extracted_from_sha256 = "eebd460257982a98cf6ce9f14e189ae0c4398a686f4181bc037c5591e87243f2";
+    bench:extraction_columns    = "avg_WRN_dep";
+    bench:extraction_filter     = "common_MSI_lineage=1 & CCLE_MSI in {MSI,MSS} & avg_WRN_dep real (NaN/NA dropped); group A=MSI (n=37), B=MSS (n=91); each sorted ascending";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:wrn_dep_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [-2.623081, -2.225778, -2.056004, -1.826026, -1.801462, -1.775366, -1.570166, -1.505872,
+         -1.492430, -1.477463, -1.344363, -1.274070, -1.184914, -1.096147, -1.047139, -0.993197,
+         -0.910127, -0.830779, -0.810157, -0.770493, -0.744374, -0.738790, -0.697405, -0.677736,
+         -0.674509, -0.618785, -0.520890, -0.415037, -0.395224, -0.347907, -0.236841, -0.209223,
+         -0.199727, -0.145768, -0.012400, 0.020318, 0.128328],
+        [-0.355546, -0.353888, -0.352529, -0.320391, -0.318409, -0.304129, -0.290073, -0.269563,
+         -0.258723, -0.257041, -0.245021, -0.244267, -0.241807, -0.241384, -0.210512, -0.208758,
+         -0.207016, -0.206909, -0.205790, -0.205265, -0.177701, -0.175114, -0.174864, -0.167826,
+         -0.159125, -0.151440, -0.149299, -0.134245, -0.132432, -0.129745, -0.123319, -0.116815,
+         -0.116629, -0.116322, -0.114192, -0.108169, -0.108043, -0.107132, -0.104000, -0.102705,
+         -0.094210, -0.093614, -0.090988, -0.085417, -0.076764, -0.070082, -0.069146, -0.068466,
+         -0.068314, -0.066562, -0.059598, -0.051638, -0.045905, -0.042263, -0.040483, -0.038843,
+         -0.036078, -0.027051, -0.026841, -0.025989, -0.024593, -0.022725, -0.022585, -0.019797,
+         -0.017345, -0.014836, -0.004199, -0.003123, 0.007673, 0.008101, 0.009901, 0.011089,
+         0.033948, 0.033989, 0.035979, 0.038609, 0.040102, 0.048724, 0.057215, 0.057330, 0.065760,
+         0.067765, 0.069531, 0.076837, 0.089501, 0.114439, 0.125352, 0.160587, 0.175678, 0.220103,
+         0.291802],
+        BiologicalReplication(),
+    );
+}
+
+resource wrn:wrn_dep_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:wrn_dep_sampleset;
+    reflection:source    = "depmap:18Q4 (Supp Table 1)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// ─── The StatisticalAnalysisPlan (institution recomputes it) ──────────
+// RankBased → Wilcoxon rank-sum; OneSidedWitnessed → directional lt.
+// On commit the statistics institution emits
+//   wrn:wrn_dep_plan:result:main_effect
+// carrying canonical_proposition = stats:lt(stats:mean_diff_of(sampleset), 0)
+// and an IsDerivedAs witness against it.
+
+resource wrn:wrn_dep_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set = wrn:wrn_dep_sampleset;
+
+    stats:alpha               = 0.05;
+    stats:effect_size         = Absolute(0.0, "dependency_score");
+    stats:directionality      = OneSidedWitnessed("urn:eigenius:pub:wrn:msi_directionality_witness");
+    stats:variance_assumption = RankBased();
+    stats:outlier_exclusion   = Identity();
+}
+
+resource wrn:wrn_dep_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:wrn_dep_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// ─── Declared: the statistical→domain bridge ─────────────────────────
+// Lifts the recomputed statistical claim into the domain conclusion.
+// Monomorphic (specialised to this sample set + WRN/MSI), mirroring the
+// drug_screening.esl bridge.
+
+resource wrn:bridge_msi_selective : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:selective-essentiality-criterion";
+    reflection:rationale   = "If a sample set measuring WRN dependency by MSI status has its MSI-group mean strictly below its MSS-group mean (MSI more dependent), WRN is selectively essential in MSI. The directional statistical claim is the warrant.";
+
+    reflection:canonical_proposition = type_expr(
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.0)
+        ->
+        onco:SelectivelyEssential("WRN", "MSI")
+    );
+}
+
+resource wrn:bridge_msi_selective_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:bridge_msi_selective;
+    reflection:declared_by = "wrn-paper:selective-essentiality-criterion";
+    reflection:timestamp   = "2026-06-12T14:00:00Z";
+}
+
+// ─── C-WRN (recomputed): SelectivelyEssential(WRN, MSI) ──────────────
+// Justified by the bridge applied to the institution-recomputed result.
+
+resource wrn:concl_wrn_selective_recomputed : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+
+    reasoning:proposition = type_expr(
+        onco:SelectivelyEssential("WRN", "MSI")
+    );
+
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_msi_selective"),
+        DerivedEvidence("urn:eigenius:pub:wrn:wrn_dep_plan:result:main_effect")
+    );
+
+    reasoning:certificate = type_expr(
+        alias
+            SS     = "urn:eigenius:pub:wrn:wrn_dep_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_msi_selective",
+            RESULT = "urn:eigenius:pub:wrn:wrn_dep_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            SE     = onco:SelectivelyEssential("WRN", "MSI")
+        in
+        app(
+            STAT, SE,
+            DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            declared(BRIDGE, STAT -> SE),
+            derived(RESULT, STAT)
+        )
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// D-REFINE (recomputed): WRN dependency tracks mutator load
+// ════════════════════════════════════════════════════════════════════
+// The Spearman correlation between #MS-deletions and WRN dependency
+// across the 51 MSI cell lines (rho = -0.74, the corrected n = 51 —
+// finding F1), kernel-recomputed. Same two-institution pattern: the
+// statistics institution recomputes the correlation and emits the
+// IsDerivedAs witness; the reasoning institution composes it through a
+// bridge into onco:DependencyCorrelatesWithMutatorLoad(WRN, MSI).
+// Pairs: (x = ms_deletions_normed, y = avg_WRN_dep).
+
+resource wrn:mutator_load_directionality_witness : stats:ImpossibilityWitness {
+    reflection:declared_by = "wrn-paper:mutator-load-directionality";
+    reflection:rationale   = "The hypothesis is that accumulating MSI deletions increase WRN dependence — a negative correlation between #MS-deletions and WRN dependency score (more deletions ⇒ more negative ⇒ more dependent). The inverse direction is not the claim, licensing the one-sided test.";
+}
+
+resource wrn:wrn_corr_sampleset : stats:SampleSetResource {
+    reflection:source      = "depmap:18Q4 MSI lines — ms_deletions vs avg WRN dependency (Supp Table 1)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    // Tier-1 extraction pin (verified by extract/extract_samplesets.py).
+    bench:extracted_from_slice  = "data/slices/wrn_supplementary_table_1.csv";
+    bench:extracted_from_sha256 = "eebd460257982a98cf6ce9f14e189ae0c4398a686f4181bc037c5591e87243f2";
+    bench:extraction_columns    = "ms_deletions_normed,avg_WRN_dep";
+    bench:extraction_filter     = "CCLE_MSI=MSI (all lineages) & both columns real (NaN/NA dropped) -> 51 pairs; sorted by ms_deletions ascending; emitted interleaved [x,y,...]";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:wrn_corr_sampleset";
+
+    stats:sample_set_value = stats:Paired(
+        [
+            6333.018312, -0.207237,   6736.623661, 0.102046,    7640.575026, -0.145768,
+            8617.577078, -0.069051,   9734.055723, -0.341651,   11256.854980, -0.086113,
+            12451.560360, -0.209223,  12630.440360, -0.479516,  13098.608110, 0.045767,
+            13277.460910, 0.069459,   13294.656540, 0.057511,   13442.668810, 0.033271,
+            13747.108330, -0.236841,  14264.487880, -0.012400,  14722.380060, -0.347907,
+            14774.607890, -0.604023,  14868.332690, 0.128328,   15178.087230, -0.198382,
+            15511.633250, 0.188472,   15832.092350, -0.674509,  15871.132070, -0.738790,
+            17143.573850, 0.020318,   18329.297720, -0.395224,  18623.038150, -0.765442,
+            18786.574140, -1.826026,  18859.835510, -0.744374,  19110.269510, -0.677736,
+            19474.573610, -1.477463,  20059.566700, -0.810157,  21891.525960, -0.697405,
+            22909.233030, -1.492430,  23555.302970, -0.199727,  24418.901440, -0.415037,
+            25052.190390, -1.801462,  26190.594690, -1.344363,  26285.633570, -2.225778,
+            26365.640900, -1.775366,  26645.944790, -0.910127,  28286.570940, -1.184914,
+            28464.156320, -1.274070,  28657.759730, -1.570166,  28690.554970, -1.505872,
+            29014.202540, -1.096147,  29690.956800, -2.056004,  30207.990280, -0.830779,
+            30614.307280, -0.618785,  31020.320740, -0.520890,  31025.611280, -2.623081,
+            33443.370800, -0.993197,  34447.654600, -1.047139,  38325.306740, -0.770493,
+        ],
+        BiologicalReplication(),
+    );
+}
+
+resource wrn:wrn_corr_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:wrn_corr_sampleset;
+    reflection:source    = "depmap:18Q4 (Supp Table 1)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:wrn_corr_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set = wrn:wrn_corr_sampleset;
+
+    stats:alpha               = 0.05;
+    stats:effect_size         = Absolute(0.0, "spearman_rho");
+    stats:directionality      = OneSidedWitnessed("urn:eigenius:pub:wrn:mutator_load_directionality_witness");
+    stats:variance_assumption = RankBased();
+    stats:outlier_exclusion   = Identity();
+}
+
+resource wrn:wrn_corr_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:wrn_corr_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:bridge_mutator_load : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:mutator-load-criterion";
+    reflection:rationale   = "If WRN dependency negatively correlates with mutator load (#MS deletions) across MSI lines, WRN dependency tracks mutator load — supporting the refinement that a stronger mutator phenotype drives WRN dependence.";
+
+    reflection:canonical_proposition = type_expr(
+        stats:lt(stats:spearman_rho("urn:eigenius:pub:wrn:wrn_corr_sampleset"), 0.0)
+        ->
+        onco:DependencyCorrelatesWithMutatorLoad("WRN", "MSI")
+    );
+}
+
+resource wrn:bridge_mutator_load_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:bridge_mutator_load;
+    reflection:declared_by = "wrn-paper:mutator-load-criterion";
+    reflection:timestamp   = "2026-06-12T14:30:00Z";
+}
+
+resource wrn:concl_refine_recomputed : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+
+    reasoning:proposition = type_expr(
+        onco:DependencyCorrelatesWithMutatorLoad("WRN", "MSI")
+    );
+
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_mutator_load"),
+        DerivedEvidence("urn:eigenius:pub:wrn:wrn_corr_plan:result:main_effect")
+    );
+
+    reasoning:certificate = type_expr(
+        alias
+            SS     = "urn:eigenius:pub:wrn:wrn_corr_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_mutator_load",
+            RESULT = "urn:eigenius:pub:wrn:wrn_corr_plan:result:main_effect",
+            STAT   = stats:lt(stats:spearman_rho(SS), 0.0),
+            DC     = onco:DependencyCorrelatesWithMutatorLoad("WRN", "MSI")
+        in
+        app(
+            STAT, DC,
+            DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            declared(BRIDGE, STAT -> DC),
+            derived(RESULT, STAT)
+        )
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// D-RECQ (recomputed): WRN is the only MSI-selective RecQ helicase
+// ════════════════════════════════════════════════════════════════════
+// The RecQ-family comparison (Achilles CRISPR-CERES, all lineages, the
+// recorded artifact's cohort: 32 MSI / 413 MSS). The kernel
+// recomputes WRN's MSI-vs-MSS Wilcoxon here (P = 1.1e-8, median -0.49 vs
+// -0.11) and lifts it to the family-uniqueness claim through a Declared
+// rule. The other three RecQ helicases (BLM P=0.65, RECQL P=0.58,
+// RECQL5 P=0.11) are NON-significant and RECQL4 is absent from the 18Q4
+// CERES matrix — their non-selectivity is a Declared scientific judgment,
+// NOT a derived warrant: a null cannot be derived (you cannot prove "no
+// effect" from "failed to find an effect"). So uniqueness composes one
+// kernel-derived positive (WRN selective) with the declared interpretation
+// of the three kernel-computed n.s. p-values cited in the rule's rationale.
+
+resource wrn:wrn_recq_sampleset : stats:SampleSetResource {
+    reflection:source      = "depmap:18Q4 Achilles CRISPR-CERES WRN gene-effect, all lineages by CCLE_MSI (Supp Table 1)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    // Tier-1 extraction pin (verified by extract/extract_samplesets.py).
+    // Joins three slices: WRN column of the Achilles matrix, keyed by
+    // DepMap_ID → CCLE_name (sample_info) → CCLE_MSI (Supp Table 1).
+    bench:extracted_from_slice  = "data/slices/achilles_18Q4_gene_effect.csv (+ sample_info.csv, Supp Table 1)";
+    bench:extracted_from_sha256 = "2186669de8ade17bfbf7f2bc3e67e8af59d644800bf793ef103c67a4692eb68b";
+    bench:extraction_columns    = "WRN (7486)";
+    bench:extraction_filter     = "join DepMap_ID->CCLE_name->CCLE_MSI; CCLE_MSI in {MSI,MSS} (all lineages) & WRN value real; group A=MSI (n=32), B=MSS (n=413); each sorted ascending";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:wrn_recq_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [
+            -1.096147, -1.047139, -1.015328, -0.962689, -0.955987, -0.908925, -0.810157, -0.801795,
+            -0.765442, -0.759833, -0.744374, -0.674509, -0.618785, -0.604023, -0.532735, -0.500754,
+            -0.479516, -0.469102, -0.396486, -0.395224, -0.372934, -0.347907, -0.341651, -0.198382,
+            -0.163101, -0.145768, -0.080697, -0.069051, -0.017576, -0.012400, 0.097757, 0.188472,
+        ],
+        [
+            -0.692033, -0.692000, -0.668058, -0.651479, -0.590057, -0.588987, -0.556139, -0.553334,
+            -0.515088, -0.500498, -0.492550, -0.491708, -0.491493, -0.453641, -0.443269, -0.424377,
+            -0.423555, -0.423188, -0.415689, -0.406691, -0.389095, -0.387559, -0.384903, -0.382044,
+            -0.375238, -0.366544, -0.361083, -0.356723, -0.355645, -0.355546, -0.353888, -0.352529,
+            -0.345146, -0.336916, -0.323831, -0.320391, -0.319661, -0.319337, -0.319031, -0.319004,
+            -0.318063, -0.309700, -0.305519, -0.304129, -0.304004, -0.302165, -0.300332, -0.300189,
+            -0.298616, -0.294127, -0.291032, -0.290073, -0.284268, -0.278645, -0.278175, -0.270874,
+            -0.269563, -0.268109, -0.265457, -0.265177, -0.262519, -0.261877, -0.261397, -0.259318,
+            -0.258723, -0.257400, -0.255053, -0.254811, -0.254403, -0.250944, -0.250676, -0.250150,
+            -0.248483, -0.248171, -0.247702, -0.247492, -0.247273, -0.247052, -0.246535, -0.245782,
+            -0.245270, -0.245106, -0.245021, -0.244267, -0.243146, -0.242525, -0.242521, -0.241807,
+            -0.241384, -0.238388, -0.235896, -0.231696, -0.231678, -0.230599, -0.228186, -0.227601,
+            -0.225454, -0.225382, -0.224033, -0.223497, -0.223191, -0.221800, -0.218776, -0.215876,
+            -0.215432, -0.215201, -0.214895, -0.210598, -0.210512, -0.210376, -0.210085, -0.208137,
+            -0.207016, -0.206428, -0.205790, -0.205265, -0.204591, -0.200946, -0.199823, -0.197369,
+            -0.197009, -0.196970, -0.196840, -0.195396, -0.192896, -0.187711, -0.186039, -0.184800,
+            -0.183169, -0.182281, -0.180990, -0.179510, -0.179162, -0.177701, -0.177572, -0.175114,
+            -0.174864, -0.172546, -0.172215, -0.168942, -0.167826, -0.166882, -0.166025, -0.164101,
+            -0.162655, -0.162312, -0.161540, -0.159125, -0.158514, -0.158286, -0.157624, -0.157002,
+            -0.155956, -0.154698, -0.154370, -0.152911, -0.152358, -0.151638, -0.151440, -0.149893,
+            -0.149299, -0.147166, -0.146926, -0.146135, -0.144053, -0.143201, -0.142754, -0.142590,
+            -0.141573, -0.141271, -0.141029, -0.139329, -0.139292, -0.139175, -0.138953, -0.137950,
+            -0.137742, -0.135374, -0.133800, -0.132432, -0.131827, -0.131133, -0.129745, -0.129537,
+            -0.128464, -0.127981, -0.127920, -0.127626, -0.126385, -0.125454, -0.124827, -0.121913,
+            -0.120680, -0.120400, -0.120095, -0.119022, -0.118378, -0.117715, -0.117456, -0.116815,
+            -0.116629, -0.116322, -0.113892, -0.113555, -0.112288, -0.111158, -0.110016, -0.110007,
+            -0.109910, -0.109858, -0.108169, -0.108043, -0.108022, -0.106137, -0.105802, -0.104684,
+            -0.103155, -0.102705, -0.102529, -0.101973, -0.101778, -0.100494, -0.100268, -0.099127,
+            -0.098534, -0.097614, -0.097116, -0.096311, -0.096199, -0.095698, -0.094781, -0.093614,
+            -0.093022, -0.092521, -0.091786, -0.090988, -0.090462, -0.089125, -0.088837, -0.087600,
+            -0.086916, -0.085789, -0.085466, -0.085240, -0.085062, -0.083834, -0.083519, -0.083362,
+            -0.081858, -0.081327, -0.080189, -0.077706, -0.076951, -0.076018, -0.075675, -0.075592,
+            -0.075569, -0.074847, -0.074517, -0.073073, -0.070158, -0.070101, -0.069146, -0.069136,
+            -0.066753, -0.066525, -0.065582, -0.065386, -0.064867, -0.064494, -0.064089, -0.063544,
+            -0.061331, -0.059589, -0.059474, -0.058167, -0.057541, -0.057373, -0.056930, -0.056811,
+            -0.056779, -0.056421, -0.055402, -0.052897, -0.052829, -0.052453, -0.051436, -0.051184,
+            -0.049984, -0.048291, -0.048288, -0.048181, -0.047858, -0.046558, -0.046227, -0.045860,
+            -0.045026, -0.042741, -0.042263, -0.041615, -0.041143, -0.040837, -0.040083, -0.039476,
+            -0.039465, -0.039366, -0.038340, -0.036078, -0.034180, -0.034014, -0.033347, -0.032610,
+            -0.030871, -0.030279, -0.030078, -0.028461, -0.028438, -0.027066, -0.027051, -0.026934,
+            -0.026076, -0.025040, -0.024792, -0.024729, -0.023842, -0.022725, -0.022168, -0.020447,
+            -0.019628, -0.018082, -0.017563, -0.017345, -0.015886, -0.015514, -0.012758, -0.012623,
+            -0.012225, -0.011434, -0.011109, -0.011062, -0.010459, -0.010292, -0.008616, -0.007725,
+            -0.007196, -0.006261, -0.003123, -0.001145, -0.001067, -0.000030, 0.000089, 0.000228,
+            0.002208, 0.002320, 0.003832, 0.004605, 0.007565, 0.009285, 0.010963, 0.011089,
+            0.013224, 0.014869, 0.015086, 0.017017, 0.017372, 0.017786, 0.019049, 0.021248,
+            0.024002, 0.028502, 0.029278, 0.030330, 0.035372, 0.035979, 0.038609, 0.039995,
+            0.041452, 0.044654, 0.046418, 0.047860, 0.048724, 0.053405, 0.053500, 0.054463,
+            0.055345, 0.056267, 0.057215, 0.059532, 0.061187, 0.061652, 0.062488, 0.064511,
+            0.065238, 0.076847, 0.078350, 0.078456, 0.086167, 0.091340, 0.091839, 0.093538,
+            0.093965, 0.096407, 0.101676, 0.106935, 0.111336, 0.119992, 0.120527, 0.127523,
+            0.133734, 0.155453, 0.174789, 0.178480, 0.261314,
+        ],
+        BiologicalReplication(),
+    );
+}
+
+resource wrn:wrn_recq_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:wrn_recq_sampleset;
+    reflection:source    = "depmap:18Q4 Achilles gene_effect.csv + Supp Table 1 (pinned snapshot)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:wrn_recq_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set = wrn:wrn_recq_sampleset;
+
+    stats:alpha               = 0.05;
+    stats:effect_size         = Absolute(0.0, "dependency_score");
+    stats:directionality      = OneSidedWitnessed("urn:eigenius:pub:wrn:msi_directionality_witness");
+    stats:variance_assumption = RankBased();
+    stats:outlier_exclusion   = Identity();
+}
+
+resource wrn:wrn_recq_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:wrn_recq_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// The uniqueness rule. Its antecedent is the kernel-recomputed WRN result
+// (MSI mean dependency strictly below MSS in the RecQ cohort); its
+// rationale records the three other RecQ helicases' kernel-computed,
+// non-significant p-values as the declared basis for "only WRN".
+resource wrn:recq_uniqueness_rule : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:recq-family-specificity";
+    reflection:rationale   = "Among the RecQ helicases tested MSI-vs-MSS in the same Achilles CRISPR-CERES cohort (32 MSI / 413 MSS, all lineages): only WRN has a significant MSI-selective dependency (Wilcoxon P = 1.1e-8, median -0.49 vs -0.11; kernel-recomputed via wrn_recq_plan). BLM (P = 0.65), RECQL (P = 0.58) and RECQL5 (P = 0.11) are all non-significant (kernel-computed against the same pinned snapshot); RECQL4 is absent from the 18Q4 CERES matrix (paper Ext Data 1c: n.s.). A null is not derivable, so the non-selectivity of the other three is a declared scientific judgment — at this n and effect scale, their non-significance indicates no MSI-selective dependency. Given WRN's significant selective dependency, WRN is therefore the only MSI-selective RecQ helicase.";
+
+    reflection:canonical_proposition = type_expr(
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_recq_sampleset"), 0.0)
+        ->
+        onco:OnlyMSISelectiveInFamily("WRN", "RecQ_helicases")
+    );
+}
+
+resource wrn:recq_uniqueness_rule_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:recq_uniqueness_rule;
+    reflection:declared_by = "wrn-paper:recq-family-specificity";
+    reflection:timestamp   = "2026-06-12T14:45:00Z";
+}
+
+resource wrn:concl_recq_recomputed : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+
+    reasoning:proposition = type_expr(
+        onco:OnlyMSISelectiveInFamily("WRN", "RecQ_helicases")
+    );
+
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:recq_uniqueness_rule"),
+        DerivedEvidence("urn:eigenius:pub:wrn:wrn_recq_plan:result:main_effect")
+    );
+
+    reasoning:certificate = type_expr(
+        alias
+            SS     = "urn:eigenius:pub:wrn:wrn_recq_sampleset",
+            RULE   = "urn:eigenius:pub:wrn:recq_uniqueness_rule",
+            RESULT = "urn:eigenius:pub:wrn:wrn_recq_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            OM     = onco:OnlyMSISelectiveInFamily("WRN", "RecQ_helicases")
+        in
+        app(
+            STAT, OM,
+            DeclaredEvidence(RULE), DerivedEvidence(RESULT),
+            declared(RULE, STAT -> OM),
+            derived(RESULT, STAT)
+        )
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// D-BIOM (recomputed): MSI is a strong biomarker for WRN dependency
+// ════════════════════════════════════════════════════════════════════
+// A threshold classifier over the SAME wrn_dep_sampleset (37 MSI = group A
+// = test-positive, 91 MSS = group B; condition-positive = WRN-dependent =
+// avg dependency < -0.5). The statistics institution (ClassificationAnalysisPlan,
+// D52 §2.2) recomputes PPV = 27/37 = 0.73 and sensitivity = 27/27 = 1.00,
+// emitting two results carrying stats:ge(stats:ppv(s), 0.7) and
+// stats:ge(stats:sensitivity(s), 0.9). A declared bridge composes both into
+// onco:StrongBiomarker. Thresholds 0.7 / 0.9 are the "strong biomarker"
+// criterion (comparable to KRAS/BRAF dependency biomarkers; paper Ext Data 1d,e).
+
+resource wrn:biomarker_plan : stats:ClassificationAnalysisPlan {
+    stats:sample_set               = wrn:wrn_dep_sampleset;
+    stats:classification_threshold = -0.5;
+    stats:min_ppv                  = 0.7;
+    stats:min_sensitivity          = 0.9;
+}
+
+resource wrn:biomarker_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:biomarker_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:bridge_biomarker : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:biomarker-criterion";
+    reflection:rationale   = "If MSI status predicts WRN dependency with PPV >= 0.7 AND sensitivity >= 0.9 (at the dependency < -0.5 threshold), MSI is a strong biomarker for WRN dependency — a predictive relationship comparable to established oncogene dependency biomarkers (KRAS/BRAF). The two classifier-quality facts are the warrant.";
+
+    reflection:canonical_proposition = type_expr(
+        stats:ge(stats:ppv("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.7)
+        ->
+        stats:ge(stats:sensitivity("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.9)
+        ->
+        onco:StrongBiomarker("MSI", "WRN_dependency")
+    );
+}
+
+resource wrn:bridge_biomarker_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:bridge_biomarker;
+    reflection:declared_by = "wrn-paper:biomarker-criterion";
+    reflection:timestamp   = "2026-06-12T15:00:00Z";
+}
+
+resource wrn:concl_biomarker_recomputed : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+
+    reasoning:proposition = type_expr(
+        onco:StrongBiomarker("MSI", "WRN_dependency")
+    );
+
+    reasoning:justification = App(
+        App(
+            DeclaredEvidence("urn:eigenius:pub:wrn:bridge_biomarker"),
+            DerivedEvidence("urn:eigenius:pub:wrn:biomarker_plan:result:ppv")
+        ),
+        DerivedEvidence("urn:eigenius:pub:wrn:biomarker_plan:result:sensitivity")
+    );
+
+    reasoning:certificate = type_expr(
+        alias
+            SS      = "urn:eigenius:pub:wrn:wrn_dep_sampleset",
+            BRIDGE  = "urn:eigenius:pub:wrn:bridge_biomarker",
+            R_PPV   = "urn:eigenius:pub:wrn:biomarker_plan:result:ppv",
+            R_SENS  = "urn:eigenius:pub:wrn:biomarker_plan:result:sensitivity",
+            PPVP    = stats:ge(stats:ppv(SS), 0.7),
+            SENSP   = stats:ge(stats:sensitivity(SS), 0.9),
+            SB      = onco:StrongBiomarker("MSI", "WRN_dependency"),
+            bridge_cert = declared(BRIDGE, PPVP -> SENSP -> SB),
+            cert1 = app(PPVP, SENSP -> SB, DeclaredEvidence(BRIDGE), DerivedEvidence(R_PPV), bridge_cert, derived(R_PPV, PPVP))
+        in
+        app(SENSP, SB, reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_PPV)), DerivedEvidence(R_SENS), cert1, derived(R_SENS, SENSP))
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// C-MECH (recomputed sub-warrant): p53 status modulates WRN dependence
+// ════════════════════════════════════════════════════════════════════
+// The mechanism phase rests largely on linked-external wet-lab readouts
+// (DSB foci, GSEA, IF), but one sub-claim IS recomputable from the pinned
+// slice: WRN dependence is stronger in p53-intact than p53-impaired MSI
+// lines (paper: P = 0.02, n = 23 vs 13, common-MSI lineages). Group A =
+// p53-intact (TP53_proficient, more dependent), Group B = p53-impaired
+// (TP53_null). One-sided in the stated direction (intact more dependent;
+// paper two-sided P = 0.02 ⇒ one-sided ~0.01). Lifts to the domain claim
+// that p53 status MODULATES (contributes to, not solely determines) WRN
+// dependence — the "p53 contributes" half of C-MECH's p53 dissection.
+
+resource wrn:p53_directionality_witness : stats:ImpossibilityWitness {
+    reflection:declared_by = "wrn-paper:p53-contribution-directionality";
+    reflection:rationale   = "The mechanistic hypothesis is that WRN loss activates p53, so p53-proficient MSI cells are predicted MORE dependent on WRN than p53-impaired ones. That directional prediction (intact more dependent) is the claim under test; the inverse is not, licensing the one-sided p-value (paper reports two-sided P = 0.02; one-sided ~0.01).";
+}
+
+resource wrn:p53_dep_sampleset : stats:SampleSetResource {
+    reflection:source      = "depmap:18Q4 avg WRN dependency, common-MSI MSI lines by TP53 status (Supp Table 1)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    // Tier-1 extraction pin (verified by extract/extract_samplesets.py).
+    bench:extracted_from_slice  = "data/slices/wrn_supplementary_table_1.csv";
+    bench:extracted_from_sha256 = "eebd460257982a98cf6ce9f14e189ae0c4398a686f4181bc037c5591e87243f2";
+    bench:extraction_columns    = "avg_WRN_dep,TP53_status";
+    bench:extraction_filter     = "common_MSI_lineage=1 & CCLE_MSI=MSI & avg_WRN_dep real; group A=TP53_proficient (n=23), B=TP53_null (n=13); each sorted ascending (the 1 NA-TP53 line of the 37 dropped)";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:p53_dep_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [-2.225778, -1.826026, -1.801462, -1.775366, -1.570166, -1.505872, -1.492430, -1.477463,
+         -1.274070, -1.184914, -1.096147, -1.047139, -0.993197, -0.910127, -0.830779, -0.810157,
+         -0.770493, -0.744374, -0.677736, -0.674509, -0.520890, -0.415037, -0.012400],
+        [-2.623081, -2.056004, -1.344363, -0.738790, -0.697405, -0.618785, -0.395224, -0.347907,
+         -0.236841, -0.209223, -0.199727, -0.145768, 0.020318],
+        BiologicalReplication(),
+    );
+}
+
+resource wrn:p53_dep_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:p53_dep_sampleset;
+    reflection:source    = "depmap:18Q4 (Supp Table 1)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:p53_dep_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set = wrn:p53_dep_sampleset;
+
+    stats:alpha               = 0.05;
+    stats:effect_size         = Absolute(0.0, "dependency_score");
+    stats:directionality      = OneSidedWitnessed("urn:eigenius:pub:wrn:p53_directionality_witness");
+    stats:variance_assumption = RankBased();
+    stats:outlier_exclusion   = Identity();
+}
+
+resource wrn:p53_dep_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:p53_dep_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:bridge_p53_modulates : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:p53-contribution-criterion";
+    reflection:rationale   = "If WRN dependence differs by p53 status across MSI lines (p53-intact mean strictly below p53-impaired — more dependent), then p53 status modulates WRN dependence: it contributes to, but does not solely determine, the dependence (both strata remain dependent; DSBs are toxic independent of p53).";
+
+    reflection:canonical_proposition = type_expr(
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:p53_dep_sampleset"), 0.0)
+        ->
+        onco:ModulatesDependence("TP53", "WRN")
+    );
+}
+
+resource wrn:bridge_p53_modulates_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:bridge_p53_modulates;
+    reflection:declared_by = "wrn-paper:p53-contribution-criterion";
+    reflection:timestamp   = "2026-06-13T03:00:00Z";
+}
+
+resource wrn:concl_p53_modulates : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+
+    reasoning:proposition = type_expr(
+        onco:ModulatesDependence("TP53", "WRN")
+    );
+
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_p53_modulates"),
+        DerivedEvidence("urn:eigenius:pub:wrn:p53_dep_plan:result:main_effect")
+    );
+
+    reasoning:certificate = type_expr(
+        alias
+            SS     = "urn:eigenius:pub:wrn:p53_dep_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_p53_modulates",
+            RESULT = "urn:eigenius:pub:wrn:p53_dep_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            MD     = onco:ModulatesDependence("TP53", "WRN")
+        in
+        app(
+            STAT, MD,
+            DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            declared(BRIDGE, STAT -> MD),
+            derived(RESULT, STAT)
+        )
+    );
+}

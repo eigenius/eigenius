@@ -1,0 +1,109 @@
+// mol — molecule data-shape module (D50 §4). Extends bench-core.
+//
+// Covers the molecule-centric pilot tasks: SAB 16 (compound filter),
+// 17 (chemical-space viz), 94 (molecule graph), and the molecule-centric
+// bioinformatics tasks 8 (DKPES feature selection) and 18 (DILI RF).
+// These last two are SAB "bio" tasks but are molecule-shaped (Compound /
+// SMILES / fingerprints), which is why the modules cut by data shape
+// rather than SAB domain label.
+//
+// Thin by design: the recurring nouns only. Per-task predicates
+// (PassesFilter, Predicted, OptimalSubsetSize, …) and decision rules are
+// authored per task in the model-then-reason vocabulary phase — see the
+// SAB-16 template in docs/notes/chem-bio-pilot-execution-plan.md.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace bench      = "urn:eigenius:benchmark";
+namespace mol        = "urn:eigenius:benchmark:mol";
+
+// ── Compound ─────────────────────────────────────────────────────────
+
+class mol:Compound : reflection:ObservedResource {
+    description = "A chemical compound from an input dataset, identified by structure. SMILES (16/17/8/18) or an RDKit Mol read from a pickle (94).";
+    requires mol:smiles;
+    recommends mol:compound_id, mol:inchikey;
+}
+
+property mol:smiles : core:string {
+    description = "SMILES string of the compound's structure.";
+    domain mol:Compound;
+}
+
+property mol:compound_id : core:string {
+    description = "Dataset-local identifier (ZINC id, library id, PubChem CID).";
+    domain mol:Compound;
+}
+
+property mol:inchikey : core:string {
+    description = "InChIKey, when available.";
+    domain mol:Compound;
+}
+
+// ── Fingerprint (a derived tool artifact) ────────────────────────────
+
+class mol:Fingerprint : bench:ToolArtifact {
+    description = "A molecular fingerprint computed from a compound (Morgan/ECFP for SAB 16/18; shape/similarity descriptors for SAB 8). A ToolArtifact: inherits the tool / produced_from / derivation boundary.";
+    requires mol:of_compound;
+    recommends mol:fingerprint_kind;
+}
+
+property mol:of_compound : core:string {
+    description = "IRI of the mol:Compound this fingerprint was computed from.";
+    format = formats:iri;
+    domain mol:Fingerprint;
+}
+
+property mol:fingerprint_kind : core:string {
+    description = "Fingerprint family, e.g. 'morgan_r2_2048', 'ecfp4', 'shape_tanimoto'.";
+    domain mol:Fingerprint;
+}
+
+// ── Target ───────────────────────────────────────────────────────────
+
+class mol:Target : reflection:ObservedResource {
+    description = "A biological target (receptor/protein) that compound activity is measured against (SAB 17: A2A adenosine receptor, UniProt P29274).";
+    requires mol:target_id;
+    recommends mol:target_name;
+}
+
+property mol:target_id : core:string {
+    description = "Target identifier, e.g. UniProt 'P29274'.";
+    domain mol:Target;
+}
+
+property mol:target_name : core:string {
+    description = "Human-readable target name, e.g. 'A2A adenosine receptor'.";
+    domain mol:Target;
+}
+
+// ── ActivityMeasurement ──────────────────────────────────────────────
+//
+// A bench:Measurement specialised to compound activity: inherits
+// value / unit / quantity, ties them to a compound and (optionally) a
+// target and assay type. Covers SAB 16 antibiotic-activity and SAB 17
+// pchembl / IC50 / Ki readings.
+
+class mol:ActivityMeasurement : bench:Measurement {
+    description = "An activity/affinity measurement of a compound, optionally against a target via a named assay.";
+    requires mol:compound;
+    recommends mol:target, mol:assay_type;
+}
+
+property mol:compound : core:string {
+    description = "IRI of the mol:Compound this activity is for.";
+    format = formats:iri;
+    domain mol:ActivityMeasurement;
+}
+
+property mol:target : core:string {
+    description = "IRI of the mol:Target measured against, when applicable.";
+    format = formats:iri;
+    domain mol:ActivityMeasurement;
+}
+
+property mol:assay_type : core:string {
+    description = "Assay/affinity type, e.g. 'IC50', 'Ki', 'EC50', 'KD', 'antibiotic_activity'.";
+    domain mol:ActivityMeasurement;
+}

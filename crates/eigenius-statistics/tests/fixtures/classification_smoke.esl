@@ -1,0 +1,43 @@
+// Institution-recompute fixture — threshold-classifier PPV/sensitivity.
+//
+// A ClassificationAnalysisPlan over a two-group IID SampleSet. Group A is
+// the test-positive group (4 units, 3 below threshold 0.0), group B the
+// test-negative rest (3 units, none below threshold). At threshold 0.0:
+//   PPV         = 3/4 = 0.75
+//   sensitivity = 3/3 = 1.00
+// With criteria min_ppv = 0.7 (Holds) and min_sensitivity = 0.9 (Holds).
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace stats      = "urn:eigenius:measurements";
+namespace demo       = "urn:eigenius:demo:classify";
+
+resource demo:set : stats:SampleSetResource {
+    reflection:source      = "synthetic two-group classification smoke";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    stats:sample_set_value = stats:IID(
+        [-2.0, -1.0, -0.5, 0.5],
+        [0.1, 0.2, 0.3],
+        BiologicalReplication(),
+    );
+}
+
+resource demo:set_trace : reflection:ObservationTrace {
+    reflection:resource  = demo:set;
+    reflection:source    = "synthetic";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource demo:plan : stats:ClassificationAnalysisPlan {
+    stats:sample_set              = demo:set;
+    stats:classification_threshold = 0.0;
+    stats:min_ppv                 = 0.7;
+    stats:min_sensitivity         = 0.9;
+}
+
+resource demo:plan_trace : reflection:ProgramTrace {
+    reflection:resource  = demo:plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
