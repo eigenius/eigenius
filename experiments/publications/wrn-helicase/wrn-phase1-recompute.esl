@@ -1335,3 +1335,167 @@ resource wrn:concl_mmr_restoration_recomputed : reasoning:ReasoningSentence {
             DerivedEvidence(R_2), cert2, derived(R_2, O))
     );
 }
+
+// ════════════════════════════════════════════════════════════════════
+// D-ONTARGET / D-HELICASE (recomputed): the sgWRN-EIJ cDNA rescue assay
+// ════════════════════════════════════════════════════════════════════
+// The on-target + structure-function rescue (Fig 2c, KM12 competition assay,
+// relative viability, n = 6 biological replicates), kernel-recomputed via the
+// existing IID two-sample dispatch (no new capability). sgWRN-EIJ silences
+// endogenous WRN but spares the EIJ-less cDNA, so re-expressing functional WRN
+// rescues. Each rescue is a two-sample t-test of the sgWRN-EIJ arm: GFP
+// background (no rescue cDNA, group A) vs the cDNA background (group B); a
+// significant rise = rescue ⇒ stats:lt(mean_diff_of(s), 0) (group A below B).
+//   WT cDNA   rescues  (GFP-EIJ 0.41 → WT-EIJ 0.68;  two-sided P=2.4e-7)
+//   E84A cDNA rescues  (exonuclease-dead → still rescues; → 0.80; P=3.4e-6)
+//   K577M cDNA FAILS   (helicase-dead; GFP-EIJ 0.41 vs K577M-EIJ 0.37, P=0.13
+//                       n.s. — a null, kept as the Declared FailsToRescue in
+//                       wrn-phase2; a null is not derivable). Source: pinned
+// Nature Fig 2 Source Data. Replaces the linked-external va_rescue_{wt,e84a}.
+
+resource wrn:rescue_directionality_witness : stats:ImpossibilityWitness {
+    reflection:declared_by = "wrn-paper:on-target-rescue-directionality";
+    reflection:rationale   = "An EIJ-spared functional WRN cDNA RAISES sgWRN-EIJ viability above the GFP (no-rescue) control: the directional claim is GFP-background sgWRN-EIJ viability below the cDNA-background (group A mean < group B). The inverse (re-expressing WRN lowering viability) is not the hypothesis, licensing the one-sided test.";
+}
+
+resource wrn:rescue_wt_sampleset : stats:SampleSetResource {
+    reflection:source      = "wrn-paper Fig 2c KM12 relative viability — sgWRN-EIJ in GFP (A) vs WT-cDNA (B) background";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_Fig2_MOESM3.xlsx";
+    bench:extracted_from_sha256 = "e9c006d12398d87a36801d4d2ecee56a9932c3536d3ba780f1bb6234a560c89e";
+    bench:extraction_columns    = "Fig 2c: Relative ratio (firefly/renilla, normalized), sgWRN-EIJ arm x 6 biological replicates";
+    bench:extraction_filter     = "group A = GFP background + sgWRN-EIJ; group B = WRN-WT-cDNA background + sgWRN-EIJ";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:rescue_wt_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [0.417046, 0.358101, 0.383306, 0.411624, 0.449156, 0.425581],
+        [0.727926, 0.634265, 0.734202, 0.678743, 0.703516, 0.630122],
+        BiologicalReplication(),
+    );
+}
+resource wrn:rescue_wt_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:rescue_wt_sampleset;
+    reflection:source    = "wrn-paper Fig 2c (Nature Source Data, pinned)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+resource wrn:rescue_wt_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set          = wrn:rescue_wt_sampleset;
+    stats:alpha               = 0.05;
+    stats:effect_size         = Absolute(0.0, "relative_viability");
+    stats:directionality      = OneSidedWitnessed("urn:eigenius:pub:wrn:rescue_directionality_witness");
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion   = Identity();
+}
+resource wrn:rescue_wt_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:rescue_wt_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:rescue_e84a_sampleset : stats:SampleSetResource {
+    reflection:source      = "wrn-paper Fig 2c KM12 relative viability — sgWRN-EIJ in GFP (A) vs E84A-cDNA (B) background";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_Fig2_MOESM3.xlsx";
+    bench:extracted_from_sha256 = "e9c006d12398d87a36801d4d2ecee56a9932c3536d3ba780f1bb6234a560c89e";
+    bench:extraction_columns    = "Fig 2c: Relative ratio (firefly/renilla, normalized), sgWRN-EIJ arm x 6 biological replicates";
+    bench:extraction_filter     = "group A = GFP background + sgWRN-EIJ; group B = WRN-E84A-cDNA (exonuclease-dead) background + sgWRN-EIJ";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:rescue_e84a_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [0.417046, 0.358101, 0.383306, 0.411624, 0.449156, 0.425581],
+        [0.675784, 0.821126, 0.782821, 0.835812, 0.966431, 0.730515],
+        BiologicalReplication(),
+    );
+}
+resource wrn:rescue_e84a_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:rescue_e84a_sampleset;
+    reflection:source    = "wrn-paper Fig 2c (Nature Source Data, pinned)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+resource wrn:rescue_e84a_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set          = wrn:rescue_e84a_sampleset;
+    stats:alpha               = 0.05;
+    stats:effect_size         = Absolute(0.0, "relative_viability");
+    stats:directionality      = OneSidedWitnessed("urn:eigenius:pub:wrn:rescue_directionality_witness");
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion   = Identity();
+}
+resource wrn:rescue_e84a_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:rescue_e84a_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:bridge_rescue_wt : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:on-target-rescue-criterion";
+    reflection:rationale   = "If re-expressing WT WRN cDNA significantly raises sgWRN-EIJ viability above the GFP control (recomputed two-sample t-test P=2.4e-7), the cDNA rescues the depletion — the EIJ reagent spares the cDNA, so functional WRN is restored.";
+    reflection:canonical_proposition = type_expr(
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0)
+        ->
+        onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
+    );
+}
+resource wrn:bridge_rescue_wt_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:bridge_rescue_wt;
+    reflection:declared_by = "wrn-paper:on-target-rescue-criterion";
+    reflection:timestamp   = "2026-06-13T08:00:00Z";
+}
+resource wrn:concl_rescue_wt_recomputed : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
+    );
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_rescue_wt"),
+        DerivedEvidence("urn:eigenius:pub:wrn:rescue_wt_plan:result:main_effect")
+    );
+    reasoning:certificate = type_expr(
+        alias
+            SS     = "urn:eigenius:pub:wrn:rescue_wt_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_wt",
+            RESULT = "urn:eigenius:pub:wrn:rescue_wt_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            RD     = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
+        in
+        app(STAT, RD, DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            declared(BRIDGE, STAT -> RD), derived(RESULT, STAT))
+    );
+}
+
+resource wrn:bridge_rescue_e84a : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:exonuclease-dispensable-criterion";
+    reflection:rationale   = "If the exonuclease-dead (E84A) WRN cDNA significantly raises sgWRN-EIJ viability above the GFP control (recomputed two-sample t-test P=3.4e-6), it still rescues — the exonuclease activity is dispensable for the rescue.";
+    reflection:canonical_proposition = type_expr(
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0)
+        ->
+        onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")
+    );
+}
+resource wrn:bridge_rescue_e84a_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:bridge_rescue_e84a;
+    reflection:declared_by = "wrn-paper:exonuclease-dispensable-criterion";
+    reflection:timestamp   = "2026-06-13T08:00:00Z";
+}
+resource wrn:concl_rescue_e84a_recomputed : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")
+    );
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_rescue_e84a"),
+        DerivedEvidence("urn:eigenius:pub:wrn:rescue_e84a_plan:result:main_effect")
+    );
+    reasoning:certificate = type_expr(
+        alias
+            SS     = "urn:eigenius:pub:wrn:rescue_e84a_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_e84a",
+            RESULT = "urn:eigenius:pub:wrn:rescue_e84a_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            RD     = onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")
+        in
+        app(STAT, RD, DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            declared(BRIDGE, STAT -> RD), derived(RESULT, STAT))
+    );
+}

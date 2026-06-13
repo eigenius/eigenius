@@ -56,6 +56,8 @@ SHA256 = {
         "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549",
     "wrn_sourcedata_EDFig10_MOESM12.xlsx":
         "3fc08ebadbc282ac7bdb4f87d73e704e79e216b611e5357302d17e4e32cdb33c",
+    "wrn_sourcedata_Fig2_MOESM3.xlsx":
+        "e9c006d12398d87a36801d4d2ecee56a9932c3536d3ba780f1bb6234a560c89e",
 }
 
 
@@ -285,6 +287,22 @@ def _extract_mmr(group_a_key, group_b_key):
     return {"kind": "IID", "group_a": _ed10c_block(group_a_key), "group_b": _ed10c_block(group_b_key)}
 
 
+# ── Recipe 9: rescue_{wt,e84a}_sampleset (Fig 2c, KM12 cDNA rescue, n=6) ──
+#   slice  : wrn_sourcedata_Fig2_MOESM3.xlsx, sheet "Fig 2c" (sheet2)
+#   readout: "Relative ratio" (firefly/renilla, normalized to sgCh2-2=1), rows
+#            27-32 (6 biological replicates). sgWRN-EIJ arm column per cDNA
+#            background: GFP c5, WRN-WT c12, WRN-E84A c19.
+#   model  : two-sample t-test (IID), group A = GFP+sgWRN-EIJ (no-rescue),
+#            group B = cDNA+sgWRN-EIJ (rescued). Rescue ⇒ group A below B.
+def _fig2c_eij(col):
+    rows = _read_xlsx_cells("wrn_sourcedata_Fig2_MOESM3.xlsx", sheet=2)
+    return [round(float(rows[ri][col]), 6) for ri in range(27, 33)]
+
+
+def _extract_rescue(cdna_eij_col):
+    return {"kind": "IID", "group_a": _fig2c_eij(5), "group_b": _fig2c_eij(cdna_eij_col)}
+
+
 def _extract_viab(first_guide_col):
     # ED Fig 3b cell-line blocks: ES2 first-guide col 2, OVK18 11, SW620 20,
     # KM12 29. Day-10 "Relative ratio" Value 1-6 are rows 92..97. Guide order:
@@ -317,6 +335,8 @@ RECIPES = {
     "wrn:mmr_rescue_sampleset": lambda: _extract_mmr("star", "dag"),
     "wrn:mmr_resens1_sampleset": lambda: _extract_mmr("ddag", "dag"),
     "wrn:mmr_resens2_sampleset": lambda: _extract_mmr("sect", "dag"),
+    "wrn:rescue_wt_sampleset": lambda: _extract_rescue(12),
+    "wrn:rescue_e84a_sampleset": lambda: _extract_rescue(19),
 }
 
 

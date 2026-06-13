@@ -263,13 +263,17 @@ fn wrn_warrants_kernel_recomputed() {
         "urn:eigenius:pub:wrn:mmr_rescue_plan",
         "urn:eigenius:pub:wrn:mmr_resens1_plan",
         "urn:eigenius:pub:wrn:mmr_resens2_plan",
+        // D-ONTARGET / D-HELICASE(exo) recomputed: the Fig 2c cDNA-rescue
+        // two-sample t-tests (WT + E84A rescue sgWRN-EIJ).
+        "urn:eigenius:pub:wrn:rescue_wt_plan",
+        "urn:eigenius:pub:wrn:rescue_e84a_plan",
     ] {
         emitted.extend(recompute_finalized(&stats_inst, &phase1, plan_iri));
     }
     assert_eq!(
         emitted.len(),
-        17,
-        "15 single-effect results + the classification plan's 2 (ppv + sensitivity)"
+        19,
+        "17 single-effect results + the classification plan's 2 (ppv + sensitivity)"
     );
 
     // ── Step 2: commit every institution-emitted result onto the chain ──
@@ -309,6 +313,9 @@ fn wrn_warrants_kernel_recomputed() {
         &ctx,
         "urn:eigenius:pub:wrn:concl_mmr_restoration_recomputed",
     );
+    // D-ONTARGET / D-HELICASE(exo) recomputed (Fig 2c cDNA rescue):
+    assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_rescue_wt_recomputed");
+    assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_rescue_e84a_recomputed");
     // The paper's two-screen independent-replication argument (D-DIFF →
     // discovery rule), warranted by the linked-external ToolArtifacts.
     assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_wrn_selective");
