@@ -233,11 +233,13 @@ fn wrn_warrants_kernel_recomputed() {
         "wrn-phase1",
     );
 
-    // ── Step 1: the statistics institution recomputes ALL four plans ──
+    // ── Step 1: the statistics institution recomputes every plan ──
     //   - MSI-vs-MSS Wilcoxon (37 vs 91)   → C-WRN selective essentiality
     //   - mutator-load Spearman (51 pairs) → D-REFINE correlation
     //   - RecQ-cohort Wilcoxon (32 vs 413) → D-RECQ family uniqueness
+    //   - p53-stratified Wilcoxon (23 vs 13) → C-MECH p53 modulation
     //   - threshold classifier (PPV/sens)  → D-BIOM strong biomarker (2 results)
+    //   - nested two-way ANOVA × 2 (KM12, OVK18) → C-VAL wet-lab viability
     let stats_inst = StatisticsInstitution::new();
     let mut emitted: Vec<Resource> = Vec::new();
     for plan_iri in [
@@ -246,13 +248,28 @@ fn wrn_warrants_kernel_recomputed() {
         "urn:eigenius:pub:wrn:wrn_recq_plan",
         "urn:eigenius:pub:wrn:p53_dep_plan",
         "urn:eigenius:pub:wrn:biomarker_plan",
+        "urn:eigenius:pub:wrn:viab_KM12_plan",
+        "urn:eigenius:pub:wrn:viab_OVK18_plan",
+        // C-MECH recomputed DDR endpoints: cell-cycle arrest (ED Fig 4b) +
+        // apoptosis (ED Fig 4c), three MSI lines each (nested two-way ANOVA).
+        "urn:eigenius:pub:wrn:cc_KM12_plan",
+        "urn:eigenius:pub:wrn:cc_SW48_plan",
+        "urn:eigenius:pub:wrn:cc_OVK18_plan",
+        "urn:eigenius:pub:wrn:apop_KM12_plan",
+        "urn:eigenius:pub:wrn:apop_SW48_plan",
+        "urn:eigenius:pub:wrn:apop_OVK18_plan",
+        // C-MMR recomputed MMR-restoration (ED Fig 10c), three crossed two-way
+        // ANOVA contrasts: rescue + two MLH1-KO re-sensitization controls.
+        "urn:eigenius:pub:wrn:mmr_rescue_plan",
+        "urn:eigenius:pub:wrn:mmr_resens1_plan",
+        "urn:eigenius:pub:wrn:mmr_resens2_plan",
     ] {
         emitted.extend(recompute_finalized(&stats_inst, &phase1, plan_iri));
     }
     assert_eq!(
         emitted.len(),
-        6,
-        "5 single-effect results + the classification plan's 2 (ppv + sensitivity)"
+        17,
+        "15 single-effect results + the classification plan's 2 (ppv + sensitivity)"
     );
 
     // ── Step 2: commit every institution-emitted result onto the chain ──
@@ -280,6 +297,18 @@ fn wrn_warrants_kernel_recomputed() {
     assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_biomarker_recomputed");
     // C-MECH recomputed sub-warrant: p53 status modulates WRN dependence.
     assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_p53_modulates");
+    // C-VAL recomputed: wet-lab competition-assay nested ANOVA (KM12 + OVK18).
+    assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_val_recomputed");
+    // C-MECH recomputed DDR endpoints (ED Fig 4b/4c, three MSI lines each):
+    // WRN depletion causes MSI-selective cell-cycle arrest + apoptosis.
+    assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_cellcycle_recomputed");
+    assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_apoptosis_recomputed");
+    // C-MMR recomputed (ED Fig 10c, crossed two-way ANOVA, three contrasts):
+    // restoring MMR partially rescues WRN dependence.
+    assert_reasoning_holds(
+        &ctx,
+        "urn:eigenius:pub:wrn:concl_mmr_restoration_recomputed",
+    );
     // The paper's two-screen independent-replication argument (D-DIFF →
     // discovery rule), warranted by the linked-external ToolArtifacts.
     assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_wrn_selective");

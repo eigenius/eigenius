@@ -25,7 +25,42 @@ is our content address of the local copy.
 | `wrn_supplementary_table_1.xlsx` | This paper's **Supplementary Table 1** (NIHMS1522798 supplement; in `references/publications/WRN-Helicase-Supplements/`) | `1a05d612…4c4c7b2` | 246 KB | **O-MSI + the Phase-1 pivot table.** |
 | `wrn_supplementary_table_1.csv` | Derived from the `.xlsx` via a stdlib `zipfile`+`xml.etree` parser (first sheet) | `eebd4602…7243f2` | — | Machine-readable form. **1,415 cell lines × 37 cols.** Key cols: `CCLE_ID`, `Lineage`, `GDSC_MSI` (PCR), `CCLE_MSI` (NGS), `DRIVE_WRN_D2`, `CRISPR_WRN_CERES`, `avg_WRN_dep`, `is_WRN_dep`, `TP53_status`, `common_MSI_lineage`, `ms_deletions_normed`, `frac_deletions_in_ms_regions`, `MMR_loss`(+per-gene MLH1/MSH2/MSH6/PMS2 mut/deletion/loss/unexpressed). MSI labels (the D-DIFF grouping), WRN dep per screen + avg, mutator load, MMR/TP53 status. |
 
-**Total vendored: ~235 MB.** These four slices support the entire Phase-1 computational-discovery spine (`H1 → D-DIFF → C-WRN → D-RECQ/D-BIOM/D-REFINE`).
+**Total dependency/annotation slices: ~235 MB.** These four support the entire Phase-1 computational-discovery spine (`H1 → D-DIFF → C-WRN → D-RECQ/D-BIOM/D-REFINE`).
+
+### RNA-seq (Phase 4 mechanism — GSEA, fetched 2026-06-13)
+
+| File | Source | sha256 | Size | Used for |
+|---|---|---|---|---|
+| `GSE126464_STAR_Gene_Counts.csv.gz` | GEO **GSE126464**, `ftp.ncbi.nlm.nih.gov/geo/series/GSE126nnn/GSE126464/suppl/` | `e66c70f3…76daa5` | 461 KB | **O-MSEQ** — WRN-KO RNA-seq STAR gene counts. genes × 12 samples (OVK18, SW48 × {sgCh2-2, sgWRN2, sgWRN3} × {A, B} reps). C-MECH GSEA (Fig 3a). |
+| `GSE126464_Cuff_Gene_Counts.csv.gz` | same | `c136488f…904eaa` | 888 KB | Cufflinks gene counts (alternative quantification). |
+| `h.all.v6.2.symbols.gmt` | MSigDB [43], `data.broadinstitute.org/gsea-msigdb/msigdb/release/6.2/` | `0ee07a4a…22146b` | 48 KB | **O-HALLMARK** — Hallmark collection (50 sets, gene symbols), v6.2 (July 2018, era-matching the 18Q4 analysis). The gene-set definitions GSEA tests the RNA-seq DE ranking against (C-MECH, Fig 3a). Confirmed contains P53_PATHWAY/E2F_TARGETS/G2M_CHECKPOINT/APOPTOSIS. |
+
+### DepMap omics + dependency bundle (vendored 2026-06-13)
+
+| File | Source | md5 (verified) | Size | Used for |
+|---|---|---|---|---|
+| `references/publications/WRN-Helicase-Supplements/DepMap_18Q4_data.rds` | figshare **7712756**.v1 → `ndownloader.figshare.com/files/14357999` | `f9e62e63bbc58ada5fc1f2d0534d08c5` (matches figshare `supplied_md5`/`computed_md5`; size 1,600,292,535 B exact) | 1.6 GB | **O-WRNFIG** — the authors' curated `dat` list (cell-lines × genes, except `MUT`). Needed for the **omics** analyses not covered by the vendored gene-effect slices: Ext Data 9a (paralog co-loss linear models) + 9b (POLE), and any feature-matrix work. |
+
+The rds is an **R serialization** (a named list of matrices) — not readable by the Python extraction pipeline directly; consuming it needs R (`readRDS`) or `pyreadr`, i.e. an R conversion step (or the future D53 external-execution path). Contents: `DRIVE` (DEMETER2 dep), `CRISPR` (CERES dep), `GE` (log2 TPM expression), `CN` (log2 relative copy number), `MUT_HOT`/`MUT_DAM`/`MUT_OTHER` (binary mutation matrices), `MUT` (full mutation calls dataframe), `RPPA` (protein abundance).
+
+### Wet-lab Source Data (Nature per-figure XLSX, fetched 2026-06-13)
+
+The paper's per-figure Source Data, from `static-content.springer.com/esm/art%3A10.1038%2Fs41586-019-1102-x/MediaObjects/41586_2019_1102_MOESM{n}_ESM.xlsx`. These hold the per-replicate wet-lab values behind the Phase-2–5 readouts (the springer static-content URLs are directly fetchable; PMC does not host them).
+
+| File (in `slices/`) | MOESM | sha256 | Backs (encoding node) |
+|---|---|---|---|
+| `wrn_sourcedata_Fig2_MOESM3.xlsx` | 3 | `e9c006d1…60c89e` | Fig 2: competition (2a), sgWRN-EIJ rescue (2c → `va_rescue_*`), xenograft (2d → `vivo_xenograft`/`vivo_seed_control`), organoid (2f,g) |
+| `wrn_sourcedata_Fig3_MOESM4.xlsx` | 4 | `a0a6629b…3612d8` | Fig 3: GSEA (3a), p53-S15 IF contrast (3c) |
+| `wrn_sourcedata_Fig4_MOESM5.xlsx` | 5 | `90a7bc2d…a7b63b6de` | Fig 4: γH2AX (4a,c), FISH (4d,e → `fish_readout`), MMR restoration (4f → `mmr_restoration`) |
+| `wrn_sourcedata_EDFig3_MOESM6.xlsx` | 6 | `506d7ac0…41fd6` | **ED Fig 3b competition assay** (→ `va_competition`; two-way ANOVA) + clonogenic (3d) |
+| `wrn_sourcedata_EDFig4_MOESM7.xlsx` | 7 | `bba867f2…5178549` | ED Fig 4b cell-cycle, 4c/d apoptosis (two-way ANOVA) |
+| `wrn_sourcedata_EDFig5_MOESM8.xlsx` | 8 | `2b9272d8…28cc1f` | ED Fig 5 p53-S15 / p21 IF (lsmeans contrasts) |
+| `wrn_sourcedata_EDFig6_MOESM9.xlsx` | 9 | `6093a494…88cb96` | ED Fig 6 γH2AX/53BP1 foci (→ `mech_dsb`) |
+| `wrn_sourcedata_EDFig7_MOESM10.xlsx` | 10 | `0a374326…5e37f6` | ED Fig 7 pATM(S1981)/Chk2(T68) (→ `mech_dsb`) |
+| `wrn_sourcedata_EDFig8_MOESM11.xlsx` | 11 | `a8b533a5…c1c47a` | ED Fig 8 FISH / WRN localization |
+| `wrn_sourcedata_EDFig10_MOESM12.xlsx` | 12 | `3fc08eba…cdb33c` | ED Fig 10 MMR-restoration viability/clonogenic (→ `mmr_restoration`) |
+
+**Recompute-upgradeable subset (existing two-way-ANOVA dispatch):** ED Fig 3b (`va_competition`), ED Fig 4b/c/d (cell-cycle/apoptosis). ED Fig 3b layout: per cell line × {day} × {Firefly, Renilla luminescence} × {sgCh2-2, sgCh2-4, sgPolR2D, sgMYC, sgWRN1/2/3} × Value 1–6 (n=6). Relative viability = Firefly/Renilla, normalized; the two-way ANOVA is `value ~ is_WRN + guide` per cell line (per `WRN_stats_calcs.Rmd`). The IF contrasts (Fig 3c, 4c, ED 5) are lsmeans, the rescue (Fig 2c) a t-test, the xenograft (Fig 2d) lme4 — external-tool frontier, not the current institution.
 
 ### Reference code (cloned, in `data/WRN_manuscript/`, gitignored)
 
@@ -33,15 +68,26 @@ is our content address of the local copy.
 |---|---|
 | `github.com/cancerdatasci/WRN_manuscript` (shallow) | Defines the exact Derived pipelines (the authoritative recompute reference). Phase-1-relevant: `WRN_stats_calcs.Rmd`, `make_cell_line_info.R`, `process_CCLE_MSI_data.R`, `WRN_helpers.R`, `generate_figs.Rmd`. Note: original scripts pull omics from Broad's internal *taiga* server; the public substitute is the 1.6 GB figshare rds (linked below). |
 
-## Linked, not fetched (accession recorded; pull on demand)
+### CCLE Phase-2 MSI source (vendored 2026-06-13)
 
-| Resource | Accession | Why deferred |
-|---|---|---|
-| O-WRNFIG — "DepMap Datasets for WRN manuscript" | figshare **7712756**, `DepMap_18Q4_data.rds` (1.6 GB, md5 `f9e62e63bbc58ada5fc1f2d0534d08c5`) | The authors' curated `dat` bundle (expression/CN/mutation/RPPA/dependency). Not needed for Phase 1 (the dependency matrices are vendored above; MSI/MMR/TP53 calls are pre-computed in Supp Table 1). Pull if recomputing the *classifications* from raw omics. |
-| O-OMICS — DepMap 18Q4 omics | depmap.org | Subsumed by O-WRNFIG for fidelity; classifications already in Supp Table 1. |
-| O-MSEQ — WRN-KO mRNA-seq | GEO **GSE126464** | Phase-4 (differential expression / GSEA). |
-| O-HALLMARK — MSigDB Hallmark | MSigDB [43] | Phase-4 (GSEA). |
-| CCLE Phase-2 MSI source | Ghandi/CCLE 2019 Suppl. Table 7 | Upstream of the MSI calls already baked into Supp Table 1; only needed to recompute MSI classification from scratch. |
+| File (in `slices/`) | Source | sha256 | Used for |
+|---|---|---|---|
+| `ccle_phase2_suppl_table_7_msi.xlsx` | **Ghandi et al. 2019**, *Nature* 569:503 (DOI 10.1038/s41586-019-1186-3; PMC6697103), **Supplementary Table 7** — fetched via `static-content.springer.com/…/41586_2019_1186_MOESM10_ESM.xlsx` (the PMC `bin/` URL is JS-gated) | `ad26cb44…c03eb8` | Upstream raw indel counts for the MSI classification. 3 sheets: `Descriptions`, `MSI calls` (1331 cell lines; `CCLE.hc/wes/wgs.*` + `GDSC.*` `msi_del`/`total_del` + MSI calls), `Thresholds used for MSI annot.` (the calling cutoffs, e.g. CCLE-WES `P_MS_del_1/2 = 70/80`, `N_MS_del = 750`). `process_CCLE_MSI_data.R` normalizes these → the `CCLE_MSI`/`ms_deletions_normed` already in Supp Table 1. **Caveat:** this is the *final published* table; the WRN code used a pre-publication "early version" — correct table, possibly not byte-identical. Needed only to recompute the MSI *classification* from scratch (the calls are already vendored downstream in Supp Table 1).
+
+## Data-acquisition status (2026-06-13) — complete
+
+Every dataset the encoding needs is now **secured** (vendored + checksummed, or trivially fetchable):
+
+- ✅ Phase-1 dependency/annotation slices (Achilles, DRIVE, Supp Table 1) — vendored.
+- ✅ DepMap omics+dep bundle (`DepMap_18Q4_data.rds`, 1.6 GB) — vendored, md5-verified.
+- ✅ WRN-KO RNA-seq counts (GSE126464) — vendored, sha256.
+- ✅ **Wet-lab Source Data (all 10 per-figure XLSX)** — vendored, sha256 (above). The earlier "nature.com-only / not auto-fetchable" note is **resolved**: the `static-content.springer.com` URLs are directly fetchable.
+- ✅ **MSigDB Hallmark v6.2** (`h.all.v6.2.symbols.gmt`) — vendored, sha256.
+- ✅ **CCLE Phase-2 Suppl Table 7** (Ghandi 2019, MSI source) — vendored, sha256.
+
+**Every dataset the encoding could need is now vendored + checksummed.** Nothing left to fetch. The remaining gates are purely infrastructure (institution capabilities), not data.
+
+**Remaining gates are infrastructure, not data:** the genome-wide differential (`dd_achilles`/`dd_drive` rank-#1) needs the **D53 ingestion** path (187 MB matrix can't inline — but the matrix IS vendored); limma/GSEA/lme4 need their computations. The wet-lab two-way-ANOVA recomputes (`va_competition`, cell-cycle, apoptosis) are now **unblocked** — data + existing Factorial dispatch.
 
 ## Notes for Phase 1
 

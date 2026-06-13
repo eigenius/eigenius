@@ -635,3 +635,703 @@ resource wrn:concl_p53_modulates : reasoning:ReasoningSentence {
         )
     );
 }
+
+// ════════════════════════════════════════════════════════════════════
+// C-VAL (recomputed): WRN depletion impairs MSI viability (competition assay)
+// ════════════════════════════════════════════════════════════════════
+// The wet-lab competition-assay two-way ANOVA (ED Fig 3b, day 10), kernel-
+// recomputed via the NestedAnovaAnalysisPlan dispatch (value ~ is_WRN +
+// guide). The two MSI lines KM12 and OVK18 are recomputed (each: 18 sgWRN +
+// 12 negative-control day-10 relative-ratio values; the paper's two-way
+// ANOVA P = 2.7e-19 / 1.2e-7). Each plan emits stats:lt(mean_diff_of(s), 0)
+// (sgWRN mean strictly below control = impaired). A declared bridge composes
+// both MSI lines into onco:SelectiveViabilityDependence(WRN, MSI). The MSS
+// lines (ES2, SW620) are NON-significant (paper P = 0.37 / 0.23, recomputed
+// to Fail) — their "spared" status is the declared judgment (a null is not
+// derivable), cited in the bridge rationale. Source data is the pinned Nature
+// per-figure XLSX (data/MANIFEST.md); this replaces the linked-external
+// va_competition ToolArtifact.
+
+resource wrn:viability_directionality_witness : stats:ImpossibilityWitness {
+    reflection:declared_by = "wrn-paper:viability-impairment-directionality";
+    reflection:rationale   = "Synthetic lethality predicts WRN depletion IMPAIRS (not enhances) MSI viability: the directional claim is sgWRN viability below negative-control viability (group A mean < group B). The inverse is not the hypothesis, licensing the one-sided test.";
+}
+
+resource wrn:viab_KM12_sampleset : stats:SampleSetResource {
+    reflection:source      = "wrn-paper ED Fig 3b KM12 day-10 competition-assay relative ratio (Firefly:Renilla / mean-of-negatives)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig3_MOESM6.xlsx";
+    bench:extracted_from_sha256 = "506d7ac0f2517cb6b1e7277dfb175675044ab4b6fbc4a628f8c9ad843ba41fd6";
+    bench:extraction_columns    = "ED Fig 3b: Relative ratio (day 10), per guide x 6 replicates";
+    bench:extraction_filter     = "group A = sgWRN1,sgWRN2,sgWRN3 (each 6 reps, flat by guide); group B = sgCh2-2,sgCh2-4 (6 each); pan-essential controls excluded";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:viab_KM12_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [
+         0.268449, 0.248279, 0.280587, 0.291857, 0.381621, 0.304528,
+         0.235725, 0.202625, 0.264119, 0.220345, 0.171601, 0.270842,
+         0.329422, 0.351885, 0.395719, 0.453315, 0.297452, 0.237243,
+        ],
+        [
+         0.849392, 1.087221, 1.141928, 0.979374, 1.092875, 0.847365,
+         0.974682, 1.032420, 1.021721, 0.959610, 1.078654, 0.934759,
+        ],
+        BiologicalReplication(),
+    );
+}
+resource wrn:viab_KM12_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:viab_KM12_sampleset;
+    reflection:source    = "wrn-paper ED Fig 3b (Nature Source Data, pinned)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+resource wrn:viab_KM12_plan : stats:NestedAnovaAnalysisPlan {
+    stats:sample_set       = wrn:viab_KM12_sampleset;
+    stats:alpha            = 0.05;
+    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:viability_directionality_witness");
+    stats:subgroup_sizes_a = [6,6,6];
+    stats:subgroup_sizes_b = [6,6];
+}
+resource wrn:viab_KM12_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:viab_KM12_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:viab_OVK18_sampleset : stats:SampleSetResource {
+    reflection:source      = "wrn-paper ED Fig 3b OVK18 day-10 competition-assay relative ratio (Firefly:Renilla / mean-of-negatives)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig3_MOESM6.xlsx";
+    bench:extracted_from_sha256 = "506d7ac0f2517cb6b1e7277dfb175675044ab4b6fbc4a628f8c9ad843ba41fd6";
+    bench:extraction_columns    = "ED Fig 3b: Relative ratio (day 10), per guide x 6 replicates";
+    bench:extraction_filter     = "group A = sgWRN1,sgWRN2,sgWRN3 (each 6 reps, flat by guide); group B = sgCh2-2,sgCh2-4 (6 each); pan-essential controls excluded";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:viab_OVK18_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [
+         0.530093, 0.304999, 0.268184, 0.203907, 0.212368, 0.196609,
+         0.177541, 0.428282, 0.267665, 0.544004, 0.344792, 0.284103,
+         0.393316, 0.735241, 0.609907, 0.523689, 0.323949, 0.659476,
+        ],
+        [
+         1.404859, 0.802503, 0.885716, 1.094852, 0.896339, 1.254010,
+         1.053741, 0.387456, 0.695982, 1.483323, 1.044887, 0.996332,
+        ],
+        BiologicalReplication(),
+    );
+}
+resource wrn:viab_OVK18_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:viab_OVK18_sampleset;
+    reflection:source    = "wrn-paper ED Fig 3b (Nature Source Data, pinned)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+resource wrn:viab_OVK18_plan : stats:NestedAnovaAnalysisPlan {
+    stats:sample_set       = wrn:viab_OVK18_sampleset;
+    stats:alpha            = 0.05;
+    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:viability_directionality_witness");
+    stats:subgroup_sizes_a = [6,6,6];
+    stats:subgroup_sizes_b = [6,6];
+}
+resource wrn:viab_OVK18_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:viab_OVK18_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:bridge_viability : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:selective-viability-criterion";
+    reflection:rationale   = "If WRN depletion significantly impairs viability (sgWRN below negative controls in the competition assay) in MSI lines — recomputed for KM12 (two-way ANOVA P=2.7e-19) and OVK18 (P=1.2e-7) — while sparing MSS lines (ES2 P=0.37, SW620 P=0.23, non-significant; recomputed to Fail, the declared 'spared' judgment since a null is not derivable), then WRN depletion selectively impairs MSI viability.";
+
+    reflection:canonical_proposition = type_expr(
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0)
+        ->
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0)
+        ->
+        onco:SelectiveViabilityDependence("WRN", "MSI")
+    );
+}
+resource wrn:bridge_viability_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:bridge_viability;
+    reflection:declared_by = "wrn-paper:selective-viability-criterion";
+    reflection:timestamp   = "2026-06-13T05:00:00Z";
+}
+
+resource wrn:concl_val_recomputed : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:SelectiveViabilityDependence("WRN", "MSI")
+    );
+    reasoning:justification = App(
+        App(
+            DeclaredEvidence("urn:eigenius:pub:wrn:bridge_viability"),
+            DerivedEvidence("urn:eigenius:pub:wrn:viab_KM12_plan:result:main_effect")
+        ),
+        DerivedEvidence("urn:eigenius:pub:wrn:viab_OVK18_plan:result:main_effect")
+    );
+    reasoning:certificate = type_expr(
+        alias
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_viability",
+            R_KM12 = "urn:eigenius:pub:wrn:viab_KM12_plan:result:main_effect",
+            R_OVK  = "urn:eigenius:pub:wrn:viab_OVK18_plan:result:main_effect",
+            K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0),
+            O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0),
+            SVD = onco:SelectiveViabilityDependence("WRN", "MSI"),
+            cert1 = app(K, O -> SVD, DeclaredEvidence(BRIDGE), DerivedEvidence(R_KM12),
+                        declared(BRIDGE, K -> O -> SVD), derived(R_KM12, K))
+        in
+        app(O, SVD, reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_KM12)),
+            DerivedEvidence(R_OVK), cert1, derived(R_OVK, O))
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// C-MECH (recomputed): WRN depletion causes cell-cycle arrest in MSI
+// ════════════════════════════════════════════════════════════════════
+// The downstream DSB-driven-DDR consequence, kernel-recomputed from ED Fig 4b
+// (cell-cycle distribution, %S-phase). Three MSI lines — KM12, SW48, OVK18 —
+// each: 6 sgWRN (sgWRN2+sgWRN3, 3 reps each) + 3 negative-control (sgCh2-2)
+// %S-phase values, nested two-way ANOVA (value ~ is_WRN + guide; the paper's
+// design, kernel-recomputed: KM12 P=6.1e-7, SW48 P=3.5e-4, OVK18 P=2.6e-6).
+// Group A = sgWRN, Group B = sgCh2-2; the directional claim is sgWRN %S-phase
+// strictly below control (arrest reduces the S-phase fraction) ⇒
+// stats:lt(mean_diff_of(s), 0). The MSS lines (SW620 P=0.16, SW837 P=0.67,
+// ES2 P=0.69) are non-significant (recomputed to Fail; the declared "spared"
+// judgment, a null is not derivable), cited in the bridge rationale. Source:
+// pinned Nature ED Fig 4 XLSX (data/MANIFEST.md).
+
+resource wrn:cellcycle_directionality_witness : stats:ImpossibilityWitness {
+    reflection:declared_by = "wrn-paper:cellcycle-arrest-directionality";
+    reflection:rationale   = "DSB-driven cell-cycle arrest reduces the proliferating (S-phase) fraction: the directional claim is sgWRN %S-phase below negative-control %S-phase (group A mean < group B). The inverse (WRN loss increasing S-phase) is not the hypothesis, licensing the one-sided test.";
+}
+
+resource wrn:cc_KM12_sampleset : stats:SampleSetResource {
+    reflection:source      = "wrn-paper ED Fig 4b KM12 cell-cycle %S-phase (sgWRN2,sgWRN3 vs sgCh2-2)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig4_MOESM7.xlsx";
+    bench:extracted_from_sha256 = "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549";
+    bench:extraction_columns    = "ED Fig 4b: %S-phase, per guide x 3 replicates";
+    bench:extraction_filter     = "group A = sgWRN2,sgWRN3 (3 reps each, flat by guide); group B = sgCh2-2 (3 reps)";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:cc_KM12_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [31.932773, 29.894490, 31.715976, 35.946249, 35.158817, 35.611907],
+        [46.416759, 48.475289, 48.004202],
+        BiologicalReplication(),
+    );
+}
+resource wrn:cc_KM12_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:cc_KM12_sampleset;
+    reflection:source    = "wrn-paper ED Fig 4b (Nature Source Data, pinned)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+resource wrn:cc_KM12_plan : stats:NestedAnovaAnalysisPlan {
+    stats:sample_set       = wrn:cc_KM12_sampleset;
+    stats:alpha            = 0.05;
+    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:cellcycle_directionality_witness");
+    stats:subgroup_sizes_a = [3,3];
+    stats:subgroup_sizes_b = [3];
+}
+resource wrn:cc_KM12_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:cc_KM12_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:cc_SW48_sampleset : stats:SampleSetResource {
+    reflection:source      = "wrn-paper ED Fig 4b SW48 cell-cycle %S-phase (sgWRN2,sgWRN3 vs sgCh2-2)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig4_MOESM7.xlsx";
+    bench:extracted_from_sha256 = "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549";
+    bench:extraction_columns    = "ED Fig 4b: %S-phase, per guide x 3 replicates";
+    bench:extraction_filter     = "group A = sgWRN2,sgWRN3 (3 reps each, flat by guide); group B = sgCh2-2 (3 reps)";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:cc_SW48_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [15.922108, 12.811791, 14.301802, 20.350109, 22.747748, 22.971429],
+        [26.836002, 28.721502, 33.068042],
+        BiologicalReplication(),
+    );
+}
+resource wrn:cc_SW48_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:cc_SW48_sampleset;
+    reflection:source    = "wrn-paper ED Fig 4b (Nature Source Data, pinned)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+resource wrn:cc_SW48_plan : stats:NestedAnovaAnalysisPlan {
+    stats:sample_set       = wrn:cc_SW48_sampleset;
+    stats:alpha            = 0.05;
+    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:cellcycle_directionality_witness");
+    stats:subgroup_sizes_a = [3,3];
+    stats:subgroup_sizes_b = [3];
+}
+resource wrn:cc_SW48_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:cc_SW48_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:cc_OVK18_sampleset : stats:SampleSetResource {
+    reflection:source      = "wrn-paper ED Fig 4b OVK18 cell-cycle %S-phase (sgWRN2,sgWRN3 vs sgCh2-2)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig4_MOESM7.xlsx";
+    bench:extracted_from_sha256 = "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549";
+    bench:extraction_columns    = "ED Fig 4b: %S-phase, per guide x 3 replicates";
+    bench:extraction_filter     = "group A = sgWRN2,sgWRN3 (3 reps each, flat by guide); group B = sgCh2-2 (3 reps)";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:cc_OVK18_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [16.632017, 16.004184, 17.567568, 21.237113, 24.417427, 18.864097],
+        [40.261153, 42.668137, 43.139407],
+        BiologicalReplication(),
+    );
+}
+resource wrn:cc_OVK18_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:cc_OVK18_sampleset;
+    reflection:source    = "wrn-paper ED Fig 4b (Nature Source Data, pinned)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+resource wrn:cc_OVK18_plan : stats:NestedAnovaAnalysisPlan {
+    stats:sample_set       = wrn:cc_OVK18_sampleset;
+    stats:alpha            = 0.05;
+    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:cellcycle_directionality_witness");
+    stats:subgroup_sizes_a = [3,3];
+    stats:subgroup_sizes_b = [3];
+}
+resource wrn:cc_OVK18_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:cc_OVK18_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:bridge_cellcycle : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:cellcycle-arrest-criterion";
+    reflection:rationale   = "If WRN depletion significantly reduces the S-phase fraction (sgWRN %S below negative controls) across MSI lines — recomputed for KM12 (two-way ANOVA P=6.1e-7), SW48 (P=3.5e-4), OVK18 (P=2.6e-6) — while sparing MSS lines (SW620 P=0.16, SW837 P=0.67, ES2 P=0.69, non-significant; recomputed to Fail, the declared 'spared' judgment since a null is not derivable), then WRN depletion causes MSI-selective cell-cycle arrest — a downstream consequence of DSB-driven DDR.";
+
+    reflection:canonical_proposition = type_expr(
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)
+        ->
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)
+        ->
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)
+        ->
+        onco:CausesCellCycleArrest("WRN", "MSI")
+    );
+}
+resource wrn:bridge_cellcycle_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:bridge_cellcycle;
+    reflection:declared_by = "wrn-paper:cellcycle-arrest-criterion";
+    reflection:timestamp   = "2026-06-13T06:00:00Z";
+}
+
+resource wrn:concl_cellcycle_recomputed : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:CausesCellCycleArrest("WRN", "MSI")
+    );
+    reasoning:justification = App(
+        App(
+            App(
+                DeclaredEvidence("urn:eigenius:pub:wrn:bridge_cellcycle"),
+                DerivedEvidence("urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect")
+            ),
+            DerivedEvidence("urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect")
+        ),
+        DerivedEvidence("urn:eigenius:pub:wrn:cc_OVK18_plan:result:main_effect")
+    );
+    reasoning:certificate = type_expr(
+        alias
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
+            R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
+            R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
+            R_O = "urn:eigenius:pub:wrn:cc_OVK18_plan:result:main_effect",
+            K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0),
+            S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0),
+            O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
+            CA = onco:CausesCellCycleArrest("WRN", "MSI"),
+            RULE_P = K -> S -> O -> CA,
+            cert1 = app(K, S -> O -> CA, DeclaredEvidence(BRIDGE), DerivedEvidence(R_K),
+                        declared(BRIDGE, RULE_P), derived(R_K, K)),
+            cert2 = app(S, O -> CA, reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_K)),
+                        DerivedEvidence(R_S), cert1, derived(R_S, S))
+        in
+        app(O, CA, reasoning:App(reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_K)), DerivedEvidence(R_S)),
+            DerivedEvidence(R_O), cert2, derived(R_O, O))
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// C-MECH (recomputed): WRN depletion causes apoptosis in MSI
+// ════════════════════════════════════════════════════════════════════
+// The other downstream DSB-driven-DDR consequence, kernel-recomputed from ED
+// Fig 4c (Annexin-V apoptosis, total apoptotic fraction). Same three MSI lines
+// (KM12 P=3.4e-3, SW48 P=3.6e-4, OVK18 P=3.6e-5; nested two-way ANOVA). Here
+// the directional claim flips: WRN depletion INCREASES apoptosis, so the
+// SampleSet places the negative control first (group A = sgCh2-2) and sgWRN
+// second (group B = sgWRN2+sgWRN3), giving mean_a (control) < mean_b (sgWRN)
+// ⇒ stats:lt(mean_diff_of(s), 0) when apoptosis rises. The MSS lines (SW620
+// P=0.10, SW837 P=0.41, ES2 P=0.57) are non-significant (the declared 'spared'
+// judgment). Source: pinned Nature ED Fig 4 XLSX (data/MANIFEST.md).
+
+resource wrn:apoptosis_directionality_witness : stats:ImpossibilityWitness {
+    reflection:declared_by = "wrn-paper:apoptosis-induction-directionality";
+    reflection:rationale   = "DSB-driven apoptosis raises the apoptotic fraction: the directional claim is negative-control apoptosis below sgWRN apoptosis (group A = control mean < group B = sgWRN mean). The inverse (WRN loss reducing apoptosis) is not the hypothesis, licensing the one-sided test.";
+}
+
+resource wrn:apop_KM12_sampleset : stats:SampleSetResource {
+    reflection:source      = "wrn-paper ED Fig 4c KM12 total apoptosis (sgCh2-2 vs sgWRN2,sgWRN3)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig4_MOESM7.xlsx";
+    bench:extracted_from_sha256 = "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549";
+    bench:extraction_columns    = "ED Fig 4c: total apoptosis, per guide x 3 replicates";
+    bench:extraction_filter     = "group A = sgCh2-2 (3 reps); group B = sgWRN2,sgWRN3 (3 reps each, flat by guide)";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:apop_KM12_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [13.350126, 15.651736, 13.404148],
+        [28.066990, 31.354735, 20.795076, 27.193780, 24.335791, 32.435170],
+        BiologicalReplication(),
+    );
+}
+resource wrn:apop_KM12_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:apop_KM12_sampleset;
+    reflection:source    = "wrn-paper ED Fig 4c (Nature Source Data, pinned)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+resource wrn:apop_KM12_plan : stats:NestedAnovaAnalysisPlan {
+    stats:sample_set       = wrn:apop_KM12_sampleset;
+    stats:alpha            = 0.05;
+    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:apoptosis_directionality_witness");
+    stats:subgroup_sizes_a = [3];
+    stats:subgroup_sizes_b = [3,3];
+}
+resource wrn:apop_KM12_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:apop_KM12_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:apop_SW48_sampleset : stats:SampleSetResource {
+    reflection:source      = "wrn-paper ED Fig 4c SW48 total apoptosis (sgCh2-2 vs sgWRN2,sgWRN3)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig4_MOESM7.xlsx";
+    bench:extracted_from_sha256 = "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549";
+    bench:extraction_columns    = "ED Fig 4c: total apoptosis, per guide x 3 replicates";
+    bench:extraction_filter     = "group A = sgCh2-2 (3 reps); group B = sgWRN2,sgWRN3 (3 reps each, flat by guide)";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:apop_SW48_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [11.533692, 11.469645, 12.543626],
+        [18.550193, 19.540230, 21.924371, 17.389972, 15.569724, 18.150194],
+        BiologicalReplication(),
+    );
+}
+resource wrn:apop_SW48_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:apop_SW48_sampleset;
+    reflection:source    = "wrn-paper ED Fig 4c (Nature Source Data, pinned)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+resource wrn:apop_SW48_plan : stats:NestedAnovaAnalysisPlan {
+    stats:sample_set       = wrn:apop_SW48_sampleset;
+    stats:alpha            = 0.05;
+    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:apoptosis_directionality_witness");
+    stats:subgroup_sizes_a = [3];
+    stats:subgroup_sizes_b = [3,3];
+}
+resource wrn:apop_SW48_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:apop_SW48_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:apop_OVK18_sampleset : stats:SampleSetResource {
+    reflection:source      = "wrn-paper ED Fig 4c OVK18 total apoptosis (sgCh2-2 vs sgWRN2,sgWRN3)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig4_MOESM7.xlsx";
+    bench:extracted_from_sha256 = "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549";
+    bench:extraction_columns    = "ED Fig 4c: total apoptosis, per guide x 3 replicates";
+    bench:extraction_filter     = "group A = sgCh2-2 (3 reps); group B = sgWRN2,sgWRN3 (3 reps each, flat by guide)";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:apop_OVK18_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [14.446003, 12.463652, 11.389865],
+        [22.891566, 23.069208, 23.169509, 23.648039, 26.500201, 22.876080],
+        BiologicalReplication(),
+    );
+}
+resource wrn:apop_OVK18_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:apop_OVK18_sampleset;
+    reflection:source    = "wrn-paper ED Fig 4c (Nature Source Data, pinned)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+resource wrn:apop_OVK18_plan : stats:NestedAnovaAnalysisPlan {
+    stats:sample_set       = wrn:apop_OVK18_sampleset;
+    stats:alpha            = 0.05;
+    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:apoptosis_directionality_witness");
+    stats:subgroup_sizes_a = [3];
+    stats:subgroup_sizes_b = [3,3];
+}
+resource wrn:apop_OVK18_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:apop_OVK18_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:bridge_apoptosis : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:apoptosis-induction-criterion";
+    reflection:rationale   = "If WRN depletion significantly raises the apoptotic fraction (sgWRN apoptosis above negative controls) across MSI lines — recomputed for KM12 (two-way ANOVA P=3.4e-3), SW48 (P=3.6e-4), OVK18 (P=3.6e-5) — while sparing MSS lines (SW620 P=0.10, SW837 P=0.41, ES2 P=0.57, non-significant; recomputed to Fail, the declared 'spared' judgment since a null is not derivable), then WRN depletion causes MSI-selective apoptosis — a downstream consequence of DSB-driven DDR.";
+
+    reflection:canonical_proposition = type_expr(
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)
+        ->
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)
+        ->
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)
+        ->
+        onco:CausesApoptosis("WRN", "MSI")
+    );
+}
+resource wrn:bridge_apoptosis_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:bridge_apoptosis;
+    reflection:declared_by = "wrn-paper:apoptosis-induction-criterion";
+    reflection:timestamp   = "2026-06-13T06:30:00Z";
+}
+
+resource wrn:concl_apoptosis_recomputed : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:CausesApoptosis("WRN", "MSI")
+    );
+    reasoning:justification = App(
+        App(
+            App(
+                DeclaredEvidence("urn:eigenius:pub:wrn:bridge_apoptosis"),
+                DerivedEvidence("urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect")
+            ),
+            DerivedEvidence("urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect")
+        ),
+        DerivedEvidence("urn:eigenius:pub:wrn:apop_OVK18_plan:result:main_effect")
+    );
+    reasoning:certificate = type_expr(
+        alias
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
+            R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
+            R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
+            R_O = "urn:eigenius:pub:wrn:apop_OVK18_plan:result:main_effect",
+            K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0),
+            S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0),
+            O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
+            CA = onco:CausesApoptosis("WRN", "MSI"),
+            RULE_P = K -> S -> O -> CA,
+            cert1 = app(K, S -> O -> CA, DeclaredEvidence(BRIDGE), DerivedEvidence(R_K),
+                        declared(BRIDGE, RULE_P), derived(R_K, K)),
+            cert2 = app(S, O -> CA, reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_K)),
+                        DerivedEvidence(R_S), cert1, derived(R_S, S))
+        in
+        app(O, CA, reasoning:App(reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_K)), DerivedEvidence(R_S)),
+            DerivedEvidence(R_O), cert2, derived(R_O, O))
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// C-MMR (recomputed): restoring MMR partially rescues WRN dependence
+// ════════════════════════════════════════════════════════════════════
+// The MMR-restoration causal dissection (ED Fig 10c, relative viability,
+// n = 6 biological replicates), kernel-recomputed via the new
+// CrossedAnovaAnalysisPlan dispatch (`value ~ CL + guide`, guide CROSSED). The
+// HCT116 derivatives: Ch2 (MMR-deficient, ∗), Ch3+5+sgCh2-2 (MMR-restored, †),
+// Ch3+5+sgMLH1-1 (MLH1 re-knocked-out, ‡), Ch3+5+sgMLH1-2 (§). Each contrast
+// is a pair of derivatives × the shWRN guides (shWRN1, shWRN2, 6 reps each),
+// two-way ANOVA testing the CL (MMR-context) main effect on relative viability.
+// Three contrasts reproduce the paper EXACTLY (recompute-findings F3):
+//   ∗ vs † (restore MMR)        P = 5.7e-20  → restoration rescues
+//   † vs ‡ (MLH1-KO #1)         P = 3.3e-12  → re-sensitizes (MMR-attributable)
+//   † vs § (MLH1-KO #2)         P = 1.6e-16  → re-sensitizes (MMR-attributable)
+// Each SampleSet places the lower-viability (MMR-deficient / re-deficient) arm
+// as group A, so the directional claim is stats:lt(mean_diff_of(s), 0): the
+// MMR-deficient context sustains LOWER WRN-depletion viability than the
+// MMR-restored context. The rescue establishes restoration helps; the two
+// MLH1-KO re-sensitization controls establish the rescue is attributable to MMR
+// (not the chromosome transfer). "Partially" — the rescue is modest (Ch3+5
+// shWRN viability ≈0.71, not back to 1.0) — is the declared qualifier carried
+// in the bridge rationale. This replaces the linked-external mmr_restoration
+// ToolArtifact (retired in wrn-phase5). Source: pinned Nature ED Fig 10 XLSX.
+
+resource wrn:mmr_directionality_witness : stats:ImpossibilityWitness {
+    reflection:declared_by = "wrn-paper:mmr-restoration-directionality";
+    reflection:rationale   = "MMR proficiency sustains WRN-depletion viability: the directional claim is that the MMR-deficient (or MLH1-re-knocked-out) context shows LOWER shWRN viability than the MMR-restored context (group A mean < group B). The inverse (MMR restoration reducing viability) is not the hypothesis, licensing the one-sided test.";
+}
+
+// ── ∗ vs † : restoring MMR (Ch2 → Ch3+5+sgCh2-2) rescues shWRN viability ──
+resource wrn:mmr_rescue_sampleset : stats:SampleSetResource {
+    reflection:source      = "wrn-paper ED Fig 10c relative viability — HCT116 Ch2 (∗) vs Ch3+5+sgCh2-2 (†), shWRN1+shWRN2";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig10_MOESM12.xlsx";
+    bench:extracted_from_sha256 = "3fc08ebadbc282ac7bdb4f87d73e704e79e216b611e5357302d17e4e32cdb33c";
+    bench:extraction_columns    = "ED Fig 10c: relative viability (normalized), shWRN1,shWRN2 x 6 replicates";
+    bench:extraction_filter     = "group A = HCT116 Ch2 (∗), group B = HCT116 Ch3+5+sgCh2-2 (†); each = shWRN1(6)++shWRN2(6); normalized values; pan-essential/neg-control guides excluded (∗†‡§ mark the shWRN bars)";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:mmr_rescue_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [0.126426, 0.141483, 0.105401, 0.128076, 0.162610, 0.133238,
+         0.304141, 0.167127, 0.174655, 0.263488, 0.240903, 0.230364],
+        [0.705713, 0.711474, 0.665386, 0.714354, 0.650984, 0.705713,
+         0.699952, 0.731637, 0.780605, 0.688430, 0.746039, 0.763322],
+        BiologicalReplication(),
+    );
+}
+resource wrn:mmr_rescue_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:mmr_rescue_sampleset;
+    reflection:source    = "wrn-paper ED Fig 10c (Nature Source Data, pinned)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+resource wrn:mmr_rescue_plan : stats:CrossedAnovaAnalysisPlan {
+    stats:sample_set       = wrn:mmr_rescue_sampleset;
+    stats:alpha            = 0.05;
+    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:mmr_directionality_witness");
+    stats:subgroup_sizes_a = [6,6];
+    stats:subgroup_sizes_b = [6,6];
+}
+resource wrn:mmr_rescue_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:mmr_rescue_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// ── † vs ‡ : MLH1-KO #1 re-sensitizes (Ch3+5+sgMLH1-1 below Ch3+5+sgCh2-2) ──
+resource wrn:mmr_resens1_sampleset : stats:SampleSetResource {
+    reflection:source      = "wrn-paper ED Fig 10c relative viability — HCT116 Ch3+5+sgMLH1-1 (‡) vs Ch3+5+sgCh2-2 (†), shWRN1+shWRN2";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig10_MOESM12.xlsx";
+    bench:extracted_from_sha256 = "3fc08ebadbc282ac7bdb4f87d73e704e79e216b611e5357302d17e4e32cdb33c";
+    bench:extraction_columns    = "ED Fig 10c: relative viability (normalized), shWRN1,shWRN2 x 6 replicates";
+    bench:extraction_filter     = "group A = HCT116 Ch3+5+sgMLH1-1 (‡, re-sensitized), group B = HCT116 Ch3+5+sgCh2-2 (†, rescued); each = shWRN1(6)++shWRN2(6); normalized values";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:mmr_resens1_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [0.524250, 0.539800, 0.484265, 0.410959, 0.477601, 0.446501,
+         0.430951, 0.493151, 0.495372, 0.386523, 0.473158, 0.428730],
+        [0.705713, 0.711474, 0.665386, 0.714354, 0.650984, 0.705713,
+         0.699952, 0.731637, 0.780605, 0.688430, 0.746039, 0.763322],
+        BiologicalReplication(),
+    );
+}
+resource wrn:mmr_resens1_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:mmr_resens1_sampleset;
+    reflection:source    = "wrn-paper ED Fig 10c (Nature Source Data, pinned)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+resource wrn:mmr_resens1_plan : stats:CrossedAnovaAnalysisPlan {
+    stats:sample_set       = wrn:mmr_resens1_sampleset;
+    stats:alpha            = 0.05;
+    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:mmr_directionality_witness");
+    stats:subgroup_sizes_a = [6,6];
+    stats:subgroup_sizes_b = [6,6];
+}
+resource wrn:mmr_resens1_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:mmr_resens1_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// ── † vs § : MLH1-KO #2 re-sensitizes (Ch3+5+sgMLH1-2 below Ch3+5+sgCh2-2) ──
+resource wrn:mmr_resens2_sampleset : stats:SampleSetResource {
+    reflection:source      = "wrn-paper ED Fig 10c relative viability — HCT116 Ch3+5+sgMLH1-2 (§) vs Ch3+5+sgCh2-2 (†), shWRN1+shWRN2";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig10_MOESM12.xlsx";
+    bench:extracted_from_sha256 = "3fc08ebadbc282ac7bdb4f87d73e704e79e216b611e5357302d17e4e32cdb33c";
+    bench:extraction_columns    = "ED Fig 10c: relative viability (normalized), shWRN1,shWRN2 x 6 replicates";
+    bench:extraction_filter     = "group A = HCT116 Ch3+5+sgMLH1-2 (§, re-sensitized), group B = HCT116 Ch3+5+sgCh2-2 (†, rescued); each = shWRN1(6)++shWRN2(6); normalized values";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:mmr_resens2_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [0.391724, 0.388966, 0.353103, 0.344828, 0.333793, 0.336552,
+         0.350345, 0.353103, 0.333793, 0.347586, 0.250979, 0.284138],
+        [0.705713, 0.711474, 0.665386, 0.714354, 0.650984, 0.705713,
+         0.699952, 0.731637, 0.780605, 0.688430, 0.746039, 0.763322],
+        BiologicalReplication(),
+    );
+}
+resource wrn:mmr_resens2_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:mmr_resens2_sampleset;
+    reflection:source    = "wrn-paper ED Fig 10c (Nature Source Data, pinned)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+resource wrn:mmr_resens2_plan : stats:CrossedAnovaAnalysisPlan {
+    stats:sample_set       = wrn:mmr_resens2_sampleset;
+    stats:alpha            = 0.05;
+    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:mmr_directionality_witness");
+    stats:subgroup_sizes_a = [6,6];
+    stats:subgroup_sizes_b = [6,6];
+}
+resource wrn:mmr_resens2_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:mmr_resens2_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// ── Declared bridge: the three contrasts compose the causal dissection ──
+resource wrn:bridge_mmr_restoration : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:mmr-restoration-criterion";
+    reflection:rationale   = "If restoring MMR raises WRN-depletion viability (Ch2 below Ch3+5+sgCh2-2, recomputed two-way ANOVA P=5.7e-20) AND re-knocking-out MLH1 in the restored line re-lowers it (Ch3+5+sgMLH1-1 below Ch3+5+sgCh2-2, P=3.3e-12; Ch3+5+sgMLH1-2 below Ch3+5+sgCh2-2, P=1.6e-16), then the rescue is attributable to MMR (the MLH1-KO controls isolate MMR from the chromosome transfer) and restoring MMR PARTIALLY rescues WRN dependence. 'Partially' is load-bearing: the rescue is modest (Ch3+5 shWRN viability ≈0.71, not restored to 1.0), so dMMR contributes to but does not fully explain WRN dependence (cf. D-REFINE mutator load).";
+
+    reflection:canonical_proposition = type_expr(
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)
+        ->
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)
+        ->
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0)
+        ->
+        onco:RestorationPartiallyRescues("dMMR", "WRN")
+    );
+}
+resource wrn:bridge_mmr_restoration_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:bridge_mmr_restoration;
+    reflection:declared_by = "wrn-paper:mmr-restoration-criterion";
+    reflection:timestamp   = "2026-06-13T07:00:00Z";
+}
+
+resource wrn:concl_mmr_restoration_recomputed : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:RestorationPartiallyRescues("dMMR", "WRN")
+    );
+    reasoning:justification = App(
+        App(
+            App(
+                DeclaredEvidence("urn:eigenius:pub:wrn:bridge_mmr_restoration"),
+                DerivedEvidence("urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect")
+            ),
+            DerivedEvidence("urn:eigenius:pub:wrn:mmr_resens1_plan:result:main_effect")
+        ),
+        DerivedEvidence("urn:eigenius:pub:wrn:mmr_resens2_plan:result:main_effect")
+    );
+    reasoning:certificate = type_expr(
+        alias
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_mmr_restoration",
+            R_R = "urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect",
+            R_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan:result:main_effect",
+            R_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan:result:main_effect",
+            K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0),
+            S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0),
+            O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0),
+            RP = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            RULE_P = K -> S -> O -> RP,
+            cert1 = app(K, S -> O -> RP, DeclaredEvidence(BRIDGE), DerivedEvidence(R_R),
+                        declared(BRIDGE, RULE_P), derived(R_R, K)),
+            cert2 = app(S, O -> RP, reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_R)),
+                        DerivedEvidence(R_1), cert1, derived(R_1, S))
+        in
+        app(O, RP, reasoning:App(reasoning:App(DeclaredEvidence(BRIDGE), DerivedEvidence(R_R)), DerivedEvidence(R_1)),
+            DerivedEvidence(R_2), cert2, derived(R_2, O))
+    );
+}

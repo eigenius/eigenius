@@ -53,9 +53,10 @@ use eigenius_kernel::ontology::well_known as wk;
 use crate::institution::iris;
 use crate::institution::StatisticsInstitution;
 use crate::numerics::{
-    classification_metrics, esd_filter, one_sample_t_test, paired_t_test,
-    passing_bablok_regression, rcbd_anova, repeated_measures_cs_anova, spearman_correlation,
-    splitplot_anova, two_sample_t_test, wilcoxon_rank_sum, TwoSampleVariance,
+    classification_metrics, crossed_two_way_anova, esd_filter, nested_group_anova,
+    one_sample_t_test, paired_t_test, passing_bablok_regression, rcbd_anova,
+    repeated_measures_cs_anova, spearman_correlation, splitplot_anova, two_sample_t_test,
+    wilcoxon_rank_sum, TwoSampleVariance,
 };
 
 /// Top-level handler called by `StatisticsInstitution::query`.
@@ -141,6 +142,32 @@ pub fn do_validate_analysis_plan(
     let classification_iri = Iri::parse(iris::CLASSIFICATION_ANALYSIS_PLAN).expect("static IRI");
     if claim.is_instance_of(&classification_iri) {
         return recompute_classification_quality_claim(claim, &bundle, &sample_set_iri_str);
+    }
+
+    // ── §2.2 class-based early dispatch: NestedAnovaAnalysisPlan ─────────────
+    //
+    // A nested fixed-effects two-way ANOVA (`value ~ group + subgroup`): the
+    // binary group effect tested against the within-subgroup residual, with
+    // subgroup a nuisance nested in group. The two IID SampleSet arms carry
+    // the two groups (flat, grouped by subgroup); the plan's `subgroup_sizes_a`
+    // / `subgroup_sizes_b` partition each. Has its own dispatch + directionality
+    // handling, so route here before the standard hypothesis-test reads.
+    let nested_anova_iri = Iri::parse(iris::NESTED_ANOVA_ANALYSIS_PLAN).expect("static IRI");
+    if claim.is_instance_of(&nested_anova_iri) {
+        return recompute_nested_anova_claim(claim, &bundle, &sample_set_iri_str, ctx);
+    }
+
+    // ── §2.2 class-based early dispatch: CrossedAnovaAnalysisPlan ────────────
+    //
+    // A crossed additive two-way ANOVA (`value ~ group + block`): the binary
+    // group effect tested against the additive-model residual, with `block`
+    // CROSSED (the same block levels appear in both groups, unlike the nested
+    // plan). The two IID SampleSet arms carry the two groups; `subgroup_sizes_a`
+    // / `subgroup_sizes_b` partition each into blocks, paired by index. Routes
+    // to its own emitter before the standard hypothesis-test reads.
+    let crossed_anova_iri = Iri::parse(iris::CROSSED_ANOVA_ANALYSIS_PLAN).expect("static IRI");
+    if claim.is_instance_of(&crossed_anova_iri) {
+        return recompute_crossed_anova_claim(claim, &bundle, &sample_set_iri_str, ctx);
     }
 
     // ── Step 4: dispatch on the product position ──────────────────────
@@ -1132,6 +1159,341 @@ fn encode_classification_proposition(
         encode_app(encode_const_ref(i::STATS_GE), metric_of_s),
         encode_lit_float(threshold),
     )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// §2.2 — NestedAnovaAnalysisPlan / nested two-way ANOVA dispatch
+// ────────────────────────────────────────────────────────────────────
+
+/// Recompute a `stats:NestedAnovaAnalysisPlan` — a nested fixed-effects
+/// two-way ANOVA `value ~ group + subgroup` (D52 §2.2). The SampleSet's two
+/// IID arms are the two groups (A = first arm, B = second arm), each a flat
+/// array grouped by subgroup; `subgroup_sizes_a` / `subgroup_sizes_b` partition
+/// them. The binary group main effect is tested against the within-subgroup
+/// residual (subgroup = fixed nuisance). On a directional Holds it emits
+/// `stats:lt(stats:mean_diff_of(s), 0)` — group A mean strictly below group B,
+/// the same proposition shape as the two-sample dispatch, so the same
+/// statistical→domain bridges consume it.
+fn recompute_nested_anova_claim(
+    claim: &Resource,
+    bundle: &DecodedBundle,
+    sample_set_iri_str: &str,
+    ctx: &ExecutionContext,
+) -> Result<QueryOutcome, InstitutionError> {
+    let (flat_a, flat_b) = match decode_two_group_observations(&bundle.observations_raw) {
+        Ok(p) => p,
+        Err(diag) => return Ok(gate_fails(diag)),
+    };
+    let sizes_a = match read_usize_array(claim, iris::PROP_SUBGROUP_SIZES_A)? {
+        Some(s) => s,
+        None => {
+            return Ok(gate_fails(
+                "NestedAnovaAnalysisPlan missing required `subgroup_sizes_a`".into(),
+            ))
+        }
+    };
+    let sizes_b = match read_usize_array(claim, iris::PROP_SUBGROUP_SIZES_B)? {
+        Some(s) => s,
+        None => {
+            return Ok(gate_fails(
+                "NestedAnovaAnalysisPlan missing required `subgroup_sizes_b`".into(),
+            ))
+        }
+    };
+    let group_a = match partition_by_sizes(&flat_a, &sizes_a) {
+        Ok(g) => g,
+        Err(d) => return Ok(gate_fails(format!("subgroup_sizes_a: {d}"))),
+    };
+    let group_b = match partition_by_sizes(&flat_b, &sizes_b) {
+        Ok(g) => g,
+        Err(d) => return Ok(gate_fails(format!("subgroup_sizes_b: {d}"))),
+    };
+    let alpha = match read_float_property(claim, iris::PROP_ALPHA)? {
+        Some(a) => a,
+        None => return Ok(gate_fails("claim missing `alpha`".into())),
+    };
+    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY)? {
+        Some(j) => j,
+        None => return Ok(gate_fails("claim missing `directionality`".into())),
+    };
+    let r = match nested_group_anova(&group_a, &group_b) {
+        Some(r) => r,
+        None => {
+            return Ok(gate_fails(
+                "InsufficientReplication: nested ANOVA needs both groups non-empty and total \
+                 N > #subgroups (at least one within-subgroup residual df)"
+                    .into(),
+            ))
+        }
+    };
+    // Directionality (D52 §7.1). The group-effect F has 1 df (= t²), so the
+    // one-sided p is the two-sided F p halved; OneSidedWitnessed also requires
+    // the asserted direction (group A mean below group B — the lt claim) and a
+    // resolving impossibility witness. TwoSided uses the raw two-way-ANOVA p.
+    let dctor = json_ctor_name(&directionality);
+    let (p_for_alpha, one_sided, direction_ok) = match dctor {
+        Some("TwoSided") => (r.p_two_sided, false, true),
+        Some("OneSidedWitnessed") => {
+            let witness = directionality["args"]
+                .get(0)
+                .and_then(serde_json::Value::as_str);
+            let witness = match witness {
+                Some(s) => s.to_string(),
+                None => {
+                    return Ok(gate_fails(
+                        "directionality = OneSidedWitnessed requires a witness IRI (D52 §7.1)"
+                            .into(),
+                    ))
+                }
+            };
+            if let Some(diag) = check_impossibility_witness(&witness, ctx)? {
+                return Ok(gate_fails(diag));
+            }
+            (r.p_two_sided / 2.0, true, r.mean_a < r.mean_b)
+        }
+        other => {
+            return Ok(gate_fails(format!(
+                "unknown directionality ctor `{other:?}` (expected TwoSided / OneSidedWitnessed)"
+            )))
+        }
+    };
+    let derived = derive_canonical_proposition_twosample(sample_set_iri_str, &directionality);
+    let rejected = p_for_alpha < alpha && direction_ok;
+    let note = format!(
+        "Nested two-way ANOVA (value ~ group + subgroup): F({}, {}) = {:.4}, p_two_sided = {:.6}{}; \
+         group_a mean = {:.4} (n = {}), group_b mean = {:.4} (n = {}); {} subgroups",
+        r.df_group as usize,
+        r.df_resid as usize,
+        r.f_group,
+        r.p_two_sided,
+        if one_sided {
+            format!(", p_one_sided = {:.6}", r.p_two_sided / 2.0)
+        } else {
+            String::new()
+        },
+        r.mean_a,
+        r.n_a,
+        r.mean_b,
+        r.n_b,
+        r.n_subgroups,
+    );
+    let ctor = if rejected {
+        wk::VERDICT_HOLDS
+    } else {
+        wk::VERDICT_FAILS
+    };
+    let diag = if rejected {
+        note
+    } else {
+        format!(
+            "AlphaNotCrossed: computed p = {p_for_alpha:.6}, alpha = {alpha}, \
+             direction_ok = {direction_ok}. {note}"
+        )
+    };
+    let canonical = if rejected { derived.as_ref() } else { None };
+    Ok(gate_holds_with_result(
+        claim.id(),
+        "main_effect",
+        ctor,
+        Some(&diag),
+        (r.f_group, p_for_alpha),
+        canonical,
+    ))
+}
+
+/// Recompute a `CrossedAnovaAnalysisPlan` (`value ~ group + block`, block
+/// crossed): the binary group main effect against the additive-model residual.
+/// Mirrors [`recompute_nested_anova_claim`] but pairs the two arms' block
+/// partitions by index (crossed ⇒ same block levels in both groups, so the two
+/// size arrays must have equal length) and calls [`crossed_two_way_anova`].
+fn recompute_crossed_anova_claim(
+    claim: &Resource,
+    bundle: &DecodedBundle,
+    sample_set_iri_str: &str,
+    ctx: &ExecutionContext,
+) -> Result<QueryOutcome, InstitutionError> {
+    let (flat_a, flat_b) = match decode_two_group_observations(&bundle.observations_raw) {
+        Ok(p) => p,
+        Err(diag) => return Ok(gate_fails(diag)),
+    };
+    let sizes_a = match read_usize_array(claim, iris::PROP_SUBGROUP_SIZES_A)? {
+        Some(s) => s,
+        None => {
+            return Ok(gate_fails(
+                "CrossedAnovaAnalysisPlan missing required `subgroup_sizes_a`".into(),
+            ))
+        }
+    };
+    let sizes_b = match read_usize_array(claim, iris::PROP_SUBGROUP_SIZES_B)? {
+        Some(s) => s,
+        None => {
+            return Ok(gate_fails(
+                "CrossedAnovaAnalysisPlan missing required `subgroup_sizes_b`".into(),
+            ))
+        }
+    };
+    // Crossed design: the two arms must declare the SAME block levels, so the
+    // partitions are index-aligned and equal in count.
+    if sizes_a.len() != sizes_b.len() {
+        return Ok(gate_fails(format!(
+            "CrossedAnovaAnalysisPlan requires the same crossed block levels in both groups: \
+             subgroup_sizes_a has {} blocks but subgroup_sizes_b has {}",
+            sizes_a.len(),
+            sizes_b.len()
+        )));
+    }
+    let group_a = match partition_by_sizes(&flat_a, &sizes_a) {
+        Ok(g) => g,
+        Err(d) => return Ok(gate_fails(format!("subgroup_sizes_a: {d}"))),
+    };
+    let group_b = match partition_by_sizes(&flat_b, &sizes_b) {
+        Ok(g) => g,
+        Err(d) => return Ok(gate_fails(format!("subgroup_sizes_b: {d}"))),
+    };
+    let alpha = match read_float_property(claim, iris::PROP_ALPHA)? {
+        Some(a) => a,
+        None => return Ok(gate_fails("claim missing `alpha`".into())),
+    };
+    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY)? {
+        Some(j) => j,
+        None => return Ok(gate_fails("claim missing `directionality`".into())),
+    };
+    let r = match crossed_two_way_anova(&group_a, &group_b) {
+        Some(r) => r,
+        None => {
+            return Ok(gate_fails(
+                "InsufficientReplication: crossed ANOVA needs equal block counts (each block \
+                 present), both groups non-empty, and total N > #blocks + 1 (≥1 residual df)"
+                    .into(),
+            ))
+        }
+    };
+    // Directionality (D52 §7.1): the group-effect F has 1 df (= t²), so the
+    // one-sided p is the two-sided F p halved; OneSidedWitnessed also requires
+    // the asserted direction (group A mean below group B) and a resolving
+    // impossibility witness. TwoSided uses the raw two-way-ANOVA p.
+    let dctor = json_ctor_name(&directionality);
+    let (p_for_alpha, one_sided, direction_ok) = match dctor {
+        Some("TwoSided") => (r.p_two_sided, false, true),
+        Some("OneSidedWitnessed") => {
+            let witness = directionality["args"]
+                .get(0)
+                .and_then(serde_json::Value::as_str);
+            let witness = match witness {
+                Some(s) => s.to_string(),
+                None => {
+                    return Ok(gate_fails(
+                        "directionality = OneSidedWitnessed requires a witness IRI (D52 §7.1)"
+                            .into(),
+                    ))
+                }
+            };
+            if let Some(diag) = check_impossibility_witness(&witness, ctx)? {
+                return Ok(gate_fails(diag));
+            }
+            (r.p_two_sided / 2.0, true, r.mean_a < r.mean_b)
+        }
+        other => {
+            return Ok(gate_fails(format!(
+                "unknown directionality ctor `{other:?}` (expected TwoSided / OneSidedWitnessed)"
+            )))
+        }
+    };
+    let derived = derive_canonical_proposition_twosample(sample_set_iri_str, &directionality);
+    let rejected = p_for_alpha < alpha && direction_ok;
+    let note = format!(
+        "Crossed two-way ANOVA (value ~ group + block): F({}, {}) = {:.4}, p_two_sided = {:.6e}{}; \
+         group_a mean = {:.4} (n = {}), group_b mean = {:.4} (n = {}); {} crossed blocks",
+        r.df_group as usize,
+        r.df_resid as usize,
+        r.f_group,
+        r.p_two_sided,
+        if one_sided {
+            format!(", p_one_sided = {:.6e}", r.p_two_sided / 2.0)
+        } else {
+            String::new()
+        },
+        r.mean_a,
+        r.n_a,
+        r.mean_b,
+        r.n_b,
+        r.n_blocks,
+    );
+    let ctor = if rejected {
+        wk::VERDICT_HOLDS
+    } else {
+        wk::VERDICT_FAILS
+    };
+    let diag = if rejected {
+        note
+    } else {
+        format!(
+            "AlphaNotCrossed: computed p = {p_for_alpha:.6e}, alpha = {alpha}, \
+             direction_ok = {direction_ok}. {note}"
+        )
+    };
+    let canonical = if rejected { derived.as_ref() } else { None };
+    Ok(gate_holds_with_result(
+        claim.id(),
+        "main_effect",
+        ctor,
+        Some(&diag),
+        (r.f_group, p_for_alpha),
+        canonical,
+    ))
+}
+
+/// Read a `core:value_array` of non-negative integers (the subgroup partition
+/// sizes) off the claim. Accepts `Value::Integer`/`Value::Float` (whole)
+/// elements; rejects negatives / non-integral / non-array values.
+fn read_usize_array(
+    claim: &Resource,
+    prop_iri: &str,
+) -> Result<Option<Vec<usize>>, InstitutionError> {
+    let iri = Iri::parse(prop_iri).expect("static IRI");
+    let arr = match claim.get(&iri) {
+        Some(Value::Array(a)) => a,
+        Some(other) => {
+            return Err(InstitutionError::ComputationFailed(format!(
+                "NestedAnovaAnalysisPlan `{prop_iri}` is not an array: {other:?}"
+            )))
+        }
+        None => return Ok(None),
+    };
+    let mut out = Vec::with_capacity(arr.len());
+    for v in arr {
+        let n = match v {
+            Value::Integer(i) if *i >= 0 => *i as usize,
+            Value::Float(f) if *f >= 0.0 && f.fract() == 0.0 => *f as usize,
+            other => {
+                return Err(InstitutionError::ComputationFailed(format!(
+                    "NestedAnovaAnalysisPlan `{prop_iri}` element is not a non-negative integer: {other:?}"
+                )))
+            }
+        };
+        out.push(n);
+    }
+    Ok(Some(out))
+}
+
+/// Partition a flat value vector into subgroups of the given sizes. Errors if
+/// the sizes don't sum to the vector length (the SampleSet arm and the
+/// declared subgroup partition disagree).
+fn partition_by_sizes(flat: &[f64], sizes: &[usize]) -> Result<Vec<Vec<f64>>, String> {
+    let total: usize = sizes.iter().sum();
+    if total != flat.len() {
+        return Err(format!(
+            "sizes sum to {total} but the SampleSet group has {} values",
+            flat.len()
+        ));
+    }
+    let mut out = Vec::with_capacity(sizes.len());
+    let mut off = 0;
+    for &s in sizes {
+        out.push(flat[off..off + s].to_vec());
+        off += s;
+    }
+    Ok(out)
 }
 
 // ────────────────────────────────────────────────────────────────────

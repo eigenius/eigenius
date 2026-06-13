@@ -35,6 +35,7 @@ import hashlib
 import os
 import re
 import sys
+import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SLICES = os.path.join(HERE, "..", "data", "slices")
@@ -49,6 +50,12 @@ SHA256 = {
         "2186669de8ade17bfbf7f2bc3e67e8af59d644800bf793ef103c67a4692eb68b",
     "achilles_18Q4_sample_info.csv":
         "c5778e66e6c62c94386a39924be50f24086d5f0d5401117b065c3e6d7fbdb498",
+    "wrn_sourcedata_EDFig3_MOESM6.xlsx":
+        "506d7ac0f2517cb6b1e7277dfb175675044ab4b6fbc4a628f8c9ad843ba41fd6",
+    "wrn_sourcedata_EDFig4_MOESM7.xlsx":
+        "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549",
+    "wrn_sourcedata_EDFig10_MOESM12.xlsx":
+        "3fc08ebadbc282ac7bdb4f87d73e704e79e216b611e5357302d17e4e32cdb33c",
 }
 
 
@@ -182,12 +189,134 @@ def extract_p53_dep():
     return {"kind": "IID", "group_a": grp("TP53_proficient"), "group_b": grp("TP53_null")}
 
 
+# ── Recipe 5: viab_{KM12,OVK18}_sampleset (IID nested, C-VAL competition assay) ─
+#   slice  : wrn_sourcedata_EDFig3_MOESM6.xlsx (Nature Source Data, ED Fig 3b)
+#   sheet  : "ED Fig 3b" → "Relative ratio" block, Day 10 (Firefly:Renilla /
+#            mean-of-negatives, 6 reps per guide)
+#   group A: sgWRN1,sgWRN2,sgWRN3 (flat by guide); group B: sgCh2-2,sgCh2-4
+#   (pan-essential controls sgPolR2D/sgMYC excluded — "sgWRNs vs neg controls")
+def _read_xlsx_cells(fname, sheet=1):
+    """Minimal xlsx reader → sheet `sheet` rows as {col_idx: value}. Stdlib only."""
+    import xml.etree.ElementTree as ET
+
+    path = _verify_sha256(fname)
+    z = zipfile.ZipFile(path)
+    ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    sst = []
+    if "xl/sharedStrings.xml" in z.namelist():
+        sst = [(n.text or "") for n in ET.fromstring(z.read("xl/sharedStrings.xml")).iter(f"{{{ns}}}t")]
+
+    def colnum(ref):
+        m = re.match(r"([A-Z]+)", ref)
+        s = 0
+        for ch in m.group(1):
+            s = s * 26 + (ord(ch) - 64)
+        return s - 1
+
+    rows = []
+    for row in ET.fromstring(z.read(f"xl/worksheets/sheet{sheet}.xml")).iter(f"{{{ns}}}row"):
+        cur = {}
+        for c in row.findall(f"{{{ns}}}c"):
+            v = c.find(f"{{{ns}}}v")
+            if v is None:
+                continue
+            cur[colnum(c.get("r"))] = sst[int(v.text)] if c.get("t") == "s" else v.text
+        rows.append(cur)
+    return rows
+
+
+# ── Recipe 6: cc_{KM12,SW48,OVK18}_sampleset (cell-cycle %S, ED Fig 4b) ──
+#   slice  : wrn_sourcedata_EDFig4_MOESM7.xlsx, sheet "ED Fig 4b" (sheet1)
+#   layout : 6-row cell-line blocks (block b at rows 6b..6b+5; values 6b+3..+5).
+#            S-phase columns per guide: sgCh2-2 c3, sgWRN2 c6, sgWRN3 c9.
+#   block  : KM12 b=2, SW48 b=3, OVK18 b=5.
+#   group A: sgWRN2,sgWRN3 (3 reps each, flat by guide); group B: sgCh2-2 (3)
+# ── Recipe 7: apop_{KM12,SW48,OVK18}_sampleset (total apoptosis, ED Fig 4c) ─
+#   slice  : same file, sheet "ED Fig 4c" (sheet2)
+#   layout : same 6-row blocks; total-apoptosis columns: sgCh2-2 c4, sgWRN2 c8,
+#            sgWRN3 c12.  group A: sgCh2-2 (3); group B: sgWRN2,sgWRN3 (3 each)
+#            (control first — WRN loss RAISES apoptosis, so mean_a < mean_b).
+def _ed4_block_vals(rows, block, col):
+    base = block * 6
+    return [round(float(rows[base + 3 + r][col]), 6) for r in range(3)]
+
+
+def _extract_cc(block):
+    rows = _read_xlsx_cells("wrn_sourcedata_EDFig4_MOESM7.xlsx", sheet=1)
+    wrn = _ed4_block_vals(rows, block, 6) + _ed4_block_vals(rows, block, 9)  # sgWRN2, sgWRN3
+    ctl = _ed4_block_vals(rows, block, 3)  # sgCh2-2
+    return {"kind": "IID", "group_a": wrn, "group_b": ctl}
+
+
+def _extract_apop(block):
+    rows = _read_xlsx_cells("wrn_sourcedata_EDFig4_MOESM7.xlsx", sheet=2)
+    ctl = _ed4_block_vals(rows, block, 4)  # sgCh2-2 (control first)
+    wrn = _ed4_block_vals(rows, block, 8) + _ed4_block_vals(rows, block, 12)  # sgWRN2, sgWRN3
+    return {"kind": "IID", "group_a": ctl, "group_b": wrn}
+
+
+# ── Recipe 8: mmr_{rescue,resens1,resens2}_sampleset (ED Fig 10c, n=6) ────
+#   slice  : wrn_sourcedata_EDFig10_MOESM12.xlsx, sheet "ED Fig 10c" (sheet2)
+#   readout: relative viability (NORMALIZED rows), shWRN1 (c5) + shWRN2 (c6),
+#            6 reps each — the bars the figure's ∗†‡§ symbols mark.
+#   blocks : four HCT116 derivatives, each a 16-row block (6 raw, mean,
+#            mean-norm, 6 norm) — the normalized per-replicate rows are:
+#            ∗ Ch2            rows 10-15 (0-indexed); † Ch3+5+sgCh2-2  rows 26-31
+#            ‡ Ch3+5+sgMLH1-1 rows 43-48;             § Ch3+5+sgMLH1-2 rows 59-64
+#   model  : crossed `lm(value ~ CL + guide)`; group_a = the lower-viability
+#            (MMR-deficient / re-deficient) arm, group_b = the rescued arm.
+_ED10C_NORM_ROWS = {
+    "star": range(11, 17),  # ∗ HCT116 Ch2
+    "dag": range(27, 33),  # † HCT116 Ch3+5+sgCh2-2
+    "ddag": range(44, 50),  # ‡ HCT116 Ch3+5+sgMLH1-1
+    "sect": range(60, 66),  # § HCT116 Ch3+5+sgMLH1-2
+}
+
+
+def _ed10c_block(key):
+    rows = _read_xlsx_cells("wrn_sourcedata_EDFig10_MOESM12.xlsx", sheet=2)
+    rr = _ED10C_NORM_ROWS[key]
+    w1 = [round(float(rows[ri][5]), 6) for ri in rr]  # shWRN1
+    w2 = [round(float(rows[ri][6]), 6) for ri in rr]  # shWRN2
+    return w1 + w2
+
+
+def _extract_mmr(group_a_key, group_b_key):
+    return {"kind": "IID", "group_a": _ed10c_block(group_a_key), "group_b": _ed10c_block(group_b_key)}
+
+
+def _extract_viab(first_guide_col):
+    # ED Fig 3b cell-line blocks: ES2 first-guide col 2, OVK18 11, SW620 20,
+    # KM12 29. Day-10 "Relative ratio" Value 1-6 are rows 92..97. Guide order:
+    # sgCh2-2,sgCh2-4,sgPolR2D,sgMYC,sgWRN1,sgWRN2,sgWRN3 (offsets 0..6).
+    rows = _read_xlsx_cells("wrn_sourcedata_EDFig3_MOESM6.xlsx")
+
+    def vals(offset):
+        col = first_guide_col + offset
+        return [round(float(rows[ri][col]), 6) for ri in range(92, 98) if rows[ri].get(col) not in (None, "")]
+
+    wrn = vals(4) + vals(5) + vals(6)  # sgWRN1,2,3
+    ctl = vals(0) + vals(1)  # sgCh2-2, sgCh2-4
+    return {"kind": "IID", "group_a": wrn, "group_b": ctl}
+
+
 # resource name in the ESL → recipe
 RECIPES = {
     "wrn:wrn_dep_sampleset": extract_wrn_dep,
     "wrn:wrn_corr_sampleset": extract_wrn_corr,
     "wrn:wrn_recq_sampleset": extract_wrn_recq,
     "wrn:p53_dep_sampleset": extract_p53_dep,
+    "wrn:viab_KM12_sampleset": lambda: _extract_viab(29),
+    "wrn:viab_OVK18_sampleset": lambda: _extract_viab(11),
+    "wrn:cc_KM12_sampleset": lambda: _extract_cc(2),
+    "wrn:cc_SW48_sampleset": lambda: _extract_cc(3),
+    "wrn:cc_OVK18_sampleset": lambda: _extract_cc(5),
+    "wrn:apop_KM12_sampleset": lambda: _extract_apop(2),
+    "wrn:apop_SW48_sampleset": lambda: _extract_apop(3),
+    "wrn:apop_OVK18_sampleset": lambda: _extract_apop(5),
+    "wrn:mmr_rescue_sampleset": lambda: _extract_mmr("star", "dag"),
+    "wrn:mmr_resens1_sampleset": lambda: _extract_mmr("ddag", "dag"),
+    "wrn:mmr_resens2_sampleset": lambda: _extract_mmr("sect", "dag"),
 }
 
 

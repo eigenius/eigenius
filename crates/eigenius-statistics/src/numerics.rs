@@ -510,6 +510,212 @@ pub struct ClassificationMetrics {
     pub n_condition_positive: usize,
 }
 
+/// Two-level nested fixed-effects ANOVA — the authors' `lm(value ~ group +
+/// subgroup)` model (D52 §2.2 wet-lab designs; e.g. WRN ED Fig 3b/4/10
+/// `value ~ is_WRN + guide`). `group_a` / `group_b` are the two groups'
+/// subgroup partitions: each a slice of subgroup value-vectors (e.g.
+/// `group_a` = the WRN guides' replicate vectors, `group_b` = the control
+/// guides'). The **group main effect** (1 df, the binary treatment) is tested
+/// against the **within-subgroup residual**, treating subgroups (guides) as a
+/// fixed nuisance — exactly the Type-I `anova(lm(...))` on the group term when
+/// group is a coarsening of subgroup (guide nested in is_WRN). Reported p is
+/// two-sided (the standard two-way-ANOVA F p the paper reports); the caller
+/// applies one-sided halving + directionality from `mean_a` vs `mean_b`.
+pub fn nested_group_anova(group_a: &[Vec<f64>], group_b: &[Vec<f64>]) -> Option<NestedAnovaResult> {
+    let sum_n = |g: &[Vec<f64>]| g.iter().map(|s| s.len()).sum::<usize>();
+    let n_a = sum_n(group_a);
+    let n_b = sum_n(group_b);
+    let n = n_a + n_b;
+    let n_subgroups = group_a.len() + group_b.len();
+    // Need at least one within-subgroup residual df and both groups non-empty.
+    if n_a == 0 || n_b == 0 || n <= n_subgroups {
+        return None;
+    }
+    let sum_g = |g: &[Vec<f64>]| g.iter().flatten().sum::<f64>();
+    let grand = (sum_g(group_a) + sum_g(group_b)) / n as f64;
+    let mean_a = sum_g(group_a) / n_a as f64;
+    let mean_b = sum_g(group_b) / n_b as f64;
+    // SS for the 2-level group factor (df = 1).
+    let ss_group = n_a as f64 * (mean_a - grand).powi(2) + n_b as f64 * (mean_b - grand).powi(2);
+    // Within-subgroup residual: Σ_subgroup Σ_i (v - subgroup_mean)² — computed
+    // directly (not by SS_total − SS_subgroup) to avoid cancellation when
+    // subgroup baselines dominate (mirrors rcbd_anova's ss_error).
+    let ss_resid: f64 = group_a
+        .iter()
+        .chain(group_b.iter())
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let m = s.iter().sum::<f64>() / s.len() as f64;
+            s.iter().map(|v| (v - m).powi(2)).sum::<f64>()
+        })
+        .sum();
+    let df_group = 1.0_f64;
+    let df_resid = (n - n_subgroups) as f64;
+    let ms_resid = ss_resid / df_resid;
+    let f_group = if ms_resid == 0.0 {
+        if ss_group == 0.0 {
+            0.0
+        } else {
+            f64::INFINITY
+        }
+    } else {
+        (ss_group / df_group) / ms_resid
+    };
+    let dist = FisherSnedecor::new(df_group, df_resid).ok()?;
+    // Upper-tail survival function directly (not `1 - cdf`, which underflows to
+    // 0 for extreme F — e.g. ED Fig 3b KM12 F ⇒ p ≈ 2.7e-19).
+    let p_two_sided = if f_group.is_finite() {
+        dist.sf(f_group)
+    } else if f_group.is_nan() {
+        f64::NAN
+    } else {
+        0.0
+    };
+    Some(NestedAnovaResult {
+        f_group,
+        p_two_sided,
+        df_group,
+        df_resid,
+        mean_a,
+        mean_b,
+        n_a,
+        n_b,
+        n_subgroups,
+    })
+}
+
+/// Numeric output of [`nested_group_anova`]: the group main-effect F-test
+/// against the within-subgroup residual, plus the two group means (for
+/// directionality) and the design counts for audit.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NestedAnovaResult {
+    pub f_group: f64,
+    pub p_two_sided: f64,
+    pub df_group: f64,
+    pub df_resid: f64,
+    pub mean_a: f64,
+    pub mean_b: f64,
+    pub n_a: usize,
+    pub n_b: usize,
+    pub n_subgroups: usize,
+}
+
+/// Two-level **crossed** additive two-way ANOVA — the authors' `lm(value ~
+/// group + block)` model where `block` is **crossed** (the same block levels
+/// appear in *both* groups), as opposed to [`nested_group_anova`] where the
+/// block (subgroup) is nested in the group. The motivating case is WRN ED
+/// Fig 10c MMR-restoration: `group` = the 2-level MMR-context (HCT116 Ch2 vs
+/// Ch3+5 derivative), `block` = the shRNA guide (shWRN1, shWRN2) shared across
+/// both contexts. `group_a[i]` and `group_b[i]` are the **same block level**
+/// `i`'s replicate vectors in group A and group B respectively (so the two
+/// slices must have equal length = the number of shared block levels).
+///
+/// The **group main effect** (1 df) is tested against the **additive-model
+/// residual** (`df = N − #group_levels − #block_levels + 1 = N − G − 1`),
+/// which pools any group×block interaction — exactly R's
+/// `anova(lm(value ~ group + block))` group term for a balanced crossed design.
+/// The residual is computed from the additive fit `ŷ = group_mean + block_mean
+/// − grand` (for balanced data this equals `SST − SS_group − SS_block`, but the
+/// direct form avoids cancellation). Reported p is two-sided; the caller
+/// applies one-sided halving + the `mean_a` vs `mean_b` directionality.
+pub fn crossed_two_way_anova(
+    group_a: &[Vec<f64>],
+    group_b: &[Vec<f64>],
+) -> Option<CrossedAnovaResult> {
+    // Crossed ⇒ both groups carry the same block levels, index-aligned.
+    if group_a.len() != group_b.len() || group_a.is_empty() {
+        return None;
+    }
+    let n_blocks = group_a.len();
+    let sum_n = |g: &[Vec<f64>]| g.iter().map(|s| s.len()).sum::<usize>();
+    let n_a = sum_n(group_a);
+    let n_b = sum_n(group_b);
+    let n = n_a + n_b;
+    let df_resid_usize = n.checked_sub(n_blocks + 1);
+    // Need both groups non-empty and at least one residual df (N > G + 1).
+    match df_resid_usize {
+        Some(d) if d >= 1 && n_a > 0 && n_b > 0 => {}
+        _ => return None,
+    }
+    let sum_g = |g: &[Vec<f64>]| g.iter().flatten().sum::<f64>();
+    let grand = (sum_g(group_a) + sum_g(group_b)) / n as f64;
+    let mean_a = sum_g(group_a) / n_a as f64;
+    let mean_b = sum_g(group_b) / n_b as f64;
+    // SS for the 2-level group factor (df = 1).
+    let ss_group = n_a as f64 * (mean_a - grand).powi(2) + n_b as f64 * (mean_b - grand).powi(2);
+    // Block means pooled across both groups (the crossed block factor).
+    let mut block_means = Vec::with_capacity(n_blocks);
+    for i in 0..n_blocks {
+        let ni = group_a[i].len() + group_b[i].len();
+        if ni == 0 {
+            // A block level absent from both groups carries no information and
+            // breaks the crossed design's df accounting.
+            return None;
+        }
+        let mi = (group_a[i].iter().sum::<f64>() + group_b[i].iter().sum::<f64>()) / ni as f64;
+        block_means.push(mi);
+    }
+    // Additive-model residual: Σ (v − (group_mean + block_mean − grand))².
+    let mut ss_resid = 0.0;
+    for (group_mean, grp) in [(mean_a, group_a), (mean_b, group_b)] {
+        for (i, s) in grp.iter().enumerate() {
+            let fitted = group_mean + block_means[i] - grand;
+            for &v in s {
+                ss_resid += (v - fitted).powi(2);
+            }
+        }
+    }
+    let df_group = 1.0_f64;
+    let df_resid = (n - n_blocks - 1) as f64;
+    let ms_resid = ss_resid / df_resid;
+    let f_group = if ms_resid == 0.0 {
+        if ss_group == 0.0 {
+            0.0
+        } else {
+            f64::INFINITY
+        }
+    } else {
+        (ss_group / df_group) / ms_resid
+    };
+    let dist = FisherSnedecor::new(df_group, df_resid).ok()?;
+    // Upper-tail survival function directly (not `1 - cdf`, which underflows to
+    // 0 for the extreme F seen here — e.g. ED10c F = 1187 ⇒ p ≈ 5.7e-20).
+    let p_two_sided = if f_group.is_finite() {
+        dist.sf(f_group)
+    } else if f_group.is_nan() {
+        f64::NAN
+    } else {
+        0.0
+    };
+    Some(CrossedAnovaResult {
+        f_group,
+        p_two_sided,
+        df_group,
+        df_resid,
+        mean_a,
+        mean_b,
+        n_a,
+        n_b,
+        n_blocks,
+    })
+}
+
+/// Numeric output of [`crossed_two_way_anova`]: the group main-effect F-test
+/// against the additive-model residual, plus the two group means (for
+/// directionality) and the design counts for audit.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CrossedAnovaResult {
+    pub f_group: f64,
+    pub p_two_sided: f64,
+    pub df_group: f64,
+    pub df_resid: f64,
+    pub mean_a: f64,
+    pub mean_b: f64,
+    pub n_a: usize,
+    pub n_b: usize,
+    pub n_blocks: usize,
+}
+
 #[cfg(test)]
 mod spearman_wrn_tests {
     use super::*;
@@ -2054,6 +2260,60 @@ mod tests {
         let m2 = classification_metrics(&a, &b2, 0.0);
         assert_eq!((m2.tp, m2.fn_, m2.n_condition_positive), (3, 1, 4));
         assert!((m2.sensitivity - 0.75).abs() < 1e-12);
+    }
+
+    #[test]
+    fn nested_group_anova_group_effect() {
+        // 2 subgroups per group, 3 reps each → N=12, n_subgroups=4,
+        // df_resid = 12 - 4 = 8, df_group = 1. group_a far below group_b.
+        let group_a = [vec![1.0, 2.0, 1.0], vec![2.0, 1.0, 2.0]];
+        let group_b = [vec![10.0, 11.0, 10.0], vec![11.0, 10.0, 11.0]];
+        let r = nested_group_anova(&group_a, &group_b).expect("valid design");
+        assert_eq!((r.df_group, r.df_resid), (1.0, 8.0));
+        assert_eq!((r.n_a, r.n_b, r.n_subgroups), (6, 6, 4));
+        assert!((r.mean_a - 1.5).abs() < 1e-9 && (r.mean_b - 10.5).abs() < 1e-9);
+        assert!(r.mean_a < r.mean_b); // directional: group A below group B
+        assert!(r.f_group > 100.0 && r.p_two_sided < 1e-6);
+        // Degenerate guards: empty group / no residual df → None.
+        assert!(nested_group_anova(&[], &group_b).is_none());
+        assert!(nested_group_anova(&[vec![1.0]], &[vec![2.0]]).is_none()); // N=2=n_subgroups
+    }
+
+    #[test]
+    fn crossed_two_way_anova_reproduces_wrn_ed10c_rescue() {
+        // WRN ED Fig 10c MMR-restoration rescue (∗ vs †): HCT116 Ch2 vs
+        // Ch3+5+sgCh2-2, relative viability, shWRN1 + shWRN2 (each 6 reps),
+        // crossed `lm(value ~ CL + guide)`. The paper's two-way-ANOVA
+        // P = 5.7e-20; R gives F(1,21) = 1187.5. group_a = Ch2 (the
+        // MMR-deficient, lower-viability arm), group_b = Ch3+5 (rescued).
+        // group_a[i] / group_b[i] are the SAME guide i in the two contexts.
+        let group_a = [
+            vec![0.126426, 0.141483, 0.105401, 0.128076, 0.162610, 0.133238], // Ch2 shWRN1
+            vec![0.304141, 0.167127, 0.174655, 0.263488, 0.240903, 0.230364], // Ch2 shWRN2
+        ];
+        let group_b = [
+            vec![0.705713, 0.711474, 0.665386, 0.714354, 0.650984, 0.705713], // Ch3+5 shWRN1
+            vec![0.699952, 0.731637, 0.780605, 0.688430, 0.746039, 0.763322], // Ch3+5 shWRN2
+        ];
+        let r = crossed_two_way_anova(&group_a, &group_b).expect("valid crossed design");
+        // N = 24, G = 2 blocks → df_resid = N − G − 1 = 21, df_group = 1.
+        assert_eq!((r.df_group, r.df_resid), (1.0, 21.0));
+        assert_eq!((r.n_a, r.n_b, r.n_blocks), (12, 12, 2));
+        assert!(r.mean_a < r.mean_b); // directional: Ch2 viability below Ch3+5 (rescue)
+                                      // F(1,21) = 1187.5, P = 5.74e-20 (reproduces the paper's 5.7e-20).
+        assert!((r.f_group - 1187.5).abs() < 0.5, "F = {}", r.f_group);
+        assert!(
+            r.p_two_sided > 4.0e-20 && r.p_two_sided < 7.0e-20,
+            "p = {:e}",
+            r.p_two_sided
+        );
+        // Crossed ≠ nested: the residual pools the group×block interaction
+        // (df_resid = 21), unlike nested's within-cell residual (df = 20).
+        let nested = nested_group_anova(&group_a, &group_b).expect("also a valid nested input");
+        assert_eq!(nested.df_resid, 20.0);
+        // Degenerate guards: mismatched block counts / no residual df → None.
+        assert!(crossed_two_way_anova(&group_a, &group_b[..1]).is_none());
+        assert!(crossed_two_way_anova(&[vec![1.0]], &[vec![2.0]]).is_none()); // N=2, G=1 → df_resid 0
     }
 
     /// Reference values from R: `t.test(c(72, 85, 100), mu = 100)`.

@@ -782,6 +782,65 @@ property stats:min_sensitivity : core:float {
     domain stats:ClassificationAnalysisPlan;
 }
 
+// §2.2 — nested fixed-effects two-way ANOVA (`value ~ group + subgroup`).
+//
+// A standalone plan for the recurring wet-lab design where a binary treatment
+// (group, e.g. is_WRN) is applied via several reagents (subgroup, e.g. guide),
+// each with replicates — and the group effect is tested against the
+// within-subgroup (replicate) residual, treating subgroup as a fixed nuisance.
+// This is the authors' `lm(value ~ is_WRN + guide)` model (WRN ED Fig 3b/4/10).
+// Reuses the two-group `stats:IID(group_a, group_b, …)` SampleSet (group A =
+// the treatment arm, group B = the control arm), each arm a flat array grouped
+// by subgroup; the plan's subgroup_sizes_{a,b} partition each. The institution
+// emits one StatisticalAnalysisResult carrying `stats:lt(stats:mean_diff_of(s), 0)`
+// (group A mean strictly below group B) on a directional Holds — the same
+// proposition shape as the two-sample dispatch, so the same bridges consume it.
+
+class stats:NestedAnovaAnalysisPlan {
+    description = "A nested fixed-effects two-way ANOVA plan (D52 §2.2): `value ~ group + subgroup`, the binary group main effect tested against the within-subgroup residual (subgroup a fixed nuisance nested in group). Models the recurring functional-genomics design of a treatment applied via several reagents (guides/shRNAs) with replicates — the authors' `lm(value ~ is_WRN + guide)`. Reuses the two-group stats:IID SampleSet (group A = treatment arm, group B = control arm, each flat and grouped by subgroup); subgroup_sizes_a/b give the within-arm subgroup partition. Emits `stats:lt(stats:mean_diff_of(s), 0)` (group A below group B) on a directional Holds (p < alpha and the asserted direction), reusing the two-sample canonical proposition. Reported F-test p is two-sided; OneSidedWitnessed halves it (the 1-df group F is t²).";
+    requires stats:sample_set,
+             stats:alpha,
+             stats:directionality,
+             stats:subgroup_sizes_a,
+             stats:subgroup_sizes_b;
+}
+
+property stats:subgroup_sizes_a : core:value_array {
+    description = "Within-group-A subgroup partition: the per-subgroup observation counts (e.g. replicates per WRN guide), in the order group A's flat IID arm is laid out. Must sum to group A's length.";
+    element_type = core:integer;
+    domain stats:NestedAnovaAnalysisPlan;
+}
+
+property stats:subgroup_sizes_b : core:value_array {
+    description = "Within-group-B subgroup partition (per-subgroup observation counts for the control arm), summing to group B's length.";
+    element_type = core:integer;
+    domain stats:NestedAnovaAnalysisPlan;
+}
+
+// ── CrossedAnovaAnalysisPlan (D52 §2.2 — value ~ group + block, block crossed) ─
+// The CROSSED sibling of NestedAnovaAnalysisPlan: a two-way additive ANOVA
+// where the block factor (e.g. shRNA guide) is shared across both groups,
+// rather than nested within a group. The binary group main effect (1 df) is
+// tested against the additive-model residual (df = N − #group − #block + 1,
+// which pools any group×block interaction) — exactly R's
+// `anova(lm(value ~ group + block))` group term for a balanced crossed design.
+// Motivating case: WRN ED Fig 10c MMR-restoration, `lm(value ~ CL + guide)`
+// where CL = the 2-level MMR-context (HCT116 Ch2 vs a Ch3+5 derivative) and
+// guide = the shWRN hairpins (shWRN1, shWRN2) shared across both contexts.
+// Reuses the two-group `stats:IID` SampleSet (group A / group B) and the same
+// subgroup_sizes_a/b partition properties, here paired by index (block i in
+// group A ↔ block i in group B). Emits the same `stats:lt(stats:mean_diff_of(s), 0)`
+// proposition (group A mean below group B) so existing bridges consume it.
+
+class stats:CrossedAnovaAnalysisPlan {
+    description = "A crossed additive two-way ANOVA plan (D52 §2.2): `value ~ group + block`, the binary group main effect tested against the additive-model residual, with `block` CROSSED (the same block levels appear in both groups) rather than nested. Distinct from NestedAnovaAnalysisPlan only in the block↔group relationship and hence the residual df (N − #group − #block + 1, pooling the group×block interaction). Models the recurring design of a 2-level context contrast measured under several shared reagents with replicates — the authors' `lm(value ~ CL + guide)` (WRN ED Fig 10c MMR-restoration). Reuses the two-group stats:IID SampleSet (group A / group B) and the subgroup_sizes_a/b partition (here paired by index across the two groups, so they must declare the same block count). Emits `stats:lt(stats:mean_diff_of(s), 0)` (group A below group B) on a directional Holds, reusing the two-sample canonical proposition. Reported F-test p is two-sided; OneSidedWitnessed halves it (the 1-df group F is t²).";
+    requires stats:sample_set,
+             stats:alpha,
+             stats:directionality,
+             stats:subgroup_sizes_a,
+             stats:subgroup_sizes_b;
+}
+
 property stats:sample_set : core:string {
     description = "IRI of the SampleSet ObservedResource holding the raw replicates this claim is computed against. Required for recomputation.";
     format = formats:iri;
@@ -983,6 +1042,24 @@ resource stats:qc_validate_method_comparison_claim : institution:QueryClass {
 resource stats:qc_validate_classification_claim : institution:QueryClass {
     core:description = "AutoOnLoad gate on every ClassificationAnalysisPlan commit (D52 §2.2). Dispatches the same validate_analysis_plan handler, which detects the ClassificationAnalysisPlan is_a marker and routes to the threshold-classifier PPV/sensitivity emitter (two StatisticalAnalysisResults: :result:ppv and :result:sensitivity) instead of a hypothesis test.";
     institution:query_class = stats:ClassificationAnalysisPlan;
+    institution:result_class = institution:Verdict;
+    institution:dispatch_role = [dispatch:auto_on_load];
+    institution:query_handler = proc:validate_analysis_plan;
+    institution:institution_ref = stats:statistics_institution;
+}
+
+resource stats:qc_validate_nested_anova_claim : institution:QueryClass {
+    core:description = "AutoOnLoad gate on every NestedAnovaAnalysisPlan commit (D52 §2.2). Dispatches the same validate_analysis_plan handler, which detects the NestedAnovaAnalysisPlan is_a marker and routes to the nested two-way-ANOVA emitter (value ~ group + subgroup; group effect vs within-subgroup residual) instead of a crossed factorial / hypothesis test.";
+    institution:query_class = stats:NestedAnovaAnalysisPlan;
+    institution:result_class = institution:Verdict;
+    institution:dispatch_role = [dispatch:auto_on_load];
+    institution:query_handler = proc:validate_analysis_plan;
+    institution:institution_ref = stats:statistics_institution;
+}
+
+resource stats:qc_validate_crossed_anova_claim : institution:QueryClass {
+    core:description = "AutoOnLoad gate on every CrossedAnovaAnalysisPlan commit (D52 §2.2). Dispatches the same validate_analysis_plan handler, which detects the CrossedAnovaAnalysisPlan is_a marker and routes to the crossed two-way-ANOVA emitter (value ~ group + block, block crossed; group effect vs the additive-model residual) instead of the nested emitter or a hypothesis test.";
+    institution:query_class = stats:CrossedAnovaAnalysisPlan;
     institution:result_class = institution:Verdict;
     institution:dispatch_role = [dispatch:auto_on_load];
     institution:query_handler = proc:validate_analysis_plan;

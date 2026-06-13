@@ -9,6 +9,99 @@ a divergence is a recorded finding, not a silent pass.
 |---|---|---|---|---|
 | F1 | Spearman WRN-dep ~ #MS-deletions, all MSI: rho = −0.74, **n = 54** | rho = **−0.74** (matches), **n = 51** | B (effect) ✓ / **A (count) ✗** | **Discrepancy — benign** |
 | F2 | Biomarker (common-MSI lineages): PPV = 0.73 (27/37), sensitivity = 1.00 (27/27) | PPV = **0.73 (27/37)**, sensitivity = **1.00 (27/27)** | A ✓ | **Confirms paper — provenance gotcha noted** |
+| F3 | ED Fig 10c MMR-restoration (C-MMR): two-way ANOVA P = 5.7e-20 / 3.3e-12 / 1.6e-16 | **5.74e-20 / 3.26e-12 / 1.56e-16** (exact, from public MOESM12) | A ✓ | **Reproduces paper exactly** |
+
+## F3 — ED Fig 10c MMR-restoration: model identified from authors' code, reproduced exactly from public data
+
+**Where:** `data/WRN_manuscript/src/WRN_stats_calcs.Rmd:228-323` (the authors' own analysis code,
+vendored). The C-MMR MMR-restoration viability contrasts (ED Fig 10c — the Ch2-vs-Ch3+5 rescue
+and the two sgMLH1-KO re-sensitization controls) are each a **crossed additive two-way ANOVA**
+`lm(value ~ CL + guide)` over a *pair* of conditions, testing the `CL` (MMR-context) main effect
+controlling for `guide`. This is the **same formula family** as C-VAL's `value ~ is_WRN + guide`
+— *not* the pooled interaction-contrast model first assumed. The distinction from the nested
+dispatch (increment 8): here `guide` is **crossed** (the same shRNAs appear in both `CL` levels),
+so the residual is `N − #CL − #guide + 1` with any CL×guide interaction pooled into it — a
+different SS decomposition than the nested `N − n_subgroups`.
+
+**The exact recipe (reproduces the paper to 2 s.f.).** Source: `wrn_sourcedata_EDFig10_MOESM12.xlsx`,
+sheet **"ED Fig 10c"** (relative viability, **n = 6 biological replicates**) — four HCT116
+derivative blocks: Ch2 (∗), Ch3+5+sgCh2-2 (†), Ch3+5+sgMLH1-1 (‡), Ch3+5+sgMLH1-2 (§), each with
+guides {shRFP, shPSMD2, shRPL6, shWRN1, shWRN2} × 6 reps. Use the **normalized** (relative-viability)
+values, filter to the **shWRN guides** (shWRN1+shWRN2 — the bars the ∗†‡§ symbols mark), and run
+`lm(value ~ CL + guide)` on each pair, testing the CL main effect:
+
+| Contrast | Conditions | Paper P | Recomputed |
+|---|---|---|---|
+| ∗ vs † | Ch2 → Ch3+5 (restore MMR) | 5.7e-20 | **5.74e-20** |
+| † vs ‡ | Ch3+5 → +sgMLH1-1 (re-sensitize) | 3.3e-12 | **3.26e-12** |
+| † vs § | Ch3+5 → +sgMLH1-2 (re-sensitize) | 1.6e-16 | **1.56e-16** |
+
+**Correction of an earlier mis-call.** A first pass reported this as "blocked — public data ≠
+analysis data," for two wrong reasons: (1) it analyzed the wrong sheet — "ED Fig 10f" (n = 3, a
+secondary clonogenic-adjacent panel with duplicate-fill replicates like Ch2/shWRN1 = `0.10, 9.19,
+9.19`), not the n = 6 viability sheet "ED Fig 10c" that backs the reported p-values; (2) it tested
+the CL main effect over **all** guides (≈7e-5), diluting the shWRN-specific rescue with the
+shRFP/pan-essential bars. With the right sheet + shWRN-only contrast the public data reproduces
+the paper exactly. The non-public `reformattedforstats.xlsx` is merely a relabeled concatenation
+of these same published display numbers — not a different (cleaner) dataset.
+
+**Status — LIFTED (increment 10).** C-MMR's `mmr_restoration` is now **kernel-recomputed**. A new
+`stats:CrossedAnovaAnalysisPlan` dispatch (`numerics::crossed_two_way_anova`, group = 2-level
+CL/MMR-context, crossed blocking factor = guide; distinct from the increment-8 nested dispatch)
+recomputes the three contrasts; `wrn-phase1-recompute.esl` carries the three Tier-1-pinned
+SampleSets + plans + `bridge_mmr_restoration` → `concl_mmr_restoration_recomputed`
+(`RestorationPartiallyRescues(dMMR, WRN)`). The linked-external `wrn:mmr_restoration` ToolArtifact
+is retired; `concl_mmr` (phase 5) discharges its antecedent by D54 lemma citation. The unit test
+`crossed_two_way_anova_reproduces_wrn_ed10c_rescue` pins F(1,21)=1187.5 / P=5.74e-20.
+
+### F3 — the data-mapping difficulty (why this took several wrong turns)
+
+This was, by a wide margin, the **hardest mapping** in the whole encoding — not because the
+statistics were exotic (it is an ordinary two-way ANOVA) but because *nothing about the published
+artifacts told us how to wire it*, and several plausible-but-wrong wirings each produced a
+confident, wrong number. Recorded here because future wet-lab recomputes will hit the same wall,
+and because "the p-value reproduced" hides how much detective work the binding actually took.
+
+The obstacle chain, in the order it bit:
+1. **Display data ≠ analysis data, with no signpost.** The authors' code reads a non-public
+   `NatureDataSpreadsheet_..._reformattedforstats.xlsx`; what Nature hosts is the per-figure
+   *display* Source Data (MOESM12). Whether the two even contain the same numbers was unknowable
+   up front — it took reproducing the result to confirm the reformatted file is just a relabeled
+   concatenation, not a cleaned superset. The first conclusion ("blocked — data not public") was
+   wrong, but *defensibly* wrong given the evidence then in hand.
+2. **Panel-letter drift between analysis and publication.** The authors' code analyzes sheets it
+   labels ED10a / **ED10b** / **ED10e**; the published figure + MOESM12 sheets are labeled ED10a /
+   **ED10c** / ED10f. The reported viability p-values live in published **10c** (= the code's
+   "10b"), while the sheet literally named "ED Fig 10f" is a *different*, n=3 panel. Matching by
+   panel letter sends you to the wrong sheet.
+3. **A decoy sheet that looks right.** "ED Fig 10f" (n=3) has the same Ch2/Ch3+5 structure and
+   superficially fits, but its replicates are corrupted (duplicate-fill artifacts like
+   `0.10, 9.19, 9.19`) and it is *not* what the reported p-values come from. It produces garbage
+   p-values (0.80 / 0.082 / 0.011) under the correct model — which reads as "the model is wrong"
+   rather than "the sheet is wrong." The right sheet (10c, n=6) is three rows further down the
+   same file.
+4. **Symbol→condition decoding with unlabeled sub-blocks.** MOESM12 stacks four identically-titled
+   "HCT116 Ch3+5" blocks with no sgCh2-2 / sgMLH1-1 / sgMLH1-2 annotation; the figure's ∗ † ‡ §
+   symbols (which the legend compares pairwise) had to be matched to blocks by cross-referencing
+   the R code's condition order and the viability pattern (rescued ≈0.71 vs re-sensitized ≈0.34–0.47).
+5. **Which rows: raw vs normalized.** Each block carries *both* raw counts and "value N normalized"
+   rows; the analysis is on the normalized relative viability. Using raw values gives the wrong p.
+6. **Which bars: the shWRN-only contrast.** The decisive step. The legend says "two-way ANOVA" and
+   the code says `lm(value ~ CL + guide)`, which *reads* like "test CL across all guides" — but
+   that dilutes the shWRN rescue with shRFP/pan-essential bars and gives ≈7e-5. The ∗†‡§ symbols
+   mark only the **shWRN** bars, so the ANOVA is run on the shWRN1+shWRN2 subset. Only with sheet
+   10c + normalized + shWRN-only does `value ~ CL + guide` land on 5.74e-20.
+
+**The lesson for the audit chain.** Each wrong turn produced a *plausible* number (0.80; 7e-5),
+not an error — so without the published target p-value to check against, any of them could have
+been silently encoded as "the recompute." The binding discipline (encoding-plan §5.1: a recompute
+must preserve the published claim *and* land within the quantity-class tolerance) is exactly what
+rejected the wrong wirings: a one-sided rescue at p≈7e-5 "supports the claim" but misses the
+reported 5.7e-20 by 15 orders of magnitude, flagging that the mapping was not yet right. Faithful
+recomputation of published wet-lab statistics is therefore **gated on having both the analysis-grade
+data and the exact model+subset**, and neither is reliably recoverable from a paper's display
+Source Data alone — the authors' analysis code was indispensable, and even with it the
+display↔analysis data mapping required reproducing the target number to confirm.
 
 ## F1 — Spearman sample size: paper says n=54, data gives n=51
 

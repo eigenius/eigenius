@@ -161,7 +161,9 @@ fn wrn_phase2_validation_chain_validates() {
     );
     let inst = ReasoningInstitution::new();
 
-    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_val");
+    // C-VAL is now kernel-recomputed (concl_val_recomputed, statistics layer);
+    // the linked-external concl_val it replaced is retired. The Declared
+    // experimental-design conclusions remain here:
     assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_ontarget");
     assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_helicase_required");
     assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_exo_dispensable");

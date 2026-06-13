@@ -41,24 +41,13 @@ namespace wrn        = "urn:eigenius:pub:wrn";
 // data lives with the authors (not vendored), so these are linked, not
 // recomputed — the Phase-2.x frontier (parallel to limma for D-DIFF).
 
-// C-VAL evidence: competitive-growth + viability assays show MSI-selective
-// WRN dependence. ED Fig. 3b two-way ANOVA (sgWRNs vs negative controls,
-// day 10): MSI lines significant (2.7e-19, 1.2e-7), MSS lines n.s. (0.37,
-// 0.23); n = 6 biological replicates.
-resource wrn:va_competition : bench:ToolArtifact {
-    bench:tool            = "luciferase competitive-growth + viability assay (two-way ANOVA)";
-    bench:produced_from   = ["wrn-paper:ED-Fig-3b", "wrn-paper:Fig-2a"];
-    bench:tool_parameters = "sgWRN vs intergenic negative controls across MSI {KM12, OVK18, SW48, …} and MSS {ES2, SW620, SW837} lines; day-10 two-way ANOVA P: MSI 2.7e-19 / 1.2e-7 (significant), MSS 0.37 / 0.23 (n.s.); n = 6 biological replicates. MSI-selective viability loss; LINKED-EXTERNAL (authors' assay, raw data not vendored).";
-    reflection:derivation = wrn:va_competition_trace;
-    reflection:canonical_proposition = type_expr(
-        onco:SelectiveViabilityDependence("WRN", "MSI")
-    );
-}
-resource wrn:va_competition_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:va_competition;
-    reflection:source    = "wrn-paper:wet-lab competitive-growth/viability assay (linked-external)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
-}
+// C-VAL is now KERNEL-RECOMPUTED in the statistics layer
+// (wrn-phase1-recompute.esl :: concl_val_recomputed) — the ED Fig 3b
+// competition-assay two-way ANOVA (value ~ is_WRN + guide) recomputed via the
+// NestedAnovaAnalysisPlan dispatch on the pinned Nature Source Data, for the
+// MSI lines KM12 (P=2.7e-19) and OVK18 (P=1.2e-7), composed into
+// SelectiveViabilityDependence(WRN, MSI). The linked-external va_competition
+// ToolArtifact it replaced has been retired.
 
 // D-ONTARGET evidence: WRN cDNA (silencing-resistant to sgWRN-EIJ) rescues
 // the viability loss from sgWRN-EIJ in KM12 (Fig. 2b, c).
@@ -177,19 +166,9 @@ resource wrn:exo_rule_trace : reflection:DeclarationTrace {
 // Conclusions
 // ════════════════════════════════════════════════════════════════════
 
-// C-VAL: WRN depletion selectively impairs MSI viability (warranted directly
-// by the multi-assay readout).
-resource wrn:concl_val : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
-        onco:SelectiveViabilityDependence("WRN", "MSI")
-    );
-    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:va_competition");
-    reasoning:certificate = type_expr(
-        derived("urn:eigenius:pub:wrn:va_competition",
-                onco:SelectiveViabilityDependence("WRN", "MSI"))
-    );
-}
+// C-VAL (SelectiveViabilityDependence) is kernel-recomputed as
+// concl_val_recomputed in the statistics layer (see the header note above) —
+// the recorded concl_val/va_competition pair has been retired.
 
 // D-ONTARGET: the viability loss is attributable to WRN inactivation.
 resource wrn:concl_ontarget : reasoning:ReasoningSentence {

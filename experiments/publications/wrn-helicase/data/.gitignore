@@ -1,6 +1,8 @@
-# Vendored data slices are gitignored; provenance lives in data/MANIFEST.md
-data/slices/
+# Vendored data + reference clones are gitignored; provenance lives in MANIFEST.md
+slices/
+WRN_manuscript/
 *.rds
 *.gz
 *.tsv
 *.csv
+*.xlsx

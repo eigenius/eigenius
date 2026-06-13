@@ -27,21 +27,15 @@ namespace bench      = "urn:eigenius:benchmark";
 namespace onco       = "urn:eigenius:benchmark:onco";
 namespace wrn        = "urn:eigenius:pub:wrn";
 
-// Linked-external: the MMR-restoration causal-dissection experiment.
-resource wrn:mmr_restoration : bench:ToolArtifact {
-    bench:tool            = "HCT116 Ch3+5 MMR-restoration viability/DSB rescue + MLH1-KO re-sensitization (7-day viability, clonogenic)";
-    bench:produced_from   = ["wrn-paper:Fig-4f", "wrn-paper:ED-Fig-10a", "wrn-paper:ED-Fig-10b", "wrn-paper:ED-Fig-10c", "wrn-paper:ED-Fig-10d", "wrn-paper:ED-Fig-10e", "wrn-paper:ED-Fig-10f"];
-    bench:tool_parameters = "Restoring MMR in MLH1/MSH3-mutant HCT116 via chromosome 3+5 transfer suppressed DSB accumulation and PARTIALLY rescued viability from shWRN; CRISPR-KO of MLH1 re-sensitized HCT116 Ch3+5 and restored DSB induction (the rescue is attributable to MMR). Clonogenic: rescue modest with MMR restoration, abolished with MLH1-KO. LINKED-EXTERNAL.";
-    reflection:derivation = wrn:mmr_restoration_trace;
-    reflection:canonical_proposition = type_expr(
-        onco:RestorationPartiallyRescues("dMMR", "WRN")
-    );
-}
-resource wrn:mmr_restoration_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:mmr_restoration;
-    reflection:source    = "wrn-paper:Fig-4f / ED-Fig-10 MMR-restoration assays (linked-external)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
-}
+// The MMR-restoration causal-dissection experiment is now KERNEL-RECOMPUTED
+// (increment 10): `wrn:concl_mmr_restoration_recomputed` in the statistics
+// recompute layer establishes RestorationPartiallyRescues(dMMR, WRN) from the
+// ED Fig 10c relative-viability data via three CrossedAnovaAnalysisPlan
+// contrasts (restore P=5.7e-20; two MLH1-KO re-sensitization controls
+// P=3.3e-12 / 1.6e-16) — reproducing the paper exactly (recompute-findings F3).
+// The linked-external `wrn:mmr_restoration` ToolArtifact it replaced is RETIRED;
+// `concl_mmr` below now discharges RestorationPartiallyRescues by D54 lemma
+// citation of that recomputed conclusion.
 
 // Declared: the causal-dissection rule. A factor whose restoration partially
 // rescues a dependence — with a KO control confirming the rescue is
@@ -64,6 +58,11 @@ resource wrn:mmr_rule_trace : reflection:DeclarationTrace {
 }
 
 // C-MMR: dMMR contributes to (but does not fully explain) WRN dependence.
+// Modus ponens over mmr_rule: the antecedent RestorationPartiallyRescues is
+// discharged by CITING the kernel-recomputed conclusion as a lemma (D54: a
+// Holds ReasoningSentence is admitted as a Verified witness keyed on its IRI),
+// not by a linked-external ToolArtifact. The leaf proof (the three ED Fig 10c
+// CrossedAnovaAnalysisPlan contrasts) lives in wrn-phase1-recompute.
 resource wrn:concl_mmr : reasoning:ReasoningSentence {
     reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     reasoning:proposition = type_expr(
@@ -71,17 +70,17 @@ resource wrn:concl_mmr : reasoning:ReasoningSentence {
     );
     reasoning:justification = App(
         DeclaredEvidence("urn:eigenius:pub:wrn:mmr_rule"),
-        DerivedEvidence("urn:eigenius:pub:wrn:mmr_restoration")
+        VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr_restoration_recomputed")
     );
     reasoning:certificate = type_expr(
         alias
-            RULE = "urn:eigenius:pub:wrn:mmr_rule",
-            ART  = "urn:eigenius:pub:wrn:mmr_restoration",
-            RP   = onco:RestorationPartiallyRescues("dMMR", "WRN"),
-            CD   = onco:ContributesToDependence("dMMR", "WRN")
+            RULE  = "urn:eigenius:pub:wrn:mmr_rule",
+            CONCL = "urn:eigenius:pub:wrn:concl_mmr_restoration_recomputed",
+            RP    = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            CD    = onco:ContributesToDependence("dMMR", "WRN")
         in
-        app(RP, CD, DeclaredEvidence(RULE), DerivedEvidence(ART),
-            declared(RULE, RP -> CD), derived(ART, RP))
+        app(RP, CD, DeclaredEvidence(RULE), VerifiedEvidence(CONCL),
+            declared(RULE, RP -> CD), verified(CONCL, RP))
     );
 }
 
@@ -91,12 +90,12 @@ resource wrn:concl_mmr : reasoning:ReasoningSentence {
 // The capstone. The synthesis rule is the "from A follows B" implication
 // the whole paper builds toward; C-MAIN reaches the thesis by modus ponens
 // (App) over the load-bearing findings (plan §7: C-VAL, C-VIVO, D-HELICASE,
-// C-MECH, C-MMR). Each antecedent is discharged by its own warrant —
-// inlined here (re-stating each finding's leaf proof) because the
-// lemma-citation mechanism that would let C-MAIN reference the phase
-// CONCLUSIONS directly (D39's planned `Asserts` wrapper, "Phase 5b") is not
-// yet built. A proven sentence is NOT an evidence atom; it is the antecedent
-// of this implication, discharged by its justification.
+// C-MECH, C-MMR). Each antecedent is discharged by CITING its phase
+// conclusion as a lemma (D54 lemma citation: a Holds ReasoningSentence is
+// admitted as a Verified witness keyed on its IRI). A proven sentence is NOT
+// an evidence atom; it is the antecedent of this implication, discharged by
+// the lemma. (C-VAL is cited as concl_val_recomputed — the kernel-recomputed
+// competition-assay nested ANOVA in the statistics layer.)
 
 resource wrn:synthesis_rule : reflection:DeclaredResource {
     reflection:declared_by = "wrn-paper:synthetic-lethality-thesis";
@@ -132,7 +131,7 @@ resource wrn:concl_main : reasoning:ReasoningSentence {
                 App(
                     App(
                         DeclaredEvidence("urn:eigenius:pub:wrn:synthesis_rule"),
-                        VerifiedEvidence("urn:eigenius:pub:wrn:concl_val")
+                        VerifiedEvidence("urn:eigenius:pub:wrn:concl_val_recomputed")
                     ),
                     VerifiedEvidence("urn:eigenius:pub:wrn:concl_vivo")
                 ),
@@ -154,13 +153,13 @@ resource wrn:concl_main : reasoning:ReasoningSentence {
             SL  = onco:SyntheticLethal("WRN", "MSI"),
             RULE_P = SVD -> IVD -> RA -> DL -> CD -> SL,
             // antecedent justification terms — lemma citations of conclusions
-            jSVD = VerifiedEvidence("urn:eigenius:pub:wrn:concl_val"),
+            jSVD = VerifiedEvidence("urn:eigenius:pub:wrn:concl_val_recomputed"),
             jIVD = VerifiedEvidence("urn:eigenius:pub:wrn:concl_vivo"),
             jRA  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_helicase_required"),
             jDL  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_mech"),
             jCD  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr"),
             // antecedent certificates — one verified(conclusion, P) each
-            cSVD = verified("urn:eigenius:pub:wrn:concl_val", SVD),
+            cSVD = verified("urn:eigenius:pub:wrn:concl_val_recomputed", SVD),
             cIVD = verified("urn:eigenius:pub:wrn:concl_vivo", IVD),
             cRA  = verified("urn:eigenius:pub:wrn:concl_helicase_required", RA),
             cDL  = verified("urn:eigenius:pub:wrn:concl_mech", DL),

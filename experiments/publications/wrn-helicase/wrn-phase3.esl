@@ -146,9 +146,13 @@ resource wrn:mech_dsb_trace : reflection:ProgramTrace {
 // (explaining why p53-impaired MSI cells are also sensitive).
 resource wrn:mech_rule : reflection:DeclaredResource {
     reflection:declared_by = "wrn-paper:dsb-ddr-mechanism";
-    reflection:rationale   = "MSI-selective DSBs on WRN loss activate the DNA-damage response: GSEA shows downregulated G2/M-checkpoint and E2F-target signatures and upregulated apoptosis + p53 signatures; annexin V/PI confirms apoptosis/death; p53-S15 phosphorylation and p21 rise (p53 activation) in MSI not MSS. DSBs are also directly toxic independent of p53 status, explaining the sensitivity of p53-impaired MSI cells. Hence WRN loss drives MSI-selective lethality through DSB-induced DNA-damage response.";
+    reflection:rationale   = "MSI-selective DSBs on WRN loss activate the DNA-damage response, manifesting in TWO recomputed downstream consequences: cell-cycle arrest (reduced S-phase, ED Fig 4b — kernel-recomputed) and apoptosis (raised apoptotic fraction, ED Fig 4c — kernel-recomputed), both MSI-selective. GSEA corroborates (downregulated G2/M-checkpoint + E2F-target signatures, upregulated apoptosis + p53 signatures); p53-S15 phosphorylation and p21 rise (p53 activation) in MSI not MSS. DSBs are also directly toxic independent of p53 status, explaining the sensitivity of p53-impaired MSI cells. Hence DSBs that drive both arrest and apoptosis establish DSB-induced DDR as the MSI-selective lethal mechanism. The lethality claim now rests on the linked-external DSB readout PLUS the two kernel-recomputed DDR endpoints.";
     reflection:canonical_proposition = type_expr(
         onco:CausesDSBs("WRN", "MSI")
+        ->
+        onco:CausesCellCycleArrest("WRN", "MSI")
+        ->
+        onco:CausesApoptosis("WRN", "MSI")
         ->
         onco:DSBDrivenLethality("WRN", "MSI")
     );
@@ -171,24 +175,49 @@ resource wrn:concl_dsb : reasoning:ReasoningSentence {
     );
 }
 
+// Modus ponens over the 3-antecedent mech_rule: the first leg (DSBs) is
+// discharged by the linked-external DSB-marker ToolArtifact (DerivedEvidence);
+// the two downstream legs (cell-cycle arrest, apoptosis) are discharged by
+// CITING the kernel-recomputed conclusions as lemmas (D54: a Holds
+// ReasoningSentence is admitted as a Verified witness keyed on its IRI). The
+// arrest/apoptosis leaf proofs live in wrn-phase1-recompute (ED Fig 4b/4c
+// nested ANOVAs); C-MECH references them by name.
 resource wrn:concl_mech : reasoning:ReasoningSentence {
     reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     reasoning:proposition = type_expr(
         onco:DSBDrivenLethality("WRN", "MSI")
     );
     reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:mech_rule"),
-        DerivedEvidence("urn:eigenius:pub:wrn:mech_dsb")
+        App(
+            App(
+                DeclaredEvidence("urn:eigenius:pub:wrn:mech_rule"),
+                DerivedEvidence("urn:eigenius:pub:wrn:mech_dsb")
+            ),
+            VerifiedEvidence("urn:eigenius:pub:wrn:concl_cellcycle_recomputed")
+        ),
+        VerifiedEvidence("urn:eigenius:pub:wrn:concl_apoptosis_recomputed")
     );
     reasoning:certificate = type_expr(
         alias
             RULE = "urn:eigenius:pub:wrn:mech_rule",
             ART  = "urn:eigenius:pub:wrn:mech_dsb",
+            CC   = "urn:eigenius:pub:wrn:concl_cellcycle_recomputed",
+            AP   = "urn:eigenius:pub:wrn:concl_apoptosis_recomputed",
             DSB  = onco:CausesDSBs("WRN", "MSI"),
-            DL   = onco:DSBDrivenLethality("WRN", "MSI")
+            CA   = onco:CausesCellCycleArrest("WRN", "MSI"),
+            AA   = onco:CausesApoptosis("WRN", "MSI"),
+            DL   = onco:DSBDrivenLethality("WRN", "MSI"),
+            RULE_P = DSB -> CA -> AA -> DL,
+            jDSB = DerivedEvidence(ART),
+            jCA  = VerifiedEvidence(CC),
+            jAA  = VerifiedEvidence(AP),
+            cert1 = app(DSB, CA -> AA -> DL, DeclaredEvidence(RULE), jDSB,
+                        declared(RULE, RULE_P), derived(ART, DSB)),
+            cert2 = app(CA, AA -> DL, reasoning:App(DeclaredEvidence(RULE), jDSB),
+                        jCA, cert1, verified(CC, CA))
         in
-        app(DSB, DL, DeclaredEvidence(RULE), DerivedEvidence(ART),
-            declared(RULE, DSB -> DL), derived(ART, DSB))
+        app(AA, DL, reasoning:App(reasoning:App(DeclaredEvidence(RULE), jDSB), jCA),
+            jAA, cert2, verified(AP, AA))
     );
 }
 

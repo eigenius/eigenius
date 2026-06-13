@@ -78,12 +78,28 @@ pub mod iris {
         "urn:eigenius:measurements:MethodComparisonAnalysisPlan";
     pub const CLASSIFICATION_ANALYSIS_PLAN: &str =
         "urn:eigenius:measurements:ClassificationAnalysisPlan";
+    pub const NESTED_ANOVA_ANALYSIS_PLAN: &str =
+        "urn:eigenius:measurements:NestedAnovaAnalysisPlan";
+    pub const CROSSED_ANOVA_ANALYSIS_PLAN: &str =
+        "urn:eigenius:measurements:CrossedAnovaAnalysisPlan";
 
     // ── ClassificationAnalysisPlan property IRIs (D52 §2.2) ──────────────
     pub const PROP_CLASSIFICATION_THRESHOLD: &str =
         "urn:eigenius:measurements:classification_threshold";
     pub const PROP_MIN_PPV: &str = "urn:eigenius:measurements:min_ppv";
     pub const PROP_MIN_SENSITIVITY: &str = "urn:eigenius:measurements:min_sensitivity";
+
+    // ── Nested/CrossedAnovaAnalysisPlan property IRIs (D52 §2.2) ─────────────
+    // The block (guide) partition sizes for the two SampleSet IID arms. Each is
+    // the per-block observation count, summing to that group's flat length.
+    // - NestedAnovaAnalysisPlan (`value ~ group + subgroup`): blocks are NESTED
+    //   in the group; `subgroup_sizes_a`/`_b` partition group A / group B's arms
+    //   independently (the guides differ per group).
+    // - CrossedAnovaAnalysisPlan (`value ~ group + block`): blocks are CROSSED
+    //   (the same block levels appear in both groups); the two arrays must have
+    //   equal length and are paired by index (block i in group A ↔ block i in B).
+    pub const PROP_SUBGROUP_SIZES_A: &str = "urn:eigenius:measurements:subgroup_sizes_a";
+    pub const PROP_SUBGROUP_SIZES_B: &str = "urn:eigenius:measurements:subgroup_sizes_b";
 
     // ── StatisticalAnalysisResult property IRIs (per-effect derivation shape) ─
     pub const PROP_VERDICT_CTOR: &str = "urn:eigenius:measurements:verdict_ctor";
