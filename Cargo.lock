@@ -1363,6 +1363,8 @@ dependencies = [
  "eigenius-r-worker",
  "eigenius-runtime-substrate",
  "serde_bytes",
+ "serde_json",
+ "sha2",
  "tempfile",
 ]
 
@@ -1375,6 +1377,7 @@ dependencies = [
  "eigenius-runtime-substrate",
  "serde",
  "serde_bytes",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
 ]

@@ -15,6 +15,9 @@ eigenius-kernel = { path = "../../kernel" }
 # substrate's own CBOR codec, consistent across both sides.
 ciborium = "0.2"
 serde_bytes = "0.11"
+# Hashes the renv.lock into the image manifest hash (the cross-check anchor),
+# using the same `sha256:{:x}` idiom as eigenius-julia/eigenius-lean-runtime.
+sha2 = "0.10"
 
 [dev-dependencies]
 # The P2 end-to-end test drives a real R worker through LocalServiceSpawner;
@@ -22,3 +25,11 @@ serde_bytes = "0.11"
 # worker the spawned `Rscript` dyn.loads) and lets the test locate it.
 eigenius-r-worker = { path = "../eigenius-r-worker" }
 tempfile = "3"
+# Asserts the canonical_proposition term shape the R worker emits
+# (marshalling_round_trip) — same D47 JSON the reasoning institution reads.
+serde_json.workspace = true
+# The P3.2 build→Docker-dispatch e2e needs `DockerServiceSpawner` (the
+# `docker-spawner` feature). Enabling it only here keeps the production
+# crate generic over `ServiceSpawner` with no Docker/bollard dependency;
+# Cargo unifies the feature for test builds.
+eigenius-runtime-substrate = { path = "../runtime-substrate", features = ["docker-spawner"] }

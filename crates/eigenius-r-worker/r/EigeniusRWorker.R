@@ -47,9 +47,42 @@ arg_or_env <- function(env_name, args, idx) {
   stop("missing ", env_name, " (and no argv[", idx, "] fallback)")
 }
 
+# Boot cross-check (D26 §9.3): when running against a pinned image, verify
+# the in-image manifest-hash matches the digest the substrate recorded, and
+# fail closed (exit 78) on mismatch — mirroring JuliaWorker's verify_cross_check
+# and the substrate's `prepare_substrate_side`/`verify_in_worker`. Under the
+# LocalServiceSpawner dev path there is no pinned environment, so the env var
+# is unset and the check is skipped (correct — nothing to verify against).
+EXIT_CROSS_CHECK_FAILURE <- 78L
+
+verify_cross_check <- function() {
+  env_hash <- Sys.getenv("EIGENIUS_RUNTIME_ENV_MANIFEST_HASH", unset = NA_character_)
+  if (is.na(env_hash) || !nzchar(env_hash)) {
+    return(invisible()) # no pinned environment (local dev) → nothing to check
+  }
+  prov_dir <- Sys.getenv("EIGENIUS_RUNTIME_ENV_DIR", unset = "/etc/eigenius-runtime-env")
+  file_path <- file.path(prov_dir, "manifest-hash")
+  in_image <- tryCatch(
+    trimws(paste(readLines(file_path, warn = FALSE), collapse = "\n")),
+    error = function(e) NULL
+  )
+  if (is.null(in_image)) {
+    cat("eigenius-r-worker: cross-check: manifest-hash unreadable at", file_path, "\n",
+        file = stderr())
+    quit(status = EXIT_CROSS_CHECK_FAILURE)
+  }
+  if (!identical(in_image, env_hash)) {
+    cat("eigenius-r-worker: cross-check: manifest-hash mismatch (env vs in-image)\n",
+        file = stderr())
+    quit(status = EXIT_CROSS_CHECK_FAILURE)
+  }
+}
+
 args <- commandArgs(trailingOnly = TRUE)
 socket_path <- arg_or_env("EIGENIUS_TEST_WORKER_UDS", args, 1L)
 cdylib_path <- arg_or_env("EIGENIUS_R_WORKER_CDYLIB", args, 2L)
+
+verify_cross_check()
 
 dyn.load(cdylib_path)
 
@@ -65,9 +98,21 @@ repeat {
     # Health
     .Call("r_send_health", id)
   } else if (kind == 3L) {
-    # DispatchScript — evaluate the R source; its value is the output bytes.
+    # DispatchScript — evaluate the R source; its value is the output bytes
+    # (typically the CBOR of an Eigon DerivedResource built via the
+    # r_eigon_* marshalling helpers). The input resources (CBOR) are bound
+    # as `eigenius_inputs` (a list of raw vectors) in the eval environment;
+    # the script decodes them with `r_eigon_f64_array` / `r_eigon_str_array`.
     src <- .Call("r_script_source", id)
-    result <- tryCatch(eval(parse(text = src)), error = function(e) e)
+    n <- .Call("r_input_count", id)
+    eigenius_inputs <- if (n > 0L) {
+      lapply(seq_len(n) - 1L, function(i) .Call("r_input", id, as.integer(i)))
+    } else {
+      list()
+    }
+    eval_env <- new.env(parent = globalenv())
+    eval_env$eigenius_inputs <- eigenius_inputs
+    result <- tryCatch(eval(parse(text = src), envir = eval_env), error = function(e) e)
     if (inherits(result, "error")) {
       .Call("r_send_dispatch_failed", id, "runtime_error", conditionMessage(result))
     } else {

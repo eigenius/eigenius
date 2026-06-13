@@ -34,6 +34,10 @@ use std::slice;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
+use eigenius_kernel::ontology::eigon_cbor;
+use eigenius_kernel::ontology::iri::Iri;
+use eigenius_kernel::ontology::resource::{Resource, Value};
+use eigenius_kernel::ontology::well_known::{CANONICAL_PROPOSITION, IS_A};
 use eigenius_runtime_substrate::rpc::protocol::HealthInfo;
 
 use crate::RWorker;
@@ -50,8 +54,10 @@ mod rapi {
     #[allow(non_camel_case_types)]
     pub type R_xlen_t = isize;
 
-    /// `RAWSXP` — the raw-vector `SEXPTYPE`.
+    /// `SEXPTYPE`s: raw / real(double) / character vectors.
     pub const RAWSXP: c_int = 24;
+    pub const REALSXP: c_int = 14;
+    pub const STRSXP: c_int = 16;
 
     unsafe extern "C" {
         pub fn Rf_allocVector(stype: c_int, n: R_xlen_t) -> SEXP;
@@ -59,12 +65,15 @@ mod rapi {
         pub fn Rf_ScalarString(x: SEXP) -> SEXP;
         pub fn Rf_mkCharLen(s: *const c_char, n: c_int) -> SEXP;
         pub fn Rf_asInteger(x: SEXP) -> c_int;
+        pub fn Rf_asReal(x: SEXP) -> f64;
         pub fn Rf_protect(x: SEXP) -> SEXP;
         pub fn Rf_unprotect(n: c_int);
         pub fn Rf_xlength(x: SEXP) -> R_xlen_t;
         pub fn R_CHAR(x: SEXP) -> *const c_char;
         pub fn STRING_ELT(x: SEXP, i: R_xlen_t) -> SEXP;
+        pub fn SET_STRING_ELT(x: SEXP, i: R_xlen_t, v: SEXP);
         pub fn RAW(x: SEXP) -> *mut u8;
+        pub fn REAL(x: SEXP) -> *mut f64;
         pub static R_NilValue: SEXP;
     }
 }
@@ -100,6 +109,30 @@ unsafe fn sexp_to_string(s: SEXP) -> Option<String> {
             .to_string_lossy()
             .into_owned(),
     )
+}
+
+/// A whole R character vector → owned `Vec<String>` (non-string / `NULL`
+/// inputs yield an empty vector). Used by `r_eigon_set_proposition` to read
+/// a predicate's literal-string arguments.
+unsafe fn sexp_str_vec(s: SEXP) -> Vec<String> {
+    if s == unsafe { rapi::R_NilValue } {
+        return Vec::new();
+    }
+    let n = unsafe { rapi::Rf_xlength(s) };
+    let mut out = Vec::with_capacity(n.max(0) as usize);
+    for i in 0..n {
+        let elt = unsafe { rapi::STRING_ELT(s, i) };
+        let cptr = unsafe { rapi::R_CHAR(elt) };
+        if cptr.is_null() {
+            continue;
+        }
+        out.push(
+            unsafe { std::ffi::CStr::from_ptr(cptr) }
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    out
 }
 
 /// `&str` → R character scalar (`STRSXP` of length 1).
@@ -343,4 +376,275 @@ pub unsafe extern "C" fn r_close(id: SEXP) -> SEXP {
     let id = unsafe { rapi::Rf_asInteger(id) };
     registry().lock().unwrap().remove(&id);
     unsafe { nil() }
+}
+
+// ── P1.3: Eigon ↔ R marshalling ─────────────────────────────────────────
+//
+// The R script decodes its input resources (CBOR, from `r_input`) into R
+// vectors by property IRI, and encodes its result as an Eigon
+// `DerivedResource` (CBOR) the runtime parses back into a `RunOutcome`.
+// All of it reuses the workspace Eigon-CBOR codec — R never sees CBOR.
+
+/// `r_eigon_f64_array(cbor, prop)` → R numeric vector of the named property's
+/// value array (`Float`/`Integer` elements; a scalar becomes length-1), or
+/// `NULL` if absent/unparseable.
+///
+/// # Safety
+/// Called by R via `.Call`; `cbor` is a RAWSXP, `prop` a character scalar.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn r_eigon_f64_array(cbor: SEXP, prop: SEXP) -> SEXP {
+    let bytes = unsafe { raw_to_bytes(cbor) };
+    let prop = match unsafe { sexp_to_string(prop) } {
+        Some(p) => p,
+        None => return unsafe { nil() },
+    };
+    let iri = match Iri::parse(&prop) {
+        Ok(i) => i,
+        Err(_) => return unsafe { nil() },
+    };
+    let resource = match eigon_cbor::parse_resource_lenient(&bytes) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("eigenius-r-worker: r_eigon_f64_array parse: {e}");
+            return unsafe { nil() };
+        }
+    };
+    let vals: Vec<f64> = match resource.get(&iri) {
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|v| match v {
+                Value::Float(f) => Some(*f),
+                Value::Integer(i) => Some(*i as f64),
+                _ => None,
+            })
+            .collect(),
+        Some(Value::Float(f)) => vec![*f],
+        Some(Value::Integer(i)) => vec![*i as f64],
+        _ => return unsafe { nil() },
+    };
+    unsafe {
+        let out = rapi::Rf_protect(rapi::Rf_allocVector(
+            rapi::REALSXP,
+            vals.len() as rapi::R_xlen_t,
+        ));
+        let dst = rapi::REAL(out);
+        for (i, v) in vals.iter().enumerate() {
+            *dst.add(i) = *v;
+        }
+        rapi::Rf_unprotect(1);
+        out
+    }
+}
+
+/// `r_eigon_str_array(cbor, prop)` → R character vector of the named
+/// property's `String` array (scalar becomes length-1), or `NULL`.
+///
+/// # Safety
+/// Called by R via `.Call`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn r_eigon_str_array(cbor: SEXP, prop: SEXP) -> SEXP {
+    let bytes = unsafe { raw_to_bytes(cbor) };
+    let prop = match unsafe { sexp_to_string(prop) } {
+        Some(p) => p,
+        None => return unsafe { nil() },
+    };
+    let iri = match Iri::parse(&prop) {
+        Ok(i) => i,
+        Err(_) => return unsafe { nil() },
+    };
+    let resource = match eigon_cbor::parse_resource_lenient(&bytes) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("eigenius-r-worker: r_eigon_str_array parse: {e}");
+            return unsafe { nil() };
+        }
+    };
+    let vals: Vec<String> = match resource.get(&iri) {
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|v| match v {
+                Value::String(s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect(),
+        Some(Value::String(s)) => vec![s.clone()],
+        _ => return unsafe { nil() },
+    };
+    unsafe {
+        let out = rapi::Rf_protect(rapi::Rf_allocVector(
+            rapi::STRSXP,
+            vals.len() as rapi::R_xlen_t,
+        ));
+        for (i, s) in vals.iter().enumerate() {
+            let ch = rapi::Rf_mkCharLen(s.as_ptr() as *const c_char, s.len() as c_int);
+            rapi::SET_STRING_ELT(out, i as rapi::R_xlen_t, ch);
+        }
+        rapi::Rf_unprotect(1);
+        out
+    }
+}
+
+/// In-progress output resources being assembled by the encode builder. R
+/// holds an `i32` builder id; the `Resource` never leaves Rust.
+fn builder_registry() -> &'static Mutex<HashMap<i32, Resource>> {
+    static REG: OnceLock<Mutex<HashMap<i32, Resource>>> = OnceLock::new();
+    REG.get_or_init(|| Mutex::new(HashMap::new()))
+}
+static NEXT_BUILDER_ID: AtomicI32 = AtomicI32::new(1);
+
+/// `r_eigon_begin(iri)` → builder id (`-1` on a bad IRI). Starts a new
+/// output `DerivedResource` at `iri`.
+///
+/// # Safety
+/// Called by R via `.Call`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn r_eigon_begin(iri: SEXP) -> SEXP {
+    let iri = match unsafe { sexp_to_string(iri) }.and_then(|s| Iri::parse(&s).ok()) {
+        Some(i) => i,
+        None => return unsafe { rapi::Rf_ScalarInteger(-1) },
+    };
+    let id = NEXT_BUILDER_ID.fetch_add(1, Ordering::Relaxed);
+    builder_registry()
+        .lock()
+        .unwrap()
+        .insert(id, Resource::new(iri));
+    unsafe { rapi::Rf_ScalarInteger(id) }
+}
+
+/// `r_eigon_add_class(bid, class_iri)` → status (appends to the resource's
+/// `is_a` list, e.g. `reflection:DerivedResource`).
+///
+/// # Safety
+/// Called by R via `.Call`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn r_eigon_add_class(bid: SEXP, class_iri: SEXP) -> SEXP {
+    let id = unsafe { rapi::Rf_asInteger(bid) };
+    let class = match unsafe { sexp_to_string(class_iri) } {
+        Some(c) => c,
+        None => return unsafe { rapi::Rf_ScalarInteger(ERR) },
+    };
+    let is_a = Iri::parse(IS_A).expect("IS_A is a static IRI");
+    let mut reg = builder_registry().lock().unwrap();
+    let rc = match reg.get_mut(&id) {
+        Some(r) => {
+            let mut arr = match r.get(&is_a) {
+                Some(Value::Array(a)) => a.clone(),
+                _ => Vec::new(),
+            };
+            arr.push(Value::String(class));
+            r.set(is_a, Value::Array(arr));
+            OK
+        }
+        None => ERR,
+    };
+    unsafe { rapi::Rf_ScalarInteger(rc) }
+}
+
+/// `r_eigon_set_f64(bid, prop, val)` → status. Sets a `Float` property.
+///
+/// # Safety
+/// Called by R via `.Call`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn r_eigon_set_f64(bid: SEXP, prop: SEXP, val: SEXP) -> SEXP {
+    let id = unsafe { rapi::Rf_asInteger(bid) };
+    let prop = match unsafe { sexp_to_string(prop) }.and_then(|s| Iri::parse(&s).ok()) {
+        Some(p) => p,
+        None => return unsafe { rapi::Rf_ScalarInteger(ERR) },
+    };
+    let value = unsafe { rapi::Rf_asReal(val) };
+    let mut reg = builder_registry().lock().unwrap();
+    let rc = match reg.get_mut(&id) {
+        Some(r) => {
+            r.set(prop, Value::Float(value));
+            OK
+        }
+        None => ERR,
+    };
+    unsafe { rapi::Rf_ScalarInteger(rc) }
+}
+
+/// `r_eigon_set_str(bid, prop, val)` → status. Sets a `String` property.
+///
+/// # Safety
+/// Called by R via `.Call`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn r_eigon_set_str(bid: SEXP, prop: SEXP, val: SEXP) -> SEXP {
+    let id = unsafe { rapi::Rf_asInteger(bid) };
+    let prop = match unsafe { sexp_to_string(prop) }.and_then(|s| Iri::parse(&s).ok()) {
+        Some(p) => p,
+        None => return unsafe { rapi::Rf_ScalarInteger(ERR) },
+    };
+    let value = match unsafe { sexp_to_string(val) } {
+        Some(s) => s,
+        None => return unsafe { rapi::Rf_ScalarInteger(ERR) },
+    };
+    let mut reg = builder_registry().lock().unwrap();
+    let rc = match reg.get_mut(&id) {
+        Some(r) => {
+            r.set(prop, Value::String(value));
+            OK
+        }
+        None => ERR,
+    };
+    unsafe { rapi::Rf_ScalarInteger(rc) }
+}
+
+/// `r_eigon_set_proposition(bid, pred_iri, args)` → status. Sets the
+/// inherited `reflection:canonical_proposition` slot to a D47-encoded
+/// predicate application `pred(arg₁, …, argₙ)` over string-literal
+/// arguments — the same term shape the statistics institution emits, so a
+/// wrapped-R `DerivedResource` composes with the reasoning institution
+/// identically (D54 / D55 §12). The term is built in Rust (R never sees the
+/// JSON encoding): `App(…App(ConstRef(pred_iri), LitString(arg₁))…,
+/// LitString(argₙ))`. `args` is an R character vector (empty → bare
+/// `ConstRef(pred_iri)`, a nullary predicate).
+///
+/// # Safety
+/// Called by R via `.Call`; `pred_iri` a character scalar, `args` a
+/// character vector.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn r_eigon_set_proposition(bid: SEXP, pred_iri: SEXP, args: SEXP) -> SEXP {
+    let id = unsafe { rapi::Rf_asInteger(bid) };
+    let pred = match unsafe { sexp_to_string(pred_iri) } {
+        Some(p) => p,
+        None => return unsafe { rapi::Rf_ScalarInteger(ERR) },
+    };
+    let args = unsafe { sexp_str_vec(args) };
+
+    // Build the App spine: ConstRef(pred) applied to each LitString(arg).
+    let mut term = serde_json::json!({"ctor": "ConstRef", "args": [pred]});
+    for arg in &args {
+        let lit = serde_json::json!({"ctor": "LitString", "args": [arg]});
+        term = serde_json::json!({"ctor": "App", "args": [term, lit]});
+    }
+
+    let prop = Iri::parse(CANONICAL_PROPOSITION).expect("CANONICAL_PROPOSITION is a static IRI");
+    let mut reg = builder_registry().lock().unwrap();
+    let rc = match reg.get_mut(&id) {
+        Some(r) => {
+            r.set(prop, Value::Json(term));
+            OK
+        }
+        None => ERR,
+    };
+    unsafe { rapi::Rf_ScalarInteger(rc) }
+}
+
+/// `r_eigon_finish(bid)` → RAWSXP of the resource's Eigon-CBOR (consumes
+/// the builder), or `NULL` if the id is unknown. The script returns this as
+/// its value; the runtime parses it back into the `RunOutcome` output.
+///
+/// # Safety
+/// Called by R via `.Call`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn r_eigon_finish(bid: SEXP) -> SEXP {
+    let id = unsafe { rapi::Rf_asInteger(bid) };
+    let resource = builder_registry().lock().unwrap().remove(&id);
+    match resource {
+        Some(r) => {
+            let cbor = eigon_cbor::serialize_resource(&r);
+            unsafe { bytes_to_raw(&cbor) }
+        }
+        None => unsafe { nil() },
+    }
 }

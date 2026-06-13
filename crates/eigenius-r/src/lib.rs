@@ -36,6 +36,8 @@
 //! [`ServiceSpawner`]: eigenius_runtime_substrate::spawner::service::ServiceSpawner
 
 pub mod conventions;
+pub mod dockerfile;
 pub mod runtime;
 
-pub use runtime::RLanguageRuntime;
+pub use dockerfile::{r_dockerfile_fragments, RImagePlan};
+pub use runtime::{RImageBinding, RLanguageRuntime};
