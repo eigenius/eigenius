@@ -1355,6 +1355,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-r"
+version = "0.1.0"
+dependencies = [
+ "ciborium",
+ "eigenius-kernel",
+ "eigenius-r-worker",
+ "eigenius-runtime-substrate",
+ "serde_bytes",
+ "tempfile",
+]
+
+[[package]]
+name = "eigenius-r-worker"
+version = "0.1.0"
+dependencies = [
+ "ciborium",
+ "eigenius-kernel",
+ "eigenius-runtime-substrate",
+ "serde",
+ "serde_bytes",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "eigenius-reasoning"
 version = "0.1.0"
 dependencies = [

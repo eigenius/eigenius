@@ -10,6 +10,8 @@ members = [
     "crates/eigenius-lean",
     "crates/eigenius-lean-runtime",
     "crates/eigenius-lean-worker",
+    "crates/eigenius-r-worker",
+    "crates/eigenius-r",
     "crates/eigenius-reasoning",
     "crates/eigenius-statistics",
     "crates/wasm-runtime",
