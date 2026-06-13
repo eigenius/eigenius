@@ -122,75 +122,50 @@ resource wrn:concl_main : reasoning:ReasoningSentence {
         onco:SyntheticLethal("WRN", "MSI")
     );
 
-    // Modus ponens over the five findings: App(App(App(App(App(rule,
-    // jSVD), jIVD), jRA), jDL), jCD). Each j_X is the finding's justification.
+    // Modus ponens over the five findings — each antecedent discharged by
+    // CITING its phase conclusion as a lemma (D54: a Holds ReasoningSentence
+    // is admitted as a Verified witness keyed on its IRI). The leaf proofs
+    // live in the phase conclusions; C-MAIN references them by name.
     reasoning:justification = App(
         App(
             App(
                 App(
                     App(
                         DeclaredEvidence("urn:eigenius:pub:wrn:synthesis_rule"),
-                        DerivedEvidence("urn:eigenius:pub:wrn:va_competition")
+                        VerifiedEvidence("urn:eigenius:pub:wrn:concl_val")
                     ),
-                    DerivedEvidence("urn:eigenius:pub:wrn:vivo_xenograft")
+                    VerifiedEvidence("urn:eigenius:pub:wrn:concl_vivo")
                 ),
-                App(
-                    DeclaredEvidence("urn:eigenius:pub:wrn:helicase_rule"),
-                    DerivedEvidence("urn:eigenius:pub:wrn:va_fail_k577m")
-                )
+                VerifiedEvidence("urn:eigenius:pub:wrn:concl_helicase_required")
             ),
-            App(
-                DeclaredEvidence("urn:eigenius:pub:wrn:mech_rule"),
-                DerivedEvidence("urn:eigenius:pub:wrn:mech_dsb")
-            )
+            VerifiedEvidence("urn:eigenius:pub:wrn:concl_mech")
         ),
-        App(
-            DeclaredEvidence("urn:eigenius:pub:wrn:mmr_rule"),
-            DerivedEvidence("urn:eigenius:pub:wrn:mmr_restoration")
-        )
+        VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr")
     );
 
     reasoning:certificate = type_expr(
         alias
             RULE = "urn:eigenius:pub:wrn:synthesis_rule",
-            // findings
             SVD = onco:SelectiveViabilityDependence("WRN", "MSI"),
             IVD = onco:InVivoDependence("WRN", "MSI"),
             RA  = onco:RequiresActivity("WRN", "helicase"),
             DL  = onco:DSBDrivenLethality("WRN", "MSI"),
             CD  = onco:ContributesToDependence("dMMR", "WRN"),
             SL  = onco:SyntheticLethal("WRN", "MSI"),
-            // antecedent leaf propositions
-            FR  = onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ"),
-            DSB = onco:CausesDSBs("WRN", "MSI"),
-            RP  = onco:RestorationPartiallyRescues("dMMR", "WRN"),
-            // antecedent justification terms
-            jSVD = DerivedEvidence("urn:eigenius:pub:wrn:va_competition"),
-            jIVD = DerivedEvidence("urn:eigenius:pub:wrn:vivo_xenograft"),
-            jRA  = reasoning:App(DeclaredEvidence("urn:eigenius:pub:wrn:helicase_rule"),
-                                 DerivedEvidence("urn:eigenius:pub:wrn:va_fail_k577m")),
-            jDL  = reasoning:App(DeclaredEvidence("urn:eigenius:pub:wrn:mech_rule"),
-                                 DerivedEvidence("urn:eigenius:pub:wrn:mech_dsb")),
-            jCD  = reasoning:App(DeclaredEvidence("urn:eigenius:pub:wrn:mmr_rule"),
-                                 DerivedEvidence("urn:eigenius:pub:wrn:mmr_restoration")),
-            // antecedent certificates
-            cSVD = derived("urn:eigenius:pub:wrn:va_competition", SVD),
-            cIVD = derived("urn:eigenius:pub:wrn:vivo_xenograft", IVD),
-            cRA  = app(FR, RA, DeclaredEvidence("urn:eigenius:pub:wrn:helicase_rule"),
-                       DerivedEvidence("urn:eigenius:pub:wrn:va_fail_k577m"),
-                       declared("urn:eigenius:pub:wrn:helicase_rule", FR -> RA),
-                       derived("urn:eigenius:pub:wrn:va_fail_k577m", FR)),
-            cDL  = app(DSB, DL, DeclaredEvidence("urn:eigenius:pub:wrn:mech_rule"),
-                       DerivedEvidence("urn:eigenius:pub:wrn:mech_dsb"),
-                       declared("urn:eigenius:pub:wrn:mech_rule", DSB -> DL),
-                       derived("urn:eigenius:pub:wrn:mech_dsb", DSB)),
-            cCD  = app(RP, CD, DeclaredEvidence("urn:eigenius:pub:wrn:mmr_rule"),
-                       DerivedEvidence("urn:eigenius:pub:wrn:mmr_restoration"),
-                       declared("urn:eigenius:pub:wrn:mmr_rule", RP -> CD),
-                       derived("urn:eigenius:pub:wrn:mmr_restoration", RP)),
-            // the full synthesis implication (must match synthesis_rule's prop)
             RULE_P = SVD -> IVD -> RA -> DL -> CD -> SL,
-            // modus-ponens spine
+            // antecedent justification terms — lemma citations of conclusions
+            jSVD = VerifiedEvidence("urn:eigenius:pub:wrn:concl_val"),
+            jIVD = VerifiedEvidence("urn:eigenius:pub:wrn:concl_vivo"),
+            jRA  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_helicase_required"),
+            jDL  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_mech"),
+            jCD  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr"),
+            // antecedent certificates — one verified(conclusion, P) each
+            cSVD = verified("urn:eigenius:pub:wrn:concl_val", SVD),
+            cIVD = verified("urn:eigenius:pub:wrn:concl_vivo", IVD),
+            cRA  = verified("urn:eigenius:pub:wrn:concl_helicase_required", RA),
+            cDL  = verified("urn:eigenius:pub:wrn:concl_mech", DL),
+            cCD  = verified("urn:eigenius:pub:wrn:concl_mmr", CD),
+            // modus-ponens spine (unchanged — the "from A follows B" backbone)
             c1 = app(SVD, IVD -> RA -> DL -> CD -> SL,
                      DeclaredEvidence(RULE), jSVD, declared(RULE, RULE_P), cSVD),
             c2 = app(IVD, RA -> DL -> CD -> SL,

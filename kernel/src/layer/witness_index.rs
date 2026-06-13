@@ -34,6 +34,13 @@ use crate::ontology::{Iri, Value};
 use crate::witness::{hash_proposition_value, WitnessCategory, WitnessKey};
 use std::collections::BTreeMap;
 
+/// D54: the `reasoning:ReasoningSentence` class IRI and its `proposition`
+/// property. Named here (rather than in `well_known`) because the D49
+/// witness machinery is the one kernel site that is intrinsically
+/// reasoning-aware — it builds the witnesses `JustifiedBy` consumes.
+const REASONING_SENTENCE: &str = "urn:eigenius:reasoning:ReasoningSentence";
+const REASONING_PROPOSITION: &str = "urn:eigenius:reasoning:proposition";
+
 /// Build the per-`Layer` witness index by walking the Layer's local
 /// resources and dispatching each Trace-class resource to the
 /// corresponding witness emission.
@@ -107,8 +114,39 @@ pub fn build_witness_index(layer: &Layer) -> BTreeMap<WitnessKey, ()> {
                 index.insert(key, ());
             }
         }
+        // D54 reasoning-sentence lemma citation: a committed
+        // `reasoning:ReasoningSentence` is a kernel-checked proof of its
+        // `proposition` — the `ValidateJustification` gate Held, and the
+        // commit pipeline rejects `Fails` sentences, so any *committed*
+        // sentence Held (the same trust-committed model that lets us admit
+        // institution derivations without re-running them). Admit it as a
+        // `Verified` witness keyed on its own IRI, so a later sentence can
+        // cite it as a lemma via `JustifiedBy.verified` (or `.derived`, via
+        // the `IsVerifiedAs → IsDerivedAs` coercion in `lookup_chain_witness`).
+        if is_a.iter().any(|c| c.as_str() == REASONING_SENTENCE) {
+            if let Some(key) = emit_from_reasoning_sentence(&resource) {
+                index.insert(key, ());
+            }
+        }
     }
     index
+}
+
+/// D54: read a `reasoning:ReasoningSentence`'s `proposition` and build a
+/// `Verified` `WitnessKey` keyed on the sentence's own IRI. The proposition
+/// is the D47-encoded `Value::Json` the consumer's `JustifiedBy.verified(iri, P)`
+/// term hashes to identically (same encoding path), so the key matches.
+/// Returns `None` when the sentence has no `@id` or no `proposition`.
+fn emit_from_reasoning_sentence(sentence: &Resource) -> Option<WitnessKey> {
+    let sentence_iri = sentence.id().cloned()?;
+    let prop_iri = Iri::parse(REASONING_PROPOSITION).ok()?;
+    let encoded_prop = sentence.get(&prop_iri)?;
+    let prop_hash = hash_proposition_value(encoded_prop);
+    Some(WitnessKey {
+        category: WitnessCategory::Verified,
+        iri: sentence_iri,
+        prop_hash,
+    })
 }
 
 /// D52 institution-emitted derivation: read `canonical_proposition`
