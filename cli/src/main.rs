@@ -17,7 +17,11 @@
 use clap::{Parser, Subcommand, ValueEnum};
 
 // Phase 19a.5 (D31): mirror / env / institution lifecycle CLI verbs.
+mod common;
+mod env;
 mod institutions;
+mod mirror;
+mod scripts;
 use eigenius_kernel::bootstrap;
 use eigenius_kernel::context::ExecutionContext;
 use eigenius_kernel::lattice;
@@ -327,6 +331,12 @@ enum Commands {
     Env {
         #[command(subcommand)]
         command: EnvCommands,
+    },
+
+    /// Publish, list, inspect, and run runtime scripts (D26 §10)
+    Script {
+        #[command(subcommand)]
+        command: ScriptCommands,
     },
 
     /// Manage external institutions (D31 §5, Phase 19a.5.e)
@@ -657,6 +667,67 @@ enum EnvCommands {
 }
 
 #[derive(Subcommand)]
+enum ScriptCommands {
+    /// Publish a script as a content-addressed RuntimeScript resource.
+    /// Cheap — just a graph commit. The language is inferred from the
+    /// file extension (.r/.jl/.py/.lean) unless `--lang` is given.
+    Publish {
+        /// Path to the script source file.
+        #[arg(value_name = "FILE")]
+        file: String,
+
+        /// IRI of the RuntimeEnvironment the script declares as compatible.
+        #[arg(long, value_name = "ENV_IRI")]
+        env: String,
+
+        /// Override the inferred language identifier (e.g. `r`, `julia`).
+        #[arg(long, value_name = "LANG")]
+        lang: Option<String>,
+
+        /// Declared entry-point name. Optional — omit for a top-level
+        /// script (the common RunRuntimeScript case); set it only when
+        /// the script exposes a typed entry point.
+        #[arg(long, value_name = "NAME")]
+        entry_point: Option<String>,
+
+        /// Human-readable description.
+        #[arg(long, value_name = "TEXT")]
+        description: Option<String>,
+    },
+
+    /// List published runtime scripts.
+    List {
+        /// Optional language filter.
+        #[arg(long, value_name = "LANG")]
+        lang: Option<String>,
+    },
+
+    /// Inspect a published script's metadata and source.
+    Inspect {
+        /// IRI of the RuntimeScript.
+        #[arg(value_name = "SCRIPT_IRI")]
+        iri: String,
+    },
+
+    /// Run a published script against a graph-resident input resource.
+    /// The kernel resolves the script's source and environment from the
+    /// graph at execution (D26 §6.2).
+    Run {
+        /// IRI of the published RuntimeScript.
+        #[arg(value_name = "SCRIPT_IRI")]
+        iri: String,
+
+        /// Comma-separated input resource IRIs. v1 takes exactly one.
+        #[arg(long, value_name = "IRI", value_delimiter = ',')]
+        inputs: Vec<String>,
+
+        /// Branch the trace layer commits into (defaults to "main").
+        #[arg(long, value_name = "BRANCH")]
+        branch: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum InstitutionCommands {
     /// Install an institution by submitting its definition to the chain.
     Install {
@@ -874,6 +945,7 @@ async fn main() {
             }
             Commands::Mirror { command } => remote_mirror(endpoint, command, cli.json).await,
             Commands::Env { command } => remote_env(endpoint, command, cli.json).await,
+            Commands::Script { command } => remote_script(endpoint, command, cli.json).await,
             Commands::Institution { command } => {
                 remote_institution(endpoint, command, cli.json).await
             }
@@ -1015,6 +1087,10 @@ async fn main() {
         }
         Commands::Env { .. } => {
             eprintln!("'env' commands require --endpoint");
+            std::process::exit(1);
+        }
+        Commands::Script { .. } => {
+            eprintln!("'script' commands require --endpoint");
             std::process::exit(1);
         }
         Commands::Institution { .. } => {
@@ -2968,7 +3044,7 @@ async fn remote_mirror(endpoint: &str, command: MirrorCommands, json: bool) {
             output,
             institution_file,
         } => {
-            institutions::mirror_create(
+            mirror::mirror_create(
                 endpoint,
                 &layer,
                 filter.as_deref(),
@@ -2981,12 +3057,12 @@ async fn remote_mirror(endpoint: &str, command: MirrorCommands, json: bool) {
             .await
         }
         MirrorCommands::Get { iri, output } => {
-            institutions::mirror_get(endpoint, &iri, &output, json).await
+            mirror::mirror_get(endpoint, &iri, &output, json).await
         }
         MirrorCommands::List { language } => {
-            institutions::mirror_list(endpoint, language.as_deref(), json).await
+            mirror::mirror_list(endpoint, language.as_deref(), json).await
         }
-        MirrorCommands::Inspect { iri } => institutions::mirror_inspect(endpoint, &iri, json).await,
+        MirrorCommands::Inspect { iri } => mirror::mirror_inspect(endpoint, &iri, json).await,
     }
 }
 
@@ -3002,7 +3078,7 @@ async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
             r_driver,
             r_cdylib,
         } => {
-            institutions::env_build(
+            env::env_build(
                 endpoint,
                 &language,
                 package_path.as_deref(),
@@ -3026,7 +3102,7 @@ async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
             image_digest,
             runtime_version,
         } => {
-            institutions::env_create(
+            env::env_create(
                 endpoint,
                 &language,
                 &handler_package,
@@ -3040,10 +3116,40 @@ async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
             )
             .await
         }
-        EnvCommands::List { language } => {
-            institutions::env_list(endpoint, language.as_deref(), json).await
+        EnvCommands::List { language } => env::env_list(endpoint, language.as_deref(), json).await,
+        EnvCommands::Inspect { iri } => env::env_inspect(endpoint, &iri, json).await,
+    }
+}
+
+async fn remote_script(endpoint: &str, command: ScriptCommands, json: bool) {
+    match command {
+        ScriptCommands::Publish {
+            file,
+            env,
+            lang,
+            entry_point,
+            description,
+        } => {
+            scripts::script_publish(
+                endpoint,
+                &file,
+                &env,
+                lang.as_deref(),
+                entry_point.as_deref(),
+                description.as_deref(),
+                json,
+            )
+            .await
         }
-        EnvCommands::Inspect { iri } => institutions::env_inspect(endpoint, &iri, json).await,
+        ScriptCommands::List { lang } => {
+            scripts::script_list(endpoint, lang.as_deref(), json).await
+        }
+        ScriptCommands::Inspect { iri } => scripts::script_inspect(endpoint, &iri, json).await,
+        ScriptCommands::Run {
+            iri,
+            inputs,
+            branch,
+        } => scripts::script_run(endpoint, &iri, &inputs, branch.as_deref(), json).await,
     }
 }
 
