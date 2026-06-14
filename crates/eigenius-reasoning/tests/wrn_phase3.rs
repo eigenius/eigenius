@@ -85,8 +85,9 @@ fn assert_holds(ctx: &ExecutionContext, inst: &ReasoningInstitution, iri: &str) 
     );
 }
 
-#[test]
-fn wrn_phase3_invivo_and_mechanism_chain_validates() {
+/// Builds the full WRN chain up to phase-3 in-process and returns a read-only
+/// execution context plus a Reasoning institution to validate against.
+fn build_phase3_ctx() -> (ExecutionContext, ReasoningInstitution) {
     let core = {
         let mut b = LayerBuilder::new("core", None);
         for r in
@@ -177,11 +178,40 @@ fn wrn_phase3_invivo_and_mechanism_chain_validates() {
         ExecutionMode::ReadOnly,
         LayerStorage::in_memory(),
     );
-    let inst = ReasoningInstitution::new();
+    (ctx, ReasoningInstitution::new())
+}
 
-    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_vivo");
+/// The mechanism chain validates hermetically: every conclusion here discharges
+/// against witnesses emitted in-process (declarations and in-file program
+/// traces), so no external runtime is required.
+///
+/// `concl_vivo_ontarget` discharges `DerivedEvidence(vivo_seed_control)`, whose
+/// witness comes from `vivo_seed_control`'s in-file `ProgramTrace` — not from R.
+#[test]
+fn wrn_phase3_mechanism_chain_validates() {
+    let (ctx, inst) = build_phase3_ctx();
     assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_vivo_ontarget");
     assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_dsb");
     assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_mech");
     assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_not_telomere");
+}
+
+/// `concl_vivo` (in-vivo WRN dependence) discharges
+/// `DerivedEvidence(vivo_lme4:result)`, whose `IsDerivedAs` witness is produced
+/// only by running the xenograft lme4 program through the R language runtime
+/// (the Docker-hosted Bioconductor container). That witness cannot exist in this
+/// in-process harness, so the assertion is necessarily absent here.
+///
+/// The R-backed leg is covered end-to-end by `demo/wrn-helicase/run.sh`, which
+/// runs the lme4 program for real (p ≈ 0.048, `onco:InVivoDependence` Holds).
+/// This test exists to document that boundary; do not "fix" it by hand-authoring
+/// a `vivo_lme4:result` resource — that would fabricate the very derivation the
+/// witness is meant to attest. Unignore it only when the harness can drive the
+/// runtime substrate (see eigenius#85's two-phase load discussion for the
+/// surrounding load-ordering context).
+#[test]
+#[ignore = "needs the R runtime to emit the vivo_lme4 witness; covered live by demo/wrn-helicase/run.sh"]
+fn wrn_phase3_invivo_validates() {
+    let (ctx, inst) = build_phase3_ctx();
+    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_vivo");
 }

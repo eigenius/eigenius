@@ -219,6 +219,8 @@ The implementation will likely surface refinements in these areas; calling them 
 
 **Multiple Layers admitting the same witness.** The algorithm returns the first hit walking top-down; ties are resolved by the most-recent admitting Layer. This matters for content-addressing (the witness inhabitant carries the discovering Layer's identity in debug output) but not for soundness (the witness is the same fact regardless of which Layer surfaced it first).
 
+**Intra-load emitter/consumer ordering (eigenius#85).** §6 builds the witness index lazily by walking `layer.resources`, but commit is sequential within a load unit: a consumer's commit-time justification gate (D54 `qc_validate_justification`) fires before a later-in-file emitter has committed its witness-bearing Trace into the layer. A single file mixing emitters and consumers therefore fails on first load and succeeds on retry (the emitters' witnesses persist to an ancestor layer on the partial first pass). This is an ordering artifact, not a missing warrant. Current workaround: author emitters and consumers in separate, ordered files. Proper fix is a two-phase AutoOnLoad (index all derivations across the load unit, then gate consumers) — tracked in eigenius#85, which also flags the partial-apply-on-failure behaviour as a related D41 smell.
+
 ## 10. Relationship to other documents
 
 - **[D39 v2 justification logic](d39-justification-logic.md)** — D49 is the implementation memo for D39 §5's `ChainWitness` predicate family. D39 specifies the predicate shape, indexing decisions, and JustifiedBy constructor signatures; D49 specifies where the table lives, how witnesses are synthesised, and how the Lean checker integrates.
