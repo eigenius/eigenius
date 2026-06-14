@@ -42,7 +42,7 @@ namespace wrn        = "urn:eigenius:pub:wrn";
 // recomputed — the Phase-2.x frontier (parallel to limma for D-DIFF).
 
 // C-VAL is now KERNEL-RECOMPUTED in the statistics layer
-// (wrn-phase1-recompute.esl :: concl_val_recomputed) — the ED Fig 3b
+// (wrn-phase1-recompute-conclusions.esl :: concl_val_recomputed) — the ED Fig 3b
 // competition-assay two-way ANOVA (value ~ is_WRN + guide) recomputed via the
 // nested-ANOVA dispatch (stats:Nested SampleSet) on the pinned Nature Source Data, for the
 // MSI lines KM12 (P=2.7e-19) and OVK18 (P=1.2e-7), composed into
@@ -50,7 +50,7 @@ namespace wrn        = "urn:eigenius:pub:wrn";
 // ToolArtifact it replaced has been retired.
 
 // D-ONTARGET / D-HELICASE(exo) evidence is now KERNEL-RECOMPUTED in the
-// statistics layer (wrn-phase1-recompute.esl): the Fig 2c KM12 cDNA-rescue
+// statistics layer (wrn-phase1-recompute-conclusions.esl): the Fig 2c KM12 cDNA-rescue
 // competition assay (relative viability, n = 6), recomputed via the IID
 // two-sample dispatch on the pinned Nature Source Data:
 //   - concl_rescue_wt_recomputed   → RescuesDepletion(WRN_cDNA_WT, sgWRN_EIJ)

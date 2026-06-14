@@ -16,7 +16,8 @@
 //! reasoning (the rescue / control logic), kernel-type-checked.
 //!
 //! Builds core → reflection → reasoning → statistics → bench-core → harness
-//! → onco → wrn-phase1-recompute → wrn-phase1 → wrn-phase2, then runs
+//! → onco → wrn-phase1-recompute-{plans,conclusions} → wrn-phase1 →
+//! wrn-phase2, then runs
 //! ValidateJustification on the four Phase-2 conclusions and asserts Holds:
 //! - C-VAL `SelectiveViabilityDependence(WRN, MSI)`
 //! - D-ONTARGET `OnTarget(WRN, MSI_viability)` (sgWRN-EIJ rescue logic)
@@ -136,10 +137,20 @@ fn wrn_phase2_validation_chain_validates() {
         &harness,
         "onco",
     );
-    let recompute = esl_against(
-        include_str!("../../../experiments/publications/wrn-helicase/wrn-phase1-recompute.esl"),
+    // D54 two-phase load: plans (emitters) before conclusions (consumers).
+    let recompute_plans = esl_against(
+        include_str!(
+            "../../../experiments/publications/wrn-helicase/wrn-phase1-recompute-plans.esl"
+        ),
         &onco,
-        "wrn-recompute",
+        "wrn-recompute-plans",
+    );
+    let recompute = esl_against(
+        include_str!(
+            "../../../experiments/publications/wrn-helicase/wrn-phase1-recompute-conclusions.esl"
+        ),
+        &recompute_plans,
+        "wrn-recompute-conclusions",
     );
     let phase1 = esl_against(
         include_str!("../../../experiments/publications/wrn-helicase/wrn-phase1.esl"),

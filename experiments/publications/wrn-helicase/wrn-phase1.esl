@@ -1,6 +1,6 @@
 // WRN Helicase paper — Phase-1 narrative / deliverable layer.
 //
-// Stacks ON TOP of wrn-phase1-recompute.esl (the kernel-recomputed
+// Stacks ON TOP of wrn-phase1-recompute-{plans,conclusions}.esl (the kernel-recomputed
 // statistical-warrant layer). This file carries the parts that are NOT
 // institution-recomputed:
 //   - the Observed public datasets (provenance per data/MANIFEST.md);
@@ -175,7 +175,7 @@ resource wrn:concl_wrn_selective : reasoning:ReasoningSentence {
 }
 
 // ─── D-REFINE / D-RECQ / D-BIOM: kernel-recomputed in the statistics
-//     layer (wrn-phase1-recompute.esl) ──────────────────────────────────
+//     layer (wrn-phase1-recompute-{plans,conclusions}.esl) ───────────────
 // These three warrants — the mutator-load Spearman (D-REFINE), the
 // RecQ-family uniqueness (D-RECQ), and the biomarker PPV/sensitivity
 // (D-BIOM) — are all institution-recomputable (D50 §2.2), so they live as

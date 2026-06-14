@@ -9,7 +9,7 @@
 // bench:ToolArtifacts. The one Phase-3 sub-claim that IS recomputable from
 // the pinned slice — p53 status modulates WRN dependence (Wilcoxon, 23 vs
 // 13, P=0.02) — is kernel-recomputed in the statistics layer
-// (wrn-phase1-recompute.esl :: concl_p53_modulates).
+// (wrn-phase1-recompute-conclusions.esl :: concl_p53_modulates).
 //
 // The encodable contribution here is again the Declared reasoning:
 //   - C-VIVO: the C911 seed-control logic — shWRN1 impairs KM12 xenograft
@@ -52,7 +52,9 @@ namespace wrn        = "urn:eigenius:pub:wrn";
 // materialized before this chain layer is loaded — D54 lemma-citation order).
 //
 // Minimal class for the program's typed input (the xenograft table).
-class wrn:XenograftTable {}
+class wrn:XenograftTable {
+    description = "The KM12 shWRN1 xenograft tumor-volume table (Fig 2d) consumed by the lme4 in-vivo-dependence RuntimeScript program (D56). Columns: vivo_volume, vivo_day, vivo_mouse, vivo_dox.";
+}
 
 // Linked-external: the C911 seed-matched control is inert in vivo.
 resource wrn:vivo_seed_control : bench:ToolArtifact {

@@ -1,7 +1,7 @@
 # SampleSet extraction — the Tier-1 provenance pin
 
 The numeric arrays inlined as `stats:sample_set_value` in
-[`../wrn-phase1-recompute.esl`](../wrn-phase1-recompute.esl) are **projections
+[`../wrn-phase1-recompute-plans.esl`](../wrn-phase1-recompute-plans.esl) are **projections
 of the pinned public-data slices** (a column + filter + sort of a checksummed
 CSV). This directory closes the one previously-uncommitted link in the audit
 chain:

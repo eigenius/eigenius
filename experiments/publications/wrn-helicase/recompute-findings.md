@@ -49,7 +49,7 @@ of these same published display numbers — not a different (cleaner) dataset.
 **Status — LIFTED (increment 10).** C-MMR's `mmr_restoration` is now **kernel-recomputed**. A new
 `stats:CrossedAnovaAnalysisPlan` dispatch (`numerics::crossed_two_way_anova`, group = 2-level
 CL/MMR-context, crossed blocking factor = guide; distinct from the increment-8 nested dispatch)
-recomputes the three contrasts; `wrn-phase1-recompute.esl` carries the three Tier-1-pinned
+recomputes the three contrasts; `wrn-phase1-recompute-plans.esl` carries the three Tier-1-pinned
 SampleSets + plans + `bridge_mmr_restoration` → `concl_mmr_restoration_recomputed`
 (`RestorationPartiallyRescues(dMMR, WRN)`). The linked-external `wrn:mmr_restoration` ToolArtifact
 is retired; `concl_mmr` (phase 5) discharges its antecedent by D54 lemma citation. The unit test

@@ -130,10 +130,20 @@ fn build_ctx() -> ExecutionContext {
         &harness,
         "onco",
     );
-    let recompute = esl_against(
-        include_str!("../../../experiments/publications/wrn-helicase/wrn-phase1-recompute.esl"),
+    // D54 two-phase load: plans (emitters) before conclusions (consumers).
+    let recompute_plans = esl_against(
+        include_str!(
+            "../../../experiments/publications/wrn-helicase/wrn-phase1-recompute-plans.esl"
+        ),
         &onco,
-        "wrn-recompute",
+        "wrn-recompute-plans",
+    );
+    let recompute = esl_against(
+        include_str!(
+            "../../../experiments/publications/wrn-helicase/wrn-phase1-recompute-conclusions.esl"
+        ),
+        &recompute_plans,
+        "wrn-recompute-conclusions",
     );
     let phase1 = esl_against(
         include_str!("../../../experiments/publications/wrn-helicase/wrn-phase1.esl"),

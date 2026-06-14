@@ -16,7 +16,8 @@
 //! (C911 seed-control logic, DSB→DDR mechanism, telomere-defect rejection),
 //! kernel-type-checked.
 //!
-//! Builds core → … → onco → wrn-phase1-recompute → wrn-phase1 → wrn-phase2
+//! Builds core → … → onco → wrn-phase1-recompute-{plans,conclusions} →
+//! wrn-phase1 → wrn-phase2
 //! → wrn-phase3 and runs ValidateJustification on the five Phase-3
 //! conclusions, asserting Holds:
 //! - C-VIVO `InVivoDependence(WRN, MSI)`
@@ -138,10 +139,20 @@ fn wrn_phase3_invivo_and_mechanism_chain_validates() {
         &harness,
         "onco",
     );
-    let recompute = esl_against(
-        include_str!("../../../experiments/publications/wrn-helicase/wrn-phase1-recompute.esl"),
+    // D54 two-phase load: plans (emitters) before conclusions (consumers).
+    let recompute_plans = esl_against(
+        include_str!(
+            "../../../experiments/publications/wrn-helicase/wrn-phase1-recompute-plans.esl"
+        ),
         &onco,
-        "wrn-recompute",
+        "wrn-recompute-plans",
+    );
+    let recompute = esl_against(
+        include_str!(
+            "../../../experiments/publications/wrn-helicase/wrn-phase1-recompute-conclusions.esl"
+        ),
+        &recompute_plans,
+        "wrn-recompute-conclusions",
     );
     let phase1 = esl_against(
         include_str!("../../../experiments/publications/wrn-helicase/wrn-phase1.esl"),

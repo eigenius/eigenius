@@ -14,7 +14,7 @@
 
 //! Tier-1 data-extraction pin (D50 §9.1) — the mechanical link from the raw
 //! checksummed slices to the SampleSet arrays inlined in
-//! `wrn-phase1-recompute.esl`.
+//! `wrn-phase1-recompute-plans.esl`.
 //!
 //! Shells out to the committed canonical extractor
 //! (`experiments/publications/wrn-helicase/extract/extract_samplesets.py

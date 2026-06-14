@@ -9,7 +9,7 @@
 """Canonical extraction recipes for the WRN Phase-1 SampleSets (Tier 1 pin).
 
 This module is the SINGLE SOURCE OF TRUTH for the numeric arrays inlined as
-`stats:sample_set_value` in ../wrn-phase1-recompute.esl. Each recipe states
+`stats:sample_set_value` in ../wrn-phase1-recompute-plans.esl. Each recipe states
 exactly which pinned slice + column + filter + sort + grouping produces the
 array, enforces the slice's sha256 before reading, and supports:
 
@@ -39,7 +39,7 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SLICES = os.path.join(HERE, "..", "data", "slices")
-ESL = os.path.join(HERE, "..", "wrn-phase1-recompute.esl")
+ESL = os.path.join(HERE, "..", "wrn-phase1-recompute-plans.esl")
 
 # Pin anchors — full sha256 of each slice this extraction depends on.
 # (MANIFEST.md carries the truncated forms; these are the enforced values.)

@@ -802,10 +802,23 @@ property stats:sample_set_value : core:resource {
 // chain commits an author asked; the *answer* (with its derived
 // proposition + numerics) is the Verdict the institution emits.
 
-class stats:StatisticalAnalysisPlan {
-    description = "A pre-registered Statistical Analysis Plan (SAP) tied to a specific SampleSet — the chain-resident specification of how a test will be run. Pairs a SampleSet reference with the universal SAP parameters (alpha, effect_size, directionality, variance assumption, outlier rule). The StatisticalAnalysisPlan itself carries no proposition; the chain attests propositions through the StatisticalAnalysisResult derivations the institution emits at validation time. On AutoOnLoad, the statistics institution validates the SAP and emits one StatisticalAnalysisResult per effect (one for single-effect dispatches; 2^k − 1 for k-factor factorial; W/S/W×S for split-plot, etc.) at IRIs `{claim_iri}:result:{effect_name}`. Each StatisticalAnalysisResult is the chain-resident DerivedResource downstream D39 reasoning cites via DerivedEvidence.";
-    requires stats:sample_set,
-             stats:alpha,
+// Base class for every plan that recomputes against a chain-resident
+// SampleSet, carrying the one property they all share — `sample_set`. Both
+// the inferential `StatisticalAnalysisPlan` (hypothesis tests, with alpha /
+// effect_size / directionality) and the non-inferential
+// `ClassificationAnalysisPlan` (a deterministic PPV/sensitivity count, no
+// alpha) subclass it, so `sample_set`'s domain is the base and applies to
+// both via subclass resolution — rather than enumerating each plan kind on
+// the property's domain. New plan kinds over a SampleSet slot in by
+// subclassing `AnalysisPlan` (D52 §3 / §4.2).
+class stats:AnalysisPlan {
+    description = "Base class for any plan recomputed against a chain-resident SampleSet. Carries `sample_set` (the SampleSetResource IRI the plan is computed over); subclasses add their kind-specific parameters — StatisticalAnalysisPlan the hypothesis-test universals (alpha, effect_size, directionality, variance, outlier), ClassificationAnalysisPlan the classifier thresholds. Not instantiated directly.";
+    requires stats:sample_set;
+}
+
+class stats:StatisticalAnalysisPlan : stats:AnalysisPlan {
+    description = "A pre-registered Statistical Analysis Plan (SAP) tied to a specific SampleSet — the chain-resident specification of how a test will be run. Pairs the inherited SampleSet reference with the universal SAP parameters (alpha, effect_size, directionality, variance assumption, outlier rule). The StatisticalAnalysisPlan itself carries no proposition; the chain attests propositions through the StatisticalAnalysisResult derivations the institution emits at validation time. On AutoOnLoad, the statistics institution validates the SAP and emits one StatisticalAnalysisResult per effect (one for single-effect dispatches; 2^k − 1 for k-factor factorial; W/S/W×S for split-plot, etc.) at IRIs `{claim_iri}:result:{effect_name}`. Each StatisticalAnalysisResult is the chain-resident DerivedResource downstream D39 reasoning cites via DerivedEvidence.";
+    requires stats:alpha,
              stats:effect_size,
              stats:directionality,
              stats:variance_assumption,
@@ -849,10 +862,9 @@ class stats:MethodComparisonAnalysisPlan : stats:StatisticalAnalysisPlan {
 // (`:result:ppv` and `:result:sensitivity`), each Holds iff its metric
 // meets the declared minimum and carrying `stats:ge(stats:<metric>(s), min)`.
 
-class stats:ClassificationAnalysisPlan {
-    description = "A plan evaluating a threshold classifier's positive predictive value and sensitivity over a two-group SampleSet (D52 §2.2). Reuses the stats:IID(group_a, group_b, …) authoring surface: group_a is the test-positive group (flagged by the predictor under evaluation), group_b the test-negative rest; a unit is condition-positive when its value is below classification_threshold (e.g. dependency score < −0.5). The institution emits two StatisticalAnalysisResult derivations — `{plan}:result:ppv` carrying `stats:ge(stats:ppv(s), min_ppv)` and `{plan}:result:sensitivity` carrying `stats:ge(stats:sensitivity(s), min_sensitivity)` — each Holds iff its metric meets the declared minimum. Unlike a hypothesis test this is a deterministic count and carries no alpha / effect_size / directionality.";
-    requires stats:sample_set,
-             stats:classification_threshold,
+class stats:ClassificationAnalysisPlan : stats:AnalysisPlan {
+    description = "A plan evaluating a threshold classifier's positive predictive value and sensitivity over a two-group SampleSet (D52 §2.2). A subclass of stats:AnalysisPlan (it computes against a SampleSet) but NOT of StatisticalAnalysisPlan — PPV/sensitivity is a deterministic count, not a hypothesis test, so it carries no alpha / effect_size / directionality / variance assumption. Reuses the stats:IID(group_a, group_b, …) authoring surface: group_a is the test-positive group (flagged by the predictor under evaluation), group_b the test-negative rest; a unit is condition-positive when its value is below classification_threshold (e.g. dependency score < −0.5). The institution emits two StatisticalAnalysisResult derivations — `{plan}:result:ppv` carrying `stats:ge(stats:ppv(s), min_ppv)` and `{plan}:result:sensitivity` carrying `stats:ge(stats:sensitivity(s), min_sensitivity)` — each Holds iff its metric meets the declared minimum.";
+    requires stats:classification_threshold,
              stats:min_ppv,
              stats:min_sensitivity;
 }
@@ -881,9 +893,9 @@ property stats:min_sensitivity : core:float {
 // `stats:StatisticalAnalysisPlan`. See the macro doc comments above.
 
 property stats:sample_set : core:string {
-    description = "IRI of the SampleSet ObservedResource holding the raw replicates this claim is computed against. Required for recomputation.";
+    description = "IRI of the SampleSet ObservedResource holding the raw replicates this claim is computed against. Required for recomputation. Domain is the stats:AnalysisPlan base, so it applies to every plan kind (StatisticalAnalysisPlan + ClassificationAnalysisPlan) via subclass resolution.";
     format = formats:iri;
-    domain stats:StatisticalAnalysisPlan;
+    domain stats:AnalysisPlan;
 }
 
 // The "predicate the claim establishes when the test holds" rides on
