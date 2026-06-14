@@ -114,7 +114,7 @@ run_r_program() {
         sed "s|sha256:[0-9a-f]\{64\}|$R_IMAGE_DIGEST|" "$src" > "$prog"
     fi
     eig run "$prog" "$input" | grep -iE "$pat" || true
-    [ "$prog" != "$src" ] && rm -f "$prog"
+    if [ "$prog" != "$src" ]; then rm -f "$prog"; fi
 }
 
 echo "--- Step 3: Run the wrapped-R warrants (lme4, D55/D56) ---"
