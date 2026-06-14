@@ -105,19 +105,40 @@ echo
 # Build it once with:  eig env build --language r   (prints the digest), and
 # paste it into programs/xenograft-lme4-program.json (or pass it here via
 # $R_IMAGE_DIGEST to patch a temp copy).
-echo "--- Step 3: Run the lme4 xenograft program (wrapped-R, D56) ---"
-PROG="$PROGRAMS/xenograft-lme4-program.json"
-if [ -n "${R_IMAGE_DIGEST:-}" ]; then
-    PROG="$(mktemp -t wrn-xeno-prog-XXXXXX.json)"
-    trap 'rm -f "$PROG"' EXIT
-    sed "s|sha256:[0-9a-f]\{64\}|$R_IMAGE_DIGEST|" \
-        "$PROGRAMS/xenograft-lme4-program.json" > "$PROG"
-fi
-eig run "$PROG" "$PROGRAMS/xenograft-input.json" | grep -iE "lrt_p_value|InVivoDependence" || true
+# run_r_program <program.json> <input.json> <grep-pattern>: runs a wrapped-R
+# program, patching runtime:image_digest from $R_IMAGE_DIGEST when set.
+run_r_program() {
+    local src="$1" input="$2" pat="$3" prog="$1"
+    if [ -n "${R_IMAGE_DIGEST:-}" ]; then
+        prog="$(mktemp -t wrn-r-prog-XXXXXX.json)"
+        sed "s|sha256:[0-9a-f]\{64\}|$R_IMAGE_DIGEST|" "$src" > "$prog"
+    fi
+    eig run "$prog" "$input" | grep -iE "$pat" || true
+    [ "$prog" != "$src" ] && rm -f "$prog"
+}
+
+echo "--- Step 3: Run the wrapped-R warrants (lme4, D55/D56) ---"
+# 3a. In-vivo: the authors' own random-slope LRT on the xenograft volumes,
+#     committing wrn:vivo_lme4:result -> InVivoDependence(WRN,MSI) (concl_vivo).
+echo "  3a. xenograft in-vivo lme4 -> InVivoDependence"
+run_r_program "$PROGRAMS/xenograft-lme4-program.json" \
+    "$PROGRAMS/xenograft-input.json" "lrt_p_value|InVivoDependence"
+# 3b. Biological-level competition assay (finding F4): the pseudoreplication-
+#     corrected mixed model lmer(value ~ is_WRN + (1|guide)) LRT on the KM12
+#     competition data — the guide as biological unit. Commits
+#     wrn:viab_KM12_bio_lme4:result -> ViabilityDependenceAtBiologicalUnit(WRN,KM12)
+#     (P ~ 2.15e-6), the honest counterpart of the published nested-ANOVA warrant
+#     (P = 2.74e-19, recomputed by wrn:viab_KM12_plan in the statistics layer).
+echo "  3b. KM12 competition biological-unit lme4 -> ViabilityDependenceAtBiologicalUnit (F4)"
+run_r_program "$PROGRAMS/km12-competition-lme4-program.json" \
+    "$PROGRAMS/km12-competition-input.json" "lrt_p_value|ViabilityDependenceAtBiologicalUnit"
 echo
 
 # Step 4: the reasoning layers that cite the recomputed + wrapped-R warrants.
-echo "--- Step 4: Load WRN reasoning chain (phase2, phase3, phase5) ---"
+# wrn-phase1-biological-sap.esl cites the 3b warrant (concl_viab_KM12_biological)
+# and records the F4 dual-SAP fact — loaded here, after 3b committed its witness.
+echo "--- Step 4: Load WRN reasoning chain (biological-SAP, phase2, phase3, phase5) ---"
+eig load "$WRN/wrn-phase1-biological-sap.esl"
 eig load "$WRN/wrn-phase2.esl"
 eig load "$WRN/wrn-phase3.esl"
 eig load "$WRN/wrn-phase5.esl"

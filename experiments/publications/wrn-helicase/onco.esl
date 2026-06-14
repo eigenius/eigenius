@@ -114,6 +114,17 @@ data onco:DispensableActivity : core:string -> core:string -> Prop {
 data onco:SelectiveViabilityDependence : core:string -> core:string -> Prop {
 }
 
+// (gene, cell_line): gene depletion impairs viability in a single cell line,
+// established with the *biological replication unit* (the shRNA/sgRNA guide) as
+// the unit of inference — a mixed-effects (lmer) test of the is_WRN fixed effect
+// against the between-guide variance. This is the pseudoreplication-corrected
+// counterpart to the published competition-assay analysis, which tested against
+// the technical (within-guide) residual (recompute finding F4). Distinct from
+// SelectiveViabilityDependence (the MSI-vs-MSS-selective composed claim): this
+// predicate is per-line and is *about the replication stratum of the evidence*.
+data onco:ViabilityDependenceAtBiologicalUnit : core:string -> core:string -> Prop {
+}
+
 // ── In vivo + mechanism predicates (Phase 3: C-VIVO / C-MECH) ─────────
 
 // (gene, context): the dependence holds in vivo / in a patient-derived model.

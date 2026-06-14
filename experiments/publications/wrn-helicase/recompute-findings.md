@@ -154,18 +154,40 @@ definition of pseudoreplication:
 1. **Faithful reproduction** — the authors' *declared* SAP: a `StatisticalAnalysisPlan` over the
    competition-assay `SampleSet` reproducing `lm(value ~ is_WRN + guide)` (`nested_group_anova`,
    P = 2.74e-19). This is "what the paper claimed," recomputed exactly.
-2. **Alternative (preferred) SAP** — the biological-level analysis (`guide` as the biological
-   replicate unit; mixed-model / between-guide stratification), as a *distinct* warrant over the
-   *same* `SampleSet`. The locus of the difference is the SampleSet's `replication` axis
-   (`NestedReplication(biological_n, technical_per_biological)`, D52 §4.2) — which already carries
-   the structure needed to drive the correct variance-component stratification (D52 §3 / §7.4),
-   currently consumed only for scope admissibility, not error-term selection.
+2. **Alternative (preferred) SAP** — the biological-level analysis: `guide` as the biological
+   replicate unit, the mixed model `lmer(value ~ is_WRN + (1|guide))` LRT (P ≈ 2.15e-6). This is
+   **lifted through the R language runtime** (D55/D56), *not* reimplemented as statistics-institution
+   numerics: a mixed-effects LRT (REML/optimizer-dependent) is exactly the runtime-dependent
+   computation D26 §2.2 says belongs in the substrate (operationally reproducible, not
+   mathematically re-checkable in-kernel) — and it is the *same* model and *same* mechanism the
+   paper's own in-vivo arm uses (`concl_vivo`, the xenograft `lmer` LRT). Using it here also resolves
+   the paper's internal inconsistency (mixed model in vivo, fixed-effects ANOVA in vitro): when *we*
+   do the in-vitro analysis correctly, we use the same tool.
 
-The two are linked on the chain: the alternative **refines / annotates** the published claim, so
+**Implemented (this is now on the chain, not a follow-up).** The R program
+[`programs/km12-competition-lme4-program.json`](programs/km12-competition-lme4-program.json) runs the
+LRT on [`programs/km12-competition-input.json`](programs/km12-competition-input.json) (the ED Fig 3b
+KM12 data) and commits `wrn:viab_KM12_bio_lme4:result` carrying an `IsDerivedAs` witness over
+`onco:ViabilityDependenceAtBiologicalUnit("WRN","KM12")`. [`wrn-phase1-biological-sap.esl`](wrn-phase1-biological-sap.esl)
+holds `concl_viab_KM12_biological` (the D54 reasoning sentence that discharges that witness) and
+`wrn:viab_KM12_dual_sap` (a declared resource recording F4 itself: the technical-stratum warrant
+`wrn:viab_KM12_plan` at 2.74e-19 vs the biological-stratum warrant at ≈2.15e-6, conclusion robust).
+Like `concl_vivo`, the witness exists only after the R program runs, so the warrant is exercised by
+the live demo ([`demo/wrn-helicase/run.sh`](../../../demo/wrn-helicase/run.sh) Step 3b), not the
+in-process recompute tests.
+
+The two SAPs are linked on the chain: the alternative **refines / annotates** the published claim, so
 both the reproduced number *and* the methodological caveat are first-class, queryable facts — the
 "audit chain surfaces what prose hides" demonstration, here on the *model* rather than the data
-(cf. F1, which did it on a sample size). Lifting the alternative SAP into a recomputed warrant —
-the D52 §7.4 replication-stratification path — is tracked as a statistics-institution follow-up.
+(cf. F1, which did it on a sample size).
+
+> *Design note.* An earlier attempt lifted this as a deterministic between-guide nested ANOVA
+> (`nested_group_anova`'s F(1, k−2) sibling) inside the statistics institution. That was reverted:
+> it computes a *coarser proxy* (the pooled t-test on guide means, ≈2.3e-3) rather than the mixed
+> model we actually ran, and it grows the institution with a test whose principled form (REML) is
+> not deterministically re-checkable anyway. The R-runtime path uses the real model and reuses
+> existing infrastructure. (A deterministic biological-stratum primitive in the institution may still
+> be worth having later as a *second*, kernel-recomputed cross-check — but it is not the warrant.)
 
 ## F1 — Spearman sample size: paper says n=54, data gives n=51
 

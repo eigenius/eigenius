@@ -52,8 +52,8 @@ namespace wrn        = "urn:eigenius:pub:wrn";
 // materialized before this chain layer is loaded — D54 lemma-citation order).
 //
 // Minimal class for the program's typed input (the xenograft table).
-class wrn:XenograftTable {
-    description = "The KM12 shWRN1 xenograft tumor-volume table (Fig 2d) consumed by the lme4 in-vivo-dependence RuntimeScript program (D56). Columns: vivo_volume, vivo_day, vivo_mouse, vivo_dox.";
+class wrn:XenograftTable : reflection:ObservedResource {
+    description = "The KM12 shWRN1 xenograft tumor-volume table (Fig 2d) consumed by the lme4 in-vivo-dependence RuntimeScript program (D56). Columns: vivo_volume, vivo_day, vivo_mouse, vivo_dox. An ObservedResource so it carries the same tier-1 extraction pins (bench:extracted_from_*) as the SampleSets — the input data is traced to the pinned source slice via a re-runnable recipe.";
 }
 
 // Linked-external: the C911 seed-matched control is inert in vivo.

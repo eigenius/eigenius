@@ -6,12 +6,15 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-"""Canonical extraction recipes for the WRN Phase-1 SampleSets (Tier 1 pin).
+"""Canonical extraction recipes for the WRN Phase-1 SampleSets + program inputs
+(Tier 1 pin).
 
 This module is the SINGLE SOURCE OF TRUTH for the numeric arrays inlined as
-`stats:sample_set_value` in ../wrn-phase1-recompute-plans.esl. Each recipe states
-exactly which pinned slice + column + filter + sort + grouping produces the
-array, enforces the slice's sha256 before reading, and supports:
+`stats:sample_set_value` in ../wrn-phase1-recompute-plans.esl AND for the
+wrapped-R RuntimeScript program-input tables under ../programs/ (the lme4
+xenograft + KM12-competition inputs, D56). Each recipe states exactly which
+pinned slice + column + filter + sort + grouping produces the array, enforces
+the slice's sha256 before reading, and supports:
 
     python3 extract_samplesets.py --check    # re-derive + diff vs the ESL (default)
     python3 extract_samplesets.py --emit      # print ESL-ready arrays (regenerate)
@@ -32,6 +35,7 @@ slice content-hash, rather than an Observed node with a recipe sidecar.
 
 import csv
 import hashlib
+import json
 import os
 import re
 import sys
@@ -318,6 +322,58 @@ def _extract_viab(first_guide_col):
     return {"kind": "IID", "group_a": wrn, "group_b": ctl}
 
 
+# ── Program-input table: viab_KM12_competition_table (flat per-row) ───────
+#   Same pinned slice / same data as wrn:viab_KM12_sampleset (Recipe 5), but
+#   reshaped to the flat per-row [value, guide] table the biological-unit lme4
+#   RuntimeScript program consumes (programs/km12-competition-input.json). The
+#   guide is the biological replication unit; is_WRN is derived in the R script.
+def _extract_viab_table(first_guide_col):
+    rows = _read_xlsx_cells("wrn_sourcedata_EDFig3_MOESM6.xlsx")
+
+    def vals(offset):
+        col = first_guide_col + offset
+        return [round(float(rows[ri][col]), 6) for ri in range(92, 98) if rows[ri].get(col) not in (None, "")]
+
+    # Order matches the JSON: sgWRN guides first (group A), then controls (B).
+    guides = [("sgWRN1", 4), ("sgWRN2", 5), ("sgWRN3", 6), ("sgCh2-2", 0), ("sgCh2-4", 1)]
+    value, guide = [], []
+    for name, off in guides:
+        vs = vals(off)
+        value += vs
+        guide += [name] * len(vs)
+    return {"value": value, "guide": guide}
+
+
+# ── Program-input table: vivo_xenograft_table (Fig 2d, lme4 in-vivo input) ─
+#   slice : wrn_sourcedata_Fig2_MOESM3.xlsx, sheet "Fig 2d" (sheet 3)
+#   The sheet has four column-blocks (header row 1): shWRN1 at col offsets 0/12,
+#   and the shWRN1-C911 seed control at 23/32 (EXCLUDED — not in the lme4 input).
+#   Each shWRN1 arm's "Volume" section is 5 per-mouse rows (sheet rows 14..18) of
+#   tumor volume (mm^3) across the "Days after randomization" header (row 2).
+#   col-0 block = Dox-on (Y, WRN-depleted); col-12 block = Dox-off (N). Each
+#   mouse's available (non-empty) timepoints are emitted; Y mice first, then N.
+#   This is the random-slope-LRT input (in_vivo_KM12_analysis.R).
+def _extract_xenograft():
+    rows = _read_xlsx_cells("wrn_sourcedata_Fig2_MOESM3.xlsx", sheet=3)
+    volume, day, mouse, dox = [], [], [], []
+    for tag, col0 in (("Y", 3), ("N", 15)):
+        days = []
+        c = col0
+        while rows[2].get(c) not in (None, ""):
+            days.append(float(rows[2][c]))
+            c += 1
+        for i, r in enumerate(range(14, 19), start=1):  # 5 mice per arm
+            for k, dy in enumerate(days):
+                cell = rows[r].get(col0 + k)
+                if cell in (None, ""):
+                    continue
+                volume.append(round(float(cell), 6))
+                day.append(dy)
+                mouse.append(f"{tag}{i}")
+                dox.append(tag)
+    return {"volume": volume, "day": day, "mouse": mouse, "dox": dox}
+
+
 # resource name in the ESL → recipe
 RECIPES = {
     "wrn:wrn_dep_sampleset": extract_wrn_dep,
@@ -338,6 +394,33 @@ RECIPES = {
     "wrn:rescue_wt_sampleset": lambda: _extract_rescue(12),
     "wrn:rescue_e84a_sampleset": lambda: _extract_rescue(19),
 }
+
+
+# Program-input tables (JSON, not ESL): resource name → (recipe, json path,
+# {derived key → property short-name in the JSON}). These are the wrapped-R
+# RuntimeScript inputs (D56); carrying the same tier-1 pins as the SampleSets
+# closes the only unpinned data in the WRN encoding. Verified by re-deriving
+# each column from the pinned slice and diffing the inlined JSON arrays.
+PROGRAMS = os.path.join(HERE, "..", "programs")
+INPUT_TABLES = {
+    "wrn:viab_KM12_competition_table": (
+        lambda: _extract_viab_table(29),
+        os.path.join(PROGRAMS, "km12-competition-input.json"),
+        {"value": "viab_value", "guide": "viab_guide"},
+    ),
+}
+
+
+def _inlined_json_columns(path, columns):
+    """Read the named `urn:eigenius:pub:wrn:<col>` arrays from a program-input
+    JSON document (single resource), rounding floats to match the recipe."""
+    doc = json.load(open(path))
+    res = doc[0] if isinstance(doc, list) else doc
+    out = {}
+    for col in columns:
+        raw = res[f"urn:eigenius:pub:wrn:{col}"]
+        out[col] = [round(x, 6) if isinstance(x, float) else x for x in raw]
+    return out
 
 
 def _derived_flat(result):
@@ -379,9 +462,20 @@ def cmd_check():
             f"  {resource:<28} derived={len(derived):>3} inlined={len(inlined):>3}  "
             f"{'IDENTICAL' if same else 'DRIFT ✗'}"
         )
+    for resource, (recipe, path, colmap) in INPUT_TABLES.items():
+        derived = recipe()
+        inlined = _inlined_json_columns(path, colmap.values())
+        for key, col in colmap.items():
+            d = [round(x, 6) if isinstance(x, float) else x for x in derived[key]]
+            same = d == inlined[col]
+            ok = ok and same
+            print(
+                f"  {resource + '.' + col:<44} derived={len(d):>3} inlined={len(inlined[col]):>3}  "
+                f"{'IDENTICAL' if same else 'DRIFT ✗'}"
+            )
     if not ok:
-        raise SystemExit("FAIL: inlined SampleSet array(s) drifted from the pinned slices")
-    print("OK: all inlined SampleSets reproduce exactly from the pinned slices")
+        raise SystemExit("FAIL: inlined SampleSet/input array(s) drifted from the pinned slices")
+    print("OK: all inlined SampleSets + program inputs reproduce exactly from the pinned slices")
 
 
 def cmd_emit():
