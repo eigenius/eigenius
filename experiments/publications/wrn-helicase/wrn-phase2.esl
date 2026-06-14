@@ -44,7 +44,7 @@ namespace wrn        = "urn:eigenius:pub:wrn";
 // C-VAL is now KERNEL-RECOMPUTED in the statistics layer
 // (wrn-phase1-recompute.esl :: concl_val_recomputed) — the ED Fig 3b
 // competition-assay two-way ANOVA (value ~ is_WRN + guide) recomputed via the
-// NestedAnovaAnalysisPlan dispatch on the pinned Nature Source Data, for the
+// nested-ANOVA dispatch (stats:Nested SampleSet) on the pinned Nature Source Data, for the
 // MSI lines KM12 (P=2.7e-19) and OVK18 (P=1.2e-7), composed into
 // SelectiveViabilityDependence(WRN, MSI). The linked-external va_competition
 // ToolArtifact it replaced has been retired.

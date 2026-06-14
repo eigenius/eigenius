@@ -157,9 +157,11 @@ impl RLanguageRuntime {
     /// carrying the `RuntimeEnvironment.image_digest` for each dispatch, so
     /// one registered runtime serves whatever image the env declares (D26
     /// §5.3 / §5.5). The cross-check `manifest_hash` comes from this
-    /// runtime's own recipe (`image_manifest_hash` — driver + cdylib +
-    /// plan), exactly as Julia computes it from `self`; an env built from
-    /// the same recipe matches, and a mismatch fails the boot cross-check
+    /// runtime's own recipe (`image_manifest_hash` — the composed
+    /// Dockerfile + driver script; the cdylib is excluded, see
+    /// `manifest_hash`), exactly as Julia computes it from `self`; an env
+    /// built from the same recipe matches, and a mismatch fails the boot
+    /// cross-check
     /// closed (D26 §9.3). Falls back to [`Self::worker_spec`] (the
     /// construction-time `self.image` / local backend) when the env carries
     /// no digest — the `LocalServiceSpawner` dev + test path.
@@ -276,9 +278,11 @@ impl RLanguageRuntime {
     /// production wiring recomputes it after `build_environment_image` to
     /// construct the [`RImageBinding`] for [`Self::with_image`].
     pub fn image_manifest_hash(&self) -> Result<String, BuildError> {
-        let (driver, cdylib) = self.read_assets()?;
+        // `read_assets` still validates the cdylib exists (it's baked into
+        // the image), but only the driver feeds the hash (see `manifest_hash`).
+        let (driver, _cdylib) = self.read_assets()?;
         let dockerfile = compose_image_dockerfile(&self.base_image_ref, &self.image_plan);
-        Ok(manifest_hash(&dockerfile, &driver, &cdylib))
+        Ok(manifest_hash(&dockerfile, &driver))
     }
 }
 
@@ -295,7 +299,7 @@ impl LanguageRuntime for RLanguageRuntime {
     ) -> Result<ImageDigest, BuildError> {
         let (driver, cdylib) = self.read_assets()?;
         let dockerfile = compose_image_dockerfile(&self.base_image_ref, &self.image_plan);
-        let manifest_hash = manifest_hash(&dockerfile, &driver, &cdylib);
+        let manifest_hash = manifest_hash(&dockerfile, &driver);
 
         let work_dir = self.depot_path.join("build-context-r");
         let _ = std::fs::remove_dir_all(&work_dir);
@@ -458,15 +462,27 @@ fn build_output_resource(invocation_id: &str, output: Vec<u8>) -> Resource {
     r
 }
 
-/// The image's manifest hash: `sha256(dockerfile || driver || cdylib)`. Any
-/// change to the recipe or the baked worker assets yields a new hash, which
-/// the boot cross-check (D26 §9.3) verifies against the in-image
-/// `manifest-hash` file. Mirrors the Julia runtime's `manifest_hash`.
-fn manifest_hash(dockerfile: &str, driver: &[u8], cdylib: &[u8]) -> String {
+/// The image's manifest hash: `sha256(dockerfile || driver)` — the
+/// reproducibility surface (the Bioconductor base + pinned R packages, via
+/// the composed Dockerfile, plus the driver script source). The boot
+/// cross-check (D26 §9.3) verifies it against the in-image `manifest-hash`
+/// file.
+///
+/// The compiled `eigenius-r-worker` **cdylib is deliberately excluded**.
+/// It's our transport shim (pinned by the worker crate version), not a
+/// scientific-reproducibility variable, and it's built independently on
+/// two hosts in this flow — the CLI's `env build` (host `rustc`, workspace
+/// path `/home/...`) and the orchestrator image (`rust:…-bookworm`,
+/// `/build`). Rust release binaries aren't byte-reproducible across
+/// differing toolchains + embedded source paths, so hashing the cdylib
+/// bytes makes the cross-check fail spuriously across build environments
+/// without adding reproducibility value. Pinning a single canonical cdylib
+/// (build once, copy to both) would be the way to include it; hashing two
+/// independent builds is not.
+fn manifest_hash(dockerfile: &str, driver: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(dockerfile.as_bytes());
     hasher.update(driver);
-    hasher.update(cdylib);
     format!("sha256:{:x}", hasher.finalize())
 }
 

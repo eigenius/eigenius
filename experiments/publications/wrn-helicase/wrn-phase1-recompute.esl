@@ -640,8 +640,8 @@ resource wrn:concl_p53_modulates : reasoning:ReasoningSentence {
 // C-VAL (recomputed): WRN depletion impairs MSI viability (competition assay)
 // ════════════════════════════════════════════════════════════════════
 // The wet-lab competition-assay two-way ANOVA (ED Fig 3b, day 10), kernel-
-// recomputed via the NestedAnovaAnalysisPlan dispatch (value ~ is_WRN +
-// guide). The two MSI lines KM12 and OVK18 are recomputed (each: 18 sgWRN +
+// recomputed via the nested-ANOVA dispatch (stats:Nested SampleSet, value ~
+// is_WRN + guide). The two MSI lines KM12 and OVK18 are recomputed (each: 18 sgWRN +
 // 12 negative-control day-10 relative-ratio values; the paper's two-way
 // ANOVA P = 2.7e-19 / 1.2e-7). Each plan emits stats:lt(mean_diff_of(s), 0)
 // (sgWRN mean strictly below control = impaired). A declared bridge composes
@@ -667,7 +667,7 @@ resource wrn:viab_KM12_sampleset : stats:SampleSetResource {
     bench:extraction_filter     = "group A = sgWRN1,sgWRN2,sgWRN3 (each 6 reps, flat by guide); group B = sgCh2-2,sgCh2-4 (6 each); pan-essential controls excluded";
     bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:viab_KM12_sampleset";
 
-    stats:sample_set_value = stats:IID(
+    stats:sample_set_value = stats:Nested(
         [
          0.268449, 0.248279, 0.280587, 0.291857, 0.381621, 0.304528,
          0.235725, 0.202625, 0.264119, 0.220345, 0.171601, 0.270842,
@@ -677,6 +677,8 @@ resource wrn:viab_KM12_sampleset : stats:SampleSetResource {
          0.849392, 1.087221, 1.141928, 0.979374, 1.092875, 0.847365,
          0.974682, 1.032420, 1.021721, 0.959610, 1.078654, 0.934759,
         ],
+        [6,6,6],
+        [6,6],
         BiologicalReplication(),
     );
 }
@@ -685,12 +687,13 @@ resource wrn:viab_KM12_sampleset_trace : reflection:ObservationTrace {
     reflection:source    = "wrn-paper ED Fig 3b (Nature Source Data, pinned)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
 }
-resource wrn:viab_KM12_plan : stats:NestedAnovaAnalysisPlan {
-    stats:sample_set       = wrn:viab_KM12_sampleset;
-    stats:alpha            = 0.05;
-    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:viability_directionality_witness");
-    stats:subgroup_sizes_a = [6,6,6];
-    stats:subgroup_sizes_b = [6,6];
+resource wrn:viab_KM12_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set        = wrn:viab_KM12_sampleset;
+    stats:alpha             = 0.05;
+    stats:directionality    = OneSidedWitnessed("urn:eigenius:pub:wrn:viability_directionality_witness");
+    stats:effect_size       = Absolute(0.0, "relative-ratio");
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion = Identity();
 }
 resource wrn:viab_KM12_plan_trace : reflection:ProgramTrace {
     reflection:resource  = wrn:viab_KM12_plan;
@@ -708,7 +711,7 @@ resource wrn:viab_OVK18_sampleset : stats:SampleSetResource {
     bench:extraction_filter     = "group A = sgWRN1,sgWRN2,sgWRN3 (each 6 reps, flat by guide); group B = sgCh2-2,sgCh2-4 (6 each); pan-essential controls excluded";
     bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:viab_OVK18_sampleset";
 
-    stats:sample_set_value = stats:IID(
+    stats:sample_set_value = stats:Nested(
         [
          0.530093, 0.304999, 0.268184, 0.203907, 0.212368, 0.196609,
          0.177541, 0.428282, 0.267665, 0.544004, 0.344792, 0.284103,
@@ -718,6 +721,8 @@ resource wrn:viab_OVK18_sampleset : stats:SampleSetResource {
          1.404859, 0.802503, 0.885716, 1.094852, 0.896339, 1.254010,
          1.053741, 0.387456, 0.695982, 1.483323, 1.044887, 0.996332,
         ],
+        [6,6,6],
+        [6,6],
         BiologicalReplication(),
     );
 }
@@ -726,12 +731,13 @@ resource wrn:viab_OVK18_sampleset_trace : reflection:ObservationTrace {
     reflection:source    = "wrn-paper ED Fig 3b (Nature Source Data, pinned)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
 }
-resource wrn:viab_OVK18_plan : stats:NestedAnovaAnalysisPlan {
-    stats:sample_set       = wrn:viab_OVK18_sampleset;
-    stats:alpha            = 0.05;
-    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:viability_directionality_witness");
-    stats:subgroup_sizes_a = [6,6,6];
-    stats:subgroup_sizes_b = [6,6];
+resource wrn:viab_OVK18_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set        = wrn:viab_OVK18_sampleset;
+    stats:alpha             = 0.05;
+    stats:directionality    = OneSidedWitnessed("urn:eigenius:pub:wrn:viability_directionality_witness");
+    stats:effect_size       = Absolute(0.0, "relative-ratio");
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion = Identity();
 }
 resource wrn:viab_OVK18_plan_trace : reflection:ProgramTrace {
     reflection:resource  = wrn:viab_OVK18_plan;
@@ -815,9 +821,11 @@ resource wrn:cc_KM12_sampleset : stats:SampleSetResource {
     bench:extraction_filter     = "group A = sgWRN2,sgWRN3 (3 reps each, flat by guide); group B = sgCh2-2 (3 reps)";
     bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:cc_KM12_sampleset";
 
-    stats:sample_set_value = stats:IID(
+    stats:sample_set_value = stats:Nested(
         [31.932773, 29.894490, 31.715976, 35.946249, 35.158817, 35.611907],
         [46.416759, 48.475289, 48.004202],
+        [3,3],
+        [3],
         BiologicalReplication(),
     );
 }
@@ -826,12 +834,13 @@ resource wrn:cc_KM12_sampleset_trace : reflection:ObservationTrace {
     reflection:source    = "wrn-paper ED Fig 4b (Nature Source Data, pinned)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
 }
-resource wrn:cc_KM12_plan : stats:NestedAnovaAnalysisPlan {
-    stats:sample_set       = wrn:cc_KM12_sampleset;
-    stats:alpha            = 0.05;
-    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:cellcycle_directionality_witness");
-    stats:subgroup_sizes_a = [3,3];
-    stats:subgroup_sizes_b = [3];
+resource wrn:cc_KM12_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set        = wrn:cc_KM12_sampleset;
+    stats:alpha             = 0.05;
+    stats:directionality    = OneSidedWitnessed("urn:eigenius:pub:wrn:cellcycle_directionality_witness");
+    stats:effect_size       = Absolute(0.0, "relative-ratio");
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion = Identity();
 }
 resource wrn:cc_KM12_plan_trace : reflection:ProgramTrace {
     reflection:resource  = wrn:cc_KM12_plan;
@@ -849,9 +858,11 @@ resource wrn:cc_SW48_sampleset : stats:SampleSetResource {
     bench:extraction_filter     = "group A = sgWRN2,sgWRN3 (3 reps each, flat by guide); group B = sgCh2-2 (3 reps)";
     bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:cc_SW48_sampleset";
 
-    stats:sample_set_value = stats:IID(
+    stats:sample_set_value = stats:Nested(
         [15.922108, 12.811791, 14.301802, 20.350109, 22.747748, 22.971429],
         [26.836002, 28.721502, 33.068042],
+        [3,3],
+        [3],
         BiologicalReplication(),
     );
 }
@@ -860,12 +871,13 @@ resource wrn:cc_SW48_sampleset_trace : reflection:ObservationTrace {
     reflection:source    = "wrn-paper ED Fig 4b (Nature Source Data, pinned)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
 }
-resource wrn:cc_SW48_plan : stats:NestedAnovaAnalysisPlan {
-    stats:sample_set       = wrn:cc_SW48_sampleset;
-    stats:alpha            = 0.05;
-    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:cellcycle_directionality_witness");
-    stats:subgroup_sizes_a = [3,3];
-    stats:subgroup_sizes_b = [3];
+resource wrn:cc_SW48_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set        = wrn:cc_SW48_sampleset;
+    stats:alpha             = 0.05;
+    stats:directionality    = OneSidedWitnessed("urn:eigenius:pub:wrn:cellcycle_directionality_witness");
+    stats:effect_size       = Absolute(0.0, "relative-ratio");
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion = Identity();
 }
 resource wrn:cc_SW48_plan_trace : reflection:ProgramTrace {
     reflection:resource  = wrn:cc_SW48_plan;
@@ -883,9 +895,11 @@ resource wrn:cc_OVK18_sampleset : stats:SampleSetResource {
     bench:extraction_filter     = "group A = sgWRN2,sgWRN3 (3 reps each, flat by guide); group B = sgCh2-2 (3 reps)";
     bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:cc_OVK18_sampleset";
 
-    stats:sample_set_value = stats:IID(
+    stats:sample_set_value = stats:Nested(
         [16.632017, 16.004184, 17.567568, 21.237113, 24.417427, 18.864097],
         [40.261153, 42.668137, 43.139407],
+        [3,3],
+        [3],
         BiologicalReplication(),
     );
 }
@@ -894,12 +908,13 @@ resource wrn:cc_OVK18_sampleset_trace : reflection:ObservationTrace {
     reflection:source    = "wrn-paper ED Fig 4b (Nature Source Data, pinned)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
 }
-resource wrn:cc_OVK18_plan : stats:NestedAnovaAnalysisPlan {
-    stats:sample_set       = wrn:cc_OVK18_sampleset;
-    stats:alpha            = 0.05;
-    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:cellcycle_directionality_witness");
-    stats:subgroup_sizes_a = [3,3];
-    stats:subgroup_sizes_b = [3];
+resource wrn:cc_OVK18_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set        = wrn:cc_OVK18_sampleset;
+    stats:alpha             = 0.05;
+    stats:directionality    = OneSidedWitnessed("urn:eigenius:pub:wrn:cellcycle_directionality_witness");
+    stats:effect_size       = Absolute(0.0, "relative-ratio");
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion = Identity();
 }
 resource wrn:cc_OVK18_plan_trace : reflection:ProgramTrace {
     reflection:resource  = wrn:cc_OVK18_plan;
@@ -991,9 +1006,11 @@ resource wrn:apop_KM12_sampleset : stats:SampleSetResource {
     bench:extraction_filter     = "group A = sgCh2-2 (3 reps); group B = sgWRN2,sgWRN3 (3 reps each, flat by guide)";
     bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:apop_KM12_sampleset";
 
-    stats:sample_set_value = stats:IID(
+    stats:sample_set_value = stats:Nested(
         [13.350126, 15.651736, 13.404148],
         [28.066990, 31.354735, 20.795076, 27.193780, 24.335791, 32.435170],
+        [3],
+        [3,3],
         BiologicalReplication(),
     );
 }
@@ -1002,12 +1019,13 @@ resource wrn:apop_KM12_sampleset_trace : reflection:ObservationTrace {
     reflection:source    = "wrn-paper ED Fig 4c (Nature Source Data, pinned)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
 }
-resource wrn:apop_KM12_plan : stats:NestedAnovaAnalysisPlan {
-    stats:sample_set       = wrn:apop_KM12_sampleset;
-    stats:alpha            = 0.05;
-    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:apoptosis_directionality_witness");
-    stats:subgroup_sizes_a = [3];
-    stats:subgroup_sizes_b = [3,3];
+resource wrn:apop_KM12_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set        = wrn:apop_KM12_sampleset;
+    stats:alpha             = 0.05;
+    stats:directionality    = OneSidedWitnessed("urn:eigenius:pub:wrn:apoptosis_directionality_witness");
+    stats:effect_size       = Absolute(0.0, "relative-ratio");
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion = Identity();
 }
 resource wrn:apop_KM12_plan_trace : reflection:ProgramTrace {
     reflection:resource  = wrn:apop_KM12_plan;
@@ -1025,9 +1043,11 @@ resource wrn:apop_SW48_sampleset : stats:SampleSetResource {
     bench:extraction_filter     = "group A = sgCh2-2 (3 reps); group B = sgWRN2,sgWRN3 (3 reps each, flat by guide)";
     bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:apop_SW48_sampleset";
 
-    stats:sample_set_value = stats:IID(
+    stats:sample_set_value = stats:Nested(
         [11.533692, 11.469645, 12.543626],
         [18.550193, 19.540230, 21.924371, 17.389972, 15.569724, 18.150194],
+        [3],
+        [3,3],
         BiologicalReplication(),
     );
 }
@@ -1036,12 +1056,13 @@ resource wrn:apop_SW48_sampleset_trace : reflection:ObservationTrace {
     reflection:source    = "wrn-paper ED Fig 4c (Nature Source Data, pinned)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
 }
-resource wrn:apop_SW48_plan : stats:NestedAnovaAnalysisPlan {
-    stats:sample_set       = wrn:apop_SW48_sampleset;
-    stats:alpha            = 0.05;
-    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:apoptosis_directionality_witness");
-    stats:subgroup_sizes_a = [3];
-    stats:subgroup_sizes_b = [3,3];
+resource wrn:apop_SW48_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set        = wrn:apop_SW48_sampleset;
+    stats:alpha             = 0.05;
+    stats:directionality    = OneSidedWitnessed("urn:eigenius:pub:wrn:apoptosis_directionality_witness");
+    stats:effect_size       = Absolute(0.0, "relative-ratio");
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion = Identity();
 }
 resource wrn:apop_SW48_plan_trace : reflection:ProgramTrace {
     reflection:resource  = wrn:apop_SW48_plan;
@@ -1059,9 +1080,11 @@ resource wrn:apop_OVK18_sampleset : stats:SampleSetResource {
     bench:extraction_filter     = "group A = sgCh2-2 (3 reps); group B = sgWRN2,sgWRN3 (3 reps each, flat by guide)";
     bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:apop_OVK18_sampleset";
 
-    stats:sample_set_value = stats:IID(
+    stats:sample_set_value = stats:Nested(
         [14.446003, 12.463652, 11.389865],
         [22.891566, 23.069208, 23.169509, 23.648039, 26.500201, 22.876080],
+        [3],
+        [3,3],
         BiologicalReplication(),
     );
 }
@@ -1070,12 +1093,13 @@ resource wrn:apop_OVK18_sampleset_trace : reflection:ObservationTrace {
     reflection:source    = "wrn-paper ED Fig 4c (Nature Source Data, pinned)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
 }
-resource wrn:apop_OVK18_plan : stats:NestedAnovaAnalysisPlan {
-    stats:sample_set       = wrn:apop_OVK18_sampleset;
-    stats:alpha            = 0.05;
-    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:apoptosis_directionality_witness");
-    stats:subgroup_sizes_a = [3];
-    stats:subgroup_sizes_b = [3,3];
+resource wrn:apop_OVK18_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set        = wrn:apop_OVK18_sampleset;
+    stats:alpha             = 0.05;
+    stats:directionality    = OneSidedWitnessed("urn:eigenius:pub:wrn:apoptosis_directionality_witness");
+    stats:effect_size       = Absolute(0.0, "relative-ratio");
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion = Identity();
 }
 resource wrn:apop_OVK18_plan_trace : reflection:ProgramTrace {
     reflection:resource  = wrn:apop_OVK18_plan;
@@ -1144,7 +1168,7 @@ resource wrn:concl_apoptosis_recomputed : reasoning:ReasoningSentence {
 // ════════════════════════════════════════════════════════════════════
 // The MMR-restoration causal dissection (ED Fig 10c, relative viability,
 // n = 6 biological replicates), kernel-recomputed via the new
-// CrossedAnovaAnalysisPlan dispatch (`value ~ CL + guide`, guide CROSSED). The
+// crossed-ANOVA dispatch (stats:Crossed SampleSet, `value ~ CL + guide`, guide CROSSED). The
 // HCT116 derivatives: Ch2 (MMR-deficient, ∗), Ch3+5+sgCh2-2 (MMR-restored, †),
 // Ch3+5+sgMLH1-1 (MLH1 re-knocked-out, ‡), Ch3+5+sgMLH1-2 (§). Each contrast
 // is a pair of derivatives × the shWRN guides (shWRN1, shWRN2, 6 reps each),
@@ -1179,11 +1203,13 @@ resource wrn:mmr_rescue_sampleset : stats:SampleSetResource {
     bench:extraction_filter     = "group A = HCT116 Ch2 (∗), group B = HCT116 Ch3+5+sgCh2-2 (†); each = shWRN1(6)++shWRN2(6); normalized values; pan-essential/neg-control guides excluded (∗†‡§ mark the shWRN bars)";
     bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:mmr_rescue_sampleset";
 
-    stats:sample_set_value = stats:IID(
+    stats:sample_set_value = stats:Crossed(
         [0.126426, 0.141483, 0.105401, 0.128076, 0.162610, 0.133238,
          0.304141, 0.167127, 0.174655, 0.263488, 0.240903, 0.230364],
         [0.705713, 0.711474, 0.665386, 0.714354, 0.650984, 0.705713,
          0.699952, 0.731637, 0.780605, 0.688430, 0.746039, 0.763322],
+        [6,6],
+        [6,6],
         BiologicalReplication(),
     );
 }
@@ -1192,12 +1218,13 @@ resource wrn:mmr_rescue_sampleset_trace : reflection:ObservationTrace {
     reflection:source    = "wrn-paper ED Fig 10c (Nature Source Data, pinned)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
 }
-resource wrn:mmr_rescue_plan : stats:CrossedAnovaAnalysisPlan {
-    stats:sample_set       = wrn:mmr_rescue_sampleset;
-    stats:alpha            = 0.05;
-    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:mmr_directionality_witness");
-    stats:subgroup_sizes_a = [6,6];
-    stats:subgroup_sizes_b = [6,6];
+resource wrn:mmr_rescue_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set        = wrn:mmr_rescue_sampleset;
+    stats:alpha             = 0.05;
+    stats:directionality    = OneSidedWitnessed("urn:eigenius:pub:wrn:mmr_directionality_witness");
+    stats:effect_size       = Absolute(0.0, "relative-ratio");
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion = Identity();
 }
 resource wrn:mmr_rescue_plan_trace : reflection:ProgramTrace {
     reflection:resource  = wrn:mmr_rescue_plan;
@@ -1216,11 +1243,13 @@ resource wrn:mmr_resens1_sampleset : stats:SampleSetResource {
     bench:extraction_filter     = "group A = HCT116 Ch3+5+sgMLH1-1 (‡, re-sensitized), group B = HCT116 Ch3+5+sgCh2-2 (†, rescued); each = shWRN1(6)++shWRN2(6); normalized values";
     bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:mmr_resens1_sampleset";
 
-    stats:sample_set_value = stats:IID(
+    stats:sample_set_value = stats:Crossed(
         [0.524250, 0.539800, 0.484265, 0.410959, 0.477601, 0.446501,
          0.430951, 0.493151, 0.495372, 0.386523, 0.473158, 0.428730],
         [0.705713, 0.711474, 0.665386, 0.714354, 0.650984, 0.705713,
          0.699952, 0.731637, 0.780605, 0.688430, 0.746039, 0.763322],
+        [6,6],
+        [6,6],
         BiologicalReplication(),
     );
 }
@@ -1229,12 +1258,13 @@ resource wrn:mmr_resens1_sampleset_trace : reflection:ObservationTrace {
     reflection:source    = "wrn-paper ED Fig 10c (Nature Source Data, pinned)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
 }
-resource wrn:mmr_resens1_plan : stats:CrossedAnovaAnalysisPlan {
-    stats:sample_set       = wrn:mmr_resens1_sampleset;
-    stats:alpha            = 0.05;
-    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:mmr_directionality_witness");
-    stats:subgroup_sizes_a = [6,6];
-    stats:subgroup_sizes_b = [6,6];
+resource wrn:mmr_resens1_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set        = wrn:mmr_resens1_sampleset;
+    stats:alpha             = 0.05;
+    stats:directionality    = OneSidedWitnessed("urn:eigenius:pub:wrn:mmr_directionality_witness");
+    stats:effect_size       = Absolute(0.0, "relative-ratio");
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion = Identity();
 }
 resource wrn:mmr_resens1_plan_trace : reflection:ProgramTrace {
     reflection:resource  = wrn:mmr_resens1_plan;
@@ -1253,11 +1283,13 @@ resource wrn:mmr_resens2_sampleset : stats:SampleSetResource {
     bench:extraction_filter     = "group A = HCT116 Ch3+5+sgMLH1-2 (§, re-sensitized), group B = HCT116 Ch3+5+sgCh2-2 (†, rescued); each = shWRN1(6)++shWRN2(6); normalized values";
     bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:mmr_resens2_sampleset";
 
-    stats:sample_set_value = stats:IID(
+    stats:sample_set_value = stats:Crossed(
         [0.391724, 0.388966, 0.353103, 0.344828, 0.333793, 0.336552,
          0.350345, 0.353103, 0.333793, 0.347586, 0.250979, 0.284138],
         [0.705713, 0.711474, 0.665386, 0.714354, 0.650984, 0.705713,
          0.699952, 0.731637, 0.780605, 0.688430, 0.746039, 0.763322],
+        [6,6],
+        [6,6],
         BiologicalReplication(),
     );
 }
@@ -1266,12 +1298,13 @@ resource wrn:mmr_resens2_sampleset_trace : reflection:ObservationTrace {
     reflection:source    = "wrn-paper ED Fig 10c (Nature Source Data, pinned)";
     reflection:timestamp = "2019-01-01T00:00:00Z";
 }
-resource wrn:mmr_resens2_plan : stats:CrossedAnovaAnalysisPlan {
-    stats:sample_set       = wrn:mmr_resens2_sampleset;
-    stats:alpha            = 0.05;
-    stats:directionality   = OneSidedWitnessed("urn:eigenius:pub:wrn:mmr_directionality_witness");
-    stats:subgroup_sizes_a = [6,6];
-    stats:subgroup_sizes_b = [6,6];
+resource wrn:mmr_resens2_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set        = wrn:mmr_resens2_sampleset;
+    stats:alpha             = 0.05;
+    stats:directionality    = OneSidedWitnessed("urn:eigenius:pub:wrn:mmr_directionality_witness");
+    stats:effect_size       = Absolute(0.0, "relative-ratio");
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion = Identity();
 }
 resource wrn:mmr_resens2_plan_trace : reflection:ProgramTrace {
     reflection:resource  = wrn:mmr_resens2_plan;

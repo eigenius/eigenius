@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Institution-recompute test — the NestedAnovaAnalysisPlan dispatch (D52
-//! §2.2) on the REAL WRN ED Fig 3b day-10 competition-assay data. Reproduces
+//! Institution-recompute test — the nested two-way ANOVA dispatch (D52
+//! §2.2), keyed on a `stats:Nested(...)` SampleSet's NestedBlocking ctor
+//! under a plain StatisticalAnalysisPlan, on the REAL WRN ED Fig 3b day-10
+//! competition-assay data. Reproduces
 //! the paper's two-way ANOVA `value ~ is_WRN + guide`:
 //!   - KM12 (MSI): paper p = 2.7e-19 → Holds, carries `lt(mean_diff_of(s), 0)`.
 //!   - ES2  (MSS): paper p = 0.37    → Fails (no canonical proposition).

@@ -144,29 +144,30 @@ pub fn do_validate_analysis_plan(
         return recompute_classification_quality_claim(claim, &bundle, &sample_set_iri_str);
     }
 
-    // ── §2.2 class-based early dispatch: NestedAnovaAnalysisPlan ─────────────
+    // ── §2.2 SampleSet-based early dispatch: nested two-way ANOVA ────────────
     //
     // A nested fixed-effects two-way ANOVA (`value ~ group + subgroup`): the
     // binary group effect tested against the within-subgroup residual, with
-    // subgroup a nuisance nested in group. The two IID SampleSet arms carry
-    // the two groups (flat, grouped by subgroup); the plan's `subgroup_sizes_a`
-    // / `subgroup_sizes_b` partition each. Has its own dispatch + directionality
-    // handling, so route here before the standard hypothesis-test reads.
-    let nested_anova_iri = Iri::parse(iris::NESTED_ANOVA_ANALYSIS_PLAN).expect("static IRI");
-    if claim.is_instance_of(&nested_anova_iri) {
+    // subgroup a nuisance nested in group. Expressed as a `stats:Nested(...)`
+    // SampleSet — the blocking ctor is `NestedBlocking` and the observations
+    // wrapper carries `[group_a, group_b, subgroup_sizes_a, subgroup_sizes_b]`.
+    // The plan is a plain StatisticalAnalysisPlan, so dispatch keys on the
+    // SampleSet's blocking ctor (not the plan's is_a). Has its own dispatch +
+    // directionality handling, so route here before the standard reads.
+    if bundle.blocking == "NestedBlocking" {
         return recompute_nested_anova_claim(claim, &bundle, &sample_set_iri_str, ctx);
     }
 
-    // ── §2.2 class-based early dispatch: CrossedAnovaAnalysisPlan ────────────
+    // ── §2.2 SampleSet-based early dispatch: crossed two-way ANOVA ───────────
     //
     // A crossed additive two-way ANOVA (`value ~ group + block`): the binary
     // group effect tested against the additive-model residual, with `block`
     // CROSSED (the same block levels appear in both groups, unlike the nested
-    // plan). The two IID SampleSet arms carry the two groups; `subgroup_sizes_a`
-    // / `subgroup_sizes_b` partition each into blocks, paired by index. Routes
-    // to its own emitter before the standard hypothesis-test reads.
-    let crossed_anova_iri = Iri::parse(iris::CROSSED_ANOVA_ANALYSIS_PLAN).expect("static IRI");
-    if claim.is_instance_of(&crossed_anova_iri) {
+    // case). Expressed as a `stats:Crossed(...)` SampleSet — blocking ctor
+    // `CrossedBlocking`, observations wrapper `[group_a, group_b,
+    // subgroup_sizes_a, subgroup_sizes_b]` with the two size arrays paired by
+    // index. Routes to its own emitter before the standard reads.
+    if bundle.blocking == "CrossedBlocking" {
         return recompute_crossed_anova_claim(claim, &bundle, &sample_set_iri_str, ctx);
     }
 
@@ -1162,44 +1163,30 @@ fn encode_classification_proposition(
 }
 
 // ────────────────────────────────────────────────────────────────────
-// §2.2 — NestedAnovaAnalysisPlan / nested two-way ANOVA dispatch
+// §2.2 — stats:Nested SampleSet / nested two-way ANOVA dispatch
 // ────────────────────────────────────────────────────────────────────
 
-/// Recompute a `stats:NestedAnovaAnalysisPlan` — a nested fixed-effects
-/// two-way ANOVA `value ~ group + subgroup` (D52 §2.2). The SampleSet's two
-/// IID arms are the two groups (A = first arm, B = second arm), each a flat
-/// array grouped by subgroup; `subgroup_sizes_a` / `subgroup_sizes_b` partition
-/// them. The binary group main effect is tested against the within-subgroup
-/// residual (subgroup = fixed nuisance). On a directional Holds it emits
-/// `stats:lt(stats:mean_diff_of(s), 0)` — group A mean strictly below group B,
-/// the same proposition shape as the two-sample dispatch, so the same
-/// statistical→domain bridges consume it.
+/// Recompute a nested fixed-effects two-way ANOVA `value ~ group + subgroup`
+/// (D52 §2.2), expressed as a `stats:Nested(...)` SampleSet (blocking ctor
+/// `NestedBlocking`). The SampleSet's observations wrapper carries
+/// `[group_a, group_b, subgroup_sizes_a, subgroup_sizes_b]`: the two groups
+/// (A = first arm, B = second arm), each a flat array grouped by subgroup,
+/// and the per-arm subgroup partition. The binary group main effect is
+/// tested against the within-subgroup residual (subgroup = fixed nuisance).
+/// On a directional Holds it emits `stats:lt(stats:mean_diff_of(s), 0)` —
+/// group A mean strictly below group B, the same proposition shape as the
+/// two-sample dispatch, so the same statistical→domain bridges consume it.
 fn recompute_nested_anova_claim(
     claim: &Resource,
     bundle: &DecodedBundle,
     sample_set_iri_str: &str,
     ctx: &ExecutionContext,
 ) -> Result<QueryOutcome, InstitutionError> {
-    let (flat_a, flat_b) = match decode_two_group_observations(&bundle.observations_raw) {
-        Ok(p) => p,
-        Err(diag) => return Ok(gate_fails(diag)),
-    };
-    let sizes_a = match read_usize_array(claim, iris::PROP_SUBGROUP_SIZES_A)? {
-        Some(s) => s,
-        None => {
-            return Ok(gate_fails(
-                "NestedAnovaAnalysisPlan missing required `subgroup_sizes_a`".into(),
-            ))
-        }
-    };
-    let sizes_b = match read_usize_array(claim, iris::PROP_SUBGROUP_SIZES_B)? {
-        Some(s) => s,
-        None => {
-            return Ok(gate_fails(
-                "NestedAnovaAnalysisPlan missing required `subgroup_sizes_b`".into(),
-            ))
-        }
-    };
+    let (flat_a, flat_b, sizes_a, sizes_b) =
+        match decode_nested_observations(&bundle.observations_raw) {
+            Ok(p) => p,
+            Err(diag) => return Ok(gate_fails(diag)),
+        };
     let group_a = match partition_by_sizes(&flat_a, &sizes_a) {
         Ok(g) => g,
         Err(d) => return Ok(gate_fails(format!("subgroup_sizes_a: {d}"))),
@@ -1301,42 +1288,30 @@ fn recompute_nested_anova_claim(
     ))
 }
 
-/// Recompute a `CrossedAnovaAnalysisPlan` (`value ~ group + block`, block
-/// crossed): the binary group main effect against the additive-model residual.
-/// Mirrors [`recompute_nested_anova_claim`] but pairs the two arms' block
-/// partitions by index (crossed ⇒ same block levels in both groups, so the two
-/// size arrays must have equal length) and calls [`crossed_two_way_anova`].
+/// Recompute a crossed additive two-way ANOVA `value ~ group + block`
+/// (block crossed), expressed as a `stats:Crossed(...)` SampleSet (blocking
+/// ctor `CrossedBlocking`): the binary group main effect against the
+/// additive-model residual. Mirrors [`recompute_nested_anova_claim`] but
+/// reads the same `[group_a, group_b, subgroup_sizes_a, subgroup_sizes_b]`
+/// observations wrapper and pairs the two arms' block partitions by index
+/// (crossed ⇒ same block levels in both groups, so the two size arrays must
+/// have equal length) and calls [`crossed_two_way_anova`].
 fn recompute_crossed_anova_claim(
     claim: &Resource,
     bundle: &DecodedBundle,
     sample_set_iri_str: &str,
     ctx: &ExecutionContext,
 ) -> Result<QueryOutcome, InstitutionError> {
-    let (flat_a, flat_b) = match decode_two_group_observations(&bundle.observations_raw) {
-        Ok(p) => p,
-        Err(diag) => return Ok(gate_fails(diag)),
-    };
-    let sizes_a = match read_usize_array(claim, iris::PROP_SUBGROUP_SIZES_A)? {
-        Some(s) => s,
-        None => {
-            return Ok(gate_fails(
-                "CrossedAnovaAnalysisPlan missing required `subgroup_sizes_a`".into(),
-            ))
-        }
-    };
-    let sizes_b = match read_usize_array(claim, iris::PROP_SUBGROUP_SIZES_B)? {
-        Some(s) => s,
-        None => {
-            return Ok(gate_fails(
-                "CrossedAnovaAnalysisPlan missing required `subgroup_sizes_b`".into(),
-            ))
-        }
-    };
+    let (flat_a, flat_b, sizes_a, sizes_b) =
+        match decode_nested_observations(&bundle.observations_raw) {
+            Ok(p) => p,
+            Err(diag) => return Ok(gate_fails(diag)),
+        };
     // Crossed design: the two arms must declare the SAME block levels, so the
     // partitions are index-aligned and equal in count.
     if sizes_a.len() != sizes_b.len() {
         return Ok(gate_fails(format!(
-            "CrossedAnovaAnalysisPlan requires the same crossed block levels in both groups: \
+            "stats:Crossed requires the same crossed block levels in both groups: \
              subgroup_sizes_a has {} blocks but subgroup_sizes_b has {}",
             sizes_a.len(),
             sizes_b.len()
@@ -1441,39 +1416,6 @@ fn recompute_crossed_anova_claim(
         (r.f_group, p_for_alpha),
         canonical,
     ))
-}
-
-/// Read a `core:value_array` of non-negative integers (the subgroup partition
-/// sizes) off the claim. Accepts `Value::Integer`/`Value::Float` (whole)
-/// elements; rejects negatives / non-integral / non-array values.
-fn read_usize_array(
-    claim: &Resource,
-    prop_iri: &str,
-) -> Result<Option<Vec<usize>>, InstitutionError> {
-    let iri = Iri::parse(prop_iri).expect("static IRI");
-    let arr = match claim.get(&iri) {
-        Some(Value::Array(a)) => a,
-        Some(other) => {
-            return Err(InstitutionError::ComputationFailed(format!(
-                "NestedAnovaAnalysisPlan `{prop_iri}` is not an array: {other:?}"
-            )))
-        }
-        None => return Ok(None),
-    };
-    let mut out = Vec::with_capacity(arr.len());
-    for v in arr {
-        let n = match v {
-            Value::Integer(i) if *i >= 0 => *i as usize,
-            Value::Float(f) if *f >= 0.0 && f.fract() == 0.0 => *f as usize,
-            other => {
-                return Err(InstitutionError::ComputationFailed(format!(
-                    "NestedAnovaAnalysisPlan `{prop_iri}` element is not a non-negative integer: {other:?}"
-                )))
-            }
-        };
-        out.push(n);
-    }
-    Ok(Some(out))
 }
 
 /// Partition a flat value vector into subgroups of the given sizes. Errors if
@@ -2078,6 +2020,60 @@ fn decode_two_group_observations(j: &serde_json::Value) -> Result<(Vec<f64>, Vec
     let group_a = decode_flat_observations(&outer[0]).map_err(|e| format!("IID group A: {e}"))?;
     let group_b = decode_flat_observations(&outer[1]).map_err(|e| format!("IID group B: {e}"))?;
     Ok((group_a, group_b))
+}
+
+/// Decoded nested/crossed two-way-ANOVA observations:
+/// `(group_a, group_b, subgroup_sizes_a, subgroup_sizes_b)`. Typed alias to
+/// satisfy clippy's type-complexity lint on the decoder's return type.
+type NestedObservations = (Vec<f64>, Vec<f64>, Vec<usize>, Vec<usize>);
+
+/// Decode the nested/crossed two-way-ANOVA observations payload:
+/// `[group_a, group_b, subgroup_sizes_a, subgroup_sizes_b]` (D52 §2.2 /
+/// §4.2). Elements [0],[1] are the two flat group arrays (group A = the
+/// treatment / first-context arm, group B = control / second-context arm);
+/// elements [2],[3] are the per-subgroup observation counts that partition
+/// each arm. The subgroup partition lives in the SampleSet (carried by the
+/// `stats:Nested` / `stats:Crossed` smart-constructors) rather than on the
+/// plan. Returns `(group_a, group_b, subgroup_sizes_a, subgroup_sizes_b)`.
+fn decode_nested_observations(j: &serde_json::Value) -> Result<NestedObservations, String> {
+    let outer = j
+        .as_array()
+        .ok_or_else(|| format!("Nested/Crossed observations slot is not an array: {j:?}"))?;
+    if outer.len() != 4 {
+        return Err(format!(
+            "Nested/Crossed expects observations = [group_a, group_b, subgroup_sizes_a, \
+             subgroup_sizes_b] (4 elements; got {})",
+            outer.len()
+        ));
+    }
+    let group_a =
+        decode_flat_observations(&outer[0]).map_err(|e| format!("Nested/Crossed group A: {e}"))?;
+    let group_b =
+        decode_flat_observations(&outer[1]).map_err(|e| format!("Nested/Crossed group B: {e}"))?;
+    let sizes_a = decode_usize_array(&outer[2])
+        .map_err(|e| format!("Nested/Crossed subgroup_sizes_a: {e}"))?;
+    let sizes_b = decode_usize_array(&outer[3])
+        .map_err(|e| format!("Nested/Crossed subgroup_sizes_b: {e}"))?;
+    Ok((group_a, group_b, sizes_a, sizes_b))
+}
+
+/// Decode a flat JSON array of non-negative whole numbers into
+/// `Vec<usize>` — the subgroup partition sizes carried in the
+/// nested/crossed SampleSet observations wrapper. Rejects negatives /
+/// non-integral / non-array values.
+fn decode_usize_array(j: &serde_json::Value) -> Result<Vec<usize>, String> {
+    let arr = j.as_array().ok_or_else(|| format!("not an array: {j:?}"))?;
+    let mut out = Vec::with_capacity(arr.len());
+    for (i, v) in arr.iter().enumerate() {
+        let n = v
+            .as_f64()
+            .ok_or_else(|| format!("element {i} is not a number: {v:?}"))?;
+        if n < 0.0 || n.fract() != 0.0 {
+            return Err(format!("element {i} is not a non-negative integer: {n}"));
+        }
+        out.push(n as usize);
+    }
+    Ok(out)
 }
 
 /// Decode the Paired observations payload: a flat float array of

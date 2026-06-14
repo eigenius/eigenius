@@ -78,10 +78,11 @@ pub mod iris {
         "urn:eigenius:measurements:MethodComparisonAnalysisPlan";
     pub const CLASSIFICATION_ANALYSIS_PLAN: &str =
         "urn:eigenius:measurements:ClassificationAnalysisPlan";
-    pub const NESTED_ANOVA_ANALYSIS_PLAN: &str =
-        "urn:eigenius:measurements:NestedAnovaAnalysisPlan";
-    pub const CROSSED_ANOVA_ANALYSIS_PLAN: &str =
-        "urn:eigenius:measurements:CrossedAnovaAnalysisPlan";
+    // Nested + crossed two-way ANOVA are no longer plan classes — they are
+    // stats:Nested / stats:Crossed SampleSet smart-constructors whose
+    // blocking ctor (NestedBlocking / CrossedBlocking) drives dispatch
+    // (D52 §4.2). The plan that references them is a plain
+    // StatisticalAnalysisPlan, so no per-class IRI const is needed here.
 
     // ── ClassificationAnalysisPlan property IRIs (D52 §2.2) ──────────────
     pub const PROP_CLASSIFICATION_THRESHOLD: &str =
@@ -89,17 +90,12 @@ pub mod iris {
     pub const PROP_MIN_PPV: &str = "urn:eigenius:measurements:min_ppv";
     pub const PROP_MIN_SENSITIVITY: &str = "urn:eigenius:measurements:min_sensitivity";
 
-    // ── Nested/CrossedAnovaAnalysisPlan property IRIs (D52 §2.2) ─────────────
-    // The block (guide) partition sizes for the two SampleSet IID arms. Each is
-    // the per-block observation count, summing to that group's flat length.
-    // - NestedAnovaAnalysisPlan (`value ~ group + subgroup`): blocks are NESTED
-    //   in the group; `subgroup_sizes_a`/`_b` partition group A / group B's arms
-    //   independently (the guides differ per group).
-    // - CrossedAnovaAnalysisPlan (`value ~ group + block`): blocks are CROSSED
-    //   (the same block levels appear in both groups); the two arrays must have
-    //   equal length and are paired by index (block i in group A ↔ block i in B).
-    pub const PROP_SUBGROUP_SIZES_A: &str = "urn:eigenius:measurements:subgroup_sizes_a";
-    pub const PROP_SUBGROUP_SIZES_B: &str = "urn:eigenius:measurements:subgroup_sizes_b";
+    // ── Nested/crossed two-way ANOVA subgroup partition (D52 §2.2 / §4.2) ──
+    // The block (guide) partition sizes now live IN the SampleSet (carried as
+    // elements [2] and [3] of the stats:Nested / stats:Crossed observations
+    // wrapper `[group_a, group_b, subgroup_sizes_a, subgroup_sizes_b]`), not as
+    // properties on the plan. The verifier reads them straight off the decoded
+    // bundle's observations slot, so no plan-property IRI const is needed.
 
     // ── StatisticalAnalysisResult property IRIs (per-effect derivation shape) ─
     pub const PROP_VERDICT_CTOR: &str = "urn:eigenius:measurements:verdict_ctor";

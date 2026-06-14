@@ -89,6 +89,21 @@ data stats:Blocking {
     // false-positive shield depends on this distinction landing at
     // the type level.
     SplitPlotBlocking(core:integer, core:integer),
+    // D52 §2.2 — two-way additive ANOVA blocking. The subgroup/block
+    // axis lives in the SampleSet (carried in the observations wrapper
+    // as two size arrays), so these ctors are zero-arg dispatch keys:
+    // the verifier branches on the ctor NAME to pick the nested vs
+    // crossed recomputation procedure.
+    //
+    //  - NestedBlocking: `value ~ group + subgroup`, subgroup nested in
+    //    group (the subgroup levels differ per group). The group main
+    //    effect is tested against the within-subgroup residual.
+    //  - CrossedBlocking: `value ~ group + block`, block crossed (the
+    //    same block levels appear in both groups). The group main effect
+    //    is tested against the additive-model residual (pooling the
+    //    group×block interaction).
+    NestedBlocking,
+    CrossedBlocking,
 }
 
 data stats:FactorDesign {
@@ -451,6 +466,81 @@ macro stats:IID(
         [group_a, group_b],
     );
 
+// Nested fixed-effects two-way ANOVA SampleSet (D52 §2.2 / §4.2). The
+// recurring functional-genomics design: a binary treatment (group, e.g.
+// is_WRN) applied via several reagents (subgroup, e.g. guide), each with
+// replicates — the authors' `lm(value ~ group + subgroup)` model
+// (WRN ED Fig 3b/4/10). `subgroup` is a fixed nuisance NESTED in group
+// (the subgroup levels differ per group), and the binary group main
+// effect is tested against the within-subgroup residual.
+//
+// Lands at blocking position `NestedBlocking()` — a zero-arg dispatch
+// key. The subgroup partition lives IN the SampleSet (not on the plan):
+// the observations wrapper carries FOUR elements
+// `[group_a, group_b, subgroup_sizes_a, subgroup_sizes_b]` where group A
+// = the treatment arm and group B = the control arm (each a flat array
+// grouped by subgroup), and `subgroup_sizes_{a,b}` partition each arm
+// into its subgroups (each must sum to its arm's length). The plan that
+// references this SampleSet is a plain `stats:StatisticalAnalysisPlan`;
+// the verifier dispatches on `NestedBlocking` and recomputes the nested
+// ANOVA, emitting `stats:lt(stats:mean_diff_of(s), 0)` on a directional
+// Holds — the same two-sample canonical proposition shape, so the same
+// downstream bridges consume it.
+macro stats:Nested(
+    group_a         : core:value_array,
+    group_b         : core:value_array,
+    subgroup_sizes_a : core:value_array,
+    subgroup_sizes_b : core:value_array,
+    replication     : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        CompleteRandom(),
+        NestedBlocking(),
+        SingleFactor(),
+        replication,
+        CrossSectional(),
+        Units([]),
+        Columns([]),
+        Entries([]),
+        [group_a, group_b, subgroup_sizes_a, subgroup_sizes_b],
+    );
+
+// Crossed additive two-way ANOVA SampleSet (D52 §2.2 / §4.2). The CROSSED
+// sibling of `stats:Nested`: a two-level context contrast (group) measured
+// under several SHARED reagents with replicates — the authors'
+// `lm(value ~ group + block)` model (WRN ED Fig 10c MMR-restoration,
+// `lm(value ~ CL + guide)`). Distinct from nested only in the block↔group
+// relationship: the same block levels appear in BOTH groups (crossed,
+// paired by index), so the group main effect is tested against the
+// additive-model residual (which pools any group×block interaction).
+//
+// Lands at blocking position `CrossedBlocking()`. The observations wrapper
+// carries the same FOUR elements `[group_a, group_b, subgroup_sizes_a,
+// subgroup_sizes_b]`; because blocks are crossed, `subgroup_sizes_a` and
+// `subgroup_sizes_b` must have EQUAL length (block i in group A ↔ block i
+// in group B) — the recompute checks this. The plan is a plain
+// `stats:StatisticalAnalysisPlan`; the verifier dispatches on
+// `CrossedBlocking` and emits the same `stats:lt(stats:mean_diff_of(s), 0)`
+// directional proposition.
+macro stats:Crossed(
+    group_a         : core:value_array,
+    group_b         : core:value_array,
+    subgroup_sizes_a : core:value_array,
+    subgroup_sizes_b : core:value_array,
+    replication     : stats:Replication,
+) : stats:SampleSet =>
+    Bundle(
+        CompleteRandom(),
+        CrossedBlocking(),
+        SingleFactor(),
+        replication,
+        CrossSectional(),
+        Units([]),
+        Columns([]),
+        Entries([]),
+        [group_a, group_b, subgroup_sizes_a, subgroup_sizes_b],
+    );
+
 // Paired-sample / matched-design: each entry is a `(before, after)`
 // pair (or matched-case/control pair). The Bundle's observations slot
 // stores a flat float array `[b0, a0, b1, a1, ..., bn, an]` —
@@ -782,64 +872,13 @@ property stats:min_sensitivity : core:float {
     domain stats:ClassificationAnalysisPlan;
 }
 
-// §2.2 — nested fixed-effects two-way ANOVA (`value ~ group + subgroup`).
-//
-// A standalone plan for the recurring wet-lab design where a binary treatment
-// (group, e.g. is_WRN) is applied via several reagents (subgroup, e.g. guide),
-// each with replicates — and the group effect is tested against the
-// within-subgroup (replicate) residual, treating subgroup as a fixed nuisance.
-// This is the authors' `lm(value ~ is_WRN + guide)` model (WRN ED Fig 3b/4/10).
-// Reuses the two-group `stats:IID(group_a, group_b, …)` SampleSet (group A =
-// the treatment arm, group B = the control arm), each arm a flat array grouped
-// by subgroup; the plan's subgroup_sizes_{a,b} partition each. The institution
-// emits one StatisticalAnalysisResult carrying `stats:lt(stats:mean_diff_of(s), 0)`
-// (group A mean strictly below group B) on a directional Holds — the same
-// proposition shape as the two-sample dispatch, so the same bridges consume it.
-
-class stats:NestedAnovaAnalysisPlan {
-    description = "A nested fixed-effects two-way ANOVA plan (D52 §2.2): `value ~ group + subgroup`, the binary group main effect tested against the within-subgroup residual (subgroup a fixed nuisance nested in group). Models the recurring functional-genomics design of a treatment applied via several reagents (guides/shRNAs) with replicates — the authors' `lm(value ~ is_WRN + guide)`. Reuses the two-group stats:IID SampleSet (group A = treatment arm, group B = control arm, each flat and grouped by subgroup); subgroup_sizes_a/b give the within-arm subgroup partition. Emits `stats:lt(stats:mean_diff_of(s), 0)` (group A below group B) on a directional Holds (p < alpha and the asserted direction), reusing the two-sample canonical proposition. Reported F-test p is two-sided; OneSidedWitnessed halves it (the 1-df group F is t²).";
-    requires stats:sample_set,
-             stats:alpha,
-             stats:directionality,
-             stats:subgroup_sizes_a,
-             stats:subgroup_sizes_b;
-}
-
-property stats:subgroup_sizes_a : core:value_array {
-    description = "Within-group-A subgroup partition: the per-subgroup observation counts (e.g. replicates per WRN guide), in the order group A's flat IID arm is laid out. Must sum to group A's length.";
-    element_type = core:integer;
-    domain stats:NestedAnovaAnalysisPlan;
-}
-
-property stats:subgroup_sizes_b : core:value_array {
-    description = "Within-group-B subgroup partition (per-subgroup observation counts for the control arm), summing to group B's length.";
-    element_type = core:integer;
-    domain stats:NestedAnovaAnalysisPlan;
-}
-
-// ── CrossedAnovaAnalysisPlan (D52 §2.2 — value ~ group + block, block crossed) ─
-// The CROSSED sibling of NestedAnovaAnalysisPlan: a two-way additive ANOVA
-// where the block factor (e.g. shRNA guide) is shared across both groups,
-// rather than nested within a group. The binary group main effect (1 df) is
-// tested against the additive-model residual (df = N − #group − #block + 1,
-// which pools any group×block interaction) — exactly R's
-// `anova(lm(value ~ group + block))` group term for a balanced crossed design.
-// Motivating case: WRN ED Fig 10c MMR-restoration, `lm(value ~ CL + guide)`
-// where CL = the 2-level MMR-context (HCT116 Ch2 vs a Ch3+5 derivative) and
-// guide = the shWRN hairpins (shWRN1, shWRN2) shared across both contexts.
-// Reuses the two-group `stats:IID` SampleSet (group A / group B) and the same
-// subgroup_sizes_a/b partition properties, here paired by index (block i in
-// group A ↔ block i in group B). Emits the same `stats:lt(stats:mean_diff_of(s), 0)`
-// proposition (group A mean below group B) so existing bridges consume it.
-
-class stats:CrossedAnovaAnalysisPlan {
-    description = "A crossed additive two-way ANOVA plan (D52 §2.2): `value ~ group + block`, the binary group main effect tested against the additive-model residual, with `block` CROSSED (the same block levels appear in both groups) rather than nested. Distinct from NestedAnovaAnalysisPlan only in the block↔group relationship and hence the residual df (N − #group − #block + 1, pooling the group×block interaction). Models the recurring design of a 2-level context contrast measured under several shared reagents with replicates — the authors' `lm(value ~ CL + guide)` (WRN ED Fig 10c MMR-restoration). Reuses the two-group stats:IID SampleSet (group A / group B) and the subgroup_sizes_a/b partition (here paired by index across the two groups, so they must declare the same block count). Emits `stats:lt(stats:mean_diff_of(s), 0)` (group A below group B) on a directional Holds, reusing the two-sample canonical proposition. Reported F-test p is two-sided; OneSidedWitnessed halves it (the 1-df group F is t²).";
-    requires stats:sample_set,
-             stats:alpha,
-             stats:directionality,
-             stats:subgroup_sizes_a,
-             stats:subgroup_sizes_b;
-}
+// §2.2 — nested + crossed two-way ANOVA are expressed as SampleSet
+// smart-constructors (`stats:Nested` / `stats:Crossed` above), NOT as
+// standalone plan classes. The subgroup/block partition lives in the
+// SampleSet's observations wrapper and the verifier dispatches on the
+// SampleSet's blocking ctor (`NestedBlocking` / `CrossedBlocking`); the
+// plan that references the SampleSet is a plain
+// `stats:StatisticalAnalysisPlan`. See the macro doc comments above.
 
 property stats:sample_set : core:string {
     description = "IRI of the SampleSet ObservedResource holding the raw replicates this claim is computed against. Required for recomputation.";
@@ -1048,20 +1087,8 @@ resource stats:qc_validate_classification_claim : institution:QueryClass {
     institution:institution_ref = stats:statistics_institution;
 }
 
-resource stats:qc_validate_nested_anova_claim : institution:QueryClass {
-    core:description = "AutoOnLoad gate on every NestedAnovaAnalysisPlan commit (D52 §2.2). Dispatches the same validate_analysis_plan handler, which detects the NestedAnovaAnalysisPlan is_a marker and routes to the nested two-way-ANOVA emitter (value ~ group + subgroup; group effect vs within-subgroup residual) instead of a crossed factorial / hypothesis test.";
-    institution:query_class = stats:NestedAnovaAnalysisPlan;
-    institution:result_class = institution:Verdict;
-    institution:dispatch_role = [dispatch:auto_on_load];
-    institution:query_handler = proc:validate_analysis_plan;
-    institution:institution_ref = stats:statistics_institution;
-}
-
-resource stats:qc_validate_crossed_anova_claim : institution:QueryClass {
-    core:description = "AutoOnLoad gate on every CrossedAnovaAnalysisPlan commit (D52 §2.2). Dispatches the same validate_analysis_plan handler, which detects the CrossedAnovaAnalysisPlan is_a marker and routes to the crossed two-way-ANOVA emitter (value ~ group + block, block crossed; group effect vs the additive-model residual) instead of the nested emitter or a hypothesis test.";
-    institution:query_class = stats:CrossedAnovaAnalysisPlan;
-    institution:result_class = institution:Verdict;
-    institution:dispatch_role = [dispatch:auto_on_load];
-    institution:query_handler = proc:validate_analysis_plan;
-    institution:institution_ref = stats:statistics_institution;
-}
+// §2.2 — the nested + crossed two-way ANOVA designs need NO separate
+// QueryClass registration: they are plain stats:StatisticalAnalysisPlan
+// instances (already covered by qc_validate_analysis_plan above). The
+// verifier branches on the referenced SampleSet's blocking ctor
+// (NestedBlocking / CrossedBlocking) to pick the recomputation procedure.

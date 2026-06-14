@@ -30,7 +30,7 @@ namespace wrn        = "urn:eigenius:pub:wrn";
 // The MMR-restoration causal-dissection experiment is now KERNEL-RECOMPUTED
 // (increment 10): `wrn:concl_mmr_restoration_recomputed` in the statistics
 // recompute layer establishes RestorationPartiallyRescues(dMMR, WRN) from the
-// ED Fig 10c relative-viability data via three CrossedAnovaAnalysisPlan
+// ED Fig 10c relative-viability data via three crossed-ANOVA (stats:Crossed)
 // contrasts (restore P=5.7e-20; two MLH1-KO re-sensitization controls
 // P=3.3e-12 / 1.6e-16) — reproducing the paper exactly (recompute-findings F3).
 // The linked-external `wrn:mmr_restoration` ToolArtifact it replaced is RETIRED;
@@ -62,7 +62,7 @@ resource wrn:mmr_rule_trace : reflection:DeclarationTrace {
 // discharged by CITING the kernel-recomputed conclusion as a lemma (D54: a
 // Holds ReasoningSentence is admitted as a Verified witness keyed on its IRI),
 // not by a linked-external ToolArtifact. The leaf proof (the three ED Fig 10c
-// CrossedAnovaAnalysisPlan contrasts) lives in wrn-phase1-recompute.
+// crossed-ANOVA (stats:Crossed) contrasts) lives in wrn-phase1-recompute.
 resource wrn:concl_mmr : reasoning:ReasoningSentence {
     reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     reasoning:proposition = type_expr(

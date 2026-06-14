@@ -10,6 +10,7 @@ a divergence is a recorded finding, not a silent pass.
 | F1 | Spearman WRN-dep ~ #MS-deletions, all MSI: rho = −0.74, **n = 54** | rho = **−0.74** (matches), **n = 51** | B (effect) ✓ / **A (count) ✗** | **Discrepancy — benign** |
 | F2 | Biomarker (common-MSI lineages): PPV = 0.73 (27/37), sensitivity = 1.00 (27/27) | PPV = **0.73 (27/37)**, sensitivity = **1.00 (27/27)** | A ✓ | **Confirms paper — provenance gotcha noted** |
 | F3 | ED Fig 10c MMR-restoration (C-MMR): two-way ANOVA P = 5.7e-20 / 3.3e-12 / 1.6e-16 | **5.74e-20 / 3.26e-12 / 1.56e-16** (exact, from public MOESM12) | A ✓ | **Reproduces paper exactly** |
+| F4 | C-VAL / C-MMR competition assays: two-way ANOVA `value ~ is_WRN + guide` (e.g. KM12 P = 2.7e-19) | **2.74e-19 reproduced** — but tests the *technical* residual; biological-unit P ≈ **2e-3 – 2e-6** | Methodology (design) | **Reproduces paper exactly; flags pseudoreplication; conclusion robust** |
 
 ## F3 — ED Fig 10c MMR-restoration: model identified from authors' code, reproduced exactly from public data
 
@@ -102,6 +103,69 @@ recomputation of published wet-lab statistics is therefore **gated on having bot
 data and the exact model+subset**, and neither is reliably recoverable from a paper's display
 Source Data alone — the authors' analysis code was indispensable, and even with it the
 display↔analysis data mapping required reproducing the target number to confirm.
+
+## F4 — the competition-assay ANOVA pseudoreplicates: the published p is technical, not biological
+
+**Where:** `data/WRN_manuscript/src/WRN_stats_calcs.Rmd:35,59,83,107,…` — the authors run
+`lm(value ~ is_WRN + guide) %>% anova()`, filtered to `term == 'is_WRN'`, for *every*
+competition-assay figure (Fig 2b/2d/3a/3b; the crossed `value ~ CL + guide` sibling backs ED Fig
+10c, see F3). `is_WRN = factor(grepl('WRN', guide))`, so **`guide` is nested in `is_WRN`** — each
+shRNA/sgRNA reagent is either WRN-targeting or control. The reported P tests the `is_WRN` main
+effect against the model **residual**.
+
+**The issue.** That residual is the **within-guide, technical-replicate** variation. For KM12
+(3 sgWRN + 2 control guides × 6 reps, N = 30) `is_WRN` is tested against **25 residual df** — but
+the independent **biological units** for a claim about *WRN* are the **5 guides** (≈ 2–3 df), not
+the 30 wells. The 6 reps per guide are technical (repeated reads of one perturbation); counting
+them as independent evidence that "depleting WRN impairs viability" is **pseudoreplication** —
+borrowing precision from technical replication that does not bear on biological generality,
+inflating the denominator df and the significance.
+
+**Quantified (recomputed locally, lme4; same KM12 data as `viab_KM12_sampleset`):**
+
+| Model | Unit of inference | P (`is_WRN`) |
+|---|---|---|
+| `lm(value ~ is_WRN + guide)` — authors' | technical residual (25 df) | **2.74e-19** (reproduces paper's 2.7e-19) |
+| `lmer(value ~ is_WRN + (1\|guide))` LRT | guide as biological random effect | **2.15e-6** |
+| t-test on the 5 guide means | guide (2 df) | **2.3e-3** |
+
+The conclusion is **robust** — WRN depletion significantly impairs MSI viability under *all three*
+(p < 0.01) — but the published **2.74e-19 is a pseudoreplication artifact**, overstating the
+evidence by ~13–16 orders of magnitude relative to the biologically-honest analysis.
+
+**Internal inconsistency in the paper.** The authors *do* use the correct mixed-effects approach
+elsewhere: the in-vivo xenograft (`in_vivo_KM12_analysis.R`) is analyzed with
+`lmer(Volume ~ Day + (0+Day|Mouse))` — mouse as the biological random effect — yet the in-vitro
+competition assays use the fixed-effects two-way ANOVA against the technical residual. The
+replication-stratification choice is inconsistent across the paper's own analyses.
+
+**Standard methodology (textbook).** Biological vs technical replicates must be stratified so
+inference lands at the biological unit; pooling technical reps as independent is the textbook
+definition of pseudoreplication:
+- Lazic, S. E. *Experimental Design for Laboratory Biologists: Maximising Information and Improving
+  Reproducibility.* Cambridge Univ. Press, 2016 — chapters on replication & nested designs.
+- Blainey, P., Krzywinski, M. & Altman, N. "Points of Significance: Replication." *Nat. Methods*
+  11, 879–880 (2014).
+- Hurlbert, S. H. "Pseudoreplication and the design of ecological field experiments." *Ecol.
+  Monogr.* 54, 187–211 (1984) — origin of the term.
+- (CLSI EP05-A3 — already D52's reference for variance-component stratification.)
+
+**How the chain models it (decision).** Represent **both**, not one:
+1. **Faithful reproduction** — the authors' *declared* SAP: a `StatisticalAnalysisPlan` over the
+   competition-assay `SampleSet` reproducing `lm(value ~ is_WRN + guide)` (`nested_group_anova`,
+   P = 2.74e-19). This is "what the paper claimed," recomputed exactly.
+2. **Alternative (preferred) SAP** — the biological-level analysis (`guide` as the biological
+   replicate unit; mixed-model / between-guide stratification), as a *distinct* warrant over the
+   *same* `SampleSet`. The locus of the difference is the SampleSet's `replication` axis
+   (`NestedReplication(biological_n, technical_per_biological)`, D52 §4.2) — which already carries
+   the structure needed to drive the correct variance-component stratification (D52 §3 / §7.4),
+   currently consumed only for scope admissibility, not error-term selection.
+
+The two are linked on the chain: the alternative **refines / annotates** the published claim, so
+both the reproduced number *and* the methodological caveat are first-class, queryable facts — the
+"audit chain surfaces what prose hides" demonstration, here on the *model* rather than the data
+(cf. F1, which did it on a sample size). Lifting the alternative SAP into a recomputed warrant —
+the D52 §7.4 replication-stratification path — is tracked as a statistics-institution follow-up.
 
 ## F1 — Spearman sample size: paper says n=54, data gives n=51
 

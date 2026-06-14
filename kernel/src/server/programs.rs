@@ -320,9 +320,7 @@ impl EigeniusService {
             // read its `canonical_proposition` and no `IsDerivedAs` is
             // minted — breaking the D56 wrapped-component derivation path.
             if let Some(out_id) = output.id().cloned() {
-                let already = produced_resources
-                    .iter()
-                    .any(|r| r.id() == Some(&out_id));
+                let already = produced_resources.iter().any(|r| r.id() == Some(&out_id));
                 if !already {
                     if let Err(e) = ctx.add_resource(output.clone()) {
                         errors.push(ValidationError {
