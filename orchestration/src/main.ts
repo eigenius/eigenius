@@ -95,6 +95,19 @@ const LEAN_COMMON_DIR = Deno.env.get("EIGENIUS_LEAN_COMMON_DIR");
 const LEAN_BASE_IMAGE_REF = Deno.env.get("EIGENIUS_LEAN_BASE_IMAGE_REF");
 const LEAN_DEPOT_PATH = Deno.env.get("EIGENIUS_LEAN_DEPOT_PATH");
 
+/** Configuration for the R language runtime (D55 / D56). All four must
+ * be set for R to register; if any is missing the runtime stays
+ * unregistered and R dispatches surface a typed `UnknownLanguage`
+ * error. `DRIVER_PATH`/`CDYLIB_PATH` are the host paths to
+ * `EigeniusRWorker.R` + `libeigenius_r_worker.so` baked into the image;
+ * they must match the recipe that built the R worker image so the boot
+ * cross-check passes (D26 §9.3). The image itself is resolved per
+ * dispatch from the env Resource's `image_digest`. */
+const R_DRIVER_PATH = Deno.env.get("EIGENIUS_R_DRIVER_PATH");
+const R_CDYLIB_PATH = Deno.env.get("EIGENIUS_R_CDYLIB_PATH");
+const R_BASE_IMAGE_REF = Deno.env.get("EIGENIUS_R_BASE_IMAGE_REF");
+const R_DEPOT_PATH = Deno.env.get("EIGENIUS_R_DEPOT_PATH");
+
 function main() {
   // Install the structured-logging subscriber before anything else
   // emits an event. Reads `EIGENIUS_LOG_LEVEL` and
@@ -233,6 +246,37 @@ function main() {
           "failed to register LeanLanguageRuntime",
           {
             error_kind: "lean_runtime_register_failed",
+            error_message: e instanceof Error ? e.message : String(e),
+          },
+        );
+      }
+    }
+    if (
+      R_DRIVER_PATH && R_CDYLIB_PATH && R_BASE_IMAGE_REF && R_DEPOT_PATH
+    ) {
+      try {
+        substrateAddon.registerRLanguageRuntime(
+          R_DRIVER_PATH,
+          R_CDYLIB_PATH,
+          R_BASE_IMAGE_REF,
+          R_DEPOT_PATH,
+        );
+        log.info(
+          operation.COMPONENT_REGISTER,
+          "registered RLanguageRuntime",
+          {
+            driver_path: R_DRIVER_PATH,
+            cdylib_path: R_CDYLIB_PATH,
+            base_image_ref: R_BASE_IMAGE_REF,
+            depot_path: R_DEPOT_PATH,
+          },
+        );
+      } catch (e) {
+        log.warn(
+          operation.COMPONENT_REGISTER,
+          "failed to register RLanguageRuntime",
+          {
+            error_kind: "r_runtime_register_failed",
             error_message: e instanceof Error ? e.message : String(e),
           },
         );

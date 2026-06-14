@@ -19,6 +19,7 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "macros", 
 eigenius-runtime-substrate = { path = "../../crates/runtime-substrate", features = ["test-runtime"] }
 eigenius-julia = { path = "../../crates/eigenius-julia" }
 eigenius-lean-runtime = { path = "../../crates/eigenius-lean-runtime" }
+eigenius-r = { path = "../../crates/eigenius-r" }
 eigenius-config = { path = "../../crates/eigenius-config" }
 
 [build-dependencies]

@@ -150,6 +150,43 @@ impl RLanguageRuntime {
         }
     }
 
+    /// Resolve the `WorkerSpec` for a dispatch, preferring the **env
+    /// Resource's** `image_digest` over the construction-time backing.
+    /// This mirrors `eigenius-julia`'s `resolve_image_digest`: the
+    /// orchestrator's `SubstrateDispatcher` synthesises an env Resource
+    /// carrying the `RuntimeEnvironment.image_digest` for each dispatch, so
+    /// one registered runtime serves whatever image the env declares (D26
+    /// §5.3 / §5.5). The cross-check `manifest_hash` comes from this
+    /// runtime's own recipe (`image_manifest_hash` — driver + cdylib +
+    /// plan), exactly as Julia computes it from `self`; an env built from
+    /// the same recipe matches, and a mismatch fails the boot cross-check
+    /// closed (D26 §9.3). Falls back to [`Self::worker_spec`] (the
+    /// construction-time `self.image` / local backend) when the env carries
+    /// no digest — the `LocalServiceSpawner` dev + test path.
+    fn worker_spec_for_env(&self, env: &Resource) -> Result<WorkerSpec, RunError> {
+        const PROP_IMAGE_DIGEST: &str = "urn:eigenius:runtime:image_digest";
+        let digest_str = env
+            .get(&Iri::parse(PROP_IMAGE_DIGEST).expect("static IRI"))
+            .and_then(Value::as_str);
+        match digest_str {
+            Some(s) => {
+                let digest = ImageDigest::parse(s).map_err(|e| {
+                    RunError::WorkerRpcFailed(format!(
+                        "env carries malformed image_digest `{s}`: {e}"
+                    ))
+                })?;
+                let manifest_hash = self
+                    .image_manifest_hash()
+                    .map_err(|e| RunError::WorkerRpcFailed(format!("manifest_hash: {e}")))?;
+                self.docker_worker_spec(&RImageBinding {
+                    digest,
+                    manifest_hash,
+                })
+            }
+            None => self.worker_spec(),
+        }
+    }
+
     /// `WorkerSpec` for the local (host-subprocess) backend: command
     /// `Rscript <driver>`, no image, cdylib path supplied via env.
     fn local_worker_spec(&self) -> WorkerSpec {
@@ -306,7 +343,7 @@ impl LanguageRuntime for RLanguageRuntime {
 
     fn run_script(
         &self,
-        _env: &Resource,
+        env: &Resource,
         script: &Resource,
         inputs: &[Resource],
     ) -> Result<RunOutcome, RunError> {
@@ -325,7 +362,7 @@ impl LanguageRuntime for RLanguageRuntime {
 
         let handle = self
             .spawner
-            .ensure_service(self.worker_spec()?)
+            .ensure_service(self.worker_spec_for_env(env)?)
             .map_err(|e| RunError::WorkerRpcFailed(format!("ensure_service: {e}")))?;
 
         // Dispatch on a fresh connection, then always drain. Per-invocation

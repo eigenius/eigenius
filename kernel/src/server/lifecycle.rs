@@ -286,6 +286,13 @@ const REMOTE_COMPONENTS: &[&str] = &[
     "urn:eigenius:program:components:CompleteText",
     "urn:eigenius:program:components:CompleteJson",
     "urn:eigenius:program:components:HttpRequest",
+    // Substrate-backed script execution (D26 §4.1): the orchestrator's
+    // handler routes it to `dispatchRunRuntimeScript` → `SubstrateDispatcher`
+    // → the language runtime (e.g. R/lme4). A program applies it with the
+    // input table as component input and the `RuntimeScript` (+ env) as the
+    // component argument; the run's `ProgramTrace` mints the `IsDerivedAs`
+    // witness over the output (D56 §3.1).
+    "urn:eigenius:program:components:RunRuntimeScript",
 ];
 
 /// Embedder-side configuration handed to [`start_server`] by the

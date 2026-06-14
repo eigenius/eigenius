@@ -52,6 +52,7 @@
 use eigenius_config::Loader as ConfigLoader;
 use eigenius_julia::JuliaLanguageRuntime;
 use eigenius_lean_runtime::LeanLanguageRuntime;
+use eigenius_r::RLanguageRuntime;
 use eigenius_runtime_substrate::facade::{DispatchOutcome, SubstrateDispatcher};
 use eigenius_runtime_substrate::spawner::service::DockerServiceSpawner;
 use eigenius_runtime_substrate::spawner::DockerSpawnerConfig;
@@ -203,6 +204,48 @@ pub fn register_lean_language_runtime(
         Arc::new(spawner),
         depot,
     );
+    let mut d = dispatcher().lock().map_err(lock_err)?;
+    d.register_language_runtime(Box::new(runtime))
+        .map_err(into_napi_err)
+}
+
+/// Register the [`RLanguageRuntime`] under language_id="r". Idempotent
+/// within a process — calling twice surfaces an explicit
+/// `RegistryError::AlreadyRegistered`.
+///
+/// `driver_path` points at `EigeniusRWorker.R` and `cdylib_path` at
+/// `libeigenius_r_worker.so` — both copied into the orchestrator image at
+/// build time and baked into the R worker image (D55 §6). At dispatch the
+/// runtime resolves the image from the env Resource's `image_digest`
+/// (D26 §5.3) and computes the cross-check `manifest_hash` from this
+/// recipe — so `driver`/`cdylib`/`base_image_ref` here must match the
+/// recipe that built the R worker image, or the boot cross-check fails
+/// closed (D26 §9.3). `depot_path` is the shared host/container path for
+/// substrate artifacts + worker UDS sockets — must match the
+/// orchestrator's bind-mount in `docker-compose.yml` (D26 §9.5).
+#[napi]
+pub fn register_r_language_runtime(
+    driver_path: String,
+    cdylib_path: String,
+    base_image_ref: String,
+    depot_path: String,
+) -> Result<()> {
+    let config = ConfigLoader::new()
+        .load()
+        .map_err(|e| into_napi_err(format!("eigenius-config load: {e}")))?;
+
+    let depot = PathBuf::from(&depot_path);
+    let spawner_config =
+        DockerSpawnerConfig::from_substrate_config(depot.clone(), &config.substrate);
+    let spawner = DockerServiceSpawner::new(spawner_config)
+        .map_err(|e| into_napi_err(format!("DockerServiceSpawner::new: {e}")))?;
+    let runtime = RLanguageRuntime::new(
+        Arc::new(spawner),
+        PathBuf::from(driver_path),
+        PathBuf::from(cdylib_path),
+        depot,
+    )
+    .with_build_config(base_image_ref, eigenius_r::RImagePlan::default());
     let mut d = dispatcher().lock().map_err(lock_err)?;
     d.register_language_runtime(Box::new(runtime))
         .map_err(into_napi_err)
