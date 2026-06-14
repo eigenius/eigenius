@@ -49,6 +49,17 @@ export interface ComponentInput {
 export interface ComponentOutput {
   /** The output resource (will be serialized to CBOR by the transport layer). */
   output: EigonResource;
+  /**
+   * Optional raw Eigon-CBOR bytes to forward to the kernel verbatim,
+   * bypassing the JS-object re-encode. Used by passthrough components
+   * (e.g. RunRuntimeScript) whose worker already produced canonical
+   * Eigon-CBOR: re-encoding via the decoded JS object loses
+   * `data_type: json` tags (cbor-x unwraps the EIGENIUS_JSON_TAG on
+   * decode, so a `canonical_proposition` term re-encodes as an untagged
+   * map the kernel mis-reads as a nested resource). When set and the
+   * request is CBOR, the executor sends these bytes unchanged.
+   */
+  outputBytes?: Uint8Array;
   /** Optional metrics (LLM token counts, latency, etc.). */
   metrics?: ComponentMetrics;
 }

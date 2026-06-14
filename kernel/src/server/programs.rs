@@ -311,6 +311,30 @@ impl EigeniusService {
                     });
                 }
             }
+            // Commit the program's final output Resource itself when it
+            // carries an `@id` and isn't already among `produced_resources`
+            // (the comorphism-reify path pushes its output there; a plain
+            // component application — e.g. `RunRuntimeScript` — does not).
+            // Without this the committed `ProgramTrace` points at a target
+            // that isn't chain-resident, so the D49 witness emitter can't
+            // read its `canonical_proposition` and no `IsDerivedAs` is
+            // minted — breaking the D56 wrapped-component derivation path.
+            if let Some(out_id) = output.id().cloned() {
+                let already = produced_resources
+                    .iter()
+                    .any(|r| r.id() == Some(&out_id));
+                if !already {
+                    if let Err(e) = ctx.add_resource(output.clone()) {
+                        errors.push(ValidationError {
+                            resource_iri: out_id.as_str().to_string(),
+                            property_iri: String::new(),
+                            rule: "internal".to_string(),
+                            message: format!("failed to add program output: {e}"),
+                            severity: "error".to_string(),
+                        });
+                    }
+                }
+            }
             // Capture the trace IRI before moving the resource — needed
             // for the failure path's error message (trace_iri_str is
             // semantically the same value, but reading it off the

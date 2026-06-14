@@ -88,6 +88,12 @@ export function createRunRuntimeScriptHandler(
       latency_ms: latencyMs,
     });
 
-    return { output: decodeResource(outcome.output) };
+    // Forward the worker's raw Eigon-CBOR verbatim (outputBytes) so the
+    // canonical_proposition's `data_type: json` term reaches the kernel
+    // intact; `output` is the decoded view (for any inspection/logging).
+    return {
+      output: decodeResource(outcome.output),
+      outputBytes: outcome.output,
+    };
   };
 }

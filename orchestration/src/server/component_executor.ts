@@ -136,7 +136,13 @@ export async function executeComponentRequest(
     // Encode output in the same codec the request used so a
     // pre-18e kernel still gets JSON back during a rolling
     // upgrade.
-    const outputBytes = useCbor
+    // Passthrough components (RunRuntimeScript) supply already-canonical
+    // Eigon-CBOR via `outputBytes`; forward it verbatim so `data_type:
+    // json` tags (the canonical_proposition term) survive — re-encoding
+    // the decoded JS object would drop them.
+    const outputBytes = useCbor && result.outputBytes
+      ? result.outputBytes
+      : useCbor
       ? encodeResource(result.output)
       : TEXT_ENCODER.encode(JSON.stringify(result.output));
 

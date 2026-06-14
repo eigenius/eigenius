@@ -56,6 +56,10 @@ WORKDIR /build
 # member crate the addon depends on (runtime-substrate + eigenius-julia
 # + their workspace siblings reachable through path deps).
 COPY Cargo.toml Cargo.lock ./
+# The root workspace `[patch.crates-io]` points `tonic-web` at
+# `patches/tonic-web`; the `eigenius-r-worker` cdylib build below uses the
+# root workspace, so the patched source must be in the build context.
+COPY patches/ patches/
 COPY kernel/ kernel/
 COPY crates/ crates/
 COPY sdk/ sdk/
@@ -151,7 +155,7 @@ ENV EIGENIUS_JULIA_BASE_IMAGE_REF=docker.io/library/julia:1.12-bookworm
 ENV EIGENIUS_JULIA_DEPOT_PATH=/var/lib/eigenius/substrate-depot
 ENV EIGENIUS_R_DRIVER_PATH=/opt/eigenius/r-runtime-worker/EigeniusRWorker.R
 ENV EIGENIUS_R_CDYLIB_PATH=/opt/eigenius/r-runtime-worker/libeigenius_r_worker.so
-ENV EIGENIUS_R_BASE_IMAGE_REF=bioconductor/bioconductor_docker:RELEASE_3_18
+ENV EIGENIUS_R_BASE_IMAGE_REF=docker.io/bioconductor/bioconductor_docker:RELEASE_3_18
 ENV EIGENIUS_R_DEPOT_PATH=/var/lib/eigenius/substrate-depot
 
 EXPOSE 8080

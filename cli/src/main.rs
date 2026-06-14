@@ -559,14 +559,28 @@ enum EnvCommands {
         package_path: Option<String>,
 
         /// IRI of a previously-committed `RuntimePackageMirror` to bake in.
+        /// Required for `julia`; optional for `r` (the R image bakes the
+        /// pinned `RImagePlan` packages — limma/fgsea/lme4 — and has no
+        /// mirror until the P4 S4 generator lands).
         #[arg(long, value_name = "MIRROR_IRI")]
-        mirror: String,
+        mirror: Option<String>,
 
         /// Override the language's default base image. Pin by digest in
         /// production (e.g. `julia@sha256:...`) so builds stay
-        /// reproducible.
+        /// reproducible. For `r` the default is the Bioconductor base.
         #[arg(long, value_name = "REF", default_value = "julia:1.12-bookworm")]
         base_image: String,
+
+        /// (R only) Path to the `EigeniusRWorker.R` driver. Defaults to
+        /// `crates/eigenius-r-worker/r/EigeniusRWorker.R` in the workspace.
+        #[arg(long, value_name = "FILE")]
+        r_driver: Option<String>,
+
+        /// (R only) Path to the `libeigenius_r_worker.so` cdylib. Defaults
+        /// to `target/{release,debug}/libeigenius_r_worker.so`. Build it
+        /// first with `cargo build -p eigenius-r-worker --release`.
+        #[arg(long, value_name = "FILE")]
+        r_cdylib: Option<String>,
 
         /// Path to the Julia worker's project directory (must contain
         /// `Project.toml`, `Manifest.toml`, `src/JuliaWorker.jl`).
@@ -2985,15 +2999,19 @@ async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
             base_image,
             worker_source_dir,
             depot,
+            r_driver,
+            r_cdylib,
         } => {
             institutions::env_build(
                 endpoint,
                 &language,
                 package_path.as_deref(),
-                &mirror,
+                mirror.as_deref(),
                 &base_image,
                 worker_source_dir.as_deref(),
                 depot.as_deref(),
+                r_driver.as_deref(),
+                r_cdylib.as_deref(),
                 json,
             )
             .await

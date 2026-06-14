@@ -412,16 +412,34 @@ pub async fn env_build(
     endpoint: &str,
     language: &str,
     package_path: Option<&str>,
-    mirror_iri: &str,
+    mirror_iri: Option<&str>,
     base_image: &str,
     worker_source_dir: Option<&str>,
     depot: Option<&str>,
+    r_driver: Option<&str>,
+    r_cdylib: Option<&str>,
     json: bool,
 ) {
+    // R (D55/D56): no handler package, no mirror. Build the WRN-study
+    // image (Bioconductor base + RImagePlan::default = limma/fgsea/lme4)
+    // via the substrate's `build_environment_image`, then print the
+    // digest to paste into the program's `runtime:image_digest`.
+    if language == "r" {
+        env_build_r(r_driver, r_cdylib, depot, json).await;
+        return;
+    }
+
     if language != "julia" {
-        eprintln!("language `{language}` is not yet supported by env build (only `julia` for v1)");
+        eprintln!("language `{language}` is not yet supported by env build (only `julia`, `r`)");
         std::process::exit(1);
     }
+    let mirror_iri = match mirror_iri {
+        Some(m) => m,
+        None => {
+            eprintln!("julia env build requires --mirror <RuntimePackageMirror IRI>");
+            std::process::exit(1);
+        }
+    };
 
     // 1. Resolve package directory (cwd by default).
     let pkg_dir = match package_path {
@@ -822,6 +840,141 @@ fn base64_encode(input: &[u8]) -> String {
         }
     }
     out
+}
+
+/// Resolve the R worker driver + cdylib for `env build --language r`,
+/// defaulting to the workspace locations (`<repo>` derived from the CLI
+/// crate's manifest dir). The cdylib must be built first
+/// (`cargo build -p eigenius-r-worker [--release]`).
+fn resolve_r_assets(
+    driver: Option<&str>,
+    cdylib: Option<&str>,
+) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
+    let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    let driver_path = match driver {
+        Some(p) => std::path::PathBuf::from(p),
+        None => repo.join("crates/eigenius-r-worker/r/EigeniusRWorker.R"),
+    };
+    let cdylib_path = match cdylib {
+        Some(p) => std::path::PathBuf::from(p),
+        None => {
+            let rel = repo.join("target/release/libeigenius_r_worker.so");
+            if rel.is_file() {
+                rel
+            } else {
+                repo.join("target/debug/libeigenius_r_worker.so")
+            }
+        }
+    };
+    if !driver_path.is_file() {
+        return Err(format!(
+            "R worker driver not found at {} (pass --r-driver)",
+            driver_path.display()
+        ));
+    }
+    if !cdylib_path.is_file() {
+        return Err(format!(
+            "R worker cdylib not found at {} — build it first:\n\
+             cargo build -p eigenius-r-worker --release   (or pass --r-cdylib)",
+            cdylib_path.display()
+        ));
+    }
+    Ok((driver_path, cdylib_path))
+}
+
+/// `eigenius env build --language r`: build the WRN-study R image
+/// (Bioconductor base + `RImagePlan::default` = limma/fgsea/lme4) via the
+/// substrate's `build_environment_image`, and print the resulting
+/// `sha256:` digest. No chain endpoint needed — this is a local Docker
+/// build; the digest is pasted into the program's `runtime:image_digest`
+/// (the substrate's `synthesize_env` forwards it to the dispatch env).
+async fn env_build_r(
+    r_driver: Option<&str>,
+    r_cdylib: Option<&str>,
+    depot: Option<&str>,
+    json: bool,
+) {
+    let (driver_path, cdylib_path) = match resolve_r_assets(r_driver, r_cdylib) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+
+    let depot_path = match depot {
+        Some(p) => std::path::PathBuf::from(p),
+        None => {
+            let dir =
+                std::env::temp_dir().join(format!("eigenius-env-build-r-{}", std::process::id()));
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                eprintln!("failed to create depot dir {}: {e}", dir.display());
+                std::process::exit(1);
+            }
+            dir
+        }
+    };
+
+    let substrate_config = match eigenius_config::Loader::new().load() {
+        Ok(c) => c.substrate,
+        Err(e) => {
+            eprintln!("eigenius-config load failed: {e}");
+            std::process::exit(1);
+        }
+    };
+    let depot_for_blocking = depot_path.clone();
+    let digest = match tokio::task::spawn_blocking(move || {
+        let spawner = eigenius_runtime_substrate::spawner::service::DockerServiceSpawner::new(
+            eigenius_runtime_substrate::spawner::DockerSpawnerConfig::from_substrate_config(
+                depot_for_blocking.clone(),
+                &substrate_config,
+            ),
+        )
+        .map_err(|e| {
+            format!(
+                "failed to construct DockerServiceSpawner: {e}\n\
+                 Is the Docker daemon running and reachable?"
+            )
+        })?;
+        let runtime = eigenius_r::RLanguageRuntime::new(
+            std::sync::Arc::new(spawner),
+            driver_path,
+            cdylib_path,
+            depot_for_blocking,
+        );
+        use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
+        let env_resource = eigenius_kernel::ontology::resource::Resource::new_embedded();
+        // `build_environment_image` ignores the env/packages/mirror args
+        // for R — it uses the runtime's own `RImagePlan` recipe.
+        runtime
+            .build_environment_image(&env_resource, &[], None)
+            .map_err(|e| format!("R env build failed: {e}"))
+    })
+    .await
+    {
+        Ok(Ok(d)) => d,
+        Ok(Err(msg)) => {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("env build worker join failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    if json {
+        println!(
+            "{{\"image_digest\":\"{}\",\"language\":\"r\",\"packages\":\"limma,fgsea,lme4\"}}",
+            digest.as_str()
+        );
+    } else {
+        println!("R image built (Bioconductor base + limma/fgsea/lme4).");
+        println!("  Digest: {}", digest.as_str());
+        println!();
+        println!("Paste this digest into the program's `runtime:image_digest`, e.g.");
+        println!("  experiments/publications/wrn-helicase/programs/xenograft-lme4-program.json");
+    }
 }
 
 /// Resolve the Julia worker source directory in priority order:

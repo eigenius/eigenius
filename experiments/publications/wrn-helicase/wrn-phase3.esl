@@ -35,22 +35,24 @@ namespace wrn        = "urn:eigenius:pub:wrn";
 // C-VIVO — in vivo + patient-derived validation
 // ════════════════════════════════════════════════════════════════════
 
-// Linked-external: KM12 dox-inducible shWRN1 xenograft growth (lme4 LRT)
-// + MSI patient-derived organoid (Fig. 2d-g).
-resource wrn:vivo_xenograft : bench:ToolArtifact {
-    bench:tool            = "KM12 xenograft growth (linear mixed model, lme4 likelihood-ratio test) + MSI patient-derived organoid viability";
-    bench:produced_from   = ["wrn-paper:Fig-2d", "wrn-paper:Fig-2f", "wrn-paper:Fig-2g"];
-    bench:tool_parameters = "Dox-inducible shWRN1 in KM12 (MSI) significantly impairs xenograft tumor growth (% volume increase ~ time, random slope per mouse; LRT); shWRN also impairs a novel MSI colon patient-derived organoid (CCLF_CORE_0001_T). LINKED-EXTERNAL (authors' in vivo data not vendored).";
-    reflection:derivation = wrn:vivo_xenograft_trace;
-    reflection:canonical_proposition = type_expr(
-        onco:InVivoDependence("WRN", "MSI")
-    );
-}
-resource wrn:vivo_xenograft_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:vivo_xenograft;
-    reflection:source    = "wrn-paper:Fig-2d-g in vivo / organoid assays (linked-external)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
-}
+// Kernel-recomputed (D56): the KM12 dox-inducible shWRN1 xenograft growth
+// warrant is no longer a linked-external bench:ToolArtifact. It is
+// materialized by running the authors' lme4 random-slope mixed-model LRT
+// (in_vivo_KM12_analysis.R) as a RuntimeScript through the R language
+// runtime (D55), wrapping the real lme4 at a pinned image. The pieces:
+//   - programs/xenograft-input.json  — the Fig 2d tumor-volume table (73 obs)
+//   - programs/xenograft-lme4-program.json — applies the RunRuntimeScript
+//     component to that table; the R script fits the lme4 LRT and emits the
+//     DerivedResource `wrn:vivo_lme4:result` carrying
+//     `canonical_proposition = onco:InVivoDependence("WRN","MSI")` (set when
+//     the Day:Dox interaction is significant; observed p ≈ 0.048).
+// `eigenius run` commits that output under a ProgramTrace, which mints the
+// `IsDerivedAs(vivo_lme4:result, InVivoDependence(WRN,MSI))` witness the
+// concl_vivo certificate below discharges (the recomputed warrant must be
+// materialized before this chain layer is loaded — D54 lemma-citation order).
+//
+// Minimal class for the program's typed input (the xenograft table).
+class wrn:XenograftTable {}
 
 // Linked-external: the C911 seed-matched control is inert in vivo.
 resource wrn:vivo_seed_control : bench:ToolArtifact {
@@ -91,9 +93,9 @@ resource wrn:concl_vivo : reasoning:ReasoningSentence {
     reasoning:proposition = type_expr(
         onco:InVivoDependence("WRN", "MSI")
     );
-    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:vivo_xenograft");
+    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:vivo_lme4:result");
     reasoning:certificate = type_expr(
-        derived("urn:eigenius:pub:wrn:vivo_xenograft",
+        derived("urn:eigenius:pub:wrn:vivo_lme4:result",
                 onco:InVivoDependence("WRN", "MSI"))
     );
 }
