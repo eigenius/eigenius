@@ -37,6 +37,7 @@ pub mod boundary;
 pub mod chain;
 pub mod content_address;
 pub mod cross_check;
+pub mod dataset_schema;
 pub mod error;
 pub mod external_file;
 pub mod facade;
@@ -68,6 +69,10 @@ pub use cross_check::{
     CrossCheckOutcome, ProvenanceDirAction, SubstratePrepareError, DEFAULT_PROVENANCE_DIR,
     ENV_DIGEST_VAR, ENV_MANIFEST_HASH_VAR, ENV_PROVENANCE_DIR_VAR, EXIT_CODE_CROSS_CHECK_FAILURE,
     MANIFEST_HASH_FILE,
+};
+pub use dataset_schema::{
+    header_columns, parse_dataset_schema, validate_collection, validate_tabular, Attribute,
+    DatasetSchema, Dimension, Layout, LayoutKind, Measure,
 };
 pub use error::{BuildError, ResourceLimit, RunError, SpawnError};
 pub use external_file::{

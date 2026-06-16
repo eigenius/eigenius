@@ -22,6 +22,9 @@ use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 
+use eigenius_kernel::server::proto::eigenius_kernel_client::EigeniusKernelClient;
+use tonic::transport::Channel;
+
 use crate::common::{fetch_resource, submit_resource_for_load};
 
 const PINNED_FILE_CLASS: &str = "urn:eigenius:ingest:PinnedExternalFile";
@@ -31,6 +34,9 @@ const PROP_MEDIA_TYPE: &str = "urn:eigenius:ingest:media_type";
 const PROP_SOURCE: &str = "urn:eigenius:reflection:source";
 const PROP_IS_A: &str = "urn:eigenius:core:is_a";
 const PROP_SHORT_NAME: &str = "urn:eigenius:core:short_name";
+const PROP_SCHEMA: &str = "urn:eigenius:ingest:schema";
+const PROP_SCHEMAS: &str = "urn:eigenius:ingest:schemas";
+const PROP_CONTENT_ENCODING: &str = "urn:eigenius:ingest:content_encoding";
 
 /// Best-effort IANA media type from a file extension (D53 §3, §4.1).
 fn media_type_for(file: &str) -> &'static str {
@@ -253,6 +259,231 @@ pub async fn data_verify(endpoint: &str, iri: &str, json: bool) {
             eprintln!("Verification could not fetch `{reference}`: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+/// Resolve a schema value (an embedded `DatasetSchema` or a `ResourceRef` to a
+/// committed one) to a concrete resource.
+async fn resolve_schema_value(
+    client: &mut EigeniusKernelClient<Channel>,
+    v: &Value,
+) -> Option<Resource> {
+    match v {
+        Value::Embedded(b) => Some((**b).clone()),
+        Value::ResourceRef(i) => fetch_resource(client, i.as_str()).await,
+        // A schema reference can also arrive as a plain string IRI (e.g. when a
+        // resource hasn't been ref-canonicalized on the read path).
+        Value::String(s) => fetch_resource(client, s).await,
+        _ => None,
+    }
+}
+
+/// Collect a file's bound `DatasetSchema`s from `ingest:schema` (one) and
+/// `ingest:schemas` (a set), resolving refs against the chain.
+async fn collect_schemas(
+    client: &mut EigeniusKernelClient<Channel>,
+    resource: &Resource,
+) -> Vec<Resource> {
+    let mut out = Vec::new();
+    for prop in [PROP_SCHEMA, PROP_SCHEMAS] {
+        let Some(value) = Iri::parse(prop)
+            .ok()
+            .and_then(|i| resource.get(&i).cloned())
+        else {
+            continue;
+        };
+        match value {
+            Value::Array(items) => {
+                for v in &items {
+                    if let Some(r) = resolve_schema_value(client, v).await {
+                        out.push(r);
+                    }
+                }
+            }
+            other => {
+                if let Some(r) = resolve_schema_value(client, &other).await {
+                    out.push(r);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Implements `eigenius data validate <iri>` — the D53 §4.1 checkable gate.
+/// Fetches the file + its `DatasetSchema`(s), materializes the bytes (which also
+/// re-verifies the content hash), reads the header, and checks each declared
+/// layout against the actual columns. Tabular (CSV/TSV) only; columnar
+/// (Parquet/Arrow) carry their own schema in-file and are validated worker-side.
+pub async fn data_validate(endpoint: &str, iri: &str, json: bool) {
+    let mut client = crate::connect_client(endpoint).await;
+    let resource = match fetch_resource(&mut client, iri).await {
+        Some(r) => r,
+        None => {
+            eprintln!("No resource at IRI `{iri}`");
+            std::process::exit(1);
+        }
+    };
+    let read = |prop: &str| {
+        Iri::parse(prop)
+            .ok()
+            .and_then(|i| resource.get(&i).cloned())
+            .and_then(|v| v.as_str().map(str::to_string))
+    };
+
+    let schemas = collect_schemas(&mut client, &resource).await;
+    if schemas.is_empty() {
+        if json {
+            println!(
+                "{{\"valid\":true,\"iri\":\"{iri}\",\"note\":\"no schema bound (opaque file)\"}}"
+            );
+        } else {
+            println!("No DatasetSchema bound to `{iri}` — opaque file, nothing to validate.");
+        }
+        return;
+    }
+
+    let (reference, content_hash) = match (read(PROP_REFERENCE), read(PROP_CONTENT_HASH)) {
+        (Some(r), Some(h)) => (r, h),
+        _ => {
+            eprintln!("`{iri}` is missing reference or content_hash");
+            std::process::exit(1);
+        }
+    };
+    let media_type =
+        read(PROP_MEDIA_TYPE).unwrap_or_else(|| "application/octet-stream".to_string());
+    let content_encoding = read(PROP_CONTENT_ENCODING);
+
+    // Materialize (and content-verify) into a throwaway dir.
+    let tmp = std::env::temp_dir().join(format!("eig_validate_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&tmp);
+    let opts = eigenius_runtime_substrate::ResolveOptions {
+        cache_root: Some(&tmp),
+        reject_node_local_files: false,
+    };
+    let path =
+        match eigenius_runtime_substrate::resolve_and_materialize(&reference, &content_hash, &opts)
+        {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&tmp);
+                eprintln!("Could not materialize `{reference}` for validation: {e}");
+                std::process::exit(1);
+            }
+        };
+
+    let delimited = matches!(
+        media_type.as_str(),
+        "text/csv" | "text/tab-separated-values"
+    );
+    if content_encoding.is_some() || !delimited {
+        let _ = std::fs::remove_dir_all(&tmp);
+        let reason = match &content_encoding {
+            Some(enc) => format!("content_encoding `{enc}` not supported by the header gate"),
+            None => format!("media_type `{media_type}` is not delimited text"),
+        };
+        if json {
+            println!("{{\"valid\":true,\"iri\":\"{iri}\",\"note\":\"layout check deferred to worker: {reason}\"}}");
+        } else {
+            println!("✓ content verified. Layout check deferred to the worker ({reason}).");
+        }
+        return;
+    }
+
+    // Read the first non-empty lines: line 0 is the header for tabular
+    // layouts; for a Collection (no header row) the lines are data rows.
+    let lines: Vec<String> = {
+        use std::io::BufRead;
+        match std::fs::File::open(&path) {
+            Ok(f) => std::io::BufReader::new(f)
+                .lines()
+                .map_while(Result::ok)
+                .filter(|l| !l.trim().is_empty())
+                .take(16)
+                .collect(),
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&tmp);
+                eprintln!("Could not read materialized file: {e}");
+                std::process::exit(1);
+            }
+        }
+    };
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    // Validate each bound schema, dispatching on its layout kind.
+    let mut all_ok = true;
+    let mut report: Vec<(Option<String>, Vec<String>)> = Vec::new();
+    for sr in &schemas {
+        let parsed = eigenius_runtime_substrate::parse_dataset_schema(sr);
+        // Member schemas describe an intra-file matrix (.rds member / sheet)
+        // that a flat header can't represent — skip with a note.
+        if parsed.member.is_some() {
+            report.push((parsed.member.clone(), vec![]));
+            continue;
+        }
+        let is_collection = matches!(
+            parsed.layout.as_ref().map(|l| &l.kind),
+            Some(eigenius_runtime_substrate::LayoutKind::Collection)
+        );
+        let issues = if is_collection {
+            // Ragged: every line is a data row; split each into fields.
+            let rows: Vec<Vec<String>> = lines
+                .iter()
+                .map(|l| eigenius_runtime_substrate::header_columns(l, &media_type))
+                .collect();
+            eigenius_runtime_substrate::validate_collection(&parsed, &rows)
+        } else {
+            let header = lines
+                .first()
+                .map(|l| eigenius_runtime_substrate::header_columns(l, &media_type))
+                .unwrap_or_default();
+            eigenius_runtime_substrate::validate_tabular(&parsed, &header)
+        };
+        if !issues.is_empty() {
+            all_ok = false;
+        }
+        report.push((None, issues));
+    }
+
+    if json {
+        let entries: Vec<String> = report
+            .iter()
+            .map(|(member, issues)| {
+                let issues_json: Vec<String> = issues.iter().map(|i| format!("{i:?}")).collect();
+                format!(
+                    "{{\"member\":{},\"issues\":[{}]}}",
+                    member
+                        .as_ref()
+                        .map(|m| format!("{m:?}"))
+                        .unwrap_or_else(|| "null".to_string()),
+                    issues_json.join(",")
+                )
+            })
+            .collect();
+        println!(
+            "{{\"valid\":{all_ok},\"iri\":\"{iri}\",\"schemas\":[{}]}}",
+            entries.join(",")
+        );
+    } else if all_ok {
+        println!(
+            "✓ valid — {}: layout matches the header for all bound schema(s).",
+            iri
+        );
+        for (member, _) in &report {
+            if let Some(m) = member {
+                println!("  (member `{m}` schema — intra-file layout, not header-checkable here)");
+            }
+        }
+    } else {
+        eprintln!("✗ INVALID — {iri}");
+        for (_, issues) in &report {
+            for issue in issues {
+                eprintln!("  - {issue}");
+            }
+        }
+    }
+    if !all_ok {
+        std::process::exit(1);
     }
 }
 

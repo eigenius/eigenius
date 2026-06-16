@@ -76,11 +76,17 @@ hands the worker a path** — no kernel/proto change for v1.
 
 *Unblocks:* large/versioned/distributed data — the production path.
 
-### Phase 3 — `DatasetSchema`-driven typing
+### Phase 3 — `DatasetSchema`-driven typing ✅ (core; collection profile deferred)
 
-1. The worker (or a native consumer) reads **typed** columns/rows per the schema's dimensions/measures/layout, not just raw bytes — the mirror-generator analog (`crates/runtime-substrate/src/mirror_generator.rs`) extended to external-file schemas.
-2. Implement the §10 refinements as needed: **plural `schemas`** (member/sheet selector — the `.rds`/multi-sheet case), the **`Collection`** layout (`.gmt`), code-list resolution, layout orientation.
-3. Schema vocabulary IRIs route through **D57** (`urn:schema_org:` mapping) — settle that first if the descriptive metadata fields are wanted typed.
+1. **Vocabulary** ✅ — `ontologies/ingest/ingest-ontology.json` gains the component classes `Dimension` / `Measure` / `Attribute` / `Layout` and the binding properties (`dimension`/`measure`/`attribute` as **`resource_array`**; `layout`/`class`/`property`/`code_list`/`data_type` as to-one `resource`; `member`/`name`/`kind`/`row_key`/`row_key_binds`/`column_dimension`/`header_parse`/`cell_measure` as strings) + plural **`schemas`** (`resource_array`) on `PinnedExternalFile` for the multi-matrix container case (§10 #1). Bootstrap green (26).
+2. **Checkable gate** ✅ — `crates/runtime-substrate/src/dataset_schema.rs` parses a `DatasetSchema` resource into a typed view and `validate_tabular` checks the declared layout against a file's actual header (wide-matrix row-key + `header_parse` template match; long-table per-component `source` columns). Scope = delimited (CSV/TSV) — the WRN matrices' format. **Parquet/Arrow deferred to the worker** (validating substrate-side needs the heavy `parquet`/`arrow` crates — same weight we declined for `liboxen`; the worker reads them natively and `content_hash` is the trust root regardless).
+3. **CLI** ✅ — `data validate <iri>` resolves the file + its schema(s) (ref or embedded), materializes + content-verifies, header-scans, reports per-schema (member schemas noted as intra-file, not header-checkable). Live-verified: a good CERES matrix passes; one missing the row-key column fails with a precise message + exit 1.
+4. **Worker typed-read** — for R/CSV the script reads named columns directly; the schema's runtime role is the gate + graph-linkage + typed downstream reference, so no per-worker codegen was needed (§4.3 "worker is the bridge"). A typed Julia/`.rds` member reader stays deferred with the Julia parity item.
+5. **D57** — not needed: the schema binds to `onco:`/`core:` IRIs natively; D57's `urn:schema_org:` slice is only for optional descriptive metadata.
+
+6. **Collection profile** ✅ ([#88](https://github.com/eigenius/eigenius/issues/88)) — `LayoutKind::Collection` + `member_dimension` / `member_start_column` layout props bind ragged set→member-list data (a `.gmt`: each row a named set, row-key→set dimension, trailing fields→member dimension). `validate_collection` checks each row carries ≥1 member and the member dimension is declared; `data validate` dispatches Collection (data rows) vs tabular (header). Live-verified on a Hallmark-style `.gmt` (good passes; a memberless set fails, exit 1). Needed for the WRN GSEA corpus.
+
+*Deferred:* code-list FK *resolution* ([#86](https://github.com/eigenius/eigenius/issues/86) — the `code_list`/`member_dimension` pointers exist; following them to validate membership is future) and Parquet/Arrow substrate-side validation ([#87](https://github.com/eigenius/eigenius/issues/87)).
 
 *Unblocks:* the full WRN corpus modeling ([worked example](d53-wrn-attachment-worked-example.md)).
 

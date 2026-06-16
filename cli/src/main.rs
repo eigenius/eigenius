@@ -783,6 +783,15 @@ enum DataCommands {
         #[arg(value_name = "DATA_IRI")]
         iri: String,
     },
+
+    /// Validate the bound DatasetSchema against the file's actual columns —
+    /// the D53 §4.1 checkable layout gate. Materializes (content-verifies) the
+    /// file and header-scans it (CSV/TSV; columnar formats defer to the worker).
+    Validate {
+        /// IRI of the PinnedExternalFile to validate.
+        #[arg(value_name = "DATA_IRI")]
+        iri: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -3207,6 +3216,7 @@ async fn remote_data(endpoint: &str, command: DataCommands, json: bool) {
         }
         DataCommands::Inspect { iri } => data::data_inspect(endpoint, &iri, json).await,
         DataCommands::Verify { iri } => data::data_verify(endpoint, &iri, json).await,
+        DataCommands::Validate { iri } => data::data_validate(endpoint, &iri, json).await,
     }
 }
 
