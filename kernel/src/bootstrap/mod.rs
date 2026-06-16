@@ -395,8 +395,18 @@ pub fn bootstrap_with_storage(
         storage.clone(),
     )?;
 
+    // ingest: layer (D53) — declares PinnedExternalFile (a content-hash-tracked
+    // external data file) and DatasetSchema. Sits above reflection (the parent
+    // of PinnedExternalFile via reflection:ObservedResource); placed at the tip.
+    let ingest = load_layer(
+        "ingest",
+        include_str!("../../../ontologies/ingest/ingest-ontology.json"),
+        Some(notebook),
+        storage.clone(),
+    )?;
+
     Ok(ExecutionContext::new(
-        notebook,
+        ingest,
         "working",
         ExecutionMode::ReadWrite,
         storage,
@@ -592,7 +602,7 @@ fn check_and_migrate_schema_version(
     Ok(())
 }
 
-fn embedded_ontologies() -> [(&'static str, &'static str); 14] {
+fn embedded_ontologies() -> [(&'static str, &'static str); 15] {
     [
         (
             "core",
@@ -655,6 +665,10 @@ fn embedded_ontologies() -> [(&'static str, &'static str); 14] {
         (
             "notebook",
             include_str!("../../../ontologies/notebook/notebook-ontology.json"),
+        ),
+        (
+            "ingest",
+            include_str!("../../../ontologies/ingest/ingest-ontology.json"),
         ),
     ]
 }
@@ -810,7 +824,10 @@ mod tests {
         // statistics inserted at D52 Phase 5 to declare the
         // Measurement Statistics institution and its chain artifacts.
         assert!(!ctx.head().is_root());
-        let statistics = ctx.head().parent().unwrap();
+        // ingest layer (D53) is the tip; notebook sits below it.
+        let notebook = ctx.head().parent().unwrap();
+        assert!(!notebook.is_root());
+        let statistics = notebook.parent().unwrap();
         assert!(!statistics.is_root());
         let reasoning = statistics.parent().unwrap();
         assert!(!reasoning.is_root());

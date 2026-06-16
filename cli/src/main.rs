@@ -18,6 +18,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 // Phase 19a.5 (D31): mirror / env / institution lifecycle CLI verbs.
 mod common;
+mod data;
 mod env;
 mod institutions;
 mod mirror;
@@ -337,6 +338,12 @@ enum Commands {
     Script {
         #[command(subcommand)]
         command: ScriptCommands,
+    },
+
+    /// Attach, list, and inspect external data files (D53)
+    Data {
+        #[command(subcommand)]
+        command: DataCommands,
     },
 
     /// Manage external institutions (D31 §5, Phase 19a.5.e)
@@ -728,6 +735,45 @@ enum ScriptCommands {
 }
 
 #[derive(Subcommand)]
+enum DataCommands {
+    /// Attach an external file as a content-addressed PinnedExternalFile.
+    /// Reads the local file to compute its hash; commits the typed node
+    /// (bytes stay off-chain). The IRI is content-addressed (D53 §3).
+    Attach {
+        /// Path to the local file (read to compute the content hash).
+        #[arg(value_name = "FILE")]
+        file: String,
+
+        /// Durable backend locator stored on the node (the substrate fetches
+        /// from this later). Defaults to a `file://` URL of the absolute path.
+        #[arg(long, value_name = "REFERENCE")]
+        reference: Option<String>,
+
+        /// Override the inferred media type (e.g. `text/csv`).
+        #[arg(long, value_name = "MEDIA_TYPE")]
+        media_type: Option<String>,
+
+        /// Override the short name (defaults to the file name).
+        #[arg(long, value_name = "NAME")]
+        name: Option<String>,
+    },
+
+    /// List attached external files.
+    List {
+        /// Optional media-type filter.
+        #[arg(long, value_name = "MEDIA_TYPE")]
+        media_type: Option<String>,
+    },
+
+    /// Inspect a pinned external file's metadata.
+    Inspect {
+        /// IRI of the PinnedExternalFile.
+        #[arg(value_name = "DATA_IRI")]
+        iri: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum InstitutionCommands {
     /// Install an institution by submitting its definition to the chain.
     Install {
@@ -946,6 +992,7 @@ async fn main() {
             Commands::Mirror { command } => remote_mirror(endpoint, command, cli.json).await,
             Commands::Env { command } => remote_env(endpoint, command, cli.json).await,
             Commands::Script { command } => remote_script(endpoint, command, cli.json).await,
+            Commands::Data { command } => remote_data(endpoint, command, cli.json).await,
             Commands::Institution { command } => {
                 remote_institution(endpoint, command, cli.json).await
             }
@@ -1091,6 +1138,10 @@ async fn main() {
         }
         Commands::Script { .. } => {
             eprintln!("'script' commands require --endpoint");
+            std::process::exit(1);
+        }
+        Commands::Data { .. } => {
+            eprintln!("'data' commands require --endpoint");
             std::process::exit(1);
         }
         Commands::Institution { .. } => {
@@ -3118,6 +3169,31 @@ async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
         }
         EnvCommands::List { language } => env::env_list(endpoint, language.as_deref(), json).await,
         EnvCommands::Inspect { iri } => env::env_inspect(endpoint, &iri, json).await,
+    }
+}
+
+async fn remote_data(endpoint: &str, command: DataCommands, json: bool) {
+    match command {
+        DataCommands::Attach {
+            file,
+            reference,
+            media_type,
+            name,
+        } => {
+            data::data_attach(
+                endpoint,
+                &file,
+                reference.as_deref(),
+                media_type.as_deref(),
+                name.as_deref(),
+                json,
+            )
+            .await
+        }
+        DataCommands::List { media_type } => {
+            data::data_list(endpoint, media_type.as_deref(), json).await
+        }
+        DataCommands::Inspect { iri } => data::data_inspect(endpoint, &iri, json).await,
     }
 }
 

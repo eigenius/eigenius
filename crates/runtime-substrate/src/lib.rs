@@ -57,7 +57,10 @@ pub mod types;
 
 pub use boundary::{check_call_method, check_run_script};
 pub use chain::ChainAccessor;
-pub use content_address::{RuntimeScriptIdentity, RUNTIME_SCRIPT_IRI_PREFIX};
+pub use content_address::{
+    content_hash_of, pinned_external_file_iri, ContentAddressError, RuntimeScriptIdentity,
+    PINNED_EXTERNAL_FILE_IRI_PREFIX, RUNTIME_SCRIPT_IRI_PREFIX,
+};
 pub use cross_check::{
     is_cross_check_failure, prepare_substrate_side, verify_in_worker, CrossCheckError,
     CrossCheckOutcome, ProvenanceDirAction, SubstratePrepareError, DEFAULT_PROVENANCE_DIR,

@@ -1,0 +1,71 @@
+[
+  {
+    "@id": "urn:eigenius:ingest:PinnedExternalFile",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:ObservedResource"],
+    "urn:eigenius:core:description": "A data file too large to inline on the chain (or deliberately kept off-chain), tracked by content hash and located by a backend reference. The bytes live in an external store (Oxen, or a disk volume); only this typed node — reference + content_hash + media_type — travels on the chain. The substrate fetches + content-verifies + materializes it as an input to a computation (D53). The IRI is content-addressed from content_hash, so byte-identical files converge to one node. Inherits the reflection:source requirement from ObservedResource.",
+    "urn:eigenius:core:short_name": "PinnedExternalFile",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:ingest:reference",
+      "urn:eigenius:ingest:content_hash",
+      "urn:eigenius:ingest:media_type"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:ingest:content_encoding",
+      "urn:eigenius:ingest:schema"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:ingest:DatasetSchema",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A reusable schema binding a tabular/multidimensional file's internal structure (dimensions, measures, attributes) and physical layout to graph types — the QB-DSD analog of D53 §4. Referenced by a PinnedExternalFile via ingest:schema. The dimension/measure/attribute/layout component vocabulary is specified in a later phase (D53 §4, §10); this class is the stable referent.",
+    "urn:eigenius:core:short_name": "DatasetSchema",
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:description"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:ingest:reference",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Backend locator for the bytes, scheme-dispatched: `oxen://repo@commit/path` (versioned/large/distributed) or `file://<volume>/<path>` (a mounted disk volume). The substrate resolver fetches by this; content_hash is the backend-independent trust root (D53 §3.1).",
+    "urn:eigenius:core:short_name": "reference",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:PinnedExternalFile"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:content_hash",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Eigenius-computed SHA-256 over the materialized bytes, in `sha256:<64 hex>` form. The correctness root: the substrate re-hashes at provision and fails closed on mismatch (D53 §5). Independent of any backend's internal addressing.",
+    "urn:eigenius:core:short_name": "content_hash",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:PinnedExternalFile"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:media_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IANA media type / format of the bytes (e.g. `text/csv`, `application/vnd.apache.parquet`, `application/x-hdf5`). Tells the consuming worker/tool how to read it.",
+    "urn:eigenius:core:short_name": "media_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:PinnedExternalFile"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:content_encoding",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Optional transfer/storage encoding applied over the media type, e.g. `gzip` for a `.csv.gz`. Absent means none.",
+    "urn:eigenius:core:short_name": "content_encoding",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:PinnedExternalFile"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:schema",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Optional reference to a DatasetSchema binding this file's internal structure to graph types (D53 §4). Absent means the file is opaque to the graph (a black-box input the consuming tool parses by its own format).",
+    "urn:eigenius:core:short_name": "schema",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:ingest:DatasetSchema"],
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:PinnedExternalFile"]
+  }
+]

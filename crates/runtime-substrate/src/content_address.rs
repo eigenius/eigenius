@@ -31,6 +31,44 @@ use sha2::{Digest, Sha256};
 /// IRI prefix for content-addressed `RuntimeScript` resources.
 pub const RUNTIME_SCRIPT_IRI_PREFIX: &str = "urn:eigenius:runtime:script:";
 
+/// IRI prefix for content-addressed `ingest:PinnedExternalFile` nodes (D53 §3).
+pub const PINNED_EXTERNAL_FILE_IRI_PREFIX: &str = "urn:eigenius:ingest:file:";
+
+/// Compute the Eigenius content hash of a byte slice — the `sha256:<64 hex>`
+/// form used for `ingest:content_hash` and for content-addressed verification
+/// at provision (D53 §5). This is *Eigenius's own* hash over the materialized
+/// bytes, independent of any backend's internal addressing (the correctness
+/// root, D53 §2).
+pub fn content_hash_of(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+/// Mint the content-addressed IRI for a `PinnedExternalFile` from its
+/// `content_hash`: `urn:eigenius:ingest:file:<64 hex>`. The file's identity *is*
+/// its content, so byte-identical files converge to one node regardless of where
+/// they're referenced from (D53 §3). Accepts the canonical `sha256:<hex>` form
+/// or a bare `<hex>`; rejects anything that isn't 64 lowercase hex digits.
+pub fn pinned_external_file_iri(content_hash: &str) -> Result<String, ContentAddressError> {
+    let hex = content_hash.strip_prefix("sha256:").unwrap_or(content_hash);
+    let valid = hex.len() == 64
+        && hex
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase());
+    if !valid {
+        return Err(ContentAddressError::MalformedContentHash(
+            content_hash.to_string(),
+        ));
+    }
+    Ok(format!("{PINNED_EXTERNAL_FILE_IRI_PREFIX}{hex}"))
+}
+
+/// Error minting a content-addressed IRI.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ContentAddressError {
+    #[error("content_hash must be `sha256:<64 lowercase hex>` (or bare 64 hex), got `{0}`")]
+    MalformedContentHash(String),
+}
+
 /// The defining fields of a `RuntimeScript`, in the order they feed the
 /// content hash. Optional fields (`entry_point`, `entry_point_signature`)
 /// are encoded as their absence-vs-presence plus value, so a top-level
@@ -146,6 +184,32 @@ mod tests {
             base().content_addressed_iri(),
             empty.content_addressed_iri()
         );
+    }
+
+    #[test]
+    fn content_hash_is_sha256_prefixed_and_deterministic() {
+        let h = content_hash_of(b"hello\n");
+        assert!(h.starts_with("sha256:"));
+        assert_eq!(h.len(), "sha256:".len() + 64);
+        assert_eq!(h, content_hash_of(b"hello\n"));
+        assert_ne!(h, content_hash_of(b"world\n"));
+    }
+
+    #[test]
+    fn pinned_file_iri_from_hash() {
+        let h = content_hash_of(b"some bytes");
+        let iri = pinned_external_file_iri(&h).unwrap();
+        assert!(iri.starts_with(PINNED_EXTERNAL_FILE_IRI_PREFIX));
+        // byte-identical content → same IRI, regardless of the sha256: prefix form.
+        let bare = h.strip_prefix("sha256:").unwrap();
+        assert_eq!(iri, pinned_external_file_iri(bare).unwrap());
+    }
+
+    #[test]
+    fn pinned_file_iri_rejects_malformed() {
+        assert!(pinned_external_file_iri("sha256:nothex").is_err());
+        assert!(pinned_external_file_iri("sha256:ABCDEF").is_err()); // uppercase + short
+        assert!(pinned_external_file_iri("").is_err());
     }
 
     #[test]
