@@ -28,16 +28,16 @@ hands the worker a path** — no kernel/proto change for v1.
 | `PinnedExternalFile` + `DatasetSchema` classes | ontologies | **new** `ontologies/ingest/ingest-ontology.json` | author classes/properties (JSON shape mirrors `ontologies/runtime/runtime-substrate-ontology.json`) |
 | Bootstrap registration | kernel | `kernel/src/bootstrap/mod.rs` — `bootstrap_with_storage()` (~290) + `embedded_ontologies()` array (~595-660) | add a `load_layer("ingest", …)` after `runtime`; add the tuple to the embedded array (drives the manifest hash) |
 | Content-addressed IRI | `eigenius-runtime-substrate` | `crates/runtime-substrate/src/content_address.rs:29-95` | add `PinnedExternalFileIdentity { reference, content_hash, media_type }` → `content_addressed_iri()` (clone the `RuntimeScriptIdentity` length-prefixed-hash pattern) |
-| External-file **resolver** (file:// ✅, oxen:// P2) | `eigenius-runtime-substrate` | **new** `crates/runtime-substrate/src/external_file.rs` | scheme dispatch → fetch → verify `content_hash` (fail closed) → materialize into the depot cache. `file://` done (same-host + depot-cache); `oxen://` returns a typed Phase-2 error |
+| External-file **resolver** (file:// ✅, oxen:// ✅) | `eigenius-runtime-substrate` | `crates/runtime-substrate/src/external_file.rs` (+ `oxen.rs`) | scheme dispatch → fetch → **stream-verify** `content_hash` (fail closed) → materialize into the depot cache. Both backends done; large files never buffered in memory |
 | Content-hash verify | `eigenius-runtime-substrate` | reuse `content_address.rs` (`sha2`) + `types.rs:37-56` (`ImageDigest::parse` sha256-hex shape) | `verify_file_hash(path, expected) -> Result<(), _>` |
-| Oxen fetch (subprocess) | `eigenius-runtime-substrate` | inside `external_file.rs` | shell out to the `oxen` CLI (`oxen download <repo>@<commit> <path>`); auth via `$OXEN_CONFIG_DIR`/`auth_config.toml` (D53 §10). `file://` = copy/symlink from the mounted volume |
+| Oxen fetch (subprocess) ✅ | `eigenius-runtime-substrate` | `oxen.rs` | shell out to the `oxen` CLI: `oxen download <ns/repo> <path> --output <dir> --revision <rev> --host <host> --scheme <s>`; auth via inherited `$OXEN_CONFIG_DIR`/`auth_config.toml` (D53 §10). `file://` = `std::fs::copy` into the cache |
 | Depot cache (no new mount) ✅ | `eigenius-runtime-substrate` | `external_file.rs` cache root, set in `orchestration/runtime-substrate-native/src/lib.rs` register_* fns | **Refinement:** materialize under `<depot>/extfile-cache/<sha256-hex>/<name>`. The whole depot is *already* RO-bind-mounted into the worker at the same path (`container.rs:145-151`), so the worker sees the cache with **no per-file `Mount`**. Cache root threaded via `SubstrateDispatcher::set_extfile_cache_root`; `None` ⇒ same-host passthrough. Content-addressed ⇒ idempotent (cache hit skips re-fetch+re-verify) |
 | Provision: detect file input → materialize → pass path ✅ | `eigenius-runtime-substrate` | `crates/runtime-substrate/src/facade.rs` — `prepare_input` applied at all three input parse sites (`dispatch_run_runtime_script`, `dispatch_call_runtime_method`, `dispatch_external_institution`) | if `input.is_a` contains `PinnedExternalFile`: resolve+materialize, synthesize a `{ ingest:materialized_path }` input resource for the worker. Lean shape — no RPC/proto change |
 | Boundary gate (eager verify) | `eigenius-runtime-substrate` | `crates/runtime-substrate/src/boundary.rs:114-170` (`run_check`) | optional pre-dispatch fetch+verify gate |
 | Worker reads the path (R ✅, Julia deferred) | `eigenius-r-worker` + R driver | `crates/eigenius-r-worker/src/ffi.rs` `r_eigon_materialized_path` + `r/EigeniusRWorker.R` doc | R done. **Julia deferred** — Julia's input model is typed-mirror-dispatch (`discover_decoders`), not raw-property read; the natural equivalent is a `PinnedExternalFile` mirror struct in `EigeniusJuliaCommon`, to add when a Julia external-file consumer exists. The substrate provision is already language-agnostic (Julia dispatches get `ingest:materialized_path` for free) |
 | Error taxonomy ✅ | `eigenius-runtime-substrate` (+ kernel mirror) | `crates/runtime-substrate/src/error.rs` | `ExternalFetchFailed { reference, reason }`, `ContentHashMismatch { reference, expected, got }` |
 | `eigenius data` CLI | `eigenius-cli` | **new** `cli/src/data.rs` + `cli/src/main.rs` (Commands enum ~330, dispatch ~948, `remote_data` ~3124) | `attach`/`list`/`inspect`/`verify`, mirroring `scripts.rs`; reuse `common.rs::{fetch_resource, submit_resource_for_load}` + `run_query`/`connect_client` |
-| Oxen CLI in the image | deploy | `deploy/Dockerfile.orchestration` | install the `oxen` CLI binary in the orchestrator image |
+| Oxen CLI in the image ✅ | deploy | `deploy/Dockerfile.orchestration` | installs the `oxen` CLI from the per-arch release `.deb` (`oxen-linux-{x86_64,arm64}.deb`, pinned `OXEN_VERSION` arg + `dpkg --print-architecture` detection) + sets `OXEN_CONFIG_DIR` |
 | napi registration (no-op if substrate-internal) | orchestration | `orchestration/runtime-substrate-native/src/lib.rs:254-277` | only if a new dispatch param is needed (avoided by the lean design) |
 
 ## 2. Phased plan
@@ -66,13 +66,13 @@ hands the worker a path** — no kernel/proto change for v1.
 
 *Unblocks:* the whole read path end-to-end for local-volume files — and this is exactly how a DepMap matrix on a mounted volume would feed limma.
 
-### Phase 2 — Oxen backend + auth + `verify`
+### Phase 2 — Oxen backend + auth + `verify` ✅
 
-1. **`external_file.rs`** — add the `oxen://repo@commit/path` arm: subprocess the `oxen` CLI into the cache; per-host content-addressed cache (idempotent); auth via a substrate-owned `$OXEN_CONFIG_DIR`/`auth_config.toml` (D53 §10).
-2. **`deploy/Dockerfile.orchestration`** — install the `oxen` CLI in the orchestrator image.
-3. **`cli/src/data.rs`** — `data attach <oxen://…>` (substrate computes the hash) + `data verify <iri>` (dispatch the resolver's fetch+verify standalone).
-4. **Distribution** (D53 §3.1): per-host fetch into a local depot cache; reject node-local `file://` when distributed (config flag).
-5. **Tests:** an Oxen round-trip behind a feature flag / opt-in (needs an Oxen repo); the content-hash-mismatch fail-closed path unit-tested with a tampered file.
+1. **`oxen.rs`** (new) ✅ — `oxen://[<host>/]<ns>/<repo>@<revision>/<path>` parse + `oxen download` command build (pure, unit-tested) + subprocess `download_into` + `render_auth_config_toml`/`write_auth_config`. Uses the prebuilt CLI (not `liboxen` — ~160 deps). Binary/scheme overridable via `EIGENIUS_OXEN_BIN`/`EIGENIUS_OXEN_SCHEME`. **`external_file.rs`** ✅ — `oxen://` arm stages the download into a per-hash cache subdir, **stream-hashes** (large files never buffered), verifies fail-closed, atomically renames; content-addressed cache hit skips re-fetch.
+2. **`deploy/Dockerfile.orchestration`** ✅ — installs the `oxen` CLI (pinned `OXEN_DEB_URL` build arg) in the orchestrator image; sets `OXEN_CONFIG_DIR` for the auth secret.
+3. **`cli/src/data.rs`** ✅ — `data attach` is scheme-aware (`oxen://` fetches once to hash; local/`file://` stream-hash) + `data verify <iri>` (re-fetch + recompute + check, fail closed). Live-verified: file:// verify passes intact, exits 1 on tamper.
+4. **Distribution** (D53 §3.1) ✅ — `ResolveOptions::reject_node_local_files` (set via `SubstrateDispatcher::set_reject_node_local_files`) rejects node-local `file://` in a distributed deployment; `oxen://` is the per-host pull path.
+5. **Tests:** ✅ pure parse/args/auth unit tests; cache idempotence + fail-closed (file:// **and** cache path) unit-tested with tampered files; an `#[ignore]`'d `oxen_live_download_verifies` e2e (env-driven, needs CLI + server).
 
 *Unblocks:* large/versioned/distributed data — the production path.
 

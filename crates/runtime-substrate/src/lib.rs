@@ -44,6 +44,7 @@ pub mod image_build;
 pub mod invocation;
 pub mod language_runtime;
 pub mod mirror_generator;
+pub mod oxen;
 pub mod registry;
 pub mod rpc;
 pub mod spawner;
@@ -59,8 +60,8 @@ pub mod types;
 pub use boundary::{check_call_method, check_run_script};
 pub use chain::ChainAccessor;
 pub use content_address::{
-    content_hash_of, pinned_external_file_iri, ContentAddressError, RuntimeScriptIdentity,
-    PINNED_EXTERNAL_FILE_IRI_PREFIX, RUNTIME_SCRIPT_IRI_PREFIX,
+    content_hash_of, content_hash_of_file, pinned_external_file_iri, ContentAddressError,
+    RuntimeScriptIdentity, PINNED_EXTERNAL_FILE_IRI_PREFIX, RUNTIME_SCRIPT_IRI_PREFIX,
 };
 pub use cross_check::{
     is_cross_check_failure, prepare_substrate_side, verify_in_worker, CrossCheckError,
@@ -70,7 +71,8 @@ pub use cross_check::{
 };
 pub use error::{BuildError, ResourceLimit, RunError, SpawnError};
 pub use external_file::{
-    is_pinned_external_file, prepare_input, resolve_and_materialize, PROP_MATERIALIZED_PATH,
+    is_pinned_external_file, prepare_input, resolve_and_materialize, ResolveOptions,
+    PROP_MATERIALIZED_PATH,
 };
 pub use facade::{FacadeError, SubstrateDispatcher};
 pub use image_build::{

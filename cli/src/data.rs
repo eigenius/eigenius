@@ -57,13 +57,13 @@ fn media_type_for(file: &str) -> &'static str {
     }
 }
 
-/// Implements `eigenius data attach <file> [--reference …] [--media-type …]`.
-/// Reads the local file, computes its content hash, mints the
-/// content-addressed `PinnedExternalFile` IRI, and commits the node. The
-/// `reference` is the *durable* locator the substrate will later fetch from
-/// (defaults to a `file://` URL of the absolute path); the local `<file>` is
-/// only read here to compute the hash. Idempotent — byte-identical files
-/// converge to one IRI (D53 §3).
+/// Implements `eigenius data attach <file|file://…|oxen://…>`.
+/// Computes the content hash from the bytes — streamed from a local file /
+/// `file://`, or fetched once via the Oxen client for an `oxen://` reference —
+/// mints the content-addressed `PinnedExternalFile` IRI, and commits the node.
+/// The `reference` is the *durable* locator the substrate fetches from later;
+/// the bytes stay off-chain. Idempotent — byte-identical files converge to one
+/// IRI (D53 §3).
 #[allow(clippy::too_many_arguments)]
 pub async fn data_attach(
     endpoint: &str,
@@ -73,14 +73,14 @@ pub async fn data_attach(
     name_override: Option<&str>,
     json: bool,
 ) {
-    let bytes = match std::fs::read(file) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("Failed to read file `{file}`: {e}");
-            std::process::exit(1);
-        }
+    // Resolve the bytes-source by scheme → (content_hash, default reference,
+    // a path-like string used to infer media type + short name).
+    let (content_hash, default_reference, name_source) = if file.starts_with("oxen://") {
+        attach_hash_oxen(file)
+    } else {
+        attach_hash_local(file)
     };
-    let content_hash = eigenius_runtime_substrate::content_hash_of(&bytes);
+
     let iri_str = match eigenius_runtime_substrate::pinned_external_file_iri(&content_hash) {
         Ok(s) => s,
         Err(e) => {
@@ -90,21 +90,16 @@ pub async fn data_attach(
     };
     let iri = Iri::parse(&iri_str).expect("content-addressed IRI is well-formed");
 
-    // Durable locator: default to a file:// URL of the absolute path.
-    let reference = match reference_override {
-        Some(r) => r.to_string(),
-        None => {
-            let abs = std::fs::canonicalize(file).unwrap_or_else(|_| file.into());
-            format!("file://{}", abs.display())
-        }
-    };
+    let reference = reference_override
+        .map(str::to_string)
+        .unwrap_or(default_reference);
     let media_type = media_type_override
         .map(str::to_string)
-        .unwrap_or_else(|| media_type_for(file).to_string());
+        .unwrap_or_else(|| media_type_for(&name_source).to_string());
     let short_name = name_override
         .map(str::to_string)
         .or_else(|| {
-            std::path::Path::new(file)
+            std::path::Path::new(&name_source)
                 .file_name()
                 .and_then(|s| s.to_str())
                 .map(str::to_string)
@@ -140,6 +135,124 @@ pub async fn data_attach(
         println!("  content_hash: {content_hash}");
         println!("  reference:    {reference}");
         println!("  media_type:   {media_type}");
+    }
+}
+
+/// Hash a local path or `file://` reference by streaming (never buffers the
+/// whole file). Returns `(content_hash, file://abs reference, name source)`.
+fn attach_hash_local(file: &str) -> (String, String, String) {
+    let local = file.strip_prefix("file://").unwrap_or(file);
+    let content_hash =
+        match eigenius_runtime_substrate::content_hash_of_file(std::path::Path::new(local)) {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!("Failed to read file `{local}`: {e}");
+                std::process::exit(1);
+            }
+        };
+    let abs = std::fs::canonicalize(local).unwrap_or_else(|_| local.into());
+    (
+        content_hash,
+        format!("file://{}", abs.display()),
+        local.to_string(),
+    )
+}
+
+/// Fetch an `oxen://` reference once via the Oxen client and hash the bytes.
+/// Returns `(content_hash, the oxen reference verbatim, in-repo path)`.
+fn attach_hash_oxen(file: &str) -> (String, String, String) {
+    let oref = match eigenius_runtime_substrate::oxen::parse(file) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("Invalid oxen reference: {e}");
+            std::process::exit(1);
+        }
+    };
+    let tmp = std::env::temp_dir().join(format!("eig_attach_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&tmp);
+    let path = match eigenius_runtime_substrate::oxen::download_into(&oref, &tmp) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Oxen download failed: {e}");
+            let _ = std::fs::remove_dir_all(&tmp);
+            std::process::exit(1);
+        }
+    };
+    let content_hash = match eigenius_runtime_substrate::content_hash_of_file(&path) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("Failed to hash downloaded file: {e}");
+            let _ = std::fs::remove_dir_all(&tmp);
+            std::process::exit(1);
+        }
+    };
+    let _ = std::fs::remove_dir_all(&tmp);
+    (content_hash, file.to_string(), oref.path)
+}
+
+/// Implements `eigenius data verify <iri>`. Fetches the node, re-fetches the
+/// bytes by its `reference`, recomputes the hash, and checks it against the
+/// pinned `content_hash` (fail closed — D53 §5).
+pub async fn data_verify(endpoint: &str, iri: &str, json: bool) {
+    let mut client = crate::connect_client(endpoint).await;
+    let resource = match fetch_resource(&mut client, iri).await {
+        Some(r) => r,
+        None => {
+            eprintln!("No resource at IRI `{iri}`");
+            std::process::exit(1);
+        }
+    };
+    let read = |prop: &str| {
+        Iri::parse(prop)
+            .ok()
+            .and_then(|i| resource.get(&i).cloned())
+            .and_then(|v| v.as_str().map(str::to_string))
+    };
+    let (reference, content_hash) = match (read(PROP_REFERENCE), read(PROP_CONTENT_HASH)) {
+        (Some(r), Some(h)) => (r, h),
+        _ => {
+            eprintln!("`{iri}` is missing reference or content_hash");
+            std::process::exit(1);
+        }
+    };
+
+    // Verify into a throwaway cache dir; we only care whether the hash matches.
+    let tmp = std::env::temp_dir().join(format!("eig_verify_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&tmp);
+    let opts = eigenius_runtime_substrate::ResolveOptions {
+        cache_root: Some(&tmp),
+        reject_node_local_files: false,
+    };
+    let outcome =
+        eigenius_runtime_substrate::resolve_and_materialize(&reference, &content_hash, &opts);
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    match outcome {
+        Ok(_) => {
+            if json {
+                println!(
+                    "{{\"verified\":true,\"iri\":\"{iri}\",\"content_hash\":\"{content_hash}\"}}"
+                );
+            } else {
+                println!("✓ verified — bytes at {reference} match {content_hash}");
+            }
+        }
+        Err(eigenius_runtime_substrate::RunError::ContentHashMismatch {
+            expected, got, ..
+        }) => {
+            if json {
+                println!(
+                    "{{\"verified\":false,\"iri\":\"{iri}\",\"expected\":\"{expected}\",\"got\":\"{got}\"}}"
+                );
+            } else {
+                eprintln!("✗ MISMATCH — {reference}\n  expected {expected}\n  got      {got}");
+            }
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Verification could not fetch `{reference}`: {e}");
+            std::process::exit(1);
+        }
     }
 }
 

@@ -43,6 +43,25 @@ pub fn content_hash_of(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
+/// Streaming form of [`content_hash_of`] for a file on disk — reads in fixed
+/// chunks so a genome-scale matrix is never loaded into memory at once (D53 is
+/// the large-data path; the whole point is to avoid buffering the bytes). Same
+/// `sha256:<64 hex>` output as [`content_hash_of`] over the same bytes.
+pub fn content_hash_of_file(path: &std::path::Path) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(format!("sha256:{:x}", hasher.finalize()))
+}
+
 /// Mint the content-addressed IRI for a `PinnedExternalFile` from its
 /// `content_hash`: `urn:eigenius:ingest:file:<64 hex>`. The file's identity *is*
 /// its content, so byte-identical files converge to one node regardless of where
@@ -193,6 +212,15 @@ mod tests {
         assert_eq!(h.len(), "sha256:".len() + 64);
         assert_eq!(h, content_hash_of(b"hello\n"));
         assert_ne!(h, content_hash_of(b"world\n"));
+    }
+
+    #[test]
+    fn content_hash_of_file_matches_in_memory() {
+        let bytes = b"some\nfile\nbytes\n";
+        let p = std::env::temp_dir().join(format!("eig_cah_test_{}.bin", std::process::id()));
+        std::fs::write(&p, bytes).unwrap();
+        assert_eq!(content_hash_of_file(&p).unwrap(), content_hash_of(bytes));
+        let _ = std::fs::remove_file(&p);
     }
 
     #[test]

@@ -115,6 +115,29 @@ LABEL org.opencontainers.image.documentation="https://github.com/eigenius/eigeni
 
 WORKDIR /app
 
+# Install the prebuilt `oxen` CLI (D53 §2 / §9). The substrate shells out to
+# it to fetch `oxen://` PinnedExternalFile inputs into the depot cache — we use
+# the prebuilt binary rather than the `liboxen` crate (its ~160 transitive deps
+# are wrong for our build + TCB). Oxen's release workflow publishes per-arch
+# Debian packages `oxen-linux-x86_64.deb` / `oxen-linux-arm64.deb` (see the
+# Oxen RELEASING runbook). Pin the version per release; confirm the latest at
+# https://github.com/Oxen-AI/Oxen/releases.
+ARG OXEN_VERSION=0.50.4
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && arch="$(dpkg --print-architecture)" \
+    && case "$arch" in \
+         amd64) oxen_arch=x86_64 ;; \
+         arm64) oxen_arch=arm64 ;; \
+         *) echo "unsupported arch for oxen CLI: $arch" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL -o /tmp/oxen.deb \
+         "https://github.com/Oxen-AI/Oxen/releases/download/v${OXEN_VERSION}/oxen-linux-${oxen_arch}.deb" \
+    && apt-get install -y --no-install-recommends /tmp/oxen.deb \
+    && rm -f /tmp/oxen.deb \
+    && rm -rf /var/lib/apt/lists/* \
+    && oxen --version
+
 # Cache Deno deps from the source layout.
 COPY orchestration/deno.json ./
 COPY orchestration/src/ src/
@@ -157,6 +180,11 @@ ENV EIGENIUS_R_DRIVER_PATH=/opt/eigenius/r-runtime-worker/EigeniusRWorker.R
 ENV EIGENIUS_R_CDYLIB_PATH=/opt/eigenius/r-runtime-worker/libeigenius_r_worker.so
 ENV EIGENIUS_R_BASE_IMAGE_REF=docker.io/bioconductor/bioconductor_docker:RELEASE_3_18
 ENV EIGENIUS_R_DEPOT_PATH=/var/lib/eigenius/substrate-depot
+# Oxen auth (D53 §10): the `oxen` CLI reads `auth_config.toml` from
+# $OXEN_CONFIG_DIR. The deployment mounts the per-host bearer token here from
+# its secret store (the credential is substrate-side only; it never enters a
+# worker image). Self-hosted http servers also set EIGENIUS_OXEN_SCHEME=http.
+ENV OXEN_CONFIG_DIR=/var/lib/eigenius/oxen-config
 
 EXPOSE 8080
 

@@ -737,15 +737,18 @@ enum ScriptCommands {
 #[derive(Subcommand)]
 enum DataCommands {
     /// Attach an external file as a content-addressed PinnedExternalFile.
-    /// Reads the local file to compute its hash; commits the typed node
-    /// (bytes stay off-chain). The IRI is content-addressed (D53 §3).
+    /// Computes the hash from the bytes (a local path / `file://`, or an
+    /// `oxen://` reference the CLI fetches once) and commits the typed node;
+    /// the bytes stay off-chain. The IRI is content-addressed (D53 §3).
     Attach {
-        /// Path to the local file (read to compute the content hash).
-        #[arg(value_name = "FILE")]
+        /// A local file path, a `file://` URL, or an `oxen://repo@rev/path`
+        /// reference. For `oxen://` the CLI downloads once to compute the hash.
+        #[arg(value_name = "FILE_OR_REF")]
         file: String,
 
         /// Durable backend locator stored on the node (the substrate fetches
-        /// from this later). Defaults to a `file://` URL of the absolute path.
+        /// from this later). Defaults to a `file://` URL of the absolute path
+        /// for local files, or the `oxen://` reference itself.
         #[arg(long, value_name = "REFERENCE")]
         reference: Option<String>,
 
@@ -768,6 +771,15 @@ enum DataCommands {
     /// Inspect a pinned external file's metadata.
     Inspect {
         /// IRI of the PinnedExternalFile.
+        #[arg(value_name = "DATA_IRI")]
+        iri: String,
+    },
+
+    /// Verify an attached file: fetch it by its `reference`, recompute the
+    /// content hash, and check it against the pinned `content_hash`
+    /// (fail closed — D53 §5). Proves the off-chain bytes still match.
+    Verify {
+        /// IRI of the PinnedExternalFile to verify.
         #[arg(value_name = "DATA_IRI")]
         iri: String,
     },
@@ -3194,6 +3206,7 @@ async fn remote_data(endpoint: &str, command: DataCommands, json: bool) {
             data::data_list(endpoint, media_type.as_deref(), json).await
         }
         DataCommands::Inspect { iri } => data::data_inspect(endpoint, &iri, json).await,
+        DataCommands::Verify { iri } => data::data_verify(endpoint, &iri, json).await,
     }
 }
 
