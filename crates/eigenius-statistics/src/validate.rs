@@ -59,9 +59,62 @@ use crate::numerics::{
     wilcoxon_rank_sum, TwoSampleVariance,
 };
 
+// File-backed SampleSet observations (D53 §6.1).
+const PROP_OBSERVATIONS_SOURCE: &str = "urn:eigenius:measurements:observations_source";
+const PROP_OBSERVATIONS_COLUMN: &str = "urn:eigenius:measurements:observations_column";
+const INGEST_REFERENCE: &str = "urn:eigenius:ingest:reference";
+const INGEST_CONTENT_HASH: &str = "urn:eigenius:ingest:content_hash";
+const INGEST_MEDIA_TYPE: &str = "urn:eigenius:ingest:media_type";
+
+/// Resolve a flat (single-array) SampleSet's observations. If the
+/// SampleSetResource declares `observations_source` (a `PinnedExternalFile`
+/// IRI) + `observations_column`, read the content-verified column from the
+/// materialized file (D53 §6.1 native-over-file); otherwise decode the inline
+/// observations slot. Either way the recompute over the returned array is the
+/// same deterministic Rust — native grade is set by the method, not the storage
+/// (D53 §6).
+fn resolve_flat_observations(
+    sample_set_res: &Resource,
+    bundle: &DecodedBundle,
+    store: &eigenius_kernel::storage::content_array::ContentArrayStore,
+    ctx: &ExecutionContext,
+) -> Result<Vec<f64>, String> {
+    let source =
+        read_iri_property(sample_set_res, PROP_OBSERVATIONS_SOURCE).map_err(|e| e.to_string())?;
+    let Some(source_iri) = source else {
+        // Inline observations (the default / existing path).
+        return decode_flat_observations(&bundle.observations_raw);
+    };
+
+    let column = read_iri_property(sample_set_res, PROP_OBSERVATIONS_COLUMN)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| {
+            "observations_source set but observations_column missing (D53 §6.1)".to_string()
+        })?;
+    let file_iri = Iri::parse(&source_iri)
+        .map_err(|e| format!("observations_source `{source_iri}` is not a valid IRI: {e}"))?;
+    let file_res = ctx
+        .resolve(&file_iri)
+        .ok_or_else(|| format!("PinnedExternalFile `{source_iri}` not found on chain"))?;
+
+    let reference = read_iri_property(&file_res, INGEST_REFERENCE)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("PinnedExternalFile `{source_iri}` missing ingest:reference"))?;
+    let content_hash = read_iri_property(&file_res, INGEST_CONTENT_HASH)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("PinnedExternalFile `{source_iri}` missing ingest:content_hash"))?;
+    let media_type = read_iri_property(&file_res, INGEST_MEDIA_TYPE)
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| "text/csv".to_string());
+
+    store
+        .read_column(&reference, &content_hash, &media_type, &column)
+        .map_err(|e| format!("file-backed observations ({source_iri}): {e}"))
+}
+
 /// Top-level handler called by `StatisticsInstitution::query`.
 pub fn do_validate_analysis_plan(
-    _inst: &StatisticsInstitution,
+    inst: &StatisticsInstitution,
     claim: &Resource,
     ctx: &ExecutionContext,
 ) -> Result<QueryOutcome, InstitutionError> {
@@ -373,7 +426,14 @@ pub fn do_validate_analysis_plan(
                         ));
                     }
                 };
-                let samples = match decode_flat_observations(&bundle.observations_raw) {
+                // D53 §6.1: observations may be inline or read from a
+                // content-verified PinnedExternalFile column (native-over-file).
+                let samples = match resolve_flat_observations(
+                    &sample_set_res,
+                    &bundle,
+                    inst.content_store(),
+                    ctx,
+                ) {
                     Ok(s) => s,
                     Err(diag) => return Ok(gate_fails(diag)),
                 };

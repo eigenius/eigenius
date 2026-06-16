@@ -30,6 +30,8 @@ use std::fmt;
 #[allow(unused_imports)]
 use std::sync::Arc;
 
+pub mod content_array;
+
 pub mod memory;
 
 pub mod version;

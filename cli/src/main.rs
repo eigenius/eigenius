@@ -792,6 +792,21 @@ enum DataCommands {
         #[arg(value_name = "DATA_IRI")]
         iri: String,
     },
+
+    /// Provision a PinnedExternalFile into the local content-addressed cache
+    /// the kernel reads for native file-backed SampleSet recompute (D53 §6.1
+    /// / §7). Fetches + content-verifies into `<cache>/<hash>/<name>`. Run on
+    /// the host whose depot the kernel reads.
+    Provision {
+        /// IRI of the PinnedExternalFile to provision.
+        #[arg(value_name = "DATA_IRI")]
+        iri: String,
+
+        /// Cache root (the depot's extfile-cache). Defaults to
+        /// `$EIGENIUS_EXTFILE_CACHE_DIR`.
+        #[arg(long, value_name = "DIR")]
+        cache_root: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -3217,6 +3232,9 @@ async fn remote_data(endpoint: &str, command: DataCommands, json: bool) {
         DataCommands::Inspect { iri } => data::data_inspect(endpoint, &iri, json).await,
         DataCommands::Verify { iri } => data::data_verify(endpoint, &iri, json).await,
         DataCommands::Validate { iri } => data::data_validate(endpoint, &iri, json).await,
+        DataCommands::Provision { iri, cache_root } => {
+            data::data_provision(endpoint, &iri, cache_root.as_deref(), json).await
+        }
     }
 }
 

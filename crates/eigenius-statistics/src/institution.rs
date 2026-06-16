@@ -26,6 +26,7 @@ use eigenius_kernel::institution::runtime::{Institution, QueryOutcome};
 use eigenius_kernel::nbe::val::Val;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Resource;
+use eigenius_kernel::storage::content_array::ContentArrayStore;
 
 use crate::validate::do_validate_analysis_plan;
 
@@ -136,15 +137,37 @@ pub mod iris {
 /// In-process measurement-statistics institution.
 pub struct StatisticsInstitution {
     iri: Iri,
+    /// Reads content-verified columns from materialized `PinnedExternalFile`s
+    /// for file-backed SampleSets (D53 §6.1). Defaults to `file://`-only; a
+    /// deployment with an Oxen-backed depot constructs it with the depot's
+    /// content-cache root via [`Self::with_content_store`].
+    content_store: ContentArrayStore,
 }
 
 impl StatisticsInstitution {
     /// Construct a fresh institution bound to the canonical
-    /// `urn:eigenius:measurements:statistics_institution` IRI.
+    /// `urn:eigenius:measurements:statistics_institution` IRI. File-backed
+    /// SampleSets resolve `file://` references only (no content cache).
     pub fn new() -> Self {
         Self {
             iri: Iri::parse(iris::INSTITUTION).expect("static institution IRI"),
+            content_store: ContentArrayStore::new(),
         }
+    }
+
+    /// Construct with a content-array store backed by a local content-addressed
+    /// cache (the depot's `extfile-cache`), so an Oxen-fetched
+    /// `PinnedExternalFile` resolves by `content_hash` (D53 §6.1).
+    pub fn with_content_store(content_store: ContentArrayStore) -> Self {
+        Self {
+            iri: Iri::parse(iris::INSTITUTION).expect("static institution IRI"),
+            content_store,
+        }
+    }
+
+    /// The content-array capability used for file-backed SampleSet observations.
+    pub fn content_store(&self) -> &ContentArrayStore {
+        &self.content_store
     }
 
     /// Wrap a fresh institution in an `Arc<dyn Institution>` ready to

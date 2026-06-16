@@ -778,11 +778,32 @@ macro stats:RepeatedMeasures(
 class stats:SampleSetResource : reflection:ObservedResource {
     description = "Chain-resident wrapper carrying a raw SampleSet inductive value. The StatisticalAnalysisPlan's sample_set property references this resource by IRI; the institution's verifier reads sample_set_value to recompute the claim. Subclassing ObservedResource gives the SampleSet the standard provenance fields (source, observed_at, ObservationTrace witness).";
     requires stats:sample_set_value;
+    recommends stats:observations_source, stats:observations_column;
 }
 
 property stats:sample_set_value : core:resource {
     description = "The SampleSet inductive value (axis-product + observations) this resource carries. Encoded as a D32 §3.7 chain inductive ctor — typically produced by a smart-constructor macro call like `stats:SingleSampleEstimate(...)`.";
     class_types stats:SampleSet;
+    domain stats:SampleSetResource;
+}
+
+// ── File-backed observations (D53 §6.1 — native recompute over a file) ──
+//
+// When a SampleSet's observation payload is too large to inline (a
+// genome-scale column), it lives in a `PinnedExternalFile` (D53). The
+// bundle's axes still describe the statistical *structure* on-chain; only
+// the observation array moves off-chain. The orchestrator fetches +
+// content-verifies the file (D53 §5); the kernel reads the verified column
+// through its content-array capability and recomputes in deterministic Rust
+// — so the warrant grade stays **native** (D53 §6), only the storage moved.
+property stats:observations_source : core:string {
+    description = "IRI of a PinnedExternalFile (D53) whose column supplies this SampleSet's observations, instead of the inline observations slot. The substrate materializes + content-verifies the bytes (D53 §5); the verifier reads the column (observations_column) over the verified array — native grade unchanged (D53 §6.1). When set, the inline observations slot may be empty.";
+    format = formats:iri;
+    domain stats:SampleSetResource;
+}
+
+property stats:observations_column : core:string {
+    description = "Column name within observations_source to read the observation array from (a D53 §4 DatasetSchema measure). Used with observations_source for file-backed SampleSets (D53 §6.1).";
     domain stats:SampleSetResource;
 }
 

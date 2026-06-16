@@ -90,11 +90,19 @@ hands the worker a path** — no kernel/proto change for v1.
 
 *Unblocks:* the full WRN corpus modeling ([worked example](d53-wrn-attachment-worked-example.md)).
 
-### Phase 4 — Native recompute over a file (D52 + D53)
+### Phase 4 — Native recompute over a file (D52 + D53) ✅
 
-1. Extend `eigenius-statistics` so a `SampleSet` whose values reference a `PinnedExternalFile` is materialized (Phase 1 path) and the deterministic numerics read the materialized array — native-grade at scale (D53 §6). Decide execution placement: in-kernel read of a verified local array, or a substrate-dispatched native-Rust component (keeps kernel I/O-free).
+Placement decided (D53 §6.1): **in-kernel recompute**; the kernel reads the
+verified array through a content-addressed storage capability the orchestrator
+populates. Recompute stays in-kernel ⇒ unambiguously native grade.
 
-*Unblocks:* the storage⊥grade promise — native warrants over genome-scale data.
+1. **Kernel content-array capability** ✅ — `kernel/src/storage/content_array.rs` `ContentArrayStore::read_column`: resolve (`file://` or `<cache>/<hash>/<name>`) → **content-verify (fail closed)** → read CSV/TSV column → `Vec<f64>`. Pure local reader — never fetches. 7 unit tests.
+2. **Ontology** ✅ — `stats:observations_source` (PinnedExternalFile IRI) + `stats:observations_column` on `SampleSetResource` (statistics.esl). String-IRI (statistics is an ancestor of the `ingest` layer, so it can't type-reference `ingest:PinnedExternalFile`).
+3. **Verifier** ✅ — `validate.rs::resolve_flat_observations`: file-backed → store.read_column; else inline (unchanged). Institution holds a `ContentArrayStore`.
+4. **Live wiring** ✅ — read side: `startup.rs` builds the institution `with_content_store(ContentArrayStore::with_cache_root($EIGENIUS_EXTFILE_CACHE_DIR))` when the env is set (else `file://`-only). Write side: `eigenius data provision <iri>` (the §7 provision step) materializes a PinnedExternalFile into `<cache>/<hash>/<name>` via the §5 resolver (live-verified). Seam = the shared content-addressed cache; **no kernel→orchestrator RPC** (D53 §6.1).
+5. **Proof** ✅ — `tests/file_backed_observations.rs`: file-backed recompute == inline (Holds, t = −8.056); content-hash tamper fails closed (no result over unverified bytes).
+
+*Unblocks:* the storage⊥grade promise — native warrants over genome-scale data. Combined with P2 (wrapped-R reads Oxen via the substrate), **every WRN data file can live in Oxen** regardless of consuming grade.
 
 ### Phase 5 — limma D-DIFF (the payoff, P7)
 

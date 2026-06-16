@@ -1419,6 +1419,7 @@ dependencies = [
  "eigenius-reasoning",
  "ndarray",
  "serde_json",
+ "sha2",
  "statrs",
  "thiserror 2.0.18",
 ]

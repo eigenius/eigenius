@@ -487,6 +487,73 @@ pub async fn data_validate(endpoint: &str, iri: &str, json: bool) {
     }
 }
 
+/// Implements `eigenius data provision <iri> [--cache-root <dir>]` — the D53 §7
+/// provision step. Materializes a `PinnedExternalFile` into the local
+/// content-addressed cache (`<cache>/<sha256-hex>/<name>`) the kernel reads for
+/// native file-backed SampleSet recompute (D53 §6.1), fetching + content-
+/// verifying via the §5 resolver. Run on the host whose depot the kernel reads
+/// (co-located / per-host); the cache root defaults to
+/// `$EIGENIUS_EXTFILE_CACHE_DIR`. `file://` on a shared volume needs no
+/// provisioning (the kernel reads it directly) — this is for `oxen://` (and any
+/// reference you want warmed into the cache).
+pub async fn data_provision(endpoint: &str, iri: &str, cache_root: Option<&str>, json: bool) {
+    let mut client = crate::connect_client(endpoint).await;
+    let resource = match fetch_resource(&mut client, iri).await {
+        Some(r) => r,
+        None => {
+            eprintln!("No resource at IRI `{iri}`");
+            std::process::exit(1);
+        }
+    };
+    let read = |prop: &str| {
+        Iri::parse(prop)
+            .ok()
+            .and_then(|i| resource.get(&i).cloned())
+            .and_then(|v| v.as_str().map(str::to_string))
+    };
+    let (reference, content_hash) = match (read(PROP_REFERENCE), read(PROP_CONTENT_HASH)) {
+        (Some(r), Some(h)) => (r, h),
+        _ => {
+            eprintln!("`{iri}` is missing reference or content_hash");
+            std::process::exit(1);
+        }
+    };
+
+    let cache = cache_root
+        .map(str::to_string)
+        .or_else(|| std::env::var("EIGENIUS_EXTFILE_CACHE_DIR").ok())
+        .filter(|s| !s.trim().is_empty());
+    let Some(cache) = cache else {
+        eprintln!(
+            "No cache root: pass --cache-root <dir> or set EIGENIUS_EXTFILE_CACHE_DIR \
+             (the depot's extfile-cache the kernel reads)."
+        );
+        std::process::exit(1);
+    };
+
+    let opts = eigenius_runtime_substrate::ResolveOptions {
+        cache_root: Some(std::path::Path::new(&cache)),
+        reject_node_local_files: false,
+    };
+    match eigenius_runtime_substrate::resolve_and_materialize(&reference, &content_hash, &opts) {
+        Ok(path) => {
+            if json {
+                println!(
+                    "{{\"provisioned\":true,\"iri\":\"{iri}\",\"path\":{:?}}}",
+                    path.to_string_lossy()
+                );
+            } else {
+                println!("✓ provisioned {iri}");
+                println!("  → {}", path.display());
+            }
+        }
+        Err(e) => {
+            eprintln!("Provision failed for `{reference}`: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 /// Implements `eigenius data list [--media-type <mt>]`.
 pub async fn data_list(endpoint: &str, media_type: Option<&str>, json: bool) {
     let mut client = crate::connect_client(endpoint).await;
