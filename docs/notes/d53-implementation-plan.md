@@ -1,0 +1,107 @@
+# D53 — implementation plan
+
+> Detailed, codebase-mapped plan to implement [D53 large-data tracking](../design/d53-large-data-tracking.md).
+> Components mapped to concrete changes per crate / module / service, with file
+> anchors and a phased order. Grounded in a codebase survey (June 2026); line
+> numbers are approximate and drift with edits.
+
+## 0. Shape recap (what we're building)
+
+D53 is an **input layer**, not an institution (D53 §7): an **ontology extension**
+(`PinnedExternalFile` + `DatasetSchema` nodes) plus a **substrate capability**
+(fetch external file by `reference` → verify `content_hash` → materialize into the
+worker). The compute layer above it (native D52 or wrapped D56) is chosen by
+*method*, not by where the bytes live (D53 §6). So the build is mostly
+**substrate-side**, with a small ontology + CLI surface and *no kernel
+correctness change* for the read path.
+
+**Design lever that keeps v1 small:** the kernel already sends a component's
+`input` as a (small) CBOR resource. A `PinnedExternalFile` node *is* small
+(reference + hash + schema). So the kernel sends it unchanged; the **substrate
+facade detects an `is_a PinnedExternalFile` input, resolves + materializes it, and
+hands the worker a path** — no kernel/proto change for v1.
+
+## 1. Component → location map
+
+| D53 component | Crate / service | Module (file:line anchor) | Change |
+|---|---|---|---|
+| `PinnedExternalFile` + `DatasetSchema` classes | ontologies | **new** `ontologies/ingest/ingest-ontology.json` | author classes/properties (JSON shape mirrors `ontologies/runtime/runtime-substrate-ontology.json`) |
+| Bootstrap registration | kernel | `kernel/src/bootstrap/mod.rs` — `bootstrap_with_storage()` (~290) + `embedded_ontologies()` array (~595-660) | add a `load_layer("ingest", …)` after `runtime`; add the tuple to the embedded array (drives the manifest hash) |
+| Content-addressed IRI | `eigenius-runtime-substrate` | `crates/runtime-substrate/src/content_address.rs:29-95` | add `PinnedExternalFileIdentity { reference, content_hash, media_type }` → `content_addressed_iri()` (clone the `RuntimeScriptIdentity` length-prefixed-hash pattern) |
+| External-file **resolver** (oxen:// + file://) | `eigenius-runtime-substrate` | **new** `crates/runtime-substrate/src/external_file.rs` | scheme dispatch → fetch → verify `content_hash` (fail closed) → materialize into the depot cache. Generalizes the stubbed `LibraryContent::External` (`mirror_generator.rs:155-170`) |
+| Content-hash verify | `eigenius-runtime-substrate` | reuse `content_address.rs` (`sha2`) + `types.rs:37-56` (`ImageDigest::parse` sha256-hex shape) | `verify_file_hash(path, expected) -> Result<(), _>` |
+| Oxen fetch (subprocess) | `eigenius-runtime-substrate` | inside `external_file.rs` | shell out to the `oxen` CLI (`oxen download <repo>@<commit> <path>`); auth via `$OXEN_CONFIG_DIR`/`auth_config.toml` (D53 §10). `file://` = copy/symlink from the mounted volume |
+| Depot cache + bind-mount | `eigenius-runtime-substrate` | `spawner/docker/container.rs:134-177` (`build_host_config`, the `mounts` vec) + `spawner/docker/depot.rs` | materialize under a content-addressed cache dir in the depot; add a read-only `Mount` so the worker sees it |
+| Provision: detect file input → materialize → pass path | `eigenius-runtime-substrate` | `crates/runtime-substrate/src/facade.rs:139-159` (`dispatch_run_runtime_script`) | if `input.is_a` contains `PinnedExternalFile`: resolve+materialize, synthesize a `{ ingest:materialized_path }` input resource for the worker |
+| Boundary gate (eager verify) | `eigenius-runtime-substrate` | `crates/runtime-substrate/src/boundary.rs:114-170` (`run_check`) | optional pre-dispatch fetch+verify gate |
+| Worker reads the path | `eigenius-r-worker` + R driver | `crates/eigenius-r-worker/src/ffi.rs` (clone `r_input`/`r_eigon_*`, ~276-300) | add `r_eigon_materialized_path(input)` → the script opens the file (R `read.csv`/`arrow::read_parquet`) |
+| Error taxonomy | `eigenius-runtime-substrate` (+ kernel mirror) | `crates/runtime-substrate/src/error.rs` | `ExternalFetchFailed { reference, reason }`, `ContentHashMismatch { expected, got }` |
+| `eigenius data` CLI | `eigenius-cli` | **new** `cli/src/data.rs` + `cli/src/main.rs` (Commands enum ~330, dispatch ~948, `remote_data` ~3124) | `attach`/`list`/`inspect`/`verify`, mirroring `scripts.rs`; reuse `common.rs::{fetch_resource, submit_resource_for_load}` + `run_query`/`connect_client` |
+| Oxen CLI in the image | deploy | `deploy/Dockerfile.orchestration` | install the `oxen` CLI binary in the orchestrator image |
+| napi registration (no-op if substrate-internal) | orchestration | `orchestration/runtime-substrate-native/src/lib.rs:254-277` | only if a new dispatch param is needed (avoided by the lean design) |
+
+## 2. Phased plan
+
+### Phase 0 — Ontology + identity + attach (pure graph, no execution)
+
+*Goal: track files as typed nodes; nothing runs yet.*
+
+1. **`ontologies/ingest/ingest-ontology.json`** — `ingest:PinnedExternalFile` (`is_a reflection:ObservedResource`; requires `reference`, `content_hash`, `media_type`; recommends `schema`, `content_encoding`, descriptive metadata → defer names to D57), `ingest:DatasetSchema`, `ingest:Dimension`, `ingest:Measure`, `ingest:Attribute`, `ingest:Layout`, and their properties. Start minimal: the §4 *cube* fields; the §10 refinements (plural `schemas`, `Collection` layout) can be additive later.
+2. **`kernel/src/bootstrap/mod.rs`** — register the layer (after `runtime`) + add to `embedded_ontologies()`.
+3. **`content_address.rs`** — `PinnedExternalFileIdentity::content_addressed_iri()`.
+4. **`cli/src/data.rs`** — `data attach <file://path>` (read local bytes, compute sha256, mint IRI, build the node, `submit_resource_for_load`); `data list`/`data inspect` (query/fetch). Defer `oxen://` + `verify` to Phase 2.
+5. **Tests:** `cargo test` for the identity hash; an attach→inspect round trip against an in-memory kernel (mirror `scripts.rs` test patterns). `cargo build` proves the ontology loads (the bootstrap manifest must stay green).
+
+*Unblocks:* files are first-class typed graph nodes. No substrate work yet.
+
+### Phase 1 — Resolver + provision (the read path, `file://`)
+
+*Goal: a `RunRuntimeScript` reads a `file://` `PinnedExternalFile`.*
+
+1. **`crates/runtime-substrate/src/external_file.rs`** (new) — `resolve_and_materialize(file: &Resource, depot: &Path) -> Result<PathBuf, RunError>`: parse `reference` scheme; `file://` → resolve against the configured volume; compute sha256; compare to `content_hash` (fail closed); place/symlink into `<depot>/cache/<sha256>/<name>`.
+2. **`spawner/docker/container.rs:134-177`** — extend the `mounts` vec with a read-only bind of the cache dir (or rely on it already being under the depot mount — confirm path is depot-relative, then no new mount needed).
+3. **`facade.rs:139-159`** — in `dispatch_run_runtime_script`, after `parse_resource(input_cbor)`: if the input `is_a` `ingest:PinnedExternalFile`, call `resolve_and_materialize`, then synthesize the worker input resource `{ is_a: …, ingest:materialized_path: "<path>" }` (lean design — reuses the existing `inputs: Vec<ByteBuf>` channel; **no RPC/proto change**).
+4. **`eigenius-r-worker/src/ffi.rs`** — `r_eigon_materialized_path(input_cbor) -> SEXP` (string); the R driver/script opens it.
+5. **Tests:** an integration test (under `LocalSpawner`) running a trivial R script that reads a `file://`-attached CSV and emits a `DerivedResource`. Reuse `test_runtime_docker.rs` patterns.
+
+*Unblocks:* the whole read path end-to-end for local-volume files — and this is exactly how a DepMap matrix on a mounted volume would feed limma.
+
+### Phase 2 — Oxen backend + auth + `verify`
+
+1. **`external_file.rs`** — add the `oxen://repo@commit/path` arm: subprocess the `oxen` CLI into the cache; per-host content-addressed cache (idempotent); auth via a substrate-owned `$OXEN_CONFIG_DIR`/`auth_config.toml` (D53 §10).
+2. **`deploy/Dockerfile.orchestration`** — install the `oxen` CLI in the orchestrator image.
+3. **`cli/src/data.rs`** — `data attach <oxen://…>` (substrate computes the hash) + `data verify <iri>` (dispatch the resolver's fetch+verify standalone).
+4. **Distribution** (D53 §3.1): per-host fetch into a local depot cache; reject node-local `file://` when distributed (config flag).
+5. **Tests:** an Oxen round-trip behind a feature flag / opt-in (needs an Oxen repo); the content-hash-mismatch fail-closed path unit-tested with a tampered file.
+
+*Unblocks:* large/versioned/distributed data — the production path.
+
+### Phase 3 — `DatasetSchema`-driven typing
+
+1. The worker (or a native consumer) reads **typed** columns/rows per the schema's dimensions/measures/layout, not just raw bytes — the mirror-generator analog (`crates/runtime-substrate/src/mirror_generator.rs`) extended to external-file schemas.
+2. Implement the §10 refinements as needed: **plural `schemas`** (member/sheet selector — the `.rds`/multi-sheet case), the **`Collection`** layout (`.gmt`), code-list resolution, layout orientation.
+3. Schema vocabulary IRIs route through **D57** (`urn:schema_org:` mapping) — settle that first if the descriptive metadata fields are wanted typed.
+
+*Unblocks:* the full WRN corpus modeling ([worked example](d53-wrn-attachment-worked-example.md)).
+
+### Phase 4 — Native recompute over a file (D52 + D53)
+
+1. Extend `eigenius-statistics` so a `SampleSet` whose values reference a `PinnedExternalFile` is materialized (Phase 1 path) and the deterministic numerics read the materialized array — native-grade at scale (D53 §6). Decide execution placement: in-kernel read of a verified local array, or a substrate-dispatched native-Rust component (keeps kernel I/O-free).
+
+*Unblocks:* the storage⊥grade promise — native warrants over genome-scale data.
+
+### Phase 5 — limma D-DIFF (the payoff, P7)
+
+1. A wrapped-R limma `RuntimeScript` reading the Achilles/DRIVE matrices as `PinnedExternalFile` inputs → commits the differential-dependency result → lifts `dd_achilles`/`dd_drive` from linked-external to reproduced-external. Pure composition of Phases 1–2 + D56.
+
+## 3. Cross-cutting / decisions before coding
+
+- **Multi-input.** The facade passes a single `input` (`&[input]`, `facade.rs:157`). The multi-file join (WRN RecQ) and limma's matrix+sample-info need *multiple* `PinnedExternalFile` inputs → a real extension (kernel sends N inputs; RPC `inputs: Vec<ByteBuf>` already plural, but the kernel/program model sends one). Scope: defer to when a multi-file analysis lands, or do it in Phase 1 if limma needs it (it joins matrix + sample-info).
+- **Lean vs explicit worker channel.** Phase 1 uses the *lean* path (synthesize a `materialized_path` input resource — no proto/RPC change). The *explicit* channel (proto `ComponentRequest.file_inputs`, RPC `DispatchMethod.file_inputs`, worker `r_input_file_path`) is cleaner long-term but heavier; adopt it only if the lean path proves limiting.
+- **`LibraryContent::External` is stubbed** (`mirror_generator.rs`, rejected in `eigenius-julia/src/runtime.rs:809`). D53's resolver should *generalize* that discipline (fetch+verify) rather than fork it; consider unifying the mirror-external path and the input-file path through one resolver.
+- **Depot under DooD** (`spawner/docker/depot.rs`): the cache must live *under* the depot host path so the DooD bind-mount makes it visible at the same path in the worker. Verify `verify_tempdir_under_depot` semantics apply to the cache dir.
+- **Schema vocabulary** depends on **D57**; Phases 0–2 only need `reference`/`content_hash`/`media_type` (no schema), so D57 isn't blocking until Phase 3.
+
+## 4. Suggested first cut
+
+**Phases 0 + 1** are the minimal vertical slice: attach a `file://` file as a typed node and have a `RunRuntimeScript` read it — no Oxen, no schema, no kernel change. That proves the seam end-to-end and is exactly the shape limma needs (Phase 5) once Oxen (Phase 2) lands. Everything else is additive.

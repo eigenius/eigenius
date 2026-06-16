@@ -25,6 +25,47 @@ schema.org is the lingua franca for describing datasets, files, software, people
 3. **Descriptive layer, not domain layer.** `urn:schema_org:` supplies *generic descriptive* metadata (who made it, what format, what license, how big). Eigenius **domain** types (`onco:Gene`, `stats:SampleSet`, …) stay separate and are the *binding* targets for D53 §4's typed axes. A `PinnedExternalFile` can be `is_a urn:schema_org:Dataset` (descriptive) *and* carry Eigenius-typed schema bindings (semantic) — the two layers coexist.
 4. **Open-world by default.** schema.org classes have no required properties; their Eigenius translations therefore land everything under `recommends`, nothing under `requires` — schema.org's open-world stance preserved.
 
+## 2.5 Minimum slice for D53 (the only part D53 needs now)
+
+D53 needs schema.org for exactly **one** thing: the *recommended* file-level
+descriptive metadata on `PinnedExternalFile` (D53 §10) — name, license, creator,
+size, DOI, etc. — so it lives as typed fields rather than `MANIFEST.md` prose.
+**Everything else D53 uses is Eigenius-native:** its *required* fields
+(`ingest:reference`, `ingest:content_hash`, `ingest:media_type`) are deliberately
+`ingest:` properties, not schema.org, to keep D53 off D57's critical path; and the
+§4 cube binds to `onco:` / `ingest:` types, not schema.org. So D53 **functionally
+needs zero of D57** — implementation-plan Phases 0–3 never touch it; this slice is
+purely the optional descriptive enrichment.
+
+**The slice: ~10 hand-authored properties, no classes, no machinery.** Under
+`urn:schema_org:`, each a `core:Property` with `data_type = core:string` — the
+union-range simplification (a DOI, a license URL, a creator name are all strings),
+which **sidesteps §3's hard type-mapping entirely**:
+
+| `urn:schema_org:` property | role on `PinnedExternalFile` | note |
+|---|---|---|
+| `name` | dataset/file name | |
+| `description` | human description | |
+| `contentSize` | byte size | string now; integer later |
+| `encodingFormat` | media type | aligns with `ingest:media_type` (keep both, or alias later) |
+| `license` | license URL / SPDX id | string |
+| `creator` | author | string (defer the `Person` range) |
+| `sourceOrganization` | producing org | string (defer the `Organization` range) |
+| `identifier` | DOI / accession / URL | string (defer the `PropertyValue` range) |
+| `datePublished` | ISO-8601 date | string |
+| `isPartOf` | parent collection | string / URL (defer the `CreativeWork` range) |
+
+**Deferred (all of D57's hard parts, none needed for D53):** no classes
+(`Dataset`/`Person`/`Organization`/`CreativeWork`) — values are strings, not typed
+entities; no generation-from-JSON-LD (ten hand-authored properties); no
+union/range mapping (§3); no `subClassOf` hierarchy; no IRI reconciliation; no
+RO-Crate. Those land when a *consumer* needs them (typed authorship, RO-Crate
+export), not for D53.
+
+**Deliberately *not* in the slice:** `content_hash` stays `ingest:content_hash`
+(schema.org has no sha256, and it's the correctness root — Eigenius-owned);
+`reference` / `media_type` stay `ingest:` (required fields, off D57's critical path).
+
 ## 3. Open questions
 
 - **Type/range mapping.** schema.org property ranges (`Text`, `URL`, `Number`, `Integer`, `Boolean`, `Date`/`DateTime`, or a class) → Eigenius `data_type` (`string`, `float`, `integer`, `boolean`, `resource`+`class_types`). Conventions needed for: `Date`/`DateTime` (→ `string`, ISO-8601), `URL` (→ `string`), and especially schema.org's **multi-range (union) properties** — a single property whose value may be `Text` *or* a `Class` — which Eigenius's single-`data_type` model doesn't express directly (candidates: pick the broadest, fall back to `string`, or `json`). This is the bulk of the real design work.
