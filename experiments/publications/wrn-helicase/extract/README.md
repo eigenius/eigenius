@@ -66,4 +66,4 @@ and **emits** the SampleSet as a `DerivedResource` witnessed by a
 `RuntimeInvocation` (input hash + script hash + image digest + output hash) —
 reclassifying it from Observed-with-recipe-sidecar to Derived-from-raw-Observed
 and closing the audit chain to raw bytes. Full design:
-[docs/design/d53-data-ingestion-institution.md](../../../../docs/design/d53-data-ingestion-institution.md).
+[docs/design/d53-large-data-tracking.md](../../../../docs/design/d53-large-data-tracking.md).

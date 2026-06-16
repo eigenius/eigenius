@@ -149,14 +149,16 @@ matters:
 - **Differential dependency via `limma` (D-DIFF) — a real capability gap.** The
   paper's genome-wide differential-dependency call is an empirical-Bayes
   moderated *t* (`limma`) over the **full Achilles dependency matrix** (~187 MB,
-  cell-lines × 17,634 genes). We do **not** run it. The blocker is **dataset
-  scale**: the current data-ingestion path (**D53**) cannot stage inputs that
-  large into a substrate worker. This is the substantive omission — a known limit
-  of the ingestion implementation, not something we papered over. When D53's
-  large-input ingestion lands (or a native moderated-*t* institution is built),
-  D-DIFF becomes recomputable; until then it stays Observed-grade. The
-  *downstream* consequence of D-DIFF — that WRN is MSI-selective — *is*
-  independently recomputed by the Wilcoxon C-WRN warrant, so the conclusion is
+  cell-lines × 17,634 genes). We do **not** run it. limma-the-analysis would be a
+  **wrapped-R warrant** (the same D56 mechanism as the lme4 models we *did* ship);
+  the blocker is its **large input** — that matrix is too big to inline on the
+  chain. The fix is **[D53](../../../docs/design/d53-large-data-tracking.md)**:
+  track the matrix as an Oxen-backed `PinnedExternalFile`, fetch + content-verify +
+  materialize it into the worker, and commit only the small differential-dependency
+  result. Neither D53's `PinnedExternalFile` path nor a D56 limma warrant is built
+  yet, so D-DIFF stays Observed-grade for now — a known boundary, not something we
+  papered over. The *downstream* consequence of D-DIFF — that WRN is MSI-selective —
+  *is* independently recomputed by the Wilcoxon C-WRN warrant, so the conclusion is
   not left unsupported, only this particular statistic is un-rerun.
 
 - **GSEA via `fgsea` (mechanism corroboration, Fig 3a) — not-yet-wired.** The
@@ -176,10 +178,11 @@ matters:
 
 The split is deliberate and is itself the prioritized roadmap: anything the
 statistics institution can re-run from fetched data is recomputed (attestable);
-anything that is a runtime-dependent or large-scale pipeline is linked until the
-relevant institution (limma moderated-*t*) or the D53 ingestion path closes the
-gap. The mixed-models frontier item *already* closed this session (lme4 via the R
-runtime); limma is the next, gated on D53 large-input support.
+anything that is a runtime-dependent or large-scale pipeline is linked until a
+wrapped-R warrant (D56) plus, for the large-input cases, D53's Oxen-backed
+`PinnedExternalFile` path closes the gap. The mixed-models frontier item *already*
+closed this session (lme4 via the R runtime); limma is the next, gated on the D53
+large-data input path.
 
 ## 6. What the exercise demonstrates
 
