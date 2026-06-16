@@ -11,6 +11,7 @@ a divergence is a recorded finding, not a silent pass.
 | F2 | Biomarker (common-MSI lineages): PPV = 0.73 (27/37), sensitivity = 1.00 (27/27) | PPV = **0.73 (27/37)**, sensitivity = **1.00 (27/27)** | A ✓ | **Confirms paper — provenance gotcha noted** |
 | F3 | ED Fig 10c MMR-restoration (C-MMR): two-way ANOVA P = 5.7e-20 / 3.3e-12 / 1.6e-16 | **5.74e-20 / 3.26e-12 / 1.56e-16** (exact, from public MOESM12) | A ✓ | **Reproduces paper exactly** |
 | F4 | C-VAL / C-MMR competition assays: two-way ANOVA `value ~ is_WRN + guide` (e.g. KM12 P = 2.7e-19) | **2.74e-19 reproduced** — but tests the *technical* residual; biological-unit P ≈ **2e-3 – 2e-6** | Methodology (design) | **Reproduces paper exactly; flags pseudoreplication; conclusion robust** |
+| F5 | **D-DIFF (Achilles): WRN is the top MSI-vs-MSS differential dependency, Q = 4.8e-24** | **WRN rank 1, Q = 4.81e-24** (limma moderated-t over the 187 MB CERES matrix; 32 MSI / 413 MSS) | A ✓ | **Reproduces paper exactly — run live through the substrate (D53 + D56)** |
 
 ## F3 — ED Fig 10c MMR-restoration: model identified from authors' code, reproduced exactly from public data
 
@@ -252,3 +253,34 @@ cause. F1 remains a genuine paper-internal inconsistency; F2 is purely a re-deri
 **Robustness note.** The `wrn_recq_sampleset` (32 MSI / 413 MSS) is immune by construction — it
 reads the Achilles gene-effect *matrix* directly and parses each cell with `float()`, which
 rejects `NA` and `NaN` identically.
+
+## F5 — D-DIFF (Achilles): WRN is the top differential dependency, reproduced live through the substrate
+
+**Where:** `programs/dd-achilles-limma-program.json` (the wrapped-R D56 warrant) over the pinned
+`achilles_18Q4_gene_effect.csv` (D53 `PinnedExternalFile`, sha256 `2186669d…2eb68b`, matches
+`MANIFEST.md`), joined to MSI labels across two more pinned files via the multi-input path
+(matrix `DepMap_ID` → `sample_info` `CCLE_name` → Supp Table 1 `CCLE_MSI`).
+
+**The recipe (reproduces the paper exactly).** limma `lmFit`/`eBayes` moderated-*t* of CERES
+gene-effect, MSI vs MSS (445 lines: 32 MSI / 413 MSS), over 17,634 genes; rank the
+MSI-preferential genes (logFC < 0, more essential in MSI) by P. **WRN comes out rank 1 of 10,507,
+adj.P (Q) = 4.81e-24** — the paper's reported **Q = 4.8e-24**.
+
+**Why this is a D56 wrapped-R warrant, not native (the methodological point).** A crude Welch
+*t*-test on the same join ranks WRN **8th** (q ≈ 0.004) — WRN has the *largest* effect size
+(meanDiff −0.368) but a noisier per-gene variance. limma's empirical-Bayes variance shrinkage,
+which borrows strength across genes, is exactly what rewards WRN's large, consistent effect and
+lifts it to rank 1 with the headline Q. Re-implementing eBayes natively (D52) would be
+re-deriving a non-trivial statistical method; instead we **wrap the pinned tool** (D53 §6) and
+make the warrant re-checkable by the `content_hash` of the inputs + the image digest.
+
+**End-to-end through Eigenius.** `eig run` dispatches the program; the kernel resolves the two
+auxiliary inputs from `runtime:additional_inputs`; the substrate materializes + content-verifies
+all three; a DooD-spawned R worker reads them via `r_eigon_materialized_path` and runs limma; the
+result commits as `wrn:dd_achilles:result` (Q = 4.81e-24, rank 1,
+`canonical_proposition = TopDifferentialDependency("WRN","Achilles_MSI")`) under a ProgramTrace →
+IsDerivedAs witness. This lifts D-DIFF from **linked-external** to **reproduced-external**.
+
+**Remaining:** DRIVE (RNAi/DEMETER2, paper Q = 1.5e-45) is the symmetric case — same program shape
+over the transposed `drive_D2_DRIVE_gene_dep_scores.csv` (genes × cell-lines; row key empty,
+columns = CCLE names), not yet run.

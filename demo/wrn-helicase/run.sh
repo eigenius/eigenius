@@ -23,7 +23,7 @@
 # language runtime (D55/D56) wrapping the authors' own lme4 mixed model
 # for the in-vivo claim.
 #
-# Two structural points this demo exercises:
+# Three structural points this demo exercises:
 #
 #   1. Two-phase recompute load (D54 lemma citation). The recompute layer
 #      is split into PLANS (SampleSets + StatisticalAnalysisPlans + bridges
@@ -39,6 +39,14 @@
 #      commits the LRT-p DerivedResource carrying
 #      onco:InVivoDependence("WRN","MSI") under a ProgramTrace, and the
 #      witness lifts concl_vivo.
+#
+#   3. Large-data wrapped-R over off-chain inputs (D53 + multi-input D56,
+#      Step 3c). The headline D-DIFF call — WRN is the top MSI-vs-MSS
+#      differential dependency — runs limma moderated-t over the 187 MB
+#      Achilles CERES matrix tracked as a content-addressed PinnedExternalFile
+#      (D53), joined to MSI labels across two more pinned files via the
+#      multi-input RunRuntimeScript path. Reproduces the paper's Q = 4.8e-24
+#      (WRN rank 1) and lifts D-DIFF from linked-external to reproduced-external.
 #
 # Prerequisites:
 #   EIGENIUS_MOCK_LLM=true docker compose up -d   (or `just up-mock`)
@@ -88,12 +96,19 @@ eig load "$REPO_DIR/experiments/benchmark/base-ontologies/bench-core.esl"
 eig load "$WRN/onco.esl"
 echo
 
-# Step 2: narrative + recompute layers. The recompute is two-phase:
-# plans (emitters) before conclusions (consumers).
-echo "--- Step 2: Load WRN narrative + recompute (plans -> conclusions) ---"
-eig load "$WRN/wrn-phase1.esl"
+# Step 2: recompute layers, then the narrative on top. Order matters and
+# matches the validated stack (wrn_phase1_recompute.rs:
+# onco -> recompute-plans -> recompute-conclusions -> wrn-phase1):
+#   - PLANS (emitters) first — AutoOnLoad commits the StatisticalAnalysisResult
+#     IsDerivedAs witnesses into this layer;
+#   - CONCLUSIONS (consumers) next — the concl_*_recomputed sentences gate
+#     against those now-ancestor witnesses;
+#   - wrn-phase1 (narrative) LAST — it stacks ON TOP and its TaskOutput cites
+#     the recomputed conclusions, so they must already be ancestors.
+echo "--- Step 2: Load WRN recompute (plans -> conclusions) + narrative on top ---"
 eig load "$WRN/wrn-phase1-recompute-plans.esl"
 eig load "$WRN/wrn-phase1-recompute-conclusions.esl"
+eig load "$WRN/wrn-phase1.esl"
 echo
 
 # Step 3: the wrapped-R in-vivo warrant (D55/D56). Run the lme4 xenograft
@@ -101,12 +116,15 @@ echo
 # random-slope LRT, and commits wrn:vivo_lme4:result (carrying the
 # InVivoDependence proposition) under a ProgramTrace -> IsDerivedAs witness.
 #
-# The program's runtime:image_digest must point at the R+lme4 worker image.
-# Build it once with:  eig env build --language r   (prints the digest), and
-# paste it into programs/xenograft-lme4-program.json (or pass it here via
-# $R_IMAGE_DIGEST to patch a temp copy).
-# run_r_program <program.json> <input.json> <grep-pattern>: runs a wrapped-R
-# program, patching runtime:image_digest from $R_IMAGE_DIGEST when set.
+# Each program's runtime:image_digest must point at the R worker image (which
+# bakes limma/fgsea/lme4 + the worker cdylib/driver). The baked digests are
+# environment-specific AND go stale whenever the R worker crate changes (the
+# boot cross-check, D26 §9.3, then refuses the old image). So rebuild and pass
+# the fresh digest to patch ALL programs for this run:
+#   R_IMAGE_DIGEST="$(eig env build --language r --json | jq -r .digest)" ./run.sh
+# (or build with `eig env build --language r`, copy the printed sha256:, and
+#  export R_IMAGE_DIGEST=…). run_r_program sed-patches runtime:image_digest from
+# $R_IMAGE_DIGEST when set — covering xenograft, km12, and dd-achilles alike.
 run_r_program() {
     local src="$1" input="$2" pat="$3" prog="$1"
     if [ -n "${R_IMAGE_DIGEST:-}" ]; then
@@ -132,6 +150,41 @@ run_r_program "$PROGRAMS/xenograft-lme4-program.json" \
 echo "  3b. KM12 competition biological-unit lme4 -> ViabilityDependenceAtBiologicalUnit (F4)"
 run_r_program "$PROGRAMS/km12-competition-lme4-program.json" \
     "$PROGRAMS/km12-competition-input.json" "lrt_p_value|ViabilityDependenceAtBiologicalUnit"
+
+# 3c. D-DIFF (Achilles): the headline genome-wide differential dependency,
+#     reproduced via limma moderated-t (D56 wrapped-R) over the 187 MB CERES
+#     matrix pinned as a D53 PinnedExternalFile, joined to MSI labels across two
+#     more pinned files through the MULTI-INPUT RunRuntimeScript path
+#     (runtime:additional_inputs = sample_info bridge + Supp Table 1). Commits
+#     wrn:dd_achilles:result -> TopDifferentialDependency(WRN,Achilles_MSI)
+#     (WRN rank 1, Q = 4.81e-24, matching the paper's 4.8e-24) under a
+#     ProgramTrace -> IsDerivedAs witness; lifts D-DIFF to reproduced-external.
+#
+#     Heavier than 3a/3b: the dependency matrices are gitignored (data/slices/,
+#     ~235 MB). When present, content-address them, stage them into the depot's
+#     extfile-cache (the DooD-shared mount the orchestrator + sibling R worker
+#     both see), commit the two auxiliary PinnedExternalFile nodes, then run.
+SLICES="$WRN/data/slices"
+if [ -f "$SLICES/achilles_18Q4_gene_effect.csv" ]; then
+    echo "  3c. D-DIFF limma (Achilles, 187 MB matrix) -> TopDifferentialDependency"
+    ORCH="$(docker compose ps -q orchestrator 2>/dev/null || true)"
+    ORCH="${ORCH:-eigenius-orchestrator-1}"
+    CACHE=/var/lib/eigenius/substrate-depot/extfile-cache
+    # Stage each input into the content-addressed cache: <cache>/<sha256-hex>/<basename>.
+    # Hashes are the pinned MANIFEST.md content addresses (== the PinnedExternalFile IRIs).
+    for f in achilles_18Q4_gene_effect.csv:2186669de8ade17bfbf7f2bc3e67e8af59d644800bf793ef103c67a4692eb68b \
+             achilles_18Q4_sample_info.csv:c5778e66e6c62c94386a39924be50f24086d5f0d5401117b065c3e6d7fbdb498 \
+             wrn_supplementary_table_1.csv:eebd460257982a98cf6ce9f14e189ae0c4398a686f4181bc037c5591e87243f2; do
+        name="${f%%:*}"; hex="${f##*:}"
+        docker exec "$ORCH" mkdir -p "$CACHE/$hex"
+        docker cp "$SLICES/$name" "$ORCH:$CACHE/$hex/$name"
+    done
+    eig load "$PROGRAMS/dd-achilles-files.json"   # sample_info + supp1 (the additional_inputs)
+    run_r_program "$PROGRAMS/dd-achilles-limma-program.json" \
+        "$PROGRAMS/dd-achilles-input.json" "adj_p_value|differential_rank|TopDifferentialDependency"
+else
+    echo "  3c. D-DIFF limma -> SKIPPED (data/slices/ not vended; see data/MANIFEST.md)"
+fi
 echo
 
 # Step 4: the reasoning layers that cite the recomputed + wrapped-R warrants.

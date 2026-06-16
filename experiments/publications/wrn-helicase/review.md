@@ -142,24 +142,31 @@ prose and its data — the point of the exercise. Full detail in
 ## 5. What we left out — and why
 
 Honest scope boundary: not every analysis in the paper is kernel-recomputed.
-Three remain **linked-external** `bench:ToolArtifact`s — cited with pinned
-provenance, but not re-executed. They differ in *why*, and the distinction
-matters:
+**Differential dependency via `limma` (D-DIFF) — now reproduced-external (this
+session).** The paper's headline genome-wide call — *WRN is the top preferential
+dependency in MSI vs MSS* — is an empirical-Bayes moderated *t* (`limma`) over the
+**full Achilles dependency matrix** (~187 MB, cell-lines × 17,634 genes). It is
+now **run live through the substrate** and reproduces the paper exactly: **WRN
+rank 1, Q = 4.81e-24** (paper: 4.8e-24). This closes what was the encoding's last
+real capability gap, and it exercises the whole new stack end to end:
+**[D53](../../../docs/design/d53-large-data-tracking.md)** tracks the matrix (and
+the `sample_info` bridge + Supp Table 1 MSI labels) as content-addressed
+`PinnedExternalFile`s; a **multi-input `RunRuntimeScript`** ships all three to a
+DooD-spawned R worker (fetched + content-verified, not inlined); the worker runs
+`limma::lmFit/eBayes`; and a **D56 wrapped-R warrant** commits the small result
+(`wrn:dd_achilles:result`, carrying `TopDifferentialDependency("WRN","Achilles_MSI")`)
+under a ProgramTrace → IsDerivedAs witness. Why wrapped-R and not native: a crude
+Welch *t* over the same join ranks WRN **8th** — limma's variance shrinkage is
+precisely what lifts WRN's large, consistent effect to rank 1 with the headline Q,
+so faithfully reimplementing it natively (D52) is not warranted; D53 §6 wraps the
+pinned tool instead and makes the warrant re-checkable by `content_hash` + image
+digest. See [recompute-findings F5](recompute-findings.md) and
+`programs/dd-achilles-limma-program.json`. (DRIVE — the RNAi/DEMETER2 replicate,
+paper Q = 1.5e-45 — is the symmetric next case, same program shape over the
+transposed matrix.)
 
-- **Differential dependency via `limma` (D-DIFF) — a real capability gap.** The
-  paper's genome-wide differential-dependency call is an empirical-Bayes
-  moderated *t* (`limma`) over the **full Achilles dependency matrix** (~187 MB,
-  cell-lines × 17,634 genes). We do **not** run it. limma-the-analysis would be a
-  **wrapped-R warrant** (the same D56 mechanism as the lme4 models we *did* ship);
-  the blocker is its **large input** — that matrix is too big to inline on the
-  chain. The fix is **[D53](../../../docs/design/d53-large-data-tracking.md)**:
-  track the matrix as an Oxen-backed `PinnedExternalFile`, fetch + content-verify +
-  materialize it into the worker, and commit only the small differential-dependency
-  result. Neither D53's `PinnedExternalFile` path nor a D56 limma warrant is built
-  yet, so D-DIFF stays Observed-grade for now — a known boundary, not something we
-  papered over. The *downstream* consequence of D-DIFF — that WRN is MSI-selective —
-  *is* independently recomputed by the Wilcoxon C-WRN warrant, so the conclusion is
-  not left unsupported, only this particular statistic is un-rerun.
+Two remain **linked-external** `bench:ToolArtifact`s — cited with pinned
+provenance, but not re-executed:
 
 - **GSEA via `fgsea` (mechanism corroboration, Fig 3a) — not-yet-wired.** The
   mRNA-seq gene-set enrichment (WRN-KO vs Hallmark sets; cell-cycle/E2F down,
@@ -180,9 +187,12 @@ The split is deliberate and is itself the prioritized roadmap: anything the
 statistics institution can re-run from fetched data is recomputed (attestable);
 anything that is a runtime-dependent or large-scale pipeline is linked until a
 wrapped-R warrant (D56) plus, for the large-input cases, D53's Oxen-backed
-`PinnedExternalFile` path closes the gap. The mixed-models frontier item *already*
-closed this session (lme4 via the R runtime); limma is the next, gated on the D53
-large-data input path.
+`PinnedExternalFile` path closes the gap. Two frontier items have now closed: the
+mixed-models case (lme4 via the R runtime) and the large-data case (**limma D-DIFF
+over the 187 MB matrix, run live via D53 + the multi-input D56 path**). The
+remaining linked-external items (fgsea GSEA, the IF/foci readouts) are now backlog
+of the *same proven* shape — a wrapped-R warrant over pinned inputs — not open
+capability gaps.
 
 ## 6. What the exercise demonstrates
 

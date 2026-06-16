@@ -68,12 +68,18 @@ resource wrn:h1_trace : reflection:DeclarationTrace {
 // ─── Derived: recompute artifacts (IsDerivedAs via ProgramTrace) ─────
 
 // D-DIFF (Achilles): WRN is the top preferential dependency in MSI vs MSS,
-// CRISPR. Paper Q = 4.8e-24; recompute (Phase 1) reproduces the mean-diff +
-// WRN top-rank; exact moderated-t Q awaits Phase 2.5 (limma institution).
+// CRISPR. **Reproduced-external** (D53 file-pinned matrix + D56 wrapped-R
+// limma): the limma moderated-t over the Achilles CERES matrix gives WRN
+// rank 1, Q = 4.81e-24 — matching the paper's 4.8e-24. Run live through the
+// substrate via programs/dd-achilles-limma-program.json (multi-input: the
+// pinned matrix + sample_info bridge + Supp Table 1 MSI labels), which
+// commits wrn:dd_achilles:result under a ProgramTrace -> IsDerivedAs witness.
+// This node is the narrative anchor the C-WRN certificate cites; running the
+// program emits the live witness carrying the same canonical_proposition.
 resource wrn:dd_achilles : bench:ToolArtifact {
-    bench:tool            = "R limma::lmFit/eBayes + BH (mean-diff + ranking recomputed; moderated-t Q linked, Phase 2.5)";
+    bench:tool            = "R limma::lmFit/eBayes moderated-t (D56 wrapped-R over a D53 PinnedExternalFile); reproduced live: WRN rank 1, Q = 4.81e-24 (vs paper 4.8e-24, CRISPR/Achilles)";
     bench:produced_from   = ["urn:eigenius:pub:wrn:ds_achilles", "urn:eigenius:pub:wrn:ds_supp1"];
-    bench:tool_parameters = "MSI vs MSS differential dependency over 17,634 genes; WRN rank = 1; paper Q = 4.8e-24 (CRISPR/Achilles).";
+    bench:tool_parameters = "MSI vs MSS differential dependency over 17,634 genes via limma moderated-t (3-file MSI join: DepMap_ID -> sample_info CCLE_name -> Supp Table 1 CCLE_MSI); WRN rank = 1; reproduced Q = 4.81e-24.";
     reflection:derivation = wrn:dd_achilles_trace;
     reflection:canonical_proposition = type_expr(
         onco:TopDifferentialDependency("WRN", "Achilles_MSI")
@@ -81,7 +87,7 @@ resource wrn:dd_achilles : bench:ToolArtifact {
 }
 resource wrn:dd_achilles_trace : reflection:ProgramTrace {
     reflection:resource  = wrn:dd_achilles;
-    reflection:source    = "R 4.3.3 differential-dependency recompute vs pinned snapshot (data/MANIFEST.md)";
+    reflection:source    = "limma moderated-t recompute via programs/dd-achilles-limma-program.json (D56 wrapped-R; substrate-spawned R worker over the pinned Achilles matrix); emits wrn:dd_achilles:result";
     reflection:timestamp = "2026-06-12T13:00:01Z";
 }
 
