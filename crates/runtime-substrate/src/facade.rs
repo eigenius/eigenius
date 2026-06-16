@@ -178,14 +178,39 @@ impl SubstrateDispatcher {
         input_cbor: &[u8],
         argument_cbor: &[u8],
     ) -> Result<DispatchOutcome, FacadeError> {
-        // D53 §5: if the input is an `ingest:PinnedExternalFile`, the
-        // substrate fetches + content-verifies + materializes it here and
-        // hands the runtime a resource carrying `ingest:materialized_path`.
-        // Ordinary chain-resident inputs pass through untouched.
-        let input = crate::external_file::prepare_input(
+        self.dispatch_run_runtime_script_multi(input_cbor, &[], argument_cbor)
+    }
+
+    /// Multi-input form of [`Self::dispatch_run_runtime_script`] (D53 §4.3 /
+    /// multi-file join). The primary `input_cbor` plus each of
+    /// `additional_inputs_cbor` are prepared (D53 §5: `PinnedExternalFile`
+    /// inputs are fetched + content-verified + materialized) and handed to the
+    /// runtime as the ordered input list — so a script can read e.g. a
+    /// dependency matrix + a sample-info bridge + an annotation table together
+    /// (the worker binds them as `eigenius_inputs[[1..N]]`).
+    pub fn dispatch_run_runtime_script_multi(
+        &self,
+        input_cbor: &[u8],
+        additional_inputs_cbor: &[Vec<u8>],
+        argument_cbor: &[u8],
+    ) -> Result<DispatchOutcome, FacadeError> {
+        // D53 §5: if an input is an `ingest:PinnedExternalFile`, the substrate
+        // fetches + content-verifies + materializes it here and hands the
+        // runtime a resource carrying `ingest:materialized_path`. Ordinary
+        // chain-resident inputs pass through untouched.
+        let opts = self.resolve_options();
+        let mut inputs = Vec::with_capacity(1 + additional_inputs_cbor.len());
+        inputs.push(crate::external_file::prepare_input(
             parse_resource(input_cbor)?,
-            &self.resolve_options(),
-        )?;
+            &opts,
+        )?);
+        for bytes in additional_inputs_cbor {
+            inputs.push(crate::external_file::prepare_input(
+                parse_resource(bytes)?,
+                &opts,
+            )?);
+        }
+
         let argument = parse_resource(argument_cbor)?;
         let language = read_string_property(&argument, PROP_LANGUAGE)?;
         let runtime = self
@@ -198,7 +223,7 @@ impl SubstrateDispatcher {
         // boundary check + full chain resolution land in 18b/c.
         let script = &argument;
 
-        let outcome = runtime.run_script(&env, script, &[input])?;
+        let outcome = runtime.run_script(&env, script, &inputs)?;
         Ok(build_outcome(outcome, &language))
     }
 

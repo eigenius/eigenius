@@ -611,9 +611,15 @@ message RegisterWasmComponentResponse {
 
 message ComponentRequest {
   string component_iri = 1;    // Which component to execute
-  bytes input = 2;             // Input resource as CBOR or Eigon-JSON
+  bytes input = 2;             // Input resource as CBOR or Eigon-JSON (primary input)
   bytes argument = 3;          // Argument/config resource
   string content_type = 4;     // "application/cbor" or "application/eigon+json"
+  // Auxiliary inputs for a multi-file join (D53 §4.3): each an additional
+  // input resource (CBOR), materialized + content-verified alongside `input`
+  // and passed to the worker as the ordered tail of its input list. Used by
+  // RunRuntimeScript when a script reads several PinnedExternalFiles together
+  // (e.g. a dependency matrix + a sample-info bridge + an annotation table).
+  repeated bytes additional_inputs = 5;
 }
 
 message ComponentResponse {

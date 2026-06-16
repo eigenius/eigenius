@@ -115,3 +115,88 @@ fn call_runtime_method_with_test_runtime_returns_method_signature_mismatch() {
         "got {err:?}"
     );
 }
+
+// ── D53 §4.3 multi-input RunRuntimeScript ────────────────────────────
+
+use eigenius_runtime_substrate::content_hash_of;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static MI_UNIQ: AtomicU64 = AtomicU64::new(0);
+
+fn write_temp(name: &str, bytes: &[u8]) -> PathBuf {
+    let n = MI_UNIQ.fetch_add(1, Ordering::Relaxed);
+    let p = std::env::temp_dir().join(format!("eig_facade_mi_{}_{n}_{name}", std::process::id()));
+    std::fs::write(&p, bytes).unwrap();
+    p
+}
+
+/// An `ingest:PinnedExternalFile` input resource (Eigon-CBOR), file:// backed.
+fn pinned_file_input(reference: &str, content_hash: &str) -> Vec<u8> {
+    let mut r = Resource::new_embedded();
+    r.set(
+        Iri::parse("urn:eigenius:core:is_a").unwrap(),
+        Value::Array(vec![Value::ResourceRef(
+            Iri::parse("urn:eigenius:ingest:PinnedExternalFile").unwrap(),
+        )]),
+    );
+    r.set(
+        Iri::parse("urn:eigenius:ingest:reference").unwrap(),
+        Value::String(reference.to_string()),
+    );
+    r.set(
+        Iri::parse("urn:eigenius:ingest:content_hash").unwrap(),
+        Value::String(content_hash.to_string()),
+    );
+    r.set(
+        Iri::parse("urn:eigenius:ingest:media_type").unwrap(),
+        Value::String("text/csv".to_string()),
+    );
+    eigon_cbor::serialize_resource(&r)
+}
+
+#[test]
+fn multi_input_materializes_and_verifies_additional_pinned_files() {
+    let d = dispatcher_with_test_runtime();
+    let argument = build_argument("test", "echo multi-ok");
+
+    let bytes_a = b"a,b\n1,2\n";
+    let bytes_b = b"x\n3\n";
+    let pa = write_temp("a.csv", bytes_a);
+    let pb = write_temp("b.csv", bytes_b);
+    let add_a = pinned_file_input(
+        &format!("file://{}", pa.display()),
+        &content_hash_of(bytes_a),
+    );
+    let add_b = pinned_file_input(
+        &format!("file://{}", pb.display()),
+        &content_hash_of(bytes_b),
+    );
+
+    // Primary input empty; two content-verified additional file inputs.
+    let outcome = d
+        .dispatch_run_runtime_script_multi(&[], &[add_a, add_b], &argument)
+        .expect("dispatch with two additional inputs (both content-verified)");
+    let output = eigon_cbor::parse_resource_lenient(&outcome.output_cbor).expect("decode output");
+    let stdout = output
+        .get(&Iri::parse("urn:eigenius:test:bash_stdout").unwrap())
+        .and_then(Value::as_str)
+        .expect("worker ran after all inputs were prepared");
+    assert_eq!(stdout.trim(), "multi-ok");
+}
+
+#[test]
+fn multi_input_additional_file_fails_closed_on_tamper() {
+    let d = dispatcher_with_test_runtime();
+    let argument = build_argument("test", "echo should-not-run");
+    let p = write_temp("tamper.csv", b"the real bytes\n");
+    // Pinned with a wrong hash — the additional input must fail content
+    // verification (in prepare_input) before the worker ever runs.
+    let bad = pinned_file_input(&format!("file://{}", p.display()), "sha256:0000");
+    let err = d
+        .dispatch_run_runtime_script_multi(&[], &[bad], &argument)
+        .expect_err("a tampered additional input must fail closed");
+    assert!(
+        matches!(err, FacadeError::Run(RunError::ContentHashMismatch { .. })),
+        "got {err:?}"
+    );
+}

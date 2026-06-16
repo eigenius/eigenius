@@ -43,6 +43,12 @@ export interface ComponentInput {
   input: EigonResource;
   /** The argument resource (component configuration). */
   argument: EigonResource;
+  /**
+   * Auxiliary input resources for a multi-file join (D53 §4.3) — resolved by
+   * the kernel from `runtime:additional_inputs` and passed to the worker as the
+   * ordered tail of its input list. Empty/absent for single-input components.
+   */
+  additionalInputs?: EigonResource[];
 }
 
 /** Output from a component handler. */

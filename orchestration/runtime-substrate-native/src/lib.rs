@@ -265,12 +265,21 @@ pub fn register_r_language_runtime(
 pub async fn dispatch_run_runtime_script(
     input: Buffer,
     argument: Buffer,
+    additional_inputs: Option<Vec<Buffer>>,
 ) -> Result<JsDispatchOutcome> {
     let input_bytes = input.to_vec();
     let argument_bytes = argument.to_vec();
+    // Auxiliary `PinnedExternalFile` inputs for a multi-file join (D53 §4.3) —
+    // each materialized + content-verified alongside the primary input and
+    // bound as `eigenius_inputs[[2..N]]` in the worker.
+    let additional_bytes: Vec<Vec<u8>> = additional_inputs
+        .unwrap_or_default()
+        .into_iter()
+        .map(|b| b.to_vec())
+        .collect();
     tokio::task::spawn_blocking(move || -> Result<DispatchOutcome> {
         let d = dispatcher().lock().map_err(lock_err)?;
-        d.dispatch_run_runtime_script(&input_bytes, &argument_bytes)
+        d.dispatch_run_runtime_script_multi(&input_bytes, &additional_bytes, &argument_bytes)
             .map_err(into_napi_err)
     })
     .await

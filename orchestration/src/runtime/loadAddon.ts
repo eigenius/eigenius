@@ -103,6 +103,7 @@ export interface RuntimeSubstrateAddon {
   dispatchRunRuntimeScript(
     input: Uint8Array,
     argument: Uint8Array,
+    additionalInputs?: Uint8Array[],
   ): Promise<DispatchOutcome>;
 
   /** Dispatch a `CallRuntimeMethod` invocation. v1 errors against any

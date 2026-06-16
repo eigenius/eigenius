@@ -55,15 +55,24 @@ export function createRunRuntimeScriptHandler(
     const startTime = Date.now();
     const inputCbor = encodeResource(req.input);
     const argumentCbor = encodeResource(req.argument);
+    // Auxiliary PinnedExternalFile inputs for a multi-file join (D53 §4.3).
+    const additionalCbors = (req.additionalInputs ?? []).map((r) =>
+      encodeResource(r)
+    );
 
     log.debug(operation.COMPONENT_DISPATCH, "RunRuntimeScript dispatching", {
       input_bytes: inputCbor.byteLength,
       argument_bytes: argumentCbor.byteLength,
+      additional_inputs: additionalCbors.length,
     });
 
     let outcome: { output: Uint8Array; partialInvocation: Uint8Array };
     try {
-      outcome = await addon.dispatchRunRuntimeScript(inputCbor, argumentCbor);
+      outcome = await addon.dispatchRunRuntimeScript(
+        inputCbor,
+        argumentCbor,
+        additionalCbors,
+      );
     } catch (e) {
       log.warn(
         operation.COMPONENT_DISPATCH,

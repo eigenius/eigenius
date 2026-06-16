@@ -20,7 +20,8 @@
 
 use crate::layer::Layer;
 use crate::ontology::eigon_cbor;
-use crate::ontology::resource::Resource;
+use crate::ontology::iri::Iri;
+use crate::ontology::resource::{Resource, Value};
 use crate::program::component::{BuiltinComponent, ComponentResult};
 use crate::program::trace::ComponentMetrics;
 use crate::server::proto::component_executor_client::ComponentExecutorClient;
@@ -82,6 +83,40 @@ impl RemoteComponent {
     }
 }
 
+/// Property naming a component_argument's auxiliary inputs for a multi-file
+/// join (D53 §4.3): a list of resource IRIs (typically PinnedExternalFiles)
+/// shipped to the worker alongside the primary input.
+const RUNTIME_ADDITIONAL_INPUTS: &str = "urn:eigenius:runtime:additional_inputs";
+
+/// Resolve `runtime:additional_inputs` (a list of resource IRIs) on a
+/// component_argument into Eigon-CBOR-serialized resources, preserving declared
+/// order. Fails closed if an entry is malformed or absent from the chain.
+fn resolve_additional_inputs(argument: &Resource, layer: &Layer) -> Result<Vec<Vec<u8>>, String> {
+    let prop = Iri::parse(RUNTIME_ADDITIONAL_INPUTS).expect("static IRI");
+    let value_iri = |v: &Value| -> Option<String> {
+        match v {
+            Value::String(s) => Some(s.clone()),
+            other => other.as_iri_str().map(str::to_string),
+        }
+    };
+    let iris: Vec<String> = match argument.get(&prop) {
+        None => return Ok(Vec::new()),
+        Some(Value::Array(items)) => items.iter().filter_map(value_iri).collect(),
+        Some(v) => value_iri(v).into_iter().collect(),
+    };
+    let mut out = Vec::with_capacity(iris.len());
+    for iri_str in iris {
+        let iri = Iri::parse(&iri_str).map_err(|_| {
+            format!("runtime:additional_inputs entry `{iri_str}` is not a valid IRI")
+        })?;
+        let res = layer.resolve(&iri).ok_or_else(|| {
+            format!("runtime:additional_inputs `{iri_str}` not found on the chain")
+        })?;
+        out.push(eigon_cbor::serialize_resource(&res));
+    }
+    Ok(out)
+}
+
 impl BuiltinComponent for RemoteComponent {
     fn is_io(&self) -> bool {
         true
@@ -91,7 +126,7 @@ impl BuiltinComponent for RemoteComponent {
         &self,
         input: &Resource,
         argument: Option<&Resource>,
-        _layer: &Layer,
+        layer: &Layer,
     ) -> Result<ComponentResult, String> {
         // Serialize input and argument to Eigon-CBOR (D26 §8.1 / Phase 18e).
         let input_cbor = eigon_cbor::serialize_resource(input);
@@ -99,11 +134,23 @@ impl BuiltinComponent for RemoteComponent {
             .map(eigon_cbor::serialize_resource)
             .unwrap_or_default();
 
+        // Multi-file join (D53 §4.3): a component_argument may name auxiliary
+        // inputs via `runtime:additional_inputs` (IRIs of committed resources —
+        // typically PinnedExternalFiles). Resolve each against the chain and
+        // ship it alongside the primary input; the substrate materializes +
+        // content-verifies each and the worker reads them as the tail of its
+        // input list.
+        let additional_inputs = match argument {
+            Some(arg) => resolve_additional_inputs(arg, layer)?,
+            None => Vec::new(),
+        };
+
         let request = ComponentRequest {
             component_iri: self.component_iri.clone(),
             input: input_cbor,
             argument: argument_cbor,
             content_type: EIGON_CBOR_CONTENT_TYPE.to_string(),
+            additional_inputs,
         };
 
         // Block on the async gRPC call within the tokio runtime
