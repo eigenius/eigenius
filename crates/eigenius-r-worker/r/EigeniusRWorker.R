@@ -103,6 +103,10 @@ repeat {
     # r_eigon_* marshalling helpers). The input resources (CBOR) are bound
     # as `eigenius_inputs` (a list of raw vectors) in the eval environment;
     # the script decodes them with `r_eigon_f64_array` / `r_eigon_str_array`.
+    # For a `PinnedExternalFile` input (D53), the substrate has already
+    # fetched + content-verified the external file; the script obtains the
+    # local path with `.Call("r_eigon_materialized_path", eigenius_inputs[[i]])`
+    # and opens it with the appropriate reader (read.csv / arrow::read_parquet).
     src <- .Call("r_script_source", id)
     n <- .Call("r_input_count", id)
     eigenius_inputs <- if (n > 0L) {

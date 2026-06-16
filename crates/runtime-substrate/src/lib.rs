@@ -38,6 +38,7 @@ pub mod chain;
 pub mod content_address;
 pub mod cross_check;
 pub mod error;
+pub mod external_file;
 pub mod facade;
 pub mod image_build;
 pub mod invocation;
@@ -68,6 +69,9 @@ pub use cross_check::{
     MANIFEST_HASH_FILE,
 };
 pub use error::{BuildError, ResourceLimit, RunError, SpawnError};
+pub use external_file::{
+    is_pinned_external_file, prepare_input, resolve_and_materialize, PROP_MATERIALIZED_PATH,
+};
 pub use facade::{FacadeError, SubstrateDispatcher};
 pub use image_build::{
     compose_dockerfile, is_buildah_available, BuildContext, BuildContextSpec, BuildahImageBuilder,

@@ -156,6 +156,9 @@ pub fn register_julia_language_runtime(
         depot,
     );
     let mut d = dispatcher().lock().map_err(lock_err)?;
+    // D53 §7 / Phase 1.5: materialize PinnedExternalFile inputs under the
+    // depot so the depot's read-only bind-mount exposes them to the worker.
+    d.set_extfile_cache_root(PathBuf::from(&depot_path).join("extfile-cache"));
     d.register_language_runtime(Box::new(runtime))
         .map_err(into_napi_err)
 }
@@ -205,6 +208,8 @@ pub fn register_lean_language_runtime(
         depot,
     );
     let mut d = dispatcher().lock().map_err(lock_err)?;
+    // D53 §7 / Phase 1.5: see `register_julia_language_runtime`.
+    d.set_extfile_cache_root(PathBuf::from(&depot_path).join("extfile-cache"));
     d.register_language_runtime(Box::new(runtime))
         .map_err(into_napi_err)
 }
@@ -247,6 +252,8 @@ pub fn register_r_language_runtime(
     )
     .with_build_config(base_image_ref, eigenius_r::RImagePlan::default());
     let mut d = dispatcher().lock().map_err(lock_err)?;
+    // D53 §7 / Phase 1.5: see `register_julia_language_runtime`.
+    d.set_extfile_cache_root(PathBuf::from(&depot_path).join("extfile-cache"));
     d.register_language_runtime(Box::new(runtime))
         .map_err(into_napi_err)
 }

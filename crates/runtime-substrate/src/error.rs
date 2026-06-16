@@ -150,6 +150,22 @@ pub enum RunError {
     /// `RuntimeError` (language-level): the worker process is gone.
     #[error("worker exited unexpectedly: {0}")]
     WorkerExited(String),
+
+    /// A `PinnedExternalFile` input could not be fetched/located from its
+    /// `reference` (D53 §5). Unreachable backend, missing file, unsupported
+    /// scheme.
+    #[error("external file fetch failed for `{reference}`: {reason}")]
+    ExternalFetchFailed { reference: String, reason: String },
+
+    /// A fetched `PinnedExternalFile`'s bytes did not hash to the node's
+    /// committed `content_hash` — fail closed before any computation runs
+    /// (D53 §5, the correctness root).
+    #[error("content hash mismatch for `{reference}`: expected {expected}, got {got}")]
+    ContentHashMismatch {
+        reference: String,
+        expected: String,
+        got: String,
+    },
 }
 
 /// Per-invocation resource cap categories used by `RunError::ResourceLimitExceeded`.

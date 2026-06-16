@@ -484,6 +484,42 @@ pub unsafe extern "C" fn r_eigon_str_array(cbor: SEXP, prop: SEXP) -> SEXP {
     }
 }
 
+/// `r_eigon_materialized_path(cbor)` → character scalar holding the
+/// substrate-materialized filesystem path of a `PinnedExternalFile` input
+/// (D53 §5/§7), or `NULL` if the property is absent. The substrate fetches +
+/// content-verifies the external file before dispatch and stamps the resulting
+/// path on `ingest:materialized_path`; the R script reads it here and opens the
+/// file with the appropriate reader (read.csv / arrow::read_parquet / …).
+///
+/// # Safety
+/// Called by R via `.Call`; `cbor` is a RAWSXP.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn r_eigon_materialized_path(cbor: SEXP) -> SEXP {
+    let bytes = unsafe { raw_to_bytes(cbor) };
+    let iri = match Iri::parse("urn:eigenius:ingest:materialized_path") {
+        Ok(i) => i,
+        Err(_) => return unsafe { nil() },
+    };
+    let resource = match eigon_cbor::parse_resource_lenient(&bytes) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("eigenius-r-worker: r_eigon_materialized_path parse: {e}");
+            return unsafe { nil() };
+        }
+    };
+    let path = match resource.get(&iri) {
+        Some(Value::String(s)) => s.clone(),
+        _ => return unsafe { nil() },
+    };
+    unsafe {
+        let out = rapi::Rf_protect(rapi::Rf_allocVector(rapi::STRSXP, 1));
+        let ch = rapi::Rf_mkCharLen(path.as_ptr() as *const c_char, path.len() as c_int);
+        rapi::SET_STRING_ELT(out, 0, ch);
+        rapi::Rf_unprotect(1);
+        out
+    }
+}
+
 /// In-progress output resources being assembled by the encode builder. R
 /// holds an `i32` builder id; the `Resource` never leaves Rust.
 fn builder_registry() -> &'static Mutex<HashMap<i32, Resource>> {
