@@ -161,38 +161,78 @@ precisely what lifts WRN's large, consistent effect to rank 1 with the headline 
 so faithfully reimplementing it natively (D52) is not warranted; D53 §6 wraps the
 pinned tool instead and makes the warrant re-checkable by `content_hash` + image
 digest. See [recompute-findings F5](recompute-findings.md) and
-`programs/dd-achilles-limma-program.json`. (DRIVE — the RNAi/DEMETER2 replicate,
-paper Q = 1.5e-45 — is the symmetric next case, same program shape over the
-transposed matrix.)
+`programs/dd-achilles-limma-program.json`. The **D-DIFF family** then replicates
+the call across screens and MSI callers, all run live: **DRIVE** (RNAi/DEMETER2,
+`programs/dd-drive-limma-program.json`) puts **WRN rank 1, Q = 1.46e-45** (paper
+1.5e-45) — #1 in *both* the CRISPR and RNAi screens; and a **GDSC PCR-MSI
+robustness** re-run (`programs/dd-gdsc-limma-program.json`, MSI-H vs MSS/MSI-L over
+the same Achilles matrix) keeps **WRN rank 1, Q = 4.66e-20** — the headline does
+not depend on the MSI calling method.
 
-Two remain **linked-external** `bench:ToolArtifact`s — cited with pinned
-provenance, but not re-executed:
+A second wrapped-R mechanism warrant has now closed, leaving one
+**linked-external** block (microscopy) cited with pinned provenance:
 
-- **GSEA via `fgsea` (mechanism corroboration, Fig 3a) — not-yet-wired.** The
-  mRNA-seq gene-set enrichment (WRN-KO vs Hallmark sets; cell-cycle/E2F down,
-  apoptosis/p53 up) is a permutation test (1M permutations). Its inputs are
-  vendored (`GSE126464`, `h.all.v6.2.symbols.gmt`) and *not* large; we simply
-  have not wired an fgsea path. It corroborates C-MECH (cited in the `concl_mech`
-  rationale) but is not load-bearing for any verdict. Now that the R runtime
-  hosts `lme4`, fgsea is a natural next wrapped-R warrant — a backlog item, not a
-  capability gap.
+**GSEA via `fgsea` (mechanism corroboration, Fig 3a) — now reproduced-external.**
+The WRN-KO mRNA-seq gene-set enrichment is run as a D56 wrapped-R warrant
+(`programs/gsea-mech-program.json`): limma-voom DE over the GSE126464 STAR counts
+→ fgsea against the Hallmark `.gmt`. It reproduces Fig 3a — **G2M_CHECKPOINT
+NES −3.53 / E2F_TARGETS −3.44 (padj 2.5e-49) down, P53_PATHWAY +2.89 (padj
+9.9e-21) / APOPTOSIS +1.78 up** — and commits `gsea_mech:result` carrying
+`CausesCellCycleArrest("WRN","MSI")` under a ProgramTrace, a *transcriptional*
+witness alongside the FACS-ANOVA evidence `concl_mech` already cites. It's the
+first consumer of the §4/§10 **Collection profile** (the `.gmt` as a typed
+`PinnedExternalFile` whose sets are over `onco:Gene`) and the multi-input path.
 
-- **Immunofluorescence contrasts + foci counts (lsmeans / direct readouts) —
-  not-yet-wired.** The p53-S15 / p21 IF least-squares-means contrasts (Fig 3c,
-  ED 5), the γH2AX/53BP1/pATM/Chk2 DSB foci (ED 6/7), and FISH (ED 8) stay
-  linked-external. Source data is pinned; these are the paper's own microscopy
-  assays, deferred behind the same external-tool frontier.
+**p53-activation IF via `emmeans` (mechanism corroboration, ED Fig 5) — now
+reproduced-external.** The per-cell phospho-p53(S15)/p21 immunofluorescence
+(175,974 cells, pinned as a D53 file-backed `PinnedExternalFile` with a
+`LongTable` schema, derived from the authors' source workbook by a vendored
+extractor) is dispatched through a D56 wrapped-R `emmeans` least-squares-means
+contrast (`programs/if-ed5-lsmeans-program.json`): WRN-KO vs control on
+log-intensity over the MSI + TP53-proficient stratum. It reproduces ED Fig 5 —
+**p-p53 logFC +0.155 (p = 7e-69), p21 +0.310 (p ≈ 0)** — and commits
+`if_ed5:result` carrying `ActivatesP53Response("WRN","MSI")`, discharged by
+`concl_p53_activation` (wrn-phase3.esl). The recompute also *sharpens* the claim
+(finding F7): p21 is a p53 transcriptional target, so the p53-null MSI line KM12
+fails to induce it (`p21_null_logfc` ≈ −0.074), recovering the paper's own
+p53-independence point — the upstream lesion is p53-independent, the p21 arm is
+p53-dependent — directly from the per-cell data. This is the first consumer of
+the `emmeans` package (one-line `RImagePlan` add) and the `LongTable` schema.
+
+**DSB induction via the 53BP1 foci (mechanism, ED Fig 6f/6h) — now
+reproduced-external.** The per-cell Apple-53BP1-trunc DSB-foci counts (39,249
+cells across MSS SW620/ES2 + MSI KM12/OVK18, a D53 file-backed SampleSet) run
+through a D56 wrapped-R interaction lm (`programs/foci-ed6-program.json`,
+`foci ~ cell_line + condition*MSI`): the **condition×MSI interaction +1.82
+(p ≈ 2.6e-142)** is the MSI-selective extra DSB induction — WRN-KO multiplies
+foci ×2.08 in MSI vs ×1.04 in MSS. It commits `foci_dsb:result` carrying
+`CausesDSBs("WRN","MSI")`, discharged by `concl_dsb_foci` (finding F8). This is
+the concrete reproduced-external corroboration of `concl_dsb` (which still cites
+the full-panel linked-external `mech_dsb`, keeping the mechanism chain
+in-process-verifiable).
+
+The remaining linked-external corroborations are the rest of the DSB-marker
+panel, now a tractable backlog (not a capability gap): γH2AX intensity (ED 6c)
+and the pATM(S1981)/Chk2(T68) foci (ED 6/7) are per-cell quantitative data over
+the same D53 file-backed SampleSet shape — closed by a wrapped-R `emmeans`
+contrast (intensity) / interaction lm (counts); FISH (ED 8) is a t-test. Source
+data is pinned; these are the same proven shape, not a missing capability.
 
 The split is deliberate and is itself the prioritized roadmap: anything the
 statistics institution can re-run from fetched data is recomputed (attestable);
 anything that is a runtime-dependent or large-scale pipeline is linked until a
 wrapped-R warrant (D56) plus, for the large-input cases, D53's Oxen-backed
 `PinnedExternalFile` path closes the gap. Two frontier items have now closed: the
-mixed-models case (lme4 via the R runtime) and the large-data case (**limma D-DIFF
-over the 187 MB matrix, run live via D53 + the multi-input D56 path**). The
-remaining linked-external items (fgsea GSEA, the IF/foci readouts) are now backlog
-of the *same proven* shape — a wrapped-R warrant over pinned inputs — not open
-capability gaps.
+mixed-models case (lme4 via the R runtime), the large-data case (**limma D-DIFF
+over the 187 MB matrix, run live via D53 + the multi-input D56 path**), and the
+gene-set case (**fgsea GSEA over the pinned RNA-seq counts + Hallmark `.gmt`
+Collection profile**), the per-cell-IF case (**`emmeans` lsmeans over the
+175k-cell p53/p21 file-backed SampleSet**), the per-cell-count case (**53BP1 DSB
+foci interaction lm**), and the large-multi-schema-container case (**paralogue
+co-loss lm over the 1.6 GB DepMap omics rds, read in-worker via `readRDS`**).
+Every analysis class in the paper now runs live through the platform; the only
+remaining linked-external items (the other DSB-marker channels — γH2AX intensity,
+pATM/Chk2 foci) are the *same proven* shape, not an open capability gap.
 
 ## 6. What the exercise demonstrates
 
@@ -262,6 +302,10 @@ L = linked-external).
 | `concl_refine_recomputed` | `DependencyCorrelatesWithMutatorLoad(WRN, MSI)` | R |
 | `concl_recq_recomputed` | `OnlyMSISelectiveInFamily(WRN, RecQ_helicases)` | R |
 | `concl_biomarker_recomputed` | `StrongBiomarker(MSI, WRN_dependency)` | R |
+| `concl_lineage_mutator_recomputed` | `ElevatedMutatorLoadInCommonLineages(MSI_common, MSI_uncommon)` | R (Wilcoxon, ED Fig 2b) |
+| `concl_coloc_recomputed` | `ReducedNucleolarColocalization(WRN, MSI)` | R (t-test, ED Fig 8d) |
+| `concl_hcr_recomputed` | `MMRRestorationRestoresRepair(HCT116, Ch3plus5)` | R (t-test, ED Fig 10a) |
+| `concl_apop_shrna_recomputed` | `CausesApoptosis(WRN, MSI)` | R (shRNA, ED Fig 4d) |
 | `concl_p53_modulates` | `ModulatesDependence(TP53, WRN)` | R |
 | `concl_val_recomputed` | `SelectiveViabilityDependence(WRN, MSI)` | R (+D bridge) |
 | `concl_cellcycle_recomputed` | `CausesCellCycleArrest(WRN, MSI)` | R |
@@ -276,8 +320,11 @@ L = linked-external).
 | `concl_vivo_ontarget` | `OnTarget(WRN, xenograft_growth)` | D (over W) |
 | `concl_viab_KM12_biological` | `ViabilityDependenceAtBiologicalUnit(WRN, KM12)` | W |
 | `concl_dsb` | `CausesDSBs(WRN, MSI)` | L |
+| `concl_dsb_foci` | `CausesDSBs(WRN, MSI)` | W (53BP1 foci interaction lm, ED Fig 6f/6h) |
+| `concl_p53_activation` | `ActivatesP53Response(WRN, MSI)` | W (emmeans lsmeans, ED Fig 5) |
 | `concl_mech` | `DSBDrivenLethality(WRN, MSI)` | D (over R+L) |
 | `concl_not_telomere` | `NotViaTelomereDefect(WRN, MSI)` | L |
+| `concl_paralog` | `NotExplainedByParalogLoss(WRN, MSI)` | W (paralogue co-loss lm over the 1.6 GB DepMap rds, ED Fig 9a) |
 | `concl_mmr` | `ContributesToDependence(dMMR, WRN)` | D |
 | `concl_main` | `SyntheticLethal(WRN, MSI)` | D (composes all) |
 

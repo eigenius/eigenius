@@ -41,12 +41,16 @@
 #      witness lifts concl_vivo.
 #
 #   3. Large-data wrapped-R over off-chain inputs (D53 + multi-input D56,
-#      Step 3c). The headline D-DIFF call — WRN is the top MSI-vs-MSS
+#      Steps 3c/3d). The headline D-DIFF call — WRN is the top MSI-vs-MSS
 #      differential dependency — runs limma moderated-t over the 187 MB
 #      Achilles CERES matrix tracked as a content-addressed PinnedExternalFile
 #      (D53), joined to MSI labels across two more pinned files via the
 #      multi-input RunRuntimeScript path. Reproduces the paper's Q = 4.8e-24
 #      (WRN rank 1) and lifts D-DIFF from linked-external to reproduced-external.
+#      Step 3d exercises the same machinery for the transcriptional mechanism:
+#      WRN-KO RNA-seq through limma-voom -> fgsea against the Hallmark .gmt,
+#      pinned under the D53 Collection layout profile (ragged gene-set rows) and
+#      carried as a second runtime:additional_inputs file.
 #
 # Prerequisites:
 #   EIGENIUS_MOCK_LLM=true docker compose up -d   (or `just up-mock`)
@@ -184,6 +188,155 @@ if [ -f "$SLICES/achilles_18Q4_gene_effect.csv" ]; then
         "$PROGRAMS/dd-achilles-input.json" "adj_p_value|differential_rank|TopDifferentialDependency"
 else
     echo "  3c. D-DIFF limma -> SKIPPED (data/slices/ not vended; see data/MANIFEST.md)"
+fi
+
+# 3d. C-MECH (GSEA, ED Fig 3a): the transcriptional corroboration of cell-cycle
+#     arrest. WRN-KO RNA-seq (GEO GSE126464 STAR counts, genes x 12 samples,
+#     pinned + gzipped) is run through limma-voom -> moderated-t, ranked, and
+#     fed to fgsea against the MSigDB Hallmark .gmt (a D53 Collection-profile
+#     PinnedExternalFile carried as runtime:additional_inputs). Commits
+#     wrn:gsea_mech:result -> CausesCellCycleArrest(WRN,MSI): G2M/E2F depleted
+#     (NES -3.5 / -3.4, padj ~1e-49), p53 response activated (NES +2.9,
+#     padj ~1e-20), apoptosis up -- matching the paper's Fig 3a panel.
+if [ -f "$SLICES/GSE126464_STAR_Gene_Counts.csv.gz" ] && [ -f "$SLICES/h.all.v6.2.symbols.gmt" ]; then
+    echo "  3d. C-MECH GSEA limma-voom + fgsea (GSE126464 vs Hallmark) -> CausesCellCycleArrest"
+    ORCH="$(docker compose ps -q orchestrator 2>/dev/null || true)"
+    ORCH="${ORCH:-eigenius-orchestrator-1}"
+    CACHE=/var/lib/eigenius/substrate-depot/extfile-cache
+    for f in GSE126464_STAR_Gene_Counts.csv.gz:e66c70f32079bc137b6e3849fc71d5cf0d3e42caed3e8b8e7be4a3bc4876daa5 \
+             h.all.v6.2.symbols.gmt:0ee07a4abda7bba49e6cf4ce773f1c5a57b24726cd6c6662f01cabe31e22146b; do
+        name="${f%%:*}"; hex="${f##*:}"
+        docker exec "$ORCH" mkdir -p "$CACHE/$hex"
+        docker cp "$SLICES/$name" "$ORCH:$CACHE/$hex/$name"
+    done
+    eig load "$PROGRAMS/gsea-mech-files.json"   # Hallmark .gmt + Collection schema (the additional_input)
+    run_r_program "$PROGRAMS/gsea-mech-program.json" \
+        "$PROGRAMS/gsea-mech-input.json" "nes_|padj_|CausesCellCycleArrest"
+else
+    echo "  3d. C-MECH GSEA -> SKIPPED (data/slices/ not vended; see data/MANIFEST.md)"
+fi
+
+# 3e. D-DIFF family — DRIVE (RNAi/DEMETER2, ED Fig 1b): the orthogonal-screen
+#     replication. Same limma D-DIFF program shape as 3c, run over the 59 MB
+#     DRIVE dependency matrix (genes x cell-lines; columns ARE CCLE_IDs, so the
+#     MSI join is direct to Supp Table 1 — no sample_info bridge). Commits
+#     wrn:dd_drive:result -> TopDifferentialDependency(WRN,DRIVE_MSI) (WRN rank 1,
+#     Q = 1.46e-45, matching the paper's 1.5e-45) — WRN is #1 in BOTH the CRISPR
+#     (Achilles) and RNAi (DRIVE) screens.
+if [ -f "$SLICES/drive_D2_DRIVE_gene_dep_scores.csv" ]; then
+    echo "  3e. D-DIFF DRIVE limma (RNAi, 59 MB matrix) -> TopDifferentialDependency(DRIVE)"
+    ORCH="$(docker compose ps -q orchestrator 2>/dev/null || true)"
+    ORCH="${ORCH:-eigenius-orchestrator-1}"
+    CACHE=/var/lib/eigenius/substrate-depot/extfile-cache
+    for f in drive_D2_DRIVE_gene_dep_scores.csv:3f863c296188be1aa8a491ef5489b135a9bfd65266f05d0690225d20fc38254b \
+             wrn_supplementary_table_1.csv:eebd460257982a98cf6ce9f14e189ae0c4398a686f4181bc037c5591e87243f2; do
+        name="${f%%:*}"; hex="${f##*:}"
+        docker exec "$ORCH" mkdir -p "$CACHE/$hex"
+        docker cp "$SLICES/$name" "$ORCH:$CACHE/$hex/$name"
+    done
+    eig load "$PROGRAMS/dd-achilles-files.json"   # supp1 (the additional_input; sample_info unused here)
+    eig load "$PROGRAMS/dd-drive-input.json"
+    run_r_program "$PROGRAMS/dd-drive-limma-program.json" \
+        "$PROGRAMS/dd-drive-input.json" "adj_p_value|differential_rank|TopDifferentialDependency"
+else
+    echo "  3e. D-DIFF DRIVE -> SKIPPED (data/slices/ not vended; see data/MANIFEST.md)"
+fi
+
+# 3f. D-DIFF family — GDSC PCR-MSI robustness (ED Fig 1b). Re-runs the Achilles
+#     D-DIFF (3c) but groups by the orthogonal GDSC PCR MSI panel (MSI-H vs
+#     MSS/MSI-L, only 19 MSI-H lines) instead of the NGS CCLE_MSI calls. Same
+#     pinned matrix + join; only the label column differs. Commits
+#     wrn:dd_gdsc:result -> TopDifferentialDependency(WRN,Achilles_GDSC_MSI)
+#     (WRN STILL rank 1, Q = 4.66e-20) — the headline doesn't depend on the MSI
+#     calling method. Reuses 3c's staged matrix + the supp1/sample_info nodes.
+if [ -f "$SLICES/achilles_18Q4_gene_effect.csv" ]; then
+    echo "  3f. D-DIFF GDSC PCR-MSI robustness (Achilles matrix) -> TopDifferentialDependency(GDSC)"
+    run_r_program "$PROGRAMS/dd-gdsc-limma-program.json" \
+        "$PROGRAMS/dd-achilles-input.json" "adj_p_value|differential_rank|TopDifferentialDependency"
+else
+    echo "  3f. D-DIFF GDSC robustness -> SKIPPED (data/slices/ not vended; see data/MANIFEST.md)"
+fi
+
+# 3g. C-MECH p53 activation (ED Fig 5b/d/f): the IF least-squares-means warrant.
+#     Per-cell phospho-p53(S15)/p21 staining intensity (175,974 cells, a D53
+#     file-backed SampleSet with a LongTable schema) through a D56 wrapped-R
+#     emmeans contrast (WRN-KO vs control on log-intensity, adjusting for
+#     cell_line). The genotype is joined from Supp Table 1 (additional input):
+#     the contrast is recomputed over the MSI + TP53-proficient stratum, where
+#     p-p53 (logFC +0.155) and p21 (+0.310) both rise. Commits
+#     wrn:if_ed5:result -> ActivatesP53Response(WRN,MSI). The p53-null MSI line
+#     (KM12) fails to induce p21 (p21_null_logfc < 0) — the p53-independence
+#     control emitted as a measurement, NOT a failed warrant (finding F7).
+#     The slice is derived from wrn_sourcedata_EDFig5_MOESM8.xlsx by
+#     programs/if-ed5-extract.R (run once in data/slices/).
+if [ -f "$SLICES/if_ed5_long.csv" ]; then
+    echo "  3g. C-MECH p53 IF emmeans lsmeans (175k cells) -> ActivatesP53Response"
+    ORCH="$(docker compose ps -q orchestrator 2>/dev/null || true)"
+    ORCH="${ORCH:-eigenius-orchestrator-1}"
+    CACHE=/var/lib/eigenius/substrate-depot/extfile-cache
+    HEX=8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519
+    docker exec "$ORCH" mkdir -p "$CACHE/$HEX"
+    docker cp "$SLICES/if_ed5_long.csv" "$ORCH:$CACHE/$HEX/if_ed5_long.csv"
+    eig load "$PROGRAMS/dd-achilles-files.json"   # supp1 genotype (the additional_input)
+    eig load "$PROGRAMS/if-ed5-files.json"        # LongTable DatasetSchema
+    eig load "$PROGRAMS/if-ed5-input.json"        # IF PinnedExternalFile node
+    run_r_program "$PROGRAMS/if-ed5-lsmeans-program.json" \
+        "$PROGRAMS/if-ed5-input.json" "logfc|p_value|ActivatesP53Response"
+else
+    echo "  3g. C-MECH p53 IF emmeans -> SKIPPED (derived slice not present; see programs/if-ed5-extract.R)"
+fi
+
+# 3h. C-MECH DSB induction (ED Fig 6f/6h): the 53BP1 DSB-foci warrant. Per-cell
+#     Apple-53BP1-trunc foci counts (39,249 cells across MSS SW620/ES2 + MSI
+#     KM12/OVK18, a D53 file-backed SampleSet) through a D56 wrapped-R lm
+#     foci ~ cell_line + condition*MSI. The condition×MSI INTERACTION is the
+#     MSI-selective extra DSB induction: WRN-KO ~2.08x foci in MSI vs ~1.04x in
+#     MSS (interaction +1.82, p ~ 2.6e-142). Commits wrn:foci_dsb:result ->
+#     CausesDSBs(WRN,MSI); reproduced-external corroboration of concl_dsb
+#     (concl_dsb_foci). The broader γH2AX/pATM/Chk2 panel stays linked (mech_dsb).
+#     Slice derived from wrn_sourcedata_EDFig6_MOESM9.xlsx by foci-ed6-extract.R.
+if [ -f "$SLICES/foci_53bp1_long.csv" ]; then
+    echo "  3h. C-MECH 53BP1 DSB foci lm (39k cells, MSI-selective) -> CausesDSBs"
+    ORCH="$(docker compose ps -q orchestrator 2>/dev/null || true)"
+    ORCH="${ORCH:-eigenius-orchestrator-1}"
+    CACHE=/var/lib/eigenius/substrate-depot/extfile-cache
+    HEX=1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83
+    docker exec "$ORCH" mkdir -p "$CACHE/$HEX"
+    docker cp "$SLICES/foci_53bp1_long.csv" "$ORCH:$CACHE/$HEX/foci_53bp1_long.csv"
+    eig load "$PROGRAMS/dd-achilles-files.json"   # supp1 genotype (the additional_input)
+    eig load "$PROGRAMS/foci-ed6-files.json"      # LongTable DatasetSchema
+    eig load "$PROGRAMS/foci-ed6-input.json"      # foci PinnedExternalFile node
+    run_r_program "$PROGRAMS/foci-ed6-program.json" \
+        "$PROGRAMS/foci-ed6-input.json" "interaction|foci_fc|CausesDSBs"
+else
+    echo "  3h. C-MECH 53BP1 DSB foci -> SKIPPED (derived slice not present; see programs/foci-ed6-extract.R)"
+fi
+
+# 3i. Specificity (ED Fig 9a): paralogue co-loss control over the 1.6 GB DepMap
+#     omics bundle — the LARGE multi-schema D53 container path. The authors' dat
+#     list (DRIVE/CRISPR/GE/CN/MUT_*/RPPA matrices) is pinned as a single
+#     PinnedExternalFile and read in-worker via readRDS; the warrant fits
+#     lm(avg_WRN_dep ~ MSI + gene_loss) per RECQ paralogue and emits
+#     wrn:paralog_ctrl:result -> NotExplainedByParalogLoss(WRN,MSI): the MSI
+#     coefficient stays significant + same-signed (baseline β=-0.667 p=4.4e-60;
+#     controlled β≈-0.67..-0.70, worst p≈1e-58) — WRN dependence is intrinsic to
+#     MSI, not a paralogue-co-loss confound. Discharged by concl_paralog.
+RDS="$REPO_DIR/references/publications/WRN-Helicase-Supplements/DepMap_18Q4_data.rds"
+if [ -f "$RDS" ]; then
+    echo "  3i. Specificity paralogue co-loss lm (1.6 GB DepMap rds) -> NotExplainedByParalogLoss"
+    ORCH="$(docker compose ps -q orchestrator 2>/dev/null || true)"
+    ORCH="${ORCH:-eigenius-orchestrator-1}"
+    CACHE=/var/lib/eigenius/substrate-depot/extfile-cache
+    HEX=14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed
+    docker exec "$ORCH" mkdir -p "$CACHE/$HEX"
+    docker cp "$RDS" "$ORCH:$CACHE/$HEX/DepMap_18Q4_data.rds"
+    eig load "$PROGRAMS/dd-achilles-files.json"   # supp1 (avg_WRN_dep + CCLE_MSI; additional_input)
+    eig load "$PROGRAMS/paralog-ed9a-files.json"  # rds container schema
+    eig load "$PROGRAMS/paralog-ed9a-input.json"  # rds PinnedExternalFile node
+    run_r_program "$PROGRAMS/paralog-ed9a-program.json" \
+        "$PROGRAMS/paralog-ed9a-input.json" "paralog_|NotExplainedByParalogLoss"
+else
+    echo "  3i. Specificity paralogue co-loss -> SKIPPED (1.6 GB DepMap rds not vended; see data/MANIFEST.md)"
 fi
 echo
 

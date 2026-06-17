@@ -60,6 +60,10 @@ The paper's per-figure Source Data, from `static-content.springer.com/esm/art%3A
 | `wrn_sourcedata_EDFig8_MOESM11.xlsx` | 11 | `a8b533a5…c1c47a` | ED Fig 8 FISH / WRN localization |
 | `wrn_sourcedata_EDFig10_MOESM12.xlsx` | 12 | `3fc08eba…cdb33c` | ED Fig 10 MMR-restoration viability/clonogenic (→ `mmr_restoration`) |
 
+**Derived tidy slices (reshaped from the source `.xlsx`, pinned + run as D53 file-backed SampleSets):**
+- `if_ed5_long.csv` (sha256 `8d26fbb8…c86c519`, 175,974 rows) — ED Fig 5b/d/f per-cell p-p53(S15)/p21 IF intensities reshaped from `wrn_sourcedata_EDFig5_MOESM8.xlsx` by `programs/if-ed5-extract.R` into `(cell_line, readout, guide, condition, value)` long form. Consumed by the `emmeans` lsmeans warrant (`if_ed5:result` → `ActivatesP53Response`, finding **F7**).
+- `foci_53bp1_long.csv` (sha256 `1ba6dc6f…4e9b83`, 39,249 rows) — ED Fig 6f/6h per-cell Apple-53BP1-trunc DSB foci counts reshaped from `wrn_sourcedata_EDFig6_MOESM9.xlsx` by `programs/foci-ed6-extract.R` (same long shape). Consumed by the wrapped-R interaction-lm warrant (`foci_dsb:result` → `CausesDSBs`, MSI-selective, finding **F8**).
+
 **Recompute-upgradeable subset (existing two-way-ANOVA dispatch):** ED Fig 3b (`va_competition`), ED Fig 4b/c/d (cell-cycle/apoptosis). ED Fig 3b layout: per cell line × {day} × {Firefly, Renilla luminescence} × {sgCh2-2, sgCh2-4, sgPolR2D, sgMYC, sgWRN1/2/3} × Value 1–6 (n=6). Relative viability = Firefly/Renilla, normalized; the two-way ANOVA is `value ~ is_WRN + guide` per cell line (per `WRN_stats_calcs.Rmd`). The IF contrasts (Fig 3c, 4c, ED 5) are lsmeans, the rescue (Fig 2c) a t-test, the xenograft (Fig 2d) lme4 — external-tool frontier, not the current institution.
 
 ### Reference code (cloned, in `data/WRN_manuscript/`, gitignored)
@@ -87,7 +91,7 @@ Every dataset the encoding needs is now **secured** (vendored + checksummed, or 
 
 **Every dataset the encoding could need is now vendored + checksummed.** Nothing left to fetch. The remaining gates are purely infrastructure (institution capabilities), not data.
 
-**Remaining gates are infrastructure, not data:** the genome-wide differential (`dd_achilles`/`dd_drive` rank-#1) needs the **D53 ingestion** path (187 MB matrix can't inline — but the matrix IS vendored); limma/GSEA/lme4 need their computations. The wet-lab two-way-ANOVA recomputes (`va_competition`, cell-cycle, apoptosis) are now **unblocked** — data + existing Factorial dispatch.
+**Infrastructure gates now closed (D53 + D56 wrapped-R, this session):** the genome-wide differential (`dd_achilles` rank-1 Q = 4.81e-24; `dd_drive` rank-1 Q = 1.46e-45; `dd_gdsc` PCR-MSI robustness rank-1 Q = 4.66e-20) all run live through the D53 ingestion path (187 MB / 59 MB matrices content-addressed, not inlined) + a multi-input `RunRuntimeScript` to a DooD-spawned R worker running limma. GSEA (`gsea_mech`, Fig 3a) likewise runs via fgsea over pinned RNA-seq counts + the Hallmark `.gmt` (D53 Collection profile). lme4 mixed models (`vivo`, `viab_KM12_bio`) run via the same wrapped-R path. The wet-lab two-way-ANOVA recomputes (`va_competition`, cell-cycle, apoptosis) run D52-native. Remaining: the IF/foci microscopy readouts (close-out plan #3–4).
 
 ## Notes for Phase 1
 

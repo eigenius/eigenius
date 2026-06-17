@@ -599,13 +599,17 @@ async fn env_build_r(
         }
     };
 
+    // Report the actual baked package list (the runtime's `RImagePlan` recipe)
+    // rather than a hardcoded string, so it never drifts from the image.
+    let packages = eigenius_r::RImagePlan::default().packages.join(",");
     if json {
         println!(
-            "{{\"image_digest\":\"{}\",\"language\":\"r\",\"packages\":\"limma,fgsea,lme4\"}}",
-            digest.as_str()
+            "{{\"image_digest\":\"{}\",\"language\":\"r\",\"packages\":\"{}\"}}",
+            digest.as_str(),
+            packages
         );
     } else {
-        println!("R image built (Bioconductor base + limma/fgsea/lme4).");
+        println!("R image built (Bioconductor base + {packages}).");
         println!("  Digest: {}", digest.as_str());
         println!();
         println!("Paste this digest into the program's `runtime:image_digest`, e.g.");

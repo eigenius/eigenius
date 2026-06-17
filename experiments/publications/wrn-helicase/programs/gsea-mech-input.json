@@ -1,0 +1,13 @@
+[
+  {
+    "@id": "urn:eigenius:ingest:file:e66c70f32079bc137b6e3849fc71d5cf0d3e42caed3e8b8e7be4a3bc4876daa5",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:ingest:PinnedExternalFile"
+    ],
+    "urn:eigenius:reflection:source": "GEO GSE126464 WRN-KO RNA-seq STAR gene counts (genes x 12 samples)",
+    "urn:eigenius:ingest:reference": "file://wrn-slices/GSE126464_STAR_Gene_Counts.csv.gz",
+    "urn:eigenius:ingest:content_hash": "sha256:e66c70f32079bc137b6e3849fc71d5cf0d3e42caed3e8b8e7be4a3bc4876daa5",
+    "urn:eigenius:ingest:media_type": "application/gzip",
+    "urn:eigenius:ingest:content_encoding": "gzip"
+  }
+]

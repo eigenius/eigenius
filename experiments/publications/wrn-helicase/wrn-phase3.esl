@@ -123,12 +123,67 @@ resource wrn:concl_vivo_ontarget : reasoning:ReasoningSentence {
     );
 }
 
+// Reproduced-external (C-MECH p53 arm): WRN loss activates the p53 DDR. Like
+// concl_vivo, the witness only exists after the R program runs — the per-cell
+// p-p53(S15)/p21 immunofluorescence (ED Fig 5b/d/f, 175,974 cells pinned as a
+// D53 file-backed SampleSet) is dispatched through a D56 wrapped-R `emmeans`
+// least-squares-means contrast:
+//   - programs/if-ed5-input.json  — the tidy per-cell IF intensities (primary)
+//   - programs/if-ed5-lsmeans-program.json — applies RunRuntimeScript; joins
+//     genotype from Supp Table 1 (additional input) and runs the WRN-KO-vs-
+//     control lsmeans contrast on log-intensity over the MSI + TP53-proficient
+//     stratum, emitting `wrn:if_ed5:result` with
+//     `canonical_proposition = onco:ActivatesP53Response("WRN","MSI")` (set when
+//     BOTH p-p53 and p21 rise significantly: logFC +0.155 / +0.310). p21 is a
+//     p53 transcriptional target, so the p53-null MSI line KM12 fails to induce
+//     it (p21_null_logfc ≈ −0.074) — the p53-INDEPENDENCE control (finding F7),
+//     emitted as a measurement, not a failed warrant.
+// `eigenius run` commits that output under a ProgramTrace, minting the
+// `IsDerivedAs(if_ed5:result, ActivatesP53Response(WRN,MSI))` witness the
+// concl_p53_activation certificate discharges (run before this layer loads).
+resource wrn:concl_p53_activation : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:ActivatesP53Response("WRN", "MSI")
+    );
+    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:if_ed5:result");
+    reasoning:certificate = type_expr(
+        derived("urn:eigenius:pub:wrn:if_ed5:result",
+                onco:ActivatesP53Response("WRN", "MSI"))
+    );
+}
+
+// Reproduced-external (specificity / rejected-alternative): WRN's MSI-selective
+// dependence is intrinsic to MSI, NOT a confound of paralogue co-loss. Like
+// concl_vivo, the witness exists only after the R program runs — the authors'
+// 1.6 GB DepMap omics bundle (D53 PinnedExternalFile, read via readRDS — the
+// large multi-schema container path) is dispatched through a D56 wrapped-R
+// warrant (programs/paralog-ed9a-program.json) that fits
+// lm(avg_WRN_dep ~ MSI + gene_loss) per RECQ paralogue and emits
+// `wrn:paralog_ctrl:result` with `NotExplainedByParalogLoss("WRN","MSI")` —
+// set when the MSI coefficient stays significant + same-signed controlling for
+// every paralogue's loss (baseline β = −0.667 p = 4.4e-60; controlled β stays
+// ≈ −0.67..−0.70, worst p ≈ 1e-58). ED Fig 9a.
+resource wrn:concl_paralog : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:NotExplainedByParalogLoss("WRN", "MSI")
+    );
+    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:paralog_ctrl:result");
+    reasoning:certificate = type_expr(
+        derived("urn:eigenius:pub:wrn:paralog_ctrl:result",
+                onco:NotExplainedByParalogLoss("WRN", "MSI"))
+    );
+}
+
 // ════════════════════════════════════════════════════════════════════
 // C-MECH — mechanism: WRN loss ⇒ MSI-selective DSBs ⇒ DDR-driven lethality
 // ════════════════════════════════════════════════════════════════════
 
 // Linked-external: DSB induction in MSI (γH2AX/53BP1 foci; pATM(S1981) +
-// Chk2(T68) corroboration), MSI-selective.
+// Chk2(T68) corroboration), MSI-selective. The 53BP1-foci arm is now ALSO
+// reproduced-external (wrn:foci_dsb:result / concl_dsb_foci, ED Fig 6f/6h); this
+// ToolArtifact still carries the full marker panel as linked corroboration.
 resource wrn:mech_dsb : bench:ToolArtifact {
     bench:tool            = "DSB-marker immunofluorescence (γH2AX, 53BP1, pATM-S1981, Chk2-T68 foci)";
     bench:produced_from   = ["wrn-paper:Fig-4a-c", "wrn-paper:ED-Fig-6", "wrn-paper:ED-Fig-7"];
@@ -150,7 +205,7 @@ resource wrn:mech_dsb_trace : reflection:ProgramTrace {
 // (explaining why p53-impaired MSI cells are also sensitive).
 resource wrn:mech_rule : reflection:DeclaredResource {
     reflection:declared_by = "wrn-paper:dsb-ddr-mechanism";
-    reflection:rationale   = "MSI-selective DSBs on WRN loss activate the DNA-damage response, manifesting in TWO recomputed downstream consequences: cell-cycle arrest (reduced S-phase, ED Fig 4b — kernel-recomputed) and apoptosis (raised apoptotic fraction, ED Fig 4c — kernel-recomputed), both MSI-selective. GSEA corroborates (downregulated G2/M-checkpoint + E2F-target signatures, upregulated apoptosis + p53 signatures); p53-S15 phosphorylation and p21 rise (p53 activation) in MSI not MSS. DSBs are also directly toxic independent of p53 status, explaining the sensitivity of p53-impaired MSI cells. Hence DSBs that drive both arrest and apoptosis establish DSB-induced DDR as the MSI-selective lethal mechanism. The lethality claim now rests on the linked-external DSB readout PLUS the two kernel-recomputed DDR endpoints.";
+    reflection:rationale   = "MSI-selective DSBs on WRN loss activate the DNA-damage response, manifesting in TWO recomputed downstream consequences: cell-cycle arrest (reduced S-phase, ED Fig 4b — kernel-recomputed) and apoptosis (raised apoptotic fraction, ED Fig 4c — kernel-recomputed), both MSI-selective. GSEA corroborates (downregulated G2/M-checkpoint + E2F-target signatures, upregulated apoptosis + p53 signatures — reproduced-external, wrn:gsea_mech:result); p53-S15 phosphorylation and p21 rise (p53 activation, reproduced-external via wrn:if_ed5:result / concl_p53_activation — MSI- and p53-status-selective). DSBs are also directly toxic independent of p53 status, explaining the sensitivity of p53-impaired MSI cells (the p53-null MSI line KM12 shows DSBs/death but fails to induce the p21 transcriptional response — finding F7). Hence DSBs that drive both arrest and apoptosis establish DSB-induced DDR as the MSI-selective lethal mechanism. The lethality claim now rests on the linked-external DSB readout PLUS the two kernel-recomputed DDR endpoints.";
     reflection:canonical_proposition = type_expr(
         onco:CausesDSBs("WRN", "MSI")
         ->
@@ -175,6 +230,31 @@ resource wrn:concl_dsb : reasoning:ReasoningSentence {
     reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:mech_dsb");
     reasoning:certificate = type_expr(
         derived("urn:eigenius:pub:wrn:mech_dsb",
+                onco:CausesDSBs("WRN", "MSI"))
+    );
+}
+
+// Reproduced-external corroboration of concl_dsb: the 53BP1 DSB-foci arm of the
+// marker panel, recomputed live. Like concl_vivo / concl_p53_activation, the
+// witness only exists after the R program runs — the per-cell Apple-53BP1-trunc
+// foci counts (ED Fig 6f/6h, 39,249 cells across MSS SW620/ES2 + MSI KM12/OVK18,
+// pinned as a D53 file-backed SampleSet) are dispatched through a D56 wrapped-R
+// warrant (programs/foci-ed6-program.json) that fits foci ~ cell_line +
+// condition*MSI and emits `wrn:foci_dsb:result` with
+// `canonical_proposition = onco:CausesDSBs("WRN","MSI")` — set when the
+// condition×MSI interaction is positive and significant (the MSI-SELECTIVE extra
+// DSB induction: WRN-KO ~2.08× foci in MSI vs ~1.04× in MSS, interaction
+// +1.82 foci, p ≈ 2.6e-142). The broader marker panel (γH2AX intensity, pATM
+// (S1981)/Chk2(T68) foci, ED 6c/7) remains linked-external in mech_dsb; this
+// concretely reproduces the 53BP1 leg from the per-cell source data.
+resource wrn:concl_dsb_foci : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:CausesDSBs("WRN", "MSI")
+    );
+    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:foci_dsb:result");
+    reasoning:certificate = type_expr(
+        derived("urn:eigenius:pub:wrn:foci_dsb:result",
                 onco:CausesDSBs("WRN", "MSI"))
     );
 }

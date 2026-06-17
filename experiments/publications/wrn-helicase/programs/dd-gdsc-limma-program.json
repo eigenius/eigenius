@@ -1,0 +1,31 @@
+[
+  {
+    "@id": "urn:eigenius:pub:wrn:program:dd_gdsc_limma",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:program:Program"
+    ],
+    "urn:eigenius:program:input_type": "urn:eigenius:ingest:PinnedExternalFile",
+    "urn:eigenius:program:output_type": "urn:eigenius:reflection:DerivedResource",
+    "urn:eigenius:program:body": {
+      "urn:eigenius:core:is_a": [
+        "urn:eigenius:program:Apply"
+      ],
+      "urn:eigenius:program:function": "urn:eigenius:program:components:RunRuntimeScript",
+      "urn:eigenius:program:argument": {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:program:Var"
+        ],
+        "urn:eigenius:program:name": "input"
+      },
+      "urn:eigenius:program:component_argument": {
+        "urn:eigenius:runtime:language": "r",
+        "urn:eigenius:runtime:source": "# D-DIFF robustness (Achilles, GDSC PCR-MSI labels): WRN is STILL the top\n# preferential dependency under the orthogonal GDSC PCR MSI panel (MSI-H vs\n# MSS/MSI-L), not just the NGS CCLE_MSI calls used in dd_achilles. Same matrix\n# + join as dd_achilles (D53 4.3 multi-file); only the MSI label column differs.\nach <- .Call(\"r_eigon_materialized_path\", eigenius_inputs[[1]])\nsip <- .Call(\"r_eigon_materialized_path\", eigenius_inputs[[2]])\ns1p <- .Call(\"r_eigon_materialized_path\", eigenius_inputs[[3]])\nsuppressMessages({ library(data.table); library(limma) })\ndt  <- fread(ach); ids <- dt[[1]]; M <- as.matrix(dt[, -1]); rownames(M) <- ids\nsi  <- fread(sip); s1 <- fread(s1p)\nccle <- si$CCLE_name[match(ids, si$DepMap_ID)]\ng    <- s1$GDSC_MSI[match(ccle, s1$CCLE_ID)]\nkeep <- !is.na(g) & g %in% c(\"MSI-H\", \"MSS/MSI-L\")\nM <- M[keep, ]; grp <- factor(g[keep], levels = c(\"MSS/MSI-L\", \"MSI-H\"))\nfit <- eBayes(lmFit(t(M), model.matrix(~ grp)))\ntt  <- topTable(fit, coef = 2, number = Inf, sort.by = \"none\"); tt$gene <- rownames(tt)\nneg <- tt[tt$logFC < 0, ]; neg <- neg[order(neg$P.Value), ]\nw   <- which(grepl(\"^WRN \\\\(\", neg$gene))[1]\nq   <- neg$adj.P.Val[w]; rnk <- as.numeric(w)\nb <- .Call(\"r_eigon_begin\", \"urn:eigenius:pub:wrn:dd_gdsc:result\")\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:measurements:adj_p_value\", q)\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:differential_rank\", rnk)\nif (rnk == 1) {\n  .Call(\"r_eigon_set_proposition\", b,\n        \"urn:eigenius:benchmark:onco:TopDifferentialDependency\", c(\"WRN\", \"Achilles_GDSC_MSI\"))\n}\n.Call(\"r_eigon_finish\", b)\n",
+        "urn:eigenius:runtime:image_digest": "sha256:9ffb0efb052795e7f65dbd16760e26afae5708d605941b25587b76046ff36364",
+        "urn:eigenius:runtime:additional_inputs": [
+          "urn:eigenius:ingest:file:c5778e66e6c62c94386a39924be50f24086d5f0d5401117b065c3e6d7fbdb498",
+          "urn:eigenius:ingest:file:eebd460257982a98cf6ce9f14e189ae0c4398a686f4181bc037c5591e87243f2"
+        ]
+      }
+    }
+  }
+]

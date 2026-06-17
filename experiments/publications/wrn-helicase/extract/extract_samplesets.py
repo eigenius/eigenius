@@ -58,6 +58,8 @@ SHA256 = {
         "506d7ac0f2517cb6b1e7277dfb175675044ab4b6fbc4a628f8c9ad843ba41fd6",
     "wrn_sourcedata_EDFig4_MOESM7.xlsx":
         "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549",
+    "wrn_sourcedata_EDFig8_MOESM11.xlsx":
+        "a8b533a5b506457878a51941455a717b552b69e63900fbc21f277652b3c1c47a",
     "wrn_sourcedata_EDFig10_MOESM12.xlsx":
         "3fc08ebadbc282ac7bdb4f87d73e704e79e216b611e5357302d17e4e32cdb33c",
     "wrn_sourcedata_Fig2_MOESM3.xlsx":
@@ -118,6 +120,82 @@ def extract_wrn_dep():
         return sorted(v for v in vals if v is not None)
 
     return {"kind": "IID", "group_a": grp("MSI"), "group_b": grp("MSS")}
+
+
+# ── Recipe (ED Fig 2b): mutator_load_sampleset (Wilcoxon, common vs uncommon) ─
+#   slice  : wrn_supplementary_table_1.csv
+#   column : ms_deletions_normed
+#   filter : CCLE_MSI = MSI; group A = MSI uncommon lineages (common_MSI_lineage
+#            falsey, n = 45), group B = MSI common lineages (truthy, n = 54).
+#   Group A below group B (uncommon carry FEWER MS-deletions) matches the
+#   institution's OneSidedWitnessed → lt(mean_diff_of, 0). Wilcoxon P = 1.7e-9.
+def extract_mutator_load():
+    supp = _supp()
+
+    def grp(common):
+        vals = [
+            _realnum(r["ms_deletions_normed"])
+            for r in supp
+            if r["CCLE_MSI"].strip() == "MSI" and _truthy(r["common_MSI_lineage"]) == common
+        ]
+        return sorted(v for v in vals if v is not None)
+
+    return {"kind": "IID", "group_a": grp(False), "group_b": grp(True)}
+
+
+# ── Recipe (ED Fig 8d): coloc_sampleset (t-test, WRN–fibrillarin coloc) ──────
+#   slice  : wrn_sourcedata_EDFig8_MOESM11.xlsx, sheet "ED Figure 8d"
+#   readout: Pearson's colocalization coefficient (WRN vs fibrillarin), 5 values
+#            per cell line. Cols (0-based): 2=SW620(MSS), 3=KM12(MSI),
+#            4=SW48(MSI), 5=ES2(MSS), 6=OVK18(MSI); value rows = list rows 1..5.
+#   group A = MSI (KM12,SW48,OVK18; n=15) below group B = MSS (SW620,ES2; n=10):
+#   WRN is delocalized from nucleoli (lower fibrillarin coloc) in MSI. Two-tailed
+#   t-test in the paper; encoded one-sided-witnessed for the directional claim.
+def extract_coloc():
+    rows = _read_xlsx_cells("wrn_sourcedata_EDFig8_MOESM11.xlsx", sheet=1)
+
+    def col(c):
+        return sorted(round(float(rows[r][c]), 6) for r in range(2, 7) if rows[r].get(c) not in (None, ""))
+
+    msi = sorted(col(3) + col(4) + col(6))
+    mss = sorted(col(2) + col(5))
+    return {"kind": "IID", "group_a": msi, "group_b": mss}
+
+
+# ── Recipe (ED Fig 10a): hcr_sampleset (t-test, host-cell reactivation) ──────
+#   slice  : wrn_sourcedata_EDFig10_MOESM12.xlsx, sheet "ED Fig 10a"
+#   readout: flow-cytometric host-cell reactivation (MMR repair of a G:G
+#            mismatch), 3 values per condition. Cols (0-based): 4 = HCT116
+#            parental (MMR-deficient), 6 = HCT116 Ch3+5 (MMR-restored).
+#   group A = parental (low repair; n=3) below group B = Ch3+5 (restored; n=3):
+#   restoring MLH1/MSH3 (Ch3+5) restores mismatch repair. Two-tailed t-test.
+def extract_hcr():
+    rows = _read_xlsx_cells("wrn_sourcedata_EDFig10_MOESM12.xlsx", sheet=1)
+
+    def col(c):
+        return sorted(round(float(rows[r][c]), 6) for r in range(3, 6) if rows[r].get(c) not in (None, ""))
+
+    return {"kind": "IID", "group_a": col(4), "group_b": col(6)}
+
+
+# ── Recipe (ED Fig 4d): apop_shrna_KM12_sampleset (t-test, shRNA apoptosis) ──
+#   slice  : wrn_sourcedata_EDFig4_MOESM7.xlsx, sheet "ED Fig 4d" (sheet3)
+#   readout: % apoptotic death by shRNA in KM12 (MSI), Day4 + Day8, n=3 each.
+#            Cols (0-based): d4 shRFP=1 / shWRN1=3 / shWRN2=4; d8 shRFP=6 /
+#            shWRN1=8 / shWRN2=9. KM12 block = list rows 9..11.
+#   group A = control shRFP (n=6) below group B = shWRN1+shWRN2 (n=12): WRN
+#   knockDOWN (orthogonal to the ED4c CRISPR knockout) raises apoptosis in MSI.
+#   The lineage-matched MSS line SW837 (rows 3..5) is the spared negative control
+#   (control ~12 vs shWRN ~8.6, NOT elevated) — referenced in the bridge rationale.
+def extract_apop_shrna_km12():
+    rows = _read_xlsx_cells("wrn_sourcedata_EDFig4_MOESM7.xlsx", sheet=3)
+
+    def col(c):
+        return [round(float(rows[r][c]), 6) for r in range(9, 12) if rows[r].get(c) not in (None, "")]
+
+    ctl = sorted(col(1) + col(6))
+    wrn = sorted(col(3) + col(4) + col(8) + col(9))
+    return {"kind": "IID", "group_a": ctl, "group_b": wrn}
 
 
 # ── Recipe 2: wrn_corr_sampleset (Paired, 51 (x,y) pairs) ────────────────
@@ -377,6 +455,10 @@ def _extract_xenograft():
 # resource name in the ESL → recipe
 RECIPES = {
     "wrn:wrn_dep_sampleset": extract_wrn_dep,
+    "wrn:mutator_load_sampleset": extract_mutator_load,
+    "wrn:coloc_sampleset": extract_coloc,
+    "wrn:hcr_sampleset": extract_hcr,
+    "wrn:apop_shrna_KM12_sampleset": extract_apop_shrna_km12,
     "wrn:wrn_corr_sampleset": extract_wrn_corr,
     "wrn:wrn_recq_sampleset": extract_wrn_recq,
     "wrn:p53_dep_sampleset": extract_p53_dep,

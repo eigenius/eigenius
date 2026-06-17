@@ -215,3 +215,48 @@ fn wrn_phase3_invivo_validates() {
     let (ctx, inst) = build_phase3_ctx();
     assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_vivo");
 }
+
+/// `concl_p53_activation` (C-MECH p53 arm) discharges
+/// `DerivedEvidence(if_ed5:result)`, whose `IsDerivedAs` witness is produced only
+/// by running the ED Fig 5 IF `emmeans` lsmeans program through the R language
+/// runtime. Like `concl_vivo`, that witness cannot exist in this in-process
+/// harness, so the assertion is necessarily absent here and the leg is covered
+/// end-to-end by `demo/wrn-helicase/run.sh` (Step 3g: ActivatesP53Response Holds,
+/// p-p53 +0.155 / p21 +0.310, p53-null KM12 control p21_null_logfc < 0). Do not
+/// "fix" it by hand-authoring an `if_ed5:result` — that fabricates the very
+/// derivation the witness attests.
+#[test]
+#[ignore = "needs the R runtime to emit the if_ed5 witness; covered live by demo/wrn-helicase/run.sh"]
+fn wrn_phase3_p53_activation_validates() {
+    let (ctx, inst) = build_phase3_ctx();
+    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_p53_activation");
+}
+
+/// `concl_dsb_foci` (the reproduced-external 53BP1 DSB-foci corroboration of
+/// `concl_dsb`) discharges `DerivedEvidence(foci_dsb:result)`, whose `IsDerivedAs`
+/// witness is produced only by running the ED Fig 6f/6h foci-count program through
+/// the R language runtime. Like `concl_vivo`, that witness is absent in this
+/// in-process harness; the leg is covered live by `demo/wrn-helicase/run.sh`
+/// (Step 3h: CausesDSBs Holds, condition×MSI interaction +1.82, p ≈ 2.6e-142).
+/// The linked-external `concl_dsb`/`concl_mech` chain stays verifiable in-process
+/// (it cites the full-panel `mech_dsb` ToolArtifact), so this is purely additive.
+#[test]
+#[ignore = "needs the R runtime to emit the foci_dsb witness; covered live by demo/wrn-helicase/run.sh"]
+fn wrn_phase3_dsb_foci_validates() {
+    let (ctx, inst) = build_phase3_ctx();
+    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_dsb_foci");
+}
+
+/// `concl_paralog` (ED Fig 9a specificity) discharges
+/// `DerivedEvidence(paralog_ctrl:result)`, whose `IsDerivedAs` witness is produced
+/// only by running the paralogue co-loss program through the R language runtime
+/// over the 1.6 GB DepMap rds (the large multi-schema D53 container path). Like
+/// `concl_vivo`, that witness is absent in this in-process harness; covered live
+/// by `demo/wrn-helicase/run.sh` (Step 3i: NotExplainedByParalogLoss Holds, MSI
+/// β = −0.667 baseline / stays significant controlling for each paralogue's loss).
+#[test]
+#[ignore = "needs the R runtime + 1.6GB rds to emit the paralog_ctrl witness; covered live by demo/wrn-helicase/run.sh"]
+fn wrn_phase3_paralog_validates() {
+    let (ctx, inst) = build_phase3_ctx();
+    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_paralog");
+}

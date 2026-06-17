@@ -113,6 +113,129 @@ resource wrn:concl_refine_recomputed : reasoning:ReasoningSentence {
     );
 }
 
+// ─── D-LINEAGE (recomputed, ED Fig 2b): common MSI lineages carry a higher
+// mutator load than uncommon ones — the basis for the biomarker's lineage
+// restriction. Two-sample Wilcoxon (mean_diff_of, group A uncommon below
+// group B common), lifted through bridge_lineage_mutator.
+resource wrn:concl_lineage_mutator_recomputed : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+
+    reasoning:proposition = type_expr(
+        onco:ElevatedMutatorLoadInCommonLineages("MSI_common", "MSI_uncommon")
+    );
+
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_lineage_mutator"),
+        DerivedEvidence("urn:eigenius:pub:wrn:mutator_load_plan:result:main_effect")
+    );
+
+    reasoning:certificate = type_expr(
+        alias
+            SS     = "urn:eigenius:pub:wrn:mutator_load_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_lineage_mutator",
+            RESULT = "urn:eigenius:pub:wrn:mutator_load_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            EM     = onco:ElevatedMutatorLoadInCommonLineages("MSI_common", "MSI_uncommon")
+        in
+        app(
+            STAT, EM,
+            DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            declared(BRIDGE, STAT -> EM),
+            derived(RESULT, STAT)
+        )
+    );
+}
+
+// ─── C-LOC (recomputed, ED Fig 8d): WRN delocalized from the nucleolus in MSI.
+resource wrn:concl_coloc_recomputed : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+
+    reasoning:proposition = type_expr(
+        onco:ReducedNucleolarColocalization("WRN", "MSI")
+    );
+
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_coloc"),
+        DerivedEvidence("urn:eigenius:pub:wrn:coloc_plan:result:main_effect")
+    );
+
+    reasoning:certificate = type_expr(
+        alias
+            SS     = "urn:eigenius:pub:wrn:coloc_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_coloc",
+            RESULT = "urn:eigenius:pub:wrn:coloc_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            RC     = onco:ReducedNucleolarColocalization("WRN", "MSI")
+        in
+        app(
+            STAT, RC,
+            DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            declared(BRIDGE, STAT -> RC),
+            derived(RESULT, STAT)
+        )
+    );
+}
+
+// ─── C-APOP-shRNA (recomputed, ED Fig 4d): apoptosis confirmed via shRNA.
+resource wrn:concl_apop_shrna_recomputed : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+
+    reasoning:proposition = type_expr(
+        onco:CausesApoptosis("WRN", "MSI")
+    );
+
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_apop_shrna"),
+        DerivedEvidence("urn:eigenius:pub:wrn:apop_shrna_KM12_plan:result:main_effect")
+    );
+
+    reasoning:certificate = type_expr(
+        alias
+            SS     = "urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_apop_shrna",
+            RESULT = "urn:eigenius:pub:wrn:apop_shrna_KM12_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            CA     = onco:CausesApoptosis("WRN", "MSI")
+        in
+        app(
+            STAT, CA,
+            DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            declared(BRIDGE, STAT -> CA),
+            derived(RESULT, STAT)
+        )
+    );
+}
+
+// ─── C-MMR-FN (recomputed, ED Fig 10a): MMR restoration restores repair.
+resource wrn:concl_hcr_recomputed : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+
+    reasoning:proposition = type_expr(
+        onco:MMRRestorationRestoresRepair("HCT116", "Ch3plus5")
+    );
+
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:bridge_hcr"),
+        DerivedEvidence("urn:eigenius:pub:wrn:hcr_plan:result:main_effect")
+    );
+
+    reasoning:certificate = type_expr(
+        alias
+            SS     = "urn:eigenius:pub:wrn:hcr_sampleset",
+            BRIDGE = "urn:eigenius:pub:wrn:bridge_hcr",
+            RESULT = "urn:eigenius:pub:wrn:hcr_plan:result:main_effect",
+            STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
+            MR     = onco:MMRRestorationRestoresRepair("HCT116", "Ch3plus5")
+        in
+        app(
+            STAT, MR,
+            DeclaredEvidence(BRIDGE), DerivedEvidence(RESULT),
+            declared(BRIDGE, STAT -> MR),
+            derived(RESULT, STAT)
+        )
+    );
+}
+
 resource wrn:concl_recq_recomputed : reasoning:ReasoningSentence {
     reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 

@@ -66,6 +66,27 @@ data onco:SelectivelyEssential : core:string -> core:string -> Prop {
 data onco:DependencyCorrelatesWithMutatorLoad : core:string -> core:string -> Prop {
 }
 
+// (common, uncommon): among MSI cell lines, the common MSI lineages (where the
+// WRN-dependence biomarker holds) carry a HIGHER microsatellite-deletion load
+// than the uncommon MSI lineages — the mutator-load basis for the lineage
+// restriction of the biomarker (ED Fig 2b, Wilcoxon P = 1.7e-9, kernel-recomputed).
+data onco:ElevatedMutatorLoadInCommonLineages : core:string -> core:string -> Prop {
+}
+
+// (gene, context): the gene's nucleolar localization (Pearson colocalization
+// with fibrillarin) is REDUCED in the context vs lineage-matched controls — WRN
+// is delocalized from the nucleolus in MSI cells (ED Fig 8d, two-tailed t-test,
+// kernel-recomputed). A localization correlate of the MSI-selective phenotype.
+data onco:ReducedNucleolarColocalization : core:string -> core:string -> Prop {
+}
+
+// (model, restoration): in an MMR-deficient model, restoring the MMR machinery
+// restores functional mismatch repair (flow-cytometric host-cell reactivation
+// of a G:G mismatch) — the functional confirmation that the model's WRN
+// dependence rides on a genuine MMR defect (ED Fig 10a, t-test, kernel-recomputed).
+data onco:MMRRestorationRestoresRepair : core:string -> core:string -> Prop {
+}
+
 data onco:StrongBiomarker : core:string -> core:string -> Prop {
 }
 
@@ -147,6 +168,15 @@ data onco:DSBDrivenLethality : core:string -> core:string -> Prop {
 data onco:NotViaTelomereDefect : core:string -> core:string -> Prop {
 }
 
+// (gene, context): the gene's context-selective dependence is intrinsic to the
+// context, NOT a confound of co-loss of a paralogue / DNA-helicase partner.
+// ED Fig 9a: in lm(avg_gene_dep ~ context + gene_loss) over the DepMap omics,
+// the context coefficient stays the dominant, significant predictor controlling
+// for the loss of each candidate gene — an explicitly tested-and-rejected
+// alternative explanation (reproduced-external over the 1.6 GB DepMap rds).
+data onco:NotExplainedByParalogLoss : core:string -> core:string -> Prop {
+}
+
 // (modifier, gene): the modifier status (e.g. TP53) modulates the magnitude
 // of dependence on the gene — a measured difference in dependence across the
 // modifier's strata. (Contributes-to, not solely-responsible-for.)
@@ -163,6 +193,15 @@ data onco:CausesCellCycleArrest : core:string -> core:string -> Prop {
 // downstream DSB-driven-DDR consequence (increased total apoptotic fraction;
 // ED Fig 4c/d Annexin-V, kernel-recomputed).
 data onco:CausesApoptosis : core:string -> core:string -> Prop {
+}
+
+// (gene, context): gene depletion activates the p53 DNA-damage response in the
+// context — a downstream DSB-driven-DDR consequence manifesting as raised
+// phospho-p53(S15) and p21 immunofluorescence intensity (ED Fig 5b/d/f,
+// reproduced-external via emmeans lsmeans). MSI-selective AND p53-status-gated:
+// p21 (a p53 transcriptional target) is induced only where p53 is intact, so
+// the warrant is recomputed over the MSI + TP53-proficient lines.
+data onco:ActivatesP53Response : core:string -> core:string -> Prop {
 }
 
 // (gene, context): a seed-matched but on-target-disrupted control reagent

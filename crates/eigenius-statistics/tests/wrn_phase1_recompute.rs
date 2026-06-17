@@ -258,6 +258,10 @@ fn wrn_warrants_kernel_recomputed() {
     for plan_iri in [
         "urn:eigenius:pub:wrn:wrn_dep_plan",
         "urn:eigenius:pub:wrn:wrn_corr_plan",
+        "urn:eigenius:pub:wrn:mutator_load_plan",
+        "urn:eigenius:pub:wrn:coloc_plan",
+        "urn:eigenius:pub:wrn:hcr_plan",
+        "urn:eigenius:pub:wrn:apop_shrna_KM12_plan",
         "urn:eigenius:pub:wrn:wrn_recq_plan",
         "urn:eigenius:pub:wrn:p53_dep_plan",
         "urn:eigenius:pub:wrn:biomarker_plan",
@@ -285,8 +289,8 @@ fn wrn_warrants_kernel_recomputed() {
     }
     assert_eq!(
         emitted.len(),
-        19,
-        "17 single-effect results + the classification plan's 2 (ppv + sensitivity)"
+        23,
+        "21 single-effect results + the classification plan's 2 (ppv + sensitivity)"
     );
 
     // ── Step 2: commit every institution-emitted result onto the chain ──
@@ -312,6 +316,18 @@ fn wrn_warrants_kernel_recomputed() {
     assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_refine_recomputed");
     assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_recq_recomputed");
     assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_biomarker_recomputed");
+    // D-LINEAGE recomputed (ED Fig 2b, Wilcoxon P = 1.7e-9): common MSI lineages
+    // carry a higher mutator load than uncommon ones.
+    assert_reasoning_holds(
+        &ctx,
+        "urn:eigenius:pub:wrn:concl_lineage_mutator_recomputed",
+    );
+    // C-LOC recomputed (ED Fig 8d, t-test): WRN delocalized from nucleolus in MSI.
+    assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_coloc_recomputed");
+    // C-MMR-FN recomputed (ED Fig 10a, t-test): MMR restoration restores repair.
+    assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_hcr_recomputed");
+    // C-APOP-shRNA recomputed (ED Fig 4d, t-test): apoptosis confirmed via shRNA.
+    assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_apop_shrna_recomputed");
     // C-MECH recomputed sub-warrant: p53 status modulates WRN dependence.
     assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_p53_modulates");
     // C-VAL recomputed: wet-lab competition-assay nested ANOVA (KM12 + OVK18).

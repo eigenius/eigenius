@@ -81,7 +81,7 @@ pub struct RImagePlan {
     /// package versions `BiocManager::install` resolves.
     pub bioc_version: String,
     /// The Bioconductor/CRAN packages to install (the wrapped tools).
-    /// Default: limma + fgsea + lme4 (the WRN Tier-2 frontier).
+    /// Default: limma + fgsea + lme4 + emmeans (the WRN Tier-2 frontier).
     pub packages: Vec<String>,
     /// `true` once a `RPackageMirror` archive is materialised under
     /// [`MIRROR_IN_IMAGE`](crate::conventions::MIRROR_IN_IMAGE) (P4).
@@ -92,7 +92,12 @@ impl Default for RImagePlan {
     fn default() -> Self {
         Self {
             bioc_version: "3.18".to_string(),
-            packages: vec!["limma".to_string(), "fgsea".to_string(), "lme4".to_string()],
+            packages: vec![
+                "limma".to_string(),
+                "fgsea".to_string(),
+                "lme4".to_string(),
+                "emmeans".to_string(),
+            ],
             include_mirror: false,
         }
     }
@@ -160,7 +165,7 @@ mod tests {
         assert_eq!(f.install_packages.len(), 1);
         let line = &f.install_packages[0];
         assert!(line.contains("BiocManager::install"));
-        assert!(line.contains("\"limma\", \"fgsea\", \"lme4\""));
+        assert!(line.contains("\"limma\", \"fgsea\", \"lme4\", \"emmeans\""));
         assert!(line.contains("version=\"3.18\""));
         assert_eq!(f.bootstrap_command, vec!["Rscript", DRIVER_IN_IMAGE]);
     }

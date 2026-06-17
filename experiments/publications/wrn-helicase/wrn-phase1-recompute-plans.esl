@@ -238,6 +238,234 @@ resource wrn:bridge_mutator_load_trace : reflection:DeclarationTrace {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// D-LINEAGE (recomputed, ED Fig 2b): common MSI lineages carry a higher
+// mutator load than uncommon MSI lineages
+// ════════════════════════════════════════════════════════════════════
+// Among MSI cell lines, those in the COMMON MSI lineages (colorectal /
+// endometrial / gastric / ovarian — where the WRN-dependence biomarker holds)
+// carry a higher microsatellite-deletion burden than the UNCOMMON MSI lineages.
+// Wilcoxon rank-sum on ms_deletions_normed (group A = uncommon n=45, group B =
+// common n=54), kernel-recomputed: P = 1.7e-9 (matching the paper). Group A
+// below group B (uncommon fewer deletions) → the institution's directional
+// stats:lt(mean_diff_of, 0). This is the mutator-load basis for why WRN
+// dependence — and the biomarker — is restricted to the common MSI lineages.
+
+resource wrn:lineage_mutator_directionality_witness : stats:ImpossibilityWitness {
+    reflection:declared_by = "wrn-paper:lineage-mutator-directionality";
+    reflection:rationale   = "The hypothesis is that the common MSI lineages carry MORE microsatellite deletions than the uncommon ones (higher mutator load drives the lineage-restricted WRN dependence). The inverse direction is not the claim, licensing the one-sided test.";
+}
+
+resource wrn:mutator_load_sampleset : stats:SampleSetResource {
+    reflection:source      = "depmap:18Q4 MS-deletion load, MSI lines by lineage commonness (Supp Table 1)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    // Tier-1 extraction pin (verified by extract/extract_samplesets.py).
+    bench:extracted_from_slice  = "data/slices/wrn_supplementary_table_1.csv";
+    bench:extracted_from_sha256 = "eebd460257982a98cf6ce9f14e189ae0c4398a686f4181bc037c5591e87243f2";
+    bench:extraction_columns    = "ms_deletions_normed";
+    bench:extraction_filter     = "CCLE_MSI=MSI; group A=uncommon lineages (common_MSI_lineage falsey, n=45), group B=common lineages (truthy, n=54); each sorted ascending";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:mutator_load_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [5846.618007, 6333.018312, 6736.623661, 6813.594981, 6892.381206, 7209.183102, 7588.720588, 7763.707134,
+         7896.787227, 8617.577078, 9229.782982, 9734.055723, 9776.605626, 10217.019540, 10296.826090, 10822.958150,
+         10865.074400, 11115.582160, 11256.854980, 11514.930570, 12630.440360, 12920.250260, 13098.608110, 13277.460910,
+         13294.656540, 13442.668810, 13677.482720, 14360.488430, 14739.390600, 14774.607890, 15178.087230, 15511.633250,
+         16733.445140, 16876.022740, 18443.005600, 18623.038150, 18737.701960, 19371.126200, 20600.738200, 20680.544750,
+         21142.120100, 23012.669430, 23414.596760, 23482.641330, 26258.142360],
+        [7640.575026, 12311.203820, 12451.560360, 12483.145680, 12948.821630, 13747.108330, 14264.487880, 14722.380060,
+         14868.332690, 15552.235080, 15832.092350, 15871.132070, 17143.573850, 18259.585580, 18329.297720, 18786.574140,
+         18859.835510, 18883.900700, 19110.269510, 19175.238880, 19474.573610, 20059.566700, 21129.826050, 21891.525960,
+         22478.384430, 22909.233030, 23216.193590, 23555.302970, 24418.901440, 24552.013920, 25052.190390, 25279.997350,
+         25956.462480, 26190.594690, 26285.633570, 26365.640900, 26387.265190, 26645.944790, 27487.747720, 28286.570940,
+         28464.156320, 28657.759730, 28690.554970, 29014.202540, 29604.099150, 29690.956800, 30207.990280, 30614.307280,
+         31020.320740, 31025.611280, 32674.316620, 33443.370800, 34447.654600, 38325.306740],
+        BiologicalReplication(),
+    );
+}
+
+resource wrn:mutator_load_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:mutator_load_sampleset;
+    reflection:source    = "depmap:18Q4 (Supp Table 1)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:mutator_load_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set = wrn:mutator_load_sampleset;
+
+    stats:alpha               = 0.05;
+    stats:effect_size         = Absolute(0.0, "ms_deletions");
+    stats:directionality      = OneSidedWitnessed("urn:eigenius:pub:wrn:lineage_mutator_directionality_witness");
+    stats:variance_assumption = RankBased();
+    stats:outlier_exclusion   = Identity();
+}
+
+resource wrn:mutator_load_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:mutator_load_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:bridge_lineage_mutator : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:lineage-mutator-criterion";
+    reflection:rationale   = "If among MSI lines the uncommon-lineage group has its mean MS-deletion load strictly below the common-lineage group, the common MSI lineages carry an elevated mutator load. The directional statistical claim is the warrant for the lineage restriction of the biomarker.";
+
+    reflection:canonical_proposition = type_expr(
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mutator_load_sampleset"), 0.0)
+        ->
+        onco:ElevatedMutatorLoadInCommonLineages("MSI_common", "MSI_uncommon")
+    );
+}
+
+resource wrn:bridge_lineage_mutator_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:bridge_lineage_mutator;
+    reflection:declared_by = "wrn-paper:lineage-mutator-criterion";
+    reflection:timestamp   = "2026-06-16T14:30:00Z";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// C-LOC (recomputed, ED Fig 8d): WRN is delocalized from the nucleolus in MSI
+// ════════════════════════════════════════════════════════════════════
+// WRN–fibrillarin Pearson colocalization (5 values per line) is LOWER in MSI
+// (KM12,SW48,OVK18; n=15) than in lineage-matched MSS (SW620,ES2; n=10) — WRN
+// leaves the nucleolus in MSI cells. Two-sample t-test (group A = MSI below
+// group B = MSS → directional stats:lt(mean_diff_of, 0)); kernel-recomputed
+// (paper two-tailed t-test p = 3.2e-8).
+
+resource wrn:coloc_directionality_witness : stats:ImpossibilityWitness {
+    reflection:declared_by = "wrn-paper:nucleolar-delocalization-directionality";
+    reflection:rationale   = "The hypothesis is that WRN's nucleolar (fibrillarin) colocalization is REDUCED in MSI relative to lineage-matched MSS — a directional decrease. The inverse direction is not the claim, licensing the one-sided test.";
+}
+
+resource wrn:coloc_sampleset : stats:SampleSetResource {
+    reflection:source      = "WRN–fibrillarin Pearson colocalization, MSI vs lineage-matched MSS (ED Fig 8d source data)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig8_MOESM11.xlsx";
+    bench:extracted_from_sha256 = "a8b533a5b506457878a51941455a717b552b69e63900fbc21f277652b3c1c47a";
+    bench:extraction_columns    = "Pearson's colocalization coefficient";
+    bench:extraction_filter     = "sheet 'ED Figure 8d', 5 values/line; group A=MSI (KM12,SW48,OVK18; n=15), group B=MSS (SW620,ES2; n=10); each sorted ascending";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:coloc_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [0.072000, 0.215000, 0.233000, 0.274000, 0.290000, 0.401000, 0.404000, 0.408000,
+         0.410000, 0.413000, 0.430000, 0.449000, 0.459000, 0.487000, 0.491000],
+        [0.569000, 0.593000, 0.628000, 0.629000, 0.682000, 0.720000, 0.730000, 0.766000,
+         0.781000, 0.796000],
+        BiologicalReplication(),
+    );
+}
+
+resource wrn:coloc_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:coloc_sampleset;
+    reflection:source    = "wrn-paper:ED-Fig-8d source data";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:coloc_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set = wrn:coloc_sampleset;
+
+    stats:alpha               = 0.05;
+    stats:effect_size         = Absolute(0.0, "pearson_coloc");
+    stats:directionality      = OneSidedWitnessed("urn:eigenius:pub:wrn:coloc_directionality_witness");
+    stats:variance_assumption = WelchUnequal();
+    stats:outlier_exclusion   = Identity();
+}
+
+resource wrn:coloc_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:coloc_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:bridge_coloc : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:nucleolar-delocalization-criterion";
+    reflection:rationale   = "If WRN–fibrillarin colocalization in MSI lines is strictly below the lineage-matched MSS group, WRN is delocalized from the nucleolus in MSI. The directional statistical claim is the warrant.";
+
+    reflection:canonical_proposition = type_expr(
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:coloc_sampleset"), 0.0)
+        ->
+        onco:ReducedNucleolarColocalization("WRN", "MSI")
+    );
+}
+
+resource wrn:bridge_coloc_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:bridge_coloc;
+    reflection:declared_by = "wrn-paper:nucleolar-delocalization-criterion";
+    reflection:timestamp   = "2026-06-16T15:00:00Z";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// C-MMR-FN (recomputed, ED Fig 10a): MMR restoration restores mismatch repair
+// ════════════════════════════════════════════════════════════════════
+// Flow-cytometric host-cell reactivation (repair of a G:G mismatch) in HCT116:
+// parental (MMR-deficient, n=3, ~1.9) vs Ch3+5 (MLH1/MSH3 restored, n=3, ~35.8).
+// Restoring MMR restores repair — the functional confirmation the model's WRN
+// dependence rides on a real MMR defect. Two-sample t-test (group A = parental
+// below group B = Ch3+5 → directional lt(mean_diff_of, 0)); paper t-test p≈2.3e-3.
+
+resource wrn:hcr_directionality_witness : stats:ImpossibilityWitness {
+    reflection:declared_by = "wrn-paper:mmr-restoration-directionality";
+    reflection:rationale   = "The hypothesis is that restoring MMR (Ch3+5) INCREASES mismatch-repair capacity over the MMR-deficient parental — a directional increase. The inverse direction is not the claim, licensing the one-sided test.";
+}
+
+resource wrn:hcr_sampleset : stats:SampleSetResource {
+    reflection:source      = "HCT116 host-cell reactivation, parental vs Ch3+5 (ED Fig 10a source data)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig10_MOESM12.xlsx";
+    bench:extracted_from_sha256 = "3fc08ebadbc282ac7bdb4f87d73e704e79e216b611e5357302d17e4e32cdb33c";
+    bench:extraction_columns    = "host-cell reactivation (ED Fig 10a)";
+    bench:extraction_filter     = "sheet 'ED Fig 10a', 3 values/condition; group A=HCT116 parental (MMR-deficient, n=3), group B=HCT116 Ch3+5 (MMR-restored, n=3); each sorted ascending";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:hcr_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [1.730713, 1.857164, 2.016017],
+        [32.741693, 36.210852, 38.438682],
+        BiologicalReplication(),
+    );
+}
+
+resource wrn:hcr_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:hcr_sampleset;
+    reflection:source    = "wrn-paper:ED-Fig-10a source data";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:hcr_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set = wrn:hcr_sampleset;
+
+    stats:alpha               = 0.05;
+    stats:effect_size         = Absolute(0.0, "reactivation_pct");
+    stats:directionality      = OneSidedWitnessed("urn:eigenius:pub:wrn:hcr_directionality_witness");
+    stats:variance_assumption = WelchUnequal();
+    stats:outlier_exclusion   = Identity();
+}
+
+resource wrn:hcr_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:hcr_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:bridge_hcr : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:mmr-restoration-criterion";
+    reflection:rationale   = "If the MMR-deficient parental's mismatch-repair capacity is strictly below the MMR-restored Ch3+5 group, MMR restoration restores functional repair — confirming the model's MMR defect is genuine. The directional statistical claim is the warrant.";
+
+    reflection:canonical_proposition = type_expr(
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:hcr_sampleset"), 0.0)
+        ->
+        onco:MMRRestorationRestoresRepair("HCT116", "Ch3plus5")
+    );
+}
+
+resource wrn:bridge_hcr_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:bridge_hcr;
+    reflection:declared_by = "wrn-paper:mmr-restoration-criterion";
+    reflection:timestamp   = "2026-06-16T15:30:00Z";
+}
+
+// ════════════════════════════════════════════════════════════════════
 // D-RECQ (recomputed): WRN is the only MSI-selective RecQ helicase
 // ════════════════════════════════════════════════════════════════════
 // The RecQ-family comparison (Achilles CRISPR-CERES, all lineages, the
@@ -920,6 +1148,70 @@ resource wrn:bridge_apoptosis_trace : reflection:DeclarationTrace {
     reflection:resource    = wrn:bridge_apoptosis;
     reflection:declared_by = "wrn-paper:apoptosis-induction-criterion";
     reflection:timestamp   = "2026-06-13T06:30:00Z";
+}
+
+// ─── C-APOP-shRNA (recomputed, ED Fig 4d): apoptosis via shRNA (orthogonal) ───
+// Orthogonal-reagent confirmation that the MSI apoptosis is on-target, not a
+// CRISPR/Cas9 artifact: WRN knockDOWN (shWRN1+shWRN2) raises % apoptotic death
+// in KM12 (MSI; control shRFP n=6 ~12.3 vs WRN n=12 ~35.1) while the
+// lineage-matched MSS line SW837 is spared (~12 → ~8.6, NOT elevated). Two-sample
+// directional t-test, kernel-recomputed. Reuses the apoptosis directionality
+// witness + CausesApoptosis (a second, shRNA-based warrant for the same claim).
+
+resource wrn:apop_shrna_KM12_sampleset : stats:SampleSetResource {
+    reflection:source      = "KM12 % apoptotic death by shRNA, control vs shWRN (ED Fig 4d source data)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig4_MOESM7.xlsx";
+    bench:extracted_from_sha256 = "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549";
+    bench:extraction_columns    = "% apoptotic death (ED Fig 4d, KM12 block)";
+    bench:extraction_filter     = "sheet 'ED Fig 4d', KM12 block, Day4+Day8; group A=control shRFP (n=6), group B=WRN shWRN1+shWRN2 (n=12); each sorted ascending";
+    bench:extraction_recipe     = "extract/extract_samplesets.py#wrn:apop_shrna_KM12_sampleset";
+
+    stats:sample_set_value = stats:IID(
+        [8.646999, 9.007912, 10.388821, 14.509923, 15.500101, 15.879959],
+        [22.927329, 23.155320, 24.094779, 25.608609, 27.707073, 28.973131, 37.467349, 37.794210,
+         39.442938, 50.696008, 51.538932, 52.066879],
+        BiologicalReplication(),
+    );
+}
+
+resource wrn:apop_shrna_KM12_sampleset_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:apop_shrna_KM12_sampleset;
+    reflection:source    = "wrn-paper:ED-Fig-4d source data";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:apop_shrna_KM12_plan : stats:StatisticalAnalysisPlan {
+    stats:sample_set        = wrn:apop_shrna_KM12_sampleset;
+    stats:alpha             = 0.05;
+    stats:directionality    = OneSidedWitnessed("urn:eigenius:pub:wrn:apoptosis_directionality_witness");
+    stats:effect_size       = Absolute(0.0, "apoptotic-pct");
+    stats:variance_assumption = WelchUnequal();
+    stats:outlier_exclusion = Identity();
+}
+
+resource wrn:apop_shrna_KM12_plan_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:apop_shrna_KM12_plan;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:bridge_apop_shrna : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:apoptosis-shrna-criterion";
+    reflection:rationale   = "If WRN knockDOWN (shWRN) raises the apoptotic fraction above the shRFP control in the MSI line KM12 — recomputed here — while the lineage-matched MSS line SW837 is spared (control ~12 vs shWRN ~8.6, not elevated; a null is not derivable, so 'spared' is the declared judgment), then WRN loss causes MSI apoptosis via an shRNA reagent orthogonal to the CRISPR knockout — establishing the apoptosis is on-target, not a Cas9 artifact.";
+
+    reflection:canonical_proposition = type_expr(
+        stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset"), 0.0)
+        ->
+        onco:CausesApoptosis("WRN", "MSI")
+    );
+}
+
+resource wrn:bridge_apop_shrna_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:bridge_apop_shrna;
+    reflection:declared_by = "wrn-paper:apoptosis-shrna-criterion";
+    reflection:timestamp   = "2026-06-16T16:00:00Z";
 }
 
 // ════════════════════════════════════════════════════════════════════

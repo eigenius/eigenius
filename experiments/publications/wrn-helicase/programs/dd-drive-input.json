@@ -1,0 +1,12 @@
+[
+  {
+    "@id": "urn:eigenius:ingest:file:3f863c296188be1aa8a491ef5489b135a9bfd65266f05d0690225d20fc38254b",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:ingest:PinnedExternalFile"
+    ],
+    "urn:eigenius:reflection:source": "DEMETER2 DRIVE D2_DRIVE_gene_dep_scores (figshare 6025238); RNAi gene-dependency matrix (genes x cell-lines)",
+    "urn:eigenius:ingest:reference": "file://wrn-slices/drive_D2_DRIVE_gene_dep_scores.csv",
+    "urn:eigenius:ingest:content_hash": "sha256:3f863c296188be1aa8a491ef5489b135a9bfd65266f05d0690225d20fc38254b",
+    "urn:eigenius:ingest:media_type": "text/csv"
+  }
+]
