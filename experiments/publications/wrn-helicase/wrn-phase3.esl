@@ -30,6 +30,7 @@ namespace eigentt    = "urn:eigenius:eigentt";
 namespace bench      = "urn:eigenius:benchmark";
 namespace onco       = "urn:eigenius:benchmark:onco";
 namespace wrn        = "urn:eigenius:pub:wrn";
+namespace litclaim   = "urn:eigenius:pub:wrn:litclaim";
 
 // ════════════════════════════════════════════════════════════════════
 // C-VIVO — in vivo + patient-derived validation
@@ -77,8 +78,10 @@ resource wrn:vivo_seed_control_trace : reflection:ProgramTrace {
 // (C911) that is inert isolates the on-target effect.
 resource wrn:seed_control_rule : reflection:DeclaredResource {
     reflection:declared_by = "wrn-paper:c911-seed-control-logic";
-    reflection:rationale   = "shRNA off-target effects are mediated by the 'seed' sequence. shWRN1-C911 preserves the seed (only nt 9-11 are complemented) but loses on-target silencing. If this seed-matched control is INERT while shWRN1 impairs growth, the phenotype cannot be a seed-driven off-target effect — it is on-target for WRN.";
+    reflection:rationale   = "shRNA off-target effects are mediated by the 'seed' sequence, and a C911 seed-preserving control isolates on-target from seed off-target effects (Buehler 2012 [16], a litclaim premise): shWRN1-C911 preserves the seed (only nt 9-11 are complemented) but loses on-target silencing. Given that control's validity, if the seed-matched control is INERT while shWRN1 impairs growth, the phenotype cannot be a seed-driven off-target effect — it is on-target for WRN.";
     reflection:canonical_proposition = type_expr(
+        litclaim:C911ControlIsValid("shRNA")
+        ->
         onco:SeedControlInert("WRN", "xenograft_growth")
         ->
         onco:OnTarget("WRN", "xenograft_growth")
@@ -108,18 +111,28 @@ resource wrn:concl_vivo_ontarget : reasoning:ReasoningSentence {
         onco:OnTarget("WRN", "xenograft_growth")
     );
     reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:seed_control_rule"),
+        App(
+            DeclaredEvidence("urn:eigenius:pub:wrn:seed_control_rule"),
+            DeclaredEvidence("urn:eigenius:pub:wrn:lit:lit_c911_design")
+        ),
         DerivedEvidence("urn:eigenius:pub:wrn:vivo_seed_control")
     );
     reasoning:certificate = type_expr(
         alias
             RULE = "urn:eigenius:pub:wrn:seed_control_rule",
+            LIT  = "urn:eigenius:pub:wrn:lit:lit_c911_design",
             ART  = "urn:eigenius:pub:wrn:vivo_seed_control",
+            C911 = litclaim:C911ControlIsValid("shRNA"),
             SC   = onco:SeedControlInert("WRN", "xenograft_growth"),
-            OT   = onco:OnTarget("WRN", "xenograft_growth")
+            OT   = onco:OnTarget("WRN", "xenograft_growth"),
+            RULE_P = C911 -> SC -> OT,
+            jC911 = DeclaredEvidence(LIT),
+            jSC   = DerivedEvidence(ART),
+            cert1 = app(C911, SC -> OT, DeclaredEvidence(RULE), jC911,
+                        declared(RULE, RULE_P), declared(LIT, C911))
         in
-        app(SC, OT, DeclaredEvidence(RULE), DerivedEvidence(ART),
-            declared(RULE, SC -> OT), derived(ART, SC))
+        app(SC, OT, reasoning:App(DeclaredEvidence(RULE), jC911), jSC,
+            cert1, derived(ART, SC))
     );
 }
 

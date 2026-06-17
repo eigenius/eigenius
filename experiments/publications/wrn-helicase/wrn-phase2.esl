@@ -32,6 +32,7 @@ namespace eigentt    = "urn:eigenius:eigentt";
 namespace bench      = "urn:eigenius:benchmark";
 namespace onco       = "urn:eigenius:benchmark:onco";
 namespace wrn        = "urn:eigenius:pub:wrn";
+namespace litclaim   = "urn:eigenius:pub:wrn:litclaim";
 
 // ════════════════════════════════════════════════════════════════════
 // Observed (linked-external): the wet-lab readouts
@@ -111,8 +112,10 @@ resource wrn:ontarget_rule_trace : reflection:DeclarationTrace {
 // means the helicase activity is required for the phenotype.
 resource wrn:helicase_rule : reflection:DeclaredResource {
     reflection:declared_by = "wrn-paper:structure-function-dissection";
-    reflection:rationale   = "WRN is both a 3'-5' exonuclease and a 3'-5' helicase. Rescuing sgWRN-EIJ with catalytic-dead constructs localises the essential activity. A helicase-dead (K577M) cDNA that FAILS to rescue (while WT does) shows the helicase activity is required for the MSI viability phenotype.";
+    reflection:rationale   = "WRN is both a 3'-5' exonuclease and a 3'-5' helicase, and these activities are SEPARABLE — the E84A and K577M point mutants each ablate one without the other (Swanson 2004 [14], a litclaim premise). Given that separability, rescuing sgWRN-EIJ with catalytic-dead constructs localises the essential activity: a helicase-dead (K577M) cDNA that FAILS to rescue (while WT does) shows the helicase activity is required for the MSI viability phenotype.";
     reflection:canonical_proposition = type_expr(
+        litclaim:WRNActivitiesSeparable("WRN")
+        ->
         onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ")
         ->
         onco:RequiresActivity("WRN", "helicase")
@@ -129,8 +132,10 @@ resource wrn:helicase_rule_trace : reflection:DeclarationTrace {
 // rescuing means the exonuclease activity is not required.
 resource wrn:exo_rule : reflection:DeclaredResource {
     reflection:declared_by = "wrn-paper:structure-function-dissection";
-    reflection:rationale   = "An exonuclease-dead (E84A) WRN cDNA that still rescues sgWRN-EIJ (rescue not attenuated) shows the exonuclease activity is dispensable for the MSI viability phenotype.";
+    reflection:rationale   = "Given that WRN's exonuclease and helicase activities are SEPARABLE (E84A ablates only the exonuclease; Swanson 2004 [14], a litclaim premise), an exonuclease-dead (E84A) WRN cDNA that still rescues sgWRN-EIJ (rescue not attenuated) shows the exonuclease activity is dispensable for the MSI viability phenotype.";
     reflection:canonical_proposition = type_expr(
+        litclaim:WRNActivitiesSeparable("WRN")
+        ->
         onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")
         ->
         onco:DispensableActivity("WRN", "exonuclease")
@@ -179,18 +184,28 @@ resource wrn:concl_helicase_required : reasoning:ReasoningSentence {
         onco:RequiresActivity("WRN", "helicase")
     );
     reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:helicase_rule"),
+        App(
+            DeclaredEvidence("urn:eigenius:pub:wrn:helicase_rule"),
+            DeclaredEvidence("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
+        ),
         DerivedEvidence("urn:eigenius:pub:wrn:va_fail_k577m")
     );
     reasoning:certificate = type_expr(
         alias
             RULE = "urn:eigenius:pub:wrn:helicase_rule",
+            LIT  = "urn:eigenius:pub:wrn:lit:lit_wrn_separable",
             ART  = "urn:eigenius:pub:wrn:va_fail_k577m",
+            SEP  = litclaim:WRNActivitiesSeparable("WRN"),
             FR   = onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ"),
-            RA   = onco:RequiresActivity("WRN", "helicase")
+            RA   = onco:RequiresActivity("WRN", "helicase"),
+            RULE_P = SEP -> FR -> RA,
+            jSEP = DeclaredEvidence(LIT),
+            jFR  = DerivedEvidence(ART),
+            cert1 = app(SEP, FR -> RA, DeclaredEvidence(RULE), jSEP,
+                        declared(RULE, RULE_P), declared(LIT, SEP))
         in
-        app(FR, RA, DeclaredEvidence(RULE), DerivedEvidence(ART),
-            declared(RULE, FR -> RA), derived(ART, FR))
+        app(FR, RA, reasoning:App(DeclaredEvidence(RULE), jSEP), jFR,
+            cert1, derived(ART, FR))
     );
 }
 
@@ -201,17 +216,27 @@ resource wrn:concl_exo_dispensable : reasoning:ReasoningSentence {
         onco:DispensableActivity("WRN", "exonuclease")
     );
     reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:exo_rule"),
+        App(
+            DeclaredEvidence("urn:eigenius:pub:wrn:exo_rule"),
+            DeclaredEvidence("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
+        ),
         VerifiedEvidence("urn:eigenius:pub:wrn:concl_rescue_e84a_recomputed")
     );
     reasoning:certificate = type_expr(
         alias
             RULE  = "urn:eigenius:pub:wrn:exo_rule",
+            LIT   = "urn:eigenius:pub:wrn:lit:lit_wrn_separable",
             CONCL = "urn:eigenius:pub:wrn:concl_rescue_e84a_recomputed",
+            SEP   = litclaim:WRNActivitiesSeparable("WRN"),
             RES   = onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ"),
-            DA    = onco:DispensableActivity("WRN", "exonuclease")
+            DA    = onco:DispensableActivity("WRN", "exonuclease"),
+            RULE_P = SEP -> RES -> DA,
+            jSEP  = DeclaredEvidence(LIT),
+            jRES  = VerifiedEvidence(CONCL),
+            cert1 = app(SEP, RES -> DA, DeclaredEvidence(RULE), jSEP,
+                        declared(RULE, RULE_P), declared(LIT, SEP))
         in
-        app(RES, DA, DeclaredEvidence(RULE), VerifiedEvidence(CONCL),
-            declared(RULE, RES -> DA), verified(CONCL, RES))
+        app(RES, DA, reasoning:App(DeclaredEvidence(RULE), jSEP), jRES,
+            cert1, verified(CONCL, RES))
     );
 }

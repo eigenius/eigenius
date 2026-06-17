@@ -91,13 +91,17 @@ eig inspect "urn:eigenius:core:Class" >/dev/null
 echo "Stack healthy."
 echo
 
-# Step 1: ontology deps. reasoning + statistics are seeded in the kernel
-# image; bench-core + onco carry the domain vocabulary (bench:Measurement,
+# Step 1: ontology deps. reasoning + statistics + reference are seeded in the
+# kernel image; bench-core + onco carry the domain vocabulary (bench:Measurement,
 # onco:Gene / onco:InVivoDependence / ...) the WRN chain + the
-# canonical_proposition ConstRefs resolve against.
-echo "--- Step 1: Load ontology deps (bench-core, onco) ---"
+# canonical_proposition ConstRefs resolve against. wrn-literature carries the
+# bibliographic References + the imported-claim warrants (reference:Citation)
+# that the structure-function rules [14] and the seed-control rule [16] compose
+# as premises, so it must load before the phases that cite it.
+echo "--- Step 1: Load ontology deps (bench-core, onco, wrn-literature) ---"
 eig load "$REPO_DIR/experiments/benchmark/base-ontologies/bench-core.esl"
 eig load "$WRN/onco.esl"
+eig load "$WRN/wrn-literature.esl"
 echo
 
 # Step 2: recompute layers, then the narrative on top. Order matters and

@@ -35,7 +35,49 @@ use eigenius_kernel::ontology::well_known as wk;
 use eigenius_reasoning::validate::do_validate_justification;
 use eigenius_reasoning::ReasoningInstitution;
 
+/// Statistics-institution-recomputed conclusions (DerivedEvidence witnesses
+/// emitted out of band); validated in wrn_phase1_recompute.rs. See esl_against_pending.
+const STATS_RECOMPUTED: &[&str] = &[
+    "urn:eigenius:pub:wrn:concl_wrn_selective_recomputed",
+    "urn:eigenius:pub:wrn:concl_refine_recomputed",
+    "urn:eigenius:pub:wrn:concl_lineage_mutator_recomputed",
+    "urn:eigenius:pub:wrn:concl_coloc_recomputed",
+    "urn:eigenius:pub:wrn:concl_apop_shrna_recomputed",
+    "urn:eigenius:pub:wrn:concl_hcr_recomputed",
+    "urn:eigenius:pub:wrn:concl_recq_recomputed",
+    "urn:eigenius:pub:wrn:concl_biomarker_recomputed",
+    "urn:eigenius:pub:wrn:concl_p53_modulates",
+    "urn:eigenius:pub:wrn:concl_val_recomputed",
+    "urn:eigenius:pub:wrn:concl_cellcycle_recomputed",
+    "urn:eigenius:pub:wrn:concl_apoptosis_recomputed",
+    "urn:eigenius:pub:wrn:concl_mmr_restoration_recomputed",
+    "urn:eigenius:pub:wrn:concl_rescue_wt_recomputed",
+    "urn:eigenius:pub:wrn:concl_rescue_e84a_recomputed",
+];
+
+/// Conclusions whose witnesses come from the R runtime; covered live by the demo.
+const R_RUNTIME: &[&str] = &[
+    "urn:eigenius:pub:wrn:concl_vivo",
+    "urn:eigenius:pub:wrn:concl_p53_activation",
+    "urn:eigenius:pub:wrn:concl_dsb_foci",
+    "urn:eigenius:pub:wrn:concl_paralog",
+];
+
 fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
+    esl_against_pending(source, parent, name, &[])
+}
+
+/// Build a layer from ESL, then replicate the live commit pipeline's AutoOnLoad
+/// gate: every `reasoning:ReasoningSentence` this layer adds MUST validate to
+/// `Holds`, else the live loader would reject it (and a downstream lemma citation
+/// would be unsound). Panics on a non-`Holds` sentence unless its IRI is in
+/// `pending` (witnesses produced out of band — R runtime / statistics institution).
+fn esl_against_pending(
+    source: &str,
+    parent: &Arc<Layer>,
+    name: &str,
+    pending: &[&str],
+) -> Arc<Layer> {
     let resources = esl::compile_against_layer(source, parent).unwrap_or_else(|errs| {
         panic!(
             "{name} failed to compile:\n{}",
@@ -46,10 +88,48 @@ fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
         )
     });
     let mut b = LayerBuilder::new(name, Some(parent.clone()));
-    for r in resources {
-        b.add_resource(r).unwrap();
+    for r in &resources {
+        b.add_resource(r.clone()).unwrap();
     }
-    Arc::new(b.build(LayerStorage::in_memory()))
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    let _ = layer.chain_witness_index();
+    let ctx = ExecutionContext::new(
+        layer.clone(),
+        name,
+        ExecutionMode::ReadOnly,
+        LayerStorage::in_memory(),
+    );
+    let inst = ReasoningInstitution::new();
+    let sentence_class = "urn:eigenius:reasoning:ReasoningSentence";
+    for r in &resources {
+        if !r.is_a().iter().any(|c| c.as_str() == sentence_class) {
+            continue;
+        }
+        let iri = r.id().map(|i| i.as_str().to_string()).unwrap_or_default();
+        let outcome =
+            do_validate_justification(&inst, r, &ctx).expect("validate handler returns outcome");
+        let ctor = outcome
+            .output
+            .get(&Iri::parse(wk::CTOR_NAME).unwrap())
+            .and_then(Value::as_str)
+            .unwrap_or("<none>");
+        if ctor != wk::VERDICT_HOLDS && !pending.iter().any(|p| *p == iri) {
+            let diag = outcome
+                .output
+                .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            panic!(
+                "esl_against({name}): conclusion `{iri}` did not Hold (got {ctor}) — the live \
+                 AutoOnLoad gate would reject this layer, so a downstream lemma citation of it \
+                 would be unsound. diagnostic: {diag}\n  If its witness is produced out of band \
+                 (R runtime / statistics institution AutoOnLoad, not run in this harness), add \
+                 its IRI to `pending`."
+            );
+        }
+    }
+    layer
 }
 
 fn verdict(
@@ -130,20 +210,27 @@ fn build_ctx() -> ExecutionContext {
         &harness,
         "onco",
     );
+    // Literature layer: phase2/phase3 rules compose its warrants as premises.
+    let literature = esl_against(
+        include_str!("../../../experiments/publications/wrn-helicase/wrn-literature.esl"),
+        &onco,
+        "wrn-literature",
+    );
     // D54 two-phase load: plans (emitters) before conclusions (consumers).
     let recompute_plans = esl_against(
         include_str!(
             "../../../experiments/publications/wrn-helicase/wrn-phase1-recompute-plans.esl"
         ),
-        &onco,
+        &literature,
         "wrn-recompute-plans",
     );
-    let recompute = esl_against(
+    let recompute = esl_against_pending(
         include_str!(
             "../../../experiments/publications/wrn-helicase/wrn-phase1-recompute-conclusions.esl"
         ),
         &recompute_plans,
         "wrn-recompute-conclusions",
+        STATS_RECOMPUTED,
     );
     let phase1 = esl_against(
         include_str!("../../../experiments/publications/wrn-helicase/wrn-phase1.esl"),
@@ -155,10 +242,11 @@ fn build_ctx() -> ExecutionContext {
         &phase1,
         "wrn-phase2",
     );
-    let phase3 = esl_against(
+    let phase3 = esl_against_pending(
         include_str!("../../../experiments/publications/wrn-helicase/wrn-phase3.esl"),
         &phase2,
         "wrn-phase3",
+        R_RUNTIME,
     );
     let phase5 = esl_against(
         include_str!("../../../experiments/publications/wrn-helicase/wrn-phase5.esl"),
