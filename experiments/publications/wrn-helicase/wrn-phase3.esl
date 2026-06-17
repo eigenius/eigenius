@@ -136,33 +136,62 @@ resource wrn:concl_vivo_ontarget : reasoning:ReasoningSentence {
     );
 }
 
-// Reproduced-external (C-MECH p53 arm): WRN loss activates the p53 DDR. Like
-// concl_vivo, the witness only exists after the R program runs — the per-cell
-// p-p53(S15)/p21 immunofluorescence (ED Fig 5b/d/f, 175,974 cells pinned as a
-// D53 file-backed SampleSet) is dispatched through a D56 wrapped-R `emmeans`
-// least-squares-means contrast:
-//   - programs/if-ed5-input.json  — the tidy per-cell IF intensities (primary)
-//   - programs/if-ed5-lsmeans-program.json — applies RunRuntimeScript; joins
-//     genotype from Supp Table 1 (additional input) and runs the WRN-KO-vs-
-//     control lsmeans contrast on log-intensity over the MSI + TP53-proficient
-//     stratum, emitting `wrn:if_ed5:result` with
-//     `canonical_proposition = onco:ActivatesP53Response("WRN","MSI")` (set when
-//     BOTH p-p53 and p21 rise significantly: logFC +0.155 / +0.310). p21 is a
-//     p53 transcriptional target, so the p53-null MSI line KM12 fails to induce
-//     it (p21_null_logfc ≈ −0.074) — the p53-INDEPENDENCE control (finding F7),
-//     emitted as a measurement, not a failed warrant.
-// `eigenius run` commits that output under a ProgramTrace, minting the
-// `IsDerivedAs(if_ed5:result, ActivatesP53Response(WRN,MSI))` witness the
-// concl_p53_activation certificate discharges (run before this layer loads).
+// Reproduced-external (C-MECH p53 arm): WRN loss activates the p53 DDR. The
+// wrapped-R `emmeans` warrant (programs/if-ed5-lsmeans-program.json) over the
+// per-cell p-p53(S15)/p21 IF (ED Fig 5b/d/f, 175,974 cells; MSI + TP53-proficient
+// stratum) emits the MEASURED fact `wrn:if_ed5:result` →
+// `onco:RaisesP53DamageMarkers("WRN","MSI")` (set when BOTH p-p53 and p21 rise
+// significantly: logFC +0.155 / +0.310; the p53-null MSI line KM12 fails to
+// induce p21 — finding F7). The ACTIVATION interpretation is then a logical step
+// over the literature: phospho-p53(S15) marks p53 activation (Loughery 2014 [16
+// → wrn:lit:lit_ps15_readout]). The p53_activation_rule composes that premise
+// with the measured fact; concl_p53_activation discharges it (the if_ed5 witness
+// is minted by the R run; lit_ps15_readout by its DeclarationTrace).
+resource wrn:p53_activation_rule : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:p53-activation-readout";
+    reflection:rationale   = "Phospho-p53(Ser15) is an ATR/ATM DNA-damage-response target that marks p53 activation (Loughery 2014, the lit_ps15_readout premise). Given that, if WRN depletion raises p-p53(S15) (and the p53 target p21) in MSI cells, WRN depletion activates the p53 response in MSI.";
+    reflection:canonical_proposition = type_expr(
+        litclaim:pS15MarksP53Activation("p53")
+        ->
+        onco:RaisesP53DamageMarkers("WRN", "MSI")
+        ->
+        onco:ActivatesP53Response("WRN", "MSI")
+    );
+}
+resource wrn:p53_activation_rule_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:p53_activation_rule;
+    reflection:declared_by = "wrn-paper:p53-activation-readout";
+    reflection:timestamp   = "2026-06-17T00:00:00Z";
+}
+
 resource wrn:concl_p53_activation : reasoning:ReasoningSentence {
     reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     reasoning:proposition = type_expr(
         onco:ActivatesP53Response("WRN", "MSI")
     );
-    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:if_ed5:result");
+    reasoning:justification = App(
+        App(
+            DeclaredEvidence("urn:eigenius:pub:wrn:p53_activation_rule"),
+            DeclaredEvidence("urn:eigenius:pub:wrn:lit:lit_ps15_readout")
+        ),
+        DerivedEvidence("urn:eigenius:pub:wrn:if_ed5:result")
+    );
     reasoning:certificate = type_expr(
-        derived("urn:eigenius:pub:wrn:if_ed5:result",
-                onco:ActivatesP53Response("WRN", "MSI"))
+        alias
+            RULE = "urn:eigenius:pub:wrn:p53_activation_rule",
+            LIT  = "urn:eigenius:pub:wrn:lit:lit_ps15_readout",
+            RES  = "urn:eigenius:pub:wrn:if_ed5:result",
+            PS15 = litclaim:pS15MarksP53Activation("p53"),
+            RM   = onco:RaisesP53DamageMarkers("WRN", "MSI"),
+            AP   = onco:ActivatesP53Response("WRN", "MSI"),
+            RULE_P = PS15 -> RM -> AP,
+            jPS15 = DeclaredEvidence(LIT),
+            jRM   = DerivedEvidence(RES),
+            cert1 = app(PS15, RM -> AP, DeclaredEvidence(RULE), jPS15,
+                        declared(RULE, RULE_P), declared(LIT, PS15))
+        in
+        app(RM, AP, reasoning:App(DeclaredEvidence(RULE), jPS15), jRM,
+            cert1, derived(RES, RM))
     );
 }
 

@@ -198,12 +198,14 @@ resource wrn:concl_wrn_selective : reasoning:ReasoningSentence {
 resource wrn:discovery_finding : bench:TaskOutput {
     bench:task             = "urn:eigenius:pub:wrn:question_msi_vulnerability";
     bench:deliverable_kind = "prose";
-    bench:payload = "Computational discovery (DepMap Achilles CRISPR + Project DRIVE RNAi): WRN, a RecQ DNA helicase, is the top preferential dependency in microsatellite-unstable (MSI) vs microsatellite-stable (MSS) cancer cell lines, independently in both screens; it is the only MSI-selective member of the RecQ helicase family; MSI is a strong biomarker for WRN dependency (comparable to KRAS/BRAF); and WRN dependency tracks mutator load within MSI lines. Conclusion: WRN is selectively essential in MSI cancers.";
+    bench:payload = "Computational discovery (DepMap Achilles CRISPR + Project DRIVE RNAi): WRN, a RecQ DNA helicase, is the top preferential dependency in microsatellite-unstable (MSI) vs microsatellite-stable (MSS) cancer cell lines, independently in both screens; it is the only MSI-selective member of the RecQ helicase family; MSI is a strong biomarker for WRN dependency (comparable to KRAS/BRAF); and WRN dependency tracks mutator load within MSI lines. The biomarker is lineage-restricted — the common MSI lineages carry a higher microsatellite-deletion load than uncommon ones (ED Fig 2b) — and the dependence is modulated but not abolished by TP53 status (largely p53-independent). Conclusion: WRN is selectively essential in MSI cancers.";
     bench:reasoning_chain  = [
         "urn:eigenius:pub:wrn:concl_wrn_selective_recomputed",
         "urn:eigenius:pub:wrn:concl_recq_recomputed",
         "urn:eigenius:pub:wrn:concl_biomarker_recomputed",
-        "urn:eigenius:pub:wrn:concl_refine_recomputed"
+        "urn:eigenius:pub:wrn:concl_refine_recomputed",
+        "urn:eigenius:pub:wrn:concl_lineage_mutator_recomputed",
+        "urn:eigenius:pub:wrn:concl_p53_modulates"
     ];
     reflection:derivation = wrn:discovery_finding_trace;
 }

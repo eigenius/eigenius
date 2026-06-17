@@ -285,7 +285,7 @@ if [ -f "$SLICES/if_ed5_long.csv" ]; then
     eig load "$PROGRAMS/if-ed5-files.json"        # LongTable DatasetSchema
     eig load "$PROGRAMS/if-ed5-input.json"        # IF PinnedExternalFile node
     run_r_program "$PROGRAMS/if-ed5-lsmeans-program.json" \
-        "$PROGRAMS/if-ed5-input.json" "logfc|p_value|ActivatesP53Response"
+        "$PROGRAMS/if-ed5-input.json" "logfc|p_value|RaisesP53DamageMarkers"
 else
     echo "  3g. C-MECH p53 IF emmeans -> SKIPPED (derived slice not present; see programs/if-ed5-extract.R)"
 fi

@@ -195,12 +195,19 @@ data onco:CausesCellCycleArrest : core:string -> core:string -> Prop {
 data onco:CausesApoptosis : core:string -> core:string -> Prop {
 }
 
+// (gene, context): the MEASURED immunofluorescence fact — gene depletion raises
+// phospho-p53(S15) AND p21 staining intensity in the context (ED Fig 5b/d/f,
+// MSI + TP53-proficient lines; emmeans lsmeans). This is what the wrapped-R
+// warrant emits; the activation INTERPRETATION (below) is lifted from it by the
+// p53-S15-readout literature premise [17].
+data onco:RaisesP53DamageMarkers : core:string -> core:string -> Prop {
+}
+
 // (gene, context): gene depletion activates the p53 DNA-damage response in the
-// context — a downstream DSB-driven-DDR consequence manifesting as raised
-// phospho-p53(S15) and p21 immunofluorescence intensity (ED Fig 5b/d/f,
-// reproduced-external via emmeans lsmeans). MSI-selective AND p53-status-gated:
-// p21 (a p53 transcriptional target) is induced only where p53 is intact, so
-// the warrant is recomputed over the MSI + TP53-proficient lines.
+// context — a downstream DSB-driven-DDR consequence. Derived from the measured
+// marker rise (onco:RaisesP53DamageMarkers) via the literature premise that
+// phospho-p53(S15) marks p53 activation (Loughery 2014 [17]); see the
+// p53_activation_rule in wrn-phase3.esl. MSI-selective AND p53-status-gated.
 data onco:ActivatesP53Response : core:string -> core:string -> Prop {
 }
 

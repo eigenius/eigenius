@@ -99,13 +99,14 @@ resource wrn:concl_mmr : reasoning:ReasoningSentence {
 
 resource wrn:synthesis_rule : reflection:DeclaredResource {
     reflection:declared_by = "wrn-paper:synthetic-lethality-thesis";
-    reflection:rationale   = "The paper's thesis composes its findings: WRN depletion selectively impairs MSI viability (C-VAL), validated in vivo and in a patient-derived model (C-VIVO); the helicase activity is the required function (D-HELICASE); the lethality is driven by MSI-selective DSB-induced DNA-damage response (C-MECH); and dMMR contributes to the dependence (C-MMR). Together these establish WRN — specifically its helicase activity — as a synthetic-lethal therapeutic target in MSI cancers.";
+    reflection:rationale   = "The paper's thesis composes its findings: WRN depletion selectively impairs MSI viability (C-VAL), validated in vivo and in a patient-derived model (C-VIVO); the helicase activity is the required function (D-HELICASE); the lethality is driven by MSI-selective DSB-induced DNA-damage response (C-MECH); dMMR contributes to the dependence (C-MMR); and the MSI-selective dependence is intrinsic to MSI, not a confound of paralogue co-loss (the ED Fig 9a specificity control). Together these establish WRN — specifically its helicase activity — as a synthetic-lethal therapeutic target in MSI cancers.";
     reflection:canonical_proposition = type_expr(
         onco:SelectiveViabilityDependence("WRN", "MSI") ->
         onco:InVivoDependence("WRN", "MSI") ->
         onco:RequiresActivity("WRN", "helicase") ->
         onco:DSBDrivenLethality("WRN", "MSI") ->
         onco:ContributesToDependence("dMMR", "WRN") ->
+        onco:NotExplainedByParalogLoss("WRN", "MSI") ->
         onco:SyntheticLethal("WRN", "MSI")
     );
 }
@@ -130,16 +131,19 @@ resource wrn:concl_main : reasoning:ReasoningSentence {
             App(
                 App(
                     App(
-                        DeclaredEvidence("urn:eigenius:pub:wrn:synthesis_rule"),
-                        VerifiedEvidence("urn:eigenius:pub:wrn:concl_val_recomputed")
+                        App(
+                            DeclaredEvidence("urn:eigenius:pub:wrn:synthesis_rule"),
+                            VerifiedEvidence("urn:eigenius:pub:wrn:concl_val_recomputed")
+                        ),
+                        VerifiedEvidence("urn:eigenius:pub:wrn:concl_vivo")
                     ),
-                    VerifiedEvidence("urn:eigenius:pub:wrn:concl_vivo")
+                    VerifiedEvidence("urn:eigenius:pub:wrn:concl_helicase_required")
                 ),
-                VerifiedEvidence("urn:eigenius:pub:wrn:concl_helicase_required")
+                VerifiedEvidence("urn:eigenius:pub:wrn:concl_mech")
             ),
-            VerifiedEvidence("urn:eigenius:pub:wrn:concl_mech")
+            VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr")
         ),
-        VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr")
+        VerifiedEvidence("urn:eigenius:pub:wrn:concl_paralog")
     );
 
     reasoning:certificate = type_expr(
@@ -150,32 +154,37 @@ resource wrn:concl_main : reasoning:ReasoningSentence {
             RA  = onco:RequiresActivity("WRN", "helicase"),
             DL  = onco:DSBDrivenLethality("WRN", "MSI"),
             CD  = onco:ContributesToDependence("dMMR", "WRN"),
+            PAR = onco:NotExplainedByParalogLoss("WRN", "MSI"),
             SL  = onco:SyntheticLethal("WRN", "MSI"),
-            RULE_P = SVD -> IVD -> RA -> DL -> CD -> SL,
+            RULE_P = SVD -> IVD -> RA -> DL -> CD -> PAR -> SL,
             // antecedent justification terms — lemma citations of conclusions
             jSVD = VerifiedEvidence("urn:eigenius:pub:wrn:concl_val_recomputed"),
             jIVD = VerifiedEvidence("urn:eigenius:pub:wrn:concl_vivo"),
             jRA  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_helicase_required"),
             jDL  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_mech"),
             jCD  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr"),
+            jPAR = VerifiedEvidence("urn:eigenius:pub:wrn:concl_paralog"),
             // antecedent certificates — one verified(conclusion, P) each
             cSVD = verified("urn:eigenius:pub:wrn:concl_val_recomputed", SVD),
             cIVD = verified("urn:eigenius:pub:wrn:concl_vivo", IVD),
             cRA  = verified("urn:eigenius:pub:wrn:concl_helicase_required", RA),
             cDL  = verified("urn:eigenius:pub:wrn:concl_mech", DL),
             cCD  = verified("urn:eigenius:pub:wrn:concl_mmr", CD),
+            cPAR = verified("urn:eigenius:pub:wrn:concl_paralog", PAR),
             // modus-ponens spine (unchanged — the "from A follows B" backbone)
-            c1 = app(SVD, IVD -> RA -> DL -> CD -> SL,
+            c1 = app(SVD, IVD -> RA -> DL -> CD -> PAR -> SL,
                      DeclaredEvidence(RULE), jSVD, declared(RULE, RULE_P), cSVD),
-            c2 = app(IVD, RA -> DL -> CD -> SL,
+            c2 = app(IVD, RA -> DL -> CD -> PAR -> SL,
                      reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD, c1, cIVD),
-            c3 = app(RA, DL -> CD -> SL,
+            c3 = app(RA, DL -> CD -> PAR -> SL,
                      reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA, c2, cRA),
-            c4 = app(DL, CD -> SL,
-                     reasoning:App(reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA), jDL, c3, cDL)
+            c4 = app(DL, CD -> PAR -> SL,
+                     reasoning:App(reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA), jDL, c3, cDL),
+            c5 = app(CD, PAR -> SL,
+                     reasoning:App(reasoning:App(reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA), jDL), jCD, c4, cCD)
         in
-        app(CD, SL,
-            reasoning:App(reasoning:App(reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA), jDL),
-            jCD, c4, cCD)
+        app(PAR, SL,
+            reasoning:App(reasoning:App(reasoning:App(reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA), jDL), jCD),
+            jPAR, c5, cPAR)
     );
 }

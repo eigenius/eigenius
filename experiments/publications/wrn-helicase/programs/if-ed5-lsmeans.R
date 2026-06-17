@@ -39,6 +39,6 @@ b <- .Call("r_eigon_begin", "urn:eigenius:pub:wrn:if_ed5:result")
 if (pp$estimate[1] > 0 && pp$p.value[1] < 0.05 &&
     p21$estimate[1] > 0 && p21$p.value[1] < 0.05) {
   .Call("r_eigon_set_proposition", b,
-        "urn:eigenius:benchmark:onco:ActivatesP53Response", c("WRN", "MSI"))
+        "urn:eigenius:benchmark:onco:RaisesP53DamageMarkers", c("WRN", "MSI"))
 }
 .Call("r_eigon_finish", b)

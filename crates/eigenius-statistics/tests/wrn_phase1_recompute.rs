@@ -349,8 +349,9 @@ fn wrn_warrants_kernel_recomputed() {
     // discovery rule), warranted by the linked-external ToolArtifacts.
     assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_wrn_selective");
 
-    // ── Step 4: the Phase-1 deliverable resolves and cites the four
-    //            kernel-recomputed conclusions ──
+    // ── Step 4: the Phase-1 deliverable resolves and cites the six
+    //            kernel-recomputed discovery conclusions (the core four plus the
+    //            lineage-restriction [ED2b] and TP53-modulation characterizations) ──
     let finding = ctx
         .resolve(&Iri::parse("urn:eigenius:pub:wrn:discovery_finding").unwrap())
         .expect("discovery_finding TaskOutput on chain");
@@ -359,5 +360,5 @@ fn wrn_warrants_kernel_recomputed() {
         Some(Value::Array(a)) => a.len(),
         other => panic!("reasoning_chain not an array: {other:?}"),
     };
-    assert_eq!(n_chain, 4, "discovery_finding should cite 4 conclusions");
+    assert_eq!(n_chain, 6, "discovery_finding should cite 6 conclusions");
 }
