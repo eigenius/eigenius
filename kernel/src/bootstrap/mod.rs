@@ -894,6 +894,7 @@ mod tests {
         // both resolve from the seeded reference layer.
         for iri in [
             "urn:eigenius:reference:Reference",
+            "urn:eigenius:reference:Citation",
             "urn:eigenius:reference:CitationType",
             "urn:eigenius:reference:cites_as_evidence",
             "urn:eigenius:reference:citation_type",

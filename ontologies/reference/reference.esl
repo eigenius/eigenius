@@ -6,53 +6,57 @@
 // above the `ingest` layer): always present on every chain, so any study
 // encoding can cite literature without first loading a support layer.
 //
-// DESIGN — three concerns, three standards, kept native to the platform's
-// own epistemic model rather than grafting on a parallel RDF graph:
+// DESIGN — separate the WORK from a USE of it, three standards, kept native to
+// the platform's own epistemic model rather than grafting on a parallel RDF graph:
 //
-//   1. The imported CLAIM (what the reference warrants) is **Declared**.
-//      An imported literature claim is asserted on external authority — it
-//      is neither observed/derived/verified data nor a kernel proof — so it
-//      is exactly a `reflection:DeclaredResource` whose
-//      `reflection:canonical_proposition` IS the imported claim. Consuming
-//      nodes cite it through the existing `reasoning:DeclaredEvidence`
-//      mechanism (no new machinery). This half already worked; we only add
-//      the reference identity + the typed link.
+//   0. REFERENCE vs CITATION (the core split, after BiRO / CiTO). A
+//      `reference:Reference` is the global bibliographic WORK (Buehler 2012); a
+//      `reference:Citation` is one citing entity's USE of that work. Anything
+//      local to the citing document — the in-text reference number, the CiTO
+//      function, the imported claim — lives on the Citation, never on the
+//      Reference (a different paper citing the same work numbers it differently).
+//
+//   1. The imported CLAIM (what a citation warrants) is **Declared**.
+//      `reference:Citation` is a `reflection:DeclaredResource`: a citation is an
+//      asserted act, and when it imports a claim (a *literature warrant*) the
+//      claim IS its `reflection:canonical_proposition`. Consuming nodes cite the
+//      warrant through the existing `reasoning:DeclaredEvidence` mechanism.
 //
 //   2. The reference IDENTITY + METADATA follows **CSL-JSON / Dublin Core**.
-//      `reference:Reference` is an epistemically-neutral bibliographic
-//      record (it asserts nothing; the warrant does). Its fields mirror
-//      CSL-JSON (the de-facto Zotero/Pandoc bibliographic data model) and
-//      Dublin Core terms, so a chain's references round-trip to/from a
-//      standard bibliography. The DOI is the stable identity; the canonical
-//      IRI form is `urn:eigenius:reference:doi:<doi>`.
+//      `reference:Reference` is epistemically neutral (it asserts nothing; the
+//      Citation does). Its fields mirror CSL-JSON (the de-facto Zotero/Pandoc
+//      bibliographic data model) + Dublin Core, so a chain's bibliography
+//      round-trips to standard tooling. Identity = DOI and/or PubMed ID.
 //
 //   3. The citation FUNCTION follows **CiTO** (Citation Typing Ontology,
-//      SPAR). `reference:citation_type` names HOW the cited work is used —
-//      background / method / evidence / source-document / authority — so the
-//      "what claim does this reference support" table (encoding-plan §3)
-//      becomes machine-meaningful, not a flat bibliography. Each citation
-//      type carries `reference:cito_iri`, the canonical CiTO URI, for export.
+//      SPAR). `reference:citation_type` (on the Citation) names HOW the work is
+//      used — background / method / evidence / source-document / authority — so
+//      the "what claim does this reference support" table (encoding-plan §3)
+//      becomes machine-meaningful. Each type carries `reference:cito_iri`.
 //
 // WORKED EXAMPLE (the shape an encoding produces; lives in wrn-literature.esl):
 //
-//   // (1) the reference — identity + metadata
+//   // (1) the Reference — the global bibliographic WORK (no citing-doc-local
+//   //     fields like a reference number; those belong on the Citation).
 //   resource lit:buehler_2012 : reference:Reference {
-//       reference:doi             = "10.1186/1756-0500-5-232";
-//       reference:title           = "siRNA off-target effects ... C911 controls";
-//       reference:creator         = "Buehler E, et al.";
-//       reference:container_title = "BMC Research Notes";
+//       reference:doi             = "10.1371/journal.pone.0051942";
+//       reference:title           = "C911: a bench-level control for ... siRNA off-target effects";
+//       reference:creator         = "Buehler E, Chen YC, Martin S";
+//       reference:container_title = "PLoS One";
 //       reference:issued_year     = 2012;
-//       reference:reference_label = "16";   // the WRN paper's own [16]
 //   }
-//   // (2) the literature warrant — the imported claim, Declared, typed by CiTO.
-//   //     reference:cites is the authoritative reference link (declared_by is
-//   //     compiler-stamped on commit, so it can't name the reference).
-//   resource wrn:lit_c911_design : reflection:DeclaredResource {
+//   // (2) the Citation — THIS encoding's use of that work: a Declared act that
+//   //     carries the CiTO function, the citing doc's local label, and (when it
+//   //     imports a claim, i.e. a literature warrant) the claim via
+//   //     canonical_proposition. reference:cites is the authoritative link
+//   //     (declared_by is compiler-stamped on commit).
+//   resource wrn:lit_c911_design : reference:Citation {
+//       reference:cites                  = lit:buehler_2012;
+//       reference:citation_type          = reference:uses_method_in;
+//       reference:reference_label        = "16";   // the WRN paper's own [16]
 //       reflection:rationale             = "A C911 (seed-preserving, target-
 //           disrupted) control isolates on-target from shRNA seed off-target.";
 //       reflection:canonical_proposition = type_expr( onco:SeedControlIsValid("C911") );
-//       reference:cites                  = lit:buehler_2012;
-//       reference:citation_type          = reference:uses_method_in;
 //   }
 //   // (3) a node CITES the warrant via the existing reasoning mechanism —
 //   //     e.g. wrn:seed_control_rule's justification gains
@@ -63,22 +67,27 @@ namespace formats    = "urn:eigenius:core:formats";
 namespace reflection = "urn:eigenius:reflection";
 namespace reference  = "urn:eigenius:reference";
 
-// ── The bibliographic entity (CSL-JSON / Dublin Core aligned) ────────────
+// ── The bibliographic WORK (CSL-JSON / Dublin Core aligned) ──────────────
 //
-// A published work, identified by DOI. Epistemically neutral: it is a record
-// of an external artifact and asserts nothing on its own (a marker class with
-// metadata, like stats:ImpossibilityWitness). The CLAIM it warrants lives in
-// the separate Declared literature warrant that `reference:cites` it.
+// A published work, identified by DOI / PubMed ID. Epistemically neutral: it is
+// a global record of an external artifact and asserts nothing on its own (a
+// marker class with metadata, like stats:ImpossibilityWitness). It carries NO
+// citing-document-local fields — those live on reference:Citation. The CLAIM a
+// citation warrants lives on the Citation that `reference:cites` this work.
 
 class reference:Reference {
-    description = "A published work cited by an encoding. Identity is the DOI (IRI form urn:eigenius:reference:doi:<doi>). Metadata fields follow CSL-JSON / Dublin Core so a chain's bibliography is interoperable. Epistemically neutral: it asserts nothing — the imported claim is carried by a reflection:DeclaredResource literature warrant that references it via reference:cites.";
-    requires reference:doi;
-    recommends reference:title, reference:creator, reference:container_title,
-               reference:issued_year, reference:reference_label, reference:url;
+    description = "A published work cited by an encoding — the global bibliographic record, reusable across any number of citing documents. Identified by a DOI and/or a PubMed ID (reference:doi / reference:pmid — the authoritative external identifiers); the IRI is a stable readable slug, by convention urn:eigenius:reference:lit:<first-author>_<year>. Metadata fields follow CSL-JSON / Dublin Core so a chain's bibliography is interoperable. Epistemically neutral: it asserts nothing, and carries no citing-doc-local data (in-text number, citation function, imported claim) — those belong on reference:Citation.";
+    recommends reference:doi, reference:pmid, reference:title, reference:creator,
+               reference:container_title, reference:issued_year, reference:url;
 }
 
 property reference:doi : core:string {
-    description = "Digital Object Identifier (CSL 'DOI'), bare form '10.xxxx/...'. The stable identity; the canonical IRI is urn:eigenius:reference:doi:<doi>.";
+    description = "Digital Object Identifier (CSL 'DOI'), bare form '10.xxxx/...'. Preferred stable identity; canonical IRI urn:eigenius:reference:doi:<doi>.";
+    domain reference:Reference;
+}
+
+property reference:pmid : core:string {
+    description = "PubMed identifier (the common biomedical-literature id; not a CSL field but carried in PubMed/NCBI exports). Used as identity when no DOI is recorded; canonical IRI urn:eigenius:reference:pmid:<pmid>.";
     domain reference:Reference;
 }
 
@@ -105,11 +114,6 @@ property reference:issued_year : core:integer {
 property reference:url : core:string {
     description = "Resolvable URL for the work (CSL 'URL'); typically https://doi.org/<doi>.";
     format = formats:iri;
-    domain reference:Reference;
-}
-
-property reference:reference_label : core:string {
-    description = "The citing work's own in-text label for this reference (e.g. the WRN paper's '[16]'), recorded for cross-walk to its published reference list.";
     domain reference:Reference;
 }
 
@@ -155,29 +159,40 @@ resource reference:cites_as_authority : reference:CitationType {
     reference:cito_iri = "http://purl.org/spar/cito/citesAsAuthority";
 }
 
-// ── Binding a literature warrant to its reference ────────────────────────
+// ── The CITATION (a citing entity's use of a Reference) ──────────────────
 //
-// A literature warrant is a reflection:DeclaredResource: its
-// canonical_proposition IS the imported claim, and the two typed properties
-// below give the machine-readable link (the reference + the CiTO function).
-// `reference:cites` is the AUTHORITATIVE binding — the ESL compiler stamps
-// reflection:declared_by with its own provenance ("esl-compiler") on commit,
-// so it is not available to name the reference. Consuming nodes discharge the
-// claim through reasoning:DeclaredEvidence on the warrant's IRI — unchanged.
+// One use of a Reference: it names the cited work, the CiTO function, and the
+// citing document's local label. A Citation IS a reflection:DeclaredResource —
+// a citation is an asserted act — so a *literature warrant* (a Citation that
+// imports a domain claim) simply carries that claim as its
+// reflection:canonical_proposition, and consuming nodes discharge it via
+// reasoning:DeclaredEvidence on the Citation's IRI. (declared_by is
+// compiler-stamped on commit, so reference:cites is the authoritative link.)
+
+class reference:Citation : reflection:DeclaredResource {
+    description = "A citation — one citing entity's use of a reference:Reference. Carries the cited work (reference:cites), the CiTO citation function (reference:citation_type), and the citing document's own in-text label (reference:reference_label). As a DeclaredResource it may carry an imported claim in reflection:canonical_proposition (then it is a 'literature warrant' a node can discharge via DeclaredEvidence); a Citation without one is pure provenance. All citing-doc-local data lives here, not on the global Reference.";
+    requires reference:cites;
+    recommends reference:citation_type, reference:reference_label;
+}
 
 property reference:cites : core:resource {
-    description = "The published Reference whose claim this DeclaredResource imports. The authoritative reference binding (reflection:declared_by is compiler-stamped, so cannot carry it). The warrant's reflection:canonical_proposition states the imported claim.";
+    description = "The published Reference this Citation uses. The authoritative work link (reflection:declared_by is compiler-stamped, so cannot carry it).";
     class_types reference:Reference;
-    domain reflection:DeclaredResource;
+    domain reference:Citation;
 }
 
 property reference:citation_type : core:resource {
-    description = "How the cited reference is used, from the CiTO-aligned reference:CitationType vocabulary. Constrained by allows_only to the five citation functions, so an unknown value is rejected at commit and narrowing the set is a retroactively-checked change.";
+    description = "How the cited work is used, from the CiTO-aligned reference:CitationType vocabulary. Constrained by allows_only to the five citation functions, so an unknown value is rejected at commit and narrowing the set is a retroactively-checked change.";
     class_types reference:CitationType;
     allows_only reference:obtains_background_from,
                 reference:uses_method_in,
                 reference:cites_as_evidence,
                 reference:cites_as_source_document,
                 reference:cites_as_authority;
-    domain reflection:DeclaredResource;
+    domain reference:Citation;
+}
+
+property reference:reference_label : core:string {
+    description = "The citing document's own in-text label for this citation (e.g. the WRN paper's '[16]'), for cross-walk to its published reference list. Local to the citing document, hence on the Citation — not the Reference.";
+    domain reference:Citation;
 }
