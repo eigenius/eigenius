@@ -405,8 +405,23 @@ pub fn bootstrap_with_storage(
         storage.clone(),
     )?;
 
+    // reference: layer — bibliographic references + literature-citation
+    // warrants. `Reference` (DOI-identified, CSL/Dublin-Core metadata) is an
+    // epistemically-neutral record; the imported claim rides a
+    // reflection:DeclaredResource whose typed `reference:cites` /
+    // `reference:citation_type` (CiTO-aligned, allows_only-constrained) link
+    // it to the work. Sourced from ESL; depends only on core + reflection
+    // (DeclaredResource is the domain of the binding properties), placed at the
+    // tip so any study chain can cite literature out of the box.
+    let reference = load_esl_layer(
+        "reference",
+        include_str!("../../../ontologies/reference/reference.esl"),
+        Some(ingest),
+        storage.clone(),
+    )?;
+
     Ok(ExecutionContext::new(
-        ingest,
+        reference,
         "working",
         ExecutionMode::ReadWrite,
         storage,
@@ -602,7 +617,7 @@ fn check_and_migrate_schema_version(
     Ok(())
 }
 
-fn embedded_ontologies() -> [(&'static str, &'static str); 15] {
+fn embedded_ontologies() -> [(&'static str, &'static str); 16] {
     [
         (
             "core",
@@ -669,6 +684,10 @@ fn embedded_ontologies() -> [(&'static str, &'static str); 15] {
         (
             "ingest",
             include_str!("../../../ontologies/ingest/ingest-ontology.json"),
+        ),
+        (
+            "reference",
+            include_str!("../../../ontologies/reference/reference.esl"),
         ),
     ]
 }
@@ -824,8 +843,10 @@ mod tests {
         // statistics inserted at D52 Phase 5 to declare the
         // Measurement Statistics institution and its chain artifacts.
         assert!(!ctx.head().is_root());
-        // ingest layer (D53) is the tip; notebook sits below it.
-        let notebook = ctx.head().parent().unwrap();
+        // reference layer is the tip; ingest (D53) sits below it, then notebook.
+        let ingest = ctx.head().parent().unwrap();
+        assert!(!ingest.is_root());
+        let notebook = ingest.parent().unwrap();
         assert!(!notebook.is_root());
         let statistics = notebook.parent().unwrap();
         assert!(!statistics.is_root());
@@ -864,6 +885,24 @@ mod tests {
             resolved.is_some(),
             "should resolve Class from core ontology"
         );
+    }
+
+    #[test]
+    fn can_resolve_reference_ontology() {
+        let ctx = bootstrap().unwrap();
+        // The bibliographic class + a CiTO-aligned citation-type individual
+        // both resolve from the seeded reference layer.
+        for iri in [
+            "urn:eigenius:reference:Reference",
+            "urn:eigenius:reference:CitationType",
+            "urn:eigenius:reference:cites_as_evidence",
+            "urn:eigenius:reference:citation_type",
+        ] {
+            assert!(
+                ctx.resolve(&Iri::parse(iri).unwrap()).is_some(),
+                "should resolve {iri} from the reference ontology"
+            );
+        }
     }
 
     #[test]

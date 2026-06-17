@@ -1,0 +1,183 @@
+// reference — bibliographic references + literature-citation warrants.
+//
+// Lets an encoding import a claim from the published literature as a
+// first-class, cite-able warrant, instead of burying the citation in prose.
+// A bootstrap ontology (kernel-seeded via kernel/src/bootstrap/mod.rs, stacked
+// above the `ingest` layer): always present on every chain, so any study
+// encoding can cite literature without first loading a support layer.
+//
+// DESIGN — three concerns, three standards, kept native to the platform's
+// own epistemic model rather than grafting on a parallel RDF graph:
+//
+//   1. The imported CLAIM (what the reference warrants) is **Declared**.
+//      An imported literature claim is asserted on external authority — it
+//      is neither observed/derived/verified data nor a kernel proof — so it
+//      is exactly a `reflection:DeclaredResource` whose
+//      `reflection:canonical_proposition` IS the imported claim. Consuming
+//      nodes cite it through the existing `reasoning:DeclaredEvidence`
+//      mechanism (no new machinery). This half already worked; we only add
+//      the reference identity + the typed link.
+//
+//   2. The reference IDENTITY + METADATA follows **CSL-JSON / Dublin Core**.
+//      `reference:Reference` is an epistemically-neutral bibliographic
+//      record (it asserts nothing; the warrant does). Its fields mirror
+//      CSL-JSON (the de-facto Zotero/Pandoc bibliographic data model) and
+//      Dublin Core terms, so a chain's references round-trip to/from a
+//      standard bibliography. The DOI is the stable identity; the canonical
+//      IRI form is `urn:eigenius:reference:doi:<doi>`.
+//
+//   3. The citation FUNCTION follows **CiTO** (Citation Typing Ontology,
+//      SPAR). `reference:citation_type` names HOW the cited work is used —
+//      background / method / evidence / source-document / authority — so the
+//      "what claim does this reference support" table (encoding-plan §3)
+//      becomes machine-meaningful, not a flat bibliography. Each citation
+//      type carries `reference:cito_iri`, the canonical CiTO URI, for export.
+//
+// WORKED EXAMPLE (the shape an encoding produces; lives in wrn-literature.esl):
+//
+//   // (1) the reference — identity + metadata
+//   resource lit:buehler_2012 : reference:Reference {
+//       reference:doi             = "10.1186/1756-0500-5-232";
+//       reference:title           = "siRNA off-target effects ... C911 controls";
+//       reference:creator         = "Buehler E, et al.";
+//       reference:container_title = "BMC Research Notes";
+//       reference:issued_year     = 2012;
+//       reference:reference_label = "16";   // the WRN paper's own [16]
+//   }
+//   // (2) the literature warrant — the imported claim, Declared, typed by CiTO.
+//   //     reference:cites is the authoritative reference link (declared_by is
+//   //     compiler-stamped on commit, so it can't name the reference).
+//   resource wrn:lit_c911_design : reflection:DeclaredResource {
+//       reflection:rationale             = "A C911 (seed-preserving, target-
+//           disrupted) control isolates on-target from shRNA seed off-target.";
+//       reflection:canonical_proposition = type_expr( onco:SeedControlIsValid("C911") );
+//       reference:cites                  = lit:buehler_2012;
+//       reference:citation_type          = reference:uses_method_in;
+//   }
+//   // (3) a node CITES the warrant via the existing reasoning mechanism —
+//   //     e.g. wrn:seed_control_rule's justification gains
+//   //     DeclaredEvidence("urn:eigenius:pub:wrn:lit_c911_design").
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace reference  = "urn:eigenius:reference";
+
+// ── The bibliographic entity (CSL-JSON / Dublin Core aligned) ────────────
+//
+// A published work, identified by DOI. Epistemically neutral: it is a record
+// of an external artifact and asserts nothing on its own (a marker class with
+// metadata, like stats:ImpossibilityWitness). The CLAIM it warrants lives in
+// the separate Declared literature warrant that `reference:cites` it.
+
+class reference:Reference {
+    description = "A published work cited by an encoding. Identity is the DOI (IRI form urn:eigenius:reference:doi:<doi>). Metadata fields follow CSL-JSON / Dublin Core so a chain's bibliography is interoperable. Epistemically neutral: it asserts nothing — the imported claim is carried by a reflection:DeclaredResource literature warrant that references it via reference:cites.";
+    requires reference:doi;
+    recommends reference:title, reference:creator, reference:container_title,
+               reference:issued_year, reference:reference_label, reference:url;
+}
+
+property reference:doi : core:string {
+    description = "Digital Object Identifier (CSL 'DOI'), bare form '10.xxxx/...'. The stable identity; the canonical IRI is urn:eigenius:reference:doi:<doi>.";
+    domain reference:Reference;
+}
+
+property reference:title : core:string {
+    description = "Title of the work (CSL 'title' / dcterms:title).";
+    domain reference:Reference;
+}
+
+property reference:creator : core:string {
+    description = "Authors (CSL 'author' / dcterms:creator). v1: a single formatted display string, e.g. 'Chan EM, Shibue T, et al.'. A structured value_array is a future refinement.";
+    domain reference:Reference;
+}
+
+property reference:container_title : core:string {
+    description = "Journal / book / venue the work appeared in (CSL 'container-title').";
+    domain reference:Reference;
+}
+
+property reference:issued_year : core:integer {
+    description = "Year of publication (CSL 'issued', year part).";
+    domain reference:Reference;
+}
+
+property reference:url : core:string {
+    description = "Resolvable URL for the work (CSL 'URL'); typically https://doi.org/<doi>.";
+    format = formats:iri;
+    domain reference:Reference;
+}
+
+property reference:reference_label : core:string {
+    description = "The citing work's own in-text label for this reference (e.g. the WRN paper's '[16]'), recorded for cross-walk to its published reference list.";
+    domain reference:Reference;
+}
+
+// ── Citation-function vocabulary (CiTO-aligned individuals) ───────────────
+//
+// The rhetorical/evidential role a citation plays, mirroring the CiTO object
+// properties. Individuals (not constructors) so each can carry its canonical
+// CiTO URI for interop, exactly as reflection:EpistemicStatus enumerates
+// observed/derived/verified/declared.
+
+class reference:CitationType {
+    description = "How a literature warrant uses the work it cites — the CiTO (Citation Typing Ontology, SPAR) citation function. A DeclaredResource names one via reference:citation_type; reference:cito_iri carries the canonical CiTO URI.";
+}
+
+property reference:cito_iri : core:string {
+    description = "Canonical CiTO URI this citation type maps to, e.g. 'http://purl.org/spar/cito/citesAsEvidence'. Carried for export / interop.";
+    format = formats:iri;
+    domain reference:CitationType;
+}
+
+resource reference:obtains_background_from : reference:CitationType {
+    core:description = "The citing claim takes background or motivation from the cited work — e.g. a definition, framing, or domain premise. CiTO cito:obtainsBackgroundFrom.";
+    reference:cito_iri = "http://purl.org/spar/cito/obtainsBackgroundFrom";
+}
+
+resource reference:uses_method_in : reference:CitationType {
+    core:description = "The citing claim uses a method, protocol, assay, or reagent design described in the cited work. CiTO cito:usesMethodIn.";
+    reference:cito_iri = "http://purl.org/spar/cito/usesMethodIn";
+}
+
+resource reference:cites_as_evidence : reference:CitationType {
+    core:description = "The cited work supplies empirical evidence for the citing claim. CiTO cito:citesAsEvidence.";
+    reference:cito_iri = "http://purl.org/spar/cito/citesAsEvidence";
+}
+
+resource reference:cites_as_source_document : reference:CitationType {
+    core:description = "The cited work is the source document for data, material, or a dataset the citing claim uses. CiTO cito:citesAsSourceDocument.";
+    reference:cito_iri = "http://purl.org/spar/cito/citesAsSourceDocument";
+}
+
+resource reference:cites_as_authority : reference:CitationType {
+    core:description = "The cited work is an authority for a definition, standard, or convention the citing claim adopts. CiTO cito:citesAsAuthority.";
+    reference:cito_iri = "http://purl.org/spar/cito/citesAsAuthority";
+}
+
+// ── Binding a literature warrant to its reference ────────────────────────
+//
+// A literature warrant is a reflection:DeclaredResource: its
+// canonical_proposition IS the imported claim, and the two typed properties
+// below give the machine-readable link (the reference + the CiTO function).
+// `reference:cites` is the AUTHORITATIVE binding — the ESL compiler stamps
+// reflection:declared_by with its own provenance ("esl-compiler") on commit,
+// so it is not available to name the reference. Consuming nodes discharge the
+// claim through reasoning:DeclaredEvidence on the warrant's IRI — unchanged.
+
+property reference:cites : core:resource {
+    description = "The published Reference whose claim this DeclaredResource imports. The authoritative reference binding (reflection:declared_by is compiler-stamped, so cannot carry it). The warrant's reflection:canonical_proposition states the imported claim.";
+    class_types reference:Reference;
+    domain reflection:DeclaredResource;
+}
+
+property reference:citation_type : core:resource {
+    description = "How the cited reference is used, from the CiTO-aligned reference:CitationType vocabulary. Constrained by allows_only to the five citation functions, so an unknown value is rejected at commit and narrowing the set is a retroactively-checked change.";
+    class_types reference:CitationType;
+    allows_only reference:obtains_background_from,
+                reference:uses_method_in,
+                reference:cites_as_evidence,
+                reference:cites_as_source_document,
+                reference:cites_as_authority;
+    domain reflection:DeclaredResource;
+}
