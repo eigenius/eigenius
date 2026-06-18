@@ -248,6 +248,8 @@ comorphisms. The difference is operational, not protocol.
 | [`crates/runtime-substrate/src/chain.rs`](../../../crates/runtime-substrate/src/chain.rs) | Chain accessor abstraction |
 | [`crates/runtime-substrate/src/cross_check.rs`](../../../crates/runtime-substrate/src/cross_check.rs) | Type validation across the boundary |
 | [`crates/runtime-substrate/src/facade.rs`](../../../crates/runtime-substrate/src/facade.rs) | Substrate facade exposed to the orchestrator |
+| [`crates/runtime-substrate/src/external_file.rs`](../../../crates/runtime-substrate/src/external_file.rs) | External-file resolver — content-addressed IRI minting, `resolve_and_materialize` (fetch + content-verify into the depot cache), `DatasetSchema` parsing / layout validation (D53) |
+| [`crates/runtime-substrate/src/oxen.rs`](../../../crates/runtime-substrate/src/oxen.rs) | `oxen://` reference parsing + prebuilt-client fetch (D53 §2) |
 | [`crates/eigenius-julia/`](../../../crates/eigenius-julia/) | Julia `LanguageRuntime` instantiation |
 | [`julia/runtime-worker/`](../../../julia/runtime-worker/) | The Julia worker source loaded into the env image |
 | [`julia/common/EigeniusJuliaCommon/`](../../../julia/common/EigeniusJuliaCommon/) | Substrate-side Julia utilities |
@@ -257,7 +259,9 @@ comorphisms. The difference is operational, not protocol.
 ## 11.7. Cross-references
 
 - [**Chapter 4 — CLI reference**](04-cli-reference.md) — the `mirror`,
-  `env`, and `institution` subcommand groups walked through above.
+  `env`, and `institution` subcommand groups walked through above, plus
+  the `data` subcommand group (§4.12) for attaching, verifying, and
+  provisioning the external data files this crate resolves.
 - [**Chapter 10 — Building WASM institutions**](10-wasm-institutions.md)
   — the peer surface for sandboxed institutions.
 - [**ESL §9 — Institutions in ESL**](../esl/09-institutions.md),

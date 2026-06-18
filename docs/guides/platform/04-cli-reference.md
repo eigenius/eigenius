@@ -519,7 +519,102 @@ eigenius --endpoint http://localhost:50051 tasks cancel <uuid>
 
 Request cooperative cancellation. The task transitions to `Cancelled` at its next checkpoint.
 
-## 4.12. Other commands
+## 4.12. Data commands (require `--endpoint`)
+
+The `data` subcommand group manages **external data files** — large dataset files (CRISPR dependency matrices, expression tables, GMT gene-set files, `.rds` blobs) that are too big, too binary, or too provenance-sensitive to inline into the chain. Each file is attached as a content-addressed `ingest:PinnedExternalFile` node ([D53](../../design/d53-large-data-tracking.md)): the **bytes stay off-chain**; only the durable `reference` (locator), the `content_hash` (sha256), and the `media_type` travel on the chain. The IRI is derived from the content hash, so byte-identical files converge to one node (idempotent attach).
+
+All `data` commands talk to a running kernel and require `--endpoint`.
+
+**Reference schemes.** A file is identified by a *reference* — the durable locator the substrate fetches from later:
+
+| Scheme | Example | Notes |
+|---|---|---|
+| local path | `data/depmap/crispr.parquet` | Canonicalised to a `file://` absolute path on attach. |
+| `file://` | `file:///var/lib/eigenius/depot/crispr.parquet` | A path on a volume the kernel can read directly — no provisioning needed. |
+| `oxen://` | `oxen://ml-datasets/depmap@main/crispr.parquet` | Versioned, content-addressed Oxen remote. Grammar: `oxen://[<host>/]<namespace>/<repo>@<revision>/<path>`. `<host>` is optional and defaults to `hub.oxen.ai`; `<revision>` is a branch name or commit id. The CLI fetches once (via the prebuilt `oxen` client) to compute the hash. |
+
+**Oxen auth.** Oxen access uses a per-host bearer token in `auth_config.toml` under the Oxen config dir (`$OXEN_CONFIG_DIR`). The token is a deployment secret held substrate-side; it never enters a worker image. Override the client binary with `EIGENIUS_OXEN_BIN` and the URL scheme with `EIGENIUS_OXEN_SCHEME` if needed.
+
+### `data attach <FILE_OR_REF> [--reference <REF>] [--media-type <MT>] [--name <NAME>]`
+
+Hash the bytes, mint the content-addressed IRI, and commit the `PinnedExternalFile` node. For an `oxen://` reference the CLI downloads once to compute the hash, then discards the temp copy.
+
+```bash
+# Local file — reference defaults to a file:// URL of the absolute path
+eigenius --endpoint http://localhost:50051 data attach \
+    data/depmap/crispr-gene-effect.csv
+
+# Oxen-backed — the oxen:// reference is stored verbatim as the locator
+eigenius --endpoint http://localhost:50051 data attach \
+    oxen://ml-datasets/depmap@main/crispr-gene-effect.parquet
+
+# Override the durable locator (e.g. attach from a local copy but record the
+# shared-volume path the kernel will read at recompute time)
+eigenius --endpoint http://localhost:50051 data attach /tmp/crispr.parquet \
+    --reference file:///var/lib/eigenius/depot/crispr.parquet
+```
+
+| Flag | Default | Use |
+|---|---|---|
+| `--reference <REF>` | `file://` of the abs path (local), or the `oxen://` ref verbatim | The durable backend locator stored on the node — what the substrate fetches from later. Override when the bytes you're hashing live somewhere other than where the kernel will read them. |
+| `--media-type <MT>` | inferred from extension | Override the IANA media type (e.g. `text/csv`). Inference strips a trailing `.gz` and maps `.parquet`, `.arrow`, `.csv`, `.tsv`/`.gmt`, `.json`, `.xlsx`, `.h5`/`.hdf5`, `.rds`; anything else is `application/octet-stream`. |
+| `--name <NAME>` | the file name | Override the `short_name`. |
+
+JSON output (`--json`) carries `success`, `iri`, `content_hash`, `reference`, `media_type`.
+
+### `data list [--media-type <MT>]`
+
+List every attached `PinnedExternalFile` with its media type and reference.
+
+```bash
+eigenius --endpoint http://localhost:50051 data list
+eigenius --endpoint http://localhost:50051 data list --media-type text/csv
+```
+
+### `data inspect <DATA_IRI>`
+
+Print one pinned file's metadata — reference, content hash, media type, bound schema, source.
+
+```bash
+eigenius --endpoint http://localhost:50051 data inspect \
+    urn:eigenius:ingest:file:9b1c...
+```
+
+### `data verify <DATA_IRI>`
+
+Re-fetch the bytes by the node's `reference`, recompute the hash, and check it against the pinned `content_hash` (fail closed — D53 §5). Proves the off-chain bytes still match what was attached. Exits non-zero on a mismatch.
+
+```bash
+eigenius --endpoint http://localhost:50051 data verify \
+    urn:eigenius:ingest:file:9b1c...
+```
+
+### `data validate <DATA_IRI>`
+
+The D53 §4.1 checkable layout gate. Materializes the file (which also re-verifies the content hash), reads its header, and checks each bound `DatasetSchema`'s declared layout against the actual columns. Delimited text (CSV/TSV) is header-checked in process; columnar formats (Parquet/Arrow) and compressed files carry their schema in-file and defer to the worker. A file with no bound schema is reported valid (opaque file — nothing to check).
+
+```bash
+eigenius --endpoint http://localhost:50051 data validate \
+    urn:eigenius:ingest:file:9b1c...
+```
+
+### `data provision <DATA_IRI> [--cache-root <DIR>]`
+
+Materialize a pinned file into the local content-addressed cache (`<cache>/<sha256-hex>/<name>`) that the kernel reads for native file-backed `SampleSet` recompute (D53 §6.1 / §7). Fetches and content-verifies via the §5 resolver. Run this on the host whose depot the kernel reads.
+
+```bash
+eigenius --endpoint http://localhost:50051 data provision \
+    urn:eigenius:ingest:file:9b1c... \
+    --cache-root /var/lib/eigenius/substrate-depot/extfile-cache
+```
+
+| Flag | Default | Use |
+|---|---|---|
+| `--cache-root <DIR>` | `$EIGENIUS_EXTFILE_CACHE_DIR` | The depot's extfile-cache directory the kernel reads. Required either via this flag or the env var. |
+
+A `file://` reference on a volume the kernel already reads needs no provisioning — the kernel reads it in place. Provision is for `oxen://` (and any reference you want warmed into the cache ahead of a recompute).
+
+## 4.13. Other commands
 
 ### `list-institutions` (requires `--endpoint`)
 
@@ -553,7 +648,7 @@ eigenius version
 
 Print the build version and metadata.
 
-## 4.13. Output formatting
+## 4.14. Output formatting
 
 The global `--json` flag switches output from human-formatted prose to a machine-readable JSON envelope, suitable for piping into `jq` or scripting:
 
@@ -563,7 +658,7 @@ eigenius --json query 'MATCH ?x {} RETURN [] { x: ?x }' | jq '.results[0]'
 
 Without `--json`, output is colourised plain text intended for terminal display.
 
-## 4.14. Exit codes
+## 4.15. Exit codes
 
 The CLI uses standard exit codes:
 
