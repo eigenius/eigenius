@@ -131,12 +131,13 @@ export async function executeComponentRequest(
     // Auxiliary inputs for a multi-file join (D53 §4.3) — decoded in the same
     // codec as the primary input; an empty list for ordinary single-input
     // components.
-    const additionalInputs: Record<string, unknown>[] = (req.additionalInputs ?? [])
-      .map((bytes) =>
-        useCbor
-          ? decodeResource(bytes) as Record<string, unknown>
-          : JSON.parse(TEXT_DECODER.decode(bytes) || "{}")
-      );
+    const additionalInputs: Record<string, unknown>[] =
+      (req.additionalInputs ?? [])
+        .map((bytes) =>
+          useCbor
+            ? decodeResource(bytes) as Record<string, unknown>
+            : JSON.parse(TEXT_DECODER.decode(bytes) || "{}")
+        );
 
     const result = await registry.execute(componentIri, {
       input,
