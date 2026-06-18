@@ -1,0 +1,92 @@
+// Institution-recompute fixture — nested two-way ANOVA (value ~ group + subgroup).
+// Real WRN ED Fig 3b day-10 competition-assay relative ratios. KM12 (MSI) is
+// strongly significant (paper two-way ANOVA p=2.7e-19); ES2 (MSS) is n.s.
+// (p=0.37). group A = sgWRN1/2/3 (each 6 reps), group B = sgCh2-2/-4 (6 each).
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace stats      = "urn:eigenius:measurements";
+namespace demo       = "urn:eigenius:demo:nested";
+
+resource demo:viability_witness : stats:ImpossibilityWitness {
+    reflection:declared_by = "wrn-paper:viability-impairment-directionality";
+    reflection:rationale   = "Synthetic lethality predicts WRN depletion IMPAIRS (not enhances) MSI viability; the directional claim is group A (sgWRN) mean below group B (control). The inverse is not the hypothesis, licensing the one-sided test.";
+}
+
+// KM12 (MSI) — competition assay day-10 relative ratio.
+// group A = sgWRN guides (flat, by guide), group B = sgCh2 negative controls.
+resource demo:set_KM12 : stats:SampleSetResource {
+    reflection:source      = "wrn-paper ED Fig 3b KM12 day-10 relative ratio";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+    stats:sample_set_value = stats:Nested(
+        [
+        0.268449, 0.248279, 0.280587, 0.291857, 0.381621, 0.304528,
+        0.235725, 0.202625, 0.264119, 0.220345, 0.171601, 0.270842,
+        0.329422, 0.351885, 0.395719, 0.453315, 0.297452, 0.237243,
+        ],
+        [
+        0.849392, 1.087221, 1.141928, 0.979374, 1.092875, 0.847365,
+        0.974682, 1.032420, 1.021721, 0.959610, 1.078654, 0.934759,
+        ],
+        [6,6,6],
+        [6,6],
+        BiologicalReplication(),
+    );
+}
+resource demo:set_KM12_trace : reflection:ObservationTrace {
+    reflection:resource  = demo:set_KM12;
+    reflection:source    = "wrn-paper ED Fig 3b";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+resource demo:plan_KM12 : stats:StatisticalAnalysisPlan {
+    stats:sample_set         = demo:set_KM12;
+    stats:alpha              = 0.05;
+    stats:directionality     = OneSidedWitnessed("urn:eigenius:demo:nested:viability_witness");
+    stats:effect_size        = Absolute(0.0, "relative-ratio");
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion  = Identity();
+}
+resource demo:plan_KM12_trace : reflection:ProgramTrace {
+    reflection:resource  = demo:plan_KM12;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+// ES2 (MSS) — competition assay day-10 relative ratio.
+// group A = sgWRN guides (flat, by guide), group B = sgCh2 negative controls.
+resource demo:set_ES2 : stats:SampleSetResource {
+    reflection:source      = "wrn-paper ED Fig 3b ES2 day-10 relative ratio";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+    stats:sample_set_value = stats:Nested(
+        [
+        1.129250, 0.892831, 0.888756, 1.023207, 1.107421, 0.991177,
+        1.004540, 0.874552, 0.955135, 0.827588, 0.894626, 0.907547,
+        0.988081, 1.140355, 1.050832, 0.949959, 1.010102, 0.820192,
+        ],
+        [
+        0.965622, 1.023679, 1.054918, 1.194749, 1.005635, 0.916648,
+        1.070199, 0.957590, 0.979636, 0.891239, 0.912269, 1.027818,
+        ],
+        [6,6,6],
+        [6,6],
+        BiologicalReplication(),
+    );
+}
+resource demo:set_ES2_trace : reflection:ObservationTrace {
+    reflection:resource  = demo:set_ES2;
+    reflection:source    = "wrn-paper ED Fig 3b";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+resource demo:plan_ES2 : stats:StatisticalAnalysisPlan {
+    stats:sample_set         = demo:set_ES2;
+    stats:alpha              = 0.05;
+    stats:directionality     = OneSidedWitnessed("urn:eigenius:demo:nested:viability_witness");
+    stats:effect_size        = Absolute(0.0, "relative-ratio");
+    stats:variance_assumption = Pooled();
+    stats:outlier_exclusion  = Identity();
+}
+resource demo:plan_ES2_trace : reflection:ProgramTrace {
+    reflection:resource  = demo:plan_ES2;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}

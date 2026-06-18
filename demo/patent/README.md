@@ -92,7 +92,7 @@ program patent:analyze_patent : patent:PatentClaim -> patent:PatentBrief {
         completion:system_prompt = "You are a patent analyst...";
         completion:output_schema = patent:PatentAnalysis;
         completion:request_parameters = {
-            request:model = "claude-sonnet-4-20250514";
+            request:model = "claude-sonnet-4-6";
             request:temperature = 0.0;
             request:max_tokens = 2000;
         };
@@ -107,7 +107,7 @@ program patent:analyze_patent : patent:PatentClaim -> patent:PatentBrief {
             Applications: {{urn:eigenius:demo:patent:practical_applications}}";
         completion:system_prompt = "You are a technical writer...";
         completion:request_parameters = {
-            request:model = "claude-sonnet-4-20250514";
+            request:model = "claude-sonnet-4-6";
             request:temperature = 0.3;
             request:max_tokens = 1000;
         };
@@ -395,7 +395,7 @@ sugar over this structure.
           "urn:eigenius:program:components:completion:output_schema":
             "urn:eigenius:demo:patent:PatentAnalysis",
           "urn:eigenius:program:components:completion:request_parameters": {
-            "urn:eigenius:program:request:model": "claude-sonnet-4-20250514",
+            "urn:eigenius:program:request:model": "claude-sonnet-4-6",
             "urn:eigenius:program:request:temperature": 0.0,
             "urn:eigenius:program:request:max_tokens": 2000
           }
@@ -418,7 +418,7 @@ sugar over this structure.
             "urn:eigenius:program:components:completion:system_prompt":
               "You are a technical writer...",
             "urn:eigenius:program:components:completion:request_parameters": {
-              "urn:eigenius:program:request:model": "claude-sonnet-4-20250514",
+              "urn:eigenius:program:request:model": "claude-sonnet-4-6",
               "urn:eigenius:program:request:temperature": 0.3,
               "urn:eigenius:program:request:max_tokens": 1000
             }

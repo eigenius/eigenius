@@ -1,0 +1,27 @@
+[
+  {
+    "@id": "urn:eigenius:pub:wrn:program:xenograft_lme4",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:program:Program"
+    ],
+    "urn:eigenius:program:input_type": "urn:eigenius:pub:wrn:XenograftTable",
+    "urn:eigenius:program:output_type": "urn:eigenius:reflection:DerivedResource",
+    "urn:eigenius:program:body": {
+      "urn:eigenius:core:is_a": [
+        "urn:eigenius:program:Apply"
+      ],
+      "urn:eigenius:program:function": "urn:eigenius:program:components:RunRuntimeScript",
+      "urn:eigenius:program:argument": {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:program:Var"
+        ],
+        "urn:eigenius:program:name": "input"
+      },
+      "urn:eigenius:program:component_argument": {
+        "urn:eigenius:runtime:language": "r",
+        "urn:eigenius:runtime:source": "in0   <- eigenius_inputs[[1]]\nvol   <- .Call(\"r_eigon_f64_array\", in0, \"urn:eigenius:pub:wrn:vivo_volume\")\nday   <- .Call(\"r_eigon_f64_array\", in0, \"urn:eigenius:pub:wrn:vivo_day\")\nmouse <- .Call(\"r_eigon_str_array\", in0, \"urn:eigenius:pub:wrn:vivo_mouse\")\ndox   <- .Call(\"r_eigon_str_array\", in0, \"urn:eigenius:pub:wrn:vivo_dox\")\ndf <- data.frame(Volume = vol, Day = day, Mouse = factor(mouse), Dox = factor(dox))\nstopifnot(nrow(df) == 73L, nlevels(df$Dox) == 2L)\nlibrary(lme4)\n# Authors' random-slope mixed model (in_vivo_KM12_analysis.R): does WRN\n# depletion (Dox) change the per-day growth slope? LRT of the Day:Dox\n# interaction against the no-interaction model.\nm1 <- lmer(Volume ~ Day + (0 + Day | Mouse), df, REML = FALSE)\nm2 <- lmer(Volume ~ Day + Day:Dox + (0 + Day | Mouse), df, REML = FALSE)\npval <- anova(m1, m2)[[\"Pr(>Chisq)\"]][2]\nb <- .Call(\"r_eigon_begin\", \"urn:eigenius:pub:wrn:vivo_lme4:result\")\n.Call(\"r_eigon_add_class\", b, \"urn:eigenius:reflection:DerivedResource\")\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:measurements:lrt_p_value\", pval)\n# A significant interaction is the in-vivo WRN dependence warrant. Set the\n# canonical_proposition the reasoning institution consumes (D56); the\n# committed ProgramTrace mints IsDerivedAs over this output.\nif (pval < 0.05) {\n  .Call(\"r_eigon_set_proposition\", b,\n        \"urn:eigenius:benchmark:onco:InVivoDependence\", c(\"WRN\", \"MSI\"))\n}\n.Call(\"r_eigon_finish\", b)\n",
+        "urn:eigenius:runtime:image_digest": "sha256:9ffb0efb052795e7f65dbd16760e26afae5708d605941b25587b76046ff36364"
+      }
+    }
+  }
+]

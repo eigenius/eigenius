@@ -11,6 +11,10 @@
 | `EIGENIUS_ORCHESTRATOR_PORT` | `8080` | Orchestrator | Port the orchestrator binds to |
 | `EIGENIUS_MOCK_LLM` | `false` | Orchestrator | When `true`, swap real LLM handlers for canned mock responses |
 | `ANTHROPIC_API_KEY` | (none) | Orchestrator | Required when `EIGENIUS_MOCK_LLM` is unset |
+| `EIGENIUS_EXTFILE_CACHE_DIR` | (none) | `eigenius data provision`, kernel recompute | Depot extfile-cache root where pinned external files materialize (`<cache>/<sha256>/<name>`). Default cache root for `data provision` when `--cache-root` is omitted; the directory the kernel reads for native file-backed `SampleSet` recompute (D53 §6.1 / §7). |
+| `EIGENIUS_OXEN_BIN` | `oxen` | Runtime substrate (Oxen fetch) | Path to the prebuilt `oxen` client binary used to fetch `oxen://` references (D53 §2). |
+| `EIGENIUS_OXEN_SCHEME` | `https` | Runtime substrate (Oxen fetch) | URL scheme the Oxen client uses for the remote host (set `http` for a local/plaintext Oxen server). |
+| `OXEN_CONFIG_DIR` | Oxen client default | Runtime substrate (Oxen auth) | Oxen config dir holding `auth_config.toml` (per-host bearer token). The token is substrate-side only and never enters a worker image (D53 §10). |
 | `RUSTFLAGS` | (none) | `cargo` | `RUSTFLAGS="-D warnings"` upgrades clippy warnings to errors (used by `just check`) |
 
 CLI commands also accept `--endpoint <url>` as an alternative to setting an env var; the flag takes precedence.

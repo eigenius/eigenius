@@ -53,13 +53,68 @@ use eigenius_kernel::ontology::well_known as wk;
 use crate::institution::iris;
 use crate::institution::StatisticsInstitution;
 use crate::numerics::{
-    esd_filter, one_sample_t_test, paired_t_test, passing_bablok_regression, rcbd_anova,
-    repeated_measures_cs_anova, splitplot_anova, two_sample_t_test, TwoSampleVariance,
+    classification_metrics, crossed_two_way_anova, esd_filter, nested_group_anova,
+    one_sample_t_test, paired_t_test, passing_bablok_regression, rcbd_anova,
+    repeated_measures_cs_anova, spearman_correlation, splitplot_anova, two_sample_t_test,
+    wilcoxon_rank_sum, TwoSampleVariance,
 };
+
+// File-backed SampleSet observations (D53 §6.1).
+const PROP_OBSERVATIONS_SOURCE: &str = "urn:eigenius:measurements:observations_source";
+const PROP_OBSERVATIONS_COLUMN: &str = "urn:eigenius:measurements:observations_column";
+const INGEST_REFERENCE: &str = "urn:eigenius:ingest:reference";
+const INGEST_CONTENT_HASH: &str = "urn:eigenius:ingest:content_hash";
+const INGEST_MEDIA_TYPE: &str = "urn:eigenius:ingest:media_type";
+
+/// Resolve a flat (single-array) SampleSet's observations. If the
+/// SampleSetResource declares `observations_source` (a `PinnedExternalFile`
+/// IRI) + `observations_column`, read the content-verified column from the
+/// materialized file (D53 §6.1 native-over-file); otherwise decode the inline
+/// observations slot. Either way the recompute over the returned array is the
+/// same deterministic Rust — native grade is set by the method, not the storage
+/// (D53 §6).
+fn resolve_flat_observations(
+    sample_set_res: &Resource,
+    bundle: &DecodedBundle,
+    store: &eigenius_kernel::storage::content_array::ContentArrayStore,
+    ctx: &ExecutionContext,
+) -> Result<Vec<f64>, String> {
+    let source =
+        read_iri_property(sample_set_res, PROP_OBSERVATIONS_SOURCE).map_err(|e| e.to_string())?;
+    let Some(source_iri) = source else {
+        // Inline observations (the default / existing path).
+        return decode_flat_observations(&bundle.observations_raw);
+    };
+
+    let column = read_iri_property(sample_set_res, PROP_OBSERVATIONS_COLUMN)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| {
+            "observations_source set but observations_column missing (D53 §6.1)".to_string()
+        })?;
+    let file_iri = Iri::parse(&source_iri)
+        .map_err(|e| format!("observations_source `{source_iri}` is not a valid IRI: {e}"))?;
+    let file_res = ctx
+        .resolve(&file_iri)
+        .ok_or_else(|| format!("PinnedExternalFile `{source_iri}` not found on chain"))?;
+
+    let reference = read_iri_property(&file_res, INGEST_REFERENCE)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("PinnedExternalFile `{source_iri}` missing ingest:reference"))?;
+    let content_hash = read_iri_property(&file_res, INGEST_CONTENT_HASH)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("PinnedExternalFile `{source_iri}` missing ingest:content_hash"))?;
+    let media_type = read_iri_property(&file_res, INGEST_MEDIA_TYPE)
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| "text/csv".to_string());
+
+    store
+        .read_column(&reference, &content_hash, &media_type, &column)
+        .map_err(|e| format!("file-backed observations ({source_iri}): {e}"))
+}
 
 /// Top-level handler called by `StatisticsInstitution::query`.
 pub fn do_validate_analysis_plan(
-    _inst: &StatisticsInstitution,
+    inst: &StatisticsInstitution,
     claim: &Resource,
     ctx: &ExecutionContext,
 ) -> Result<QueryOutcome, InstitutionError> {
@@ -129,6 +184,44 @@ pub fn do_validate_analysis_plan(
         Iri::parse(iris::METHOD_COMPARISON_ANALYSIS_PLAN).expect("static IRI");
     if claim.is_instance_of(&method_comparison_iri) {
         return recompute_method_comparison_claim(claim, &bundle, ctx);
+    }
+
+    // ── §2.2 class-based early dispatch: ClassificationAnalysisPlan ──────────
+    //
+    // A threshold classifier's PPV/sensitivity is a deterministic count
+    // over a two-group SampleSet, not an inferential test — it has no
+    // alpha / effect_size / directionality. Route it to its own emitter
+    // before the hypothesis-test parameter reads below.
+    let classification_iri = Iri::parse(iris::CLASSIFICATION_ANALYSIS_PLAN).expect("static IRI");
+    if claim.is_instance_of(&classification_iri) {
+        return recompute_classification_quality_claim(claim, &bundle, &sample_set_iri_str);
+    }
+
+    // ── §2.2 SampleSet-based early dispatch: nested two-way ANOVA ────────────
+    //
+    // A nested fixed-effects two-way ANOVA (`value ~ group + subgroup`): the
+    // binary group effect tested against the within-subgroup residual, with
+    // subgroup a nuisance nested in group. Expressed as a `stats:Nested(...)`
+    // SampleSet — the blocking ctor is `NestedBlocking` and the observations
+    // wrapper carries `[group_a, group_b, subgroup_sizes_a, subgroup_sizes_b]`.
+    // The plan is a plain StatisticalAnalysisPlan, so dispatch keys on the
+    // SampleSet's blocking ctor (not the plan's is_a). Has its own dispatch +
+    // directionality handling, so route here before the standard reads.
+    if bundle.blocking == "NestedBlocking" {
+        return recompute_nested_anova_claim(claim, &bundle, &sample_set_iri_str, ctx);
+    }
+
+    // ── §2.2 SampleSet-based early dispatch: crossed two-way ANOVA ───────────
+    //
+    // A crossed additive two-way ANOVA (`value ~ group + block`): the binary
+    // group effect tested against the additive-model residual, with `block`
+    // CROSSED (the same block levels appear in both groups, unlike the nested
+    // case). Expressed as a `stats:Crossed(...)` SampleSet — blocking ctor
+    // `CrossedBlocking`, observations wrapper `[group_a, group_b,
+    // subgroup_sizes_a, subgroup_sizes_b]` with the two size arrays paired by
+    // index. Routes to its own emitter before the standard reads.
+    if bundle.blocking == "CrossedBlocking" {
+        return recompute_crossed_anova_claim(claim, &bundle, &sample_set_iri_str, ctx);
     }
 
     // ── Step 4: dispatch on the product position ──────────────────────
@@ -333,7 +426,14 @@ pub fn do_validate_analysis_plan(
                         ));
                     }
                 };
-                let samples = match decode_flat_observations(&bundle.observations_raw) {
+                // D53 §6.1: observations may be inline or read from a
+                // content-verified PinnedExternalFile column (native-over-file).
+                let samples = match resolve_flat_observations(
+                    &sample_set_res,
+                    &bundle,
+                    inst.content_store(),
+                    ctx,
+                ) {
                     Ok(s) => s,
                     Err(diag) => return Ok(gate_fails(diag)),
                 };
@@ -420,30 +520,57 @@ pub fn do_validate_analysis_plan(
                         Ok(pair) => pair,
                         Err(diag) => return Ok(gate_fails(diag)),
                     };
-                let variance = match variance_assumption.as_ref().and_then(json_ctor_name) {
-                    Some("Pooled") => TwoSampleVariance::Pooled,
-                    Some("WelchUnequal") => TwoSampleVariance::WelchUnequal,
-                    Some(other) => {
-                        return Ok(gate_fails(format!(
-                            "IID two-sample with variance_assumption `{other}` not yet wired \
-                         (Phase 1.5 supports Pooled / WelchUnequal; NonParametric / RankBased \
-                         are follow-on)"
-                        )));
+                match variance_assumption.as_ref().and_then(json_ctor_name) {
+                    // Rank-based / distribution-free two-sample: the
+                    // Wilcoxon rank-sum (Mann–Whitney U) test. Reported
+                    // statistic is the normal-approximation z; the note
+                    // carries U + the group medians for audit. Same H1
+                    // shape as the t-test (group A vs group B central
+                    // tendency), so Step 6.5 derives the same two-sample
+                    // proposition for it.
+                    Some("RankBased") | Some("NonParametric") => {
+                        let r = match wilcoxon_rank_sum(&group_a, &group_b) {
+                            Some(r) => r,
+                            None => {
+                                return Ok(gate_fails(
+                                    "InsufficientReplication: Wilcoxon rank-sum requires \
+                                     non-empty groups"
+                                        .into(),
+                                ));
+                            }
+                        };
+                        let note = format!(
+                            "Wilcoxon rank-sum (Mann–Whitney): U = {:.1}, z = {:.4}, \
+                             n_a = {}, n_b = {}, median_a = {:.4}, median_b = {:.4}",
+                            r.u_statistic, r.z_statistic, r.n_a, r.n_b, r.median_a, r.median_b
+                        );
+                        (r.z_statistic, r.p_value_two_sided, Some(note))
                     }
-                    None => TwoSampleVariance::WelchUnequal,
-                };
-                let r = match two_sample_t_test(&group_a, &group_b, variance) {
-                    Some(r) => r,
-                    None => {
-                        return Ok(gate_fails(format!(
-                            "InsufficientReplication: two-sample t-test requires n >= 2 in each \
-                         group, got n_a = {}, n_b = {}",
-                            group_a.len(),
-                            group_b.len()
-                        )));
+                    other => {
+                        let variance = match other {
+                            Some("Pooled") => TwoSampleVariance::Pooled,
+                            Some("WelchUnequal") | None => TwoSampleVariance::WelchUnequal,
+                            Some(o) => {
+                                return Ok(gate_fails(format!(
+                                    "IID two-sample with variance_assumption `{o}` not recognised \
+                                     (expected Pooled / WelchUnequal / RankBased / NonParametric)"
+                                )));
+                            }
+                        };
+                        let r = match two_sample_t_test(&group_a, &group_b, variance) {
+                            Some(r) => r,
+                            None => {
+                                return Ok(gate_fails(format!(
+                                    "InsufficientReplication: two-sample t-test requires n >= 2 \
+                                     in each group, got n_a = {}, n_b = {}",
+                                    group_a.len(),
+                                    group_b.len()
+                                )));
+                            }
+                        };
+                        (r.t_statistic, r.p_value_two_sided, None)
                     }
-                };
-                (r.t_statistic, r.p_value_two_sided, None)
+                }
             }
             DispatchPos::Paired => {
                 // Paired: observations is a flat array `[b0, a0, b1, a1,
@@ -454,16 +581,42 @@ pub fn do_validate_analysis_plan(
                     Ok(p) => p,
                     Err(diag) => return Ok(gate_fails(diag)),
                 };
-                let r = match paired_t_test(&pairs) {
-                    Some(r) => r,
-                    None => {
-                        return Ok(gate_fails(format!(
-                            "InsufficientReplication: paired t-test requires n_pairs >= 2, got {}",
-                            pairs.len()
-                        )));
+                match variance_assumption.as_ref().and_then(json_ctor_name) {
+                    // Rank-based bivariate: Spearman rank correlation. The
+                    // Paired pairs are read as (x, y) observations; the
+                    // reported statistic is the t-approximation, the note
+                    // carries rho.
+                    Some("RankBased") | Some("NonParametric") => {
+                        let r = match spearman_correlation(&pairs) {
+                            Some(r) => r,
+                            None => {
+                                return Ok(gate_fails(format!(
+                                    "InsufficientReplication: Spearman correlation requires \
+                                     n_pairs >= 3, got {}",
+                                    pairs.len()
+                                )));
+                            }
+                        };
+                        let note = format!(
+                            "Spearman rank correlation: rho = {:.4}, t = {:.4}, n_pairs = {}",
+                            r.rho, r.t_statistic, r.n_pairs
+                        );
+                        (r.t_statistic, r.p_value_two_sided, Some(note))
                     }
-                };
-                (r.t_statistic, r.p_value_two_sided, None)
+                    _ => {
+                        let r = match paired_t_test(&pairs) {
+                            Some(r) => r,
+                            None => {
+                                return Ok(gate_fails(format!(
+                                    "InsufficientReplication: paired t-test requires \
+                                     n_pairs >= 2, got {}",
+                                    pairs.len()
+                                )));
+                            }
+                        };
+                        (r.t_statistic, r.p_value_two_sided, None)
+                    }
+                }
             }
             DispatchPos::Factorial => {
                 // Unreachable: the Factorial dispatch short-circuits at
@@ -691,6 +844,17 @@ pub fn do_validate_analysis_plan(
             &effect_size,
             &directionality,
         ),
+        DispatchPos::IID => {
+            derive_canonical_proposition_twosample(&sample_set_iri_str, &directionality)
+        }
+        DispatchPos::Paired => match variance_assumption.as_ref().and_then(json_ctor_name) {
+            // RankBased Paired = Spearman correlation; derive the rho prop.
+            // (The paired t-test's difference proposition is a follow-on.)
+            Some("RankBased") | Some("NonParametric") => {
+                derive_canonical_proposition_correlation(&sample_set_iri_str, &directionality)
+            }
+            _ => None,
+        },
         _ => None,
     };
 
@@ -917,6 +1081,421 @@ fn recompute_method_comparison_claim(
         (res.slope, p_indicator),
         None,
     ))
+}
+
+// ────────────────────────────────────────────────────────────────────
+// §2.2 — ClassificationAnalysisPlan / PPV-sensitivity dispatch
+// ────────────────────────────────────────────────────────────────────
+
+/// Recompute a `stats:ClassificationAnalysisPlan` — the PPV/sensitivity of
+/// a threshold classifier over a two-group (IID) SampleSet (D52 §2.2).
+///
+/// `group_a` is the **test-positive** group (the predictor under
+/// evaluation flags these — e.g. MSI cell lines), `group_b` the
+/// **test-negative** rest (MSS). A unit is **condition-positive** (the
+/// trait predicted — e.g. WRN-dependent) when its value is below the
+/// declared `classification_threshold` (dependency scores: lower = more
+/// dependent).
+///
+/// Emits two `StatisticalAnalysisResult` derivations:
+///   - `{plan}:result:ppv`         carrying `stats:ge(stats:ppv(s), min_ppv)`
+///   - `{plan}:result:sensitivity` carrying `stats:ge(stats:sensitivity(s), min_sensitivity)`
+///
+/// Each result Holds iff its metric meets the author-declared minimum;
+/// the canonical proposition (and thus the D49 `IsDerivedAs`) attaches
+/// only on Holds. Downstream D39 reasoning composes both via a declared
+/// statistical→domain bridge into a domain biomarker conclusion.
+fn recompute_classification_quality_claim(
+    claim: &Resource,
+    bundle: &DecodedBundle,
+    sample_set_iri_str: &str,
+) -> Result<QueryOutcome, InstitutionError> {
+    let (group_a, group_b) = match decode_two_group_observations(&bundle.observations_raw) {
+        Ok(pair) => pair,
+        Err(diag) => return Ok(gate_fails(diag)),
+    };
+    let threshold = match read_float_property(claim, iris::PROP_CLASSIFICATION_THRESHOLD)? {
+        Some(t) => t,
+        None => {
+            return Ok(gate_fails(
+                "ClassificationAnalysisPlan missing required `classification_threshold`".into(),
+            ))
+        }
+    };
+    let min_ppv = match read_float_property(claim, iris::PROP_MIN_PPV)? {
+        Some(v) => v,
+        None => {
+            return Ok(gate_fails(
+                "ClassificationAnalysisPlan missing required `min_ppv`".into(),
+            ))
+        }
+    };
+    let min_sensitivity = match read_float_property(claim, iris::PROP_MIN_SENSITIVITY)? {
+        Some(v) => v,
+        None => {
+            return Ok(gate_fails(
+                "ClassificationAnalysisPlan missing required `min_sensitivity`".into(),
+            ))
+        }
+    };
+    if group_a.is_empty() {
+        return Ok(gate_fails(
+            "ClassificationAnalysisPlan: test-positive group (group A) is empty — \
+             PPV is undefined"
+                .into(),
+        ));
+    }
+    let m = classification_metrics(&group_a, &group_b, threshold);
+
+    // PPV result: stats:ge(stats:ppv(s), min_ppv)
+    let ppv_holds = m.ppv >= min_ppv;
+    let ppv_prop = encode_classification_proposition(iris::STATS_PPV, sample_set_iri_str, min_ppv);
+    let ppv_diag = format!(
+        "Classification @ threshold {threshold}: PPV = {:.4} ({}/{} test-positive are \
+         condition-positive); criterion PPV >= {min_ppv}",
+        m.ppv, m.tp, m.n_test_positive,
+    );
+    // Sensitivity result: stats:ge(stats:sensitivity(s), min_sensitivity)
+    let sens_holds = m.sensitivity >= min_sensitivity;
+    let sens_prop = encode_classification_proposition(
+        iris::STATS_SENSITIVITY,
+        sample_set_iri_str,
+        min_sensitivity,
+    );
+    let sens_diag = format!(
+        "Classification @ threshold {threshold}: sensitivity = {:.4} ({}/{} condition-positive \
+         are test-positive; FN = {}); criterion sensitivity >= {min_sensitivity}",
+        m.sensitivity, m.tp, m.n_condition_positive, m.fn_,
+    );
+
+    let results = vec![
+        PerEffectResult {
+            effect_name: "ppv".to_string(),
+            result_ctor: if ppv_holds {
+                wk::VERDICT_HOLDS
+            } else {
+                wk::VERDICT_FAILS
+            },
+            diagnostic: Some(if ppv_holds {
+                ppv_diag
+            } else {
+                format!("CriterionNotMet: {ppv_diag}")
+            }),
+            numerics: (m.ppv, 1.0 - m.ppv),
+            canonical_proposition: if ppv_holds { Some(ppv_prop) } else { None },
+        },
+        PerEffectResult {
+            effect_name: "sensitivity".to_string(),
+            result_ctor: if sens_holds {
+                wk::VERDICT_HOLDS
+            } else {
+                wk::VERDICT_FAILS
+            },
+            diagnostic: Some(if sens_holds {
+                sens_diag
+            } else {
+                format!("CriterionNotMet: {sens_diag}")
+            }),
+            numerics: (m.sensitivity, 1.0 - m.sensitivity),
+            canonical_proposition: if sens_holds { Some(sens_prop) } else { None },
+        },
+    ];
+    Ok(gate_holds_with_results(claim.id(), results))
+}
+
+/// Build `stats:ge(stats:<metric>(s), threshold)` as a D47 type-fragment
+/// JSON tree — the canonical proposition a ClassificationAnalysisPlan
+/// result carries. `metric_iri` is `stats:ppv` or `stats:sensitivity`.
+fn encode_classification_proposition(
+    metric_iri: &str,
+    sample_set_iri: &str,
+    threshold: f64,
+) -> serde_json::Value {
+    use crate::institution::iris as i;
+    let metric_of_s = encode_app(
+        encode_const_ref(metric_iri),
+        encode_lit_string(sample_set_iri),
+    );
+    encode_app(
+        encode_app(encode_const_ref(i::STATS_GE), metric_of_s),
+        encode_lit_float(threshold),
+    )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// §2.2 — stats:Nested SampleSet / nested two-way ANOVA dispatch
+// ────────────────────────────────────────────────────────────────────
+
+/// Recompute a nested fixed-effects two-way ANOVA `value ~ group + subgroup`
+/// (D52 §2.2), expressed as a `stats:Nested(...)` SampleSet (blocking ctor
+/// `NestedBlocking`). The SampleSet's observations wrapper carries
+/// `[group_a, group_b, subgroup_sizes_a, subgroup_sizes_b]`: the two groups
+/// (A = first arm, B = second arm), each a flat array grouped by subgroup,
+/// and the per-arm subgroup partition. The binary group main effect is
+/// tested against the within-subgroup residual (subgroup = fixed nuisance).
+/// On a directional Holds it emits `stats:lt(stats:mean_diff_of(s), 0)` —
+/// group A mean strictly below group B, the same proposition shape as the
+/// two-sample dispatch, so the same statistical→domain bridges consume it.
+fn recompute_nested_anova_claim(
+    claim: &Resource,
+    bundle: &DecodedBundle,
+    sample_set_iri_str: &str,
+    ctx: &ExecutionContext,
+) -> Result<QueryOutcome, InstitutionError> {
+    let (flat_a, flat_b, sizes_a, sizes_b) =
+        match decode_nested_observations(&bundle.observations_raw) {
+            Ok(p) => p,
+            Err(diag) => return Ok(gate_fails(diag)),
+        };
+    let group_a = match partition_by_sizes(&flat_a, &sizes_a) {
+        Ok(g) => g,
+        Err(d) => return Ok(gate_fails(format!("subgroup_sizes_a: {d}"))),
+    };
+    let group_b = match partition_by_sizes(&flat_b, &sizes_b) {
+        Ok(g) => g,
+        Err(d) => return Ok(gate_fails(format!("subgroup_sizes_b: {d}"))),
+    };
+    let alpha = match read_float_property(claim, iris::PROP_ALPHA)? {
+        Some(a) => a,
+        None => return Ok(gate_fails("claim missing `alpha`".into())),
+    };
+    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY)? {
+        Some(j) => j,
+        None => return Ok(gate_fails("claim missing `directionality`".into())),
+    };
+    let r = match nested_group_anova(&group_a, &group_b) {
+        Some(r) => r,
+        None => {
+            return Ok(gate_fails(
+                "InsufficientReplication: nested ANOVA needs both groups non-empty and total \
+                 N > #subgroups (at least one within-subgroup residual df)"
+                    .into(),
+            ))
+        }
+    };
+    // Directionality (D52 §7.1). The group-effect F has 1 df (= t²), so the
+    // one-sided p is the two-sided F p halved; OneSidedWitnessed also requires
+    // the asserted direction (group A mean below group B — the lt claim) and a
+    // resolving impossibility witness. TwoSided uses the raw two-way-ANOVA p.
+    let dctor = json_ctor_name(&directionality);
+    let (p_for_alpha, one_sided, direction_ok) = match dctor {
+        Some("TwoSided") => (r.p_two_sided, false, true),
+        Some("OneSidedWitnessed") => {
+            let witness = directionality["args"]
+                .get(0)
+                .and_then(serde_json::Value::as_str);
+            let witness = match witness {
+                Some(s) => s.to_string(),
+                None => {
+                    return Ok(gate_fails(
+                        "directionality = OneSidedWitnessed requires a witness IRI (D52 §7.1)"
+                            .into(),
+                    ))
+                }
+            };
+            if let Some(diag) = check_impossibility_witness(&witness, ctx)? {
+                return Ok(gate_fails(diag));
+            }
+            (r.p_two_sided / 2.0, true, r.mean_a < r.mean_b)
+        }
+        other => {
+            return Ok(gate_fails(format!(
+                "unknown directionality ctor `{other:?}` (expected TwoSided / OneSidedWitnessed)"
+            )))
+        }
+    };
+    let derived = derive_canonical_proposition_twosample(sample_set_iri_str, &directionality);
+    let rejected = p_for_alpha < alpha && direction_ok;
+    let note = format!(
+        "Nested two-way ANOVA (value ~ group + subgroup): F({}, {}) = {:.4}, p_two_sided = {:.6}{}; \
+         group_a mean = {:.4} (n = {}), group_b mean = {:.4} (n = {}); {} subgroups",
+        r.df_group as usize,
+        r.df_resid as usize,
+        r.f_group,
+        r.p_two_sided,
+        if one_sided {
+            format!(", p_one_sided = {:.6}", r.p_two_sided / 2.0)
+        } else {
+            String::new()
+        },
+        r.mean_a,
+        r.n_a,
+        r.mean_b,
+        r.n_b,
+        r.n_subgroups,
+    );
+    let ctor = if rejected {
+        wk::VERDICT_HOLDS
+    } else {
+        wk::VERDICT_FAILS
+    };
+    let diag = if rejected {
+        note
+    } else {
+        format!(
+            "AlphaNotCrossed: computed p = {p_for_alpha:.6}, alpha = {alpha}, \
+             direction_ok = {direction_ok}. {note}"
+        )
+    };
+    let canonical = if rejected { derived.as_ref() } else { None };
+    Ok(gate_holds_with_result(
+        claim.id(),
+        "main_effect",
+        ctor,
+        Some(&diag),
+        (r.f_group, p_for_alpha),
+        canonical,
+    ))
+}
+
+/// Recompute a crossed additive two-way ANOVA `value ~ group + block`
+/// (block crossed), expressed as a `stats:Crossed(...)` SampleSet (blocking
+/// ctor `CrossedBlocking`): the binary group main effect against the
+/// additive-model residual. Mirrors [`recompute_nested_anova_claim`] but
+/// reads the same `[group_a, group_b, subgroup_sizes_a, subgroup_sizes_b]`
+/// observations wrapper and pairs the two arms' block partitions by index
+/// (crossed ⇒ same block levels in both groups, so the two size arrays must
+/// have equal length) and calls [`crossed_two_way_anova`].
+fn recompute_crossed_anova_claim(
+    claim: &Resource,
+    bundle: &DecodedBundle,
+    sample_set_iri_str: &str,
+    ctx: &ExecutionContext,
+) -> Result<QueryOutcome, InstitutionError> {
+    let (flat_a, flat_b, sizes_a, sizes_b) =
+        match decode_nested_observations(&bundle.observations_raw) {
+            Ok(p) => p,
+            Err(diag) => return Ok(gate_fails(diag)),
+        };
+    // Crossed design: the two arms must declare the SAME block levels, so the
+    // partitions are index-aligned and equal in count.
+    if sizes_a.len() != sizes_b.len() {
+        return Ok(gate_fails(format!(
+            "stats:Crossed requires the same crossed block levels in both groups: \
+             subgroup_sizes_a has {} blocks but subgroup_sizes_b has {}",
+            sizes_a.len(),
+            sizes_b.len()
+        )));
+    }
+    let group_a = match partition_by_sizes(&flat_a, &sizes_a) {
+        Ok(g) => g,
+        Err(d) => return Ok(gate_fails(format!("subgroup_sizes_a: {d}"))),
+    };
+    let group_b = match partition_by_sizes(&flat_b, &sizes_b) {
+        Ok(g) => g,
+        Err(d) => return Ok(gate_fails(format!("subgroup_sizes_b: {d}"))),
+    };
+    let alpha = match read_float_property(claim, iris::PROP_ALPHA)? {
+        Some(a) => a,
+        None => return Ok(gate_fails("claim missing `alpha`".into())),
+    };
+    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY)? {
+        Some(j) => j,
+        None => return Ok(gate_fails("claim missing `directionality`".into())),
+    };
+    let r = match crossed_two_way_anova(&group_a, &group_b) {
+        Some(r) => r,
+        None => {
+            return Ok(gate_fails(
+                "InsufficientReplication: crossed ANOVA needs equal block counts (each block \
+                 present), both groups non-empty, and total N > #blocks + 1 (≥1 residual df)"
+                    .into(),
+            ))
+        }
+    };
+    // Directionality (D52 §7.1): the group-effect F has 1 df (= t²), so the
+    // one-sided p is the two-sided F p halved; OneSidedWitnessed also requires
+    // the asserted direction (group A mean below group B) and a resolving
+    // impossibility witness. TwoSided uses the raw two-way-ANOVA p.
+    let dctor = json_ctor_name(&directionality);
+    let (p_for_alpha, one_sided, direction_ok) = match dctor {
+        Some("TwoSided") => (r.p_two_sided, false, true),
+        Some("OneSidedWitnessed") => {
+            let witness = directionality["args"]
+                .get(0)
+                .and_then(serde_json::Value::as_str);
+            let witness = match witness {
+                Some(s) => s.to_string(),
+                None => {
+                    return Ok(gate_fails(
+                        "directionality = OneSidedWitnessed requires a witness IRI (D52 §7.1)"
+                            .into(),
+                    ))
+                }
+            };
+            if let Some(diag) = check_impossibility_witness(&witness, ctx)? {
+                return Ok(gate_fails(diag));
+            }
+            (r.p_two_sided / 2.0, true, r.mean_a < r.mean_b)
+        }
+        other => {
+            return Ok(gate_fails(format!(
+                "unknown directionality ctor `{other:?}` (expected TwoSided / OneSidedWitnessed)"
+            )))
+        }
+    };
+    let derived = derive_canonical_proposition_twosample(sample_set_iri_str, &directionality);
+    let rejected = p_for_alpha < alpha && direction_ok;
+    let note = format!(
+        "Crossed two-way ANOVA (value ~ group + block): F({}, {}) = {:.4}, p_two_sided = {:.6e}{}; \
+         group_a mean = {:.4} (n = {}), group_b mean = {:.4} (n = {}); {} crossed blocks",
+        r.df_group as usize,
+        r.df_resid as usize,
+        r.f_group,
+        r.p_two_sided,
+        if one_sided {
+            format!(", p_one_sided = {:.6e}", r.p_two_sided / 2.0)
+        } else {
+            String::new()
+        },
+        r.mean_a,
+        r.n_a,
+        r.mean_b,
+        r.n_b,
+        r.n_blocks,
+    );
+    let ctor = if rejected {
+        wk::VERDICT_HOLDS
+    } else {
+        wk::VERDICT_FAILS
+    };
+    let diag = if rejected {
+        note
+    } else {
+        format!(
+            "AlphaNotCrossed: computed p = {p_for_alpha:.6e}, alpha = {alpha}, \
+             direction_ok = {direction_ok}. {note}"
+        )
+    };
+    let canonical = if rejected { derived.as_ref() } else { None };
+    Ok(gate_holds_with_result(
+        claim.id(),
+        "main_effect",
+        ctor,
+        Some(&diag),
+        (r.f_group, p_for_alpha),
+        canonical,
+    ))
+}
+
+/// Partition a flat value vector into subgroups of the given sizes. Errors if
+/// the sizes don't sum to the vector length (the SampleSet arm and the
+/// declared subgroup partition disagree).
+fn partition_by_sizes(flat: &[f64], sizes: &[usize]) -> Result<Vec<Vec<f64>>, String> {
+    let total: usize = sizes.iter().sum();
+    if total != flat.len() {
+        return Err(format!(
+            "sizes sum to {total} but the SampleSet group has {} values",
+            flat.len()
+        ));
+    }
+    let mut out = Vec::with_capacity(sizes.len());
+    let mut off = 0;
+    for &s in sizes {
+        out.push(flat[off..off + s].to_vec());
+        off += s;
+    }
+    Ok(out)
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1501,6 +2080,60 @@ fn decode_two_group_observations(j: &serde_json::Value) -> Result<(Vec<f64>, Vec
     let group_a = decode_flat_observations(&outer[0]).map_err(|e| format!("IID group A: {e}"))?;
     let group_b = decode_flat_observations(&outer[1]).map_err(|e| format!("IID group B: {e}"))?;
     Ok((group_a, group_b))
+}
+
+/// Decoded nested/crossed two-way-ANOVA observations:
+/// `(group_a, group_b, subgroup_sizes_a, subgroup_sizes_b)`. Typed alias to
+/// satisfy clippy's type-complexity lint on the decoder's return type.
+type NestedObservations = (Vec<f64>, Vec<f64>, Vec<usize>, Vec<usize>);
+
+/// Decode the nested/crossed two-way-ANOVA observations payload:
+/// `[group_a, group_b, subgroup_sizes_a, subgroup_sizes_b]` (D52 §2.2 /
+/// §4.2). Elements [0],[1] are the two flat group arrays (group A = the
+/// treatment / first-context arm, group B = control / second-context arm);
+/// elements [2],[3] are the per-subgroup observation counts that partition
+/// each arm. The subgroup partition lives in the SampleSet (carried by the
+/// `stats:Nested` / `stats:Crossed` smart-constructors) rather than on the
+/// plan. Returns `(group_a, group_b, subgroup_sizes_a, subgroup_sizes_b)`.
+fn decode_nested_observations(j: &serde_json::Value) -> Result<NestedObservations, String> {
+    let outer = j
+        .as_array()
+        .ok_or_else(|| format!("Nested/Crossed observations slot is not an array: {j:?}"))?;
+    if outer.len() != 4 {
+        return Err(format!(
+            "Nested/Crossed expects observations = [group_a, group_b, subgroup_sizes_a, \
+             subgroup_sizes_b] (4 elements; got {})",
+            outer.len()
+        ));
+    }
+    let group_a =
+        decode_flat_observations(&outer[0]).map_err(|e| format!("Nested/Crossed group A: {e}"))?;
+    let group_b =
+        decode_flat_observations(&outer[1]).map_err(|e| format!("Nested/Crossed group B: {e}"))?;
+    let sizes_a = decode_usize_array(&outer[2])
+        .map_err(|e| format!("Nested/Crossed subgroup_sizes_a: {e}"))?;
+    let sizes_b = decode_usize_array(&outer[3])
+        .map_err(|e| format!("Nested/Crossed subgroup_sizes_b: {e}"))?;
+    Ok((group_a, group_b, sizes_a, sizes_b))
+}
+
+/// Decode a flat JSON array of non-negative whole numbers into
+/// `Vec<usize>` — the subgroup partition sizes carried in the
+/// nested/crossed SampleSet observations wrapper. Rejects negatives /
+/// non-integral / non-array values.
+fn decode_usize_array(j: &serde_json::Value) -> Result<Vec<usize>, String> {
+    let arr = j.as_array().ok_or_else(|| format!("not an array: {j:?}"))?;
+    let mut out = Vec::with_capacity(arr.len());
+    for (i, v) in arr.iter().enumerate() {
+        let n = v
+            .as_f64()
+            .ok_or_else(|| format!("element {i} is not a number: {v:?}"))?;
+        if n < 0.0 || n.fract() != 0.0 {
+            return Err(format!("element {i} is not a non-negative integer: {n}"));
+        }
+        out.push(n as usize);
+    }
+    Ok(out)
 }
 
 /// Decode the Paired observations payload: a flat float array of
@@ -2222,6 +2855,76 @@ fn derive_canonical_proposition_singlesample(
                 threshold,
             ))
         }
+        _ => None,
+    }
+}
+
+/// Derive the canonical proposition for a two-sample (IID) comparison —
+/// shared by the t-test and Wilcoxon rank-sum paths (same H1 shape). The
+/// proposition is about the sample set's group mean-difference
+/// `stats:mean_diff_of(s)` = mean(group_a) − mean(group_b):
+///
+///   TwoSided          → ¬(mean_diff_of(s) = 0)
+///   OneSidedWitnessed → stats:lt(mean_diff_of(s), 0)   (group A below group B)
+///
+/// Authoring convention: place the hypothesised-lower group first
+/// (`group_a`) so the one-sided `lt` reads in the asserted direction.
+/// (As with the one-sample case, v1's verdict checks p < alpha but not
+/// the sign of the observed difference — the directional refinement is a
+/// shared follow-on; the WRN MSI<MSS direction holds regardless.)
+fn derive_canonical_proposition_twosample(
+    sample_set_iri: &str,
+    directionality: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    use crate::institution::iris as i;
+    let mean_diff = encode_app(
+        encode_const_ref(i::STATS_MEAN_DIFF_OF),
+        encode_lit_string(sample_set_iri),
+    );
+    let zero = encode_lit_float(0.0);
+    match json_ctor_name(directionality)? {
+        "TwoSided" => {
+            // ¬(mean_diff_of(s) = 0) ≡ (mean_diff_of(s) = 0) → False
+            let eq = encode_id(encode_const_ref(wk::FLOAT), mean_diff, zero);
+            Some(encode_pi("", eq, encode_const_ref(i::STATS_FALSE)))
+        }
+        "OneSidedWitnessed" => Some(encode_app(
+            encode_app(encode_const_ref(i::STATS_LT), mean_diff),
+            zero,
+        )),
+        _ => None,
+    }
+}
+
+/// Derive the canonical proposition for a Spearman rank correlation
+/// (Paired + RankBased) over `stats:spearman_rho(s)`:
+///
+///   TwoSided          → ¬(spearman_rho(s) = 0)   (some monotone association)
+///   OneSidedWitnessed → stats:lt(spearman_rho(s), 0)   (negative correlation)
+///
+/// Authoring convention: the one-sided form asserts *anti*-correlation
+/// (rho < 0); the WRN dependency ~ #MS-deletions claim is of this form.
+/// (As elsewhere, v1's verdict checks p < alpha but not the sign of the
+/// observed rho — a shared directional follow-on; the WRN rho < 0 holds.)
+fn derive_canonical_proposition_correlation(
+    sample_set_iri: &str,
+    directionality: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    use crate::institution::iris as i;
+    let rho = encode_app(
+        encode_const_ref(i::STATS_SPEARMAN_RHO),
+        encode_lit_string(sample_set_iri),
+    );
+    let zero = encode_lit_float(0.0);
+    match json_ctor_name(directionality)? {
+        "TwoSided" => {
+            let eq = encode_id(encode_const_ref(wk::FLOAT), rho, zero);
+            Some(encode_pi("", eq, encode_const_ref(i::STATS_FALSE)))
+        }
+        "OneSidedWitnessed" => Some(encode_app(
+            encode_app(encode_const_ref(i::STATS_LT), rho),
+            zero,
+        )),
         _ => None,
     }
 }

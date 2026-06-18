@@ -1,0 +1,43 @@
+# WRN-Helicase case study — machine-readable data manifest (single source of truth for fetch.sh).
+#
+# One row per artifact. Tab-separated. Columns:
+#   id      short stable identifier
+#   kind    raw | manual | derived
+#             raw     — fetched from a public origin URL by fetch.sh
+#             manual  — not auto-fetchable (paper author-manuscript supplement);
+#                       fetch.sh copies from the in-repo fallback path if present,
+#                       else prints instructions
+#             derived — produced from another artifact by an extract/ script
+#   source  raw:     origin URL
+#           manual:  repo-relative fallback path
+#           derived: "<interp>|<script>|<input-basename>" (interp = python3|Rscript)
+#   md5     figshare-supplied md5 (verified on download), or "-" if none published
+#   sha256  Eigenius content address of the local copy (the authority; == the
+#           PinnedExternalFile IRI hash used in the demo + chain provenance)
+#   dest    path under data/ where the artifact lives
+#
+# Human-readable provenance narrative (what each is used for): see MANIFEST.md.
+#
+# id	kind	source	md5	sha256	dest
+achilles_gene_effect	raw	https://ndownloader.figshare.com/files/13396070	30f243486c3370d3e5cc6f8ef57b90b3	2186669de8ade17bfbf7f2bc3e67e8af59d644800bf793ef103c67a4692eb68b	slices/achilles_18Q4_gene_effect.csv
+achilles_sample_info	raw	https://ndownloader.figshare.com/files/13396100	96167950d09e6aa1c9184eb61af5c4b2	c5778e66e6c62c94386a39924be50f24086d5f0d5401117b065c3e6d7fbdb498	slices/achilles_18Q4_sample_info.csv
+drive_dep_scores	raw	https://ndownloader.figshare.com/files/11489693	69b13ed329a027cad2d28166e1af20b0	3f863c296188be1aa8a491ef5489b135a9bfd65266f05d0690225d20fc38254b	slices/drive_D2_DRIVE_gene_dep_scores.csv
+depmap_18q4_rds	raw	https://ndownloader.figshare.com/files/14357999	f9e62e63bbc58ada5fc1f2d0534d08c5	14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed	large/DepMap_18Q4_data.rds
+gse126464_star	raw	https://ftp.ncbi.nlm.nih.gov/geo/series/GSE126nnn/GSE126464/suppl/GSE126464_STAR_Gene_Counts.csv.gz	-	e66c70f32079bc137b6e3849fc71d5cf0d3e42caed3e8b8e7be4a3bc4876daa5	slices/GSE126464_STAR_Gene_Counts.csv.gz
+gse126464_cuff	raw	https://ftp.ncbi.nlm.nih.gov/geo/series/GSE126nnn/GSE126464/suppl/GSE126464_Cuff_Gene_Counts.csv.gz	-	c136488faa9b81c20711f2b97d370ef5edd511e36ea3d663f1486aa13b904eaa	slices/GSE126464_Cuff_Gene_Counts.csv.gz
+hallmark_v62	raw	https://data.broadinstitute.org/gsea-msigdb/msigdb/release/6.2/h.all.v6.2.symbols.gmt	-	0ee07a4abda7bba49e6cf4ce773f1c5a57b24726cd6c6662f01cabe31e22146b	slices/h.all.v6.2.symbols.gmt
+sourcedata_fig2	raw	https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-019-1102-x/MediaObjects/41586_2019_1102_MOESM3_ESM.xlsx	-	e9c006d12398d87a36801d4d2ecee56a9932c3536d3ba780f1bb6234a560c89e	slices/wrn_sourcedata_Fig2_MOESM3.xlsx
+sourcedata_fig3	raw	https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-019-1102-x/MediaObjects/41586_2019_1102_MOESM4_ESM.xlsx	-	a0a6629bba9356cfacfd7e36d8e0b5aeb3622665f097da05e63aeffc153612d8	slices/wrn_sourcedata_Fig3_MOESM4.xlsx
+sourcedata_fig4	raw	https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-019-1102-x/MediaObjects/41586_2019_1102_MOESM5_ESM.xlsx	-	90a7bc2dd50f6a934ab1f051c8cdf670a1507dd8c19736937fb371bf7a63b6de	slices/wrn_sourcedata_Fig4_MOESM5.xlsx
+sourcedata_edfig3	raw	https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-019-1102-x/MediaObjects/41586_2019_1102_MOESM6_ESM.xlsx	-	506d7ac0f2517cb6b1e7277dfb175675044ab4b6fbc4a628f8c9ad843ba41fd6	slices/wrn_sourcedata_EDFig3_MOESM6.xlsx
+sourcedata_edfig4	raw	https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-019-1102-x/MediaObjects/41586_2019_1102_MOESM7_ESM.xlsx	-	bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549	slices/wrn_sourcedata_EDFig4_MOESM7.xlsx
+sourcedata_edfig5	raw	https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-019-1102-x/MediaObjects/41586_2019_1102_MOESM8_ESM.xlsx	-	2b9272d8f04c615521cbeea2c0d252169d330b77f799f2017a73b5cf4328cc1f	slices/wrn_sourcedata_EDFig5_MOESM8.xlsx
+sourcedata_edfig6	raw	https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-019-1102-x/MediaObjects/41586_2019_1102_MOESM9_ESM.xlsx	-	6093a49413854f93d9b21bc69a70a698f62dd53697e6746629384e677488cb96	slices/wrn_sourcedata_EDFig6_MOESM9.xlsx
+sourcedata_edfig7	raw	https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-019-1102-x/MediaObjects/41586_2019_1102_MOESM10_ESM.xlsx	-	0a374326b1db4a38388450caa3b28732b5bb1a16461b0a3b79d91aabd25e37f6	slices/wrn_sourcedata_EDFig7_MOESM10.xlsx
+sourcedata_edfig8	raw	https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-019-1102-x/MediaObjects/41586_2019_1102_MOESM11_ESM.xlsx	-	a8b533a5b506457878a51941455a717b552b69e63900fbc21f277652b3c1c47a	slices/wrn_sourcedata_EDFig8_MOESM11.xlsx
+sourcedata_edfig10	raw	https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-019-1102-x/MediaObjects/41586_2019_1102_MOESM12_ESM.xlsx	-	3fc08ebadbc282ac7bdb4f87d73e704e79e216b611e5357302d17e4e32cdb33c	slices/wrn_sourcedata_EDFig10_MOESM12.xlsx
+ccle_phase2_msi	raw	https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-019-1186-3/MediaObjects/41586_2019_1186_MOESM10_ESM.xlsx	-	ad26cb4460308d0522fed0121c27bce05c033e423f627629606738ffdec03eb8	slices/ccle_phase2_suppl_table_7_msi.xlsx
+supp_table_1_xlsx	manual	references/publications/WRN-Helicase-Supplements/NIHMS1522798-supplement-Supp_Table_1.xlsx	-	1a05d612e18c21b0e49cbd866df53dae654cc3d180c1fc568bc53388fac4c7b2	slices/wrn_supplementary_table_1.xlsx
+supp_table_1_csv	derived	python3|extract/supp_table_1_to_csv.py|wrn_supplementary_table_1.xlsx	-	eebd460257982a98cf6ce9f14e189ae0c4398a686f4181bc037c5591e87243f2	slices/wrn_supplementary_table_1.csv
+if_ed5_long	derived	Rscript|extract/if-ed5-extract.R|wrn_sourcedata_EDFig5_MOESM8.xlsx	-	8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519	slices/if_ed5_long.csv
+foci_53bp1_long	derived	Rscript|extract/foci-ed6-extract.R|wrn_sourcedata_EDFig6_MOESM9.xlsx	-	1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83	slices/foci_53bp1_long.csv

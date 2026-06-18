@@ -1,0 +1,30 @@
+[
+  {
+    "@id": "urn:eigenius:pub:wrn:program:paralog_ctrl",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:program:Program"
+    ],
+    "urn:eigenius:program:input_type": "urn:eigenius:ingest:PinnedExternalFile",
+    "urn:eigenius:program:output_type": "urn:eigenius:reflection:DerivedResource",
+    "urn:eigenius:program:body": {
+      "urn:eigenius:core:is_a": [
+        "urn:eigenius:program:Apply"
+      ],
+      "urn:eigenius:program:function": "urn:eigenius:program:components:RunRuntimeScript",
+      "urn:eigenius:program:argument": {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:program:Var"
+        ],
+        "urn:eigenius:program:name": "input"
+      },
+      "urn:eigenius:program:component_argument": {
+        "urn:eigenius:runtime:language": "r",
+        "urn:eigenius:runtime:source": "# Paralogue co-loss control (ED Fig 9a): WRN's MSI-selective dependence is\n# INTRINSIC to MSI, not a confound of paralogue / DNA-helicase co-loss. D56\n# wrapped-R over the 1.6 GB DepMap omics rds (D53 PinnedExternalFile, read via\n# readRDS) -- the large multi-schema container path. Inputs: [1] DepMap rds,\n# [2] Supp Table 1 (avg_WRN_dep + CCLE_MSI).\nrp  <- .Call(\"r_eigon_materialized_path\", eigenius_inputs[[1]])\ns1p <- .Call(\"r_eigon_materialized_path\", eigenius_inputs[[2]])\ndat <- readRDS(rp)\ns1  <- read.csv(s1p, check.names = FALSE)\ncd  <- data.frame(CCLE_ID = s1$CCLE_ID, MSI = s1$CCLE_MSI == \"MSI\",\n                  avg_WRN_dep = suppressWarnings(as.numeric(s1$avg_WRN_dep)))\nCN_loss <- -1; GE_un <- 1   # authors' thresholds (methylation ignored: Inf)\ncls <- cd$CCLE_ID[!is.na(cd$avg_WRN_dep) & cd$CCLE_ID %in% rownames(dat$GE) & cd$CCLE_ID %in% rownames(dat$CN)]\ngene_loss <- function(g) {\n  il <- setNames(rep(FALSE, length(cls)), cls)\n  if (!is.null(dat$MUT_DAM) && g %in% colnames(dat$MUT_DAM)) { u <- intersect(cls, rownames(dat$MUT_DAM)); il[u[which(dat$MUT_DAM[u, g] == TRUE)]] <- TRUE }\n  if (g %in% colnames(dat$CN)) { u <- intersect(cls, rownames(dat$CN)); v <- dat$CN[u, g]; il[u[which(v < CN_loss & !is.na(v))]] <- TRUE }\n  if (g %in% colnames(dat$GE)) { u <- intersect(cls, rownames(dat$GE)); v <- dat$GE[u, g]; il[u[which(v < GE_un & !is.na(v))]] <- TRUE }\n  il\n}\nbase <- summary(lm(avg_WRN_dep ~ MSI, data = cd))$coefficients\nbase_b <- base[\"MSITRUE\", 1]; base_p <- base[\"MSITRUE\", 4]\n# Control for each RECQ paralogue's loss; the MSI coefficient must survive.\nparalogues <- c(\"RECQL\", \"BLM\", \"RECQL4\", \"RECQL5\")\nmsi_bs <- c(); msi_ps <- c()\nfor (g in paralogues) {\n  gl <- gene_loss(g)\n  df <- merge(cd, data.frame(CCLE_ID = names(gl), gene_loss = gl), by = \"CCLE_ID\")\n  co <- summary(lm(avg_WRN_dep ~ MSI + gene_loss, data = df))$coefficients\n  msi_bs <- c(msi_bs, co[\"MSITRUE\", 1]); msi_ps <- c(msi_ps, co[\"MSITRUE\", 4])\n}\nworst_p <- max(msi_ps)            # weakest MSI coefficient across paralogue controls\nsame_sign <- all(sign(msi_bs) == sign(base_b))\nb <- .Call(\"r_eigon_begin\", \"urn:eigenius:pub:wrn:paralog_ctrl:result\")\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:paralog_baseline_msi_beta\", base_b)\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:paralog_baseline_msi_p\", base_p)\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:paralog_controlled_msi_p_max\", worst_p)\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:paralog_controlled_msi_beta_min\", min(msi_bs))\n# Warrant: the MSI coefficient stays significant and same-signed controlling for\n# every paralogue's loss -- WRN dependence is not explained by paralogue co-loss.\nif (base_p < 0.05 && worst_p < 0.05 && same_sign) {\n  .Call(\"r_eigon_set_proposition\", b,\n        \"urn:eigenius:benchmark:onco:NotExplainedByParalogLoss\", c(\"WRN\", \"MSI\"))\n}\n.Call(\"r_eigon_finish\", b)\n",
+        "urn:eigenius:runtime:image_digest": "sha256:9ffb0efb052795e7f65dbd16760e26afae5708d605941b25587b76046ff36364",
+        "urn:eigenius:runtime:additional_inputs": [
+          "urn:eigenius:ingest:file:eebd460257982a98cf6ce9f14e189ae0c4398a686f4181bc037c5591e87243f2"
+        ]
+      }
+    }
+  }
+]

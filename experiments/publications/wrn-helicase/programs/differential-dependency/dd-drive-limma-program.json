@@ -1,0 +1,30 @@
+[
+  {
+    "@id": "urn:eigenius:pub:wrn:program:dd_drive_limma",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:program:Program"
+    ],
+    "urn:eigenius:program:input_type": "urn:eigenius:ingest:PinnedExternalFile",
+    "urn:eigenius:program:output_type": "urn:eigenius:reflection:DerivedResource",
+    "urn:eigenius:program:body": {
+      "urn:eigenius:core:is_a": [
+        "urn:eigenius:program:Apply"
+      ],
+      "urn:eigenius:program:function": "urn:eigenius:program:components:RunRuntimeScript",
+      "urn:eigenius:program:argument": {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:program:Var"
+        ],
+        "urn:eigenius:program:name": "input"
+      },
+      "urn:eigenius:program:component_argument": {
+        "urn:eigenius:runtime:language": "r",
+        "urn:eigenius:runtime:source": "# D-DIFF (DRIVE): WRN is the top preferential dependency in MSI vs MSS,\n# reproduced from public RNAi data via limma moderated-t (D53 6 wrapped-R / D56).\n# Inputs (D53 4.3 multi-file join): [1] DRIVE DEMETER2 matrix (genes x cell-lines,\n# columns are CCLE_IDs), [2] Supp Table 1 (CCLE_MSI labels).\ndrv <- .Call(\"r_eigon_materialized_path\", eigenius_inputs[[1]])\ns1p <- .Call(\"r_eigon_materialized_path\", eigenius_inputs[[2]])\nsuppressMessages({ library(data.table); library(limma) })\ndt  <- fread(drv); g <- dt[[1]]; M <- as.matrix(dt[, -1]); rownames(M) <- g\ns1  <- fread(s1p)\nmsi <- s1$CCLE_MSI[match(colnames(M), s1$CCLE_ID)]\nkeep <- !is.na(msi) & msi %in% c(\"MSI\", \"MSS\")\nM <- M[, keep]; grp <- factor(msi[keep], levels = c(\"MSS\", \"MSI\"))\nM <- M[rowSums(!is.na(M)) >= 3, ]\n# limma moderated-t: DRIVE is already features (genes) x samples (cell lines).\nfit <- eBayes(lmFit(M, model.matrix(~ grp)))\ntt  <- topTable(fit, coef = 2, number = Inf, sort.by = \"none\"); tt$gene <- rownames(tt)\nneg <- tt[tt$logFC < 0, ]; neg <- neg[order(neg$P.Value), ]\nw   <- which(grepl(\"^WRN \\\\(\", neg$gene))[1]\nq   <- neg$adj.P.Val[w]; rnk <- as.numeric(w)\nb <- .Call(\"r_eigon_begin\", \"urn:eigenius:pub:wrn:dd_drive:result\")\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:measurements:adj_p_value\", q)\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:differential_rank\", rnk)\nif (rnk == 1) {\n  .Call(\"r_eigon_set_proposition\", b,\n        \"urn:eigenius:benchmark:onco:TopDifferentialDependency\", c(\"WRN\", \"DRIVE_MSI\"))\n}\n.Call(\"r_eigon_finish\", b)\n",
+        "urn:eigenius:runtime:image_digest": "sha256:9ffb0efb052795e7f65dbd16760e26afae5708d605941b25587b76046ff36364",
+        "urn:eigenius:runtime:additional_inputs": [
+          "urn:eigenius:ingest:file:eebd460257982a98cf6ce9f14e189ae0c4398a686f4181bc037c5591e87243f2"
+        ]
+      }
+    }
+  }
+]

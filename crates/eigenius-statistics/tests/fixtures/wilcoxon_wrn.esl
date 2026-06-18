@@ -1,0 +1,67 @@
+// Institution-recompute fixture — WRN MSI-vs-MSS dependency, Wilcoxon.
+//
+// The IID two-sample dispatch with variance_assumption = RankBased now
+// runs the Wilcoxon rank-sum (Mann–Whitney U) test instead of a t-test.
+// The data are the REAL avg WRN dependency scores (CRISPR-CERES + RNAi-
+// DEMETER2) for the 37 MSI and 91 MSS common-MSI-lineage cell lines from
+// the WRN paper's Supplementary Table 1 (pinned snapshot). The paper
+// reports this comparison at P = 4.2e-13; the institution recomputes it
+// and emits a Holds StatisticalAnalysisResult carrying the verifier-
+// derived two-sample proposition ¬(mean_diff_of(s) = 0), which the D49
+// witness emitter admits as IsDerivedAs.
+//
+// Group A = MSI (hypothesised more-dependent / more-negative), Group B =
+// MSS, so mean_diff_of(s) = mean(MSI) − mean(MSS) < 0.
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace stats      = "urn:eigenius:measurements";
+namespace wrn        = "urn:eigenius:demo:wrndep";
+
+resource wrn:wrn_dep_msi_vs_mss : stats:SampleSetResource {
+    reflection:source      = "depmap:18Q4 avg WRN dependency, common-MSI lineages (Supp Table 1)";
+    reflection:observed_at = "2019-01-01T00:00:00Z";
+
+    stats:sample_set_value = stats:IID(
+        [-2.623081, -2.225778, -2.056004, -1.826026, -1.801462, -1.775366, -1.570166, -1.505872,
+         -1.492430, -1.477463, -1.344363, -1.274070, -1.184914, -1.096147, -1.047139, -0.993197,
+         -0.910127, -0.830779, -0.810157, -0.770493, -0.744374, -0.738790, -0.697405, -0.677736,
+         -0.674509, -0.618785, -0.520890, -0.415037, -0.395224, -0.347907, -0.236841, -0.209223,
+         -0.199727, -0.145768, -0.012400, 0.020318, 0.128328],
+        [-0.355546, -0.353888, -0.352529, -0.320391, -0.318409, -0.304129, -0.290073, -0.269563,
+         -0.258723, -0.257041, -0.245021, -0.244267, -0.241807, -0.241384, -0.210512, -0.208758,
+         -0.207016, -0.206909, -0.205790, -0.205265, -0.177701, -0.175114, -0.174864, -0.167826,
+         -0.159125, -0.151440, -0.149299, -0.134245, -0.132432, -0.129745, -0.123319, -0.116815,
+         -0.116629, -0.116322, -0.114192, -0.108169, -0.108043, -0.107132, -0.104000, -0.102705,
+         -0.094210, -0.093614, -0.090988, -0.085417, -0.076764, -0.070082, -0.069146, -0.068466,
+         -0.068314, -0.066562, -0.059598, -0.051638, -0.045905, -0.042263, -0.040483, -0.038843,
+         -0.036078, -0.027051, -0.026841, -0.025989, -0.024593, -0.022725, -0.022585, -0.019797,
+         -0.017345, -0.014836, -0.004199, -0.003123, 0.007673, 0.008101, 0.009901, 0.011089,
+         0.033948, 0.033989, 0.035979, 0.038609, 0.040102, 0.048724, 0.057215, 0.057330, 0.065760,
+         0.067765, 0.069531, 0.076837, 0.089501, 0.114439, 0.125352, 0.160587, 0.175678, 0.220103,
+         0.291802],
+        BiologicalReplication(),
+    );
+}
+
+resource wrn:wrn_dep_trace : reflection:ObservationTrace {
+    reflection:resource  = wrn:wrn_dep_msi_vs_mss;
+    reflection:source    = "depmap:18Q4 (Supp Table 1)";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}
+
+resource wrn:claim_msi_more_wrn_dependent : stats:StatisticalAnalysisPlan {
+    stats:sample_set = wrn:wrn_dep_msi_vs_mss;
+
+    stats:alpha               = 0.05;
+    stats:effect_size         = Absolute(0.0, "dependency_score");
+    stats:directionality      = TwoSided();
+    stats:variance_assumption = RankBased();
+    stats:outlier_exclusion   = Identity();
+}
+
+resource wrn:claim_msi_more_wrn_dependent_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:claim_msi_more_wrn_dependent;
+    reflection:source    = "statistics-institution:validate_analysis_plan";
+    reflection:timestamp = "2019-01-01T00:00:00Z";
+}

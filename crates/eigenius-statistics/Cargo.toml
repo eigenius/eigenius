@@ -29,3 +29,6 @@ serde_json.workspace = true
 # cite a MeasurementClaim's IsDerivedAs witness via DerivedEvidence,
 # proving the statistics → reasoning hand-off promised by §8.
 eigenius-reasoning = { path = "../eigenius-reasoning" }
+# D53 §6.1 file-backed-observations test: compute the content_hash of the
+# materialized CSV the kernel content-array capability verifies against.
+sha2 = "0.10"

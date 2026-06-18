@@ -81,6 +81,21 @@ export interface RuntimeSubstrateAddon {
     depotPath: string,
   ): void;
 
+  /** Register the R language runtime under language_id="r" (D55 / D56).
+   * `driverPath` points at `EigeniusRWorker.R` and `cdylibPath` at
+   * `libeigenius_r_worker.so` — both baked into the R worker image; they
+   * must match the recipe that built it or the boot cross-check fails
+   * closed (D26 §9.3). The image is resolved per dispatch from the env
+   * Resource's `image_digest`. `baseImageRef` is the digest-pinned
+   * Bioconductor base. `depotPath` is the shared host/container path
+   * (same constraint as the Julia/Lean variants). */
+  registerRLanguageRuntime(
+    driverPath: string,
+    cdylibPath: string,
+    baseImageRef: string,
+    depotPath: string,
+  ): void;
+
   /** Dispatch a `RunRuntimeScript` invocation. Both args are
    * Eigon-CBOR `Buffer`s; returns the output Resource and a partial
    * `RuntimeInvocation` Resource (Phase 18c.5 / D26 §5.5) carrying the
@@ -88,6 +103,7 @@ export interface RuntimeSubstrateAddon {
   dispatchRunRuntimeScript(
     input: Uint8Array,
     argument: Uint8Array,
+    additionalInputs?: Uint8Array[],
   ): Promise<DispatchOutcome>;
 
   /** Dispatch a `CallRuntimeMethod` invocation. v1 errors against any

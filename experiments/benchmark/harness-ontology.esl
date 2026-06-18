@@ -1,0 +1,100 @@
+// benchmark harness ontology (D50 §5b). Extends reflection / bench-core.
+//
+// Declares `bench:TaskOutput` — the chain-resident deliverable handle for
+// condition C. It pairs the artifact the task asked for (Python source,
+// prose, JSON/CSV, or a resource set) with an explicit pointer chain back
+// to the ReasoningSentences that justified its construction. This is what
+// the scoring harness consumes, and what makes the chain "complete in
+// itself": an auditor can ask "for this program, which reasoning steps
+// produced which behaviour?" and walk `reasoning_chain` to find out.
+//
+// Benchmark-scoped, NOT reasoning-scoped (D50 §5b): the class is justified
+// entirely by benchmark evaluation, so it lives with the harness and the
+// Reasoning institution stays unaware of it. Namespace `benchmark`
+// (prefix `bench`, shared with bench-core); loaded as a sibling layer to
+// the per-family base ontologies.
+//
+// Conception (per the SAB-16 modelling discussion): the benchmark's
+// deliverable program is the *object code* of the agent's reasoning; this
+// resource is the typed handle binding that object code to its source —
+// the warranted methodological decisions in `reasoning_chain`. The
+// endpoint is program-generated-from-chain; for now the agent authors
+// both and `reasoning_chain` records the justification.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace bench      = "urn:eigenius:benchmark";
+
+class bench:TaskOutput : reflection:DerivedResource {
+    description = "Chain-resident deliverable handle for a benchmark task (D50 §5b): the artifact the task asked for, plus the ReasoningSentences that justified its construction. A DerivedResource — the deliverable is derived from the reasoning chain + the agent loop that produced it.";
+    requires bench:task,
+             bench:deliverable_kind,
+             bench:payload,
+             bench:reasoning_chain,
+             reflection:derivation;
+    recommends bench:deliverable_resources;
+}
+
+property bench:task : core:string {
+    description = "IRI of the benchmark task this output answers. Gives the deliverable task-scoped identity.";
+    format = formats:iri;
+    domain bench:TaskOutput;
+}
+
+property bench:deliverable_kind : core:string {
+    description = "What kind of artifact the payload is. Pilot values: 'python_source', 'prose', 'json', 'csv'. Free string for forward-compat per D50 §5b — new kinds are added as task families need them.";
+    domain bench:TaskOutput;
+}
+
+property bench:payload : core:string {
+    description = "The artifact content the task asked for — a literal for python_source / prose / json / csv. For deliverable_kind = 'resource_set' the payload lives in bench:deliverable_resources instead and this may be a short manifest/description.";
+    domain bench:TaskOutput;
+}
+
+property bench:reasoning_chain : core:value_array {
+    description = "IRIs of the reasoning:ReasoningSentences this output rests on, in commit order. Auditors trace from the deliverable to its warrants. (Commit-time validation that each IRI resolves to a ReasoningSentence on chain is a follow-on validator rule, D50 §5b.)";
+    element_type = core:string;
+    domain bench:TaskOutput;
+}
+
+property bench:deliverable_resources : core:value_array {
+    description = "For deliverable_kind = 'resource_set': IRIs of the chain resources that constitute the deliverable. Absent for literal payloads.";
+    element_type = core:string;
+    domain bench:TaskOutput;
+}
+
+// ── CodeBlock — decision ↔ code-section overlay ───────────────────────
+//
+// Connects a methodological decision (a reasoning step) to the named
+// region of the deliverable program that realises it. The program payload
+// carries matching `# region: <label>` / `# endregion` markers, so the
+// mapping is navigable in the artifact AND queryable on chain. This is the
+// connective tissue between the reasoning (source) and the program (object
+// code): it makes the coverage check possible — every decision realised by
+// some block (no unimplemented method); every block realises ≥1 decision
+// (no unwarranted logic). One region may realise several decisions (e.g. a
+// single line carrying both the similarity-reduction and threshold
+// choices). Endpoint: blocks generated from decisions (program-from-chain).
+
+class bench:CodeBlock {
+    description = "Overlay linking a methodological decision to the named code region of a bench:TaskOutput program that realises it. Not a warrant category — structural connective metadata between the reasoning chain and the deliverable.";
+    requires bench:of_output, bench:block_label, bench:realizes;
+}
+
+property bench:of_output : core:resource {
+    description = "The bench:TaskOutput program this block indexes a region of.";
+    class_types bench:TaskOutput;
+    domain bench:CodeBlock;
+}
+
+property bench:block_label : core:string {
+    description = "Region label; matches a `# region: <label>` marker in the program payload, so the decision↔code mapping is navigable in the artifact.";
+    domain bench:CodeBlock;
+}
+
+property bench:realizes : core:value_array {
+    description = "IRIs of the methodological decisions (Declared conformances / ReasoningSentences) this code region implements. An array — one region may realise several decisions.";
+    element_type = core:string;
+    domain bench:CodeBlock;
+}

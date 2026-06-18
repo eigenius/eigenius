@@ -124,7 +124,7 @@ The atomic unit of traced IO computation. This is the cache identity for memoiza
   "urn:eigenius:reflection:argument_hash": "<cbor-deterministic-hash>",
   "urn:eigenius:reflection:output": { ... embedded output resource ... },
   "urn:eigenius:reflection:provider": "anthropic",
-  "urn:eigenius:reflection:model": "claude-sonnet-4-20250514",
+  "urn:eigenius:reflection:model": "claude-sonnet-4-6",
   "urn:eigenius:reflection:prompt_tokens": 450,
   "urn:eigenius:reflection:completion_tokens": 120,
   "urn:eigenius:reflection:latency_ms": 1200,

@@ -1,0 +1,27 @@
+[
+  {
+    "@id": "urn:eigenius:pub:wrn:program:km12_competition_lme4",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:program:Program"
+    ],
+    "urn:eigenius:program:input_type": "urn:eigenius:pub:wrn:CompetitionTable",
+    "urn:eigenius:program:output_type": "urn:eigenius:reflection:DerivedResource",
+    "urn:eigenius:program:body": {
+      "urn:eigenius:core:is_a": [
+        "urn:eigenius:program:Apply"
+      ],
+      "urn:eigenius:program:function": "urn:eigenius:program:components:RunRuntimeScript",
+      "urn:eigenius:program:argument": {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:program:Var"
+        ],
+        "urn:eigenius:program:name": "input"
+      },
+      "urn:eigenius:program:component_argument": {
+        "urn:eigenius:runtime:language": "r",
+        "urn:eigenius:runtime:source": "in0   <- eigenius_inputs[[1]]\nval   <- .Call(\"r_eigon_f64_array\", in0, \"urn:eigenius:pub:wrn:viab_value\")\nguide <- .Call(\"r_eigon_str_array\", in0, \"urn:eigenius:pub:wrn:viab_guide\")\ndf <- data.frame(value = val, guide = factor(guide), is_WRN = factor(grepl(\"WRN\", guide)))\nstopifnot(nrow(df) == 30L, nlevels(df$guide) == 5L, nlevels(df$is_WRN) == 2L)\nlibrary(lme4)\n# Biological-level (pseudoreplication-corrected) competition-assay analysis (F4).\n# The guide is the biological replication unit (3 sgWRN + 2 control); the 6 reps\n# per guide are technical. Test the is_WRN fixed effect via an LRT of the full\n# vs guide-only random-intercept model (REML=FALSE) -- the mixed-model\n# counterpart of the authors' lm(value ~ is_WRN + guide) %>% anova(), which\n# instead tested is_WRN against the technical within-guide residual.\nm0 <- lmer(value ~ (1 | guide), df, REML = FALSE)\nm1 <- lmer(value ~ is_WRN + (1 | guide), df, REML = FALSE)\npval <- anova(m0, m1)[[\"Pr(>Chisq)\"]][2]\nimpaired <- mean(df$value[df$is_WRN == \"TRUE\"]) < mean(df$value[df$is_WRN == \"FALSE\"])\nb <- .Call(\"r_eigon_begin\", \"urn:eigenius:pub:wrn:viab_KM12_bio_lme4:result\")\n.Call(\"r_eigon_add_class\", b, \"urn:eigenius:reflection:DerivedResource\")\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:measurements:lrt_p_value\", pval)\n# A significant is_WRN effect with sgWRN viability below control, established at\n# the biological unit, is the honest viability-dependence warrant (F4).\nif (pval < 0.05 && impaired) {\n  .Call(\"r_eigon_set_proposition\", b,\n        \"urn:eigenius:benchmark:onco:ViabilityDependenceAtBiologicalUnit\", c(\"WRN\", \"KM12\"))\n}\n.Call(\"r_eigon_finish\", b)\n",
+        "urn:eigenius:runtime:image_digest": "sha256:9ffb0efb052795e7f65dbd16760e26afae5708d605941b25587b76046ff36364"
+      }
+    }
+  }
+]

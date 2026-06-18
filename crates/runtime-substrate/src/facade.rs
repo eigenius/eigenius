@@ -107,6 +107,17 @@ pub struct DispatchOutcome {
 #[derive(Default)]
 pub struct SubstrateDispatcher {
     registry: LanguageRuntimeRegistry,
+    /// Root under which `PinnedExternalFile` inputs are materialized
+    /// (D53 §7). Set to a directory **under the depot** for containerized
+    /// (Docker) deployments so the depot's read-only bind-mount makes the
+    /// bytes visible to the worker at the same path. Left `None` for the
+    /// same-host (local) spawner, where the verified source path is handed
+    /// to the worker directly. See [`crate::external_file::prepare_input`].
+    extfile_cache_root: Option<std::path::PathBuf>,
+    /// Reject node-local `file://` inputs (D53 §3.1). Set in a distributed
+    /// deployment without a network-shared volume — see
+    /// [`crate::external_file::ResolveOptions::reject_node_local_files`].
+    reject_node_local_files: bool,
 }
 
 impl SubstrateDispatcher {
@@ -125,6 +136,32 @@ impl SubstrateDispatcher {
         &self.registry
     }
 
+    /// Set the depot-relative cache root for `PinnedExternalFile`
+    /// materialization (D53 §7 / Phase 1.5). Callers that wire a
+    /// depot-backed (Docker) spawner pass `<depot>/extfile-cache` here so
+    /// materialized inputs land under the depot bind-mount; same-host
+    /// deployments leave it unset.
+    pub fn set_extfile_cache_root(&mut self, root: impl Into<std::path::PathBuf>) {
+        self.extfile_cache_root = Some(root.into());
+    }
+
+    /// Reject node-local `file://` references (D53 §3.1). Set this in a
+    /// distributed deployment without a network-shared volume so a `file://`
+    /// that only exists on one host can't silently break when a worker lands
+    /// elsewhere — such deployments must use `oxen://`.
+    pub fn set_reject_node_local_files(&mut self, reject: bool) {
+        self.reject_node_local_files = reject;
+    }
+
+    /// The resolver policy assembled from this dispatcher's configuration,
+    /// applied to every `PinnedExternalFile` input before dispatch.
+    fn resolve_options(&self) -> crate::external_file::ResolveOptions<'_> {
+        crate::external_file::ResolveOptions {
+            cache_root: self.extfile_cache_root.as_deref(),
+            reject_node_local_files: self.reject_node_local_files,
+        }
+    }
+
     /// Dispatch a `RunRuntimeScript` invocation.
     ///
     /// - `input_cbor` — Eigon-CBOR bytes for the input Resource that
@@ -141,7 +178,39 @@ impl SubstrateDispatcher {
         input_cbor: &[u8],
         argument_cbor: &[u8],
     ) -> Result<DispatchOutcome, FacadeError> {
-        let input = parse_resource(input_cbor)?;
+        self.dispatch_run_runtime_script_multi(input_cbor, &[], argument_cbor)
+    }
+
+    /// Multi-input form of [`Self::dispatch_run_runtime_script`] (D53 §4.3 /
+    /// multi-file join). The primary `input_cbor` plus each of
+    /// `additional_inputs_cbor` are prepared (D53 §5: `PinnedExternalFile`
+    /// inputs are fetched + content-verified + materialized) and handed to the
+    /// runtime as the ordered input list — so a script can read e.g. a
+    /// dependency matrix + a sample-info bridge + an annotation table together
+    /// (the worker binds them as `eigenius_inputs[[1..N]]`).
+    pub fn dispatch_run_runtime_script_multi(
+        &self,
+        input_cbor: &[u8],
+        additional_inputs_cbor: &[Vec<u8>],
+        argument_cbor: &[u8],
+    ) -> Result<DispatchOutcome, FacadeError> {
+        // D53 §5: if an input is an `ingest:PinnedExternalFile`, the substrate
+        // fetches + content-verifies + materializes it here and hands the
+        // runtime a resource carrying `ingest:materialized_path`. Ordinary
+        // chain-resident inputs pass through untouched.
+        let opts = self.resolve_options();
+        let mut inputs = Vec::with_capacity(1 + additional_inputs_cbor.len());
+        inputs.push(crate::external_file::prepare_input(
+            parse_resource(input_cbor)?,
+            &opts,
+        )?);
+        for bytes in additional_inputs_cbor {
+            inputs.push(crate::external_file::prepare_input(
+                parse_resource(bytes)?,
+                &opts,
+            )?);
+        }
+
         let argument = parse_resource(argument_cbor)?;
         let language = read_string_property(&argument, PROP_LANGUAGE)?;
         let runtime = self
@@ -154,7 +223,7 @@ impl SubstrateDispatcher {
         // boundary check + full chain resolution land in 18b/c.
         let script = &argument;
 
-        let outcome = runtime.run_script(&env, script, &[input])?;
+        let outcome = runtime.run_script(&env, script, &inputs)?;
         Ok(build_outcome(outcome, &language))
     }
 
@@ -167,7 +236,10 @@ impl SubstrateDispatcher {
         input_cbor: &[u8],
         argument_cbor: &[u8],
     ) -> Result<DispatchOutcome, FacadeError> {
-        let input = parse_resource(input_cbor)?;
+        let input = crate::external_file::prepare_input(
+            parse_resource(input_cbor)?,
+            &self.resolve_options(),
+        )?;
         let argument = parse_resource(argument_cbor)?;
         let language = read_string_property(&argument, PROP_LANGUAGE)?;
         let runtime = self
@@ -211,9 +283,13 @@ impl SubstrateDispatcher {
             .get(language)
             .ok_or_else(|| FacadeError::UnknownLanguage(language.to_string()))?;
 
+        let opts = self.resolve_options();
         let mut inputs = Vec::with_capacity(input_cbors.len());
         for bytes in input_cbors {
-            inputs.push(parse_resource(bytes)?);
+            inputs.push(crate::external_file::prepare_input(
+                parse_resource(bytes)?,
+                &opts,
+            )?);
         }
 
         let signature =

@@ -1,0 +1,232 @@
+// onco — cancer-dependency genomics module (thin-but-reusable). Extends bench-core.
+//
+// The domain nouns + biology predicates for encoding DepMap-style cancer
+// functional-genomics papers (Chan et al. WRN is the first). Designed to
+// generalise across this family of papers, not just WRN — the
+// dependency / MSI / MMR / biology vocabulary recurs.
+//
+// As with the SAB tracers, the reasoning rides on the per-task predicates
+// (here the biology Props) + the recompute Derived artifacts; the nouns
+// (Gene, CellLine, DependencyScore) are the Observed anchors.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace bench      = "urn:eigenius:benchmark";
+namespace onco       = "urn:eigenius:benchmark:onco";
+
+// ── Entities (Observed anchors) ──────────────────────────────────────
+
+class onco:Gene : reflection:ObservedResource {
+    description = "A gene, identified by symbol + external IDs (HGNC/Entrez/UniProt).";
+    requires onco:symbol;
+    recommends onco:entrez, onco:uniprot;
+}
+property onco:symbol  : core:string { description = "HGNC gene symbol, e.g. 'WRN'."; domain onco:Gene; }
+property onco:entrez  : core:string { description = "Entrez gene ID, e.g. '7486'."; domain onco:Gene; }
+property onco:uniprot : core:string { description = "UniProt accession, e.g. 'Q14191'."; domain onco:Gene; }
+
+class onco:CellLine : reflection:ObservedResource {
+    description = "A cancer cell line, identified by DepMap_ID / CCLE_name, with lineage.";
+    requires onco:cell_line_id;
+    recommends onco:ccle_name, onco:lineage, onco:cellosaurus;
+}
+property onco:cell_line_id : core:string { description = "DepMap_ID, e.g. 'ACH-000007'."; domain onco:CellLine; }
+property onco:ccle_name    : core:string { description = "CCLE name, e.g. 'KM12_LARGE_INTESTINE'."; domain onco:CellLine; }
+property onco:lineage      : core:string { description = "Tissue lineage, e.g. 'colorectal'."; domain onco:CellLine; }
+property onco:cellosaurus  : core:string { description = "Cellosaurus accession."; domain onco:CellLine; }
+
+class onco:DependencyScore : bench:Measurement {
+    description = "A gene-dependency score for a (gene, cell line) pair from a screen. bench:value carries the score (normalized: 0 = neg-control median, -1 = pan-essential median); bench:quantity names the screen/algorithm.";
+    requires onco:of_gene, onco:in_cell_line, onco:screen;
+}
+property onco:of_gene      : core:string { description = "IRI of the onco:Gene scored."; format = formats:iri; domain onco:DependencyScore; }
+property onco:in_cell_line : core:string { description = "IRI of the onco:CellLine."; format = formats:iri; domain onco:DependencyScore; }
+property onco:screen       : core:string { description = "Screen/algorithm, e.g. 'CRISPR-CERES', 'RNAi-DEMETER2', 'aggregate'."; domain onco:DependencyScore; }
+
+// ── Status predicates (Declared classifications — Props over cell-line IRIs) ──
+
+data onco:MSI : core:string -> Prop {
+}
+data onco:MSS : core:string -> Prop {
+}
+data onco:MMRloss : core:string -> Prop {
+}
+data onco:TP53intact : core:string -> Prop {
+}
+
+// ── Biology predicates (the reasoning targets — Props over (gene, context)) ──
+
+data onco:TopDifferentialDependency : core:string -> core:string -> Prop {
+}
+
+data onco:SelectivelyEssential : core:string -> core:string -> Prop {
+}
+
+data onco:DependencyCorrelatesWithMutatorLoad : core:string -> core:string -> Prop {
+}
+
+// (common, uncommon): among MSI cell lines, the common MSI lineages (where the
+// WRN-dependence biomarker holds) carry a HIGHER microsatellite-deletion load
+// than the uncommon MSI lineages — the mutator-load basis for the lineage
+// restriction of the biomarker (ED Fig 2b, Wilcoxon P = 1.7e-9, kernel-recomputed).
+data onco:ElevatedMutatorLoadInCommonLineages : core:string -> core:string -> Prop {
+}
+
+// (gene, context): the gene's nucleolar localization (Pearson colocalization
+// with fibrillarin) is REDUCED in the context vs lineage-matched controls — WRN
+// is delocalized from the nucleolus in MSI cells (ED Fig 8d, two-tailed t-test,
+// kernel-recomputed). A localization correlate of the MSI-selective phenotype.
+data onco:ReducedNucleolarColocalization : core:string -> core:string -> Prop {
+}
+
+// (model, restoration): in an MMR-deficient model, restoring the MMR machinery
+// restores functional mismatch repair (flow-cytometric host-cell reactivation
+// of a G:G mismatch) — the functional confirmation that the model's WRN
+// dependence rides on a genuine MMR defect (ED Fig 10a, t-test, kernel-recomputed).
+data onco:MMRRestorationRestoresRepair : core:string -> core:string -> Prop {
+}
+
+data onco:StrongBiomarker : core:string -> core:string -> Prop {
+}
+
+data onco:OnlyMSISelectiveInFamily : core:string -> core:string -> Prop {
+}
+
+data onco:SyntheticLethal : core:string -> core:string -> Prop {
+}
+
+data onco:RequiresActivity : core:string -> core:string -> Prop {
+}
+
+// ── Wet-lab validation predicates (Phase 2: C-VAL / D-ONTARGET / D-HELICASE) ──
+//
+// Phase 2 validates the computational call in the lab. Its statistics are
+// the authors' own assays (competitive-growth / viability, two-way ANOVA,
+// contrast-test-of-least-squares-means) whose raw data is not in any public
+// slice we hold — so those readouts are LINKED-EXTERNAL bench:ToolArtifacts
+// citing the reported values, NOT kernel-recomputed. The encodable
+// contribution is the Declared experimental-design reasoning (the rescue /
+// control logic) that lifts those readouts into the conclusions.
+
+// (rescue_construct, depletion_reagent): re-expressing the construct restores
+// viability lost to the depletion reagent. A positive, measured readout.
+data onco:RescuesDepletion : core:string -> core:string -> Prop {
+}
+
+// (rescue_construct, depletion_reagent): the construct does NOT restore
+// viability — a positive, measured non-rescue (the viability stayed impaired),
+// distinct from absence-of-evidence. Used for the catalytic-dead constructs.
+data onco:FailsToRescue : core:string -> core:string -> Prop {
+}
+
+// (gene, context): the depletion phenotype is attributable to loss of the gene
+// (not an off-target effect of the silencing reagent).
+data onco:OnTarget : core:string -> core:string -> Prop {
+}
+
+// (gene, activity): the named enzymatic activity is dispensable for the
+// phenotype (complement of onco:RequiresActivity).
+data onco:DispensableActivity : core:string -> core:string -> Prop {
+}
+
+// (gene, context): wet-lab-validated selective viability dependence — gene
+// depletion impairs viability in the context but spares the comparator.
+data onco:SelectiveViabilityDependence : core:string -> core:string -> Prop {
+}
+
+// (gene, cell_line): gene depletion impairs viability in a single cell line,
+// established with the *biological replication unit* (the shRNA/sgRNA guide) as
+// the unit of inference — a mixed-effects (lmer) test of the is_WRN fixed effect
+// against the between-guide variance. This is the pseudoreplication-corrected
+// counterpart to the published competition-assay analysis, which tested against
+// the technical (within-guide) residual (recompute finding F4). Distinct from
+// SelectiveViabilityDependence (the MSI-vs-MSS-selective composed claim): this
+// predicate is per-line and is *about the replication stratum of the evidence*.
+data onco:ViabilityDependenceAtBiologicalUnit : core:string -> core:string -> Prop {
+}
+
+// ── In vivo + mechanism predicates (Phase 3: C-VIVO / C-MECH) ─────────
+
+// (gene, context): the dependence holds in vivo / in a patient-derived model.
+data onco:InVivoDependence : core:string -> core:string -> Prop {
+}
+
+// (gene, context): gene depletion induces DNA double-strand breaks in the
+// context (γH2AX / 53BP1 / pATM(S1981) / Chk2(T68) readouts).
+data onco:CausesDSBs : core:string -> core:string -> Prop {
+}
+
+// (gene, context): the lethal phenotype is driven by DSB-induced DNA-damage
+// response (p53 activation, apoptosis, cell-cycle arrest) — the mechanism.
+data onco:DSBDrivenLethality : core:string -> core:string -> Prop {
+}
+
+// (gene, context): the synthetic lethality is NOT mediated by a telomere
+// defect (FISH: diffuse chromosomal DSBs, no telomeric end-to-end fusions
+// or signal loss) — an explicitly tested-and-rejected hypothesis.
+data onco:NotViaTelomereDefect : core:string -> core:string -> Prop {
+}
+
+// (gene, context): the gene's context-selective dependence is intrinsic to the
+// context, NOT a confound of co-loss of a paralogue / DNA-helicase partner.
+// ED Fig 9a: in lm(avg_gene_dep ~ context + gene_loss) over the DepMap omics,
+// the context coefficient stays the dominant, significant predictor controlling
+// for the loss of each candidate gene — an explicitly tested-and-rejected
+// alternative explanation (reproduced-external over the 1.6 GB DepMap rds).
+data onco:NotExplainedByParalogLoss : core:string -> core:string -> Prop {
+}
+
+// (modifier, gene): the modifier status (e.g. TP53) modulates the magnitude
+// of dependence on the gene — a measured difference in dependence across the
+// modifier's strata. (Contributes-to, not solely-responsible-for.)
+data onco:ModulatesDependence : core:string -> core:string -> Prop {
+}
+
+// (gene, context): gene depletion induces cell-cycle arrest in the context —
+// a downstream DSB-driven-DDR consequence (reduced S-phase fraction, cells
+// accumulating outside S; ED Fig 4b %S-phase, kernel-recomputed).
+data onco:CausesCellCycleArrest : core:string -> core:string -> Prop {
+}
+
+// (gene, context): gene depletion induces apoptosis in the context — a
+// downstream DSB-driven-DDR consequence (increased total apoptotic fraction;
+// ED Fig 4c/d Annexin-V, kernel-recomputed).
+data onco:CausesApoptosis : core:string -> core:string -> Prop {
+}
+
+// (gene, context): the MEASURED immunofluorescence fact — gene depletion raises
+// phospho-p53(S15) AND p21 staining intensity in the context (ED Fig 5b/d/f,
+// MSI + TP53-proficient lines; emmeans lsmeans). This is what the wrapped-R
+// warrant emits; the activation INTERPRETATION (below) is lifted from it by the
+// p53-S15-readout literature premise [17].
+data onco:RaisesP53DamageMarkers : core:string -> core:string -> Prop {
+}
+
+// (gene, context): gene depletion activates the p53 DNA-damage response in the
+// context — a downstream DSB-driven-DDR consequence. Derived from the measured
+// marker rise (onco:RaisesP53DamageMarkers) via the literature premise that
+// phospho-p53(S15) marks p53 activation (Loughery 2014 [17]); see the
+// p53_activation_rule in wrn-phase3.esl. MSI-selective AND p53-status-gated.
+data onco:ActivatesP53Response : core:string -> core:string -> Prop {
+}
+
+// (gene, context): a seed-matched but on-target-disrupted control reagent
+// (e.g. shWRN1-C911, nt 9-11 complemented to preserve the off-target 'seed')
+// is inert while the on-target reagent produces the phenotype — isolating
+// the on-target effect from shRNA seed off-target.
+data onco:SeedControlInert : core:string -> core:string -> Prop {
+}
+
+// ── Causal-dissection predicates (Phase 5: C-MMR) ─────────────────────
+
+// (factor, gene): restoring the factor partially rescues the dependence,
+// and knocking the restored factor back out re-sensitizes — isolating the
+// factor's contribution (HCT116 Ch3+5 MMR-restoration + MLH1-KO control).
+data onco:RestorationPartiallyRescues : core:string -> core:string -> Prop {
+}
+
+// (factor, gene): the factor contributes to (but does not solely determine)
+// dependence on the gene — partial, not complete, rescue.
+data onco:ContributesToDependence : core:string -> core:string -> Prop {
+}

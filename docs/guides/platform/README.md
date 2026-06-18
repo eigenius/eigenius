@@ -31,7 +31,7 @@ The most-used reference chapters are:
 
 3. **[Building and testing](03-building-and-testing.md)** — `just build`, `just test`, `just check`. What `just build` does that plain `cargo build` does not.
 
-4. **[CLI reference](04-cli-reference.md)** — every `eigenius` subcommand, grouped by purpose: file commands, knowledge-graph commands, program commands, server, database, branch, mirror, env, institution, capability, tasks.
+4. **[CLI reference](04-cli-reference.md)** — every `eigenius` subcommand, grouped by purpose: file commands, knowledge-graph commands, program commands, server, database, branch, mirror, env, institution, capability, tasks, data.
 
 5. **[Running the platform locally](05-running-locally.md)** — three-terminal model (orchestrator + kernel + CLI), Docker Compose, what state survives restarts.
 

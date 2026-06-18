@@ -1,0 +1,344 @@
+// SAB 18 — DILI Random-Forest predictor — condition-C reasoning chain.
+//
+// TRACER, same model as SAB 16 v3: the program is the object code; this
+// chain is the source justifying its CONSTRUCTION. SAB 18 is the richer,
+// failure-prone Pattern-A task — five spec-adherence decisions, the
+// trickiest being the 4→2 label mapping and the row-range config splits.
+//
+//   5 methodological decisions  (Declared, spec-warranted)
+//        │  composed through a declared acceptance rule
+//        ▼
+//   ImplementsDILIPredictor(solution)   (ReasoningSentence)
+//        │  binds                              ▲ overlay
+//        ▼                                      │
+//   bench:TaskOutput(python_source)  ◀── 5 bench:CodeBlocks (coverage)
+//
+// Honest scope: every Conforms… is spec-warranted (Declared), like SAB 16.
+// The contingent hyperparameters CV picks are the program's runtime output,
+// not chain reasoning. SAB 18 stresses spec-adherence reasoning hardest.
+//
+// Validated by crates/eigenius-reasoning/tests/sab18_tracer.rs (Holds + coverage).
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace bench      = "urn:eigenius:benchmark";
+namespace s18        = "urn:eigenius:bench:sab18";
+
+// ─── Phase 1: per-task predicate vocabulary ────────────────────────
+
+data s18:ConformsFeaturization : core:string -> Prop {
+}
+
+data s18:ConformsLabelMapping : core:string -> Prop {
+}
+
+data s18:ConformsConfigs : core:string -> Prop {
+}
+
+data s18:ConformsModelSelection : core:string -> Prop {
+}
+
+data s18:ConformsOutputFormat : core:string -> Prop {
+}
+
+data s18:ImplementsDILIPredictor : core:string -> Prop {
+}
+
+// ─── Phase 2: the methodological decisions ─────────────────────────
+
+resource s18:conf_featurization : reflection:DeclaredResource {
+    reflection:declared_by = "agent:sab18-method";
+    reflection:rationale   = "Featurize standardised_smiles with ECFP / Morgan fingerprints (radius 2, 2048 bits). Warrant: the domain knowledge names Morgan fingerprints (spec); radius 2 / 2048 bits is the ECFP4 convention, matching the gold DILI_models_ECFP_RF.py.";
+    reflection:canonical_proposition = type_expr(
+        s18:ConformsFeaturization("urn:eigenius:bench:sab18:solution")
+    );
+}
+resource s18:conf_featurization_trace : reflection:DeclarationTrace {
+    reflection:resource    = s18:conf_featurization;
+    reflection:declared_by = "agent:sab18-method";
+    reflection:timestamp   = "2026-06-12T11:00:00Z";
+}
+
+resource s18:conf_label_mapping : reflection:DeclaredResource {
+    reflection:declared_by = "agent:sab18-method";
+    reflection:rationale   = "Collapse the 4-way vDILIConcern to binary: 'vMost-DILI-Concern' and 'vLess-DILI-Concern' -> DILI (positive); 'vNo-DILI-Concern' and 'sider_inactive' -> NoDILI (negative). Warrant: the instruction states this mapping verbatim (spec). The error-prone reading the discipline pins down: sider_inactive is NEGATIVE (not dropped), and vLess is POSITIVE.";
+    reflection:canonical_proposition = type_expr(
+        s18:ConformsLabelMapping("urn:eigenius:bench:sab18:solution")
+    );
+}
+resource s18:conf_label_mapping_trace : reflection:DeclarationTrace {
+    reflection:resource    = s18:conf_label_mapping;
+    reflection:declared_by = "agent:sab18-method";
+    reflection:timestamp   = "2026-06-12T11:00:01Z";
+}
+
+resource s18:conf_configs : reflection:DeclaredResource {
+    reflection:declared_by = "agent:sab18-method";
+    reflection:rationale   = "Build the three configurations from the train.csv row ranges (1-based inclusive: MC 1-173, LC 174-433, NC 434-660, sider 661-923): MCNC = MC+ vs NC-, MCLCNC = MC/LC+ vs NC-, all = MC/LC+ vs NC/sider-. Warrant: the instruction defines the splits and the three configs (spec). The interpretation the discipline pins down: the ranges are row positions, 1-based inclusive.";
+    reflection:canonical_proposition = type_expr(
+        s18:ConformsConfigs("urn:eigenius:bench:sab18:solution")
+    );
+}
+resource s18:conf_configs_trace : reflection:DeclarationTrace {
+    reflection:resource    = s18:conf_configs;
+    reflection:declared_by = "agent:sab18-method";
+    reflection:timestamp   = "2026-06-12T11:00:02Z";
+}
+
+resource s18:conf_model_selection : reflection:DeclaredResource {
+    reflection:declared_by = "agent:sab18-method";
+    reflection:rationale   = "Per config, train a RandomForest with hyperparameters chosen by 5-fold cross-validated grid search (number of trees, max depth, min samples split/leaf), then refit on the best hyperparameter. Warrant: the instruction requires 5-fold CV + hyperparameter search and 'the model trained on the best hyperparameter' (spec).";
+    reflection:canonical_proposition = type_expr(
+        s18:ConformsModelSelection("urn:eigenius:bench:sab18:solution")
+    );
+}
+resource s18:conf_model_selection_trace : reflection:DeclarationTrace {
+    reflection:resource    = s18:conf_model_selection;
+    reflection:declared_by = "agent:sab18-method";
+    reflection:timestamp   = "2026-06-12T11:00:03Z";
+}
+
+resource s18:conf_output_format : reflection:DeclaredResource {
+    reflection:declared_by = "agent:sab18-method";
+    reflection:rationale   = "For each config write pred_results/{config}_RF.csv (MCNC_RF.csv, MCLCNC_RF.csv, all_RF.csv) with columns standardised_smiles and label, label in {DILI, NoDILI}. Warrant: the instruction specifies the filenames, columns, and label vocabulary (spec).";
+    reflection:canonical_proposition = type_expr(
+        s18:ConformsOutputFormat("urn:eigenius:bench:sab18:solution")
+    );
+}
+resource s18:conf_output_format_trace : reflection:DeclarationTrace {
+    reflection:resource    = s18:conf_output_format;
+    reflection:declared_by = "agent:sab18-method";
+    reflection:timestamp   = "2026-06-12T11:00:04Z";
+}
+
+// ─── Phase 3: the acceptance rule ──────────────────────────────────
+
+resource s18:impl_rule : reflection:DeclaredResource {
+    reflection:declared_by = "benchmark:sab18-acceptance";
+    reflection:rationale   = "A solution implements the required DILI predictor iff it conforms on every methodological axis: featurization, label mapping, configurations, model selection, and output format.";
+    reflection:canonical_proposition = type_expr(
+        forall (p : core:string) =>
+            s18:ConformsFeaturization(p) ->
+            s18:ConformsLabelMapping(p) ->
+            s18:ConformsConfigs(p) ->
+            s18:ConformsModelSelection(p) ->
+            s18:ConformsOutputFormat(p) ->
+            s18:ImplementsDILIPredictor(p)
+    );
+}
+resource s18:impl_rule_trace : reflection:DeclarationTrace {
+    reflection:resource    = s18:impl_rule;
+    reflection:declared_by = "benchmark:sab18-acceptance";
+    reflection:timestamp   = "2026-06-12T11:00:05Z";
+}
+
+// ─── Phase 4: the conclusion ───────────────────────────────────────
+
+resource s18:concl_solution_implements : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:bench:sab18:solution";
+
+    reasoning:proposition = type_expr(
+        s18:ImplementsDILIPredictor("urn:eigenius:bench:sab18:solution")
+    );
+
+    reasoning:justification = App(
+        App(
+            App(
+                App(
+                    App(
+                        SpecStr(
+                            DeclaredEvidence("urn:eigenius:bench:sab18:impl_rule"),
+                            "urn:eigenius:bench:sab18:solution"
+                        ),
+                        DeclaredEvidence("urn:eigenius:bench:sab18:conf_featurization")
+                    ),
+                    DeclaredEvidence("urn:eigenius:bench:sab18:conf_label_mapping")
+                ),
+                DeclaredEvidence("urn:eigenius:bench:sab18:conf_configs")
+            ),
+            DeclaredEvidence("urn:eigenius:bench:sab18:conf_model_selection")
+        ),
+        DeclaredEvidence("urn:eigenius:bench:sab18:conf_output_format")
+    );
+
+    reasoning:certificate = type_expr(
+        alias
+            P    = "urn:eigenius:bench:sab18:solution",
+            RULE = "urn:eigenius:bench:sab18:impl_rule",
+            D1   = "urn:eigenius:bench:sab18:conf_featurization",
+            D2   = "urn:eigenius:bench:sab18:conf_label_mapping",
+            D3   = "urn:eigenius:bench:sab18:conf_configs",
+            D4   = "urn:eigenius:bench:sab18:conf_model_selection",
+            D5   = "urn:eigenius:bench:sab18:conf_output_format",
+
+            C1   = s18:ConformsFeaturization(P),
+            C2   = s18:ConformsLabelMapping(P),
+            C3   = s18:ConformsConfigs(P),
+            C4   = s18:ConformsModelSelection(P),
+            C5   = s18:ConformsOutputFormat(P),
+            IMPL = s18:ImplementsDILIPredictor(P),
+
+            RULE_P = forall (p : core:string) =>
+                s18:ConformsFeaturization(p) ->
+                s18:ConformsLabelMapping(p) ->
+                s18:ConformsConfigs(p) ->
+                s18:ConformsModelSelection(p) ->
+                s18:ConformsOutputFormat(p) ->
+                s18:ImplementsDILIPredictor(p),
+
+            j0 = reasoning:SpecStr(DeclaredEvidence(RULE), P),
+            j1 = reasoning:App(j0, DeclaredEvidence(D1)),
+            j2 = reasoning:App(j1, DeclaredEvidence(D2)),
+            j3 = reasoning:App(j2, DeclaredEvidence(D3)),
+            j4 = reasoning:App(j3, DeclaredEvidence(D4)),
+
+            rule_cert = spec_str(
+                fun (p : core:string) =>
+                    s18:ConformsFeaturization(p) ->
+                    s18:ConformsLabelMapping(p) ->
+                    s18:ConformsConfigs(p) ->
+                    s18:ConformsModelSelection(p) ->
+                    s18:ConformsOutputFormat(p) ->
+                    s18:ImplementsDILIPredictor(p),
+                DeclaredEvidence(RULE),
+                P,
+                declared(RULE, RULE_P)
+            ),
+            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, j0, DeclaredEvidence(D1), rule_cert, declared(D1, C1)),
+            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, j1, DeclaredEvidence(D2), cert1, declared(D2, C2)),
+            cert3 = app(C3, C4 -> C5 -> IMPL, j2, DeclaredEvidence(D3), cert2, declared(D3, C3)),
+            cert4 = app(C4, C5 -> IMPL, j3, DeclaredEvidence(D4), cert3, declared(D4, C4))
+        in
+        app(C5, IMPL, j4, DeclaredEvidence(D5), cert4, declared(D5, C5))
+    );
+}
+
+// ─── Phase 5: the deliverable ──────────────────────────────────────
+
+resource s18:solution : bench:TaskOutput {
+    bench:task             = "urn:eigenius:bench:sab18:task";
+    bench:deliverable_kind = "python_source";
+    bench:reasoning_chain  = ["urn:eigenius:bench:sab18:concl_solution_implements"];
+    reflection:derivation  = s18:solution_trace;
+
+    bench:payload = "import numpy as np
+import pandas as pd
+from rdkit import Chem
+from rdkit.Chem import AllChem
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV
+
+
+# region: featurization
+def ecfp(smiles, radius=2, n_bits=2048):
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return None
+    return list(AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits))
+# endregion
+
+
+# region: label_mapping
+POSITIVE = {'vMost-DILI-Concern', 'vLess-DILI-Concern'}
+NEGATIVE = {'vNo-DILI-Concern', 'sider_inactive'}
+
+def to_label(concern):
+    if concern in POSITIVE:
+        return 1
+    if concern in NEGATIVE:
+        return 0
+    return None
+# endregion
+
+
+train = pd.read_csv('dili/train.csv')
+test = pd.read_csv('dili/test.csv')
+
+
+# region: configs
+def rows(df, start, end):
+    return df.iloc[start - 1:end]
+
+MC, LC = rows(train, 1, 173), rows(train, 174, 433)
+NC, SIDER = rows(train, 434, 660), rows(train, 661, 923)
+CONFIGS = {
+    'MCNC':   (MC, NC),
+    'MCLCNC': (pd.concat([MC, LC]), NC),
+    'all':    (pd.concat([MC, LC]), pd.concat([NC, SIDER])),
+}
+# endregion
+
+
+# region: model_selection
+GRID = {'n_estimators': [100, 300], 'max_depth': [8, 12, None], 'min_samples_leaf': [1, 2]}
+
+def train_model(pos, neg):
+    rowset = pd.concat([pos, neg])
+    X, y = [], []
+    for _, r in rowset.iterrows():
+        fp, lbl = ecfp(r['standardised_smiles']), to_label(r['vDILIConcern'])
+        if fp is not None and lbl is not None:
+            X.append(fp)
+            y.append(lbl)
+    search = GridSearchCV(RandomForestClassifier(random_state=0), GRID, cv=5)
+    search.fit(np.array(X), np.array(y))
+    return search.best_estimator_
+# endregion
+
+
+# region: output
+test_fps = [ecfp(s) for s in test['standardised_smiles']]
+for name, (pos, neg) in CONFIGS.items():
+    model = train_model(pos, neg)
+    preds = []
+    for fp in test_fps:
+        if fp is None:
+            preds.append('NoDILI')
+        else:
+            preds.append('DILI' if model.predict([fp])[0] == 1 else 'NoDILI')
+    out = pd.DataFrame({'standardised_smiles': test['standardised_smiles'], 'label': preds})
+    out.to_csv(f'pred_results/{name}_RF.csv', index=False)
+# endregion
+";
+}
+
+resource s18:solution_trace : reflection:ProgramTrace {
+    reflection:resource  = s18:solution;
+    reflection:source    = "agent:sab18-condition-c-loop";
+    reflection:timestamp = "2026-06-12T11:05:00Z";
+}
+
+// ─── Phase 6: decision ↔ code-section overlay ──────────────────────
+
+resource s18:block_featurization : bench:CodeBlock {
+    bench:of_output   = s18:solution;
+    bench:block_label = "featurization";
+    bench:realizes    = ["urn:eigenius:bench:sab18:conf_featurization"];
+}
+
+resource s18:block_label_mapping : bench:CodeBlock {
+    bench:of_output   = s18:solution;
+    bench:block_label = "label_mapping";
+    bench:realizes    = ["urn:eigenius:bench:sab18:conf_label_mapping"];
+}
+
+resource s18:block_configs : bench:CodeBlock {
+    bench:of_output   = s18:solution;
+    bench:block_label = "configs";
+    bench:realizes    = ["urn:eigenius:bench:sab18:conf_configs"];
+}
+
+resource s18:block_model_selection : bench:CodeBlock {
+    bench:of_output   = s18:solution;
+    bench:block_label = "model_selection";
+    bench:realizes    = ["urn:eigenius:bench:sab18:conf_model_selection"];
+}
+
+resource s18:block_output : bench:CodeBlock {
+    bench:of_output   = s18:solution;
+    bench:block_label = "output";
+    bench:realizes    = ["urn:eigenius:bench:sab18:conf_output_format"];
+}

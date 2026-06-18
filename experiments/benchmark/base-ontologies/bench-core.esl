@@ -1,0 +1,149 @@
+// bench-core — shared spine for the benchmark base ontologies (D50 §4).
+//
+// Domain-agnostic vocabulary every pilot task rests on. The data-shape
+// modules (mol / materials / singlecell) extend this; per-task agent
+// vocabulary extends those. Authored against the `reflection` layer —
+// every class anchors to a reflection warrant category.
+//
+// Three load-bearing pieces:
+//
+//   - ToolArtifact : the typed tool boundary. The kernel never checks
+//     what RDKit / pymatgen / sklearn computed; it checks that a named
+//     tool produced a typed output from typed inputs (D50 §9, §12). A
+//     ToolArtifact is a DerivedResource, so its `reflection:derivation`
+//     ProgramTrace yields an `IsDerivedAs` witness the D49 emitter admits
+//     — that is what lets a ReasoningSentence cite it via DerivedEvidence.
+//
+//   - Measurement : a scalar value + unit + measured quantity. Reuses the
+//     value/unit shape proven in statistics.esl. Observed by default;
+//     computed quantities are ToolArtifacts instead.
+//
+//   - Dataset : an input data file recorded from external reality, with
+//     provenance. The Observed anchor every task's inputs hang off.
+//
+// Plus `concerns`, the shared linking-predicate convention: ties a tool
+// result / measurement to the subject it is about, for the cases where
+// the statistical-entity and domain-entity identities differ (the
+// `sample_for` pattern in notebooks/examples/stats-and-reasoning.json).
+// Tasks whose predicates already name the subject IRI directly do not
+// need it.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace bench      = "urn:eigenius:benchmark";
+
+// ── Typed tool boundary ──────────────────────────────────────────────
+
+class bench:ToolArtifact : reflection:DerivedResource {
+    description = "The typed output of running an external tool/library on typed inputs. The kernel checks the boundary (the named tool + the input resources + the inherited derivation trace), not the internal computation. Every RDKit/pymatgen/sklearn/scanpy output in the pilot is a ToolArtifact.";
+    requires bench:tool, bench:produced_from;
+    recommends bench:tool_parameters;
+}
+
+property bench:tool : core:string {
+    description = "Identifier of the external tool/library invoked, e.g. 'rdkit.FilterCatalog', 'pymatgen.Chgcar', 'sklearn.RandomForestClassifier'.";
+    domain bench:ToolArtifact;
+}
+
+property bench:produced_from : core:value_array {
+    description = "IRIs of the input resources this artifact was computed from.";
+    element_type = core:string;
+    domain bench:ToolArtifact;
+}
+
+property bench:tool_parameters : core:string {
+    description = "The parameters the tool was run with (JSON or key=value), recorded for audit.";
+    domain bench:ToolArtifact;
+}
+
+// ── Measurement ──────────────────────────────────────────────────────
+
+class bench:Measurement : reflection:ObservedResource {
+    description = "A scalar measurement: a value, its unit, and the quantity it measures. Observed by default (instrument/assay/dataset); computed quantities are ToolArtifacts instead.";
+    requires bench:value, bench:unit, bench:quantity;
+}
+
+property bench:value : core:float {
+    description = "The scalar measured value.";
+    domain bench:Measurement;
+}
+
+property bench:unit : core:string {
+    description = "Unit of the value, e.g. 'nM', 'pIC50', 'electrons/Ang^3'. Free string in v1.";
+    domain bench:Measurement;
+}
+
+property bench:quantity : core:string {
+    description = "What is measured, e.g. 'IC50', 'antibiotic_activity', 'pchembl_value'.";
+    domain bench:Measurement;
+}
+
+// ── Dataset (observed input) ─────────────────────────────────────────
+
+class bench:Dataset : reflection:ObservedResource {
+    description = "An input dataset recorded from external reality, with provenance (the file path / locator the task supplies).";
+    requires bench:dataset_path;
+    recommends bench:dataset_description;
+}
+
+property bench:dataset_path : core:string {
+    description = "Path / locator of the dataset file as given by the task.";
+    domain bench:Dataset;
+}
+
+property bench:dataset_description : core:string {
+    description = "Human description of the dataset's contents/schema.";
+    domain bench:Dataset;
+}
+
+// ── Data-extraction provenance (Tier 1 pin; D50 §9.1) ────────────────
+//
+// When an Observed resource inlines numeric data PROJECTED from a larger
+// pinned slice (e.g. a stats:SampleSetResource whose values are a column +
+// filter of a checksummed CSV), these fields record the exact recipe so
+// the projection is reviewable in-chain and mechanically re-derivable. The
+// content hash is the pin anchor; a committed extractor (named by
+// `extraction_recipe`) re-runs the recipe and diffs the inlined values
+// against the slice, failing loudly on drift. Tier 2 (follow-up) lifts this
+// into a kernel data-ingestion institution so the resource becomes a
+// DerivedResource witnessed by the slice hash rather than Observed with a
+// recipe sidecar.
+
+property bench:extracted_from_slice : core:string {
+    description = "Filename / locator of the pinned source slice the inlined data was projected from (provenance per data/MANIFEST.md).";
+    domain reflection:ObservedResource;
+}
+
+property bench:extracted_from_sha256 : core:string {
+    description = "Full sha256 of the source slice — the content-address pin anchor the extractor enforces before reading.";
+    domain reflection:ObservedResource;
+}
+
+property bench:extraction_columns : core:string {
+    description = "The slice column(s) the inlined values come from (e.g. 'avg_WRN_dep', or 'ms_deletions_normed,avg_WRN_dep').";
+    domain reflection:ObservedResource;
+}
+
+property bench:extraction_filter : core:string {
+    description = "The row filter + sort + grouping that selects the inlined values (e.g. 'CCLE_MSI in {MSI,MSS} & common_MSI_lineage; group A=MSI,B=MSS; sorted asc; NaN/NA dropped').";
+    domain reflection:ObservedResource;
+}
+
+property bench:extraction_recipe : core:string {
+    description = "Pointer to the committed extractor that re-derives + verifies this array (script path + resource name), e.g. 'extract/extract_samplesets.py#wrn:wrn_dep_sampleset'.";
+    domain reflection:ObservedResource;
+}
+
+// ── Linking-predicate convention ─────────────────────────────────────
+//
+// `concerns(result_iri, subject_iri)` : the tool result / measurement at
+// `result_iri` is about the domain subject at `subject_iri`. A Prop with
+// no constructors — admitted on chain by committing a DeclaredResource
+// whose canonical_proposition IS a `concerns(...)` application, exactly
+// as stats-and-reasoning.json admits `sample_for(...)`. Bridges in the
+// per-task vocabulary universally quantify over `(result, subject)` and
+// discharge the `concerns` premise per-pair.
+
+data bench:concerns : core:string -> core:string -> Prop {
+}

@@ -170,15 +170,17 @@ A single executable artifact (a script file) authored by a user.
 
 | Property | Purpose |
 |---|---|
-| `language` | Language identifier (`"julia"`, `"python"`, etc.). |
-| `source` | Script source text, embedded as a string. |
-| `entry_point` | Declared entry point name. |
-| `entry_point_signature` | IRI of a `RuntimeMethodSignature` describing input/output types in mirror-struct terms. |
-| `requires_environment` | IRI of a `RuntimeEnvironment` the script declares as compatible. |
-| `requires_mirror_classes` | List of Eigon class IRIs the script's mirror-struct usage covers. |
-| `description` | Human-readable. |
+| `language` | Language identifier (`"julia"`, `"python"`, etc.). **Required.** |
+| `source` | Script source text, embedded as a string. **Required.** |
+| `requires_environment` | IRI of a `RuntimeEnvironment` the script declares as compatible. **Required.** |
+| `entry_point` | Declared entry point name. *Optional.* |
+| `entry_point_signature` | IRI of a `RuntimeMethodSignature` describing input/output types in mirror-struct terms. *Optional.* |
+| `requires_mirror_classes` | List of Eigon class IRIs the script's mirror-struct usage covers. *Optional.* |
+| `description` | Human-readable. *Optional.* |
 
-Content-addressed IRI is a function of the above. Two notebooks publishing the same script body with the same declared signature produce the same IRI.
+The canonical `RunRuntimeScript` dispatch (§4.1, §6.3) evaluates `source` top-level: the worker loads the script, the script reads `eigenius_inputs` and emits its output resource. That path needs only `language` + `source` + `requires_environment`, which is why those three are required and `entry_point` / `entry_point_signature` are not. A script declares `entry_point` + `entry_point_signature` only when it exposes a *typed* entry point — the `CallRuntimeMethod` surface (§4.1), where the worker dispatches into the named function with marshalled, signature-checked arguments. Requiring an entry point on every script would conflate the two surfaces; the substrate's `LanguageRuntime::run_script` reads only `source`.
+
+Content-addressed IRI is a function of the above (`language`, `source`, `entry_point`, `entry_point_signature`, `requires_environment`). Two notebooks publishing the same script body with the same declared signature and environment produce the same IRI.
 
 ### 5.2 `RuntimePackage`
 

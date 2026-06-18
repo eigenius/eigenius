@@ -1209,6 +1209,7 @@ dependencies = [
  "eigenius-julia",
  "eigenius-kernel",
  "eigenius-lean",
+ "eigenius-r",
  "eigenius-reasoning",
  "eigenius-runtime-substrate",
  "eigenius-statistics",
@@ -1355,6 +1356,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-r"
+version = "0.1.0"
+dependencies = [
+ "ciborium",
+ "eigenius-kernel",
+ "eigenius-r-worker",
+ "eigenius-runtime-substrate",
+ "serde_bytes",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
+name = "eigenius-r-worker"
+version = "0.1.0"
+dependencies = [
+ "ciborium",
+ "eigenius-kernel",
+ "eigenius-runtime-substrate",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "eigenius-reasoning"
 version = "0.1.0"
 dependencies = [
@@ -1390,6 +1419,7 @@ dependencies = [
  "eigenius-reasoning",
  "ndarray",
  "serde_json",
+ "sha2",
  "statrs",
  "thiserror 2.0.18",
 ]

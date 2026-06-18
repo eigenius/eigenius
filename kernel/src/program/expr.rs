@@ -391,16 +391,98 @@ fn parse_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     let comp_arg_prop = Iri::parse("urn:eigenius:program:component_argument").unwrap();
     let effective_arg = match resource.get(&comp_arg_prop) {
         Some(Value::Embedded(comp_arg)) => {
+            // A component_argument that references a published `RuntimeScript`
+            // by IRI (`runtime:script`) is resolved against the graph here
+            // and expanded into the flat shape the substrate consumes (D26
+            // §6.2); the inline ad-hoc-script form passes through unchanged.
+            let resolved = expand_runtime_script_argument(comp_arg, layer)?;
             // Pack as Pair(arg, EigonResource(comp_arg)) so the dispatcher can extract it
             Exp::Pair(
                 Box::new(arg_exp),
-                Box::new(Exp::EigonResource(comp_arg.clone())),
+                Box::new(Exp::EigonResource(Box::new(resolved))),
             )
         }
         _ => arg_exp,
     };
 
     Ok(Exp::App(Box::new(func_exp), Box::new(effective_arg)))
+}
+
+/// IRI of the `runtime:script` reference a `RunRuntimeScript`
+/// component_argument may carry instead of inline `source`/`language`.
+const RUNTIME_SCRIPT_REF: &str = "urn:eigenius:runtime:script";
+const RUNTIME_LANGUAGE: &str = "urn:eigenius:runtime:language";
+const RUNTIME_SOURCE: &str = "urn:eigenius:runtime:source";
+const RUNTIME_IMAGE_DIGEST: &str = "urn:eigenius:runtime:image_digest";
+const RUNTIME_REQUIRES_ENV: &str = "urn:eigenius:runtime:requires_environment";
+
+/// Resolve a `RunRuntimeScript` component_argument that references a
+/// published [`RuntimeScript`] by IRI into the flat
+/// `{language, source, image_digest}` shape the substrate's
+/// `dispatch_run_runtime_script` consumes (D26 §6.2).
+///
+/// The published script stays the run-time source of truth: the program
+/// references it by IRI (preserving the D26 §6.5 reproducibility anchor
+/// `script_iri + env_iri + …`), and the kernel resolves `source` +
+/// `language` from the `RuntimeScript` and `image_digest` from its
+/// `requires_environment` at execution. A component_argument with no
+/// `runtime:script` reference is the inline ad-hoc-script form and is
+/// returned unchanged.
+///
+/// [`RuntimeScript`]: https://example.invalid (ontology class
+/// `urn:eigenius:runtime:RuntimeScript`)
+fn expand_runtime_script_argument(comp_arg: &Resource, layer: &Layer) -> Result<Resource, String> {
+    let read = |r: &Resource, p: &str| -> Option<String> {
+        r.get(&Iri::parse(p).unwrap()).and_then(|v| match v {
+            Value::String(s) => Some(s.clone()),
+            other => other.as_iri_str().map(str::to_string),
+        })
+    };
+
+    let script_ref = match read(comp_arg, RUNTIME_SCRIPT_REF) {
+        Some(s) => s,
+        // Inline form (carries source/language directly): no resolution.
+        None => return Ok(comp_arg.clone()),
+    };
+
+    let script_iri = Iri::parse(&script_ref).map_err(|_| {
+        format!("component_argument `runtime:script` is not a valid IRI: {script_ref}")
+    })?;
+    let script = layer.resolve(&script_iri).ok_or_else(|| {
+        format!("RunRuntimeScript: published RuntimeScript `{script_ref}` not found on the chain")
+    })?;
+
+    let language = read(&script, RUNTIME_LANGUAGE)
+        .ok_or_else(|| format!("RuntimeScript `{script_ref}` missing required `language`"))?;
+    let source = read(&script, RUNTIME_SOURCE)
+        .ok_or_else(|| format!("RuntimeScript `{script_ref}` missing required `source`"))?;
+    let env_ref = read(&script, RUNTIME_REQUIRES_ENV).ok_or_else(|| {
+        format!("RuntimeScript `{script_ref}` missing required `requires_environment`")
+    })?;
+
+    let env_iri = Iri::parse(&env_ref).map_err(|_| {
+        format!("RuntimeScript `{script_ref}` has invalid `requires_environment`: {env_ref}")
+    })?;
+    let env = layer.resolve(&env_iri).ok_or_else(|| {
+        format!(
+            "RuntimeScript `{script_ref}` references RuntimeEnvironment `{env_ref}` not found on the chain"
+        )
+    })?;
+    let image_digest = read(&env, RUNTIME_IMAGE_DIGEST).ok_or_else(|| {
+        format!("RuntimeEnvironment `{env_ref}` missing `image_digest` (build the env image first)")
+    })?;
+
+    let mut expanded = Resource::new_embedded();
+    expanded.set(
+        Iri::parse(RUNTIME_LANGUAGE).unwrap(),
+        Value::String(language),
+    );
+    expanded.set(Iri::parse(RUNTIME_SOURCE).unwrap(), Value::String(source));
+    expanded.set(
+        Iri::parse(RUNTIME_IMAGE_DIGEST).unwrap(),
+        Value::String(image_digest),
+    );
+    Ok(expanded)
 }
 
 /// Inductive constructor application (Phase 11b step 10, multi-arg).
@@ -1071,6 +1153,89 @@ mod tests {
             Exp::Lam(_, body) => *body,
             other => panic!("expected Lam, got {other:?}"),
         }
+    }
+
+    /// Build a layer holding a published `RuntimeScript` + its
+    /// `RuntimeEnvironment`, for the resolution tests below.
+    fn runtime_layer() -> Arc<crate::layer::Layer> {
+        let prop = |s: &str| Iri::parse(s).unwrap();
+        let mut env = Resource::new(prop("urn:eigenius:test:env"));
+        env.set(
+            prop("urn:eigenius:runtime:image_digest"),
+            Value::String("sha256:deadbeef".to_string()),
+        );
+
+        let mut script = Resource::new(prop("urn:eigenius:test:script"));
+        script.set(
+            prop("urn:eigenius:runtime:language"),
+            Value::String("r".to_string()),
+        );
+        script.set(
+            prop("urn:eigenius:runtime:source"),
+            Value::String("print(1)\n".to_string()),
+        );
+        script.set(
+            prop("urn:eigenius:runtime:requires_environment"),
+            Value::ResourceRef(prop("urn:eigenius:test:env")),
+        );
+
+        let mut b = LayerBuilder::new("runtime", None);
+        b.add_resource(env).unwrap();
+        b.add_resource(script).unwrap();
+        Arc::new(b.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    #[test]
+    fn runtime_script_ref_expands_to_flat_dispatch_shape() {
+        let layer = runtime_layer();
+        let mut comp_arg = Resource::new_embedded();
+        comp_arg.set(
+            Iri::parse(RUNTIME_SCRIPT_REF).unwrap(),
+            Value::ResourceRef(Iri::parse("urn:eigenius:test:script").unwrap()),
+        );
+        let expanded = expand_runtime_script_argument(&comp_arg, &layer).expect("resolves");
+        let get = |p: &str| {
+            expanded
+                .get(&Iri::parse(p).unwrap())
+                .and_then(|v| v.as_iri_str())
+                .map(str::to_string)
+        };
+        assert_eq!(get(RUNTIME_LANGUAGE).as_deref(), Some("r"));
+        assert_eq!(get(RUNTIME_SOURCE).as_deref(), Some("print(1)\n"));
+        assert_eq!(
+            get(RUNTIME_IMAGE_DIGEST).as_deref(),
+            Some("sha256:deadbeef")
+        );
+        // The script reference is consumed, not echoed.
+        assert!(get(RUNTIME_SCRIPT_REF).is_none());
+    }
+
+    #[test]
+    fn inline_component_argument_passes_through_unchanged() {
+        let layer = runtime_layer();
+        let mut comp_arg = Resource::new_embedded();
+        comp_arg.set(
+            Iri::parse(RUNTIME_LANGUAGE).unwrap(),
+            Value::String("r".to_string()),
+        );
+        comp_arg.set(
+            Iri::parse(RUNTIME_SOURCE).unwrap(),
+            Value::String("cat('hi')\n".to_string()),
+        );
+        let out = expand_runtime_script_argument(&comp_arg, &layer).expect("passthrough");
+        assert_eq!(out, comp_arg);
+    }
+
+    #[test]
+    fn unresolvable_script_ref_errors() {
+        let layer = runtime_layer();
+        let mut comp_arg = Resource::new_embedded();
+        comp_arg.set(
+            Iri::parse(RUNTIME_SCRIPT_REF).unwrap(),
+            Value::ResourceRef(Iri::parse("urn:eigenius:test:missing").unwrap()),
+        );
+        let err = expand_runtime_script_argument(&comp_arg, &layer).unwrap_err();
+        assert!(err.contains("not found on the chain"), "got: {err}");
     }
 
     #[test]

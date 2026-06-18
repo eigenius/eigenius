@@ -1,0 +1,22 @@
+[
+  {
+    "@id": "urn:eigenius:ingest:file:c5778e66e6c62c94386a39924be50f24086d5f0d5401117b065c3e6d7fbdb498",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:ingest:PinnedExternalFile"
+    ],
+    "urn:eigenius:reflection:source": "DepMap 18Q4 sample_info (DepMap_ID<->CCLE_name bridge)",
+    "urn:eigenius:ingest:reference": "file://wrn-slices/achilles_18Q4_sample_info.csv",
+    "urn:eigenius:ingest:content_hash": "sha256:c5778e66e6c62c94386a39924be50f24086d5f0d5401117b065c3e6d7fbdb498",
+    "urn:eigenius:ingest:media_type": "text/csv"
+  },
+  {
+    "@id": "urn:eigenius:ingest:file:eebd460257982a98cf6ce9f14e189ae0c4398a686f4181bc037c5591e87243f2",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:ingest:PinnedExternalFile"
+    ],
+    "urn:eigenius:reflection:source": "WRN paper Supplementary Table 1 (CCLE_MSI labels)",
+    "urn:eigenius:ingest:reference": "file://wrn-slices/wrn_supplementary_table_1.csv",
+    "urn:eigenius:ingest:content_hash": "sha256:eebd460257982a98cf6ce9f14e189ae0c4398a686f4181bc037c5591e87243f2",
+    "urn:eigenius:ingest:media_type": "text/csv"
+  }
+]

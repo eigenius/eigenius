@@ -19,7 +19,7 @@
           "urn:eigenius:program:components:completion:user_prompt": "Summarize the following document in 2-3 sentences:\n\n{{urn:eigenius:demo:text}}",
           "urn:eigenius:program:components:completion:system_prompt": "You are a concise technical summarizer.",
           "urn:eigenius:program:components:completion:request_parameters": {
-            "urn:eigenius:program:request:model": "claude-sonnet-4-20250514",
+            "urn:eigenius:program:request:model": "claude-sonnet-4-6",
             "urn:eigenius:program:request:temperature": 0.3,
             "urn:eigenius:program:request:max_tokens": 200
           }

@@ -1,0 +1,76 @@
+// WRN Phase-1 — biological-level (pseudoreplication-corrected) viability SAP.
+//
+// Finding F4 (recompute-findings.md): the published competition-assay analysis
+// `lm(value ~ is_WRN + guide) %>% anova()` tests the WRN effect against the
+// *technical* within-guide residual (KM12: 25 resid df, P = 2.74e-19). The
+// biological unit for a claim about WRN is the *guide* (3 sgWRN + 2 control);
+// the 6 reps per guide are technical. Tested at the biological unit — a mixed
+// model `lmer(value ~ is_WRN + (1|guide))` LRT — the honest P is ~2.15e-6: the
+// conclusion is robust, but the published value overstates the evidence by ~13
+// orders of magnitude.
+//
+// This file lifts that *alternative* SAP into a kernel-checkable warrant. The
+// model is run through the R language runtime (D55/D56) — the same mechanism the
+// in-vivo arm (concl_vivo) uses for the authors' own lme4 mixed model — NOT
+// reimplemented as statistics-institution numerics: a mixed-effects LRT is a
+// runtime-dependent computation (D26 §2.2). The R program
+// (programs/invivo/km12-competition-lme4-program.json) commits
+// `wrn:viab_KM12_bio_lme4:result` carrying an IsDerivedAs witness over
+// onco:ViabilityDependenceAtBiologicalUnit("WRN","KM12"); concl_viab_KM12_biological
+// discharges it. The faithful (published) warrant — the nested-ANOVA
+// StatisticalAnalysisPlan in wrn-phase1-recompute-plans.esl — stays as the
+// "what the paper claimed" reproduction. Both are first-class on the chain; the
+// dual-SAP annotation below records F4 as a queryable fact.
+//
+// Like concl_vivo, the witness only exists after the R program runs, so this
+// file is loaded by the live demo (demo/wrn-helicase/run.sh) after that step —
+// not by the in-process recompute tests.
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace stats      = "urn:eigenius:measurements";
+namespace onco       = "urn:eigenius:benchmark:onco";
+namespace bench      = "urn:eigenius:benchmark";
+namespace wrn        = "urn:eigenius:pub:wrn";
+
+// The KM12 day-10 competition-assay table consumed by the lme4 biological-unit
+// RuntimeScript program (D56). Columns: viab_value (the Firefly:Renilla
+// relative ratio), viab_guide (the shRNA/sgRNA reagent — is_WRN is derived in
+// the script via grepl("WRN", guide)). Same source data as
+// wrn:viab_KM12_sampleset (ED Fig 3b, Nature Source Data, pinned); here modeled
+// with the guide as the biological replication unit.
+class wrn:CompetitionTable : reflection:ObservedResource {
+    description = "KM12 day-10 competition-assay relative-ratio table (ED Fig 3b) consumed by the biological-unit lme4 RuntimeScript program. Columns: viab_value, viab_guide. An ObservedResource so it carries the same tier-1 extraction pins (bench:extracted_from_*) as the SampleSets — the input data is traced to the pinned source slice via a re-runnable recipe, not trusted as typed-in numbers.";
+}
+
+// The biological-unit viability warrant: discharges the IsDerivedAs witness the
+// lme4 program commits (onco:ViabilityDependenceAtBiologicalUnit("WRN","KM12")).
+// Mirrors concl_vivo's shape (D54 certificate over a wrapped-R derived result).
+resource wrn:concl_viab_KM12_biological : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12")
+    );
+    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:viab_KM12_bio_lme4:result");
+    reasoning:certificate = type_expr(
+        derived("urn:eigenius:pub:wrn:viab_KM12_bio_lme4:result",
+                onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12"))
+    );
+}
+
+// F4 as a first-class chain fact: the two SAPs over the same KM12 competition
+// data, and the pseudoreplication relationship between them. Links the published
+// (technical-stratum) warrant — recomputed exactly by wrn:viab_KM12_plan via the
+// nested-ANOVA dispatch, P = 2.74e-19 — to the biological-stratum warrant
+// (wrn:viab_KM12_bio_lme4:result, mixed-model LRT, P ≈ 2.15e-6). The conclusion
+// is robust under both; the published value is a pseudoreplication artifact.
+resource wrn:viab_KM12_dual_sap : reflection:DeclaredResource {
+    reflection:declared_by = "recompute-findings:F4-competition-assay-pseudoreplication";
+    reflection:rationale   = "The published competition-assay SAP (wrn:viab_KM12_plan, lm(value ~ is_WRN + guide) %>% anova) tests the WRN effect against the technical within-guide residual (25 df, P = 2.74e-19); the biological-unit SAP (wrn:viab_KM12_bio_lme4:result, lmer(value ~ is_WRN + (1|guide)) LRT) tests against the between-guide variance (P ≈ 2.15e-6). Same data; the guide is the biological replication unit and the 6 reps per guide are technical. The conclusion — WRN depletion impairs KM12 viability — is robust under both (p < 0.01), but the published P overstates the evidence by ~13 orders of magnitude (pseudoreplication; Hurlbert 1984, Lazic 2016, Blainey/Krzywinski/Altman 2014). The paper is internally inconsistent: its in-vivo arm (concl_vivo) already uses the mixed-effects approach.";
+}
+resource wrn:viab_KM12_dual_sap_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:viab_KM12_dual_sap;
+    reflection:declared_by = "recompute-findings:F4-competition-assay-pseudoreplication";
+    reflection:timestamp   = "2026-06-14T00:00:00Z";
+}

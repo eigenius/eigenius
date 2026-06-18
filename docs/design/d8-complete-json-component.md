@@ -507,7 +507,7 @@ Identity has no `argument_type` — it takes no component argument.
     "urn:eigenius:program:components:completion:system_prompt": "You are a structured data extractor.",
     "urn:eigenius:program:components:completion:output_schema": "urn:ex:Analysis",
     "urn:eigenius:program:components:completion:request_parameters": {
-      "urn:eigenius:program:request:model": "claude-sonnet-4-20250514",
+      "urn:eigenius:program:request:model": "claude-sonnet-4-6",
       "urn:eigenius:program:request:temperature": 0.0,
       "urn:eigenius:program:request:max_tokens": 2000
     }

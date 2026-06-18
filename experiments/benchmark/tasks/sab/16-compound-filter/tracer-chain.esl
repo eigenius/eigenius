@@ -1,0 +1,326 @@
+// SAB 16 — compound filter — hand-driven condition-C reasoning chain (v2).
+//
+// TRACER, corrected model. The benchmark's Python program is the *object
+// code* of the agent's reasoning; this chain is its *source*. It does NOT
+// reason per-compound (that's the program's output) — it justifies the
+// program's CONSTRUCTION: the methodological decisions where correctness
+// is actually won (featurization, alert catalogs, similarity reduction,
+// threshold, composition), each a warranted decision, composed into the
+// claim that the program implements SAB-16's required filter.
+//
+//   5 methodological decisions  (Declared, warranted by spec/convention)
+//        │  composed through a declared acceptance rule
+//        ▼
+//   ImplementsRequiredFilter(solution)   (ReasoningSentence)
+//        │  binds
+//        ▼
+//   bench:TaskOutput(python_source)      (the deliverable program)
+//
+// Honest residue: each Conforms… is agent-attested (Declared) — the kernel
+// can't yet verify the emitted Python implements it (the payload is opaque
+// text). Closing that is the program-generated-from-chain endpoint. The
+// pilot gets the forcing + auditability benefit.
+//
+// Validated by crates/eigenius-reasoning/tests/sab16_tracer.rs (Holds).
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace bench      = "urn:eigenius:benchmark";
+namespace s16        = "urn:eigenius:bench:sab16";
+
+// ─── Phase 1: per-task predicate vocabulary ────────────────────────
+// Conformance predicates over the solution IRI — one per methodological
+// axis — plus the top-level implementation claim. Plain Props.
+
+data s16:ConformsFeaturization : core:string -> Prop {
+}
+
+data s16:ConformsAlertCatalogs : core:string -> Prop {
+}
+
+data s16:ConformsReduction : core:string -> Prop {
+}
+
+data s16:ConformsThreshold : core:string -> Prop {
+}
+
+data s16:ConformsComposition : core:string -> Prop {
+}
+
+data s16:ImplementsRequiredFilter : core:string -> Prop {
+}
+
+// ─── Phase 2: the methodological decisions ─────────────────────────
+// Each is a Declared conformance — the agent's warranted choice about how
+// the program computes a step. The rationale carries the warrant (spec vs
+// convention, distinguished). Each admits IsDeclaredAs via its trace.
+
+resource s16:conf_featurization : reflection:DeclaredResource {
+    reflection:declared_by = "agent:sab16-method";
+    reflection:rationale   = "Featurize with Morgan fingerprints, radius 2, 2048 bits. Warrant: the task's domain knowledge specifies Morgan fingerprints (spec); radius 2 / 2048 bits is the ECFP4 community default (convention).";
+    reflection:canonical_proposition = type_expr(
+        s16:ConformsFeaturization("urn:eigenius:bench:sab16:solution")
+    );
+}
+resource s16:conf_featurization_trace : reflection:DeclarationTrace {
+    reflection:resource    = s16:conf_featurization;
+    reflection:declared_by = "agent:sab16-method";
+    reflection:timestamp   = "2026-06-12T10:00:00Z";
+}
+
+resource s16:conf_alert_catalogs : reflection:DeclaredResource {
+    reflection:declared_by = "agent:sab16-method";
+    reflection:rationale   = "Detect structural alerts with an RDKit FilterCatalog containing BOTH the PAINS and Brenk catalogs. Warrant: the instruction names both PAINS and Brenk (spec).";
+    reflection:canonical_proposition = type_expr(
+        s16:ConformsAlertCatalogs("urn:eigenius:bench:sab16:solution")
+    );
+}
+resource s16:conf_alert_catalogs_trace : reflection:DeclarationTrace {
+    reflection:resource    = s16:conf_alert_catalogs;
+    reflection:declared_by = "agent:sab16-method";
+    reflection:timestamp   = "2026-06-12T10:00:01Z";
+}
+
+resource s16:conf_reduction : reflection:DeclaredResource {
+    reflection:declared_by = "agent:sab16-method";
+    reflection:rationale   = "Similarity reduction: for each hit take the MAXIMUM Tanimoto over ALL train actives. Warrant: the instruction says 'maximum tanimoto similarity ... to any of the active compounds' (spec) — max-over-actives, not mean.";
+    reflection:canonical_proposition = type_expr(
+        s16:ConformsReduction("urn:eigenius:bench:sab16:solution")
+    );
+}
+resource s16:conf_reduction_trace : reflection:DeclarationTrace {
+    reflection:resource    = s16:conf_reduction;
+    reflection:declared_by = "agent:sab16-method";
+    reflection:timestamp   = "2026-06-12T10:00:02Z";
+}
+
+resource s16:conf_threshold : reflection:DeclaredResource {
+    reflection:declared_by = "agent:sab16-method";
+    reflection:rationale   = "Keep a hit only when its max Tanimoto is STRICTLY less than 0.5. Warrant: the instruction says 'less than 0.5' (spec) — strict, not <=.";
+    reflection:canonical_proposition = type_expr(
+        s16:ConformsThreshold("urn:eigenius:bench:sab16:solution")
+    );
+}
+resource s16:conf_threshold_trace : reflection:DeclarationTrace {
+    reflection:resource    = s16:conf_threshold;
+    reflection:declared_by = "agent:sab16-method";
+    reflection:timestamp   = "2026-06-12T10:00:03Z";
+}
+
+resource s16:conf_composition : reflection:DeclaredResource {
+    reflection:declared_by = "agent:sab16-method";
+    reflection:rationale   = "Keep a hit iff it is alert-free AND below the similarity threshold (logical conjunction of the two gates). Warrant: the instruction requires no PAINS/Brenk substructures and max Tanimoto < 0.5 jointly (spec).";
+    reflection:canonical_proposition = type_expr(
+        s16:ConformsComposition("urn:eigenius:bench:sab16:solution")
+    );
+}
+resource s16:conf_composition_trace : reflection:DeclarationTrace {
+    reflection:resource    = s16:conf_composition;
+    reflection:declared_by = "agent:sab16-method";
+    reflection:timestamp   = "2026-06-12T10:00:04Z";
+}
+
+// ─── Phase 3: the acceptance rule ──────────────────────────────────
+// A solution implements SAB-16's required filter iff it conforms on all
+// five axes. Declared as the benchmark acceptance criterion.
+
+resource s16:impl_rule : reflection:DeclaredResource {
+    reflection:declared_by = "benchmark:sab16-acceptance";
+    reflection:rationale   = "A solution implements the required compound filter iff it conforms on every methodological axis: featurization, alert catalogs, similarity reduction, threshold, and composition.";
+    reflection:canonical_proposition = type_expr(
+        forall (p : core:string) =>
+            s16:ConformsFeaturization(p) ->
+            s16:ConformsAlertCatalogs(p) ->
+            s16:ConformsReduction(p) ->
+            s16:ConformsThreshold(p) ->
+            s16:ConformsComposition(p) ->
+            s16:ImplementsRequiredFilter(p)
+    );
+}
+resource s16:impl_rule_trace : reflection:DeclarationTrace {
+    reflection:resource    = s16:impl_rule;
+    reflection:declared_by = "benchmark:sab16-acceptance";
+    reflection:timestamp   = "2026-06-12T10:00:05Z";
+}
+
+// ─── Phase 4: the conclusion ───────────────────────────────────────
+// "The solution implements the required filter", justified by applying the
+// acceptance rule (specialised at the solution) to the five conformances.
+
+resource s16:concl_solution_implements : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:bench:sab16:solution";
+
+    reasoning:proposition = type_expr(
+        s16:ImplementsRequiredFilter("urn:eigenius:bench:sab16:solution")
+    );
+
+    reasoning:justification = App(
+        App(
+            App(
+                App(
+                    App(
+                        SpecStr(
+                            DeclaredEvidence("urn:eigenius:bench:sab16:impl_rule"),
+                            "urn:eigenius:bench:sab16:solution"
+                        ),
+                        DeclaredEvidence("urn:eigenius:bench:sab16:conf_featurization")
+                    ),
+                    DeclaredEvidence("urn:eigenius:bench:sab16:conf_alert_catalogs")
+                ),
+                DeclaredEvidence("urn:eigenius:bench:sab16:conf_reduction")
+            ),
+            DeclaredEvidence("urn:eigenius:bench:sab16:conf_threshold")
+        ),
+        DeclaredEvidence("urn:eigenius:bench:sab16:conf_composition")
+    );
+
+    reasoning:certificate = type_expr(
+        alias
+            P    = "urn:eigenius:bench:sab16:solution",
+            RULE = "urn:eigenius:bench:sab16:impl_rule",
+            D1   = "urn:eigenius:bench:sab16:conf_featurization",
+            D2   = "urn:eigenius:bench:sab16:conf_alert_catalogs",
+            D3   = "urn:eigenius:bench:sab16:conf_reduction",
+            D4   = "urn:eigenius:bench:sab16:conf_threshold",
+            D5   = "urn:eigenius:bench:sab16:conf_composition",
+
+            C1   = s16:ConformsFeaturization(P),
+            C2   = s16:ConformsAlertCatalogs(P),
+            C3   = s16:ConformsReduction(P),
+            C4   = s16:ConformsThreshold(P),
+            C5   = s16:ConformsComposition(P),
+            IMPL = s16:ImplementsRequiredFilter(P),
+
+            RULE_P = forall (p : core:string) =>
+                s16:ConformsFeaturization(p) ->
+                s16:ConformsAlertCatalogs(p) ->
+                s16:ConformsReduction(p) ->
+                s16:ConformsThreshold(p) ->
+                s16:ConformsComposition(p) ->
+                s16:ImplementsRequiredFilter(p),
+
+            // justification spine
+            j0 = reasoning:SpecStr(DeclaredEvidence(RULE), P),
+            j1 = reasoning:App(j0, DeclaredEvidence(D1)),
+            j2 = reasoning:App(j1, DeclaredEvidence(D2)),
+            j3 = reasoning:App(j2, DeclaredEvidence(D3)),
+            j4 = reasoning:App(j3, DeclaredEvidence(D4)),
+
+            // certificate spine — specialise the rule, then discharge the
+            // five conformances one at a time via Artemov application.
+            rule_cert = spec_str(
+                fun (p : core:string) =>
+                    s16:ConformsFeaturization(p) ->
+                    s16:ConformsAlertCatalogs(p) ->
+                    s16:ConformsReduction(p) ->
+                    s16:ConformsThreshold(p) ->
+                    s16:ConformsComposition(p) ->
+                    s16:ImplementsRequiredFilter(p),
+                DeclaredEvidence(RULE),
+                P,
+                declared(RULE, RULE_P)
+            ),
+            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, j0, DeclaredEvidence(D1), rule_cert, declared(D1, C1)),
+            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, j1, DeclaredEvidence(D2), cert1, declared(D2, C2)),
+            cert3 = app(C3, C4 -> C5 -> IMPL, j2, DeclaredEvidence(D3), cert2, declared(D3, C3)),
+            cert4 = app(C4, C5 -> IMPL, j3, DeclaredEvidence(D4), cert3, declared(D4, C4))
+        in
+        app(C5, IMPL, j4, DeclaredEvidence(D5), cert4, declared(D5, C5))
+    );
+}
+
+// ─── Phase 5: the deliverable ──────────────────────────────────────
+// The program is the object code of the reasoning above; the TaskOutput
+// binds it to its source via reasoning_chain. Per-compound results are the
+// program's OUTPUT, not individually reasoned.
+
+resource s16:solution : bench:TaskOutput {
+    bench:task             = "urn:eigenius:bench:sab16:task";
+    bench:deliverable_kind = "python_source";
+    bench:reasoning_chain  = ["urn:eigenius:bench:sab16:concl_solution_implements"];
+    reflection:derivation  = s16:solution_trace;
+
+    bench:payload = "import pandas as pd
+from rdkit import Chem
+from rdkit.Chem import AllChem, DataStructs
+from rdkit.Chem.FilterCatalog import FilterCatalog, FilterCatalogParams
+
+
+# region: alert_catalogs
+def alert_catalog():
+    params = FilterCatalogParams()
+    params.AddCatalog(FilterCatalogParams.FilterCatalogs.PAINS)
+    params.AddCatalog(FilterCatalogParams.FilterCatalogs.BRENK)
+    return FilterCatalog(params)
+# endregion
+
+
+# region: featurization
+def morgan(mol):
+    return AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
+# endregion
+
+
+hit_smiles = pd.read_csv('hits.csv')['SMILES'].tolist()
+active_mols = [Chem.MolFromSmiles(s) for s in pd.read_csv('train.csv')['SMILES']]
+active_fps = [morgan(m) for m in active_mols if m is not None]
+catalog = alert_catalog()
+
+# region: filter
+kept = []
+for smi in hit_smiles:
+    mol = Chem.MolFromSmiles(smi)
+    if mol is None:
+        continue
+    if catalog.HasMatch(mol):
+        continue
+    fp = morgan(mol)
+    max_sim = max((DataStructs.TanimotoSimilarity(fp, afp) for afp in active_fps), default=0.0)
+    if max_sim < 0.5:
+        kept.append(smi)
+
+with open('pred_results/compound_filter_results.txt', 'w') as out:
+    for smi in kept:
+        print(smi, file=out)
+# endregion
+";
+}
+
+// ─── Phase 6: decision ↔ code-section overlay ──────────────────────
+// Each block links a program region (by label, matching a `# region:`
+// marker in the payload above) to the methodological decision(s) it
+// realises. Coverage: the union of `realizes` across the blocks equals the
+// five decisions — every decision is implemented, every region is
+// warranted. The `filter` region realises three decisions at once (the
+// max-over-actives reduction, the strict threshold, and the conjunction).
+
+resource s16:block_alert_catalogs : bench:CodeBlock {
+    bench:of_output   = s16:solution;
+    bench:block_label = "alert_catalogs";
+    bench:realizes    = ["urn:eigenius:bench:sab16:conf_alert_catalogs"];
+}
+
+resource s16:block_featurization : bench:CodeBlock {
+    bench:of_output   = s16:solution;
+    bench:block_label = "featurization";
+    bench:realizes    = ["urn:eigenius:bench:sab16:conf_featurization"];
+}
+
+resource s16:block_filter : bench:CodeBlock {
+    bench:of_output   = s16:solution;
+    bench:block_label = "filter";
+    bench:realizes    = [
+        "urn:eigenius:bench:sab16:conf_reduction",
+        "urn:eigenius:bench:sab16:conf_threshold",
+        "urn:eigenius:bench:sab16:conf_composition"
+    ];
+}
+
+resource s16:solution_trace : reflection:ProgramTrace {
+    reflection:resource  = s16:solution;
+    reflection:source    = "agent:sab16-condition-c-loop";
+    reflection:timestamp = "2026-06-12T10:05:00Z";
+}

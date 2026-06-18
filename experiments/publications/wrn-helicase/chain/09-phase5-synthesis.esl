@@ -1,0 +1,190 @@
+// WRN Helicase paper — Phase-5 causal dissection (C-MMR).
+//
+// Stacks on the Phase-3 chain (… → wrn-phase3 → wrn-phase5). Encodes
+// C-MMR: dMMR contributes to, but does not fully explain, WRN dependence.
+//
+// As in Phases 2-3, the wet-lab statistics are the authors' own (HCT116
+// Ch3+5 MMR-restoration viability/DSB rescue; MLH1-KO re-sensitization;
+// clonogenic) and not in any vendored slice, so the readout is
+// LINKED-EXTERNAL. The encodable contribution is the Declared
+// causal-dissection logic:
+//   - HCT116 Ch3+5 (re-introducing MLH1 + MSH3) restores MMR and PARTIALLY
+//     rescues viability + suppresses DSBs from shWRN;
+//   - CRISPR-KO of MLH1 in HCT116 Ch3+5 RE-SENSITIZES (the control proving
+//     the rescue is attributable to MMR, not the chromosome transfer);
+//   - the rescue is only modest (abolished by MLH1-KO) ⇒ dMMR contributes
+//     but does not fully explain — consistent with D-REFINE (mutator load
+//     matters beyond MMR status).
+//
+// Validated by crates/eigenius-reasoning/tests/wrn_phase5.rs.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace bench      = "urn:eigenius:benchmark";
+namespace onco       = "urn:eigenius:benchmark:onco";
+namespace wrn        = "urn:eigenius:pub:wrn";
+
+// The MMR-restoration causal-dissection experiment is now KERNEL-RECOMPUTED
+// (increment 10): `wrn:concl_mmr_restoration_recomputed` in the statistics
+// recompute layer establishes RestorationPartiallyRescues(dMMR, WRN) from the
+// ED Fig 10c relative-viability data via three crossed-ANOVA (stats:Crossed)
+// contrasts (restore P=5.7e-20; two MLH1-KO re-sensitization controls
+// P=3.3e-12 / 1.6e-16) — reproducing the paper exactly (recompute-findings F3).
+// The linked-external `wrn:mmr_restoration` ToolArtifact it replaced is RETIRED;
+// `concl_mmr` below now discharges RestorationPartiallyRescues by D54 lemma
+// citation of that recomputed conclusion.
+
+// Declared: the causal-dissection rule. A factor whose restoration partially
+// rescues a dependence — with a KO control confirming the rescue is
+// attributable to that factor — contributes to the dependence. "Partially"
+// (not fully) is the load-bearing qualifier: the rescue being modest means
+// the factor contributes but does not solely determine the dependence.
+resource wrn:mmr_rule : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:mmr-causal-dissection";
+    reflection:rationale   = "Restoring MMR (Ch3+5) partially rescues WRN dependence and suppresses DSBs; MLH1-KO re-sensitizes (isolating MMR as the responsible factor, not the chromosome transfer). Because the rescue is only partial/modest, dMMR contributes to but does not fully explain WRN dependence — accumulating MSI lesions (mutator load; cf. D-REFINE) cooperate with dMMR to create WRN-requiring genomic structures (indel/D-loops; yeast Sgs1 precedent).";
+    reflection:canonical_proposition = type_expr(
+        onco:RestorationPartiallyRescues("dMMR", "WRN")
+        ->
+        onco:ContributesToDependence("dMMR", "WRN")
+    );
+}
+resource wrn:mmr_rule_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:mmr_rule;
+    reflection:declared_by = "wrn-paper:mmr-causal-dissection";
+    reflection:timestamp   = "2026-06-13T04:00:00Z";
+}
+
+// C-MMR: dMMR contributes to (but does not fully explain) WRN dependence.
+// Modus ponens over mmr_rule: the antecedent RestorationPartiallyRescues is
+// discharged by CITING the kernel-recomputed conclusion as a lemma (D54: a
+// Holds ReasoningSentence is admitted as a Verified witness keyed on its IRI),
+// not by a linked-external ToolArtifact. The leaf proof (the three ED Fig 10c
+// crossed-ANOVA (stats:Crossed) contrasts) lives in wrn-phase1-recompute.
+resource wrn:concl_mmr : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:ContributesToDependence("dMMR", "WRN")
+    );
+    reasoning:justification = App(
+        DeclaredEvidence("urn:eigenius:pub:wrn:mmr_rule"),
+        VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr_restoration_recomputed")
+    );
+    reasoning:certificate = type_expr(
+        alias
+            RULE  = "urn:eigenius:pub:wrn:mmr_rule",
+            CONCL = "urn:eigenius:pub:wrn:concl_mmr_restoration_recomputed",
+            RP    = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            CD    = onco:ContributesToDependence("dMMR", "WRN")
+        in
+        app(RP, CD, DeclaredEvidence(RULE), VerifiedEvidence(CONCL),
+            declared(RULE, RP -> CD), verified(CONCL, RP))
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// C-MAIN — the thesis: WRN (helicase) is a synthetic-lethal target in MSI
+// ════════════════════════════════════════════════════════════════════
+// The capstone. The synthesis rule is the "from A follows B" implication
+// the whole paper builds toward; C-MAIN reaches the thesis by modus ponens
+// (App) over the load-bearing findings (plan §7: C-VAL, C-VIVO, D-HELICASE,
+// C-MECH, C-MMR). Each antecedent is discharged by CITING its phase
+// conclusion as a lemma (D54 lemma citation: a Holds ReasoningSentence is
+// admitted as a Verified witness keyed on its IRI). A proven sentence is NOT
+// an evidence atom; it is the antecedent of this implication, discharged by
+// the lemma. (C-VAL is cited as concl_val_recomputed — the kernel-recomputed
+// competition-assay nested ANOVA in the statistics layer.)
+
+resource wrn:synthesis_rule : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:synthetic-lethality-thesis";
+    reflection:rationale   = "The paper's thesis composes its findings: WRN depletion selectively impairs MSI viability (C-VAL), validated in vivo and in a patient-derived model (C-VIVO); the helicase activity is the required function (D-HELICASE); the lethality is driven by MSI-selective DSB-induced DNA-damage response (C-MECH); dMMR contributes to the dependence (C-MMR); and the MSI-selective dependence is intrinsic to MSI, not a confound of paralogue co-loss (the ED Fig 9a specificity control). Together these establish WRN — specifically its helicase activity — as a synthetic-lethal therapeutic target in MSI cancers.";
+    reflection:canonical_proposition = type_expr(
+        onco:SelectiveViabilityDependence("WRN", "MSI") ->
+        onco:InVivoDependence("WRN", "MSI") ->
+        onco:RequiresActivity("WRN", "helicase") ->
+        onco:DSBDrivenLethality("WRN", "MSI") ->
+        onco:ContributesToDependence("dMMR", "WRN") ->
+        onco:NotExplainedByParalogLoss("WRN", "MSI") ->
+        onco:SyntheticLethal("WRN", "MSI")
+    );
+}
+resource wrn:synthesis_rule_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:synthesis_rule;
+    reflection:declared_by = "wrn-paper:synthetic-lethality-thesis";
+    reflection:timestamp   = "2026-06-13T04:30:00Z";
+}
+
+resource wrn:concl_main : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:SyntheticLethal("WRN", "MSI")
+    );
+
+    // Modus ponens over the five findings — each antecedent discharged by
+    // CITING its phase conclusion as a lemma (D54: a Holds ReasoningSentence
+    // is admitted as a Verified witness keyed on its IRI). The leaf proofs
+    // live in the phase conclusions; C-MAIN references them by name.
+    reasoning:justification = App(
+        App(
+            App(
+                App(
+                    App(
+                        App(
+                            DeclaredEvidence("urn:eigenius:pub:wrn:synthesis_rule"),
+                            VerifiedEvidence("urn:eigenius:pub:wrn:concl_val_recomputed")
+                        ),
+                        VerifiedEvidence("urn:eigenius:pub:wrn:concl_vivo")
+                    ),
+                    VerifiedEvidence("urn:eigenius:pub:wrn:concl_helicase_required")
+                ),
+                VerifiedEvidence("urn:eigenius:pub:wrn:concl_mech")
+            ),
+            VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr")
+        ),
+        VerifiedEvidence("urn:eigenius:pub:wrn:concl_paralog")
+    );
+
+    reasoning:certificate = type_expr(
+        alias
+            RULE = "urn:eigenius:pub:wrn:synthesis_rule",
+            SVD = onco:SelectiveViabilityDependence("WRN", "MSI"),
+            IVD = onco:InVivoDependence("WRN", "MSI"),
+            RA  = onco:RequiresActivity("WRN", "helicase"),
+            DL  = onco:DSBDrivenLethality("WRN", "MSI"),
+            CD  = onco:ContributesToDependence("dMMR", "WRN"),
+            PAR = onco:NotExplainedByParalogLoss("WRN", "MSI"),
+            SL  = onco:SyntheticLethal("WRN", "MSI"),
+            RULE_P = SVD -> IVD -> RA -> DL -> CD -> PAR -> SL,
+            // antecedent justification terms — lemma citations of conclusions
+            jSVD = VerifiedEvidence("urn:eigenius:pub:wrn:concl_val_recomputed"),
+            jIVD = VerifiedEvidence("urn:eigenius:pub:wrn:concl_vivo"),
+            jRA  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_helicase_required"),
+            jDL  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_mech"),
+            jCD  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr"),
+            jPAR = VerifiedEvidence("urn:eigenius:pub:wrn:concl_paralog"),
+            // antecedent certificates — one verified(conclusion, P) each
+            cSVD = verified("urn:eigenius:pub:wrn:concl_val_recomputed", SVD),
+            cIVD = verified("urn:eigenius:pub:wrn:concl_vivo", IVD),
+            cRA  = verified("urn:eigenius:pub:wrn:concl_helicase_required", RA),
+            cDL  = verified("urn:eigenius:pub:wrn:concl_mech", DL),
+            cCD  = verified("urn:eigenius:pub:wrn:concl_mmr", CD),
+            cPAR = verified("urn:eigenius:pub:wrn:concl_paralog", PAR),
+            // modus-ponens spine (unchanged — the "from A follows B" backbone)
+            c1 = app(SVD, IVD -> RA -> DL -> CD -> PAR -> SL,
+                     DeclaredEvidence(RULE), jSVD, declared(RULE, RULE_P), cSVD),
+            c2 = app(IVD, RA -> DL -> CD -> PAR -> SL,
+                     reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD, c1, cIVD),
+            c3 = app(RA, DL -> CD -> PAR -> SL,
+                     reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA, c2, cRA),
+            c4 = app(DL, CD -> PAR -> SL,
+                     reasoning:App(reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA), jDL, c3, cDL),
+            c5 = app(CD, PAR -> SL,
+                     reasoning:App(reasoning:App(reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA), jDL), jCD, c4, cCD)
+        in
+        app(PAR, SL,
+            reasoning:App(reasoning:App(reasoning:App(reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA), jDL), jCD),
+            jPAR, c5, cPAR)
+    );
+}

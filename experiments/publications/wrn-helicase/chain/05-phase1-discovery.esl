@@ -1,0 +1,216 @@
+// WRN Helicase paper — Phase-1 narrative / deliverable layer.
+//
+// Stacks ON TOP of wrn-phase1-recompute-{plans,conclusions}.esl (the kernel-recomputed
+// statistical-warrant layer). This file carries the parts that are NOT
+// institution-recomputed:
+//   - the Observed public datasets (provenance per data/MANIFEST.md);
+//   - the motivating hypothesis H1;
+//   - D-DIFF: the genome-wide differential-dependency "WRN is the top
+//     preferential dependency in two independent screens" — a linked-
+//     external bench:ToolArtifact boundary, because the exact limma
+//     moderated-t / genome-wide ranking awaits the Phase-2.5 limma
+//     institution (a single-gene Wilcoxon can't establish *top*);
+//   - the Declared two-screen discovery rule + the C-WRN conclusion it
+//     warrants (the paper's actual independent-replication argument);
+//   - the Phase-1 deliverable (bench:TaskOutput) citing the four
+//     kernel-recomputed conclusions from the statistics layer.
+//
+// The institution-recomputable warrants (C-WRN Wilcoxon, D-REFINE Spearman,
+// D-RECQ family, D-BIOM biomarker) are kernel-recomputed in the statistics
+// layer; their recorded bench:ToolArtifact predecessors have been retired.
+//
+// Validated by crates/eigenius-statistics/tests/wrn_phase1_recompute.rs.
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace bench      = "urn:eigenius:benchmark";
+namespace onco       = "urn:eigenius:benchmark:onco";
+namespace wrn        = "urn:eigenius:pub:wrn";
+
+// ─── Observed: the public datasets (provenance per data/MANIFEST.md) ──
+
+resource wrn:ds_achilles : bench:Dataset {
+    reflection:source        = "figshare:7270880/gene_effect.csv (DepMap Achilles 18Q4, CERES)";
+    bench:dataset_path        = "data/slices/achilles_18Q4_gene_effect.csv";
+    bench:dataset_description = "CRISPR/Cas9 gene-effect (CERES), cell lines x 17,634 genes. figshare md5 30f243486c3370d3e5cc6f8ef57b90b3; sha256 2186669d…2eb68b.";
+}
+
+resource wrn:ds_drive : bench:Dataset {
+    reflection:source        = "figshare:6025238/D2_DRIVE_gene_dep_scores.csv (Project DRIVE, DEMETER2)";
+    bench:dataset_path        = "data/slices/drive_D2_DRIVE_gene_dep_scores.csv";
+    bench:dataset_description = "RNAi gene-dependency (DEMETER2), genes x 398 cell lines. figshare md5 69b13ed329a027cad2d28166e1af20b0; sha256 3f863c29…38254b.";
+}
+
+resource wrn:ds_supp1 : bench:Dataset {
+    reflection:source        = "NIHMS1522798 Supplementary Table 1 (this paper)";
+    bench:dataset_path        = "data/slices/wrn_supplementary_table_1.csv";
+    bench:dataset_description = "Per-cell-line MSI/MMR/TP53 status + WRN dependency + mutator load; 1,415 lines x 37 cols. sha256 eebd4602…7243f2. Provides the MSI grouping + ms_deletions for D-DIFF / D-REFINE.";
+}
+
+// ─── Declared: the motivating hypothesis (H1) ────────────────────────
+
+resource wrn:h1 : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:hypothesis";
+    reflection:rationale   = "Hypothesis: dMMR / MSI may create genetic vulnerabilities — motivating a query of large-scale dependency datasets for genes selectively essential in MSI. (Warranted by the synthetic-lethality framing, ref [1]; the DNA-repair-defect strategy, refs [2,3].)";
+    reflection:canonical_proposition = type_expr(
+        onco:SelectivelyEssential("some_gene", "MSI")
+    );
+}
+resource wrn:h1_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:h1;
+    reflection:declared_by = "wrn-paper:hypothesis";
+    reflection:timestamp   = "2026-06-12T13:00:00Z";
+}
+
+// ─── Derived: recompute artifacts (IsDerivedAs via ProgramTrace) ─────
+
+// D-DIFF (Achilles): WRN is the top preferential dependency in MSI vs MSS,
+// CRISPR. **Reproduced-external** (D53 file-pinned matrix + D56 wrapped-R
+// limma): the limma moderated-t over the Achilles CERES matrix gives WRN
+// rank 1, Q = 4.81e-24 — matching the paper's 4.8e-24. Run live through the
+// substrate via programs/differential-dependency/dd-achilles-limma-program.json (multi-input: the
+// pinned matrix + sample_info bridge + Supp Table 1 MSI labels), which
+// commits wrn:dd_achilles:result under a ProgramTrace -> IsDerivedAs witness.
+// This node is the narrative anchor the C-WRN certificate cites; running the
+// program emits the live witness carrying the same canonical_proposition.
+resource wrn:dd_achilles : bench:ToolArtifact {
+    bench:tool            = "R limma::lmFit/eBayes moderated-t (D56 wrapped-R over a D53 PinnedExternalFile); reproduced live: WRN rank 1, Q = 4.81e-24 (vs paper 4.8e-24, CRISPR/Achilles)";
+    bench:produced_from   = ["urn:eigenius:pub:wrn:ds_achilles", "urn:eigenius:pub:wrn:ds_supp1"];
+    bench:tool_parameters = "MSI vs MSS differential dependency over 17,634 genes via limma moderated-t (3-file MSI join: DepMap_ID -> sample_info CCLE_name -> Supp Table 1 CCLE_MSI); WRN rank = 1; reproduced Q = 4.81e-24.";
+    reflection:derivation = wrn:dd_achilles_trace;
+    reflection:canonical_proposition = type_expr(
+        onco:TopDifferentialDependency("WRN", "Achilles_MSI")
+    );
+}
+resource wrn:dd_achilles_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:dd_achilles;
+    reflection:source    = "limma moderated-t recompute via programs/differential-dependency/dd-achilles-limma-program.json (D56 wrapped-R; substrate-spawned R worker over the pinned Achilles matrix); emits wrn:dd_achilles:result";
+    reflection:timestamp = "2026-06-12T13:00:01Z";
+}
+
+// D-DIFF (DRIVE): same, independent RNAi screen. Paper Q = 1.5e-45.
+resource wrn:dd_drive : bench:ToolArtifact {
+    bench:tool            = "R limma::lmFit/eBayes + BH (mean-diff + ranking recomputed; moderated-t Q linked, Phase 2.5)";
+    bench:produced_from   = ["urn:eigenius:pub:wrn:ds_drive", "urn:eigenius:pub:wrn:ds_supp1"];
+    bench:tool_parameters = "MSI vs MSS differential dependency; WRN rank = 1; paper Q = 1.5e-45 (RNAi/DRIVE).";
+    reflection:derivation = wrn:dd_drive_trace;
+    reflection:canonical_proposition = type_expr(
+        onco:TopDifferentialDependency("WRN", "DRIVE_MSI")
+    );
+}
+resource wrn:dd_drive_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:dd_drive;
+    reflection:source    = "R 4.3.3 differential-dependency recompute vs pinned snapshot (data/MANIFEST.md)";
+    reflection:timestamp = "2026-06-12T13:00:02Z";
+}
+
+// ─── Declared: the discovery rule ────────────────────────────────────
+// Independent CRISPR + RNAi replication of a top differential dependency
+// establishes selective essentiality. Universally quantified over genes;
+// SpecStr applies it at WRN in the certificate.
+
+resource wrn:discovery_rule : reflection:DeclaredResource {
+    reflection:declared_by = "wrn-paper:discovery-logic";
+    reflection:rationale   = "A gene that is the top preferential dependency in MSI vs MSS in two INDEPENDENT large-scale screens (CRISPR/Achilles and RNAi/DRIVE) is selectively essential in MSI. Independent-platform replication is the warrant.";
+    reflection:canonical_proposition = type_expr(
+        forall (g : core:string) =>
+            onco:TopDifferentialDependency(g, "Achilles_MSI") ->
+            onco:TopDifferentialDependency(g, "DRIVE_MSI") ->
+            onco:SelectivelyEssential(g, "MSI")
+    );
+}
+resource wrn:discovery_rule_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrn:discovery_rule;
+    reflection:declared_by = "wrn-paper:discovery-logic";
+    reflection:timestamp   = "2026-06-12T13:00:04Z";
+}
+
+// ─── C-WRN: WRN is selectively essential in MSI ──────────────────────
+
+resource wrn:concl_wrn_selective : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+
+    reasoning:proposition = type_expr(
+        onco:SelectivelyEssential("WRN", "MSI")
+    );
+
+    reasoning:justification = App(
+        App(
+            SpecStr(DeclaredEvidence("urn:eigenius:pub:wrn:discovery_rule"), "WRN"),
+            DerivedEvidence("urn:eigenius:pub:wrn:dd_achilles")
+        ),
+        DerivedEvidence("urn:eigenius:pub:wrn:dd_drive")
+    );
+
+    reasoning:certificate = type_expr(
+        alias
+            G    = "WRN",
+            ACTX = "Achilles_MSI",
+            DCTX = "DRIVE_MSI",
+            MSI  = "MSI",
+            RULE = "urn:eigenius:pub:wrn:discovery_rule",
+            DDA  = "urn:eigenius:pub:wrn:dd_achilles",
+            DDD  = "urn:eigenius:pub:wrn:dd_drive",
+
+            TA = onco:TopDifferentialDependency(G, ACTX),
+            TD = onco:TopDifferentialDependency(G, DCTX),
+            SE = onco:SelectivelyEssential(G, MSI),
+
+            RULE_P = forall (g : core:string) =>
+                onco:TopDifferentialDependency(g, ACTX) ->
+                onco:TopDifferentialDependency(g, DCTX) ->
+                onco:SelectivelyEssential(g, MSI),
+
+            j0 = reasoning:SpecStr(DeclaredEvidence(RULE), G),
+            rule_cert = spec_str(
+                fun (g : core:string) =>
+                    onco:TopDifferentialDependency(g, ACTX) ->
+                    onco:TopDifferentialDependency(g, DCTX) ->
+                    onco:SelectivelyEssential(g, MSI),
+                DeclaredEvidence(RULE),
+                G,
+                declared(RULE, RULE_P)
+            ),
+            cert1 = app(TA, TD -> SE, j0, DerivedEvidence(DDA), rule_cert, derived(DDA, TA))
+        in
+        app(TD, SE, reasoning:App(j0, DerivedEvidence(DDA)), DerivedEvidence(DDD), cert1, derived(DDD, TD))
+    );
+}
+
+// ─── D-REFINE / D-RECQ / D-BIOM: kernel-recomputed in the statistics
+//     layer (wrn-phase1-recompute-{plans,conclusions}.esl) ───────────────
+// These three warrants — the mutator-load Spearman (D-REFINE), the
+// RecQ-family uniqueness (D-RECQ), and the biomarker PPV/sensitivity
+// (D-BIOM) — are all institution-recomputable (D50 §2.2), so they live as
+// kernel-recomputed warrants in the statistics layer this file stacks on
+// (concl_refine_recomputed / concl_recq_recomputed / concl_biomarker_recomputed).
+// Their recorded bench:ToolArtifact predecessors have been retired. The
+// deliverable below cites the recomputed conclusions.
+
+// ─── Phase-1 deliverable: the computational-discovery finding ─────────
+// The discovery conclusion as a chain-resident deliverable (D50 §5b
+// TaskOutput, deliverable_kind = "prose"); reasoning_chain points at the
+// four warranted conclusions that compose it.
+
+resource wrn:discovery_finding : bench:TaskOutput {
+    bench:task             = "urn:eigenius:pub:wrn:question_msi_vulnerability";
+    bench:deliverable_kind = "prose";
+    bench:payload = "Computational discovery (DepMap Achilles CRISPR + Project DRIVE RNAi): WRN, a RecQ DNA helicase, is the top preferential dependency in microsatellite-unstable (MSI) vs microsatellite-stable (MSS) cancer cell lines, independently in both screens; it is the only MSI-selective member of the RecQ helicase family; MSI is a strong biomarker for WRN dependency (comparable to KRAS/BRAF); and WRN dependency tracks mutator load within MSI lines. The biomarker is lineage-restricted — the common MSI lineages carry a higher microsatellite-deletion load than uncommon ones (ED Fig 2b) — and the dependence is modulated but not abolished by TP53 status (largely p53-independent). Conclusion: WRN is selectively essential in MSI cancers.";
+    bench:reasoning_chain  = [
+        "urn:eigenius:pub:wrn:concl_wrn_selective_recomputed",
+        "urn:eigenius:pub:wrn:concl_recq_recomputed",
+        "urn:eigenius:pub:wrn:concl_biomarker_recomputed",
+        "urn:eigenius:pub:wrn:concl_refine_recomputed",
+        "urn:eigenius:pub:wrn:concl_lineage_mutator_recomputed",
+        "urn:eigenius:pub:wrn:concl_p53_modulates"
+    ];
+    reflection:derivation = wrn:discovery_finding_trace;
+}
+resource wrn:discovery_finding_trace : reflection:ProgramTrace {
+    reflection:resource  = wrn:discovery_finding;
+    reflection:source    = "eigenius:wrn-phase1-encoding";
+    reflection:timestamp = "2026-06-12T13:00:07Z";
+}

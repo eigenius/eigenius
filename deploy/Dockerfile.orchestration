@@ -56,6 +56,10 @@ WORKDIR /build
 # member crate the addon depends on (runtime-substrate + eigenius-julia
 # + their workspace siblings reachable through path deps).
 COPY Cargo.toml Cargo.lock ./
+# The root workspace `[patch.crates-io]` points `tonic-web` at
+# `patches/tonic-web`; the `eigenius-r-worker` cdylib build below uses the
+# root workspace, so the patched source must be in the build context.
+COPY patches/ patches/
 COPY kernel/ kernel/
 COPY crates/ crates/
 COPY sdk/ sdk/
@@ -87,6 +91,17 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # next to package.json. We stage them under /tmp/ so the cache-mounted
 # target/ directory doesn't shadow the artifacts on the way out.
 
+# Build the R worker cdylib the substrate's RLanguageRuntime loads into
+# the spawned R container (D55 / D56). It's a root-workspace member
+# (`crates/eigenius-r-worker`); libR symbols resolve at `dyn.load` in the
+# worker image, so building the `.so` here needs no R toolchain. Staged
+# under /tmp/ alongside the driver for the runtime stage to copy in.
+WORKDIR /build
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/target \
+    cargo build -p eigenius-r-worker --release \
+    && cp target/release/libeigenius_r_worker.so /tmp/
+
 # --- Stage 3: orchestrator runtime --------------------------------------------
 FROM denoland/deno:latest
 
@@ -99,6 +114,29 @@ LABEL org.opencontainers.image.vendor="Eigenius"
 LABEL org.opencontainers.image.documentation="https://github.com/eigenius/eigenius/tree/main/docs"
 
 WORKDIR /app
+
+# Install the prebuilt `oxen` CLI (D53 §2 / §9). The substrate shells out to
+# it to fetch `oxen://` PinnedExternalFile inputs into the depot cache — we use
+# the prebuilt binary rather than the `liboxen` crate (its ~160 transitive deps
+# are wrong for our build + TCB). Oxen's release workflow publishes per-arch
+# Debian packages `oxen-linux-x86_64.deb` / `oxen-linux-arm64.deb` (see the
+# Oxen RELEASING runbook). Pin the version per release; confirm the latest at
+# https://github.com/Oxen-AI/Oxen/releases.
+ARG OXEN_VERSION=0.50.4
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && arch="$(dpkg --print-architecture)" \
+    && case "$arch" in \
+         amd64) oxen_arch=x86_64 ;; \
+         arm64) oxen_arch=arm64 ;; \
+         *) echo "unsupported arch for oxen CLI: $arch" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL -o /tmp/oxen.deb \
+         "https://github.com/Oxen-AI/Oxen/releases/download/v${OXEN_VERSION}/oxen-linux-${oxen_arch}.deb" \
+    && apt-get install -y --no-install-recommends /tmp/oxen.deb \
+    && rm -f /tmp/oxen.deb \
+    && rm -rf /var/lib/apt/lists/* \
+    && oxen --version
 
 # Cache Deno deps from the source layout.
 COPY orchestration/deno.json ./
@@ -126,11 +164,27 @@ COPY --from=substrate-builder /tmp/*.node /app/runtime-substrate-native/
 # Dockerfile when an env image is built lazily.
 COPY julia/runtime-worker/ /opt/eigenius/julia-runtime-worker/
 
+# Bake the R worker assets (D55 / D56): the driver the spawned R
+# container runs + the cdylib it `dyn.load`s. `RLanguageRuntime` reads
+# these host paths to compute the cross-check manifest hash; they must
+# match the recipe that built the R worker image.
+COPY crates/eigenius-r-worker/r/EigeniusRWorker.R /opt/eigenius/r-runtime-worker/EigeniusRWorker.R
+COPY --from=substrate-builder /tmp/libeigenius_r_worker.so /opt/eigenius/r-runtime-worker/libeigenius_r_worker.so
+
 ENV EIGENIUS_KERNEL_ENDPOINT=http://eigenius-kernel:50051
 ENV EIGENIUS_NOTEBOOK_STATIC=/app/notebooks
 ENV EIGENIUS_JULIA_WORKER_PROJECT_DIR=/opt/eigenius/julia-runtime-worker
 ENV EIGENIUS_JULIA_BASE_IMAGE_REF=docker.io/library/julia:1.12-bookworm
 ENV EIGENIUS_JULIA_DEPOT_PATH=/var/lib/eigenius/substrate-depot
+ENV EIGENIUS_R_DRIVER_PATH=/opt/eigenius/r-runtime-worker/EigeniusRWorker.R
+ENV EIGENIUS_R_CDYLIB_PATH=/opt/eigenius/r-runtime-worker/libeigenius_r_worker.so
+ENV EIGENIUS_R_BASE_IMAGE_REF=docker.io/bioconductor/bioconductor_docker:RELEASE_3_18
+ENV EIGENIUS_R_DEPOT_PATH=/var/lib/eigenius/substrate-depot
+# Oxen auth (D53 §10): the `oxen` CLI reads `auth_config.toml` from
+# $OXEN_CONFIG_DIR. The deployment mounts the per-host bearer token here from
+# its secret store (the credential is substrate-side only; it never enters a
+# worker image). Self-hosted http servers also set EIGENIUS_OXEN_SCHEME=http.
+ENV OXEN_CONFIG_DIR=/var/lib/eigenius/oxen-config
 
 EXPOSE 8080
 

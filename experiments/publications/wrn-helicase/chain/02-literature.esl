@@ -1,0 +1,476 @@
+// wrn-literature — the WRN paper's literature references as first-class,
+// cite-able warrants (encoding-plan §3: "references → the exact claim each
+// supports"). Built on the bootstrap `reference` ontology:
+//
+//   - reference:Reference — the global bibliographic WORK (real details from the
+//                           paper's reference list; DOI + PubMed ID both carried).
+//   - litclaim:*          — the imported claim a citation warrants, as a
+//                           proposition (so a node can later discharge it via
+//                           DeclaredEvidence).
+//   - reference:Citation  — THIS paper's use of a Reference (a DeclaredResource):
+//                           reference:cites + the CiTO reference:citation_type +
+//                           the paper's local reference:reference_label. A
+//                           *literature warrant* is a Citation that also carries
+//                           the imported claim in canonical_proposition; a
+//                           Citation without one is pure provenance.
+//
+// Bracketed numbers are the WRN paper's own reference numbers (reference_label).
+// PMIDs are transcribed from the manuscript's reference list; DOIs are the
+// authoritative NCBI PMID->DOI cross-walk (not fabricated); url resolves to
+// doi.org (or PubMed for the one Exp. Oncol. entry with no registered DOI).
+// All PMIDs were spot-checked against NCBI esummary and resolve to these works.
+//
+// Load order: this layer loads BEFORE wrn-phase2/phase3, which compose its
+// warrants as LOGICAL PREMISES (not just provenance) — the structure-function
+// rules consume WRNActivitiesSeparable [14] and the seed-control rule consumes
+// C911ControlIsValid [16], so concl_helicase_required / concl_exo_dispensable /
+// concl_vivo_ontarget each carry a DeclaredEvidence on the matching warrant and
+// thread it through their certificate. Each warrant has a DeclarationTrace so
+// the kernel mints the IsDeclaredAs witness those certificates discharge.
+// (Remaining warrants — [1]/[10]/[11]/[17]/[20]/[36]/[40]/[43] and the
+// provenance citations — are authored and cite-able; not yet composed.)
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace reference  = "urn:eigenius:reference";
+namespace lit        = "urn:eigenius:reference:lit";
+namespace litclaim   = "urn:eigenius:pub:wrn:litclaim";
+namespace wrnlit     = "urn:eigenius:pub:wrn:lit";
+
+// ════════════════════════════════════════════════════════════════════
+// Imported-claim propositions — what the literature warrants assert
+// ════════════════════════════════════════════════════════════════════
+
+// [1] synthetic-lethality strategy is exploitable for cancer therapy.
+data litclaim:SyntheticLethalityExploitable : core:string -> Prop { }
+// [14] WRN's exonuclease and helicase activities are separable (E84A / K577M).
+data litclaim:WRNActivitiesSeparable : core:string -> Prop { }
+// [16] a C911 seed-preserving control isolates on-target from shRNA seed off-target.
+data litclaim:C911ControlIsValid : core:string -> Prop { }
+// [17] phospho-p53(Ser15) marks p53 activation (an ATR/ATM DDR target).
+data litclaim:pS15MarksP53Activation : core:string -> Prop { }
+// [20] WRN relocalizes between nucleoli and nucleoplasm (repair-protein dynamics).
+data litclaim:WRNNucleolarDynamics : core:string -> Prop { }
+// [10] CERES corrects the copy-number effect in CRISPR essentiality screens.
+data litclaim:CERESCorrectsCopyNumber : core:string -> Prop { }
+// [11] Project DRIVE is a deep-RNAi (DEMETER2) cancer-dependency compendium.
+data litclaim:DRIVEDependencyDataset : core:string -> Prop { }
+// [36] limma provides empirical-Bayes moderated-t differential expression.
+data litclaim:LimmaModeratedT : core:string -> Prop { }
+// [40] voom precision weights enable linear-model analysis of RNA-seq counts.
+data litclaim:VoomPrecisionWeights : core:string -> Prop { }
+// [43] the MSigDB Hallmark collection is a curated gene-set resource.
+data litclaim:HallmarkGeneSets : core:string -> Prop { }
+// [22] loss of MSH3 (MutSα/β component) causes microsatellite instability.
+data litclaim:MSH3LossCausesInstability : core:string -> Prop { }
+
+// ════════════════════════════════════════════════════════════════════
+// References (bibliographic records — real details from the paper)
+// ════════════════════════════════════════════════════════════════════
+
+resource lit:chan_giaccia_2011 : reference:Reference {
+    reference:creator         = "Chan DA, Giaccia AJ";
+    reference:title           = "Harnessing synthetic lethal interactions in anticancer drug discovery";
+    reference:container_title = "Nature Reviews Drug Discovery";
+    reference:issued_year     = 2011;
+    reference:doi             = "10.1038/nrd3374";
+    reference:pmid            = "21532565";
+    reference:url             = "https://doi.org/10.1038/nrd3374";
+}
+
+resource lit:kim_2013 : reference:Reference {
+    reference:creator         = "Kim TM, et al.";
+    reference:title           = "The landscape of microsatellite instability in colorectal and endometrial cancer genomes";
+    reference:container_title = "Cell";
+    reference:issued_year     = 2013;
+    reference:doi             = "10.1016/j.cell.2013.10.015";
+    reference:pmid            = "24209623";
+    reference:url             = "https://doi.org/10.1016/j.cell.2013.10.015";
+}
+
+resource lit:le_2017 : reference:Reference {
+    reference:creator         = "Le DT, et al.";
+    reference:title           = "Mismatch-repair deficiency predicts response of solid tumors to PD-1 blockade";
+    reference:container_title = "Science";
+    reference:issued_year     = 2017;
+    reference:doi             = "10.1126/science.aan6733";
+    reference:pmid            = "28596308";
+    reference:url             = "https://doi.org/10.1126/science.aan6733";
+}
+
+resource lit:meyers_2017 : reference:Reference {
+    reference:creator         = "Meyers RM, et al.";
+    reference:title           = "Computational correction of copy number effect improves specificity of CRISPR-Cas9 essentiality screens in cancer cells";
+    reference:container_title = "Nature Genetics";
+    reference:issued_year     = 2017;
+    reference:doi             = "10.1038/ng.3984";
+    reference:pmid            = "29083409";
+    reference:url             = "https://doi.org/10.1038/ng.3984";
+}
+
+resource lit:mcdonald_2017 : reference:Reference {
+    reference:creator         = "McDonald ER, et al.";
+    reference:title           = "Project DRIVE: a compendium of cancer dependencies and synthetic lethal relationships uncovered by large-scale, deep RNAi screening";
+    reference:container_title = "Cell";
+    reference:issued_year     = 2017;
+    reference:doi             = "10.1016/j.cell.2017.07.005";
+    reference:pmid            = "28753431";
+    reference:url             = "https://doi.org/10.1016/j.cell.2017.07.005";
+}
+
+resource lit:barretina_2012 : reference:Reference {
+    reference:creator         = "Barretina J, et al.";
+    reference:title           = "The Cancer Cell Line Encyclopedia enables predictive modelling of anticancer drug sensitivity";
+    reference:container_title = "Nature";
+    reference:issued_year     = 2012;
+    reference:doi             = "10.1038/nature11003";
+    reference:pmid            = "22460905";
+    reference:url             = "https://doi.org/10.1038/nature11003";
+}
+
+resource lit:iorio_2016 : reference:Reference {
+    reference:creator         = "Iorio F, et al.";
+    reference:title           = "A landscape of pharmacogenomic interactions in cancer";
+    reference:container_title = "Cell";
+    reference:issued_year     = 2016;
+    reference:doi             = "10.1016/j.cell.2016.06.017";
+    reference:pmid            = "27397505";
+    reference:url             = "https://doi.org/10.1016/j.cell.2016.06.017";
+}
+
+resource lit:swanson_2004 : reference:Reference {
+    reference:creator         = "Swanson C, et al.";
+    reference:title           = "The Werner syndrome protein has separable recombination and survival functions";
+    reference:container_title = "DNA Repair";
+    reference:issued_year     = 2004;
+    reference:doi             = "10.1016/j.dnarep.2004.01.002";
+    reference:pmid            = "15084309";
+    reference:url             = "https://doi.org/10.1016/j.dnarep.2004.01.002";
+}
+
+resource lit:rossi_2010 : reference:Reference {
+    reference:creator         = "Rossi ML, Ghosh AK, Bohr VA";
+    reference:title           = "Roles of Werner syndrome protein in protection of genome integrity";
+    reference:container_title = "DNA Repair";
+    reference:issued_year     = 2010;
+    reference:doi             = "10.1016/j.dnarep.2009.12.011";
+    reference:pmid            = "20075015";
+    reference:url             = "https://doi.org/10.1016/j.dnarep.2009.12.011";
+}
+
+resource lit:buehler_2012 : reference:Reference {
+    reference:creator         = "Buehler E, Chen YC, Martin S";
+    reference:title           = "C911: a bench-level control for sequence specific siRNA off-target effects";
+    reference:container_title = "PLoS One";
+    reference:issued_year     = 2012;
+    reference:doi             = "10.1371/journal.pone.0051942";
+    reference:pmid            = "23251657";
+    reference:url             = "https://doi.org/10.1371/journal.pone.0051942";
+}
+
+resource lit:loughery_2014 : reference:Reference {
+    reference:creator         = "Loughery J, Cox M, Smith LM, Meek DW";
+    reference:title           = "Critical role for p53-serine 15 phosphorylation in stimulating transactivation at p53-responsive promoters";
+    reference:container_title = "Nucleic Acids Research";
+    reference:issued_year     = 2014;
+    reference:doi             = "10.1093/nar/gku501";
+    reference:pmid            = "24928858";
+    reference:url             = "https://doi.org/10.1093/nar/gku501";
+}
+
+resource lit:nowsheen_2012 : reference:Reference {
+    reference:creator         = "Nowsheen S, Yang ES";
+    reference:title           = "The intersection between DNA damage response and cell death pathways";
+    reference:container_title = "Experimental Oncology";
+    reference:issued_year     = 2012;
+    reference:pmid            = "23070009";
+    reference:url             = "https://pubmed.ncbi.nlm.nih.gov/23070009/";
+}
+
+resource lit:bendtsen_2014 : reference:Reference {
+    reference:creator         = "Bendtsen KM, et al.";
+    reference:title           = "Dynamics of the DNA repair proteins WRN and BLM in the nucleoplasm and nucleoli";
+    reference:container_title = "European Biophysics Journal";
+    reference:issued_year     = 2014;
+    reference:doi             = "10.1007/s00249-014-0981-x";
+    reference:pmid            = "25119658";
+    reference:url             = "https://doi.org/10.1007/s00249-014-0981-x";
+}
+
+resource lit:haugen_2008 : reference:Reference {
+    reference:creator         = "Haugen AC, et al.";
+    reference:title           = "Genetic instability caused by loss of MutS homologue 3 in human colorectal cancer";
+    reference:container_title = "Cancer Research";
+    reference:issued_year     = 2008;
+    reference:doi             = "10.1158/0008-5472.CAN-08-0002";
+    reference:pmid            = "18922920";
+    reference:url             = "https://doi.org/10.1158/0008-5472.CAN-08-0002";
+}
+
+resource lit:ccle_gdsc_2015 : reference:Reference {
+    reference:creator         = "Cancer Cell Line Encyclopedia Consortium; Genomics of Drug Sensitivity in Cancer Consortium";
+    reference:title           = "Pharmacogenomic agreement between two cancer cell line data sets";
+    reference:container_title = "Nature";
+    reference:issued_year     = 2015;
+    reference:doi             = "10.1038/nature15736";
+    reference:pmid            = "26570998";
+    reference:url             = "https://doi.org/10.1038/nature15736";
+}
+
+resource lit:ritchie_2015 : reference:Reference {
+    reference:creator         = "Ritchie ME, et al.";
+    reference:title           = "limma powers differential expression analyses for RNA-sequencing and microarray studies";
+    reference:container_title = "Nucleic Acids Research";
+    reference:issued_year     = 2015;
+    reference:doi             = "10.1093/nar/gkv007";
+    reference:pmid            = "25605792";
+    reference:url             = "https://doi.org/10.1093/nar/gkv007";
+}
+
+resource lit:law_2014 : reference:Reference {
+    reference:creator         = "Law CW, Chen Y, Shi W, Smyth GK";
+    reference:title           = "voom: precision weights unlock linear model analysis tools for RNA-seq read counts";
+    reference:container_title = "Genome Biology";
+    reference:issued_year     = 2014;
+    reference:doi             = "10.1186/gb-2014-15-2-r29";
+    reference:pmid            = "24485249";
+    reference:url             = "https://doi.org/10.1186/gb-2014-15-2-r29";
+}
+
+resource lit:liberzon_2015 : reference:Reference {
+    reference:creator         = "Liberzon A, et al.";
+    reference:title           = "The Molecular Signatures Database hallmark gene set collection";
+    reference:container_title = "Cell Systems";
+    reference:issued_year     = 2015;
+    reference:doi             = "10.1016/j.cels.2015.12.004";
+    reference:pmid            = "26771021";
+    reference:url             = "https://doi.org/10.1016/j.cels.2015.12.004";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Literature warrants — reference → imported claim, typed by CiTO
+// ════════════════════════════════════════════════════════════════════
+
+// [1] the synthetic-lethality framing that motivates the whole discovery.
+resource wrnlit:lit_synthetic_lethality : reference:Citation {
+    reflection:rationale             = "The study's premise — exploit a synthetic-lethal vulnerability of MSI cancers — rests on the established strategy that synthetic-lethal interactions can be harnessed for anticancer drug discovery.";
+    reflection:canonical_proposition = type_expr( litclaim:SyntheticLethalityExploitable("anticancer_therapy") );
+    reference:cites                  = lit:chan_giaccia_2011;
+    reference:citation_type          = reference:obtains_background_from;
+    reference:reference_label        = "1";
+}
+
+// [14] separable exonuclease / helicase activities → the structure-function dissection.
+resource wrnlit:lit_wrn_separable : reference:Citation {
+    reflection:rationale             = "WRN's 3'->5' exonuclease and helicase activities are separable, with E84A and K577M point mutants abolishing the respective activity — the basis for the cDNA rescue panel that shows the helicase (not the exonuclease) is required.";
+    reflection:canonical_proposition = type_expr( litclaim:WRNActivitiesSeparable("WRN") );
+    reference:cites                  = lit:swanson_2004;
+    reference:citation_type          = reference:cites_as_authority;
+    reference:reference_label        = "14";
+}
+
+// [16] C911 seed-control design → the seed_control_rule.
+resource wrnlit:lit_c911_design : reference:Citation {
+    reflection:rationale             = "A C911 control (nt 9-11 complemented to preserve the off-target seed while disrupting on-target silencing) isolates on-target from shRNA seed off-target effects — the design behind the in-vivo seed control.";
+    reflection:canonical_proposition = type_expr( litclaim:C911ControlIsValid("shRNA") );
+    reference:cites                  = lit:buehler_2012;
+    reference:citation_type          = reference:uses_method_in;
+    reference:reference_label        = "16";
+}
+
+// [17] p53-S15 as a p53-activation readout → the ED5 p-p53 IF warrant.
+resource wrnlit:lit_ps15_readout : reference:Citation {
+    reflection:rationale             = "Phosphorylation of p53 at Ser15 is an ATR/ATM DNA-damage-response target that marks p53 activation — the interpretation under the ED Fig 5 phospho-p53 immunofluorescence (the ActivatesP53Response warrant).";
+    reflection:canonical_proposition = type_expr( litclaim:pS15MarksP53Activation("p53") );
+    reference:cites                  = lit:loughery_2014;
+    reference:citation_type          = reference:cites_as_authority;
+    reference:reference_label        = "17";
+}
+
+// [20] WRN nucleolar/nucleoplasm dynamics → the ED8d delocalization warrant.
+resource wrnlit:lit_wrn_nucleolar : reference:Citation {
+    reflection:rationale             = "WRN relocalizes between the nucleoli and the nucleoplasm — the established repair-protein dynamics under the ED Fig 8d WRN-fibrillarin colocalization readout (the ReducedNucleolarColocalization warrant).";
+    reflection:canonical_proposition = type_expr( litclaim:WRNNucleolarDynamics("WRN") );
+    reference:cites                  = lit:bendtsen_2014;
+    reference:citation_type          = reference:cites_as_authority;
+    reference:reference_label        = "20";
+}
+
+// [10] CERES → the Achilles dependency scoring the D-DIFF runs over.
+resource wrnlit:lit_ceres_method : reference:Citation {
+    reflection:rationale             = "CERES computationally corrects the copy-number effect in CRISPR-Cas9 essentiality screens — the method behind the Achilles gene-effect matrix the headline differential-dependency analysis (dd_achilles) is computed over.";
+    reflection:canonical_proposition = type_expr( litclaim:CERESCorrectsCopyNumber("Achilles") );
+    reference:cites                  = lit:meyers_2017;
+    reference:citation_type          = reference:uses_method_in;
+    reference:reference_label        = "10";
+}
+
+// [11] DRIVE → the RNAi dependency matrix the D-DIFF replicate runs over.
+resource wrnlit:lit_drive_data : reference:Citation {
+    reflection:rationale             = "Project DRIVE is the deep-RNAi (DEMETER2) cancer-dependency compendium — the source of the DRIVE gene-dependency matrix the orthogonal differential-dependency replicate (dd_drive) is computed over.";
+    reflection:canonical_proposition = type_expr( litclaim:DRIVEDependencyDataset("DRIVE") );
+    reference:cites                  = lit:mcdonald_2017;
+    reference:citation_type          = reference:cites_as_source_document;
+    reference:reference_label        = "11";
+}
+
+// [36] limma → the moderated-t method of the D-DIFF warrants.
+resource wrnlit:lit_limma_method : reference:Citation {
+    reflection:rationale             = "limma's empirical-Bayes moderated-t differential expression is the method wrapped in the dd_achilles / dd_drive / dd_gdsc warrants (variance shrinkage is what lifts WRN to rank 1).";
+    reflection:canonical_proposition = type_expr( litclaim:LimmaModeratedT("limma") );
+    reference:cites                  = lit:ritchie_2015;
+    reference:citation_type          = reference:uses_method_in;
+    reference:reference_label        = "36";
+}
+
+// [40] voom → the RNA-seq DE step of the GSEA warrant.
+resource wrnlit:lit_voom_method : reference:Citation {
+    reflection:rationale             = "voom precision weights enable limma's linear-model tools on RNA-seq read counts — the differential-expression step that ranks genes before fgsea in the gsea_mech warrant.";
+    reflection:canonical_proposition = type_expr( litclaim:VoomPrecisionWeights("voom") );
+    reference:cites                  = lit:law_2014;
+    reference:citation_type          = reference:uses_method_in;
+    reference:reference_label        = "40";
+}
+
+// [43] MSigDB Hallmark → the gene-set collection the GSEA warrant scores against.
+resource wrnlit:lit_hallmark_sets : reference:Citation {
+    reflection:rationale             = "The MSigDB Hallmark collection is the curated gene-set resource the gsea_mech warrant scores the WRN-KO ranking against (the .gmt pinned under the D53 Collection profile).";
+    reflection:canonical_proposition = type_expr( litclaim:HallmarkGeneSets("Hallmark") );
+    reference:cites                  = lit:liberzon_2015;
+    reference:citation_type          = reference:cites_as_source_document;
+    reference:reference_label        = "43";
+}
+
+// [22] MSH3 loss → the HCT116 Ch3+5 MMR-restoration model basis.
+resource wrnlit:lit_msh3_instability : reference:Citation {
+    reflection:rationale             = "Loss of MutS homologue 3 (MSH3) causes microsatellite instability in colorectal cancer — the basis for the HCT116 Ch3+5 MMR-restoration model (restoring MLH1/MSH3 restores repair; the C-MMR and ED Fig 10a warrants).";
+    reflection:canonical_proposition = type_expr( litclaim:MSH3LossCausesInstability("MSH3") );
+    reference:cites                  = lit:haugen_2008;
+    reference:citation_type          = reference:obtains_background_from;
+    reference:reference_label        = "22";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Provenance citations — references used for background / data without a
+// distinct imported domain claim (Citations with no canonical_proposition).
+// ════════════════════════════════════════════════════════════════════
+
+resource wrnlit:cite_kim : reference:Citation {
+    reference:cites           = lit:kim_2013;
+    reference:citation_type   = reference:obtains_background_from;
+    reference:reference_label = "4";
+    reflection:rationale      = "MSI = a hypermutable indel-at-microsatellite state arising via Lynch or MLH1 promoter hypermethylation (the MSI definition the encoding adopts).";
+}
+
+resource wrnlit:cite_le : reference:Citation {
+    reference:cites           = lit:le_2017;
+    reference:citation_type   = reference:obtains_background_from;
+    reference:reference_label = "8";
+    reflection:rationale      = "dMMR predicts solid-tumour response to PD-1 blockade (clinical motivation for MSI-selective targets).";
+}
+
+resource wrnlit:cite_barretina : reference:Citation {
+    reference:cites           = lit:barretina_2012;
+    reference:citation_type   = reference:cites_as_source_document;
+    reference:reference_label = "12";
+    reflection:rationale      = "The Cancer Cell Line Encyclopedia (CCLE) — the cell-line panel + NGS-based MSI classifications the analyses are keyed to.";
+}
+
+resource wrnlit:cite_iorio : reference:Citation {
+    reference:cites           = lit:iorio_2016;
+    reference:citation_type   = reference:cites_as_source_document;
+    reference:reference_label = "13";
+    reflection:rationale      = "The GDSC PCR-based MSI phenotyping used as the orthogonal MSI labels in the dd_gdsc robustness warrant.";
+}
+
+resource wrnlit:cite_rossi : reference:Citation {
+    reference:cites           = lit:rossi_2010;
+    reference:citation_type   = reference:obtains_background_from;
+    reference:reference_label = "15";
+    reflection:rationale      = "WRN's roles in genome-integrity maintenance (replication/repair/telomere) and the Werner-syndrome phenotype.";
+}
+
+resource wrnlit:cite_nowsheen : reference:Citation {
+    reference:cites           = lit:nowsheen_2012;
+    reference:citation_type   = reference:obtains_background_from;
+    reference:reference_label = "19";
+    reflection:rationale      = "The DNA-damage-response / cell-death pathway intersection underpinning the DSB->DDR->apoptosis mechanism.";
+}
+
+resource wrnlit:cite_ccle_gdsc : reference:Citation {
+    reference:cites           = lit:ccle_gdsc_2015;
+    reference:citation_type   = reference:cites_as_authority;
+    reference:reference_label = "34";
+    reflection:rationale      = "Pharmacogenomic agreement between CCLE and GDSC — the authority for cross-panel MSI/data concordance.";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// DeclarationTraces — mint the IsDeclaredAs witness for each warrant, so a
+// chain node can discharge the imported claim via DeclaredEvidence.
+// ════════════════════════════════════════════════════════════════════
+
+resource wrnlit:lit_synthetic_lethality_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrnlit:lit_synthetic_lethality;
+    reflection:declared_by = "wrn-literature";
+    reflection:timestamp   = "2026-06-16T00:00:00Z";
+}
+
+resource wrnlit:lit_wrn_separable_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrnlit:lit_wrn_separable;
+    reflection:declared_by = "wrn-literature";
+    reflection:timestamp   = "2026-06-16T00:00:00Z";
+}
+
+resource wrnlit:lit_c911_design_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrnlit:lit_c911_design;
+    reflection:declared_by = "wrn-literature";
+    reflection:timestamp   = "2026-06-16T00:00:00Z";
+}
+
+resource wrnlit:lit_ps15_readout_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrnlit:lit_ps15_readout;
+    reflection:declared_by = "wrn-literature";
+    reflection:timestamp   = "2026-06-16T00:00:00Z";
+}
+
+resource wrnlit:lit_wrn_nucleolar_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrnlit:lit_wrn_nucleolar;
+    reflection:declared_by = "wrn-literature";
+    reflection:timestamp   = "2026-06-16T00:00:00Z";
+}
+
+resource wrnlit:lit_ceres_method_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrnlit:lit_ceres_method;
+    reflection:declared_by = "wrn-literature";
+    reflection:timestamp   = "2026-06-16T00:00:00Z";
+}
+
+resource wrnlit:lit_drive_data_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrnlit:lit_drive_data;
+    reflection:declared_by = "wrn-literature";
+    reflection:timestamp   = "2026-06-16T00:00:00Z";
+}
+
+resource wrnlit:lit_limma_method_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrnlit:lit_limma_method;
+    reflection:declared_by = "wrn-literature";
+    reflection:timestamp   = "2026-06-16T00:00:00Z";
+}
+
+resource wrnlit:lit_voom_method_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrnlit:lit_voom_method;
+    reflection:declared_by = "wrn-literature";
+    reflection:timestamp   = "2026-06-16T00:00:00Z";
+}
+
+resource wrnlit:lit_hallmark_sets_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrnlit:lit_hallmark_sets;
+    reflection:declared_by = "wrn-literature";
+    reflection:timestamp   = "2026-06-16T00:00:00Z";
+}
+
+resource wrnlit:lit_msh3_instability_trace : reflection:DeclarationTrace {
+    reflection:resource    = wrnlit:lit_msh3_instability;
+    reflection:declared_by = "wrn-literature";
+    reflection:timestamp   = "2026-06-16T00:00:00Z";
+}

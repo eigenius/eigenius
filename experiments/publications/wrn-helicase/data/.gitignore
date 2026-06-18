@@ -1,0 +1,17 @@
+# Vendored data + reference clones are gitignored (large, content-addressed).
+# What IS committed: MANIFEST.md (provenance narrative), sources.tsv (checksum
+# manifest), fetch.sh (the fetch+verify+derive tool). Run `bash fetch.sh` to
+# repopulate everything below from public origins.
+slices/
+large/
+reference/
+*.rds
+*.gz
+*.csv
+*.xlsx
+
+# ...but keep the committed manifest + tooling tracked.
+!.gitignore
+!MANIFEST.md
+!sources.tsv
+!fetch.sh

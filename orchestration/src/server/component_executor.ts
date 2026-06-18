@@ -128,15 +128,33 @@ export async function executeComponentRequest(
       argument = argumentJson ? JSON.parse(argumentJson) : {};
     }
 
+    // Auxiliary inputs for a multi-file join (D53 §4.3) — decoded in the same
+    // codec as the primary input; an empty list for ordinary single-input
+    // components.
+    const additionalInputs: Record<string, unknown>[] =
+      (req.additionalInputs ?? [])
+        .map((bytes) =>
+          useCbor
+            ? decodeResource(bytes) as Record<string, unknown>
+            : JSON.parse(TEXT_DECODER.decode(bytes) || "{}")
+        );
+
     const result = await registry.execute(componentIri, {
       input,
       argument,
+      additionalInputs,
     });
 
     // Encode output in the same codec the request used so a
     // pre-18e kernel still gets JSON back during a rolling
     // upgrade.
-    const outputBytes = useCbor
+    // Passthrough components (RunRuntimeScript) supply already-canonical
+    // Eigon-CBOR via `outputBytes`; forward it verbatim so `data_type:
+    // json` tags (the canonical_proposition term) survive — re-encoding
+    // the decoded JS object would drop them.
+    const outputBytes = useCbor && result.outputBytes
+      ? result.outputBytes
+      : useCbor
       ? encodeResource(result.output)
       : TEXT_ENCODER.encode(JSON.stringify(result.output));
 

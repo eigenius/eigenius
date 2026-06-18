@@ -1,0 +1,28 @@
+[
+  {
+    "@id": "urn:eigenius:pub:wrn:viab_KM12_competition_table",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:pub:wrn:CompetitionTable"
+    ],
+    "urn:eigenius:reflection:source": "wrn-paper ED Fig 3b KM12 day-10 competition-assay relative ratio (Firefly:Renilla / mean-of-negatives), per-row [value, guide]",
+    "urn:eigenius:benchmark:extracted_from_slice": "data/slices/wrn_sourcedata_EDFig3_MOESM6.xlsx",
+    "urn:eigenius:benchmark:extracted_from_sha256": "506d7ac0f2517cb6b1e7277dfb175675044ab4b6fbc4a628f8c9ad843ba41fd6",
+    "urn:eigenius:benchmark:extraction_columns": "ED Fig 3b: Relative ratio (day 10), per guide x 6 replicates",
+    "urn:eigenius:benchmark:extraction_filter": "group A = sgWRN1,sgWRN2,sgWRN3 (each 6 reps); group B = sgCh2-2,sgCh2-4 (6 each); pan-essential controls excluded; emitted flat per-row, sgWRN guides then control guides. Same pinned slice as wrn:viab_KM12_sampleset (the faithful nested-ANOVA warrant) — same bytes, flat-table shape for the lme4 biological-unit program.",
+    "urn:eigenius:benchmark:extraction_recipe": "extract/extract_samplesets.py#wrn:viab_KM12_competition_table",
+    "urn:eigenius:pub:wrn:viab_value": [
+      0.268449, 0.248279, 0.280587, 0.291857, 0.381621, 0.304528,
+      0.235725, 0.202625, 0.264119, 0.220345, 0.171601, 0.270842,
+      0.329422, 0.351885, 0.395719, 0.453315, 0.297452, 0.237243,
+      0.849392, 1.087221, 1.141928, 0.979374, 1.092875, 0.847365,
+      0.974682, 1.032420, 1.021721, 0.959610, 1.078654, 0.934759
+    ],
+    "urn:eigenius:pub:wrn:viab_guide": [
+      "sgWRN1", "sgWRN1", "sgWRN1", "sgWRN1", "sgWRN1", "sgWRN1",
+      "sgWRN2", "sgWRN2", "sgWRN2", "sgWRN2", "sgWRN2", "sgWRN2",
+      "sgWRN3", "sgWRN3", "sgWRN3", "sgWRN3", "sgWRN3", "sgWRN3",
+      "sgCh2-2", "sgCh2-2", "sgCh2-2", "sgCh2-2", "sgCh2-2", "sgCh2-2",
+      "sgCh2-4", "sgCh2-4", "sgCh2-4", "sgCh2-4", "sgCh2-4", "sgCh2-4"
+    ]
+  }
+]

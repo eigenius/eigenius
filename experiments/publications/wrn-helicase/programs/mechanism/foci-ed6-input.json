@@ -1,0 +1,13 @@
+[
+  {
+    "@id": "urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:ingest:PinnedExternalFile"
+    ],
+    "urn:eigenius:reflection:source": "Derived from wrn_sourcedata_EDFig6_MOESM9.xlsx (panels 6f/6h) via programs/foci-ed6-extract.R; per-cell Apple-53BP1-trunc DSB foci counts",
+    "urn:eigenius:ingest:reference": "file://wrn-slices/foci_53bp1_long.csv",
+    "urn:eigenius:ingest:content_hash": "sha256:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83",
+    "urn:eigenius:ingest:media_type": "text/csv",
+    "urn:eigenius:ingest:schema": "urn:eigenius:pub:wrn:foci_53bp1_schema"
+  }
+]

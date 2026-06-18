@@ -1,0 +1,30 @@
+[
+  {
+    "@id": "urn:eigenius:pub:wrn:program:gsea_mech",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:program:Program"
+    ],
+    "urn:eigenius:program:input_type": "urn:eigenius:ingest:PinnedExternalFile",
+    "urn:eigenius:program:output_type": "urn:eigenius:reflection:DerivedResource",
+    "urn:eigenius:program:body": {
+      "urn:eigenius:core:is_a": [
+        "urn:eigenius:program:Apply"
+      ],
+      "urn:eigenius:program:function": "urn:eigenius:program:components:RunRuntimeScript",
+      "urn:eigenius:program:argument": {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:program:Var"
+        ],
+        "urn:eigenius:program:name": "input"
+      },
+      "urn:eigenius:program:component_argument": {
+        "urn:eigenius:runtime:language": "r",
+        "urn:eigenius:runtime:source": "# C-MECH transcriptional corroboration (ED Fig 3a): WRN-KO RNA-seq GSEA vs\n# Hallmark (D56 wrapped-R, fgsea). Inputs (D53 multi-file): [1] GSE126464 STAR\n# counts (genes x 12 samples, gz), [2] Hallmark .gmt (Collection profile).\ncp <- .Call(\"r_eigon_materialized_path\", eigenius_inputs[[1]])\ngp <- .Call(\"r_eigon_materialized_path\", eigenius_inputs[[2]])\nsuppressMessages({ library(limma); library(fgsea) })\ndf <- read.csv(gzfile(cp), check.names = FALSE, stringsAsFactors = FALSE)\ng <- df[[1]]; ok <- !duplicated(g); M <- as.matrix(df[ok, -1]); rownames(M) <- g[ok]\nsamp <- colnames(M)\ncond <- factor(ifelse(grepl(\"Ch2-2\", samp), \"control\", \"KO\"), levels = c(\"control\", \"KO\"))\ncell <- factor(ifelse(grepl(\"^OVK18\", samp), \"OVK18\", \"SW48\"))\nkeep <- rowSums(M >= 10) >= 6; M <- M[keep, ]\ndesign <- model.matrix(~ cell + cond)            # last coef = WRN-KO vs control\nfit <- eBayes(lmFit(voom(M, design), design))\ntt  <- topTable(fit, coef = ncol(design), number = Inf, sort.by = \"none\")\nranks <- sort(setNames(tt$t, rownames(tt)))\npw <- gmtPathways(gp)\nset.seed(1)\nres <- fgsea(pw, ranks, minSize = 15, maxSize = 500)\ngp_ <- function(p) res[pathway == p]\ng2m <- gp_(\"HALLMARK_G2M_CHECKPOINT\"); e2f <- gp_(\"HALLMARK_E2F_TARGETS\")\np53 <- gp_(\"HALLMARK_P53_PATHWAY\");    apo <- gp_(\"HALLMARK_APOPTOSIS\")\nb <- .Call(\"r_eigon_begin\", \"urn:eigenius:pub:wrn:gsea_mech:result\")\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:nes_g2m_checkpoint\", g2m$NES)\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:padj_g2m_checkpoint\", g2m$padj)\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:nes_e2f_targets\", e2f$NES)\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:nes_p53_pathway\", p53$NES)\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:padj_p53_pathway\", p53$padj)\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:nes_apoptosis\", apo$NES)\n# WRN-KO depletes proliferation signatures (G2M/E2F down) AND activates the p53\n# response (up) -- the transcriptional signature of cell-cycle arrest.\nif (g2m$NES < 0 && g2m$padj < 0.05 && p53$NES > 0 && p53$padj < 0.05) {\n  .Call(\"r_eigon_set_proposition\", b,\n        \"urn:eigenius:benchmark:onco:CausesCellCycleArrest\", c(\"WRN\", \"MSI\"))\n}\n.Call(\"r_eigon_finish\", b)\n",
+        "urn:eigenius:runtime:image_digest": "sha256:9ffb0efb052795e7f65dbd16760e26afae5708d605941b25587b76046ff36364",
+        "urn:eigenius:runtime:additional_inputs": [
+          "urn:eigenius:ingest:file:0ee07a4abda7bba49e6cf4ce773f1c5a57b24726cd6c6662f01cabe31e22146b"
+        ]
+      }
+    }
+  }
+]

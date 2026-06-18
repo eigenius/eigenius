@@ -1,0 +1,317 @@
+[
+  {
+    "@id": "urn:eigenius:ingest:PinnedExternalFile",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:ObservedResource"],
+    "urn:eigenius:core:description": "A data file too large to inline on the chain (or deliberately kept off-chain), tracked by content hash and located by a backend reference. The bytes live in an external store (Oxen, or a disk volume); only this typed node — reference + content_hash + media_type — travels on the chain. The substrate fetches + content-verifies + materializes it as an input to a computation (D53). The IRI is content-addressed from content_hash, so byte-identical files converge to one node. Inherits the reflection:source requirement from ObservedResource.",
+    "urn:eigenius:core:short_name": "PinnedExternalFile",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:ingest:reference",
+      "urn:eigenius:ingest:content_hash",
+      "urn:eigenius:ingest:media_type"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:ingest:content_encoding",
+      "urn:eigenius:ingest:schema",
+      "urn:eigenius:ingest:schemas"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:ingest:DatasetSchema",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A reusable schema binding a tabular/multidimensional file's internal structure to graph types — the QB-DSD analog of D53 §4. Declares dimensions (identifying axes bound to classes), measures (values bound to properties), per-component attributes, and a physical layout binding (wide vs long vs transposed). Referenced by a PinnedExternalFile via ingest:schema (one) or ingest:schemas (a set keyed by ingest:member, for multi-matrix containers like .rds / multi-sheet .xlsx — D53 §10).",
+    "urn:eigenius:core:short_name": "DatasetSchema",
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:description",
+      "urn:eigenius:ingest:dimension",
+      "urn:eigenius:ingest:measure",
+      "urn:eigenius:ingest:attribute",
+      "urn:eigenius:ingest:layout",
+      "urn:eigenius:ingest:member"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:ingest:Dimension",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "An identifying axis of a DatasetSchema cube, bound to an Eigenius class (ingest:class) — a foreign key: values resolve to existing resources, never copied. Optionally coded by a code-list (ingest:code_list → another DatasetSchema, the FK target table). The physical placement (row key vs entity-per-column) is in the Layout, not here (D53 §4.1).",
+    "urn:eigenius:core:short_name": "Dimension",
+    "urn:eigenius:core:requires": ["urn:eigenius:ingest:name"],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:ingest:class",
+      "urn:eigenius:ingest:code_list",
+      "urn:eigenius:ingest:source"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:ingest:Measure",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "The value of a DatasetSchema cube — a dimension-tuple maps to this — bound to an Eigenius property (ingest:property). In a long table it has a physical column (ingest:source); in a wide matrix the cell carries it (Layout ingest:cell_measure). D53 §4.1.",
+    "urn:eigenius:core:short_name": "Measure",
+    "urn:eigenius:core:requires": ["urn:eigenius:ingest:name"],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:ingest:property",
+      "urn:eigenius:ingest:data_type",
+      "urn:eigenius:ingest:source"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:ingest:Attribute",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "A per-component qualifier on a dimension or measure (a unit, a categorical the analyses stratify on), bound to a property. Fixes base-QB's gap where an attribute could only hang off a whole observation. D53 §4.1.",
+    "urn:eigenius:core:short_name": "Attribute",
+    "urn:eigenius:core:requires": ["urn:eigenius:ingest:name"],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:ingest:property",
+      "urn:eigenius:ingest:data_type",
+      "urn:eigenius:ingest:source"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:ingest:Layout",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "How a DatasetSchema's semantic cube maps to the physical file — the per-file binding that lets one cube read from either layout (D53 §4.1). ingest:kind is WideMatrix (one axis is the row key, the other is entity-per-column via ingest:column_dimension + ingest:header_parse, cells carry ingest:cell_measure), LongTable (one column per component, ingest:source on each), or Collection (ragged set→member-list data like a .gmt: each row is a named set, the row key binds the set dimension, and the variable-length trailing fields from ingest:member_start_column on bind ingest:member_dimension — D53 §4/§10). Orientation is a layout fact (DRIVE is Achilles transposed — same cube, flipped layout).",
+    "urn:eigenius:core:short_name": "Layout",
+    "urn:eigenius:core:requires": ["urn:eigenius:ingest:kind"],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:ingest:row_key",
+      "urn:eigenius:ingest:row_key_binds",
+      "urn:eigenius:ingest:column_dimension",
+      "urn:eigenius:ingest:header_parse",
+      "urn:eigenius:ingest:cell_measure",
+      "urn:eigenius:ingest:member_dimension",
+      "urn:eigenius:ingest:member_start_column"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:ingest:reference",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Backend locator for the bytes, scheme-dispatched: `oxen://repo@commit/path` (versioned/large/distributed) or `file://<volume>/<path>` (a mounted disk volume). The substrate resolver fetches by this; content_hash is the backend-independent trust root (D53 §3.1).",
+    "urn:eigenius:core:short_name": "reference",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:PinnedExternalFile"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:content_hash",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Eigenius-computed SHA-256 over the materialized bytes, in `sha256:<64 hex>` form. The correctness root: the substrate re-hashes at provision and fails closed on mismatch (D53 §5). Independent of any backend's internal addressing.",
+    "urn:eigenius:core:short_name": "content_hash",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:PinnedExternalFile"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:media_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "IANA media type / format of the bytes (e.g. `text/csv`, `application/vnd.apache.parquet`, `application/x-hdf5`). Tells the consuming worker/tool how to read it.",
+    "urn:eigenius:core:short_name": "media_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:PinnedExternalFile"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:content_encoding",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Optional transfer/storage encoding applied over the media type, e.g. `gzip` for a `.csv.gz`. Absent means none.",
+    "urn:eigenius:core:short_name": "content_encoding",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:PinnedExternalFile"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:schema",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Optional reference to a DatasetSchema binding this file's internal structure to graph types (D53 §4). Absent means the file is opaque to the graph (a black-box input the consuming tool parses by its own format).",
+    "urn:eigenius:core:short_name": "schema",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:ingest:DatasetSchema"],
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:PinnedExternalFile"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:schemas",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "A set of DatasetSchemas for a multi-matrix container (one per contained member — .rds member / .xlsx sheet), each keyed by ingest:member (D53 §10, à la Croissant RecordSet-per-FileObject). Use instead of ingest:schema when the file holds several cubes.",
+    "urn:eigenius:core:short_name": "schemas",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:ingest:DatasetSchema"],
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:PinnedExternalFile"]
+  },
+
+  {
+    "@id": "urn:eigenius:ingest:dimension",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The identifying axes of the cube (D53 §4.1) — one or more embedded ingest:Dimension components.",
+    "urn:eigenius:core:short_name": "dimension",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:ingest:Dimension"],
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:DatasetSchema"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:measure",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The values of the cube (D53 §4.1) — one or more embedded ingest:Measure components.",
+    "urn:eigenius:core:short_name": "measure",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:ingest:Measure"],
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:DatasetSchema"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:attribute",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Per-component qualifiers (D53 §4.1) — zero or more embedded ingest:Attribute components.",
+    "urn:eigenius:core:short_name": "attribute",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:ingest:Attribute"],
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:DatasetSchema"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:layout",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The physical layout binding (D53 §4.1). Value is one embedded ingest:Layout.",
+    "urn:eigenius:core:short_name": "layout",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:ingest:Layout"],
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:DatasetSchema"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:member",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Intra-file selector for a schema within a multi-matrix container — the .rds member name or .xlsx sheet name the schema binds (D53 §10).",
+    "urn:eigenius:core:short_name": "member",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:DatasetSchema"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:name",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The component's logical name within its schema (e.g. cell_line, gene, ceres). Distinct from its physical column (ingest:source) and its graph binding (ingest:class / ingest:property).",
+    "urn:eigenius:core:short_name": "name",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:ingest:Dimension",
+      "urn:eigenius:ingest:Measure",
+      "urn:eigenius:ingest:Attribute"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:ingest:class",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The Eigenius class a Dimension binds to — the foreign-key target type (e.g. onco:CellLine, onco:Gene). Dimension values resolve to instances of this class (D53 §4.1).",
+    "urn:eigenius:core:short_name": "class",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:Dimension"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:property",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The Eigenius property a Measure or Attribute binds to (e.g. onco:dependency_score, onco:msi_status). D53 §4.1.",
+    "urn:eigenius:core:short_name": "property",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:ingest:Measure",
+      "urn:eigenius:ingest:Attribute"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:ingest:code_list",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "A Dimension's code-list — the DatasetSchema of the attached file that enumerates this dimension's members (the FK target table, e.g. sample_info.csv defining DepMap_ID ↔ onco:CellLine). D53 §10 refinement: code-list source tables are first-class.",
+    "urn:eigenius:core:short_name": "code_list",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:ingest:DatasetSchema"],
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:Dimension"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:data_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The scalar datatype of a Measure or Attribute's values (e.g. core:float, core:string, core:boolean). D53 §4.1.",
+    "urn:eigenius:core:short_name": "data_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:DataType"],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:ingest:Measure",
+      "urn:eigenius:ingest:Attribute"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:ingest:source",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The physical column name a component reads from (Croissant source-style). On a Dimension/Measure/Attribute in a long table; absent for the entity-per-column dimension of a wide matrix (its values come from the headers). Distinct from reflection:source (provenance). D53 §4.1.",
+    "urn:eigenius:core:short_name": "source",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:ingest:Dimension",
+      "urn:eigenius:ingest:Measure",
+      "urn:eigenius:ingest:Attribute"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:ingest:kind",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The layout kind: `WideMatrix` (row key × entity-per-column, cells carry the measure) or `LongTable` (one column per component). D53 §4.1.",
+    "urn:eigenius:core:short_name": "kind",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:Layout"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:row_key",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The physical column holding the row key (e.g. `DepMap_ID`). D53 §4.1.",
+    "urn:eigenius:core:short_name": "row_key",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:Layout"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:row_key_binds",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The dimension name (ingest:name) the row key binds to. Captures orientation: in transposed layouts the row key binds a different dimension over the same semantic cube. D53 §10.",
+    "urn:eigenius:core:short_name": "row_key_binds",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:Layout"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:column_dimension",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "For a WideMatrix, the dimension name (ingest:name) the column headers enumerate (entity-per-column). D53 §4.1.",
+    "urn:eigenius:core:short_name": "column_dimension",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:Layout"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:header_parse",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "An explicit template for parsing a wide-matrix column header into the column_dimension's coded value, e.g. `<symbol> (<entrez>)` for `WRN (7486)` → the entrez code. Explicit (declared), not Croissant's fragile implicit name-suffix match. D53 §4.1.",
+    "urn:eigenius:core:short_name": "header_parse",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:Layout"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:cell_measure",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "For a WideMatrix, the measure name (ingest:name) the cell values carry. D53 §4.1.",
+    "urn:eigenius:core:short_name": "cell_measure",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:Layout"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:member_dimension",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "For a Collection layout, the dimension name (ingest:name) the variable-length list members bind to — e.g. `gene` for a .gmt whose trailing fields are gene members of each set (D53 §4/§10).",
+    "urn:eigenius:core:short_name": "member_dimension",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:Layout"]
+  },
+  {
+    "@id": "urn:eigenius:ingest:member_start_column",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "For a Collection layout, the 0-based column index at which a row's members begin — the trailing variable-length list. A .gmt is `set<TAB>description<TAB>member+`, so member_start_column is `2` (the set is column 0, bound by ingest:row_key; the description is column 1). D53 §4/§10.",
+    "urn:eigenius:core:short_name": "member_start_column",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:ingest:Layout"]
+  }
+]

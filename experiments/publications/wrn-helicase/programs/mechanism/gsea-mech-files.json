@@ -1,0 +1,44 @@
+[
+  {
+    "@id": "urn:eigenius:pub:wrn:hallmark_gmt_schema",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:ingest:DatasetSchema"
+    ],
+    "urn:eigenius:core:description": "MSigDB Hallmark .gmt: each row a named gene set over onco:Gene (ragged collection).",
+    "urn:eigenius:ingest:dimension": [
+      {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:ingest:Dimension"
+        ],
+        "urn:eigenius:ingest:name": "gene_set"
+      },
+      {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:ingest:Dimension"
+        ],
+        "urn:eigenius:ingest:name": "gene"
+      }
+    ],
+    "urn:eigenius:ingest:layout": {
+      "urn:eigenius:core:is_a": [
+        "urn:eigenius:ingest:Layout"
+      ],
+      "urn:eigenius:ingest:kind": "Collection",
+      "urn:eigenius:ingest:row_key": "0",
+      "urn:eigenius:ingest:row_key_binds": "gene_set",
+      "urn:eigenius:ingest:member_dimension": "gene",
+      "urn:eigenius:ingest:member_start_column": "2"
+    }
+  },
+  {
+    "@id": "urn:eigenius:ingest:file:0ee07a4abda7bba49e6cf4ce773f1c5a57b24726cd6c6662f01cabe31e22146b",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:ingest:PinnedExternalFile"
+    ],
+    "urn:eigenius:reflection:source": "MSigDB Hallmark v6.2 (50 gene sets, symbols)",
+    "urn:eigenius:ingest:reference": "file://wrn-slices/h.all.v6.2.symbols.gmt",
+    "urn:eigenius:ingest:content_hash": "sha256:0ee07a4abda7bba49e6cf4ce773f1c5a57b24726cd6c6662f01cabe31e22146b",
+    "urn:eigenius:ingest:media_type": "text/tab-separated-values",
+    "urn:eigenius:ingest:schema": "urn:eigenius:pub:wrn:hallmark_gmt_schema"
+  }
+]

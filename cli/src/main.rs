@@ -17,7 +17,12 @@
 use clap::{Parser, Subcommand, ValueEnum};
 
 // Phase 19a.5 (D31): mirror / env / institution lifecycle CLI verbs.
+mod common;
+mod data;
+mod env;
 mod institutions;
+mod mirror;
+mod scripts;
 use eigenius_kernel::bootstrap;
 use eigenius_kernel::context::ExecutionContext;
 use eigenius_kernel::lattice;
@@ -329,6 +334,18 @@ enum Commands {
         command: EnvCommands,
     },
 
+    /// Publish, list, inspect, and run runtime scripts (D26 §10)
+    Script {
+        #[command(subcommand)]
+        command: ScriptCommands,
+    },
+
+    /// Attach, list, and inspect external data files (D53)
+    Data {
+        #[command(subcommand)]
+        command: DataCommands,
+    },
+
     /// Manage external institutions (D31 §5, Phase 19a.5.e)
     Institution {
         #[command(subcommand)]
@@ -559,14 +576,41 @@ enum EnvCommands {
         package_path: Option<String>,
 
         /// IRI of a previously-committed `RuntimePackageMirror` to bake in.
+        /// Required for `julia`; optional for `r` (the R image bakes the
+        /// pinned `RImagePlan` packages — limma/fgsea/lme4 — and has no
+        /// mirror until the P4 S4 generator lands).
         #[arg(long, value_name = "MIRROR_IRI")]
-        mirror: String,
+        mirror: Option<String>,
 
         /// Override the language's default base image. Pin by digest in
         /// production (e.g. `julia@sha256:...`) so builds stay
-        /// reproducible.
+        /// reproducible. For `r` the default is the Bioconductor base.
         #[arg(long, value_name = "REF", default_value = "julia:1.12-bookworm")]
         base_image: String,
+
+        /// (R only) Path to the `EigeniusRWorker.R` driver. Defaults to
+        /// `crates/eigenius-r-worker/r/EigeniusRWorker.R` in the workspace.
+        #[arg(long, value_name = "FILE")]
+        r_driver: Option<String>,
+
+        /// (R only) Path to the `libeigenius_r_worker.so` cdylib. Defaults
+        /// to `target/{release,debug}/libeigenius_r_worker.so`. Build it
+        /// first with `cargo build -p eigenius-r-worker --release`.
+        #[arg(long, value_name = "FILE")]
+        r_cdylib: Option<String>,
+
+        /// (R only) Bioconductor/CRAN package to bake into the image
+        /// (repeatable). When given, this explicit list drives the build
+        /// instead of the compiled-in `RImagePlan::default`. The set MUST
+        /// match the orchestrator's compiled default, or the worker's boot
+        /// cross-check (D26 §9.3) rejects the image. Empty ⇒ use the default.
+        #[arg(long = "r-package", value_name = "PKG")]
+        r_package: Vec<String>,
+
+        /// (R only) Bioconductor release the `--r-package`s install from
+        /// (e.g. `3.18`). Defaults to the `RImagePlan::default` release.
+        #[arg(long, value_name = "VERSION")]
+        bioc_version: Option<String>,
 
         /// Path to the Julia worker's project directory (must contain
         /// `Project.toml`, `Manifest.toml`, `src/JuliaWorker.jl`).
@@ -639,6 +683,142 @@ enum EnvCommands {
         /// IRI of the RuntimeEnvironment.
         #[arg(value_name = "ENV_IRI")]
         iri: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ScriptCommands {
+    /// Publish a script as a content-addressed RuntimeScript resource.
+    /// Cheap — just a graph commit. The language is inferred from the
+    /// file extension (.r/.jl/.py/.lean) unless `--lang` is given.
+    Publish {
+        /// Path to the script source file.
+        #[arg(value_name = "FILE")]
+        file: String,
+
+        /// IRI of the RuntimeEnvironment the script declares as compatible.
+        #[arg(long, value_name = "ENV_IRI")]
+        env: String,
+
+        /// Override the inferred language identifier (e.g. `r`, `julia`).
+        #[arg(long, value_name = "LANG")]
+        lang: Option<String>,
+
+        /// Declared entry-point name. Optional — omit for a top-level
+        /// script (the common RunRuntimeScript case); set it only when
+        /// the script exposes a typed entry point.
+        #[arg(long, value_name = "NAME")]
+        entry_point: Option<String>,
+
+        /// Human-readable description.
+        #[arg(long, value_name = "TEXT")]
+        description: Option<String>,
+    },
+
+    /// List published runtime scripts.
+    List {
+        /// Optional language filter.
+        #[arg(long, value_name = "LANG")]
+        lang: Option<String>,
+    },
+
+    /// Inspect a published script's metadata and source.
+    Inspect {
+        /// IRI of the RuntimeScript.
+        #[arg(value_name = "SCRIPT_IRI")]
+        iri: String,
+    },
+
+    /// Run a published script against a graph-resident input resource.
+    /// The kernel resolves the script's source and environment from the
+    /// graph at execution (D26 §6.2).
+    Run {
+        /// IRI of the published RuntimeScript.
+        #[arg(value_name = "SCRIPT_IRI")]
+        iri: String,
+
+        /// Comma-separated input resource IRIs. v1 takes exactly one.
+        #[arg(long, value_name = "IRI", value_delimiter = ',')]
+        inputs: Vec<String>,
+
+        /// Branch the trace layer commits into (defaults to "main").
+        #[arg(long, value_name = "BRANCH")]
+        branch: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DataCommands {
+    /// Attach an external file as a content-addressed PinnedExternalFile.
+    /// Computes the hash from the bytes (a local path / `file://`, or an
+    /// `oxen://` reference the CLI fetches once) and commits the typed node;
+    /// the bytes stay off-chain. The IRI is content-addressed (D53 §3).
+    Attach {
+        /// A local file path, a `file://` URL, or an `oxen://repo@rev/path`
+        /// reference. For `oxen://` the CLI downloads once to compute the hash.
+        #[arg(value_name = "FILE_OR_REF")]
+        file: String,
+
+        /// Durable backend locator stored on the node (the substrate fetches
+        /// from this later). Defaults to a `file://` URL of the absolute path
+        /// for local files, or the `oxen://` reference itself.
+        #[arg(long, value_name = "REFERENCE")]
+        reference: Option<String>,
+
+        /// Override the inferred media type (e.g. `text/csv`).
+        #[arg(long, value_name = "MEDIA_TYPE")]
+        media_type: Option<String>,
+
+        /// Override the short name (defaults to the file name).
+        #[arg(long, value_name = "NAME")]
+        name: Option<String>,
+    },
+
+    /// List attached external files.
+    List {
+        /// Optional media-type filter.
+        #[arg(long, value_name = "MEDIA_TYPE")]
+        media_type: Option<String>,
+    },
+
+    /// Inspect a pinned external file's metadata.
+    Inspect {
+        /// IRI of the PinnedExternalFile.
+        #[arg(value_name = "DATA_IRI")]
+        iri: String,
+    },
+
+    /// Verify an attached file: fetch it by its `reference`, recompute the
+    /// content hash, and check it against the pinned `content_hash`
+    /// (fail closed — D53 §5). Proves the off-chain bytes still match.
+    Verify {
+        /// IRI of the PinnedExternalFile to verify.
+        #[arg(value_name = "DATA_IRI")]
+        iri: String,
+    },
+
+    /// Validate the bound DatasetSchema against the file's actual columns —
+    /// the D53 §4.1 checkable layout gate. Materializes (content-verifies) the
+    /// file and header-scans it (CSV/TSV; columnar formats defer to the worker).
+    Validate {
+        /// IRI of the PinnedExternalFile to validate.
+        #[arg(value_name = "DATA_IRI")]
+        iri: String,
+    },
+
+    /// Provision a PinnedExternalFile into the local content-addressed cache
+    /// the kernel reads for native file-backed SampleSet recompute (D53 §6.1
+    /// / §7). Fetches + content-verifies into `<cache>/<hash>/<name>`. Run on
+    /// the host whose depot the kernel reads.
+    Provision {
+        /// IRI of the PinnedExternalFile to provision.
+        #[arg(value_name = "DATA_IRI")]
+        iri: String,
+
+        /// Cache root (the depot's extfile-cache). Defaults to
+        /// `$EIGENIUS_EXTFILE_CACHE_DIR`.
+        #[arg(long, value_name = "DIR")]
+        cache_root: Option<String>,
     },
 }
 
@@ -860,6 +1040,8 @@ async fn main() {
             }
             Commands::Mirror { command } => remote_mirror(endpoint, command, cli.json).await,
             Commands::Env { command } => remote_env(endpoint, command, cli.json).await,
+            Commands::Script { command } => remote_script(endpoint, command, cli.json).await,
+            Commands::Data { command } => remote_data(endpoint, command, cli.json).await,
             Commands::Institution { command } => {
                 remote_institution(endpoint, command, cli.json).await
             }
@@ -1001,6 +1183,14 @@ async fn main() {
         }
         Commands::Env { .. } => {
             eprintln!("'env' commands require --endpoint");
+            std::process::exit(1);
+        }
+        Commands::Script { .. } => {
+            eprintln!("'script' commands require --endpoint");
+            std::process::exit(1);
+        }
+        Commands::Data { .. } => {
+            eprintln!("'data' commands require --endpoint");
             std::process::exit(1);
         }
         Commands::Institution { .. } => {
@@ -2954,7 +3144,7 @@ async fn remote_mirror(endpoint: &str, command: MirrorCommands, json: bool) {
             output,
             institution_file,
         } => {
-            institutions::mirror_create(
+            mirror::mirror_create(
                 endpoint,
                 &layer,
                 filter.as_deref(),
@@ -2967,12 +3157,12 @@ async fn remote_mirror(endpoint: &str, command: MirrorCommands, json: bool) {
             .await
         }
         MirrorCommands::Get { iri, output } => {
-            institutions::mirror_get(endpoint, &iri, &output, json).await
+            mirror::mirror_get(endpoint, &iri, &output, json).await
         }
         MirrorCommands::List { language } => {
-            institutions::mirror_list(endpoint, language.as_deref(), json).await
+            mirror::mirror_list(endpoint, language.as_deref(), json).await
         }
-        MirrorCommands::Inspect { iri } => institutions::mirror_inspect(endpoint, &iri, json).await,
+        MirrorCommands::Inspect { iri } => mirror::mirror_inspect(endpoint, &iri, json).await,
     }
 }
 
@@ -2985,15 +3175,23 @@ async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
             base_image,
             worker_source_dir,
             depot,
+            r_driver,
+            r_cdylib,
+            r_package,
+            bioc_version,
         } => {
-            institutions::env_build(
+            env::env_build(
                 endpoint,
                 &language,
                 package_path.as_deref(),
-                &mirror,
+                mirror.as_deref(),
                 &base_image,
                 worker_source_dir.as_deref(),
                 depot.as_deref(),
+                r_driver.as_deref(),
+                r_cdylib.as_deref(),
+                &r_package,
+                bioc_version.as_deref(),
                 json,
             )
             .await
@@ -3008,7 +3206,7 @@ async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
             image_digest,
             runtime_version,
         } => {
-            institutions::env_create(
+            env::env_create(
                 endpoint,
                 &language,
                 &handler_package,
@@ -3022,10 +3220,70 @@ async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
             )
             .await
         }
-        EnvCommands::List { language } => {
-            institutions::env_list(endpoint, language.as_deref(), json).await
+        EnvCommands::List { language } => env::env_list(endpoint, language.as_deref(), json).await,
+        EnvCommands::Inspect { iri } => env::env_inspect(endpoint, &iri, json).await,
+    }
+}
+
+async fn remote_data(endpoint: &str, command: DataCommands, json: bool) {
+    match command {
+        DataCommands::Attach {
+            file,
+            reference,
+            media_type,
+            name,
+        } => {
+            data::data_attach(
+                endpoint,
+                &file,
+                reference.as_deref(),
+                media_type.as_deref(),
+                name.as_deref(),
+                json,
+            )
+            .await
         }
-        EnvCommands::Inspect { iri } => institutions::env_inspect(endpoint, &iri, json).await,
+        DataCommands::List { media_type } => {
+            data::data_list(endpoint, media_type.as_deref(), json).await
+        }
+        DataCommands::Inspect { iri } => data::data_inspect(endpoint, &iri, json).await,
+        DataCommands::Verify { iri } => data::data_verify(endpoint, &iri, json).await,
+        DataCommands::Validate { iri } => data::data_validate(endpoint, &iri, json).await,
+        DataCommands::Provision { iri, cache_root } => {
+            data::data_provision(endpoint, &iri, cache_root.as_deref(), json).await
+        }
+    }
+}
+
+async fn remote_script(endpoint: &str, command: ScriptCommands, json: bool) {
+    match command {
+        ScriptCommands::Publish {
+            file,
+            env,
+            lang,
+            entry_point,
+            description,
+        } => {
+            scripts::script_publish(
+                endpoint,
+                &file,
+                &env,
+                lang.as_deref(),
+                entry_point.as_deref(),
+                description.as_deref(),
+                json,
+            )
+            .await
+        }
+        ScriptCommands::List { lang } => {
+            scripts::script_list(endpoint, lang.as_deref(), json).await
+        }
+        ScriptCommands::Inspect { iri } => scripts::script_inspect(endpoint, &iri, json).await,
+        ScriptCommands::Run {
+            iri,
+            inputs,
+            branch,
+        } => scripts::script_run(endpoint, &iri, &inputs, branch.as_deref(), json).await,
     }
 }
 

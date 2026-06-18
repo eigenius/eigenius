@@ -1,0 +1,43 @@
+[
+  {
+    "@id": "urn:eigenius:pub:wrn:if_ed5_long_schema",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:ingest:DatasetSchema"
+    ],
+    "urn:eigenius:core:description": "ED Fig 5b/d/f per-cell p-p53/p21 immunofluorescence, tidy long form: one staining-intensity value per cell.",
+    "urn:eigenius:ingest:dimension": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:ingest:Dimension"],
+        "urn:eigenius:ingest:name": "cell_line",
+        "urn:eigenius:ingest:source": "cell_line"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:ingest:Dimension"],
+        "urn:eigenius:ingest:name": "readout",
+        "urn:eigenius:ingest:source": "readout"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:ingest:Dimension"],
+        "urn:eigenius:ingest:name": "guide",
+        "urn:eigenius:ingest:source": "guide"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:ingest:Dimension"],
+        "urn:eigenius:ingest:name": "condition",
+        "urn:eigenius:ingest:source": "condition"
+      }
+    ],
+    "urn:eigenius:ingest:measure": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:ingest:Measure"],
+        "urn:eigenius:ingest:name": "intensity",
+        "urn:eigenius:ingest:source": "value",
+        "urn:eigenius:ingest:data_type": "urn:eigenius:core:float"
+      }
+    ],
+    "urn:eigenius:ingest:layout": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:ingest:Layout"],
+      "urn:eigenius:ingest:kind": "LongTable"
+    }
+  }
+]

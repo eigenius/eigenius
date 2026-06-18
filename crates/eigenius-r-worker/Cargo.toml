@@ -1,0 +1,41 @@
+[package]
+name = "eigenius-r-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Worker-side substrate protocol shim for the R language runtime (D55). Hosts the UDS + CBOR transport and the Eigon-CBOR codec; an R driver loads the cdylib via C FFI and supplies only the computation (limma/fgsea/lme4). Mirrors eigenius-lean-worker. See D26 §8.1, D55."
+keywords = ["eigenius", "r", "ffi", "language-runtime"]
+categories = ["external-ffi-bindings", "science"]
+
+[lib]
+# `cdylib` produces the shared object R `dyn.load`s and calls via `.Call`;
+# `rlib` keeps the in-crate protocol-loop test exercising [`RWorker`]
+# directly. Mirrors `eigenius-lean-worker`'s dual crate-type.
+#
+# The R-facing `.Call` entry points (`r_*`, see src/ffi.rs) are written in
+# Rust as `#[no_mangle] extern "C" fn(SEXP…) -> SEXP`, calling a small
+# hand-declared slice of libR's API. So they are guaranteed-exported from
+# the cdylib (a C bridge's symbols would be GC'd as unreferenced), R's
+# symbols resolve at `dyn.load` against the already-loaded libR, and no
+# bindgen/libclang/cc is needed.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+eigenius-runtime-substrate = { path = "../runtime-substrate" }
+# Eigon-CBOR decode/encode helpers the R side calls through the worker
+# (decode input resources, encode the output DerivedResource) — the same
+# reuse eigenius-lean-worker makes so R needs no parallel CBOR codec.
+eigenius-kernel = { path = "../../kernel" }
+# The substrate's own CBOR codec — decodes the `String` script source and
+# the `MethodInvocation` carried in `DispatchMethod.target`.
+ciborium = "0.2"
+serde.workspace = true
+serde_bytes = "0.11"
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# The R round-trip integration test spawns `Rscript` driving the cdylib
+# against a temp UDS and acts as the substrate client.
+tempfile = "3"

@@ -2,19 +2,19 @@
   {
     "@id": "urn:eigenius:runtime:RuntimeScript",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A single executable script authored by a user, dispatched into a pinned RuntimeEnvironment by the substrate's RunRuntimeScript component. The IRI is content-addressed from language + source + entry_point + entry_point_signature so that two notebooks publishing the same script produce the same IRI. See D26 §5.1.",
+    "urn:eigenius:core:description": "A single executable script authored by a user, dispatched into a pinned RuntimeEnvironment by the substrate's RunRuntimeScript component. The canonical RunRuntimeScript dispatch evaluates `source` top-level (the script reads `eigenius_inputs` and writes its output resource), so `entry_point` + `entry_point_signature` are optional — declare them only when the script exposes a typed entry point for CallRuntimeMethod-style dispatch. The IRI is content-addressed from language + source + entry_point + entry_point_signature + requires_environment so that two notebooks publishing the same script produce the same IRI. See D26 §5.1.",
     "urn:eigenius:core:short_name": "RuntimeScript",
     "urn:eigenius:core:requires": [
       "urn:eigenius:core:is_a",
       "urn:eigenius:core:short_name",
       "urn:eigenius:runtime:language",
       "urn:eigenius:runtime:source",
-      "urn:eigenius:runtime:entry_point",
-      "urn:eigenius:runtime:entry_point_signature",
       "urn:eigenius:runtime:requires_environment"
     ],
     "urn:eigenius:core:recommends": [
       "urn:eigenius:core:description",
+      "urn:eigenius:runtime:entry_point",
+      "urn:eigenius:runtime:entry_point_signature",
       "urn:eigenius:runtime:requires_mirror_classes"
     ]
   },
