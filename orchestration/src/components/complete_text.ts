@@ -35,7 +35,7 @@ import type {
 
 /** Default request parameters. */
 const DEFAULTS = {
-  model: "claude-sonnet-4-20250514",
+  model: "claude-sonnet-4-6",
   temperature: 0.3,
   maxTokens: 4000,
 };
@@ -49,7 +49,7 @@ const DEFAULTS = {
  *   "urn:eigenius:program:components:completion:user_prompt": "...",
  *   "urn:eigenius:program:components:completion:system_prompt": "...",
  *   "urn:eigenius:program:components:completion:request_parameters": {
- *     "urn:eigenius:program:request:model": "claude-sonnet-4-20250514",
+ *     "urn:eigenius:program:request:model": "claude-sonnet-4-6",
  *     "urn:eigenius:program:request:temperature": 0.3,
  *     "urn:eigenius:program:request:max_tokens": 4000
  *   }

@@ -631,7 +631,7 @@ message ComponentResponse {
 
 message ComponentMetrics {
   string provider = 1;         // e.g. "anthropic"
-  string model = 2;            // e.g. "claude-sonnet-4-20250514"
+  string model = 2;            // e.g. "claude-sonnet-4-6"
   int64 prompt_tokens = 3;
   int64 completion_tokens = 4;
   int64 latency_ms = 5;

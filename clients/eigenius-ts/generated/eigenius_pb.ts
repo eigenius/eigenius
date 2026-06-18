@@ -1055,7 +1055,7 @@ export type ComponentMetrics = Message<"eigenius.v1.ComponentMetrics"> & {
   provider: string;
 
   /**
-   * e.g. "claude-sonnet-4-20250514"
+   * e.g. "claude-sonnet-4-6"
    *
    * @generated from field: string model = 2;
    */

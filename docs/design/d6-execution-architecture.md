@@ -94,7 +94,7 @@ Kernel evaluates: Apply(CompleteJson, input, argument)
         trace_key → {
           output: result,
           provider: "anthropic",
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-6",
           prompt_tokens: 450,
           completion_tokens: 120,
           latency_ms: 1200,
@@ -245,7 +245,7 @@ An agent is a component whose implementation involves multiple LLM calls with to
 handlers["urn:eigenius:program:components:ResearchAgent"] = async (input, argument) => {
     // This might use DAPR workflow internally for multi-turn durability
     const agent = createAgent({
-        model: anthropic("claude-sonnet-4-20250514"),
+        model: anthropic("claude-sonnet-4-6"),
         tools: {
             query: async (eigenql: string) => {
                 // Call back to kernel via DAPR
@@ -277,7 +277,7 @@ Each completed component call produces a trace stored as an Eigon resource:
   "urn:eigenius:reflection:argument_hash": "<cbor-hash-of-argument>",
   "urn:eigenius:reflection:output": { ... embedded resource ... },
   "urn:eigenius:reflection:provider": "anthropic",
-  "urn:eigenius:reflection:model": "claude-sonnet-4-20250514",
+  "urn:eigenius:reflection:model": "claude-sonnet-4-6",
   "urn:eigenius:reflection:prompt_tokens": 450,
   "urn:eigenius:reflection:completion_tokens": 120,
   "urn:eigenius:reflection:latency_ms": 1200,
