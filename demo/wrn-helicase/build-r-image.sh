@@ -56,6 +56,11 @@ R_PACKAGES=(limma fgsea lme4 emmeans)
 VERIFY=0
 [ "${1:-}" = "--verify" ] && VERIFY=1
 
+# The R image build runs locally (buildah on the host) and does not talk to the
+# kernel, but the `env` command group still requires an endpoint flag. Default to
+# the local stack; override with EIGENIUS_ENDPOINT.
+ENDPOINT="${EIGENIUS_ENDPOINT:-http://localhost:50051}"
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_DIR"
@@ -71,7 +76,7 @@ pkg_flags=()
 for p in "${R_PACKAGES[@]}"; do pkg_flags+=(--r-package "$p"); done
 
 echo "Building R env image: Bioconductor $BIOC_VERSION + ${R_PACKAGES[*]}" >&2
-OUT="$("$EIGENIUS" env build --language r \
+OUT="$("$EIGENIUS" --endpoint "$ENDPOINT" env build --language r \
     --bioc-version "$BIOC_VERSION" \
     "${pkg_flags[@]}" \
     --r-driver "$DRIVER" \
