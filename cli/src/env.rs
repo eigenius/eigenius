@@ -54,14 +54,17 @@ pub async fn env_build(
     depot: Option<&str>,
     r_driver: Option<&str>,
     r_cdylib: Option<&str>,
+    r_package: &[String],
+    bioc_version: Option<&str>,
     json: bool,
 ) {
     // R (D55/D56): no handler package, no mirror. Build the WRN-study
-    // image (Bioconductor base + RImagePlan::default = limma/fgsea/lme4)
-    // via the substrate's `build_environment_image`, then print the
-    // digest to paste into the program's `runtime:image_digest`.
+    // image (Bioconductor base + the package plan) via the substrate's
+    // `build_environment_image`, then print the digest to paste into the
+    // program's `runtime:image_digest`. An explicit `--r-package` list (with
+    // optional `--bioc-version`) overrides the compiled `RImagePlan::default`.
     if language == "r" {
-        env_build_r(r_driver, r_cdylib, depot, json).await;
+        env_build_r(r_driver, r_cdylib, depot, r_package, bioc_version, json).await;
         return;
     }
 
@@ -528,8 +531,26 @@ async fn env_build_r(
     r_driver: Option<&str>,
     r_cdylib: Option<&str>,
     depot: Option<&str>,
+    r_package: &[String],
+    bioc_version: Option<&str>,
     json: bool,
 ) {
+    // Resolve the image recipe: an explicit `--r-package` list (the build-script
+    // path) overrides the compiled-in `RImagePlan::default`, so the package set
+    // is a visible build input rather than a buried default. `--bioc-version`
+    // overrides the release only when packages are given.
+    let image_plan = if r_package.is_empty() {
+        eigenius_r::RImagePlan::default()
+    } else {
+        let mut plan = eigenius_r::RImagePlan {
+            packages: r_package.to_vec(),
+            ..eigenius_r::RImagePlan::default()
+        };
+        if let Some(v) = bioc_version {
+            plan.bioc_version = v.to_string();
+        }
+        plan
+    };
     let (driver_path, cdylib_path) = match resolve_r_assets(r_driver, r_cdylib) {
         Ok(p) => p,
         Err(e) => {
@@ -559,6 +580,10 @@ async fn env_build_r(
         }
     };
     let depot_for_blocking = depot_path.clone();
+    // Capture the package list for reporting before the plan is moved into the
+    // build closure.
+    let packages = image_plan.packages.join(",");
+    let plan_for_blocking = image_plan;
     let digest = match tokio::task::spawn_blocking(move || {
         let spawner = eigenius_runtime_substrate::spawner::service::DockerServiceSpawner::new(
             eigenius_runtime_substrate::spawner::DockerSpawnerConfig::from_substrate_config(
@@ -577,11 +602,16 @@ async fn env_build_r(
             driver_path,
             cdylib_path,
             depot_for_blocking,
-        );
+        )
+        // Pin the image recipe (Bioconductor base + the resolved package plan).
+        // `build_environment_image` reads it from the runtime, so an explicit
+        // `--r-package` list flows all the way into the Dockerfile + the
+        // cross-check manifest.
+        .with_build_config(eigenius_r::DEFAULT_BASE_IMAGE, plan_for_blocking);
         use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
         let env_resource = eigenius_kernel::ontology::resource::Resource::new_embedded();
         // `build_environment_image` ignores the env/packages/mirror args
-        // for R — it uses the runtime's own `RImagePlan` recipe.
+        // for R — it uses the runtime's own `RImagePlan` recipe (set above).
         runtime
             .build_environment_image(&env_resource, &[], None)
             .map_err(|e| format!("R env build failed: {e}"))
@@ -599,9 +629,8 @@ async fn env_build_r(
         }
     };
 
-    // Report the actual baked package list (the runtime's `RImagePlan` recipe)
-    // rather than a hardcoded string, so it never drifts from the image.
-    let packages = eigenius_r::RImagePlan::default().packages.join(",");
+    // `packages` (captured above) is the actual baked list — the resolved plan,
+    // so the report never drifts from what went into the image.
     if json {
         println!(
             "{{\"image_digest\":\"{}\",\"language\":\"r\",\"packages\":\"{}\"}}",
@@ -613,7 +642,9 @@ async fn env_build_r(
         println!("  Digest: {}", digest.as_str());
         println!();
         println!("Paste this digest into the program's `runtime:image_digest`, e.g.");
-        println!("  experiments/publications/wrn-helicase/programs/xenograft-lme4-program.json");
+        println!(
+            "  experiments/publications/wrn-helicase/programs/invivo/xenograft-lme4-program.json"
+        );
     }
 }
 

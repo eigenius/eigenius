@@ -218,7 +218,7 @@ fn wrn_warrants_kernel_recomputed() {
         "harness",
     );
     let onco = esl_against(
-        include_str!("../../../experiments/publications/wrn-helicase/onco.esl"),
+        include_str!("../../../experiments/publications/wrn-helicase/chain/01-onco.esl"),
         &harness,
         "onco",
     );
@@ -228,20 +228,22 @@ fn wrn_warrants_kernel_recomputed() {
     // `concl_*_recomputed` ReasoningSentences citing the emitted witnesses).
     let recompute_plans = esl_against(
         include_str!(
-            "../../../experiments/publications/wrn-helicase/wrn-phase1-recompute-plans.esl"
+            "../../../experiments/publications/wrn-helicase/chain/03-phase1-recompute-plans.esl"
         ),
         &onco,
         "wrn-recompute-plans",
     );
     let recompute = esl_against(
         include_str!(
-            "../../../experiments/publications/wrn-helicase/wrn-phase1-recompute-conclusions.esl"
+            "../../../experiments/publications/wrn-helicase/chain/04-phase1-recompute-conclusions.esl"
         ),
         &recompute_plans,
         "wrn-recompute-conclusions",
     );
     let phase1 = esl_against(
-        include_str!("../../../experiments/publications/wrn-helicase/wrn-phase1.esl"),
+        include_str!(
+            "../../../experiments/publications/wrn-helicase/chain/05-phase1-discovery.esl"
+        ),
         &recompute,
         "wrn-phase1",
     );

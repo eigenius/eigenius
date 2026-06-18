@@ -8,7 +8,7 @@
 # row 2 = cell-line label (every 4th col), row 3 = guide (sgCh2-2/sgWRN2/sgWRN3),
 # rows 4+ = one foci count per cell (ragged, NA-filled).
 #
-# Run from data/slices/:  Rscript ../../programs/foci-ed6-extract.R
+# Run from data/slices/:  Rscript ../../extract/foci-ed6-extract.R
 # Produces foci_53bp1_long.csv (cell_line, readout, guide, condition, value).
 suppressMessages(library(readxl))
 reshape_block <- function(file, sheet, readout) {

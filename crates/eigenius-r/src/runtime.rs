@@ -44,7 +44,10 @@ use crate::dockerfile::{compose_image_dockerfile, r_dockerfile_fragments, RImage
 /// `RELEASE_3_18` is a representative tag — pin a real `@sha256:` digest
 /// when first building for production. The built image's own `ImageDigest`
 /// is the binding pin regardless.
-const DEFAULT_BASE_IMAGE: &str = "docker.io/bioconductor/bioconductor_docker:RELEASE_3_18";
+/// The Bioconductor base image the R env build extends by default. Public so
+/// the CLI can pass it to [`RLanguageRuntime::with_build_config`] when building
+/// with an explicit package plan (the build script path).
+pub const DEFAULT_BASE_IMAGE: &str = "docker.io/bioconductor/bioconductor_docker:RELEASE_3_18";
 
 /// Binds the runtime to a pinned R image (the production / Docker backend):
 /// the built image `digest` + the `manifest_hash` (the `renv.lock` hash) the

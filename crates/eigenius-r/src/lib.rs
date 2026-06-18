@@ -40,4 +40,4 @@ pub mod dockerfile;
 pub mod runtime;
 
 pub use dockerfile::{r_dockerfile_fragments, RImagePlan};
-pub use runtime::{RImageBinding, RLanguageRuntime};
+pub use runtime::{RImageBinding, RLanguageRuntime, DEFAULT_BASE_IMAGE};

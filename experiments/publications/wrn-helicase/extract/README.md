@@ -1,7 +1,7 @@
 # SampleSet extraction — the Tier-1 provenance pin
 
 The numeric arrays inlined as `stats:sample_set_value` in
-[`../wrn-phase1-recompute-plans.esl`](../wrn-phase1-recompute-plans.esl) are **projections
+[`../chain/03-phase1-recompute-plans.esl`](../chain/03-phase1-recompute-plans.esl) are **projections
 of the pinned public-data slices** (a column + filter + sort of a checksummed
 CSV). This directory closes the one previously-uncommitted link in the audit
 chain:
@@ -25,6 +25,16 @@ The same recipe is also recorded **in-chain** on each SampleSet via the
 `bench:extracted_from_slice` / `extracted_from_sha256` / `extraction_columns`
 / `extraction_filter` / `extraction_recipe` fields (declared in
 `experiments/benchmark/base-ontologies/bench-core.esl`).
+
+This directory also holds the **slice derivers** that reshape raw paper supplements
+into the pinned tidy slices (the file-backed SampleSet inputs). Each reproduces its
+pinned `sha256` byte-for-byte; all three are wired into [`../data/fetch.sh`](../data/fetch.sh):
+
+- [`supp_table_1_to_csv.py`](supp_table_1_to_csv.py) — the paper's Supplementary
+  Table 1 workbook → `wrn_supplementary_table_1.csv` (stdlib `zipfile` + `xml.etree`;
+  `--check` verifies byte-identity).
+- [`if-ed5-extract.R`](if-ed5-extract.R) — ED Fig 5 IF workbook → `if_ed5_long.csv`.
+- [`foci-ed6-extract.R`](foci-ed6-extract.R) — ED Fig 6 foci workbook → `foci_53bp1_long.csv`.
 
 ## Running the pin
 
@@ -54,7 +64,7 @@ fails only on an actual drift between the inlined arrays and the raw data.
 | `wrn:wrn_recq_sampleset` | `achilles_18Q4_gene_effect.csv` → `WRN (7486)` | all-lineage by `CCLE_MSI` (joined via `sample_info.csv`) → 32 / 413 |
 
 All filters are NaN-aware (reject both `NA` and `NaN`); see
-[`../recompute-findings.md`](../recompute-findings.md) F2 for why that matters.
+[`../recompute-findings.md`](../docs/03-recompute-findings.md) F2 for why that matters.
 
 ## Follow-up (Tier 2)
 

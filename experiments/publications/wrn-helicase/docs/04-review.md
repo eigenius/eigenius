@@ -4,8 +4,8 @@
 > lethal target in microsatellite unstable cancers*, **Nature** 568:551–556
 > (2019), doi:10.1038/s41586-019-1102-x, into Eigenius's typed,
 > kernel-checkable representation. This is the narrative companion to the
-> forward-looking [encoding-plan.md](encoding-plan.md) and the discrepancy log
-> [recompute-findings.md](recompute-findings.md). It describes **what we did,
+> forward-looking [encoding-plan.md](01-encoding-plan.md) and the discrepancy log
+> [recompute-findings.md](03-recompute-findings.md). It describes **what we did,
 > what we found, and — explicitly — what we left out.**
 
 ## 1. The study
@@ -38,7 +38,7 @@ argument runs end to end from computation to mechanism:
 ## 2. Assets we retrieved
 
 Every datum is content-addressed (`sha256`) in
-[data/MANIFEST.md](data/MANIFEST.md); the large slices live under
+[data/MANIFEST.md](../data/MANIFEST.md); the large slices live under
 `data/slices/` (gitignored, pinned by hash).
 
 | Asset | What it is | Role |
@@ -104,7 +104,7 @@ Every claim carries one of **four warrant grades**, ordered by strength:
 
 **Provenance is uniform.** Every recomputed datum (and now every wrapped-R
 program input) traces to a pinned slice via a re-runnable recipe in
-[extract/extract_samplesets.py](extract/extract_samplesets.py); `--check`
+[extract/extract_samplesets.py](../extract/extract_samplesets.py); `--check`
 re-derives all 17 SampleSets + both program-input tables and fails loudly on
 drift. The R-program inputs were the last unpinned data in the encoding; they now
 carry the same `bench:extracted_from_*` pins as the SampleSets.
@@ -112,13 +112,13 @@ carry the same `bench:extracted_from_*` pins as the SampleSets.
 **Live result.** On a clean database the full chain loads, both lme4 R programs
 run in spawned containers, and **41/41 verdicts Hold** — including both halves of
 the F4 dual SAP (`viab_KM12_plan` at 2.74e-19 and `concl_viab_KM12_biological` at
-2.15e-6) side by side. The demo is [demo/wrn-helicase/run.sh](../../../demo/wrn-helicase/run.sh).
+2.15e-6) side by side. The demo is [demo/wrn-helicase/run.sh](../../../../demo/wrn-helicase/run.sh).
 
 ## 4. What we found
 
 Recomputing rather than restating surfaced four discrepancies between the paper's
 prose and its data — the point of the exercise. Full detail in
-[recompute-findings.md](recompute-findings.md); in brief:
+[recompute-findings.md](03-recompute-findings.md); in brief:
 
 - **F1 — Spearman n.** The correlation reports n=54; the pinned data yields **51**
   real pairs (3 dropped as `NA`/`NaN`). The kernel recomputes P from 51.
@@ -149,7 +149,7 @@ dependency in MSI vs MSS* — is an empirical-Bayes moderated *t* (`limma`) over
 now **run live through the substrate** and reproduces the paper exactly: **WRN
 rank 1, Q = 4.81e-24** (paper: 4.8e-24). This closes what was the encoding's last
 real capability gap, and it exercises the whole new stack end to end:
-**[D53](../../../docs/design/d53-large-data-tracking.md)** tracks the matrix (and
+**[D53](../../../../docs/design/d53-large-data-tracking.md)** tracks the matrix (and
 the `sample_info` bridge + Supp Table 1 MSI labels) as content-addressed
 `PinnedExternalFile`s; a **multi-input `RunRuntimeScript`** ships all three to a
 DooD-spawned R worker (fetched + content-verified, not inlined); the worker runs
@@ -160,12 +160,12 @@ Welch *t* over the same join ranks WRN **8th** — limma's variance shrinkage is
 precisely what lifts WRN's large, consistent effect to rank 1 with the headline Q,
 so faithfully reimplementing it natively (D52) is not warranted; D53 §6 wraps the
 pinned tool instead and makes the warrant re-checkable by `content_hash` + image
-digest. See [recompute-findings F5](recompute-findings.md) and
-`programs/dd-achilles-limma-program.json`. The **D-DIFF family** then replicates
+digest. See [recompute-findings F5](03-recompute-findings.md) and
+`programs/differential-dependency/dd-achilles-limma-program.json`. The **D-DIFF family** then replicates
 the call across screens and MSI callers, all run live: **DRIVE** (RNAi/DEMETER2,
-`programs/dd-drive-limma-program.json`) puts **WRN rank 1, Q = 1.46e-45** (paper
+`programs/differential-dependency/dd-drive-limma-program.json`) puts **WRN rank 1, Q = 1.46e-45** (paper
 1.5e-45) — #1 in *both* the CRISPR and RNAi screens; and a **GDSC PCR-MSI
-robustness** re-run (`programs/dd-gdsc-limma-program.json`, MSI-H vs MSS/MSI-L over
+robustness** re-run (`programs/differential-dependency/dd-gdsc-limma-program.json`, MSI-H vs MSS/MSI-L over
 the same Achilles matrix) keeps **WRN rank 1, Q = 4.66e-20** — the headline does
 not depend on the MSI calling method.
 
@@ -174,7 +174,7 @@ A second wrapped-R mechanism warrant has now closed, leaving one
 
 **GSEA via `fgsea` (mechanism corroboration, Fig 3a) — now reproduced-external.**
 The WRN-KO mRNA-seq gene-set enrichment is run as a D56 wrapped-R warrant
-(`programs/gsea-mech-program.json`): limma-voom DE over the GSE126464 STAR counts
+(`programs/mechanism/gsea-mech-program.json`): limma-voom DE over the GSE126464 STAR counts
 → fgsea against the Hallmark `.gmt`. It reproduces Fig 3a — **G2M_CHECKPOINT
 NES −3.53 / E2F_TARGETS −3.44 (padj 2.5e-49) down, P53_PATHWAY +2.89 (padj
 9.9e-21) / APOPTOSIS +1.78 up** — and commits `gsea_mech:result` carrying
@@ -188,11 +188,11 @@ reproduced-external.** The per-cell phospho-p53(S15)/p21 immunofluorescence
 (175,974 cells, pinned as a D53 file-backed `PinnedExternalFile` with a
 `LongTable` schema, derived from the authors' source workbook by a vendored
 extractor) is dispatched through a D56 wrapped-R `emmeans` least-squares-means
-contrast (`programs/if-ed5-lsmeans-program.json`): WRN-KO vs control on
+contrast (`programs/mechanism/if-ed5-lsmeans-program.json`): WRN-KO vs control on
 log-intensity over the MSI + TP53-proficient stratum. It reproduces ED Fig 5 —
 **p-p53 logFC +0.155 (p = 7e-69), p21 +0.310 (p ≈ 0)** — and commits
 `if_ed5:result` carrying `ActivatesP53Response("WRN","MSI")`, discharged by
-`concl_p53_activation` (wrn-phase3.esl). The recompute also *sharpens* the claim
+`concl_p53_activation` (chain/08-phase3-invivo-mechanism.esl). The recompute also *sharpens* the claim
 (finding F7): p21 is a p53 transcriptional target, so the p53-null MSI line KM12
 fails to induce it (`p21_null_logfc` ≈ −0.074), recovering the paper's own
 p53-independence point — the upstream lesion is p53-independent, the p21 arm is
@@ -202,7 +202,7 @@ the `emmeans` package (one-line `RImagePlan` add) and the `LongTable` schema.
 **DSB induction via the 53BP1 foci (mechanism, ED Fig 6f/6h) — now
 reproduced-external.** The per-cell Apple-53BP1-trunc DSB-foci counts (39,249
 cells across MSS SW620/ES2 + MSI KM12/OVK18, a D53 file-backed SampleSet) run
-through a D56 wrapped-R interaction lm (`programs/foci-ed6-program.json`,
+through a D56 wrapped-R interaction lm (`programs/mechanism/foci-ed6-program.json`,
 `foci ~ cell_line + condition*MSI`): the **condition×MSI interaction +1.82
 (p ≈ 2.6e-142)** is the MSI-selective extra DSB induction — WRN-KO multiplies
 foci ×2.08 in MSI vs ×1.04 in MSS. It commits `foci_dsb:result` carrying
@@ -448,7 +448,7 @@ Mapping every chain proposition back to where Chan et al. argue it. Anchored to
 the published Nature article (`references/publications/WRN-Helicase-Nature.pdf`,
 converted to text via `pdftotext` →
 `references/publications/WRN-Helicase-Nature-OCR/WRN-Helicase-Nature_pdftotext.txt`).
-Figure numbers cross-checked against [data/MANIFEST.md](data/MANIFEST.md) (which
+Figure numbers cross-checked against [data/MANIFEST.md](../data/MANIFEST.md) (which
 ties each source-data file to its figure). Grade: R = recomputed, W = wrapped-R,
 D = declared, L = linked-external.
 

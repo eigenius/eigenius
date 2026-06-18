@@ -100,8 +100,8 @@ echo
 # as premises, so it must load before the phases that cite it.
 echo "--- Step 1: Load ontology deps (bench-core, onco, wrn-literature) ---"
 eig load "$REPO_DIR/experiments/benchmark/base-ontologies/bench-core.esl"
-eig load "$WRN/onco.esl"
-eig load "$WRN/wrn-literature.esl"
+eig load "$WRN/chain/01-onco.esl"
+eig load "$WRN/chain/02-literature.esl"
 echo
 
 # Step 2: recompute layers, then the narrative on top. Order matters and
@@ -114,9 +114,9 @@ echo
 #   - wrn-phase1 (narrative) LAST — it stacks ON TOP and its TaskOutput cites
 #     the recomputed conclusions, so they must already be ancestors.
 echo "--- Step 2: Load WRN recompute (plans -> conclusions) + narrative on top ---"
-eig load "$WRN/wrn-phase1-recompute-plans.esl"
-eig load "$WRN/wrn-phase1-recompute-conclusions.esl"
-eig load "$WRN/wrn-phase1.esl"
+eig load "$WRN/chain/03-phase1-recompute-plans.esl"
+eig load "$WRN/chain/04-phase1-recompute-conclusions.esl"
+eig load "$WRN/chain/05-phase1-discovery.esl"
 echo
 
 # Step 3: the wrapped-R in-vivo warrant (D55/D56). Run the lme4 xenograft
@@ -125,14 +125,14 @@ echo
 # InVivoDependence proposition) under a ProgramTrace -> IsDerivedAs witness.
 #
 # Each program's runtime:image_digest must point at the R worker image (which
-# bakes limma/fgsea/lme4 + the worker cdylib/driver). The baked digests are
-# environment-specific AND go stale whenever the R worker crate changes (the
-# boot cross-check, D26 §9.3, then refuses the old image). So rebuild and pass
-# the fresh digest to patch ALL programs for this run:
-#   R_IMAGE_DIGEST="$(eig env build --language r --json | jq -r .digest)" ./run.sh
-# (or build with `eig env build --language r`, copy the printed sha256:, and
-#  export R_IMAGE_DIGEST=…). run_r_program sed-patches runtime:image_digest from
-# $R_IMAGE_DIGEST when set — covering xenograft, km12, and dd-achilles alike.
+# bakes limma/fgsea/lme4/emmeans + the worker cdylib/driver). The baked digests
+# are environment-specific AND go stale whenever the R worker crate changes (the
+# boot cross-check, D26 §9.3, then refuses the old image). So rebuild with the
+# committed build script (which declares the R packages explicitly) and pass the
+# fresh digest to patch ALL programs for this run:
+#   R_IMAGE_DIGEST="$(./demo/wrn-helicase/build-r-image.sh)" ./demo/wrn-helicase/run.sh
+# run_r_program sed-patches runtime:image_digest from $R_IMAGE_DIGEST when set —
+# covering xenograft, km12, and dd-achilles alike.
 run_r_program() {
     local src="$1" input="$2" pat="$3" prog="$1"
     if [ -n "${R_IMAGE_DIGEST:-}" ]; then
@@ -147,8 +147,8 @@ echo "--- Step 3: Run the wrapped-R warrants (lme4, D55/D56) ---"
 # 3a. In-vivo: the authors' own random-slope LRT on the xenograft volumes,
 #     committing wrn:vivo_lme4:result -> InVivoDependence(WRN,MSI) (concl_vivo).
 echo "  3a. xenograft in-vivo lme4 -> InVivoDependence"
-run_r_program "$PROGRAMS/xenograft-lme4-program.json" \
-    "$PROGRAMS/xenograft-input.json" "lrt_p_value|InVivoDependence"
+run_r_program "$PROGRAMS/invivo/xenograft-lme4-program.json" \
+    "$PROGRAMS/invivo/xenograft-input.json" "lrt_p_value|InVivoDependence"
 # 3b. Biological-level competition assay (finding F4): the pseudoreplication-
 #     corrected mixed model lmer(value ~ is_WRN + (1|guide)) LRT on the KM12
 #     competition data — the guide as biological unit. Commits
@@ -156,8 +156,8 @@ run_r_program "$PROGRAMS/xenograft-lme4-program.json" \
 #     (P ~ 2.15e-6), the honest counterpart of the published nested-ANOVA warrant
 #     (P = 2.74e-19, recomputed by wrn:viab_KM12_plan in the statistics layer).
 echo "  3b. KM12 competition biological-unit lme4 -> ViabilityDependenceAtBiologicalUnit (F4)"
-run_r_program "$PROGRAMS/km12-competition-lme4-program.json" \
-    "$PROGRAMS/km12-competition-input.json" "lrt_p_value|ViabilityDependenceAtBiologicalUnit"
+run_r_program "$PROGRAMS/invivo/km12-competition-lme4-program.json" \
+    "$PROGRAMS/invivo/km12-competition-input.json" "lrt_p_value|ViabilityDependenceAtBiologicalUnit"
 
 # 3c. D-DIFF (Achilles): the headline genome-wide differential dependency,
 #     reproduced via limma moderated-t (D56 wrapped-R) over the 187 MB CERES
@@ -187,9 +187,9 @@ if [ -f "$SLICES/achilles_18Q4_gene_effect.csv" ]; then
         docker exec "$ORCH" mkdir -p "$CACHE/$hex"
         docker cp "$SLICES/$name" "$ORCH:$CACHE/$hex/$name"
     done
-    eig load "$PROGRAMS/dd-achilles-files.json"   # sample_info + supp1 (the additional_inputs)
-    run_r_program "$PROGRAMS/dd-achilles-limma-program.json" \
-        "$PROGRAMS/dd-achilles-input.json" "adj_p_value|differential_rank|TopDifferentialDependency"
+    eig load "$PROGRAMS/differential-dependency/dd-achilles-files.json"   # sample_info + supp1 (the additional_inputs)
+    run_r_program "$PROGRAMS/differential-dependency/dd-achilles-limma-program.json" \
+        "$PROGRAMS/differential-dependency/dd-achilles-input.json" "adj_p_value|differential_rank|TopDifferentialDependency"
 else
     echo "  3c. D-DIFF limma -> SKIPPED (data/slices/ not vended; see data/MANIFEST.md)"
 fi
@@ -213,9 +213,9 @@ if [ -f "$SLICES/GSE126464_STAR_Gene_Counts.csv.gz" ] && [ -f "$SLICES/h.all.v6.
         docker exec "$ORCH" mkdir -p "$CACHE/$hex"
         docker cp "$SLICES/$name" "$ORCH:$CACHE/$hex/$name"
     done
-    eig load "$PROGRAMS/gsea-mech-files.json"   # Hallmark .gmt + Collection schema (the additional_input)
-    run_r_program "$PROGRAMS/gsea-mech-program.json" \
-        "$PROGRAMS/gsea-mech-input.json" "nes_|padj_|CausesCellCycleArrest"
+    eig load "$PROGRAMS/mechanism/gsea-mech-files.json"   # Hallmark .gmt + Collection schema (the additional_input)
+    run_r_program "$PROGRAMS/mechanism/gsea-mech-program.json" \
+        "$PROGRAMS/mechanism/gsea-mech-input.json" "nes_|padj_|CausesCellCycleArrest"
 else
     echo "  3d. C-MECH GSEA -> SKIPPED (data/slices/ not vended; see data/MANIFEST.md)"
 fi
@@ -238,10 +238,10 @@ if [ -f "$SLICES/drive_D2_DRIVE_gene_dep_scores.csv" ]; then
         docker exec "$ORCH" mkdir -p "$CACHE/$hex"
         docker cp "$SLICES/$name" "$ORCH:$CACHE/$hex/$name"
     done
-    eig load "$PROGRAMS/dd-achilles-files.json"   # supp1 (the additional_input; sample_info unused here)
-    eig load "$PROGRAMS/dd-drive-input.json"
-    run_r_program "$PROGRAMS/dd-drive-limma-program.json" \
-        "$PROGRAMS/dd-drive-input.json" "adj_p_value|differential_rank|TopDifferentialDependency"
+    eig load "$PROGRAMS/differential-dependency/dd-achilles-files.json"   # supp1 (the additional_input; sample_info unused here)
+    eig load "$PROGRAMS/differential-dependency/dd-drive-input.json"
+    run_r_program "$PROGRAMS/differential-dependency/dd-drive-limma-program.json" \
+        "$PROGRAMS/differential-dependency/dd-drive-input.json" "adj_p_value|differential_rank|TopDifferentialDependency"
 else
     echo "  3e. D-DIFF DRIVE -> SKIPPED (data/slices/ not vended; see data/MANIFEST.md)"
 fi
@@ -255,8 +255,8 @@ fi
 #     calling method. Reuses 3c's staged matrix + the supp1/sample_info nodes.
 if [ -f "$SLICES/achilles_18Q4_gene_effect.csv" ]; then
     echo "  3f. D-DIFF GDSC PCR-MSI robustness (Achilles matrix) -> TopDifferentialDependency(GDSC)"
-    run_r_program "$PROGRAMS/dd-gdsc-limma-program.json" \
-        "$PROGRAMS/dd-achilles-input.json" "adj_p_value|differential_rank|TopDifferentialDependency"
+    run_r_program "$PROGRAMS/differential-dependency/dd-gdsc-limma-program.json" \
+        "$PROGRAMS/differential-dependency/dd-achilles-input.json" "adj_p_value|differential_rank|TopDifferentialDependency"
 else
     echo "  3f. D-DIFF GDSC robustness -> SKIPPED (data/slices/ not vended; see data/MANIFEST.md)"
 fi
@@ -272,7 +272,7 @@ fi
 #     (KM12) fails to induce p21 (p21_null_logfc < 0) — the p53-independence
 #     control emitted as a measurement, NOT a failed warrant (finding F7).
 #     The slice is derived from wrn_sourcedata_EDFig5_MOESM8.xlsx by
-#     programs/if-ed5-extract.R (run once in data/slices/).
+#     extract/if-ed5-extract.R (run once in data/slices/).
 if [ -f "$SLICES/if_ed5_long.csv" ]; then
     echo "  3g. C-MECH p53 IF emmeans lsmeans (175k cells) -> ActivatesP53Response"
     ORCH="$(docker compose ps -q orchestrator 2>/dev/null || true)"
@@ -281,13 +281,13 @@ if [ -f "$SLICES/if_ed5_long.csv" ]; then
     HEX=8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519
     docker exec "$ORCH" mkdir -p "$CACHE/$HEX"
     docker cp "$SLICES/if_ed5_long.csv" "$ORCH:$CACHE/$HEX/if_ed5_long.csv"
-    eig load "$PROGRAMS/dd-achilles-files.json"   # supp1 genotype (the additional_input)
-    eig load "$PROGRAMS/if-ed5-files.json"        # LongTable DatasetSchema
-    eig load "$PROGRAMS/if-ed5-input.json"        # IF PinnedExternalFile node
-    run_r_program "$PROGRAMS/if-ed5-lsmeans-program.json" \
-        "$PROGRAMS/if-ed5-input.json" "logfc|p_value|RaisesP53DamageMarkers"
+    eig load "$PROGRAMS/differential-dependency/dd-achilles-files.json"   # supp1 genotype (the additional_input)
+    eig load "$PROGRAMS/mechanism/if-ed5-files.json"        # LongTable DatasetSchema
+    eig load "$PROGRAMS/mechanism/if-ed5-input.json"        # IF PinnedExternalFile node
+    run_r_program "$PROGRAMS/mechanism/if-ed5-lsmeans-program.json" \
+        "$PROGRAMS/mechanism/if-ed5-input.json" "logfc|p_value|RaisesP53DamageMarkers"
 else
-    echo "  3g. C-MECH p53 IF emmeans -> SKIPPED (derived slice not present; see programs/if-ed5-extract.R)"
+    echo "  3g. C-MECH p53 IF emmeans -> SKIPPED (derived slice not present; see extract/if-ed5-extract.R)"
 fi
 
 # 3h. C-MECH DSB induction (ED Fig 6f/6h): the 53BP1 DSB-foci warrant. Per-cell
@@ -307,13 +307,13 @@ if [ -f "$SLICES/foci_53bp1_long.csv" ]; then
     HEX=1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83
     docker exec "$ORCH" mkdir -p "$CACHE/$HEX"
     docker cp "$SLICES/foci_53bp1_long.csv" "$ORCH:$CACHE/$HEX/foci_53bp1_long.csv"
-    eig load "$PROGRAMS/dd-achilles-files.json"   # supp1 genotype (the additional_input)
-    eig load "$PROGRAMS/foci-ed6-files.json"      # LongTable DatasetSchema
-    eig load "$PROGRAMS/foci-ed6-input.json"      # foci PinnedExternalFile node
-    run_r_program "$PROGRAMS/foci-ed6-program.json" \
-        "$PROGRAMS/foci-ed6-input.json" "interaction|foci_fc|CausesDSBs"
+    eig load "$PROGRAMS/differential-dependency/dd-achilles-files.json"   # supp1 genotype (the additional_input)
+    eig load "$PROGRAMS/mechanism/foci-ed6-files.json"      # LongTable DatasetSchema
+    eig load "$PROGRAMS/mechanism/foci-ed6-input.json"      # foci PinnedExternalFile node
+    run_r_program "$PROGRAMS/mechanism/foci-ed6-program.json" \
+        "$PROGRAMS/mechanism/foci-ed6-input.json" "interaction|foci_fc|CausesDSBs"
 else
-    echo "  3h. C-MECH 53BP1 DSB foci -> SKIPPED (derived slice not present; see programs/foci-ed6-extract.R)"
+    echo "  3h. C-MECH 53BP1 DSB foci -> SKIPPED (derived slice not present; see extract/foci-ed6-extract.R)"
 fi
 
 # 3i. Specificity (ED Fig 9a): paralogue co-loss control over the 1.6 GB DepMap
@@ -325,7 +325,7 @@ fi
 #     coefficient stays significant + same-signed (baseline β=-0.667 p=4.4e-60;
 #     controlled β≈-0.67..-0.70, worst p≈1e-58) — WRN dependence is intrinsic to
 #     MSI, not a paralogue-co-loss confound. Discharged by concl_paralog.
-RDS="$REPO_DIR/references/publications/WRN-Helicase-Supplements/DepMap_18Q4_data.rds"
+RDS="$WRN/data/large/DepMap_18Q4_data.rds"
 if [ -f "$RDS" ]; then
     echo "  3i. Specificity paralogue co-loss lm (1.6 GB DepMap rds) -> NotExplainedByParalogLoss"
     ORCH="$(docker compose ps -q orchestrator 2>/dev/null || true)"
@@ -334,11 +334,11 @@ if [ -f "$RDS" ]; then
     HEX=14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed
     docker exec "$ORCH" mkdir -p "$CACHE/$HEX"
     docker cp "$RDS" "$ORCH:$CACHE/$HEX/DepMap_18Q4_data.rds"
-    eig load "$PROGRAMS/dd-achilles-files.json"   # supp1 (avg_WRN_dep + CCLE_MSI; additional_input)
-    eig load "$PROGRAMS/paralog-ed9a-files.json"  # rds container schema
-    eig load "$PROGRAMS/paralog-ed9a-input.json"  # rds PinnedExternalFile node
-    run_r_program "$PROGRAMS/paralog-ed9a-program.json" \
-        "$PROGRAMS/paralog-ed9a-input.json" "paralog_|NotExplainedByParalogLoss"
+    eig load "$PROGRAMS/differential-dependency/dd-achilles-files.json"   # supp1 (avg_WRN_dep + CCLE_MSI; additional_input)
+    eig load "$PROGRAMS/specificity/paralog-ed9a-files.json"  # rds container schema
+    eig load "$PROGRAMS/specificity/paralog-ed9a-input.json"  # rds PinnedExternalFile node
+    run_r_program "$PROGRAMS/specificity/paralog-ed9a-program.json" \
+        "$PROGRAMS/specificity/paralog-ed9a-input.json" "paralog_|NotExplainedByParalogLoss"
 else
     echo "  3i. Specificity paralogue co-loss -> SKIPPED (1.6 GB DepMap rds not vended; see data/MANIFEST.md)"
 fi
@@ -348,10 +348,10 @@ echo
 # wrn-phase1-biological-sap.esl cites the 3b warrant (concl_viab_KM12_biological)
 # and records the F4 dual-SAP fact — loaded here, after 3b committed its witness.
 echo "--- Step 4: Load WRN reasoning chain (biological-SAP, phase2, phase3, phase5) ---"
-eig load "$WRN/wrn-phase1-biological-sap.esl"
-eig load "$WRN/wrn-phase2.esl"
-eig load "$WRN/wrn-phase3.esl"
-eig load "$WRN/wrn-phase5.esl"
+eig load "$WRN/chain/06-phase1-biological-sap.esl"
+eig load "$WRN/chain/07-phase2-validation.esl"
+eig load "$WRN/chain/08-phase3-invivo-mechanism.esl"
+eig load "$WRN/chain/09-phase5-synthesis.esl"
 echo
 
 # Step 5: show every WRN verdict — all should be Holds.

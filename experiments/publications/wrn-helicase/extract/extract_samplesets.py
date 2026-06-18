@@ -10,7 +10,7 @@
 (Tier 1 pin).
 
 This module is the SINGLE SOURCE OF TRUTH for the numeric arrays inlined as
-`stats:sample_set_value` in ../wrn-phase1-recompute-plans.esl AND for the
+`stats:sample_set_value` in ../chain/03-phase1-recompute-plans.esl AND for the
 wrapped-R RuntimeScript program-input tables under ../programs/ (the lme4
 xenograft + KM12-competition inputs, D56). Each recipe states exactly which
 pinned slice + column + filter + sort + grouping produces the array, enforces
@@ -43,7 +43,7 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SLICES = os.path.join(HERE, "..", "data", "slices")
-ESL = os.path.join(HERE, "..", "wrn-phase1-recompute-plans.esl")
+ESL = os.path.join(HERE, "..", "chain", "03-phase1-recompute-plans.esl")
 
 # Pin anchors — full sha256 of each slice this extraction depends on.
 # (MANIFEST.md carries the truncated forms; these are the enforced values.)
@@ -403,7 +403,7 @@ def _extract_viab(first_guide_col):
 # ── Program-input table: viab_KM12_competition_table (flat per-row) ───────
 #   Same pinned slice / same data as wrn:viab_KM12_sampleset (Recipe 5), but
 #   reshaped to the flat per-row [value, guide] table the biological-unit lme4
-#   RuntimeScript program consumes (programs/km12-competition-input.json). The
+#   RuntimeScript program consumes (programs/invivo/km12-competition-input.json). The
 #   guide is the biological replication unit; is_WRN is derived in the R script.
 def _extract_viab_table(first_guide_col):
     rows = _read_xlsx_cells("wrn_sourcedata_EDFig3_MOESM6.xlsx")
@@ -487,7 +487,7 @@ PROGRAMS = os.path.join(HERE, "..", "programs")
 INPUT_TABLES = {
     "wrn:viab_KM12_competition_table": (
         lambda: _extract_viab_table(29),
-        os.path.join(PROGRAMS, "km12-competition-input.json"),
+        os.path.join(PROGRAMS, "invivo", "km12-competition-input.json"),
         {"value": "viab_value", "guide": "viab_guide"},
     ),
 }

@@ -599,6 +599,19 @@ enum EnvCommands {
         #[arg(long, value_name = "FILE")]
         r_cdylib: Option<String>,
 
+        /// (R only) Bioconductor/CRAN package to bake into the image
+        /// (repeatable). When given, this explicit list drives the build
+        /// instead of the compiled-in `RImagePlan::default`. The set MUST
+        /// match the orchestrator's compiled default, or the worker's boot
+        /// cross-check (D26 §9.3) rejects the image. Empty ⇒ use the default.
+        #[arg(long = "r-package", value_name = "PKG")]
+        r_package: Vec<String>,
+
+        /// (R only) Bioconductor release the `--r-package`s install from
+        /// (e.g. `3.18`). Defaults to the `RImagePlan::default` release.
+        #[arg(long, value_name = "VERSION")]
+        bioc_version: Option<String>,
+
         /// Path to the Julia worker's project directory (must contain
         /// `Project.toml`, `Manifest.toml`, `src/JuliaWorker.jl`).
         /// Defaults to `julia/runtime-worker/` resolved against
@@ -3164,6 +3177,8 @@ async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
             depot,
             r_driver,
             r_cdylib,
+            r_package,
+            bioc_version,
         } => {
             env::env_build(
                 endpoint,
@@ -3175,6 +3190,8 @@ async fn remote_env(endpoint: &str, command: EnvCommands, json: bool) {
                 depot.as_deref(),
                 r_driver.as_deref(),
                 r_cdylib.as_deref(),
+                &r_package,
+                bioc_version.as_deref(),
                 json,
             )
             .await

@@ -7,7 +7,7 @@
 # row 2 = cell-line label (every 4th col), row 3 = guide (sgCh2-2 / sgWRN2 /
 # sgWRN3), rows 4+ = one staining-intensity value per cell (ragged, NA-filled).
 #
-# Run from data/slices/:  Rscript ../../programs/if-ed5-extract.R
+# Run from data/slices/:  Rscript ../../extract/if-ed5-extract.R
 # Produces if_ed5_long.csv (cell_line, readout, guide, condition, value).
 suppressMessages(library(readxl))
 reshape_if <- function(file, sheet, readout) {

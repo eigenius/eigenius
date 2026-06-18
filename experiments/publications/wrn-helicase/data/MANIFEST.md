@@ -2,11 +2,21 @@
 
 Provenance for the vendored Phase-1 data slices. The slices themselves live under
 `data/slices/` and are **gitignored** (large); this manifest is the committed,
-content-addressed record. Decision §9.1 of the [encoding plan](../encoding-plan.md):
+content-addressed record. Decision §9.1 of the [encoding plan](../docs/01-encoding-plan.md):
 *fetch the minimal Phase-1 slices, checksum them, link the rest.*
 
 Fetched 2026-06-12. Figshare `supplied_md5` verified on download (all OK); `sha256`
 is our content address of the local copy.
+
+This file is the human-readable narrative. The **machine-readable** counterpart —
+one row per artifact with origin URL + checksums — is [`sources.tsv`](sources.tsv),
+the single source of truth for [`fetch.sh`](fetch.sh), which downloads every
+input from its public origin, verifies it, and runs the `extract/` derivers:
+
+```bash
+bash fetch.sh            # fetch + derive everything, then verify
+bash fetch.sh --check    # verify the present copies; never download
+```
 
 ## Vendored slices (`data/slices/`)
 
@@ -39,7 +49,7 @@ is our content address of the local copy.
 
 | File | Source | md5 (verified) | Size | Used for |
 |---|---|---|---|---|
-| `references/publications/WRN-Helicase-Supplements/DepMap_18Q4_data.rds` | figshare **7712756**.v1 → `ndownloader.figshare.com/files/14357999` | `f9e62e63bbc58ada5fc1f2d0534d08c5` (matches figshare `supplied_md5`/`computed_md5`; size 1,600,292,535 B exact) | 1.6 GB | **O-WRNFIG** — the authors' curated `dat` list (cell-lines × genes, except `MUT`). Needed for the **omics** analyses not covered by the vendored gene-effect slices: Ext Data 9a (paralog co-loss linear models) + 9b (POLE), and any feature-matrix work. |
+| `large/DepMap_18Q4_data.rds` | figshare **7712756**.v1 → `ndownloader.figshare.com/files/14357999` | `f9e62e63bbc58ada5fc1f2d0534d08c5` (matches figshare `supplied_md5`/`computed_md5`; size 1,600,292,535 B exact) | 1.6 GB | **O-WRNFIG** — the authors' curated `dat` list (cell-lines × genes, except `MUT`). Needed for the **omics** analyses not covered by the vendored gene-effect slices: Ext Data 9a (paralog co-loss linear models) + 9b (POLE), and any feature-matrix work. |
 
 The rds is an **R serialization** (a named list of matrices) — not readable by the Python extraction pipeline directly; consuming it needs R (`readRDS`) or `pyreadr`, i.e. an R conversion step (or the future D53 external-execution path). Contents: `DRIVE` (DEMETER2 dep), `CRISPR` (CERES dep), `GE` (log2 TPM expression), `CN` (log2 relative copy number), `MUT_HOT`/`MUT_DAM`/`MUT_OTHER` (binary mutation matrices), `MUT` (full mutation calls dataframe), `RPPA` (protein abundance).
 
@@ -61,12 +71,12 @@ The paper's per-figure Source Data, from `static-content.springer.com/esm/art%3A
 | `wrn_sourcedata_EDFig10_MOESM12.xlsx` | 12 | `3fc08eba…cdb33c` | ED Fig 10 MMR-restoration viability/clonogenic (→ `mmr_restoration`) |
 
 **Derived tidy slices (reshaped from the source `.xlsx`, pinned + run as D53 file-backed SampleSets):**
-- `if_ed5_long.csv` (sha256 `8d26fbb8…c86c519`, 175,974 rows) — ED Fig 5b/d/f per-cell p-p53(S15)/p21 IF intensities reshaped from `wrn_sourcedata_EDFig5_MOESM8.xlsx` by `programs/if-ed5-extract.R` into `(cell_line, readout, guide, condition, value)` long form. Consumed by the `emmeans` lsmeans warrant (`if_ed5:result` → `ActivatesP53Response`, finding **F7**).
-- `foci_53bp1_long.csv` (sha256 `1ba6dc6f…4e9b83`, 39,249 rows) — ED Fig 6f/6h per-cell Apple-53BP1-trunc DSB foci counts reshaped from `wrn_sourcedata_EDFig6_MOESM9.xlsx` by `programs/foci-ed6-extract.R` (same long shape). Consumed by the wrapped-R interaction-lm warrant (`foci_dsb:result` → `CausesDSBs`, MSI-selective, finding **F8**).
+- `if_ed5_long.csv` (sha256 `8d26fbb8…c86c519`, 175,974 rows) — ED Fig 5b/d/f per-cell p-p53(S15)/p21 IF intensities reshaped from `wrn_sourcedata_EDFig5_MOESM8.xlsx` by `extract/if-ed5-extract.R` into `(cell_line, readout, guide, condition, value)` long form. Consumed by the `emmeans` lsmeans warrant (`if_ed5:result` → `ActivatesP53Response`, finding **F7**).
+- `foci_53bp1_long.csv` (sha256 `1ba6dc6f…4e9b83`, 39,249 rows) — ED Fig 6f/6h per-cell Apple-53BP1-trunc DSB foci counts reshaped from `wrn_sourcedata_EDFig6_MOESM9.xlsx` by `extract/foci-ed6-extract.R` (same long shape). Consumed by the wrapped-R interaction-lm warrant (`foci_dsb:result` → `CausesDSBs`, MSI-selective, finding **F8**).
 
 **Recompute-upgradeable subset (existing two-way-ANOVA dispatch):** ED Fig 3b (`va_competition`), ED Fig 4b/c/d (cell-cycle/apoptosis). ED Fig 3b layout: per cell line × {day} × {Firefly, Renilla luminescence} × {sgCh2-2, sgCh2-4, sgPolR2D, sgMYC, sgWRN1/2/3} × Value 1–6 (n=6). Relative viability = Firefly/Renilla, normalized; the two-way ANOVA is `value ~ is_WRN + guide` per cell line (per `WRN_stats_calcs.Rmd`). The IF contrasts (Fig 3c, 4c, ED 5) are lsmeans, the rescue (Fig 2c) a t-test, the xenograft (Fig 2d) lme4 — external-tool frontier, not the current institution.
 
-### Reference code (cloned, in `data/WRN_manuscript/`, gitignored)
+### Reference code (cloned, in `data/reference/WRN_manuscript/`, gitignored)
 
 | Source | Used for |
 |---|---|

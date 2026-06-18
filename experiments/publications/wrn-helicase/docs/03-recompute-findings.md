@@ -1,8 +1,8 @@
 # WRN encoding — recompute findings log
 
 Discrepancies surfaced by recomputing the paper's claims against the pinned public-data
-snapshot ([data/MANIFEST.md](data/MANIFEST.md)). Each is the discipline working: a gap
-between the published number and what the data re-yields. Per [encoding-plan §5.1](encoding-plan.md),
+snapshot ([data/MANIFEST.md](../data/MANIFEST.md)). Each is the discipline working: a gap
+between the published number and what the data re-yields. Per [encoding-plan §5.1](01-encoding-plan.md),
 a divergence is a recorded finding, not a silent pass.
 
 | # | Claim (paper) | Recomputed | Class | Verdict |
@@ -58,7 +58,7 @@ of these same published display numbers — not a different (cleaner) dataset.
 **Status — LIFTED (increment 10).** C-MMR's `mmr_restoration` is now **kernel-recomputed**. A new
 `stats:CrossedAnovaAnalysisPlan` dispatch (`numerics::crossed_two_way_anova`, group = 2-level
 CL/MMR-context, crossed blocking factor = guide; distinct from the increment-8 nested dispatch)
-recomputes the three contrasts; `wrn-phase1-recompute-plans.esl` carries the three Tier-1-pinned
+recomputes the three contrasts; `chain/03-phase1-recompute-plans.esl` carries the three Tier-1-pinned
 SampleSets + plans + `bridge_mmr_restoration` → `concl_mmr_restoration_recomputed`
 (`RestorationPartiallyRescues(dMMR, WRN)`). The linked-external `wrn:mmr_restoration` ToolArtifact
 is retired; `concl_mmr` (phase 5) discharges its antecedent by D54 lemma citation. The unit test
@@ -174,15 +174,15 @@ definition of pseudoreplication:
    do the in-vitro analysis correctly, we use the same tool.
 
 **Implemented (this is now on the chain, not a follow-up).** The R program
-[`programs/km12-competition-lme4-program.json`](programs/km12-competition-lme4-program.json) runs the
-LRT on [`programs/km12-competition-input.json`](programs/km12-competition-input.json) (the ED Fig 3b
+[`programs/invivo/km12-competition-lme4-program.json`](../programs/invivo/km12-competition-lme4-program.json) runs the
+LRT on [`programs/invivo/km12-competition-input.json`](../programs/invivo/km12-competition-input.json) (the ED Fig 3b
 KM12 data) and commits `wrn:viab_KM12_bio_lme4:result` carrying an `IsDerivedAs` witness over
-`onco:ViabilityDependenceAtBiologicalUnit("WRN","KM12")`. [`wrn-phase1-biological-sap.esl`](wrn-phase1-biological-sap.esl)
+`onco:ViabilityDependenceAtBiologicalUnit("WRN","KM12")`. [`chain/06-phase1-biological-sap.esl`](../chain/06-phase1-biological-sap.esl)
 holds `concl_viab_KM12_biological` (the D54 reasoning sentence that discharges that witness) and
 `wrn:viab_KM12_dual_sap` (a declared resource recording F4 itself: the technical-stratum warrant
 `wrn:viab_KM12_plan` at 2.74e-19 vs the biological-stratum warrant at ≈2.15e-6, conclusion robust).
 Like `concl_vivo`, the witness exists only after the R program runs, so the warrant is exercised by
-the live demo ([`demo/wrn-helicase/run.sh`](../../../demo/wrn-helicase/run.sh) Step 3b), not the
+the live demo ([`demo/wrn-helicase/run.sh`](../../../../demo/wrn-helicase/run.sh) Step 3b), not the
 in-process recompute tests.
 
 The two SAPs are linked on the chain: the alternative **refines / annotates** the published claim, so
@@ -264,7 +264,7 @@ rejects `NA` and `NaN` identically.
 
 ## F5 — D-DIFF (Achilles): WRN is the top differential dependency, reproduced live through the substrate
 
-**Where:** `programs/dd-achilles-limma-program.json` (the wrapped-R D56 warrant) over the pinned
+**Where:** `programs/differential-dependency/dd-achilles-limma-program.json` (the wrapped-R D56 warrant) over the pinned
 `achilles_18Q4_gene_effect.csv` (D53 `PinnedExternalFile`, sha256 `2186669d…2eb68b`, matches
 `MANIFEST.md`), joined to MSI labels across two more pinned files via the multi-input path
 (matrix `DepMap_ID` → `sample_info` `CCLE_name` → Supp Table 1 `CCLE_MSI`).
@@ -290,12 +290,12 @@ result commits as `wrn:dd_achilles:result` (Q = 4.81e-24, rank 1,
 IsDerivedAs witness. This lifts D-DIFF from **linked-external** to **reproduced-external**.
 
 **D-DIFF family (the same warrant across screens + MSI callers), all run live through the substrate:**
-- **DRIVE (RNAi/DEMETER2, ED Fig 1b)** — `programs/dd-drive-limma-program.json` over the 59 MB
+- **DRIVE (RNAi/DEMETER2, ED Fig 1b)** — `programs/differential-dependency/dd-drive-limma-program.json` over the 59 MB
   `drive_D2_DRIVE_gene_dep_scores.csv` (genes × cell-lines; columns ARE CCLE_IDs, so the MSI join is
   direct to Supp Table 1 — no sample_info bridge). **WRN rank 1 of 4,591, Q = 1.46e-45** — the
   paper's **1.5e-45**. WRN is #1 in *both* the CRISPR (Achilles) and RNAi (DRIVE) screens; commits
   `wrn:dd_drive:result` → `TopDifferentialDependency("WRN","DRIVE_MSI")`.
-- **GDSC PCR-MSI robustness (ED Fig 1b)** — `programs/dd-gdsc-limma-program.json`, the Achilles
+- **GDSC PCR-MSI robustness (ED Fig 1b)** — `programs/differential-dependency/dd-gdsc-limma-program.json`, the Achilles
   D-DIFF re-run grouped by the orthogonal GDSC PCR panel (MSI-H vs MSS/MSI-L; only 19 MSI-H lines)
   instead of the NGS CCLE_MSI calls. Same pinned matrix + join, only the label column differs.
   **WRN STILL rank 1 of 9,714, Q = 4.66e-20** — the headline does not depend on the MSI calling
@@ -303,7 +303,7 @@ IsDerivedAs witness. This lifts D-DIFF from **linked-external** to **reproduced-
 
 ## F6 — C-MECH (Fig 3a GSEA): WRN-KO transcriptional arrest signature, reproduced live through the substrate
 
-**Where:** `programs/gsea-mech-program.json` (the wrapped-R D56 warrant) over two pinned D53
+**Where:** `programs/mechanism/gsea-mech-program.json` (the wrapped-R D56 warrant) over two pinned D53
 `PinnedExternalFile`s — the WRN-KO RNA-seq counts `GSE126464_STAR_Gene_Counts.csv.gz`
 (genes × 12 samples, gzipped; sha256 `e66c70f3…876daa5`, primary input) and the MSigDB Hallmark
 v6.2 gene-set file `h.all.v6.2.symbols.gmt` (sha256 `0ee07a4a…22146b`, carried as
@@ -333,10 +333,10 @@ file. This lifts C-MECH/GSEA from **linked-external** to **reproduced-external**
 
 ## F7 — C-MECH (ED Fig 5 IF): WRN-KO activates the p53 response, p53-status-gated, reproduced live through the substrate
 
-**Where:** `programs/if-ed5-lsmeans-program.json` (the wrapped-R D56 `emmeans` warrant) over the tidy
+**Where:** `programs/mechanism/if-ed5-lsmeans-program.json` (the wrapped-R D56 `emmeans` warrant) over the tidy
 per-cell immunofluorescence slice `if_ed5_long.csv` (175,974 cells; a D53 file-backed `PinnedExternalFile`
 with a `LongTable` schema, sha256 `8d26fbb8…c86c519`), derived from the authors' ED Fig 5 source workbook
-`wrn_sourcedata_EDFig5_MOESM8.xlsx` (panels 5b/5d/5f) by the vendored `programs/if-ed5-extract.R`.
+`wrn_sourcedata_EDFig5_MOESM8.xlsx` (panels 5b/5d/5f) by the vendored `extract/if-ed5-extract.R`.
 Genotype (CCLE_MSI + TP53_status) is joined from Supp Table 1 (the additional input).
 
 **The recipe.** Per readout, the WRN-KO vs control least-squares-means contrast on log-intensity,
@@ -358,7 +358,7 @@ p53-dependent — recovered directly from the per-cell source data rather than a
 worker (image now bakes `emmeans`) runs the lsmeans contrasts; the result commits as `wrn:if_ed5:result`
 (the five logFC/p-value measures, `canonical_proposition = ActivatesP53Response("WRN","MSI")`, set when
 BOTH p-p53 and p21 rise significantly) under a ProgramTrace → IsDerivedAs witness. The
-`concl_p53_activation` ReasoningSentence (wrn-phase3.esl) discharges that witness — a reproduced-external
+`concl_p53_activation` ReasoningSentence (chain/08-phase3-invivo-mechanism.esl) discharges that witness — a reproduced-external
 corroboration of `concl_mech`. This lifts the p53-activation arm of C-MECH from **linked-external** to
 **reproduced-external**.
 
@@ -368,11 +368,11 @@ SampleSet shape, via D52-native ANOVA / a count-model warrant.
 
 ## F8 — C-MECH (ED Fig 6f/6h): WRN-KO induces 53BP1 DSB foci MSI-selectively, reproduced live through the substrate
 
-**Where:** `programs/foci-ed6-program.json` (the wrapped-R D56 warrant) over the tidy per-cell foci slice
+**Where:** `programs/mechanism/foci-ed6-program.json` (the wrapped-R D56 warrant) over the tidy per-cell foci slice
 `foci_53bp1_long.csv` (39,249 cells; a D53 file-backed `PinnedExternalFile` with a `LongTable` schema,
 sha256 `1ba6dc6f…4e9b83`), derived from the authors' ED Fig 6 source workbook
 `wrn_sourcedata_EDFig6_MOESM9.xlsx` (panels 6f/6h — Apple-53BP1-trunc foci) by the vendored
-`programs/foci-ed6-extract.R`. MSI genotype is joined from Supp Table 1 (the additional input).
+`extract/foci-ed6-extract.R`. MSI genotype is joined from Supp Table 1 (the additional input).
 
 **The recipe.** Panels 6f (SW620 MSS, KM12 MSI) and 6h (ES2 MSS, OVK18 MSI) together span both MSI
 strata, so MSI-selectivity is a single interaction model: `foci ~ cell_line + condition*MSI`. The
@@ -390,14 +390,14 @@ wrapped-R path as the p53 IF warrant (F7).
 content-verifies the foci slice + Supp Table 1; a DooD-spawned R worker fits the interaction lm; the
 result commits as `wrn:foci_dsb:result` (the interaction estimate/p + per-stratum fold-changes,
 `canonical_proposition = CausesDSBs("WRN","MSI")`, set when the interaction is positive and significant)
-under a ProgramTrace → IsDerivedAs witness. The `concl_dsb_foci` ReasoningSentence (wrn-phase3.esl)
+under a ProgramTrace → IsDerivedAs witness. The `concl_dsb_foci` ReasoningSentence (chain/08-phase3-invivo-mechanism.esl)
 discharges it — a reproduced-external corroboration of `concl_dsb`. This lifts the **53BP1 arm** of
 CausesDSBs from linked-external to reproduced-external; the broader marker panel (γH2AX intensity ED 6c,
 pATM(S1981)/Chk2(T68) ED 6/7) remains linked corroboration in `mech_dsb`, the same-shape backlog.
 
 ## F9 — ED Fig 9a: WRN's MSI-dependence is intrinsic, not a paralogue-co-loss confound, reproduced live over the 1.6 GB DepMap rds
 
-**Where:** `programs/paralog-ed9a-program.json` (the wrapped-R D56 warrant) over the authors' 1.6 GB
+**Where:** `programs/specificity/paralog-ed9a-program.json` (the wrapped-R D56 warrant) over the authors' 1.6 GB
 DepMap 18Q4 omics bundle `DepMap_18Q4_data.rds` (D53 `PinnedExternalFile`, sha256 `14e82c39…9c85ed`,
 read in-worker via `readRDS` — the **large multi-schema container** path: a named list of cell-line×gene
 matrices DRIVE/CRISPR/GE/CN/MUT_*/RPPA). `avg_WRN_dep` + `CCLE_MSI` come from Supp Table 1 (the
@@ -429,6 +429,6 @@ container's members with an `Other` layout. The worker `readRDS` of the full bun
 `wrn:paralog_ctrl:result` (baseline + controlled MSI β/p, `canonical_proposition =
 NotExplainedByParalogLoss("WRN","MSI")`, set when the MSI coefficient stays significant + same-signed
 across all paralogue controls) under a ProgramTrace → IsDerivedAs witness, discharged by `concl_paralog`
-(wrn-phase3.esl). This closes the omics-analysis frontier: every analysis class in the paper — native
+(chain/08-phase3-invivo-mechanism.esl). This closes the omics-analysis frontier: every analysis class in the paper — native
 recompute, mixed models (lme4), large-matrix limma, GSEA (fgsea), per-cell IF/foci (emmeans/interaction
 lm), and now the large multi-schema rds container — runs live through the platform.

@@ -2,7 +2,7 @@
 
 From literature references + datasets through to the final synthetic-lethal
 conclusion. **Node colour encodes the four epistemic statuses**, using the
-official site warrant palette ([website/src/styles/custom.css](../../../website/src/styles/custom.css)):
+official site warrant palette ([website/src/styles/custom.css](../../../../website/src/styles/custom.css)):
 
 - 🟦 **Observed** `#3A7CA5` — recorded from reality (datasets, `PinnedExternalFile`s, `SampleSet`s, the xenograft table).
 - 🟧 **Derived** `#D98C5F` — computed with an `IsDerivedAs` witness (statistics-institution results, wrapped-R results, linked-external `ToolArtifact`s).

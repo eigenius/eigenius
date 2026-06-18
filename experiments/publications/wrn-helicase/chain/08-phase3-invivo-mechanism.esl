@@ -41,8 +41,8 @@ namespace litclaim   = "urn:eigenius:pub:wrn:litclaim";
 // materialized by running the authors' lme4 random-slope mixed-model LRT
 // (in_vivo_KM12_analysis.R) as a RuntimeScript through the R language
 // runtime (D55), wrapping the real lme4 at a pinned image. The pieces:
-//   - programs/xenograft-input.json  — the Fig 2d tumor-volume table (73 obs)
-//   - programs/xenograft-lme4-program.json — applies the RunRuntimeScript
+//   - programs/invivo/xenograft-input.json  — the Fig 2d tumor-volume table (73 obs)
+//   - programs/invivo/xenograft-lme4-program.json — applies the RunRuntimeScript
 //     component to that table; the R script fits the lme4 LRT and emits the
 //     DerivedResource `wrn:vivo_lme4:result` carrying
 //     `canonical_proposition = onco:InVivoDependence("WRN","MSI")` (set when
@@ -137,7 +137,7 @@ resource wrn:concl_vivo_ontarget : reasoning:ReasoningSentence {
 }
 
 // Reproduced-external (C-MECH p53 arm): WRN loss activates the p53 DDR. The
-// wrapped-R `emmeans` warrant (programs/if-ed5-lsmeans-program.json) over the
+// wrapped-R `emmeans` warrant (programs/mechanism/if-ed5-lsmeans-program.json) over the
 // per-cell p-p53(S15)/p21 IF (ED Fig 5b/d/f, 175,974 cells; MSI + TP53-proficient
 // stratum) emits the MEASURED fact `wrn:if_ed5:result` →
 // `onco:RaisesP53DamageMarkers("WRN","MSI")` (set when BOTH p-p53 and p21 rise
@@ -200,7 +200,7 @@ resource wrn:concl_p53_activation : reasoning:ReasoningSentence {
 // concl_vivo, the witness exists only after the R program runs — the authors'
 // 1.6 GB DepMap omics bundle (D53 PinnedExternalFile, read via readRDS — the
 // large multi-schema container path) is dispatched through a D56 wrapped-R
-// warrant (programs/paralog-ed9a-program.json) that fits
+// warrant (programs/specificity/paralog-ed9a-program.json) that fits
 // lm(avg_WRN_dep ~ MSI + gene_loss) per RECQ paralogue and emits
 // `wrn:paralog_ctrl:result` with `NotExplainedByParalogLoss("WRN","MSI")` —
 // set when the MSI coefficient stays significant + same-signed controlling for
@@ -281,7 +281,7 @@ resource wrn:concl_dsb : reasoning:ReasoningSentence {
 // witness only exists after the R program runs — the per-cell Apple-53BP1-trunc
 // foci counts (ED Fig 6f/6h, 39,249 cells across MSS SW620/ES2 + MSI KM12/OVK18,
 // pinned as a D53 file-backed SampleSet) are dispatched through a D56 wrapped-R
-// warrant (programs/foci-ed6-program.json) that fits foci ~ cell_line +
+// warrant (programs/mechanism/foci-ed6-program.json) that fits foci ~ cell_line +
 // condition*MSI and emits `wrn:foci_dsb:result` with
 // `canonical_proposition = onco:CausesDSBs("WRN","MSI")` — set when the
 // condition×MSI interaction is positive and significant (the MSI-SELECTIVE extra

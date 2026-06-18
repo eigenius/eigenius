@@ -184,7 +184,7 @@ eigenius data verify <iri>
 
 ## 8. Smaller inputs: optional de-duplication
 
-The same `PinnedExternalFile` path applied to *small* already-pinned sources closes a real wart in the wrapped-R warrants. Today the WRN lme4 programs read **inlined** input tables (`programs/km12-competition-input.json`, `xenograft-input.json`) that re-transcribe data already pinned elsewhere: `km12-competition-input.json` carries the same ED Fig 3b bytes as `viab_KM12_sampleset`, just reshaped flat — **two transcriptions of one already-checksummed slice**.
+The same `PinnedExternalFile` path applied to *small* already-pinned sources closes a real wart in the wrapped-R warrants. Today the WRN lme4 programs read **inlined** input tables (`programs/invivo/km12-competition-input.json`, `xenograft-input.json`) that re-transcribe data already pinned elsewhere: `km12-competition-input.json` carries the same ED Fig 3b bytes as `viab_KM12_sampleset`, just reshaped flat — **two transcriptions of one already-checksummed slice**.
 
 Routing the program's input through a `PinnedExternalFile` that references that **one pinned source** (the xlsx slice, or a small pinned CSV slice of it) removes the duplicate: the script reads the genuine pinned bytes, and the only remaining on-chain copy is the `SampleSet`'s inlined values — which D52's pure-Rust path *must* read on the chain, and which is a legitimate Observed→Derived projection of the same source (verified by the `--check` recipe), not an independent hand-transcription.
 

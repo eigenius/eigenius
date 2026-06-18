@@ -14,7 +14,7 @@
 // in-vivo arm (concl_vivo) uses for the authors' own lme4 mixed model — NOT
 // reimplemented as statistics-institution numerics: a mixed-effects LRT is a
 // runtime-dependent computation (D26 §2.2). The R program
-// (programs/km12-competition-lme4-program.json) commits
+// (programs/invivo/km12-competition-lme4-program.json) commits
 // `wrn:viab_KM12_bio_lme4:result` carrying an IsDerivedAs witness over
 // onco:ViabilityDependenceAtBiologicalUnit("WRN","KM12"); concl_viab_KM12_biological
 // discharges it. The faithful (published) warrant — the nested-ANOVA

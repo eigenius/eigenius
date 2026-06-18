@@ -71,7 +71,7 @@ resource wrn:h1_trace : reflection:DeclarationTrace {
 // CRISPR. **Reproduced-external** (D53 file-pinned matrix + D56 wrapped-R
 // limma): the limma moderated-t over the Achilles CERES matrix gives WRN
 // rank 1, Q = 4.81e-24 — matching the paper's 4.8e-24. Run live through the
-// substrate via programs/dd-achilles-limma-program.json (multi-input: the
+// substrate via programs/differential-dependency/dd-achilles-limma-program.json (multi-input: the
 // pinned matrix + sample_info bridge + Supp Table 1 MSI labels), which
 // commits wrn:dd_achilles:result under a ProgramTrace -> IsDerivedAs witness.
 // This node is the narrative anchor the C-WRN certificate cites; running the
@@ -87,7 +87,7 @@ resource wrn:dd_achilles : bench:ToolArtifact {
 }
 resource wrn:dd_achilles_trace : reflection:ProgramTrace {
     reflection:resource  = wrn:dd_achilles;
-    reflection:source    = "limma moderated-t recompute via programs/dd-achilles-limma-program.json (D56 wrapped-R; substrate-spawned R worker over the pinned Achilles matrix); emits wrn:dd_achilles:result";
+    reflection:source    = "limma moderated-t recompute via programs/differential-dependency/dd-achilles-limma-program.json (D56 wrapped-R; substrate-spawned R worker over the pinned Achilles matrix); emits wrn:dd_achilles:result";
     reflection:timestamp = "2026-06-12T13:00:01Z";
 }
 

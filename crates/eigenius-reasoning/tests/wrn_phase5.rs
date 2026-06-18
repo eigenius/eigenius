@@ -206,50 +206,58 @@ fn build_ctx() -> ExecutionContext {
         "harness",
     );
     let onco = esl_against(
-        include_str!("../../../experiments/publications/wrn-helicase/onco.esl"),
+        include_str!("../../../experiments/publications/wrn-helicase/chain/01-onco.esl"),
         &harness,
         "onco",
     );
     // Literature layer: phase2/phase3 rules compose its warrants as premises.
     let literature = esl_against(
-        include_str!("../../../experiments/publications/wrn-helicase/wrn-literature.esl"),
+        include_str!("../../../experiments/publications/wrn-helicase/chain/02-literature.esl"),
         &onco,
         "wrn-literature",
     );
     // D54 two-phase load: plans (emitters) before conclusions (consumers).
     let recompute_plans = esl_against(
         include_str!(
-            "../../../experiments/publications/wrn-helicase/wrn-phase1-recompute-plans.esl"
+            "../../../experiments/publications/wrn-helicase/chain/03-phase1-recompute-plans.esl"
         ),
         &literature,
         "wrn-recompute-plans",
     );
     let recompute = esl_against_pending(
         include_str!(
-            "../../../experiments/publications/wrn-helicase/wrn-phase1-recompute-conclusions.esl"
+            "../../../experiments/publications/wrn-helicase/chain/04-phase1-recompute-conclusions.esl"
         ),
         &recompute_plans,
         "wrn-recompute-conclusions",
         STATS_RECOMPUTED,
     );
     let phase1 = esl_against(
-        include_str!("../../../experiments/publications/wrn-helicase/wrn-phase1.esl"),
+        include_str!(
+            "../../../experiments/publications/wrn-helicase/chain/05-phase1-discovery.esl"
+        ),
         &recompute,
         "wrn-phase1",
     );
     let phase2 = esl_against(
-        include_str!("../../../experiments/publications/wrn-helicase/wrn-phase2.esl"),
+        include_str!(
+            "../../../experiments/publications/wrn-helicase/chain/07-phase2-validation.esl"
+        ),
         &phase1,
         "wrn-phase2",
     );
     let phase3 = esl_against_pending(
-        include_str!("../../../experiments/publications/wrn-helicase/wrn-phase3.esl"),
+        include_str!(
+            "../../../experiments/publications/wrn-helicase/chain/08-phase3-invivo-mechanism.esl"
+        ),
         &phase2,
         "wrn-phase3",
         R_RUNTIME,
     );
     let phase5 = esl_against(
-        include_str!("../../../experiments/publications/wrn-helicase/wrn-phase5.esl"),
+        include_str!(
+            "../../../experiments/publications/wrn-helicase/chain/09-phase5-synthesis.esl"
+        ),
         &phase3,
         "wrn-phase5",
     );
