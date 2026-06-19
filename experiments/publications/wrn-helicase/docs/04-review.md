@@ -4,8 +4,9 @@
 > lethal target in microsatellite unstable cancers*, **Nature** 568:551–556
 > (2019), doi:10.1038/s41586-019-1102-x, into Eigenius's typed,
 > kernel-checkable representation. This is the narrative companion to the
-> forward-looking [encoding-plan.md](01-encoding-plan.md) and the discrepancy log
-> [recompute-findings.md](03-recompute-findings.md). It describes **what we did,
+> [encoding-plan.md](01-encoding-plan.md) — the design plan, since realized in
+> full and annotated in place with dated as-built increment logs — and the
+> discrepancy log [recompute-findings.md](03-recompute-findings.md). It describes **what we did,
 > what we found, and — explicitly — what we left out.**
 
 ## 1. The study
@@ -60,13 +61,16 @@ recompute or wrap faithfully rather than guess.
 ## 3. How we represented it
 
 The encoding is a **layered chain** (each layer immutable, parent-pointed):
-ontology deps (`bench-core`, `onco`) → narrative (`wrn-phase1`) → recompute
-**plans** (emitters) → recompute **conclusions** (consumers) → wrapped-R warrants
-→ reasoning phases (2/3/5) → a biological-SAP layer. Two institutions compose
-through the shared chain: the **statistics institution** writes `IsDerivedAs`
-witnesses; the **reasoning institution** reads them via the D49 ChainWitness
-index to discharge `JustifiedBy` certificates. Declared rules bridge statistical
-facts to domain conclusions.
+ontology deps (`bench-core`, `onco`, and the bootstrap `reference` ontology) →
+bibliographic **literature** warrants (`chain/02-literature.esl`) → narrative →
+recompute **plans** (emitters) → recompute **conclusions** (consumers) →
+wrapped-R warrants → reasoning phases (2/3/5) → a biological-SAP layer. Two
+institutions compose through the shared chain: the **statistics institution**
+writes `IsDerivedAs` witnesses; the **reasoning institution** reads them via the
+D49 ChainWitness index to discharge `JustifiedBy` certificates. Declared rules
+bridge statistical facts to domain conclusions, and the reasoning institution
+also discharges **imported published claims** (the literature warrants below) as
+Declared premises inside those certificates.
 
 Every claim carries one of **four warrant grades**, ordered by strength:
 
@@ -102,6 +106,39 @@ Every claim carries one of **four warrant grades**, ordered by strength:
    cite by their reported value with pinned source provenance but do **not**
    re-run — see §5.
 
+**Literature references as typed, composable warrants.** The paper's cited prior
+work is on the chain as first-class typed objects, not free text. A bootstrap
+`reference` ontology defines `reference:Reference` (a global bibliographic
+work — `doi`, `pmid`, `title`, `creator`, `container_title`, `issued_year`,
+`url`) separately from `reference:Citation` (a `reflection:DeclaredResource`
+recording one *use* of a work). Each citation is typed by its **CiTO** function
+(`reference:citation_type`, drawn from a five-member SPAR/CiTO vocabulary —
+`obtainsBackgroundFrom`, `usesMethodIn`, `citesAsEvidence`,
+`citesAsSourceDocument`, `citesAsAuthority` — constrained by `allows_only`, so an
+unknown function is rejected at commit). `chain/02-literature.esl` carries **18
+`Reference`s** (real, validated DOIs + PMIDs) and **18 CiTO-typed `Citation`s**.
+
+Eleven of those citations are **warrants**: a `Citation` carrying a
+`reflection:canonical_proposition` (the imported claim, e.g.
+`litclaim:WRNActivitiesSeparable("WRN")`) plus a `DeclarationTrace` that admits
+it as an `IsDeclaredAs` witness. These are wired as **genuine logical premises**,
+not provenance sidecars — the reasoning certificates discharge them with
+`declared(LIT, …)`:
+
+- `litclaim:WRNActivitiesSeparable` (Newman/Sturzenegger structure–function) →
+  an antecedent of the helicase/exonuclease rules → **`concl_helicase_required`**
+  and **`concl_exo_dispensable`**.
+- `litclaim:C911ControlIsValid` (the C911 seed-control design) → the seed-control
+  rule → **`concl_vivo_ontarget`**.
+- `litclaim:pS15MarksP53Activation` (Loughery 2014, p-p53(S15) as a p53-activation
+  marker) → the p53 rule → **`concl_p53_activation`**.
+
+The remaining citations are provenance-only (CiTO-typed links to the datasets and
+methods — CERES, DEMETER2, limma/voom, Hallmark — that the warrants rest on). So
+the paper's bibliography is queryable, each citation says *how* the work is used,
+and the load-bearing prior claims participate in the proof rather than sitting
+beside it.
+
 **Provenance is uniform.** Every recomputed datum (and now every wrapped-R
 program input) traces to a pinned slice via a re-runnable recipe in
 [extract/extract_samplesets.py](../extract/extract_samplesets.py); `--check`
@@ -109,10 +146,12 @@ re-derives all 17 SampleSets + both program-input tables and fails loudly on
 drift. The R-program inputs were the last unpinned data in the encoding; they now
 carry the same `bench:extracted_from_*` pins as the SampleSets.
 
-**Live result.** On a clean database the full chain loads, both lme4 R programs
-run in spawned containers, and **41/41 verdicts Hold** — including both halves of
-the F4 dual SAP (`viab_KM12_plan` at 2.74e-19 and `concl_viab_KM12_biological` at
-2.15e-6) side by side. The demo is [demo/wrn-helicase/run.sh](../../../../demo/wrn-helicase/run.sh).
+**Live result.** On a clean database the full chain loads, all nine wrapped-R
+programs run in spawned containers, and **52/52 verdicts Hold** — including the
+literature-composed conclusions (`concl_helicase_required`, `concl_exo_dispensable`,
+`concl_vivo_ontarget`, `concl_p53_activation`) and both halves of the F4 dual SAP
+(`viab_KM12_plan` at 2.74e-19 and `concl_viab_KM12_biological` at 2.15e-6) side by
+side. The demo is [demo/wrn-helicase/run.sh](../../../../demo/wrn-helicase/run.sh).
 
 ## 4. What we found
 
@@ -250,7 +289,7 @@ than overstating its coverage.
 
 # Appendix A — Inventory of warrants, computations, and verdicts
 
-Every row below `Holds` on the live chain (41 verdicts total; clean-DB run via
+Every row below `Holds` on the live chain (52 verdicts total; clean-DB run via
 `run.sh`). Statistics are the kernel-recomputed values; the SampleSet/program
 inputs are content-hash-pinned (`extract --check`).
 
@@ -508,9 +547,13 @@ the number), and `ViabilityDependenceAtBiologicalUnit` is *our* methodological
 addition, flagged as such.
 
 > **Note on representation.** This table is the *documentation* form of the
-> mapping (option (a)). Today the link is carried by free-text
-> `reflection:declared_by` slugs (`wrn-paper:…`) that resolve to nothing, and the
-> paper's own bibliography is not on the chain. Promoting the publication and its
-> claims/citations to first-class resolvable resources — so the mapping is
-> queryable and literature references are typed objects — is a separate
-> structural step (options (b)/(c)), deferred to its own design note.
+> figure-to-proposition mapping. The complementary structural step — promoting
+> the paper's **bibliography** to first-class resolvable resources — is **done**
+> (it was deferred to its own design note when this memo was first written): the
+> bootstrap `reference` ontology + [`chain/02-literature.esl`](../chain/02-literature.esl)
+> put 18 typed `reference:Reference` works and 18 CiTO-typed `reference:Citation`s
+> on the chain, with 11 of them composed into the proof as imported-claim warrants
+> (see §3, "Literature references as typed, composable warrants"). The
+> figure-to-chain-proposition mapping in this appendix is still carried as
+> documentation rather than as per-proposition `cites` edges; tightening *that*
+> last link is the remaining structural step.

@@ -3,6 +3,8 @@
 > **Stage-1 deliverable.** A detailed implementation + content plan for converting Chan et al., *Nature* 2019 (568:551–556, doi:10.1038/s41586-019-1102-x) from prose into a structured, machine-checkable Eigenius representation. Stage 2 (the actual encoding) is informed by this plan. Source text: [`../WRN-Helicase-nihms-1522798.txt`](../../../../references/publications/WRN-Helicase-nihms-1522798.txt).
 >
 > *Created 2026-06-12. Working document.*
+>
+> **Status: realized in full as of 2026-06-13.** This plan was executed end to end; the whole `H1 → … → C-MAIN` argument graph type-checks across Phases 1–5. The §8 phasing section is annotated in place with the dated as-built increment logs, and the [review memo](04-review.md) is the retrospective narrative. This document now doubles as plan-of-record and as-built log.
 
 ---
 
