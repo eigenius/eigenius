@@ -250,12 +250,27 @@ the concrete reproduced-external corroboration of `concl_dsb` (which still cites
 the full-panel linked-external `mech_dsb`, keeping the mechanism chain
 in-process-verifiable).
 
-The remaining linked-external corroborations are the rest of the DSB-marker
-panel, now a tractable backlog (not a capability gap): γH2AX intensity (ED 6c)
-and the pATM(S1981)/Chk2(T68) foci (ED 6/7) are per-cell quantitative data over
-the same D53 file-backed SampleSet shape — closed by a wrapped-R `emmeans`
-contrast (intensity) / interaction lm (counts); FISH (ED 8) is a t-test. Source
-data is pinned; these are the same proven shape, not a missing capability.
+The rest of the DSB-marker panel is **now recomputed too** (the backlog is
+closed). Each marker is recomputed by its *biologically valid* readout: **γH2AX**
+by **intensity** (ED 6c, `emmeans` interaction — reproduces the paper's published
+log10 fold-change 0.055 ES2 / 0.144 OVK18 and contrast P<2×10⁻¹⁶,
+`concl_dsb_gh2ax`) *and* by **foci** (ED 6a/6d, interaction lm with saturated
+pan-nuclear cells counted at a ceiling, `concl_dsb_gh2ax_foci`); the
+DDR-signaling **pATM(S1981)** by **foci** (ED 7b/7d, interaction lm →
+`onco:ActivatesDSBResponse`, `concl_ddr_signaling` — the ATM-activation bridge to
+p53). A subtlety the data forced: γH2AX foci-counting is only valid if pan-nuclear
+(saturated, uncountable) cells are *counted*, not dropped — they are the
+most-damaged, MSI-enriched cells (pan-nuclear fraction KM12 13%→50% on WRN loss),
+and dropping them inverts the result. That is why the authors quantify γH2AX
+primarily by intensity, and why pATM/53BP1 (discrete foci, rarely pan-nuclear)
+are quantified by foci.
+
+The **only** mechanism readouts that stay linked are the two with **no numeric
+source data**: the **Chk2(T68) western blot** (ED 7e — band levels, no per-cell
+sheet) and the **telomere-FISH metaphase scoring** (ED 8a — no source sheet, and
+the "no telomeric defect" finding is a qualitative negative anyway). Both are
+recorded as data constraints, not scope choices (`MOESM10` carries only 7b/7d;
+`MOESM11` only the 8d coloc).
 
 The split is deliberate and is itself the prioritized roadmap: anything the
 statistics institution can re-run from fetched data is recomputed (attestable);
@@ -268,10 +283,14 @@ gene-set case (**fgsea GSEA over the pinned RNA-seq counts + Hallmark `.gmt`
 Collection profile**), the per-cell-IF case (**`emmeans` lsmeans over the
 175k-cell p53/p21 file-backed SampleSet**), the per-cell-count case (**53BP1 DSB
 foci interaction lm**), and the large-multi-schema-container case (**paralogue
-co-loss lm over the 1.6 GB DepMap omics rds, read in-worker via `readRDS`**).
-Every analysis class in the paper now runs live through the platform; the only
-remaining linked-external items (the other DSB-marker channels — γH2AX intensity,
-pATM/Chk2 foci) are the *same proven* shape, not an open capability gap.
+co-loss lm over the 1.6 GB DepMap omics rds, read in-worker via `readRDS`**), the
+per-cell-intensity case (**γH2AX `emmeans` interaction, ED 6c**), and the
+DDR-signaling case (**pATM(S1981) foci lm, ED 7b/7d**).
+Every analysis class in the paper now runs live through the platform, and **every
+per-cell quantitative DSB-mechanism readout is recomputed** (γH2AX intensity +
+foci, 53BP1 foci, pATM foci); the only linked-external mechanism items left are
+the two with **no numeric source data** — the Chk2(T68) western and the telomere
+FISH — which is a data constraint, not a capability gap.
 
 ## 6. What the exercise demonstrates
 

@@ -157,6 +157,12 @@ data onco:InVivoDependence : core:string -> core:string -> Prop {
 data onco:CausesDSBs : core:string -> core:string -> Prop {
 }
 
+// (gene, context): gene depletion activates the ATM-driven DSB response in the
+// context — phospho-ATM(S1981) autophosphorylation (and Chk2(T68)), the
+// signaling step bridging DSBs to p53 / anti-proliferative signaling.
+data onco:ActivatesDSBResponse : core:string -> core:string -> Prop {
+}
+
 // (gene, context): the lethal phenotype is driven by DSB-induced DNA-damage
 // response (p53 activation, apoptosis, cell-cycle arrest) — the mechanism.
 data onco:DSBDrivenLethality : core:string -> core:string -> Prop {

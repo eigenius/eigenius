@@ -43,7 +43,8 @@ flowchart LR
     ed3["ED Fig 3b competition"]:::observed
     ed4["ED Fig 4b/c/d<br/>cell-cycle / apoptosis"]:::observed
     ed5["ED Fig 5 p-p53 / p21 IF"]:::observed
-    ed6["ED Fig 6f/h 53BP1 foci"]:::observed
+    ed6["ED Fig 6 γH2AX + 53BP1<br/>(intensity 6c, foci 6a/d/f/h)"]:::observed
+    ed7["ED Fig 7b/d pATM(S1981) foci"]:::observed
     ed8["ED Fig 8d coloc · FISH"]:::observed
     ed10["ED Fig 10 MMR restoration / HCR"]:::observed
   end
@@ -114,6 +115,12 @@ flowchart LR
     r_foci["foci_dsb result<br/>53BP1 ×MSI interaction"]:::derived
     c_dsb["CausesDSBs(WRN,MSI)"]:::verified
     c_dsb_foci["CausesDSBs — 53BP1 (reproduced)"]:::verified
+    r_gh2ax["gh2ax result<br/>γH2AX intensity emmeans"]:::derived
+    c_dsb_gh2ax["CausesDSBs — γH2AX intensity (reproduced)"]:::verified
+    r_gh2axf["gh2ax_foci result<br/>γH2AX foci ×MSI lm"]:::derived
+    c_dsb_gh2axf["CausesDSBs — γH2AX foci (reproduced)"]:::verified
+    r_patm["patm result<br/>pATM(S1981) foci ×MSI lm"]:::derived
+    c_ddr["ActivatesDSBResponse(WRN,MSI)"]:::verified
     r_cc["cell-cycle results (ANOVA)"]:::derived
     c_cc["CausesCellCycleArrest(WRN,MSI)"]:::verified
     r_apop["apoptosis results (ANOVA)"]:::derived
@@ -192,6 +199,12 @@ flowchart LR
 
   %% ---------- mechanism edges ----------
   ed6 --> r_foci --> c_dsb_foci
+  ed6 --> r_gh2ax --> c_dsb_gh2ax
+  ed6 --> r_gh2axf --> c_dsb_gh2axf
+  ed7 --> r_patm --> c_ddr
+  supp --> r_gh2ax
+  supp --> r_gh2axf
+  supp --> r_patm
   mech_dsb --> c_dsb
   ed4 --> r_cc --> c_cc
   ed4 --> r_apop --> c_apop

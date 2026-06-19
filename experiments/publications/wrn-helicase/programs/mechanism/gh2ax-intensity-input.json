@@ -1,0 +1,13 @@
+[
+  {
+    "@id": "urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:ingest:PinnedExternalFile"
+    ],
+    "urn:eigenius:reflection:source": "Derived from wrn_sourcedata_EDFig6_MOESM9.xlsx (panel 6c) via extract/gh2ax-ed6c-extract.R; tidy per-cell gamma-H2AX staining intensities",
+    "urn:eigenius:ingest:reference": "file://wrn-slices/gh2ax_intensity_long.csv",
+    "urn:eigenius:ingest:content_hash": "sha256:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95",
+    "urn:eigenius:ingest:media_type": "text/csv",
+    "urn:eigenius:ingest:schema": "urn:eigenius:pub:wrn:gh2ax_intensity_schema"
+  }
+]

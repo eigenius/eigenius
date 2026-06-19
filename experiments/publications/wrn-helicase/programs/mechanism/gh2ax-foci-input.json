@@ -1,0 +1,13 @@
+[
+  {
+    "@id": "urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:ingest:PinnedExternalFile"
+    ],
+    "urn:eigenius:reflection:source": "Derived from wrn_sourcedata_EDFig6_MOESM9.xlsx (panels 6a/6d) via extract/gh2ax-ed6ad-extract.R; tidy per-cell gamma-H2AX foci counts (pan-nuclear at saturation ceiling)",
+    "urn:eigenius:ingest:reference": "file://wrn-slices/gh2ax_foci_long.csv",
+    "urn:eigenius:ingest:content_hash": "sha256:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c",
+    "urn:eigenius:ingest:media_type": "text/csv",
+    "urn:eigenius:ingest:schema": "urn:eigenius:pub:wrn:gh2ax_foci_schema"
+  }
+]

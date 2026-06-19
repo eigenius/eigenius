@@ -70,6 +70,9 @@ const R_RUNTIME: &[&str] = &[
     "urn:eigenius:pub:wrn:concl_vivo",
     "urn:eigenius:pub:wrn:concl_p53_activation",
     "urn:eigenius:pub:wrn:concl_dsb_foci",
+    "urn:eigenius:pub:wrn:concl_dsb_gh2ax",
+    "urn:eigenius:pub:wrn:concl_dsb_gh2ax_foci",
+    "urn:eigenius:pub:wrn:concl_ddr_signaling",
     "urn:eigenius:pub:wrn:concl_paralog",
 ];
 
@@ -346,6 +349,44 @@ fn wrn_phase3_p53_activation_validates() {
 fn wrn_phase3_dsb_foci_validates() {
     let (ctx, inst) = build_phase3_ctx();
     assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_dsb_foci");
+}
+
+/// `concl_dsb_gh2ax` (the reproduced-external γH2AX-intensity leg of `CausesDSBs`,
+/// ED Fig 6c) discharges `DerivedEvidence(gh2ax:result)`, whose `IsDerivedAs`
+/// witness is produced only by running the ED Fig 6c emmeans intensity program
+/// through the R runtime. Absent in-process; covered live by
+/// `demo/wrn-helicase/run.sh` (γH2AX intensity: log10 FC 0.055 ES2 / 0.144 OVK18,
+/// MSI-vs-MSS contrast P < 2e-16 — the paper's published statistic).
+#[test]
+#[ignore = "needs the R runtime to emit the gh2ax witness; covered live by demo/wrn-helicase/run.sh"]
+fn wrn_phase3_dsb_gh2ax_validates() {
+    let (ctx, inst) = build_phase3_ctx();
+    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_dsb_gh2ax");
+}
+
+/// `concl_dsb_gh2ax_foci` (the reproduced-external γH2AX-foci leg of `CausesDSBs`,
+/// ED Fig 6a/6d) discharges `DerivedEvidence(gh2ax_foci:result)`, whose witness is
+/// produced only by the R runtime (foci interaction lm with pan-nuclear saturated
+/// cells counted at a ceiling). Absent in-process; covered live by
+/// `demo/wrn-helicase/run.sh` (interaction +7.3, foci ×3.4 MSI vs ×1.0 MSS).
+#[test]
+#[ignore = "needs the R runtime to emit the gh2ax_foci witness; covered live by demo/wrn-helicase/run.sh"]
+fn wrn_phase3_dsb_gh2ax_foci_validates() {
+    let (ctx, inst) = build_phase3_ctx();
+    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_dsb_gh2ax_foci");
+}
+
+/// `concl_ddr_signaling` (the reproduced-external DDR-signaling leg,
+/// `ActivatesDSBResponse`, ED Fig 7b/7d) discharges `DerivedEvidence(patm:result)`,
+/// whose witness is produced only by the R runtime (pATM(S1981) foci interaction
+/// lm). Absent in-process; covered live by `demo/wrn-helicase/run.sh` (pATM foci
+/// ×1.74 MSI vs ×1.11 MSS, interaction p≈0). This is the ATM-activation bridge the
+/// paper draws from DSBs to p53.
+#[test]
+#[ignore = "needs the R runtime to emit the patm witness; covered live by demo/wrn-helicase/run.sh"]
+fn wrn_phase3_ddr_signaling_validates() {
+    let (ctx, inst) = build_phase3_ctx();
+    assert_holds(&ctx, &inst, "urn:eigenius:pub:wrn:concl_ddr_signaling");
 }
 
 /// `concl_paralog` (ED Fig 9a specificity) discharges

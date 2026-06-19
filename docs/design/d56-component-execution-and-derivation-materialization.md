@@ -1,6 +1,6 @@
 # D56 — Component execution & derivation materialization
 
-*Status: design (2026-06-13, revised same day). Establishes that a **component execution** (side-effecting, external — D26 language runtimes) becomes a chain-resident, witness-bearing derivation **through the existing program-execution subsystem** (`kernel/src/program`, the `RunProgram` RPC / `eigenius run`), not a bespoke "materializer." Distinguishes this from **institution recomputation** (pure, decidable, implicit at commit — D52/AutoOnLoad). Motivated by the WRN `concl_vivo` lift (wrapping lme4 via D55). References D6b (program trace), D8 (components), D26 (RuntimeInvocation), D41 (commit pipeline), D49 (ChainWitness), D52 (statistics institution), D54 (reasoning lemma citation), D55 (R runtime).*
+*Status: **implemented** (2026-06-13 design, revised same day; realized end-to-end through Phase C — see §9). `RunRuntimeScript` is a kernel remote component routed to the D26 substrate; the WRN wrapped-R family (lme4 in-vivo + KM12, limma D-DIFF ×3, fgsea GSEA, emmeans IF, foci lm, paralogue lm) all lift via `ProgramTrace → IsDerivedAs` and Hold in the clean-DB demo (52/52). Establishes that a **component execution** (side-effecting, external — D26 language runtimes) becomes a chain-resident, witness-bearing derivation **through the existing program-execution subsystem** (`kernel/src/program`, the `RunProgram` RPC / `eigenius run`), not a bespoke "materializer." Distinguishes this from **institution recomputation** (pure, decidable, implicit at commit — D52/AutoOnLoad). Motivated by the WRN `concl_vivo` lift (wrapping lme4 via D55). References D6b (program trace), D8 (components), D26 (RuntimeInvocation), D41 (commit pipeline), D49 (ChainWitness), D52 (statistics institution), D54 (reasoning lemma citation), D55 (R runtime).*
 
 > **Revision note.** The first draft proposed a standalone *materializer* + a *pending-RuntimeInvocation* marker as a new commit-adjacent operation. That was over-built. Eigenius already has the driver (program execution) and already mints the witness (`ProgramTrace → IsDerivedAs`). The corrected model below replaces it: a component execution is **a program invoking a RuntimeScript component**, and `eigenius run` is the demanded-execution driver. §3, §5, §6 carry the corrected design; §1–§2, §4 (the tension and the kind distinction) stand unchanged.
 
@@ -87,19 +87,23 @@ So there is **no new component kind, no per-script registration, no kernel scan,
 
 ## 8. The WRN `concl_vivo` lift (first consumer)
 
+> **Landed.** Built and run end-to-end: `concl_vivo` lifts through a real
+> `eigenius run` dispatching `RunRuntimeScript` to a substrate-spawned R
+> container. The design below is as-built.
+
 - A **program** whose body applies the `RunRuntimeScript` component to the chain-resident Fig 2d xenograft table (73 obs), with the lme4 model (`xenograft_lme4.rs`'s source) carried as a `RuntimeScript` (+ R `RuntimeEnvironment`) in the component `argument`.
 - `eigenius run` executes lme4, commits the LRT-p `DerivedResource` carrying `canonical_proposition = onco:InVivoDependence("WRN","MSI")` under a `ProgramTrace`; the witness index mints `IsDerivedAs(vivo_result, InVivoDependence(...))`.
 - A Declared bridge + a `concl_vivo` ReasoningSentence `derived(...)` it into the conclusion — identical shape to every recomputed conclusion in wrn-phase1-recompute-conclusions.esl. Per the §7.4 decision, the existing linked-external `wrn:vivo_xenograft` `bench:ToolArtifact` is **replaced** by the program-produced derivation.
 
 The `r_eigon_set_proposition` primitive + its round-trip proof (`marshalling_round_trip.rs`), the real lme4 LRT (`xenograft_lme4.rs`), and the `ProgramTrace → IsDerivedAs` witness emission (`build_witness_index`) are each already verified independently. The lift's correctness therefore rests not on re-composing them in a test (that composition follows by construction — an early "Phase A" doing so was dropped as a tautology test that would have used non-production glue and de-risked nothing), but on building and running the **real** transport below and observing `concl_vivo` lift through an actual `eigenius run`.
 
-## 9. Phasing
+## 9. Phasing — as built
 
-The `RunRuntimeScript` component + orchestrator handler + napi bridge + `SubstrateDispatcher` already exist (D26 §4.1). The remaining work is wiring R into them and authoring the WRN encoding; verification is a real `eigenius run` against the Docker Compose stack (kernel + Deno orchestrator + DooD substrate spawning the R container — the production `DockerServiceSpawner` path, which no in-repo test exercises).
+All phases landed. The `RunRuntimeScript` component + orchestrator handler + napi bridge + `SubstrateDispatcher` existed (D26 §4.1); the work below wired R into them, authored the WRN encoding, and verified via a real `eigenius run` against the Docker Compose stack (kernel + Deno orchestrator + DooD substrate spawning the R container — the production `DockerServiceSpawner` path).
 
-- **B.2a (kernel)** — add `RunRuntimeScript` to `REMOTE_COMPONENTS` (`server/lifecycle.rs`). Rust.
-- **B.2b (substrate)** — register `RLanguageRuntime` in `runtime-substrate-native`'s dispatcher, mirroring Julia/Lean. Rust + napi.
-- **B.3 (WRN)** — the xenograft `RuntimeScript` (lme4 source + R `RuntimeEnvironment` w/ `image_digest`) + the input table + a program invoking `RunRuntimeScript`; replace `wrn:vivo_xenograft`; `concl_vivo` derives against the program output. Build + tag the R+lme4 image (D55 §6) so the DooD spawner can run it.
-- **B.4 (verify)** — `docker compose build kernel orchestrator && docker compose up`; `eigenius run` the xenograft program; confirm the sibling R container runs lme4 and `concl_vivo` lifts. First real dispatch leg for a substrate-built R image (P3.2 built it + loaded the cdylib in-container but skipped dispatch under rootful docker).
-- **B.5 (CLI)** — D26 §10's `eigenius script publish/run/list/inspect`.
-- **Phase C** — generalize: GSEA (fgsea, seed-pinned) → `mech_rule` antecedent; D-DIFF (limma, Oxen-resolved inputs) → `dd_achilles`/`dd_drive`.
+- ✅ **B.2a (kernel)** — `RunRuntimeScript` added to `REMOTE_COMPONENTS` ([`server/lifecycle.rs`](../../kernel/src/server/lifecycle.rs)).
+- ✅ **B.2b (substrate)** — `RLanguageRuntime` registered in `runtime-substrate-native`'s dispatcher ([`orchestration/runtime-substrate-native/src/lib.rs`](../../orchestration/runtime-substrate-native/src/lib.rs)), mirroring Julia/Lean.
+- ✅ **B.3 (WRN)** — the xenograft `RuntimeScript` + input table + invoking program ([`programs/invivo/`](../../experiments/publications/wrn-helicase/programs/invivo/)); `wrn:vivo_xenograft` replaced; `concl_vivo` derives against the program output. R+lme4 image built + tagged (D55 §6); see [`demo/wrn-helicase/build-r-image.sh`](../../demo/wrn-helicase/build-r-image.sh).
+- ✅ **B.4 (verify)** — clean-DB `docker compose` run; `eigenius run` dispatches to the sibling R container and `concl_vivo` lifts — the first real dispatch leg for a substrate-built R image. The whole WRN chain lands **52/52 Holds** ([`demo/wrn-helicase/run.sh`](../../demo/wrn-helicase/run.sh)).
+- ✅ **B.5 (CLI)** — D26 §10's `eigenius script publish/run/list/inspect` (`ScriptCommands` in [`cli/src/main.rs`](../../cli/src/main.rs)).
+- ✅ **Phase C** — generalized: GSEA (fgsea, seed-pinned) → `mech_rule` antecedent; D-DIFF (limma) → `dd_achilles`/`dd_drive`/`dd_gdsc`; plus IF lsmeans (emmeans), 53BP1 foci lm, and the 1.6 GB paralogue co-loss lm — all `RunRuntimeScript` derivations that Hold in the demo.

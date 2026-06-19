@@ -1,0 +1,43 @@
+[
+  {
+    "@id": "urn:eigenius:pub:wrn:gh2ax_foci_schema",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:ingest:DatasetSchema"
+    ],
+    "urn:eigenius:core:description": "ED Fig 6a/6d per-cell nuclear gamma-H2AX foci counts (colon SW620/KM12/SW48 + ovarian ES2/OVK18; pan-nuclear cells at saturation ceiling), tidy long form: one foci count per cell.",
+    "urn:eigenius:ingest:dimension": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:ingest:Dimension"],
+        "urn:eigenius:ingest:name": "cell_line",
+        "urn:eigenius:ingest:source": "cell_line"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:ingest:Dimension"],
+        "urn:eigenius:ingest:name": "readout",
+        "urn:eigenius:ingest:source": "readout"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:ingest:Dimension"],
+        "urn:eigenius:ingest:name": "guide",
+        "urn:eigenius:ingest:source": "guide"
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:ingest:Dimension"],
+        "urn:eigenius:ingest:name": "condition",
+        "urn:eigenius:ingest:source": "condition"
+      }
+    ],
+    "urn:eigenius:ingest:measure": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:ingest:Measure"],
+        "urn:eigenius:ingest:name": "foci_count",
+        "urn:eigenius:ingest:source": "value",
+        "urn:eigenius:ingest:data_type": "urn:eigenius:core:float"
+      }
+    ],
+    "urn:eigenius:ingest:layout": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:ingest:Layout"],
+      "urn:eigenius:ingest:kind": "LongTable"
+    }
+  }
+]

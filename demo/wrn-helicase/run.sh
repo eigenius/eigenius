@@ -342,6 +342,76 @@ if [ -f "$RDS" ]; then
 else
     echo "  3i. Specificity paralogue co-loss -> SKIPPED (1.6 GB DepMap rds not vended; see data/MANIFEST.md)"
 fi
+
+# 3j. C-MECH γH2AX intensity (ED Fig 6c): the canonical DSB-lesion marker, the
+#     authors' published quantification. Per-cell nuclear γH2AX staining intensity
+#     (32,882 cells, ES2 MSS + OVK18 MSI) through a D56 wrapped-R emmeans
+#     interaction on log10-intensity; emits wrn:gh2ax:result -> CausesDSBs(WRN,MSI).
+#     Reproduces the paper exactly: mean log10 FC 0.055 ES2 / 0.144 OVK18,
+#     MSI-vs-MSS contrast P < 2e-16 (concl_dsb_gh2ax). Slice from ED 6c via
+#     extract/gh2ax-ed6c-extract.R.
+if [ -f "$SLICES/gh2ax_intensity_long.csv" ]; then
+    echo "  3j. C-MECH γH2AX intensity emmeans (32k cells, ED 6c) -> CausesDSBs"
+    ORCH="$(docker compose ps -q orchestrator 2>/dev/null || true)"
+    ORCH="${ORCH:-eigenius-orchestrator-1}"
+    CACHE=/var/lib/eigenius/substrate-depot/extfile-cache
+    HEX=d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95
+    docker exec "$ORCH" mkdir -p "$CACHE/$HEX"
+    docker cp "$SLICES/gh2ax_intensity_long.csv" "$ORCH:$CACHE/$HEX/gh2ax_intensity_long.csv"
+    eig load "$PROGRAMS/differential-dependency/dd-achilles-files.json"   # supp1 genotype (additional_input)
+    eig load "$PROGRAMS/mechanism/gh2ax-intensity-files.json"   # LongTable DatasetSchema
+    eig load "$PROGRAMS/mechanism/gh2ax-intensity-input.json"   # γH2AX intensity PinnedExternalFile
+    run_r_program "$PROGRAMS/mechanism/gh2ax-intensity-program.json" \
+        "$PROGRAMS/mechanism/gh2ax-intensity-input.json" "gh2ax_logfc|gh2ax_interaction|CausesDSBs"
+else
+    echo "  3j. C-MECH γH2AX intensity -> SKIPPED (derived slice not present; see extract/gh2ax-ed6c-extract.R)"
+fi
+
+# 3k. C-MECH γH2AX foci (ED Fig 6a/6d): the discrete-foci leg of the same marker.
+#     Per-cell γH2AX foci (94,791 cells, colon + ovarian) through a D56 wrapped-R
+#     interaction lm; saturated pan-nuclear cells (MSI-enriched) counted at a
+#     ceiling, not dropped. Emits wrn:gh2ax_foci:result -> CausesDSBs(WRN,MSI)
+#     (interaction +7.3, foci ×3.4 MSI vs ×1.0 MSS; concl_dsb_gh2ax_foci). Slice
+#     from ED 6a/6d via extract/gh2ax-ed6ad-extract.R.
+if [ -f "$SLICES/gh2ax_foci_long.csv" ]; then
+    echo "  3k. C-MECH γH2AX foci lm (95k cells, ED 6a/6d) -> CausesDSBs"
+    ORCH="$(docker compose ps -q orchestrator 2>/dev/null || true)"
+    ORCH="${ORCH:-eigenius-orchestrator-1}"
+    CACHE=/var/lib/eigenius/substrate-depot/extfile-cache
+    HEX=70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c
+    docker exec "$ORCH" mkdir -p "$CACHE/$HEX"
+    docker cp "$SLICES/gh2ax_foci_long.csv" "$ORCH:$CACHE/$HEX/gh2ax_foci_long.csv"
+    eig load "$PROGRAMS/differential-dependency/dd-achilles-files.json"   # supp1 genotype
+    eig load "$PROGRAMS/mechanism/gh2ax-foci-files.json"
+    eig load "$PROGRAMS/mechanism/gh2ax-foci-input.json"
+    run_r_program "$PROGRAMS/mechanism/gh2ax-foci-program.json" \
+        "$PROGRAMS/mechanism/gh2ax-foci-input.json" "gh2ax_foci_interaction|gh2ax_foci_fc|CausesDSBs"
+else
+    echo "  3k. C-MECH γH2AX foci -> SKIPPED (derived slice not present; see extract/gh2ax-ed6ad-extract.R)"
+fi
+
+# 3l. C-MECH DDR signaling, pATM(S1981) foci (ED Fig 7b/7d): the DSB-response
+#     kinase activation that bridges DSBs to p53. Per-cell pATM(S1981) foci
+#     (191,241 cells, colon SW620/KM12/SW48 + ovarian ES2/OVK18) through a D56
+#     wrapped-R interaction lm; emits wrn:patm:result -> ActivatesDSBResponse(WRN,
+#     MSI) (foci ×1.74 MSI vs ×1.11 MSS, interaction p≈0; concl_ddr_signaling).
+#     Slice from ED 7b/7d via extract/patm-ed7-extract.R.
+if [ -f "$SLICES/patm_foci_long.csv" ]; then
+    echo "  3l. C-MECH pATM(S1981) foci lm (191k cells, ED 7b/7d) -> ActivatesDSBResponse"
+    ORCH="$(docker compose ps -q orchestrator 2>/dev/null || true)"
+    ORCH="${ORCH:-eigenius-orchestrator-1}"
+    CACHE=/var/lib/eigenius/substrate-depot/extfile-cache
+    HEX=9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de
+    docker exec "$ORCH" mkdir -p "$CACHE/$HEX"
+    docker cp "$SLICES/patm_foci_long.csv" "$ORCH:$CACHE/$HEX/patm_foci_long.csv"
+    eig load "$PROGRAMS/differential-dependency/dd-achilles-files.json"   # supp1 genotype
+    eig load "$PROGRAMS/mechanism/patm-foci-files.json"
+    eig load "$PROGRAMS/mechanism/patm-foci-input.json"
+    run_r_program "$PROGRAMS/mechanism/patm-foci-program.json" \
+        "$PROGRAMS/mechanism/patm-foci-input.json" "patm_msi_interaction|patm_foci_fc|ActivatesDSBResponse"
+else
+    echo "  3l. C-MECH pATM foci -> SKIPPED (derived slice not present; see extract/patm-ed7-extract.R)"
+fi
 echo
 
 # Step 4: the reasoning layers that cite the recomputed + wrapped-R warrants.

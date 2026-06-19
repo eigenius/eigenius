@@ -222,10 +222,14 @@ resource wrn:concl_paralog : reasoning:ReasoningSentence {
 // C-MECH — mechanism: WRN loss ⇒ MSI-selective DSBs ⇒ DDR-driven lethality
 // ════════════════════════════════════════════════════════════════════
 
-// Linked-external: DSB induction in MSI (γH2AX/53BP1 foci; pATM(S1981) +
-// Chk2(T68) corroboration), MSI-selective. The 53BP1-foci arm is now ALSO
-// reproduced-external (wrn:foci_dsb:result / concl_dsb_foci, ED Fig 6f/6h); this
-// ToolArtifact still carries the full marker panel as linked corroboration.
+// DSB induction in MSI, MSI-selective — now mostly RECOMPUTED. The lesion markers
+// γH2AX (intensity ED 6c → concl_dsb_gh2ax; foci ED 6a/6d → concl_dsb_gh2ax_foci)
+// and 53BP1 (foci ED 6f/6h → concl_dsb_foci), and the DDR-signaling pATM(S1981)
+// (ED 7b/7d → concl_ddr_signaling), are all reproduced-external. This ToolArtifact
+// now carries only the genuinely non-recomputable remnant as linked corroboration:
+// the Chk2(T68) western blot (ED 7e — band levels, no per-cell numeric data) and
+// the shRNA in-vitro/in-vivo γH2AX confirmation (Fig 2e / ED 7e, CRISPR-artifact
+// control). No source-data sheet exists for either.
 resource wrn:mech_dsb : bench:ToolArtifact {
     bench:tool            = "DSB-marker immunofluorescence (γH2AX, 53BP1, pATM-S1981, Chk2-T68 foci)";
     bench:produced_from   = ["wrn-paper:Fig-4a-c", "wrn-paper:ED-Fig-6", "wrn-paper:ED-Fig-7"];
@@ -247,7 +251,7 @@ resource wrn:mech_dsb_trace : reflection:ProgramTrace {
 // (explaining why p53-impaired MSI cells are also sensitive).
 resource wrn:mech_rule : reflection:DeclaredResource {
     reflection:declared_by = "wrn-paper:dsb-ddr-mechanism";
-    reflection:rationale   = "MSI-selective DSBs on WRN loss activate the DNA-damage response, manifesting in TWO recomputed downstream consequences: cell-cycle arrest (reduced S-phase, ED Fig 4b — kernel-recomputed) and apoptosis (raised apoptotic fraction, ED Fig 4c — kernel-recomputed), both MSI-selective. GSEA corroborates (downregulated G2/M-checkpoint + E2F-target signatures, upregulated apoptosis + p53 signatures — reproduced-external, wrn:gsea_mech:result); p53-S15 phosphorylation and p21 rise (p53 activation, reproduced-external via wrn:if_ed5:result / concl_p53_activation — MSI- and p53-status-selective). DSBs are also directly toxic independent of p53 status, explaining the sensitivity of p53-impaired MSI cells (the p53-null MSI line KM12 shows DSBs/death but fails to induce the p21 transcriptional response — finding F7). Hence DSBs that drive both arrest and apoptosis establish DSB-induced DDR as the MSI-selective lethal mechanism. The lethality claim now rests on the linked-external DSB readout PLUS the two kernel-recomputed DDR endpoints.";
+    reflection:rationale   = "MSI-selective DSBs on WRN loss activate the DNA-damage response, manifesting in TWO recomputed downstream consequences: cell-cycle arrest (reduced S-phase, ED Fig 4b — kernel-recomputed) and apoptosis (raised apoptotic fraction, ED Fig 4c — kernel-recomputed), both MSI-selective. GSEA corroborates (downregulated G2/M-checkpoint + E2F-target signatures, upregulated apoptosis + p53 signatures — reproduced-external, wrn:gsea_mech:result); p53-S15 phosphorylation and p21 rise (p53 activation, reproduced-external via wrn:if_ed5:result / concl_p53_activation — MSI- and p53-status-selective). DSBs are also directly toxic independent of p53 status, explaining the sensitivity of p53-impaired MSI cells (the p53-null MSI line KM12 shows DSBs/death but fails to induce the p21 transcriptional response — finding F7). Hence DSBs that drive both arrest and apoptosis establish DSB-induced DDR as the MSI-selective lethal mechanism. The DSB lesion is now reproduced-external in both markers (γH2AX intensity + foci via concl_dsb_gh2ax/concl_dsb_gh2ax_foci; 53BP1 foci via concl_dsb_foci), and the upstream DDR signaling that bridges DSBs to p53 is reproduced via pATM(S1981) (concl_ddr_signaling, onco:ActivatesDSBResponse) — so the lethality claim rests on recomputed DSB + DDR-signaling readouts PLUS the two kernel-recomputed DDR endpoints; only the Chk2(T68) western remains linked.";
     reflection:canonical_proposition = type_expr(
         onco:CausesDSBs("WRN", "MSI")
         ->
@@ -286,9 +290,10 @@ resource wrn:concl_dsb : reasoning:ReasoningSentence {
 // `canonical_proposition = onco:CausesDSBs("WRN","MSI")` — set when the
 // condition×MSI interaction is positive and significant (the MSI-SELECTIVE extra
 // DSB induction: WRN-KO ~2.08× foci in MSI vs ~1.04× in MSS, interaction
-// +1.82 foci, p ≈ 2.6e-142). The broader marker panel (γH2AX intensity, pATM
-// (S1981)/Chk2(T68) foci, ED 6c/7) remains linked-external in mech_dsb; this
-// concretely reproduces the 53BP1 leg from the per-cell source data.
+// +1.82 foci, p ≈ 2.6e-142). The other markers are now ALSO reproduced (γH2AX
+// intensity + foci → concl_dsb_gh2ax / concl_dsb_gh2ax_foci; pATM(S1981) foci →
+// concl_ddr_signaling); only the Chk2(T68) western (ED 7e, no numeric data)
+// remains linked in mech_dsb. This reproduces the 53BP1 leg from per-cell data.
 resource wrn:concl_dsb_foci : reasoning:ReasoningSentence {
     reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     reasoning:proposition = type_expr(
@@ -298,6 +303,60 @@ resource wrn:concl_dsb_foci : reasoning:ReasoningSentence {
     reasoning:certificate = type_expr(
         derived("urn:eigenius:pub:wrn:foci_dsb:result",
                 onco:CausesDSBs("WRN", "MSI"))
+    );
+}
+
+// Reproduced-external: the γH2AX DSB-lesion arm, now recomputed live in BOTH the
+// authors' quantifications. γH2AX is the canonical DSB marker (named before 53BP1
+// in the text). (1) INTENSITY (ED Fig 6c, ES2 MSS + OVK18 MSI, 32,882 cells) via a
+// D56 wrapped-R emmeans interaction (programs/mechanism/gh2ax-intensity-program.json)
+// — reproduces the paper's published statistic exactly (mean log10 fold-change
+// 0.055 ES2 / 0.144 OVK18; MSI-vs-MSS contrast P < 2e-16). (2) FOCI (ED Fig 6a/6d,
+// colon + ovarian, 94,791 cells) via a wrapped-R interaction lm
+// (programs/mechanism/gh2ax-foci-program.json), with saturated pan-nuclear cells
+// counted at a ceiling (the MSI-enriched high-damage cells; interaction +7.3,
+// foci ×3.4 MSI vs ×1.0 MSS). Two independent recomputed γH2AX legs of CausesDSBs.
+resource wrn:concl_dsb_gh2ax : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:CausesDSBs("WRN", "MSI")
+    );
+    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:gh2ax:result");
+    reasoning:certificate = type_expr(
+        derived("urn:eigenius:pub:wrn:gh2ax:result",
+                onco:CausesDSBs("WRN", "MSI"))
+    );
+}
+resource wrn:concl_dsb_gh2ax_foci : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:CausesDSBs("WRN", "MSI")
+    );
+    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:gh2ax_foci:result");
+    reasoning:certificate = type_expr(
+        derived("urn:eigenius:pub:wrn:gh2ax_foci:result",
+                onco:CausesDSBs("WRN", "MSI"))
+    );
+}
+
+// Reproduced-external: the DDR-SIGNALING arm — phospho-ATM(S1981) foci (ED Fig
+// 7b/7d, colon SW620/KM12/SW48 + ovarian ES2/OVK18, 191,241 cells) via a D56
+// wrapped-R interaction lm (programs/mechanism/patm-foci-program.json; foci ×1.74
+// MSI vs ×1.11 MSS, interaction p≈0). ATM autophosphorylation reports activation
+// of the apical DSB-response kinase — the signaling step the paper uses to bridge
+// DSBs → p53 / anti-proliferative signaling (the upstream evidence concl_p53_
+// activation rests on). Commits the new onco:ActivatesDSBResponse, previously
+// absent from the chain. (Chk2(T68), ED 7e, is a western blot with no per-cell
+// numeric data and stays linked in mech_dsb.)
+resource wrn:concl_ddr_signaling : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    reasoning:proposition = type_expr(
+        onco:ActivatesDSBResponse("WRN", "MSI")
+    );
+    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:patm:result");
+    reasoning:certificate = type_expr(
+        derived("urn:eigenius:pub:wrn:patm:result",
+                onco:ActivatesDSBResponse("WRN", "MSI"))
     );
 }
 

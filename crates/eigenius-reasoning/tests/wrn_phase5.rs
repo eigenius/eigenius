@@ -60,6 +60,9 @@ const R_RUNTIME: &[&str] = &[
     "urn:eigenius:pub:wrn:concl_vivo",
     "urn:eigenius:pub:wrn:concl_p53_activation",
     "urn:eigenius:pub:wrn:concl_dsb_foci",
+    "urn:eigenius:pub:wrn:concl_dsb_gh2ax",
+    "urn:eigenius:pub:wrn:concl_dsb_gh2ax_foci",
+    "urn:eigenius:pub:wrn:concl_ddr_signaling",
     "urn:eigenius:pub:wrn:concl_paralog",
 ];
 

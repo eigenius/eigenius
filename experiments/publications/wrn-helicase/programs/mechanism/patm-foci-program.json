@@ -1,0 +1,30 @@
+[
+  {
+    "@id": "urn:eigenius:pub:wrn:program:patm_foci",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:program:Program"
+    ],
+    "urn:eigenius:program:input_type": "urn:eigenius:ingest:PinnedExternalFile",
+    "urn:eigenius:program:output_type": "urn:eigenius:reflection:DerivedResource",
+    "urn:eigenius:program:body": {
+      "urn:eigenius:core:is_a": [
+        "urn:eigenius:program:Apply"
+      ],
+      "urn:eigenius:program:function": "urn:eigenius:program:components:RunRuntimeScript",
+      "urn:eigenius:program:argument": {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:program:Var"
+        ],
+        "urn:eigenius:program:name": "input"
+      },
+      "urn:eigenius:program:component_argument": {
+        "urn:eigenius:runtime:language": "r",
+        "urn:eigenius:runtime:source": "# DDR signaling (ED Fig 7b/7d): WRN loss raises phospho-ATM(S1981) foci per cell,\n# MSI-SELECTIVELY (D56 wrapped-R over a D53 file-backed SampleSet). 191,241 cells\n# across SW620/ES2 (MSS) + KM12/SW48/OVK18 (MSI). pATM(S1981) autophosphorylation\n# reports activation of the apical ATM DSB-response kinase \u2014 the signaling step\n# the paper uses to bridge DSBs -> p53 / anti-proliferative signaling. The\n# MSI-selectivity is an interaction (condition x MSI), so this is wrapped-R lm.\n# Inputs: [1] tidy per-cell pATM foci counts, [2] Supp Table 1 (MSI).\nfp  <- .Call(\"r_eigon_materialized_path\", eigenius_inputs[[1]])\ns1p <- .Call(\"r_eigon_materialized_path\", eigenius_inputs[[2]])\ndf <- read.csv(fp, check.names = FALSE)\ns1 <- read.csv(s1p, check.names = FALSE)\nlk <- do.call(rbind, lapply(unique(df$cell_line), function(l) {\n  r <- s1[grepl(paste0(\"^\", l, \"_\"), s1$CCLE_ID), ][1, ]\n  data.frame(cell_line = l, msi = r$CCLE_MSI)\n}))\ndf <- merge(df, lk, by = \"cell_line\")\ndf$condition <- factor(df$condition, levels = c(\"control\", \"WRN_KO\"))\ndf$msi <- factor(df$msi, levels = c(\"MSS\", \"MSI\"))\ndf$cell_line <- factor(df$cell_line)\n# foci ~ cell_line + condition*MSI: the interaction is the MSI-selective extra\n# pATM activation on WRN loss (above the MSS baseline change).\nm <- lm(value ~ cell_line + condition * msi, data = df)\nco <- summary(m)$coefficients\nix <- grep(\"conditionWRN_KO:msiMSI\", rownames(co))\ninter_est <- co[ix, 1]; inter_p <- co[ix, 4]\nfc <- function(s) { d <- df[df$msi == s, ]; mean(d$value[d$condition == \"WRN_KO\"]) / mean(d$value[d$condition == \"control\"]) }\nb <- .Call(\"r_eigon_begin\", \"urn:eigenius:pub:wrn:patm:result\")\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:patm_msi_interaction\", inter_est)\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:patm_msi_interaction_p\", inter_p)\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:patm_foci_fc_msi\", fc(\"MSI\"))\n.Call(\"r_eigon_set_f64\", b, \"urn:eigenius:pub:wrn:patm_foci_fc_mss\", fc(\"MSS\"))\n# Warrant: WRN loss activates the ATM DSB-response MORE in MSI than MSS (positive,\n# significant interaction) -- MSI-selective DDR signaling, the bridge to p53.\nif (inter_est > 0 && inter_p < 0.05) {\n  .Call(\"r_eigon_set_proposition\", b,\n        \"urn:eigenius:benchmark:onco:ActivatesDSBResponse\", c(\"WRN\", \"MSI\"))\n}\n.Call(\"r_eigon_finish\", b)\n",
+        "urn:eigenius:runtime:image_digest": "sha256:9ffb0efb052795e7f65dbd16760e26afae5708d605941b25587b76046ff36364",
+        "urn:eigenius:runtime:additional_inputs": [
+          "urn:eigenius:ingest:file:eebd460257982a98cf6ce9f14e189ae0c4398a686f4181bc037c5591e87243f2"
+        ]
+      }
+    }
+  }
+]

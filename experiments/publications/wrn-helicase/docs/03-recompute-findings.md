@@ -20,6 +20,9 @@ a divergence is a recorded finding, not a silent pass.
 | F11 | **ED Fig 8d: WRN is delocalized from the nucleolus in MSI** | WRN–fibrillarin coloc MSI 0.36 < MSS 0.69, t **p = 3.2e-8** (n=15 vs 10) | A ✓ | **Reproduces paper — D52-native t-test** |
 | F12 | **ED Fig 10a: restoring MMR restores mismatch repair** | host-cell reactivation parental 1.9 → Ch3+5 35.8, t **p = 2.3e-3** | A ✓ | **Reproduces paper — D52-native t-test (MMR-defect functional confirmation)** |
 | F13 | **ED Fig 4d: WRN-KD raises apoptosis in MSI (shRNA, orthogonal to CRISPR)** | KM12 (MSI) control 12.3 → shWRN 35.1; MSS SW837 spared (12 → 8.6) | A ✓ | **Reproduces paper — D52-native; on-target confirmation (not a Cas9 artifact)** |
+| F14 | **ED Fig 6c: WRN-KO raises γH2AX (canonical DSB marker) MSI-selectively** | intensity log10 FC **0.055 ES2 / 0.144 OVK18**, MSI-vs-MSS contrast **P<2×10⁻¹⁶** (wrapped-R emmeans interaction) | A ✓ | **Reproduces the paper's published γH2AX statistic — the canonical-lesion leg of CausesDSBs** |
+| F14b | **ED Fig 6a/6d: WRN-KO raises γH2AX foci MSI-selectively (discrete-foci leg)** | interaction **+7.3**, foci **×3.4 MSI vs ×1.0 MSS** (wrapped-R lm; pan-nuclear cells counted at saturation ceiling) | A ✓ | **Reproduces the foci view; counting pan-nuclear vs dropping is load-bearing — dropping inverts the sign** |
+| F15 | **ED Fig 7b/7d: WRN-KO activates pATM(S1981) DDR signaling MSI-selectively** | foci **×1.74 MSI vs ×1.11 MSS**, interaction **p≈0** (wrapped-R lm → `ActivatesDSBResponse`) | A ✓ | **Reproduces the DSB→p53 ATM-signaling bridge — a new proposition, previously absent from the chain** |
 
 ## F3 — ED Fig 10c MMR-restoration: model identified from authors' code, reproduced exactly from public data
 
@@ -432,3 +435,40 @@ across all paralogue controls) under a ProgramTrace → IsDerivedAs witness, dis
 (chain/08-phase3-invivo-mechanism.esl). This closes the omics-analysis frontier: every analysis class in the paper — native
 recompute, mixed models (lme4), large-matrix limma, GSEA (fgsea), per-cell IF/foci (emmeans/interaction
 lm), and now the large multi-schema rds container — runs live through the platform.
+
+## F14 — ED Fig 6c: WRN-KO raises γH2AX (the canonical DSB marker) MSI-selectively, reproduced live
+
+γH2AX is named *before* 53BP1 in the mechanism text ("substantially increased γH2AX and 53BP1 foci,
+markers of DSB"); ED 6c is its **published quantification** — nuclear γH2AX staining **intensity** per cell.
+The tidy slice `gh2ax_intensity_long.csv` (32,882 cells, ES2 MSS + OVK18 MSI; ED 6c via
+`extract/gh2ax-ed6c-extract.R`) runs through a D56 wrapped-R `emmeans` interaction on **log10** intensity
+(`programs/mechanism/gh2ax-intensity-program.json`). Reproduces the paper's reported statistic essentially
+exactly: mean log10 fold-change **0.055 (ES2)** / **0.144 (OVK18)** vs the paper's 0.055 / 0.147, and the
+OVK18-vs-ES2 contrast-of-LSM **P ≈ 2.7e-39 < 2×10⁻¹⁶** (paper: P<2×10⁻¹⁶). Commits `wrn:gh2ax:result`
+(`canonical_proposition = CausesDSBs("WRN","MSI")`, set on a positive, significant MSI-vs-MSS interaction),
+discharged by `concl_dsb_gh2ax`. The log base mattered: the paper uses log10, not natural log.
+
+## F14b — ED Fig 6a/6d: WRN-KO raises γH2AX foci MSI-selectively — but only if pan-nuclear cells are counted
+
+ED 6a (colon) / 6d (ovarian) give the discrete per-cell γH2AX **foci** counts. The crucial subtlety: γH2AX
+is a *diffuse* marker that **saturates (goes pan-nuclear)** at high damage, and pan-nuclear cells have
+uncountable, blank foci. Those cells are the most-damaged ones and are MSI-enriched — on WRN loss the
+pan-nuclear fraction jumps (KM12 **13%→50%**, SW48 **1%→21%**) while MSS lines stay flat. **Dropping** them
+(the naive parse) discards the signal and yields a *spurious decrease* in MSI (interaction −0.43). Counting
+them at a saturation ceiling (`extract/gh2ax-ed6ad-extract.R`) recovers the true MSI-selective induction:
+interaction **+7.3 (p≈0)**, foci **×3.4 MSI vs ×1.0 MSS** (`programs/mechanism/gh2ax-foci-program.json` →
+`wrn:gh2ax_foci:result` → `CausesDSBs`, `concl_dsb_gh2ax_foci`). This is *why* the authors quantify γH2AX
+primarily by intensity (F14), and why this panel exists alongside it. A documented modeling decision, not a
+silent one.
+
+## F15 — ED Fig 7b/7d: WRN-KO activates pATM(S1981) DDR signaling MSI-selectively (the bridge to p53)
+
+pATM(S1981) autophosphorylation reports activation of the apical ATM DSB-response kinase — the signaling
+step the paper uses to connect DSBs to p53 ("DSB responses known to activate p53"). Unlike γH2AX, pATM
+forms **discrete** foci even at high damage (94–100% countable, pan-nuclear rare), so foci is the valid,
+unbiased readout. The slice `patm_foci_long.csv` (191,241 cells, colon SW620/KM12/SW48 + ovarian
+ES2/OVK18; ED 7b/7d via `extract/patm-ed7-extract.R`) runs through a wrapped-R interaction lm
+(`programs/mechanism/patm-foci-program.json`): foci **×1.74 MSI vs ×1.11 MSS**, interaction **p≈0**.
+Commits `wrn:patm:result` → the **new** `onco:ActivatesDSBResponse("WRN","MSI")` (`concl_ddr_signaling`) —
+a mechanism proposition previously absent from the chain. The companion Chk2(T68) readout (ED 7e) is a
+western blot with no per-cell numeric source data, so it stays linked in `mech_dsb`.
