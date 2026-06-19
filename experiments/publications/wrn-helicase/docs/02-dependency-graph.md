@@ -275,7 +275,7 @@ flowchart LR
   classDef final    fill:#2E9D5D33,stroke:#2E9D5D,color:#052E16,stroke-width:3px;
 
   DATA["📊 Datasets<br/>DepMap (Achilles/DRIVE/rds), Supp Table 1,<br/>RNA-seq + Hallmark, Nature Source Data"]:::observed
-  LIT["📚 Literature warrants<br/>11 references (CiTO-typed Citations)"]:::declared
+  LIT["📚 Literature warrants<br/>18 CiTO-typed Citations (11 claim warrants)"]:::declared
 
   DISC["Computational discovery<br/>SelectivelyEssential · TopDiffDep ·<br/>biomarker · RecQ-unique · mutator-load"]:::verified
   VAL["C-VAL viability<br/>SelectiveViabilityDependence"]:::verified
@@ -283,6 +283,7 @@ flowchart LR
   HEL["D-HELICASE<br/>RequiresActivity(helicase) ⟸ [14]"]:::verified
   MECH["C-MECH mechanism<br/>DSBs → arrest + apoptosis →<br/>DSBDrivenLethality"]:::verified
   MMR["C-MMR<br/>ContributesToDependence(dMMR)"]:::verified
+  SPEC["Specificity control (ED 9a)<br/>NotExplainedByParalogLoss"]:::verified
 
   MAIN["SyntheticLethal(WRN, MSI)"]:::final
 
@@ -292,11 +293,13 @@ flowchart LR
   DATA --> HEL
   DATA --> MECH
   DATA --> MMR
+  DATA --> SPEC
   LIT  -.->|method / source / background| DISC
-  LIT  ==>|premises [14] [16]| HEL
+  LIT  ==>|premise [14]| HEL
   LIT  ==>|premise [16]| VIVO
   LIT  ==>|premise [17]| MECH
-  LIT  -.->|background [20] [22]| MECH
+  LIT  -.->|authority [20]| MECH
+  LIT  -.->|background [22]| MMR
 
   DISC -.->|establishes| MAIN
   VAL  --> MAIN
@@ -304,4 +307,5 @@ flowchart LR
   HEL  --> MAIN
   MECH --> MAIN
   MMR  --> MAIN
+  SPEC --> MAIN
 ```
