@@ -146,12 +146,14 @@ re-derives all 17 SampleSets + both program-input tables and fails loudly on
 drift. The R-program inputs were the last unpinned data in the encoding; they now
 carry the same `bench:extracted_from_*` pins as the SampleSets.
 
-**Live result.** On a clean database the full chain loads, all nine wrapped-R
-programs run in spawned containers, and **52/52 verdicts Hold** — including the
-literature-composed conclusions (`concl_helicase_required`, `concl_exo_dispensable`,
-`concl_vivo_ontarget`, `concl_p53_activation`) and both halves of the F4 dual SAP
-(`viab_KM12_plan` at 2.74e-19 and `concl_viab_KM12_biological` at 2.15e-6) side by
-side. The demo is [demo/wrn-helicase/run.sh](../../../../demo/wrn-helicase/run.sh).
+**Live result.** On a clean database the full chain loads, all twelve wrapped-R
+programs run in spawned containers, and **55/55 verdicts Hold** — including the
+DSB-mechanism conclusions now closed (`concl_dsb_gh2ax`, `concl_dsb_gh2ax_foci`,
+`concl_ddr_signaling`), the literature-composed conclusions
+(`concl_helicase_required`, `concl_exo_dispensable`, `concl_vivo_ontarget`,
+`concl_p53_activation`) and both halves of the F4 dual SAP (`viab_KM12_plan` at
+2.74e-19 and `concl_viab_KM12_biological` at 2.15e-6) side by side. The demo is
+[demo/wrn-helicase/run.sh](../../../../demo/wrn-helicase/run.sh).
 
 ## 4. What we found
 
@@ -308,7 +310,7 @@ than overstating its coverage.
 
 # Appendix A — Inventory of warrants, computations, and verdicts
 
-Every row below `Holds` on the live chain (52 verdicts total; clean-DB run via
+Every row below `Holds` on the live chain (55 verdicts total; clean-DB run via
 `run.sh`). Statistics are the kernel-recomputed values; the SampleSet/program
 inputs are content-hash-pinned (`extract --check`).
 
@@ -349,7 +351,7 @@ published technical-stratum 2.74e-19 — same data, honest unit of inference.
 
 ## A.3 Domain conclusions (reasoning institution)
 
-The 23 `ReasoningSentence`s, each with the proposition it asserts and the grade of
+The 33 `ReasoningSentence`s, each with the proposition it asserts and the grade of
 its load-bearing warrant (R = recomputed, W = wrapped-R, D = declared,
 L = linked-external).
 
@@ -379,6 +381,9 @@ L = linked-external).
 | `concl_viab_KM12_biological` | `ViabilityDependenceAtBiologicalUnit(WRN, KM12)` | W |
 | `concl_dsb` | `CausesDSBs(WRN, MSI)` | L |
 | `concl_dsb_foci` | `CausesDSBs(WRN, MSI)` | W (53BP1 foci interaction lm, ED Fig 6f/6h) |
+| `concl_dsb_gh2ax` | `CausesDSBs(WRN, MSI)` | W (γH2AX intensity emmeans interaction, ED Fig 6c) |
+| `concl_dsb_gh2ax_foci` | `CausesDSBs(WRN, MSI)` | W (γH2AX foci interaction lm, pan-nuclear at ceiling, ED Fig 6a/6d) |
+| `concl_ddr_signaling` | `ActivatesDSBResponse(WRN, MSI)` | W (pATM(S1981) foci interaction lm, ED Fig 7b/7d) |
 | `concl_p53_activation` | `ActivatesP53Response(WRN, MSI)` | W (emmeans lsmeans, ED Fig 5) |
 | `concl_mech` | `DSBDrivenLethality(WRN, MSI)` | D (over R+L) |
 | `concl_not_telomere` | `NotViaTelomereDefect(WRN, MSI)` | L |
