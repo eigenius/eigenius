@@ -1,0 +1,39 @@
+// ════════════════════════════════════════════════════════════════════
+// m1 — Mapping discipline (Declared, discharged)
+// ════════════════════════════════════════════════════════════════════
+//
+// The settled schema.org → Eigenius mapping discipline (full spec: D57 §3).
+// Recorded here as a Declared rule carrying the milestone proposition, with a
+// DeclarationTrace so the kernel mints the IsDeclaredAs witness that
+// obj:concl_discipline's certificate discharges. This is the dogfood discipline:
+// evidence (the Declared rule) committed first, then the proposition that cites it.
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace obj        = "urn:eigenius:obj:d57";
+
+// The discipline, as a Declared rule. canonical_proposition = the milestone fact.
+resource obj:mapping_discipline : reflection:DeclaredResource {
+    reflection:declared_by = "d57:mapping-discipline";
+    reflection:rationale   = "schema.org maps to Eigenius in three tiers (D57 §3). Tier 1 (clean 1:1): every Class -> core:Class + is_a; every Enumeration -> core:Class + member DeclaredResource instances; a single-DataType range -> the matching core scalar; a single-Class range -> resource + class_types=[class]. Tier 2 (by convention, full original rangeIncludes preserved as schema_org:range_includes provenance): all-Class union -> resource + class_types=[all]; all-DataType union -> string; mixed literal-or-entity union -> ENTITY-FIRST (resource + class_types=[the Classes], literal option dropped). Tier 3 (not mapped, enumerated with reason): RDFS/OWL inference + relational semantics (supersededBy, subPropertyOf, equivalentClass, inverseOf) and the Role pattern -- kept as inert provenance, never active relations. Scope: core + hosted extensions; pending/attic excluded. Identity: prefix substitution https://schema.org/<T> <-> urn:schema_org:<T>, original retained as core:source_irl. Adopted grade: every emitted resource is_a reflection:DeclaredResource.";
+    reflection:canonical_proposition = type_expr(
+        obj:MappingDisciplineDefined("schema_org")
+    );
+}
+resource obj:mapping_discipline_trace : reflection:DeclarationTrace {
+    reflection:resource    = obj:mapping_discipline;
+    reflection:declared_by = "d57:mapping-discipline";
+    reflection:timestamp   = "2026-06-19T00:00:00Z";
+}
+
+// m1 discharged: the discipline is defined (Declared), witnessed by the rule above.
+resource obj:concl_discipline : reasoning:ReasoningSentence {
+    reasoning:subject_iri   = "urn:eigenius:obj:d57:schema_org";
+    reasoning:proposition   = type_expr( obj:MappingDisciplineDefined("schema_org") );
+    reasoning:justification = DeclaredEvidence("urn:eigenius:obj:d57:mapping_discipline");
+    reasoning:certificate   = type_expr(
+        declared("urn:eigenius:obj:d57:mapping_discipline",
+                 obj:MappingDisciplineDefined("schema_org"))
+    );
+}

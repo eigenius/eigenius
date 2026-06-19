@@ -1,10 +1,10 @@
 # D58 — Objective Framing & Obligation Graphs
 
-*Status: **stub** · design memo · June 2026*
+*Status: **ontology designed** (§5, from the D57 dogfood harvest) · design memo · June 2026 · gate-query wiring + loop budget remaining*
 
 *Companion documents: [D39 justification logic](d39-justification-logic.md) (the warrant calculus), [D43 text & vector retrieval](d43-text-and-vector-retrieval.md) + [D57 schema.org mapping](d57-schema-org-vocabulary-mapping.md) (grounding), [D49 chain-witness machinery](d49-chainwitness-machinery.md), [D54 lemma citation](d54-reasoning-lemma-citation.md). Operationalized by the `reasoning` + `grounding` skills. **Not** to be confused with D21 kernel tasks or `bench:TaskOutput` — see §6.*
 
-*This memo specifies how a unit of science/engineering work — an **objective** — is **framed in Eigenius before work begins**: as a typed **obligation graph** (a thesis, the axioms it may assume, and the milestone propositions to derive), made **well-posed** through a frame⇄ground iteration loop. The reasoning protocol assumes a well-posed objective; this is the missing assessment phase that produces one. **Stub:** the shape and the admissibility gates are settled below; the exact ontology and the gate-query encodings are open. (The object is `objective:Objective` to avoid collision with the kernel's execution "task" notion — §6; "objective" reads naturally across science and engineering disciplines.)*
+*This memo specifies how a unit of science/engineering work — an **objective** — is **framed in Eigenius before work begins**: as a typed **obligation graph** (a thesis, the axioms it may assume, and the milestone propositions to derive), made **well-posed** through a frame⇄ground iteration loop. The reasoning protocol assumes a well-posed objective; this is the missing assessment phase that produces one. The shape, the admissibility gates, **and the `objective:` ontology (§5)** are settled — the ontology designed from the first real dogfood (D57; harvest in `experiments/objectives/d57-schema-org/HARVEST-d58.md`), not from speculation. The gate-query wiring and the loop budget remain open. (The object is `objective:Objective` to avoid collision with the kernel's execution "task" notion — §6; "objective" reads naturally across science and engineering disciplines.)*
 
 ---
 
@@ -94,28 +94,88 @@ a term with no grounding. That is not license to proceed on faith; it is a
 **recorded finding**: the objective is (currently) ill-posed or blocked here, with the
 specific gap. Catching that before sinking effort is the phase's main payoff.
 
-## 5. Open questions
+## 5. The objective ontology (`objective:`)
 
-- **Ontology shape.** New `objective:Objective` / `objective:Milestone` /
-  `objective:Axiom` classes vs. reuse: milestones as `ReasoningSentence` stubs
-  (proposition set, no justification yet) + an `OPEN`/frontier status; axioms as
-  plain Observed/Declared/Citation resources tagged into the objective; the thesis as
-  the root milestone. How to represent the *intended warrant edge* before the
-  certificate exists (a declared `intends`/`depends_on` link?).
-- **Acceptance-criterion encoding** — grade + witness-kind + falsifier as
-  properties; how the gate dispatch reads them.
-- **The gate queries** — the exact EigenQL for Anchored / Reachable / Checkable
-  (Expressible is just "does it compile"); whether an AutoOnLoad `QueryClass`
-  should emit a `WellPosed` / `Blocked` verdict on an `Objective` resource.
-- **Objective isolation** — branch-per-objective (`branch create <slug>`) vs an
-  objective-rooted layer; how the obligation graph is GC'd or archived when done.
-- **Frontier representation** — how OPEN nodes + their failing gate are marked so
-  the loop (and a human) can see the remaining grounding work at a glance.
-- **Completion artifact** — whether a completed objective emits a dedicated
-  deliverable resource (distinct from `bench:TaskOutput`), or completion is purely
-  the thesis-Holds query.
+Designed from the D57 dogfood, where the obligation graph was first run
+"lightweight" (bare `Prop` declarations + prose comments). Each construct below
+answers a place that forced prose where a typed node belonged
+(`HARVEST-d58.md`, findings H1–H8). Realized as
+`ontologies/objective/objective-ontology.esl` (loads — *Expressible* by
+construction).
+
+**The three planning nodes are structural, not epistemic.** They reference
+propositions and witnesses; the *claims* stay where the epistemic stack already
+puts them (the `Prop`, the `ReasoningSentence` that discharges it, the
+Observed/Declared/Citation witness). This keeps `objective:` a thin planning layer
+over the reasoning stack rather than a parallel epistemics.
+
+### 5.1 Classes
+
+- **`objective:Objective`** — the root planning node for a unit of work. Holds the
+  **thesis** (→ a Milestone), a **version** + a `supersedes` edge to the prior
+  version (H3 — reframing is the normal case; a revision points back and the gates
+  re-run), the working **branch**, and an overall **status**.
+- **`objective:Milestone`** — a proposition to establish, with acceptance criteria
+  (H1, H2). Carries `proposition` (the `Prop`, same value the discharging
+  `ReasoningSentence` will carry — H6), `acceptance_grade`, `witness_kind`,
+  `falsifier`, the intended-warrant edges `depends_on` (→ Milestones/Axioms), a
+  `status` (`open | blocked | admissible | satisfied`) and, while open, the
+  `frontier_gate` that is pending (H4). **Completion is a query** (§2): the
+  milestone is satisfied iff a `Holds` `ReasoningSentence` carries its
+  `proposition` (`satisfied_by` records which). The thesis is just the root
+  Milestone.
+- **`objective:Axiom`** — a premise admitted without derivation: a *pointer* to an
+  already-admitted witness, not the witness itself. Carries `proposition`,
+  `axiom_kind` (`observed | declared | cited`), and `witness` (the
+  `IsObservedAs` / `IsDeclaredAs` / `reference:Citation` IRI). Anything lacking a
+  resolvable `witness` is an unjustified assumption, not an axiom (the *Anchored*
+  gate).
+
+### 5.2 Key properties
+
+| Property | On | Type | Role |
+|---|---|---|---|
+| `objective:thesis` | Objective | resource → Milestone | the root goal |
+| `objective:version` / `objective:supersedes` | Objective | integer / IRI | frame revision (H3) |
+| `objective:branch` | Objective | string | branch-per-objective (H7) |
+| `objective:proposition` | Milestone, Axiom | *(as `reasoning:proposition`)* | the `Prop` |
+| `objective:acceptance_grade` | Milestone | string | `observed\|declared\|derived\|verified` (H2) |
+| `objective:witness_kind` | Milestone | string | `layer-commit\|query\|generator-output\|citation` (H2) |
+| `objective:falsifier` | Milestone | string | what would refute it (H2, *Checkable*) |
+| `objective:depends_on` | Milestone | resource[] → Milestone/Axiom | intended-warrant edge (H1) |
+| `objective:status` | Objective, Milestone | string | `open\|blocked\|admissible\|satisfied` (H4) |
+| `objective:frontier_gate` | Milestone | string | pending gate while open (H4) |
+| `objective:satisfied_by` | Milestone | string | the discharging `ReasoningSentence` IRI (H6) |
+| `objective:axiom_kind` / `objective:witness` | Axiom | string / IRI | admitted-witness pointer |
+
+### 5.3 The four gates as `QueryClass`es
+
+The §3 gates become committed, mechanically-checkable queries over the objective's
+layer (H5) — three are real EigenQL; *Expressible* is just "the frame loaded":
+
+- **Anchored** — every `objective:Axiom` whose `witness` does **not** resolve to an
+  `IsObservedAs`/`IsDeclaredAs`/`reference:Citation` is a violation.
+- **Reachable** — every non-thesis Milestone is reachable along `depends_on` from
+  the thesis, and every `depends_on` target resolves (no dangling/cyclic edge).
+- **Checkable** — every Milestone has `acceptance_grade` + `witness_kind` +
+  `falsifier` set.
+
+An AutoOnLoad `QueryClass` on `objective:Objective` emits a **`WellPosed`** /
+**`Blocked`** verdict (mirroring the reasoning institution's `Holds`/`Fails`), and
+**re-fires on each new version** (H3). Completion is the separate thesis-Holds
+query (§2).
+
+### 5.4 Remaining open
+
+- **Gate-query wiring** — §5.3 specifies the gate semantics + EigenQL sketches;
+  registering them as a `QueryClass`/institution emitting `WellPosed`/`Blocked` is
+  the implementation step.
+- **Completion artifact** — whether a satisfied Objective emits a dedicated
+  deliverable resource (distinct from `bench:TaskOutput`; §6) or completion is
+  purely the thesis-Holds query. Leaning: query only, no new artifact.
 - **Loop budget / convergence** — guard against non-terminating reframing; when to
-  declare "ill-posed" vs keep grounding.
+  declare "ill-posed" vs. keep grounding. (Out of the ontology; a protocol policy.)
+- **Archival / GC** — how a finished objective's branch is archived.
 
 ## 6. Relationship to kernel tasks (D21) and `bench:TaskOutput` — distinct concepts
 

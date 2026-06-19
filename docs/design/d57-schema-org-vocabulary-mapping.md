@@ -1,6 +1,8 @@
 # D57 — schema.org Vocabulary Mapping
 
-*Status: **stub** · design memo · June 2026*
+*Status: **mapping discipline settled** (June 2026) · generator + full mapping in progress on objective branch `obj-d57` · design memo*
+
+*Scope correction (2026-06-19): the deliverable is the **whole** vocabulary — a generated mapping of every *mappable* schema.org term plus an explicit, justified cut of what cannot be mapped — not the §2.5 ten-property slice (that is now the proof-of-shape probe). The mapping discipline below (§3) is settled; the generator (§3.6) and the cut accounting are the remaining work, tracked as objective `obj-d57` (`experiments/objectives/d57-schema-org/`).*
 
 *Companion documents: [D53 large-data tracking](d53-large-data-tracking.md) (the caller), [core ontology](../../ontologies/core/core-ontology.json), [D26 runtime substrate](d26-runtime-substrate.md).*
 
@@ -66,13 +68,86 @@ export), not for D53.
 (schema.org has no sha256, and it's the correctness root — Eigenius-owned);
 `reference` / `media_type` stay `ingest:` (required fields, off D57's critical path).
 
-## 3. Open questions
+## 3. Mapping discipline (settled)
 
-- **Type/range mapping.** schema.org property ranges (`Text`, `URL`, `Number`, `Integer`, `Boolean`, `Date`/`DateTime`, or a class) → Eigenius `data_type` (`string`, `float`, `integer`, `boolean`, `resource`+`class_types`). Conventions needed for: `Date`/`DateTime` (→ `string`, ISO-8601), `URL` (→ `string`), and especially schema.org's **multi-range (union) properties** — a single property whose value may be `Text` *or* a `Class` — which Eigenius's single-`data_type` model doesn't express directly (candidates: pick the broadest, fall back to `string`, or `json`). This is the bulk of the real design work.
-- **Generation, not hand-authoring.** schema.org publishes its full vocabulary as downloadable JSON-LD/RDF. The `urn:schema_org:` ontology should be **generated** from that (a deterministic translator, in the spirit of the mirror generator), not transcribed — so it stays in sync and the "mostly as-is" mapping is mechanized. The translator encodes the §3 type conventions.
-- **Scope / subset.** schema.org has ~800 types; Eigenius needs the dataset/file/provenance/agent slice first (`Dataset`, `DataDownload`/`MediaObject`, `File`, `PropertyValue`, `DefinedTerm`, `Person`, `Organization`, `SoftwareSourceCode`/`SoftwareApplication`, `CreativeWork`, `Thing`, plus the properties they hang off). Generate-on-demand vs vendor-the-slice.
-- **Identity reconciliation.** How `urn:schema_org:` IRIs relate to schema.org's own `https://schema.org/...` IRIs (for JSON-LD round-trip): a fixed prefix substitution, or a recorded `sameAs`. Needed by the RO-Crate boundary tool.
-- **Layer placement.** Whether `urn:schema_org:` is a root layer (like the core ontology) or a sibling vendored ontology stacked above core.
+The cut between what maps and what does not. Four constructs; the friction is
+entirely in property *ranges*. The translator (§3.6) encodes these rules.
+
+### 3.1 The four constructs
+
+| schema.org | Eigenius target | Tier |
+|---|---|---|
+| **Class** (`rdfs:Class` + `rdfs:subClassOf`) | `core:Class` + `is_a` chain (`Thing → CreativeWork → Dataset`) | clean |
+| **DataType** (Text, Number→Integer/Float, Boolean, Date, DateTime, Time, URL⊂Text) | core scalars (§3.2) | clean |
+| **Enumeration** (Class ⊂ Enumeration + fixed member individuals) | `core:Class` + each member a `reflection:DeclaredResource` instance (a code list) | clean |
+| **Property** (`rdf:Property` + multi-valued `domainIncludes` / `rangeIncludes`) | `core:Property` (§3.3) | the crux |
+
+### 3.2 DataType alignment
+
+`Text` → `string`; `URL` → `string` (format `iri`); `Integer` → `integer`;
+`Number`/`Float` → `float`; `Boolean` → `boolean`; `Date`/`DateTime`/`Time` →
+`string` (ISO-8601, with a format hint). The DataType subclass hierarchy is
+carried as `is_a`/annotation but is informational — Eigenius does not infer over
+it.
+
+### 3.3 Property ranges — three tiers
+
+`rangeIncludes` is multi-valued in schema.org; Eigenius `core:Property` has a
+*single* `data_type` (a scalar) **or** `data_type = resource` + a `class_types`
+set. The mapping by range shape:
+
+- **Tier 1 — clean (1:1):** range is exactly one DataType → that scalar; range is
+  exactly one Class → `resource` + `class_types = [that class]`.
+- **Tier 2 — by documented convention:**
+  - *all Classes* (e.g. `{Person, Organization}`) → `resource` +
+    `class_types = [all]`. Lossless (`class_types` is already a set).
+  - *all DataTypes* (e.g. `{Number, Text}`) → `string` (the broadest literal).
+  - *mixed literal-or-entity* (e.g. `author = {Person, Organization, Text}`,
+    `license = {CreativeWork, URL}`) → **entity-first**: `resource` +
+    `class_types = [the Classes]`; the literal option is dropped from the active
+    type. *(Decision 2026-06-19: entity-first over literal-first — typed-entity
+    binding is the platform's value; a bare-string value is the degenerate case
+    schema.org itself tolerates. The opposite choice, all-`string`, was rejected.)*
+- In **every** Tier-2 case the generator preserves the **full original
+  `rangeIncludes` verbatim** as a `schema_org:range_includes` provenance
+  annotation, so nothing is lost and the JSON-LD round-trip is exact even when the
+  active `data_type` picks one interpretation.
+
+### 3.4 Tier 3 — not mapped, recorded with reason (the residual)
+
+Eigenius adopts a *vocabulary*, not a reasoner (§4), so schema.org's
+inference/relational semantics are **not** imported as active relations — only as
+inert provenance annotations, enumerated in the cut accounting:
+
+- `supersededBy`, `rdfs:subPropertyOf`, `owl:equivalentClass`, `inverseOf` — no
+  Eigenius inference consumes these.
+- the **Role** superimposition pattern — no analog.
+
+### 3.5 Scope, layer, identity
+
+- **Scope** *(decision 2026-06-19)*: **core + hosted extensions**
+  (health-lifesci, bib, auto, …; ~800 Classes / ~1.4k Properties). The unstable
+  `pending/` staging layer and deprecated `attic/` layer are **excluded** —
+  stable IRIs for round-trip. (Re-runnable, so expanding later is cheap.)
+- **Identity / round-trip**: fixed prefix substitution
+  `https://schema.org/<Term>` ↔ `urn:schema_org:<Term>`; the original https IRI is
+  retained on each resource as `core:source_irl`. (No per-term `sameAs` needed —
+  the substitution is total and reversible.)
+- **Layer placement**: `urn:schema_org:` is a **sibling vendored ontology stacked
+  above core** (like `ingest`/`reference`/`obo`), not a root layer — it depends on
+  core's scalar types and `reflection:DeclaredResource`.
+
+### 3.6 Remaining open (the generator)
+
+- **The translator.** A deterministic schema.org-JSON-LD → Eigon-JSON generator
+  implementing §3.1–3.5 (in the spirit of the obograph importer / mirror
+  generator). Input: schema.org's published `schemaorg-current-https.jsonld`.
+  Output: the `urn:schema_org:` ontology + a **coverage report** (mapped clean /
+  mapped-by-convention / Tier-3 residual counts + the per-term residual list).
+  Home: `crates/eigenius-schemaorg/` (proposed), `--bin schemaorg_import`.
+- **Adopted grade.** Every emitted resource is
+  `is_a [..., reflection:DeclaredResource]` with `reflection:declared_by =
+  "urn:schema_org"` + `core:source_irl` — adopted, never re-minted as native.
 
 ## 4. Out of scope
 

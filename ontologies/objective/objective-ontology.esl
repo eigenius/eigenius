@@ -1,0 +1,106 @@
+// objective — the D58 objective-framing layer: a typed obligation graph that
+// makes "is this unit of work well-posed?" a mechanical question before any
+// deriving begins.
+//
+// DESIGN (D58 §5, grounded in the D57 dogfood harvest, not speculation):
+// the three planning nodes are STRUCTURAL, not epistemic. They reference
+// propositions and witnesses; the claims themselves stay in the existing
+// epistemic stack — the `Prop`, the reasoning:ReasoningSentence that discharges
+// it, and the Observed/Declared/Citation witness. So `objective:` is a thin
+// planning layer over the reasoning stack, never a parallel epistemics.
+//
+// An Objective is a DAG: a thesis Milestone, intermediate Milestones (each a
+// proposition to derive, with acceptance criteria), and Axioms (pointers to
+// admitted premises). Completion is a QUERY — a Milestone is satisfied iff a
+// Holds reasoning:ReasoningSentence carries its proposition. Frame revision is
+// first-class (objective:supersedes): reframing is the normal case, and the
+// admissibility gates re-run on each version.
+//
+// Stacks above core + reasoning (it references reasoning:proposition's encoding).
+
+namespace core      = "urn:eigenius:core";
+namespace reasoning = "urn:eigenius:reasoning";
+namespace eigentt   = "urn:eigenius:eigentt";
+namespace objective = "urn:eigenius:objective";
+
+// ── Classes ──────────────────────────────────────────────────────────
+
+class objective:Objective {
+    description = "The root planning node for a unit of science/engineering work — the obligation graph as a typed resource. Holds the thesis (objective:thesis → the root Milestone), a version + a supersedes edge to the prior version (reframing is the normal case; gates re-run on revision), the working branch, and an overall well-posedness status. Distinct from D21 kernel tasks / bench:TaskOutput (D58 §6): this is the reasoning FRAME, not a program run.";
+    requires   objective:thesis;
+    recommends objective:version, objective:supersedes, objective:branch,
+               objective:status;
+}
+
+class objective:Milestone {
+    description = "A proposition to establish, with acceptance criteria. Carries the Prop (objective:proposition — the same value the discharging reasoning:ReasoningSentence will carry), the acceptance grade + witness kind + falsifier, and the intended-warrant edges (objective:depends_on → other Milestones/Axioms). Completion is a query: the milestone is satisfied iff a Holds reasoning:ReasoningSentence carries its proposition (objective:satisfied_by records which). The thesis is just the root Milestone.";
+    requires   objective:proposition, objective:acceptance_grade;
+    recommends objective:witness_kind, objective:falsifier, objective:depends_on,
+               objective:status, objective:frontier_gate, objective:satisfied_by;
+}
+
+class objective:Axiom {
+    description = "A premise admitted WITHOUT derivation — a pointer to an already-admitted witness, not the witness itself. Carries the Prop, the axiom kind (observed | declared | cited), and objective:witness (the IsObservedAs / IsDeclaredAs / reference:Citation IRI). Anything lacking a resolvable witness is an unjustified assumption, not an axiom — the Anchored gate.";
+    requires   objective:proposition, objective:axiom_kind;
+    recommends objective:witness;
+}
+
+// ── Properties ───────────────────────────────────────────────────────
+
+property objective:thesis : core:resource {
+    description = "The root Milestone of the objective — its thesis proposition + acceptance grade.";
+    class_types objective:Milestone;
+    domain objective:Objective;
+}
+property objective:version : core:integer {
+    description = "Monotonic version of this objective frame; bumped on each reframing.";
+    domain objective:Objective;
+}
+property objective:supersedes : core:string {
+    description = "IRI of the prior objective version this one replaces (frame revision). On a new version, the admissibility gates re-run.";
+    domain objective:Objective;
+}
+property objective:branch : core:string {
+    description = "The branch this objective is developed on (branch-per-objective isolation).";
+    domain objective:Objective;
+}
+property objective:status : core:string {
+    description = "Well-posedness / progress status: open | blocked | admissible | satisfied. On the Objective (overall) and on each Milestone.";
+}
+property objective:proposition : core:resource {
+    description = "The Prop-typed proposition (a type_expr / eigentt:TypeExpr, encoded as for reasoning:proposition) this Milestone must establish or this Axiom admits. Shared identity with the discharging reasoning:ReasoningSentence's proposition.";
+    class_types eigentt:TypeExpr;
+}
+property objective:acceptance_grade : core:string {
+    description = "The grade this Milestone must reach to count as done: observed | declared | derived | verified.";
+    domain objective:Milestone;
+}
+property objective:witness_kind : core:string {
+    description = "How the Milestone is expected to be witnessed: layer-commit | query | generator-output | citation.";
+    domain objective:Milestone;
+}
+property objective:falsifier : core:string {
+    description = "What evidence would refute this Milestone — the Checkable gate's requirement.";
+    domain objective:Milestone;
+}
+property objective:depends_on : core:resource_array {
+    description = "Intended-warrant edges: the Milestones/Axioms expected to discharge this Milestone. The plan's dependency graph, before any certificate exists.";
+    class_types objective:Milestone, objective:Axiom;
+    domain objective:Milestone;
+}
+property objective:frontier_gate : core:string {
+    description = "While status=open, the admissibility gate pending on this Milestone: expressible | anchored | reachable | checkable. Makes the grounding frontier queryable.";
+    domain objective:Milestone;
+}
+property objective:satisfied_by : core:string {
+    description = "IRI of the Holds reasoning:ReasoningSentence that discharged this Milestone's proposition (filled on completion).";
+    domain objective:Milestone;
+}
+property objective:axiom_kind : core:string {
+    description = "The kind of admitted premise: observed | declared | cited.";
+    domain objective:Axiom;
+}
+property objective:witness : core:string {
+    description = "IRI of the admitted witness backing this Axiom (an IsObservedAs / IsDeclaredAs witness, or a reference:Citation).";
+    domain objective:Axiom;
+}
