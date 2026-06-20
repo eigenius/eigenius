@@ -18,6 +18,8 @@
 
 pub mod convert;
 pub mod jsonld;
+pub mod report;
 
 pub use convert::{convert, ConvertReport, Coverage, RangeTier};
 pub use jsonld::parse_graph;
+pub use report::{build_report, report_to_cbor};

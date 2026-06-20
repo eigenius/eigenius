@@ -27,7 +27,9 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use eigenius_kernel::ontology::eigon_json;
+use eigenius_schemaorg::report::{self, RESULT_IRI};
 use eigenius_schemaorg::{convert, parse_graph};
+use sha2::{Digest, Sha256};
 
 #[derive(Parser, Debug)]
 #[command(about = "Import schema.org JSON-LD into Eigon-JSON under urn:schema_org:")]
@@ -41,18 +43,37 @@ struct Args {
     /// Coverage / cut-accounting report (JSON). Omit to skip.
     #[arg(long)]
     report: Option<PathBuf>,
+    /// Conversion-report `DerivedResource` as Eigon-CBOR (D60 §4.1 — the `oci`
+    /// tool-runtime result wire format). Omit to skip. `-` writes to stdout.
+    #[arg(long)]
+    report_cbor: Option<PathBuf>,
     /// Pretty-print the Eigon-JSON output.
     #[arg(long)]
     pretty: bool,
 }
 
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 fn main() -> ExitCode {
     let args = Args::parse();
 
-    let input = match fs::read_to_string(&args.input) {
-        Ok(s) => s,
+    let input_bytes = match fs::read(&args.input) {
+        Ok(b) => b,
         Err(e) => {
             eprintln!("error: cannot read `{}`: {e}", args.input.display());
+            return ExitCode::from(2);
+        }
+    };
+    let input_sha256 = sha256_hex(&input_bytes);
+    let input = match String::from_utf8(input_bytes) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: input is not valid UTF-8: {e}");
             return ExitCode::from(2);
         }
     };
@@ -105,6 +126,38 @@ fn main() -> ExitCode {
             Ok(()) => eprintln!("wrote coverage → {}", path.display()),
             Err(e) => {
                 eprintln!("error: writing report: {e}");
+                return ExitCode::from(1);
+            }
+        }
+    }
+    if let Some(path) = &args.report_cbor {
+        // Hash the canonical (compact) ontology serialization — the artifact the
+        // chain pins as `gen_output` — to record the input→output provenance.
+        let doc = eigon_json::serialize_document(&report.resources);
+        let output_sha256 = match serde_json::to_string(&doc) {
+            Ok(s) => sha256_hex(s.as_bytes()),
+            Err(e) => {
+                eprintln!("error: serializing ontology for hash: {e}");
+                return ExitCode::from(1);
+            }
+        };
+        let result =
+            report::build_report(RESULT_IRI, &input_sha256, &output_sha256, &report.coverage);
+        let cbor = report::report_to_cbor(&result);
+        let write = if path.as_os_str() == "-" {
+            use std::io::Write;
+            std::io::stdout().write_all(&cbor).map_err(serde_err)
+        } else {
+            fs::write(path, &cbor).map_err(serde_err)
+        };
+        match write {
+            Ok(()) => eprintln!(
+                "wrote conversion-report (Eigon-CBOR, {} bytes) → {}",
+                cbor.len(),
+                path.display()
+            ),
+            Err(e) => {
+                eprintln!("error: writing report-cbor: {e}");
                 return ExitCode::from(1);
             }
         }
