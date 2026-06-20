@@ -48,10 +48,7 @@ pub(super) fn apply_pattern(
 
     for binding in &existing {
         for (resource_iri, resource) in &candidates {
-            if let Some(new_binding) = try_match_resource(pattern, resource, resource_iri, binding)
-            {
-                result.push(new_binding);
-            }
+            result.extend(try_match_resource(pattern, resource, resource_iri, binding));
         }
     }
 
@@ -72,7 +69,7 @@ pub(super) fn apply_negated_pattern(
     for binding in &existing {
         let has_match = candidates
             .iter()
-            .any(|(iri, resource)| try_match_resource(pattern, resource, iri, binding).is_some());
+            .any(|(iri, resource)| !try_match_resource(pattern, resource, iri, binding).is_empty());
         if !has_match {
             result.push(binding.clone());
         }
@@ -96,22 +93,32 @@ fn collect_candidates<'a>(
     derived: &'a BTreeMap<String, Vec<Binding>>,
     overlay: &'a [(Iri, Resource)],
 ) -> Vec<(Option<Iri>, BTreeMap<Iri, Value>)> {
-    // Check if this references a derived relation
+    // Check if this references a derived relation. Derived rows are stored as
+    // positional tuples ("0" = the relation's first/subject column; see
+    // `project_onto_head` in mod.rs). A pattern references a derived relation by
+    // its subject only — the parser allows a single variable, e.g. `Reach(?n)` —
+    // so bind that subject from column "0", and when the column value is a
+    // resource IRI, resolve it to the REAL resource. That makes a brace
+    // refinement (`Reach(?n) { prop: ?v }`) match the resource's actual
+    // properties and join on shared variables, exactly like a concrete pattern.
+    // A column IRI that doesn't resolve (a dangling reference) yields empty
+    // properties: the subject still binds (the row is in the relation) but no
+    // brace refinement can match it.
     if let Some(Name::ShortName(ref name)) = pattern.class {
         if let Some(derived_bindings) = derived.get(name) {
-            // Convert derived bindings to pseudo-resources
             return derived_bindings
                 .iter()
-                .map(|b| {
-                    let props: BTreeMap<Iri, Value> = b
-                        .iter()
-                        .filter_map(|(k, v)| {
-                            Iri::parse(&format!("urn:derived:{k}"))
-                                .ok()
-                                .map(|iri| (iri, v.clone()))
-                        })
-                        .collect();
-                    (None, props)
+                .filter_map(|b| {
+                    let subject = b.get("0")?;
+                    let iri = match subject {
+                        Value::String(s) => Iri::parse(s).ok()?,
+                        _ => return None,
+                    };
+                    let props = layer
+                        .resolve(&iri)
+                        .map(|r| r.properties().clone())
+                        .unwrap_or_default();
+                    Some((Some(iri), props))
                 })
                 .collect();
         }
@@ -206,70 +213,133 @@ fn class_with_subclass_closure(class_iri: &Iri, layer: &Layer) -> BTreeSet<Iri> 
 }
 
 /// Try to match a resource against a pattern, extending an existing binding.
+///
+/// Returns *all* extended bindings the match produces: empty on no match, one
+/// for an ordinary match, and possibly many when an array pattern's `[... ?e ...]`
+/// (Each) form iterates a property's elements (D59). Each property pattern is a
+/// join step over the running frontier of partial bindings.
 fn try_match_resource(
     pattern: &Pattern,
     resource_props: &BTreeMap<Iri, Value>,
     resource_iri: &Option<Iri>,
     existing: &Binding,
-) -> Option<Binding> {
-    let mut binding = existing.clone();
+) -> Vec<Binding> {
+    let mut base = existing.clone();
 
-    // Bind the subject variable
+    // Bind the subject variable.
     let subject_name = &pattern.subject.name;
     if let Some(iri) = resource_iri {
         let iri_val = Value::String(iri.as_str().to_string());
-        if let Some(existing_val) = binding.get(subject_name) {
+        if let Some(existing_val) = base.get(subject_name) {
             if !values_equal(existing_val, &iri_val) {
-                return None; // Conflict with existing binding
+                return Vec::new(); // conflict with existing binding
             }
         }
-        binding.insert(subject_name.clone(), iri_val);
+        base.insert(subject_name.clone(), iri_val);
     }
 
-    // Match property patterns
+    // Match property patterns, threading a frontier of partial bindings.
+    let mut frontier = vec![base];
     for prop_pat in &pattern.properties {
         let prop_iri = match &prop_pat.property {
-            Name::ShortName(s) => {
-                // Find by shortname in resource properties
-                find_property_by_shortname(s, resource_props)?
-            }
+            Name::ShortName(s) => match find_property_by_shortname(s, resource_props) {
+                Some(iri) => iri,
+                None => return Vec::new(),
+            },
             Name::FullIri(iri) => iri.clone(),
         };
-
         let value = resource_props.get(&prop_iri);
 
-        match &prop_pat.object {
-            ValueOrVariable::Variable(var) => {
-                match value {
-                    Some(val) => {
-                        if let Some(existing_val) = binding.get(&var.name) {
-                            if !values_equal(existing_val, val) {
-                                return None; // Conflict
+        let mut next: Vec<Binding> = Vec::new();
+        for b in frontier {
+            match &prop_pat.object {
+                ValueOrVariable::Variable(var) => {
+                    // property absent → no match
+                    if let Some(val) = value {
+                        match b.get(&var.name) {
+                            Some(existing_val) if !values_equal(existing_val, val) => {}
+                            Some(_) => next.push(b),
+                            None => {
+                                let mut nb = b;
+                                nb.insert(var.name.clone(), val.clone());
+                                next.push(nb);
                             }
-                        } else {
-                            binding.insert(var.name.clone(), val.clone());
                         }
                     }
-                    None => {
-                        // Property not present — mark as unbound for NOT EXISTS
-                        // Don't insert anything; NOT EXISTS checks for absence
-                        // But this means the pattern doesn't match this resource
-                        // unless we're specifically allowing optional matching
-                        return None;
+                }
+                ValueOrVariable::Literal(lit) => {
+                    let expected = literal_to_value(lit);
+                    if let Some(val) = value {
+                        if values_equal(val, &expected) {
+                            next.push(b);
+                        }
+                    }
+                }
+                ValueOrVariable::Array(ap) => {
+                    // property absent or not an array → no match
+                    if let Some(Value::Array(items)) = value {
+                        match_array_pattern(ap, items, b, &mut next);
                     }
                 }
             }
-            ValueOrVariable::Literal(lit) => {
-                let expected = literal_to_value(lit);
-                match value {
-                    Some(val) if values_equal(val, &expected) => {}
-                    _ => return None,
+        }
+        frontier = next;
+        if frontier.is_empty() {
+            return Vec::new();
+        }
+    }
+
+    frontier
+}
+
+/// Match an array pattern (D59) against a property's elements, pushing every
+/// resulting binding (an `Each` pattern forks one per element) onto `out`.
+fn match_array_pattern(ap: &ArrayPattern, elems: &[Value], base: Binding, out: &mut Vec<Binding>) {
+    match ap {
+        ArrayPattern::Exact(vars) => {
+            if elems.len() == vars.len() {
+                if let Some(b) = bind_positional(vars, elems, base) {
+                    out.push(b);
+                }
+            }
+        }
+        ArrayPattern::AtLeast(vars) => {
+            if elems.len() >= vars.len() {
+                if let Some(b) = bind_positional(vars, &elems[..vars.len()], base) {
+                    out.push(b);
+                }
+            }
+        }
+        ArrayPattern::Each(var) => {
+            for el in elems {
+                match base.get(&var.name) {
+                    Some(existing_val) if !values_equal(existing_val, el) => {}
+                    Some(_) => out.push(base.clone()),
+                    None => {
+                        let mut nb = base.clone();
+                        nb.insert(var.name.clone(), el.clone());
+                        out.push(nb);
+                    }
                 }
             }
         }
     }
+}
 
-    Some(binding)
+/// Bind a positional run of variables to array elements (equi-join on any var
+/// already bound). Returns None on a binding conflict.
+fn bind_positional(vars: &[Variable], elems: &[Value], base: Binding) -> Option<Binding> {
+    let mut b = base;
+    for (var, el) in vars.iter().zip(elems.iter()) {
+        match b.get(&var.name) {
+            Some(existing_val) if !values_equal(existing_val, el) => return None,
+            Some(_) => {}
+            None => {
+                b.insert(var.name.clone(), el.clone());
+            }
+        }
+    }
+    Some(b)
 }
 
 /// Find a property IRI by shortname by looking it up in the resource's keys.
@@ -534,6 +604,184 @@ mod tests {
         assert!(!results.is_empty());
     }
 
+    fn build_array_layer() -> Arc<Layer> {
+        // team1 has members [a, b, c]; team0 has []. Members carry a name.
+        let storage = crate::layer::LayerStorage::in_memory();
+        let core_json = include_str!("../../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut core_builder = LayerBuilder::new("core", None);
+        for r in core_resources {
+            core_builder.add_resource(r).unwrap();
+        }
+        let core = Arc::new(core_builder.build(storage.clone()));
+        let mut b = LayerBuilder::new("arr", Some(core));
+
+        let iri = |s: &str| Iri::parse(s).unwrap();
+        let sv = |s: &str| Value::String(s.into());
+        for (id, nm) in [("a", "A"), ("b", "B"), ("c", "C")] {
+            let mut m = Resource::new(iri(&format!("urn:eigenius:t:{id}")));
+            m.set(iri("urn:eigenius:t:name"), sv(nm));
+            b.add_resource(m).unwrap();
+        }
+        let mut team1 = Resource::new(iri("urn:eigenius:t:team1"));
+        team1.set(
+            iri("urn:eigenius:t:members"),
+            Value::Array(vec![
+                sv("urn:eigenius:t:a"),
+                sv("urn:eigenius:t:b"),
+                sv("urn:eigenius:t:c"),
+            ]),
+        );
+        b.add_resource(team1).unwrap();
+        let mut team0 = Resource::new(iri("urn:eigenius:t:team0"));
+        team0.set(iri("urn:eigenius:t:members"), Value::Array(vec![]));
+        b.add_resource(team0).unwrap();
+        Arc::new(b.build(storage))
+    }
+
+    // D59 Item 2 — array element-iteration + cardinality patterns.
+
+    fn array_query(q: &str) -> usize {
+        let layer = build_array_layer();
+        run_query(&layer, q).len()
+    }
+
+    #[test]
+    fn array_each_iterates_elements() {
+        // `[... ?m ...]` yields one binding per element: team1 → 3, team0 → 0.
+        assert_eq!(
+            array_query(
+                r#"MATCH ?t { "urn:eigenius:t:members": [... ?m ...] } RETURN [] { "urn:eigenius:t:who": ?m }"#
+            ),
+            3
+        );
+    }
+
+    #[test]
+    fn array_exact_matches_cardinality() {
+        // exactly three → team1 only; exactly two → neither (3 and 0).
+        assert_eq!(
+            array_query(
+                r#"MATCH ?t { "urn:eigenius:t:members": [?x, ?y, ?z] } RETURN [] { "urn:eigenius:t:k": ?x }"#
+            ),
+            1
+        );
+        assert_eq!(
+            array_query(
+                r#"MATCH ?t { "urn:eigenius:t:members": [?x, ?y] } RETURN [] { "urn:eigenius:t:k": ?x }"#
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn array_empty_matches_empty_only() {
+        // `[]` → only team0.
+        assert_eq!(
+            array_query(
+                r#"MATCH ?t { "urn:eigenius:t:members": [] } RETURN [] { "urn:eigenius:t:t": ?t }"#
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn array_at_least_matches_prefix() {
+        // `[?x, ?y, ...]` → team1 (3 ≥ 2); team0 (0 < 2) excluded.
+        assert_eq!(
+            array_query(
+                r#"MATCH ?t { "urn:eigenius:t:members": [?x, ?y, ...] } RETURN [] { "urn:eigenius:t:k": ?x }"#
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn array_each_joins_to_element_resource() {
+        // The Reachable shape: iterate elements, then join each back to its
+        // resource's real property. team1's 3 members each resolve a name.
+        assert_eq!(
+            array_query(
+                r#"MATCH ?t { "urn:eigenius:t:members": [... ?m ...] },
+                         ?m { "urn:eigenius:t:name": ?n }
+                   RETURN [] { "urn:eigenius:t:name": ?n }"#
+            ),
+            3
+        );
+    }
+
+    // D59 Item 3 — the Reachable well-posedness check end to end: recursive
+    // transitive closure over an array-valued `dep` edge (Item 2's `[... ?n ...]`)
+    // through a derived-relation subject (Item 1's join), with a stratified-
+    // negation `Unreachable` set. This is the D58 Reachable gate in miniature.
+    fn build_objgraph_layer(include_orphan: bool) -> Arc<Layer> {
+        let storage = crate::layer::LayerStorage::in_memory();
+        let core_json = include_str!("../../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut core_builder = LayerBuilder::new("core", None);
+        for r in core_resources {
+            core_builder.add_resource(r).unwrap();
+        }
+        let core = Arc::new(core_builder.build(storage.clone()));
+        let mut b = LayerBuilder::new("objgraph", Some(core));
+        let iri = |s: &str| Iri::parse(s).unwrap();
+        let sv = |s: &str| Value::String(s.into());
+        let p = "urn:eigenius:t";
+
+        // node(name) with a `dep` array edge and a `node` marker.
+        let mut node = |id: &str, deps: Vec<&str>, bldr: &mut crate::layer::LayerBuilder| {
+            let mut r = Resource::new(iri(&format!("{p}:{id}")));
+            r.set(iri(&format!("{p}:node")), sv("y"));
+            r.set(
+                iri(&format!("{p}:dep")),
+                Value::Array(deps.iter().map(|d| sv(&format!("{p}:{d}"))).collect()),
+            );
+            bldr.add_resource(r).unwrap();
+        };
+        node("thesis", vec!["m1", "m2"], &mut b);
+        node("m1", vec!["ax"], &mut b);
+        node("m2", vec![], &mut b);
+        node("ax", vec![], &mut b);
+        if include_orphan {
+            node("orphan", vec![], &mut b); // a node nothing depends on
+        }
+        // The objective root carries the thesis pointer.
+        let mut obj = Resource::new(iri(&format!("{p}:obj")));
+        obj.set(iri(&format!("{p}:thesis")), sv(&format!("{p}:thesis")));
+        b.add_resource(obj).unwrap();
+
+        Arc::new(b.build(storage))
+    }
+
+    const REACHABLE_QUERY: &str = r#"
+        DEFINE Reach(?t) FROM MATCH ?o { "urn:eigenius:t:thesis": ?t }
+        DEFINE Reach(?n) FROM MATCH Reach(?m) { "urn:eigenius:t:dep": [... ?n ...] }
+        DEFINE Node(?x) FROM MATCH ?x { "urn:eigenius:t:node": ?v }
+        DEFINE Unreachable(?x) FROM MATCH Node(?x) {}, NOT Reach(?x) {}
+        MATCH Unreachable(?x) {} RETURN [] { "urn:eigenius:t:x": ?x }
+    "#;
+
+    #[test]
+    fn reachable_gate_well_posed_graph_has_no_unreachable() {
+        let layer = build_objgraph_layer(false);
+        assert_eq!(
+            run_query(&layer, REACHABLE_QUERY).len(),
+            0,
+            "fully-connected graph should have no unreachable nodes"
+        );
+    }
+
+    #[test]
+    fn reachable_gate_flags_orphan() {
+        let layer = build_objgraph_layer(true);
+        // Only the orphan is unreachable from the thesis.
+        assert_eq!(
+            run_query(&layer, REACHABLE_QUERY).len(),
+            1,
+            "the disconnected orphan node must be flagged unreachable"
+        );
+    }
+
     fn build_hierarchy_layer() -> Arc<Layer> {
         // Build a simple hierarchy: Alice -> Bob -> Charlie
         let storage = crate::layer::LayerStorage::in_memory();
@@ -613,5 +861,82 @@ mod tests {
             "#,
         );
         assert!(!results.is_empty());
+    }
+
+    // D59 Item 1 — derived-relation binding/join. The three tests below would
+    // each have failed before the positional-head-projection + resolve-subject
+    // fix (unbound projection, empty/cross-product join, broken recursion).
+
+    #[test]
+    fn derived_subject_is_bound_and_projectable() {
+        // A variable bound via a DEFINE relation must carry into the query and be
+        // RETURN-able. Pre-fix this errored "unbound variable ?p" (run_query
+        // would panic).
+        let layer = build_hierarchy_layer();
+        let results = run_query(
+            &layer,
+            r#"
+            DEFINE Mgr(?x) FROM MATCH ?x { "urn:eigenius:test:reports_to": ?z }
+            MATCH Mgr(?p) {}
+            RETURN [] { "urn:eigenius:test:who": ?p }
+            "#,
+        );
+        // Alice and Bob report to someone; Charlie does not.
+        assert_eq!(
+            results.len(),
+            2,
+            "expected the two reporters, got {}",
+            results.len()
+        );
+    }
+
+    #[test]
+    fn derived_join_refinement_no_cross_product() {
+        // A brace refinement on a derived-relation subject must match the REAL
+        // resource's properties and equi-join on the bound subject — not
+        // cross-product (the bug produced N× rows) and not return empty (the
+        // pseudo-resource bug).
+        let layer = build_hierarchy_layer();
+        let results = run_query(
+            &layer,
+            r#"
+            DEFINE Mgr(?x) FROM MATCH ?x { "urn:eigenius:test:reports_to": ?z }
+            MATCH Mgr(?p) { "urn:eigenius:test:name": ?n }
+            RETURN [] { "urn:eigenius:test:name": ?n }
+            "#,
+        );
+        assert_eq!(
+            results.len(),
+            2,
+            "expected exactly Alice+Bob, got {}",
+            results.len()
+        );
+    }
+
+    #[test]
+    fn recursive_reach_single_arg_closure() {
+        // The Reachable shape: a 1-arg relation whose recursive step refines the
+        // derived subject through a real property. From Alice: direct = Bob,
+        // transitive = Charlie. Exercises recursion + derived-subject join.
+        let layer = build_hierarchy_layer();
+        let results = run_query(
+            &layer,
+            r#"
+            DEFINE Reach(?n) FROM
+                MATCH ?s { "urn:eigenius:test:reports_to": ?n }
+                WHERE ?s = "urn:eigenius:test:alice"
+            DEFINE Reach(?n) FROM
+                MATCH Reach(?m) { "urn:eigenius:test:reports_to": ?n }
+            MATCH Reach(?p) { "urn:eigenius:test:name": ?nm }
+            RETURN [] { "urn:eigenius:test:name": ?nm }
+            "#,
+        );
+        // Reach(alice) = { bob, charlie }
+        assert_eq!(
+            results.len(),
+            2,
+            "expected Bob+Charlie reachable from Alice, got {}",
+            results.len()
+        );
     }
 }

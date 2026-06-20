@@ -190,11 +190,36 @@ impl Variable {
     }
 }
 
-/// Either a variable reference or a literal value.
+/// Either a variable reference, a literal value, or an array pattern.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueOrVariable {
     Variable(Variable),
     Literal(Literal),
+    /// An array pattern (D59) — matches against an array-valued property,
+    /// binding/iterating its elements.
+    Array(ArrayPattern),
+}
+
+/// A pattern over an array-valued property (D59).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArrayPattern {
+    /// `[]`, `[?a]`, `[?a, ?b]` — exactly N elements, bound positionally.
+    Exact(Vec<Variable>),
+    /// `[?a, ...]`, `[?a, ?b, ...]` — at least N elements; the first N bound
+    /// positionally, the remainder unconstrained.
+    AtLeast(Vec<Variable>),
+    /// `[... ?e ...]` — iterate: one binding per array element.
+    Each(Variable),
+}
+
+impl ArrayPattern {
+    /// The variables this pattern binds (for bound-ness tracking).
+    pub fn variables(&self) -> Vec<&Variable> {
+        match self {
+            ArrayPattern::Exact(vs) | ArrayPattern::AtLeast(vs) => vs.iter().collect(),
+            ArrayPattern::Each(v) => vec![v],
+        }
+    }
 }
 
 /// A literal value.

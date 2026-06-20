@@ -1145,8 +1145,46 @@ impl Parser {
         }
     }
 
+    /// Parse an array pattern (D59) in a property-object position.
+    /// Forms: `[]`, `[?a]`, `[?a, ?b]` (Exact); `[?a, ...]`, `[?a, ?b, ...]`
+    /// (AtLeast); `[... ?e ...]` (Each — iterate one binding per element).
+    fn parse_array_pattern(&mut self) -> Result<ArrayPattern, QueryError> {
+        self.expect(&TokenKind::LBracket)?;
+        // `[]`
+        if matches!(self.peek(), TokenKind::RBracket) {
+            self.advance();
+            return Ok(ArrayPattern::Exact(vec![]));
+        }
+        // `[... ?e ...]`
+        if matches!(self.peek(), TokenKind::Ellipsis) {
+            self.advance();
+            let var = self.parse_variable()?;
+            self.expect(&TokenKind::Ellipsis)?;
+            self.expect(&TokenKind::RBracket)?;
+            return Ok(ArrayPattern::Each(var));
+        }
+        // `[?a]`, `[?a, ?b]`, or `[?a, ?b, ...]`
+        let mut vars = Vec::new();
+        loop {
+            vars.push(self.parse_variable()?);
+            if matches!(self.peek(), TokenKind::Comma) {
+                self.advance();
+                if matches!(self.peek(), TokenKind::Ellipsis) {
+                    self.advance();
+                    self.expect(&TokenKind::RBracket)?;
+                    return Ok(ArrayPattern::AtLeast(vars));
+                }
+                continue;
+            }
+            break;
+        }
+        self.expect(&TokenKind::RBracket)?;
+        Ok(ArrayPattern::Exact(vars))
+    }
+
     fn parse_value_or_variable(&mut self) -> Result<ValueOrVariable, QueryError> {
         match self.peek().clone() {
+            TokenKind::LBracket => Ok(ValueOrVariable::Array(self.parse_array_pattern()?)),
             TokenKind::Variable(_) => {
                 let var = self.parse_variable()?;
                 Ok(ValueOrVariable::Variable(var))

@@ -1,6 +1,12 @@
 # D59 — EigenQL: derived-relation joins + array element patterns (plan)
 
-*Status: **plan** · June 2026 · prerequisite for D58 Reachable gate, then D57/D58 resume*
+*Status: **implemented** (Items 1–3) · June 2026 · unblocks D58 Reachable gate, then D57/D58 resume*
+
+*Implementation summary: three defects fixed + array patterns added, all in
+`kernel/src/query/`, verified by 7 new unit tests (1565 kernel tests green, clippy
+clean) and a live kernel run of the Reachable query against the D58 objective graph
+(`m_orphan` correctly flagged). A **third** latent defect surfaced during Item 3
+validation — see §1b.*
 
 *This work was surfaced by the D58 dogfood: building the objective-graph
 **Reachable** well-posedness check (transitive closure over `objective:depends_on`)
@@ -75,6 +81,31 @@ query needs a 2-column join no resource property can carry).
 - `DEFINE R … MATCH R(?x) {} RETURN {x}` projects;
 - a recursive 1-arg relation over a real property converges (Ancestor-style);
 - regression: the documented `Ancestor(?y) { reports_to: ?z }` idiom now works.
+
+## 1b. Item 1b (discovered during Item 3) — stratified negation must evaluate in stratum order
+
+**Symptom:** the Reachable query (`Unreachable = Node \ Reach`, a negation over a
+recursive relation) reported one *extra* unreachable node — a node that **is**
+reached was flagged.
+
+**Root cause:** `evaluate/mod.rs` ran *all* `DEFINE` rules together in a single
+monotonic add-only fixpoint. `Unreachable` negates `Reach`, so it was computed
+against a **partial** `Reach` in early iterations and added stale rows (e.g. `ax`,
+before the recursion reached it) that the add-only loop never retracts. The
+stratifier (`query/stratify.rs`) already computes ordered strata and `query/mod`
+calls it — but only to *validate*; the order was discarded and the documented
+"run stratum 0 to fixpoint, then stratum 1" semantics (guide ch.10) were never
+implemented.
+
+**Fix:** `evaluate/mod.rs` now evaluates **stratum by stratum in order**, running a
+seminaive fixpoint over each stratum's rules with all lower strata already fixed.
+Negation in a higher stratum therefore sees a complete lower relation. (Within a
+stratum only positive recursion is allowed — the stratifier guarantees it — so the
+add-only fixpoint is sound there.)
+
+**Modified:** `kernel/src/query/evaluate/mod.rs` (uses `stratify::stratify`'s
+ordered output). Verified by `reachable_gate_well_posed_graph_has_no_unreachable`
+(0) and `reachable_gate_flags_orphan` (1).
 
 ## 2. Item 2 — array element-iteration + cardinality patterns
 

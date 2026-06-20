@@ -285,8 +285,16 @@ fn collect_pattern_vars<'a>(
     for pattern in patterns {
         vars.insert(pattern.subject.name.clone());
         for prop in &pattern.properties {
-            if let ValueOrVariable::Variable(v) = &prop.object {
-                vars.insert(v.name.clone());
+            match &prop.object {
+                ValueOrVariable::Variable(v) => {
+                    vars.insert(v.name.clone());
+                }
+                ValueOrVariable::Array(ap) => {
+                    for v in ap.variables() {
+                        vars.insert(v.name.clone());
+                    }
+                }
+                ValueOrVariable::Literal(_) => {}
             }
         }
     }

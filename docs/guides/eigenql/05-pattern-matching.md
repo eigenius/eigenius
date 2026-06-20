@@ -111,6 +111,30 @@ Variables may be free or bound:
 - **Free**: the variable is assigned to the property's value. In the result binding, `?breed` → value of the `breed` property.
 - **Bound**: the property's value is compared via `values_equal` against the existing binding. Disagreement → the pattern fails.
 
+### Array targets (D59)
+
+A property whose value is an array (`resource_array` / `value_array`) can be matched with an **array pattern** in the target position, instead of binding the array as a whole:
+
+```eigenql
+MATCH ?team { members: [] }                 -- exactly empty
+MATCH ?team { members: [?only] }            -- exactly one element, bound to ?only
+MATCH ?team { members: [?a, ?b] }           -- exactly two, bound positionally
+MATCH ?team { members: [?a, ?b, ...] }      -- at least two; ?a,?b = the first two
+MATCH ?team { members: [... ?m ...] }       -- iterate: one binding per element
+```
+
+- `[v0, v1, …]` — **exact arity**: matches only when the array has exactly that many elements; binds each variable positionally (ordered arrays, so positions are well-defined). `[]` matches the empty array.
+- `[v0, …, vN, ...]` — **at least N**: matches when the array has at least the listed elements; binds the first N, leaves the rest unconstrained.
+- `[... ?e ...]` — **iterate**: produces *one binding per element* (an unnest). This turns an array property into a relation, so it composes with recursion for graph traversal:
+
+```eigenql
+-- reachability over an array-valued `depends_on` edge
+DEFINE Reach(?n) FROM MATCH "...:Objective"(?o) { thesis: ?n }
+DEFINE Reach(?n) FROM MATCH Reach(?m) { depends_on: [... ?n ...] }
+```
+
+Positional binds equi-join on any variable already bound, exactly like a scalar target. An array pattern against a non-array (or absent) property simply doesn't match.
+
 ## 5.5. Multiple patterns in a single `MATCH`
 
 ```eigenql

@@ -58,6 +58,25 @@ use return_shape::{binding_to_resource, deduplicate, shape_result, sort_results}
 ///
 /// FIBER clauses require `runtime` to carry both an institution registry
 /// and an execution context; otherwise they error at dispatch time.
+/// Project DEFINE-body bindings onto the rule's head variables, re-keyed by
+/// positional index ("0", "1", …). A relation defined by multiple rules with
+/// differently-named head variables thus yields one consistent positional tuple
+/// shape, and rule-local (non-head) variables are dropped. A row that fails to
+/// bind every head variable is dropped (an under-bound head is not a valid fact).
+fn project_onto_head(bindings: Vec<Binding>, head: &[crate::query::ast::Variable]) -> Vec<Binding> {
+    bindings
+        .into_iter()
+        .filter_map(|b| {
+            let mut row = Binding::new();
+            for (i, var) in head.iter().enumerate() {
+                let val = b.get(&var.name)?;
+                row.insert(i.to_string(), val.clone());
+            }
+            Some(row)
+        })
+        .collect()
+}
+
 pub fn evaluate(
     program: &Program,
     layer: &Layer,
@@ -82,36 +101,55 @@ pub fn evaluate(
 
     let mut derived: BTreeMap<String, Vec<Binding>> = BTreeMap::new();
 
-    // 1. Evaluate DEFINE rules with seminaive fixpoint
+    // 1. Evaluate DEFINE rules, stratum by stratum, with a seminaive fixpoint
+    //    per stratum.
+    //
+    // Strata MUST be evaluated in order: a relation that negates another
+    // (`NOT Reach(?x)`) sits in a strictly higher stratum, and its negated
+    // dependency must be *fully computed* before it runs. Evaluating all rules
+    // together in one fixpoint is unsound for negation — the negating relation
+    // would see a partial lower relation early and, since the loop only adds
+    // facts, those stale rows would never be retracted. (Stratification is
+    // validated upstream in `query::mod`; here we use the same ordering.)
+    //
+    // Each rule's body bindings are *projected onto the rule's head variables*,
+    // re-keyed by positional index ("0", "1", …), before being stored. This is
+    // load-bearing: a relation defined by several rules may use differently-named
+    // head variables (e.g. `Reach(?t)` in one rule and `Reach(?n)` in another),
+    // so storing raw body bindings would yield inconsistent keys that the
+    // consumer (collect_candidates) cannot map. Positional projection gives one
+    // canonical tuple shape per relation and drops rule-local junk variables.
     if !program.definitions.is_empty() {
-        // Initial pass: evaluate all rules from base facts
-        for def in &program.definitions {
-            let bindings = evaluate_match_part(&def.body, layer, &derived)?;
-            let entry = derived.entry(def.name.clone()).or_default();
-            entry.extend(bindings);
-        }
-
-        // Fixpoint loop: keep evaluating until no new facts are derived
+        let strata = crate::query::stratify::stratify(&program.definitions)?;
         let max_iterations = 1000; // Safety bound
-        for _ in 0..max_iterations {
-            let mut new_facts = false;
-            for def in &program.definitions {
-                let bindings = evaluate_match_part(&def.body, layer, &derived)?;
-                let entry = derived.entry(def.name.clone()).or_default();
-                let prev_len = entry.len();
-                // Add only truly new bindings (not already present)
-                for binding in bindings {
-                    if !entry.contains(&binding) {
-                        entry.push(binding);
-                        new_facts = true;
+        for stratum in &strata {
+            let in_stratum: std::collections::BTreeSet<&str> =
+                stratum.relations.iter().map(String::as_str).collect();
+            let rules: Vec<&crate::query::ast::RuleDefinition> = program
+                .definitions
+                .iter()
+                .filter(|d| in_stratum.contains(d.name.as_str()))
+                .collect();
+
+            // Seminaive fixpoint over this stratum only; lower strata are fixed.
+            // The first iteration is the initial pass; stop when a full pass
+            // adds no new facts.
+            for _ in 0..=max_iterations {
+                let mut new_facts = false;
+                for def in &rules {
+                    let bindings = evaluate_match_part(&def.body, layer, &derived)?;
+                    let projected = project_onto_head(bindings, &def.variables);
+                    let entry = derived.entry(def.name.clone()).or_default();
+                    for binding in projected {
+                        if !entry.contains(&binding) {
+                            entry.push(binding);
+                            new_facts = true;
+                        }
                     }
                 }
-                if entry.len() > prev_len {
-                    new_facts = true;
+                if !new_facts {
+                    break;
                 }
-            }
-            if !new_facts {
-                break; // Fixpoint reached
             }
         }
     }
