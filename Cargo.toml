@@ -6,6 +6,7 @@ members = [
     "crates/eigenius-embedder-candle",
     "crates/eigenius-obograph",
     "crates/eigenius-schemaorg",
+    "crates/eigenius-schemaorg-worker",
     "crates/runtime-substrate",
     "crates/eigenius-julia",
     "crates/eigenius-lean",

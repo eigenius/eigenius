@@ -1424,6 +1424,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-schemaorg-worker"
+version = "0.1.0"
+dependencies = [
+ "eigenius-kernel",
+ "eigenius-runtime-substrate",
+ "eigenius-schemaorg",
+ "serde_bytes",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "eigenius-statistics"
 version = "0.1.0"
 dependencies = [
