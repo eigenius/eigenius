@@ -1,0 +1,286 @@
+[
+  {
+    "@id": "urn:schema_org:Thing",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "Thing",
+    "urn:eigenius:core:description": "The most generic type of item. (schema.org/Thing)",
+    "urn:eigenius:core:source_irl": "https://schema.org/Thing",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:CreativeWork",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "CreativeWork",
+    "urn:eigenius:core:description": "The most generic kind of creative work. (schema.org/CreativeWork)",
+    "urn:eigenius:core:subclass_of": [
+      "urn:schema_org:Thing"
+    ],
+    "urn:eigenius:core:source_irl": "https://schema.org/CreativeWork",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:Dataset",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "Dataset",
+    "urn:eigenius:core:description": "A body of structured information describing some topic(s) of interest. (schema.org/Dataset)",
+    "urn:eigenius:core:subclass_of": [
+      "urn:schema_org:CreativeWork"
+    ],
+    "urn:eigenius:core:source_irl": "https://schema.org/Dataset",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:MediaObject",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "MediaObject",
+    "urn:eigenius:core:description": "A media object, e.g. a downloadable file. (schema.org/MediaObject)",
+    "urn:eigenius:core:subclass_of": [
+      "urn:schema_org:CreativeWork"
+    ],
+    "urn:eigenius:core:source_irl": "https://schema.org/MediaObject",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:DataDownload",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "DataDownload",
+    "urn:eigenius:core:description": "A dataset in downloadable form. (schema.org/DataDownload)",
+    "urn:eigenius:core:subclass_of": [
+      "urn:schema_org:MediaObject"
+    ],
+    "urn:eigenius:core:source_irl": "https://schema.org/DataDownload",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:Person",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "Person",
+    "urn:eigenius:core:description": "A person (alive, dead, undead, or fictional). (schema.org/Person)",
+    "urn:eigenius:core:subclass_of": [
+      "urn:schema_org:Thing"
+    ],
+    "urn:eigenius:core:source_irl": "https://schema.org/Person",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:Organization",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "Organization",
+    "urn:eigenius:core:description": "An organization such as a school, NGO, corporation, club, etc. (schema.org/Organization)",
+    "urn:eigenius:core:subclass_of": [
+      "urn:schema_org:Thing"
+    ],
+    "urn:eigenius:core:source_irl": "https://schema.org/Organization",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:Enumeration",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "Enumeration",
+    "urn:eigenius:core:description": "Lists or enumerations \u2014 e.g. a list of cuisines or music genres. (schema.org/Enumeration)",
+    "urn:eigenius:core:subclass_of": [
+      "urn:schema_org:Thing"
+    ],
+    "urn:eigenius:core:source_irl": "https://schema.org/Enumeration",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:DayOfWeek",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "DayOfWeek",
+    "urn:eigenius:core:description": "The day of the week, e.g. used to specify to which day(s) opening hours apply. (schema.org/DayOfWeek)",
+    "urn:eigenius:core:subclass_of": [
+      "urn:schema_org:Enumeration"
+    ],
+    "urn:eigenius:core:source_irl": "https://schema.org/DayOfWeek",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:Monday",
+    "urn:eigenius:core:is_a": [
+      "urn:schema_org:DayOfWeek",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "Monday",
+    "urn:eigenius:core:description": "The day of the week between Sunday and Tuesday. (schema.org/Monday)",
+    "urn:eigenius:core:source_irl": "https://schema.org/Monday",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:Tuesday",
+    "urn:eigenius:core:is_a": [
+      "urn:schema_org:DayOfWeek",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "Tuesday",
+    "urn:eigenius:core:description": "The day of the week between Monday and Wednesday. (schema.org/Tuesday)",
+    "urn:eigenius:core:source_irl": "https://schema.org/Tuesday",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:name",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "name",
+    "urn:eigenius:core:description": "The name of the item. (schema.org/name)",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:source_irl": "https://schema.org/name",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:description",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "description",
+    "urn:eigenius:core:description": "A description of the item. (schema.org/description)",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:source_irl": "https://schema.org/description",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:contentSize",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "contentSize",
+    "urn:eigenius:core:description": "File size in (mega/kilo)bytes. (schema.org/contentSize)",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:source_irl": "https://schema.org/contentSize",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:encodingFormat",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "encodingFormat",
+    "urn:eigenius:core:description": "Media type (MIME) of the content, or a URL of the format definition. (schema.org/encodingFormat). Original rangeIncludes Text|URL \u2014 both literal, so mapped to string.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:source_irl": "https://schema.org/encodingFormat",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:datePublished",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "datePublished",
+    "urn:eigenius:core:description": "Date of first publication. (schema.org/datePublished). Date|DateTime -> string (ISO-8601).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:source_irl": "https://schema.org/datePublished",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:sourceOrganization",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "sourceOrganization",
+    "urn:eigenius:core:description": "The Organization on whose behalf the creator was working. (schema.org/sourceOrganization)",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": [
+      "urn:schema_org:Organization"
+    ],
+    "urn:eigenius:core:source_irl": "https://schema.org/sourceOrganization",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:publisher",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "publisher",
+    "urn:eigenius:core:description": "The publisher of the creative work. (schema.org/publisher). All-Class union.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": [
+      "urn:schema_org:Organization",
+      "urn:schema_org:Person"
+    ],
+    "urn:eigenius:core:source_irl": "https://schema.org/publisher",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:creator",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "creator",
+    "urn:eigenius:core:description": "The author of this content. (schema.org/creator). Original rangeIncludes Organization|Person|Text; mapped ENTITY-FIRST (D57 \u00a73.3) \u2014 class_types=[Person,Organization], the Text option dropped from the active type. The full original range is recorded canonically by core:source_irl, not duplicated on-chain.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": [
+      "urn:schema_org:Person",
+      "urn:schema_org:Organization"
+    ],
+    "urn:eigenius:core:source_irl": "https://schema.org/creator",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:dayOfWeek",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "dayOfWeek",
+    "urn:eigenius:core:description": "The day of the week for which these opening hours are valid. (schema.org/dayOfWeek). ENUMERATION range -> class_types=[DayOfWeek] + allows_only=[members], enforcing the closed set (D57 metamodel note \u00a75). (Probe carries 2 representative members.)",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": [
+      "urn:schema_org:DayOfWeek"
+    ],
+    "urn:eigenius:core:allows_only": [
+      "urn:schema_org:Monday",
+      "urn:schema_org:Tuesday"
+    ],
+    "urn:eigenius:core:source_irl": "https://schema.org/dayOfWeek",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  },
+  {
+    "@id": "urn:schema_org:url",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property",
+      "urn:eigenius:reflection:DeclaredResource"
+    ],
+    "urn:eigenius:core:short_name": "url",
+    "urn:eigenius:core:description": "URL of the item. (schema.org/url). DataType URL -> string with core:format=iri, which the kernel validates (D57 metamodel note: DataType refinement via core:format, not a free-text annotation).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
+    "urn:eigenius:core:source_irl": "https://schema.org/url",
+    "urn:eigenius:reflection:declared_by": "urn:schema_org"
+  }
+]

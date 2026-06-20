@@ -109,11 +109,13 @@ fn collect_candidates<'a>(
             return derived_bindings
                 .iter()
                 .filter_map(|b| {
-                    let subject = b.get("0")?;
-                    let iri = match subject {
-                        Value::String(s) => Iri::parse(s).ok()?,
-                        _ => return None,
-                    };
+                    // The subject column may be a `Value::String` (a subject
+                    // binding, parse-time) or a `Value::ResourceRef` (a value read
+                    // from a resource-valued property on a canonicalised chain).
+                    // `as_iri` accepts both — a strict `Value::String` match would
+                    // silently drop the ResourceRef case (e.g. a relation derived
+                    // from `Objective { thesis: ?t }`).
+                    let iri = b.get("0")?.as_iri()?;
                     let props = layer
                         .resolve(&iri)
                         .map(|r| r.properties().clone())
@@ -779,6 +781,50 @@ mod tests {
             run_query(&layer, REACHABLE_QUERY).len(),
             1,
             "the disconnected orphan node must be flagged unreachable"
+        );
+    }
+
+    #[test]
+    fn derived_subject_from_resource_ref_property_resolves() {
+        // Regression: a derived relation whose subject column comes from a
+        // resource-VALUED property stored as `Value::ResourceRef` (the
+        // chain-canonicalised shape) must resolve — not only `Value::String`
+        // subject bindings. Reproduces the live `Reach(?t) FROM Objective {
+        // thesis: ?t }` failure where `thesis` is a canonicalised ResourceRef.
+        let storage = crate::layer::LayerStorage::in_memory();
+        let core_json = include_str!("../../../../ontologies/core/core-ontology.json");
+        let core_resources = eigon_json::parse_document(core_json).unwrap();
+        let mut cb = LayerBuilder::new("core", None);
+        for r in core_resources {
+            cb.add_resource(r).unwrap();
+        }
+        let core = Arc::new(cb.build(storage.clone()));
+        let mut b = LayerBuilder::new("rr", Some(core));
+        let iri = |s: &str| Iri::parse(s).unwrap();
+        let mut target = Resource::new(iri("urn:eigenius:t:target"));
+        target.set(iri("urn:eigenius:t:name"), Value::String("T".into()));
+        b.add_resource(target).unwrap();
+        let mut root = Resource::new(iri("urn:eigenius:t:root"));
+        // stored as a ResourceRef — the canonicalised shape a strict
+        // Value::String match would drop.
+        root.set(
+            iri("urn:eigenius:t:points_to"),
+            Value::ResourceRef(iri("urn:eigenius:t:target")),
+        );
+        b.add_resource(root).unwrap();
+        let layer = Arc::new(b.build(storage));
+        let results = run_query(
+            &layer,
+            r#"
+            DEFINE Reach(?t) FROM MATCH ?r { "urn:eigenius:t:points_to": ?t }
+            MATCH Reach(?x) { "urn:eigenius:t:name": ?n }
+            RETURN [] { "urn:eigenius:t:name": ?n }
+            "#,
+        );
+        assert_eq!(
+            results.len(),
+            1,
+            "derived subject from a ResourceRef-valued property must resolve"
         );
     }
 

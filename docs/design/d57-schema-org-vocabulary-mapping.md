@@ -68,27 +68,52 @@ export), not for D53.
 (schema.org has no sha256, and it's the correctness root — Eigenius-owned);
 `reference` / `media_type` stay `ingest:` (required fields, off D57's critical path).
 
+> **Superseded by §3 / the metamodel note.** The "~10 string properties"
+> simplification predates the construct-correspondence analysis. Under the settled
+> discipline only `name`/`description`/`contentSize` are cleanly `string`;
+> `encodingFormat`/`datePublished` are `string`-by-collapse (format-spanning unions, §3.2);
+> and `creator`/`publisher`/`sourceOrganization`/`license`/`identifier`/`isPartOf`
+> are **entity- or union-typed** (`class_types`, entity-first per §3.3) — *not*
+> strings. The m2 probe confirmed this on a real file: descriptive string fields
+> bind directly, and `creator` binds to a `Person` resource (entity-first). So the
+> file-level descriptive metadata is a *mix* of scalar and entity-valued fields,
+> as the meta-ontology dictates — not a flat string bag.
+
 ## 3. Mapping discipline (settled)
 
-The cut between what maps and what does not. Four constructs; the friction is
-entirely in property *ranges*. The translator (§3.6) encodes these rules.
+The cut between what maps and what does not, **derived construct-by-construct from
+the two meta-ontologies** — see the analysis in
+[docs/notes/d57-schemaorg-vs-core-metamodel.md](../notes/d57-schemaorg-vs-core-metamodel.md),
+which is the principled basis for the rules below (the "tiers" are consequences of
+the `rangeIncludes` correspondence, not independent heuristics). The friction is
+entirely in property *ranges*. The translator (§3.6) implements the correspondence.
 
-### 3.1 The four constructs
+### 3.1 The constructs
 
 | schema.org | Eigenius target | Tier |
 |---|---|---|
-| **Class** (`rdfs:Class` + `rdfs:subClassOf`) | `core:Class` + `is_a` chain (`Thing → CreativeWork → Dataset`) | clean |
+| **Class** (`rdfs:Class` + `rdfs:subClassOf`) | `core:Class` + **`core:subclass_of`** chain (`Thing → CreativeWork → Dataset`) | clean |
 | **DataType** (Text, Number→Integer/Float, Boolean, Date, DateTime, Time, URL⊂Text) | core scalars (§3.2) | clean |
-| **Enumeration** (Class ⊂ Enumeration + fixed member individuals) | `core:Class` + each member a `reflection:DeclaredResource` instance (a code list) | clean |
-| **Property** (`rdf:Property` + multi-valued `domainIncludes` / `rangeIncludes`) | `core:Property` (§3.3) | the crux |
+| **Enumeration** (Class ⊂ Enumeration + fixed member individuals) | `core:Class` + each member a `reflection:DeclaredResource` instance; **a property ranging over it → `class_types=[E]` + `allows_only=[members]`**, which *enforces* the closed set at commit (the `core:DataType`/`reflection:EpistemicStatus` idiom; metamodel note §5). Open enumerations (also admitting `DefinedTerm`/`Text`) widen `class_types` and drop `allows_only`. | clean |
+| **Property** (`rdf:Property` + multi-valued `domainIncludes` → `core:domain` / `rangeIncludes`) | `core:Property` (§3.3) | the crux |
 
-### 3.2 DataType alignment
+### 3.2 DataType alignment (via `core:Format`)
 
-`Text` → `string`; `URL` → `string` (format `iri`); `Integer` → `integer`;
-`Number`/`Float` → `float`; `Boolean` → `boolean`; `Date`/`DateTime`/`Time` →
-`string` (ISO-8601, with a format hint). The DataType subclass hierarchy is
-carried as `is_a`/annotation but is informational — Eigenius does not infer over
-it.
+schema.org's literal DataType *subtypes* map onto `core` scalars refined by
+**`core:format`** — they mirror core's `Format` vocabulary almost 1:1 (metamodel
+note §5.1), and the kernel *validates* the refinement (a fidelity gain):
+
+- `Text` → `string`; `Integer` → `integer`; `Number`/`Float` → `float`;
+  `Boolean` → `boolean`.
+- `URL` (⊂ `Text`) → `string` + `format = iri`.
+- `Date` / `DateTime` / `Time` → `string` + `format = date`/`datetime`/`time`.
+
+`core:format` applies only when the range is a **single** refined DataType and all
+values conform. A union spanning distinct formats does **not** refine: `Date |
+DateTime` → plain `string` (no single format covers both), and `Text | URL` is
+degenerate (`URL ⊂ Text`) with possibly non-IRI values (MIME strings) → plain
+`string`. The DataType subclass hierarchy is informational — Eigenius does not
+infer over it.
 
 ### 3.3 Property ranges — three tiers
 
@@ -101,17 +126,22 @@ set. The mapping by range shape:
 - **Tier 2 — by documented convention:**
   - *all Classes* (e.g. `{Person, Organization}`) → `resource` +
     `class_types = [all]`. Lossless (`class_types` is already a set).
-  - *all DataTypes* (e.g. `{Number, Text}`) → `string` (the broadest literal).
+  - *all DataTypes* (e.g. `{Number, Text}`) → `string` (the broadest literal; §3.2
+    governs any `core:format`).
   - *mixed literal-or-entity* (e.g. `author = {Person, Organization, Text}`,
     `license = {CreativeWork, URL}`) → **entity-first**: `resource` +
     `class_types = [the Classes]`; the literal option is dropped from the active
     type. *(Decision 2026-06-19: entity-first over literal-first — typed-entity
     binding is the platform's value; a bare-string value is the degenerate case
     schema.org itself tolerates. The opposite choice, all-`string`, was rejected.)*
-- In **every** Tier-2 case the generator preserves the **full original
-  `rangeIncludes` verbatim** as a `schema_org:range_includes` provenance
-  annotation, so nothing is lost and the JSON-LD round-trip is exact even when the
-  active `data_type` picks one interpretation.
+- **No on-chain range cache.** The original `rangeIncludes` is recorded canonically
+  by `core:source_irl` (and the source JSON-LD the generator reads); it is **not**
+  duplicated in a bespoke property. `class_types` carries the class members,
+  `core:format` carries the validated literal refinement, and `source_irl` carries
+  the full provenance — so the dropped literal of an entity-first union is
+  recoverable without an extra annotation. *(Earlier drafts added a
+  `schema_org:range_literals` string; removed as redundant with `source_irl` +
+  `core:format`.)*
 
 ### 3.4 Tier 3 — not mapped, recorded with reason (the residual)
 
@@ -126,9 +156,12 @@ inert provenance annotations, enumerated in the cut accounting:
 ### 3.5 Scope, layer, identity
 
 - **Scope** *(decision 2026-06-19)*: **core + hosted extensions**
-  (health-lifesci, bib, auto, …; ~800 Classes / ~1.4k Properties). The unstable
-  `pending/` staging layer and deprecated `attic/` layer are **excluded** —
-  stable IRIs for round-trip. (Re-runnable, so expanding later is cheap.)
+  (health-lifesci, bib, auto, …; ~800 Classes / ~1.4k Properties). Realized by
+  taking the **`current`** distribution (which excludes the deprecated `attic/`
+  retired terms — `all` would include them) and **filtering out `pending`** terms,
+  which ship inside `current` marked `schema:isPartOf https://pending.schema.org`
+  (marker to confirm against the V30.0 file in m3). Stable IRIs for round-trip;
+  re-runnable, so expanding later is cheap.
 - **Identity / round-trip**: fixed prefix substitution
   `https://schema.org/<Term>` ↔ `urn:schema_org:<Term>`; the original https IRI is
   retained on each resource as `core:source_irl`. (No per-term `sameAs` needed —
@@ -141,10 +174,16 @@ inert provenance annotations, enumerated in the cut accounting:
 
 - **The translator.** A deterministic schema.org-JSON-LD → Eigon-JSON generator
   implementing §3.1–3.5 (in the spirit of the obograph importer / mirror
-  generator). Input: schema.org's published `schemaorg-current-https.jsonld`.
-  Output: the `urn:schema_org:` ontology + a **coverage report** (mapped clean /
-  mapped-by-convention / Tier-3 residual counts + the per-term residual list).
-  Home: `crates/eigenius-schemaorg/` (proposed), `--bin schemaorg_import`.
+  generator). **Input (pinned):** `schemaorg-current-https.jsonld` at a fixed
+  release — **V30.0 (2026-03-19)** — content-hashed for reproducibility, *not*
+  "latest". JSON-LD is chosen over the CSV/Turtle/NT/RDF-XML distributions because
+  it carries the full graph (`subClassOf`, `domainIncludes`/`rangeIncludes`,
+  DataType/Enumeration membership) in one file, parseable without an RDF library;
+  `https` + `current` match §3.5's scope/identity. (Older releases live under
+  `data/releases/` at github.com/schemaorg/schemaorg.) Output: the `urn:schema_org:`
+  ontology + a **coverage report** (mapped clean / mapped-by-convention / Tier-3
+  residual counts + the per-term residual list). Home: `crates/eigenius-schemaorg/`
+  (proposed), `--bin schemaorg_import`.
 - **Adopted grade.** Every emitted resource is
   `is_a [..., reflection:DeclaredResource]` with `reflection:declared_by =
   "urn:schema_org"` + `core:source_irl` — adopted, never re-minted as native.

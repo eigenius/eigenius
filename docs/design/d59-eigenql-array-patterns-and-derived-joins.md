@@ -56,6 +56,12 @@ candidates:
 - In `collect_candidates`' derived branch: for the pattern's subject column, set
   `resource_iri = Some(<the IRI value>)` and `props = layer.resolve(iri).properties()`
   (fall back to the pseudo-prop value when the column is a literal, not an IRI).
+  Extract the IRI with **`Value::as_iri()`**, which accepts both `Value::String`
+  (parse-time) and `Value::ResourceRef` (the chain-canonicalised shape). *(Found in
+  D57 m2: a strict `Value::String` match silently dropped a derived subject read
+  from a resource-valued property — e.g. `Reach(?t) FROM Objective { thesis: ?t }`
+  where `thesis` canonicalises to `ResourceRef` — making the whole graph
+  unreachable. Regression test: `derived_subject_from_resource_ref_property_resolves`.)*
 - Ensure `try_match_resource` binds **every** head variable of the relation
   (not just the subject) from the derived row, with the existing `values_equal`
   consistency check so joins constrain rather than cross-product.

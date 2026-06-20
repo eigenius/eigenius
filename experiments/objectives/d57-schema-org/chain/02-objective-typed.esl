@@ -55,12 +55,12 @@ resource otd:m1 : objective:Milestone {
 resource otd:m2 : objective:Milestone {
     core:description        = "Proof-of-shape probe binds to a real file.";
     objective:proposition   = type_expr( obj:ProbeValidates("schema_org") );
-    objective:acceptance_grade = epistemic:derived;
+    objective:acceptance_grade = epistemic:declared;
     objective:witness_kind  = objective:wk_query;
     objective:falsifier     = "a probe term that fails to load or whose bound value does not round-trip a query";
     objective:depends_on    = [otd:m1];
-    objective:status        = "open";
-    objective:frontier_gate = "reachable";
+    objective:status        = "satisfied";
+    objective:satisfied_by  = "urn:eigenius:obj:d57:concl_probe";
 }
 resource otd:m3 : objective:Milestone {
     core:description        = "Generator emits the mappable vocabulary.";
