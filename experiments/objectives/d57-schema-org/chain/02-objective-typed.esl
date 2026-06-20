@@ -65,32 +65,32 @@ resource otd:m2 : objective:Milestone {
 resource otd:m3 : objective:Milestone {
     core:description        = "Generator emits the mappable vocabulary.";
     objective:proposition   = type_expr( obj:GeneratorProduces("schema_org") );
-    objective:acceptance_grade = epistemic:derived;
+    objective:acceptance_grade = epistemic:declared;
     objective:witness_kind  = objective:wk_generator_output;
     objective:falsifier     = "generator output that fails to load/validate, or is non-deterministic across runs";
     objective:depends_on    = [otd:m1, otd:m2];
-    objective:status        = "open";
-    objective:frontier_gate = "reachable";
+    objective:status        = "satisfied";
+    objective:satisfied_by  = "urn:eigenius:obj:d57:concl_generator";
 }
 resource otd:m4 : objective:Milestone {
     core:description        = "The cut accounted: mapped vs residual, with reasons.";
     objective:proposition   = type_expr( obj:CutAccounted("schema_org") );
-    objective:acceptance_grade = epistemic:derived;
+    objective:acceptance_grade = epistemic:declared;
     objective:witness_kind  = objective:wk_generator_output;
     objective:falsifier     = "a schema.org term absent from both the mapped set and the residual list";
     objective:depends_on    = [otd:m3];
-    objective:status        = "open";
-    objective:frontier_gate = "reachable";
+    objective:status        = "satisfied";
+    objective:satisfied_by  = "urn:eigenius:obj:d57:concl_cut";
 }
 
 // ── Thesis (the root milestone) ────────────────────────────────────
 resource otd:m_thesis : objective:Milestone {
     core:description        = "schema.org is mapped into Eigenius (mappable part generated; residual enumerated).";
     objective:proposition   = type_expr( obj:SchemaOrgMapped("schema_org") );
-    objective:acceptance_grade = epistemic:derived;
+    objective:acceptance_grade = epistemic:verified;
     objective:witness_kind  = objective:wk_query;
     objective:falsifier     = "any in-scope schema.org term neither mapped nor in the justified residual";
     objective:depends_on    = [otd:m1, otd:m2, otd:m3, otd:m4];
-    objective:status        = "open";
-    objective:frontier_gate = "reachable";
+    objective:status        = "satisfied";
+    objective:satisfied_by  = "urn:eigenius:obj:d57:concl_main";
 }

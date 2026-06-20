@@ -1,0 +1,58 @@
+// ════════════════════════════════════════════════════════════════════
+// m3 + m4 + thesis — generator, cut accounting, and the D57 synthesis
+// ════════════════════════════════════════════════════════════════════
+//
+// m3 (GeneratorProduces) and m4 (CutAccounted) are Declared conclusions (like
+// m1/m2), each witnessed by the live generator run + kernel load cited in the
+// rationale. The thesis (SchemaOrgMapped) then composes all four milestones by
+// modus ponens — each antecedent discharged by CITING its milestone conclusion
+// as a lemma (D54: a Holds ReasoningSentence is a Verified witness keyed on its
+// IRI). Pattern copied from wrn-helicase/chain/09-phase5-synthesis.esl (concl_main).
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace obj        = "urn:eigenius:obj:d57";
+
+// ── m3: the generator produces the mappable vocabulary ──────────────
+resource obj:generator_run : reflection:DeclaredResource {
+    reflection:declared_by = "d57:m3-generator";
+    reflection:rationale   = "crates/eigenius-schemaorg (--bin schemaorg-import) translates the pinned schema.org V30.0 JSON-LD (data/MANIFEST.md, sha256 0f0c97a4...) into urn:schema_org: Eigon-JSON by the settled discipline (D57 §3 / metamodel note). Verified live: it emits 2114 resources (683 classes, 51 enumeration classes, 250 enumeration members, 1130 properties); the full output LOADS + VALIDATES in the kernel (Expressible); the conversion is deterministic (byte-identical across runs); 9 unit tests cover every tier of the correspondence. domainIncludes is inverted into class core:recommends (advisory), no core:domain; enumeration ranges carry class_types + allows_only.";
+    reflection:canonical_proposition = type_expr( obj:GeneratorProduces("schema_org") );
+}
+resource obj:generator_run_trace : reflection:DeclarationTrace {
+    reflection:resource    = obj:generator_run;
+    reflection:declared_by = "d57:m3-generator";
+    reflection:timestamp   = "2026-06-20T00:00:00Z";
+}
+resource obj:concl_generator : reasoning:ReasoningSentence {
+    reasoning:subject_iri   = "urn:eigenius:obj:d57:schema_org";
+    reasoning:proposition   = type_expr( obj:GeneratorProduces("schema_org") );
+    reasoning:justification = DeclaredEvidence("urn:eigenius:obj:d57:generator_run");
+    reasoning:certificate   = type_expr(
+        declared("urn:eigenius:obj:d57:generator_run", obj:GeneratorProduces("schema_org"))
+    );
+}
+
+// ── m4: the cut is accounted ────────────────────────────────────────
+resource obj:cut_accounting : reflection:DeclaredResource {
+    reflection:declared_by = "d57:m4-cut";
+    reflection:rationale   = "The generator emits a coverage report (data/coverage.json) accounting the cut for V30.0: property ranges by tier (Clean 867, by-convention 188, enumeration 66, defaulted 9); 15 DataTypes folded into core scalars; 848 terms excluded by layer (pending + meta; attic absent from 'current'; hosted extensions kept); and the Tier-3 residual recorded but NOT mapped (equivalentClass 48, equivalentProperty 89, subPropertyOf 142, inverseOf 45, supersededBy 82 — inert provenance, no reasoner). Every in-scope schema: term is therefore either mapped or in the justified residual.";
+    reflection:canonical_proposition = type_expr( obj:CutAccounted("schema_org") );
+}
+resource obj:cut_accounting_trace : reflection:DeclarationTrace {
+    reflection:resource    = obj:cut_accounting;
+    reflection:declared_by = "d57:m4-cut";
+    reflection:timestamp   = "2026-06-20T00:00:00Z";
+}
+resource obj:concl_cut : reasoning:ReasoningSentence {
+    reasoning:subject_iri   = "urn:eigenius:obj:d57:schema_org";
+    reasoning:proposition   = type_expr( obj:CutAccounted("schema_org") );
+    reasoning:justification = DeclaredEvidence("urn:eigenius:obj:d57:cut_accounting");
+    reasoning:certificate   = type_expr(
+        declared("urn:eigenius:obj:d57:cut_accounting", obj:CutAccounted("schema_org"))
+    );
+}
+
+// (Thesis composition lives in 05-synthesis.esl — it cites concl_generator /
+// concl_cut as Verified lemmas, so it loads as a later layer after they Hold.)

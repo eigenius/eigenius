@@ -5,6 +5,7 @@ members = [
     "crates/eigenius-config",
     "crates/eigenius-embedder-candle",
     "crates/eigenius-obograph",
+    "crates/eigenius-schemaorg",
     "crates/runtime-substrate",
     "crates/eigenius-julia",
     "crates/eigenius-lean",

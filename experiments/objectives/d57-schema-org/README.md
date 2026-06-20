@@ -57,13 +57,16 @@ eigenius --endpoint $EP query --branch obj-d57 \
 
 ## Milestone status
 
-| Milestone | Proposition | Status |
-|---|---|---|
-| m1 | mapping discipline defined | **satisfied** (`concl_discipline` Holds) |
-| m2 | proof-of-shape probe binds to a real file | open |
-| m3 | generator emits the mappable vocabulary | open |
-| m4 | the cut accounted (mapped vs residual) | open |
-| thesis | schema.org is mapped | open (composes m1–m4) |
+**Objective complete** — all milestones satisfied; the thesis Holds; gates pass
+(reachable 0, anchored 0).
 
-As each milestone is executed, flip its `objective:status` to `satisfied` and set
-`objective:satisfied_by` to the discharging `ReasoningSentence` (as m1 already shows).
+| Milestone | Proposition | Grade | Discharged by |
+|---|---|---|---|
+| m1 | mapping discipline defined | declared | `concl_discipline` (Holds) |
+| m2 | proof-of-shape probe binds to a real file | declared | `concl_probe` (Holds) |
+| m3 | generator emits the mappable vocabulary | declared | `concl_generator` (Holds) |
+| m4 | the cut accounted (mapped vs residual) | declared | `concl_cut` (Holds) |
+| **thesis** | **schema.org is mapped** | **verified** | `concl_main` (Holds — composes m1∧m2∧m3∧m4 by modus ponens, D54 lemma citation) |
+
+Chain: `00`-objective → `01`-discipline (m1) → `02`-typed graph → `probe/` + `03`
+(m2) → `04`-generator (m3, m4) → `05`-synthesis (thesis).

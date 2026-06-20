@@ -1,0 +1,80 @@
+// ════════════════════════════════════════════════════════════════════
+// Thesis — schema.org is mapped (compose m1 ∧ m2 ∧ m3 ∧ m4)
+// ════════════════════════════════════════════════════════════════════
+//
+// The capstone. Each antecedent is discharged by CITING its milestone
+// conclusion as a lemma (D54: a Holds ReasoningSentence is admitted as a Verified
+// witness keyed on its IRI). Loaded as a layer AFTER 01/03/04 so concl_discipline
+// (m1), concl_probe (m2), concl_generator (m3), concl_cut (m4) already Hold.
+// Modus-ponens spine copied from wrn-helicase/chain/09 (concl_main).
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace obj        = "urn:eigenius:obj:d57";
+
+resource obj:synthesis_rule : reflection:DeclaredResource {
+    reflection:declared_by = "d57:synthesis";
+    reflection:rationale   = "schema.org is mapped into Eigenius when: the mapping discipline is defined (m1), validated on representative real terms (m2), the generator produces the full mappable vocabulary that loads+validates (m3), and the cut between mapped and residual is accounted (m4). Those four together establish SchemaOrgMapped.";
+    reflection:canonical_proposition = type_expr(
+        obj:MappingDisciplineDefined("schema_org")
+        ->
+        obj:ProbeValidates("schema_org")
+        ->
+        obj:GeneratorProduces("schema_org")
+        ->
+        obj:CutAccounted("schema_org")
+        ->
+        obj:SchemaOrgMapped("schema_org")
+    );
+}
+resource obj:synthesis_rule_trace : reflection:DeclarationTrace {
+    reflection:resource    = obj:synthesis_rule;
+    reflection:declared_by = "d57:synthesis";
+    reflection:timestamp   = "2026-06-20T00:00:00Z";
+}
+resource obj:concl_main : reasoning:ReasoningSentence {
+    reasoning:subject_iri = "urn:eigenius:obj:d57:schema_org";
+    reasoning:proposition = type_expr( obj:SchemaOrgMapped("schema_org") );
+    reasoning:justification = App(
+        App(
+            App(
+                App(
+                    DeclaredEvidence("urn:eigenius:obj:d57:synthesis_rule"),
+                    VerifiedEvidence("urn:eigenius:obj:d57:concl_discipline")
+                ),
+                VerifiedEvidence("urn:eigenius:obj:d57:concl_probe")
+            ),
+            VerifiedEvidence("urn:eigenius:obj:d57:concl_generator")
+        ),
+        VerifiedEvidence("urn:eigenius:obj:d57:concl_cut")
+    );
+    reasoning:certificate = type_expr(
+        alias
+            RULE = "urn:eigenius:obj:d57:synthesis_rule",
+            MDD = obj:MappingDisciplineDefined("schema_org"),
+            PV  = obj:ProbeValidates("schema_org"),
+            GP  = obj:GeneratorProduces("schema_org"),
+            CA  = obj:CutAccounted("schema_org"),
+            SOM = obj:SchemaOrgMapped("schema_org"),
+            RULE_P = MDD -> PV -> GP -> CA -> SOM,
+            jMDD = VerifiedEvidence("urn:eigenius:obj:d57:concl_discipline"),
+            jPV  = VerifiedEvidence("urn:eigenius:obj:d57:concl_probe"),
+            jGP  = VerifiedEvidence("urn:eigenius:obj:d57:concl_generator"),
+            jCA  = VerifiedEvidence("urn:eigenius:obj:d57:concl_cut"),
+            cMDD = verified("urn:eigenius:obj:d57:concl_discipline", MDD),
+            cPV  = verified("urn:eigenius:obj:d57:concl_probe", PV),
+            cGP  = verified("urn:eigenius:obj:d57:concl_generator", GP),
+            cCA  = verified("urn:eigenius:obj:d57:concl_cut", CA),
+            c1 = app(MDD, PV -> GP -> CA -> SOM,
+                     DeclaredEvidence(RULE), jMDD, declared(RULE, RULE_P), cMDD),
+            c2 = app(PV, GP -> CA -> SOM,
+                     reasoning:App(DeclaredEvidence(RULE), jMDD), jPV, c1, cPV),
+            c3 = app(GP, CA -> SOM,
+                     reasoning:App(reasoning:App(DeclaredEvidence(RULE), jMDD), jPV), jGP, c2, cGP)
+        in
+        app(CA, SOM,
+            reasoning:App(reasoning:App(reasoning:App(DeclaredEvidence(RULE), jMDD), jPV), jGP),
+            jCA, c3, cCA)
+    );
+}

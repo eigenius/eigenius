@@ -1,6 +1,6 @@
 # D57 — schema.org Vocabulary Mapping
 
-*Status: **mapping discipline settled** (June 2026) · generator + full mapping in progress on objective branch `obj-d57` · design memo*
+*Status: **complete** (June 2026) · the full schema.org V30.0 vocabulary maps to `urn:schema_org:` (~2114 resources, loads + validates) via `crates/eigenius-schemaorg`; mapping discipline (§3) + cut accounting (§3.7) settled · design memo. The objective is discharged on-chain (`experiments/objectives/d57-schema-org/`): m1–m4 + the thesis `SchemaOrgMapped` all Hold; well-posedness gates pass.*
 
 *Scope correction (2026-06-19): the deliverable is the **whole** vocabulary — a generated mapping of every *mappable* schema.org term plus an explicit, justified cut of what cannot be mapped — not the §2.5 ten-property slice (that is now the proof-of-shape probe). The mapping discipline below (§3) is settled; the generator (§3.6) and the cut accounting are the remaining work, tracked as objective `obj-d57` (`experiments/objectives/d57-schema-org/`).*
 
@@ -95,7 +95,8 @@ entirely in property *ranges*. The translator (§3.6) implements the corresponde
 | **Class** (`rdfs:Class` + `rdfs:subClassOf`) | `core:Class` + **`core:subclass_of`** chain (`Thing → CreativeWork → Dataset`) | clean |
 | **DataType** (Text, Number→Integer/Float, Boolean, Date, DateTime, Time, URL⊂Text) | core scalars (§3.2) | clean |
 | **Enumeration** (Class ⊂ Enumeration + fixed member individuals) | `core:Class` + each member a `reflection:DeclaredResource` instance; **a property ranging over it → `class_types=[E]` + `allows_only=[members]`**, which *enforces* the closed set at commit (the `core:DataType`/`reflection:EpistemicStatus` idiom; metamodel note §5). Open enumerations (also admitting `DefinedTerm`/`Text`) widen `class_types` and drop `allows_only`. | clean |
-| **Property** (`rdf:Property` + multi-valued `domainIncludes` → `core:domain` / `rangeIncludes`) | `core:Property` (§3.3) | the crux |
+| **Property** (`rdf:Property` + `rangeIncludes`) | `core:Property` (§3.3) | the crux |
+| **`domainIncludes`** (advisory) | each domain class's **`core:recommends`** (inverted; subclasses inherit) — *not* `core:domain` (which restricts; schema.org doesn't) | clean |
 
 ### 3.2 DataType alignment (via `core:Format`)
 
@@ -170,23 +171,36 @@ inert provenance annotations, enumerated in the cut accounting:
   above core** (like `ingest`/`reference`/`obo`), not a root layer — it depends on
   core's scalar types and `reflection:DeclaredResource`.
 
-### 3.6 Remaining open (the generator)
+### 3.6 The generator (implemented)
 
-- **The translator.** A deterministic schema.org-JSON-LD → Eigon-JSON generator
-  implementing §3.1–3.5 (in the spirit of the obograph importer / mirror
-  generator). **Input (pinned):** `schemaorg-current-https.jsonld` at a fixed
-  release — **V30.0 (2026-03-19)** — content-hashed for reproducibility, *not*
-  "latest". JSON-LD is chosen over the CSV/Turtle/NT/RDF-XML distributions because
-  it carries the full graph (`subClassOf`, `domainIncludes`/`rangeIncludes`,
-  DataType/Enumeration membership) in one file, parseable without an RDF library;
-  `https` + `current` match §3.5's scope/identity. (Older releases live under
-  `data/releases/` at github.com/schemaorg/schemaorg.) Output: the `urn:schema_org:`
-  ontology + a **coverage report** (mapped clean / mapped-by-convention / Tier-3
-  residual counts + the per-term residual list). Home: `crates/eigenius-schemaorg/`
-  (proposed), `--bin schemaorg_import`.
-- **Adopted grade.** Every emitted resource is
-  `is_a [..., reflection:DeclaredResource]` with `reflection:declared_by =
-  "urn:schema_org"` + `core:source_irl` — adopted, never re-minted as native.
+`crates/eigenius-schemaorg` (`--bin schemaorg-import`) — a deterministic
+schema.org-JSON-LD → Eigon-JSON translator implementing §3.1–3.5 (modeled on the
+obograph importer). **Input (pinned):** `schemaorg-current-https.jsonld`
+**V30.0 (2026-03-19)**, content-hashed (`data/MANIFEST.md`), *not* "latest".
+JSON-LD over the CSV/Turtle/NT/RDF-XML distributions: it carries the full graph
+(`subClassOf`, `domainIncludes`/`rangeIncludes`, DataType/Enumeration membership)
+in one file, parseable without an RDF library; `https` + `current` match §3.5.
+Every emitted resource is `is_a [..., reflection:DeclaredResource]` with
+`reflection:declared_by = "urn:schema_org"` + `core:source_irl` — adopted, never
+re-minted as native. Deterministic (byte-identical per input). Unit-tested across
+every tier; **the full output (~2114 resources) loads + validates in the kernel.**
+
+### 3.7 Coverage — the cut, accounted (m4; from V30.0)
+
+The generator emits a coverage report (`data/coverage.json`). For V30.0:
+
+- **Mapped (2114 resources):** 683 classes, 51 enumeration classes, 250
+  enumeration members, 1130 properties.
+- **Property ranges by tier:** Clean 867, by-convention 188 (entity-first unions /
+  format-spanning literal unions), enumeration 66 (`class_types`+`allows_only`),
+  defaulted 9 (no in-scope range → `string`).
+- **DataTypes folded → core scalars (15):** `Text`/`URL`/`Number`/`Integer`/
+  `Float`/`Boolean`/`Date`/`DateTime`/`Time` + the `Quantity` family.
+- **Excluded by layer (848):** `pending` + `meta` (attic already absent from
+  `current`). Hosted extensions (health-lifesci, auto, bib) are kept.
+- **Tier-3 residual — recorded, not mapped (the cut):** `equivalentClass` 48,
+  `equivalentProperty` 89, `subPropertyOf` 142, `inverseOf` 45, `supersededBy` 82
+  — inert provenance only (no reasoner; §4).
 
 ## 4. Out of scope
 

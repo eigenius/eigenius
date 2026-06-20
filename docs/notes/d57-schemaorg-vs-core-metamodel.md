@@ -71,7 +71,8 @@ one place we *enforce* (`allows_only`).
 |---|---|---|
 | Type / `rdfs:Class` | `core:Class` | **direct** |
 | `rdfs:subClassOf` (multi) | `core:subclass_of` (multi) | **direct** (ESL surface allows one parent; JSON allows many) |
-| `rdf:Property` (global) + `domainIncludes` | `core:Property` + `core:domain` | **direct** — schema.org's "global property listing its domains" is exactly Property + `domain` |
+| `rdf:Property` (global) | `core:Property` | direct |
+| `schema:domainIncludes` (multi, **advisory**) | each domain class's **`core:recommends`** (inverted) | **not `core:domain`** — domainIncludes says "expected on", advisory; `core:domain` *restricts* usage and would over-enforce. Subclasses inherit `recommends`, matching schema.org's apply-to-subtypes. |
 | `rangeIncludes` — **Class members** | **`core:class_types`** | **direct** — this *is* the mapping for the class part of a range |
 | `rangeIncludes` — **DataType members** | `core:data_type` (+ `core:format`, §5.1) | a union of distinct literal types collapses to one scalar (§6) |
 | `rangeIncludes` — **mixed (class + literal)** | `class_types=[classes]`, `data_type=resource` | **entity-first** (D57 §3.3); the dropped literal option is recoverable from `source_irl` (not duplicated on-chain) |
@@ -154,10 +155,14 @@ cases, and validates on top.
 
 ## 6. Where the metamodels genuinely diverge
 
-1. **Enforcement vs recommendation.** schema.org `domainIncludes`/`rangeIncludes`
-   are advisory; `core:domain`/`class_types` are enforced. Mapping keeps schema.org's
-   openness by mapping properties to `recommends` (never `requires`) — *except*
-   enumerations, where `allows_only` enforces the one set schema.org means to close.
+1. **Enforcement vs recommendation.** schema.org `domainIncludes` is advisory, so
+   it maps to **`core:recommends`** (advisory) on each domain class — *never*
+   `core:domain`, which *restricts* a property's usage (schema.org has no such
+   restriction; `core:domain` is therefore unused by the import). Likewise
+   properties are `recommends`, never `requires`. The one place we *do* enforce is
+   the enumeration's closed set (`allows_only`) — the one set schema.org means to
+   close. (Class members of `rangeIncludes` → `class_types` is typing of the value,
+   a deliberate entity-binding gain, not a usage restriction.)
 2. **Union ranges have no single-type analog.** `core:data_type` is single. A
    class-union → `class_types` (lossless set). A mixed union → entity-first
    (`class_types` + `data_type=resource`; the literal option dropped). An
