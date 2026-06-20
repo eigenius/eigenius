@@ -1,6 +1,6 @@
 # D58 — Objective Framing & Obligation Graphs
 
-*Status: **ontology designed** (§5, from the D57 dogfood harvest) · design memo · June 2026 · gate-query wiring + loop budget remaining*
+*Status: **implemented** · design memo · June 2026 · the `objective:` ontology (§5) + all four admissibility gates are realized and live-validated (three type-enforced at commit, two on-demand queries — §5.3, §5.5); loop budget set in the `reasoning` skill. Deferred (non-blocking): completion artifact, archival/GC (§5.4).*
 
 *Companion documents: [D39 justification logic](d39-justification-logic.md) (the warrant calculus), [D43 text & vector retrieval](d43-text-and-vector-retrieval.md) + [D57 schema.org mapping](d57-schema-org-vocabulary-mapping.md) (grounding), [D49 chain-witness machinery](d49-chainwitness-machinery.md), [D54 lemma citation](d54-reasoning-lemma-citation.md). Operationalized by the `reasoning` + `grounding` skills. **Not** to be confused with D21 kernel tasks or `bench:TaskOutput` — see §6.*
 
@@ -178,25 +178,43 @@ a non-well-posed node simply does not load — with no handler, no kernel rebuil
   `witness` → `MissingRequired`). The **residual** — does the named witness
   actually resolve to an admitted `IsObservedAs`/`IsDeclaredAs`/`Citation` — is
   open-world and is the one Anchored check left to a query.
-- **Reachable** — *the only genuinely runtime gate.* Transitive closure +
-  acyclicity over `depends_on` is a graph property, not a type constraint (a
-  dangling edge is caught by reference typing; full reachability needs recursive
-  Datalog). When wired, it is a **Decidable/OnDemand** query (`Holds`=reachable,
-  `Fails`=blocked) — **not AutoOnLoad**, because a blocked objective must remain
-  *recordable* (§4: blocked is a finding, not a rejected commit; AutoOnLoad `Fails`
-  would reject it).
+- **Reachable** — *the only genuinely runtime gate* (transitive closure over
+  `depends_on` is a graph property, not a type constraint). **Implemented** as a
+  committed EigenQL query (§5.5), made expressible by D59 (array iteration +
+  derived-relation joins + stratum-ordered negation). It is run *on demand* against
+  the objective's branch — **not** an AutoOnLoad gate, because a blocked objective
+  must remain *recordable* (§4: blocked is a finding, not a rejected commit).
 
-So well-posedness is *mostly* a structural property of a loadable frame, not a
-verdict a handler emits. This is why "wiring the gates" turned out to be an
-ontology-strengthening exercise, not a new institution crate.
+So well-posedness is *mostly* a structural property of a loadable frame plus one
+on-demand graph query — not a verdict a handler emits. "Wiring the gates" was an
+ontology-strengthening exercise plus two queries, **not** a new institution crate.
+
+### 5.5 The runtime gates (implemented)
+
+The two checks not enforced by the type system are committed EigenQL queries,
+run on demand against an objective's branch. **An empty result means the gate
+passes**; any returned row is a recorded well-posedness finding (the objective is
+blocked there — §4). Both are live-validated against the D57 objective graph.
+
+- **Reachable** — [`experiments/objectives/well-posed-reachable.eigenql`](../../experiments/objectives/well-posed-reachable.eigenql).
+  Transitive closure from the thesis over `depends_on` (D59 `[... ?n ...]`
+  iteration + derived-relation join + stratified `NOT Reach`); returns every
+  Milestone/Axiom not reachable. *Verified:* well-posed graph → 0; a disconnected
+  orphan milestone → flagged.
+- **Anchored (referential)** — [`experiments/objectives/well-posed-anchored.eigenql`](../../experiments/objectives/well-posed-anchored.eigenql).
+  Returns every Axiom whose `witness` IRI doesn't resolve to a committed resource.
+  *Verified:* real Citation witnesses → 0; a dangling witness → flagged.
+
+**Dispatch — documented queries, not a materialized verdict.** Well-posedness is a
+query the protocol runs (consistent with §2's "completion is a query"), not a
+`WellPosed`/`Blocked` resource a handler emits. Materializing a verdict would
+require an in-process institution crate (the only path to chain-emitted verdicts) —
+disproportionate for one graph check, and a blocked objective must stay recordable
+anyway. A Decidable `QueryClass` wrapper remains a future option *if* on-chain
+well-posedness provenance is ever wanted.
 
 ### 5.4 Remaining open
 
-- **Reachable query** — the lone runtime gate: the recursive `depends_on`
-  reachability/acyclicity check (Decidable `QueryClass`, `WellPosed`/`Blocked`).
-  Everything else is type-enforced.
-- **Anchored residual** — a query confirming each `objective:witness` resolves to a
-  live witness/citation (the open-world half).
 - **Completion artifact** — whether a satisfied Objective emits a dedicated
   deliverable resource (distinct from `bench:TaskOutput`; §6) or completion is
   purely the thesis-Holds query. Leaning: query only, no new artifact.

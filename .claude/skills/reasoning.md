@@ -65,30 +65,41 @@ axioms or milestones until you have grounded enough to *express* them — so fra
 and grounding are **co-recursive**. Iterate until the graph is well-posed, then
 execute.
 
-Draft the graph, then check four admissibility gates — each failure names a
-grounding or reframing action:
-- **Expressible** — every proposition compiles in the available vocabulary (an
-  undefined predicate ⇒ vocabulary gap → `grounding`: import/align/declare terms).
-- **Anchored** — every axiom has an admitted witness (unanchored ⇒ `grounding`:
-  cite/observe, or demote to a flagged Declared hypothesis).
-- **Reachable** — every milestone has a candidate evidence path (none ⇒ decompose,
-  or record **blocked**).
-- **Checkable** — every proposition states what evidence would satisfy/refute it.
+Draft the graph as typed `objective:` resources, then check four admissibility
+gates. Three are **enforced by the type system at commit** — a non-well-posed frame
+simply won't load — and one is a query you run:
+- **Expressible** — every proposition compiles (an undefined predicate ⇒ vocabulary
+  gap → `grounding`: import/align/declare terms). *The frame loads = passes.*
+- **Checkable** — every `objective:Milestone` carries `acceptance_grade` +
+  `witness_kind` + `falsifier` (all `requires`d; values `allows_only`-constrained).
+  A milestone with undefined acceptance won't commit.
+- **Anchored (presence)** — every `objective:Axiom` carries a `witness` (required);
+  an unanchored axiom won't commit. Its referential half (does the witness resolve?)
+  is the query below.
+- **Reachable** + **Anchored (referential)** — the two runtime checks: run
+  [`experiments/objectives/well-posed-reachable.eigenql`](../../experiments/objectives/well-posed-reachable.eigenql)
+  and [`well-posed-anchored.eigenql`](../../experiments/objectives/well-posed-anchored.eigenql)
+  against the objective's branch. **Empty result = passes;** any row is a node
+  disconnected from the thesis / an axiom with a dangling witness → `grounding`
+  (cite/observe), decompose, or record **blocked**.
 
-Loop frame⇄ground until all four pass for the whole graph (`grounding`'s
-retrieve-first shrinks the frontier each pass, so it converges). If a gate **can't**
-be closed — no evidence, no path, no grounding — that's a recorded finding: the
-objective is ill-posed/blocked *here*; stop, don't proceed on faith. Full spec + the
-objective ontology: **D58**. (Distinct from kernel D21 tasks / `bench:TaskOutput`,
-which are program-run execution — D58 §6.)
+Loop frame⇄ground until all gates pass (`grounding`'s retrieve-first shrinks the
+frontier each pass, so it converges). **Loop budget:** cap reframing at a few
+rounds — if a gate still can't be closed after ~3 passes (no evidence, no path, no
+grounding), stop and record the finding: the objective is ill-posed/blocked *here*;
+don't proceed on faith. Full spec + the objective ontology: **D58**. (Distinct from
+kernel D21 tasks / `bench:TaskOutput`, which are program-run execution — D58 §6.)
 
-Commit the thesis + milestones as proposition stubs now (the goal posts), in the
-objective's own namespace:
+Commit the thesis + milestones now (the goal posts) as typed `objective:` resources
+in the objective's own namespace — the propositions they target as `Prop` decls,
+wrapped in `objective:Milestone`/`Axiom` nodes (worked example:
+`experiments/objectives/d57-schema-org/chain/`):
 ```esl
 namespace obj = "urn:eigenius:obj:<slug>";
 data obj:ThesisHolds : core:string -> Prop { }
-// Thesis + each milestone authored now as goals; each only Holds once its
-// antecedents do. Acceptance = the grade you commit to reaching per node.
+// Each Prop is the TARGET of an objective:Milestone (acceptance_grade +
+// witness_kind + falsifier + depends_on edges); it only Holds once its
+// antecedents do. The thesis is the root Milestone.
 ```
 
 ### 1. Anchor — when entering new territory, fix the ground in real sources
