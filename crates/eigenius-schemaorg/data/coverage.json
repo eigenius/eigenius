@@ -9,6 +9,13 @@
     "Defaulted": 9,
     "Enumeration": 66
   },
+  "enumeration_open": 4,
+  "enumeration_open_examples": [
+    "schema:businessFunction -> schema:BusinessFunction",
+    "schema:eligibleCustomerType -> schema:BusinessEntityType",
+    "schema:typeOfBed -> schema:BedType",
+    "schema:warrantyScope -> schema:WarrantyScope"
+  ],
   "datatypes_folded": [
     "schema:Boolean",
     "schema:DataType",

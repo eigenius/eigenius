@@ -113,6 +113,15 @@ pub struct Coverage {
     pub enumeration_members: usize,
     pub properties: usize,
     pub property_tiers: BTreeMap<String, usize>,
+    /// Enumeration-tier properties whose enumeration class has no members
+    /// anywhere in its subtree (a genuinely empty enumeration, e.g.
+    /// `BusinessFunction` — members are defined in an external vocabulary). The
+    /// `class_types` typing still applies, but no closed set (`allows_only`) can
+    /// be formed, so the range stays open. Accounted, not silently dropped:
+    /// `Enumeration` tier = (properties carrying `allows_only`) + `enumeration_open`.
+    pub enumeration_open: usize,
+    /// `property -> EmptyEnum` examples of the open enumerations above.
+    pub enumeration_open_examples: Vec<String>,
     /// schema.org DataTypes folded into core scalars (not emitted as classes).
     pub datatypes_folded: Vec<String>,
     /// Excluded by layer (pending/meta).
@@ -272,8 +281,8 @@ pub fn convert(nodes: &[Json]) -> ConvertReport {
     }
 
     // Enumeration members: a node whose @type is an enumeration class.
-    // Build enum_class → [member urns] for allows_only.
-    let mut enum_members: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    // Build enum_class → [direct member urns].
+    let mut enum_direct: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for n in nodes {
         let Some(id) = node_id(n) else { continue };
         if !id.starts_with("schema:") || excluded_by_layer(n) {
@@ -283,10 +292,37 @@ pub fn convert(nodes: &[Json]) -> ConvertReport {
             if enum_set.contains(t) {
                 if let (Some((murn, _)), Some((eurn, _))) = (map_schema_id(id), map_schema_id(t)) {
                     if kept_ids.contains(&murn) && kept_ids.contains(&eurn) {
-                        enum_members.entry(eurn).or_default().push(murn);
+                        enum_direct.entry(eurn).or_default().push(murn);
                     }
                 }
             }
+        }
+    }
+    // Closed set per enumeration class = the TRANSITIVE member closure: a member
+    // of any sub-enumeration is a valid value for a property ranging on the
+    // parent (schema.org's enumerations are a subclass hierarchy — members of
+    // `QualitativeValue` live under its subtypes, members of `NonprofitType`
+    // under its). Direct-only collection under-populated `allows_only` (it was
+    // empty whenever the named enum's members lived in subclasses), so the closed
+    // set leaked open. Walk each enum's descendants and union their direct members.
+    let mut enum_members: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for e_curie in &enum_set {
+        let Some((eurn, _)) = map_schema_id(e_curie) else {
+            continue;
+        };
+        if !kept_ids.contains(&eurn) {
+            continue;
+        }
+        let mut members: BTreeSet<String> = BTreeSet::new();
+        for d_curie in descendants_incl(e_curie, &children) {
+            if let Some((durn, _)) = map_schema_id(&d_curie) {
+                if let Some(ms) = enum_direct.get(&durn) {
+                    members.extend(ms.iter().cloned());
+                }
+            }
+        }
+        if !members.is_empty() {
+            enum_members.insert(eurn, members.into_iter().collect());
         }
     }
 
@@ -479,7 +515,19 @@ fn emit_property(
                     }
                 }
             }
-            if !members.is_empty() {
+            if members.is_empty() {
+                // Every ranged enumeration is genuinely member-less (members
+                // defined in an external vocabulary, e.g. BusinessFunction). The
+                // class_types typing stands, but no closed set can be formed —
+                // the range stays open. Accounted explicitly (the cut), not silent.
+                report.coverage.enumeration_open += 1;
+                if report.coverage.enumeration_open_examples.len() < 20 {
+                    report
+                        .coverage
+                        .enumeration_open_examples
+                        .push(format!("{id} -> {}", entity_enum_curies.join(",")));
+                }
+            } else {
                 r.set(
                     iri(ALLOWS_ONLY),
                     Value::Array(members.iter().map(|m| rref(m)).collect()),
@@ -557,6 +605,17 @@ mod tests {
             json!({"@id":"schema:author","@type":"rdf:Property","schema:domainIncludes":{"@id":"schema:CreativeWork"},"schema:rangeIncludes":[{"@id":"schema:Person"},{"@id":"schema:Organization"}]}),
             json!({"@id":"schema:about","@type":"rdf:Property","schema:rangeIncludes":[{"@id":"schema:Thing"},{"@id":"schema:Text"}]}),
             json!({"@id":"schema:dow","@type":"rdf:Property","schema:rangeIncludes":{"@id":"schema:DayOfWeek"}}),
+            // Parent enumeration whose members live in a SUBCLASS enum — the
+            // closed set must be the transitive member closure (regression for
+            // the direct-only-members bug).
+            json!({"@id":"schema:MedicalEnum","@type":"rdfs:Class","rdfs:subClassOf":{"@id":"schema:Enumeration"}}),
+            json!({"@id":"schema:SurgicalSpec","@type":"rdfs:Class","rdfs:subClassOf":{"@id":"schema:MedicalEnum"}}),
+            json!({"@id":"schema:Cardiac","@type":"schema:SurgicalSpec","rdfs:label":"Cardiac"}),
+            json!({"@id":"schema:spec","@type":"rdf:Property","schema:rangeIncludes":{"@id":"schema:MedicalEnum"}}),
+            // Genuinely empty enumeration (members defined in an external vocab) —
+            // stays open (class_types only) and is accounted in enumeration_open.
+            json!({"@id":"schema:EmptyEnum","@type":"rdfs:Class","rdfs:subClassOf":{"@id":"schema:Enumeration"}}),
+            json!({"@id":"schema:emptyRanged","@type":"rdf:Property","schema:rangeIncludes":{"@id":"schema:EmptyEnum"}}),
             json!({"@id":"schema:rel","@type":"rdf:Property","schema:rangeIncludes":{"@id":"schema:Thing"},"schema:supersededBy":{"@id":"schema:about"}}),
             json!({"@id":"schema:badref","@type":"rdf:Property","schema:rangeIncludes":{"@id":"schema:Secret"}}),
         ]
@@ -651,6 +710,26 @@ mod tests {
         let dow = find(&rep, "urn:schema_org:dow").unwrap();
         assert_eq!(refs(dow, CLASS_TYPES), vec!["urn:schema_org:DayOfWeek"]);
         assert_eq!(refs(dow, ALLOWS_ONLY), vec!["urn:schema_org:Monday"]);
+    }
+
+    #[test]
+    fn enumeration_closure_is_transitive_and_open_enums_accounted() {
+        let rep = convert(&graph());
+        // spec ranges on the PARENT enum; its only member lives in a subclass —
+        // the closed set must still include it (transitive closure).
+        let spec = find(&rep, "urn:schema_org:spec").unwrap();
+        assert_eq!(refs(spec, CLASS_TYPES), vec!["urn:schema_org:MedicalEnum"]);
+        assert_eq!(refs(spec, ALLOWS_ONLY), vec!["urn:schema_org:Cardiac"]);
+        // emptyRanged ranges on a member-less enum: typed, but no closable set.
+        let empty = find(&rep, "urn:schema_org:emptyRanged").unwrap();
+        assert_eq!(refs(empty, CLASS_TYPES), vec!["urn:schema_org:EmptyEnum"]);
+        assert!(empty.get(&iri(ALLOWS_ONLY)).is_none());
+        assert_eq!(rep.coverage.enumeration_open, 1);
+        assert!(rep
+            .coverage
+            .enumeration_open_examples
+            .iter()
+            .any(|e| e.contains("schema:emptyRanged")));
     }
 
     #[test]

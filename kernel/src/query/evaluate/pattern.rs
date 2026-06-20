@@ -731,7 +731,7 @@ mod tests {
         let p = "urn:eigenius:t";
 
         // node(name) with a `dep` array edge and a `node` marker.
-        let mut node = |id: &str, deps: Vec<&str>, bldr: &mut crate::layer::LayerBuilder| {
+        let node = |id: &str, deps: Vec<&str>, bldr: &mut crate::layer::LayerBuilder| {
             let mut r = Resource::new(iri(&format!("{p}:{id}")));
             r.set(iri(&format!("{p}:node")), sv("y"));
             r.set(

@@ -53,8 +53,12 @@ namespace objcite    = "urn:eigenius:obj:d57:cite";
 // ════════════════════════════════════════════════════════════════════
 
 // What the anchors import (Declared premises the design decision rests on).
-data objclaim:SchemaOrgIsDatasetVocabulary : core:string -> Prop { }
-data objclaim:CroissantBuildsOnSchemaOrg   : core:string -> Prop { }
+data objclaim:SchemaOrgIsDatasetVocabulary  : core:string -> Prop { }
+data objclaim:CroissantBuildsOnSchemaOrg    : core:string -> Prop { }
+// The conformance fact behind the whole advisory-vs-enforced discipline (#9), and
+// the versioned-distribution fact behind pinning V30.0 as the generator input.
+data objclaim:SchemaOrgDomainIsAdvisory     : core:string -> Prop { }
+data objclaim:SchemaOrgVersionedDistribution : core:string -> Prop { }
 
 // The works (epistemically neutral global records).
 resource lit:schema_org : reference:Reference {
@@ -70,6 +74,20 @@ resource lit:croissant_2024 : reference:Reference {
     reference:issued_year     = 2024;
     reference:url             = "https://docs.mlcommons.org/croissant/";
 }
+// The schema.org documentation actually used to derive the mapping discipline (the
+// two docs grounding decisions #4/#9 and the input selection — d57-mapping-decisions.md).
+resource lit:schema_org_datamodel : reference:Reference {
+    reference:title           = "Schema.org Data Model";
+    reference:creator         = "Schema.org Community Group (W3C)";
+    reference:container_title = "schema.org";
+    reference:url             = "https://schema.org/docs/datamodel.html";
+}
+resource lit:schema_org_developers : reference:Reference {
+    reference:title           = "Schema.org for Website Developers";
+    reference:creator         = "Schema.org Community Group (W3C)";
+    reference:container_title = "schema.org";
+    reference:url             = "https://schema.org/docs/developers.html";
+}
 
 // The citations (THIS objective's Declared use of each work, carrying the claim).
 resource objcite:schema_org_source : reference:Citation {
@@ -83,6 +101,24 @@ resource objcite:croissant_authority : reference:Citation {
     reflection:canonical_proposition = type_expr( objclaim:CroissantBuildsOnSchemaOrg("croissant") );
     reference:cites                  = lit:croissant_2024;
     reference:citation_type          = reference:cites_as_authority;
+}
+// The load-bearing conformance anchor for the mapping discipline (decision #9): the
+// Data Model documents domainIncludes/rangeIncludes as advisory expectations, NOT
+// constraints — which is why domainIncludes maps to advisory core:recommends (never
+// the restrictive core:domain) and rangeIncludes unions stay permissive.
+resource objcite:datamodel_conformance : reference:Citation {
+    reflection:rationale             = "schema.org's Data Model documents domainIncludes/rangeIncludes as advisory ('expected', not constraining) — the type system is recommendation-based, not enforcing. This is the conformance fact decision #9 rests on: domainIncludes -> core:recommends (advisory), never core:domain (restrictive); multi-valued rangeIncludes -> permissive unions. It grounds the entire advisory-vs-enforced mapping discipline (m1).";
+    reflection:canonical_proposition = type_expr( objclaim:SchemaOrgDomainIsAdvisory("schema_org") );
+    reference:cites                  = lit:schema_org_datamodel;
+    reference:citation_type          = reference:cites_as_source_document;
+}
+// The provenance anchor for input selection: the versioned distribution (the
+// per-version schemaorg-current-https.jsonld) is what we pin as the generator input.
+resource objcite:developers_distribution : reference:Citation {
+    reflection:rationale             = "schema.org's developer documentation describes the versioned distribution — each release publishes schemaorg-current-https.jsonld at https://schema.org/version/<N>/. That is the provenance basis for pinning V30.0 (sha256 0f0c97a4...) as the deterministic generator input (m3).";
+    reflection:canonical_proposition = type_expr( objclaim:SchemaOrgVersionedDistribution("schema_org") );
+    reference:cites                  = lit:schema_org_developers;
+    reference:citation_type          = reference:cites_as_source_document;
 }
 
 // ════════════════════════════════════════════════════════════════════

@@ -192,8 +192,9 @@ The generator emits a coverage report (`data/coverage.json`). For V30.0:
 - **Mapped (2114 resources):** 683 classes, 51 enumeration classes, 250
   enumeration members, 1130 properties.
 - **Property ranges by tier:** Clean 867, by-convention 188 (entity-first unions /
-  format-spanning literal unions), enumeration 66 (`class_types`+`allows_only`),
-  defaulted 9 (no in-scope range → `string`).
+  format-spanning literal unions), enumeration 66 (`class_types` + `allows_only` over
+  the transitive member closure — 62 closed + 4 genuinely-open member-less enums,
+  `coverage.enumeration_open`), defaulted 9 (no in-scope range → `string`).
 - **DataTypes folded → core scalars (15):** `Text`/`URL`/`Number`/`Integer`/
   `Float`/`Boolean`/`Date`/`DateTime`/`Time` + the `Quantity` family.
 - **Excluded by layer (848):** `pending` + `meta` (attic already absent from

@@ -64,9 +64,22 @@ eigenius --endpoint $EP query --branch obj-d57 \
 |---|---|---|---|
 | m1 | mapping discipline defined | declared | `concl_discipline` (Holds) |
 | m2 | proof-of-shape probe binds to a real file | declared | `concl_probe` (Holds) |
-| m3 | generator emits the mappable vocabulary | declared | `concl_generator` (Holds) |
-| m4 | the cut accounted (mapped vs residual) | declared | `concl_cut` (Holds) |
+| m3 | generator emits the mappable vocabulary | **observed + declared** | `concl_generator` (Holds — composes two content-hashed Observed artifacts `gen_input`/`gen_output` ∧ a mechanically-witnessed Declared `GeneratorConforms`) |
+| m4 | the cut accounted (mapped vs residual) | declared | `concl_cut` (Holds — partition independently recounted by test) |
 | **thesis** | **schema.org is mapped** | **verified** | `concl_main` (Holds — composes m1∧m2∧m3∧m4 by modus ponens, D54 lemma citation) |
 
 Chain: `00`-objective → `01`-discipline (m1) → `02`-typed graph → `probe/` + `03`
-(m2) → `04`-generator (m3, m4) → `05`-synthesis (thesis).
+(m2) → `04`-generator (m3 Observed pins + checks, m4) → `05`-synthesis (thesis).
+
+**Mechanical evidence (Level 1, `docs/notes/d57-mechanical-evidence-plan.md`).** m3's
+artifact existence is *Observed* (content-hashed `ingest:PinnedExternalFile` pins, the
+kernel emits `IsObservedAs`); its conformance to the discipline and m4's partition are
+*witnessed* by `cargo test -p eigenius-schemaorg -- --ignored`
+(`tests/output_validates.rs`: load+validate 0 errors, no `core:domain`, transitive
+`allows_only` closure, `source_irl` round-trip, coverage-partition recount,
+determinism). The chain itself is kernel-type-checked by `tests/d57_chain_validates.rs`.
+The remaining Declared legs become *Derived* once the generator runs as a
+kernel-dispatched program (the D56 wrapped-program path, `ProgramTrace → IsDerivedAs`
+— the WRN wrapped-R pattern; no new institution) — Level 2. Two findings surfaced from
+witnessing — see the decisions doc (F1 transitive-closure bug, F2 genuinely-open
+enumerations).
