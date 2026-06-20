@@ -18,10 +18,12 @@
 //
 // Stacks above core + reasoning (it references reasoning:proposition's encoding).
 
-namespace core      = "urn:eigenius:core";
-namespace reasoning = "urn:eigenius:reasoning";
-namespace eigentt   = "urn:eigenius:eigentt";
-namespace objective = "urn:eigenius:objective";
+namespace core       = "urn:eigenius:core";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace reflection = "urn:eigenius:reflection";
+namespace epistemic  = "urn:eigenius:reflection:epistemic";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace objective  = "urn:eigenius:objective";
 
 // ── Classes ──────────────────────────────────────────────────────────
 
@@ -33,16 +35,41 @@ class objective:Objective {
 }
 
 class objective:Milestone {
-    description = "A proposition to establish, with acceptance criteria. Carries the Prop (objective:proposition — the same value the discharging reasoning:ReasoningSentence will carry), the acceptance grade + witness kind + falsifier, and the intended-warrant edges (objective:depends_on → other Milestones/Axioms). Completion is a query: the milestone is satisfied iff a Holds reasoning:ReasoningSentence carries its proposition (objective:satisfied_by records which). The thesis is just the root Milestone.";
-    requires   objective:proposition, objective:acceptance_grade;
-    recommends objective:witness_kind, objective:falsifier, objective:depends_on,
-               objective:status, objective:frontier_gate, objective:satisfied_by;
+    description = "A proposition to establish, with acceptance criteria. Carries the Prop (objective:proposition — the same value the discharging reasoning:ReasoningSentence will carry), the acceptance grade + witness kind + falsifier, and the intended-warrant edges (objective:depends_on → other Milestones/Axioms). Completion is a query: the milestone is satisfied iff a Holds reasoning:ReasoningSentence carries its proposition (objective:satisfied_by records which). The thesis is just the root Milestone. The Checkable gate (D58 §3) is a TYPE CHECK, not a runtime query: proposition + acceptance_grade + witness_kind + falsifier are all required, so the structural validator rejects any milestone whose acceptance is undefined at commit — a non-checkable milestone cannot be recorded.";
+    requires   objective:proposition, objective:acceptance_grade,
+               objective:witness_kind, objective:falsifier;
+    recommends objective:depends_on, objective:status,
+               objective:frontier_gate, objective:satisfied_by;
 }
 
 class objective:Axiom {
-    description = "A premise admitted WITHOUT derivation — a pointer to an already-admitted witness, not the witness itself. Carries the Prop, the axiom kind (observed | declared | cited), and objective:witness (the IsObservedAs / IsDeclaredAs / reference:Citation IRI). Anything lacking a resolvable witness is an unjustified assumption, not an axiom — the Anchored gate.";
-    requires   objective:proposition, objective:axiom_kind;
-    recommends objective:witness;
+    description = "A premise admitted WITHOUT derivation — a pointer to an already-admitted witness, not the witness itself. Carries the Prop, the axiom kind (observed | declared; a 'cited' premise is just declared with a reference:Citation witness), and objective:witness (the IsObservedAs / IsDeclaredAs / reference:Citation IRI). objective:witness is REQUIRED: an axiom that names no witness is an unjustified assumption, and the structural validator rejects it at commit — so the presence half of the Anchored gate (D58 §3) is a type check. The residual (does the named witness actually resolve to an admitted IsObservedAs/IsDeclaredAs/Citation) is the open-world part left to a query.";
+    requires   objective:proposition, objective:axiom_kind, objective:witness;
+}
+
+// ── Enumerations (resource vocabularies; allows_only constrains to these) ──
+//
+// The grade fields REUSE reflection:EpistemicStatus (the canonical four-grade
+// vocabulary: epistemic:{observed,declared,derived,verified}) rather
+// than minting a parallel enum — objective: is a thin layer over the reflection
+// epistemic stack. The only objective-specific enum is WitnessKind (operational
+// "how", no reflection analog). Plain-string fields (status, frontier_gate)
+// carry mutable progress state and are not enumerated.
+
+class objective:WitnessKind {
+    description = "How a Milestone is expected to be witnessed — operational planning metadata with no reflection analog (reflection's Trace family records the realized 'how'; this is the expected one).";
+}
+resource objective:wk_layer_commit : objective:WitnessKind {
+    core:description = "The witness is the layer commit itself (the resource loaded).";
+}
+resource objective:wk_query : objective:WitnessKind {
+    core:description = "The witness is a query result over the chain.";
+}
+resource objective:wk_generator_output : objective:WitnessKind {
+    core:description = "The witness is the deterministic output of a generator/program run.";
+}
+resource objective:wk_citation : objective:WitnessKind {
+    core:description = "The witness is a reference:Citation carrying the claim.";
 }
 
 // ── Properties ───────────────────────────────────────────────────────
@@ -65,18 +92,24 @@ property objective:branch : core:string {
     domain objective:Objective;
 }
 property objective:status : core:string {
-    description = "Well-posedness / progress status: open | blocked | admissible | satisfied. On the Objective (overall) and on each Milestone.";
+    description = "Well-posedness / progress status: open | blocked | admissible | satisfied. On the Objective (overall) and on each Milestone. Mutable progress state — a plain string, not part of the type contract.";
 }
 property objective:proposition : core:resource {
-    description = "The Prop-typed proposition (a type_expr / eigentt:TypeExpr, encoded as for reasoning:proposition) this Milestone must establish or this Axiom admits. Shared identity with the discharging reasoning:ReasoningSentence's proposition.";
+    description = "The Prop-typed proposition (eigentt:TypeExpr, encoded as for reasoning:proposition) this Milestone TARGETS or this Axiom admits. Distinct in role from reflection:canonical_proposition: this is the goal an OPEN milestone has not yet established; the discharging reasoning:ReasoningSentence ASSERTS it (carries it as canonical_proposition). On completion the two coincide — objective:satisfied_by links the milestone to that sentence.";
     class_types eigentt:TypeExpr;
 }
-property objective:acceptance_grade : core:string {
-    description = "The grade this Milestone must reach to count as done: observed | declared | derived | verified.";
+property objective:acceptance_grade : core:resource {
+    description = "The grade this Milestone must reach to count as done — the SAME reflection:EpistemicStatus the rest of the epistemic stack uses (not a parallel enum). allows_only enforces the grade vocabulary at commit — a value-level type check, part of Checkable. (Distinct property from reflection:epistemic_status: this is the TARGET grade of an open goal; epistemic_status is the ACTUAL grade of a produced resource.)";
+    class_types reflection:EpistemicStatus;
+    allows_only epistemic:observed, epistemic:declared,
+                epistemic:derived, epistemic:verified;
     domain objective:Milestone;
 }
-property objective:witness_kind : core:string {
-    description = "How the Milestone is expected to be witnessed: layer-commit | query | generator-output | citation.";
+property objective:witness_kind : core:resource {
+    description = "How the Milestone is expected to be witnessed (an objective:WitnessKind). allows_only enforces the kind vocabulary at commit — part of Checkable.";
+    class_types objective:WitnessKind;
+    allows_only objective:wk_layer_commit, objective:wk_query,
+                objective:wk_generator_output, objective:wk_citation;
     domain objective:Milestone;
 }
 property objective:falsifier : core:string {
@@ -89,15 +122,17 @@ property objective:depends_on : core:resource_array {
     domain objective:Milestone;
 }
 property objective:frontier_gate : core:string {
-    description = "While status=open, the admissibility gate pending on this Milestone: expressible | anchored | reachable | checkable. Makes the grounding frontier queryable.";
+    description = "While status=open, the admissibility gate pending on this Milestone: expressible | anchored | reachable | checkable. Makes the grounding frontier queryable. Mutable progress state — a plain string.";
     domain objective:Milestone;
 }
 property objective:satisfied_by : core:string {
     description = "IRI of the Holds reasoning:ReasoningSentence that discharged this Milestone's proposition (filled on completion).";
     domain objective:Milestone;
 }
-property objective:axiom_kind : core:string {
-    description = "The kind of admitted premise: observed | declared | cited.";
+property objective:axiom_kind : core:resource {
+    description = "The grade of the witness backing this admitted premise — reflection:EpistemicStatus restricted to observed | declared (an axiom is recorded data or an asserted premise; derived/verified things are Milestones, not Axioms). A 'cited' premise is simply DECLARED with a reference:Citation witness — reference:Citation is itself a DeclaredResource — so it needs no separate kind; objective:witness names the Citation.";
+    class_types reflection:EpistemicStatus;
+    allows_only epistemic:observed, epistemic:declared;
     domain objective:Axiom;
 }
 property objective:witness : core:string {

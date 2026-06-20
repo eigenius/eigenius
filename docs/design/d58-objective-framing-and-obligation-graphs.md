@@ -63,6 +63,10 @@ checkable over the objective's layer:
 All four pass for the whole DAG ⇒ **well-posed** ⇒ the linear execute phases begin.
 This is the framing-level analogue of "don't assert unwitnessed": *don't start
 deriving until the obligations are expressible, anchored, reachable, and checkable.*
+(**Realization (§5.3):** three of the four — Expressible, Checkable, and the
+presence half of Anchored — are enforced by the **type system at commit**, so
+"passes the gate" means "the frame loads"; only Reachable's graph property needs a
+runtime query.)
 
 ## 4. The frame⇄ground fixpoint (settled)
 
@@ -116,20 +120,25 @@ over the reasoning stack rather than a parallel epistemics.
   version (H3 — reframing is the normal case; a revision points back and the gates
   re-run), the working **branch**, and an overall **status**.
 - **`objective:Milestone`** — a proposition to establish, with acceptance criteria
-  (H1, H2). Carries `proposition` (the `Prop`, same value the discharging
-  `ReasoningSentence` will carry — H6), `acceptance_grade`, `witness_kind`,
-  `falsifier`, the intended-warrant edges `depends_on` (→ Milestones/Axioms), a
-  `status` (`open | blocked | admissible | satisfied`) and, while open, the
-  `frontier_gate` that is pending (H4). **Completion is a query** (§2): the
-  milestone is satisfied iff a `Holds` `ReasoningSentence` carries its
-  `proposition` (`satisfied_by` records which). The thesis is just the root
-  Milestone.
+  (H1, H2). Carries `proposition` (the *target* `Prop` — the value the discharging
+  `ReasoningSentence` will assert as its `canonical_proposition`; distinct in role
+  from it — target vs assertion — H6), `acceptance_grade` (a **`reflection:Epistemic
+  Status`** — the same four-grade vocabulary the epistemic stack uses, *not* a
+  parallel enum), `witness_kind` (an `objective:WitnessKind` — the one
+  objective-specific enum, no reflection analog), `falsifier`, the intended-warrant
+  edges `depends_on` (→ Milestones/Axioms), a `status` (`open | blocked |
+  admissible | satisfied`) and, while open, the `frontier_gate` that is pending
+  (H4). **Completion is a query** (§2): the milestone is satisfied iff a `Holds`
+  `ReasoningSentence` carries its `proposition` (`satisfied_by` records which). The
+  thesis is just the root Milestone.
 - **`objective:Axiom`** — a premise admitted without derivation: a *pointer* to an
   already-admitted witness, not the witness itself. Carries `proposition`,
-  `axiom_kind` (`observed | declared | cited`), and `witness` (the
-  `IsObservedAs` / `IsDeclaredAs` / `reference:Citation` IRI). Anything lacking a
-  resolvable `witness` is an unjustified assumption, not an axiom (the *Anchored*
-  gate).
+  `axiom_kind` (a `reflection:EpistemicStatus` restricted to `observed | declared`
+  — a *cited* premise is simply **declared** with a `reference:Citation` witness,
+  since a `Citation` is itself a `DeclaredResource`; no third kind needed), and a
+  **required** `witness` (the `IsObservedAs` / `IsDeclaredAs` / `reference:Citation`
+  IRI). An axiom that names no witness won't commit — the presence half of the
+  *Anchored* gate is a type check (§5.3).
 
 ### 5.2 Key properties
 
@@ -138,38 +147,56 @@ over the reasoning stack rather than a parallel epistemics.
 | `objective:thesis` | Objective | resource → Milestone | the root goal |
 | `objective:version` / `objective:supersedes` | Objective | integer / IRI | frame revision (H3) |
 | `objective:branch` | Objective | string | branch-per-objective (H7) |
-| `objective:proposition` | Milestone, Axiom | *(as `reasoning:proposition`)* | the `Prop` |
-| `objective:acceptance_grade` | Milestone | string | `observed\|declared\|derived\|verified` (H2) |
-| `objective:witness_kind` | Milestone | string | `layer-commit\|query\|generator-output\|citation` (H2) |
+| `objective:proposition` | Milestone, Axiom | `resource` → `eigentt:TypeExpr` | the target `Prop` (≠ `canonical_proposition`; target vs assertion) |
+| `objective:acceptance_grade` | Milestone | `resource` → `reflection:EpistemicStatus` | target grade — **reuses the reflection enum**, `allows_only` the four `epistemic:*` (H2) |
+| `objective:witness_kind` | Milestone | `resource` → `objective:WitnessKind` | `wk_layer_commit\|wk_query\|wk_generator_output\|wk_citation` (H2) |
 | `objective:falsifier` | Milestone | string | what would refute it (H2, *Checkable*) |
-| `objective:depends_on` | Milestone | resource[] → Milestone/Axiom | intended-warrant edge (H1) |
-| `objective:status` | Objective, Milestone | string | `open\|blocked\|admissible\|satisfied` (H4) |
+| `objective:depends_on` | Milestone | `resource_array` → Milestone/Axiom | intended-warrant edge (H1) |
+| `objective:status` | Objective, Milestone | string | `open\|blocked\|admissible\|satisfied` — mutable state (H4) |
 | `objective:frontier_gate` | Milestone | string | pending gate while open (H4) |
 | `objective:satisfied_by` | Milestone | string | the discharging `ReasoningSentence` IRI (H6) |
-| `objective:axiom_kind` / `objective:witness` | Axiom | string / IRI | admitted-witness pointer |
+| `objective:axiom_kind` | Axiom | `resource` → `reflection:EpistemicStatus`{observed,declared} | grade of the admitted witness |
+| `objective:witness` | Axiom | string (IRI) | the admitted-witness pointer (**required**) |
 
-### 5.3 The four gates as `QueryClass`es
+### 5.3 The four gates — type-system-first, not a runtime institution
 
-The §3 gates become committed, mechanically-checkable queries over the objective's
-layer (H5) — three are real EigenQL; *Expressible* is just "the frame loaded":
+The decisive design call (and a correction of an earlier draft that routed all
+gates through an AutoOnLoad `QueryClass`): **push each gate into the type system as
+far as it goes; leave a runtime check only for what is genuinely graph-shaped.**
+Three of the four gates are then enforced by the structural validator *at commit* —
+a non-well-posed node simply does not load — with no handler, no kernel rebuild:
 
-- **Anchored** — every `objective:Axiom` whose `witness` does **not** resolve to an
-  `IsObservedAs`/`IsDeclaredAs`/`reference:Citation` is a violation.
-- **Reachable** — every non-thesis Milestone is reachable along `depends_on` from
-  the thesis, and every `depends_on` target resolves (no dangling/cyclic edge).
-- **Checkable** — every Milestone has `acceptance_grade` + `witness_kind` +
-  `falsifier` set.
+- **Expressible** — *fully a type check.* The frame compiles/validates or it
+  doesn't (an undefined predicate fails to resolve).
+- **Checkable** — *fully a type check.* `objective:Milestone` **requires**
+  `proposition` + `acceptance_grade` + `witness_kind` + `falsifier`, and
+  `allows_only` constrains the grade/kind values to their enum members. A milestone
+  whose acceptance is undefined is rejected at commit (*verified live:* omitting
+  `falsifier` → `MissingRequired`).
+- **Anchored** — *presence is a type check.* `objective:Axiom` **requires**
+  `witness`; an axiom that names none is rejected (*verified live:* omitting
+  `witness` → `MissingRequired`). The **residual** — does the named witness
+  actually resolve to an admitted `IsObservedAs`/`IsDeclaredAs`/`Citation` — is
+  open-world and is the one Anchored check left to a query.
+- **Reachable** — *the only genuinely runtime gate.* Transitive closure +
+  acyclicity over `depends_on` is a graph property, not a type constraint (a
+  dangling edge is caught by reference typing; full reachability needs recursive
+  Datalog). When wired, it is a **Decidable/OnDemand** query (`Holds`=reachable,
+  `Fails`=blocked) — **not AutoOnLoad**, because a blocked objective must remain
+  *recordable* (§4: blocked is a finding, not a rejected commit; AutoOnLoad `Fails`
+  would reject it).
 
-An AutoOnLoad `QueryClass` on `objective:Objective` emits a **`WellPosed`** /
-**`Blocked`** verdict (mirroring the reasoning institution's `Holds`/`Fails`), and
-**re-fires on each new version** (H3). Completion is the separate thesis-Holds
-query (§2).
+So well-posedness is *mostly* a structural property of a loadable frame, not a
+verdict a handler emits. This is why "wiring the gates" turned out to be an
+ontology-strengthening exercise, not a new institution crate.
 
 ### 5.4 Remaining open
 
-- **Gate-query wiring** — §5.3 specifies the gate semantics + EigenQL sketches;
-  registering them as a `QueryClass`/institution emitting `WellPosed`/`Blocked` is
-  the implementation step.
+- **Reachable query** — the lone runtime gate: the recursive `depends_on`
+  reachability/acyclicity check (Decidable `QueryClass`, `WellPosed`/`Blocked`).
+  Everything else is type-enforced.
+- **Anchored residual** — a query confirming each `objective:witness` resolves to a
+  live witness/citation (the open-world half).
 - **Completion artifact** — whether a satisfied Objective emits a dedicated
   deliverable resource (distinct from `bench:TaskOutput`; §6) or completion is
   purely the thesis-Holds query. Leaning: query only, no new artifact.
