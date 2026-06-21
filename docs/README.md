@@ -22,11 +22,11 @@ For most users, the notebook is the lowest-friction first touch — it's the Rea
 
 ## [Design documents →](design/README.md)
 
-The architecture specification and design documents (D1–D28):
+The architecture specification and design documents (D1–D60 — **[full index](design/README.md)**):
 
 - **[architecture-v0.3.md](design/architecture-v0.3.md)** — current architecture specification.
 - **[implementation-plan.md](design/implementation-plan.md)** — phased build plan (Phases 0–21).
-- **D1–D28** — per-subsystem design notes: Eigon serialization (D1), EigenQL (D2), program model (D3), storage encoding (D4), gRPC API (D5), execution architecture (D6/D6b), ESL surface (D7), structured LLM output (D8), NbE and type extensions (D9), codata (D11), WASM extensibility (D12), durable kernel state (D13), **institutions (D14, supersedes D10)**, ontology-as-types (D18), inductive and sized types (D19), task traces (D21), notebook UX and TypeScript SDK (D22), runtime substrate (D26), Julia institutions (D27), Lean 4 as verification institution (D28).
+- **[design/README.md](design/README.md)** — the complete, linked index of every per-subsystem design note. Highlights: Eigon serialization (D1), EigenQL (D2), program model (D3), execution architecture (D6/D6b), ESL surface (D7), NbE and type extensions (D9), **institutions (D14, supersedes D10)**, ontology-as-types (D18), inductive types (D19), notebook UX and TypeScript SDK (D22), runtime substrate (D26), Julia institutions (D27), Lean 4 verification institution (D28), justification logic (D39), the EigenTT type/inductive fragments (D32/D46/D47/D48), ChainWitness machinery (D49), the measurement-statistics institution (D52), large-data tracking (D53), the R language runtime (D55), component execution & derivation materialization (D56), schema.org mapping (D57), objective framing (D58), and the generic OCI tool runtime + kernel-tracked env build (D60).
 - Plus standalone notes: [life-science requirements](design/life-science-requirements.md), [boundary contracts](design/boundary-contracts.md), [vision](design/vision.md), [manifesto](design/manifesto.md).
 
 The design documents are spec-first. They define what should exist and why; the user guides explain what does exist and how to use it.

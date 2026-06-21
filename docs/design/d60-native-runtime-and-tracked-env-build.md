@@ -1,14 +1,39 @@
 # D60 — Generic OCI tool runtime, kernel-tracked environment build, and the D57 generator lift (Level 2)
 
-*Status: **proposed** (2026-06-20). Implements Level 2 of the D57 mechanical-evidence
+*Status: **implemented** (2026-06-20). Implements Level 2 of the D57 mechanical-evidence
 plan ([d57-mechanical-evidence-plan.md](../notes/d57-mechanical-evidence-plan.md) §3):
 run the schema.org generator as a program **through the kernel** so `concl_generator`
 discharges `GeneratorConforms` via `derived(...)` instead of `declared(...)`. Builds on
 D26 (runtime substrate), D55 (R runtime — the closest precedent), D56 (component
 execution → `ProgramTrace → IsDerivedAs`), D53 (`PinnedExternalFile` provisioning).
-References the user requirement (2026-06-20): the image build must go through the
-existing `eigenius env build` CLI feature, and the build command/recipe should be
-**kernel-tracked** (on-chain), not an ad-hoc shell script.*
+References the user requirement (2026-06-20): the image build goes through the existing
+`eigenius env build` CLI feature, and the build command/recipe is **kernel-tracked**
+(on-chain), not an ad-hoc shell script.*
+
+> **As built.** New crates `eigenius-schemaorg-worker` (the converter as a plain-Rust
+> RPC worker — no FFI, sets its own `canonical_proposition`) and `eigenius-oci`
+> (`OciToolRuntime` = `TestLanguageRuntimeDocker`'s build half + `eigenius-r`'s
+> dispatch half, spawner-agnostic). `runtime:BuildRecipe` added (ontology + generic
+> builder + `OciToolRuntime::build_recipe`). napi `register_oci_tool_runtime` + TS
+> `registerOciToolRuntime` (`EIGENIUS_OCI_*`); `eigenius env build --language oci`;
+> the orchestrator image stages the worker. `04-generator.esl`'s `concl_generator`
+> now composes `observed(gen_input) ∧ observed(gen_output) ∧
+> **derived(generate_result, GeneratorConforms)**`.
+>
+> **Verified — including the live clean-DB run.** `cargo test -p eigenius-oci --test
+> oci_e2e -- --ignored` (real buildah image + sibling container + real conversion →
+> report carries `GeneratorConforms("schema_org")`); `cargo test -p eigenius-schemaorg
+> --test d57_chain_validates`; plus unit/bootstrap/clippy. **And end-to-end on a fresh
+> DB** (`demo/d57-schema-org/run.sh`): `docker compose down -v && up` → `eigenius run`
+> dispatches the generator through the `oci` runtime (the worker converts the real
+> V30.0 vocabulary in a pinned sibling container), commits `generate_result` + a
+> `ProgramTrace`, and the five conclusions — `concl_discipline`, `concl_probe`,
+> **`concl_generator` (via `derived(...)`)**, `concl_cut`, **`concl_main` (the thesis)**
+> — all return kernel-checked `Holds`. The chain is split into `04a-evidence.esl`
+> (pre-run pins/rule) + `04b-conclusions.esl` (post-run), since `gen_input` must commit
+> before the run. One deployment detail the live run surfaced: the `oci` image must be
+> built from the *same* worker binary the orchestrator stages (boot cross-check, D26
+> §9.3) — the demo `docker cp`s the staged binary before `eigenius env build`.
 
 ## 1. Goal
 

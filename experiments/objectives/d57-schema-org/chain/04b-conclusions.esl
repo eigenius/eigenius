@@ -1,0 +1,67 @@
+// ════════════════════════════════════════════════════════════════════
+// m3 + m4 — conclusions  [POST-RUN]
+// ════════════════════════════════════════════════════════════════════
+//
+// Loads AFTER `eigenius run` (the generator dispatched through the D60 `oci`
+// runtime), so the run's `obj:generate_result` + its ProgramTrace →
+// IsDerivedAs(generate_result, GeneratorConforms) witness already exists. m3's
+// conclusion composes the two Observed artifact pins (04a) with the **Derived**
+// conformance witness; m4's conclusion cites the Declared cut accounting (04a).
+// The evidence (pins, rule, checks, cut_accounting) lives in 04a-evidence.esl.
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace obj        = "urn:eigenius:obj:d57";
+
+// ── m3: GeneratorProduces (modus ponens over Observed ∧ Observed ∧ Derived) ─
+resource obj:concl_generator : reasoning:ReasoningSentence {
+    reasoning:subject_iri   = "urn:eigenius:obj:d57:schema_org";
+    reasoning:proposition   = type_expr( obj:GeneratorProduces("schema_org") );
+    reasoning:justification = App(
+        App(
+            App(
+                DeclaredEvidence("urn:eigenius:obj:d57:generator_rule"),
+                ObservedEvidence("urn:eigenius:obj:d57:gen_input")
+            ),
+            ObservedEvidence("urn:eigenius:obj:d57:gen_output")
+        ),
+        DerivedEvidence("urn:eigenius:obj:d57:generate_result")
+    );
+    reasoning:certificate = type_expr(
+        alias
+            RULE = "urn:eigenius:obj:d57:generator_rule",
+            IN   = "urn:eigenius:obj:d57:gen_input",
+            OUT  = "urn:eigenius:obj:d57:gen_output",
+            RES  = "urn:eigenius:obj:d57:generate_result",
+            IAO  = obj:InputArtifactObserved("schema_org"),
+            OAO  = obj:OutputArtifactObserved("schema_org"),
+            GC   = obj:GeneratorConforms("schema_org"),
+            GP   = obj:GeneratorProduces("schema_org"),
+            RULE_P = IAO -> OAO -> GC -> GP,
+            jIN  = ObservedEvidence(IN),
+            jOUT = ObservedEvidence(OUT),
+            jGC  = DerivedEvidence(RES),
+            cIN  = observed(IN, IAO),
+            cOUT = observed(OUT, OAO),
+            cGC  = derived(RES, GC),
+            c1 = app(IAO, OAO -> GC -> GP,
+                     DeclaredEvidence(RULE), jIN, declared(RULE, RULE_P), cIN),
+            c2 = app(OAO, GC -> GP,
+                     reasoning:App(DeclaredEvidence(RULE), jIN), jOUT, c1, cOUT)
+        in
+        app(GC, GP,
+            reasoning:App(reasoning:App(DeclaredEvidence(RULE), jIN), jOUT),
+            jGC, c2, cGC)
+    );
+}
+
+// ── m4: CutAccounted (Declared, mechanically-backed) ────────────────
+resource obj:concl_cut : reasoning:ReasoningSentence {
+    reasoning:subject_iri   = "urn:eigenius:obj:d57:schema_org";
+    reasoning:proposition   = type_expr( obj:CutAccounted("schema_org") );
+    reasoning:justification = DeclaredEvidence("urn:eigenius:obj:d57:cut_accounting");
+    reasoning:certificate   = type_expr(
+        declared("urn:eigenius:obj:d57:cut_accounting", obj:CutAccounted("schema_org"))
+    );
+}

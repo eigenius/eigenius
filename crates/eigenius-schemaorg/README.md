@@ -20,8 +20,9 @@ implementing the **meta-ontology correspondence** in
 ```bash
 cargo run -p eigenius-schemaorg --bin schemaorg-import -- \
     --input data/schemaorg-current-https-v30.0.jsonld \
-    --output data/schema-org.eigon.json --report data/coverage.json
+    --output ../../ontologies/schema-org/schema-org.eigon.json --report data/coverage.json
 ```
 
 Deterministic (byte-identical output per input). The full generated ontology
-(~2114 resources) loads + validates into the kernel.
+(2114 resources) loads + validates into the kernel; it is committed as a
+first-class ontology at [`ontologies/schema-org/`](../../ontologies/schema-org/).

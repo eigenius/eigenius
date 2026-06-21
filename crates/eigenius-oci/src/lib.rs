@@ -28,6 +28,8 @@
 //! The runtime is spawner-agnostic (`Arc<dyn WorkerSpawner>`) so the napi layer
 //! wires the concrete `DockerSpawner`.
 
+pub mod recipe;
+
 use std::collections::BTreeMap;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -36,7 +38,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use eigenius_kernel::ontology::eigon_cbor;
-use eigenius_kernel::ontology::resource::Resource;
+use eigenius_kernel::ontology::iri::Iri;
+use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_runtime_substrate::cross_check::{prepare_substrate_side, ProvenanceDirAction};
 use eigenius_runtime_substrate::error::{BuildError, RunError, SpawnError};
 use eigenius_runtime_substrate::image_build::dockerfile::LanguageAssetCopy;
@@ -151,22 +154,47 @@ impl OciToolRuntime {
         }
     }
 
-    fn build_image(&self) -> Result<ImageDigest, BuildError> {
-        let manifest_hash = self.manifest_hash()?.to_string();
-        let binary_bytes = self.binary_bytes()?.to_vec();
-
+    /// The composed Dockerfile this runtime builds — shared by `build_image`
+    /// (what runs) and `build_recipe` (what gets recorded), so they cannot drift.
+    fn composed_dockerfile(&self) -> String {
         let fragments = self.dockerfile_fragments_inner();
         let asset_copies = vec![LanguageAssetCopy {
             source: PathBuf::from(WORKER_ASSET),
             destination: WORKER_BINARY_DEST.to_string(),
         }];
-        let dockerfile = compose_dockerfile(&DockerfileSpec {
+        compose_dockerfile(&DockerfileSpec {
             base_image_ref: &self.base_image_ref,
             fragments: &fragments,
             included_packages: &[],
             has_mirror: false,
             language_asset_copies: &asset_copies,
-        });
+        })
+    }
+
+    /// Build the kernel-tracked [`recipe::BuildRecipe`] for this image (D60 §4.2):
+    /// the chain-resident record of how the image is built. `build_command` is the
+    /// exact `eigenius env build …` argv that produced it. Pure (no Docker) — it
+    /// records the build's inputs, which `eigenius env build --verify` later
+    /// replays to reproduce the digest.
+    pub fn build_recipe(&self, build_command: Vec<String>) -> Result<Resource, BuildError> {
+        let manifest_hash = self.manifest_hash()?.to_string();
+        let dockerfile = self.composed_dockerfile();
+        let artifact_hashes = vec![format!("{WORKER_ASSET}:{manifest_hash}")];
+        Ok(recipe::build_recipe_resource(&recipe::RecipeInputs {
+            base_image: &self.base_image_ref,
+            dockerfile: &dockerfile,
+            build_command: &build_command.join(" "),
+            builder: "buildah",
+            builder_version: &buildah_version(),
+            artifact_hashes: &artifact_hashes,
+        }))
+    }
+
+    fn build_image(&self) -> Result<ImageDigest, BuildError> {
+        let manifest_hash = self.manifest_hash()?.to_string();
+        let binary_bytes = self.binary_bytes()?.to_vec();
+
+        let dockerfile = self.composed_dockerfile();
 
         let work_dir = self.depot_path.join("build-context-oci");
         let _ = std::fs::remove_dir_all(&work_dir);
@@ -197,11 +225,24 @@ impl OciToolRuntime {
         resolve_docker_image_id(&self.image_tag)
     }
 
-    fn spawn_internal(&self) -> Result<WorkerHandle, SpawnError> {
-        let digest = self.ensure_image().map_err(|e| SpawnError::SpawnFailed {
-            backend: "docker",
-            reason: format!("oci-tool build_image failed: {e}"),
-        })?;
+    fn spawn_internal(&self, env: &Resource) -> Result<WorkerHandle, SpawnError> {
+        // Production: the RuntimeEnvironment carries the pre-built image_digest
+        // (from `eigenius env build` host-side) — spawn it, never build at dispatch
+        // (the orchestrator has no buildah; the R runtime resolves the env digest
+        // the same way). Dev/e2e: no digest on the env → build the image here.
+        let digest = match env
+            .get(&Iri::parse("urn:eigenius:runtime:image_digest").expect("static IRI"))
+            .and_then(Value::as_str)
+        {
+            Some(s) => ImageDigest::parse(s).map_err(|e| SpawnError::SpawnFailed {
+                backend: "docker",
+                reason: format!("env carries malformed image_digest `{s}`: {e}"),
+            })?,
+            None => self.ensure_image().map_err(|e| SpawnError::SpawnFailed {
+                backend: "docker",
+                reason: format!("oci-tool build_image failed: {e}"),
+            })?,
+        };
         let manifest_hash = self
             .manifest_hash()
             .map_err(|e| SpawnError::SpawnFailed {
@@ -355,7 +396,7 @@ impl LanguageRuntime for OciToolRuntime {
 
     fn run_script(
         &self,
-        _env: &Resource,
+        env: &Resource,
         _script: &Resource,
         inputs: &[Resource],
     ) -> Result<RunOutcome, RunError> {
@@ -370,7 +411,7 @@ impl LanguageRuntime for OciToolRuntime {
         let started_at = now_rfc3339();
 
         let worker = self
-            .spawn_internal()
+            .spawn_internal(env)
             .map_err(|e| RunError::WorkerRpcFailed(format!("spawn_worker: {e}")))?;
         let image_digest = self.capture_health(&worker);
 
@@ -491,6 +532,19 @@ fn resolve_docker_image_id(image_tag: &str) -> Result<ImageDigest, BuildError> {
             "docker reported an unparseable image id for `{image_tag}`: {e}"
         ))
     })
+}
+
+/// Best-effort `buildah` version string for the recipe's provenance. Falls back
+/// to `"buildah"` when the version can't be read (the recipe stays valid).
+fn buildah_version() -> String {
+    std::process::Command::new("buildah")
+        .arg("--version")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "buildah".to_string())
 }
 
 fn sanitise_for_path(s: &str) -> String {

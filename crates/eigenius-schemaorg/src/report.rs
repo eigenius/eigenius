@@ -42,6 +42,11 @@ const SOURCE: &str = "urn:eigenius:reflection:source";
 const OUTPUT_CONTENT_HASH: &str = "urn:eigenius:obj:d57:output_content_hash";
 const INPUT_CONTENT_HASH: &str = "urn:eigenius:obj:d57:input_content_hash";
 const COVERAGE: &str = "urn:eigenius:obj:d57:coverage";
+const CANONICAL_PROPOSITION: &str = "urn:eigenius:reflection:canonical_proposition";
+/// The `obj:GeneratorConforms` predicate the chain's m3 conformance leg uses.
+const GENERATOR_CONFORMS: &str = "urn:eigenius:obj:d57:GeneratorConforms";
+/// The subject the schema.org objective is about.
+pub const SUBJECT: &str = "schema_org";
 
 fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("well-known IRI")
@@ -82,6 +87,24 @@ pub fn build_report(
             "schemaorg-import: convert(schema.org JSON-LD sha256:{input_sha256}) \
              -> ontology sha256:{output_sha256}"
         )),
+    );
+    // The worker is Eigenius-aware (links the kernel), so it sets its own
+    // canonical_proposition — `obj:GeneratorConforms("schema_org")` — exactly as
+    // the WRN R worker sets `r_eigon_set_proposition` (D55/D56). The committed
+    // ProgramTrace then mints `IsDerivedAs(<this resource>, GeneratorConforms)`,
+    // which the chain's `concl_generator` discharges via `derived(...)` (D60 §4.1
+    // tool-set path; the generic invocation-declared path is for non-Eigenius
+    // tools). The term shape is the D47 App-spine the reasoning institution reads:
+    // `App(ConstRef(pred), LitString(arg))`.
+    r.set(
+        iri(CANONICAL_PROPOSITION),
+        Value::Json(serde_json::json!({
+            "ctor": "App",
+            "args": [
+                {"ctor": "ConstRef", "args": [GENERATOR_CONFORMS]},
+                {"ctor": "LitString", "args": [SUBJECT]}
+            ]
+        })),
     );
     r
 }
@@ -130,10 +153,18 @@ mod tests {
             Some("sha256:0f0c97a4"),
         );
 
-        // The tool emits NO proposition — that is invocation-declared + kernel-stamped.
-        assert!(back
-            .get(&iri("urn:eigenius:reflection:canonical_proposition"))
-            .is_none());
+        // The worker sets its own canonical_proposition — GeneratorConforms("schema_org")
+        // as the D47 App-spine — so the program-run's IsDerivedAs matches the chain's
+        // derived(...) certificate.
+        let Some(Value::Json(prop)) = back.get(&iri(CANONICAL_PROPOSITION)) else {
+            panic!("report must carry canonical_proposition");
+        };
+        assert_eq!(prop["ctor"], serde_json::json!("App"));
+        assert_eq!(
+            prop["args"][0]["args"][0],
+            serde_json::json!(GENERATOR_CONFORMS)
+        );
+        assert_eq!(prop["args"][1]["args"][0], serde_json::json!(SUBJECT));
 
         // The coverage payload round-trips and carries the m4 accounting.
         let cov_back = back.get(&iri(COVERAGE)).expect("coverage present");

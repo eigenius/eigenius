@@ -96,6 +96,20 @@ export interface RuntimeSubstrateAddon {
     depotPath: string,
   ): void;
 
+  /** Register the generic OCI tool runtime under language_id="oci" (D60).
+   * `workerBinaryPath` is the host path to a pinned Eigenius worker binary
+   * (e.g. `eigenius-schemaorg-worker`) staged into the orchestrator image; the
+   * runtime bakes it into the tool image and computes the cross-check
+   * `manifestHash` from its bytes (so the same binary must back the built
+   * image, or the boot cross-check fails closed, D26 §9.3). `baseImageRef` is
+   * the digest-pinned glibc base (e.g. `debian:bookworm-slim`). `depotPath` is
+   * the shared host/container path (same constraint as the language variants). */
+  registerOciToolRuntime(
+    workerBinaryPath: string,
+    baseImageRef: string,
+    depotPath: string,
+  ): void;
+
   /** Dispatch a `RunRuntimeScript` invocation. Both args are
    * Eigon-CBOR `Buffer`s; returns the output Resource and a partial
    * `RuntimeInvocation` Resource (Phase 18c.5 / D26 §5.5) carrying the

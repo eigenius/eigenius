@@ -1,19 +1,23 @@
 # D57 — encoding the process as mechanical evidence
 
-> **Status (2026-06-20): Level 1 implemented.** The mechanical evidence is in
-> `crates/eigenius-schemaorg/tests/output_validates.rs` (input-pinned → convert →
-> kernel `Validator` 0 errors + property checks, `cargo test … -- --ignored`) and
-> the chain is kernel-type-checked by `tests/d57_chain_validates.rs`. On-chain,
-> m3 (`04-generator.esl`) now composes **two content-hashed Observed artifacts**
-> (`obj:gen_input` / `obj:gen_output`, kernel-emitted `IsObservedAs`) ∧ a Declared
-> `GeneratorConforms` whose rationale cites the tests; m4's partition is
-> independently recounted by a test. Honest grade ceiling at Level 1: the artifact
-> existence is genuinely **Observed**; the conformance/partition properties are
-> **Declared-but-test-backed** (a kernel-emitted **Derived** witness needs the
-> generator to run as a program *through the kernel* — the D56 wrapped-program path,
-> no new institution — that is Level 2, §3). Witnessing
-> surfaced two findings (F1 transitive-closure bug, fixed; F2 four genuinely-open
-> enumerations, accounted) — see
+> **Status (2026-06-20): Levels 1 + 2 implemented.** Level 1: the mechanical evidence
+> is in `crates/eigenius-schemaorg/tests/output_validates.rs` (input-pinned → convert →
+> kernel `Validator` 0 errors + property checks); m3 composes **two content-hashed
+> Observed artifacts** (`obj:gen_input` / `obj:gen_output`, kernel-emitted
+> `IsObservedAs`); m4's partition is independently recounted. **Level 2 (D60):** the
+> `GeneratorConforms` leg is now genuinely **Derived** — `eigenius run` dispatches the
+> generator through the kernel's generic `oci` tool runtime
+> (`eigenius-schemaorg-worker` in a pinned image; kernel-tracked `runtime:BuildRecipe`),
+> committing `generate_result` + a `ProgramTrace → IsDerivedAs(generate_result,
+> GeneratorConforms)` that `concl_generator` discharges via `derived(...)`. So m3 is now
+> **Observed (artifacts) + Derived (conformance)** — the kernel attests the run, no new
+> institution. Verified: `cargo test -p eigenius-oci --test oci_e2e -- --ignored` (real
+> container conversion → report carries the proposition) + `tests/d57_chain_validates.rs`
+> (`concl_generator` Holds via `derived(...)`); the live compose run is the deployment
+> confirmation (`experiments/objectives/d57-schema-org/programs/README.md`). See
+> [d60-native-runtime-and-tracked-env-build.md](../design/d60-native-runtime-and-tracked-env-build.md).
+> Witnessing surfaced two findings (F1 transitive-closure bug, fixed; F2 four
+> genuinely-open enumerations, accounted) — see
 > [d57-mapping-decisions.md](d57-mapping-decisions.md).
 
 

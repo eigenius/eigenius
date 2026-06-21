@@ -22,6 +22,9 @@ eigenius-julia = { path = "../crates/eigenius-julia" }
 # `build_environment_image` (Bioconductor base + limma/fgsea/lme4) to
 # produce the WRN-study worker image digest.
 eigenius-r = { path = "../crates/eigenius-r" }
+# D60: the generic OCI tool runtime — `eigenius env build --language oci` bakes a
+# pinned Eigenius worker binary into an image + emits the kernel-tracked BuildRecipe.
+eigenius-oci = { path = "../crates/eigenius-oci" }
 # 20a.4: the kernel binary links the Lean verification institution
 # directly. `LeanInstitution::query` runs in-process — no IPC, no
 # orchestrator round-trip — so the verification TCB stays bounded by

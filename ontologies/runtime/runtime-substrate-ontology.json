@@ -58,7 +58,8 @@
       "urn:eigenius:runtime:included_packages",
       "urn:eigenius:runtime:mirror_dependency",
       "urn:eigenius:runtime:image_digest",
-      "urn:eigenius:runtime:image_reference"
+      "urn:eigenius:runtime:image_reference",
+      "urn:eigenius:runtime:build_recipe"
     ]
   },
 
@@ -651,5 +652,84 @@
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:class_types": ["urn:eigenius:runtime:RuntimeEnvironment"],
     "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:BuildRecipe",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Kernel-tracked recipe that produced a RuntimeEnvironment image (D60). Records the deterministic build's inputs — the digest-pinned base image, the composed Dockerfile, the content hashes of each baked-in artifact (worker binary, packages), the exact build command, and the builder + version — so 'how the image was built' is a chain-resident, content-verified fact rather than an ad-hoc shell script. `eigenius env build` emits it and commits it with the RuntimeEnvironment (referenced via runtime:build_recipe); `eigenius env build --verify` reproduces the image digest from this recipe and fails closed on drift. Generalizes across runtimes (oci, r, julia, lean).",
+    "urn:eigenius:core:short_name": "BuildRecipe",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:short_name",
+      "urn:eigenius:runtime:base_image",
+      "urn:eigenius:runtime:dockerfile",
+      "urn:eigenius:runtime:build_command",
+      "urn:eigenius:runtime:builder"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:description",
+      "urn:eigenius:runtime:artifact_hashes",
+      "urn:eigenius:runtime:builder_version"
+    ]
+  },
+
+  {
+    "@id": "urn:eigenius:runtime:build_recipe",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The BuildRecipe that produced this environment's image — the chain-resident, content-verified record of how the image was built (D60 §4.2).",
+    "urn:eigenius:core:short_name": "build_recipe",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:runtime:BuildRecipe"],
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:RuntimeEnvironment"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:base_image",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The digest-pinned base image the build extends (e.g. `debian:bookworm-slim@sha256:...`).",
+    "urn:eigenius:core:short_name": "base_image",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:BuildRecipe"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:dockerfile",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The verbatim composed Dockerfile the builder ran — the build's authoritative recipe text.",
+    "urn:eigenius:core:short_name": "dockerfile",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:BuildRecipe"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:build_command",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The exact `eigenius env build …` invocation (argv) that produced the image — reproducible from the chain.",
+    "urn:eigenius:core:short_name": "build_command",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:BuildRecipe"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:builder",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The image builder used (e.g. `buildah`).",
+    "urn:eigenius:core:short_name": "builder",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:BuildRecipe"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:builder_version",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The builder's version string (e.g. `buildah 1.33.0`).",
+    "urn:eigenius:core:short_name": "builder_version",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:BuildRecipe"]
+  },
+  {
+    "@id": "urn:eigenius:runtime:artifact_hashes",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Content hashes of each artifact baked into the image, as `name:sha256:<hex>` strings (e.g. the worker binary). The cross-check anchor — the boot cross-check verifies the in-image artifacts against these.",
+    "urn:eigenius:core:short_name": "artifact_hashes",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:runtime:BuildRecipe"]
   }
 ]

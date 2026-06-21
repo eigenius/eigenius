@@ -3,8 +3,10 @@
 [Chapter 10](10-wasm-institutions.md) covered the WASM extension surface.
 This chapter covers the **other** extension surface: the **runtime
 substrate** — the orchestrator-spawned, container-hosted runtime that lets
-institutions live in their natural language ecosystem (Julia, eventually
-Python and others) instead of inside a WASM sandbox.
+institutions live in their natural language ecosystem (Julia, R, Lean;
+Python and others tracked) instead of inside a WASM sandbox. It also hosts a
+language-agnostic **`oci` tool runtime** (§11.7, D60) that runs any pinned
+containerized tool as an attested, replayable derivation.
 
 The two surfaces are peers, not alternatives. WASM institutions are right
 when sandboxing matters, when the institution is hot-installable, or when
@@ -255,8 +257,41 @@ comorphisms. The difference is operational, not protocol.
 | [`julia/common/EigeniusJuliaCommon/`](../../../julia/common/EigeniusJuliaCommon/) | Substrate-side Julia utilities |
 | [`julia/institutions/`](../../../julia/institutions/) | The five v1 Julia institutions |
 | [`julia/comorphisms/`](../../../julia/comorphisms/) | Cross-institution comorphism declarations |
+| [`crates/eigenius-oci/`](../../../crates/eigenius-oci/) | The generic `oci` tool `LanguageRuntime` + `runtime:BuildRecipe` builder (§11.7) |
+| [`crates/eigenius-schemaorg-worker/`](../../../crates/eigenius-schemaorg-worker/) | First `oci` tool worker — the schema.org converter as an Eigenius RPC worker |
 
-## 11.7. Cross-references
+## 11.7. Generic OCI tool runtime (D60)
+
+The language runtimes above (Julia, R, Lean) each ship a worker that *speaks Eigon*
+via an in-language FFI mirror. The **`oci` tool runtime** is the complementary,
+language-agnostic path: it runs **any pinned containerized tool** as a one-shot Job
+(`lifecycle:Job`) — a Rust/C binary, a Python script, a shell pipeline. The tool is a
+pure transform; the kernel does everything else.
+
+- **Dispatch.** `eigenius run` → kernel `RunRuntimeScript` → the `oci` runtime spawns
+  the tool in its `image_digest`-pinned image (the orchestrator resolves the digest the
+  env carries — it does **not** build at dispatch). The substrate provisions inputs by
+  `content_hash` (§11 external-file resolver); the tool returns its result as
+  **Eigon-CBOR**, and the kernel commits it under a `ProgramTrace → IsDerivedAs`. A
+  downstream reasoning certificate then discharges `derived(result, P)` over it — the
+  WRN wrapped-program pattern, **no new institution**.
+- **Kernel-tracked build recipe.** `eigenius env build --language oci
+  --worker-source-dir <binary> --base-image <pinned>` bakes the tool into an image
+  *and* emits a **`runtime:BuildRecipe`** — base image, baked-artifact content hashes,
+  the composed Dockerfile, the exact build command, and the builder version — committed
+  with the `RuntimeEnvironment` (`runtime:build_recipe`). "How the image was built" is
+  thus a chain-resident, content-verified fact rather than an ad-hoc shell script; it
+  generalizes to every runtime.
+- **Boot cross-check (D26 §9.3).** The image must be baked from the *same* worker binary
+  the orchestrator stages (`EIGENIUS_OCI_WORKER_BINARY_PATH`), or the in-image
+  manifest-hash won't match the one the runtime computes at dispatch and the worker
+  exits 78.
+- **Worked example.** The D57 schema.org generator lift — `demo/d57-schema-org/run.sh`
+  runs the generator through the `oci` runtime on a clean DB and lands every conclusion
+  (incl. `concl_generator` via `derived(...)` and the thesis) as a kernel-checked
+  `Holds`. See [D60](../../design/d60-native-runtime-and-tracked-env-build.md).
+
+## 11.8. Cross-references
 
 - [**Chapter 4 — CLI reference**](04-cli-reference.md) — the `mirror`,
   `env`, and `institution` subcommand groups walked through above, plus

@@ -210,6 +210,19 @@ fn oci_runtime_converts_schemaorg_through_a_real_container() {
     };
     assert_eq!(j["classes"], serde_json::json!(1));
 
+    // The worker set its canonical_proposition (GeneratorConforms("schema_org"))
+    // and it survived the real container round-trip — this is what the kernel's
+    // ProgramTrace turns into IsDerivedAs for the chain's derived(...) certificate.
+    let Some(Value::Json(prop)) = report.get(&iri("urn:eigenius:reflection:canonical_proposition"))
+    else {
+        panic!("report must carry canonical_proposition");
+    };
+    assert_eq!(
+        prop["args"][0]["args"][0],
+        serde_json::json!("urn:eigenius:obj:d57:GeneratorConforms"),
+    );
+    assert_eq!(prop["args"][1]["args"][0], serde_json::json!("schema_org"));
+
     // The trace carries the image the worker ran against.
     assert!(
         outcome.image_digest.is_some(),

@@ -1,0 +1,22 @@
+[
+  {
+    "@id": "urn:eigenius:obj:d57:program:generate",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+    "urn:eigenius:core:description": "D57 Level-2 generator program (D60): applies the RunRuntimeScript component to the pinned schema.org V30.0 input (obj:gen_input), dispatching the `oci` tool runtime. The substrate spawns eigenius-schemaorg-worker in the pinned image, which converts the input and returns the conversion-report DerivedResource (carrying canonical_proposition = GeneratorConforms(\"schema_org\")). `eigenius run` commits it as obj:generate_result under a ProgramTrace -> IsDerivedAs, which 04-generator.esl's concl_generator discharges via derived(...).",
+    "urn:eigenius:program:input_type": "urn:eigenius:ingest:PinnedExternalFile",
+    "urn:eigenius:program:output_type": "urn:eigenius:reflection:DerivedResource",
+    "urn:eigenius:program:body": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:program:Apply"],
+      "urn:eigenius:program:function": "urn:eigenius:program:components:RunRuntimeScript",
+      "urn:eigenius:program:argument": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:program:Var"],
+        "urn:eigenius:program:name": "input"
+      },
+      "urn:eigenius:program:component_argument": {
+        "urn:eigenius:runtime:language": "oci",
+        "urn:eigenius:runtime:source": "eigenius-schemaorg-worker (image CMD; driven by inputs, not source)",
+        "urn:eigenius:runtime:image_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  }
+]

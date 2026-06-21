@@ -1209,6 +1209,7 @@ dependencies = [
  "eigenius-julia",
  "eigenius-kernel",
  "eigenius-lean",
+ "eigenius-oci",
  "eigenius-r",
  "eigenius-reasoning",
  "eigenius-runtime-substrate",

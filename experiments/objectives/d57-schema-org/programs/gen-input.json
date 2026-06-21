@@ -1,0 +1,11 @@
+[
+  {
+    "@id": "urn:eigenius:obj:d57:gen_input",
+    "urn:eigenius:core:is_a": ["urn:eigenius:ingest:PinnedExternalFile"],
+    "urn:eigenius:core:short_name": "schemaorg_v30_input",
+    "urn:eigenius:ingest:reference": "crates/eigenius-schemaorg/data/schemaorg-current-https-v30.0.jsonld",
+    "urn:eigenius:ingest:content_hash": "sha256:0f0c97a4f666b2f8563573fe48453782fd51b87a504523cf0c9aff6a71c3eec4",
+    "urn:eigenius:ingest:media_type": "application/ld+json",
+    "urn:eigenius:reflection:source": "Schema.org V30.0 (2026-03-19), https://schema.org/version/30.0/schemaorg-current-https.jsonld"
+  }
+]

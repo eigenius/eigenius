@@ -359,6 +359,23 @@ eigenius --endpoint http://localhost:50051 env build \
 
 Cold builds take 30–90 seconds (most of it `Pkg.precompile`); subsequent rebuilds without input changes hit buildah's layer cache.
 
+**`--language oci` (D60, generic tool runtime).** Bakes a pinned Eigenius worker
+binary (no mirror, no handler package) into an image over `--base-image`, and emits a
+kernel-tracked `runtime:BuildRecipe` alongside the digest:
+
+```bash
+eigenius --endpoint http://localhost:50051 env build --language oci \
+    --worker-source-dir target/release/eigenius-schemaorg-worker \
+    --base-image debian:bookworm-slim
+# → Digest: sha256:…  +  BuildRecipe (Eigon-JSON: base_image, artifact_hashes,
+#   dockerfile, build_command, builder_version) — commit it with `env create`.
+```
+
+The worker binary must be the *same* one the orchestrator stages
+(`EIGENIUS_OCI_WORKER_BINARY_PATH`), or the boot cross-check (D26 §9.3) fails. See
+[chapter 11 §11.7](11-runtime-substrate.md) and
+[D60](../../design/d60-native-runtime-and-tracked-env-build.md).
+
 ### `env create --language <LANG> --handler-package <DIR> --mirror <MIRROR_IRI> --as-iri <ENV_IRI> --image-digest <DIGEST> --runtime-version <VERSION> [--include-package <DIR> ...] [--base-image <REF>]`
 
 Commit a `RuntimeEnvironment` resource pinning the env image identity. Pass the digest and runtime version that `env build` printed.

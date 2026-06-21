@@ -64,7 +64,7 @@ eigenius --endpoint $EP query --branch obj-d57 \
 |---|---|---|---|
 | m1 | mapping discipline defined | declared | `concl_discipline` (Holds) |
 | m2 | proof-of-shape probe binds to a real file | declared | `concl_probe` (Holds) |
-| m3 | generator emits the mappable vocabulary | **observed + declared** | `concl_generator` (Holds — composes two content-hashed Observed artifacts `gen_input`/`gen_output` ∧ a mechanically-witnessed Declared `GeneratorConforms`) |
+| m3 | generator emits the mappable vocabulary | **observed + derived** | `concl_generator` (Holds — composes two content-hashed Observed artifacts `gen_input`/`gen_output` ∧ a **Derived** `GeneratorConforms` from running the generator through the kernel, D60) |
 | m4 | the cut accounted (mapped vs residual) | declared | `concl_cut` (Holds — partition independently recounted by test) |
 | **thesis** | **schema.org is mapped** | **verified** | `concl_main` (Holds — composes m1∧m2∧m3∧m4 by modus ponens, D54 lemma citation) |
 
@@ -78,8 +78,18 @@ kernel emits `IsObservedAs`); its conformance to the discipline and m4's partiti
 (`tests/output_validates.rs`: load+validate 0 errors, no `core:domain`, transitive
 `allows_only` closure, `source_irl` round-trip, coverage-partition recount,
 determinism). The chain itself is kernel-type-checked by `tests/d57_chain_validates.rs`.
-The remaining Declared legs become *Derived* once the generator runs as a
-kernel-dispatched program (the D56 wrapped-program path, `ProgramTrace → IsDerivedAs`
-— the WRN wrapped-R pattern; no new institution) — Level 2. Two findings surfaced from
-witnessing — see the decisions doc (F1 transitive-closure bug, F2 genuinely-open
+**Level 2 (D60) — done.** m3's `GeneratorConforms` leg is now genuinely *Derived*:
+`eigenius run` dispatches the generator through the kernel's generic `oci` tool
+runtime (`eigenius-schemaorg-worker` in a pinned image; the kernel-tracked
+`runtime:BuildRecipe` records how the image was built), committing `generate_result`
++ a `ProgramTrace → IsDerivedAs(generate_result, GeneratorConforms)` that
+`concl_generator` discharges via `derived(...)`. **Verified end-to-end on a clean DB**
+(`demo/d57-schema-org/run.sh`): `eigenius run` dispatches the generator through the
+`oci` runtime (real V30.0 conversion in a pinned sibling container) and all five
+conclusions — including `concl_generator` (derived) and the thesis `concl_main` —
+return kernel-checked `Holds`. Also covered by `cargo test -p eigenius-oci --test
+oci_e2e -- --ignored` + `tests/d57_chain_validates.rs`. The chain is split into
+`04a-evidence` (pre-run) + `04b-conclusions` (post-run) so `gen_input` commits before
+the run. Two findings surfaced from witnessing — see the decisions doc (F1
+transitive-closure bug, F2 genuinely-open
 enumerations).
