@@ -1,0 +1,66 @@
+{
+  "classes": 683,
+  "enumeration_classes": 51,
+  "enumeration_members": 250,
+  "properties": 1130,
+  "property_tiers": {
+    "ByConvention": 188,
+    "Clean": 867,
+    "Defaulted": 9,
+    "Enumeration": 66
+  },
+  "enumeration_open": 4,
+  "enumeration_open_examples": [
+    "schema:businessFunction -> schema:BusinessFunction",
+    "schema:eligibleCustomerType -> schema:BusinessEntityType",
+    "schema:typeOfBed -> schema:BedType",
+    "schema:warrantyScope -> schema:WarrantyScope"
+  ],
+  "datatypes_folded": [
+    "schema:Boolean",
+    "schema:DataType",
+    "schema:Date",
+    "schema:DateTime",
+    "schema:Distance",
+    "schema:Duration",
+    "schema:Energy",
+    "schema:Float",
+    "schema:Integer",
+    "schema:Mass",
+    "schema:Number",
+    "schema:Quantity",
+    "schema:Text",
+    "schema:Time",
+    "schema:URL"
+  ],
+  "excluded_layer": 848,
+  "residual_relations": {
+    "owl:equivalentClass": 48,
+    "owl:equivalentProperty": 89,
+    "rdfs:subPropertyOf": 142,
+    "schema:inverseOf": 45,
+    "schema:supersededBy": 82
+  },
+  "residual_examples": [
+    "schema:AdministrativeArea owl:equivalentClass cmns-ge:Subdivision",
+    "schema:Artery owl:equivalentClass snomed:51114001",
+    "schema:BankAccount owl:equivalentClass fibo-fbc-pas-fpas:BankAccount",
+    "schema:Brand owl:equivalentClass unece:BrandName",
+    "schema:City owl:equivalentClass fibo-fnd-plc-loc:Municipality",
+    "schema:Code schema:supersededBy schema:SoftwareSourceCode",
+    "schema:ContactPoint owl:equivalentClass fibo-fnd-org-org:ContactPoint,gs1:ContactPoint,vcard:VCard",
+    "schema:Continent owl:equivalentClass lcc-cr:Continent",
+    "schema:Cooperative owl:equivalentClass fibo-be-le-cb:CooperativeSociety",
+    "schema:Corporation owl:equivalentClass fibo-be-corp-corp:Corporation",
+    "schema:Country owl:equivalentClass gs1:Country,lcc-cr:Country,unece:Country",
+    "schema:DataCatalog owl:equivalentClass dcat:Catalog",
+    "schema:DataDownload owl:equivalentClass dcat:Distribution",
+    "schema:Dataset owl:equivalentClass dcat:Dataset,dctype:Dataset,void:Dataset",
+    "schema:Date owl:equivalentClass cmns-dt:Date",
+    "schema:DateTime owl:equivalentClass cmns-dt:DateTime",
+    "schema:DatedMoneySpecification schema:supersededBy schema:MonetaryAmount",
+    "schema:DeliveryMethod owl:equivalentClass unece:TransportMethod",
+    "schema:Demand owl:equivalentClass unece:RequestForQuotation",
+    "schema:Dermatologic schema:supersededBy schema:Dermatology"
+  ]
+}

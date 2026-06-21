@@ -1,6 +1,6 @@
 ---
 name: eigenius
-description: Drive the Eigenius typed knowledge graph platform — load Eigon-JSON / ESL resources, run EigenQL queries, execute typed programs (incl. LLM-backed via CompleteText / CompleteJson), inspect chain state and provenance, dispatch D14 institutions (Julia / Lean / WASM). TRIGGER when the user mentions Eigenius, the kernel, ESL, EigenQL, Eigon-JSON, FormulaTerm, ontologies, layers, branches, institutions, verdicts, or asks to load / query / inspect / run something on the platform. Requires the MCP server `eigenius` to be configured.
+description: Drive the Eigenius typed knowledge graph platform — load Eigon-JSON / ESL resources, run EigenQL queries, execute typed programs (incl. LLM-backed via CompleteText / CompleteJson), inspect chain state and provenance, dispatch D14 institutions (Julia / Lean / WASM); and the reasoning/provenance stack (epistemic statuses, witnesses, justification certificates) the `reasoning` skill builds on. TRIGGER when the user mentions Eigenius, the kernel, ESL, EigenQL, Eigon-JSON, FormulaTerm, ontologies, layers, branches, institutions, verdicts, reasoning sentences / witnesses / provenance, or asks to load / query / inspect / run something on the platform. Drive it via the MCP server `eigenius` *or* the `eigenius` CLI.
 ---
 
 # Eigenius
@@ -11,6 +11,13 @@ Three surface languages:
 - **Eigon-JSON** — canonical wire format. Property keys are full IRIs. Reserved key: `@id`.
 - **ESL** — human surface that compiles to Eigon-JSON. HCL-style declarations + ML-style expressions.
 - **EigenQL** — typed stratified Datalog over the chain (MATCH / DEFINE / RETURN / FIBER).
+
+**Two drivers, one chain.** Operate the platform via the **MCP tools** below *or*
+the **`eigenius` CLI** (§CLI surface) — equivalent surfaces; use whichever fits
+the context. This skill is the *mechanics*. For the **method** — capturing
+reasoning as graded, witnessed propositions the commit gate accepts or rejects —
+see the **`reasoning`** skill, which builds on §Reasoning & provenance surface
+below.
 
 ## MCP tool surface (14 tools)
 
@@ -32,6 +39,33 @@ Use these via `mcp__eigenius__<tool>`.
 | `eigenius_list_tasks` | Observe long-running programs (D21) |
 | `eigenius_get_task_status` | Detail on one task UUID |
 | `eigenius_layer_topology` | Orient — graph of classes / properties / institutions per layer |
+
+## CLI surface (equivalent to MCP; use when in a shell)
+
+The `eigenius` CLI (`target/{debug,release}/eigenius`; build with
+`cargo build -p eigenius-cli`) is the same driver from the shell. Pass
+`--endpoint http://localhost:50051` to hit the running kernel, `--json` for
+machine-readable output. Full reference (every subcommand, flags, exit codes):
+**[docs/guides/platform/04-cli-reference.md](https://github.com/eigenius/eigenius/blob/main/docs/guides/platform/04-cli-reference.md)**.
+
+| MCP tool | CLI |
+|---|---|
+| `eigenius_query` | `eigenius --endpoint … query '<EigenQL>'` |
+| `eigenius_inspect` | `eigenius --endpoint … inspect <IRI>` |
+| `eigenius_load` | `eigenius --endpoint … load <file.esl\|.json>` (accepts ESL directly) |
+| `eigenius_run_program(_by_iri)` | `eigenius --endpoint … run <program> <input>` |
+| `eigenius_validate_program` | `eigenius program-validate <file>` |
+| `eigenius_list_institutions` | `eigenius --endpoint … list-institutions` |
+| `eigenius_get_schema` | `eigenius --endpoint … get-schema <CLASS_IRI>` |
+| `eigenius_list_branches` | `eigenius --endpoint … branch list / show / create / delete` |
+
+CLI-only capabilities the `reasoning` protocol uses: **`branch create <task-slug>
+--from <head>`** (the per-task branch); **`data attach/verify/validate/provision`**
+(D53 external files); **`env build --language r|oci`** + **`run`** (wrapped-R
+warrants D55/D56, or *any* pinned tool via the generic `oci` runtime D60 — both
+commit a `ProgramTrace → IsDerivedAs` that a `derived(...)` certificate discharges);
+**`reflect <trace>`** (record a trace). `validate` / `compile` also run in-process on
+local files (no `--endpoint`).
 
 ## Vocabulary
 
@@ -106,10 +140,51 @@ RETURN [] { name: ?name }
 The MCP server `eigenius` must be configured (`claude mcp list` should show it as connected) and the orchestrator (`http://localhost:8080/mcp`) must be reachable. The orchestrator in turn needs the kernel running on `localhost:50051`. The simplest setup:
 
 ```bash
-EIGENIUS_MOCK_LLM=true docker compose up -d   # kernel + orchestrator + MCP route
+docker compose up -d   # kernel + orchestrator + MCP route
 ```
 
 For real LLM responses, set `ANTHROPIC_API_KEY` instead of the mock flag.
+
+## Reasoning & provenance surface (the epistemic stack)
+
+The chain constructs the **`reasoning`** skill composes. Read the linked spec /
+ontology when authoring witnessed propositions — don't memorize the shapes.
+
+- **Epistemic status + provenance** — the `reflection` ontology
+  (`ontologies/reflection/reflection-ontology.json`): `ObservedResource` /
+  `DeclaredResource` / `DerivedResource`; `DeclarationTrace` / `ProgramTrace`; and
+  `reflection:canonical_proposition` (the proposition a resource carries). Trace
+  schema: [D6b](https://github.com/eigenius/eigenius/blob/main/docs/design/d6b-reasoning-trace-schema.md).
+- **Verified reasoning** — the `reasoning` ontology (`ontologies/reasoning/`) + the
+  justification-logic institution
+  ([D39](https://github.com/eigenius/eigenius/blob/main/docs/design/d39-justification-logic.md),
+  guide [reasoning-institution/](https://github.com/eigenius/eigenius/tree/main/docs/guides/platform/reasoning-institution)):
+  a `ReasoningSentence` carries `justification` + `certificate`; the certificate
+  type-checks against `JustifiedBy(justification, proposition)` via
+  `DerivedEvidence`/`DeclaredEvidence`/`VerifiedEvidence`/`App` and the
+  `derived()/declared()/verified()/app()` certificate constructors.
+- **Witness index** — [D49](https://github.com/eigenius/eigenius/blob/main/docs/design/d49-chainwitness-machinery.md):
+  how `IsObservedAs`/`IsDeclaredAs`/`IsDerivedAs`/`IsVerifiedAs` witnesses are
+  admitted per layer and consumed by certificates.
+- **Lemma citation** — [D54](https://github.com/eigenius/eigenius/blob/main/docs/design/d54-reasoning-lemma-citation.md):
+  a `Holds` `ReasoningSentence` is citable as a lemma (`verified(<iri>, P)`) →
+  layered proofs.
+- **The commit gate (fail-closed).** AutoOnLoad **rejects** a layer that adds a
+  `Fails` `ReasoningSentence`, so a later lemma citation of it can't be unsound —
+  this is what makes "you can't record an unwitnessed conclusion" structural.
+- **Anchors (third-party knowledge)** — the `reference` ontology
+  (`ontologies/reference/reference.esl`): `reference:Reference` (a bibliographic
+  work) + CiTO-typed `reference:Citation` carrying an imported claim. Use real,
+  resolvable DOIs/PMIDs — never fabricated.
+- **Recompute / external evidence** — the statistics institution
+  ([D52](https://github.com/eigenius/eigenius/blob/main/docs/design/d52-measurement-statistics-institution.md),
+  guide [statistics-institution/](https://github.com/eigenius/eigenius/tree/main/docs/guides/platform/statistics-institution)):
+  `SampleSet` + `StatisticalAnalysisPlan` → an `IsDerivedAs` result; large external
+  files + the `ingest` ontology ([D53](https://github.com/eigenius/eigenius/blob/main/docs/design/d53-large-data-tracking.md));
+  wrapped external tools via the R runtime
+  ([D55](https://github.com/eigenius/eigenius/blob/main/docs/design/d55-r-language-runtime.md) /
+  [D56](https://github.com/eigenius/eigenius/blob/main/docs/design/d56-component-execution-and-derivation-materialization.md),
+  the `RunRuntimeScript` component).
 
 ## Going deeper
 
@@ -127,4 +202,5 @@ For real LLM responses, set `ANTHROPIC_API_KEY` instead of the mock flag.
 - [D26](https://github.com/eigenius/eigenius/blob/main/docs/design/d26-runtime-substrate.md) Runtime substrate · [D27](https://github.com/eigenius/eigenius/blob/main/docs/design/d27-julia-institutions.md) Julia institutions · [D28](https://github.com/eigenius/eigenius/blob/main/docs/design/d28-lean-4-as-institution.md) Lean verification
 
 **Source of truth for the bootstrap ontologies** (always read these rather than memorize):
-- `ontologies/core/` `ontologies/program/` `ontologies/reflection/` `ontologies/institution/` `ontologies/formulas/` `ontologies/runtime/`
+- Core platform: `ontologies/core/` `ontologies/program/` `ontologies/reflection/` `ontologies/institution/` `ontologies/formulas/` `ontologies/runtime/`
+- Reasoning stack (the `reasoning` skill): `ontologies/reasoning/` `ontologies/reference/` `ontologies/statistics/` `ontologies/ingest/`

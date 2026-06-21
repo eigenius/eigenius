@@ -107,6 +107,11 @@ const R_DRIVER_PATH = Deno.env.get("EIGENIUS_R_DRIVER_PATH");
 const R_CDYLIB_PATH = Deno.env.get("EIGENIUS_R_CDYLIB_PATH");
 const R_BASE_IMAGE_REF = Deno.env.get("EIGENIUS_R_BASE_IMAGE_REF");
 const R_DEPOT_PATH = Deno.env.get("EIGENIUS_R_DEPOT_PATH");
+// Generic OCI tool runtime (D60). The worker binary is a pinned Eigenius worker
+// (e.g. eigenius-schemaorg-worker) staged into the orchestrator image.
+const OCI_WORKER_BINARY_PATH = Deno.env.get("EIGENIUS_OCI_WORKER_BINARY_PATH");
+const OCI_BASE_IMAGE_REF = Deno.env.get("EIGENIUS_OCI_BASE_IMAGE_REF");
+const OCI_DEPOT_PATH = Deno.env.get("EIGENIUS_OCI_DEPOT_PATH");
 
 function main() {
   // Install the structured-logging subscriber before anything else
@@ -277,6 +282,33 @@ function main() {
           "failed to register RLanguageRuntime",
           {
             error_kind: "r_runtime_register_failed",
+            error_message: e instanceof Error ? e.message : String(e),
+          },
+        );
+      }
+    }
+    if (OCI_WORKER_BINARY_PATH && OCI_BASE_IMAGE_REF && OCI_DEPOT_PATH) {
+      try {
+        substrateAddon.registerOciToolRuntime(
+          OCI_WORKER_BINARY_PATH,
+          OCI_BASE_IMAGE_REF,
+          OCI_DEPOT_PATH,
+        );
+        log.info(
+          operation.COMPONENT_REGISTER,
+          "registered OciToolRuntime",
+          {
+            worker_binary_path: OCI_WORKER_BINARY_PATH,
+            base_image_ref: OCI_BASE_IMAGE_REF,
+            depot_path: OCI_DEPOT_PATH,
+          },
+        );
+      } catch (e) {
+        log.warn(
+          operation.COMPONENT_REGISTER,
+          "failed to register OciToolRuntime",
+          {
+            error_kind: "oci_runtime_register_failed",
             error_message: e instanceof Error ? e.message : String(e),
           },
         );

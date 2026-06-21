@@ -1,0 +1,15 @@
+// Well-posedness gate: ANCHORED — referential half (D58 §5.3).
+//
+// Every Axiom's witness must resolve to an admitted resource (a reference:Citation
+// or an IsObservedAs / IsDeclaredAs witness). The *presence* half is already a type
+// check (objective:witness is required on objective:Axiom, so an axiom that names no
+// witness won't commit); this query checks the named witness actually EXISTS.
+//
+// Run against an objective's branch. An EMPTY result means the gate PASSES; a
+// returned row is an axiom whose witness is a dangling reference.
+DEFINE Anchored(?ax) FROM
+    MATCH "urn:eigenius:objective:Axiom"(?ax) { "urn:eigenius:objective:witness": ?w },
+          ?c {}
+    WHERE ?w = ?c
+DEFINE Unanchored(?ax) FROM MATCH "urn:eigenius:objective:Axiom"(?ax) {}, NOT Anchored(?ax) {}
+MATCH Unanchored(?ax) {} RETURN [] { "urn:eigenius:objective:unanchored": ?ax }

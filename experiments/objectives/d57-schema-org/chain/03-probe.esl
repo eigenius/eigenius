@@ -1,0 +1,40 @@
+// ════════════════════════════════════════════════════════════════════
+// m2 — Proof-of-shape probe (Declared, discharged)
+// ════════════════════════════════════════════════════════════════════
+//
+// Discharges obj:ProbeValidates: the hand-authored probe slice
+// (experiments/objectives/d57-schema-org/probe/) demonstrates that the settled
+// mapping discipline (D57 §3 / metamodel note) produces loadable, validated,
+// queryable Eigenius resources on representative real schema.org shapes, and
+// binds to a real external file. Declared, witnessed by the probe artifacts +
+// the live loads/queries cited in the rationale; concl_probe cites it via
+// declared(). Same shape as m1 (01-discipline.esl).
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace obj        = "urn:eigenius:obj:d57";
+
+resource obj:probe_validation : reflection:DeclaredResource {
+    reflection:declared_by = "d57:m2-probe";
+    reflection:rationale   = "The m2 proof-of-shape probe (probe/schema-org-probe.json + probe/binding-supp1.json) hand-authors a representative slice of schema.org under urn:schema_org: exercising every meta-ontology correspondence (D57 §3 / docs/notes/d57-schemaorg-vs-core-metamodel.md): the subClassOf->subclass_of hierarchy (Thing -> CreativeWork -> Dataset / MediaObject -> DataDownload; Person, Organization); single-DataType scalars; URL -> string + core:format=iri; a single-Class range (sourceOrganization); an all-Class union (publisher); a mixed literal-or-entity union mapped ENTITY-FIRST (creator -> class_types=[Person,Organization]); and an ENUMERATION (DayOfWeek + members) consumed by a ranging property (dayOfWeek) as class_types=[DayOfWeek] + allows_only=[members]. Verified live: all resources load + validate (Expressible); the enumeration's closed set is enforced (Monday loads, Wednesday rejected with AllowedValueViolation); and a real PinnedExternalFile (WRN Supplementary Table 1, dual-typed ingest:PinnedExternalFile + schema_org:DataDownload) carries the descriptive fields and round-trips an EigenQL query, with the entity-first creator resolving to a schema_org:Person. The discipline therefore produces loadable, validated, queryable resources on real schema.org shapes.";
+    reflection:canonical_proposition = type_expr(
+        obj:ProbeValidates("schema_org")
+    );
+}
+resource obj:probe_validation_trace : reflection:DeclarationTrace {
+    reflection:resource    = obj:probe_validation;
+    reflection:declared_by = "d57:m2-probe";
+    reflection:timestamp   = "2026-06-20T00:00:00Z";
+}
+
+// m2 discharged: the probe validates the discipline (Declared), witnessed above.
+resource obj:concl_probe : reasoning:ReasoningSentence {
+    reasoning:subject_iri   = "urn:eigenius:obj:d57:schema_org";
+    reasoning:proposition   = type_expr( obj:ProbeValidates("schema_org") );
+    reasoning:justification = DeclaredEvidence("urn:eigenius:obj:d57:probe_validation");
+    reasoning:certificate   = type_expr(
+        declared("urn:eigenius:obj:d57:probe_validation",
+                 obj:ProbeValidates("schema_org"))
+    );
+}

@@ -97,7 +97,7 @@ for _ in 0..max_iterations {
 }
 ```
 
-Stratification ensures this converges because there are no negation cycles. The stratification check is the correctness guarantee; the fixpoint is the execution strategy. A future implementation might exploit strata to compute relations in dependency order without re-examining settled strata, but the semantic correctness holds either way.
+Stratification ensures this converges because there are no negation cycles. The evaluator computes strata **in dependency order** (D59): it runs a seminaive fixpoint over each stratum's rules with all lower strata already fully computed, then moves to the next stratum. This ordering is **required for negation**, not merely an optimization — a relation that negates another (`NOT Reach(?x)`) sits in a strictly higher stratum, and the add-only fixpoint would otherwise see a *partial* negated relation in early iterations and add stale rows it never retracts. Within a single stratum only positive recursion appears (the stratifier guarantees it), so the monotonic fixpoint is sound there.
 
 The **1000-iteration safety bound** is a defensive cap — ordinary DEFINE recursion converges in O(size-of-relation) iterations. If you hit the cap, something is wrong (non-terminating rule or unexpectedly large fixpoint), and the evaluator silently stops adding facts.
 

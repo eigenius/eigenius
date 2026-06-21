@@ -1,0 +1,21 @@
+[package]
+name = "eigenius-schemaorg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Import schema.org's published JSON-LD vocabulary into Eigon-JSON Resources under urn:schema_org:, per the D57 meta-ontology correspondence."
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+eigenius-reasoning = { path = "../eigenius-reasoning" }
+
+[[bin]]
+name = "schemaorg-import"
+path = "src/bin/schemaorg_import.rs"

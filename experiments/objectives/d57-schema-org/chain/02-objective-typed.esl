@@ -1,0 +1,110 @@
+// ════════════════════════════════════════════════════════════════════
+// Self-host: the D57 objective re-expressed with the D58 objective: ontology
+// ════════════════════════════════════════════════════════════════════
+//
+// Proves the objective: ontology (designed from this objective's own harvest)
+// can actually express it — not just load. The bare Prop decls + prose comments
+// of 00-objective.esl become typed Objective / Milestone / Axiom nodes with
+// machine-readable acceptance grades, intended-warrant edges, frontier status,
+// and the v1→v2 supersedes edge. The propositions are the SAME Props as
+// 00-objective.esl; m1's satisfied_by points at the real Holds sentence
+// (01-discipline.esl). Stacks on the obj: Prop decls already on obj-d57.
+
+namespace core       = "urn:eigenius:core";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace reflection = "urn:eigenius:reflection";
+namespace epistemic  = "urn:eigenius:reflection:epistemic";
+namespace objective  = "urn:eigenius:objective";
+namespace obj       = "urn:eigenius:obj:d57";
+namespace objclaim  = "urn:eigenius:obj:d57:claim";
+namespace otd       = "urn:eigenius:obj:d57:typed";
+
+// ── The objective (v2; v1 was the slice frame, superseded) ─────────
+resource otd:objective : objective:Objective {
+    core:description     = "Map schema.org into Eigenius: the mappable part by an explicit discipline, the rest enumerated with reasons.";
+    objective:thesis     = otd:m_thesis;
+    objective:version    = 2;
+    objective:supersedes = "urn:eigenius:obj:d57:typed:objective_v1";
+    objective:branch     = "obj-d57";
+    objective:status     = "open";
+}
+
+// ── Axioms (admitted premises — pointers to the §1 citations) ──────
+resource otd:ax_schemaorg : objective:Axiom {
+    objective:proposition = type_expr( objclaim:SchemaOrgIsDatasetVocabulary("schema_org") );
+    objective:axiom_kind  = epistemic:declared;
+    objective:witness     = "urn:eigenius:obj:d57:cite:schema_org_source";
+}
+resource otd:ax_croissant : objective:Axiom {
+    objective:proposition = type_expr( objclaim:CroissantBuildsOnSchemaOrg("croissant") );
+    objective:axiom_kind  = epistemic:declared;
+    objective:witness     = "urn:eigenius:obj:d57:cite:croissant_authority";
+}
+// The conformance fact the discipline rests on (#9) — witnessed by the schema.org
+// Data Model documentation citation.
+resource otd:ax_conformance : objective:Axiom {
+    objective:proposition = type_expr( objclaim:SchemaOrgDomainIsAdvisory("schema_org") );
+    objective:axiom_kind  = epistemic:declared;
+    objective:witness     = "urn:eigenius:obj:d57:cite:datamodel_conformance";
+}
+// The versioned-distribution fact behind pinning V30.0 as the generator input —
+// witnessed by the schema.org developer documentation citation.
+resource otd:ax_distribution : objective:Axiom {
+    objective:proposition = type_expr( objclaim:SchemaOrgVersionedDistribution("schema_org") );
+    objective:axiom_kind  = epistemic:declared;
+    objective:witness     = "urn:eigenius:obj:d57:cite:developers_distribution";
+}
+
+// ── Milestones ─────────────────────────────────────────────────────
+resource otd:m1 : objective:Milestone {
+    core:description        = "Mapping discipline defined (D57 §3).";
+    objective:proposition   = type_expr( obj:MappingDisciplineDefined("schema_org") );
+    objective:acceptance_grade = epistemic:declared;
+    objective:witness_kind  = objective:wk_citation;
+    objective:falsifier     = "a schema.org construct with no tier (clean/convention/residual) assignment";
+    objective:depends_on    = [otd:ax_schemaorg, otd:ax_croissant, otd:ax_conformance];
+    objective:status        = "satisfied";
+    objective:satisfied_by  = "urn:eigenius:obj:d57:concl_discipline";
+}
+resource otd:m2 : objective:Milestone {
+    core:description        = "Proof-of-shape probe binds to a real file.";
+    objective:proposition   = type_expr( obj:ProbeValidates("schema_org") );
+    objective:acceptance_grade = epistemic:declared;
+    objective:witness_kind  = objective:wk_query;
+    objective:falsifier     = "a probe term that fails to load or whose bound value does not round-trip a query";
+    objective:depends_on    = [otd:m1];
+    objective:status        = "satisfied";
+    objective:satisfied_by  = "urn:eigenius:obj:d57:concl_probe";
+}
+resource otd:m3 : objective:Milestone {
+    core:description        = "Generator emits the mappable vocabulary.";
+    objective:proposition   = type_expr( obj:GeneratorProduces("schema_org") );
+    objective:acceptance_grade = epistemic:declared;
+    objective:witness_kind  = objective:wk_generator_output;
+    objective:falsifier     = "generator output that fails to load/validate, or is non-deterministic across runs";
+    objective:depends_on    = [otd:m1, otd:m2, otd:ax_distribution];
+    objective:status        = "satisfied";
+    objective:satisfied_by  = "urn:eigenius:obj:d57:concl_generator";
+}
+resource otd:m4 : objective:Milestone {
+    core:description        = "The cut accounted: mapped vs residual, with reasons.";
+    objective:proposition   = type_expr( obj:CutAccounted("schema_org") );
+    objective:acceptance_grade = epistemic:declared;
+    objective:witness_kind  = objective:wk_generator_output;
+    objective:falsifier     = "a schema.org term absent from both the mapped set and the residual list";
+    objective:depends_on    = [otd:m3];
+    objective:status        = "satisfied";
+    objective:satisfied_by  = "urn:eigenius:obj:d57:concl_cut";
+}
+
+// ── Thesis (the root milestone) ────────────────────────────────────
+resource otd:m_thesis : objective:Milestone {
+    core:description        = "schema.org is mapped into Eigenius (mappable part generated; residual enumerated).";
+    objective:proposition   = type_expr( obj:SchemaOrgMapped("schema_org") );
+    objective:acceptance_grade = epistemic:verified;
+    objective:witness_kind  = objective:wk_query;
+    objective:falsifier     = "any in-scope schema.org term neither mapped nor in the justified residual";
+    objective:depends_on    = [otd:m1, otd:m2, otd:m3, otd:m4];
+    objective:status        = "satisfied";
+    objective:satisfied_by  = "urn:eigenius:obj:d57:concl_main";
+}

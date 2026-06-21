@@ -20,6 +20,7 @@ eigenius-runtime-substrate = { path = "../../crates/runtime-substrate", features
 eigenius-julia = { path = "../../crates/eigenius-julia" }
 eigenius-lean-runtime = { path = "../../crates/eigenius-lean-runtime" }
 eigenius-r = { path = "../../crates/eigenius-r" }
+eigenius-oci = { path = "../../crates/eigenius-oci" }
 eigenius-config = { path = "../../crates/eigenius-config" }
 
 [build-dependencies]

@@ -1,0 +1,17 @@
+// Well-posedness gate: REACHABLE (D58 §5.3; D59 array-iteration + derived joins).
+//
+// Every Milestone/Axiom must be reachable from the thesis along depends_on.
+// Run against an objective's branch:
+//   eigenius --endpoint http://localhost:50051 query --branch <obj> "$(cat this)"
+// An EMPTY result means the gate PASSES. Any returned row is a node disconnected
+// from the obligation graph — the objective is BLOCKED there (D58 §4).
+//
+// Uses D59 features: `[... ?n ...]` iterates the depends_on array; `Reach(?m){…}`
+// joins a derived-relation subject back to its real properties; the recursive
+// `Reach` + `NOT Reach` negation is evaluated in stratum order.
+DEFINE Node(?x) FROM MATCH "urn:eigenius:objective:Milestone"(?x) {}
+DEFINE Node(?x) FROM MATCH "urn:eigenius:objective:Axiom"(?x) {}
+DEFINE Reach(?t) FROM MATCH "urn:eigenius:objective:Objective"(?o) { "urn:eigenius:objective:thesis": ?t }
+DEFINE Reach(?n) FROM MATCH Reach(?m) { "urn:eigenius:objective:depends_on": [... ?n ...] }
+DEFINE Unreachable(?x) FROM MATCH Node(?x) {}, NOT Reach(?x) {}
+MATCH Unreachable(?x) {} RETURN [] { "urn:eigenius:objective:unreachable": ?x }

@@ -592,12 +592,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-oci"
+version = "0.1.0"
+dependencies = [
+ "ciborium",
+ "eigenius-kernel",
+ "eigenius-runtime-substrate",
+ "serde_bytes",
+ "sha2",
+]
+
+[[package]]
 name = "eigenius-orchestrator-runtime-substrate"
 version = "0.1.0"
 dependencies = [
  "eigenius-config",
  "eigenius-julia",
  "eigenius-lean-runtime",
+ "eigenius-oci",
  "eigenius-r",
  "eigenius-runtime-substrate",
  "napi",

@@ -1,0 +1,187 @@
+// ════════════════════════════════════════════════════════════════════
+// Objective: D57 schema.org descriptive-vocabulary minimum slice
+// ════════════════════════════════════════════════════════════════════
+//
+// FIRST DOGFOOD of the `reasoning` + `grounding` skills and the D58 objective-
+// framing protocol.
+//
+// OBJECTIVE (full D57): map schema.org into Eigenius — translate every *mappable*
+// schema.org term into `urn:schema_org:` resources by an explicit mapping
+// discipline, and enumerate every term that *cannot* be mapped with the reason.
+// Not a hand-picked slice: the whole vocabulary, with a principled cut between
+// what maps cleanly, what maps under a documented convention, and what is out of
+// reach of Eigenius's type system. The mapping must be *generated* from
+// schema.org's published JSON-LD (deterministic, re-runnable), not transcribed.
+//
+// FRAME REVISION (v2). v1 framed this as the d57 §2.5 ten-property descriptive
+// slice (user correction, 2026-06-19: "the full objective would be a mapping of
+// all of schema.org, or a clean cut of what can be mapped and what cannot, and a
+// mapping for the part that can"). The slice survives, demoted to milestone m2 —
+// a hand-authored proof-of-shape that validates the discipline on real terms
+// before the generator runs. This revision is itself the frame⇄ground loop doing
+// its job (HARVEST-3: D58 frames need first-class revision/versioning).
+//
+// This file is the FRAME ⇄ GROUND product (reasoning skill phase 0 + 1), authored
+// "D58-lightweight": the obligation graph is expressed as plain proposition
+// (`Prop`) declarations — thesis + milestones — because the `objective:` ontology
+// (D58 §5) does not exist yet. Every place that forces prose where a typed
+// construct belongs is recorded as a D58 harvest finding (see HARVEST notes).
+//
+// RETRIEVE-FIRST RESULT (grounding step 1): the kernel already ships the D53 §4
+// *structural* dataset-schema (`ingest:DatasetSchema/Dimension/Measure/Attribute/
+// Layout`) — the QB/Croissant/ADF-DCO prior art is already realized there. No
+// `urn:schema_org:` vocabulary exists (confirmed on the live kernel). So the gap
+// is exactly the *descriptive* slice — narrower than the d57 stub assumed.
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace reference  = "urn:eigenius:reference";
+namespace lit        = "urn:eigenius:reference:lit";
+namespace obj        = "urn:eigenius:obj:d57";
+namespace objclaim   = "urn:eigenius:obj:d57:claim";
+namespace objcite    = "urn:eigenius:obj:d57:cite";
+
+// ════════════════════════════════════════════════════════════════════
+// 1. ANCHORS — the load-bearing prior art (grounding steps 2-3)
+//
+// Already-verified by the deep-research survey in docs/notes/
+// d53-dataset-schema-prior-art.md (3-vote adversarial verification). For THIS
+// objective — adopting schema.org as the *descriptive* vocabulary — exactly two
+// claims are load-bearing. (QB / CSVW / ADF-DCO anchor the *structural* layer,
+// already built in `ingest:`, so they are not premises here.) Sources are real
+// and resolvable; none fabricated.
+// ════════════════════════════════════════════════════════════════════
+
+// What the anchors import (Declared premises the design decision rests on).
+data objclaim:SchemaOrgIsDatasetVocabulary  : core:string -> Prop { }
+data objclaim:CroissantBuildsOnSchemaOrg    : core:string -> Prop { }
+// The conformance fact behind the whole advisory-vs-enforced discipline (#9), and
+// the versioned-distribution fact behind pinning V30.0 as the generator input.
+data objclaim:SchemaOrgDomainIsAdvisory     : core:string -> Prop { }
+data objclaim:SchemaOrgVersionedDistribution : core:string -> Prop { }
+
+// The works (epistemically neutral global records).
+resource lit:schema_org : reference:Reference {
+    reference:title           = "Schema.org structured-data vocabulary";
+    reference:creator         = "Schema.org Community Group (W3C)";
+    reference:container_title = "schema.org";
+    reference:url             = "https://schema.org/";
+}
+resource lit:croissant_2024 : reference:Reference {
+    reference:title           = "Croissant: a metadata format for ML-ready datasets";
+    reference:creator         = "MLCommons";
+    reference:container_title = "MLCommons Croissant specification";
+    reference:issued_year     = 2024;
+    reference:url             = "https://docs.mlcommons.org/croissant/";
+}
+// The schema.org documentation actually used to derive the mapping discipline (the
+// two docs grounding decisions #4/#9 and the input selection — d57-mapping-decisions.md).
+resource lit:schema_org_datamodel : reference:Reference {
+    reference:title           = "Schema.org Data Model";
+    reference:creator         = "Schema.org Community Group (W3C)";
+    reference:container_title = "schema.org";
+    reference:url             = "https://schema.org/docs/datamodel.html";
+}
+resource lit:schema_org_developers : reference:Reference {
+    reference:title           = "Schema.org for Website Developers";
+    reference:creator         = "Schema.org Community Group (W3C)";
+    reference:container_title = "schema.org";
+    reference:url             = "https://schema.org/docs/developers.html";
+}
+
+// The citations (THIS objective's Declared use of each work, carrying the claim).
+resource objcite:schema_org_source : reference:Citation {
+    reflection:rationale             = "schema.org is the lingua franca for describing datasets, files, software, people, organizations and licenses; adopting it (rather than minting urn:eigenius: equivalents) keeps the FAIR/JSON-LD ecosystem round-trippable. It is the vocabulary this slice imports.";
+    reflection:canonical_proposition = type_expr( objclaim:SchemaOrgIsDatasetVocabulary("schema_org") );
+    reference:cites                  = lit:schema_org;
+    reference:citation_type          = reference:cites_as_source_document;
+}
+resource objcite:croissant_authority : reference:Citation {
+    reflection:rationale             = "Croissant (adopted by HuggingFace, Kaggle, OpenML, TensorFlow Datasets) describes datasets 'based on schema.org/Dataset' and binds its Fields' dataType to schema.org IRIs — independent authority that schema.org is the right descriptive base for dataset/file metadata.";
+    reflection:canonical_proposition = type_expr( objclaim:CroissantBuildsOnSchemaOrg("croissant") );
+    reference:cites                  = lit:croissant_2024;
+    reference:citation_type          = reference:cites_as_authority;
+}
+// The load-bearing conformance anchor for the mapping discipline (decision #9): the
+// Data Model documents domainIncludes/rangeIncludes as advisory expectations, NOT
+// constraints — which is why domainIncludes maps to advisory core:recommends (never
+// the restrictive core:domain) and rangeIncludes unions stay permissive.
+resource objcite:datamodel_conformance : reference:Citation {
+    reflection:rationale             = "schema.org's Data Model documents domainIncludes/rangeIncludes as advisory ('expected', not constraining) — the type system is recommendation-based, not enforcing. This is the conformance fact decision #9 rests on: domainIncludes -> core:recommends (advisory), never core:domain (restrictive); multi-valued rangeIncludes -> permissive unions. It grounds the entire advisory-vs-enforced mapping discipline (m1).";
+    reflection:canonical_proposition = type_expr( objclaim:SchemaOrgDomainIsAdvisory("schema_org") );
+    reference:cites                  = lit:schema_org_datamodel;
+    reference:citation_type          = reference:cites_as_source_document;
+}
+// The provenance anchor for input selection: the versioned distribution (the
+// per-version schemaorg-current-https.jsonld) is what we pin as the generator input.
+resource objcite:developers_distribution : reference:Citation {
+    reflection:rationale             = "schema.org's developer documentation describes the versioned distribution — each release publishes schemaorg-current-https.jsonld at https://schema.org/version/<N>/. That is the provenance basis for pinning V30.0 (sha256 0f0c97a4...) as the deterministic generator input (m3).";
+    reflection:canonical_proposition = type_expr( objclaim:SchemaOrgVersionedDistribution("schema_org") );
+    reference:cites                  = lit:schema_org_developers;
+    reference:citation_type          = reference:cites_as_source_document;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 2. THE OBLIGATION GRAPH (reasoning skill phase 0, D58-lightweight)
+//
+// Thesis + milestones as goal-post propositions. Each only becomes a Holds
+// ReasoningSentence once its evidence path is discharged (phases 3-5). The
+// acceptance grade + intended-warrant edges live in these comments — which is
+// precisely the D58 gap (HARVEST-1).
+// ════════════════════════════════════════════════════════════════════
+
+// ── THESIS (acceptance: Derived + Declared) ────────────────────────
+// schema.org is mapped into Eigenius: a deterministic generator translates every
+// mappable term from schema.org's published vocabulary into `urn:schema_org:`
+// Eigon-JSON under an explicit mapping discipline (the output loads + validates),
+// and every unmappable term is enumerated with its reason (the cut is justified).
+// Intended warrant: m1 ∧ m2 ∧ m3 ∧ m4.
+data obj:SchemaOrgMapped : core:string -> Prop { }
+
+// ── MILESTONE m1 — Mapping discipline (acceptance: Declared, anchored) ──
+// The rules are defined and justified: schema.org's type system (Class hierarchy;
+// DataTypes Text/Number/Integer/Float/Boolean/Date/DateTime/Time/URL;
+// Enumerations; multi-valued rangeIncludes = unions; domainIncludes) → Eigenius
+// (core:Class + is_a; core:Property + single data_type | resource+class_types).
+// MUST settle the union/multi-range convention (the crux of the cut) and the
+// explicit DO-NOT-MAP categories (RDFS/OWL inference, supersededBy/inverseOf,
+// pending/attic layers). Evidence: a Declared discipline doc + anchors.
+data obj:MappingDisciplineDefined : core:string -> Prop { }
+
+// ── MILESTONE m2 — Proof-of-shape probe (acceptance: Derived) ──────
+// A hand-authored representative subset (the §2.5 descriptive properties + a
+// single-Class-range property + a union-range property + an Enumeration) loads,
+// validates, and binds to a real PinnedExternalFile whose schema.org fields a
+// query returns — the discipline of m1 verified on real terms before generating.
+data obj:ProbeValidates : core:string -> Prop { }
+
+// ── MILESTONE m3 — Generator (acceptance: Derived) ─────────────────
+// A deterministic schema.org JSON-LD → Eigon-JSON translator implementing the m1
+// discipline; its output is the mappable vocabulary, loads + validates into the
+// chain. Evidence: the generator runs; the emitted ontology commits.
+data obj:GeneratorProduces : core:string -> Prop { }
+
+// ── MILESTONE m4 — The cut, accounted (acceptance: Derived + Declared) ──
+// Coverage accounting: counts of mapped (clean / by-convention) vs unmapped
+// terms, the residual list with per-term reasons, and the IRI round-trip rule
+// (urn:schema_org: ↔ https://schema.org/) recorded. The "clean cut" made explicit.
+data obj:CutAccounted : core:string -> Prop { }
+
+// ── MILESTONE m_anchor — Adoption anchored (acceptance: Declared) ──
+// Adoption of schema.org justified by real cited prior art (schema.org source +
+// Croissant authority), imported vocabulary recorded Declared with provenance —
+// never re-minted as Eigenius-native. Discharged by §1 above.
+data obj:AdoptionAnchored : core:string -> Prop { }
+
+// ── ADMISSIBILITY (D58 §3 gates), assessed at framing time ─────────
+//   Expressible — propositions compile; the schema.org *target* terms are the
+//                 m2/m3 deliverable (their absence is the work, not a blocker).
+//   Anchored    — thesis rests on schema.org + Croissant, cited above. ✓
+//                 m1 will add a schema.org-data-model anchor for the rule set.
+//   Reachable   — m1: ground schema.org's type system + decide the union rule;
+//                 m2: author+bind probe; m3: build generator; m4: tally + report.
+//   Checkable   — each milestone names its witness (discipline doc / query /
+//                 generator-output commit / coverage report). ✓
+//   OPEN (frontier) — the union/multi-range convention (m1) is the gating design
+//                 decision and is not yet settled; m1 is the next grounding pass.
+// Well-posed except the OPEN m1 decision ⇒ ground m1 before m2/m3.

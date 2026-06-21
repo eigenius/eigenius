@@ -102,6 +102,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build -p eigenius-r-worker --release \
     && cp target/release/libeigenius_r_worker.so /tmp/
 
+# D60: the schema.org worker for the generic `oci` tool runtime — a plain Rust
+# binary (no FFI). The OciToolRuntime bakes it into a pinned image at env-build
+# time; staged under /tmp/ for the runtime stage to copy in.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/target \
+    cargo build -p eigenius-schemaorg-worker --release \
+    && cp target/release/eigenius-schemaorg-worker /tmp/
+
 # --- Stage 3: orchestrator runtime --------------------------------------------
 FROM denoland/deno:latest
 
@@ -171,6 +179,10 @@ COPY julia/runtime-worker/ /opt/eigenius/julia-runtime-worker/
 COPY crates/eigenius-r-worker/r/EigeniusRWorker.R /opt/eigenius/r-runtime-worker/EigeniusRWorker.R
 COPY --from=substrate-builder /tmp/libeigenius_r_worker.so /opt/eigenius/r-runtime-worker/libeigenius_r_worker.so
 
+# D60: the schema.org worker binary for the `oci` tool runtime. OciToolRuntime
+# bakes it into a pinned image + computes the cross-check manifest hash from it.
+COPY --from=substrate-builder /tmp/eigenius-schemaorg-worker /opt/eigenius/oci-runtime-worker/eigenius-schemaorg-worker
+
 ENV EIGENIUS_KERNEL_ENDPOINT=http://eigenius-kernel:50051
 ENV EIGENIUS_NOTEBOOK_STATIC=/app/notebooks
 ENV EIGENIUS_JULIA_WORKER_PROJECT_DIR=/opt/eigenius/julia-runtime-worker
@@ -180,6 +192,10 @@ ENV EIGENIUS_R_DRIVER_PATH=/opt/eigenius/r-runtime-worker/EigeniusRWorker.R
 ENV EIGENIUS_R_CDYLIB_PATH=/opt/eigenius/r-runtime-worker/libeigenius_r_worker.so
 ENV EIGENIUS_R_BASE_IMAGE_REF=docker.io/bioconductor/bioconductor_docker:RELEASE_3_18
 ENV EIGENIUS_R_DEPOT_PATH=/var/lib/eigenius/substrate-depot
+# D60: register the generic `oci` tool runtime (the schema.org generator lift).
+ENV EIGENIUS_OCI_WORKER_BINARY_PATH=/opt/eigenius/oci-runtime-worker/eigenius-schemaorg-worker
+ENV EIGENIUS_OCI_BASE_IMAGE_REF=docker.io/library/debian:bookworm-slim
+ENV EIGENIUS_OCI_DEPOT_PATH=/var/lib/eigenius/substrate-depot
 # Oxen auth (D53 §10): the `oxen` CLI reads `auth_config.toml` from
 # $OXEN_CONFIG_DIR. The deployment mounts the per-host bearer token here from
 # its secret store (the credential is substrate-side only; it never enters a

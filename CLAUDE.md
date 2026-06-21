@@ -20,6 +20,34 @@ Key design docs:
 - `docs/design/phase0-implementation-plan.md` — detailed implementation steps
 - `ontologies/core/core-ontology.json` — self-describing core ontology
 
+## Working protocol (default for substantive tasks)
+
+For any non-trivial task with a **claim worth defending** (analysis, reproduction,
+design decisions, debugging conclusions, research), the default method is the
+**`reasoning`** skill (`.claude/skills/reasoning.md`): capture reasoning live as a
+typed Eigenius chain — every load-bearing claim is a graded, witnessed proposition
+the kernel commit gate accepts (`Holds`) or rejects (`Fails`). Read that skill at
+task start; use the `eigenius` skill for the platform mechanics.
+
+The core disciplines, always in force (even before reaching for the chain):
+- **Don't assert — witness.** Empirical claims are *Derived* (a run/test/proof
+  produced the result) or they are an explicitly-graded *Declared* hypothesis —
+  never stated as established fact unwitnessed.
+- **Check before you conclude.** Produce the evidence *before* the claim, not after.
+- **Fail closed.** An unsupported result is a stop-and-investigate that gets
+  *recorded as a finding* — never silently dropped, weakened, or routed around.
+- **Anchor new territory** in real, cited prior knowledge (verified DOIs/PMIDs;
+  never fabricate a source); distinguish anchors and assumptions from established
+  fact. The `grounding` skill is the method: retrieve from the kernel first (D43),
+  research the gap, map results back in as anchors + aligned standard vocabulary.
+- **Plan deviations are structural, not silent** — surface and justify any
+  departure from an agreed plan rather than quietly changing course.
+- **Grade every claim** Observed / Declared / Derived / Verified.
+
+Trivial mechanical work (renames, formatting, single-fact lookups) has no thesis
+and is exempt. When unsure: if being wrong about a claim would be embarrassing, it
+gets a witness.
+
 ## Build
 
 ```bash

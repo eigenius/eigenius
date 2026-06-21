@@ -1,0 +1,21 @@
+[package]
+name = "eigenius-oci"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Generic OCI tool runtime (D60): runs a pinned Eigenius worker binary baked into a container image as a one-shot Job, returning an Eigon-CBOR result. The schema.org generator (D57 Level 2) is the first tool."
+
+[dependencies]
+eigenius-runtime-substrate = { path = "../runtime-substrate" }
+eigenius-kernel = { path = "../../kernel" }
+serde_bytes = "0.11"
+ciborium = "0.2"
+sha2 = "0.10"
+
+[dev-dependencies]
+# The docker-spawner is needed to construct a real DockerSpawner in the e2e
+# test; production wiring constructs it in the napi layer (which already enables
+# the feature) and passes it as `Arc<dyn WorkerSpawner>`.
+eigenius-runtime-substrate = { path = "../runtime-substrate", features = ["docker-spawner"] }
+serde_json = { workspace = true }

@@ -1,0 +1,39 @@
+// ════════════════════════════════════════════════════════════════════
+// m1 — Mapping discipline (Declared, discharged)
+// ════════════════════════════════════════════════════════════════════
+//
+// The settled schema.org → Eigenius mapping discipline (full spec: D57 §3).
+// Recorded here as a Declared rule carrying the milestone proposition, with a
+// DeclarationTrace so the kernel mints the IsDeclaredAs witness that
+// obj:concl_discipline's certificate discharges. This is the dogfood discipline:
+// evidence (the Declared rule) committed first, then the proposition that cites it.
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace reasoning  = "urn:eigenius:reasoning";
+namespace obj        = "urn:eigenius:obj:d57";
+
+// The discipline, as a Declared rule. canonical_proposition = the milestone fact.
+resource obj:mapping_discipline : reflection:DeclaredResource {
+    reflection:declared_by = "d57:mapping-discipline";
+    reflection:rationale   = "schema.org maps to Eigenius construct-by-construct, derived from a comparison of the two meta-ontologies (docs/notes/d57-schemaorg-vs-core-metamodel.md; D57 §3). Class -> core:Class with schema subClassOf -> core:subclass_of. Property -> core:Property; schema domainIncludes is ADVISORY so it inverts to each domain class's core:recommends (subclasses inherit), NOT core:domain (which restricts; schema.org does not). The rangeIncludes correspondence: class members -> core:class_types (canonical); a single refined DataType (URL/Date/DateTime/Time) -> string + the matching core:format (iri/date/datetime/time), which the kernel validates; Text/Number/Integer/Boolean -> the plain scalar; an all-Class union -> resource + class_types=[all]; a mixed literal-or-entity union -> ENTITY-FIRST (resource + class_types=[the Classes], literal dropped); a format-spanning literal union (Date|DateTime, Text|URL) -> plain string. ENUMERATION -> core:Class + member DeclaredResource instances, consumed by a ranging property as class_types=[E] + allows_only=[members], which ENFORCES the closed set at commit (the core:DataType / reflection:EpistemicStatus idiom); open enumerations widen class_types and drop allows_only. NOT mapped (inert provenance only, no reasoner): subPropertyOf / inverseOf / supersededBy / equivalentClass and the Role pattern. The original rangeIncludes is recorded canonically by core:source_irl (not duplicated on-chain). Scope: core + hosted extensions; pending/attic excluded. Identity: prefix substitution https://schema.org/<T> <-> urn:schema_org:<T>. Adopted grade: every emitted resource is_a reflection:DeclaredResource.";
+    reflection:canonical_proposition = type_expr(
+        obj:MappingDisciplineDefined("schema_org")
+    );
+}
+resource obj:mapping_discipline_trace : reflection:DeclarationTrace {
+    reflection:resource    = obj:mapping_discipline;
+    reflection:declared_by = "d57:mapping-discipline";
+    reflection:timestamp   = "2026-06-19T00:00:00Z";
+}
+
+// m1 discharged: the discipline is defined (Declared), witnessed by the rule above.
+resource obj:concl_discipline : reasoning:ReasoningSentence {
+    reasoning:subject_iri   = "urn:eigenius:obj:d57:schema_org";
+    reasoning:proposition   = type_expr( obj:MappingDisciplineDefined("schema_org") );
+    reasoning:justification = DeclaredEvidence("urn:eigenius:obj:d57:mapping_discipline");
+    reasoning:certificate   = type_expr(
+        declared("urn:eigenius:obj:d57:mapping_discipline",
+                 obj:MappingDisciplineDefined("schema_org"))
+    );
+}

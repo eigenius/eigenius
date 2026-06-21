@@ -1209,6 +1209,7 @@ dependencies = [
  "eigenius-julia",
  "eigenius-kernel",
  "eigenius-lean",
+ "eigenius-oci",
  "eigenius-r",
  "eigenius-reasoning",
  "eigenius-runtime-substrate",
@@ -1356,6 +1357,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-oci"
+version = "0.1.0"
+dependencies = [
+ "ciborium",
+ "eigenius-kernel",
+ "eigenius-runtime-substrate",
+ "serde_bytes",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "eigenius-r"
 version = "0.1.0"
 dependencies = [
@@ -1409,6 +1422,30 @@ dependencies = [
  "sha2",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "eigenius-schemaorg"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "eigenius-kernel",
+ "eigenius-reasoning",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "eigenius-schemaorg-worker"
+version = "0.1.0"
+dependencies = [
+ "eigenius-kernel",
+ "eigenius-runtime-substrate",
+ "eigenius-schemaorg",
+ "serde_bytes",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

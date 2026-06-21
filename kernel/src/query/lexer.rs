@@ -116,6 +116,8 @@ pub enum TokenKind {
     Colon,
     Comma,
     Dot,
+    /// `...` — the rest/iteration marker in array patterns (D59).
+    Ellipsis,
 
     // End of input
     Eof,
@@ -298,6 +300,17 @@ impl<'a> Lexer<'a> {
                 });
             }
             b'.' => {
+                // `...` (ellipsis) — the rest/iteration marker in array
+                // patterns (D59); otherwise a single `.` (dot-path).
+                if self.peek_at(1) == Some(b'.') && self.peek_at(2) == Some(b'.') {
+                    self.advance();
+                    self.advance();
+                    self.advance();
+                    return Ok(Token {
+                        kind: TokenKind::Ellipsis,
+                        pos,
+                    });
+                }
                 self.advance();
                 return Ok(Token {
                     kind: TokenKind::Dot,

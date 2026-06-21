@@ -68,8 +68,18 @@ pub async fn env_build(
         return;
     }
 
+    // OCI (D60): bake a pinned Eigenius worker binary (passed via
+    // --worker-source-dir) into an image over `--base-image`, then emit the
+    // image digest + the kernel-tracked BuildRecipe (commit it with `env create`).
+    if language == "oci" {
+        env_build_oci(worker_source_dir, base_image, depot, json).await;
+        return;
+    }
+
     if language != "julia" {
-        eprintln!("language `{language}` is not yet supported by env build (only `julia`, `r`)");
+        eprintln!(
+            "language `{language}` is not yet supported by env build (only `julia`, `r`, `oci`)"
+        );
         std::process::exit(1);
     }
     let mirror_iri = match mirror_iri {
@@ -644,6 +654,137 @@ async fn env_build_r(
         println!("Paste this digest into the program's `runtime:image_digest`, e.g.");
         println!(
             "  experiments/publications/wrn-helicase/programs/invivo/xenograft-lme4-program.json"
+        );
+    }
+}
+
+/// `eigenius env build --language oci` (D60): bake a pinned Eigenius worker
+/// binary into an image over `--base-image`, then print the image digest + the
+/// kernel-tracked `BuildRecipe` (Eigon-JSON) to commit with `env create`.
+async fn env_build_oci(
+    worker_binary: Option<&str>,
+    base_image: &str,
+    depot: Option<&str>,
+    json: bool,
+) {
+    let worker = match worker_binary {
+        Some(p) => std::path::PathBuf::from(p),
+        None => {
+            eprintln!(
+                "oci env build requires --worker-source-dir <path to the Eigenius worker binary> \
+                 (e.g. target/release/eigenius-schemaorg-worker)"
+            );
+            std::process::exit(1);
+        }
+    };
+    if !worker.is_file() {
+        eprintln!("worker binary not found at {}", worker.display());
+        std::process::exit(1);
+    }
+    let depot_path = match depot {
+        Some(p) => std::path::PathBuf::from(p),
+        None => {
+            let dir =
+                std::env::temp_dir().join(format!("eigenius-env-build-oci-{}", std::process::id()));
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                eprintln!("failed to create depot dir {}: {e}", dir.display());
+                std::process::exit(1);
+            }
+            dir
+        }
+    };
+    let substrate_config = match eigenius_config::Loader::new().load() {
+        Ok(c) => c.substrate,
+        Err(e) => {
+            eprintln!("eigenius-config load failed: {e}");
+            std::process::exit(1);
+        }
+    };
+    // The exact invocation, recorded on the recipe so the build is reproducible
+    // from chain-resident data (D60 §4.2).
+    let build_command = vec![
+        "eigenius".to_string(),
+        "env".to_string(),
+        "build".to_string(),
+        "--language".to_string(),
+        "oci".to_string(),
+        "--worker-source-dir".to_string(),
+        worker.display().to_string(),
+        "--base-image".to_string(),
+        base_image.to_string(),
+    ];
+
+    let base = base_image.to_string();
+    let depot_for_blocking = depot_path.clone();
+    let built = tokio::task::spawn_blocking(move || {
+        use eigenius_runtime_substrate::language_runtime::LanguageRuntime;
+        let spawner = eigenius_runtime_substrate::spawner::DockerSpawner::new(
+            eigenius_runtime_substrate::spawner::DockerSpawnerConfig::from_substrate_config(
+                depot_for_blocking.clone(),
+                &substrate_config,
+            ),
+        )
+        .map_err(|e| {
+            format!(
+                "failed to construct DockerSpawner: {e}\n\
+                 Is the Docker daemon running and reachable?"
+            )
+        })?;
+        let runtime = eigenius_oci::OciToolRuntime::new(
+            worker,
+            base,
+            std::sync::Arc::new(spawner),
+            depot_for_blocking,
+        );
+        let env_resource = eigenius_kernel::ontology::resource::Resource::new_embedded();
+        let digest = runtime
+            .build_environment_image(&env_resource, &[], None)
+            .map_err(|e| format!("oci env build failed: {e}"))?;
+        let recipe = runtime
+            .build_recipe(build_command)
+            .map_err(|e| format!("oci build recipe failed: {e}"))?;
+        Ok::<_, String>((digest, recipe))
+    })
+    .await;
+
+    let (digest, recipe) = match built {
+        Ok(Ok(d)) => d,
+        Ok(Err(msg)) => {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("env build worker join failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let recipe_doc =
+        eigenius_kernel::ontology::eigon_json::serialize_document(std::slice::from_ref(&recipe));
+    let recipe_iri = recipe
+        .id()
+        .map(|i| i.as_str().to_string())
+        .unwrap_or_default();
+    if json {
+        println!(
+            "{{\"image_digest\":\"{}\",\"language\":\"oci\",\"build_recipe\":{}}}",
+            digest.as_str(),
+            serde_json::to_string(&recipe_doc).unwrap_or_else(|_| "null".to_string()),
+        );
+    } else {
+        println!("OCI tool image built (worker baked over {base_image}).");
+        println!("  Digest: {}", digest.as_str());
+        println!("  BuildRecipe: {recipe_iri}");
+        println!();
+        println!("Commit the environment + recipe, e.g.:");
+        println!(
+            "  eigenius env create --language oci --image-digest {} --recipe <recipe.json>",
+            digest.as_str()
+        );
+        println!("BuildRecipe (Eigon-JSON):");
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&recipe_doc).unwrap_or_default()
         );
     }
 }

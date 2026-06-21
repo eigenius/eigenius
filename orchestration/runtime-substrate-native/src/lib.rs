@@ -52,10 +52,11 @@
 use eigenius_config::Loader as ConfigLoader;
 use eigenius_julia::JuliaLanguageRuntime;
 use eigenius_lean_runtime::LeanLanguageRuntime;
+use eigenius_oci::OciToolRuntime;
 use eigenius_r::RLanguageRuntime;
 use eigenius_runtime_substrate::facade::{DispatchOutcome, SubstrateDispatcher};
 use eigenius_runtime_substrate::spawner::service::DockerServiceSpawner;
-use eigenius_runtime_substrate::spawner::DockerSpawnerConfig;
+use eigenius_runtime_substrate::spawner::{DockerSpawner, DockerSpawnerConfig};
 use eigenius_runtime_substrate::test_runtime::TestLanguageRuntime;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -209,6 +210,50 @@ pub fn register_lean_language_runtime(
     );
     let mut d = dispatcher().lock().map_err(lock_err)?;
     // D53 §7 / Phase 1.5: see `register_julia_language_runtime`.
+    d.set_extfile_cache_root(PathBuf::from(&depot_path).join("extfile-cache"));
+    d.register_language_runtime(Box::new(runtime))
+        .map_err(into_napi_err)
+}
+
+/// Register the [`OciToolRuntime`] under language_id="oci" (D60). Idempotent
+/// within a process — calling twice surfaces an explicit
+/// `RegistryError::AlreadyRegistered`.
+///
+/// `worker_binary_path` is the host path to a pinned Eigenius worker binary
+/// (e.g. `eigenius-schemaorg-worker`) staged into the orchestrator image; the
+/// runtime bakes it into the tool image at env-build time and computes the
+/// cross-check `manifest_hash` from its bytes (so the same binary must back the
+/// built image, or the boot cross-check fails closed, D26 §9.3). `base_image_ref`
+/// is the digest-pinned base the worker is baked onto (glibc, e.g.
+/// `debian:bookworm-slim`). `depot_path` is the shared host/container path for
+/// substrate artifacts + worker UDS sockets — must match the orchestrator's
+/// bind-mount in `docker-compose.yml` (D26 §9.5). Uses the Job-model
+/// `DockerSpawner` (run-once = `lifecycle:Job`), not the warm-pool
+/// `DockerServiceSpawner` the language runtimes use.
+#[napi]
+pub fn register_oci_tool_runtime(
+    worker_binary_path: String,
+    base_image_ref: String,
+    depot_path: String,
+) -> Result<()> {
+    let config = ConfigLoader::new()
+        .load()
+        .map_err(|e| into_napi_err(format!("eigenius-config load: {e}")))?;
+
+    let depot = PathBuf::from(&depot_path);
+    let spawner_config =
+        DockerSpawnerConfig::from_substrate_config(depot.clone(), &config.substrate);
+    let spawner = DockerSpawner::new(spawner_config)
+        .map_err(|e| into_napi_err(format!("DockerSpawner::new: {e}")))?;
+    let runtime = OciToolRuntime::new(
+        PathBuf::from(worker_binary_path),
+        base_image_ref,
+        Arc::new(spawner),
+        depot,
+    );
+    let mut d = dispatcher().lock().map_err(lock_err)?;
+    // D53 §7 / Phase 1.5: materialize PinnedExternalFile inputs under the depot
+    // so the depot's read-only bind-mount exposes them to the worker.
     d.set_extfile_cache_root(PathBuf::from(&depot_path).join("extfile-cache"));
     d.register_language_runtime(Box::new(runtime))
         .map_err(into_napi_err)

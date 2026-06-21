@@ -1,0 +1,23 @@
+[package]
+name = "eigenius-schemaorg-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Eigenius runtime worker running the schema.org → Eigon-JSON converter (D60 oci tool runtime; D57 Level 2 generator lift)."
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+eigenius-runtime-substrate = { path = "../runtime-substrate" }
+eigenius-schemaorg = { path = "../eigenius-schemaorg" }
+serde_json = { workspace = true }
+serde_bytes = "0.11"
+sha2 = "0.10"
+
+[lib]
+name = "eigenius_schemaorg_worker"
+path = "src/lib.rs"
+
+[[bin]]
+name = "eigenius-schemaorg-worker"
+path = "src/main.rs"

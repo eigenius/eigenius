@@ -1,0 +1,25 @@
+[
+  {
+    "@id": "urn:eigenius:obj:d57:data:person_chan",
+    "urn:eigenius:core:is_a": ["urn:schema_org:Person"],
+    "urn:eigenius:core:short_name": "person_chan",
+    "urn:schema_org:name": "Chan EM"
+  },
+  {
+    "@id": "urn:eigenius:ingest:file:eebd460257982a98cf6ce9f14e189ae0c4398a686f4181bc037c5591e87243f2",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:ingest:PinnedExternalFile",
+      "urn:schema_org:DataDownload"
+    ],
+    "urn:eigenius:core:short_name": "wrn_supp_table_1",
+    "urn:eigenius:ingest:reference": "slices/wrn_supplementary_table_1.csv",
+    "urn:eigenius:ingest:content_hash": "sha256:eebd460257982a98cf6ce9f14e189ae0c4398a686f4181bc037c5591e87243f2",
+    "urn:eigenius:ingest:media_type": "text/csv",
+    "urn:eigenius:reflection:source": "Chan EM, Shibue T, et al. Nature 568:551-556 (2019), Supplementary Table 1; xlsx -> csv via extract/supp_table_1_to_csv.py",
+    "urn:schema_org:name": "WRN-helicase study — Supplementary Table 1",
+    "urn:schema_org:description": "Cell-line MSI/MSS annotations and dependency data (Chan et al. 2019, Supplementary Table 1).",
+    "urn:schema_org:encodingFormat": "text/csv",
+    "urn:schema_org:datePublished": "2019",
+    "urn:schema_org:creator": "urn:eigenius:obj:d57:data:person_chan"
+  }
+]
