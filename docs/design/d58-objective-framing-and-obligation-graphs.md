@@ -2,7 +2,7 @@
 
 *Status: **implemented** · design memo · June 2026 · the `objective:` ontology (§5) + all four admissibility gates are realized and live-validated (three type-enforced at commit, two on-demand queries — §5.3, §5.5); loop budget set in the `reasoning` skill. Deferred (non-blocking): completion artifact, archival/GC (§5.4).*
 
-*Companion documents: [D39 justification logic](d39-justification-logic.md) (the warrant calculus), [D43 text & vector retrieval](d43-text-and-vector-retrieval.md) + [D57 schema.org mapping](d57-schema-org-vocabulary-mapping.md) (grounding), [D49 chain-witness machinery](d49-chainwitness-machinery.md), [D54 lemma citation](d54-reasoning-lemma-citation.md). Operationalized by the `reasoning` + `grounding` skills. **Not** to be confused with D21 kernel tasks or `bench:TaskOutput` — see §6.*
+*Companion documents: [D39 justification logic](d39-justification-logic.md) (the warrant calculus), [D43 text & vector retrieval](d43-text-and-vector-retrieval.md) + [D57 schema.org mapping](d57-schema-org-vocabulary-mapping.md) (grounding), [D49 chain-witness machinery](d49-chainwitness-machinery.md), [D54 lemma citation](d54-reasoning-lemma-citation.md), [D60 generic OCI tool runtime](d60-native-runtime-and-tracked-env-build.md) (the kernel-dispatched program-run that discharges a Derived milestone). Operationalized by the `reasoning` + `grounding` skills. **Not** to be confused with D21 kernel tasks or `bench:TaskOutput` — see §6.*
 
 *This memo specifies how a unit of science/engineering work — an **objective** — is **framed in Eigenius before work begins**: as a typed **obligation graph** (a thesis, the axioms it may assume, and the milestone propositions to derive), made **well-posed** through a frame⇄ground iteration loop. The reasoning protocol assumes a well-posed objective; this is the missing assessment phase that produces one. The shape, the admissibility gates, **and the `objective:` ontology (§5)** are settled — the ontology designed from the first real dogfood (D57; harvest in `experiments/objectives/d57-schema-org/HARVEST-d58.md`), not from speculation. The gate-query wiring and the loop budget remain open. (The object is `objective:Objective` to avoid collision with the kernel's execution "task" notion — §6; "objective" reads naturally across science and engineering disciplines.)*
 
@@ -97,6 +97,59 @@ gate that **cannot** be closed — no evidence for an axiom, no path to a milest
 a term with no grounding. That is not license to proceed on faith; it is a
 **recorded finding**: the objective is (currently) ill-posed or blocked here, with the
 specific gap. Catching that before sinking effort is the phase's main payoff.
+
+### 4.1 Refinement during execution — the frame is a living artifact
+
+§4's fixpoint produces a *well-posed* frame, but a frame seeded from a high-level goal
+**cannot anticipate what execution teaches.** The failure mode this guards against
+(observed in the D57 dogfood): the goal was framed once at a high level, executed, and
+then the formalization was **retrofitted after the fact** (the entire
+`d57-mechanical-evidence-plan.md` was a post-hoc re-grading of milestones that *should*
+have been graded that way as the evidence landed) under heavy manual steering. The
+frame⇄ground loop must therefore **re-enter at every subgoal boundary** — `EXECUTE` is
+not a one-way exit but a step that loops back to re-assess the frame:
+
+```
+… well-posed ─► EXECUTE milestone ─► subgoal achieved / insight surfaced
+       ▲                                      │
+       └────────── re-assess the frame ◄──────┘   (sharpen · re-grade · decompose · reframe)
+```
+
+At each boundary, fold the learning back into the obligation graph:
+
+- **Sharpen** — you now know enough to express a downstream milestone *precisely*
+  (D57: discharging m1's mapping discipline made m3's correspondence rules concrete —
+  that precision should enter the frame, not wait).
+- **Re-grade** — a milestone framed as `Declared` turns out mechanically achievable at
+  a stronger grade; raise its `acceptance_grade` and witness it there (D57 m3: Declared
+  → Observed-artifacts → Derived). The converse too: a target grade proves out of reach
+  → demote, with the reason recorded. (This is the grade-climbing the `reasoning` skill
+  enforces — *as process*, not as a later cleanup pass.)
+- **Decompose** — the milestone is larger than framed; split it (D57 m3
+  `GeneratorProduces` → `InputObserved ∧ OutputObserved ∧ GeneratorConforms`).
+- **Reframe** — a learning shows the original cut was wrong; replace or re-cut the goal
+  (D57 v1→v2: the hand-picked descriptive slice was reframed into "map the whole
+  vocabulary + account the cut", the slice demoted to a proof-of-shape milestone).
+- **Findings drive frame change** — a `Fails` or a discovered bug (D57 F1
+  transitive-closure, F2 open enumerations) is both a recorded finding *and* a trigger
+  to refine the milestone it touches; don't just patch the code, update the obligation.
+
+Two disciplines this adds (both reduce the after-the-fact retrofit + the manual
+steering it required):
+
+1. **Refine continuously, don't retrofit.** Fold each subgoal's learning into the
+   frame at its boundary. A separate "formalize what we built" pass at the end is the
+   anti-pattern — by then the grading is archaeology, not method.
+2. **Reframings are structural, not silent** (the framing-level analogue of "plan
+   deviations are structural"): every sharpen/re-grade/decompose/reframe is a recorded,
+   **versioned frame revision** carrying the insight that triggered it, so the graph's
+   evolution is auditable and the agent performs it *proactively* — escalating to the
+   human only for a genuine reframe-vs-press-on judgment, not for the routine
+   refinements it can make itself.
+
+Honest termination (§4) still applies to the re-entry: a reframe that keeps churning
+without converging is itself the finding (ill-posed), not license to loop forever
+(the loop budget, §5.4).
 
 ## 5. The objective ontology (`objective:`)
 
@@ -220,6 +273,11 @@ well-posedness provenance is ever wanted.
   purely the thesis-Holds query. Leaning: query only, no new artifact.
 - **Loop budget / convergence** — guard against non-terminating reframing; when to
   declare "ill-posed" vs. keep grounding. (Out of the ontology; a protocol policy.)
+- **`witness_kind` generality** — `wk_generator_output` was named from the D57
+  dogfood, but post-D60 it denotes the general case: *a kernel-dispatched program run*
+  (the `oci` tool runtime / D56 wrapped-program, `ProgramTrace → IsDerivedAs`).
+  Consider renaming to `wk_program_run` (a committed-ontology + chain change; D57 uses
+  the current name as-is).
 - **Archival / GC** — how a finished objective's branch is archived.
 
 ## 6. Relationship to kernel tasks (D21) and `bench:TaskOutput` — distinct concepts
@@ -240,6 +298,15 @@ They compose but do not coincide: executing an objective's milestones may **spaw
 D21 program-run tasks (and produce `bench:TaskOutput`s) as the *means* of
 discharging a Derived obligation — but the objective is the frame, not the run. Keep
 the namespaces separate (`objective:` ≠ kernel task IDs ≠ `bench:`).
+
+**Realized (D57 m3 / D60).** The first dogfood exercised exactly this: the D57 m3
+milestone (`GeneratorProduces`) is discharged by an `eigenius run` that dispatches the
+schema.org generator through the **D60 generic `oci` tool runtime**, committing a
+`generate_result` `DerivedResource` under a `ProgramTrace → IsDerivedAs`, which
+`concl_generator` cites via `derived(...)`. The objective frame stayed fixed; the run
+was the means. (Note the chain-authoring consequence: the program's input pin must
+commit *before* the run and the conclusion *after* — hence the split into
+`04a-evidence.esl` + `04b-conclusions.esl`.)
 
 ## 7. Out of scope
 

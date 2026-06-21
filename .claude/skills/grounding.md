@@ -81,16 +81,30 @@ slice*, not all 800 schema.org types / 52k GO classes unless needed; (e)
   then `eigenius … load <x.eigon.json>`. It rewrites `http(s)://` → `urn:` IRIs,
   stamps `core:source_irl` provenance, tags nodes `is_a [..., DeclaredResource]`,
   and relies on the shared `ontologies/obo/obo-meta-ontology.json`.
-- **schema.org** — per D57: own `urn:schema_org:` namespace, classes →
-  `core:Class`, properties → `core:Property`, descriptive (all `recommends`,
-  nothing `requires` — open-world). For now the settled minimum is ~10
-  hand-authored string properties (name/license/creator/identifier/…); the full
-  generated mapping is D57's open work.
+- **schema.org** — per D57 (**implemented**): own `urn:schema_org:` namespace,
+  classes → `core:Class`, properties → `core:Property`, descriptive (`domainIncludes`
+  → advisory `recommends`, never the restrictive `core:domain` — schema.org's type
+  system is recommendation-based, open-world). The **full vocabulary is generated +
+  committed** as a first-class
+  ontology at [`ontologies/schema-org/schema-org.eigon.json`](../../ontologies/schema-org/)
+  (2114 resources from V30.0) — adopt it by loading/referencing that ontology, not by
+  re-deriving. The generator (`crates/eigenius-schemaorg`) regenerates it deterministically.
 
 **Align:** map your ad-hoc task predicates → the standard term IRIs (e.g. a task
 `Gene` → the GO/relevant ontology class), so claims reference shared vocabulary.
 Imports are **Declared** (adopted on the source's authority), with `core:source_irl`
 provenance — never silently re-minted as Eigenius-native.
+
+**Read the spec, not just the data — and cite the decisions it drives, as you make
+them.** A vocabulary's machine artifact (JSON-LD, OWL, OBO graph) gives you the
+*terms*; its prose specification (data-model / conformance docs) gives you the
+*semantics* that govern how to map them — e.g. schema.org's data-model doc states
+`domainIncludes`/`rangeIncludes` are **advisory**, which is why they map to advisory
+`core:recommends`, not the restrictive `core:domain`. Pull the authoritative docs
+*proactively* (`deep-research` / `WebFetch`), and the moment a mapping decision turns
+on a documented fact, commit a `reference:Citation` carrying that fact in the same
+step — it is a load-bearing anchor. (Anti-pattern, seen in D57: the mapping was built
+from the JSON-LD alone and the conformance citation was added only when a human asked.)
 
 ### 5. Re-index so it's findable next time
 Imported vocabulary + new anchors must be retrievable by the next retrieve-first
@@ -109,6 +123,9 @@ query now surfaces what you just added — that's the loop closing.
    adopted knowledge is Declared, not asserted as derived.
 6. **Close the loop.** What you researched becomes a retrievable anchor/term, so
    the work compounds instead of repeating.
+7. **Spec over data; cite proactively.** Adopt a standard from its authoritative
+   documentation, not just its machine artifact, and commit the citation for each
+   load-bearing decision as you make it — not when prompted.
 
 ## Going deeper
 
@@ -117,7 +134,7 @@ query now surfaces what you just added — that's the loop closing.
   indexes in ESL guide §4.4a; embedder `crates/eigenius-embedder-candle`.
 - **obograph importer** — `crates/eigenius-obograph/` (`--bin obograph_import`);
   shared meta-vocab `ontologies/obo/obo-meta-ontology.json`.
-- **schema.org mapping** — [D57](https://github.com/eigenius/eigenius/blob/main/docs/design/d57-schema-org-vocabulary-mapping.md) (stub; the live testing ground for this skill).
+- **schema.org mapping** — [D57](https://github.com/eigenius/eigenius/blob/main/docs/design/d57-schema-org-vocabulary-mapping.md) (implemented; the committed ontology is `ontologies/schema-org/`). The first dogfood of this skill + the `reasoning`/objective protocol.
 - **Anchors** — `ontologies/reference/reference.esl` (Reference + CiTO Citation);
   worked example `experiments/publications/wrn-helicase/chain/02-literature.esl`.
 - **External research** — the `deep-research` skill.

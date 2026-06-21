@@ -45,15 +45,32 @@ kernel enforces. Never let a claim float ungraded.
 
 | Grade | Means | What it requires on chain | Witness |
 |---|---|---|---|
-| **Observed** | recorded from reality | `reflection:ObservedResource` + provenance (a pinned source / citation) | — |
+| **Observed** | recorded from reality | `reflection:ObservedResource` + provenance (a pinned source / content hash) + an `ObservationTrace` | `IsObservedAs` |
 | **Declared** | asserted on authority/design | `reflection:DeclaredResource` + `reflection:rationale` + a `DeclarationTrace` | `IsDeclaredAs` |
-| **Derived** | computed | a `DerivedResource` a program/institution emits, carrying `canonical_proposition` | `IsDerivedAs` |
+| **Derived** | computed | a `DerivedResource` a program/institution emits, carrying `canonical_proposition`, under a `ProgramTrace` | `IsDerivedAs` |
 | **Verified** | kernel-checked reasoning | a `ReasoningSentence` whose certificate type-checks → `Holds` | `IsVerifiedAs` |
+
+Each of the first three witnesses is emitted by the per-layer witness index **from a
+trace resource** (`ObservationTrace` / `DeclarationTrace` / `ProgramTrace`) whose
+`reflection:resource` points at the target and whose target carries
+`reflection:canonical_proposition` — so `observed(iri, P)` / `declared(iri, P)` /
+`derived(iri, P)` only resolve when that trace exists in an **ancestor layer** of the
+citing sentence (load emitters before consumers — the
+`04a-evidence`-before-`04b-conclusions` / recompute-plans-before-conclusions split).
 
 A bare opinion is, at most, a **Declared hypothesis** — and it must say so, with a
 rationale. If you want it to count as fact, it must become Derived (run it) or
 Verified (prove it). "I think the bug is X" is a Declared hypothesis until a
 Derived witness (a reproduction, a test) discharges it.
+
+**Reach for the strongest grade the mechanics allow — don't settle for Declared.**
+A claim you'd write as Declared often has a stronger *mechanical* witness available:
+content-hash a file → **Observed**; run the producer as a program *through the kernel*
+(the D60 `oci` tool runtime / D56 wrapped-program → `ProgramTrace → IsDerivedAs`) →
+**Derived**; a load that validates (0 errors) or a query that returns the expected
+result → **Verified-by-check**. Auditing your Declared claims for these upgrade paths
+is the method of the D57 mechanical-evidence pass — and the act of producing the
+witness routinely *catches a bug the assertion hid* (it found two real generator bugs).
 
 ## The loop
 
@@ -90,6 +107,18 @@ grounding), stop and record the finding: the objective is ill-posed/blocked *her
 don't proceed on faith. Full spec + the objective ontology: **D58**. (Distinct from
 kernel D21 tasks / `bench:TaskOutput`, which are program-run execution — D58 §6.)
 
+**The frame is a living artifact — re-enter it at every subgoal boundary (D58 §4.1).**
+A frame seeded from a high-level goal cannot anticipate what execution teaches, so
+`EXECUTE` is not a one-way exit: after each milestone lands, or whenever an insight
+surfaces, **re-assess the frame and fold the learning back in** — *sharpen* a
+downstream milestone now that you can express it precisely, *re-grade* it when a
+stronger witness turns out mechanical (the grade-climbing below — do it as the
+evidence lands, not as a cleanup pass), *decompose* it, or *reframe* the goal when a
+learning shows the original cut was wrong. Do this **proactively**, as part of the
+work — the anti-pattern (seen in D57) is executing against a stale high-level frame
+and then *retrofitting* the formalization afterward under manual steering. Each such
+change is a recorded, versioned frame revision (a structural diff, not silent prose).
+
 Commit the thesis + milestones now (the goal posts) as typed `objective:` resources
 in the objective's own namespace — the propositions they target as `Prop` decls,
 wrapped in `objective:Milestone`/`Axiom` nodes (worked example:
@@ -112,6 +141,18 @@ claim** (the template below) — these are the admissible premises. **Sources mu
 real and verified (DOIs/PMIDs that resolve); never fabricate a citation.** When a
 standard vocabulary types the domain, adopt it (OBO / schema.org) rather than
 reinventing terms — see `grounding`.
+
+**Consult the authoritative documentation, not just the data — and cite it as you
+decide, not when prompted.** A standard's machine artifact (JSON-LD, OWL) gives you
+the *terms*; its prose spec (data-model / conformance docs) gives you the *semantics*
+that govern how to map them — and every load-bearing design choice you make from that
+spec is itself an anchor. The failure mode (seen in D57): the mapping was built from
+schema.org's JSON-LD without reading its data-model doc, and the conformance fact the
+key decision rested on (`domainIncludes` is advisory → `recommends`, not the
+restrictive `core:domain`) was only cited as a `reference:Citation` once a human asked.
+The discipline is **proactive**: before mapping a standard, read its spec; the moment a
+decision turns on a documented fact, commit the citation carrying that fact in the same
+step — the agent does this itself, it is not a thing the human should have to request.
 ```esl
 namespace lit = "urn:eigenius:obj:<slug>:lit";
 resource lit:smith_2020 : reference:Reference {
@@ -144,11 +185,18 @@ change. Name what evidence kind will discharge each (Observed/Derived/Declared).
 For each step: make the evidence first, commit the witness, then the sentence that
 cites it. Three shapes:
 
-- **Observed** — commit an `ObservedResource` with its pinned provenance/citation.
+- **Observed** — commit an `ObservedResource` (a pinned source, a content-hashed
+  `ingest:PinnedExternalFile`) **plus an `ObservationTrace`** pointing at it
+  (`reflection:resource = <iri>`); the trace is what makes the witness index emit
+  `IsObservedAs`, so `observed(iri, P)` resolves. Without the trace the resource
+  loads but cannot be cited.
 - **Derived** — run a program / institution (see `eigenius` skill: `run`,
   `RunRuntimeScript`, the statistics institution); it emits a `DerivedResource`
   with `canonical_proposition` set **only when the computation supports it** (e.g.
-  `if (direction & significance) set_proposition`). Then:
+  `if (direction & significance) set_proposition`), committed under a `ProgramTrace`.
+  To get a Derived witness from *any* pinned tool (not just R/an institution), run it
+  through the D60 generic `oci` tool runtime — `eigenius env build --language oci` +
+  `eigenius run` — the WRN wrapped-program pattern, no new institution. Then:
 ```esl
 resource obj:concl_x : reasoning:ReasoningSentence {
     reasoning:subject_iri   = "urn:eigenius:obj:<slug>:subject";
@@ -199,11 +247,21 @@ mechanical.
    route around.
 4. **Anchor new territory.** Don't reason unaided in unfamiliar ground; bring
    real, CiTO-cited prior knowledge first. Never fabricate a source.
-5. **Plan on chain.** Deviations must be structural diffs, not prose drift.
-6. **Same claim vs distinct evidence is inspectable.** Two witnesses for one
+5. **Ground in the documentation, cite as you decide — proactively.** When mapping a
+   standard, read its prose spec (not just its data), and the moment a decision turns
+   on a documented fact, commit the citation carrying it *in the same step*. Don't wait
+   to be asked (D57: the schema.org data-model conformance fact was cited only on
+   prompt).
+6. **Refine the frame as you go; don't retrofit.** Re-enter the frame at each subgoal
+   boundary — sharpen / re-grade / decompose / reframe as you learn (D58 §4.1) — rather
+   than executing against a stale high-level frame and formalizing after the fact. Reach
+   for the strongest grade the mechanics allow *as the evidence lands*, not in a cleanup
+   pass.
+7. **Plan on chain.** Deviations must be structural diffs, not prose drift.
+8. **Same claim vs distinct evidence is inspectable.** Two witnesses for one
    `canonical_proposition` is corroboration; two propositions is distinct
    evidence. Don't call distinct evidence "redundant" — the types tell you which.
-7. **Match measure to claim; reproduce the number, not just the sign.**
+9. **Match measure to claim; reproduce the number, not just the sign.**
 
 ## Weight & escape hatch
 

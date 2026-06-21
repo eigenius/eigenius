@@ -61,9 +61,11 @@ machine-readable output. Full reference (every subcommand, flags, exit codes):
 
 CLI-only capabilities the `reasoning` protocol uses: **`branch create <task-slug>
 --from <head>`** (the per-task branch); **`data attach/verify/validate/provision`**
-(D53 external files); **`env build --language r`** + **`run`** (wrapped-R warrants,
-D55/D56); **`reflect <trace>`** (record a trace). `validate` / `compile` also run
-in-process on local files (no `--endpoint`).
+(D53 external files); **`env build --language r|oci`** + **`run`** (wrapped-R
+warrants D55/D56, or *any* pinned tool via the generic `oci` runtime D60 — both
+commit a `ProgramTrace → IsDerivedAs` that a `derived(...)` certificate discharges);
+**`reflect <trace>`** (record a trace). `validate` / `compile` also run in-process on
+local files (no `--endpoint`).
 
 ## Vocabulary
 
