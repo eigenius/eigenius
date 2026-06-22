@@ -337,10 +337,15 @@ Each slice ships **with** D61's check, never before it:
 ## 8. Bootstrapping the lexicon
 
 The lexicon (stage 1) is the engine's **bottleneck** — and the only genuinely new linguistic
-resource (the composition rules are a small universal set; §3). It is **bootstrapped from existing
-permissive resources by an LLM-proposer loop, validated formally, and codified at a graded
-witness** — never hand-built, never trusted unchecked. Because compositionality is lexicalized in
-the type system (§8.4), validating the lexicon largely validates composition too.
+resource (the composition rules are a small universal set; §3). It is bootstrapped from existing
+permissive resources, validated formally, and codified at a graded witness — never hand-built, never
+trusted unchecked. **Two complementary paths feed it:** a **deterministic structural import** of
+WordNet/VerbNet — the general English framework (**§8.7**) — and an **LLM-proposer loop** (§8.1–8.3)
+for what is genuine judgment (function-word categories, argument-type refinement, sense selection,
+and domain-specific augmentation). The structural bulk — synset→type, hypernym→subclass,
+frame→category — is *mechanical*; the LLM is reserved for where it is actually needed. Because
+compositionality is lexicalized in the type system (§8.4), validating the lexicon largely validates
+composition too.
 
 ### 8.1 Inputs — existing data, per entry-field + license
 
@@ -357,10 +362,14 @@ verified existing data (§4):
 | **CCGbank** | gold English CCG **categories** | category **eval reference only** | **LDC2005T13 — encumbered** ⚠️ |
 | curated closed-class list | function words | the **hardest** categories, hand-seeded from standard categorial treatments | hand-authored |
 
-Two precisions: **WordNet drives only the *content-word* track** (it is content-word-centric;
-function words — which carry the compositional weight — are a separate curated track). And
-**CCGbank's gold categories are LDC-encumbered** → eval reference, *not* a shipped dependency;
-English categories come from **LLM-propose-then-validate**, not CCGbank reuse.
+Three precisions: **WordNet drives only the *content-word* track** (it is content-word-centric;
+function words — which carry the compositional weight — are a separate curated track). **WordNet
+itself carries verbs** — synsets, the troponym/hypernym hierarchy, *and* coarse **sentence frames**
+(transitivity) — so a verb's *category and hierarchy* come from WordNet too; **VerbNet's role is the
+narrower one** of refining each argument *slot's type* (selectional restrictions → a hypernym-lattice
+class) beyond the frame's bare shape (§8.7.4). And **CCGbank's gold categories are LDC-encumbered** →
+eval reference, *not* a shipped dependency; English categories come from **LLM-propose-then-validate**,
+not CCGbank reuse.
 
 ### 8.2 Work-list (order of generation)
 
@@ -429,6 +438,230 @@ it covered?" — a far thinner, sharper target.
   but that is a real undertaking, not free reuse.
 - The example **labels are themselves LLM output** — human-sample them; prefer gold (FraCaS) where
   it covers the construct.
+
+### 8.6 Realized — the lexicon layer + composition + the commit-time felicity check (witnessed)
+
+A first slice of §8 is built and kernel-validated — confirming the central D62 claim at the
+smallest scale: *we did not need a new term language; the kernel's `Exp` already is one, and its
+Eigon extensions are a lexical-semantics toolkit.*
+
+- **The lexicon layer** — `experiments/lexicon/lexicon.esl`, witnessed by
+  `kernel/tests/lexicon_validates.rs` (compiles against core→reflection(+eigentt); `Validator`
+  reports 0 errors). The four categorial archetypes each map onto an existing kernel constructor:
+  - common noun (`N`) → a **type**: `EigonClass` — CN-as-type is the kernel's *native* model, not
+    a fork we add (Luo/Cooper, §3);
+  - named entity (`NP`) → a **witness by reference**: `ResourceRef`;
+  - transitive verb / adjective (`(S\NP)/NP`, `N/N`) → a **predicate**: `EigonAxiom` — a typed
+    chain constant, not an invented proposition symbol.
+- **The category is an inductive**, not a string —
+  `data lexicon:Cat { cat_s, cat_n, cat_np, fwd(Cat,Cat), bwd(Cat,Cat) }`, carried as a
+  kernel-checked `type_expr` term. This is what makes the homomorphism `⟦cat⟧ → sem_type` a
+  **recursor** — the hinge that makes the felicity check mechanizable rather than prose.
+- **Composition = the kernel type-checker as the felicity oracle** — a well-typed composition
+  type-checks; an argument-swapped one is **rejected** (`felicity_filter_*` run the *identical*
+  pipeline differing only in argument order, so the rejection is provably the type-checker). The
+  Semantic Felicity Condition (§2 stage 5), demonstrated end-to-end.
+
+**Two findings about *where the check fires* (witnessed against the kernel):**
+1. **Storage ≠ check.** A proposition *stored* in a `type_expr` field is lowered + D47-encoded,
+   not type-checked. The felicity check fires only when a term is routed through the checker — so
+   the engine's stage-5 "check" is an **explicit** step, not a side effect of storing the tree.
+   At commit it is now the kernel's job: **D49's Rule 21** (`check_type_expr_well_typed`) decodes
+   + `check_infer`s *every* `eigentt:TypeExpr`-valued slot, so a committed proposition is
+   type-checked, not merely decoded. (That rule consolidated three overlapping eigentt checks into
+   one type-system-driven validator — see D49 §6.)
+2. **Named entities are not free variables.** A `ResourceRef` in a program body lowers to an
+   unbound `Var` in the checker — chain entities need **explicit binding/resolution** when a
+   composition is checked. NP references (→ committed chain resources) must be embedded as
+   `EigonResource` or resolved against the layer, not handed to the checker as bare `Var`s.
+
+**Realized — the `⟦·⟧` recursor + the mechanized felicity invariant.** `⟦·⟧ : Cat → Type` is built
+(`denote_cat`, witnessed by `kernel/tests/lexicon_validates.rs`): `⟦cat_s⟧ = Prop`, `⟦cat_n⟧ = Set`,
+`⟦cat_np(T)⟧ = T`, `⟦A/B⟧ = ⟦A\B⟧ = ⟦B⟧ → ⟦A⟧`. The **schematic-atom** problem is resolved by
+**type-indexing the entity atom** — `cat_np(T)` carries its class (Luo's DCG move, §3), so `⟦·⟧` is
+self-contained (no external atom→type environment needed). Mechanically, `cat` became
+`data lexicon:Cat : Type 1 { … cat_np : Set -> Cat … }` (the universe bumps to `Type 1` because the
+inductive now stores a `Set`), and `cat_denotation_matches_sem_type` asserts `⟦cat⟧ = sem_type` for
+every entry — `cat` is now the checked source of truth, and the homogeneity / argument-order
+inconsistency the bare-atom spike hid is forbidden (`denotation_is_order_and_type_sensitive`).
+Conventions settled: transitive verbs are **object-first** (`⟦(S\NP)/NP⟧ = ⟦obj⟧ → ⟦subj⟧ → Prop`);
+the adjective is given **predicatively** (`S\NP`), with the attributive `N/N` (Σ-refinement → a class)
+left to a type-shifting composition rule.
+
+**Realized — the composition parser (stage 2).** A CKY chart over the categorial `cat`s
+(`kernel/tests/lexicon_validates.rs`): each step combines two items by forward/backward
+application — on the *category* (`fwd`/`bwd`) and, in lockstep, on the *sem* (`App`) — and the
+kernel confirms the assembled term. `parser_composes_sentence_to_checked_prop` parses *"HeLa
+depends on BRCA1"* → exactly one `S` parse whose assembled sem `depends_on(brca1, hela)`
+**type-checks to `Prop`** (the felicity of the *whole* sentence, kernel-confirmed) — the first
+prose-tokens → EigenTT-term → kernel-check loop. `parser_rejects_type_mismatched_sentence` parses
+*"BRCA1 depends on HeLa"* (subject/object types swapped) → **no `S` parse**: the categories don't
+combine, so the felicity filter fires *at the category level*, before any sem is assembled. Named
+entities are resolved to values (`resolve_sem`: axiom → `EigonAxiom`, class → `EigonClass`,
+instance → `EigonResource`), closing the earlier "chain entities are not free variables" finding.
+
+**Realized since:** the engine is **extracted from the test harness into `kernel/src/lexicon.rs`**
+(`denote_cat`, the combinator, CKY, plus **`gate_entry`** — the callable felicity gate) and exposed
+as the CLI **`eigenius lexicon gate`** (chain-loads schema + entries; admit/reject per entry,
+fail-closed). **CN-as-types subsumption** is wired: `Layer::is_subclass_of` (the single foundation
+authority) + the `EigonClass` subtype rule in `nbe::check` honor `core:subclass_of` as subtyping
+(the inclusion-coercion fragment of Luo `luo2012coercive`), so a general predicate typed at a
+supertype accepts subclass-typed arguments (witnessed: a general verb `affects : Entity → Entity →
+Prop` composes with `Gene`/`CellLine` arguments). And the **LLM proposer**
+(`orchestration/tools/lexicon_propose`) is built and run end-to-end on the real WordNet 3.1 corpus —
+but, per §8.7, that proposer is the *augmentation / domain-binding* tool, **not** the general
+framework.
+
+**Still ahead:** the **deterministic WordNet → lexicon mapper** — the general English framework,
+fully specified in **§8.7**, not yet built (the parser must be extended to read hypernym pointers +
+verb frames; the mint-and-gate import is then mechanical); VerbNet argument-type refinement
+(§8.7.4); broader grammar (ambiguity + derivation-ranking, type-raising, coordination, clausal /
+control frames); the attributive-adjective type-shift; an *in-kernel* `⟦·⟧` recursor (a large
+elimination — engine-side Rust suffices for now); and promoting the engine module to its own crate.
+
+### 8.7 The WordNet → lexicon mapper — complete specification
+
+The general English lexicon is **imported from WordNet's structure by a deterministic mapper,
+kernel-gated** — not LLM-proposed. WordNet already encodes the three things a typed categorial
+lexicon needs — **synsets** (the types and predicates), **hypernymy** (the subclass lattice), and
+**sentence frames** (the categories) — so the bulk of the import is a structural transform, and the
+LLM loop (§8.3) is reserved for genuine judgment (function words, argument-type refinement, sense
+selection, domain augmentation). This is the inversion of the earlier framing: **the general
+framework is the foundation; domain-specific vocabulary is an additive layer** (§8.7.8). It is also
+exactly the CN-as-types-from-WordNet construction of the prior art (Luo, `luo2012cnt`; §3).
+
+#### 8.7.1 Source & record format
+
+WordNet 3.1 `data.<pos>` / `index.<pos>` (`wndb(5WN)`), `pos ∈ {noun, verb, adj, adv}`. Each synset
+is one `data.<pos>` line:
+
+```
+offset lex_filenum ss_type w_cnt (word lex_id)+ p_cnt (ptr_sym offset pos src/tgt)* [f_cnt (+ f_num w_num)*] | gloss
+```
+
+The mapper consumes three fields the current reader skips and must be extended to capture
+(`orchestration/tools/lexicon_propose/wordnet.ts` reads only words+gloss today):
+the **pointer records** (esp. `@` hypernym, `@i` instance-hypernym), and — verbs only — the
+**frame field** (`+ f_num w_num`). License: the WordNet license is permissive/OSI — shippable.
+Offsets are **version-specific**, so the mapper pins a WordNet version and records it in provenance.
+
+#### 8.7.2 Identity
+
+- **synset → class/predicate IRI**: `urn:eigenius:wn:<ver>:<pos><offset>` (version-pinned locator).
+  For durable, cross-version identity adopt the **ILI** (Interlingual Index, Open English WordNet)
+  as the stable id, with the offset as the within-version locator.
+- **lemma → `lexicon:LexicalEntry`** whose `lexicon:sense` is the WordNet **sense key**
+  (`lemma%ss_type:lex_filenum:lex_id::`). One synset yields one type/predicate and *N* entries (one
+  per lemma); one lemma across senses yields several entries (the parser's forest selects, §8.4).
+
+#### 8.7.3 Nouns → classes (CN-as-types)
+
+- Each noun synset → a **`core:Class`** (the type — CN-as-types, the kernel's native model, §8.6).
+  `core:description` = gloss.
+- Each `@` / `@i` pointer → a **`core:subclass_of`** edge. The noun hypernym DAG, rooted at
+  `entity.n.01`, **becomes the kernel's subclass lattice** — the *same* `core:subclass_of` the
+  subsumption rule consumes (`Layer::is_subclass_of` + the `EigonClass` subtype rule in `nbe::check`,
+  §8.6). The hand-added `Entity` supertype of the spike was a stand-in for `entity.n.01`.
+- **Instance** synsets (`@i`, proper-noun individuals like *Einstein*) → the **named-entity (NP)**
+  archetype: an `EigonResource` instance of its class, not a class.
+- Each lemma → an entry: `cat = cat_n` (N), `sem` = the synset class, `sem_type = Set` (`⟦cat_n⟧`),
+  `sense` = sense key, `grade = Declared`. Multiword lemmas (`take_a_breath` → `"take a breath"`).
+
+#### 8.7.4 Verbs → predicates
+
+- Each verb synset → an **`eigentt:Axiom`** (a typed chain constant — the predicate; the EigonAxiom
+  archetype), not an invented proposition symbol.
+- **Category from the sentence frames** (the `f_num` field; §8.7.6). A synset may carry several
+  frames → several categorial entries (the verb's alternations: e.g. `breathe` has frame 2 → `S\NP`
+  *and* frame 8 → `(S\NP)/NP`).
+- **Argument types — two stages, bridged by subsumption:**
+  - **Stage 1 (WordNet-only):** type each NP slot generically at the noun root — `cat_np(entity.n.01)`
+    — so the predicate is `entity → … → Prop`. By subsumption (§8.6) it composes with *any* noun:
+    broad coverage, loose felicity. This needs *no* VerbNet.
+  - **Stage 2 (VerbNet refinement):** push slot types *down* the hypernym lattice from VerbNet
+    thematic roles + selectional restrictions (Agent `+animate` → `animate_thing.n.01`, Patient
+    `+comestible` → `food.n.01`), so *"eat a rock"* becomes a type mismatch the gate catches. The
+    VerbNet↔WordNet join is VerbNet's `wn=` sense attribute on members.
+- **`@` hypernym (troponymy)** is recorded among the axioms as an **entailment** relation
+  (*whisper ⇒ speak*), **not** as an `EigonClass` subtype edge — predicate subsumption over function
+  types is subtler than class subsumption and is deferred (§8.7.10).
+- Each lemma → entries: `cat` from frames, `sem` = the axiom, `sem_type = ⟦cat⟧` (the recursor),
+  `sense`, `grade = Declared`.
+
+#### 8.7.5 Adjectives & adverbs
+
+- **Adjectives** (`data.adj`) → the **predicative** archetype (`S\NP[X]`, an `EigonAxiom`). Stage-1:
+  typed at `entity.n.01` (`entity → Prop`); refinement via the `=` attribute and `&` similar-to
+  (satellite→head) pointers is deferred. The **attributive** `N/N` use (a Σ-refinement → a class) is
+  the type-shift already deferred in §8.6.
+- **Adverbs** (`data.adv`) → predicate/sentence modifiers (`(S\NP)/(S\NP)`, …); deferred, with the
+  `\` pertainym pointer (adverb→adjective) recorded.
+
+#### 8.7.6 Frame → category table
+
+The WordNet sentence frames (1–35) map to CCG categories. The load-bearing subset (frames 2 and 8
+confirmed against real `data.verb`):
+
+| Frame | Template | Category |
+|---|---|---|
+| 1 | Something ----s | `S\NP` |
+| 2 | Somebody ----s | `S\NP` |
+| 8 | Somebody ----s something | `(S\NP)/NP` |
+| 9 | Somebody ----s somebody | `(S\NP)/NP` |
+| 11 | Something ----s something | `(S\NP)/NP` |
+
+The mapper carries the **full 35-frame table** (transcribed from the WordNet docs — a verifiable
+source; not reproduced in full here). Clausal-complement / control / raising frames (*"Somebody
+----s that CLAUSE"*, *"Somebody ----s to INFINITIVE"*) map to **higher-order categories** and are
+flagged as the hard tail (they interact with the deferred type-raising grammar, §8.6 "still ahead").
+
+#### 8.7.7 The import algorithm
+
+1. **Parse** `data.<pos>` — extend the reader to capture `@`/`@i` pointer records and the verb frame
+   field.
+2. **Mint synset resources** — classes (nouns), axioms (verbs/adjs), with `subclass_of` from `@`.
+   The hypernym graph is a DAG; the layer chain resolves references, so emission order is flexible
+   (or topo-order parents-before-children within a layer).
+3. **Mint lexical entries** per `(lemma, synset)` — category from frames (verbs) / fixed (`N` nouns,
+   predicative adjs); `sem_type = ⟦cat⟧` derived by the recursor (so `⟦cat⟧ ≡ sem_type` by
+   construction, as in the proposer).
+4. **Route through the kernel** — classes/axioms validated by the `Validator`; entries by the
+   felicity gate (`gate_entry` / `eigenius lexicon gate`). A rejection is a **fail-closed finding**,
+   not a silent drop.
+5. **Provenance & grade** — record WordNet version, sense keys, ILI, source content-hash; `grade`
+   is `Observed` for the pinned source, `Declared` for the mechanical mapping, elevated to
+   `Derived`/`Verified` only by the §8.3 battery/human gates.
+
+Scale: ~146k noun synsets, ~25k verb, ~30k adj. The importer emits a large layer (or a per-POS layer
+chain); identity/indexing/perf at this scale is an implementation concern (§8.7.10).
+
+#### 8.7.8 Domain augmentation (the additive layer)
+
+A domain ontology binds to the general framework by **`subclass_of` into it** — `bio:Gene
+subclass_of` the WordNet gene synset, a domain predicate specializing a general verb's argument types
+— after which domain text parses with general + domain entries, the subsumption rule bridging. The
+**LLM proposer** (`orchestration/tools/lexicon_propose`) is precisely this **augmentation tool**: it
+maps a domain term onto its general parent and mints domain predicates, gated by the kernel. Its
+constrained-`--vocab` mode (map a word onto a fixed domain menu) is the *top* layer; the deterministic
+WordNet import (this section) is the *base*. (Demonstrated end-to-end on the real WordNet 3.1 corpus
+in the augmentation mode; see §8.6.)
+
+#### 8.7.9 Trust & the residual
+
+WordNet is **untrusted input**; the kernel is the oracle (every minted resource is validated). The
+import is *type-correct by gate*, **not** *faithful by gate*: WordNet's sense granularity, frame
+coverage gaps, and the stage-1 generic typing are the residual — the D61 faithfulness concern (§5).
+Word-sense ambiguity becomes multiple entries per lemma, resolved by the parser's forest +
+derivation-ranking (§8.4), not by the importer.
+
+#### 8.7.10 Open questions / deferred
+
+- **Predicate subsumption** — verb troponymy/entailment is *not* the `EigonClass` subtype rule;
+  it needs an entailment relation among axioms. (Class subsumption covers nouns; this is the verb gap.)
+- **Identity stability** — offset (version-pinned) vs **ILI** (cross-version); adopt ILI for durable ids.
+- **Scale** — ~200k synset-classes: layer size, resolution/indexing, gate throughput.
+- **Coverage** — attributive adjectives (Σ), adverbs, multiword expressions / idioms / constructions
+  (non-compositional — the coverage track, §8.4); verbs absent from VerbNet stay generically typed.
 
 ## 9. Prior art / anchors (to verify via the §4 grounding pass)
 - Cooper, R. *From Perception to Communication: A Theory of Types for Action and Meaning.* OUP,

@@ -282,47 +282,15 @@ impl Validator {
     // ── Shared chain-walking helpers used across multiple rule files ──
 
     /// Check if a resource is an instance of any of the given classes,
-    /// considering subclass relationships.
+    /// considering subclass relationships. Subsumption is decided by the single
+    /// foundation authority [`Layer::is_subclass_of`] (reflexive, so the exact
+    /// `is_a` case is covered too).
     pub(crate) fn is_instance_of_any(&self, resource: &Resource, classes: &[&Iri]) -> bool {
-        let resource_classes = resource.is_a();
-        for res_class in &resource_classes {
-            for allowed_class in classes {
-                if *res_class == **allowed_class || self.is_subclass_of(res_class, allowed_class) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    /// Check if `sub` is a subclass of `super_class` by walking subclass_of.
-    fn is_subclass_of(&self, sub: &Iri, super_class: &Iri) -> bool {
-        self.is_subclass_of_inner(sub, super_class, &mut BTreeSet::new())
-    }
-
-    fn is_subclass_of_inner(
-        &self,
-        sub: &Iri,
-        super_class: &Iri,
-        visited: &mut BTreeSet<Iri>,
-    ) -> bool {
-        if !visited.insert(sub.clone()) {
-            return false; // Cycle
-        }
-
-        if let Some(class_def) = self.layer.resolve(sub) {
-            if let Some(parents) = class_def.get(&iri(wk::PARENT_CLASSES)) {
-                for parent in parents.as_iri_array() {
-                    if parent == *super_class {
-                        return true;
-                    }
-                    if self.is_subclass_of_inner(&parent, super_class, visited) {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
+        resource.is_a().iter().any(|res_class| {
+            classes
+                .iter()
+                .any(|allowed| self.layer.is_subclass_of(res_class, allowed))
+        })
     }
 
     /// Extract the data_type IRI string from a property definition.

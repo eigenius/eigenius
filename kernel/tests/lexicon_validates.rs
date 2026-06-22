@@ -37,9 +37,14 @@ use std::sync::Arc;
 
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
+use eigenius_kernel::lexicon::{
+    cky_parse, denote_cat, entry_to_item, gate_entry, is_ctor, resolve_sem, type_eq, Item,
+};
 use eigenius_kernel::nbe::check::{check, check_infer, CheckCtx};
 use eigenius_kernel::nbe::env::Rho;
 use eigenius_kernel::nbe::eval::eval;
+use eigenius_kernel::nbe::readback::readback_val;
+use eigenius_kernel::nbe::term::Exp;
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::resource::Value;
 use eigenius_kernel::ontology::Iri;
@@ -283,5 +288,314 @@ fn commit_gate_rejects_ill_typed_proposition() {
             .contains("does not type-check against the chain")),
         "the commit gate must reject the ill-typed stored proposition (Rule 21), \
          but validate() reported: {errors:?}"
+    );
+}
+
+// ── The ⟦·⟧ recursor: the categorial → EigenTT-type homomorphism (D62 §8.6) ──
+//
+//   ⟦cat_s⟧ = Prop ;  ⟦cat_n⟧ = Set ;  ⟦cat_np(T)⟧ = T   (type-indexed entity)
+//   ⟦A/B⟧ = ⟦A\B⟧ = ⟦B⟧ → ⟦A⟧   (direction is forgotten — it drives the parser,
+//                                   not the type)
+//
+// This makes the felicity invariant `typeof(sem) = ⟦cat⟧` mechanical: an entry
+// whose category and declared type disagree is now caught (the homogeneity /
+// argument-order bug the bare-atom spike used to hide). The recursor
+// (`denote_cat`) and `type_eq` are the kernel's `eigenius_kernel::lexicon`
+// engine, imported above — the tests below witness them, not redefine them.
+fn decoded_field(layer: &Arc<Layer>, entry: &str, field: &str) -> Exp {
+    let r = layer
+        .resolve(&Iri::parse(entry).expect("entry iri"))
+        .expect("entry resolves");
+    let v = r
+        .get(&Iri::parse(field).expect("field iri"))
+        .unwrap_or_else(|| panic!("{entry} has no {field}"))
+        .clone();
+    decode_type(&v, layer).unwrap_or_else(|e| panic!("{entry}.{field} decode: {e}"))
+}
+
+#[test]
+fn cat_denotation_matches_sem_type() {
+    // The mechanized felicity invariant: for every entry, ⟦cat⟧ (derived from
+    // the category by the recursor) is definitionally equal to the declared
+    // sem_type. `cat` is now the checked source of truth — an entry whose
+    // category and type disagree fails here.
+    let lexicon = build_lexicon();
+    for entry in [
+        "urn:eigenius:lexicon:e_cell_line",
+        "urn:eigenius:lexicon:e_brca1",
+        "urn:eigenius:lexicon:e_hela",
+        "urn:eigenius:lexicon:e_depends_on",
+        "urn:eigenius:lexicon:e_primary",
+    ] {
+        let cat = decoded_field(&lexicon, entry, "urn:eigenius:lexicon:cat");
+        let sem_type = decoded_field(&lexicon, entry, "urn:eigenius:lexicon:sem_type");
+        let denoted = denote_cat(&cat).unwrap_or_else(|e| panic!("{entry}: {e}"));
+        assert!(
+            type_eq(&denoted, &sem_type),
+            "{entry}: ⟦cat⟧ must equal sem_type.\n  ⟦cat⟧    = {denoted:?}\n  sem_type = {sem_type:?}"
+        );
+    }
+}
+
+#[test]
+fn denotation_is_order_and_type_sensitive() {
+    // ⟦(S\NP)/NP⟧ for "depends on" = Gene → CellLine → Prop. The recursor must
+    // distinguish it from the argument-swapped and the homogeneous forms — the
+    // two facets of the bare-atom bug it now forbids.
+    let lexicon = build_lexicon();
+    let denoted = denote_cat(&decoded_field(
+        &lexicon,
+        "urn:eigenius:lexicon:e_depends_on",
+        "urn:eigenius:lexicon:cat",
+    ))
+    .expect("denote verb cat");
+
+    let gene = || Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:Gene").unwrap());
+    let cell = || Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:CellLine").unwrap());
+    let ar = |a: Exp, b: Exp| Exp::Arrow(Box::new(a), Box::new(b));
+
+    assert!(
+        type_eq(&denoted, &ar(gene(), ar(cell(), Exp::Sort(0)))),
+        "⟦cat⟧ should be Gene → CellLine → Prop, got {denoted:?}"
+    );
+    assert!(
+        !type_eq(&denoted, &ar(cell(), ar(gene(), Exp::Sort(0)))),
+        "⟦·⟧ must be argument-order sensitive"
+    );
+    assert!(
+        !type_eq(&denoted, &ar(gene(), ar(gene(), Exp::Sort(0)))),
+        "⟦·⟧ must distinguish entity types (the homogeneity bug is now rejected)"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// The composition parser (D62 §2 stage 2): a CKY chart over categorial
+// categories. Each step combines two items by forward/backward application —
+// on the *category* (fwd/bwd) and, in lockstep, on the *sem* (App). The
+// categorial type drives composition; the kernel confirms the assembled term
+// is well-typed. The first prose-tokens → EigenTT-term → kernel-check loop.
+// ════════════════════════════════════════════════════════════════════
+
+// `Item`, `is_ctor`, `entry_to_item`, `apply`, `cky_parse` are the kernel's
+// `eigenius_kernel::lexicon` engine (imported above). The tests below drive it
+// over the worked lexicon; they witness the engine, they do not redefine it.
+fn tokens_for(layer: &Arc<Layer>, forms: &[&str]) -> Vec<Item> {
+    forms
+        .iter()
+        .map(|f| {
+            let iri = Iri::parse(&format!("urn:eigenius:lexicon:{f}")).expect("entry iri");
+            let r = layer
+                .resolve(&iri)
+                .unwrap_or_else(|| panic!("entry not found: {f}"));
+            entry_to_item(layer, &r).unwrap_or_else(|e| panic!("{f}: {e}"))
+        })
+        .collect()
+}
+
+#[test]
+fn parser_composes_sentence_to_checked_prop() {
+    let lexicon = build_lexicon();
+    // "HeLa depends on BRCA1" — subject HeLa (CellLine), verb, object BRCA1 (Gene).
+    let tokens = tokens_for(&lexicon, &["e_hela", "e_depends_on", "e_brca1"]);
+    let parses = cky_parse(&tokens, &lexicon);
+    let sentences: Vec<&Item> = parses
+        .iter()
+        .filter(|it| is_ctor(&it.cat, "cat_s").is_some())
+        .collect();
+    assert_eq!(
+        sentences.len(),
+        1,
+        "expected exactly one S parse; got cats {:?}",
+        parses.iter().map(|i| &i.cat).collect::<Vec<_>>()
+    );
+
+    // The assembled sem must type-check — and to Prop. That is the felicity of
+    // the *whole composed sentence*, confirmed by the kernel.
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], lexicon.clone());
+    let ty = check_infer(&mut ctx, &sentences[0].sem)
+        .expect("composed sentence must type-check (felicity of the parse)");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "the composed sentence must inhabit Prop"
+    );
+}
+
+#[test]
+fn parser_rejects_type_mismatched_sentence() {
+    let lexicon = build_lexicon();
+    // "BRCA1 depends on HeLa" — the verb's object must be a Gene and its subject
+    // a CellLine, but here they're swapped. The categories do not combine: no S
+    // parse. The parse-time felicity filter, on the category alone.
+    let tokens = tokens_for(&lexicon, &["e_brca1", "e_depends_on", "e_hela"]);
+    let parses = cky_parse(&tokens, &lexicon);
+    let s = parses
+        .iter()
+        .filter(|it| is_ctor(&it.cat, "cat_s").is_some())
+        .count();
+    assert_eq!(
+        s, 0,
+        "type-mismatched sentence must not parse to S; got {s}"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// `gate_entry` — the callable felicity gate (D62 §8.6): the *trusted half* of
+// the prose→trees engine. An untrusted LLM proposer drafts lexical entries as
+// Eigon-JSON; the kernel admits or rejects each via this gate at ingestion.
+// It enforces BOTH halves of felicity on one entry: ⟦cat⟧ ≡ sem_type AND the
+// entry's `sem` actually inhabits ⟦cat⟧. The recursor tests above check the
+// first half over the worked entries; the gate is the single callable that a
+// generation tool runs every draft through.
+// ════════════════════════════════════════════════════════════════════
+
+#[test]
+fn gate_admits_well_formed_entries() {
+    let lexicon = build_lexicon();
+    for entry in [
+        "urn:eigenius:lexicon:e_cell_line",
+        "urn:eigenius:lexicon:e_brca1",
+        "urn:eigenius:lexicon:e_hela",
+        "urn:eigenius:lexicon:e_depends_on",
+        "urn:eigenius:lexicon:e_primary",
+    ] {
+        let r = lexicon
+            .resolve(&Iri::parse(entry).expect("entry iri"))
+            .unwrap_or_else(|| panic!("entry resolves: {entry}"));
+        gate_entry(&lexicon, &r)
+            .unwrap_or_else(|e| panic!("gate must admit well-formed entry {entry}: {e}"));
+    }
+}
+
+// Drafts an LLM proposer might emit: each is per-field well-formed (so the
+// commit gate / Rule 21, which checks each eigentt:TypeExpr slot in isolation,
+// admits them) but FELICITY-inconsistent across fields — caught only by
+// `gate_entry`. The gate is therefore doing real work the storage gate cannot.
+const DRAFTS: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+
+// ⟦cat_np(Gene)⟧ = Gene, but sem_type claims CellLine — category and declared
+// type disagree (the cross-field check the recursor proves for real entries).
+resource lexicon:e_bad_type : lexicon:LexicalEntry {
+    lexicon:form     = "bad-type";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene) );
+    lexicon:sem      = lexicon:brca1;
+    lexicon:sem_type = type_expr( lexicon:CellLine );
+    lexicon:grade    = epistemic:declared;
+}
+
+// cat and sem_type agree (Gene), but the `sem` points at a CellLine instance —
+// the semantics does not inhabit ⟦cat⟧. The second half of the felicity check.
+resource lexicon:e_bad_sem : lexicon:LexicalEntry {
+    lexicon:form     = "bad-sem";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene) );
+    lexicon:sem      = lexicon:hela;
+    lexicon:sem_type = type_expr( lexicon:Gene );
+    lexicon:grade    = epistemic:declared;
+}
+"#;
+
+fn drafts_layer() -> Arc<Layer> {
+    let lexicon = build_lexicon();
+    let resources = esl::compile_against_layer(DRAFTS, &lexicon)
+        .expect("drafts compile (per-field well-formed; cross-field felicity is the gate's job)");
+    let mut b = LayerBuilder::new("drafts", Some(lexicon));
+    for r in &resources {
+        b.add_resource(r.clone()).expect("add draft entry");
+    }
+    Arc::new(b.build(LayerStorage::in_memory()))
+}
+
+#[test]
+fn gate_rejects_felicity_inconsistent_drafts() {
+    let layer = drafts_layer();
+    for (entry, why) in [
+        ("urn:eigenius:lexicon:e_bad_type", "⟦cat⟧ ≠ sem_type"),
+        (
+            "urn:eigenius:lexicon:e_bad_sem",
+            "sem does not inhabit ⟦cat⟧",
+        ),
+    ] {
+        let r = layer
+            .resolve(&Iri::parse(entry).expect("entry iri"))
+            .unwrap_or_else(|| panic!("entry resolves: {entry}"));
+        let verdict = gate_entry(&layer, &r);
+        assert!(
+            verdict.is_err(),
+            "gate MUST reject {entry} ({why}), but admitted it: {verdict:?}"
+        );
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// CN-as-types subsumption (Luo 2012; D62 §8.6): the checker honors the
+// ontology's `core:subclass_of` lattice as the EigonClass subtype rule, so a
+// GENERAL predicate typed at a supertype accepts subclass-typed arguments —
+// "depends on relates entities, Gene/CellLine flow in" — with no new
+// type-system machinery. Witnessed at the kernel boundary and end-to-end
+// through the parser.
+// ════════════════════════════════════════════════════════════════════
+
+#[test]
+fn kernel_honors_subclass_subsumption() {
+    let lexicon = build_lexicon();
+    let sem = |local: &str| {
+        resolve_sem(
+            &lexicon,
+            &Iri::parse(&format!("urn:eigenius:lexicon:{local}")).unwrap(),
+        )
+    };
+    let app = |f: Exp, x: Exp| Exp::App(Box::new(f), Box::new(x));
+
+    // `affects : Entity -> Entity -> Prop` applied to brca1 : Gene and hela :
+    // CellLine type-checks — Gene, CellLine <: Entity (the subsumption rule).
+    let term = app(app(sem("affects"), sem("brca1")), sem("hela"));
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], lexicon.clone());
+    let ty = check_infer(&mut ctx, &term)
+        .expect("affects(Gene, CellLine) must type-check via subclass subsumption");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "the general-predicate application inhabits Prop"
+    );
+
+    // Subsumption is directional and sound: `depends_on : Gene -> CellLine ->
+    // Prop` applied to hela : CellLine as its FIRST argument is still REJECTED
+    // (CellLine is not a subclass of Gene) — siblings under Entity don't subsume.
+    let bad = app(sem("depends_on"), sem("hela"));
+    let mut ctx2 = CheckCtx::with_layer(Rho::Nil, vec![], lexicon.clone());
+    assert!(
+        check_infer(&mut ctx2, &bad).is_err(),
+        "depends_on(CellLine, ..) MUST be rejected — CellLine is not a subclass of Gene"
+    );
+}
+
+#[test]
+fn parser_composes_general_verb_via_subsumption() {
+    let lexicon = build_lexicon();
+    // "HeLa affects BRCA1" — the general verb's `NP[Entity]` slots accept the
+    // CellLine subject and the Gene object by subsumption. It composes to S and
+    // the assembled term checks to Prop (kernel subsumption closes the parse).
+    let tokens = tokens_for(&lexicon, &["e_hela", "e_affects", "e_brca1"]);
+    let parses = cky_parse(&tokens, &lexicon);
+    let sentences: Vec<&Item> = parses
+        .iter()
+        .filter(|it| is_ctor(&it.cat, "cat_s").is_some())
+        .collect();
+    assert_eq!(
+        sentences.len(),
+        1,
+        "expected exactly one S parse for the general verb; got cats {:?}",
+        parses.iter().map(|i| &i.cat).collect::<Vec<_>>()
+    );
+
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], lexicon.clone());
+    let ty = check_infer(&mut ctx, &sentences[0].sem)
+        .expect("composed general-verb sentence must type-check via subsumption");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "the composed general-verb sentence must inhabit Prop"
     );
 }

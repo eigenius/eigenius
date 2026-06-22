@@ -32,6 +32,7 @@ pub mod gc;
 pub mod institution;
 pub mod lattice;
 pub mod layer;
+pub mod lexicon;
 pub mod nbe;
 pub mod observability;
 pub mod ontology;

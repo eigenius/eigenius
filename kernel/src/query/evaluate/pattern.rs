@@ -355,33 +355,13 @@ pub(super) fn find_property_by_shortname(
         .cloned()
 }
 
-/// Check if a resource is an instance of a class via subclass_of chain.
+/// Check if a resource is a (subclass-)instance of a class, via the single
+/// foundation authority [`Layer::is_subclass_of`].
 fn is_subclass_instance(resource: &Resource, class_iri: &Iri, layer: &Layer) -> bool {
-    let resource_classes = resource.is_a();
-    let subclass_iri = Iri::parse(wk::PARENT_CLASSES).unwrap();
-
-    for res_class in &resource_classes {
-        if is_subclass_of(res_class, class_iri, layer, &subclass_iri) {
-            return true;
-        }
-    }
-    false
-}
-
-fn is_subclass_of(sub: &Iri, target: &Iri, layer: &Layer, subclass_prop: &Iri) -> bool {
-    if let Some(class_def) = layer.resolve(sub) {
-        if let Some(parents) = class_def.get(subclass_prop) {
-            for parent in parents.as_iri_array() {
-                if parent == *target {
-                    return true;
-                }
-                if is_subclass_of(&parent, target, layer, subclass_prop) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+    resource
+        .is_a()
+        .iter()
+        .any(|res_class| layer.is_subclass_of(res_class, class_iri))
 }
 
 /// Resolve a Name to an IRI.

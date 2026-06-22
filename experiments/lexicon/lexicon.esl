@@ -40,11 +40,19 @@ namespace lexicon    = "urn:eigenius:lexicon";
 
 // ── Demo domain types the worked entries ground against ───────────────
 // A real lexicon's `sem` targets live in the domain ontologies it is built
-// over; these two stand in so the four entries type-check end to end.
-class lexicon:Gene {
+// over; these stand in so the entries type-check end to end. `Entity` is a
+// supertype: a GENERAL predicate (a verb relating entities of any kind) types
+// at Entity, and Gene/CellLine arguments flow in by CN-as-types subsumption
+// (Luo 2012, common nouns as types + coercive subtyping; D62 §8.6). The kernel
+// honors `core:subclass_of` as the EigonClass subtype rule, so this needs no
+// new type-system machinery — only the declared hierarchy.
+class lexicon:Entity {
+    description = "Top of the demo entity hierarchy — the supertype a general relation ranges over.";
+}
+class lexicon:Gene : lexicon:Entity {
     description = "A gene (demo domain type). A common noun denotes a TYPE — CN-as-type, the kernel's native model: a class IS a type (EigonClass : Set).";
 }
-class lexicon:CellLine {
+class lexicon:CellLine : lexicon:Entity {
     description = "A cell line (demo domain type).";
 }
 
@@ -52,15 +60,18 @@ class lexicon:CellLine {
 // A category is structured, not a string: Atom | A/B | A\B. Making it an
 // inductive means (a) it cannot be malformed — the kernel checks it; (b)
 // the composition rules pattern-match on it; (c) the homomorphism
-// ⟦cat⟧ → sem_type is a *recursor* over this type — the hinge that makes the
-// felicity check `typeof(sem) = ⟦cat⟧` mechanizable (D62 §2 stage 5), not
-// deferred prose. `fwd(A, B)` = A/B (seeks a B on the right → A); `bwd` = A\B.
-data lexicon:Cat {
-    cat_s,                          // S  — sentence
-    cat_n,                          // N  — common noun
-    cat_np,                         // NP — entity
-    fwd(lexicon:Cat, lexicon:Cat),  // A/B — forward slash
-    bwd(lexicon:Cat, lexicon:Cat),  // A\B — backward slash
+// ⟦cat⟧ → sem_type is a *recursor* over this type — realized as `denote_cat`
+// (D62 §8.6), which makes the felicity check `typeof(sem) = ⟦cat⟧` mechanical
+// (D62 §2 stage 5). The entity atom `cat_np(T)` is **type-indexed** (carries its
+// class T — Luo's DCG move), so ⟦·⟧ is self-contained:
+//   ⟦cat_s⟧ = Prop ; ⟦cat_n⟧ = Set ; ⟦cat_np(T)⟧ = T ; ⟦A/B⟧ = ⟦A\B⟧ = ⟦B⟧ → ⟦A⟧.
+// `fwd(A,B)` = A/B (seeks a B on the right → A); `bwd(A,B)` = A\B.
+data lexicon:Cat : Type 1 {
+    cat_s : lexicon:Cat,                              // S  — sentence
+    cat_n : lexicon:Cat,                              // N  — common noun
+    cat_np : Set -> lexicon:Cat,                      // NP(T) — entity of type T (DCG: type-indexed)
+    fwd : lexicon:Cat -> lexicon:Cat -> lexicon:Cat,  // A/B — forward slash
+    bwd : lexicon:Cat -> lexicon:Cat -> lexicon:Cat,  // A\B — backward slash
 }
 
 // ── Predicates: verbs and adjectives as typed opaque constants ────────
@@ -70,9 +81,18 @@ data lexicon:Cat {
 axiom lexicon:depends_on : lexicon:Gene -> lexicon:CellLine -> Prop
 axiom lexicon:is_primary : lexicon:CellLine -> Prop
 
+// A GENERAL relation over entities — the faithful typing for a verb that relates
+// entities of ANY kind (the "Gene and CellLine are too limiting for depends on"
+// point): it types at the Entity supertype, and specific-typed arguments flow in
+// by subsumption. This is the reason for modeling subclass_of (Luo 2012; D62 §8.6).
+axiom lexicon:affects : lexicon:Entity -> lexicon:Entity -> Prop
+
 // ── A committed resource the proper-noun entry references by IRI ──────
 resource lexicon:brca1 : lexicon:Gene {
     core:description = "The BRCA1 gene — a committed chain resource. The named-entity entry's `sem` is a ResourceRef to this; that same IRI is its grounding `sense`.";
+}
+resource lexicon:hela : lexicon:CellLine {
+    core:description = "The HeLa cell line — a committed chain resource; the subject NP in the parser's worked sentence (kernel/tests/lexicon_validates.rs).";
 }
 
 // ── The lexicon schema ────────────────────────────────────────────────
@@ -115,8 +135,19 @@ property lexicon:grade : core:resource {
 // ════════════════════════════════════════════════════════════════════
 // The four worked entries — one per archetype.
 // ════════════════════════════════════════════════════════════════════
+//
+// `cat` vs `sem_type`: `cat` is the categorial type — a type-indexed `lexicon:Cat`
+// term (the entity atom `cat_np(T)` carries its class) — and `sem_type` is the
+// EigenTT type the `sem` inhabits. They are **machine-unified**: the homomorphism
+// ⟦·⟧ : Cat → Type (the recursor `denote_cat`, D62 §8.6) computes ⟦cat⟧, and
+// `kernel/tests/lexicon_validates.rs::cat_denotation_matches_sem_type` asserts
+// ⟦cat⟧ = sem_type for every entry. So `cat` is the source of truth; an entry
+// whose category and type disagree now FAILS that check (the homogeneity /
+// argument-order bug is forbidden). Convention: `(S\NP)/NP` is **object-first** —
+// ⟦fwd(bwd(cat_s, SUBJ), OBJ)⟧ = ⟦OBJ⟧ → ⟦SUBJ⟧ → Prop.
 
-// (1) common noun → a TYPE. CN-as-type: ⟦N⟧ = Set, and the sem IS the class.
+// (1) common noun → a TYPE. CN-as-type: ⟦cat_n⟧ = Set, and the sem IS the class
+//     (CellLine : Set).
 resource lexicon:e_cell_line : lexicon:LexicalEntry {
     lexicon:form     = "cell line";
     lexicon:cat      = type_expr( lexicon:cat_n );
@@ -130,34 +161,63 @@ resource lexicon:e_cell_line : lexicon:LexicalEntry {
 //     same IRI grounds it. ResourceRef → Exp::Var(iri) in the program layer.
 resource lexicon:e_brca1 : lexicon:LexicalEntry {
     lexicon:form     = "BRCA1";
-    lexicon:cat      = type_expr( lexicon:cat_np );
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene) );
     lexicon:sem      = lexicon:brca1;
     lexicon:sem_type = type_expr( lexicon:Gene );
     lexicon:sense    = "urn:eigenius:lexicon:brca1";
     lexicon:grade    = epistemic:declared;
 }
 
-// (3) transitive verb → a PREDICATE (EigonAxiom). ⟦(S\NP)/NP⟧ = Subj→Obj→Prop.
+// (2b) a second named entity (a CellLine) — the subject NP for the parser's
+//      worked sentence "HeLa depends on BRCA1".
+resource lexicon:e_hela : lexicon:LexicalEntry {
+    lexicon:form     = "HeLa";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:CellLine) );
+    lexicon:sem      = lexicon:hela;
+    lexicon:sem_type = type_expr( lexicon:CellLine );
+    lexicon:sense    = "urn:eigenius:lexicon:hela";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (3) transitive verb → a PREDICATE (EigonAxiom), category `(S\NP)/NP`,
+//     type-indexed as fwd(bwd(cat_s, cat_np(CellLine)), cat_np(Gene)). Object-
+//     first (see the note): ⟦cat⟧ = Gene → CellLine → Prop = typeof(depends_on).
 resource lexicon:e_depends_on : lexicon:LexicalEntry {
     lexicon:form     = "depends on";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s, lexicon:cat_np), lexicon:cat_np) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s, lexicon:cat_np(lexicon:CellLine)), lexicon:cat_np(lexicon:Gene)) );
     lexicon:sem      = lexicon:depends_on;
     lexicon:sem_type = type_expr( lexicon:Gene -> lexicon:CellLine -> Prop );
     lexicon:sense    = "wn:depend.v.01";
     lexicon:grade    = epistemic:declared;
 }
 
-// (4) intersective adjective → a PREDICATE. ⟦N/N⟧ here is the predicate
-//     CellLine→Prop; the Σ-refinement ("primary cell line" = Σ x:CellLine.
-//     is_primary x) is produced by the composition rule and realized as a
-//     CLASS (a record), since type_expr has no inline Σ — records come from
-//     class declarations. That restriction IS the design: Class = the Σ.
+// (4) adjective → a PREDICATE (EigonAxiom), given in its **predicative** form
+//     `S\NP` over CellLine — bwd(cat_s, cat_np(CellLine)) — so ⟦cat⟧ =
+//     CellLine → Prop = typeof(is_primary). The attributive N/N use ("primary
+//     cell line" = Σ x:CellLine. is_primary x) is derived by a type-shifting
+//     composition rule and realized as a CLASS (a record), since type_expr has
+//     no inline Σ — records come from class declarations (Class = the Σ). That
+//     type-shift is future work; the predicative form is what ⟦·⟧ checks here.
 resource lexicon:e_primary : lexicon:LexicalEntry {
     lexicon:form     = "primary";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_n, lexicon:cat_n) );
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s, lexicon:cat_np(lexicon:CellLine)) );
     lexicon:sem      = lexicon:is_primary;
     lexicon:sem_type = type_expr( lexicon:CellLine -> Prop );
     lexicon:sense    = "wn:primary.a.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (5) a GENERAL transitive verb → predicate typed at the supertype. Category
+//     (S\NP[Entity])/NP[Entity]; ⟦cat⟧ = Entity → Entity → Prop = typeof(affects).
+//     Unlike `depends_on` (narrowly typed Gene→CellLine), this composes with
+//     Gene/CellLine arguments by subsumption — Gene, CellLine <: Entity. Witnessed
+//     by parser_composes_general_verb_via_subsumption ("HeLa affects BRCA1").
+resource lexicon:e_affects : lexicon:LexicalEntry {
+    lexicon:form     = "affects";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s, lexicon:cat_np(lexicon:Entity)), lexicon:cat_np(lexicon:Entity)) );
+    lexicon:sem      = lexicon:affects;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:affect.v.01";
     lexicon:grade    = epistemic:declared;
 }
 

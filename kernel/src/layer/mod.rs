@@ -718,6 +718,41 @@ impl Layer {
             .filter_map(move |iri| self.get_resource(iri).map(|r| (iri.clone(), r)))
     }
 
+    /// Reflexive–transitive `core:subclass_of` closure: is `sub` equal to, or a
+    /// transitive subclass of, `super_`? The kernel's single foundation authority
+    /// for CN-as-types subsumption (Luo 2012 — `luo2012cnt` / `luo2012coercive`):
+    /// the `EigonClass` subtype rule (`nbe::check`), the `Validator`'s instance-of
+    /// checks, and EigenQL pattern matching all decide subclass membership here.
+    /// Cycle-guarded.
+    pub fn is_subclass_of(&self, sub: &Iri, super_: &Iri) -> bool {
+        if sub == super_ {
+            return true;
+        }
+        let Ok(prop) = Iri::parse(crate::ontology::well_known::PARENT_CLASSES) else {
+            return false;
+        };
+        let mut stack = vec![sub.clone()];
+        let mut seen: BTreeSet<Iri> = BTreeSet::new();
+        while let Some(cur) = stack.pop() {
+            if !seen.insert(cur.clone()) {
+                continue;
+            }
+            let Some(def) = self.resolve(&cur) else {
+                continue;
+            };
+            let Some(parents) = def.get(&prop) else {
+                continue;
+            };
+            for parent in parents.as_iri_array() {
+                if parent == *super_ {
+                    return true;
+                }
+                stack.push(parent);
+            }
+        }
+        false
+    }
+
     /// Iterate over the merged view across the entire chain (top layer wins
     /// for duplicate IRIs). Materialises the merged set eagerly for
     /// determinism; callers who need lazy iteration over very large chains

@@ -641,6 +641,19 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         // in scope can witness subtyping between neutral sizes.
         (e, t) => {
             let t1 = check_infer(ctx, e)?;
+            // CN-as-types subsumption (Luo 2012; D62 §8.6): a value of a subclass
+            // type checks against its superclass type — the inclusion-coercion
+            // fragment of coercive subtyping, honoring the ontology's declared
+            // `core:subclass_of` lattice as the `EigonClass` subtype rule. This
+            // relaxation lives ONLY at the directional check boundary; definitional
+            // equality (`eq_nf`) stays exact.
+            if let (Val::EigonClass(sub), Val::EigonClass(sup)) = (&t1, t) {
+                if let Some(layer) = &ctx.layer {
+                    if layer.is_subclass_of(sub, sup) {
+                        return Ok(());
+                    }
+                }
+            }
             subtype_of_with_hyps(ctx.rho.len(), &t1, t, &ctx.size_tso)
         }
     }

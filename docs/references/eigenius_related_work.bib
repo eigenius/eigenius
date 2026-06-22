@@ -339,8 +339,8 @@
 % records-first: a record type (labelled fields of types) is exactly the
 % Class-as-record-signature Eigenius uses (requires/recommends as fields; a
 % Resource is a record = a witness). A mature semantics natively on the substrate
-% Eigenius already is. (Luo, Carpenter, Ranta to join this section in the
-% prior-art pass.)
+% Eigenius already is. (Carpenter and Luo now in this section; Ranta / GF still to
+% join in a later prior-art pass.)
 % -----------------------------------------------------------------------------
 
 @book{cooper2023perception,
@@ -390,6 +390,55 @@
                categories AS MTT semantic types, unifying categorial composition
                with the type substrate. Characterized from the abstract + preface
                + TOC + free appendices (main case-study chapters paywalled).}
+}
+
+% Z. Luo's focused 2012 primaries — the D18 anchor that Chatzikyriakidis & Luo
+% (2020) above is the comprehensive reference for. Together they are the warrant
+% for honoring core:subclass_of as subsumption in the checker (D62 §8.6).
+@inproceedings{luo2012cnt,
+  author    = {Luo, Zhaohui},
+  title     = {Common Nouns as Types},
+  booktitle = {Logical Aspects of Computational Linguistics (LACL 2012)},
+  editor    = {B{\'e}chet, Denis and Dikovsky, Alexandre},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {7351},
+  pages     = {173--185},
+  publisher = {Springer},
+  year      = {2012},
+  doi       = {10.1007/978-3-642-31262-5_12},
+  note      = {CNs-as-types: a common noun denotes a TYPE, not a predicate over
+               entities --- so a Class IS a type, the exact move Eigenius makes
+               (EigonClass : Set; "cell line" -> the type CellLine, D62 §8.6).
+               This is what makes cat_np(T) type-indexing well-founded. Subsumption
+               between CNs is coercive subtyping (Gene <= Entity), so a general
+               predicate typed at a supertype applies to specific-typed arguments
+               without re-typing: the primary warrant for reflecting
+               core:subclass_of as the EigonClass subtype rule (the
+               inclusion-coercion fragment). Author copy (open):
+               cs.rhul.ac.uk/home/zhaohui/LACL12.pdf. DOI verified via dblp +
+               Springer (LACL 2012 = LNCS 7351, pp. 173--185).}
+}
+
+@article{luo2012coercive,
+  author  = {Luo, Zhaohui},
+  title   = {Formal Semantics in Modern Type Theories with Coercive Subtyping},
+  journal = {Linguistics and Philosophy},
+  volume  = {35},
+  number  = {6},
+  pages   = {491--513},
+  year    = {2012},
+  doi     = {10.1007/s10988-013-9126-4},
+  note    = {The focused primary for coercive subtyping as the MTT-semantics
+               device for selectional restrictions, copredication, and multiple
+               categorization: an argument slot at type A admits a value of type B
+               via a coherent coercion B -> A; the inclusion case B <= A is
+               subsumption. This is the mechanism behind "depends on : Entity ->
+               Entity -> Prop" admitting Gene / CellLine arguments because Gene,
+               CellLine <= Entity --- i.e. behind making the kernel's EigonClass
+               subtype check consult core:subclass_of (D62 §8.6). Companion to the
+               comprehensive Chatzikyriakidis & Luo (2020). Author copy (open):
+               cs.rhul.ac.uk/~zhaohui/LP12final3.pdf. DOI verified via Springer +
+               PhilPapers (LUOFSI); Ling.&Phil. 35(6):491--513, 2012.}
 }
 
 % Parsing algorithm for the D62 engine's composition / parsing front-end.
