@@ -1,0 +1,162 @@
+// ════════════════════════════════════════════════════════════════════
+// D62 §8 — the lexicon layer, drafted.
+// ════════════════════════════════════════════════════════════════════
+//
+// A categorial lexicon whose semantic content is native EigenTT — proving
+// the D62 thesis at the smallest scale: *we do not need a new term language
+// for the lexicon; the kernel already is one.* The four worked entries are
+// the four archetypes a categorial lexicon must cover, each mapped onto an
+// existing kernel constructor:
+//
+//   N    common noun  → a TYPE        (CN-as-type)        : EigonClass
+//   NP   named entity  → a WITNESS     (by reference)      : ResourceRef → Var
+//   (S\NP)/NP  t. verb → a PREDICATE   (typed constant)    : EigonAxiom
+//   N/N  adjective     → a PREDICATE   (Σ-refinement on composition) : EigonAxiom
+//
+// A lexical entry is itself a Resource (a record). It binds a surface `form`
+// to (a) its categorial `cat` (a value of the inductive `lexicon:Cat`), (b) its `sem` — a reference to kernel-checked
+// semantic content, (c) its `sem_type` — the EigenTT type ⟦cat⟧ that content
+// inhabits, written as a real `type_expr`, (d) a grounding `sense`, and (e)
+// an epistemic `grade` (the canonical reflection four-grade vocabulary).
+//
+// VALIDATION CONTRACT (the Expressible gate, witnessed by
+// kernel/tests/lexicon_validates.rs): the layer compiles against
+// core→reflection(+eigentt) and the kernel Validator reports 0 errors. Every
+// piece is independently kernel-checked — each `axiom` signature, the
+// `CellLine`/`Gene` classes, the `brca1` resource against its class, every
+// `sem_type` lowered as EigenTT, and every entry against `LexicalEntry`.
+//
+// SCOPE / honesty (D62 §7 staging): v0 checks each piece; it does NOT yet
+// emit a single kernel proposition `typeof(sem) = ⟦sem_type⟧` (the entry-
+// level Semantic Felicity Condition). That auto-check is the Phase-2
+// faithfulness component; here the alignment is by-construction + the
+// `sem_type` is the machine-readable obligation a CQ-runner will discharge.
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace epistemic  = "urn:eigenius:reflection:epistemic";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace lexicon    = "urn:eigenius:lexicon";
+
+// ── Demo domain types the worked entries ground against ───────────────
+// A real lexicon's `sem` targets live in the domain ontologies it is built
+// over; these two stand in so the four entries type-check end to end.
+class lexicon:Gene {
+    description = "A gene (demo domain type). A common noun denotes a TYPE — CN-as-type, the kernel's native model: a class IS a type (EigonClass : Set).";
+}
+class lexicon:CellLine {
+    description = "A cell line (demo domain type).";
+}
+
+// ── The category algebra: categorial types as an inductive ────────────
+// A category is structured, not a string: Atom | A/B | A\B. Making it an
+// inductive means (a) it cannot be malformed — the kernel checks it; (b)
+// the composition rules pattern-match on it; (c) the homomorphism
+// ⟦cat⟧ → sem_type is a *recursor* over this type — the hinge that makes the
+// felicity check `typeof(sem) = ⟦cat⟧` mechanizable (D62 §2 stage 5), not
+// deferred prose. `fwd(A, B)` = A/B (seeks a B on the right → A); `bwd` = A\B.
+data lexicon:Cat {
+    cat_s,                          // S  — sentence
+    cat_n,                          // N  — common noun
+    cat_np,                         // NP — entity
+    fwd(lexicon:Cat, lexicon:Cat),  // A/B — forward slash
+    bwd(lexicon:Cat, lexicon:Cat),  // A\B — backward slash
+}
+
+// ── Predicates: verbs and adjectives as typed opaque constants ────────
+// EigonAxiom — a predicate is a typed constant in the chain, NOT an ad-hoc
+// invented proposition symbol. Its proofs are grounding witnesses, not
+// enumerated constructors, which is why `axiom` (not `data`) is faithful.
+axiom lexicon:depends_on : lexicon:Gene -> lexicon:CellLine -> Prop
+axiom lexicon:is_primary : lexicon:CellLine -> Prop
+
+// ── A committed resource the proper-noun entry references by IRI ──────
+resource lexicon:brca1 : lexicon:Gene {
+    core:description = "The BRCA1 gene — a committed chain resource. The named-entity entry's `sem` is a ResourceRef to this; that same IRI is its grounding `sense`.";
+}
+
+// ── The lexicon schema ────────────────────────────────────────────────
+class lexicon:LexicalEntry {
+    description = "One categorial lexical entry: a surface form bound to its category, its EigenTT semantics (by reference) + the type that semantics inhabits, a grounding sense, and an epistemic grade. The unit the D62 bootstrap loop (§8) produces.";
+    requires   lexicon:form, lexicon:cat, lexicon:sem, lexicon:sem_type, lexicon:grade;
+    recommends lexicon:sense;
+}
+
+property lexicon:form : core:string {
+    description = "The surface form / lemma (concrete side; GF's abstract/concrete split).";
+    domain lexicon:LexicalEntry;
+}
+property lexicon:cat : core:resource {
+    description = "The categorial type as a value of the inductive lexicon:Cat (Atom | A/B | A\\B), carried as a type_expr-encoded EigenTT term — NOT a string. Kernel-checked, pattern-matchable, and the source of the ⟦cat⟧ → sem_type homomorphism.";
+    class_types eigentt:TypeExpr;
+    domain lexicon:LexicalEntry;
+}
+property lexicon:sem : core:resource {
+    description = "Reference to the kernel-checked semantic content: a class (noun → EigonClass), an axiom (verb/adjective → EigonAxiom), or a committed resource (named entity → ResourceRef → Var). Heterogeneous by design — the three things a lexicon must distinguish.";
+    domain lexicon:LexicalEntry;
+}
+property lexicon:sem_type : core:resource {
+    description = "The EigenTT type ⟦cat⟧ the `sem` content inhabits, as a real type_expr (eigentt:TypeExpr). The machine-readable felicity obligation: typeof(sem) = this.";
+    class_types eigentt:TypeExpr;
+    domain lexicon:LexicalEntry;
+}
+property lexicon:sense : core:string {
+    description = "Grounding / disambiguation key — a WordNet sense id or, for a named entity, the committed resource's IRI (sem and sense coincide there).";
+    domain lexicon:LexicalEntry;
+}
+property lexicon:grade : core:resource {
+    description = "Epistemic grade of the entry — the SAME reflection:EpistemicStatus the rest of the stack uses (not a parallel enum). The §8 loop climbs Observed → Declared → Derived → Verified.";
+    class_types reflection:EpistemicStatus;
+    allows_only epistemic:observed, epistemic:declared,
+                epistemic:derived, epistemic:verified;
+    domain lexicon:LexicalEntry;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// The four worked entries — one per archetype.
+// ════════════════════════════════════════════════════════════════════
+
+// (1) common noun → a TYPE. CN-as-type: ⟦N⟧ = Set, and the sem IS the class.
+resource lexicon:e_cell_line : lexicon:LexicalEntry {
+    lexicon:form     = "cell line";
+    lexicon:cat      = type_expr( lexicon:cat_n );
+    lexicon:sem      = lexicon:CellLine;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "wn:cell_line.n.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (2) named entity → a WITNESS, referenced by IRI. sem = the resource; the
+//     same IRI grounds it. ResourceRef → Exp::Var(iri) in the program layer.
+resource lexicon:e_brca1 : lexicon:LexicalEntry {
+    lexicon:form     = "BRCA1";
+    lexicon:cat      = type_expr( lexicon:cat_np );
+    lexicon:sem      = lexicon:brca1;
+    lexicon:sem_type = type_expr( lexicon:Gene );
+    lexicon:sense    = "urn:eigenius:lexicon:brca1";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (3) transitive verb → a PREDICATE (EigonAxiom). ⟦(S\NP)/NP⟧ = Subj→Obj→Prop.
+resource lexicon:e_depends_on : lexicon:LexicalEntry {
+    lexicon:form     = "depends on";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s, lexicon:cat_np), lexicon:cat_np) );
+    lexicon:sem      = lexicon:depends_on;
+    lexicon:sem_type = type_expr( lexicon:Gene -> lexicon:CellLine -> Prop );
+    lexicon:sense    = "wn:depend.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (4) intersective adjective → a PREDICATE. ⟦N/N⟧ here is the predicate
+//     CellLine→Prop; the Σ-refinement ("primary cell line" = Σ x:CellLine.
+//     is_primary x) is produced by the composition rule and realized as a
+//     CLASS (a record), since type_expr has no inline Σ — records come from
+//     class declarations. That restriction IS the design: Class = the Σ.
+resource lexicon:e_primary : lexicon:LexicalEntry {
+    lexicon:form     = "primary";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_n, lexicon:cat_n) );
+    lexicon:sem      = lexicon:is_primary;
+    lexicon:sem_type = type_expr( lexicon:CellLine -> Prop );
+    lexicon:sense    = "wn:primary.a.01";
+    lexicon:grade    = epistemic:declared;
+}
