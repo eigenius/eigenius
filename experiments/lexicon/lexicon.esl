@@ -160,3 +160,46 @@ resource lexicon:e_primary : lexicon:LexicalEntry {
     lexicon:sense    = "wn:primary.a.01";
     lexicon:grade    = epistemic:declared;
 }
+
+// ════════════════════════════════════════════════════════════════════
+// Composition — and WHERE the felicity check actually fires.
+// ════════════════════════════════════════════════════════════════════
+//
+// A sentence is built by applying a verb's sem to its argument NPs (nested
+// App). The felicity condition (D62 §2 stage 5) is: the assembled term must
+// type-check — a wrong argument category must be rejected.
+//
+// FINDING (witnessed against the kernel, not assumed): a proposition STORED in
+// a type_expr field is *lowered + D47-encoded, not type-checked*
+// (esl/compile.rs `lower_type_expr_to_exp` then `encode_type`). So storing
+// `s_gene_depends` below proves the composition is EXPRESSIBLE — it does NOT
+// exercise the felicity filter. The check fires only where a term is routed
+// through the checker (a program body, or a reasoning certificate at the commit
+// gate). The engine's "check" stage is an explicit step, not a side effect of
+// storage — a real D62 design constraint.
+//
+// So `s_gene_depends` is the stored, assembled proposition (Expressible). The
+// felicity FILTER itself — well-typed composition checks, argument-swapped
+// composition is REJECTED — is demonstrated through the program→check vehicle
+// in kernel/tests/lexicon_validates.rs (`felicity_filter_*`).
+
+class lexicon:Sentence {
+    description = "A composed sentence: a gloss + the EigenTT Prop its derivation assembles (the verb's sem applied to its argument NPs). The kernel checks the prop inhabits Prop — the felicity condition.";
+    requires lexicon:gloss, lexicon:prop;
+}
+property lexicon:gloss : core:string {
+    description = "Human-readable gloss of the sentence.";
+    domain lexicon:Sentence;
+}
+property lexicon:prop : core:resource {
+    description = "The assembled proposition (eigentt:TypeExpr) — verb sem applied to its arguments, kernel-checked to inhabit Prop.";
+    class_types eigentt:TypeExpr;
+    domain lexicon:Sentence;
+}
+
+// POSITIVE: "a gene depends on a cell line" — depends_on applied to NPs of
+// the categorially-required types. typeof = Prop ⇒ felicitous. Validates.
+resource lexicon:s_gene_depends : lexicon:Sentence {
+    lexicon:gloss = "a gene depends on a cell line";
+    lexicon:prop  = type_expr( forall (g : lexicon:Gene, c : lexicon:CellLine) => lexicon:depends_on(g, c) );
+}

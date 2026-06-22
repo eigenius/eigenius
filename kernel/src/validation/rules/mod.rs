@@ -19,10 +19,10 @@
 //! with `impl Validator { ... }` blocks split across files.
 
 pub(super) mod allows_only;
-pub(super) mod canonical_proposition;
 pub(super) mod class_types;
 pub(super) mod conditional;
 pub(super) mod domain;
+pub(super) mod eigentt_value;
 pub(super) mod format;
 pub(super) mod inductive;
 pub(super) mod is_a;

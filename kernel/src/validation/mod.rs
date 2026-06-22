@@ -103,13 +103,19 @@ pub enum ValidationRule {
     /// return the wrong type, or apply operators with mismatched
     /// arities before the resource lands on the chain.
     LambdaTypeMismatch,
-    /// A `reflection:canonical_proposition` property value (D49 §6)
-    /// fails to decode through the D47 type-fragment codec. The
-    /// resource is rejected at commit so malformed propositions never
-    /// reach the per-Layer witness index; without this gate a malformed
-    /// canonical proposition would silently absent the corresponding
-    /// `ChainWitness` rather than surfacing a diagnostic.
-    CanonicalPropositionMalformed,
+    /// An `eigentt:TypeExpr`-valued property carries a term that fails to
+    /// decode through the D47 codec — a malformed tree, an unresolved
+    /// `ConstRef`, or a `CtorApp` to an unknown ctor. The single decode
+    /// diagnostic for every eigentt slot (Rule 21, `eigentt_value.rs`);
+    /// generalizes the former canonical-proposition-only check, so malformed
+    /// propositions are rejected at commit and never silently absent the
+    /// corresponding `ChainWitness`.
+    TypeExprMalformed,
+    /// An `eigentt:TypeExpr`-valued property decodes but does not type-check
+    /// against the chain — the Semantic Felicity Condition (e.g. a predicate
+    /// applied to the wrong argument type, an application of a non-function).
+    /// Caught by `check_infer` (Rule 21).
+    TypeExprIllTyped,
 }
 
 impl fmt::Display for ValidationError {
@@ -226,20 +232,17 @@ impl Validator {
                 // the leftmost operator's declared arity (D32 §5.4 /
                 // Phase 19d.0.d). No-op for non-FormulaTerm values.
                 errors.extend(self.check_formula_term_arity(prop_def, value, prop_iri, &res_id));
+
+                // Rule 21: eigentt:TypeExpr fields must decode AND type-check
+                // against the chain — generalizes Rule 20's decode-only check
+                // to every type_expr slot; lands the deferred felicity check.
+                errors.extend(self.check_type_expr_well_typed(prop_def, value, prop_iri, &res_id));
             }
             // Rule 12 (open world): unknown properties are allowed
         }
 
         // Rule 13: Universe stratification (D6b §7, Phase 10b)
         errors.extend(self.check_universe_stratification(resource, &res_id));
-
-        // Rule 20: `reflection:canonical_proposition` decoder check
-        // (D49 §6). When present on a Declared / Observed / Derived
-        // resource, the value must decode cleanly through the D47
-        // type-fragment codec. Malformed propositions are rejected at
-        // commit so they never silently absent the corresponding
-        // `ChainWitness` from the per-Layer witness index.
-        errors.extend(self.check_canonical_proposition(resource, &res_id));
 
         // Rule 14: Class-definition reference integrity (eigenius#26).
         errors.extend(self.check_class_definition_references(resource, &res_id));
