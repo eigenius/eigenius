@@ -34,6 +34,10 @@ A generator implementation conforms to **D30 v1** if it emits the constructs def
 - **Embedding the full Eigon validation logic in Lean's type system.** The generator emits refinement predicates where Lean-expressible (§9); constraints that don't fit Lean's refinement-type discipline (e.g. arbitrary regex `core:pattern` constraints) become runtime checks on the constructor. Static lifting of all constraints to refinement types is a research project, not v1 scope.
 - **Generating proof obligations the user must discharge.** The mirror types are structural; format/constraint axioms become refinement predicates that, by construction, every decoded value satisfies (because the decoder enforced them). Users importing EigonFFI write proofs *about* mirror values that satisfy these refinements; the proof obligations the user faces are the user's own theorem statements, not generator-emitted artefacts.
 
+### 1.3 Prior art
+
+The "translate typed data into a proof assistant's type theory" move has a clean precedent in Lai et al.'s *Dependently Typed Knowledge Graphs* ([`lai2020dependently`]), which reproduces RDF + SPARQL in CIC/Coq with queries reformulated as types and answers as proof-carrying witnesses — the same "queries-as-types" shape this mirror serves on the Lean side. Carpenter's type-logical semantics ([`carpenter1997`]) is the compositional NL → typed-term precedent for building a term whose type is its meaning. Critically, the autoformalization-faithfulness literature (Herald [`gao2024herald`]; its audit in miniF2F-Lean Revisited [`ospanov2025minif2f`], finding ~97% LLM-judge faithfulness drops to ~66% under human evaluation; ReForm [`chen2025reform`]) shows that an LLM-judged or merely type-checking translation is *not* a faithful one — which is exactly why this spec pins a deterministic, re-derivable byte-level contract and why D28 §5.5 checks the Lean translation for *faithfulness*, not just type-correctness.
+
 ---
 
 ## 2. Output package layout

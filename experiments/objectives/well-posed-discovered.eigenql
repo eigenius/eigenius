@@ -1,0 +1,22 @@
+// Well-posedness gate: DISCOVERED (D61 §6). Mirrors well-posed-anchored.eigenql.
+//
+// A Milestone may not conclude while a CompetencyQuestion it names as a
+// discovery_target is OPEN (ungrounded). Run against an objective's branch:
+//   eigenius --endpoint http://localhost:50051 query --branch <obj> "$(cat this)"
+// An EMPTY result means the gate PASSES. Any returned row is a Milestone blocked on
+// undiscovered grounding (D58 §4) — the structural analogue, moved upstream into
+// grounding, of the reasoning skill's "fail closed".
+//
+// A CQ is GROUNDED iff its objective:grounded_by IRI resolves to a committed
+// resource (same shape as the Anchored gate's witness check). OpenCQ negates that;
+// Undiscovered joins a Milestone's discovery_target array (D59 `[... ?q ...]`) to an
+// OpenCQ. The recursive-free negation is evaluated in stratum order.
+DEFINE Grounded(?q) FROM
+    MATCH "urn:eigenius:objective:CompetencyQuestion"(?q) { "urn:eigenius:objective:grounded_by": ?w },
+          ?c {}
+    WHERE ?w = ?c
+DEFINE OpenCQ(?q) FROM MATCH "urn:eigenius:objective:CompetencyQuestion"(?q) {}, NOT Grounded(?q) {}
+DEFINE Undiscovered(?m) FROM
+    MATCH "urn:eigenius:objective:Milestone"(?m) { "urn:eigenius:objective:discovery_target": [... ?q ...] },
+          OpenCQ(?q) {}
+MATCH Undiscovered(?m) {} RETURN [] { "urn:eigenius:objective:undiscovered": ?m }

@@ -225,6 +225,10 @@ These are the risks specific to the experimental design. Architectural-soundness
 
 **Phase 0 fails to converge.** If after a week of Phase 0 iteration the three-condition runner is not producing comparable artifacts, the harness design is wrong; revisit before committing to Phase 1.
 
+## 8a. Prior art — the typed-KG-generation benchmark landscape
+
+The external landscape for generating typed knowledge graphs (and formal statements) from text frames condition C's metrics. Text2KGBench ([`mihindukulasooriya2023text2kgbench`]) scores both ontology conformance and subject/relation/object hallucination — the closest analogue to what the discipline thesis measures here. LLMs4OL ([`babaeigiglou2023llms4ol`]) decomposes ontology learning into term typing, taxonomy discovery, and non-taxonomic relation extraction (and finds foundational LLMs alone insufficient for high-reasoning ontology construction). SPIRES ([`caufield2024spires`]) is the schema-constrained, ontology-ID-grounded extraction precedent — structurally the same as the pilot's typed-tool-boundary workaround (§9, D51 §12). The autoformalization-faithfulness work (Herald / miniF2F-Lean Revisited / ReForm; see D28 §1.3, D30 §1.3) is the corresponding cautionary landscape on the proof side.
+
 ## 9. Out of scope for the pilot
 
 - **Soundness tally as a headline metric** (the earlier framing). Re-evaluated as a secondary finding (§6.3); not the primary axis.

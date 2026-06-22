@@ -26,6 +26,10 @@ Under D14, an institution is registered by committing five kinds of typed Resour
 - This is not a privileged integration. Lean 4 is one verification institution among potentially many (Rocq, Isabelle/HOL, SMT checkers, domain-specific certifiers). The protocol accommodates them all on equal footing.
 - This is not a replacement for the EigenTT type system in the kernel. EigenTT continues to check program composition; Lean 4 checks mathematical theorems.
 
+### 1.3 Prior art
+
+Verifying a knowledge representation's claims inside a proof assistant has direct precedent: Chatzikyriakidis & Luo ([`chatzikyriakidis-luo-2020`]) machine-check natural-language inferences in Coq, and Bekki's lightblue ([`bekki-lightblue`]) ships the Wani DTT prover as its native check stage — the model for using Lean as Eigenius's verification institution. The faithfulness-gap caveat applies equally here: an LLM-judged faithfulness check is not the real thing (Herald's ~97% by LLM-judge falls to ~66% under human evaluation per [`ospanov2025minif2f`]), which is why §5.5 re-checks the proof term *and* its correspondence rather than trusting an attestation.
+
 ## 2. Architectural position
 
 Lean 4 enters Eigenius as a registered institution under D14 — committing an `Institution` resource, the supporting ExportFormat / QueryClass declarations (no ImportFormats or Comorphisms in v1; see §3.4), and an `Institution` trait implementation. The kernel does not know Lean is special. It knows only that an institution at a given IRI has declared itself, including a `ProofCheck` QueryClass with `dispatch_role: AutoOnLoad` returning `Verdict`. When a `LeanProofTerm` resource enters the chain, that QueryClass fires automatically; if the verdict is `Holds`, the resource is admitted (and tagged *verified*); if `Fails`, the Load is rejected.

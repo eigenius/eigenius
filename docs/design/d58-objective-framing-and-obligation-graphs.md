@@ -48,9 +48,10 @@ which by the D39 commit gate entails every milestone Holds and every axiom is
 admitted. (A completed objective may emit a cited summary/report resource referencing
 those conclusions — but that is *not* a `bench:TaskOutput`; §6.)
 
-## 3. Well-posedness — the four admissibility gates (settled)
+## 3. Well-posedness — the admissibility gates (settled)
 
-Assessment = build the graph and check it passes four gates, each mechanically
+Assessment = build the graph and check it passes the admissibility gates — the four
+original below, plus **Discovered** (D61 §6, the fifth) — each mechanically
 checkable over the objective's layer:
 
 | Gate | Question | Check | Failure → action |
@@ -59,14 +60,19 @@ checkable over the objective's layer:
 | **Anchored** | every axiom has an admitted witness? | EigenQL: axioms lacking `IsObservedAs`/`IsDeclaredAs`/a citation | **ground** (cite/observe) or demote to a flagged Declared hypothesis |
 | **Reachable** | every milestone has a candidate evidence path? | an incoming warrant edge / plausible witness kind exists | decompose, or record **blocked** |
 | **Checkable** | every proposition's acceptance defined? | node states grade + witness kind + falsifier | sharpen until you can say what evidence satisfies it |
+| **Discovered** (D61 §6) | every load-bearing discovery target grounded before a milestone concludes? | EigenQL: a Milestone naming (via `objective:discovery_target`) a still-ungrounded `objective:CompetencyQuestion` (§5.5) | **ground** (discover/answer the open CQ) or record **blocked** |
 
-All four pass for the whole DAG ⇒ **well-posed** ⇒ the linear execute phases begin.
+All five pass for the whole DAG ⇒ **well-posed** ⇒ the linear execute phases begin.
 This is the framing-level analogue of "don't assert unwitnessed": *don't start
-deriving until the obligations are expressible, anchored, reachable, and checkable.*
-(**Realization (§5.3):** three of the four — Expressible, Checkable, and the
-presence half of Anchored — are enforced by the **type system at commit**, so
-"passes the gate" means "the frame loads"; only Reachable's graph property needs a
-runtime query.)
+deriving until the obligations are expressible, anchored, reachable, checkable, and
+discovered.* (**Realization (§5.3):** three of the original four — Expressible,
+Checkable, and the presence half of Anchored — are enforced by the **type system at
+commit**, so "passes the gate" means "the frame loads"; only Reachable's graph
+property needs a runtime query.) **Discovered** is the fifth member, introduced by
+**D61 §6**: a Milestone may not advance to *concluded* while a discovery target it
+names is ungrounded — a runtime query alongside Reachable/Anchored (§5.5). It is
+defined in D61, whose typed decision layer (`objective:CompetencyQuestion` +
+`objective:discovery_target`) extends this objective ontology.
 
 ## 4. The frame⇄ground fixpoint (settled)
 
@@ -244,10 +250,10 @@ ontology-strengthening exercise plus two queries, **not** a new institution crat
 
 ### 5.5 The runtime gates (implemented)
 
-The two checks not enforced by the type system are committed EigenQL queries,
+The checks not enforced by the type system are committed EigenQL queries,
 run on demand against an objective's branch. **An empty result means the gate
 passes**; any returned row is a recorded well-posedness finding (the objective is
-blocked there — §4). Both are live-validated against the D57 objective graph.
+blocked there — §4). All are live-validated against the D57 objective graph.
 
 - **Reachable** — [`experiments/objectives/well-posed-reachable.eigenql`](../../experiments/objectives/well-posed-reachable.eigenql).
   Transitive closure from the thesis over `depends_on` (D59 `[... ?n ...]`
@@ -257,6 +263,12 @@ blocked there — §4). Both are live-validated against the D57 objective graph.
 - **Anchored (referential)** — [`experiments/objectives/well-posed-anchored.eigenql`](../../experiments/objectives/well-posed-anchored.eigenql).
   Returns every Axiom whose `witness` IRI doesn't resolve to a committed resource.
   *Verified:* real Citation witnesses → 0; a dangling witness → flagged.
+- **Discovered** (defined in **D61 §6**) — [`experiments/objectives/well-posed-discovered.eigenql`](../../experiments/objectives/well-posed-discovered.eigenql).
+  Returns every Milestone naming (via `objective:discovery_target`) a
+  `objective:CompetencyQuestion` that is still ungrounded (no resolving
+  `objective:grounded_by`) — a milestone blocked on undiscovered grounding. The
+  fifth gate; the typed decision layer it queries is D61's extension of this
+  ontology.
 
 **Dispatch — documented queries, not a materialized verdict.** Well-posedness is a
 query the protocol runs (consistent with §2's "completion is a query"), not a

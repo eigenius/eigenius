@@ -63,6 +63,18 @@ rationale. If you want it to count as fact, it must become Derived (run it) or
 Verified (prove it). "I think the bug is X" is a Declared hypothesis until a
 Derived witness (a reproduction, a test) discharges it.
 
+**A `Holds` is only the *first* oracle.** A `Holds` proves the certificate
+**type-checks against an admitted witness** — *structural/logical* validity (D61's
+**oracle #1**). It does **not** prove the right grounding was *discovered*, nor that
+an encoding is **faithful** to its source (D61's **oracle #2** — semantic
+faithfulness, which the gate cannot give). Two encodings can both type-check while
+only one is faithful (D57 #9: `core:domain` vs `core:recommends` — both well-formed,
+only the latter true to the spec). So a `Holds` is necessary, not sufficient: still
+verify intent/grounding. A *mechanized* faithfulness/grounding check is graded
+**Derived** (a program scored it — the LLM-judge inflates, D61), **never
+auto-Verified**; only a human spot-check or a proof-level correspondence reaches
+**Verified**.
+
 **Reach for the strongest grade the mechanics allow — don't settle for Declared.**
 A claim you'd write as Declared often has a stronger *mechanical* witness available:
 content-hash a file → **Observed**; run the producer as a program *through the kernel*
@@ -243,25 +255,30 @@ mechanical.
    sentence without an admitted witness.)
 2. **Check before you conclude.** The witness *is* the check; produce it before
    the claim, never after.
-3. **Fail closed.** A `Fails` / mismatch ⇒ investigate + record, never silently
+3. **Checker-passing ≠ faithful — verify intent/grounding, not just type.** A
+   `Holds` is oracle #1 (the certificate type-checks); it is not evidence the right
+   grounding was *discovered* or that an encoding is faithful (oracle #2). A
+   mechanized faithfulness/grounding check is **Derived**, never auto-Verified —
+   only human spot-check or proof reaches Verified. (D61.)
+4. **Fail closed.** A `Fails` / mismatch ⇒ investigate + record, never silently
    route around.
-4. **Anchor new territory.** Don't reason unaided in unfamiliar ground; bring
+5. **Anchor new territory.** Don't reason unaided in unfamiliar ground; bring
    real, CiTO-cited prior knowledge first. Never fabricate a source.
-5. **Ground in the documentation, cite as you decide — proactively.** When mapping a
+6. **Ground in the documentation, cite as you decide — proactively.** When mapping a
    standard, read its prose spec (not just its data), and the moment a decision turns
    on a documented fact, commit the citation carrying it *in the same step*. Don't wait
    to be asked (D57: the schema.org data-model conformance fact was cited only on
    prompt).
-6. **Refine the frame as you go; don't retrofit.** Re-enter the frame at each subgoal
+7. **Refine the frame as you go; don't retrofit.** Re-enter the frame at each subgoal
    boundary — sharpen / re-grade / decompose / reframe as you learn (D58 §4.1) — rather
    than executing against a stale high-level frame and formalizing after the fact. Reach
    for the strongest grade the mechanics allow *as the evidence lands*, not in a cleanup
    pass.
-7. **Plan on chain.** Deviations must be structural diffs, not prose drift.
-8. **Same claim vs distinct evidence is inspectable.** Two witnesses for one
+8. **Plan on chain.** Deviations must be structural diffs, not prose drift.
+9. **Same claim vs distinct evidence is inspectable.** Two witnesses for one
    `canonical_proposition` is corroboration; two propositions is distinct
    evidence. Don't call distinct evidence "redundant" — the types tell you which.
-9. **Match measure to claim; reproduce the number, not just the sign.**
+10. **Match measure to claim; reproduce the number, not just the sign.**
 
 ## Weight & escape hatch
 
