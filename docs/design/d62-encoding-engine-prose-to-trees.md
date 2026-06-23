@@ -16,6 +16,12 @@ engine targets), [D18 ontology-as-types](d18-ontology-as-types-resolution.md) (L
 nouns-as-types half), [D43 retrieval](d43-text-and-vector-retrieval.md) (sense grounding +
 retrieve-first), the `grounding` skill (how §4 must be authored).*
 
+*The deterministic **DCG generation engine** — the categorial type system, the parser
+(combinators + chart), and the English lexicon (content + function-word track) — is specified
+end-to-end in **[D63](d63-dcg-engine-english-grammar.md)**, which lifts the realized core from
+here (§3, §8.6–8.8.1). D62 is the **encoding architecture that consumes it**: the LLM augmentation
+path (§8.7.8), the faithfulness boundary (§5, D61), and the encoding institution (§6, §8.8.2–8.8.5).*
+
 ---
 
 ## 1. Motivation & relation to D61
@@ -329,29 +335,38 @@ institution-theoretic obligations is itself a D62 design item, not claimed as se
 
 ## 7. Build staging
 
-Each slice ships **with** D61's check, never before it:
-1. **Slice 1 (first real value):** extend **D8 `CompleteJson`**, schema-constrained to the D61
-   `verify:` / typed decision vocabulary, frame-assisted (FrameNet/VerbNet valence as the slot
-   guide) — emitting *candidate* trees straight into D61's check. No type-logical core yet; the
-   LLM proposes, D61 checks.
-2. **Slice 2:** the type-logical composition core (stage 2) — categorial derivation as the
-   compositional check, replacing free-form LLM structure with a checked one.
-3. **Slice 3:** broader parsing front-ends + the HOL→EigenTT target mapping (stage 4) at depth.
+The DCG **generation engine** — the categorial core, the parser, the lexicon — is staged in
+**[D63 §8](d63-dcg-engine-english-grammar.md)** (the Slice 0–6 plan; it is now the home for what this
+section used to sketch as "the type-logical composition core" and "broader parsing front-ends").
+D62's own staging is the **autoformalization layer** over that engine, and the discipline is
+unchanged: **each slice ships *with* D61's check, never before it** — the engine emits *candidate*
+trees (Derived), and D61's faithfulness oracle + the human boundary climb their grade (§5). The
+D62-specific slices are the **LLM augmentation path** (§8.7.8) feeding that same check, and the
+**encoding-institution** wiring (§6, §8.8.2–8.8.5).
 
 ## 8. Bootstrapping the lexicon
 
 The lexicon (stage 1) is the engine's **bottleneck** — and the only genuinely new linguistic
 resource (the composition rules are a small universal set; §3). It is bootstrapped from existing
 permissive resources, validated formally, and codified at a graded witness — never hand-built, never
-trusted unchecked. **Two complementary paths feed it:** a **deterministic structural import** of
-WordNet/VerbNet — the general English framework (**§8.7**) — and an **LLM-proposer loop** (§8.1–8.3)
-for what is genuine judgment (function-word categories, argument-type refinement, sense selection,
-and domain-specific augmentation). The structural bulk — synset→type, hypernym→subclass,
+trusted unchecked. **The primary build is two parts:** the **deterministic structural import** of
+WordNet — the general English *content* framework (**§8.7**, built) — and the **hand-authored
+function-word track** (the closed class that carries the compositional weight;
+[D63 §4–5](d63-dcg-engine-english-grammar.md)). The **LLM-proposer loop (§8.1–8.5) is now the
+*augmentation* path** (domain vocabulary + scale, §8.7.8), *not* the primary lexicon build. The
+structural bulk — synset→type, hypernym→subclass,
 frame→category — is *mechanical*; the LLM is reserved for where it is actually needed. Because
 compositionality is lexicalized in the type system (§8.4), validating the lexicon largely validates
 composition too.
 
 ### 8.1 Inputs — existing data, per entry-field + license
+
+> **Scope (since Path B).** §8.1–8.5 describe the **LLM-augmentation proposer loop** — the path for
+> *domain vocabulary and scale* (§8.7.8), **not** the primary lexicon build. The general content
+> lexicon is the deterministic WordNet import (§8.7, built); the function-word track is hand-authored
+> ([D63 §4–5](d63-dcg-engine-english-grammar.md)). The loop's propose → gate → battery → grade
+> *method* (§8.3) remains the augmentation/scale method, under the same kernel felicity gate + FraCaS
+> discipline — retained here as that method, not as the primary path.
 
 A lexical entry is `(form, sense, category, meaning-term, grounding)`. Each field is seeded from
 verified existing data (§4):

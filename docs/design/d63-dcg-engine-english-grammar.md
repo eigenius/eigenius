@@ -132,26 +132,144 @@ function-word track is what turns the content lexicon into a grammar of general 
 The function-word categories presuppose machinery the stub lacks. These three decisions gate all
 authoring and must be settled (and written up) first.
 
-**5.1 Features on `Cat`.** Add a feature dimension so `S[dcl] ≠ S[q]`, with finiteness, number/person
-agreement, and case. Decide the representation (parametrize the atoms vs. a feature-structure layer)
-and the unification discipline under composition. Features carry *semantic* import (`S[q]` denotes a
-question, not a `Prop`), so this touches `⟦·⟧`. *Source:* the CCGbank category/feature scheme
-(Hockenmaier & Steedman).
+**5.1 Features on `Cat` — parametrized atoms, erased-by-`⟦·⟧`, lattice-unified (settled).**
 
-**5.2 The combinator set + normal form.** Add **type-raising (T)** and **forward/backward composition
-(B)** to `apply` (today application-only), with a **normal-form constraint** (Eisner) to suppress the
-spurious ambiguity T+B introduce. Decide **multimodal slashes** (Baldridge — the modes `core-en`
-already uses, e.g. `mode="^"/"<"/"*"`) vs. a coarser global regime. *Source:* Steedman; Baldridge
+*The split (the crux).* **Mood is the only atomic feature that alters `⟦·⟧`.** Agreement
+(number/person), case, and finiteness are **syntactic routing only — fully erased** by the
+homomorphism: `⟦S[dcl,3sg]⟧ = ⟦S[dcl,pl]⟧ = Prop`. (Finiteness is syntactic *because we don't model
+tense*; if tense/aspect is added later, that — not finiteness per se — carries the semantic import.)
+**Gaps are not atomic features** — they are the slash structure (`⟦S/NP⟧ = Entity→Prop`), handled by
+the combinators (§5.2), not the feature payload.
+
+*Representation: parametrize the atoms, in the kernel inductive.* Each atom carries exactly its
+relevant features — no generic `feat` wrapper (not every atom takes every feature), no sibling/external
+layer (breaks K1 / complicates the recursor). Concretely this extends the **`lexicon:Cat` kernel
+inductive** (the Rust-enum sketch maps to ESL `data` decls):
+```
+data lexicon:Mood { dcl ; q ; imp }
+data lexicon:Num  { sg ; pl ; num_any }
+data lexicon:Fin  { fin ; bse ; to ; ng ; pss ; fin_any }
+data lexicon:Cat : Type 1 {
+    cat_s(Mood, Fin) ;        // mood semantic, fin erased
+    cat_n(Set, Num) ;         // type semantic, num erased
+    cat_np(Set, Num) ;        // (+ Case when pronouns land — deferred)
+    fwd(Cat, Cat) ; bwd(Cat, Cat)
+}
+```
+Erasure is then trivial: `denote_cat(cat_s(m,_)) = denote_mood(m)`, `cat_n(T,_) ↦ Set`,
+`cat_np(T,_) ↦ T`. The felicity invariant `⟦cat⟧ ≡ sem_type` is unaffected (erased features never reach
+`⟦·⟧`); `cat_subsumes` gains **feature-meet** alongside the existing `is_subclass_of` on the type `T`.
+
+*Value model + unification: a subsumption lattice, `Any` as Top, no logic variables.* Unification is
+the **meet `⊓`**: `Sg ⊓ Any = Sg`, `Sg ⊓ Pl = ⊥` (fail); `*_any` is the underspecified top. No
+Prolog-style feature variables (R5: simple, deterministic). The one genuinely category-polymorphic case
+is **coordination** (`and : (X\X)/X`, Slice 4): handle it as a **coordination rule that matches the two
+conjuncts' categories with feature-meet** — *not* plain binary application, but still no logic variables.
+For Slices 1–2 (no coordination) the meet lattice alone suffices.
+
+*Inventory: minimal.* Mood {dcl, q, imp}, Fin {fin, bse, to, ng, pss}, Num {sg, pl} (+ `*_any`).
+**Defer** Case (until pronouns) and Person (fold into agreement later). Not the CCGbank set
+(Penn-tailored, messy) — values only. *(Note: the `cat_np` `Case` slot is deferred from the inductive
+too, per K3's cheap re-import — diverges from the sketch, which showed it; reconcile if you'd rather
+bake the always-`Any` slot in now.)*
+
+*Import defaults: WordNet → `Any`, Morphy instantiates.* Imported atoms carry `*_any` (the verb "run"
+is fully underspecified). The morphological stage instantiates: Morphy reads "dogs" → (lemma "dog",
+`Num::Pl`); lookup **meets** the base category `N[Dog, Any]` with the token's features → `N[Dog, Pl]`.
+Keeps WordNet unbloated (R4). **Implementation consequence:** the `Lemmatizer` seam + `LexicalIndex`
+must return **(lemma, features)**, not bare lemma strings — Morphy knows which detachment rule fired, so
+it *has* the feature; the current `Vec<String>` API discards it. This is a Slice-1 change touching
+already-built code (`dcg::lemmatizer`, `dcg::lookup`, `MorphyLemmatizer`).
+
+*Question denotation: deferred to Slice 5.* The *eventual* `⟦S[q]⟧` is `Entity→Prop` (or a set of
+Props); until Slice 5, `S[q]` is a **syntactic tag only** (denotation trapped/`unimplemented!`), used so
+auxiliary inversion parses without polluting declaratives. Consistent with §5.3's deferral.
+
+*`denote_cat` location: engine-side Rust* until the inventory locks (post-Slice-3) — promoting to an
+in-kernel recursor while the lattice is still churning would force a kernel rebuild per added feature
+(§8.6 already defers the in-kernel recursor).
+
+*Source:* CCGbank feature scheme (Hockenmaier & Steedman — values, not the full set); Steedman
+(coordination); the CN-as-types substrate (§2).
+
+**5.2 The parse substrate and combinator set.**
+
+*Substrate — CKY (settled), not Earley/LRE(k).* The chart stays **CKY-style bottom-up** (as the stub
+is). The LRE(k) hybrid (McLean & Horspool, `references/publications/FastEarleyParser.pdf`) gets its
+speed by precomputing LR(k) item sets **from a grammar's productions** over a finite nonterminal set —
+and CCG has neither: it is lexicalized + combinatory (a small schematic combinator set + a huge
+lexicon) with an **unbounded** category set (composition/type-raising *generate* categories), so there
+is nothing to precompute over short of CFG-approximating the grammar, which discards the very
+categorial/dependent-type structure that is the point. LR/Tomita methods also win only on
+**low-conflict** grammars, whereas categorial combination is high-ambiguity (the LR advantage
+evaporates). CKY is the established CCG substrate (C&C, EasyCCG, depccg), fits our binary/unary
+combinators directly, and — at sentence scale (n ≈ 10–30), where the n³ asymptotics are moot — its
+transparency beats Earley + SPPF / LR-table machinery for a *verifiable kernel component*. Crucially,
+the real bottlenecks are **off the chart** and untouched by this choice: lexical ambiguity → the
+felicity gate + sense priors + selection (the supertagging analog); spurious ambiguity → Eisner
+normal form. *(Earley would earn its place only under a production-based phrase-structure grammar —
+not our path — or for incremental/streaming parsing — not a requirement.)*
+
+*Combinators.* Within CKY, extend `apply` (today application-only) with **type-raising (T)** and
+**forward/backward composition (B)** — type-raising via **bounded unary closure** in each cell (a
+fixed target set → termination) — plus an **Eisner normal-form** constraint to suppress the spurious
+ambiguity T+B introduce. Decide **multimodal slashes** (Baldridge — the modes `core-en` uses, e.g.
+`mode="^"/"<"/"*"`) vs. a coarser global regime. *Source:* Steedman; Baldridge
 (`references/publications/Baldridge_dissertation.pdf`); Eisner
 (`references/publications/Eisner-…Normal Form Parsing.pdf`).
 
-**5.3 MTT quantifier semantics.** Decide how a determiner builds its `sem` in EigenTT. The concrete
-precedent (lightblue `English/Lexicon.hs`): the indefinite is category `(S/(S\NP))/N` with a **nested
-Σ-type** semantics (`Σ (Σ Entity (N x)) (VP (π₁ …))` — the dependent-sum encoding of `∃`). Decide the
-generalized-quantifier vs. Σ/Π vs. DTS-underspecification treatment, and whether the EigenTT term
-notation needs extending to express it (`∃`/`Σ`). *Source:* lightblue DTS; Chatz & Luo; the TT
-appendices (records = Σ-types). **This is the hard half** — the categories are largely facts; the
-dependent-type meanings are the genuine design.
+**5.3 The semantic universe and quantifier semantics — `⟦cat_s⟧ = Prop` (settled).**
+
+*Decision.* A sentence denotes a **`Prop`** (`Sort 0`), **not** a proof-relevant `Set`. Determiners
+quantify with Σ/Π **over the noun-type**, but the sentence-level existential closes into `Prop` via
+the **impredicative ∃**, so the engine's output is always a `Prop`.
+
+*Why — the D46 constraint.* The reasoning layer (goals, objectives, hypotheses, the stored
+`lexicon:prop` propositions) is built on [D46](d46-prop-universe-and-proof-irrelevance.md)'s
+**proof-irrelevant `Prop`**, and the engine exists to feed it — an encoded statement *becomes* such a
+proposition. A proof-*relevant* `Set` meaning (the DTS/lightblue default, where Σ-existentials live in
+`Set`) cannot be handed where the reasoning layer expects a `Prop`: a universe *and* a
+proof-relevance mismatch at the boundary. So `⟦cat_s⟧` stays `Prop`. (This is what makes Option A —
+proof-relevant sentence meanings — untenable for us, despite the DTS lineage.)
+
+*The forms — CN-as-types.* Nouns are types (`EigonClass`), so determiners quantify over the noun-type
+directly, with `N ≤ Entity` supplied by our existing `is_subclass_of` coercion:
+- `every = λN. λV. Π x:N. V(x)` : `Set → (Entity→Prop) → Prop`
+- `a / some = λN. λV. ∃ x:N. V(x)` : `Set → (Entity→Prop) → Prop`, where
+  `∃ x:N. P := Π C:Prop. (Π x:N. P → C) → C` is the **impredicative existential** (D46 — Π *into*
+  `Prop` is `Prop`).
+
+This is **not** lightblue's `Σ (Σ Entity (N x)) …` Entity-plus-predicate form — that's the
+entities+predicates variant; we are CN-as-types, so the noun *is* the domain (simpler, and it reuses
+the subsumption we already built). The conflict was always narrow: verb predicates already target
+`Prop` (`depends_on : … → Prop`), universals are Π-into-`Prop`, and only the existential needed the
+impredicative encoding — so the **Slice-2 milestone stands as written**:
+`every gene affects a cell line = Π g:Gene. ∃ c:CellLine. affects(g,c) : Prop`.
+
+*Σ is retained* where it is natural — the noun-records themselves (`EigonClass` *is* a Σ-type in the
+kernel, `check.rs`) and intermediate composition — just not as the sentence-level existential.
+
+*No term-notation extension, no prover, NbE for free.* EigenTT already has `Sig` / `Pi` / `Pair` /
+`Fst` / `Snd` (`kernel/src/nbe/term.rs`), so the forms are directly expressible. The kernel is an NbE
+machine: compose `sem` in the `Val` domain through the chart and `readback` a β-normal `Exp` once for
+the gate (no substitution, no capture). Producing and **type-checking** the tree is *decidable* — **no
+proof-search engine**. A prover is needed only downstream (entailment for the FraCaS battery; anaphora
+resolution if added) and fits as a *dispatched institution* (like the Lean/R/Julia computations),
+never a core engine dependency.
+
+*Cross-reference is structural, not Σ-witness-based.* DTS needs proof-relevant Σ because witnesses are
+its only handle on entities; our antecedents are **committed resources referenced by IRI** (the chain
+— a `lexicon:Sentence` is a resource, D62 §8.8). So linguistic anaphora resolves to a *resource
+reference*, which is the payoff that would otherwise motivate proof-relevant meanings.
+
+*Escape hatch (door open, D46 untouched).* If intra-sentential **donkey anaphora** ever needs a
+reusable witness, compose *that sentence* in `Set` (genuine Σ) and **truncate to `Prop` at the
+sentence boundary** (`‖Σ x:N. P‖ := Π C:Prop. (Σ x:N. P → C) → C : Prop`). Proof-relevance stays
+local to encoding one sentence; the reasoning layer only ever sees `Prop`.
+
+*Source:* [D46](d46-prop-universe-and-proof-irrelevance.md); Chatz & Luo + the TT appendices
+(CN-as-types, records = Σ); lightblue DTS (the entities+predicates contrast); `kernel/src/nbe/term.rs`
+(`Sig`/`Pi`/`Pair`).
 
 ## 6. The pipeline & the integration seam
 
@@ -216,6 +334,7 @@ Local + license-cleared (the Path B shelf):
 | CGEL — Huddleston & Pullum (`references/publications/`) | descriptive inventory / distinctions | reference (copyrighted) |
 | Baldridge dissertation (`references/publications/`) | multimodal CCG (slash modes) | reference |
 | Eisner, *Normal-Form Parsing* (`references/publications/`) | spurious-ambiguity control | reference |
+| McLean & Horspool, *A Faster Earley Parser* (`references/publications/`) | parser-substrate comparison (CKY chosen over Earley/LRE(k), §5.2) | reference |
 | TT Appendices (`references/publications/TT Appendices/`) | MTT/TTR semantics (records = Σ) | reference |
 | Chatz & Luo 2020; Luo CN-as-types / coercive; Carpenter; Cooper | the formal spine (bib) | verified anchors |
 
