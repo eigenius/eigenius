@@ -77,7 +77,7 @@ resource lexicon:hela : lexicon:CellLine {
 // (1) common noun → a TYPE. CN-as-type: ⟦cat_n⟧ = Set, and the sem IS the class.
 resource lexicon:e_cell_line : lexicon:LexicalEntry {
     lexicon:form     = "cell line";
-    lexicon:cat      = type_expr( lexicon:cat_n );
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:sg) );
     lexicon:sem      = lexicon:CellLine;
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "wn:cell_line.n.01";
@@ -87,7 +87,7 @@ resource lexicon:e_cell_line : lexicon:LexicalEntry {
 // (2) named entity → a WITNESS, referenced by IRI.
 resource lexicon:e_brca1 : lexicon:LexicalEntry {
     lexicon:form     = "BRCA1";
-    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene) );
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:num_any) );
     lexicon:sem      = lexicon:brca1;
     lexicon:sem_type = type_expr( lexicon:Gene );
     lexicon:sense    = "urn:eigenius:lexicon:brca1";
@@ -98,7 +98,7 @@ resource lexicon:e_brca1 : lexicon:LexicalEntry {
 //      worked sentence "HeLa depends on BRCA1".
 resource lexicon:e_hela : lexicon:LexicalEntry {
     lexicon:form     = "HeLa";
-    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:CellLine) );
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:CellLine, lexicon:num_any) );
     lexicon:sem      = lexicon:hela;
     lexicon:sem_type = type_expr( lexicon:CellLine );
     lexicon:sense    = "urn:eigenius:lexicon:hela";
@@ -109,7 +109,7 @@ resource lexicon:e_hela : lexicon:LexicalEntry {
 //     object-first: ⟦cat⟧ = Gene → CellLine → Prop = typeof(depends_on).
 resource lexicon:e_depends_on : lexicon:LexicalEntry {
     lexicon:form     = "depends on";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s, lexicon:cat_np(lexicon:CellLine)), lexicon:cat_np(lexicon:Gene)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:CellLine, lexicon:num_any)), lexicon:cat_np(lexicon:Gene, lexicon:num_any)) );
     lexicon:sem      = lexicon:depends_on;
     lexicon:sem_type = type_expr( lexicon:Gene -> lexicon:CellLine -> Prop );
     lexicon:sense    = "wn:depend.v.01";
@@ -121,7 +121,7 @@ resource lexicon:e_depends_on : lexicon:LexicalEntry {
 //     N/N use (Σ-refinement → a class) is a deferred type-shift (D62 §8.6).
 resource lexicon:e_primary : lexicon:LexicalEntry {
     lexicon:form     = "primary";
-    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s, lexicon:cat_np(lexicon:CellLine)) );
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:CellLine, lexicon:num_any)) );
     lexicon:sem      = lexicon:is_primary;
     lexicon:sem_type = type_expr( lexicon:CellLine -> Prop );
     lexicon:sense    = "wn:primary.a.01";
@@ -133,7 +133,7 @@ resource lexicon:e_primary : lexicon:LexicalEntry {
 //     subsumption (parser_composes_general_verb_via_subsumption: "HeLa affects BRCA1").
 resource lexicon:e_affects : lexicon:LexicalEntry {
     lexicon:form     = "affects";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s, lexicon:cat_np(lexicon:Entity)), lexicon:cat_np(lexicon:Entity)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";

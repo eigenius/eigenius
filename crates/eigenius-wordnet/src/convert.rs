@@ -87,13 +87,16 @@ impl FrameKind {
     }
 
     /// The `lexicon:Cat` term (object-first; `⟦cat⟧` equals [`Self::arrow`]).
+    /// Features (D63 §5.1): NP slots are number-underspecified (`num_any`), the
+    /// result sentence is declarative + finite (`cat_s(dcl, fin)`).
     fn cat(self) -> String {
-        let np = format!("lexicon:cat_np({ENTITY_ROOT})");
+        let np = format!("lexicon:cat_np({ENTITY_ROOT}, lexicon:num_any)");
+        let s = "lexicon:cat_s(lexicon:dcl, lexicon:fin)";
         match self {
-            FrameKind::Intransitive => format!("lexicon:bwd(lexicon:cat_s, {np})"),
-            FrameKind::Transitive => format!("lexicon:fwd(lexicon:bwd(lexicon:cat_s, {np}), {np})"),
+            FrameKind::Intransitive => format!("lexicon:bwd({s}, {np})"),
+            FrameKind::Transitive => format!("lexicon:fwd(lexicon:bwd({s}, {np}), {np})"),
             FrameKind::Ditransitive => {
-                format!("lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s, {np}), {np}), {np})")
+                format!("lexicon:fwd(lexicon:fwd(lexicon:bwd({s}, {np}), {np}), {np})")
             }
         }
     }
@@ -178,7 +181,7 @@ fn push_noun(buf: &mut String, syn: &Synset, rep: &mut Report) {
             buf,
             &format!("e_{}_{i}", local(syn)),
             lemma,
-            "lexicon:cat_n",
+            "lexicon:cat_n(lexicon:num_any)",
             &local(syn),
             "Set",
             &sense_key(syn, lemma),
@@ -212,7 +215,7 @@ fn push_instance(buf: &mut String, syn: &Synset, rep: &mut Report) {
         esc(&syn.gloss),
     ));
     rep.instances += 1;
-    let cat = format!("lexicon:cat_np({primary})");
+    let cat = format!("lexicon:cat_np({primary}, lexicon:num_any)");
     for (i, lemma) in syn.words.iter().enumerate() {
         push_entry(
             buf,
@@ -267,7 +270,9 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report) {
         local(syn)
     ));
     rep.adj_axioms += 1;
-    let cat = format!("lexicon:bwd(lexicon:cat_s, lexicon:cat_np({ENTITY_ROOT}))");
+    let cat = format!(
+        "lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np({ENTITY_ROOT}, lexicon:num_any))"
+    );
     let arrow = format!("{ENTITY_ROOT} -> Prop");
     for (i, lemma) in syn.words.iter().enumerate() {
         push_entry(
@@ -376,7 +381,7 @@ mod tests {
         assert!(buf.contains("description = \"a segment of DNA\";"));
         assert!(buf.contains("resource wn:e_n05444328_0 : lexicon:LexicalEntry {"));
         assert!(buf.contains("lexicon:form     = \"gene\";"));
-        assert!(buf.contains("lexicon:cat      = type_expr( lexicon:cat_n );"));
+        assert!(buf.contains("lexicon:cat      = type_expr( lexicon:cat_n(lexicon:num_any) );"));
         assert!(buf.contains("lexicon:sem      = wn:n05444328;"));
         assert!(buf.contains("lexicon:sem_type = type_expr( Set );"));
         assert_eq!(rep.noun_classes, 1);
@@ -407,7 +412,9 @@ mod tests {
         assert!(buf.contains("resource wn:e_n10954498_0 : lexicon:LexicalEntry {"));
         assert!(buf.contains("lexicon:form     = \"Einstein\";"));
         assert!(buf.contains("lexicon:form     = \"Albert Einstein\";"));
-        assert!(buf.contains("lexicon:cat      = type_expr( lexicon:cat_np(wn:n10428004) );"));
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:cat_np(wn:n10428004, lexicon:num_any) );"
+        ));
         assert!(buf.contains("lexicon:sem      = wn:n10954498;"));
         assert!(buf.contains("lexicon:sem_type = type_expr( wn:n10428004 );"));
         assert_eq!(rep.instances, 1);
@@ -426,7 +433,9 @@ mod tests {
         // both classes on the resource — @i first, then the rare plain @.
         assert!(buf.contains("resource wn:n00000009 : wn:n15254028, wn:n08473623 {"));
         // entry types at the first class only (exact-match gate).
-        assert!(buf.contains("lexicon:cat      = type_expr( lexicon:cat_np(wn:n15254028) );"));
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:cat_np(wn:n15254028, lexicon:num_any) );"
+        ));
         assert!(buf.contains("lexicon:sem_type = type_expr( wn:n15254028 );"));
         assert_eq!(rep.instances, 1);
     }
@@ -456,7 +465,7 @@ mod tests {
         // frame 11 → transitive; the axiom IRI is kind-tagged (`_t`).
         assert!(buf.contains("axiom wn:v00275082_t : wn:n00001740 -> wn:n00001740 -> Prop"));
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s, lexicon:cat_np(wn:n00001740)), lexicon:cat_np(wn:n00001740)) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(wn:n00001740, lexicon:num_any)), lexicon:cat_np(wn:n00001740, lexicon:num_any)) );"
         ));
         assert!(buf.contains("lexicon:sem      = wn:v00275082_t;"));
         assert_eq!(rep.verb_axioms, 1);
@@ -486,7 +495,7 @@ mod tests {
         assert!(buf.contains(
             "axiom wn:v00001234_d : wn:n00001740 -> wn:n00001740 -> wn:n00001740 -> Prop"
         ));
-        assert!(buf.contains("lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s, lexicon:cat_np(wn:n00001740)), lexicon:cat_np(wn:n00001740)), lexicon:cat_np(wn:n00001740))"));
+        assert!(buf.contains("lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(wn:n00001740, lexicon:num_any)), lexicon:cat_np(wn:n00001740, lexicon:num_any)), lexicon:cat_np(wn:n00001740, lexicon:num_any))"));
     }
 
     #[test]

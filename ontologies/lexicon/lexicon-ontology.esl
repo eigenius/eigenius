@@ -27,17 +27,31 @@ namespace lexicon    = "urn:eigenius:lexicon";
 // inductive means (a) it cannot be malformed — the kernel checks it; (b)
 // the composition rules pattern-match on it; (c) the homomorphism
 // ⟦cat⟧ → sem_type is a *recursor* over this type — realized as `denote_cat`
-// (D62 §8.6), which makes the felicity check `typeof(sem) = ⟦cat⟧` mechanical
-// (D62 §2 stage 5). The entity atom `cat_np(T)` is **type-indexed** (carries its
-// class T — Luo's DCG move), so ⟦·⟧ is self-contained:
-//   ⟦cat_s⟧ = Prop ; ⟦cat_n⟧ = Set ; ⟦cat_np(T)⟧ = T ; ⟦A/B⟧ = ⟦A\B⟧ = ⟦B⟧ → ⟦A⟧.
+// (D62 §8.6 / D63), which makes the felicity check `typeof(sem) = ⟦cat⟧`
+// mechanical (D62 §2 stage 5). The entity atom `cat_np(T, _)` is **type-indexed**
+// (carries its class T — Luo's DCG move), so ⟦·⟧ is self-contained:
+//   ⟦cat_s(m,_)⟧ = ⟦m⟧ ; ⟦cat_n(_)⟧ = Set ; ⟦cat_np(T,_)⟧ = T ; ⟦A/B⟧ = ⟦A\B⟧ = ⟦B⟧ → ⟦A⟧.
 // `fwd(A,B)` = A/B (seeks a B on the right → A); `bwd(A,B)` = A\B.
+//
+// ── Features (D63 §5.1) ───────────────────────────────────────────────
+// Atoms are parametrized by morphosyntactic features. **Mood** is the only
+// feature that alters ⟦·⟧ (a declarative is a Prop; question/imperative are
+// deferred to D63 Slice 5). **Num** (number) and **Fin** (verb form) are
+// *syntactic routing only* — fully erased by ⟦·⟧, used by the parser's
+// feature-meet to gate composition (agreement, subcategorization). `*_any` is
+// the underspecified top (WordNet imports carry it; morphology refines it).
+// `cat_n` carries Num only — NOT the noun type: the type flows through the entry's
+// `sem` (the EigonClass), and a category-level type index would force a type
+// variable on polymorphic determiners (forbidden, §5.1).
+data lexicon:Mood { dcl, q, imp }
+data lexicon:Num  { sg, pl, num_any }
+data lexicon:Fin  { fin, bse, inf, ger, pss, fin_any }
 data lexicon:Cat : Type 1 {
-    cat_s : lexicon:Cat,                              // S  — sentence
-    cat_n : lexicon:Cat,                              // N  — common noun
-    cat_np : Set -> lexicon:Cat,                      // NP(T) — entity of type T (DCG: type-indexed)
-    fwd : lexicon:Cat -> lexicon:Cat -> lexicon:Cat,  // A/B — forward slash
-    bwd : lexicon:Cat -> lexicon:Cat -> lexicon:Cat,  // A\B — backward slash
+    cat_s  : lexicon:Mood -> lexicon:Fin -> lexicon:Cat,  // S[mood,fin] — sentence
+    cat_n  : lexicon:Num -> lexicon:Cat,                  // N[num] — common noun (type via sem)
+    cat_np : Set -> lexicon:Num -> lexicon:Cat,           // NP(T)[num] — entity of type T (type-indexed)
+    fwd : lexicon:Cat -> lexicon:Cat -> lexicon:Cat,      // A/B — forward slash
+    bwd : lexicon:Cat -> lexicon:Cat -> lexicon:Cat,      // A\B — backward slash
 }
 
 // ── The lexical-entry record ──────────────────────────────────────────

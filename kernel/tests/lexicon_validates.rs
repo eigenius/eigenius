@@ -36,8 +36,8 @@
 use std::sync::Arc;
 
 use eigenius_kernel::dcg::{
-    cky_parse, denote_cat, entry_to_item, gate_entry, is_ctor, resolve_sem, type_eq, Identity,
-    Item, LexicalIndex,
+    cat_subsumes, cky_parse, denote_cat, entry_to_item, gate_entry, is_ctor, resolve_sem, type_eq,
+    Identity, Item, LexicalIndex,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -497,7 +497,7 @@ namespace epistemic = "urn:eigenius:reflection:epistemic";
 // type disagree (the cross-field check the recursor proves for real entries).
 resource lexicon:e_bad_type : lexicon:LexicalEntry {
     lexicon:form     = "bad-type";
-    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene) );
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:num_any) );
     lexicon:sem      = lexicon:brca1;
     lexicon:sem_type = type_expr( lexicon:CellLine );
     lexicon:grade    = epistemic:declared;
@@ -507,7 +507,7 @@ resource lexicon:e_bad_type : lexicon:LexicalEntry {
 // the semantics does not inhabit ⟦cat⟧. The second half of the felicity check.
 resource lexicon:e_bad_sem : lexicon:LexicalEntry {
     lexicon:form     = "bad-sem";
-    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene) );
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:num_any) );
     lexicon:sem      = lexicon:hela;
     lexicon:sem_type = type_expr( lexicon:Gene );
     lexicon:grade    = epistemic:declared;
@@ -701,5 +701,89 @@ fn bridge_yields_no_parse_for_type_mismatch() {
     assert!(
         index.parse("BRCA1 depends on HeLa", &Identity).is_empty(),
         "a type-mismatched sentence must produce no S parse"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Features on `lexicon:Cat` (D63 §5.1, Slice 1): atoms carry morphosyntactic
+// features that `⟦·⟧` erases (Num/Fin) and `cat_subsumes` unifies by **meet**
+// (`Any = ⊤`). The denotation tests above already witness erasure (⟦cat⟧ is
+// unchanged by features); this witnesses the meet — the gate the spike's
+// all-`num_any` entries can't exercise.
+// ════════════════════════════════════════════════════════════════════
+
+const FEAT: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+resource lexicon:f_n_sg : lexicon:LexicalEntry {
+    lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_n(lexicon:sg) );
+    lexicon:sem = lexicon:CellLine; lexicon:sem_type = type_expr( Set ); lexicon:grade = epistemic:declared;
+}
+resource lexicon:f_n_pl : lexicon:LexicalEntry {
+    lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_n(lexicon:pl) );
+    lexicon:sem = lexicon:CellLine; lexicon:sem_type = type_expr( Set ); lexicon:grade = epistemic:declared;
+}
+resource lexicon:f_n_any : lexicon:LexicalEntry {
+    lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_n(lexicon:num_any) );
+    lexicon:sem = lexicon:CellLine; lexicon:sem_type = type_expr( Set ); lexicon:grade = epistemic:declared;
+}
+resource lexicon:f_np_ent_sg : lexicon:LexicalEntry {
+    lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:sg) );
+    lexicon:sem = lexicon:brca1; lexicon:sem_type = type_expr( lexicon:Entity ); lexicon:grade = epistemic:declared;
+}
+resource lexicon:f_np_gene_sg : lexicon:LexicalEntry {
+    lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:sg) );
+    lexicon:sem = lexicon:brca1; lexicon:sem_type = type_expr( lexicon:Gene ); lexicon:grade = epistemic:declared;
+}
+resource lexicon:f_np_gene_pl : lexicon:LexicalEntry {
+    lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:pl) );
+    lexicon:sem = lexicon:brca1; lexicon:sem_type = type_expr( lexicon:Gene ); lexicon:grade = epistemic:declared;
+}
+"#;
+
+#[test]
+fn cat_subsumes_meets_features() {
+    let lexicon = build_lexicon();
+    let resources =
+        esl::compile_against_layer(FEAT, &lexicon).expect("feature-bearing entries compile");
+    let mut b = LayerBuilder::new("feat", Some(lexicon));
+    for r in &resources {
+        b.add_resource(r.clone()).expect("add feature entry");
+    }
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let cat = |local: &str| {
+        decoded_field(
+            &layer,
+            &format!("urn:eigenius:lexicon:{local}"),
+            "urn:eigenius:lexicon:cat",
+        )
+    };
+    let (n_sg, n_pl, n_any) = (cat("f_n_sg"), cat("f_n_pl"), cat("f_n_any"));
+    let (np_ent_sg, np_gene_sg, np_gene_pl) =
+        (cat("f_np_ent_sg"), cat("f_np_gene_sg"), cat("f_np_gene_pl"));
+
+    // cat_n number meet: `sg` fills `sg` or `Any`, never `pl`; `Any` fills anything.
+    assert!(cat_subsumes(&n_sg, &n_sg, &layer));
+    assert!(
+        !cat_subsumes(&n_sg, &n_pl, &layer),
+        "an `sg` slot must reject a `pl` argument"
+    );
+    assert!(
+        cat_subsumes(&n_sg, &n_any, &layer),
+        "an underspecified `Any` argument fills an `sg` slot (meet = sg)"
+    );
+    assert!(
+        cat_subsumes(&n_any, &n_pl, &layer),
+        "an `Any` slot accepts a `pl` argument"
+    );
+
+    // cat_np: subclass-subsume the type AND meet the number, jointly.
+    assert!(
+        cat_subsumes(&np_ent_sg, &np_gene_sg, &layer),
+        "Gene ⊑ Entity and sg = sg ⇒ fills"
+    );
+    assert!(
+        !cat_subsumes(&np_ent_sg, &np_gene_pl, &layer),
+        "type ok (Gene ⊑ Entity) but number sg ≠ pl ⇒ reject"
     );
 }

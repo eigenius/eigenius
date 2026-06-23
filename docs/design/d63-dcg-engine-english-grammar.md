@@ -146,19 +146,28 @@ relevant features — no generic `feat` wrapper (not every atom takes every feat
 layer (breaks K1 / complicates the recursor). Concretely this extends the **`lexicon:Cat` kernel
 inductive** (the Rust-enum sketch maps to ESL `data` decls):
 ```
-data lexicon:Mood { dcl ; q ; imp }
-data lexicon:Num  { sg ; pl ; num_any }
-data lexicon:Fin  { fin ; bse ; to ; ng ; pss ; fin_any }
+data lexicon:Mood { dcl, q, imp }
+data lexicon:Num  { sg, pl, num_any }
+data lexicon:Fin  { fin, bse, inf, ger, pss, fin_any }   // finite / bare / to-inf / -ing / passive
 data lexicon:Cat : Type 1 {
-    cat_s(Mood, Fin) ;        // mood semantic, fin erased
-    cat_n(Set, Num) ;         // type semantic, num erased
-    cat_np(Set, Num) ;        // (+ Case when pronouns land — deferred)
-    fwd(Cat, Cat) ; bwd(Cat, Cat)
+    cat_s  : Mood -> Fin -> Cat ;   // mood semantic, fin erased
+    cat_n  : Num -> Cat ;           // num only — NOT the noun type (see below)
+    cat_np : Set -> Num -> Cat ;    // type semantic, num erased (+ Case when pronouns land — deferred)
+    fwd : Cat -> Cat -> Cat ; bwd : Cat -> Cat -> Cat
 }
 ```
-Erasure is then trivial: `denote_cat(cat_s(m,_)) = denote_mood(m)`, `cat_n(T,_) ↦ Set`,
+**`cat_n` carries `Num` only, not the noun type** (corrected from an earlier draft). A type index on
+`cat_n` would be *dead weight*: `⟦cat_n⟧ = Set` regardless of it (denotation-erased), **and** no rule
+slot-matches on it — determiners and adjectives take *any* N, so the noun's type flows through the
+entry's `sem` (the `EigonClass`), which is where the determiner reads it (`λN. … Σ/Π x:N`). *(An earlier
+draft justified this as "a type on `cat_n` would force a type **variable** on determiners" — that was
+wrong: `Entity`-top subsumption would handle the polymorphism without a variable, exactly as `cat_np`
+does. The real reason is YAGNI — the index is never read by `⟦·⟧` nor by any slot-match.)* `cat_np`
+*does* carry its type: a name is type-specific, and slot-filling subsumes on it.
+
+Erasure is then trivial: `denote_cat(cat_s(m,_)) = denote_mood(m)`, `cat_n(_) ↦ Set`,
 `cat_np(T,_) ↦ T`. The felicity invariant `⟦cat⟧ ≡ sem_type` is unaffected (erased features never reach
-`⟦·⟧`); `cat_subsumes` gains **feature-meet** alongside the existing `is_subclass_of` on the type `T`.
+`⟦·⟧`); `cat_subsumes` gains **feature-meet**, plus the existing `is_subclass_of` on `cat_np`'s type `T`.
 
 *Value model + unification: a subsumption lattice, `Any` as Top, no logic variables.* Unification is
 the **meet `⊓`**: `Sg ⊓ Any = Sg`, `Sg ⊓ Pl = ⊥` (fail); `*_any` is the underspecified top. No
@@ -174,12 +183,15 @@ too, per K3's cheap re-import — diverges from the sketch, which showed it; rec
 bake the always-`Any` slot in now.)*
 
 *Import defaults: WordNet → `Any`, Morphy instantiates.* Imported atoms carry `*_any` (the verb "run"
-is fully underspecified). The morphological stage instantiates: Morphy reads "dogs" → (lemma "dog",
-`Num::Pl`); lookup **meets** the base category `N[Dog, Any]` with the token's features → `N[Dog, Pl]`.
-Keeps WordNet unbloated (R4). **Implementation consequence:** the `Lemmatizer` seam + `LexicalIndex`
-must return **(lemma, features)**, not bare lemma strings — Morphy knows which detachment rule fired, so
-it *has* the feature; the current `Vec<String>` API discards it. This is a Slice-1 change touching
-already-built code (`dcg::lemmatizer`, `dcg::lookup`, `MorphyLemmatizer`).
+is fully underspecified; nouns are `cat_n(num_any)`, their type carried by the `sem`). The
+morphological stage instantiates: Morphy reads "dogs" → (lemma "dog", `Num::Pl`); lookup **meets** the
+base category `N[Any]` (sem = `Dog`) with the token's feature → `N[Pl]`. Keeps WordNet unbloated (R4).
+**Implementation consequence (deferred to Slice 2):** the `Lemmatizer` seam + `LexicalIndex` must
+return **(lemma, features)**, not bare lemma strings — Morphy knows which detachment rule fired, so it
+*has* the feature; the current `Vec<String>` API discards it. This is **not needed for Slice 1**: the
+feature *mechanism* (inductive + erasure + meet) lands first with features inert (everything `Any`);
+the morphological *instantiation* that makes agreement actually bite arrives in Slice 2 with the
+determiners that exercise it. (Touches `dcg::lemmatizer`, `dcg::lookup`, `MorphyLemmatizer`.)
 
 *Question denotation: deferred to Slice 5.* The *eventual* `⟦S[q]⟧` is `Entity→Prop` (or a set of
 Props); until Slice 5, `S[q]` is a **syntactic tag only** (denotation trapped/`unimplemented!`), used so

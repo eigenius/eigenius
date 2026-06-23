@@ -51,7 +51,7 @@ resource lexicon:hela : lexicon:CellLine { core:description = "the HeLa cell lin
 
 resource lexicon:e_affect : lexicon:LexicalEntry {
     lexicon:form     = "affect";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s, lexicon:cat_np(lexicon:Entity)), lexicon:cat_np(lexicon:Entity)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:affect;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
@@ -59,7 +59,7 @@ resource lexicon:e_affect : lexicon:LexicalEntry {
 }
 resource lexicon:e_brca1 : lexicon:LexicalEntry {
     lexicon:form     = "BRCA1";
-    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene) );
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:num_any) );
     lexicon:sem      = lexicon:brca1;
     lexicon:sem_type = type_expr( lexicon:Gene );
     lexicon:sense    = "urn:eigenius:lexicon:brca1";
@@ -67,7 +67,7 @@ resource lexicon:e_brca1 : lexicon:LexicalEntry {
 }
 resource lexicon:e_hela : lexicon:LexicalEntry {
     lexicon:form     = "HeLa";
-    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:CellLine) );
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:CellLine, lexicon:num_any) );
     lexicon:sem      = lexicon:hela;
     lexicon:sem_type = type_expr( lexicon:CellLine );
     lexicon:sense    = "urn:eigenius:lexicon:hela";
