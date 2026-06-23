@@ -1581,13 +1581,13 @@ fn cmd_compile(file: &str, json_output: bool) {
     }
 }
 
-/// Run the D62 felicity gate (`eigenius_kernel::lexicon::gate_entry`) over every
+/// Run the D62 felicity gate (`eigenius_kernel::dcg::gate_entry`) over every
 /// `lexicon:LexicalEntry` in `file`. The kernel is the felicity oracle: an entry
 /// is admitted iff `⟦cat⟧ ≡ sem_type` *and* its `sem` inhabits `⟦cat⟧`. This is
 /// the trusted endpoint a WordNet/VerbNet → LLM proposer's drafts pass through
 /// (D62 §8.6). Fail-closed: any rejection — or no entries at all — exits non-zero.
 fn cmd_lexicon_gate(files: &[String], json_output: bool) {
-    use eigenius_kernel::lexicon::gate_entry;
+    use eigenius_kernel::dcg::gate_entry;
     use eigenius_kernel::ontology::resource::Value;
 
     let ctx = match bootstrap::bootstrap() {

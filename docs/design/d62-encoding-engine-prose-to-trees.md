@@ -306,12 +306,16 @@ things for free:
   **Derived** ("the kernel attests the engine computed this"), *never* Verified. That is exactly
   D62's provisional-until-checked discipline (§5), **enforced by the framework** rather than
   bolted on.
-- **Dispatch role = on-demand, not a gate.** The engine *generates*; it does not *admit*. It is
-  an **on-demand** institution (D31) you invoke to encode a piece of prose — never AutoOnLoad (it
-  is not a commit gate). This makes the engine/check split a clean **generation institution (D62,
-  Derived) + verification institution (D61's faithfulness oracle, Verified/Fails)** pair — two
-  institutions in one framework, mirroring how the reasoning institution verifies what other
-  producers emit.
+- **Three roles, cleanly separated.** *Generation* (prose → tree) is **on-demand** (D31): you
+  invoke it to encode a piece of prose, realized as a commit-capable `FIBER … INTO` query (which the
+  kernel *requires* to carry the OnDemand role, §8.8.2). The engine *generates*; it does not gate
+  arbitrary commits. *Felicity* (does the committed tree type-check?) is an **AutoOnLoad** role on
+  the emitted `lexicon:` resource classes — structural, deterministic, fail-closed (§8.8.2); it is
+  the §8.6 commit-time check realized as a D14 gate, **not** the engine admitting data.
+  *Faithfulness* (does the tree mean the prose?) is the separate **D61 verification institution**
+  (LLM-judge + human, Verified/Fails). So the split is a clean **generation institution (D62,
+  Derived) + verification institution (D61)** pair — two institutions in one framework, mirroring
+  how the reasoning institution verifies what other producers emit. (§8.8 gives the full mechanism.)
 
 **The deeper reading (and the correct direction).** Institution-theoretically, autoformalization
 is a **translation between logics** — a *comorphism* from the informal / natural-language source
@@ -500,24 +504,39 @@ combine, so the felicity filter fires *at the category level*, before any sem is
 entities are resolved to values (`resolve_sem`: axiom → `EigonAxiom`, class → `EigonClass`,
 instance → `EigonResource`), closing the earlier "chain entities are not free variables" finding.
 
-**Realized since:** the engine is **extracted from the test harness into `kernel/src/lexicon.rs`**
-(`denote_cat`, the combinator, CKY, plus **`gate_entry`** — the callable felicity gate) and exposed
+**Realized since:** the engine is **extracted from the test harness into the `kernel::dcg` module**
+([`kernel/src/dcg/`](kernel/src/dcg/), the dependent categorial grammar engine, broken into
+`category` / `parser` / `lexicon` / `lemmatizer` components with a flat public re-export) —
+`denote_cat`, the combinator, CKY, plus **`gate_entry`** (the callable felicity gate) — and exposed
 as the CLI **`eigenius lexicon gate`** (chain-loads schema + entries; admit/reject per entry,
 fail-closed). **CN-as-types subsumption** is wired: `Layer::is_subclass_of` (the single foundation
 authority) + the `EigonClass` subtype rule in `nbe::check` honor `core:subclass_of` as subtyping
 (the inclusion-coercion fragment of Luo `luo2012coercive`), so a general predicate typed at a
 supertype accepts subclass-typed arguments (witnessed: a general verb `affects : Entity → Entity →
-Prop` composes with `Gene`/`CellLine` arguments). And the **LLM proposer**
-(`orchestration/tools/lexicon_propose`) is built and run end-to-end on the real WordNet 3.1 corpus —
-but, per §8.7, that proposer is the *augmentation / domain-binding* tool, **not** the general
-framework.
+Prop` composes with `Gene`/`CellLine` arguments).
 
-**Still ahead:** the **deterministic WordNet → lexicon mapper** — the general English framework,
-fully specified in **§8.7**, not yet built (the parser must be extended to read hypernym pointers +
-verb frames; the mint-and-gate import is then mechanical); VerbNet argument-type refinement
-(§8.7.4); broader grammar (ambiguity + derivation-ranking, type-raising, coordination, clausal /
-control frames); the attributive-adjective type-shift; an *in-kernel* `⟦·⟧` recursor (a large
-elimination — engine-side Rust suffices for now); and promoting the engine module to its own crate.
+**Realized since — the deterministic WordNet → lexicon mapper (the general English framework, §8.7).**
+Built as a standalone crate [`crates/eigenius-wordnet`](crates/eigenius-wordnet/) (the
+`wordnet-import` binary; lib `wndb` reader + `convert` mapper + the Morphy port), **not** part of the
+`eigenius` CLI. Run on the **full WordNet 3.0 corpus** (`--all`, noun+verb+adj) it emits the general
+lexicon — **74,385 noun classes** (the `@` hypernym graph → the `core:subclass_of` lattice, rooted at
+`entity.n.01`), **7,730 proper-noun individuals** (the `@i` instance synsets → `EigonResource`s, the
+NP archetype — §8.7.3), **33,006 verb/adjective axioms**, and **204,088 `lexicon:LexicalEntry`
+resources** — and self-checks fail-closed (`--validate`: compile + `Validator` + `gate_entry`).
+WordNet's **Morphy** is ported faithfully ([`morphy.rs`](crates/eigenius-wordnet/src/morphy.rs)) as
+the `Lemmatizer` reference impl for the lookup stage (§8.8). The **LLM proposer** was prototyped and
+run end-to-end (the *augmentation / domain-binding* path, §8.7.8), but those orchestration changes
+are **discarded for now** — the deterministic base is the foundation; the augmentation layer is
+rebuilt on top of it later.
+
+**Still ahead:** the rest of the **parse pipeline** (§8.8) — the **lookup bridge is realized**
+([`kernel::dcg::lookup`](kernel/src/dcg/lookup.rs): the form-keyed index + multi-span lemmatized
+seeding + `parse`, Morphy-driven end to end, §8.8.5); what remains is the encoding institution (the
+FIBER-INTO generation query + the AutoOnLoad felicity gate + the *INTO-opts-into-AutoOnLoad* kernel
+hook) and the selector + alternative-recording; **VerbNet** argument-type refinement (§8.7.4); broader grammar
+(ambiguity + derivation-ranking, type-raising, coordination, clausal / control frames); the
+attributive-adjective type-shift; and an *in-kernel* `⟦·⟧` recursor (a large elimination — engine-side Rust
+suffices for now).
 
 ### 8.7 The WordNet → lexicon mapper — complete specification
 
@@ -532,17 +551,17 @@ exactly the CN-as-types-from-WordNet construction of the prior art (Luo, `luo201
 
 #### 8.7.1 Source & record format
 
-WordNet 3.1 `data.<pos>` / `index.<pos>` (`wndb(5WN)`), `pos ∈ {noun, verb, adj, adv}`. Each synset
+WordNet 3.0 `data.<pos>` / `index.<pos>` (`wndb(5WN)`), `pos ∈ {noun, verb, adj, adv}`. Each synset
 is one `data.<pos>` line:
 
 ```
 offset lex_filenum ss_type w_cnt (word lex_id)+ p_cnt (ptr_sym offset pos src/tgt)* [f_cnt (+ f_num w_num)*] | gloss
 ```
 
-The mapper consumes three fields the current reader skips and must be extended to capture
-(`orchestration/tools/lexicon_propose/wordnet.ts` reads only words+gloss today):
-the **pointer records** (esp. `@` hypernym, `@i` instance-hypernym), and — verbs only — the
-**frame field** (`+ f_num w_num`). License: the WordNet license is permissive/OSI — shippable.
+Beyond lemmas + gloss, the reader ([`crates/eigenius-wordnet/src/wndb.rs`](crates/eigenius-wordnet/src/wndb.rs))
+captures the two structural fields the mapper needs: the **pointer records** (esp. `@` hypernym,
+`@i` instance-hypernym), and — verbs only — the **frame field** (`+ f_num w_num`). License: the
+WordNet license is permissive/OSI — shippable.
 Offsets are **version-specific**, so the mapper pins a WordNet version and records it in provenance.
 
 #### 8.7.2 Identity
@@ -639,12 +658,14 @@ chain); identity/indexing/perf at this scale is an implementation concern (§8.7
 
 A domain ontology binds to the general framework by **`subclass_of` into it** — `bio:Gene
 subclass_of` the WordNet gene synset, a domain predicate specializing a general verb's argument types
-— after which domain text parses with general + domain entries, the subsumption rule bridging. The
-**LLM proposer** (`orchestration/tools/lexicon_propose`) is precisely this **augmentation tool**: it
-maps a domain term onto its general parent and mints domain predicates, gated by the kernel. Its
-constrained-`--vocab` mode (map a word onto a fixed domain menu) is the *top* layer; the deterministic
-WordNet import (this section) is the *base*. (Demonstrated end-to-end on the real WordNet 3.1 corpus
-in the augmentation mode; see §8.6.)
+— after which domain text parses with general + domain entries, the subsumption rule bridging. An
+**LLM proposer** is the intended **augmentation tool** for this layer: it maps a domain term onto its
+general parent and mints domain predicates, kernel-gated, with a constrained-`--vocab` mode (map a
+word onto a fixed domain menu) as the *top* layer over the deterministic WordNet import (this
+section) as the *base*. Such a proposer was prototyped and run end-to-end on the real WordNet corpus,
+but those orchestration changes are **discarded for now** (§8.6) — the deterministic base is the
+foundation; the augmentation proposer is rebuilt on top of it later. The trust seam is the same
+either way: an untrusted proposer only ever *proposes*; the kernel admits or rejects.
 
 #### 8.7.9 Trust & the residual
 
@@ -658,10 +679,150 @@ derivation-ranking (§8.4), not by the importer.
 
 - **Predicate subsumption** — verb troponymy/entailment is *not* the `EigonClass` subtype rule;
   it needs an entailment relation among axioms. (Class subsumption covers nouns; this is the verb gap.)
+- **Multi-class instances** — *(the instance/class split itself is now realized: `@i` synsets are
+  emitted as `EigonResource` individuals, §8.7.3 / §8.6.)* The 786 instances with **multiple** `@i`
+  classes carry **all** of them on the resource (`resource r : C1, C2, …` — no drop), but their NP
+  lexical entry types at the **first** class only, since the kernel infers `is_a().first()` for a
+  multi-class resource and the felicity gate matches exactly. Per-class NP entries + the check-mode
+  resource-inhabitation rule they require are deferred to a coherent, separately-reviewed kernel
+  change — tracked in [#91](https://github.com/eigenius/eigenius/issues/91).
 - **Identity stability** — offset (version-pinned) vs **ILI** (cross-version); adopt ILI for durable ids.
 - **Scale** — ~200k synset-classes: layer size, resolution/indexing, gate throughput.
 - **Coverage** — attributive adjectives (Σ), adverbs, multiword expressions / idioms / constructions
   (non-compositional — the coverage track, §8.4); verbs absent from VerbNet stay generically typed.
+
+### 8.8 The parse pipeline — the string→tree(s) library and the encoding institution
+
+§8.6 realized the engine's *internals* (`denote_cat`, the CKY combinator, `gate_entry`) as the
+kernel-attached `kernel::dcg` module; §8.7 imports the *lexicon data*. This section fixes the
+**runtime architecture** that turns a prose statement into a committed, referenceable EigenTT tree,
+and resolves the four design questions that surfaced once the engine was real. The shape is a
+**two-layer split** — a kernel-attached **library** that maps a string to the *forest* of
+type-checking parses, wrapped by an **encoding institution** that selects one parse and commits it
+as a `lexicon:Sentence` resource for objectives and witnesses to reference.
+
+| # | Question | Resolution |
+|---|---|---|
+| **Q1** | What does the library produce vs. the institution? | library → the *forest* (unanchored, transient); institution → exactly one committed `lexicon:Sentence` (encoding-task-anchored) — §8.8.1–8.8.2 |
+| **Q2** | Who selects among an ambiguous forest? | the **institution** selects (the faithfulness step) and **records the discarded alternatives**; the library never selects — §8.8.3 |
+| **Q3** | How does the institution commit the result? | a **commit-capable `FIBER … INTO` query** (OnDemand) generates + commits; an **AutoOnLoad** role felicity-gates the committed resource (fail-closed) — §8.8.2 |
+| **Q4** | Where does format cleaning/normalization live? | plain text first (library + institution alone); format cleaning is a **separate D60 tool-runtime pre-stage**, never baked into the trusted library or the gate — §8.8.4 |
+
+#### 8.8.1 The library — string → forest (Q1, lower half)
+
+`kernel::dcg` is the **kernel-attached library**: the trusted, deterministic compositional engine,
+the felicity *oracle*. Its parse entry point is a pipeline over the realized components —
+`lemmatizer` → lexicon lookup → `parser` (CKY) → felicity-checked forest:
+
+1. **Tokenize + lemmatize.** Each surface token is reduced to its base lemma(s) via the
+   [`Lemmatizer`](kernel/src/dcg/lemmatizer.rs) seam (WordNet's Morphy in `eigenius-wordnet` is the
+   reference impl; `Identity` the baseline). Morphological ambiguity (`axes → {axe, axis}`) becomes
+   *multiple* candidate lemmas, hence multiple leaf items.
+2. **Lexicon lookup — the bridge** ([`LexicalIndex`](kernel/src/dcg/lookup.rs)). A `form → entries`
+   index over the imported lexicon (§8.7), each entry pre-resolved to a parse `Item`; POS keys the
+   *lemmatizer* (every part of speech is tried per span), the index itself is form-keyed and
+   case-insensitive. Lookup is **multi-span**: for each token span (bounded by the longest indexed
+   form) the surface is reduced to candidate lemmas and looked up, so a multiword entry
+   (`take a breath`, the `act on` collocation) seeds an item spanning several tokens *alongside* the
+   single-token items for its parts (`on` keeps its own entries) — MWE-vs-compositional carried as
+   competing chart edges (append-not-overwrite), not resolved here.
+3. **Compose.** The chart (built by [`LexicalIndex::parse`](kernel/src/dcg/lookup.rs) over the
+   seeded spans) combines items by forward/backward [`apply`](kernel/src/dcg/parser.rs) on the
+   `lexicon:Cat`s, in lockstep on the `sem` terms; each complete `S` parse whose assembled `sem`
+   type-checks to `Prop` (the kernel as oracle, §8.6) is a forest member.
+
+The library returns the **whole forest** — *every* well-typed parse — as **transient terms**
+(unanchored `Exp` values), with **no selection and no commit**. This is the literal reading of the
+user's "string → tree(s)": *trees*, plural, on purpose. Ambiguity (MWE vs. compositional, word
+sense, attachment) is exactly §8.4's *selection residual*, surfaced as forest cardinality rather
+than hidden. An **empty** forest is a first-class outcome (no admissible parse), not an error to
+swallow.
+
+#### 8.8.2 The encoding institution — statement → one committed resource (Q1 upper half, Q3)
+
+The institution wraps the library *for the encoding task*: a textual statement carried by an
+objective or a witness's prose becomes exactly **one** `lexicon:Sentence` resource, anchored in the
+chain and referenceable downstream. It is the §6 generation institution, made concrete. The two
+capabilities are the user-specified Q3 answer — **a commit-capable fiber query, and an AutoOnLoad
+gate** — and both are grounded in existing kernel mechanism:
+
+- **Generation = `FIBER … INTO` (OnDemand).** The institution surfaces the parse as a query
+  `FIBER <prose> USING INSTITUTION <encoding> INTO "<sentence-iri>"`: it runs the library, selects
+  (§8.8.3), and the `INTO` clause **chain-commits** the chosen `lexicon:Sentence` through the
+  `CommitOrchestrator` under `WithRetroactive` ([server/query.rs:91](kernel/src/server/query.rs#L91),
+  [:153](kernel/src/server/query.rs#L153); D14 §9.3 chain-reinsertion). The kernel **requires** a
+  FIBER QueryClass to carry the **OnDemand** dispatch role
+  ([type_check.rs:539](kernel/src/query/type_check.rs#L539): *"FIBER query class … has no OnDemand
+  dispatch role — declare on_demand … to allow FIBER dispatch"*). So generation is on-demand **by
+  the kernel's own contract** — you run the query to encode a statement; the engine never gates
+  arbitrary commits. This is precisely §6's "the engine generates; it does not admit," now mechanized.
+- **Felicity gate = AutoOnLoad (fail-closed).** The committed `lexicon:Sentence` /
+  `lexicon:LexicalEntry` classes carry an **AutoOnLoad** QueryClass (`result_class = Verdict`) that
+  runs the felicity check (`gate_entry` / the sentence's assembled-term type-check, §8.6) when the
+  resource loads. A `Fails` verdict becomes an `AutoOnLoadOutcome` error and the load is **rejected**
+  ([institution/dispatch.rs](kernel/src/institution/dispatch.rs)). The §8.6 *commit-time* felicity
+  check is thereby realized as a D14 institution gate: structural, deterministic, fail-closed — and
+  distinct from faithfulness (it certifies the tree type-checks, never that it means the prose).
+
+**The one kernel touch-point (named, not assumed).** The FIBER-INTO commit path **deliberately
+bypasses AutoOnLoad** today — *"the commit path deliberately bypasses AutoOnLoad until INTO opts back
+in"* ([server/query.rs:106](kernel/src/server/query.rs#L106)). So the felicity gate does **not** fire
+automatically on a FIBER-INTO-committed sentence as the code stands. Closing this is the anticipated
+*"INTO opts back in"* hook: the encoding institution's INTO surface opts its committed
+`lexicon:Sentence` into AutoOnLoad so the gate runs. This is a small, identified extension of the
+INTO surface — recorded here as the active gap rather than papered over with an assumption that the
+gate already fires.
+
+The emitted `lexicon:Sentence` is **Derived** by construction — an institution dispatch yields a
+`DerivedResource` under a `ProgramTrace → IsDerivedAs` (§6, D56) — i.e. provisional until D61's
+faithfulness check + the human boundary climb its grade (§5). Never auto-Verified.
+
+#### 8.8.3 Selection and the recorded alternatives (Q2)
+
+The library returns the forest; the **institution selects** the intended parse. This is the
+faithfulness step, and it must be honest about its own limits: the type system guarantees every
+forest member is *well-typed*, never which one matches the author's intent — MWE-vs-compositional
+(`act on` the collocation vs. `act` + PP), word sense, and lexical-choice slack
+(`regulate`/`inhibit` → `affects`) all leave ≥1 well-typed reading. Selection is therefore exactly
+where the D61 faithfulness concern lives (§5, §8.4), not a detail the engine settles silently.
+
+- **Fail-closed, auditable.** A **single** forest member commits directly. **Multiple** → the
+  institution selects one and **records the discarded parses as provenance** on the `lexicon:Sentence`
+  (the alternative trees + the selection warrant) — never a silent drop. An **empty** forest is a
+  **fail-closed finding** ("no admissible parse for ⟨prose⟩"), surfaced for investigation, not
+  skipped.
+- **Staged policy.** Deterministic preference first (longest-MWE, sense priors, derivation cost);
+  the D61 faithfulness oracle (LLM-judge + human, → Derived/Verified) for the residual. The selector
+  is a ranking *over an already-felicitous forest*, so a wrong selection is a faithfulness miss, never
+  a type error — the two failure modes stay cleanly separated.
+
+#### 8.8.4 Input cleaning and format (Q4)
+
+v1 is **plain text**: the library + institution alone handle clean prose (statement string → forest
+→ one resource). Format-specific cleaning and normalization — de-markup, sentence segmentation,
+quote/unicode normalization, source-format extraction — is a **separate pre-stage**: a D60
+tool-runtime component run *before* the institution, **never** baked into the trusted library or the
+felicity gate. Keeping it out preserves the library's determinism and trust (the same
+generation-vs-cleaning separation the schema.org generator's format front-ends already use, §6
+substrate D26/D56/D60); the encoding institution simply consumes the cleaned text. Format handling
+is thus additive and deferred, not a v1 dependency.
+
+#### 8.8.5 Status
+
+**Realized — the lookup bridge** ([`kernel::dcg::lookup`](kernel/src/dcg/lookup.rs)): the form-keyed
+[`LexicalIndex`](kernel/src/dcg/lookup.rs) over the committed lexicon, multi-span lemmatized seeding,
+and the `LexicalIndex::parse(&str, &dyn Lemmatizer) → Vec<Item>` entry point that returns the forest
+of full-span `S` parses the kernel types to `Prop`. Witnessed in `kernel/tests/lexicon_validates.rs`
+(MWE-verb sentence → one `S`-to-`Prop`; general verb via subsumption; case-insensitivity; empty
+forest for unknown words; no parse for a type-mismatch) and — driven by the real **Morphy**
+`Lemmatizer` ([`eigenius-wordnet`](crates/eigenius-wordnet/src/lemmatizer.rs)) — in
+`crates/eigenius-wordnet/tests/morphy_bridge.rs` (an *inflected* sentence parses only because Morphy
+reduces it to the base entry; an `Identity` control yields no parse, isolating the morphology's role).
+
+**Still ahead:** **(i)** the **encoding institution** — the FIBER-INTO QueryClass (OnDemand) + the
+AutoOnLoad felicity QueryClass, plus the **INTO-opts-into-AutoOnLoad** kernel hook (§8.8.2);
+**(ii)** the **selector** + alternative-recording provenance (§8.8.3). The format-cleaning component
+(§8.8.4) and the D61 faithfulness oracle are separate, later work.
 
 ## 9. Prior art / anchors (to verify via the §4 grounding pass)
 - Cooper, R. *From Perception to Communication: A Theory of Types for Action and Meaning.* OUP,

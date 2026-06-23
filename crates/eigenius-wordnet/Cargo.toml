@@ -1,0 +1,15 @@
+[package]
+name = "eigenius-wordnet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Import WordNet — the general English lexicon — into Eigon lexicon resources: noun synsets → classes (hypernymy → subclass_of), verb/adjective synsets → predicates, lemmas → lexical entries (D62 §8.7). Deterministic; no LLM."
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+clap = { version = "4", features = ["derive"] }
+
+[[bin]]
+name = "wordnet-import"
+path = "src/bin/wordnet_import.rs"

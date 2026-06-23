@@ -35,11 +35,12 @@
 
 use std::sync::Arc;
 
+use eigenius_kernel::dcg::{
+    cky_parse, denote_cat, entry_to_item, gate_entry, is_ctor, resolve_sem, type_eq, Identity,
+    Item, LexicalIndex,
+};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
-use eigenius_kernel::lexicon::{
-    cky_parse, denote_cat, entry_to_item, gate_entry, is_ctor, resolve_sem, type_eq, Item,
-};
 use eigenius_kernel::nbe::check::{check, check_infer, CheckCtx};
 use eigenius_kernel::nbe::env::Rho;
 use eigenius_kernel::nbe::eval::eval;
@@ -81,26 +82,43 @@ fn base_chain() -> Arc<Layer> {
     )
 }
 
-/// Compile the drafted lexicon layer against the base chain. A compile error
-/// here is the *Expressible* gate failing (the kernel cannot carry the content).
-fn build_lexicon() -> Arc<Layer> {
-    let reflection = base_chain();
-    let lexicon_src = include_str!("../../experiments/lexicon/lexicon.esl");
-    let resources = esl::compile_against_layer(lexicon_src, &reflection).unwrap_or_else(|errs| {
+/// Compile a `.esl` file against `parent`, panicking with the errors if it is
+/// not Expressible, and return the resulting layer.
+fn esl_layer(name: &str, src: &str, parent: Arc<Layer>) -> Arc<Layer> {
+    let resources = esl::compile_against_layer(src, &parent).unwrap_or_else(|errs| {
         panic!(
-            "lexicon.esl failed to compile (not Expressible):\n{}",
+            "{name} failed to compile (not Expressible):\n{}",
             errs.into_iter()
                 .map(|e| format!("  - {e:?}"))
                 .collect::<Vec<_>>()
                 .join("\n")
         )
     });
-    let mut b = LayerBuilder::new("lexicon", Some(reflection));
+    let mut b = LayerBuilder::new(name, Some(parent));
     for r in &resources {
         b.add_resource(r.clone())
-            .unwrap_or_else(|e| panic!("lexicon: add_resource failed: {e:?}"));
+            .unwrap_or_else(|e| panic!("{name}: add_resource failed: {e:?}"));
     }
     Arc::new(b.build(LayerStorage::in_memory()))
+}
+
+/// The lexicon SCHEMA layer (ontologies/lexicon) over core→reflection.
+fn build_schema() -> Arc<Layer> {
+    esl_layer(
+        "lexicon-schema",
+        include_str!("../../ontologies/lexicon/lexicon-ontology.esl"),
+        base_chain(),
+    )
+}
+
+/// The worked demo DOMAIN (experiments/lexicon) over the schema. A compile error
+/// here is the *Expressible* gate failing (the kernel cannot carry the content).
+fn build_lexicon() -> Arc<Layer> {
+    esl_layer(
+        "lexicon",
+        include_str!("../../experiments/lexicon/lexicon.esl"),
+        build_schema(),
+    )
 }
 
 #[test]
@@ -300,7 +318,7 @@ fn commit_gate_rejects_ill_typed_proposition() {
 // This makes the felicity invariant `typeof(sem) = ⟦cat⟧` mechanical: an entry
 // whose category and declared type disagree is now caught (the homogeneity /
 // argument-order bug the bare-atom spike used to hide). The recursor
-// (`denote_cat`) and `type_eq` are the kernel's `eigenius_kernel::lexicon`
+// (`denote_cat`) and `type_eq` are the kernel's `eigenius_kernel::dcg`
 // engine, imported above — the tests below witness them, not redefine them.
 fn decoded_field(layer: &Arc<Layer>, entry: &str, field: &str) -> Exp {
     let r = layer
@@ -377,7 +395,7 @@ fn denotation_is_order_and_type_sensitive() {
 // ════════════════════════════════════════════════════════════════════
 
 // `Item`, `is_ctor`, `entry_to_item`, `apply`, `cky_parse` are the kernel's
-// `eigenius_kernel::lexicon` engine (imported above). The tests below drive it
+// `eigenius_kernel::dcg` engine (imported above). The tests below drive it
 // over the worked lexicon; they witness the engine, they do not redefine it.
 fn tokens_for(layer: &Arc<Layer>, forms: &[&str]) -> Vec<Item> {
     forms
@@ -597,5 +615,91 @@ fn parser_composes_general_verb_via_subsumption() {
         readback_val(0, &ty),
         Exp::Sort(0),
         "the composed general-verb sentence must inhabit Prop"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// The lookup bridge (D62 §8.8.1): string → the forest of typed parses.
+// `LexicalIndex` builds a `form → entries` index over the committed lexicon;
+// `parse` tokenizes, seeds multi-token spans via the `Lemmatizer` (`Identity`
+// here — WordNet's Morphy is witnessed in the `eigenius-wordnet` crate), runs
+// CKY, and keeps every full-span S whose assembled sem the kernel types to Prop.
+// This joins lookup + multi-span MWE seeding + composition + the felicity oracle
+// into the kernel-attached `string → tree(s)` library. The forest is returned
+// whole (no selection, no commit — that is the encoding institution's job).
+// ════════════════════════════════════════════════════════════════════
+
+#[test]
+fn index_covers_the_committed_entries() {
+    let index = LexicalIndex::build(build_lexicon());
+    assert!(!index.is_empty());
+    // the six spike entries (incl. the multiword forms "cell line", "depends on").
+    assert!(
+        index.len() >= 6,
+        "index should cover the committed lexical entries; got {}",
+        index.len()
+    );
+}
+
+#[test]
+fn bridge_parses_mwe_sentence_to_prop() {
+    let index = LexicalIndex::build(build_lexicon());
+    // "HeLa depends on BRCA1": the verb is the multiword form "depends on" — one
+    // entry seeded across two tokens (the multi-span MWE seed) — and the proper
+    // nouns are single-token NP lookups. `parse` only returns S items whose sem
+    // type-checks to Prop, so a non-empty forest is itself the felicity witness.
+    let forest = index.parse("HeLa depends on BRCA1", &Identity);
+    assert_eq!(
+        forest.len(),
+        1,
+        "expected exactly one felicitous S parse for the MWE-verb sentence; got {}",
+        forest.len()
+    );
+    assert!(
+        is_ctor(&forest[0].cat, "cat_s").is_some(),
+        "the parse is an S"
+    );
+}
+
+#[test]
+fn bridge_composes_general_verb_via_subsumption() {
+    let index = LexicalIndex::build(build_lexicon());
+    // "HeLa affects BRCA1" — the general verb's NP[Entity] slots accept the
+    // CellLine subject and Gene object by subclass subsumption, through the bridge.
+    let forest = index.parse("HeLa affects BRCA1", &Identity);
+    assert_eq!(
+        forest.len(),
+        1,
+        "the general verb must compose via subsumption; got {}",
+        forest.len()
+    );
+}
+
+#[test]
+fn bridge_is_case_insensitive() {
+    let index = LexicalIndex::build(build_lexicon());
+    // Upper-cased input still resolves: the index is keyed by lowercased form and
+    // the tokenizer lowercases.
+    let forest = index.parse("HELA DEPENDS ON BRCA1", &Identity);
+    assert_eq!(forest.len(), 1, "case-insensitive lookup must still parse");
+}
+
+#[test]
+fn bridge_returns_empty_forest_for_unknown_words() {
+    let index = LexicalIndex::build(build_lexicon());
+    assert!(
+        index.parse("xyzzy plugh frobnicate", &Identity).is_empty(),
+        "no matching entries → no admissible parse (empty forest is a first-class outcome, not an error)"
+    );
+}
+
+#[test]
+fn bridge_yields_no_parse_for_type_mismatch() {
+    let index = LexicalIndex::build(build_lexicon());
+    // "BRCA1 depends on HeLa" — subject/object types swapped; the categories do
+    // not combine, so the forest is empty (the felicity filter at the category level).
+    assert!(
+        index.parse("BRCA1 depends on HeLa", &Identity).is_empty(),
+        "a type-mismatched sentence must produce no S parse"
     );
 }

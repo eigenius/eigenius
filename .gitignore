@@ -75,3 +75,4 @@ Thumbs.db
 # copied into the orchestrator Docker image at build time).
 /notebooks/dist
 .claude/scheduled_tasks.lock
+wordnet-full.esl

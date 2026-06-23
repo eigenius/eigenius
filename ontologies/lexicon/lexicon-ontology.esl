@@ -1,0 +1,93 @@
+// ════════════════════════════════════════════════════════════════════
+// The lexicon SCHEMA — the reusable categorial-lexicon ontology (D62 §8).
+// ════════════════════════════════════════════════════════════════════
+//
+// This is the schema half of D62: the category algebra (`lexicon:Cat`), the
+// lexical-entry record (`lexicon:LexicalEntry`), and the composed-sentence
+// record (`lexicon:Sentence`). It carries NO domain vocabulary — domain types,
+// predicates, and entries live in layers built ON this one (the worked demo in
+// `experiments/lexicon/lexicon.esl`; the imported general lexicon under `wn:`
+// from `crates/eigenius-wordnet`).
+//
+// The D62 thesis: we need no new term language for the lexicon — the kernel's
+// EigenTT already is one. A category is a kernel-checked `type_expr` value of
+// the inductive `lexicon:Cat`; an entry's `sem` is native semantic content (a
+// class / axiom / resource); the homomorphism ⟦cat⟧ → sem_type is a recursor
+// (`denote_cat`, kernel/src/lexicon.rs), and the kernel type-checker is the
+// felicity oracle (`gate_entry`).
+
+namespace core       = "urn:eigenius:core";
+namespace reflection = "urn:eigenius:reflection";
+namespace epistemic  = "urn:eigenius:reflection:epistemic";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace lexicon    = "urn:eigenius:lexicon";
+
+// ── The category algebra: categorial types as an inductive ────────────
+// A category is structured, not a string: Atom | A/B | A\B. Making it an
+// inductive means (a) it cannot be malformed — the kernel checks it; (b)
+// the composition rules pattern-match on it; (c) the homomorphism
+// ⟦cat⟧ → sem_type is a *recursor* over this type — realized as `denote_cat`
+// (D62 §8.6), which makes the felicity check `typeof(sem) = ⟦cat⟧` mechanical
+// (D62 §2 stage 5). The entity atom `cat_np(T)` is **type-indexed** (carries its
+// class T — Luo's DCG move), so ⟦·⟧ is self-contained:
+//   ⟦cat_s⟧ = Prop ; ⟦cat_n⟧ = Set ; ⟦cat_np(T)⟧ = T ; ⟦A/B⟧ = ⟦A\B⟧ = ⟦B⟧ → ⟦A⟧.
+// `fwd(A,B)` = A/B (seeks a B on the right → A); `bwd(A,B)` = A\B.
+data lexicon:Cat : Type 1 {
+    cat_s : lexicon:Cat,                              // S  — sentence
+    cat_n : lexicon:Cat,                              // N  — common noun
+    cat_np : Set -> lexicon:Cat,                      // NP(T) — entity of type T (DCG: type-indexed)
+    fwd : lexicon:Cat -> lexicon:Cat -> lexicon:Cat,  // A/B — forward slash
+    bwd : lexicon:Cat -> lexicon:Cat -> lexicon:Cat,  // A\B — backward slash
+}
+
+// ── The lexical-entry record ──────────────────────────────────────────
+class lexicon:LexicalEntry {
+    description = "One categorial lexical entry: a surface form bound to its category, its EigenTT semantics (by reference) + the type that semantics inhabits, a grounding sense, and an epistemic grade. The unit the D62 bootstrap loop (§8) produces.";
+    requires   lexicon:form, lexicon:cat, lexicon:sem, lexicon:sem_type, lexicon:grade;
+    recommends lexicon:sense;
+}
+
+property lexicon:form : core:string {
+    description = "The surface form / lemma (concrete side; GF's abstract/concrete split).";
+    domain lexicon:LexicalEntry;
+}
+property lexicon:cat : core:resource {
+    description = "The categorial type as a value of the inductive lexicon:Cat (Atom | A/B | A\\B), carried as a type_expr-encoded EigenTT term — NOT a string. Kernel-checked, pattern-matchable, and the source of the ⟦cat⟧ → sem_type homomorphism.";
+    class_types eigentt:TypeExpr;
+    domain lexicon:LexicalEntry;
+}
+property lexicon:sem : core:resource {
+    description = "Reference to the kernel-checked semantic content: a class (noun → EigonClass), an axiom (verb/adjective → EigonAxiom), or a committed resource (named entity → ResourceRef → Var). Heterogeneous by design — the three things a lexicon must distinguish.";
+    domain lexicon:LexicalEntry;
+}
+property lexicon:sem_type : core:resource {
+    description = "The EigenTT type ⟦cat⟧ the `sem` content inhabits, as a real type_expr (eigentt:TypeExpr). The machine-readable felicity obligation: typeof(sem) = this.";
+    class_types eigentt:TypeExpr;
+    domain lexicon:LexicalEntry;
+}
+property lexicon:sense : core:string {
+    description = "Grounding / disambiguation key — a WordNet sense id or, for a named entity, the committed resource's IRI (sem and sense coincide there).";
+    domain lexicon:LexicalEntry;
+}
+property lexicon:grade : core:resource {
+    description = "Epistemic grade of the entry — the SAME reflection:EpistemicStatus the rest of the stack uses (not a parallel enum). The §8 loop climbs Observed → Declared → Derived → Verified.";
+    class_types reflection:EpistemicStatus;
+    allows_only epistemic:observed, epistemic:declared,
+                epistemic:derived, epistemic:verified;
+    domain lexicon:LexicalEntry;
+}
+
+// ── The composed-sentence record ──────────────────────────────────────
+class lexicon:Sentence {
+    description = "A composed sentence: a gloss + the EigenTT Prop its derivation assembles (the verb's sem applied to its argument NPs). The kernel checks the prop inhabits Prop — the felicity condition.";
+    requires lexicon:gloss, lexicon:prop;
+}
+property lexicon:gloss : core:string {
+    description = "Human-readable gloss of the sentence.";
+    domain lexicon:Sentence;
+}
+property lexicon:prop : core:resource {
+    description = "The assembled proposition (eigentt:TypeExpr) — verb sem applied to its arguments, kernel-checked to inhabit Prop.";
+    class_types eigentt:TypeExpr;
+    domain lexicon:Sentence;
+}
