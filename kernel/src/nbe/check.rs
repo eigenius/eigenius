@@ -634,6 +634,31 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
             Ok(())
         }
 
+        // EigonResource against a class type — **intensional** inhabitation (#91):
+        // the resource inhabits `sup` iff one of its declared `is_a` classes is a
+        // (reflexive-transitive) subclass of `sup`, via the single foundation
+        // authority `Layer::is_subclass_of`. Consults the FULL `is_a` array — not
+        // `check_infer`'s lossy `.first()` — so multi-class individuals and
+        // subclass chains both type; the `c == sup` disjunct is the layer-free
+        // reflexive fallback. An empty `is_a` is a valid resource that inhabits no
+        // *specific* class, so this fails closed (it never errors on the resource).
+        // Membership is nominal; the structural check is the Validator's job.
+        (Exp::EigonResource(r), Val::EigonClass(sup)) => {
+            let inhabits = r
+                .is_a()
+                .iter()
+                .any(|c| c == sup || ctx.layer.as_ref().is_some_and(|l| l.is_subclass_of(c, sup)));
+            if inhabits {
+                Ok(())
+            } else {
+                Err(format!(
+                    "resource {:?} (is_a = {:?}) does not inhabit class {sup}",
+                    r.id(),
+                    r.is_a()
+                ))
+            }
+        }
+
         // Fallthrough: infer type and compare under subtyping
         // (`inferred <: expected`). For everything except sized
         // inductive parameters, `subtype_of` reduces to `eq_nf`.
@@ -665,6 +690,23 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
 pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
     match exp {
         Exp::Var(x) => lookup_gamma(&ctx.gamma, x),
+
+        // Type annotation `(e : T)` — the bidirectional mode switch. `T` must be
+        // a type (its own type is a `Sort`); then `e` is *checked* against `T`
+        // (so a Curry-style `Lam`, unsynthesizable on its own, becomes
+        // inferable), and the inferred type is `T`. See D63 §8.2.
+        Exp::Ann(e, t) => {
+            let t_ty = check_infer(ctx, t)?;
+            if !matches!(t_ty, Val::Sort(_)) {
+                return Err(format!(
+                    "Ann: annotation must be a type (a Sort), got {:?}",
+                    readback_val(ctx.rho.len(), &t_ty)
+                ));
+            }
+            let t_val = ctx.eval(t, &ctx.rho).map_err(|err| err.to_string())?;
+            check(ctx, e, &t_val)?;
+            Ok(t_val)
+        }
 
         Exp::App(e1, e2) => {
             let t1 = check_infer(ctx, e1)?;
@@ -1671,6 +1713,10 @@ pub fn check_guarded(exp: &Exp, forbidden: &std::collections::HashSet<&str>) -> 
 
         // Sub-expressions that need recursive checking.
         Exp::Lam(_, e) => check_guarded(e, forbidden),
+        Exp::Ann(e, t) => {
+            check_guarded(e, forbidden)?;
+            check_guarded(t, forbidden)
+        }
         Exp::App(e1, e2) => {
             check_guarded(e1, forbidden)?;
             check_guarded(e2, forbidden)
@@ -2757,6 +2803,62 @@ mod tests {
     #[test]
     fn check_unit_has_type_one() {
         check(&mut ctx(), &Exp::Unit, &Val::One).unwrap();
+    }
+
+    // ── Exp::Ann — the bidirectional mode switch (D63 §8.2) ──────────────
+
+    /// `λx. x` is unsynthesizable bare, but inferable when annotated `(λx.x :
+    /// Prop→Prop)` — and the inferred type IS the annotation.
+    #[test]
+    fn ann_makes_a_curry_lambda_inferable() {
+        let id = Exp::Lam(Patt::Var("x".into()), Box::new(Exp::Var("x".into())));
+        let ty = Exp::Arrow(Box::new(Exp::Sort(0)), Box::new(Exp::Sort(0)));
+
+        // Bare: check_infer has no Lam arm — not inferable.
+        assert!(
+            check_infer(&mut ctx(), &id).is_err(),
+            "a bare Curry lambda must not be inferable"
+        );
+
+        // Annotated: infers exactly the annotation (compared as NbE normal forms,
+        // so `A → B` sugar and `Π_:A. B` agree).
+        let ann = Exp::Ann(Box::new(id), Box::new(ty.clone()));
+        let inferred = check_infer(&mut ctx(), &ann).expect("annotated lambda is inferable");
+        let want = readback_val(0, &eval(&ty, &Rho::Nil).unwrap());
+        assert_eq!(readback_val(0, &inferred), want);
+    }
+
+    /// An `Ann` whose body does not check against the annotation is rejected.
+    #[test]
+    fn ann_rejects_a_body_that_mismatches_the_annotation() {
+        // `λx. x` annotated as `Prop` (not a function type) — must fail.
+        let id = Exp::Lam(Patt::Var("x".into()), Box::new(Exp::Var("x".into())));
+        let ann = Exp::Ann(Box::new(id), Box::new(Exp::Sort(0)));
+        assert!(
+            check_infer(&mut ctx(), &ann).is_err(),
+            "Ann with a non-function annotation for an identity lambda must be rejected"
+        );
+    }
+
+    /// The annotation must itself be a type; `(Unit : ())` (annotation is a value,
+    /// not a Sort) is rejected.
+    #[test]
+    fn ann_requires_the_annotation_to_be_a_type() {
+        let ann = Exp::Ann(Box::new(Exp::Unit), Box::new(Exp::Unit));
+        assert!(
+            check_infer(&mut ctx(), &ann).is_err(),
+            "an Ann whose annotation is not a type must be rejected"
+        );
+    }
+
+    /// `Ann` is runtime-erased: `⟦(e : T)⟧ = ⟦e⟧`.
+    #[test]
+    fn ann_is_runtime_erased() {
+        let e = Exp::Sort(0);
+        let ann = Exp::Ann(Box::new(e.clone()), Box::new(Exp::Sort(1)));
+        let via_ann = readback_val(0, &eval(&ann, &Rho::Nil).unwrap());
+        let direct = readback_val(0, &eval(&e, &Rho::Nil).unwrap());
+        assert_eq!(via_ann, direct, "Ann must erase to its underlying term");
     }
 
     #[test]
@@ -3953,6 +4055,51 @@ mod tests {
             Val::EigonClass(iri) => assert_eq!(iri.as_str(), "urn:eigenius:example:Dog"),
             other => panic!("expected EigonClass, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn check_resource_inhabits_via_full_is_a() {
+        // #91: a resource check-mode-inhabits a class iff one of its FULL is_a
+        // set is that class (or a subclass) — not just `is_a().first()`.
+        use crate::ontology::resource::{Resource, Value};
+        let is_a = Iri::parse("urn:eigenius:core:is_a").unwrap();
+        let resource_of = |classes: &[&str]| {
+            let mut r = Resource::new(Iri::parse("urn:example:r").unwrap());
+            if !classes.is_empty() {
+                r.set(
+                    is_a.clone(),
+                    Value::Array(
+                        classes
+                            .iter()
+                            .map(|c| Value::String(c.to_string()))
+                            .collect(),
+                    ),
+                );
+            }
+            Exp::EigonResource(Box::new(r))
+        };
+        let class = |s: &str| Val::EigonClass(Iri::parse(s).unwrap());
+
+        // Multi-class: inhabits EACH of its classes — including the NON-first
+        // (the #91 win; reflexive case needs no layer).
+        let dual = resource_of(&["urn:eigenius:example:Gene", "urn:eigenius:example:CellLine"]);
+        assert!(check(&mut ctx(), &dual, &class("urn:eigenius:example:Gene")).is_ok());
+        assert!(
+            check(&mut ctx(), &dual, &class("urn:eigenius:example:CellLine")).is_ok(),
+            "the non-first class must inhabit (#91)"
+        );
+        assert!(
+            check(&mut ctx(), &dual, &class("urn:eigenius:example:Other")).is_err(),
+            "an unrelated class must not inhabit"
+        );
+
+        // Empty is_a: a *valid* resource that inhabits no specific class — fails
+        // closed, never panics.
+        let bare = resource_of(&[]);
+        assert!(
+            check(&mut ctx(), &bare, &class("urn:eigenius:example:Gene")).is_err(),
+            "empty is_a inhabits no specific class (fail-closed)"
+        );
     }
 
     #[test]

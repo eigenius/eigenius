@@ -56,6 +56,22 @@
       },
       {
         "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Ann",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "expr",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "typ",
+            "urn:eigenius:core:type_name": "urn:eigenius:eigentt:TypeExpr"
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
         "urn:eigenius:core:ctor_name": "Pi",
         "urn:eigenius:core:arg_types": [
           {

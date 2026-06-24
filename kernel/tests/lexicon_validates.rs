@@ -36,8 +36,9 @@
 use std::sync::Arc;
 
 use eigenius_kernel::dcg::{
-    cat_subsumes, cky_parse, denote_cat, entry_to_item, gate_entry, is_ctor, resolve_sem, type_eq,
-    Identity, Item, LexicalIndex,
+    apply, cat_subsumes, cky_parse, denote_cat, entry_to_item, gate_entry, is_ctor, resolve_sem,
+    resolve_sem_value, subst_cat, type_eq, unify_cat, Identity, Item, Lemmatizer, LexicalIndex,
+    Pos,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -45,7 +46,7 @@ use eigenius_kernel::nbe::check::{check, check_infer, CheckCtx};
 use eigenius_kernel::nbe::env::Rho;
 use eigenius_kernel::nbe::eval::eval;
 use eigenius_kernel::nbe::readback::readback_val;
-use eigenius_kernel::nbe::term::Exp;
+use eigenius_kernel::nbe::term::{Exp, MatchArm, Patt};
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::resource::Value;
 use eigenius_kernel::ontology::Iri;
@@ -102,22 +103,55 @@ fn esl_layer(name: &str, src: &str, parent: Arc<Layer>) -> Arc<Layer> {
     Arc::new(b.build(LayerStorage::in_memory()))
 }
 
-/// The lexicon SCHEMA layer (ontologies/lexicon) over core→reflection.
-fn build_schema() -> Arc<Layer> {
+/// The `logic` layer (ontologies/logic) over core→reflection — propositional
+/// primitives (`logic:False`) the determiner/connective semantics build on
+/// (D63 §8.3 Phase 0).
+fn build_logic() -> Arc<Layer> {
     esl_layer(
-        "lexicon-schema",
-        include_str!("../../ontologies/lexicon/lexicon-ontology.esl"),
+        "logic",
+        include_str!("../../ontologies/logic/logic.esl"),
         base_chain(),
     )
 }
 
-/// The worked demo DOMAIN (experiments/lexicon) over the schema. A compile error
-/// here is the *Expressible* gate failing (the kernel cannot carry the content).
+/// The lexicon SCHEMA layer (ontologies/lexicon) over core→reflection→logic.
+fn build_schema() -> Arc<Layer> {
+    esl_layer(
+        "lexicon-schema",
+        include_str!("../../ontologies/lexicon/lexicon-ontology.esl"),
+        build_logic(),
+    )
+}
+
+/// The `ontology` layer (ontologies/ontology) over the schema — `ontology:is_a` /
+/// `ontology:subclass_of`, the opaque predicate-nominal relations (D63 §8.5 3c).
+fn build_ontology() -> Arc<Layer> {
+    esl_layer(
+        "ontology",
+        include_str!("../../ontologies/ontology/ontology.esl"),
+        build_schema(),
+    )
+}
+
+/// The committed closed-class determiner layer (ontologies/lexicon/closed-class)
+/// over the ontology layer — the canonical determiners (`every`/`each`/`all`/`a`/
+/// `some`/`no`, subject + object) + copula + wh-words the tests parse with (D63 §8.3).
+fn build_closed_class() -> Arc<Layer> {
+    esl_layer(
+        "closed-class",
+        include_str!("../../ontologies/lexicon/closed-class.esl"),
+        build_ontology(),
+    )
+}
+
+/// The worked demo DOMAIN (experiments/lexicon) over the closed-class layer. A
+/// compile error here is the *Expressible* gate failing (the kernel cannot carry
+/// the content).
 fn build_lexicon() -> Arc<Layer> {
     esl_layer(
         "lexicon",
         include_str!("../../experiments/lexicon/lexicon.esl"),
-        build_schema(),
+        build_closed_class(),
     )
 }
 
@@ -716,15 +750,15 @@ const FEAT: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
 namespace epistemic = "urn:eigenius:reflection:epistemic";
 resource lexicon:f_n_sg : lexicon:LexicalEntry {
-    lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_n(lexicon:sg) );
+    lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_n(lexicon:CellLine, lexicon:sg) );
     lexicon:sem = lexicon:CellLine; lexicon:sem_type = type_expr( Set ); lexicon:grade = epistemic:declared;
 }
 resource lexicon:f_n_pl : lexicon:LexicalEntry {
-    lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_n(lexicon:pl) );
+    lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_n(lexicon:CellLine, lexicon:pl) );
     lexicon:sem = lexicon:CellLine; lexicon:sem_type = type_expr( Set ); lexicon:grade = epistemic:declared;
 }
 resource lexicon:f_n_any : lexicon:LexicalEntry {
-    lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_n(lexicon:num_any) );
+    lexicon:form = "f"; lexicon:cat = type_expr( lexicon:cat_n(lexicon:CellLine, lexicon:num_any) );
     lexicon:sem = lexicon:CellLine; lexicon:sem_type = type_expr( Set ); lexicon:grade = epistemic:declared;
 }
 resource lexicon:f_np_ent_sg : lexicon:LexicalEntry {
@@ -786,4 +820,1000 @@ fn cat_subsumes_meets_features() {
         !cat_subsumes(&np_ent_sg, &np_gene_pl, &layer),
         "type ok (Gene ⊑ Entity) but number sg ≠ pl ⇒ reject"
     );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// #91 — the check-mode resource-inhabitation rule + the check-mode gate. A
+// multi-class individual (`r : Gene, CellLine`) gate-admits a name entry at
+// EACH of its classes — including the **non-first** one, which the old
+// `check_infer`-`.first()` gate could not (it only ever saw `Gene`). Transitive
+// (Entity) works via `is_subclass_of`.
+// ════════════════════════════════════════════════════════════════════
+
+const DUAL: &str = r#"
+namespace core      = "urn:eigenius:core";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+namespace lexicon   = "urn:eigenius:lexicon";
+resource lexicon:dual : lexicon:Gene, lexicon:CellLine {
+    core:description = "an individual that is both a Gene and a CellLine";
+}
+resource lexicon:e_dual_gene : lexicon:LexicalEntry {
+    lexicon:form = "dual"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:num_any) );
+    lexicon:sem = lexicon:dual; lexicon:sem_type = type_expr( lexicon:Gene ); lexicon:grade = epistemic:declared;
+}
+resource lexicon:e_dual_cl : lexicon:LexicalEntry {
+    lexicon:form = "dual"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:CellLine, lexicon:num_any) );
+    lexicon:sem = lexicon:dual; lexicon:sem_type = type_expr( lexicon:CellLine ); lexicon:grade = epistemic:declared;
+}
+resource lexicon:e_dual_ent : lexicon:LexicalEntry {
+    lexicon:form = "dual"; lexicon:cat = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:num_any) );
+    lexicon:sem = lexicon:dual; lexicon:sem_type = type_expr( lexicon:Entity ); lexicon:grade = epistemic:declared;
+}
+"#;
+
+#[test]
+fn gate_admits_multi_class_resource_at_each_class() {
+    let lexicon = build_lexicon();
+    let resources = esl::compile_against_layer(DUAL, &lexicon).expect("dual entries compile");
+    let mut b = LayerBuilder::new("dual", Some(lexicon));
+    for r in &resources {
+        b.add_resource(r.clone()).expect("add dual entry");
+    }
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+    for (entry, why) in [
+        ("urn:eigenius:lexicon:e_dual_gene", "first class"),
+        (
+            "urn:eigenius:lexicon:e_dual_cl",
+            "NON-first class (the #91 win)",
+        ),
+        (
+            "urn:eigenius:lexicon:e_dual_ent",
+            "transitive super (Gene ⊑ Entity)",
+        ),
+    ] {
+        let r = layer
+            .resolve(&Iri::parse(entry).expect("entry iri"))
+            .unwrap_or_else(|| panic!("resolves: {entry}"));
+        gate_entry(&layer, &r).unwrap_or_else(|e| {
+            panic!("multi-class resource must gate-admit at {why} ({entry}): {e}")
+        });
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// D63 §8.2 (Slice 2) — de-risking the expert-resolved determiner SEMANTICS
+// before the category machinery (type-variables / unification / contravariance)
+// is built. The polymorphic determiner sem `λA:Set. λV:A→Prop. ∀x:A. V(x)`:
+//   (1) type-checks as a closed term against `ΠA:Set. (A→Prop)→Prop` (so it can
+//       gate in isolation — the per-item felicity discipline holds); and
+//   (2) applied to a CN (`Gene`) and a generic `Entity`-predicate (`q`), reduces
+//       (NbE) to `∀x:Gene. q(x) : Prop` — the `Gene ⊑ Entity` coercion firing
+//       under `∀` on the now-concrete `Gene`. This validates Option 2's typing
+//       end-to-end; the remaining work is plumbing to PRODUCE these terms via
+//       parsing.
+// ════════════════════════════════════════════════════════════════════
+
+const DET_SEMANTICS: &str = r#"
+namespace lexicon = "urn:eigenius:lexicon";
+axiom lexicon:q : lexicon:Entity -> Prop
+resource lexicon:det_sem : lexicon:Sentence {
+    lexicon:gloss = "the polymorphic determiner type ΠA:Set.(A→Prop)→Prop";
+    lexicon:prop  = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+}
+"#;
+
+/// The polymorphic determiner sem: `λA:Set. λV:A→Prop. ∀x:A. V(x)`.
+fn det_sem_exp() -> Exp {
+    let v_app = Exp::App(
+        Box::new(Exp::Var("V".into())),
+        Box::new(Exp::Var("x".into())),
+    );
+    let forall_x = Exp::Pi(
+        Patt::Var("x".into()),
+        Box::new(Exp::Var("A".into())),
+        Box::new(v_app),
+    );
+    let lam_v = Exp::Lam(Patt::Var("V".into()), Box::new(forall_x));
+    Exp::Lam(Patt::Var("A".into()), Box::new(lam_v))
+}
+
+fn det_layer() -> Arc<Layer> {
+    let lexicon = build_lexicon();
+    let resources =
+        esl::compile_against_layer(DET_SEMANTICS, &lexicon).expect("determiner snippet compiles");
+    let mut b = LayerBuilder::new("det", Some(lexicon));
+    for r in &resources {
+        b.add_resource(r.clone()).expect("add determiner resource");
+    }
+    Arc::new(b.build(LayerStorage::in_memory()))
+}
+
+#[test]
+fn determiner_sem_inhabits_its_polymorphic_type() {
+    // (1) The polymorphic determiner sem type-checks against ΠA:Set.(A→Prop)→Prop
+    //     — so it can gate in isolation (the per-item felicity discipline holds).
+    let layer = det_layer();
+    let det_ty = decode_type(
+        &proposition_of(&layer, "urn:eigenius:lexicon:det_sem"),
+        &layer,
+    )
+    .expect("det type decodes");
+    let ty_val = eval(&det_ty, &Rho::Nil).expect("eval det type");
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+    check(&mut ctx, &det_sem_exp(), &ty_val)
+        .expect("polymorphic determiner sem must inhabit ΠA:Set.(A→Prop)→Prop (gate-able)");
+}
+
+#[test]
+fn every_gene_q_composes_and_reduces_to_prop() {
+    // (2) The composed `det(Gene)(q)` NbE-reduces to `∀x:Gene. q(x) : Prop` — the
+    //     Gene ⊑ Entity coercion firing under ∀ (q : Entity → Prop), on the now-
+    //     concrete Gene. (Built directly here; producing it via parsing is the
+    //     remaining DCG plumbing, §8.2.)
+    let layer = det_layer();
+    let gene = Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:Gene").unwrap());
+    let q = Exp::EigonAxiom(Iri::parse("urn:eigenius:lexicon:q").unwrap());
+    let composed = Exp::App(
+        Box::new(Exp::App(Box::new(det_sem_exp()), Box::new(gene))),
+        Box::new(q),
+    );
+    let nf = readback_val(0, &eval(&composed, &Rho::Nil).expect("eval composed term"));
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+    let ty = check_infer(&mut ctx, &nf)
+        .expect("composed `every gene q` must type-check after NbE reduction");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "`every gene q` must inhabit Prop"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// D63 §8.2 item 2 — category type-variables + first-order unification.
+//
+// A determiner is polymorphic: its category `(S/(S\NP_T))/N_T` carries a
+// schematic type-variable `T`. When it composes forward with a noun `N_Gene`,
+// `apply` UNIFIES `T := Gene` and SUBSTITUTES that binding through the result,
+// producing `S/(S\NP_Gene)`. (Authoring a free `T` in ESL is the item-5
+// decision; here the polymorphic category is synthesized from a concrete
+// determiner-shaped one — through the real decode path — by replacing the
+// `Gene` leaves with a schematic `Var("T")`, so substituting `T := Gene` must
+// recover the concrete category exactly.)
+// ════════════════════════════════════════════════════════════════════
+
+// A determiner-SHAPED category authored concretely over `Gene`: the forward
+// functor `(S/(S\NP_Gene))/N_Gene`. (Not felicitous as an entry — its `sem` is a
+// placeholder; only the `cat` field is read.)
+const DET_SHAPE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+resource lexicon:e_det_shape : lexicon:LexicalEntry {
+    lexicon:form     = "every";
+    lexicon:cat      = type_expr(
+        lexicon:fwd(
+            lexicon:fwd(
+                lexicon:cat_s(lexicon:dcl, lexicon:fin_any),
+                lexicon:bwd(
+                    lexicon:cat_s(lexicon:dcl, lexicon:fin_any),
+                    lexicon:cat_np(lexicon:Gene, lexicon:num_any)
+                )
+            ),
+            lexicon:cat_n(lexicon:Gene, lexicon:num_any)
+        )
+    );
+    lexicon:sem      = lexicon:Gene;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "x";
+    lexicon:grade    = epistemic:declared;
+}
+"#;
+
+fn det_shape_layer() -> Arc<Layer> {
+    let lexicon = build_lexicon();
+    let resources =
+        esl::compile_against_layer(DET_SHAPE, &lexicon).expect("determiner-shape snippet compiles");
+    let mut b = LayerBuilder::new("det-shape", Some(lexicon));
+    for r in &resources {
+        b.add_resource(r.clone()).expect("add det-shape resource");
+    }
+    Arc::new(b.build(LayerStorage::in_memory()))
+}
+
+/// Replace every `EigonClass(class)` leaf with a schematic `Var(var)` — turning a
+/// concrete category into a polymorphic scheme (the inverse of the `subst_cat`
+/// the engine performs).
+fn polymorphize(cat: &Exp, class: &Iri, var: &str) -> Exp {
+    match cat {
+        Exp::EigonClass(iri) if iri == class => Exp::Var(var.to_string()),
+        Exp::InductiveCtor(decl, name, args) => Exp::InductiveCtor(
+            decl.clone(),
+            name.clone(),
+            args.iter().map(|a| polymorphize(a, class, var)).collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+#[test]
+fn determiner_unifies_type_var_and_substitutes_through_result() {
+    let layer = det_shape_layer();
+    let gene = Iri::parse("urn:eigenius:lexicon:Gene").unwrap();
+
+    // The concrete determiner category `(S/(S\NP_Gene))/N_Gene`, decoded through
+    // the real path; split into its result `S/(S\NP_Gene)` and its noun slot
+    // `N_Gene`.
+    let concrete = decoded_field(
+        &layer,
+        "urn:eigenius:lexicon:e_det_shape",
+        "urn:eigenius:lexicon:cat",
+    );
+    let c_args = is_ctor(&concrete, "fwd").expect("determiner is a forward functor");
+    let concrete_result = c_args[0].clone(); // S/(S\NP_Gene)
+    let noun_cat = c_args[1].clone(); // N_Gene  (= cat_n(Gene, num_any))
+
+    // The polymorphic category: `Gene` leaves → schematic `T`.
+    let poly = polymorphize(&concrete, &gene, "T");
+    let p_args = is_ctor(&poly, "fwd").expect("polymorphic determiner is a forward functor");
+    let poly_noun_slot = &p_args[1]; // N_T  (= cat_n(Var T, num_any))
+
+    // (1) Unification: the `N_T` slot binds `T := Gene` against the concrete noun.
+    let subst = unify_cat(poly_noun_slot, &noun_cat, &layer).expect("N_T unifies with N_Gene");
+    assert_eq!(
+        subst.get("T"),
+        Some(&Exp::EigonClass(gene.clone())),
+        "unification must bind T := Gene"
+    );
+
+    // (2) Substituting that binding through the polymorphic result recovers the
+    //     concrete result exactly.
+    assert_eq!(
+        subst_cat(&p_args[0], &subst),
+        concrete_result,
+        "T := Gene must flow through the result category"
+    );
+
+    // (3) End-to-end via `apply`: `every` (polymorphic) ▸ `gene` (N_Gene) yields
+    //     `S/(S\NP_Gene)` (variable resolved) and the sem `det(Gene)`.
+    let det = Item::new(poly, det_sem_exp());
+    let noun = Item::new(noun_cat, Exp::EigonClass(gene.clone()));
+    let out = apply(&det, &noun, &layer).expect("polymorphic determiner applies to its noun");
+    assert_eq!(
+        out.cat, concrete_result,
+        "apply must resolve the category variable to Gene"
+    );
+    assert_eq!(
+        out.sem,
+        Exp::App(Box::new(det_sem_exp()), Box::new(Exp::EigonClass(gene))),
+        "apply must build det(Gene) in lockstep"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// D63 §8.2 item 3 — `cat_forall` denotes Π; the dependent application.
+//
+// A determiner's category is the CLOSED, kernel-checked value
+// `cat_forall(λT:Set. S/(S\NP_T))` (the HOAS binder keeps it free-variable-
+// free, so the commit-time felicity check — Rule 21 — admits it; the probe in
+// eigenius#92's discussion confirmed the reflexive ctor type-checks). Its
+// denotation is `denote_cat`-bound as the polymorphic determiner type
+// `ΠT:Set. (T→Prop)→Prop`, so the felicity invariant ⟦cat⟧ ≡ sem_type holds IN
+// ISOLATION; and `apply` instantiates it against a noun (T := the noun's type).
+// ════════════════════════════════════════════════════════════════════
+
+const DET_CAT_FORALL: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+namespace logic     = "urn:eigenius:logic";
+
+// A general one-place predicate over entities — a stand-in VP semantics for the
+// item-4 composition test (`Entity -> Prop`, so `Gene` flows in by subsumption).
+axiom lexicon:q : lexicon:Entity -> Prop
+
+// The DETERMINERS come from the committed closed-class layer
+// (`ontologies/lexicon/closed-class.esl`), which this test's chain includes
+// (`build_closed_class`); e.g. `every` is `lexicon:every_subj`. Only the demo
+// scaffolding the engine unit tests reference is declared in this snippet.
+
+// A common noun `N_Gene` for the determiner to consume.
+resource lexicon:e_gene_noun : lexicon:LexicalEntry {
+    lexicon:form     = "gene";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Gene, lexicon:num_any) );
+    lexicon:sem      = lexicon:Gene;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "x";
+    lexicon:grade    = epistemic:declared;
+}
+
+// The supertype common noun `N_Entity` — the wider restrictor used in the FraCaS
+// monotonicity check (`every entity …` ⊨ `every gene …`, since Gene ≤ Entity).
+resource lexicon:e_entity_noun : lexicon:LexicalEntry {
+    lexicon:form     = "entity";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Entity, lexicon:num_any) );
+    lexicon:sem      = lexicon:Entity;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "x";
+    lexicon:grade    = epistemic:declared;
+}
+
+// The expected result of `every ▸ gene`: the concrete `S/(S\NP_Gene)`.
+resource lexicon:e_det_result : lexicon:LexicalEntry {
+    lexicon:form     = "every gene";
+    lexicon:cat      = type_expr(
+        lexicon:fwd(
+            lexicon:cat_s(lexicon:dcl, lexicon:fin_any),
+            lexicon:bwd(
+                lexicon:cat_s(lexicon:dcl, lexicon:fin_any),
+                lexicon:cat_np(lexicon:Gene, lexicon:num_any)
+            )
+        )
+    );
+    lexicon:sem      = lexicon:Gene;
+    lexicon:sem_type = type_expr( (lexicon:Gene -> Prop) -> Prop );
+    lexicon:sense    = "x";
+    lexicon:grade    = epistemic:declared;
+}
+"#;
+
+fn det_poly_layer() -> Arc<Layer> {
+    let lexicon = build_lexicon();
+    let resources = esl::compile_against_layer(DET_CAT_FORALL, &lexicon)
+        .expect("cat_forall determiner snippet compiles");
+    let mut b = LayerBuilder::new("det-poly", Some(lexicon));
+    for r in &resources {
+        b.add_resource(r.clone()).expect("add det-poly resource");
+    }
+    Arc::new(b.build(LayerStorage::in_memory()))
+}
+
+fn poly_cat(layer: &Arc<Layer>, entry: &str) -> Exp {
+    decoded_field(layer, entry, "urn:eigenius:lexicon:cat")
+}
+
+#[test]
+fn cat_forall_passes_commit_validation() {
+    // The closed `cat_forall(λT:Set. …)` category type-checks at commit (Rule 21
+    // decode + check_infer): the determiner entry is a legitimate chain Resource.
+    let layer = det_poly_layer();
+    let errors = Validator::new(layer).validate();
+    assert!(
+        errors.is_empty(),
+        "the cat_forall determiner entry must validate cleanly. {} error(s):\n{}",
+        errors.len(),
+        errors
+            .iter()
+            .take(10)
+            .map(|e| format!("  - {e}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+}
+
+#[test]
+fn determiner_entry_resolves_and_gates() {
+    // Item 5: a complete determiner chain entry. Its `sem` references a committed
+    // `SemTerm` whose `term` is the annotated λ-semantics. The entry passes the
+    // felicity gate (⟦cat_forall⟧ ≡ sem_type AND the resolved λ-sem inhabits
+    // ⟦cat⟧), and `resolve_sem_value` follows the ref + decodes the Ann'd term to
+    // exactly the polymorphic determiner term `det_sem_exp()`.
+    let layer = det_poly_layer();
+    let entry = layer
+        .resolve(&Iri::parse("urn:eigenius:lexicon:every_subj").unwrap())
+        .expect("determiner entry resolves");
+
+    gate_entry(&layer, &entry).expect("determiner entry must pass the felicity gate");
+
+    let sem_v = entry
+        .get(&Iri::parse("urn:eigenius:lexicon:sem").unwrap())
+        .expect("entry has sem");
+    let sem = resolve_sem_value(&layer, sem_v).expect("SemTerm-referenced λ-sem resolves");
+    let got = readback_val(0, &eval(&sem, &Rho::Nil).expect("eval resolved sem"));
+    let want = readback_val(
+        0,
+        &eval(&det_sem_exp(), &Rho::Nil).expect("eval det_sem_exp"),
+    );
+    assert_eq!(
+        got, want,
+        "the committed determiner sem must equal det_sem_exp()"
+    );
+}
+
+#[test]
+fn cat_forall_denotes_pi_and_matches_sem_type() {
+    // ⟦cat_forall(λT. S/(S\NP_T))⟧ = ΠT:Set. (T→Prop)→Prop ≡ the declared sem_type.
+    let layer = det_poly_layer();
+    let cat = poly_cat(&layer, "urn:eigenius:lexicon:every_subj");
+    let sem_type = decoded_field(
+        &layer,
+        "urn:eigenius:lexicon:every_subj",
+        "urn:eigenius:lexicon:sem_type",
+    );
+    let denoted = denote_cat(&cat).expect("denote cat_forall");
+    assert!(
+        type_eq(&denoted, &sem_type),
+        "⟦cat_forall⟧ must equal the polymorphic sem_type.\n  ⟦cat⟧    = {denoted:?}\n  sem_type = {sem_type:?}"
+    );
+}
+
+#[test]
+fn cat_forall_gates_in_isolation() {
+    // The felicity gate IN ISOLATION: the polymorphic determiner sem inhabits
+    // ⟦cat_forall⟧ = ΠT:Set.(T→Prop)→Prop — the per-item discipline holds.
+    let layer = det_poly_layer();
+    let cat = poly_cat(&layer, "urn:eigenius:lexicon:every_subj");
+    let denoted = denote_cat(&cat).expect("denote cat_forall");
+    let ty_val = eval(&denoted, &Rho::Nil).expect("eval ⟦cat⟧");
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+    check(&mut ctx, &det_sem_exp(), &ty_val)
+        .expect("determiner sem must inhabit ⟦cat_forall⟧ (gate-able in isolation)");
+}
+
+#[test]
+fn cat_forall_dependent_application_instantiates_and_stays_felicitous() {
+    // `every` (cat_forall) ▸ `gene` (N_Gene): T := Gene, category resolves to
+    // `S/(S\NP_Gene)`, sem builds `det(Gene)`, and the produced sem still
+    // inhabits the produced category's denotation (felicity preserved).
+    let layer = det_poly_layer();
+    let gene = Iri::parse("urn:eigenius:lexicon:Gene").unwrap();
+
+    let det = Item::new(
+        poly_cat(&layer, "urn:eigenius:lexicon:every_subj"),
+        det_sem_exp(),
+    );
+    let noun = Item::new(
+        poly_cat(&layer, "urn:eigenius:lexicon:e_gene_noun"),
+        Exp::EigonClass(gene.clone()),
+    );
+    let expected = poly_cat(&layer, "urn:eigenius:lexicon:e_det_result");
+
+    let out = apply(&det, &noun, &layer).expect("cat_forall determiner applies to its noun");
+    assert_eq!(
+        out.cat, expected,
+        "cat_forall ▸ N_Gene must resolve to S/(S\\NP_Gene)"
+    );
+    assert_eq!(
+        out.sem,
+        Exp::App(Box::new(det_sem_exp()), Box::new(Exp::EigonClass(gene))),
+        "sem must be det(Gene)"
+    );
+
+    // Felicity preserved across the step: the (NbE-reduced) produced sem inhabits
+    // ⟦S/(S\NP_Gene)⟧ = (Gene→Prop)→Prop.
+    let out_ty = eval(&denote_cat(&out.cat).expect("denote result"), &Rho::Nil)
+        .expect("eval result denotation");
+    let reduced_sem = readback_val(0, &eval(&out.sem, &Rho::Nil).expect("eval out sem"));
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+    check(&mut ctx, &reduced_sem, &out_ty).expect("det(Gene) must inhabit ⟦S/(S\\NP_Gene)⟧");
+}
+
+// ════════════════════════════════════════════════════════════════════
+// D63 §8.2 item 4 — contravariant structural subsumption for fwd/bwd.
+//
+// A functor `A/B` / `A\B` subsumes with function variance: covariant result,
+// CONTRAVARIANT argument. So a general VP `S\NP_Entity` fills the determiner-
+// result's `S\NP_Gene` slot (`Gene ≤ Entity` ⇒ `Entity→Prop ≤ Gene→Prop`) — the
+// step that lets `every gene` compose with a general predicate.
+// ════════════════════════════════════════════════════════════════════
+
+#[test]
+fn functor_subsumption_is_contravariant_in_the_argument() {
+    let layer = det_poly_layer();
+    // S\NP_Gene = the determiner-result's argument slot (from e_det_result).
+    let det_result = poly_cat(&layer, "urn:eigenius:lexicon:e_det_result");
+    let vp_gene = is_ctor(&det_result, "fwd").expect("fwd")[1].clone(); // S\NP_Gene
+                                                                        // S\NP_Entity = the general verb's VP (from e_affects).
+    let affects = poly_cat(&layer, "urn:eigenius:lexicon:e_affects");
+    let vp_entity = is_ctor(&affects, "fwd").expect("fwd")[0].clone(); // S\NP_Entity
+
+    // Contravariant: the more-general `S\NP_Entity` fills the `S\NP_Gene` slot…
+    assert!(
+        cat_subsumes(&vp_gene, &vp_entity, &layer),
+        "S\\NP_Entity must fill an S\\NP_Gene slot (contravariant: Gene ≤ Entity)"
+    );
+    // …but NOT the reverse — the asymmetry that proves it is contravariant, not
+    // covariant (a `Gene`-only VP cannot stand in for an `Entity` VP).
+    assert!(
+        !cat_subsumes(&vp_entity, &vp_gene, &layer),
+        "S\\NP_Gene must NOT fill an S\\NP_Entity slot"
+    );
+}
+
+#[test]
+fn every_gene_q_composes_via_apply_to_a_quantified_prop() {
+    // The item-2/3/4 pieces end-to-end through `apply` (no hand-built terms): the
+    // determiner-result `S/(S\NP_Gene)` (sem `det(Gene)`) applies forward to the
+    // general VP `S\NP_Entity` (sem `q : Entity→Prop`), accepted by contravariant
+    // functor subsumption, producing `S` whose sem reduces to `∀x:Gene. q(x) :
+    // Prop`. (This is `every_gene_q_composes_and_reduces_to_prop` — but PRODUCED
+    // by the parser combinators rather than assembled by hand.)
+    let layer = det_poly_layer();
+    let gene = Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:Gene").unwrap());
+    let q = Exp::EigonAxiom(Iri::parse("urn:eigenius:lexicon:q").unwrap());
+
+    let det_result = Item::new(
+        poly_cat(&layer, "urn:eigenius:lexicon:e_det_result"), // S/(S\NP_Gene)
+        Exp::App(Box::new(det_sem_exp()), Box::new(gene)),     // det(Gene)
+    );
+    let affects = poly_cat(&layer, "urn:eigenius:lexicon:e_affects");
+    let vp = Item::new(
+        is_ctor(&affects, "fwd").expect("fwd")[0].clone(), // S\NP_Entity
+        q,                                                 // q : Entity → Prop
+    );
+
+    let out = apply(&det_result, &vp, &layer)
+        .expect("S/(S\\NP_Gene) must apply to S\\NP_Entity via contravariant subsumption");
+
+    // The produced category is a declarative S → Prop.
+    assert!(
+        type_eq(&denote_cat(&out.cat).expect("denote S"), &Exp::Sort(0)),
+        "the produced category must denote Prop"
+    );
+    // The produced sem NbE-reduces to a well-typed proposition (∀x:Gene. q(x)).
+    let reduced = readback_val(0, &eval(&out.sem, &Rho::Nil).expect("eval sentence sem"));
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+    let ty = check_infer(&mut ctx, &reduced).expect("composed sentence must type-check");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "`every gene q` (composed via apply) must inhabit Prop"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// D63 §8.2 item 5 — the determiner milestone, end to end FROM CHAIN ENTRIES.
+//
+// "every cell line is primary" composed by the CKY parser from COMMITTED lexical
+// entries (not hand-built items): the `cat_forall` determiner (its λ-sem resolved
+// from its `SemTerm`), the `cell line` common noun, the copula `is`, and the BASE
+// predicative `primary` (`S[dcl,bse]\NP_Entity`). The copula `is` supplies
+// finiteness — `is primary : S[dcl,fin]\NP` (D63 §8.5 Slice 3a) — and the chart
+// yields an `S` whose sem NbE-reduces to `∀c:CellLine. is_primary(c) : Prop`,
+// kernel-checked. (`primary` now REQUIRES the copula: a bare `*every cell line
+// primary` is not a finite root.)
+// ════════════════════════════════════════════════════════════════════
+#[test]
+fn every_cell_line_is_primary_parses_from_entries_to_a_checked_prop() {
+    let layer = det_poly_layer();
+    let item = |iri: &str| {
+        let r = layer
+            .resolve(&Iri::parse(iri).unwrap())
+            .unwrap_or_else(|| panic!("entry {iri} resolves"));
+        entry_to_item(&layer, &r).unwrap_or_else(|e| panic!("{iri} -> item: {e}"))
+    };
+
+    // every · cell line · is · primary   (determiner · noun · copula · base adjective)
+    let tokens = vec![
+        item("urn:eigenius:lexicon:every_subj"),
+        item("urn:eigenius:lexicon:e_cell_line"),
+        item("urn:eigenius:lexicon:is_copula"),
+        item("urn:eigenius:lexicon:e_primary"),
+    ];
+
+    let parses = cky_parse(&tokens, &layer);
+    // A spanning parse whose category denotes Prop — a declarative sentence.
+    let s = parses
+        .iter()
+        .find(|it| {
+            denote_cat(&it.cat)
+                .map(|d| type_eq(&d, &Exp::Sort(0)))
+                .unwrap_or(false)
+        })
+        .expect("CKY must yield a spanning S that denotes Prop");
+
+    // Its sem NbE-reduces to a well-typed proposition: ∀c:CellLine. is_primary(c).
+    let reduced = readback_val(0, &eval(&s.sem, &Rho::Nil).expect("eval parsed sem"));
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+    let ty = check_infer(&mut ctx, &reduced).expect("parsed sentence must type-check");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "the parsed quantified sentence must inhabit Prop"
+    );
+}
+
+// ── Item 5 — the determiner milestone through the STRING bridge ──────
+/// `parse("every gene affects HeLa")` via `LexicalIndex::parse`: tokenize →
+/// seed (determiner / common noun / general verb / named entity) → CKY →
+/// felicity filter. Subject quantification + a named object (no copula, no
+/// object quantifier). The forest is the `∀g:Gene. affects(HeLa, g) : Prop`
+/// reading — every returned parse is an S the kernel confirmed inhabits Prop.
+#[test]
+fn bridge_parses_every_gene_affects_hela_to_prop() {
+    let layer = det_poly_layer();
+    let index = LexicalIndex::build(layer.clone());
+    let forest = index.parse("every gene affects HeLa", &Identity);
+    assert!(
+        !forest.is_empty(),
+        "the determiner sentence must yield at least one felicitous S:Prop parse"
+    );
+    for p in &forest {
+        assert!(is_ctor(&p.cat, "cat_s").is_some(), "each parse is an S");
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+        let ty = check_infer(&mut ctx, &p.sem).expect("parsed (reduced) sem type-checks");
+        assert_eq!(
+            readback_val(0, &ty),
+            Exp::Sort(0),
+            "each parse inhabits Prop"
+        );
+    }
+}
+
+// ── Item 5 — OBJECT QUANTIFICATION milestone (the full target) ──────
+/// `parse("every gene affects a cell line")` via the string bridge: subject
+/// universal (`every gene`, a `cat_forall` GQ) + a transitive verb + an OBJECT
+/// existential (`a cell line`, the type-raised object determiner `lexicon:a_obj`).
+/// The chart composes `affects` ▸ `a cell line` (backward, contravariant functor
+/// subsumption) into the VP, then `every gene` ▸ VP into the sentence. The forest
+/// is the `∀g:Gene. ∃c:CellLine. affects(c, g) : Prop` reading — kernel-checked.
+#[test]
+fn bridge_parses_every_gene_affects_a_cell_line_to_prop() {
+    let layer = det_poly_layer();
+    let index = LexicalIndex::build(layer.clone());
+    let forest = index.parse("every gene affects a cell line", &Identity);
+    assert!(
+        !forest.is_empty(),
+        "the doubly-quantified sentence must yield at least one felicitous S:Prop parse"
+    );
+    for p in &forest {
+        assert!(is_ctor(&p.cat, "cat_s").is_some(), "each parse is an S");
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+        let ty = check_infer(&mut ctx, &p.sem).expect("parsed (reduced) sem type-checks");
+        assert_eq!(
+            readback_val(0, &ty),
+            Exp::Sort(0),
+            "each parse inhabits Prop"
+        );
+    }
+}
+
+// ── Slice-2 tail — determiner/noun NUMBER AGREEMENT (the Slice-1 deferral) ──
+/// A minimal morphology that strips a plural `-s` (so `genes → gene`, marking the
+/// surface plural). Enough to exercise the morphological-number seam without the
+/// full WordNet Morphy (which the wordnet crate's bridge test covers).
+struct PluralS;
+impl Lemmatizer for PluralS {
+    fn lemmas(&self, surface: &str, _pos: Pos) -> Vec<String> {
+        let s = surface.trim().to_lowercase();
+        match s.strip_suffix('s') {
+            Some(base) if !base.is_empty() => vec![s.clone(), base.to_string()],
+            _ => vec![s],
+        }
+    }
+}
+
+#[test]
+fn determiner_noun_number_agreement_bites() {
+    // The Num feature, made functional end to end: the lexicon stores nouns as
+    // `num_any`; `LexicalIndex` refines the seed to the SURFACE number (`gene` sg,
+    // `genes` pl); the determiner `every` carries `sg` on its `cat_forall`, and
+    // `apply` checks agreement. So a singular determiner with a plural noun has
+    // NO parse, while the singular agrees.
+    let layer = det_poly_layer();
+    let index = LexicalIndex::build(layer.clone());
+
+    let ok = index.parse("every gene affects HeLa", &PluralS);
+    assert!(
+        !ok.is_empty(),
+        "singular 'every gene affects HeLa' must parse (sg ⊓ sg)"
+    );
+
+    let bad = index.parse("every genes affects HeLa", &PluralS);
+    assert!(
+        bad.is_empty(),
+        "'every genes ...' must NOT parse — sg determiner ⊓ pl noun fails agreement"
+    );
+}
+
+// D63 §8.5 Slice 3c — kind-subject predicate nominals → `subclass_of`. A bare-plural
+// common noun is a KIND subject (`cat_kind`, ⟦·⟧ = Set); the kind copula `are`
+// relates it to the predicate noun via `ontology:subclass_of`. Distinct from
+// "every gene is a cell line" (∀g. is_a(g, CellLine)) — the generic/kind reading.
+#[test]
+fn kind_subject_predicate_nominal_is_subclass_of() {
+    let layer = det_poly_layer();
+    let index = LexicalIndex::build(layer.clone());
+    // "genes are cell lines" → subclass_of(Gene, CellLine) : Prop (opaque; truth is a
+    // separate grounding judgment — felicity ≠ truth).
+    let forest = index.parse("genes are cell lines", &PluralS);
+    assert_eq!(forest.len(), 1, "exactly one kind-subject parse");
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+    let ty = check_infer(&mut ctx, &forest[0].sem).expect("kind nominal type-checks");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "a kind predicate nominal denotes Prop"
+    );
+    // Structure: subclass_of(Gene, CellLine) = App(App(ontology:subclass_of, Gene), CellLine).
+    match &forest[0].sem {
+        Exp::App(f, _) => match &**f {
+            Exp::App(g, _) => assert!(
+                matches!(&**g, Exp::EigonAxiom(iri) if iri.as_str() == "urn:eigenius:ontology:subclass_of"),
+                "head is ontology:subclass_of, got {g:?}"
+            ),
+            other => panic!("expected subclass_of application, got {other:?}"),
+        },
+        other => panic!("expected subclass_of(K, C), got {other:?}"),
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Slice-2 tail — a FraCaS-style MONOTONICITY runner.
+//
+// FraCaS is an NL entailment battery. The kernel
+// is a CHECKER, not a prover, so *generic* FraCaS entailment (which needs proof
+// search) is out of scope. But the monotonicity inferences — the ones licensed
+// by our generalized-quantifier semantics + coercive subtyping — have a
+// CONSTRUCTIVE witness, which the kernel gates. The runner parses premise and
+// hypothesis to Props through the bridge, then checks the supplied witness has
+// type `⟦premise⟧ → ⟦hypothesis⟧`: a kernel-verified entailment.
+// ════════════════════════════════════════════════════════════════════
+
+fn first_prop(forest: &[Item], which: &str) -> Exp {
+    assert!(
+        !forest.is_empty(),
+        "{which} must parse to at least one S:Prop"
+    );
+    forest[0].sem.clone()
+}
+
+/// Returns Ok iff the kernel confirms `witness : ⟦premise⟧ → ⟦hypothesis⟧` —
+/// i.e. the entailment holds, witnessed and checked (not proof-searched).
+fn treetest_entails(
+    layer: &Arc<Layer>,
+    index: &LexicalIndex,
+    premise: &str,
+    hypothesis: &str,
+    witness: &Exp,
+) -> Result<(), String> {
+    let p = first_prop(&index.parse(premise, &Identity), "premise");
+    let h = first_prop(&index.parse(hypothesis, &Identity), "hypothesis");
+    let arrow = Exp::Arrow(Box::new(p), Box::new(h));
+    let ty = eval(&arrow, &Rho::Nil).map_err(|e| format!("eval entailment type: {e}"))?;
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+    check(&mut ctx, witness, &ty)
+}
+
+/// The monotonicity witness `λp. λx. p(x)` — instantiate a universal at a
+/// (coerced) element. Type-checks exactly when the quantifier step is licensed.
+fn instantiation_witness() -> Exp {
+    Exp::Lam(
+        Patt::Var("p".into()),
+        Box::new(Exp::Lam(
+            Patt::Var("x".into()),
+            Box::new(Exp::App(
+                Box::new(Exp::Var("p".into())),
+                Box::new(Exp::Var("x".into())),
+            )),
+        )),
+    )
+}
+
+#[test]
+fn treetest_every_is_downward_monotone_in_its_restrictor() {
+    // FraCaS §1 (generalized quantifiers), monotonicity. `every` is DOWNWARD
+    // monotone in its restrictor: narrowing the restrictor preserves truth.
+    // `Gene ≤ Entity`, so  "every entity affects HeLa"  ⊨  "every gene affects
+    // HeLa".  Witness: λp. λg. p(g) — apply the Entity-universal at the coerced g.
+    let layer = det_poly_layer();
+    let index = LexicalIndex::build(layer.clone());
+    treetest_entails(
+        &layer,
+        &index,
+        "every entity affects HeLa",
+        "every gene affects HeLa",
+        &instantiation_witness(),
+    )
+    .expect("downward-monotone entailment must be kernel-verified (Holds)");
+}
+
+#[test]
+fn treetest_rejects_the_invalid_upward_restrictor_step() {
+    // The CONVERSE is invalid: "every gene affects HeLa" does NOT entail "every
+    // entity affects HeLa" (widening the restrictor of a universal). The same
+    // instantiation witness fails to type-check — `p : ∀g:Gene…` applied to an
+    // `Entity` has no coercion (Entity ⊄ Gene). The runner reports no entailment.
+    let layer = det_poly_layer();
+    let index = LexicalIndex::build(layer.clone());
+    let verdict = treetest_entails(
+        &layer,
+        &index,
+        "every gene affects HeLa",
+        "every entity affects HeLa",
+        &instantiation_witness(),
+    );
+    assert!(
+        verdict.is_err(),
+        "the invalid upward-restrictor step must NOT be kernel-verifiable"
+    );
+}
+
+/// The ∃-monotonicity witness `λe. λC. λk. e(C)(λg. k(g))` — lift a witness of
+/// `∃x:A. P(x)` to `∃x:B. P(x)` when `A ≤ B` (the impredicative ∃ from
+/// `exists_sem`): feed the (coerced) A-witness to the wider continuation `k`.
+fn exists_monotone_witness() -> Exp {
+    let v = |n: &str| Exp::Var(n.into());
+    Exp::Lam(
+        Patt::Var("e".into()),
+        Box::new(Exp::Lam(
+            Patt::Var("c".into()),
+            Box::new(Exp::Lam(
+                Patt::Var("k".into()),
+                Box::new(Exp::App(
+                    Box::new(Exp::App(Box::new(v("e")), Box::new(v("c")))),
+                    Box::new(Exp::Lam(
+                        Patt::Var("g".into()),
+                        Box::new(Exp::App(Box::new(v("k")), Box::new(v("g")))),
+                    )),
+                )),
+            )),
+        )),
+    )
+}
+
+#[test]
+fn treetest_some_is_upward_monotone_in_its_restrictor() {
+    // `some` is UPWARD monotone in its restrictor: widening preserves truth.
+    // `Gene ≤ Entity`, so  "some gene affects HeLa"  ⊨  "some entity affects
+    // HeLa".  Witness: lift the existential witness from Gene to Entity.
+    let layer = det_poly_layer();
+    let index = LexicalIndex::build(layer.clone());
+    treetest_entails(
+        &layer,
+        &index,
+        "some gene affects HeLa",
+        "some entity affects HeLa",
+        &exists_monotone_witness(),
+    )
+    .expect("upward-monotone existential entailment must be kernel-verified");
+}
+
+#[test]
+fn treetest_rejects_the_invalid_downward_existential_step() {
+    // The converse is invalid: "some entity affects HeLa" does NOT entail "some
+    // gene affects HeLa" (narrowing an existential's restrictor). The lift
+    // witness fails — `k : ∀x:Gene…` cannot consume the Entity-witness.
+    let layer = det_poly_layer();
+    let index = LexicalIndex::build(layer.clone());
+    let verdict = treetest_entails(
+        &layer,
+        &index,
+        "some entity affects HeLa",
+        "some gene affects HeLa",
+        &exists_monotone_witness(),
+    );
+    assert!(
+        verdict.is_err(),
+        "the invalid downward-existential step must NOT be kernel-verifiable"
+    );
+}
+
+#[test]
+fn treetest_no_is_downward_monotone_in_its_restrictor() {
+    // `no` is DOWNWARD monotone in its restrictor (`no = ∀x. ¬…`, so narrowing
+    // preserves): "no entity affects HeLa" ⊨ "no gene affects HeLa". Witness:
+    // the same instantiation `λp. λg. p(g)` (a universal instantiated at coerced g).
+    let layer = det_poly_layer();
+    let index = LexicalIndex::build(layer.clone());
+    treetest_entails(
+        &layer,
+        &index,
+        "no entity affects HeLa",
+        "no gene affects HeLa",
+        &instantiation_witness(),
+    )
+    .expect("downward-monotone negative entailment must be kernel-verified");
+}
+
+/// First projection `λm. match m { conj p q => p }` — the conjunction-elimination
+/// witness (`P ∧ Q ⊨ P`). `logic:And` is declared with `P, Q` as **parameters**
+/// (sort-typed at `Prop`), so they are fixed across the recursor motive; the
+/// `conj` arm binds only `p : P`, `q : Q` (two bindings, not four), and the
+/// `Match` synthesizes the constant motive `λ_. P` — a `Prop`-valued motive, which
+/// is the always-admissible (subsingleton) elimination. This is exactly Lean's
+/// `And.left`; it is a plain parametric recursor, no index abstraction.
+fn conjunction_elim_witness() -> Exp {
+    Exp::Lam(
+        Patt::Var("m".into()),
+        Box::new(Exp::Match {
+            scrutinee: Box::new(Exp::Var("m".into())),
+            arms: vec![MatchArm {
+                ctor_name: "conj".into(),
+                bindings: vec![Patt::Var("p".into()), Patt::Var("q".into())],
+                body: Exp::Var("p".into()),
+            }],
+        }),
+    )
+}
+
+#[test]
+fn treetest_conjunction_elimination_holds() {
+    // FraCaS conjunction elimination: a coordinated `S` entails either conjunct.
+    // "HeLa affects BRCA1 and BRCA1 affects HeLa"  ⊨  "HeLa affects BRCA1".
+    // Premise sem is `logic:And(P, Q)`; the witness `λm. match m { conj p q => p }`
+    // is the kernel-checked proof of `⟦premise⟧ → ⟦hypothesis⟧` = `And(P,Q) → P`.
+    let layer = det_poly_layer();
+    let index = LexicalIndex::build(layer.clone());
+    treetest_entails(
+        &layer,
+        &index,
+        "HeLa affects BRCA1 and BRCA1 affects HeLa",
+        "HeLa affects BRCA1",
+        &conjunction_elim_witness(),
+    )
+    .expect("conjunction elimination must be kernel-verified (Holds)");
+}
+
+#[test]
+fn treetest_rejects_a_non_conjunct_as_a_conjunction_consequence() {
+    // The projection only licenses the actual conjuncts: "HeLa affects BRCA1 and
+    // BRCA1 affects HeLa" does NOT entail an unrelated "HeLa affects HeLa" — the
+    // first projection yields `P` (= affects(BRCA1, HeLa)), which is not the
+    // hypothesis prop, so the witness fails to type-check.
+    let layer = det_poly_layer();
+    let index = LexicalIndex::build(layer.clone());
+    let verdict = treetest_entails(
+        &layer,
+        &index,
+        "HeLa affects BRCA1 and BRCA1 affects HeLa",
+        "HeLa affects HeLa",
+        &conjunction_elim_witness(),
+    );
+    assert!(
+        verdict.is_err(),
+        "first projection must not license a non-conjunct consequence"
+    );
+}
+
+#[test]
+fn treetest_rejects_the_invalid_upward_negative_step() {
+    // The converse is invalid: "no gene affects HeLa" does NOT entail "no entity
+    // affects HeLa" (widening a negative's restrictor).
+    let layer = det_poly_layer();
+    let index = LexicalIndex::build(layer.clone());
+    let verdict = treetest_entails(
+        &layer,
+        &index,
+        "no gene affects HeLa",
+        "no entity affects HeLa",
+        &instantiation_witness(),
+    );
+    assert!(
+        verdict.is_err(),
+        "the invalid upward-negative step must NOT be kernel-verifiable"
+    );
+}
+
+// ── Determiner build-out (§8.3 Phase 2) — new quantifiers parse to checked Prop ──
+fn assert_parses_to_prop(layer: &Arc<Layer>, index: &LexicalIndex, sentence: &str) {
+    let forest = index.parse(sentence, &Identity);
+    assert!(
+        !forest.is_empty(),
+        "'{sentence}' must yield an S:Prop parse"
+    );
+    for p in &forest {
+        assert!(
+            is_ctor(&p.cat, "cat_s").is_some(),
+            "'{sentence}': each parse is an S"
+        );
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
+        let ty = check_infer(&mut ctx, &p.sem)
+            .unwrap_or_else(|e| panic!("'{sentence}' must type-check: {e}"));
+        assert_eq!(
+            readback_val(0, &ty),
+            Exp::Sort(0),
+            "'{sentence}' must inhabit Prop"
+        );
+    }
+}
+
+#[test]
+fn buildout_some_and_no_determiners_parse_to_prop() {
+    let layer = det_poly_layer();
+    let index = LexicalIndex::build(layer.clone());
+    // some (subject existential):  ∃g:Gene. affects(HeLa, g)
+    assert_parses_to_prop(&layer, &index, "some gene affects HeLa");
+    // no (subject negative):       ∀g:Gene. ¬affects(HeLa, g)
+    assert_parses_to_prop(&layer, &index, "no gene affects HeLa");
+    // no (object negative, via logic:False under ∃-less ∀¬):
+    //   every gene affects no cell line  →  ∀g:Gene. ∀c:CellLine. ¬affects(c, g)
+    assert_parses_to_prop(&layer, &index, "every gene affects no cell line");
 }

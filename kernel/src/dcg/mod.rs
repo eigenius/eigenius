@@ -38,8 +38,12 @@ pub mod lexicon;
 pub mod lookup;
 pub mod parser;
 
-pub use category::{cat_subsumes, denote_cat, is_ctor, type_eq};
+pub use category::{
+    cat_subsumes, cats_coordinate, common_super, coordinate_np, coordinate_sem, denote_cat,
+    distribute, distribute_object, feat_meets, is_ctor, kind_subject, reciprocate, subst_cat,
+    type_eq, unify_cat, CatSubst,
+};
 pub use lemmatizer::{Identity, Lemmatizer, Pos};
-pub use lexicon::{entry_to_item, gate_entry, resolve_sem};
+pub use lexicon::{entry_to_item, gate_entry, resolve_sem, resolve_sem_value};
 pub use lookup::{tokenize, LexicalIndex};
-pub use parser::{apply, cky_parse, Item};
+pub use parser::{apply, cky_parse, Combinator, Item};

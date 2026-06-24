@@ -20,9 +20,9 @@
 use std::sync::Arc;
 
 use crate::layer::Layer;
-use crate::nbe::check::{check_infer, CheckCtx};
+use crate::nbe::check::{check, CheckCtx};
 use crate::nbe::env::Rho;
-use crate::nbe::readback::readback_val;
+use crate::nbe::eval::eval;
 use crate::nbe::term::Exp;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::Iri;
@@ -51,6 +51,36 @@ pub fn resolve_sem(layer: &Arc<Layer>, target: &Iri) -> Exp {
     }
 }
 
+/// Resolve an entry's `sem` field *value* to its EigenTT term. `sem` is an
+/// EigenTT term with two surface forms:
+/// - a **reference** to a chain entity — the common case (a noun's class, a
+///   verb's axiom, a named entity's resource), resolved by [`resolve_sem`]; the
+///   reference is shorthand for that entity's `ConstRef` term;
+/// - an **inline `type_expr` term** — a function word's λ-semantics, e.g. a
+///   determiner's `λA:Set. λV:A→Prop. ∀x:A. V(x)`, which has no chain entity to
+///   point at; decoded through the D47 codec.
+pub fn resolve_sem_value(layer: &Arc<Layer>, sem_v: &Value) -> Result<Exp, String> {
+    let target = match sem_v {
+        Value::ResourceRef(i) => i.clone(),
+        Value::String(s) => Iri::parse(s).map_err(|e| format!("sem iri: {e}"))?,
+        // An inline EigenTT term value (rare — references are the norm).
+        other => return decode_type(other, layer).map_err(|e| format!("sem decode: {e:?}")),
+    };
+    // A `lexicon:SemTerm` reference holds an inline λ-term: decode its `term`
+    // field. (Any other reference — class / axiom / instance — goes through
+    // `resolve_sem`'s entity dispatch.)
+    let r = layer
+        .resolve(&target)
+        .ok_or_else(|| format!("sem target not found: {target}"))?;
+    if r.is_instance_of(&iri("urn:eigenius:lexicon:SemTerm")) {
+        let term_v = r
+            .get(&iri("urn:eigenius:lexicon:term"))
+            .ok_or("lexicon:SemTerm has no `term`")?;
+        return decode_type(term_v, layer).map_err(|e| format!("sem term decode: {e:?}"));
+    }
+    Ok(resolve_sem(layer, &target))
+}
+
 /// The felicity gate: admit a lexical entry iff its category and semantics
 /// agree. Checks `⟦cat⟧ ≡ sem_type` and that the entry's `sem` actually
 /// inhabits `⟦cat⟧`. Returns the derived `⟦cat⟧` on admit; a reason on reject.
@@ -72,20 +102,17 @@ pub fn gate_entry(layer: &Arc<Layer>, entry: &Resource) -> Result<Exp, String> {
         ));
     }
 
-    // The sem must actually inhabit ⟦cat⟧ (not merely match the declared type).
-    let sem_target = match entry.get(&iri("urn:eigenius:lexicon:sem")) {
-        Some(Value::ResourceRef(i)) => i.clone(),
-        Some(Value::String(s)) => Iri::parse(s).map_err(|e| format!("sem iri: {e}"))?,
-        other => return Err(format!("entry `sem` is not a reference: {other:?}")),
-    };
-    // The sem must actually inhabit ⟦cat⟧ (not merely match the declared type).
-    let sem = resolve_sem(layer, &sem_target);
+    // The sem must actually inhabit ⟦cat⟧. **Check-mode** (not `check_infer` +
+    // exact `type_eq`): a lambda determiner sem checks against its `Pi` type, and a
+    // (possibly multi-class) resource checks against its class via the full `is_a`
+    // (#91) — neither of which `check_infer` can synthesize.
+    let sem_v = entry
+        .get(&iri("urn:eigenius:lexicon:sem"))
+        .ok_or("entry has no `sem`")?;
+    let sem = resolve_sem_value(layer, sem_v)?;
     let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(layer));
-    let sem_ty =
-        check_infer(&mut ctx, &sem).map_err(|e| format!("sem does not type-check: {e}"))?;
-    if !type_eq(&readback_val(0, &sem_ty), &denoted) {
-        return Err("typeof(sem) ≠ ⟦cat⟧".to_string());
-    }
+    let denoted_val = eval(&denoted, &Rho::Nil).map_err(|e| format!("⟦cat⟧ eval: {e}"))?;
+    check(&mut ctx, &sem, &denoted_val).map_err(|e| format!("sem does not inhabit ⟦cat⟧: {e}"))?;
     Ok(denoted)
 }
 
@@ -95,13 +122,8 @@ pub fn entry_to_item(layer: &Arc<Layer>, entry: &Resource) -> Result<Item, Strin
         .get(&iri("urn:eigenius:lexicon:cat"))
         .ok_or("entry has no `cat`")?;
     let cat = decode_type(cat_v, layer).map_err(|e| format!("cat decode: {e:?}"))?;
-    let sem_target = match entry.get(&iri("urn:eigenius:lexicon:sem")) {
-        Some(Value::ResourceRef(i)) => i.clone(),
-        Some(Value::String(s)) => Iri::parse(s).map_err(|e| format!("sem iri: {e}"))?,
-        other => return Err(format!("entry `sem` is not a reference: {other:?}")),
-    };
-    Ok(Item {
-        cat,
-        sem: resolve_sem(layer, &sem_target),
-    })
+    let sem_v = entry
+        .get(&iri("urn:eigenius:lexicon:sem"))
+        .ok_or("entry has no `sem`")?;
+    Ok(Item::new(cat, resolve_sem_value(layer, sem_v)?))
 }

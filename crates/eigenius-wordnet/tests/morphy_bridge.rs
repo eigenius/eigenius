@@ -29,9 +29,7 @@ use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 use eigenius_wordnet::morphy::{ExcLists, LemmaSet};
 use eigenius_wordnet::wndb::Pos;
 
-const SCHEMA: &str = include_str!("../../../ontologies/lexicon/lexicon-ontology.esl");
-
-// A minimal domain over the lexicon schema. The verb entry's `form` is the BASE
+// A minimal domain over the lexicon schema (now bootstrapped, D62/D63). The verb entry's `form` is the BASE
 // lemma "affect" (as the WordNet import emits), typed at the `Entity` supertype so
 // `Gene`/`CellLine` arguments flow in by subsumption; the proper nouns are NP
 // individuals.
@@ -97,8 +95,9 @@ fn morphy() -> MorphyLemmatizer {
 #[test]
 fn morphy_bridge_parses_inflected_sentence() {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let schema = layer_over("lexicon-schema", Arc::clone(ctx.head()), SCHEMA);
-    let domain = layer_over("lexicon-domain", schema, DOMAIN);
+    // The lexicon schema is part of the bootstrap chain now (D62/D63); build the
+    // demo domain directly over the bootstrapped head.
+    let domain = layer_over("lexicon-domain", Arc::clone(ctx.head()), DOMAIN);
     let index = LexicalIndex::build(domain);
 
     // The verb is INFLECTED in the input ("affects"); the entry's form is the base
@@ -120,8 +119,9 @@ fn identity_lemmatizer_cannot_reach_the_base_entry() {
     // reduce, so the inflected surface "affects" never matches the base form
     // "affect" — no parse. (With the base surface "affect" it would.)
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let schema = layer_over("lexicon-schema", Arc::clone(ctx.head()), SCHEMA);
-    let domain = layer_over("lexicon-domain", schema, DOMAIN);
+    // The lexicon schema is part of the bootstrap chain now (D62/D63); build the
+    // demo domain directly over the bootstrapped head.
+    let domain = layer_over("lexicon-domain", Arc::clone(ctx.head()), DOMAIN);
     let index = LexicalIndex::build(domain);
 
     assert!(

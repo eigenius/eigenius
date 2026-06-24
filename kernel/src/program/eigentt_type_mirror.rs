@@ -101,6 +101,13 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
             "App",
             vec![encode_type_json(h)?, encode_type_json(a)?],
         )),
+        // Type annotation `(e : T)` — the bidirectional mode switch. (A bare
+        // inner `Lam` still needs its own per-binder annotations to encode; this
+        // arm round-trips any encodable `e`.)
+        Exp::Ann(e, t) => Ok(ctor(
+            "Ann",
+            vec![encode_type_json(e)?, encode_type_json(t)?],
+        )),
         Exp::Pi(p, dom, body) => Ok(ctor(
             "Pi",
             vec![
@@ -390,6 +397,13 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
             let name = arg_string("Var", 0, &args[0])?;
             Ok(Exp::Var(name))
         }
+        "Ann" => {
+            // Type annotation `(e : T)` — the bidirectional mode switch.
+            expect_arg_count("Ann", 2, args)?;
+            let e = decode_type_json(&args[0], ctx)?;
+            let t = decode_type_json(&args[1], ctx)?;
+            Ok(Exp::Ann(Box::new(e), Box::new(t)))
+        }
         "One" => {
             expect_arg_count("One", 0, args)?;
             Ok(Exp::One)
@@ -637,6 +651,15 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
         wk::FLOAT => return Ok(Exp::EigonPrimitive(PrimitiveType::Float)),
         wk::BOOLEAN => return Ok(Exp::EigonPrimitive(PrimitiveType::Boolean)),
         wk::JSON => return Ok(Exp::EigonPrimitive(PrimitiveType::Json)),
+        // The canonical built-in `List` (not a chain resource): emit the
+        // built-in decl as a bare `InductiveType`; the App spine folds the
+        // element type onto it (`core:List(A)` → `InductiveType(List, [A])`).
+        wk::LIST => {
+            return Ok(Exp::InductiveType(
+                crate::nbe::term::list_decl(),
+                Vec::new(),
+            ))
+        }
         _ => {}
     }
     let resource = ctx
@@ -782,6 +805,16 @@ mod tests {
         // never touching the chain.
         let layer = empty_layer();
         let original = Exp::LitString("urn:eigenius:example:thing".to_string());
+        let encoded = encode_type(&original).unwrap();
+        let decoded = decode_type(&encoded, &layer).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn ann_roundtrip() {
+        // `(P : Prop)` — the bidirectional annotation round-trips through D47.
+        let layer = empty_layer();
+        let original = Exp::Ann(Box::new(Exp::Var("P".to_string())), Box::new(Exp::Sort(0)));
         let encoded = encode_type(&original).unwrap();
         let decoded = decode_type(&encoded, &layer).unwrap();
         assert_eq!(decoded, original);

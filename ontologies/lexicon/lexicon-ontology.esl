@@ -22,6 +22,21 @@ namespace epistemic  = "urn:eigenius:reflection:epistemic";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace lexicon    = "urn:eigenius:lexicon";
 
+// ── The entity top (D63 §8.3, decision ii) ────────────────────────────
+// The single foundational entity type — the universe a general predicate's
+// SUBJECT ranges over, and the type the determiners' `E` points at. CN-as-types
+// stays many-sorted on the noun/object side (a determiner is polymorphic in the
+// noun type `T:Set`); only the verb-subject position uses this one top, with
+// specific types reaching argument slots by coercive subtyping (Luo 2012). This
+// is the schema-resident, domain-independent home for what the demo called
+// `lexicon:Entity` and what the WordNet importer roots at `entity.n.01`
+// (`wn:n00001740`, the noun-lattice root) — see D63 §8.3. Both reference systems
+// converge here: lightblue quantifies over one built-in `Entity`; Luo's MTT uses
+// a maximal type for cross-sortal breadth.
+class lexicon:Entity {
+    description = "The foundational entity type: the universe a general predicate's subject ranges over and the determiners' subject top. Domain entity types are subclasses (the WordNet importer roots entity.n.01/wn:n00001740 here); specific types reach argument slots by coercive subtyping.";
+}
+
 // ── The category algebra: categorial types as an inductive ────────────
 // A category is structured, not a string: Atom | A/B | A\B. Making it an
 // inductive means (a) it cannot be malformed — the kernel checks it; (b)
@@ -40,18 +55,111 @@ namespace lexicon    = "urn:eigenius:lexicon";
 // *syntactic routing only* — fully erased by ⟦·⟧, used by the parser's
 // feature-meet to gate composition (agreement, subcategorization). `*_any` is
 // the underspecified top (WordNet imports carry it; morphology refines it).
-// `cat_n` carries Num only — NOT the noun type: the type flows through the entry's
-// `sem` (the EigonClass), and a category-level type index would force a type
-// variable on polymorphic determiners (forbidden, §5.1).
-data lexicon:Mood { dcl, q, imp }
-data lexicon:Num  { sg, pl, num_any }
-data lexicon:Fin  { fin, bse, inf, ger, pss, fin_any }
+// Both `cat_n` and `cat_np` carry the noun/entity **type** `T` (denotation-erased
+// — `⟦cat_n(T,_)⟧ = Set`, `⟦cat_np(T,_)⟧ = T`). `cat_n`'s `T` is load-bearing for
+// the **polymorphic determiner** (D63 §8.2).
+//
+// ── Polymorphic categories: `cat_forall` ──────────────────────────────
+// `cat_forall` is the **dependent forward slash over a common-noun type** — the
+// determiner constructor (D63 §8.2, Option 2). It binds the noun's type `T` and
+// yields the result category `R[T]` *after* consuming the noun: a determiner is
+// `cat_forall(λT:Set. R[T])` where `R[T] = S/(S\NP_T)`. Its denotation is the Π
+// that mirrors the polymorphic determiner sem: `⟦cat_forall(λT. R)⟧ = ΠT:Set. ⟦R⟧`
+// (e.g. `ΠT:Set. (T→Prop)→Prop`). The HOAS body (`Set -> lexicon:Cat`) keeps the
+// stored category a CLOSED, kernel-checked `lexicon:Cat` value — a free-variable
+// open term would be rejected by the commit-time felicity check (Rule 21). The
+// reflexive constructor is strictly positive, hence sound.
+// Mood — the clause type of a sentence. The ONLY feature that alters ⟦·⟧:
+// declaratives denote a `Prop`; questions / imperatives denote distinct things
+// (deferred to D63 Slice 5, where ⟦·⟧ fails closed rather than denoting `Prop`).
+data lexicon:Mood {
+    dcl,   // declarative — "a gene affects a cell line" (⟦S[dcl,_]⟧ = Prop)
+    q,     // interrogative — "does a gene affect a cell line?" (Slice 5)
+    imp,   // imperative — "affect the cell line" (Slice 5)
+}
+
+// Num — grammatical number. A *syntactic* feature (erased by ⟦·⟧): it routes
+// determiner/noun agreement at composition via the feature-meet, nothing more.
+data lexicon:Num {
+    sg,       // singular — "gene", "every gene"
+    pl,       // plural — "genes", "all genes"
+    num_any,  // underspecified ⊤: meets sg AND pl. WordNet imports carry this;
+              // the lookup bridge refines it to the surface number.
+}
+
+// Fin — clause/predicate form (finiteness / non-finite shape + the adjectival
+// predicate form). Syntactic (erased by ⟦·⟧); used for subcategorization (which
+// form a slot demands) — ≈ CCG's `S[…]` feature.
+data lexicon:Fin {
+    fin,      // finite — "affects", "affected" (tensed; heads a clause)
+    bse,      // base / bare infinitive — "affect" (after "does", "to")
+    inf,      // to-infinitive — "to affect"
+    ger,      // gerund / present participle — "affecting"
+    pss,      // past participle (passive) — "affected" (in "is affected")
+    adj,      // predicative adjective — "primary" (after the copula `is`/`are`);
+              // distinct from `bse` so the copula selects adjectives, do-support
+              // selects base verbs, and attributive `adj`+noun is recognizable.
+    fin_any,  // underspecified ⊤: meets any form.
+}
+
+// Conn — the connective of a coordinated NP group (D63 §8.4 Phase 6). Syntactic
+// (erased by ⟦·⟧ — a group denotes `List C` regardless), but load-bearing for how
+// a predicate combines OVER the group: `conn_and` distributes ∧ (and supports the
+// collective/reciprocal readings), `conn_or` distributes ∨. Carried on `cat_group`
+// because distribution is *deferred* to a later combination (the group meets its
+// predicate downstream), so the connective must travel with the phrase.
+data lexicon:Conn {
+    conn_and,  // "X and Y" — conjunctive group (distributive ∧; collective/reciprocal)
+    conn_or,   // "X or Y"  — disjunctive group (distributive ∨)
+}
+
+// Cat — the categorial type (a small inductive at Type 1, since cat_n/cat_np
+// store a `Set`). The homomorphism ⟦·⟧ : Cat → EigenTT type is a recursor over
+// it (`denote_cat`): ⟦cat_s(m,_)⟧ = ⟦m⟧ ; ⟦cat_n(_,_)⟧ = Set ; ⟦cat_np(T,_)⟧ = T ;
+// ⟦A/B⟧ = ⟦A\B⟧ = ⟦B⟧→⟦A⟧ ; ⟦cat_forall(_,λT.R)⟧ = ΠT:Set. ⟦R⟧.
 data lexicon:Cat : Type 1 {
-    cat_s  : lexicon:Mood -> lexicon:Fin -> lexicon:Cat,  // S[mood,fin] — sentence
-    cat_n  : lexicon:Num -> lexicon:Cat,                  // N[num] — common noun (type via sem)
-    cat_np : Set -> lexicon:Num -> lexicon:Cat,           // NP(T)[num] — entity of type T (type-indexed)
-    fwd : lexicon:Cat -> lexicon:Cat -> lexicon:Cat,      // A/B — forward slash
-    bwd : lexicon:Cat -> lexicon:Cat -> lexicon:Cat,      // A\B — backward slash
+    // S[mood,fin] — a sentence/clause. Mood is semantic (drives ⟦·⟧); fin records
+    // the verb form the clause is built on.
+    cat_s  : lexicon:Mood -> lexicon:Fin -> lexicon:Cat,
+    // N[num](T) — a common noun of type T (CN-as-type: ⟦N⟧ = Set; T denotation-
+    // erased but carried so the polymorphic determiner can bind it — D63 §8.2).
+    cat_n  : Set -> lexicon:Num -> lexicon:Cat,
+    // NP[num](T) — a noun phrase / named entity of type T (⟦NP(T)⟧ = T).
+    cat_np : Set -> lexicon:Num -> lexicon:Cat,
+    // A/B — forward slash: seeks a B on its RIGHT, yields A (e.g. a transitive
+    // verb (S\NP)/NP seeks its object rightward).
+    fwd : lexicon:Cat -> lexicon:Cat -> lexicon:Cat,
+    // A\B — backward slash: seeks a B on its LEFT, yields A (e.g. a VP S\NP seeks
+    // its subject leftward).
+    bwd : lexicon:Cat -> lexicon:Cat -> lexicon:Cat,
+    // Num·∀T:Set. R[T] — the polymorphic determiner: the dependent forward slash
+    // over a common-noun type. Consumes an N[Num] of type T (binding T, checking
+    // number agreement) and yields the result category R[T]; e.g. `every` is
+    // `cat_forall(sg, λT. S/(S\NP_T))` (D63 §8.2).
+    cat_forall : lexicon:Num -> (Set -> lexicon:Cat) -> lexicon:Cat,
+    // Group[conn,num](C) — a coordinated NP group of members sharing the common
+    // supertype C, joined by Conn (D63 §8.4 Phase 6). Unlike `cat_np` (an
+    // individual, ⟦NP(T)⟧ = T), a group denotes the **member-retaining list**
+    // ⟦Group(C)⟧ = List C (conn + num erased) — so the plural readings are
+    // operations *over* the group: distributive (`pred` mapped + ∧/∨-folded per
+    // Conn), reciprocal, and collective (verb typed over the whole `List C`).
+    // Arises from `and`/`or` coordination of NPs.
+    cat_group : Set -> lexicon:Conn -> lexicon:Num -> lexicon:Cat,
+    // Q(T) — a wh-question over the queried type T (D63 §8.5, Slice 5). A question
+    // denotes its **answer-property**: ⟦Q(T)⟧ = T → Prop (the predicate the answer
+    // must satisfy) — e.g. "what affects HeLa" → `λx:Entity. affects(hela, x)`,
+    // "which gene affects HeLa" → `λx:Gene. affects(hela, x)`. T is carried
+    // (CN-as-types) so the restrictor ("which GENE") narrows the answer type, exactly
+    // as determiners carry T. (Polar yes/no questions stay `cat_s(q, _)` with
+    // ⟦·⟧ = Prop — a distinct shape; D63 §8.5 Slice 5a.)
+    cat_q : Set -> lexicon:Cat,
+    // Kind(C) — a KIND-denoting NP: a bare-plural/generic noun ("genes") used as a
+    // subject denotes the **kind C as a type**, not an individual of C. So unlike
+    // `cat_np(T)` (⟦NP(T)⟧ = T, an individual), ⟦cat_kind⟧ = `Set` — the NP denotes a
+    // type-valued thing (`EigonClass(C) : Set`). The predicate over a kind is then
+    // `Set → Prop`, so "Genes are cell lines" → `subclass_of(Gene, CellLine)` (D63
+    // §8.5 Slice 3c, kind subjects). Arises from a bare-plural common noun.
+    cat_kind : lexicon:Cat,
 }
 
 // ── The lexical-entry record ──────────────────────────────────────────
@@ -71,7 +179,7 @@ property lexicon:cat : core:resource {
     domain lexicon:LexicalEntry;
 }
 property lexicon:sem : core:resource {
-    description = "Reference to the kernel-checked semantic content: a class (noun → EigonClass), an axiom (verb/adjective → EigonAxiom), or a committed resource (named entity → ResourceRef → Var). Heterogeneous by design — the three things a lexicon must distinguish.";
+    description = "Reference to the kernel-checked semantic content: a class (noun → EigonClass), an axiom (verb/adjective → EigonAxiom), a committed resource (named entity → ResourceRef), or a `lexicon:SemTerm` holding an inline EigenTT λ-term (a function word → its λ-semantics, e.g. a determiner). `sem` is uniformly a reference; resolve_sem dispatches on what is referenced.";
     domain lexicon:LexicalEntry;
 }
 property lexicon:sem_type : core:resource {
@@ -89,6 +197,25 @@ property lexicon:grade : core:resource {
     allows_only epistemic:observed, epistemic:declared,
                 epistemic:derived, epistemic:verified;
     domain lexicon:LexicalEntry;
+}
+
+// ── Inline λ-term semantics (function words) ──────────────────────────
+// A committed EigenTT term the lexicon references from `sem` when the
+// semantics is a λ-term rather than a chain entity — e.g. a determiner's
+// `λA:Set. λV:A→Prop. ∀x:A. V(x)`. The term is carried as a `type_expr` and is
+// kernel-gated at commit (Rule 21 decodes + type-checks it). Because a Curry
+// `Lam` is unsynthesizable, the term is authored with a bidirectional
+// annotation `(λ… : T)` (`Exp::Ann`), which `check_infer` admits. This keeps
+// `sem` uniformly a reference (the 200k WordNet entries reference classes /
+// axioms / instances; a function word references one of these).
+class lexicon:SemTerm {
+    description = "A committed EigenTT term referenced as a lexical entry's `sem` (a function word's λ-semantics). Kernel-gated at commit.";
+    requires lexicon:term;
+}
+property lexicon:term : core:resource {
+    description = "The EigenTT term, as a `type_expr` (eigentt:TypeExpr). For an unsynthesizable λ-term, author it annotated: `(fun … => … : T)`.";
+    class_types eigentt:TypeExpr;
+    domain lexicon:SemTerm;
 }
 
 // ── The composed-sentence record ──────────────────────────────────────

@@ -147,23 +147,25 @@ impl<'a> Parser<'a> {
     /// Parse a qualified name: `ns:name` or bare `name`.
     fn parse_qualified_name(&mut self) -> Result<QualifiedName, EslError> {
         let pos = self.current_pos();
-        let first = self.expect_ident()?;
-
-        if self.at(&TokenKind::Colon) {
-            self.advance(); // :
-            let second = self.expect_ident()?;
-            Ok(QualifiedName {
-                namespace: Some(first),
-                name: second,
+        // A qualified name `ns:name` is one atomic `QualName` token; a bare name
+        // is an `Ident`. The standalone `Colon` is never consumed here — it is
+        // reserved for the binder / annotation colon (`x : T`, `(e : T)`), so a
+        // term ending in a bare identifier followed by ` : T` is unambiguous.
+        if let TokenKind::QualName(ns, name) = self.peek() {
+            let qn = QualifiedName {
+                namespace: Some(ns.clone()),
+                name: name.clone(),
                 pos,
-            })
-        } else {
-            Ok(QualifiedName {
-                namespace: None,
-                name: first,
-                pos,
-            })
+            };
+            self.advance();
+            return Ok(qn);
         }
+        let first = self.expect_ident()?;
+        Ok(QualifiedName {
+            namespace: None,
+            name: first,
+            pos,
+        })
     }
 
     /// Parse a comma-separated list of qualified names.
@@ -550,8 +552,18 @@ impl<'a> Parser<'a> {
             }
             TokenKind::LBracket => self.parse_array_value(),
             TokenKind::LBrace => self.parse_block_value(),
-            TokenKind::Ident(name) => {
+            // A bare identifier OR a qualified name `ns:name` (one atomic
+            // `QualName` token) in value position: a resource ref, an inductive
+            // ctor application, a macro call, or the bare-keyword forms
+            // `formula(...)` / `type_expr(...)`. The bare keywords are matched
+            // first (they are never qualified); everything else goes through the
+            // shared `parse_qualified_name` + ref/ctor/macro disambiguation.
+            TokenKind::Ident(_) | TokenKind::QualName(..) => {
                 let qn_pos = self.current_pos();
+                let bare = match self.peek() {
+                    TokenKind::Ident(name) => Some(name.clone()),
+                    _ => None,
+                };
                 // `formula(...)` switches into the Pratt-parsed
                 // math-expression sublanguage (Phase 19f.3): infix
                 // arithmetic with conventional precedence, function
@@ -560,7 +572,7 @@ impl<'a> Parser<'a> {
                 // tree is a chain-typed FormulaTerm — same `Value::CtorApp`
                 // shape the `App(...)` / `OpRef(...)` literal form
                 // produces.
-                if name == "formula" && self.peek_at(1) == &TokenKind::LParen {
+                if bare.as_deref() == Some("formula") && self.peek_at(1) == &TokenKind::LParen {
                     self.advance(); // consume `formula`
                     self.expect(&TokenKind::LParen)?;
                     let expr = self.parse_formula_expr(0)?;
@@ -575,7 +587,7 @@ impl<'a> Parser<'a> {
                 // `formula(...)` for D47, used by D39 ReasoningSentence
                 // authors who'd otherwise hand-write the verbose
                 // `{"ctor":"App","args":[...]}` tagged-dict tree.
-                if name == "type_expr" && self.peek_at(1) == &TokenKind::LParen {
+                if bare.as_deref() == Some("type_expr") && self.peek_at(1) == &TokenKind::LParen {
                     let pos = self.current_pos();
                     self.advance(); // consume `type_expr`
                     self.expect(&TokenKind::LParen)?;
@@ -1100,6 +1112,29 @@ impl<'a> Parser<'a> {
 
     fn parse_type_atom(&mut self) -> Result<TypeExpr, EslError> {
         let pos = self.current_pos();
+        // Parenthesized (grouped) type — lets a function type appear as an arrow
+        // domain, e.g. `(A -> Prop) -> Prop` (higher-order types, as in
+        // generalized-quantifier determiners). A leading `(` groups; a `(` *after*
+        // a name (below) is constructor application, not grouping.
+        if self.at(&TokenKind::LParen) {
+            self.advance();
+            let inner = self.parse_type_expr()?;
+            // `(e : T)` — a type annotation (the bidirectional mode switch),
+            // distinct from plain `(e)` grouping. Lets a checkable term (a `fun`
+            // lambda) appear in inference position, e.g. a determiner's λ-sem.
+            if self.at(&TokenKind::Colon) {
+                self.advance();
+                let typ = self.parse_type_expr()?;
+                self.expect(&TokenKind::RParen)?;
+                return Ok(TypeExpr::Ann {
+                    expr: Box::new(inner),
+                    typ: Box::new(typ),
+                    pos,
+                });
+            }
+            self.expect(&TokenKind::RParen)?;
+            return Ok(inner);
+        }
         // Literal in a type position — lowers to Exp::LitString /
         // LitInt / LitFloat. Required by `type_expr(...)` so authors
         // can write predicate applications with concrete arguments,
@@ -1595,7 +1630,24 @@ impl<'a> Parser<'a> {
             let pos = self.current_pos();
             let name = self.expect_ident()?;
             self.expect(&TokenKind::Colon)?;
-            let kind = self.parse_qualified_name()?;
+            // The kind is a qualified-name class OR a sort literal (`Prop`/`Set`/
+            // `Type N`) — the latter for Lean-style sort-parametrized inductives
+            // (`And (P : Prop, ...)`). Parse a type-expr (which recognizes sort
+            // literals) and classify, mirroring the index-telescope
+            // (`parse_data_index_telescope`). A param kind is terminated by `,`
+            // or `)`, so no trailing arrow is consumed here.
+            let kind = match self.parse_type_expr()? {
+                TypeExpr::Ref { name, args, .. } if args.is_empty() => IndexKind::Named(name),
+                TypeExpr::Sort { kind, .. } => IndexKind::Sort(kind),
+                other => {
+                    return Err(EslError::parser(
+                        Some(other.pos().clone()),
+                        "data parameter kind must be a qualified-name class or a sort \
+                         literal (Prop / Set / Type N)"
+                            .to_string(),
+                    ));
+                }
+            };
             params.push(DataParam { name, kind, pos });
             if self.at(&TokenKind::Comma) {
                 self.advance();
@@ -2278,8 +2330,8 @@ impl<'a> Parser<'a> {
                 Ok(Expr::Var { name, pos })
             }
 
-            // Identifier (variable or qualified name)
-            TokenKind::Ident(_) => {
+            // Identifier (variable) or qualified name `ns:name` (one atomic token)
+            TokenKind::Ident(_) | TokenKind::QualName(..) => {
                 let pos = self.current_pos();
                 let qn = self.parse_qualified_name()?;
                 if let Some(ns) = qn.namespace {
@@ -3322,7 +3374,10 @@ mod tests {
                 assert_eq!(d.name.name, "List");
                 assert_eq!(d.params.len(), 1);
                 assert_eq!(d.params[0].name, "A");
-                assert_eq!(d.params[0].kind.name, "Set");
+                match &d.params[0].kind {
+                    IndexKind::Named(qn) => assert_eq!(qn.name, "Set"),
+                    other => panic!("expected Named param kind, got {other:?}"),
+                }
                 assert_eq!(d.ctors.len(), 2);
                 assert_eq!(d.ctors[0].name(), "nil");
                 assert!(d.ctors[0].args().is_empty());

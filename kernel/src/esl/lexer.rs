@@ -112,6 +112,11 @@ pub enum TokenKind {
 
     // Identifier (bare word: name, breed, short_name)
     Ident(String),
+    /// A qualified name `ns:name`, lexed atomically (tight `:`, no surrounding
+    /// whitespace). Making qualified names a single token frees the standalone
+    /// `:` (`Colon`) to mean *only* the binder / annotation colon (`x : T`,
+    /// `(e : T)`), removing the namespace-vs-annotation ambiguity (D63 §8.2).
+    QualName(String, String),
 
     // Operators
     Eq,        // =
@@ -516,6 +521,36 @@ impl<'a> Lexer<'a> {
             _ => TokenKind::Ident(word),
         };
 
+        // Tight qualified name `ns:name`: a plain identifier immediately
+        // followed (no whitespace) by `:` and another identifier lexes as a
+        // single `QualName` token. This is what frees a space-surrounded `:`
+        // to mean the binder / annotation colon (`x : T`, `(e : T)`) without
+        // colliding with the namespace separator. Only plain identifiers form a
+        // namespace (keywords never do), so keyword tokens are left untouched.
+        if let TokenKind::Ident(ns) = &kind {
+            if self.peek() == Some(b':')
+                && self
+                    .peek_at(1)
+                    .is_some_and(|c| c.is_ascii_alphabetic() || c == b'_')
+            {
+                let ns = ns.clone();
+                self.advance(); // consume ':'
+                let mut name = String::new();
+                while let Some(ch) = self.peek() {
+                    if ch.is_ascii_alphanumeric() || ch == b'_' {
+                        name.push(ch as char);
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                return Ok(Token {
+                    kind: TokenKind::QualName(ns, name),
+                    pos,
+                });
+            }
+        }
+
         Ok(Token { kind, pos })
     }
 }
@@ -578,16 +613,22 @@ mod tests {
 
     #[test]
     fn qualified_name_tokens() {
-        // ns:name lexes as three tokens: Ident, Colon, Ident
+        // A tight `ns:name` lexes as one atomic `QualName` token (the namespace
+        // separator), distinct from a space-surrounded binder/annotation `:`.
         assert_eq!(
             kinds("core:string ex:Dog"),
             vec![
-                TokenKind::Ident("core".into()),
+                TokenKind::QualName("core".into(), "string".into()),
+                TokenKind::QualName("ex".into(), "Dog".into()),
+            ]
+        );
+        // A space-surrounded `:` stays a standalone `Colon` (binder / annotation).
+        assert_eq!(
+            kinds("x : Set"),
+            vec![
+                TokenKind::Ident("x".into()),
                 TokenKind::Colon,
-                TokenKind::Ident("string".into()),
-                TokenKind::Ident("ex".into()),
-                TokenKind::Colon,
-                TokenKind::Ident("Dog".into()),
+                TokenKind::SetKw,
             ]
         );
     }
@@ -770,9 +811,7 @@ mod tests {
             kinds("Construct ex:Dog { name = x , breed = y }"),
             vec![
                 TokenKind::Construct,
-                TokenKind::Ident("ex".into()),
-                TokenKind::Colon,
-                TokenKind::Ident("Dog".into()),
+                TokenKind::QualName("ex".into(), "Dog".into()),
                 TokenKind::LBrace,
                 TokenKind::Ident("name".into()),
                 TokenKind::Eq,

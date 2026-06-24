@@ -17,7 +17,7 @@
 //! - noun synset → `core:Class`; `@` hypernyms → `core:subclass_of` (the
 //!   `entity.n.01`-rooted lattice the subsumption rule consumes).
 //! - verb synset → `eigentt:Axiom`; category from the sentence frames; stage-1
-//!   argument types are generic at the noun root [`ENTITY_ROOT`], so the verb
+//!   argument types are generic at the noun root [`ENTITY_TOP`], so the verb
 //!   composes with any noun by subsumption (§8.6).
 //! - adjective synset → predicative `eigentt:Axiom` (`S\NP`).
 //! - each lemma → a `lexicon:LexicalEntry`; `sem_type = ⟦cat⟧` by construction
@@ -26,9 +26,13 @@
 
 use crate::wndb::{Pos, Synset};
 
-/// `entity.n.01` — the noun root; the stage-1 generic argument type for verbs
-/// and adjectives. Must be present in any import that emits verbs/adjectives.
-pub const ENTITY_ROOT: &str = "wn:n00001740";
+/// The **entity top** (D63 §8.3, decision ii): the schema-level foundational
+/// entity type (`lexicon:Entity`) that verb/adjective argument slots — and the
+/// determiners' subject `E` — are typed at. WordNet's `entity.n.01`
+/// (`wn:n00001740`, the noun-lattice root) is rooted here, so every imported
+/// noun is `≤ lexicon:Entity` and flows into these slots by coercive subtyping.
+/// Provided by the bootstrapped lexicon schema, which the import builds on.
+pub const ENTITY_TOP: &str = "lexicon:Entity";
 
 /// The namespace + schema preamble the emitted entries reference.
 pub const ESL_HEADER: &str = "\
@@ -78,10 +82,10 @@ impl FrameKind {
     /// (stage-1; §8.7.4), so the verb composes with any noun by subsumption.
     fn arrow(self) -> String {
         match self {
-            FrameKind::Intransitive => format!("{ENTITY_ROOT} -> Prop"),
-            FrameKind::Transitive => format!("{ENTITY_ROOT} -> {ENTITY_ROOT} -> Prop"),
+            FrameKind::Intransitive => format!("{ENTITY_TOP} -> Prop"),
+            FrameKind::Transitive => format!("{ENTITY_TOP} -> {ENTITY_TOP} -> Prop"),
             FrameKind::Ditransitive => {
-                format!("{ENTITY_ROOT} -> {ENTITY_ROOT} -> {ENTITY_ROOT} -> Prop")
+                format!("{ENTITY_TOP} -> {ENTITY_TOP} -> {ENTITY_TOP} -> Prop")
             }
         }
     }
@@ -90,7 +94,7 @@ impl FrameKind {
     /// Features (D63 §5.1): NP slots are number-underspecified (`num_any`), the
     /// result sentence is declarative + finite (`cat_s(dcl, fin)`).
     fn cat(self) -> String {
-        let np = format!("lexicon:cat_np({ENTITY_ROOT}, lexicon:num_any)");
+        let np = format!("lexicon:cat_np({ENTITY_TOP}, lexicon:num_any)");
         let s = "lexicon:cat_s(lexicon:dcl, lexicon:fin)";
         match self {
             FrameKind::Intransitive => format!("lexicon:bwd({s}, {np})"),
@@ -166,8 +170,11 @@ fn push_entry(
 /// per lemma.
 fn push_noun(buf: &mut String, syn: &Synset, rep: &mut Report) {
     let parents: Vec<String> = syn.hypernyms.iter().map(|h| format!("wn:n{h}")).collect();
+    // A hypernym-less noun (WordNet's root `entity.n.01`) is rooted at the schema
+    // entity top so the whole noun lattice sits under `lexicon:Entity` (D63 §8.3
+    // ii); all other nouns parent at their `@` hypernyms.
     let header = if parents.is_empty() {
-        format!("class wn:{} {{", local(syn))
+        format!("class wn:{} : {ENTITY_TOP} {{", local(syn))
     } else {
         format!("class wn:{} : {} {{", local(syn), parents.join(", "))
     };
@@ -176,12 +183,15 @@ fn push_noun(buf: &mut String, syn: &Synset, rep: &mut Report) {
         esc(&syn.gloss)
     ));
     rep.noun_classes += 1;
+    // `cat_n` carries the noun's own class as its (denotation-erased) type index
+    // — load-bearing for polymorphic determiners (D63 §8.2).
+    let cat = format!("lexicon:cat_n(wn:{}, lexicon:num_any)", local(syn));
     for (i, lemma) in syn.words.iter().enumerate() {
         push_entry(
             buf,
             &format!("e_{}_{i}", local(syn)),
             lemma,
-            "lexicon:cat_n(lexicon:num_any)",
+            &cat,
             &local(syn),
             "Set",
             &sense_key(syn, lemma),
@@ -194,9 +204,10 @@ fn push_noun(buf: &mut String, syn: &Synset, rep: &mut Report) {
 /// §8.7.3): an `EigonResource` instance of its class(es), **not** a class. Its
 /// `@i` (and any rare co-occurring `@`) targets become the resource's types — an
 /// individual *is an instance of* all of them. Each lemma → an `NP` entry
-/// (`cat_np(C)`, `sem` = this resource), typed at the **first** class, which is
-/// what the kernel infers for a multi-class resource (`is_a().first()`) and what
-/// the felicity gate checks; the other classes stay on the resource (no drop).
+/// one `NP` entry per `(class, lemma)` — `cat_np(C, num_any)`, `sem` = this
+/// resource — so a multi-class individual is usable in each class's typing context
+/// (now admissible via the check-mode resource-inhabitation rule, #91). The other
+/// classes also stay on the resource.
 fn push_instance(buf: &mut String, syn: &Synset, rep: &mut Report) {
     // Types: `@i` first (the instance-hypernyms), then any rare plain `@`.
     let classes: Vec<String> = syn
@@ -205,9 +216,10 @@ fn push_instance(buf: &mut String, syn: &Synset, rep: &mut Report) {
         .chain(syn.hypernyms.iter())
         .map(|h| format!("wn:n{h}"))
         .collect();
-    let primary = classes
-        .first()
-        .expect("push_instance requires a non-empty instance_of");
+    assert!(
+        !classes.is_empty(),
+        "push_instance requires a non-empty instance_of"
+    );
     buf.push_str(&format!(
         "resource wn:{} : {} {{\n    core:description = \"{}\";\n}}\n\n",
         local(syn),
@@ -215,18 +227,20 @@ fn push_instance(buf: &mut String, syn: &Synset, rep: &mut Report) {
         esc(&syn.gloss),
     ));
     rep.instances += 1;
-    let cat = format!("lexicon:cat_np({primary}, lexicon:num_any)");
-    for (i, lemma) in syn.words.iter().enumerate() {
-        push_entry(
-            buf,
-            &format!("e_{}_{i}", local(syn)),
-            lemma,
-            &cat,
-            &local(syn),
-            primary,
-            &sense_key(syn, lemma),
-        );
-        rep.entries += 1;
+    for (ci, class) in classes.iter().enumerate() {
+        let cat = format!("lexicon:cat_np({class}, lexicon:num_any)");
+        for (li, lemma) in syn.words.iter().enumerate() {
+            push_entry(
+                buf,
+                &format!("e_{}_{ci}_{li}", local(syn)),
+                lemma,
+                &cat,
+                &local(syn),
+                class,
+                &sense_key(syn, lemma),
+            );
+            rep.entries += 1;
+        }
     }
 }
 
@@ -266,14 +280,18 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report) -> bool {
 /// Adjective synset → a predicative `eigentt:Axiom` (`S\NP`) + entries.
 fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report) {
     buf.push_str(&format!(
-        "axiom wn:{} : {ENTITY_ROOT} -> Prop\n\n",
+        "axiom wn:{} : {ENTITY_TOP} -> Prop\n\n",
         local(syn)
     ));
     rep.adj_axioms += 1;
+    // Predicative adjective is the **adjectival** predicate form (`adj`) — distinct
+    // from base verbs, so it requires the copula (`is`/`are`) and never do-support
+    // (D63 §8.5 Slice 3a/3b). A bare `*X large` is not a finite root; `X is large`
+    // composes the copula with this; attributive `large X` is the engine Σ-rule.
     let cat = format!(
-        "lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np({ENTITY_ROOT}, lexicon:num_any))"
+        "lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))"
     );
-    let arrow = format!("{ENTITY_ROOT} -> Prop");
+    let arrow = format!("{ENTITY_TOP} -> Prop");
     for (i, lemma) in syn.words.iter().enumerate() {
         push_entry(
             buf,
@@ -289,7 +307,7 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report) {
 }
 
 /// Render a set of synsets to one ESL document. The caller is responsible for
-/// closure (every `@` parent + [`ENTITY_ROOT`] present); rendering is order-
+/// closure (every `@` parent + [`ENTITY_TOP`] present); rendering is order-
 /// independent (references resolve at layer time). Output is deterministic:
 /// synsets are emitted sorted by `(pos, offset)`, declarations before entries.
 pub fn render_document(synsets: &[Synset]) -> (String, Report) {
@@ -381,7 +399,9 @@ mod tests {
         assert!(buf.contains("description = \"a segment of DNA\";"));
         assert!(buf.contains("resource wn:e_n05444328_0 : lexicon:LexicalEntry {"));
         assert!(buf.contains("lexicon:form     = \"gene\";"));
-        assert!(buf.contains("lexicon:cat      = type_expr( lexicon:cat_n(lexicon:num_any) );"));
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:cat_n(wn:n05444328, lexicon:num_any) );"
+        ));
         assert!(buf.contains("lexicon:sem      = wn:n05444328;"));
         assert!(buf.contains("lexicon:sem_type = type_expr( Set );"));
         assert_eq!(rep.noun_classes, 1);
@@ -389,12 +409,14 @@ mod tests {
     }
 
     #[test]
-    fn root_noun_has_no_parent_clause() {
+    fn root_noun_is_rooted_at_the_schema_entity_top() {
+        // WordNet's hypernym-less root `entity.n.01` is parented at the schema
+        // entity top `lexicon:Entity` (D63 §8.3 ii), so the whole noun lattice
+        // sits under it.
         let entity = syn("00001740 03 n 01 entity 0 001 ~ 00001930 n 0000 | that which exists");
         let mut buf = String::new();
         push_noun(&mut buf, &entity, &mut Report::default());
-        assert!(buf.contains("class wn:n00001740 {")); // no `:` parents
-        assert!(!buf.contains("class wn:n00001740 :"));
+        assert!(buf.contains("class wn:n00001740 : lexicon:Entity {"));
     }
 
     #[test]
@@ -409,7 +431,7 @@ mod tests {
         assert!(!buf.contains("class wn:n10954498"));
         assert!(buf.contains("description = \"a physicist\";"));
         // NP entries (cat_np at the class), one per lemma, sem = the individual.
-        assert!(buf.contains("resource wn:e_n10954498_0 : lexicon:LexicalEntry {"));
+        assert!(buf.contains("resource wn:e_n10954498_0_0 : lexicon:LexicalEntry {"));
         assert!(buf.contains("lexicon:form     = \"Einstein\";"));
         assert!(buf.contains("lexicon:form     = \"Albert Einstein\";"));
         assert!(buf.contains(
@@ -423,21 +445,24 @@ mod tests {
     }
 
     #[test]
-    fn multi_instance_of_keeps_all_classes_types_at_first() {
-        // A rare instance of two classes: `resource r : A, B` (no drop); the NP
-        // entry types at the FIRST (what the kernel infers via is_a().first()).
+    fn multi_instance_of_emits_an_np_entry_per_class() {
+        // A rare instance of two classes: `resource r : A, B` (no drop), and one
+        // NP entry per class — admissible via the check-mode resource rule (#91).
         let v = syn("00000009 18 n 01 Enlightenment 0 002 @i 15254028 n 0000 @ 08473623 n 0000 | a movement");
         let mut rep = Report::default();
         let mut buf = String::new();
         push_instance(&mut buf, &v, &mut rep);
         // both classes on the resource — @i first, then the rare plain @.
         assert!(buf.contains("resource wn:n00000009 : wn:n15254028, wn:n08473623 {"));
-        // entry types at the first class only (exact-match gate).
+        // one NP entry per class (both type contexts reachable).
         assert!(buf.contains(
             "lexicon:cat      = type_expr( lexicon:cat_np(wn:n15254028, lexicon:num_any) );"
         ));
-        assert!(buf.contains("lexicon:sem_type = type_expr( wn:n15254028 );"));
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:cat_np(wn:n08473623, lexicon:num_any) );"
+        ));
         assert_eq!(rep.instances, 1);
+        assert_eq!(rep.entries, 2); // 2 classes × 1 lemma
     }
 
     #[test]
@@ -449,7 +474,7 @@ mod tests {
             syn("10954498 18 n 01 Einstein 0 001 @i 10428004 n 0000 | a physicist"),
         ];
         let (doc, rep) = render_document(&synsets);
-        assert!(doc.contains("class wn:n10428004 {"));
+        assert!(doc.contains("class wn:n10428004 : lexicon:Entity {"));
         assert!(doc.contains("resource wn:n10954498 : wn:n10428004 {"));
         assert!(!doc.contains("class wn:n10954498"));
         assert_eq!(rep.noun_classes, 1);
@@ -463,9 +488,9 @@ mod tests {
         let mut buf = String::new();
         assert!(push_verb(&mut buf, &eat, &mut rep));
         // frame 11 → transitive; the axiom IRI is kind-tagged (`_t`).
-        assert!(buf.contains("axiom wn:v00275082_t : wn:n00001740 -> wn:n00001740 -> Prop"));
+        assert!(buf.contains("axiom wn:v00275082_t : lexicon:Entity -> lexicon:Entity -> Prop"));
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(wn:n00001740, lexicon:num_any)), lexicon:cat_np(wn:n00001740, lexicon:num_any)) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
         assert!(buf.contains("lexicon:sem      = wn:v00275082_t;"));
         assert_eq!(rep.verb_axioms, 1);
@@ -480,8 +505,8 @@ mod tests {
         let mut rep = Report::default();
         let mut buf = String::new();
         assert!(push_verb(&mut buf, &v, &mut rep));
-        assert!(buf.contains("axiom wn:v00001740_i : wn:n00001740 -> Prop"));
-        assert!(buf.contains("axiom wn:v00001740_t : wn:n00001740 -> wn:n00001740 -> Prop"));
+        assert!(buf.contains("axiom wn:v00001740_i : lexicon:Entity -> Prop"));
+        assert!(buf.contains("axiom wn:v00001740_t : lexicon:Entity -> lexicon:Entity -> Prop"));
         assert_eq!(rep.verb_axioms, 2);
         assert_eq!(rep.entries, 2); // one lemma × two kinds
     }
@@ -493,9 +518,9 @@ mod tests {
         let mut buf = String::new();
         assert!(push_verb(&mut buf, &v, &mut Report::default()));
         assert!(buf.contains(
-            "axiom wn:v00001234_d : wn:n00001740 -> wn:n00001740 -> wn:n00001740 -> Prop"
+            "axiom wn:v00001234_d : lexicon:Entity -> lexicon:Entity -> lexicon:Entity -> Prop"
         ));
-        assert!(buf.contains("lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(wn:n00001740, lexicon:num_any)), lexicon:cat_np(wn:n00001740, lexicon:num_any)), lexicon:cat_np(wn:n00001740, lexicon:num_any))"));
+        assert!(buf.contains("lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))"));
     }
 
     #[test]
@@ -517,7 +542,7 @@ mod tests {
         ];
         let (doc, rep) = render_document(&nouns);
         assert!(doc.contains("namespace wn         = \"urn:eigenius:wn\";"));
-        assert!(doc.contains("class wn:n00001740 {"));
+        assert!(doc.contains("class wn:n00001740 : lexicon:Entity {"));
         assert!(doc.contains("class wn:n05444328 : wn:n00001740 {"));
         // a class declaration must appear before the entry section
         let class_pos = doc.find("class wn:n05444328").unwrap();

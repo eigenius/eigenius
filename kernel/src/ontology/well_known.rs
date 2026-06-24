@@ -147,6 +147,12 @@ pub const MERGE_RECORD_RESTRUCTURE_AFFECTED_CLASS: &str =
 /// of a `(A, A, Option<A>) -> A` witness signature.
 pub const OPTION: &str = "urn:eigenius:core:Option";
 
+/// Canonical list inductive ([`crate::nbe::term::list_decl`]). A kernel
+/// built-in (not a chain resource), so type-expression decoders
+/// short-circuit this IRI to the built-in decl — as they do the
+/// primitive datatypes — rather than resolving it against the chain.
+pub const LIST: &str = "urn:eigenius:core:List";
+
 // --- Inductive types (Phase 11b, D19) ---
 
 pub const INDUCTIVE_TYPE: &str = "urn:eigenius:core:InductiveType";

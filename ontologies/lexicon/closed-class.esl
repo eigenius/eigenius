@@ -1,0 +1,429 @@
+// ════════════════════════════════════════════════════════════════════
+// closed-class — the determiner lexicon (D63 §8.3 Phase 1-2).
+// ════════════════════════════════════════════════════════════════════
+//
+// The closed-class function words English's grammar provides (vs. the open-class
+// WordNet content). Built on the bootstrapped `lexicon` schema (`cat_forall`,
+// `SemTerm`, `lexicon:Entity`) + `logic` (`logic:False` for `no`). Domain-
+// independent: every determiner is polymorphic in the noun type `T:Set`
+// (CN-as-types), and the verb-subject position uses the schema entity top
+// `lexicon:Entity` (D63 §8.3 decision ii), with specific types reaching slots by
+// coercive subtyping. SUBJECT determiners denote `(A→Prop)→Prop`; OBJECT
+// determiners are type-raised, denoting `(T→E→Prop)→(E→Prop)`.
+
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace logic     = "urn:eigenius:logic";
+namespace ontology  = "urn:eigenius:ontology";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+
+// ── Quantifier cores (factored; D63 §8.3 Phase 1) ─────────────────────
+
+// Universal (subject): λA. λV. ∀x:A. V(x).
+resource lexicon:forall_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : Set) => fun (V : A -> Prop) => forall (x : A) => V(x)
+          : forall (A : Set) => (A -> Prop) -> Prop )
+    );
+}
+// Existential (subject): λA. λV. ∃x:A. V(x)   (impredicative ∃).
+resource lexicon:exists_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : Set) => fun (V : A -> Prop) =>
+            forall (C : Prop) => (forall (x : A) => (V(x) -> C)) -> C
+          : forall (A : Set) => (A -> Prop) -> Prop )
+    );
+}
+// Negative (subject): λA. λV. ∀x:A. ¬V(x)   (¬P := P -> logic:False).
+resource lexicon:no_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : Set) => fun (V : A -> Prop) => forall (x : A) => (V(x) -> logic:False)
+          : forall (A : Set) => (A -> Prop) -> Prop )
+    );
+}
+// Universal (object): λT. λTV. λsubj. ∀x:T. TV(x, subj).
+resource lexicon:obj_forall_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (x : T) => TV(x, subj)
+          : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+// Existential (object): λT. λTV. λsubj. ∃x:T. TV(x, subj).
+resource lexicon:obj_exists_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (C : Prop) => (forall (x : T) => (TV(x, subj) -> C)) -> C
+          : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+// Negative (object): λT. λTV. λsubj. ∀x:T. ¬TV(x, subj).
+resource lexicon:obj_no_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (x : T) => (TV(x, subj) -> logic:False)
+          : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+
+// ── wh-question semantics (D63 §8.5, Slice 5b — subject wh) ───────────
+// A wh-question denotes its **answer-property** ⟦Q(T)⟧ = T → Prop. A SUBJECT wh
+// has its gap adjacent to the VP (`S\NP_T`), so it composes by plain application
+// (no extraction): the wh-word is the identity on the VP, narrowing the answer to
+// the queried type T via the category `cat_q(T)`. (Object/embedded extraction —
+// `cat_q(T)/(S/NP_T)` + composition B + Eisner — is Slice 5c.)
+
+// what — unrestricted subject wh (T = Entity): λV. λx:Entity. V(x).
+// (η-expanded — the answer-property is a λ, so the felicity check pushes the
+// queried type into the binder; cf. `which`, where this is what makes the
+// restrictor narrow without needing contravariant function subtyping.)
+resource lexicon:wh_what_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) => fun (x : lexicon:Entity) => V(x)
+          : (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+// which — restricted subject wh, polymorphic in the noun type T: λA. λV. λx:A. V(x).
+// The η-expansion binds `x:A` (= the queried type T), so the answer-property is
+// `λx:T. V(x) : T → Prop` checked against ⟦Q(T)⟧; the Entity-typed VP `V` accepts
+// the T-typed `x` by the COVARIANT application coercion (`T ≤ Entity`) the kernel
+// supports — no contravariant function subtyping needed.
+resource lexicon:wh_which_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : Set) => fun (V : A -> Prop) => fun (x : A) => V(x)
+          : forall (A : Set) => (A -> Prop) -> (A -> Prop) )
+    );
+}
+
+// what — subject wh, unrestricted. `cat_q(Entity)/(S\NP_Entity)`: takes the VP on
+// its right, yields the Entity-ranged answer-property.
+resource lexicon:what_subj : lexicon:LexicalEntry {
+    lexicon:form     = "what";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_q(lexicon:Entity), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:wh_what_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "what";
+    lexicon:grade    = epistemic:declared;
+}
+// which — subject wh, restricted by a common noun. `cat_forall(λT. cat_q(T)/(S\NP_T))`:
+// consumes the noun (binding T), then the VP, yielding the T-ranged answer-property.
+// The VP's `S\NP_Entity` fills the `S\NP_T` slot by the contravariant functor
+// subsumption (§8.2 item 4), so `Entity`-typed verbs answer `which gene` queries.
+resource lexicon:which_subj : lexicon:LexicalEntry {
+    lexicon:form     = "which";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:cat_q(T), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:wh_which_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> (A -> Prop) );
+    lexicon:sense    = "which";
+    lexicon:grade    = epistemic:declared;
+}
+
+// ── Object wh — extraction (D63 §8.5, Slice 5c) ───────────────────────
+// The OBJECT gap is non-adjacent ("what does HeLa affect [gap]?"), so the wh-word
+// consumes a sentence-missing-its-object `S[q]/NP` (built by forward composition B:
+// `does HeLa ∘ affect`). Distinct category from the subject wh (`/(S\NP_T)`); same
+// answer-property sems (reused). CCG uses both categories side by side — context
+// (the presence of the `S[q]/NP` vs the `S\NP` VP) selects which fires.
+
+// what — object wh, unrestricted. `cat_q(Entity)/(S[q]/NP_Entity)`.
+resource lexicon:what_obj : lexicon:LexicalEntry {
+    lexicon:form     = "what";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_q(lexicon:Entity), lexicon:fwd(lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:wh_what_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "what";
+    lexicon:grade    = epistemic:declared;
+}
+// which — object wh, restricted. `cat_forall(λT. cat_q(T)/(S[q]/NP_T))`: consumes
+// the noun (binding T), then the `S[q]/NP` (the gapped sentence), yielding the
+// T-ranged answer-property. The composed `S[q]/NP_Entity` fills the `S[q]/NP_T`
+// slot by the contravariant functor subsumption (§8.2 item 4).
+resource lexicon:which_obj : lexicon:LexicalEntry {
+    lexicon:form     = "which";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:cat_q(T), lexicon:fwd(lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:wh_which_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> (A -> Prop) );
+    lexicon:sense    = "which";
+    lexicon:grade    = epistemic:declared;
+}
+
+// ── Auxiliary `do`-support (D63 §8.5, Slice 5a — polar questions) ─────
+// `does`/`do`/`did` invert to form a yes/no question: `aux + subject + base-VP`.
+// Category `(S[q,fin] / (S[dcl,bse]\NP)) / NP` — takes the subject, then the BASE
+// VP, yields a finite question `S[q]`. ⟦S[q]⟧ = Prop (the queried proposition,
+// `denote_mood(q) = Prop`), so a polar question denotes the same `Prop` as the
+// declarative, `mood`-tagged `q`. `do`-support is semantically vacuous (tense
+// erased): the sem is `λsubj. λV. V(subj)`. The `bse` complement slot makes the
+// `Fin`-meet reject `*does HeLa affects …`.
+
+resource lexicon:do_aux_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (subj : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => V(subj)
+          : lexicon:Entity -> (lexicon:Entity -> Prop) -> Prop )
+    );
+}
+
+// does — present, 3sg do-support.
+resource lexicon:does_aux : lexicon:LexicalEntry {
+    lexicon:form     = "does";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:do_aux_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "does";
+    lexicon:grade    = epistemic:declared;
+}
+// do — present, non-3sg do-support.
+resource lexicon:do_aux : lexicon:LexicalEntry {
+    lexicon:form     = "do";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:do_aux_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "do";
+    lexicon:grade    = epistemic:declared;
+}
+// did — past do-support (tense erased in v1).
+resource lexicon:did_aux : lexicon:LexicalEntry {
+    lexicon:form     = "did";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:do_aux_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "did";
+    lexicon:grade    = epistemic:declared;
+}
+
+// ── Copula `be` — predicative (D63 §8.5, Slice 3a) ────────────────────
+// `is`/`are` link a subject to a **predicative adjective**: `HeLa is primary`.
+// Category `(S[dcl,fin]\NP) / (S[dcl,adj]\NP)` — it takes the **adjectival** (`adj`)
+// predicate and supplies finiteness, yielding the finite VP. The `adj` complement
+// slot makes the copula REQUIRED for adjectives (`*HeLa primary` is not a finite
+// root), selects ONLY adjectives — not finite verbal VPs (`*HeLa is affects HeLa`)
+// nor base verbs — and is what do-support (`bse`) correctly *won't* accept
+// (`*does HeLa primary`). Semantically vacuous: `λP. P` (it only lifts finiteness).
+resource lexicon:copula_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (P : lexicon:Entity -> Prop) => P
+          : (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+// is — copula, 3sg.
+resource lexicon:is_copula : lexicon:LexicalEntry {
+    lexicon:form     = "is";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+    lexicon:grade    = epistemic:declared;
+}
+// are — copula, plural / non-3sg.
+resource lexicon:are_copula : lexicon:LexicalEntry {
+    lexicon:form     = "are";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+    lexicon:grade    = epistemic:declared;
+}
+
+// ── Predicate-nominal `a` (D63 §8.5, Slice 3c) ────────────────────────
+// The PREDICATIVE indefinite article: "HeLa is **a cell line**". Distinct from the
+// existential determiner `a` — here `a` is semantically the membership former, not a
+// quantifier. It consumes the common noun (binding its type T) and yields an
+// **adjectival** predicate `S[dcl,adj]\NP` `λs. is_a(s, T)`, which the existing
+// copula `is`/`are` then lifts to a finite VP (reusing 3a — no new copula). Subject
+// dispatch is by type-checking: an instance subject (`hela : CellLine ≤ Entity`)
+// makes `is_a(hela, CellLine)` felicitous. (The `subclass_of` reading for KIND
+// subjects awaits bare-plural/generic subjects — deferred.)
+resource lexicon:pred_nominal_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (T : Set) => fun (s : lexicon:Entity) => ontology:is_a(s, T)
+          : forall (T : Set) => lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:a_pred : lexicon:LexicalEntry {
+    lexicon:form     = "a";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:pred_nominal_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => lexicon:Entity -> Prop );
+    lexicon:sense    = "a";
+    lexicon:grade    = epistemic:declared;
+}
+
+// ── Kind-subject predicate nominal: `are` (D63 §8.5, Slice 3c kind subjects) ──
+// "Genes are cell lines" → subclass_of(Gene, CellLine). The KIND copula `are`
+// consumes the predicate noun (binding its type T), yielding a finite VP over a
+// KIND subject `S[dcl,fin]\Kind`, sem `λK:Set. subclass_of(K, T)`. A bare-plural
+// kind subject (`cat_kind`, ⟦·⟧ = Set) then applies. Distinct from the predicative
+// adjective copula `are` (over `cat_np`) — the categories don't overlap.
+resource lexicon:kind_nominal_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (T : Set) => fun (k : Set) => ontology:subclass_of(k, T)
+          : forall (T : Set) => Set -> Prop )
+    );
+}
+resource lexicon:are_kind : lexicon:LexicalEntry {
+    lexicon:form     = "are";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_kind)) );
+    lexicon:sem      = lexicon:kind_nominal_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => Set -> Prop );
+    lexicon:sense    = "be";
+    lexicon:grade    = epistemic:declared;
+}
+
+// ── Negation (D63 §8.6 Slice 6-neg) ──────────────────────────────────
+// Verbal: "HeLa does not affect BRCA1" → affect(brca1, hela) → logic:False.
+// Copular: "HeLa is not primary" → is_primary(hela) → logic:False.
+// `¬P := P -> logic:False` (reusing logic:False). Verbal negation uses
+// DECLARATIVE do-support (the non-inverted counterpart of the 5a question aux):
+// `do/does/did : (S[dcl,fin]\NP)/(S[dcl,bse]\NP)`, sem `λP.P` (reuses `copula_sem`,
+// just `λP.P`). `not` is a predicate-modifier `λP.λs. ¬P(s)`, in two forms (over
+// `bse` verbal VPs and over `adj` adjectival predicates — no feature-polymorphism).
+
+resource lexicon:neg_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (P : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) => (P(s) -> logic:False)
+          : (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+// not — over a base verbal VP ("does not affect …").
+resource lexicon:not_vp : lexicon:LexicalEntry {
+    lexicon:form     = "not";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:neg_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "not";
+    lexicon:grade    = epistemic:declared;
+}
+// not — over an adjectival predicate ("is not primary").
+resource lexicon:not_adj : lexicon:LexicalEntry {
+    lexicon:form     = "not";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:neg_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "not";
+    lexicon:grade    = epistemic:declared;
+}
+// Declarative do-support (verbal negation / emphatic) — finiteness-lifting `λP.P`.
+resource lexicon:does_decl : lexicon:LexicalEntry {
+    lexicon:form     = "does";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "do";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:do_decl : lexicon:LexicalEntry {
+    lexicon:form     = "do";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "do";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:did_decl : lexicon:LexicalEntry {
+    lexicon:form     = "did";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "do";
+    lexicon:grade    = epistemic:declared;
+}
+
+// ── Determiner entries (D63 §8.3 Phase 2) ─────────────────────────────
+// Subject category:  cat_forall(num, λT. S/(S\NP_T))
+// Object category:   cat_forall(num, λT. (S\NP_E)\((S\NP_E)/NP_T)),  E = lexicon:Entity
+// `every`/`each` sg, `all` pl universal; `a` sg, `some` sg existential; `no` sg
+// negative. (Plural `some`/`no` and the definite `the` are follow-ons — D63 §8.3.)
+
+// every — universal, singular.
+resource lexicon:every_subj : lexicon:LexicalEntry {
+    lexicon:form     = "every";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:forall_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "every"; 
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:every_obj : lexicon:LexicalEntry {
+    lexicon:form     = "every";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:obj_forall_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "every"; 
+    lexicon:grade    = epistemic:declared;
+}
+// each — universal, singular (≈ every truth-conditionally).
+resource lexicon:each_subj : lexicon:LexicalEntry {
+    lexicon:form     = "each";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:forall_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "each"; 
+    lexicon:grade    = epistemic:declared;
+}
+// all — universal, plural.
+resource lexicon:all_subj : lexicon:LexicalEntry {
+    lexicon:form     = "all";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:forall_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "all"; 
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:all_obj : lexicon:LexicalEntry {
+    lexicon:form     = "all";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:obj_forall_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "all"; 
+    lexicon:grade    = epistemic:declared;
+}
+// a — existential, singular.
+resource lexicon:a_subj : lexicon:LexicalEntry {
+    lexicon:form     = "a";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "a"; 
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:a_obj : lexicon:LexicalEntry {
+    lexicon:form     = "a";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "a"; 
+    lexicon:grade    = epistemic:declared;
+}
+// some — existential, singular.
+resource lexicon:some_subj : lexicon:LexicalEntry {
+    lexicon:form     = "some";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "some"; 
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:some_obj : lexicon:LexicalEntry {
+    lexicon:form     = "some";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "some"; 
+    lexicon:grade    = epistemic:declared;
+}
+// no — negative, singular.
+resource lexicon:no_subj : lexicon:LexicalEntry {
+    lexicon:form     = "no";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:no_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "no"; 
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:no_obj : lexicon:LexicalEntry {
+    lexicon:form     = "no";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:obj_no_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "no"; 
+    lexicon:grade    = epistemic:declared;
+}

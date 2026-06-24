@@ -154,7 +154,15 @@ fn load_esl_layer(
     parent: Option<Arc<Layer>>,
     storage: crate::layer::LayerStorage,
 ) -> Result<Arc<Layer>, BootstrapError> {
-    let resources = crate::esl::compile(esl_source).map_err(|errs| {
+    // Compile AGAINST the parent layer when present, so the source can resolve
+    // constructors declared lower in the chain (e.g. `closed-class.esl` uses the
+    // `lexicon:Cat` ctor `cat_forall` from the schema). Parentless layers (the
+    // root) fall back to context-free compile.
+    let compiled = match &parent {
+        Some(p) => crate::esl::compile_against_layer(esl_source, p),
+        None => crate::esl::compile(esl_source),
+    };
+    let resources = compiled.map_err(|errs| {
         BootstrapError::CoreOntologyInvalid(
             errs.into_iter()
                 .map(|e| crate::validation::ValidationError {
@@ -420,8 +428,55 @@ pub fn bootstrap_with_storage(
         storage.clone(),
     )?;
 
+    // logic: layer (D63 §8.3 Phase 0) — propositional primitives over `Prop`
+    // (`logic:False`; `And`/`Or` arrive with the connectives). Depends only on
+    // core (`Prop`); placed at the tip beneath the lexicon, which builds on it.
+    let logic = load_esl_layer(
+        "logic",
+        include_str!("../../../ontologies/logic/logic.esl"),
+        Some(reference),
+        storage.clone(),
+    )?;
+
+    // lexicon: layer (D62/D63) — the categorial-grammar SCHEMA: `lexicon:Cat`
+    // (the category algebra), `lexicon:LexicalEntry`, `lexicon:SemTerm`, the
+    // feature inductives. Depends on core (Set/Prop), eigentt (TypeExpr-valued
+    // `cat`/`sem_type`/`term`), reflection (EpistemicStatus `grade`), and logic.
+    // The closed-class determiner ENTRIES are a separate layer (still staged in
+    // tests) — only the schema is committed here.
+    let lexicon = load_esl_layer(
+        "lexicon",
+        include_str!("../../../ontologies/lexicon/lexicon-ontology.esl"),
+        Some(logic),
+        storage.clone(),
+    )?;
+
+    // ontology: layer (D63 §8.5 Slice 3c) — Prop-valued structural relations over
+    // the class lattice (`ontology:is_a` / `ontology:subclass_of`), the opaque
+    // predicates a predicate nominal ("HeLa is a cell line") produces. Depends on
+    // the lexicon schema (`lexicon:Entity`); placed beneath the closed-class
+    // function words, which reference it.
+    let ontology = load_esl_layer(
+        "ontology",
+        include_str!("../../../ontologies/ontology/ontology.esl"),
+        Some(lexicon),
+        storage.clone(),
+    )?;
+
+    // closed-class: layer (D63 §8.3) — the determiner lexicon (`every`/`each`/
+    // `all`/`a`/`some`/`no`, subject + object variants) over the schema's
+    // `cat_forall` + `lexicon:Entity` + `logic:False`. Domain-independent
+    // (polymorphic in the noun type); the open-class WordNet content composes
+    // with it. The closed-class function words are committed chain data.
+    let closed_class = load_esl_layer(
+        "closed-class",
+        include_str!("../../../ontologies/lexicon/closed-class.esl"),
+        Some(ontology),
+        storage.clone(),
+    )?;
+
     Ok(ExecutionContext::new(
-        reference,
+        closed_class,
         "working",
         ExecutionMode::ReadWrite,
         storage,
@@ -617,7 +672,7 @@ fn check_and_migrate_schema_version(
     Ok(())
 }
 
-fn embedded_ontologies() -> [(&'static str, &'static str); 16] {
+fn embedded_ontologies() -> [(&'static str, &'static str); 19] {
     [
         (
             "core",
@@ -688,6 +743,15 @@ fn embedded_ontologies() -> [(&'static str, &'static str); 16] {
         (
             "reference",
             include_str!("../../../ontologies/reference/reference.esl"),
+        ),
+        ("logic", include_str!("../../../ontologies/logic/logic.esl")),
+        (
+            "lexicon",
+            include_str!("../../../ontologies/lexicon/lexicon-ontology.esl"),
+        ),
+        (
+            "closed-class",
+            include_str!("../../../ontologies/lexicon/closed-class.esl"),
         ),
     ]
 }
@@ -843,8 +907,17 @@ mod tests {
         // statistics inserted at D52 Phase 5 to declare the
         // Measurement Statistics institution and its chain artifacts.
         assert!(!ctx.head().is_root());
-        // reference layer is the tip; ingest (D53) sits below it, then notebook.
-        let ingest = ctx.head().parent().unwrap();
+        // closed-class (D63 §8.3) is the tip; then ontology (D63 §8.5 3c), lexicon,
+        // logic, reference, ingest (D53), notebook.
+        let ontology = ctx.head().parent().unwrap();
+        assert!(!ontology.is_root());
+        let lexicon = ontology.parent().unwrap();
+        assert!(!lexicon.is_root());
+        let logic = lexicon.parent().unwrap();
+        assert!(!logic.is_root());
+        let reference = logic.parent().unwrap();
+        assert!(!reference.is_root());
+        let ingest = reference.parent().unwrap();
         assert!(!ingest.is_root());
         let notebook = ingest.parent().unwrap();
         assert!(!notebook.is_root());
@@ -885,6 +958,30 @@ mod tests {
             resolved.is_some(),
             "should resolve Class from core ontology"
         );
+    }
+
+    #[test]
+    fn can_resolve_logic_and_lexicon() {
+        // The logic (D63 §8.3) + lexicon (D62/D63) layers are bootstrapped: the
+        // propositional bottom and the categorial-grammar schema resolve from a
+        // fresh context.
+        let ctx = bootstrap().unwrap();
+        for iri in [
+            "urn:eigenius:logic:False",
+            "urn:eigenius:lexicon:Cat",
+            "urn:eigenius:lexicon:LexicalEntry",
+            "urn:eigenius:lexicon:SemTerm",
+            "urn:eigenius:lexicon:Entity",
+            // closed-class determiners (D63 §8.3) — committed chain data.
+            "urn:eigenius:lexicon:every_subj",
+            "urn:eigenius:lexicon:no_obj",
+            "urn:eigenius:lexicon:forall_sem",
+        ] {
+            assert!(
+                ctx.resolve(&Iri::parse(iri).unwrap()).is_some(),
+                "bootstrap should resolve {iri}"
+            );
+        }
     }
 
     #[test]

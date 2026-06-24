@@ -398,6 +398,11 @@ fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) ->
             codomain: Box::new(expand_aliases(codomain, env)),
             pos: pos.clone(),
         },
+        ast::TypeExpr::Ann { expr, typ, pos } => ast::TypeExpr::Ann {
+            expr: Box::new(expand_aliases(expr, env)),
+            typ: Box::new(expand_aliases(typ, env)),
+            pos: pos.clone(),
+        },
         ast::TypeExpr::BinderArrow {
             name,
             kind,
@@ -960,7 +965,24 @@ impl Compiler {
                 let mut pr = Resource::new_embedded();
                 set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
                 pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
-                let kind = self.resolve(&p.kind)?;
+                // A parameter's kind is a qualified-name class (possibly an
+                // earlier parameter in scope) or a sort literal — the latter
+                // for Lean-style sort-parametrized inductives (`And (P : Prop,
+                // Q : Prop)`). Same lowering as indices (see `decl.indices`).
+                let kind = match &p.kind {
+                    ast::IndexKind::Named(qn) => {
+                        if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
+                            qn.name.clone()
+                        } else {
+                            self.resolve(qn)?
+                        }
+                    }
+                    ast::IndexKind::Sort(sk) => match sk {
+                        ast::SortKind::Prop => "Prop".to_string(),
+                        ast::SortKind::Set => "Set".to_string(),
+                        ast::SortKind::Type(n) => format!("Type:{n}"),
+                    },
+                };
                 pr.set(iri(wk::PARAM_KIND), Value::String(kind));
                 Ok(Value::Embedded(Box::new(pr)))
             })
@@ -1048,6 +1070,16 @@ impl Compiler {
                 );
                 Ok(Value::Embedded(Box::new(ar)))
             }
+            // A term-level annotation `(e : T)` is a category error in a
+            // type-declaration position (codata observation type / inductive ctor
+            // arg type). Annotations belong in `type_expr(...)` term slots, which
+            // compile via `encode_type_expr_to_json`, not here.
+            ast::TypeExpr::Ann { pos, .. } => Err(EslError::compiler(
+                Some(pos.clone()),
+                "a type annotation `(e : T)` is not valid in a type-declaration \
+                 position; it belongs in a term `type_expr(...)`"
+                    .to_string(),
+            )),
             ast::TypeExpr::BinderArrow {
                 name,
                 kind,
@@ -1379,6 +1411,12 @@ impl Compiler {
                 let body = self.lower_type_expr_to_exp(codomain, scope)?;
                 Ok(Exp::arrow(dom, body))
             }
+            // `(e : T)` — bidirectional annotation → `Exp::Ann`.
+            ast::TypeExpr::Ann { expr, typ, .. } => {
+                let e = self.lower_type_expr_to_exp(expr, scope)?;
+                let t = self.lower_type_expr_to_exp(typ, scope)?;
+                Ok(Exp::Ann(Box::new(e), Box::new(t)))
+            }
             ast::TypeExpr::Pi {
                 params, codomain, ..
             } => {
@@ -1588,6 +1626,17 @@ impl Compiler {
                     "args": ["", dom_json, cod_json],
                 }))
             }
+            // `(e : T)` — bidirectional annotation. Recurse into both children so
+            // a `fun` lambda inside `e` keeps its binder annotations (the whole
+            // reason `sem` can carry a λ-term that `check_infer` then accepts).
+            ast::TypeExpr::Ann { expr, typ, .. } => {
+                let e_json = self.encode_type_expr_to_json(expr, scope)?;
+                let t_json = self.encode_type_expr_to_json(typ, scope)?;
+                Ok(json!({
+                    "ctor": "Ann",
+                    "args": [e_json, t_json],
+                }))
+            }
             ast::TypeExpr::BinderArrow {
                 name,
                 kind,
@@ -1729,7 +1778,24 @@ impl Compiler {
                 let mut pr = Resource::new_embedded();
                 set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
                 pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
-                let kind = self.resolve(&p.kind)?;
+                // A parameter's kind is a qualified-name class (possibly an
+                // earlier parameter in scope) or a sort literal — the latter
+                // for Lean-style sort-parametrized inductives (`And (P : Prop,
+                // Q : Prop)`). Same lowering as indices (see `decl.indices`).
+                let kind = match &p.kind {
+                    ast::IndexKind::Named(qn) => {
+                        if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
+                            qn.name.clone()
+                        } else {
+                            self.resolve(qn)?
+                        }
+                    }
+                    ast::IndexKind::Sort(sk) => match sk {
+                        ast::SortKind::Prop => "Prop".to_string(),
+                        ast::SortKind::Set => "Set".to_string(),
+                        ast::SortKind::Type(n) => format!("Type:{n}"),
+                    },
+                };
                 pr.set(iri(wk::PARAM_KIND), Value::String(kind));
                 Ok(Value::Embedded(Box::new(pr)))
             })

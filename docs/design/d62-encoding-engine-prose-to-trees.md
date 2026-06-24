@@ -694,13 +694,13 @@ derivation-ranking (§8.4), not by the importer.
 
 - **Predicate subsumption** — verb troponymy/entailment is *not* the `EigonClass` subtype rule;
   it needs an entailment relation among axioms. (Class subsumption covers nouns; this is the verb gap.)
-- **Multi-class instances** — *(the instance/class split itself is now realized: `@i` synsets are
-  emitted as `EigonResource` individuals, §8.7.3 / §8.6.)* The 786 instances with **multiple** `@i`
-  classes carry **all** of them on the resource (`resource r : C1, C2, …` — no drop), but their NP
-  lexical entry types at the **first** class only, since the kernel infers `is_a().first()` for a
-  multi-class resource and the felicity gate matches exactly. Per-class NP entries + the check-mode
-  resource-inhabitation rule they require are deferred to a coherent, separately-reviewed kernel
-  change — tracked in [#91](https://github.com/eigenius/eigenius/issues/91).
+- **Multi-class instances — resolved ([#91](https://github.com/eigenius/eigenius/issues/91)).** `@i`
+  synsets are emitted as `EigonResource` individuals (§8.7.3 / §8.6); the 786 with **multiple** classes
+  carry **all** of them on the resource (`resource r : C1, C2, …`) **and** now get one NP entry per
+  class. The kernel's **check-mode resource-inhabitation rule** (full `is_a` × `is_subclass_of`) + the
+  **check-mode felicity gate** admit a name at *any* of its classes, including the non-first — so the
+  per-class entries gate-pass. (`check_infer(EigonResource)` keeps its `is_a().first()` best-effort:
+  it is off the inhabitation path and never load-bearing — see #91 for the narrowed synthesis note.)
 - **Identity stability** — offset (version-pinned) vs **ILI** (cross-version); adopt ILI for durable ids.
 - **Scale** — ~200k synset-classes: layer size, resolution/indexing, gate throughput.
 - **Coverage** — attributive adjectives (Σ), adverbs, multiword expressions / idioms / constructions
