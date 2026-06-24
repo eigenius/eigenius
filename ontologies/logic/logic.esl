@@ -44,3 +44,26 @@ data logic:Or (P : Prop, Q : Prop) : Prop {
     inl : forall (P : Prop, Q : Prop) => P -> logic:Or(P, Q),
     inr : forall (P : Prop, Q : Prop) => Q -> logic:Or(P, Q)
 }
+
+// ── Modality (D63 §8.9 Slice 6-aux) ──────────────────────────────────
+// `Possible` (◇) / `Necessary` (□) — the meanings the modal auxiliaries produce
+// ("HeLa can affect BRCA1" → Possible(affects(brca1, hela)); "… must …" → Necessary(…)).
+//
+// **OPAQUE** `Prop → Prop` operators (eigentt axioms), NOT a Kripke encoding: the
+// kernel does not interpret them (no World type, no possible-worlds quantification),
+// so an ordinary `Prop` stays a `Prop` and the verb axioms are untouched. Whether
+// `Possible(P)` / `Necessary(P)` *holds* is a GROUNDING judgment (a `ChainWitness`,
+// D39/D49) — felicity ≠ truth, exactly as for `ontology:is_a` / `subclass_of` and verb
+// predications. Being opaque (not reduced to ⊤/⊥) is what lets a modal claim be carried
+// as a hypothesis or a conditional antecedent ("if X can affect Y, then …") — the same
+// reason the structural predicates are opaque.
+//
+// **Independent primitives** — no classical duality `◇P ↔ ¬□¬P` is baked in (the
+// logic here is intuitionistic; `¬P := P -> logic:False`). **No modal LAWS** (T `□P→P`,
+// 4, 5, duality) are asserted in this trusted layer: they are flavor-dependent (deontic
+// `□` fails T) and are added as opt-in axioms per domain/flavor when reasoning needs
+// them. The operators are flavor-agnostic (alethic / dynamic / deontic distinctions are
+// grounding-supplied, harvested from use — like `is_a`'s actual membership); epistemic
+// "may/might" may instead route to the epistemic GRADE (Declared) — a later refinement.
+axiom logic:Possible : Prop -> Prop
+axiom logic:Necessary : Prop -> Prop

@@ -590,6 +590,101 @@ pub fn kind_subject(cat: &Exp, sem: &Exp) -> Option<(Exp, Exp)> {
     ))
 }
 
+/// Forward **bounded type-raising** `T` (D63 §8.9 Slice 6-T): an `NP_X` (a plain
+/// `cat_np(X, num)` — a name; determined NPs are already lexically raised) lifts to
+/// `S/(S\NP_X)` over the fixed target `S = cat_s(dcl, fin)` — the bound that makes the
+/// unary closure terminating. The sem is `λV. V(x)` (apply the to-be-supplied VP to
+/// the raised NP's witness). Returns `(raised_cat, raised_sem)`; the caller tags the
+/// item `Combinator::TypeRaised`, so ENF lets it only **compose** (the object-gap
+/// `S/NP` of a relative clause body), never forward-*apply*. `None` for a non-`NP`
+/// (functors, groups, kinds, already-raised determiner NPs are not raised here).
+pub fn type_raise(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Exp, Exp)> {
+    let Exp::InductiveCtor(cat_decl, name, args) = cat else {
+        return None;
+    };
+    if name != "cat_np" || args.len() != 2 {
+        return None;
+    }
+    // The fixed target `S = cat_s(dcl, fin)` — a finite declarative clause (the body
+    // of a restrictive relative). `Mood`/`Fin` are sibling inductives, resolved from
+    // the layer (as `coordinate_np` resolves `Conn`); `cat_s`/`fwd`/`bwd` reuse the
+    // `cat_np`'s own `Cat` decl.
+    let mood = resolve_inductive(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin = resolve_inductive(layer, "urn:eigenius:lexicon:Fin")?;
+    let s = Exp::InductiveCtor(
+        cat_decl.clone(),
+        "cat_s".into(),
+        vec![
+            Exp::InductiveCtor(mood, "dcl".into(), vec![]),
+            Exp::InductiveCtor(fin, "fin".into(), vec![]),
+        ],
+    );
+    let vp = Exp::InductiveCtor(cat_decl.clone(), "bwd".into(), vec![s.clone(), cat.clone()]);
+    let raised_cat = Exp::InductiveCtor(cat_decl.clone(), "fwd".into(), vec![s, vp]);
+    let v = "__tr_v";
+    let raised_sem = Exp::Lam(
+        Patt::Var(v.into()),
+        Box::new(Exp::App(
+            Box::new(Exp::Var(v.into())),
+            Box::new(sem.clone()),
+        )),
+    );
+    Some((raised_cat, raised_sem))
+}
+
+/// The **relativizer** refine rule (D63 §8.9 Slice 6-rel): a common noun `cat_n(C,
+/// num)` modified by a restrictive relative clause `[noun] that [body]` → the refined
+/// noun `cat_n(Σx:C. body(x), num)`. The `body` is the relative clause's gap-abstracted
+/// predicate — a subject relative VP `S\NP` ("that affects HeLa", sem `λx. affects(hela,
+/// x)`) or an object relative `S/NP` ("that HeLa affects", built by `T`+`>B`, sem `λx.
+/// affects(x, hela)`); both have sem `body : X → Prop`, so one rule covers them. The Σ
+/// is built over the **concrete** `C` (so `body(x)` type-checks directly — the same
+/// engine-level move as 3b's attributive Σ, dodging the abstract-`C` bounded-
+/// quantification kernel gap). The refined noun then rides 3b's determiner-over-
+/// refined-noun `Fst` machinery unchanged. `None` if the noun is not a `cat_n` or the
+/// body is not a declarative-clause `S/NP` / `S\NP`.
+pub fn relativize(noun_cat: &Exp, body_cat: &Exp, body_sem: &Exp) -> Option<(Exp, Exp)> {
+    let [c, num] = is_ctor(noun_cat, "cat_n")? else {
+        return None;
+    };
+    let Exp::InductiveCtor(decl, _, _) = noun_cat else {
+        return None;
+    };
+    // The body is a clause missing one NP: `S/NP` (object relative) or `S\NP`
+    // (subject relative), whose result `S` is a finite declarative clause.
+    let body_args = is_ctor(body_cat, "fwd").or_else(|| is_ctor(body_cat, "bwd"))?;
+    let [s, _np] = body_args else {
+        return None;
+    };
+    if !is_decl_clause(s) {
+        return None;
+    }
+    let x = "__rel_x";
+    let sigma = Exp::Sig(
+        Patt::Var(x.into()),
+        Box::new(c.clone()),
+        Box::new(Exp::App(
+            Box::new(body_sem.clone()),
+            Box::new(Exp::Var(x.into())),
+        )),
+    );
+    let cat = Exp::InductiveCtor(
+        decl.clone(),
+        "cat_n".into(),
+        vec![sigma.clone(), num.clone()],
+    );
+    Some((cat, sigma))
+}
+
+/// Whether `s` is a declarative clause `cat_s(dcl, _)` — the result type a relative
+/// clause body abstracts over (D63 §8.9). The finiteness is irrelevant here (a VP
+/// result is `fin`, an object-extraction `S/NP` result is the `T` target's `fin`);
+/// the mood must be declarative.
+fn is_decl_clause(s: &Exp) -> bool {
+    matches!(is_ctor(s, "cat_s"), Some([mood, _fin])
+        if matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -24,6 +24,7 @@
 //!   (the same `⟦·⟧` the kernel gate checks), so entries are felicitous by
 //!   construction and the gate is a confirmation.
 
+use crate::inflect::{gerund, past_participles};
 use crate::wndb::{Pos, Synset};
 
 /// The **entity top** (D63 §8.3, decision ii): the schema-level foundational
@@ -54,6 +55,9 @@ pub struct Report {
     pub verb_axioms: usize,
     pub adj_axioms: usize,
     pub entries: usize,
+    /// Of `entries`, the participle (`ger`/`pss`) verb-form entries (D63 §8.9 6-aux):
+    /// the generated gerund + past-participle forms an auxiliary selects.
+    pub participle_entries: usize,
     /// Verb synsets with no emittable frame (only predicative / clausal /
     /// control frames, or no frame) — deferred, never guessed.
     pub verbs_deferred: usize,
@@ -90,12 +94,14 @@ impl FrameKind {
         }
     }
 
-    /// The `lexicon:Cat` term (object-first; `⟦cat⟧` equals [`Self::arrow`]).
-    /// Features (D63 §5.1): NP slots are number-underspecified (`num_any`), the
-    /// result sentence is declarative + finite (`cat_s(dcl, fin)`).
-    fn cat(self) -> String {
+    /// The `lexicon:Cat` term (object-first; `⟦cat⟧` equals [`Self::arrow`]) for a given
+    /// `Fin` form. NP slots are number-underspecified (`num_any`); the result sentence is
+    /// declarative with the supplied finiteness — `fin` for the lemma entry, `ger` / `pss`
+    /// for the participle entries (D63 §5.1, §8.9 6-aux). Finiteness is erased by `⟦·⟧`,
+    /// so [`Self::arrow`] (the `sem_type`) is unchanged across forms.
+    fn cat(self, fin: &str) -> String {
         let np = format!("lexicon:cat_np({ENTITY_TOP}, lexicon:num_any)");
-        let s = "lexicon:cat_s(lexicon:dcl, lexicon:fin)";
+        let s = format!("lexicon:cat_s(lexicon:dcl, lexicon:{fin})");
         match self {
             FrameKind::Intransitive => format!("lexicon:bwd({s}, {np})"),
             FrameKind::Transitive => format!("lexicon:fwd(lexicon:bwd({s}, {np}), {np})"),
@@ -244,9 +250,35 @@ fn push_instance(buf: &mut String, syn: &Synset, rep: &mut Report) {
     }
 }
 
+/// Apply a single-word inflector to the **head** word of a (possibly multiword) verb
+/// lemma, keeping the remainder (particle / light-verb tail): "depend on" → "depending
+/// on", "take a breath" → "taken a breath".
+fn inflect_head(lemma: &str, f: impl Fn(&str) -> String) -> String {
+    match lemma.split_once(' ') {
+        Some((head, rest)) => format!("{} {rest}", f(head)),
+        None => f(lemma),
+    }
+}
+
+/// The past-participle surface(s) of a (possibly multiword) verb lemma — [`past_participles`]
+/// on the head, remainder kept ("depend on" → "depended on").
+fn head_pps(lemma: &str) -> Vec<String> {
+    match lemma.split_once(' ') {
+        Some((head, rest)) => past_participles(head)
+            .into_iter()
+            .map(|p| format!("{p} {rest}"))
+            .collect(),
+        None => past_participles(lemma),
+    }
+}
+
 /// Verb synset → an `eigentt:Axiom` + entries **per distinct emittable frame
 /// kind** (a verb with both intransitive and transitive frames yields both — its
-/// alternations). Returns `false` (deferred) when no frame is emittable.
+/// alternations). Per lemma, emits the **finite** lemma form plus the generated
+/// **present participle** (`ger`, progressive) and **past participle(s)** (`pss`,
+/// perfect/passive) — the same axiom (finiteness is erased by `⟦·⟧`), differing only in
+/// the result clause's `Fin` feature (D63 §8.9 6-aux). Returns `false` (deferred) when
+/// no frame is emittable.
 fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report) -> bool {
     let kinds: std::collections::BTreeSet<FrameKind> =
         syn.frames.iter().filter_map(|&f| classify(f)).collect();
@@ -259,19 +291,42 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report) -> bool {
         let tag = kind.tag();
         buf.push_str(&format!("axiom wn:v{off}_{tag} : {}\n\n", kind.arrow()));
         rep.verb_axioms += 1;
-        let cat = kind.cat();
+        let sem = format!("v{off}_{tag}");
         let arrow = kind.arrow();
+        let (cat_fin, cat_ger, cat_pss) = (kind.cat("fin"), kind.cat("ger"), kind.cat("pss"));
         for (i, lemma) in syn.words.iter().enumerate() {
+            let sense = sense_key(syn, lemma);
+            // Finite/base lemma form (D63 §5.1 number deferral — the lemma surface).
             push_entry(
                 buf,
                 &format!("e_v{off}_{tag}_{i}"),
                 lemma,
-                &cat,
-                &format!("v{off}_{tag}"),
+                &cat_fin,
+                &sem,
                 &arrow,
-                &sense_key(syn, lemma),
+                &sense,
             );
             rep.entries += 1;
+            // Present participle — progressive ("is affecting"); always regular.
+            let ger = inflect_head(lemma, gerund);
+            push_entry(
+                buf,
+                &format!("e_v{off}_{tag}_{i}_g"),
+                &ger,
+                &cat_ger,
+                &sem,
+                &arrow,
+                &sense,
+            );
+            rep.entries += 1;
+            rep.participle_entries += 1;
+            // Past participle(s) — perfect/passive ("has/is affected"); table-or-regular.
+            for (k, pp) in head_pps(lemma).iter().enumerate() {
+                let id = format!("e_v{off}_{tag}_{i}_p{k}");
+                push_entry(buf, &id, pp, &cat_pss, &sem, &arrow, &sense);
+                rep.entries += 1;
+                rep.participle_entries += 1;
+            }
         }
     }
     true
@@ -494,7 +549,43 @@ mod tests {
         ));
         assert!(buf.contains("lexicon:sem      = wn:v00275082_t;"));
         assert_eq!(rep.verb_axioms, 1);
-        assert_eq!(rep.entries, 3); // corrode, eat, rust
+        // Per lemma: 1 finite + 1 gerund + 1 past participle (each regular/irregular but
+        // single-variant here) → 3 lemmas × 3 = 9 entries; 6 of them participles.
+        assert_eq!(rep.entries, 9);
+        assert_eq!(rep.participle_entries, 6);
+    }
+
+    #[test]
+    fn verb_emits_participle_forms_with_ger_and_pss_categories() {
+        // D63 §8.9 6-aux: per verb lemma, the importer also emits the generated present
+        // participle (`ger`, progressive) and past participle (`pss`, perfect/passive),
+        // pointing at the SAME axiom, differing only in the result clause's Fin feature.
+        let eat = syn("00275082 30 v 03 corrode 1 eat 0 rust 1 001 @ 00259743 v 0000 01 + 11 00 | to deteriorate");
+        let mut buf = String::new();
+        assert!(push_verb(&mut buf, &eat, &mut Report::default()));
+        // gerund (regular -ing) + its `ger` category.
+        assert!(buf.contains("lexicon:form     = \"eating\";"));
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+        ));
+        // irregular past participle (eat → eaten) + its `pss` category, same axiom.
+        assert!(buf.contains("lexicon:form     = \"eaten\";"));
+        assert!(buf.contains("lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"));
+        // participles point at the same predicate axiom as the finite form.
+        assert!(buf.contains("lexicon:sem      = wn:v00275082_t;"));
+        // the regular members inflect too: corrode → corroded, rust → rusting.
+        assert!(buf.contains("lexicon:form     = \"corroded\";"));
+        assert!(buf.contains("lexicon:form     = \"rusting\";"));
+    }
+
+    #[test]
+    fn multiword_verb_inflects_only_the_head() {
+        // "depend on" (frame 13, PP-oblique → transitive): head inflects, particle kept.
+        let v = syn("00000002 31 v 01 depend_on 0 000 01 + 13 00 | rely");
+        let mut buf = String::new();
+        assert!(push_verb(&mut buf, &v, &mut Report::default()));
+        assert!(buf.contains("lexicon:form     = \"depending on\";"));
+        assert!(buf.contains("lexicon:form     = \"depended on\";"));
     }
 
     #[test]
@@ -508,7 +599,8 @@ mod tests {
         assert!(buf.contains("axiom wn:v00001740_i : lexicon:Entity -> Prop"));
         assert!(buf.contains("axiom wn:v00001740_t : lexicon:Entity -> lexicon:Entity -> Prop"));
         assert_eq!(rep.verb_axioms, 2);
-        assert_eq!(rep.entries, 2); // one lemma × two kinds
+        // one lemma × two kinds × (finite + gerund + 1 regular past participle) = 6.
+        assert_eq!(rep.entries, 6);
     }
 
     #[test]

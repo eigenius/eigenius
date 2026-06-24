@@ -95,7 +95,12 @@ data lexicon:Fin {
     bse,      // base / bare infinitive — "affect" (after "does", "to")
     inf,      // to-infinitive — "to affect"
     ger,      // gerund / present participle — "affecting"
-    pss,      // past participle (passive) — "affected" (in "is affected")
+    pss,      // past participle (active/perfect transitive) — "affected" (in "has
+              // affected …"); the importer emits verbs in this form, and the short
+              // passive consumes it unsaturated (D63 §8.9 Slice 6-aux).
+    pass,     // PASSIVE participle VP — the agentive long passive "affected by HeLa"
+              // (patient-subject), a voice-distinct result so `*X is affected Y` stays
+              // out (D63 §8.9 Slice 6-aux, agentive passive).
     adj,      // predicative adjective — "primary" (after the copula `is`/`are`);
               // distinct from `bse` so the copula selects adjectives, do-support
               // selects base verbs, and attributive `adj`+noun is recognizable.

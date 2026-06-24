@@ -27,10 +27,11 @@ use super::category::{
 };
 
 /// The combinator that produced a constituent — its **provenance**, tracked so the
-/// **Eisner normal form** (D63 §8.5 Slice 5c) can constrain a derivation by how its
-/// inputs were built. ENF's forward constraint keys on `ForwardComp`: the output of
-/// forward composition (`>B`) may not be the primary (left) functor of a subsequent
-/// `>` / `>B`. Backward / type-raise variants arrive with Slice 6.
+/// **Eisner normal form** (D63 §8.5 Slice 5c, §8.9 Slice 6-T) can constrain a
+/// derivation by how its inputs were built. ENF's forward constraint keys on
+/// `ForwardComp` (a `>B` output may not be the primary functor of a subsequent
+/// `>` / `>B`) and on `TypeRaised` (a raised functor may only *compose*, never
+/// *apply*).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Combinator {
     /// Forward application (`>`) or the dependent `cat_forall` application.
@@ -39,6 +40,12 @@ pub enum Combinator {
     BackwardApp,
     /// Forward composition (`>B`) — the one ENF's forward constraint blocks as a functor.
     ForwardComp,
+    /// Forward bounded **type-raising** (`T`, D63 §8.9 Slice 6-T): an `NP_X` raised to
+    /// `S/(S\NP_X)`. ENF blocks it from forward *application* — a raised functor may
+    /// only *compose* (`>B`), which is what builds the object-extraction `S/NP` body
+    /// of a relative clause. This kills the spurious `T`-application duplicate of plain
+    /// backward application, keeping declaratives single-parse (the regression gate).
+    TypeRaised,
     /// Any other producer (lexical leaf, coordination, group/distributive rules) —
     /// not a composition output, so ENF never constrains it.
     Other,
@@ -125,12 +132,15 @@ pub fn apply(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
             }
         }
     }
-    // Eisner normal form (D63 §8.5 Slice 5c): a forward-composition (`>B`) output may
-    // not be the primary (left) functor of `>` / `>B`. This prunes the spurious
-    // composition derivations while leaving the wh-extraction case (where a `>B`
-    // output is consumed as an *argument*, not a functor) untouched.
+    // Eisner normal form (D63 §8.5 Slice 5c, §8.9 Slice 6-T): a forward-composition
+    // (`>B`) output may not be the primary (left) functor of `>` / `>B`, and a
+    // **type-raised** (`T`) functor may not forward-*apply* (it may only compose).
+    // This prunes the spurious composition / type-raise derivations while leaving the
+    // extraction case (where the `>B` output is consumed as an *argument*, not a
+    // functor) untouched.
     let left_is_fwd_comp = left.prov == Combinator::ForwardComp;
-    if !left_is_fwd_comp {
+    let left_is_raised = left.prov == Combinator::TypeRaised;
+    if !left_is_fwd_comp && !left_is_raised {
         if let Some(args) = is_ctor(&left.cat, "fwd") {
             if args.len() == 2 {
                 if let Some(subst) = unify_cat(&args[1], &right.cat, layer) {

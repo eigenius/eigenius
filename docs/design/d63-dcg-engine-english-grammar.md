@@ -5,9 +5,11 @@ feature set on `Cat`, the determiner/quantifier + coordination + plural-group fu
 question set (subject-wh, polar, object-wh extraction via forward composition + Eisner), the copula +
 predicative/attributive adjectives + (instance) predicate nominals, and forward composition `B¹` (Slices
 1–5 + §8.4; **Slice 3 complete** — copula, predicative + attributive adjectives, instance + kind predicate
-nominals; **negation** — Slice 6-neg). Remaining: type-raising `T` + the rest of the combinator set +
-relatives, auxiliaries, the tail (Slice 6), and the operational scale-up onto full WordNet (Slice 7). The
-§8 slice plan carries the authoritative per-slice status.*
+nominals; **negation** — Slice 6-neg; **forward bounded type-raising `T` + restrictive relatives** —
+Slice 6-T/6-rel; **the auxiliary system** — Slice 6-aux, complete: progressive/perfect, passive
+(short + agentive), and modals via opaque `Prop→Prop` operators). Remaining: the tail (Slice 6-tail —
+case, pronouns/anaphora) and the operational scale-up onto full WordNet (Slice 7). The §8 slice plan
+carries the authoritative per-slice status.*
 
 *Relation to D62/D61.* D62 (*encoding engine: prose → trees*) is the **encoding architecture** — the
 LLM proposer, the faithfulness boundary (D61), and the encoding institution that commits trees as
@@ -107,13 +109,15 @@ proper-noun individuals, 33,006 verb/adjective axioms, 204,088 lexical entries �
 - **Subject wh-questions** (`what`/`which`) — the answer-property `cat_q(T)` (§8.5 Slice 5b).
 
 **Still missing (the remaining slices):**
-- **Type-raising (T)** + the rest of the combinator set (generalized `B^n`, crossing `B×`, backward
-  composition), with the Eisner clauses governing them — for aux-less extraction / relativization and
-  scope (Slice 6). **Forward composition (`B¹`)** + its Eisner normal form **is in** (Slice 5c);
-  determiners use *lexical* type-raising (`cat_forall`), not the general `T` rule.
-- **Type-raising `T`** (+ the rest of the combinator set / Eisner completion) and **relative clauses**, plus
-  **auxiliaries** (progressive/perfect/passive/modals) and the **tail** (case, pronouns) — Slice 6 (its
-  **negation** sub-slice, **6-neg, is in**; Slice 3 complete).
+- **Forward bounded type-raising `T`** (+ its Eisner `TypeRaised`-can't-apply clause) and **restrictive
+  relative clauses** **are in** (Slice 6-T/6-rel, §8.9): `T` raises `NP_X → S/(S\NP_X)`, object relatives
+  build the body via `T` + the existing forward-`B¹`, and an engine relativizer Σ-refines the noun (reusing
+  3b). **Forward composition (`B¹`)** + its Eisner normal form is in (Slice 5c); determiners use *lexical*
+  type-raising (`cat_forall`).
+- **The rest of the combinator set** (generalized `B^n`, crossing `B×`, backward composition) is **not**
+  built — restrictive relatives do not need it (no dead combinators); it returns only when a construction
+  demands it. Plus **auxiliaries** (progressive/perfect/passive/modals) and the **tail** (case, pronouns) —
+  Slice 6 (its **6-neg** and **6-T/6-rel** sub-slices **are in**; Slice 3 complete).
 - **Operational scale-up** of the engine onto the full 204k-entry WordNet layer (Slice 7).
 
 **The honest current bound:** the engine parses declaratives built from the committed
@@ -375,10 +379,16 @@ Each slice ships **with** its check. The order is dependency-forced.
   wh-question denotes its **answer-property** `⟦Q(T)⟧ = T→Prop` via a type-carrying `cat_q(T)` category.
   **Type-raising T was deferred to Slice 6** (its use is aux-less extraction / relativization).
 - **Slice 6 — negation, auxiliaries, relatives, the tail** (D63 **§8.9**; a cluster, decomposed).
-  **6-neg ✅** (verbal + copular negation, `¬P := P → logic:False`). Deferred: **6-T + 6-rel**
-  (type-raising `T` + the combinator/Eisner completion + relative clauses, reusing 3b refinement — the
-  substantial unit); **6-aux** (progressive/perfect need importer verb-form morphology; passive = voice
-  alternation; modals = modal operators); **6-tail** (case, pronouns gated on anaphora resolution).
+  **6-neg ✅** (verbal + copular negation, `¬P := P → logic:False`). **6-T + 6-rel ✅** (§8.9):
+  forward **bounded-`T`** (target `S`) + the existing forward-`B¹` + an engine relativizer reusing 3b
+  refinement — *not* the full combinator set (no `Bⁿ`/`B×`/backward needed for restrictive relatives).
+  **6-aux** partial: its **importer verb-form morphology keystone ✅** (the importer generates + emits
+  `ger`/`pss` participle entries — grounded against `verb.exc`, felicity-clean at corpus scale) and
+  **progressive + perfect ✅** (finiteness-lifting `be`-over-`ger` / `have`-over-`pss` auxes, sem `λP.P`,
+  reusing `copula_sem`), **short/agentless passive ✅** (`be` over the unsaturated `pss` TV, ∃-closing the
+  agent), **agentive long passive ✅** ("…by HeLa" via a `pass` voice feature + `by` agent-marker), and
+  **modals ✅** (opaque `logic:Possible`/`Necessary : Prop→Prop`; `can`/`must` etc. do-support-shaped
+  auxes). **6-aux is complete.** Deferred: **6-tail** (case, pronouns gated on anaphora resolution).
 - **Slice 7 — full-WordNet operationalization (scale-up).** *Orthogonal to the grammar slices* —
   gated only on Slice 2 + the closed-class track (both done), **not** on Slice 5. The 204k-entry WordNet
   content layer (§4a) is already imported and kernel-validated; this slice turns it from a *generatable
@@ -948,24 +958,119 @@ forms). Self-contained, high-value, no new combinators. Tests: `verbal_negation_
 `copular_negation_parses`. (Declarative `does` also licenses the emphatic "HeLa does affect BRCA1" —
 grammatical, synonymous with the plain declarative; not spurious.)
 
-**6-T + 6-rel — type-raising + relative clauses. Deferred (the substantial unit).** `T` exists *to serve*
-relativization (aux-less object extraction — "the gene **that HeLa affects**"); it lands *with* relatives,
-not alone. Needs: the general `T` rule + the rest of the combinator set (generalized `Bⁿ`, crossing `B×`,
-backward composition) + the **Eisner extension** covering them (5c shipped only forward-`B¹`). Relativizers
-(`that`/`which`/`who`) are noun-modifiers `(N\N)/(S\NP)` (subject relative, application-only) /
-`(N\N)/(S/NP)` (object relative, needs `T`+`B`); both **restrict a noun like an attributive adjective, so
-they reuse the 3b Σ-refinement + `Fst` machinery** — 3b already built the hard semantics; 6-rel adds the
-relativizer + extraction.
+**6-T + 6-rel — type-raising + relative clauses. ✅ Done.** Restrictive relatives ("a cell line
+**that affects HeLa**", "a cell line **that HeLa affects**") → a **refined noun**, reusing 3b's Σ-refinement +
+the determiner-over-refined-noun `Fst` rule. `T` exists *to serve* relativization (object extraction), so it
+lands *with* relatives. *As built:* `type_raise`/`relativize` in [`category.rs`], the `TypeRaised`
+provenance + Eisner clause in [`parser.rs`] (forward application rejects a `TypeRaised` left), and the unary
+`T` pass + the `that`-keyed relativizer rule in [`lookup.rs`]'s CKY loop. Tests (`closed_class_determiners`):
+`subject_relative_clause_parses`, `object_relative_clause_parses`,
+`relative_clause_refines_the_noun_to_a_sigma_over_its_base_type`, `type_raising_keeps_plain_declaratives_single`
+(the regression gate). Worked design:
 
-**6-aux — auxiliaries beyond do-support. Deferred; splits by dependency.**
-- *Progressive / perfect* ("is affecting", "has affected") — the auxes are trivial (finiteness-lifting over
-  `ger`/`pp` forms, aspect/tense erased), but need the verb's **`ger`/`pp` morphological forms** in the
-  lexicon — the importer emits base/finite only, so this is gated on **importer verb-form morphology**
-  (a Morphy-generation follow-on); demo-only it's a few hand-added forms.
-- *Passive* ("BRCA1 is affected by HeLa") — a **voice alternation** (subject/object swap + the `by`-phrase),
-  not just an aux; its own construction.
-- *Modals* ("can/must affect") — need **modal operators** (`Possible`/`Necessary` in the logic layer);
-  erasing modality loses meaning. Its own foundation.
+*Subject relatives — application only (no `T`).* In "that affects HeLa" the body "affects HeLa" is a VP
+`S\NP` (sem `λx. affects(x, hela)`); the gap is the adjacent subject.
+
+*Object relatives — the reason for `T`.* In "that HeLa affects" the body "HeLa affects [gap]" has an object
+gap, built as `S/NP` by **type-raising the embedded subject + forward composition**:
+- **`T`** (forward, **bounded** to target `S` per §5.2 — a fixed target ⇒ terminating unary closure): raise
+  `NP_X → S/(S\NP_X)`, sem `λV. V(x)`.
+- `affects = (S\NP_subj)/NP_obj`; then `T(HeLa) ∘ affects` (forward **`B`**, the 5c combinator) →
+  `S/NP_obj`, sem `λx. affects(x, hela)`. Exactly the 5c `S/NP` shape — and, as there, it is consumed as an
+  **argument** (by the relativizer), so the existing forward-`B` Eisner clause (a `>B` output can't be a
+  *functor*) leaves it untouched.
+
+*The relativizer — an engine refine rule (reusing 3b), not a categorial `(N\N)/(S/NP)` entry.* Both bodies
+(`S\NP` / `S/NP`) have sem `body : Entity → Prop` (the gap-filler is the λ-argument), so a single rule
+covers them: `[noun cat_n(C)] that [body]` → `cat_n(Σx:C. body(x))`, built over the **concrete** `C` (so
+`body(x)` type-checks — dodging the abstract-`C` bounded-quantification gap, exactly as 3b's attributive
+did). `that` is a reserved relativizer (like `each other`); the refined noun then rides 3b's
+determiner-over-refined-noun + `Fst` machinery unchanged. **Why engine, not categorial:** a categorial
+`(N\N)/(S/NP)` relativizer would re-hit the abstract-`N` Σ gap that needs kernel bounded quantification —
+the same reason 3b's attributive went engine. Consistent; no kernel work.
+
+*Eisner extension for `T`.* A new `TypeRaised` provenance, with one constraint: **forward application
+rejects a `TypeRaised` left operand** — a raised functor may only **compose** (`>B`), never apply. This
+kills the spurious `T`-duplicate (a plain "HeLa affects BRCA1" must not get a `T(HeLa)`-application
+derivation replicating backward application), so existing single-parse declaratives stay single (the
+**regression gate**). A `T` output only composes, and only with a verb still seeking its object (`B/C`) —
+which arises only in extraction.
+
+*Decisions (resolved):* bounded-`T` target = `S`; relativizer = engine refine rule (reuse 3b); **both**
+subject + object relatives (subject is free once the refine rule exists; object is the point of `T`); Eisner
+= the `TypeRaised`-can't-apply clause. *Deferred:* non-restrictive (",which…"), reduced relatives ("the gene
+affecting HeLa"), pied-piping ("the gene to which…"); `which`/`who` beyond `that` are lexical follow-ons.
+*Note — we do NOT need the full combinator set:* only forward `T` (bounded) + the existing forward `B¹`;
+generalized `Bⁿ`, crossing `B×`, and backward composition are **not** required by restrictive relatives and
+stay unbuilt (no dead combinators).
+
+*Build order (as built):* (1) `T` unary rule + `TypeRaised` provenance + the Eisner clause — the regression
+gate held (every existing test single-parse, `type_raising_keeps_plain_declaratives_single`); (2) the
+relativizer refine rule with subject-relative (application) bodies; (3) object relatives (`T`+`B` bodies)
+fell out once (1)+(2) landed. Witnesses (with the demo lexicon's `cell line`/`affects`/`primary`/HeLa):
+"every cell line that affects HeLa is primary" and "every cell line that HeLa affects is primary" → a
+refined-noun NP whose verb-saturated sentence is kernel-checked `Prop` (single parse each).
+
+**6-aux — auxiliaries beyond do-support. Splits by dependency; the shared morphology keystone is in.**
+
+*Importer verb-form morphology — the keystone. ✅ Done.* The three aspect/voice auxiliaries all
+selected non-finite participles the importer didn't emit (it gave the lemma/finite form only). Generation
+is *not* the inverse of Morphy: Morphy lemmatizes (inflected → base) and `verb.exc` doesn't tag which
+irregular form is the past participle (`went`/`gone` both reduce to `go`), so the pp can't be recovered
+from it. Built as [`eigenius-wordnet::inflect`]: **gerund** (`ger`) is pure orthography (English has no
+irregular present participles — silent-`e` drop, `ie→y`, `ee/oe/ye` retention, monosyllabic doubling);
+**past participle** (`pss`) is regular `-ed` plus a **grounded ~270-base irregular table**. The table was
+sourced from Wikipedia's *List of English irregular verbs* and **witnessed against the in-repo WordNet
+`verb.exc`** — every shipped form is an invariant (`cut`/`put`) or an attested inflection of its base;
+unattested extractions (kempt, durst, holpen) are dropped fail-closed, and the common `-t`/`-ed` twins
+(burnt→burned) are recovered productively from the attested `-t` so no non-word (weared) is ever admitted.
+The importer's `push_verb` now emits, per lemma, the gerund + past-participle(s) as `ger`/`pss`
+[`lexicon:LexicalEntry`] entries pointing at the *same* predicate axiom (finiteness erased by `⟦·⟧`, so
+`⟦cat⟧ = sem_type` unchanged → felicitous by construction). Witnesses: `inflect` unit tests + the
+`irregular_pp_attested_in_verb_exc` corpus gate; the full verb lexicon imports felicity-clean
+(13,768 synsets → 83,682 entries, **55,944 ger/pss participle forms**, all admitted by `--validate`).
+*(Also fixed in passing: the `--validate` self-check double-loaded the lexicon schema — now in the
+bootstrap chain — re-declaring `Mood:dcl`; it now compiles the import directly over the bootstrap head.)*
+
+With the forms in the lexicon, each auxiliary is unblocked on the morphology side:
+- *Progressive / perfect* ("is affecting", "has affected"). **✅ Done.** The auxes are finiteness-lifters
+  `(S[dcl,fin]\NP) / (S[dcl,ger|pss]\NP)`, sem `λP.P` (aspect/tense erased), selecting the `ger`/`pss` VPs
+  the importer now emits — *as built:* `is_prog`/`are_prog`/`was_prog`/`were_prog` (over `ger`) and
+  `has_perf`/`have_perf`/`had_perf` (over `pss`) in [`closed-class.esl`], all reusing `copula_sem`.
+  Application-only, no new combinators; the predicate axiom is unchanged. The exact `ger`/`pss` complement
+  slots fail closed (`*HeLa is affect BRCA1`, `*HeLa has affecting BRCA1` get no parse); `is`/`are` stay
+  unambiguous with the copula (distinct `adj` vs `ger` slots). Tests (`closed_class_determiners`):
+  `progressive_auxiliary_parses`, `perfect_auxiliary_parses`, `aspect_auxiliaries_select_the_right_participle`.
+- *Passive* — a **voice alternation** (the surface subject is the logical object; the agent is demoted).
+  **Short / agentless passive ✅** ("BRCA1 is affected" → `∃a:Entity. affects(brca1, a)`): a single `be`
+  entry (`is`/`are`/`was`/`were` in [`closed-class.esl`]) that takes the **unsaturated** transitive
+  past-participle TV `(S[dcl,pss]\NP)/NP` and closes the agent with the impredicative ∃
+  (`passive_sem = λTV.λp. ∃a. TV(p,a)`). Taking the TV *before* its object slot is filled is what blocks
+  over-generation — once "affected BRCA1" saturates to `S[pss]\NP`, the passive `be` no longer matches, so
+  `*HeLa is affected BRCA1` has no parse. No engine rule, no new feature. Tests:
+  `short_passive_parses_with_existential_agent`, `passive_be_rejects_a_saturated_participle`.
+  **Agentive long passive ✅** ("BRCA1 is affected by HeLa" → `affects(brca1, hela)`, the agent supplied):
+  a new **voice feature** `pass` + a `by` agent-marker + passive `be` over the `pass` VP — all lexical
+  ([`closed-class.esl`]), no engine rule. `by` consumes the agent NP then the unsaturated active TV on its
+  left, yielding the patient-VP `S[dcl,pass]\NP` (`by_agent_sem = λagent.λTV.λp. TV(p, agent)`); `be`
+  (`is`/`are`/`was`/`were`) lifts it (`λP.P`). The `pass` result is the over-generation guard: an active
+  object-saturated participle is `S[pss]\NP` (not `pass`), so it can never feed passive `be`, and
+  `*BRCA1 is affected HeLa` still has no parse (`passive_be_rejects_a_saturated_participle`). Test:
+  `agentive_long_passive_parses_with_the_by_agent`. (Ditransitive passives — "given to", second-object
+  promotion — remain a follow-on.)
+- *Modals* ("can/must affect"). **✅ Done.** Resolved the logic-layer decision in favour of **opaque
+  operators**: `axiom logic:Possible : Prop → Prop` and `axiom logic:Necessary : Prop → Prop` (◇/□) —
+  kernel-uninterpreted (no Kripke/world-indexing), witnessed downstream like `ontology:is_a`, so a modal
+  claim can be carried as a hypothesis; **no modal laws** baked in (T/4/5/duality are flavor-dependent
+  opt-in axioms), independent intuitionistic primitives, flavor-agnostic (flavor grounding-supplied).
+  *As built:* the operators in [`logic.esl`]; modal auxes `can`/`could`/`may`/`might` (→ `Possible`) and
+  `must` (→ `Necessary`) in [`closed-class.esl`], a do-support-shaped `(S[dcl,fin]\NP)/(S[dcl,bse]\NP)` aux
+  wrapping the proposition (`λP.λs. Possible(P(s))`). "HeLa can affect BRCA1" → `Possible(affects(brca1,
+  hela))`. The kernel accepts the `Prop → Prop` axiom + its application (impredicative `Prop`); the
+  base-VP slot fails closed (`*HeLa can affects BRCA1`). Tests: `modal_can_wraps_the_proposition_in_possible`,
+  `modal_must_wraps_the_proposition_in_necessary`, `modal_selects_a_base_vp`. *Refinements (follow-on):*
+  epistemic "may/might" → the Declared **grade** rather than `Possible`; `should`/`will`/`shall`; flavor
+  tags harvested from use.
 
 **6-tail — case + the long tail. Deferred (demand-driven).** Pronoun case (he/him), complementizers,
 comparatives, … — each its own construction. The big one, **pronouns**, is only useful with **anaphora

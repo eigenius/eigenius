@@ -47,11 +47,12 @@ use crate::ontology::resource::Value;
 use crate::ontology::Iri;
 
 use super::category::{
-    cats_coordinate, coordinate_np, coordinate_sem, denote_cat, is_ctor, reciprocate,
+    cats_coordinate, coordinate_np, coordinate_sem, denote_cat, is_ctor, reciprocate, relativize,
+    type_raise,
 };
 use super::lemmatizer::{Lemmatizer, Pos};
 use super::lexicon::entry_to_item;
-use super::parser::{apply, Item};
+use super::parser::{apply, Combinator, Item};
 
 /// Split prose into lowercased word tokens. Each token is trimmed of leading and
 /// trailing non-alphanumerics (so `"BRCA1,"` → `"brca1"`); empties are dropped.
@@ -198,6 +199,17 @@ impl LexicalIndex {
             }
         }
 
+        // Forward bounded type-raising `T` (D63 §8.9 Slice 6-T) at the LEAF cells: a
+        // name `NP` lifts to `S/(S\NP)`, so it can forward-compose into a relative
+        // clause's object-extraction body `S/NP` ("HeLa affects [gap]"). Applied once
+        // per leaf cell here; multi-token / composed cells are raised once each in the
+        // CKY loop below. ENF (the `TypeRaised` provenance) keeps these inert outside
+        // extraction — a raised functor may only compose, never apply.
+        for (i, row) in chart.iter_mut().enumerate() {
+            let raised = raise_nps(&row[i], &self.layer);
+            row[i].extend(raised);
+        }
+
         // 2. CKY composition, appending combined items to each cell's seeds (so a
         //    multiword leaf and a compositional derivation of the same span both
         //    remain available).
@@ -282,7 +294,34 @@ impl LexicalIndex {
                         }
                     }
                 }
+                // Relative clause (D63 §8.9 Slice 6-rel): `[noun] that [body]` → a
+                // **refined noun** `cat_n(Σx:C. body(x))`. `that` is a reserved
+                // relativizer (like `and`/`or`, `each other`); the body is a
+                // subject-relative VP `S\NP` ("that affects HeLa") or an object-relative
+                // `S/NP` ("that HeLa affects", built by `T` + forward `B`). Both have
+                // sem `body : X → Prop`, so a single rule Σ-refines the noun over the
+                // concrete `C` (reusing 3b). The noun spans `[i, c-1]`, the body
+                // `[c+1, j]`. The refined noun then rides 3b's determiner+`Fst` rule.
+                for c in (i + 1)..j {
+                    if tokens[c] != "that" {
+                        continue;
+                    }
+                    let nouns = chart[i][c - 1].clone();
+                    let bodies = chart[c + 1][j].clone();
+                    for noun in &nouns {
+                        for body in &bodies {
+                            if let Some((cat, sem)) = relativize(&noun.cat, &body.cat, &body.sem) {
+                                produced.push(Item::new(cat, sem));
+                            }
+                        }
+                    }
+                }
                 chart[i][j].extend(produced);
+                // Type-raise `T` (D63 §8.9 Slice 6-T) the cell's name NPs (after its
+                // composition + relativizer items are in place), so a non-leaf / composed
+                // NP can also seed an extraction body. Raised once per cell.
+                let raised = raise_nps(&chart[i][j], &self.layer);
+                chart[i][j].extend(raised);
             }
         }
 
@@ -326,6 +365,22 @@ impl LexicalIndex {
 
 fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("valid lexicon iri")
+}
+
+/// Forward bounded type-raise (D63 §8.9 Slice 6-T) every name `NP` in a cell's items
+/// to `S/(S\NP)`, tagged `Combinator::TypeRaised` so ENF lets it only *compose*.
+/// Non-`NP` items (functors, groups, kinds, determined NPs) yield nothing.
+fn raise_nps(items: &[Item], layer: &Arc<Layer>) -> Vec<Item> {
+    items
+        .iter()
+        .filter_map(|it| {
+            type_raise(&it.cat, &it.sem, layer).map(|(cat, sem)| Item {
+                cat,
+                sem,
+                prov: Combinator::TypeRaised,
+            })
+        })
+        .collect()
 }
 
 /// A complete clause root must be **finite**: `cat_s(_, fin | fin_any)`. A base /

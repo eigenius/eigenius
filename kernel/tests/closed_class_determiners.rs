@@ -628,6 +628,183 @@ fn copular_negation_parses() {
     );
 }
 
+// ── D63 §8.9 Slice 6-aux — progressive + perfect auxiliaries ──────────
+// Aspect auxiliaries are finiteness-lifters (λP.P): progressive `be` over a present-
+// participle (`ger`) VP, perfect `have` over a past-participle (`pss`) VP. Tense/aspect
+// erased, so the proposition equals the plain declarative's.
+
+#[test]
+fn progressive_auxiliary_parses() {
+    // "HeLa is affecting BRCA1": is_prog lifts the `ger` VP "affecting BRCA1"
+    // (S[ger]\NP) to a finite VP → affects(brca1, hela) : Prop (aspect erased).
+    let (layer, index) = index_over_bootstrap();
+    let forest = index.parse("HeLa is affecting BRCA1", &Identity);
+    assert_eq!(forest.len(), 1, "exactly one progressive parse");
+    assert_eq!(
+        sentence_mood(&forest[0].cat).as_deref(),
+        Some("dcl"),
+        "a progressive clause is a finite declarative"
+    );
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let ty = check_infer(&mut ctx, &forest[0].sem).expect("progressive sem type-checks");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "progressive denotes Prop"
+    );
+}
+
+#[test]
+fn perfect_auxiliary_parses() {
+    // "HeLa has affected BRCA1": has_perf lifts the `pss` VP "affected BRCA1"
+    // (S[pss]\NP) to a finite VP → affects(brca1, hela) : Prop (tense erased).
+    assert_parses_to_prop("HeLa has affected BRCA1");
+    let (_layer, index) = index_over_bootstrap();
+    let forest = index.parse("HeLa has affected BRCA1", &Identity);
+    assert_eq!(forest.len(), 1, "exactly one perfect parse");
+}
+
+#[test]
+fn short_passive_parses_with_existential_agent() {
+    // "BRCA1 is affected": the passive `be` takes the unsaturated past-participle TV
+    // and closes the agent → ∃a:Entity. affects(brca1, a) : Prop (BRCA1 is the patient).
+    let (layer, index) = index_over_bootstrap();
+    let forest = index.parse("BRCA1 is affected", &Identity);
+    assert_eq!(forest.len(), 1, "exactly one short-passive parse");
+    assert_eq!(
+        sentence_mood(&forest[0].cat).as_deref(),
+        Some("dcl"),
+        "a passive clause is a finite declarative"
+    );
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let ty = check_infer(&mut ctx, &forest[0].sem).expect("passive sem type-checks");
+    assert_eq!(readback_val(0, &ty), Exp::Sort(0), "passive denotes Prop");
+    // The agent is existentially closed — impredicative ∃ is `∀C:Prop. (…→C) → C`,
+    // i.e. the sem is a Π/→ whose ultimate codomain is the bound `C` (a Var), not a
+    // bare predicate application. (Distinguishes it from the active "affects".)
+    assert!(
+        matches!(&forest[0].sem, Exp::Pi(_, _, _) | Exp::Arrow(_, _)),
+        "short passive closes the agent with an (impredicative) ∃, got {:?}",
+        forest[0].sem
+    );
+}
+
+// ── D63 §8.9 Slice 6-aux — modal auxiliaries (opaque ◇/□) ─────────────
+// Modals wrap the proposition with the opaque logic-layer operators: can/could/may/
+// might → Possible, must → Necessary. Do-support-shaped aux over a BASE VP.
+
+/// The head modal operator of `op(P)` = App(EigonAxiom(logic:Possible|Necessary), _).
+fn modal_head(sem: &Exp) -> Option<String> {
+    match sem {
+        Exp::App(f, _) => match &**f {
+            Exp::EigonAxiom(iri) => Some(iri.as_str().to_string()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[test]
+fn modal_can_wraps_the_proposition_in_possible() {
+    // "HeLa can affect BRCA1" → Possible(affects(brca1, hela)) : Prop.
+    let (layer, index) = index_over_bootstrap();
+    let forest = index.parse("HeLa can affect BRCA1", &Identity);
+    assert_eq!(forest.len(), 1, "exactly one modal parse");
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let ty = check_infer(&mut ctx, &forest[0].sem).expect("modal sem type-checks");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "a modal claim denotes Prop"
+    );
+    assert_eq!(
+        modal_head(&forest[0].sem).as_deref(),
+        Some("urn:eigenius:logic:Possible"),
+        "`can` wraps the proposition in the opaque ◇ (logic:Possible)"
+    );
+}
+
+#[test]
+fn modal_must_wraps_the_proposition_in_necessary() {
+    // "HeLa must affect BRCA1" → Necessary(affects(brca1, hela)) : Prop.
+    let (_layer, index) = index_over_bootstrap();
+    let forest = index.parse("HeLa must affect BRCA1", &Identity);
+    assert_eq!(forest.len(), 1, "exactly one modal parse");
+    assert_eq!(
+        modal_head(&forest[0].sem).as_deref(),
+        Some("urn:eigenius:logic:Necessary"),
+        "`must` wraps the proposition in the opaque □ (logic:Necessary)"
+    );
+}
+
+#[test]
+fn modal_selects_a_base_vp() {
+    // The modal aux selects a BASE VP (`S[bse]\NP`), like do-support — so the finite
+    // "affects" is rejected: "*HeLa can affects BRCA1" has no parse (Fin-meet failure).
+    let (_layer, index) = index_over_bootstrap();
+    assert!(
+        index.parse("HeLa can affects BRCA1", &Identity).is_empty(),
+        "a modal must reject a finite complement (it selects the base form)"
+    );
+}
+
+#[test]
+fn agentive_long_passive_parses_with_the_by_agent() {
+    // "BRCA1 is affected by HeLa": `by HeLa` supplies the agent and tags the patient-VP
+    // with the `pass` voice feature; passive `be` lifts it → affects(brca1, hela) : Prop
+    // — the SAME proposition as active "HeLa affects BRCA1" (agent supplied, not closed).
+    let (layer, index) = index_over_bootstrap();
+    let forest = index.parse("BRCA1 is affected by HeLa", &Identity);
+    assert_eq!(forest.len(), 1, "exactly one agentive-passive parse");
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let ty = check_infer(&mut ctx, &forest[0].sem).expect("agentive passive type-checks");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "agentive passive denotes Prop"
+    );
+    // Unlike the short passive (an impredicative ∃ = Π/→), the agent is supplied, so the
+    // sem is a direct predication `affects(brca1, hela)` = App(App(affects, _), _).
+    match &forest[0].sem {
+        Exp::App(f, _) => assert!(
+            matches!(&**f, Exp::App(g, _)
+                if matches!(&**g, Exp::EigonAxiom(iri) if iri.as_str() == "urn:eigenius:lexicon:affects")),
+            "agentive passive is affects(patient, agent), got head {f:?}"
+        ),
+        other => panic!("expected a direct predication affects(_, _), got {other:?}"),
+    }
+}
+
+#[test]
+fn passive_be_rejects_a_saturated_participle() {
+    // The over-generation guard: passive `be` takes the TV *before* its object slot is
+    // filled, so once the object is supplied ("affected BRCA1" : S[pss]\NP) it no longer
+    // matches — `*HeLa is affected BRCA1` has no parse (no spurious active reading).
+    let (_layer, index) = index_over_bootstrap();
+    assert!(
+        index.parse("HeLa is affected BRCA1", &Identity).is_empty(),
+        "passive be must not consume a saturated participle (no `*X is affected Y`)"
+    );
+}
+
+#[test]
+fn aspect_auxiliaries_select_the_right_participle() {
+    // The `ger`/`pss` complement slots are exact: the progressive `be` rejects a base
+    // verb ("*HeLa is affect BRCA1") and the perfect `have` rejects a gerund
+    // ("*HeLa has affecting BRCA1") — finiteness/form mismatch, no parse (fail-closed).
+    let (_layer, index) = index_over_bootstrap();
+    assert!(
+        index.parse("HeLa is affect BRCA1", &Identity).is_empty(),
+        "progressive be must reject a base verb (needs a present participle)"
+    );
+    assert!(
+        index
+            .parse("HeLa has affecting BRCA1", &Identity)
+            .is_empty(),
+        "perfect have must reject a gerund (needs a past participle)"
+    );
+}
+
 #[test]
 fn eisner_keeps_polar_single_despite_available_composition() {
     // With forward composition B now globally available, "does HeLa affect BRCA1"
@@ -640,6 +817,71 @@ fn eisner_keeps_polar_single_despite_available_composition() {
         index.parse("does HeLa affect BRCA1", &Identity).len(),
         1,
         "Eisner NF keeps the polar question a single parse despite B being available"
+    );
+}
+
+// ── D63 §8.9 Slice 6-T + 6-rel — type-raising + restrictive relatives ──
+// `that` is a reserved relativizer; `[noun] that [body]` Σ-refines the noun. A
+// SUBJECT relative body is a VP `S\NP` (application only); an OBJECT relative body
+// is `S/NP`, built by bounded type-raising `T` (NP → S/(S\NP)) + forward `B`. The
+// refined noun then rides the 3b determiner+`Fst` machinery into a full sentence.
+
+#[test]
+fn subject_relative_clause_parses() {
+    // "every cell line that affects HeLa is primary": the subject relative body
+    // "affects HeLa" is a VP `S\NP` (sem λx. affects(hela, x)); the relativizer refines
+    // → Σx:CellLine. affects(hela, x); `every`+`Fst` quantifies; `is primary` predicates
+    // → ∀z:(Σx:CellLine. affects(hela, x)). is_primary(Fst z) : Prop.
+    assert_parses_to_prop("every cell line that affects HeLa is primary");
+    let (_layer, index) = index_over_bootstrap();
+    let forest = index.parse("every cell line that affects HeLa is primary", &Identity);
+    assert_eq!(forest.len(), 1, "exactly one subject-relative parse");
+}
+
+#[test]
+fn object_relative_clause_parses() {
+    // "every cell line that HeLa affects is primary": the object relative body "HeLa
+    // affects" has an object gap — built by type-raising HeLa (NP → S/(S\NP)) then
+    // forward-composing with `affects` → `S/NP` (sem λx. affects(x, hela)); the
+    // relativizer refines → Σx:CellLine. affects(x, hela) → a kernel-checked Prop.
+    assert_parses_to_prop("every cell line that HeLa affects is primary");
+    let (_layer, index) = index_over_bootstrap();
+    let forest = index.parse("every cell line that HeLa affects is primary", &Identity);
+    assert_eq!(forest.len(), 1, "exactly one object-relative parse");
+}
+
+#[test]
+fn relative_clause_refines_the_noun_to_a_sigma_over_its_base_type() {
+    // The refined noun's restrictor is a Σ over the noun's CONCRETE base type CellLine
+    // (the 3b move — so `body(x)` type-checks without kernel bounded quantification),
+    // existentially this time: "a cell line that affects HeLa is primary".
+    let (_layer, index) = index_over_bootstrap();
+    let forest = index.parse("a cell line that affects HeLa is primary", &Identity);
+    assert_eq!(
+        forest.len(),
+        1,
+        "exactly one existential subject-relative parse"
+    );
+    assert_parses_to_prop("a cell line that affects HeLa is primary");
+}
+
+#[test]
+fn type_raising_keeps_plain_declaratives_single() {
+    // Regression gate (the Eisner `TypeRaised`-can't-apply clause): with `T` now
+    // globally available, "HeLa affects BRCA1" could be re-derived as T(HeLa) applied
+    // to the VP "affects BRCA1". ENF blocks a raised functor from forward-applying, so
+    // the canonical backward-application derivation is the ONLY parse.
+    let (_layer, index) = index_over_bootstrap();
+    assert_eq!(
+        index.parse("HeLa affects BRCA1", &Identity).len(),
+        1,
+        "type-raising must not reintroduce a spurious declarative parse"
+    );
+    // And the polar question stays single too (T + the 5c composition both available).
+    assert_eq!(
+        index.parse("does HeLa affect BRCA1", &Identity).len(),
+        1,
+        "type-raising must not perturb the polar question's single parse"
     );
 }
 

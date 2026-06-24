@@ -178,6 +178,29 @@ resource lexicon:e_affect_bse : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 
+// (7b/7c) the PARTICIPLE forms of the general verb — `Fin = ger` (present participle,
+// "affecting") and `Fin = pss` (past participle, "affected"), the forms the progressive
+// and perfect auxiliaries select (D63 §8.9 Slice 6-aux). Same predicate (`affects`;
+// finiteness is syntactic, erased by ⟦·⟧). These mirror what the WordNet importer now
+// generates (`eigenius-wordnet::inflect`) — here hand-added for the demo so the worked
+// auxiliary sentences ("HeLa is affecting BRCA1", "HeLa has affected BRCA1") parse.
+resource lexicon:e_affect_ger : lexicon:LexicalEntry {
+    lexicon:form     = "affecting";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:affects;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:affect.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:e_affect_pss : lexicon:LexicalEntry {
+    lexicon:form     = "affected";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:affects;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:affect.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+
 // ── A stored composed sentence (Expressible; the felicity FILTER itself is
 //    demonstrated through the program→check vehicle in lexicon_validates.rs). ──
 // "a gene depends on a cell line" — depends_on applied to NPs of the

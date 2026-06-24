@@ -66,9 +66,6 @@ struct Args {
     /// Compile + validate + felicity-gate the output (self-check; fail-closed).
     #[arg(long)]
     validate: bool,
-    /// Lexicon schema ESL (provides `lexicon:Cat` / `lexicon:LexicalEntry`), for --validate.
-    #[arg(long, default_value = "ontologies/lexicon/lexicon-ontology.esl")]
-    schema: PathBuf,
 }
 
 fn pos_of(s: &str) -> Option<Pos> {
@@ -170,13 +167,15 @@ fn main() -> ExitCode {
     let (doc, rep) = render_document(&chosen);
     eprintln!(
         "wordnet import: {} synsets selected → {} noun classes, {} instances, {} verb axioms, \
-         {} adj axioms, {} entries ({} verb synsets deferred: only predicative/clausal/control frames)",
+         {} adj axioms, {} entries ({} of them ger/pss participle forms) \
+         ({} verb synsets deferred: only predicative/clausal/control frames)",
         chosen.len(),
         rep.noun_classes,
         rep.instances,
         rep.verb_axioms,
         rep.adj_axioms,
         rep.entries,
+        rep.participle_entries,
         rep.verbs_deferred,
     );
 
@@ -189,7 +188,7 @@ fn main() -> ExitCode {
     }
 
     if args.validate {
-        match validate(&doc, &args.schema) {
+        match validate(&doc) {
             Ok((admitted, rejected)) if rejected.is_empty() => {
                 eprintln!("validate: {admitted}/{admitted} entries admitted (felicity-gated)");
             }
@@ -225,23 +224,16 @@ fn load_pos(dict: &Path, p: Pos, requested: &[Pos]) -> BTreeMap<Offset, Synset> 
 
 /// Compile + structurally validate + felicity-gate the emitted ESL, all via
 /// kernel library calls. Returns (admitted, rejected reasons).
-fn validate(doc: &str, schema: &Path) -> Result<(usize, Vec<String>), String> {
+fn validate(doc: &str) -> Result<(usize, Vec<String>), String> {
     let ctx = bootstrap::bootstrap().map_err(|e| format!("bootstrap: {e}"))?;
 
-    // Schema layer (lexicon:Cat / LexicalEntry) over the bootstrap head.
-    let schema_src = fs::read_to_string(schema).map_err(|e| format!("schema read: {e}"))?;
-    let schema_layer = build_layer(
-        "wn-schema",
-        Arc::clone(ctx.head()),
-        esl::compile_against_layer(&schema_src, ctx.head())
-            .map_err(|e| format!("schema compile: {e:?}"))?,
-    )?;
-
-    // WordNet import layer over the schema (so its lexicon:Cat ctors resolve).
+    // The lexicon schema (lexicon:Cat / LexicalEntry) is already in the bootstrap chain,
+    // so the import compiles directly over the bootstrap head — re-loading the schema
+    // file here would re-declare its constructors (`Mood:dcl` twice).
     let wn_layer = build_layer(
         "wn",
-        Arc::clone(&schema_layer),
-        esl::compile_against_layer(doc, &schema_layer).map_err(|e| format!("wn compile: {e:?}"))?,
+        Arc::clone(ctx.head()),
+        esl::compile_against_layer(doc, ctx.head()).map_err(|e| format!("wn compile: {e:?}"))?,
     )?;
 
     // Structural validation (requires/class_types/Rule 21/…).
