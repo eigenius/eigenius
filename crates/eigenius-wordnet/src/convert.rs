@@ -24,7 +24,7 @@
 //!   (the same `⟦·⟧` the kernel gate checks), so entries are felicitous by
 //!   construction and the gate is a confirmation.
 
-use crate::inflect::{gerund, past_participles};
+use crate::inflect::{gerund, past_participles, third_singular};
 use crate::wndb::{Pos, Synset};
 
 /// The **entity top** (D63 §8.3, decision ii): the schema-level foundational
@@ -274,11 +274,15 @@ fn head_pps(lemma: &str) -> Vec<String> {
 
 /// Verb synset → an `eigentt:Axiom` + entries **per distinct emittable frame
 /// kind** (a verb with both intransitive and transitive frames yields both — its
-/// alternations). Per lemma, emits the **finite** lemma form plus the generated
-/// **present participle** (`ger`, progressive) and **past participle(s)** (`pss`,
-/// perfect/passive) — the same axiom (finiteness is erased by `⟦·⟧`), differing only in
-/// the result clause's `Fin` feature (D63 §8.9 6-aux). Returns `false` (deferred) when
-/// no frame is emittable.
+/// alternations). Per lemma, emits the full verb paradigm — **base** (`bse`, the lemma
+/// surface, selected by do-support / modals), **finite 3sg** (`fin`, the generated
+/// "affects", which heads a declarative), **present participle** (`ger`, progressive),
+/// and **past participle(s)** (`pss`, perfect/passive) — all the *same* axiom (finiteness
+/// is erased by `⟦·⟧`), differing only in the result clause's `Fin` feature (D63 §8.9
+/// 6-aux). Emitting `bse` distinct from `fin` is what makes do-support, polar/object-wh
+/// questions, negation, and modals fire on imported verbs (not just the hand demo), and
+/// fixes the former base-as-`fin` mistag (bare "affect" no longer parses as finite).
+/// Returns `false` (deferred) when no frame is emittable.
 fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report) -> bool {
     let kinds: std::collections::BTreeSet<FrameKind> =
         syn.frames.iter().filter_map(|&f| classify(f)).collect();
@@ -293,14 +297,27 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report) -> bool {
         rep.verb_axioms += 1;
         let sem = format!("v{off}_{tag}");
         let arrow = kind.arrow();
-        let (cat_fin, cat_ger, cat_pss) = (kind.cat("fin"), kind.cat("ger"), kind.cat("pss"));
+        let (cat_bse, cat_fin) = (kind.cat("bse"), kind.cat("fin"));
+        let (cat_ger, cat_pss) = (kind.cat("ger"), kind.cat("pss"));
         for (i, lemma) in syn.words.iter().enumerate() {
             let sense = sense_key(syn, lemma);
-            // Finite/base lemma form (D63 §5.1 number deferral — the lemma surface).
+            // Base form — the lemma surface (do-support / modal complement).
+            push_entry(
+                buf,
+                &format!("e_v{off}_{tag}_{i}_b"),
+                lemma,
+                &cat_bse,
+                &sem,
+                &arrow,
+                &sense,
+            );
+            rep.entries += 1;
+            // Finite 3sg ("affects") — heads a declarative; generated from the lemma head.
+            let fin = inflect_head(lemma, third_singular);
             push_entry(
                 buf,
                 &format!("e_v{off}_{tag}_{i}"),
-                lemma,
+                &fin,
                 &cat_fin,
                 &sem,
                 &arrow,
@@ -548,10 +565,16 @@ mod tests {
             "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
         assert!(buf.contains("lexicon:sem      = wn:v00275082_t;"));
+        // base (lemma) + finite 3sg forms (the do-support/declarative pair).
+        assert!(buf.contains("lexicon:form     = \"eat\";")); // bse
+        assert!(buf.contains("lexicon:form     = \"eats\";")); // fin 3sg
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+        ));
         assert_eq!(rep.verb_axioms, 1);
-        // Per lemma: 1 finite + 1 gerund + 1 past participle (each regular/irregular but
-        // single-variant here) → 3 lemmas × 3 = 9 entries; 6 of them participles.
-        assert_eq!(rep.entries, 9);
+        // Per lemma: base + finite 3sg + gerund + past participle → 3 lemmas × 4 = 12
+        // entries; 6 of them participles (ger + pss).
+        assert_eq!(rep.entries, 12);
         assert_eq!(rep.participle_entries, 6);
     }
 
@@ -584,6 +607,8 @@ mod tests {
         let v = syn("00000002 31 v 01 depend_on 0 000 01 + 13 00 | rely");
         let mut buf = String::new();
         assert!(push_verb(&mut buf, &v, &mut Report::default()));
+        assert!(buf.contains("lexicon:form     = \"depend on\";")); // bse
+        assert!(buf.contains("lexicon:form     = \"depends on\";")); // fin 3sg
         assert!(buf.contains("lexicon:form     = \"depending on\";"));
         assert!(buf.contains("lexicon:form     = \"depended on\";"));
     }
@@ -599,8 +624,8 @@ mod tests {
         assert!(buf.contains("axiom wn:v00001740_i : lexicon:Entity -> Prop"));
         assert!(buf.contains("axiom wn:v00001740_t : lexicon:Entity -> lexicon:Entity -> Prop"));
         assert_eq!(rep.verb_axioms, 2);
-        // one lemma × two kinds × (finite + gerund + 1 regular past participle) = 6.
-        assert_eq!(rep.entries, 6);
+        // one lemma × two kinds × (base + finite 3sg + gerund + 1 regular past participle) = 8.
+        assert_eq!(rep.entries, 8);
     }
 
     #[test]

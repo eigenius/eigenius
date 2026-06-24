@@ -77,5 +77,6 @@ The per-subsystem design notes, in number order. New documents are added here as
 | D61 | [Faithful encoding of reasoning: grounding-discovery + a typed decision layer](d61-llm-based-encoding-methodology.md) |
 | D62 | [The encoding engine: prose → typed trees (generation front-end)](d62-encoding-engine-prose-to-trees.md) |
 | D63 | [The DCG engine: a categorial grammar of English over EigenTT](d63-dcg-engine-english-grammar.md) |
+| D64 | [LLM-based anaphora resolution: pronouns as resolved resource references](d64-llm-anaphora-resolution.md) |
 
 (Numbers D15–D17 were never assigned.)

@@ -409,6 +409,31 @@ pub fn past_participles(base: &str) -> Vec<String> {
     }
 }
 
+/// The **third-person-singular present** of `base` (`affect → affects`, the finite form
+/// that heads a declarative; D63 §8.9 6-aux importer morphology). Regular `-s` with the
+/// orthographic `-es` (sibilants + `o`) and consonant-`y → -ies` rules, plus the two
+/// genuinely irregular auxiliaries (`be → is`, `have → has`; `do`/`go` are regular `-es`).
+pub fn third_singular(base: &str) -> String {
+    match base {
+        "be" => return "is".to_string(),
+        "have" => return "has".to_string(),
+        _ => {}
+    }
+    let b = base.as_bytes();
+    let n = b.len();
+    let last = b[n - 1];
+    // sibilants (s/x/z, -ch, -sh) and final -o take -es: kiss→kisses, fix→fixes,
+    // watch→watches, push→pushes, go→goes, do→does.
+    if matches!(last, b's' | b'x' | b'z' | b'o') || base.ends_with("ch") || base.ends_with("sh") {
+        return format!("{base}es");
+    }
+    // consonant + y → -ies (carry→carries); vowel + y keeps the y (play→plays).
+    if last == b'y' && n >= 2 && !matches!(b[n - 2], b'a' | b'e' | b'i' | b'o' | b'u') {
+        return format!("{}ies", &base[..n - 1]);
+    }
+    format!("{base}s")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -465,6 +490,23 @@ mod tests {
         // …but a strong form never admits a non-word regular.
         assert_eq!(past_participles("wear"), ["worn"]); // not "weared"
         assert_eq!(past_participles("creep"), ["crept"]); // not "creeped"
+    }
+
+    #[test]
+    fn third_singular_present() {
+        assert_eq!(third_singular("affect"), "affects");
+        assert_eq!(third_singular("breathe"), "breathes");
+        assert_eq!(third_singular("take"), "takes");
+        assert_eq!(third_singular("kiss"), "kisses"); // sibilant -es
+        assert_eq!(third_singular("fix"), "fixes");
+        assert_eq!(third_singular("watch"), "watches");
+        assert_eq!(third_singular("push"), "pushes");
+        assert_eq!(third_singular("go"), "goes"); // -o → -es
+        assert_eq!(third_singular("do"), "does");
+        assert_eq!(third_singular("carry"), "carries"); // cons-y → -ies
+        assert_eq!(third_singular("play"), "plays"); // vowel-y → -s
+        assert_eq!(third_singular("be"), "is"); // irregular
+        assert_eq!(third_singular("have"), "has");
     }
 
     #[test]

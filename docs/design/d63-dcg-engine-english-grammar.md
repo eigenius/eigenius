@@ -300,7 +300,8 @@ machine: compose `sem` in the `Val` domain through the chart and `readback` a β
 the gate (no substitution, no capture). Producing and **type-checking** the tree is *decidable* — **no
 proof-search engine**. A prover is needed only downstream (entailment for the FraCaS battery; anaphora
 resolution if added) and fits as a *dispatched institution* (like the Lean/R/Julia computations),
-never a core engine dependency.
+never a core engine dependency. (Anaphora resolution is specified in [D64](d64-llm-anaphora-resolution.md):
+an LLM resolver behind the felicity oracle — the dispatched institution made concrete.)
 
 *Cross-reference is structural, not Σ-witness-based.* DTS needs proof-relevant Σ because witnesses are
 its only handle on entities; our antecedents are **committed resources referenced by IRI** (the chain
@@ -382,13 +383,16 @@ Each slice ships **with** its check. The order is dependency-forced.
   **6-neg ✅** (verbal + copular negation, `¬P := P → logic:False`). **6-T + 6-rel ✅** (§8.9):
   forward **bounded-`T`** (target `S`) + the existing forward-`B¹` + an engine relativizer reusing 3b
   refinement — *not* the full combinator set (no `Bⁿ`/`B×`/backward needed for restrictive relatives).
-  **6-aux** partial: its **importer verb-form morphology keystone ✅** (the importer generates + emits
-  `ger`/`pss` participle entries — grounded against `verb.exc`, felicity-clean at corpus scale) and
+  **6-aux** partial: its **importer verb-form morphology keystone ✅** (the importer generates + emits the
+  full `bse`/`fin`-3sg/`ger`/`pss` paradigm per verb — `pss` grounded against `verb.exc`, felicity-clean at
+  corpus scale; `bse`≠`fin` makes do-support/questions/negation/modals fire on imported verbs) and
   **progressive + perfect ✅** (finiteness-lifting `be`-over-`ger` / `have`-over-`pss` auxes, sem `λP.P`,
   reusing `copula_sem`), **short/agentless passive ✅** (`be` over the unsaturated `pss` TV, ∃-closing the
   agent), **agentive long passive ✅** ("…by HeLa" via a `pass` voice feature + `by` agent-marker), and
   **modals ✅** (opaque `logic:Possible`/`Necessary : Prop→Prop`; `can`/`must` etc. do-support-shaped
-  auxes). **6-aux is complete.** Deferred: **6-tail** (case, pronouns gated on anaphora resolution).
+  auxes). **6-aux is complete.** Deferred: **6-tail** (case + pronouns — case is the syntactic half, pronouns gated on **anaphora
+  resolution**, designed in [D64](d64-llm-anaphora-resolution.md): an LLM resolver behind the felicity
+  oracle, pronouns → committed-resource IRIs).
 - **Slice 7 — full-WordNet operationalization (scale-up).** *Orthogonal to the grammar slices* —
   gated only on Slice 2 + the closed-class track (both done), **not** on Slice 5. The 204k-entry WordNet
   content layer (§4a) is already imported and kernel-validated; this slice turns it from a *generatable
@@ -1024,11 +1028,17 @@ sourced from Wikipedia's *List of English irregular verbs* and **witnessed again
 `verb.exc`** — every shipped form is an invariant (`cut`/`put`) or an attested inflection of its base;
 unattested extractions (kempt, durst, holpen) are dropped fail-closed, and the common `-t`/`-ed` twins
 (burnt→burned) are recovered productively from the attested `-t` so no non-word (weared) is ever admitted.
-The importer's `push_verb` now emits, per lemma, the gerund + past-participle(s) as `ger`/`pss`
-[`lexicon:LexicalEntry`] entries pointing at the *same* predicate axiom (finiteness erased by `⟦·⟧`, so
-`⟦cat⟧ = sem_type` unchanged → felicitous by construction). Witnesses: `inflect` unit tests + the
-`irregular_pp_attested_in_verb_exc` corpus gate; the full verb lexicon imports felicity-clean
-(13,768 synsets → 83,682 entries, **55,944 ger/pss participle forms**, all admitted by `--validate`).
+The importer's `push_verb` now emits, per lemma, the **full paradigm** — base (`bse`, the lemma surface),
+finite 3sg (`fin`, generated "affects" via `third_singular` — regular `-s`/`-es`/`-ies` + the two
+irregular auxiliaries be→is/have→has), gerund (`ger`), past-participle(s) (`pss`) — all pointing at the
+*same* predicate axiom (finiteness erased by `⟦·⟧`, so `⟦cat⟧ = sem_type` unchanged → felicitous by
+construction). Emitting **`bse` distinct from `fin`** is what makes do-support (polar / object-wh
+questions, declarative do-support, verbal negation) and modals fire on **imported** verbs, not just the
+hand demo; it also **fixes the former base-as-`fin` mistag** (the lemma was tagged `fin`, so bare "affect"
+wrongly parsed as a finite root — now it is `bse`, a non-root). Witnesses: `inflect` unit tests
+(`third_singular_present`, the gerund/pp tests) + the `irregular_pp_attested_in_verb_exc` corpus gate;
+the verb lexicon imports felicity-clean at scale (e.g. a 2,000-synset sample → 16,250 entries, all four
+`bse`/`fin`/`ger`/`pss` forms in balance, **16,250/16,250 admitted by `--validate`**).
 *(Also fixed in passing: the `--validate` self-check double-loaded the lexicon schema — now in the
 bootstrap chain — re-declaring `Mood:dcl`; it now compiles the import directly over the bootstrap head.)*
 
@@ -1074,8 +1084,11 @@ With the forms in the lexicon, each auxiliary is unblocked on the morphology sid
 
 **6-tail — case + the long tail. Deferred (demand-driven).** Pronoun case (he/him), complementizers,
 comparatives, … — each its own construction. The big one, **pronouns**, is only useful with **anaphora
-resolution** (resolve to a chain resource by IRI, §5.3) — a real feature, not a lexical entry. Not a
-discrete deliverable; items land as the target corpus demands them.
+resolution** (resolve to a chain resource by IRI, §5.3) — a real feature, not a lexical entry, **designed
+in [D64](d64-llm-anaphora-resolution.md)**: an LLM resolver behind the felicity oracle (a *dispatched
+institution*, §5.3), pronouns parse to typed `Exp::Anaphor` holes that resolve to committed-resource IRIs
+and re-gate through the kernel (Derived verdict, D61). Case is the cheap syntactic half (a `Case` feature),
+folded into the pronoun lexicon. Not a discrete deliverable; items land as the target corpus demands them.
 
 ## 9. References
 
