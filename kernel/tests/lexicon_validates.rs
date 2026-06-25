@@ -144,14 +144,25 @@ fn build_closed_class() -> Arc<Layer> {
     )
 }
 
-/// The worked demo DOMAIN (experiments/lexicon) over the closed-class layer. A
-/// compile error here is the *Expressible* gate failing (the kernel cannot carry
-/// the content).
+/// The `measurements` layer (ontologies/statistics) — the opaque float orderings
+/// `measurements:gt`/`lt` (D52) the gradable-adjective comparatives reuse (D63 §8.12
+/// 6-cmp). Layered over closed-class (it only needs core/reflection/institution below).
+fn build_measurements() -> Arc<Layer> {
+    esl_layer(
+        "measurements",
+        include_str!("../../ontologies/statistics/statistics.esl"),
+        build_closed_class(),
+    )
+}
+
+/// The worked demo DOMAIN (experiments/lexicon) over the closed-class + measurements
+/// layers. A compile error here is the *Expressible* gate failing (the kernel cannot
+/// carry the content).
 fn build_lexicon() -> Arc<Layer> {
     esl_layer(
         "lexicon",
         include_str!("../../experiments/lexicon/lexicon.esl"),
-        build_closed_class(),
+        build_measurements(),
     )
 }
 

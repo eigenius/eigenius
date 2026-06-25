@@ -24,7 +24,7 @@
 //!   (the same `⟦·⟧` the kernel gate checks), so entries are felicitous by
 //!   construction and the gate is a confirmation.
 
-use crate::inflect::{gerund, past_participles, third_singular};
+use crate::inflect::{comparison, gerund, past_participles, third_singular, Comparison};
 use crate::wndb::{Pos, Synset};
 
 /// The **entity top** (D63 §8.3, decision ii): the schema-level foundational
@@ -42,6 +42,7 @@ namespace reflection = \"urn:eigenius:reflection\";
 namespace epistemic  = \"urn:eigenius:reflection:epistemic\";
 namespace eigentt    = \"urn:eigenius:eigentt\";
 namespace lexicon    = \"urn:eigenius:lexicon\";
+namespace measurements = \"urn:eigenius:measurements\";
 namespace wn         = \"urn:eigenius:wn\";
 ";
 
@@ -377,31 +378,95 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report) -> bool {
 }
 
 /// Adjective synset → a predicative `eigentt:Axiom` (`S\NP`) + entries.
-fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report) {
+/// Emit a `lexicon:SemTerm` resource (a lambda the gradable-adjective entries reference).
+fn push_sem_term(buf: &mut String, id: &str, term: &str) {
     buf.push_str(&format!(
-        "axiom wn:{} : {ENTITY_TOP} -> Prop\n\n",
-        local(syn)
+        "resource wn:{id} : lexicon:SemTerm {{\n    lexicon:term = type_expr( {term} );\n}}\n\n"
     ));
+}
+
+/// The predicative adjective category `S[dcl,adj]\NP` (requires the copula; D63 §8.5 3a).
+fn adj_cat() -> String {
+    format!("lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))")
+}
+
+/// Adjective synset → predicative entries. **Relational** (pertainym) adjectives are
+/// non-gradable → a Boolean predicate (`is_X : Entity → Prop`, sem = the axiom).
+/// **Descriptive** (gradable) adjectives (D63 §8.12 6-cmp) become a **measure**
+/// `deg_X : Entity → core:float` (+ standard `std_X`): the **positive** is the measure
+/// vs. the standard (`gt(deg_X(x), std_X)`) and the **comparative** compares degrees
+/// (`gt(deg_X(x), deg_X(y))`) via the opaque float ordering `measurements:gt` (combo 1).
+/// Comparative surfaces come from [`comparison`]; periphrastic ("more X") adjectives emit
+/// only the positive (the `more`/`most` words are a follow-on). Superlatives await "the".
+fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report) {
+    let loc = local(syn);
+    let prop_arrow = format!("{ENTITY_TOP} -> Prop");
+    if syn.relational {
+        // Non-gradable: the existing Boolean predicate.
+        buf.push_str(&format!("axiom wn:{loc} : {prop_arrow}\n\n"));
+        rep.adj_axioms += 1;
+        let cat = adj_cat();
+        for (i, lemma) in syn.words.iter().enumerate() {
+            push_entry(
+                buf,
+                &format!("e_{loc}_{i}"),
+                lemma,
+                &cat,
+                &loc,
+                &prop_arrow,
+                &sense_key(syn, lemma),
+            );
+            rep.entries += 1;
+        }
+        return;
+    }
+    // Gradable: a measure + standard, with measure-based positive + degree comparative.
+    buf.push_str(&format!(
+        "axiom wn:deg_{loc} : {ENTITY_TOP} -> core:float\n\n"
+    ));
+    buf.push_str(&format!("axiom wn:std_{loc} : core:float\n\n"));
     rep.adj_axioms += 1;
-    // Predicative adjective is the **adjectival** predicate form (`adj`) — distinct
-    // from base verbs, so it requires the copula (`is`/`are`) and never do-support
-    // (D63 §8.5 Slice 3a/3b). A bare `*X large` is not a finite root; `X is large`
-    // composes the copula with this; attributive `large X` is the engine Σ-rule.
-    let cat = format!(
-        "lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))"
+    push_sem_term(
+        buf,
+        &format!("pos_sem_{loc}"),
+        &format!("( fun (x : {ENTITY_TOP}) => measurements:gt(wn:deg_{loc}(x), wn:std_{loc}) : {prop_arrow} )"),
     );
-    let arrow = format!("{ENTITY_TOP} -> Prop");
+    push_sem_term(
+        buf,
+        &format!("cmp_sem_{loc}"),
+        &format!("( fun (y : {ENTITY_TOP}) => fun (x : {ENTITY_TOP}) => measurements:gt(wn:deg_{loc}(x), wn:deg_{loc}(y)) : {ENTITY_TOP} -> {prop_arrow} )"),
+    );
+    let pos_cat = adj_cat();
+    let cmp_cat = format!("lexicon:fwd({}, lexicon:cat_pp_than)", adj_cat());
+    let cmp_arrow = format!("{ENTITY_TOP} -> {prop_arrow}");
     for (i, lemma) in syn.words.iter().enumerate() {
+        let sense = sense_key(syn, lemma);
+        // Positive: gt(deg(x), std).
         push_entry(
             buf,
-            &format!("e_{}_{i}", local(syn)),
+            &format!("e_{loc}_{i}"),
             lemma,
-            &cat,
-            &local(syn),
-            &arrow,
-            &sense_key(syn, lemma),
+            &pos_cat,
+            &format!("pos_sem_{loc}"),
+            &prop_arrow,
+            &sense,
         );
         rep.entries += 1;
+        // Comparative (synthetic `-er` only; periphrastic "more X" is a follow-on).
+        if let Comparison::Synthetic { comparative, .. } = comparison(lemma) {
+            for (k, c) in comparative.iter().enumerate() {
+                push_entry(
+                    buf,
+                    &format!("e_{loc}_{i}_c{k}"),
+                    c,
+                    &cmp_cat,
+                    &format!("cmp_sem_{loc}"),
+                    &cmp_arrow,
+                    &sense,
+                );
+                rep.entries += 1;
+            }
+        }
     }
 }
 
@@ -686,6 +751,48 @@ mod tests {
             "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_cp) );"
         ));
         assert!(buf.contains("lexicon:sem      = wn:v00000003_c;"));
+    }
+
+    #[test]
+    fn gradable_adjective_emits_measure_positive_and_comparative() {
+        // A descriptive (no pertainym) adjective is gradable (D63 §8.12 6-cmp): a measure
+        // `deg` + standard `std`, a measure-based positive, and a degree comparative.
+        let large = syn("00000001 00 a 01 large 0 000 | of great size");
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_adj(&mut buf, &large, &mut rep);
+        assert!(buf.contains("axiom wn:deg_a00000001 : lexicon:Entity -> core:float"));
+        assert!(buf.contains("axiom wn:std_a00000001 : core:float"));
+        assert!(buf.contains("resource wn:pos_sem_a00000001 : lexicon:SemTerm {"));
+        assert!(buf.contains("resource wn:cmp_sem_a00000001 : lexicon:SemTerm {"));
+        // positive "large" (measure-based) + comparative "larger" (degree comparison).
+        assert!(buf.contains("lexicon:form     = \"large\";"));
+        assert!(buf.contains("lexicon:form     = \"larger\";"));
+        assert!(buf.contains("lexicon:sem      = wn:pos_sem_a00000001;"));
+        assert!(buf.contains("lexicon:sem      = wn:cmp_sem_a00000001;"));
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than) );"
+        ));
+        // no Boolean is-axiom for a gradable adjective.
+        assert!(!buf.contains("axiom wn:a00000001 : lexicon:Entity -> Prop"));
+    }
+
+    #[test]
+    fn relational_adjective_stays_boolean() {
+        // A relational (pertainym `\`) adjective is non-gradable → the Boolean predicate.
+        let atomic = syn("00000004 00 a 01 atomic 0 001 \\ 00000005 n 0000 | of atoms");
+        assert!(
+            atomic.relational,
+            "pertainym `\\` marks a relational adjective"
+        );
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_adj(&mut buf, &atomic, &mut rep);
+        assert!(buf.contains("axiom wn:a00000004 : lexicon:Entity -> Prop"));
+        assert!(buf.contains("lexicon:form     = \"atomic\";"));
+        // no measure / comparative for a relational adjective.
+        assert!(!buf.contains("deg_a00000004"));
+        assert!(!buf.contains("cat_pp_than"));
     }
 
     #[test]

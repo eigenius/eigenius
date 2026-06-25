@@ -89,6 +89,11 @@ pub struct Synset {
     pub instance_of: Vec<Offset>,
     /// Verb sentence-frame numbers (empty for non-verbs).
     pub frames: Vec<u8>,
+    /// True if this synset has a `\` **pertainym** pointer — i.e. it is a *relational*
+    /// adjective ("atomic" \→ "atom"), which is **non-gradable** (D63 §8.12 6-cmp). A
+    /// descriptive (gradable) adjective lacks it. (On adverbs `\` means "derived from
+    /// adjective"; only consumed for adjectives in `push_adj`.)
+    pub relational: bool,
 }
 
 /// Parse one `data.<pos>` line, or `None` for the license preamble (which begins
@@ -119,10 +124,12 @@ pub fn parse_data_line(line: &str) -> Option<Synset> {
     i += 1;
     let mut hypernyms = Vec::new();
     let mut instance_of = Vec::new();
+    let mut relational = false;
     for _ in 0..p_cnt {
         match *tok.get(i)? {
             "@" => hypernyms.push(tok.get(i + 1)?.to_string()),
             "@i" => instance_of.push(tok.get(i + 1)?.to_string()),
+            "\\" => relational = true, // pertainym → relational (non-gradable) adjective
             _ => {}
         }
         i += 4; // sym, offset, pos, source/target
@@ -150,6 +157,7 @@ pub fn parse_data_line(line: &str) -> Option<Synset> {
         hypernyms,
         instance_of,
         frames,
+        relational,
     })
 }
 

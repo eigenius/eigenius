@@ -399,13 +399,12 @@ Each slice ships **with** its check. The order is dependency-forced.
   extension — deferred.) **6-cl ✅** — **clausal complements (§8.11):** clause-taking
   verbs ("X shows that Y") via a `cat_cp` embedded-clause category + a `that` complementizer + an opaque
   `Prop→Entity→Prop` report axiom (intensional — the complement is not asserted); importer frame-26. **6-cmp** —
-  **comparatives/superlatives (§8.12): grammar core ✅ + morphology ✅; importer scale-out + superlative
-  pending.** Degree semantics reusing D52 — degrees are `core:float`, comparison is the opaque `stats:gt`,
-  a gradable adjective is a measure `deg_A : Entity→float`; "X is larger than Y" →
-  `gt(deg_large(x), deg_large(y))`, "X is large" → `gt(deg_large(x), std_large)` (unified positive). The
-  comparison-morphology generator (grounded suppletive table + periphrastic) is built. Pending: the WordNet
-  importer scale-out (wndb pertainym gradability flag + `push_adj` measure/comparative emission) and the
-  superlative (gated on "the"). Deferred: **6-tail** (case + pronouns — case is the syntactic half, pronouns gated on **anaphora
+  **comparatives ✅ (§8.12); superlative deferred (gated on "the").** Degree semantics reusing D52 —
+  degrees are `core:float`, comparison is the opaque `stats:gt`, a gradable adjective is a measure `deg_A :
+  Entity→float`; "X is larger than Y" → `gt(deg_large(x), deg_large(y))`, "X is large" →
+  `gt(deg_large(x), std_large)` (unified positive). The comparison-morphology generator (grounded suppletive
+  table + periphrastic) is built; the importer flags gradability by the WordNet pertainym pointer
+  (descriptive ⇒ gradable measure + comparative; relational ⇒ Boolean) — corpus felicity-clean. Deferred: **6-tail** (case + pronouns — case is the syntactic half, pronouns gated on **anaphora
   resolution**, designed in [D64](d64-llm-anaphora-resolution.md): an LLM resolver behind the felicity
   oracle, pronouns → committed-resource IRIs).
 - **Slice 7 — full-WordNet operationalization (scale-up).** *Orthogonal to the grammar slices* —
@@ -1251,21 +1250,22 @@ interrogative / subject / expletive / control complements.
 
 ### 8.12 Slice 6-cmp — comparatives & superlatives (degree semantics)
 
-**Partially built — grammar core ✅ + morphology ✅; importer scale-out + superlative pending.** *Built and
-green:* the `cat_pp_than` constructor + `denote_cat` arm (⟦·⟧ = Entity); the `than` marker (`cat_pp_than /
-cat_np(Entity)`, sem `λy.y`) in [`closed-class.esl`]; a demo gradable adjective `large` (the opaque measure
-`deg_large : Entity → core:float` + standard `std_large`), with the **comparative** `larger`
-(`(S[adj]\NP)/cat_pp_than`, `λy.λx. measurements:gt(deg_large(x), deg_large(y))`) and the **measure-based
-positive** `large` (`gt(deg_large(x), std_large)` — combo 1), both reusing the copula. The
-**comparison-morphology generator** ([`eigenius-wordnet::inflect`] `comparison`): regular `-er`/`-est` +
-the grounded suppletive table (good/bad/little/much/many/far/old + shy) + the periphrastic heuristic, all
-validated. Witnesses: `comparative_compares_degrees`, `positive_gradable_adjective_is_measure_based`,
-`comparative_requires_than` (`closed_class_determiners`); `comparison_regular_irregular_and_periphrastic`
-(`inflect`). *Pending (the WordNet importer scale-out + superlative):* the **wndb pertainym flag**
-(gradability signal — a clean `Synset` addition) and the **`push_adj` gradable path** (emit `deg_A`/`std_A`
-+ SemTerm-based measure-positive + comparative/superlative entries for gradable adjectives, Boolean for
-relational — needs the importer to emit `SemTerm` blocks, a new emission pattern); and the **superlative**
-(gated on the definite "the"). The original design follows.
+**✅ Done (comparative; superlative deferred, gated on "the").** *Built and green:* the `cat_pp_than`
+constructor + `denote_cat` arm (⟦·⟧ = Entity); the `than` marker (`cat_pp_than / cat_np(Entity)`, sem
+`λy.y`) in [`closed-class.esl`]; a demo gradable adjective `large` (measure `deg_large : Entity → core:float`
++ standard `std_large`) with the **comparative** `larger` (`(S[adj]\NP)/cat_pp_than`, `λy.λx.
+measurements:gt(deg_large(x), deg_large(y))`) and the **measure-based positive** (`gt(deg_large(x),
+std_large)` — combo 1), both reusing the copula. The **comparison-morphology generator**
+([`eigenius-wordnet::inflect`] `comparison`): regular `-er`/`-est` + the grounded suppletive table + the
+periphrastic heuristic. The **importer scale-out**: a `wndb` **pertainym flag** (`\` → relational =
+non-gradable) + `push_adj`'s **gradable path** — descriptive adjectives emit `deg_A`/`std_A` + SemTerm-based
+measure-positive + synthetic comparative entries (via `comparison`); **relational** adjectives stay Boolean
+`is_A`. Witnesses: `comparative_compares_degrees`, `positive_gradable_adjective_is_measure_based`,
+`comparative_requires_than` (`closed_class_determiners`); `comparison_regular_irregular_and_periphrastic`,
+`gradable_adjective_emits_measure_positive_and_comparative`, `relational_adjective_stays_boolean`,
+`irregular_comparison_table_is_sorted` (`inflect`/`convert`); adjective corpus import felicity-clean
+(`--validate`). *Deferred:* the **superlative** ("the largest", gated on the definite "the" + maximality)
+and **periphrastic** comparatives (the `more`/`most` words). The original design follows.
 
 The genuine *degree-semantics* foundation: gradable adjectives and their
 comparison — "X is **larger than** Y", "the **largest** gene". High-value for scientific prose ("higher
