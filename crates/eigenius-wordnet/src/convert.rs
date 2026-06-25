@@ -24,8 +24,10 @@
 //!   (the same `⟦·⟧` the kernel gate checks), so entries are felicitous by
 //!   construction and the gate is a confirmation.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use crate::inflect::{comparison, gerund, past_participles, third_singular, Comparison};
-use crate::wndb::{Pos, Synset};
+use crate::wndb::{Offset, Pos, Synset};
 
 /// The **entity top** (D63 §8.3, decision ii): the schema-level foundational
 /// entity type (`lexicon:Entity`) that verb/adjective argument slots — and the
@@ -188,8 +190,17 @@ fn push_entry(
 
 /// Noun synset → a `core:Class` (with `subclass_of` from `@`) + one `N` entry
 /// per lemma.
-fn push_noun(buf: &mut String, syn: &Synset, rep: &mut Report) {
-    let parents: Vec<String> = syn.hypernyms.iter().map(|h| format!("wn:n{h}")).collect();
+fn push_noun(buf: &mut String, syn: &Synset, rep: &mut Report, noun: &BTreeMap<Offset, &Synset>) {
+    // `@` hypernyms → `subclass_of`, each resolved to the nearest CLASS. WordNet has
+    // class synsets whose `@` parent is an INSTANCE (British_West_Indies `@` West_Indies
+    // `@i` archipelago) — a class can't be a subclass of an individual, so climb the
+    // instance to its class ([`nearest_classes`]).
+    let mut parent_offsets: Vec<Offset> = Vec::new();
+    let mut seen: BTreeSet<Offset> = BTreeSet::new();
+    for h in &syn.hypernyms {
+        nearest_classes(h, noun, &mut parent_offsets, &mut seen);
+    }
+    let parents: Vec<String> = parent_offsets.iter().map(|h| format!("wn:n{h}")).collect();
     // A hypernym-less noun (WordNet's root `entity.n.01`) is rooted at the schema
     // entity top so the whole noun lattice sits under `lexicon:Entity` (D63 §8.3
     // ii); all other nouns parent at their `@` hypernyms.
@@ -228,14 +239,24 @@ fn push_noun(buf: &mut String, syn: &Synset, rep: &mut Report) {
 /// resource — so a multi-class individual is usable in each class's typing context
 /// (now admissible via the check-mode resource-inhabitation rule, #91). The other
 /// classes also stay on the resource.
-fn push_instance(buf: &mut String, syn: &Synset, rep: &mut Report) {
-    // Types: `@i` first (the instance-hypernyms), then any rare plain `@`.
-    let classes: Vec<String> = syn
-        .instance_of
-        .iter()
-        .chain(syn.hypernyms.iter())
-        .map(|h| format!("wn:n{h}"))
-        .collect();
+fn push_instance(
+    buf: &mut String,
+    syn: &Synset,
+    rep: &mut Report,
+    noun: &BTreeMap<Offset, &Synset>,
+) {
+    // Types: `@i` first (the instance-hypernyms), then any rare plain `@` — each
+    // resolved to the nearest CLASS. WordNet chains instances (`@i`) — Paternoster
+    // `@i` Lord's_Prayer `@i` prayer — but an individual cannot be typed by another
+    // individual (the parent was emitted as a `resource`, not a `class`). So climb
+    // each `@i`/`@` target to the nearest class ([`nearest_classes`]); the
+    // intermediate instances collapse into co-referential individuals of that class.
+    let mut class_offsets: Vec<Offset> = Vec::new();
+    let mut seen: BTreeSet<Offset> = BTreeSet::new();
+    for t in syn.instance_of.iter().chain(syn.hypernyms.iter()) {
+        nearest_classes(t, noun, &mut class_offsets, &mut seen);
+    }
+    let classes: Vec<String> = class_offsets.iter().map(|h| format!("wn:n{h}")).collect();
     assert!(
         !classes.is_empty(),
         "push_instance requires a non-empty instance_of"
@@ -262,6 +283,31 @@ fn push_instance(buf: &mut String, syn: &Synset, rep: &mut Report) {
             );
             rep.entries += 1;
         }
+    }
+}
+
+/// Resolve a hypernym/`@i` target to the nearest CLASS offset(s), appending to `out`
+/// (deduped via `seen`, deterministic order, cycle-guarded). A target that is itself
+/// an instance (non-empty `instance_of` in the noun index) is climbed through its own
+/// `@i`/`@`; a class (empty `instance_of`) — or an unknown offset, treated as a class —
+/// is emitted. This collapses WordNet's instance-of-instance `@i` chains so an
+/// individual is always typed by a class, never by another individual.
+fn nearest_classes(
+    start: &Offset,
+    noun: &BTreeMap<Offset, &Synset>,
+    out: &mut Vec<Offset>,
+    seen: &mut BTreeSet<Offset>,
+) {
+    if !seen.insert(start.clone()) {
+        return;
+    }
+    match noun.get(start) {
+        Some(s) if !s.instance_of.is_empty() => {
+            for t in s.instance_of.iter().chain(s.hypernyms.iter()) {
+                nearest_classes(t, noun, out, seen);
+            }
+        }
+        _ => out.push(start.clone()),
     }
 }
 
@@ -482,14 +528,23 @@ pub fn render_document(synsets: &[Synset]) -> (String, Report) {
     let mut decls = String::new(); // classes + axioms
     let mut entries = String::new();
 
+    // Noun offset → synset, for resolving instance-of-instance `@i` chains to a
+    // class ([`nearest_classes`]). The caller closes the set under hypernymy, so
+    // every `@i`/`@` ancestor is present.
+    let noun_index: BTreeMap<Offset, &Synset> = synsets
+        .iter()
+        .filter(|s| s.pos == Pos::Noun)
+        .map(|s| (s.offset.clone(), s))
+        .collect();
+
     for syn in sorted {
         match syn.pos {
             Pos::Noun => {
                 let mut block = String::new();
                 if syn.instance_of.is_empty() {
-                    push_noun(&mut block, syn, &mut rep);
+                    push_noun(&mut block, syn, &mut rep, &noun_index);
                 } else {
-                    push_instance(&mut block, syn, &mut rep);
+                    push_instance(&mut block, syn, &mut rep, &noun_index);
                 }
                 route(&block, &mut decls, &mut entries);
             }
@@ -560,7 +615,7 @@ mod tests {
         let gene = syn("05444328 08 n 03 gene 0 cistron 0 factor 0 003 @ 08476263 n 0000 #p 14854534 n 0000 #p 05449707 n 0000 | a segment of DNA");
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_noun(&mut buf, &gene, &mut rep);
+        push_noun(&mut buf, &gene, &mut rep, &BTreeMap::new());
         assert!(buf.contains("class wn:n05444328 : wn:n08476263 {"));
         assert!(buf.contains("description = \"a segment of DNA\";"));
         assert!(buf.contains("resource wn:e_n05444328_0 : lexicon:LexicalEntry {"));
@@ -581,7 +636,7 @@ mod tests {
         // sits under it.
         let entity = syn("00001740 03 n 01 entity 0 001 ~ 00001930 n 0000 | that which exists");
         let mut buf = String::new();
-        push_noun(&mut buf, &entity, &mut Report::default());
+        push_noun(&mut buf, &entity, &mut Report::default(), &BTreeMap::new());
         assert!(buf.contains("class wn:n00001740 : lexicon:Entity {"));
     }
 
@@ -591,7 +646,7 @@ mod tests {
         let einstein = syn("10954498 18 n 02 Einstein 0 Albert_Einstein 0 002 @i 10428004 n 0000 + 03031247 a 0301 | a physicist");
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_instance(&mut buf, &einstein, &mut rep);
+        push_instance(&mut buf, &einstein, &mut rep, &BTreeMap::new());
         // Emitted as a RESOURCE (instance of its class), never a `class`.
         assert!(buf.contains("resource wn:n10954498 : wn:n10428004 {"));
         assert!(!buf.contains("class wn:n10954498"));
@@ -616,7 +671,7 @@ mod tests {
         let v = syn("00000009 18 n 01 Enlightenment 0 002 @i 15254028 n 0000 @ 08473623 n 0000 | a movement");
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_instance(&mut buf, &v, &mut rep);
+        push_instance(&mut buf, &v, &mut rep, &BTreeMap::new());
         // both classes on the resource — @i first, then the rare plain @.
         assert!(buf.contains("resource wn:n00000009 : wn:n15254028, wn:n08473623 {"));
         // one NP entry per class (both type contexts reachable).
@@ -626,6 +681,39 @@ mod tests {
             .contains("lexicon:cat      = type_expr( lexicon:cat_np(wn:n08473623, lexicon:sg) );"));
         assert_eq!(rep.instances, 1);
         assert_eq!(rep.entries, 2); // 2 classes × 1 lemma
+    }
+
+    #[test]
+    fn instance_of_instance_chain_resolves_to_nearest_class() {
+        // WordNet chains instances: Paternoster `@i` Lord's_Prayer `@i` prayer (a class).
+        // An individual can't be typed by another individual (the parent is emitted as a
+        // `resource`, not a `class`), so the type climbs to the nearest class — prayer.
+        let prayer = syn("06455990 10 n 01 prayer 1 001 @ 06429590 n 0000 | a prayer");
+        let lords = syn("06457612 10 n 01 Lord's_Prayer 0 001 @i 06455990 n 0000 | the prayer");
+        let pater = syn(
+            "06457796 10 n 01 Paternoster 0 001 @i 06457612 n 0000 | the Lord's Prayer in Latin",
+        );
+        let noun_index: BTreeMap<Offset, &Synset> = [&prayer, &lords, &pater]
+            .into_iter()
+            .map(|s| (s.offset.clone(), s))
+            .collect();
+
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_instance(&mut buf, &pater, &mut rep, &noun_index);
+        // Typed at the nearest CLASS (prayer = n06455990), NOT the instance Lord's_Prayer.
+        assert!(
+            buf.contains("resource wn:n06457796 : wn:n06455990 {"),
+            "Paternoster must instantiate the class prayer, got:\n{buf}"
+        );
+        assert!(
+            !buf.contains("wn:n06457612"),
+            "must not reference the instance parent"
+        );
+        assert!(buf
+            .contains("lexicon:cat      = type_expr( lexicon:cat_np(wn:n06455990, lexicon:sg) );"));
+        assert_eq!(rep.instances, 1);
+        assert_eq!(rep.entries, 1);
     }
 
     #[test]

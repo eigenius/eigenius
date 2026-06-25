@@ -882,6 +882,27 @@ size) — growing to `--all`. Stage percentages are of the ~115k-synset / 204k-e
 *disambiguation* as inference (choosing the right synset for a token in context — a downstream
 encoding-institution / LLM-proposer concern, not the engine's; the engine returns the gated forest).
 
+**Status (in progress).**
+- **Done-when #1 — ✅ met at full scale (Derived).** `--all` imports **114,038 synsets → 325,259
+  `LexicalEntry` entries** (74,385 noun classes, 7,730 instances, 15,128 verb axioms, 18,156 adj axioms;
+  57,349 ger/pss participle forms), and **all 325,259 felicity-gate clean** (0 structural errors, 0
+  rejects). Witnessed baseline: validate pass ≈ 2:20 wall, ≈ 9.4 GB RSS (release). Stage A (`--limit 1000`)
+  → 3,129 synsets → 14,288 entries, also 100% clean, ≈ 5 s / 0.6 GB.
+- **Instance-vs-class residual — ✅ FIXED (a real Stage-C scale finding, fail-closed).** The first `--all`
+  run surfaced **301 structural errors** invisible at Stage A: WordNet has **instance-of-instance `@i`
+  chains** (Paternoster `@i` Lord's_Prayer `@i` prayer — 56 cases) and **class-`@`-instance** edges
+  (British_West_Indies `@` West_Indies `@i` archipelago — 14 cases). An individual cannot be typed by — nor
+  a class be a subclass of — another individual. Fix (`convert.rs::nearest_classes`): every `@i`/`@` target
+  is resolved to the nearest **class** (climb instance parents), so an instance's type and a class's
+  `subclass_of` always reference a `core:Class`; the intermediate instances collapse into co-referential
+  individuals of that class. Witness: `instance_of_instance_chain_resolves_to_nearest_class` +
+  `instance_synset_is_an_individual_not_a_class`; confirmed by the 301→0 drop on `--all --validate`.
+- **Done-when #2/#3/#4 — pending.** The standing-layer + `LexicalIndex::build` + representative-battery
+  parse, the parse-time / forest-size baselines, and the Stage-B **sense-ambiguity policy** (the genuine
+  decision — rank by WordNet sense frequency vs. hard beam vs. return-all) are next. Other D62 §8.7
+  residuals (#91 multi-class NP — already handled by the check-mode resource rule; troponymy subsumption)
+  re-confirm at battery time.
+
 ### 8.8 Slice 3 — copula, predication, predicate nominals
 
 Three sub-parts of differing depth; implementation surfaced that two need machinery beyond the lexicon.
