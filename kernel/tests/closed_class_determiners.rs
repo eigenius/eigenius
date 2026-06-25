@@ -301,6 +301,111 @@ fn pp_adjunct_adds_an_opaque_conjunct() {
     );
 }
 
+/// Whether the opaque axiom `iri` occurs ANYWHERE in `e` (descends binder types too —
+/// a 6-mod restrictor lives in the Σ embedded inside the determiner's ∃/∀ encoding).
+fn sem_mentions_axiom(e: &Exp, iri: &str) -> bool {
+    let any = |xs: &[Exp]| xs.iter().any(|x| sem_mentions_axiom(x, iri));
+    match e {
+        Exp::EigonAxiom(i) => i.as_str() == iri,
+        Exp::App(a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) | Exp::Pair(a, b) | Exp::Ann(a, b) => {
+            sem_mentions_axiom(a, iri) || sem_mentions_axiom(b, iri)
+        }
+        Exp::Pi(_, a, b) | Exp::Sig(_, a, b) => {
+            sem_mentions_axiom(a, iri) || sem_mentions_axiom(b, iri)
+        }
+        Exp::Lam(_, a) | Exp::Fst(a) | Exp::Snd(a) | Exp::Con(_, a) => sem_mentions_axiom(a, iri),
+        Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => any(args),
+        _ => false,
+    }
+}
+
+#[test]
+fn n_n_kind_compound_refines_with_compound_kind() {
+    // "a gene cell line affects HeLa": [N gene] + [N cell line] → Σx:CellLine.
+    // compound_kind(x, Gene) (the modifier is the kind `Gene`, a `Set`); `a` quantifies it.
+    let (_layer, index) = index_over_bootstrap();
+    let forest = index.parse("a gene cell line affects HeLa", &Identity);
+    assert!(
+        !forest.is_empty(),
+        "the N-N kind-compound sentence must parse (the N-N rule must fire)"
+    );
+    assert!(
+        forest
+            .iter()
+            .any(|p| sem_mentions_axiom(&p.sem, "urn:eigenius:ontology:compound_kind")),
+        "a parse refines the head with ontology:compound_kind; got {:?}",
+        forest[0].sem
+    );
+    assert_parses_to_prop("a gene cell line affects HeLa");
+}
+
+#[test]
+fn pp_noun_modifier_refines_the_head() {
+    // "a cell line of BRCA1 affects HeLa": [N cell line] + [PP of BRCA1] → Σx:CellLine.
+    // prep_of(x, brca1) (post-nominal refine); `a` quantifies it. `of` is a pure
+    // noun-modifier (no VP-adjunct entry), so this is the post-nominal path.
+    let (_layer, index) = index_over_bootstrap();
+    let forest = index.parse("a cell line of BRCA1 affects HeLa", &Identity);
+    assert!(
+        !forest.is_empty(),
+        "the PP-noun-modifier sentence must parse (the post-nominal rule must fire)"
+    );
+    assert!(
+        forest
+            .iter()
+            .any(|p| sem_mentions_axiom(&p.sem, "urn:eigenius:ontology:prep_of")),
+        "a parse refines the head with ontology:prep_of; got {:?}",
+        forest[0].sem
+    );
+    assert_parses_to_prop("a cell line of BRCA1 affects HeLa");
+}
+
+#[test]
+fn pp_attachment_is_ambiguous() {
+    // "HeLa affects a cell line in HeLa": `in` is BOTH a VP-adjunct and a noun-modifier, so
+    // the PP attaches two ways — to the VP (And(affects(…), prep_in(s, hela))) and to the
+    // object noun (Σx:CellLine. prep_in(x, hela)). Both felicitous → ≥2 parses, the
+    // attachment ambiguity carried in the forest (D63 §8.13).
+    let (_layer, index) = index_over_bootstrap();
+    let forest = index.parse("HeLa affects a cell line in HeLa", &Identity);
+    assert!(
+        forest.len() >= 2,
+        "PP attachment is ambiguous (VP-adjunct vs noun-modifier) → ≥2 parses, got {}",
+        forest.len()
+    );
+    // One parse conjoins at the VP (And-headed); another refines the noun (no top-level And).
+    assert!(
+        forest
+            .iter()
+            .any(|p| matches!(&p.sem, Exp::InductiveType(d, _) if d.name == "And")),
+        "one attachment conjoins the locative at the VP (And-headed)"
+    );
+    assert!(
+        forest
+            .iter()
+            .any(|p| !matches!(&p.sem, Exp::InductiveType(d, _) if d.name == "And")),
+        "the other attachment refines the object noun (not top-level And)"
+    );
+    assert_parses_to_prop("HeLa affects a cell line in HeLa");
+}
+
+#[test]
+fn compound_chain_is_left_branching() {
+    // "a BRCA1 gene cell line affects HeLa": a 3-element compound chain. The left-branching
+    // normal form (D63 §8.13) collapses [[BRCA1 gene] cell line] vs [BRCA1 [gene cell line]]
+    // to the single left-branching tree — the head of a compound may not itself be a
+    // compound result — so there is exactly ONE parse (no spurious bracketing ambiguity).
+    let (_layer, index) = index_over_bootstrap();
+    let forest = index.parse("a BRCA1 gene cell line affects HeLa", &Identity);
+    assert_eq!(
+        forest.len(),
+        1,
+        "the compound chain has a single left-branching parse (NF), got {}",
+        forest.len()
+    );
+    assert_parses_to_prop("a BRCA1 gene cell line affects HeLa");
+}
+
 #[test]
 fn committed_object_determiner_parses() {
     // `a` (object, type-raised) from the committed closed-class layer.

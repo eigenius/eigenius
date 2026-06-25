@@ -272,41 +272,118 @@ pub fn apply(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
             }
         }
     }
-    // Compound noun (D63 §8.13 Slice 6-mod): a named-entity modifier `cat_np` (left) +
-    // a head common noun `cat_n(C)` (right) → the refined noun
-    // `cat_n(Σx:C. ontology:compound(x, m))` over the concrete `C`, where `m` is the
-    // modifier entity (the NP's sem). The compound relation is OPAQUE (institution-mapped);
-    // the rule reuses 3b's Σ + the determiner-over-refined-noun `Fst` machinery. "BRCA1
-    // cell line" → `Σx:CellLine. compound(x, brca1)`.
-    if let (Some(_), Some([c, noun_num])) =
-        (is_ctor(&left.cat, "cat_np"), is_ctor(&right.cat, "cat_n"))
-    {
-        if let Exp::InductiveCtor(decl, _, _) = &right.cat {
-            let x = "__cmp_x";
-            let compound = Exp::EigonAxiom(
-                crate::ontology::iri::Iri::parse("urn:eigenius:ontology:compound")
-                    .expect("valid compound iri"),
-            );
-            let sigma = Exp::Sig(
-                Patt::Var(x.into()),
-                Box::new(c.clone()),
-                Box::new(Exp::App(
-                    Box::new(Exp::App(Box::new(compound), Box::new(Exp::Var(x.into())))),
-                    Box::new(left.sem.clone()),
-                )),
-            );
-            return Some(Item {
-                cat: Exp::InductiveCtor(
-                    decl.clone(),
-                    "cat_n".into(),
-                    vec![sigma.clone(), noun_num.clone()],
-                ),
-                sem: sigma,
-                prov: Combinator::Other,
-            });
+    // ── Nominal modification (D63 §8.13 Slice 6-mod) ──────────────────────
+    // Two PRE-nominal compound rules: a modifier (left) + a head common noun `cat_n(C)`
+    // (right) → the refined noun `cat_n(Σx:C. R(x, m))` over the concrete `C`, where the
+    // relation `R` is OPAQUE (institution-mapped). Both reuse 3b's Σ + the
+    // determiner-over-refined-noun `Fst` machinery. LEFT-BRANCHING normal form: a
+    // compound's HEAD (right) may not itself be a compound result, so a 3+-noun chain has
+    // the single bracketing `[[A B] C]` (no spurious `[A [B C]]`); an attributively-refined
+    // head is still allowed (a distinct structure, not spurious ambiguity).
+    if let Exp::InductiveCtor(decl, name, args) = &right.cat {
+        if name == "cat_n" && !is_compound_refined(&right.cat) {
+            if let [c, noun_num] = &args[..] {
+                // Named-entity compound: `[cat_np] [cat_n(C)]` → Σx:C. compound(x, m), where
+                // `m` is the modifier entity (the NP's sem). "BRCA1 cell line".
+                if is_ctor(&left.cat, "cat_np").is_some() {
+                    let restr = app2(
+                        "urn:eigenius:ontology:compound",
+                        COMPOUND_X,
+                        left.sem.clone(),
+                    );
+                    return Some(refined_noun(decl, c, noun_num, restr));
+                }
+                // N-N kind compound: `[cat_n(M)] [cat_n(C)]` → Σx:C. compound_kind(x, M),
+                // where the modifier `M` is the left noun's kind (its sem, a `Set` —
+                // CN-as-types). "mutator load", "gene cell line".
+                if is_ctor(&left.cat, "cat_n").is_some() {
+                    let restr = app2(
+                        "urn:eigenius:ontology:compound_kind",
+                        COMPOUND_X,
+                        left.sem.clone(),
+                    );
+                    return Some(refined_noun(decl, c, noun_num, restr));
+                }
+            }
+        }
+    }
+    // PP-as-noun-modifier (post-nominal): `[cat_n(C)] [cat_pp]` → Σx:C. pp(x), where
+    // ⟦cat_pp⟧ = Entity → Prop is the right's sem (a predicate over the head's entities).
+    // "biomarker of WRN dependency" → Σx:Biomarker. prep_of(x, dependency). A category
+    // distinct from a bare adjective (`S[adj]\NP`) means a post-nominal adjective never
+    // spuriously refines, and distinct from the VP-adjunct preposition so the two
+    // attachments are separate parses (PP-attachment ambiguity carried in the forest).
+    if let Exp::InductiveCtor(decl, name, args) = &left.cat {
+        if name == "cat_n" && is_ctor(&right.cat, "cat_pp").is_some() {
+            if let [c, noun_num] = &args[..] {
+                let restr = Exp::App(
+                    Box::new(right.sem.clone()),
+                    Box::new(Exp::Var(COMPOUND_X.into())),
+                );
+                return Some(refined_noun(decl, c, noun_num, restr));
+            }
         }
     }
     None
+}
+
+/// The bound variable of every 6-mod Σ-refinement (D63 §8.13).
+const COMPOUND_X: &str = "__cmp_x";
+
+/// Apply an opaque binary modifier axiom `R` to `(Var(arg0), arg1)` — the restrictor of a
+/// 6-mod Σ. `R(x, m)` where the bound `x` (`arg0`) ranges over the head noun's concrete
+/// type and `m` (`arg1`) is the modifier.
+fn app2(axiom_iri: &str, arg0: &str, arg1: Exp) -> Exp {
+    let r = Exp::EigonAxiom(
+        crate::ontology::iri::Iri::parse(axiom_iri).expect("valid modifier axiom iri"),
+    );
+    Exp::App(
+        Box::new(Exp::App(Box::new(r), Box::new(Exp::Var(arg0.into())))),
+        Box::new(arg1),
+    )
+}
+
+/// Build a refined common noun `cat_n(Σx:C. restr, num)` for a 6-mod rule (D63 §8.13),
+/// reusing the head noun's `decl` and number; `restr` is the restrictor `Prop` over the
+/// bound `COMPOUND_X`. Sem is the Σ itself (CN-as-types); provenance `Other`.
+fn refined_noun(
+    decl: &Arc<crate::nbe::term::InductiveDecl>,
+    c: &Exp,
+    noun_num: &Exp,
+    restr: Exp,
+) -> Item {
+    let sigma = Exp::Sig(
+        Patt::Var(COMPOUND_X.into()),
+        Box::new(c.clone()),
+        Box::new(restr),
+    );
+    Item {
+        cat: Exp::InductiveCtor(
+            decl.clone(),
+            "cat_n".into(),
+            vec![sigma.clone(), noun_num.clone()],
+        ),
+        sem: sigma,
+        prov: Combinator::Other,
+    }
+}
+
+/// Whether `cat` is an already-compound-refined common noun — `cat_n(Σ. body, _)` whose
+/// restrictor's App-spine head is `ontology:compound` / `compound_kind`. The left-branching
+/// normal form (D63 §8.13) forbids such a noun as a compound HEAD, collapsing the spurious
+/// bracketings of a 3+-noun compound chain to the single left-branching tree. An
+/// *attributively*-refined noun is NOT compound-refined, so adjective+compound still composes.
+fn is_compound_refined(cat: &Exp) -> bool {
+    if let Some([Exp::Sig(_, _, body), _]) = is_ctor(cat, "cat_n") {
+        let mut head = &**body;
+        while let Exp::App(f, _) = head {
+            head = f;
+        }
+        return matches!(head, Exp::EigonAxiom(iri)
+            if iri.as_str() == "urn:eigenius:ontology:compound"
+                || iri.as_str() == "urn:eigenius:ontology:compound_kind");
+    }
+    false
 }
 
 /// Whether `s` is an **adjectival** clause `cat_s(_, adj)` — the predicative

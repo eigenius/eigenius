@@ -84,10 +84,24 @@ resource lexicon:hela : lexicon:CellLine {
 // (1) common noun → a TYPE. CN-as-type: ⟦cat_n⟧ = Set, and the sem IS the class.
 resource lexicon:e_cell_line : lexicon:LexicalEntry {
     lexicon:form     = "cell line";
-    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:CellLine, lexicon:sg) );
+    // A common noun is number-UNDERSPECIFIED in the lexicon (`num_any`); the lookup index
+    // sets the SURFACE number per token (D63 §5.1, `with_noun_num`) — "cell line" → sg,
+    // "cell lines" → pl — so determiner/noun agreement bites at composition, not here.
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:CellLine, lexicon:num_any) );
     lexicon:sem      = lexicon:CellLine;
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "wn:cell_line.n.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (1b) a second common noun — the modifier of an N-N kind compound (D63 §8.13 6-mod):
+// "gene cell line" → Σx:CellLine. compound_kind(x, Gene). Its sem is the kind `Gene`.
+resource lexicon:e_gene : lexicon:LexicalEntry {
+    lexicon:form     = "gene";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Gene, lexicon:num_any) );
+    lexicon:sem      = lexicon:Gene;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "wn:gene.n.01";
     lexicon:grade    = epistemic:declared;
 }
 

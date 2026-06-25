@@ -60,6 +60,15 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
         ("cat_pp_than", []) => Ok(Exp::EigonClass(
             Iri::parse("urn:eigenius:lexicon:Entity").map_err(|e| e.to_string())?,
         )),
+        // ⟦PP[mod]⟧ = Entity → Prop — a noun-postmodifying PP is a predicate over the head
+        // noun's entities (D63 §8.13, 6-mod). The post-nominal refine rule applies it under
+        // a Σ; `of : cat_pp / cat_np(Entity)`, sem `λy.λx. prep_of(x, y)`.
+        ("cat_pp", []) => Ok(Exp::Arrow(
+            Box::new(Exp::EigonClass(
+                Iri::parse("urn:eigenius:lexicon:Entity").map_err(|e| e.to_string())?,
+            )),
+            Box::new(Exp::Sort(0)),
+        )),
         ("fwd", [a, b]) | ("bwd", [a, b]) => Ok(Exp::Arrow(
             Box::new(denote_cat(b)?),
             Box::new(denote_cat(a)?),

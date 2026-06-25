@@ -405,11 +405,12 @@ Each slice ships **with** its check. The order is dependency-forced.
   `gt(deg_large(x), std_large)` (unified positive). The comparison-morphology generator (grounded suppletive
   table + periphrastic) is built; the importer flags gradability by the WordNet pertainym pointer
   (descriptive ⇒ gradable measure + comparative; relational ⇒ Boolean) — corpus felicity-clean.
-  **6-mod** — **nominal modification (§8.13): named-entity compound ✅ + PP VP-adjunct ✅; N-N compound +
-  PP-as-noun-modifier deferred.** The highest-leverage gap for real scientific prose (most of the WRN
-  litmus). Opaque modification reusing 3b's Σ-refine: `[NP] [N] → Σx:C. compound(x, m)` (engine rule) +
-  prepositions as `(S\NP)\(S\NP)` VP-adjuncts (`λx.λV.λs. And(V(s), prep_*(s, x))`); the `compound`/`prep_*`
-  relations are kernel-uninterpreted, institution-mapped. Deferred: **6-tail** (case + pronouns — case is the syntactic half, pronouns gated on
+  **6-mod** — **nominal modification (§8.13): ✅ done.** The highest-leverage gap for real scientific prose
+  (most of the WRN litmus). Four opaque, institution-mapped rules reusing 3b's Σ-refine: named-entity
+  compound `[NP] [N] → Σx:C. compound(x, m)`; N-N kind compound `[N] [N] → Σx:C. compound_kind(x, M)`;
+  prepositions as `(S\NP)\(S\NP)` VP-adjuncts (`λx.λV.λs. And(V(s), prep_*(s, x))`) AND as `cat_pp` post-
+  nominal noun-modifiers (`[N] [PP] → Σx:C. prep_*(x, y)`) — both entries per preposition, so PP-attachment
+  ambiguity is carried in the forest. Left-branching NF collapses 3+-noun compound chains to one bracketing. Deferred: **6-tail** (case + pronouns — case is the syntactic half, pronouns gated on
   **anaphora resolution**, designed in [D64](d64-llm-anaphora-resolution.md): an LLM resolver behind the
   felicity oracle, pronouns → committed-resource IRIs).
 - **Slice 7 — full-WordNet operationalization (scale-up).** *Orthogonal to the grammar slices* —
@@ -1372,20 +1373,38 @@ reused for the predicate. *Deferred:* superlative (gated on the definite "the"),
 
 ### 8.13 Slice 6-mod — nominal modification: compound nouns + PP adjuncts
 
-**Partially built — named-entity compound ✅ + PP VP-adjunct ✅; N-N kind compound + PP-as-noun-modifier
-deferred.** *Built and green:* the opaque relation axioms (`ontology:compound`, `ontology:prep_in`/`for`/
-`with`/`on`/`from`) in [`ontology.esl`]; the **compound-noun engine rule** in [`parser.rs`] — a `cat_np`
-modifier + head `cat_n(C)` → `cat_n(Σx:C. compound(x, m))` (reusing 3b's Σ + the determiner-`Fst` rule:
-"a BRCA1 cell line affects HeLa" parses, the compound rule firing being the witness); the **PP VP-adjuncts**
-as closed-class prepositions in [`closed-class.esl`] (`((S[dcl,fin]\NP)\(S[dcl,fin]\NP))/NP`, sem
-`λx.λV.λs. logic:And(V(s), prep_*(s, x))`): "HeLa affects BRCA1 in HeLa" → `And(affects(brca1, hela),
-prep_in(hela, hela))`. The relations are **opaque** (institution-mapped, like `is_a`); no kernel change
-(Σ-refine + functor shapes + `logic:And` all exist). Witnesses (`closed_class_determiners`):
-`compound_noun_refines_the_head`, `pp_adjunct_adds_an_opaque_conjunct`. *Deferred (the parallel
-extensions):* the **N-N kind compound** ("mutator load" — `compound_kind : Entity → Set → Prop`, modifier =
-the head noun's type), the **PP-as-noun-modifier** ("biomarker of X" — the same Σ-refine over a head noun,
-an engine rule), the **left-branching bracketing NF** for compound chains, and (as below) the larger
-deferrals. The original design follows.
+**✅ Done.** The nominal/adjunct layer — four engine/lexical rules over opaque, institution-mapped
+relations, no kernel change (Σ-refine + functor shapes + `logic:And` all pre-exist):
+
+1. **Named-entity compound** — engine rule in [`parser.rs`]: a `cat_np` modifier + head `cat_n(C)` →
+   `cat_n(Σx:C. ontology:compound(x, m))`, `m` the modifier entity. "a BRCA1 cell line affects HeLa".
+2. **N-N kind compound** — engine rule: `cat_n(M)` modifier + head `cat_n(C)` →
+   `cat_n(Σx:C. ontology:compound_kind(x, M))`, where the modifier `M` is the left noun's *kind* (its
+   sem, a `Set` — CN-as-types). `compound_kind : Entity → Set → Prop`. "a gene cell line …", "mutator load".
+3. **PP VP-adjunct** — closed-class prepositions in [`closed-class.esl`] (`((S[dcl,fin]\NP)\(S[dcl,fin]\NP))
+   /NP`, sem `λx.λV.λs. logic:And(V(s), ontology:prep_*(s, x))`): "HeLa affects BRCA1 in HeLa" →
+   `And(affects(brca1, hela), prep_in(hela, hela))`. (`in`/`for`/`with`/`on`/`from`.)
+4. **PP noun-modifier** — a new `lexicon:cat_pp` category (⟦·⟧ = Entity → Prop) + post-nominal engine rule
+   `[cat_n(C)] [cat_pp]` → `cat_n(Σx:C. pp(x))`; prepositions `cat_pp / NP`, sem `λy.λx. ontology:prep_*(x, y)`
+   (`of` and also `in`/`for`/`with`/`on`/`from`). "a cell line of BRCA1 …". Because a preposition has BOTH a
+   VP-adjunct (3) and a noun-modifier (4) entry, a PP after an object noun **attaches two ways** —
+   **PP-attachment ambiguity carried in the forest** ("HeLa affects a cell line in HeLa" → 2 parses).
+
+**Left-branching normal form**: a compound's HEAD (right) may not itself be a compound result
+(`is_compound_refined`), so a 3+-noun chain has the single bracketing `[[A B] C]` (no spurious `[A [B C]]`);
+an *attributively*-refined head is still allowed (a distinct structure, not spurious). `cat_pp` is kept
+distinct from a bare adjective (`S[adj]\NP`) so a post-nominal adjective never spuriously refines, and from
+the VP-adjunct preposition so (3) and (4) stay separate parses.
+
+The modifier relations are **opaque** (institution-mapped, like `is_a` / the modals): the grammar
+guarantees a felicitous typed tree exposing the parts; the precise relation is grounding-supplied (D62).
+**Structural fix landed alongside:** common nouns are now number-**underspecified** (`cat_n(_, num_any)`) in
+the lexicon — number is a surface/morphology property the lookup index sets per token (`with_noun_num`) — so
+a plural surface reaching a noun via lemmatization no longer keeps a stale `sg`. Witnesses
+(`closed_class_determiners`): `compound_noun_refines_the_head`, `n_n_kind_compound_refines_with_compound_kind`,
+`pp_adjunct_adds_an_opaque_conjunct`, `pp_noun_modifier_refines_the_head`, `pp_attachment_is_ambiguous`,
+`compound_chain_is_left_branching`. *Deferred:* the larger items below (domain-lexicon scale-out, anaphora).
+The original design follows.
 
 The **nominal/adjunct layer** — the single highest-leverage gap for real scientific prose. The WRN litmus (`experiments/publications/wrn-helicase/sentence-corpus.md`) shows it
 bluntly: **compound nouns** ("WRN depletion", "mutator load", "helicase activity") block ~26 of 31

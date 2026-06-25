@@ -1125,15 +1125,9 @@ axiom lexicon:q : lexicon:Entity -> Prop
 // (`build_closed_class`); e.g. `every` is `lexicon:every_subj`. Only the demo
 // scaffolding the engine unit tests reference is declared in this snippet.
 
-// A common noun `N_Gene` for the determiner to consume.
-resource lexicon:e_gene_noun : lexicon:LexicalEntry {
-    lexicon:form     = "gene";
-    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Gene, lexicon:num_any) );
-    lexicon:sem      = lexicon:Gene;
-    lexicon:sem_type = type_expr( Set );
-    lexicon:sense    = "x";
-    lexicon:grade    = epistemic:declared;
-}
+// The common noun `N_Gene` the determiner consumes comes from the demo lexicon
+// (`lexicon:e_gene`, `cat_n(Gene, num_any)`) — build_lexicon provides it, so no
+// duplicate is declared here (two "gene" entries would double every parse).
 
 // The supertype common noun `N_Entity` — the wider restrictor used in the FraCaS
 // monotonicity check (`every entity …` ⊨ `every gene …`, since Gene ≤ Entity).
@@ -1271,7 +1265,7 @@ fn cat_forall_dependent_application_instantiates_and_stays_felicitous() {
         det_sem_exp(),
     );
     let noun = Item::new(
-        poly_cat(&layer, "urn:eigenius:lexicon:e_gene_noun"),
+        poly_cat(&layer, "urn:eigenius:lexicon:e_gene"),
         Exp::EigonClass(gene.clone()),
     );
     let expected = poly_cat(&layer, "urn:eigenius:lexicon:e_det_result");

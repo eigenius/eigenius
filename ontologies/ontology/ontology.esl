@@ -41,6 +41,11 @@ axiom ontology:subclass_of : Set -> Set -> Prop
 // ("WRN depletion" → Σx:Depletion. compound(x, WRN)). `prep_*(s, y)`: the predication s
 // stands in the prepositional relation to y ("… in MSI" → … ∧ prep_in(s, MSI)).
 axiom ontology:compound : lexicon:Entity -> lexicon:Entity -> Prop
+// N-N kind compound — the modifier is a common noun (a kind/`Set`), not an entity:
+// "mutator load" → Σx:Load. compound_kind(x, Mutator). (`compound` above is for a
+// named-entity modifier; `compound_kind` for a common-noun modifier.)
+axiom ontology:compound_kind : lexicon:Entity -> Set -> Prop
+axiom ontology:prep_of   : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_in   : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_for  : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_with : lexicon:Entity -> lexicon:Entity -> Prop
