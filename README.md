@@ -529,6 +529,25 @@ Deno on the host. Install Docker Engine and Compose v2 per your
 distribution's instructions; then see the [Docker Compose](#docker-compose)
 section below.
 
+**WordNet lexicon (optional, for the DCG / natural-language engine)**
+
+The English grammar engine (D63) parses prose against a lexicon imported
+from WordNet 3.0. WordNet is a third-party corpus and is **not vendored**
+in this repo (`references/` is gitignored); provision it on demand with:
+
+```bash
+scripts/provision-wordnet.sh                 # download + convert + validate (full, ~minutes)
+scripts/provision-wordnet.sh --seed gene     # a small seeded slice (fast, for trying it out)
+```
+
+The script downloads WordNet into `references/`, runs the deterministic
+importer to an Eigon-ESL lexicon (`wordnet-full.esl`, also gitignored —
+it is regenerable and large), and validates it through the kernel. To
+persist it into a running service, pass `--endpoint <addr>` (loads the
+layer like any other). The emitted lexicon carries the WordNet 3.0
+license notice. See [Installation §2.6](docs/guides/platform/02-installation.md)
+for details.
+
 **Note for WSL 2 users:** all of the above installs into the WSL
 distribution (Ubuntu or similar), not Windows itself. VS Code's WSL
 remote extension is the smoothest way to edit the repo from Windows

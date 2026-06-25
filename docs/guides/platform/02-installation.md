@@ -83,7 +83,27 @@ brew install gh              # macOS
 gh auth login
 ```
 
-## 2.6. WSL 2 notes
+## 2.6. Optional: WordNet lexicon (the DCG / natural-language engine)
+
+The English grammar engine (D63) parses prose against a lexicon imported from **WordNet 3.0**. WordNet is a third-party corpus and is **not vendored** in this repo (`references/` is gitignored, like the `data/` corpora that ship via git-LFS) — it is provisioned on demand. You only need this if you are working on the DCG / lexicon engine.
+
+One script does download → convert → load:
+
+```bash
+scripts/provision-wordnet.sh                          # full import: download + convert + validate
+scripts/provision-wordnet.sh --seed gene --seed depend  # a small SEEDED slice (fast — for trying it out)
+scripts/provision-wordnet.sh --endpoint 127.0.0.1:50051 # ... and persist into a running `eigenius serve`
+```
+
+What it does:
+
+- **download** — fetches WordNet 3.0 into `references/WordNet-3.0/` (idempotent; skipped if already present). Override the source with `WORDNET_URL=<mirror>`, and optionally verify with `WORDNET_SHA256=<digest>`.
+- **convert** — runs the **deterministic** importer (`wordnet-import`, no LLM) to an Eigon-ESL lexicon document. The full import is ~325k `LexicalEntry` resources (a few minutes to validate); a `--seed`/`--limit` slice is fast. Output is `wordnet-full.esl` (gitignored — it is regenerable and ~150 MB, so it is **not** committed; treat it as a build artifact).
+- **load** — `--validate` (compile + felicity-gate = an in-memory load proof) always runs; with `--endpoint`, the layer is additionally committed into a running `eigenius serve --db <path>` and persisted like any other layer (see [§6 Database management](06-database-management.md)).
+
+The emitted lexicon embeds WordNet content (glosses, lemmas, the synset lattice), so it is a derivative work and carries the **WordNet 3.0 license notice** at its head (Princeton's license permits redistribution with that notice).
+
+## 2.7. WSL 2 notes
 
 All toolchain installs land in the WSL distribution (Ubuntu, etc.), not in Windows itself. Expected practice:
 
@@ -93,7 +113,7 @@ All toolchain installs land in the WSL distribution (Ubuntu, etc.), not in Windo
 
 If `cargo build` is slow, the WSL filesystem may be using `/mnt/c/...` (the Windows filesystem mounted into WSL); cloning the repo into the native WSL filesystem (`~/src/eigenius`) is dramatically faster for build operations.
 
-## 2.7. Verifying the install
+## 2.8. Verifying the install
 
 After all required tools are installed:
 
@@ -118,7 +138,7 @@ deno cache src/main.ts
 
 A clean `deno cache` resolves all TypeScript dependencies without errors.
 
-## 2.8. What to install next
+## 2.9. What to install next
 
 | If you want to … | Install |
 |---|---|

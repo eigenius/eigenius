@@ -41,11 +41,27 @@ use eigenius_wordnet::convert::render_document;
 use eigenius_wordnet::import::{read_sense_ranks, select_synsets, SeedSpec};
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 
-/// The in-repo WordNet 3.0 dict (workspace-root-relative to this crate).
+/// The WordNet 3.0 dict — `<repo-root>/references/WordNet-3.0/dict`. WordNet is a
+/// third-party corpus, NOT vendored (`references/` is gitignored); provision it with
+/// `scripts/provision-wordnet.sh`.
 const DICT: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../references/WordNet-3.0/dict"
 );
+
+/// Skip a dict-dependent test cleanly when WordNet isn't provisioned (fresh checkout / CI
+/// — `references/` is gitignored). Returns `true` (after logging) when the dict is absent,
+/// so the caller early-returns instead of panicking. Checks `data.noun` as the sentinel.
+fn dict_missing() -> bool {
+    if std::path::Path::new(DICT).join("data.noun").exists() {
+        return false;
+    }
+    eprintln!(
+        "SKIP: WordNet dict not found under {DICT} — run scripts/provision-wordnet.sh \
+         (references/ is gitignored; this test needs the WordNet 3.0 corpus)"
+    );
+    true
+}
 
 /// Stand up a WordNet layer for `spec`: select (closed under hypernymy) → render →
 /// compile over the bootstrap head → build (in-memory). Returns the standing layer
@@ -115,6 +131,9 @@ fn stage_a_battery_parses_to_props_over_real_wordnet() {
     // Stand up a seeded, hypernymy-closed slice of REAL WordNet and parse the
     // battery through the engine to kernel-checked Props. Sense ambiguity makes the
     // forest > 1 (measured below); the felicity gate keeps the well-typed ones.
+    if dict_missing() {
+        return;
+    }
     let (layer, build) = stand_up(&SeedSpec::seeded(BATTERY_SEEDS.iter().copied()));
     let t0 = Instant::now();
     let index = LexicalIndex::build(Arc::clone(&layer));
@@ -166,6 +185,9 @@ fn no_spurious_duplication_from_feature_vars() {
     // the forest is a DISTINCT sense-tuple: total == distinct, with no byte-identical
     // copies. (Before the fix, Morphy's `eats → {eat, eats}` let the base + plural verb
     // forms also pass the singular subject determiner, tripling the forest.)
+    if dict_missing() {
+        return;
+    }
     let (_layer, index) = {
         let (l, _) = stand_up(&SeedSpec::seeded(BATTERY_SEEDS.iter().copied()));
         let i = LexicalIndex::build(Arc::clone(&l));
@@ -193,6 +215,9 @@ fn singular_subject_rejects_bare_and_plural_verb() {
     // bare/plural verb form has NO parse — even though Morphy reaches those forms from
     // "eats". Before the fix the object determiner laundered finiteness/number to `_any`,
     // so "every cat eat a fish" wrongly parsed (112×).
+    if dict_missing() {
+        return;
+    }
     let (_layer, index) = {
         let (l, _) = stand_up(&SeedSpec::seeded(BATTERY_SEEDS.iter().copied()));
         let i = LexicalIndex::build(Arc::clone(&l));
