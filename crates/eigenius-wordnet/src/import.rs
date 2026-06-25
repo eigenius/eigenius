@@ -22,8 +22,10 @@
 //! synset set from the same spec.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::Path;
 
+use crate::convert::SenseRanks;
 use crate::wndb::{read_data_file, Offset, Pos, Synset};
 
 /// `entity.n.01` — the noun-lattice root; always pulled in so verb/adjective
@@ -113,6 +115,42 @@ fn select_seeds(index: &BTreeMap<Offset, Synset>, spec: &SeedSpec) -> BTreeSet<O
         }
     }
     seeds
+}
+
+/// Read each requested POS's `index.<pos>` and build the sense-frequency ranks
+/// (D63 §8.7 Stage B): WordNet lists a lemma's synsets in `index.<pos>` in decreasing
+/// frequency (sense 1 = most frequent), so the i-th offset gets rank `i` (0-based). The
+/// key is the entry `sense` (`wn:{lemma}.{tag}.{offset}`), matching
+/// [`crate::convert::render_document`]'s lookup. Unranked lemmas (and the
+/// case-mismatched proper nouns, which `index` lowercases) simply default to rank 0.
+pub fn read_sense_ranks(dict: &Path, pos_set: &[Pos]) -> std::io::Result<SenseRanks> {
+    let mut ranks = SenseRanks::new();
+    for &pos in pos_set {
+        let content = match fs::read_to_string(dict.join(pos.index_file())) {
+            Ok(c) => c,
+            Err(_) => continue, // a missing index for a POS is non-fatal (ranks stay 0)
+        };
+        for line in content.lines() {
+            // The license preamble lines begin with two spaces, not a lemma.
+            if line.starts_with("  ") {
+                continue;
+            }
+            let tok: Vec<&str> = line.split_whitespace().collect();
+            // `lemma pos synset_cnt p_cnt [ptrs…] sense_cnt tagsense_cnt offset…`
+            let Some(syn_cnt) = tok.get(2).and_then(|n| n.parse::<usize>().ok()) else {
+                continue;
+            };
+            if syn_cnt == 0 || tok.len() < syn_cnt {
+                continue;
+            }
+            let lemma = tok[0];
+            // The synset offsets are the trailing `syn_cnt` tokens, in sense order.
+            for (i, off) in tok[tok.len() - syn_cnt..].iter().enumerate() {
+                ranks.insert(format!("wn:{lemma}.{}.{off}", pos.tag()), i as u32);
+            }
+        }
+    }
+    Ok(ranks)
 }
 
 /// Read the dict and gather the synsets to render for `spec` — noun selection

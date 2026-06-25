@@ -51,25 +51,53 @@ pub enum Combinator {
     Other,
 }
 
-/// A parse item: a category (`lexicon:Cat` term), its assembled EigenTT sem, and the
-/// combinator [`Combinator`] that produced it (for Eisner normal form).
+/// A parse item: a category (`lexicon:Cat` term), its assembled EigenTT sem, the
+/// combinator [`Combinator`] that produced it (for Eisner normal form), and its
+/// **cost** — an abstract additive weight summed by the combinators and used to
+/// rank + cap the forest (D63 §8.7 Stage B). A leaf's cost is set by whoever builds
+/// it (the lexical index sets it from the entry's `lexicon:sense_rank`, so a
+/// lower-cost parse uses more-frequent WordNet senses); the kernel never learns the
+/// cost *means* sense frequency — it only sums an opaque weight, keeping the engine
+/// sense-agnostic (the §6 forest-returns boundary). Cost 0 throughout (closed-class
+/// / demo entries) leaves single-parse ordering and the cap unaffected.
 #[derive(Clone)]
 pub struct Item {
     pub cat: Exp,
     pub sem: Exp,
     pub prov: Combinator,
+    pub cost: u32,
 }
 
 impl Item {
     /// A leaf / non-combinatory item (a lexical seed, or any constituent not
-    /// produced by a composition rule) — `prov = Other`, so Eisner normal form
-    /// never blocks it. The default constructor for callers outside `apply`.
+    /// produced by a composition rule) — `prov = Other`, cost `0`. The default
+    /// constructor for callers outside `apply`; set a non-zero cost with
+    /// [`Item::with_cost`].
     pub fn new(cat: Exp, sem: Exp) -> Self {
         Item {
             cat,
             sem,
             prov: Combinator::Other,
+            cost: 0,
         }
+    }
+
+    /// Same as [`Item::new`] but with an explicit leaf `cost` — used by the lexical
+    /// index to stamp an entry's `sense_rank` onto its leaf item.
+    pub fn with_cost(cat: Exp, sem: Exp, cost: u32) -> Self {
+        Item {
+            cat,
+            sem,
+            prov: Combinator::Other,
+            cost,
+        }
+    }
+
+    /// This item with its cost replaced (preserving cat/sem/prov) — for unary
+    /// transforms (type-raise, number refinement) that carry a child's cost through.
+    fn at_cost(mut self, cost: u32) -> Self {
+        self.cost = cost;
+        self
     }
 }
 
@@ -81,7 +109,16 @@ impl Item {
 /// substituted through the result category ([`subst_cat`]), so a determiner's `T`
 /// flows into the produced `S/(S\NP_Gene)`. A non-match returns `None` — the
 /// parse-time felicity filter, on the category alone.
+///
+/// The result's [`Item::cost`] is the **sum** of the two inputs' costs (D63 §8.7
+/// Stage B): every combination is binary, so a parse's cost is the sum of its
+/// leaves' costs — the additive weight the forest is ranked + capped by. The inner
+/// [`apply_combine`] builds the cat/sem/prov; this wrapper stamps the summed cost.
 pub fn apply(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
+    apply_combine(left, right, layer).map(|it| it.at_cost(left.cost.saturating_add(right.cost)))
+}
+
+fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
     // Dependent forward application (the determiner case, D63 §8.2 item 3): a
     // polymorphic `cat_forall(λT:Set. R[T])` consumes a common noun `N_G` on its
     // right, binding the bound type `T := G` and yielding `R[G]`. The sem applies
@@ -120,6 +157,7 @@ pub fn apply(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
                         cat: subst_cat(body, &subst),
                         sem,
                         prov: Combinator::ForwardApp,
+                        cost: 0,
                     });
                 }
                 let mut subst = CatSubst::new();
@@ -128,6 +166,7 @@ pub fn apply(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
                     cat: subst_cat(body, &subst),
                     sem: Exp::App(Box::new(left.sem.clone()), Box::new(right.sem.clone())),
                     prov: Combinator::ForwardApp,
+                    cost: 0,
                 });
             }
         }
@@ -148,6 +187,7 @@ pub fn apply(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
                         cat: subst_cat(&args[0], &subst),
                         sem: Exp::App(Box::new(left.sem.clone()), Box::new(right.sem.clone())),
                         prov: Combinator::ForwardApp,
+                        cost: 0,
                     });
                 }
             }
@@ -160,6 +200,7 @@ pub fn apply(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
                     cat: subst_cat(&args[0], &subst),
                     sem: Exp::App(Box::new(right.sem.clone()), Box::new(left.sem.clone())),
                     prov: Combinator::BackwardApp,
+                    cost: 0,
                 });
             }
         }
@@ -194,6 +235,7 @@ pub fn apply(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
                             cat: result,
                             sem,
                             prov: Combinator::ForwardComp,
+                            cost: 0,
                         });
                     }
                 }
@@ -219,6 +261,7 @@ pub fn apply(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
                     cat: result.clone(),
                     sem,
                     prov: Combinator::Other,
+                    cost: 0,
                 });
             }
         }
@@ -236,6 +279,7 @@ pub fn apply(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
                     cat: result.clone(),
                     sem,
                     prov: Combinator::Other,
+                    cost: 0,
                 });
             }
         }
@@ -268,6 +312,7 @@ pub fn apply(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
                     ),
                     sem: sigma,
                     prov: Combinator::Other,
+                    cost: 0,
                 });
             }
         }
@@ -365,6 +410,7 @@ fn refined_noun(
         ),
         sem: sigma,
         prov: Combinator::Other,
+        cost: 0,
     }
 }
 

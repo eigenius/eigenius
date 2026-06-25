@@ -116,14 +116,44 @@ pub fn gate_entry(layer: &Arc<Layer>, entry: &Resource) -> Result<Exp, String> {
     Ok(denoted)
 }
 
-/// Build a parse item (category + resolved sem) from a committed lexical entry.
+/// Build a parse item (category + resolved sem) from a committed lexical entry. The
+/// leaf's **cost** is the entry's `lexicon:sense_rank` (D63 §8.7 Stage B) — a 0-based
+/// WordNet sense-frequency rank (sense 1 → 0); absent ⇒ 0 (closed-class / demo
+/// entries). The parser sums leaf costs, so a parse using more-frequent senses has a
+/// lower cost and ranks higher.
 pub fn entry_to_item(layer: &Arc<Layer>, entry: &Resource) -> Result<Item, String> {
     let cat_v = entry
         .get(&iri("urn:eigenius:lexicon:cat"))
         .ok_or("entry has no `cat`")?;
-    let cat = decode_type(cat_v, layer).map_err(|e| format!("cat decode: {e:?}"))?;
+    let cat =
+        strip_feature_binders(decode_type(cat_v, layer).map_err(|e| format!("cat decode: {e:?}"))?);
     let sem_v = entry
         .get(&iri("urn:eigenius:lexicon:sem"))
         .ok_or("entry has no `sem`")?;
-    Ok(Item::new(cat, resolve_sem_value(layer, sem_v)?))
+    let cost = entry
+        .get(&iri("urn:eigenius:lexicon:sense_rank"))
+        .and_then(Value::as_integer)
+        .unwrap_or(0)
+        .max(0) as u32;
+    Ok(Item::with_cost(cat, resolve_sem_value(layer, sem_v)?, cost))
+}
+
+/// Peel `cat_fin_forall` / `cat_num_forall` binders off a leaf category (D63 §8.10),
+/// leaving its feature variables FREE — so the parser's unifier binds them
+/// (call-locally) from the consumed verb's real features and `subst_cat` propagates
+/// them into the produced VP. Felicity gating reads the resource's full (binder-
+/// wrapped) cat, where `⟦·⟧` erases the binder; only the parse item uses the
+/// stripped form. The binder's `Exp::Lam` bound name appears as `Exp::Var` in the
+/// body — which is exactly the free feature variable the parser then unifies.
+fn strip_feature_binders(cat: Exp) -> Exp {
+    if let Exp::InductiveCtor(_, name, args) = &cat {
+        if (name.as_str() == "cat_fin_forall" || name.as_str() == "cat_num_forall")
+            && args.len() == 1
+        {
+            if let Exp::Lam(_patt, body) = &args[0] {
+                return strip_feature_binders((**body).clone());
+            }
+        }
+    }
+    cat
 }

@@ -29,6 +29,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::inflect::{comparison, gerund, past_participles, third_singular, Comparison};
 use crate::wndb::{Offset, Pos, Synset};
 
+/// Sense-frequency ranks keyed by the entry's `sense` key (`wn:{lemma}.{tag}.{offset}`,
+/// as [`sense_key`] forms it) → 0-based rank (sense 1 → 0). Built by
+/// [`crate::import::read_sense_ranks`] from `index.<pos>` (whose per-lemma synset list
+/// is frequency-sorted). An absent key ⇒ rank 0. Threaded into [`render_document`] so a
+/// polysemous lemma's rarer senses get a higher `lexicon:sense_rank` (D63 §8.7 Stage B).
+pub type SenseRanks = BTreeMap<String, u32>;
+
 /// The **entity top** (D63 §8.3, decision ii): the schema-level foundational
 /// entity type (`lexicon:Entity`) that verb/adjective argument slots — and the
 /// determiners' subject `E` — are typed at. WordNet's `entity.n.01`
@@ -166,6 +173,7 @@ fn sense_key(syn: &Synset, lemma: &str) -> String {
 
 /// Emit one `lexicon:LexicalEntry` block. `entry_id` and `sem` are local names
 /// (under `wn:`); `cat` / `sem_type` are `type_expr` bodies.
+#[allow(clippy::too_many_arguments)]
 fn push_entry(
     buf: &mut String,
     entry_id: &str,
@@ -174,7 +182,15 @@ fn push_entry(
     sem: &str,
     sem_type: &str,
     sense: &str,
+    ranks: &SenseRanks,
 ) {
+    // Sense-frequency rank (D63 §8.7 Stage B): emit `lexicon:sense_rank` only when it is
+    // non-zero (rank 0 = the most-frequent sense, and the parser's default — so the
+    // overwhelming majority of entries stay rank-free, keeping the ESL lean).
+    let rank_line = match ranks.get(sense).copied().unwrap_or(0) {
+        0 => String::new(),
+        r => format!("    lexicon:sense_rank = {r};\n"),
+    };
     buf.push_str(&format!(
         "resource wn:{entry_id} : lexicon:LexicalEntry {{\n\
          \x20   lexicon:form     = \"{form}\";\n\
@@ -182,6 +198,7 @@ fn push_entry(
          \x20   lexicon:sem      = wn:{sem};\n\
          \x20   lexicon:sem_type = type_expr( {sem_type} );\n\
          \x20   lexicon:sense    = \"{sense}\";\n\
+         {rank_line}\
          \x20   lexicon:grade    = epistemic:declared;\n\
          }}\n\n",
         form = esc(form),
@@ -190,7 +207,13 @@ fn push_entry(
 
 /// Noun synset → a `core:Class` (with `subclass_of` from `@`) + one `N` entry
 /// per lemma.
-fn push_noun(buf: &mut String, syn: &Synset, rep: &mut Report, noun: &BTreeMap<Offset, &Synset>) {
+fn push_noun(
+    buf: &mut String,
+    syn: &Synset,
+    rep: &mut Report,
+    noun: &BTreeMap<Offset, &Synset>,
+    ranks: &SenseRanks,
+) {
     // `@` hypernyms → `subclass_of`, each resolved to the nearest CLASS. WordNet has
     // class synsets whose `@` parent is an INSTANCE (British_West_Indies `@` West_Indies
     // `@i` archipelago) — a class can't be a subclass of an individual, so climb the
@@ -226,6 +249,7 @@ fn push_noun(buf: &mut String, syn: &Synset, rep: &mut Report, noun: &BTreeMap<O
             &local(syn),
             "Set",
             &sense_key(syn, lemma),
+            ranks,
         );
         rep.entries += 1;
     }
@@ -244,6 +268,7 @@ fn push_instance(
     syn: &Synset,
     rep: &mut Report,
     noun: &BTreeMap<Offset, &Synset>,
+    ranks: &SenseRanks,
 ) {
     // Types: `@i` first (the instance-hypernyms), then any rare plain `@` — each
     // resolved to the nearest CLASS. WordNet chains instances (`@i`) — Paternoster
@@ -280,6 +305,7 @@ fn push_instance(
                 &local(syn),
                 class,
                 &sense_key(syn, lemma),
+                ranks,
             );
             rep.entries += 1;
         }
@@ -344,7 +370,7 @@ fn head_pps(lemma: &str) -> Vec<String> {
 /// questions, negation, and modals fire on imported verbs (not just the hand demo), and
 /// fixes the former base-as-`fin` mistag (bare "affect" no longer parses as finite).
 /// Returns `false` (deferred) when no frame is emittable.
-fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report) -> bool {
+fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks) -> bool {
     let kinds: std::collections::BTreeSet<FrameKind> =
         syn.frames.iter().filter_map(|&f| classify(f)).collect();
     if kinds.is_empty() {
@@ -372,6 +398,7 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report) -> bool {
                 &sem,
                 &arrow,
                 &sense,
+                ranks,
             );
             rep.entries += 1;
             // Finite 3sg ("affects") — SINGULAR subject (D63 §8.10 6-agr).
@@ -384,6 +411,7 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report) -> bool {
                 &sem,
                 &arrow,
                 &sense,
+                ranks,
             );
             rep.entries += 1;
             // Finite plural ("affect", = the lemma surface) — PLURAL subject (6-agr):
@@ -396,6 +424,7 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report) -> bool {
                 &sem,
                 &arrow,
                 &sense,
+                ranks,
             );
             rep.entries += 1;
             // Present participle — progressive ("is affecting"); always regular.
@@ -408,13 +437,14 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report) -> bool {
                 &sem,
                 &arrow,
                 &sense,
+                ranks,
             );
             rep.entries += 1;
             rep.participle_entries += 1;
             // Past participle(s) — perfect/passive ("has/is affected"); table-or-regular.
             for (k, pp) in head_pps(lemma).iter().enumerate() {
                 let id = format!("e_v{off}_{tag}_{i}_p{k}");
-                push_entry(buf, &id, pp, &cat_pss, &sem, &arrow, &sense);
+                push_entry(buf, &id, pp, &cat_pss, &sem, &arrow, &sense, ranks);
                 rep.entries += 1;
                 rep.participle_entries += 1;
             }
@@ -444,7 +474,7 @@ fn adj_cat() -> String {
 /// (`gt(deg_X(x), deg_X(y))`) via the opaque float ordering `measurements:gt` (combo 1).
 /// Comparative surfaces come from [`comparison`]; periphrastic ("more X") adjectives emit
 /// only the positive (the `more`/`most` words are a follow-on). Superlatives await "the".
-fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report) {
+fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks) {
     let loc = local(syn);
     let prop_arrow = format!("{ENTITY_TOP} -> Prop");
     if syn.relational {
@@ -461,6 +491,7 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report) {
                 &loc,
                 &prop_arrow,
                 &sense_key(syn, lemma),
+                ranks,
             );
             rep.entries += 1;
         }
@@ -496,6 +527,7 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report) {
             &format!("pos_sem_{loc}"),
             &prop_arrow,
             &sense,
+            ranks,
         );
         rep.entries += 1;
         // Comparative (synthetic `-er` only; periphrastic "more X" is a follow-on).
@@ -509,6 +541,7 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report) {
                     &format!("cmp_sem_{loc}"),
                     &cmp_arrow,
                     &sense,
+                    ranks,
                 );
                 rep.entries += 1;
             }
@@ -520,7 +553,9 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report) {
 /// closure (every `@` parent + [`ENTITY_TOP`] present); rendering is order-
 /// independent (references resolve at layer time). Output is deterministic:
 /// synsets are emitted sorted by `(pos, offset)`, declarations before entries.
-pub fn render_document(synsets: &[Synset]) -> (String, Report) {
+/// `ranks` supplies each lemma's sense-frequency rank → `lexicon:sense_rank` (D63
+/// §8.7 Stage B); pass an empty map to omit ranks (all default 0).
+pub fn render_document(synsets: &[Synset], ranks: &SenseRanks) -> (String, Report) {
     let mut sorted: Vec<&Synset> = synsets.iter().collect();
     sorted.sort_by(|a, b| (a.pos, &a.offset).cmp(&(b.pos, &b.offset)));
 
@@ -542,21 +577,21 @@ pub fn render_document(synsets: &[Synset]) -> (String, Report) {
             Pos::Noun => {
                 let mut block = String::new();
                 if syn.instance_of.is_empty() {
-                    push_noun(&mut block, syn, &mut rep, &noun_index);
+                    push_noun(&mut block, syn, &mut rep, &noun_index, ranks);
                 } else {
-                    push_instance(&mut block, syn, &mut rep, &noun_index);
+                    push_instance(&mut block, syn, &mut rep, &noun_index, ranks);
                 }
                 route(&block, &mut decls, &mut entries);
             }
             Pos::Verb => {
                 let mut block = String::new();
-                if push_verb(&mut block, syn, &mut rep) {
+                if push_verb(&mut block, syn, &mut rep, ranks) {
                     route(&block, &mut decls, &mut entries);
                 }
             }
             Pos::Adj => {
                 let mut block = String::new();
-                push_adj(&mut block, syn, &mut rep);
+                push_adj(&mut block, syn, &mut rep, ranks);
                 route(&block, &mut decls, &mut entries);
             }
             Pos::Adv => {} // deferred (§8.7.5)
@@ -615,7 +650,13 @@ mod tests {
         let gene = syn("05444328 08 n 03 gene 0 cistron 0 factor 0 003 @ 08476263 n 0000 #p 14854534 n 0000 #p 05449707 n 0000 | a segment of DNA");
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_noun(&mut buf, &gene, &mut rep, &BTreeMap::new());
+        push_noun(
+            &mut buf,
+            &gene,
+            &mut rep,
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+        );
         assert!(buf.contains("class wn:n05444328 : wn:n08476263 {"));
         assert!(buf.contains("description = \"a segment of DNA\";"));
         assert!(buf.contains("resource wn:e_n05444328_0 : lexicon:LexicalEntry {"));
@@ -630,13 +671,46 @@ mod tests {
     }
 
     #[test]
+    fn sense_rank_is_emitted_only_when_nonzero() {
+        // D63 §8.7 Stage B: a ranked sense → `lexicon:sense_rank`; rank 0 → omitted.
+        let gene = syn("05444328 08 n 03 gene 0 cistron 0 factor 0 003 @ 08476263 n 0000 #p 14854534 n 0000 #p 05449707 n 0000 | a segment of DNA");
+        let mut ranks = SenseRanks::new();
+        ranks.insert("wn:gene.n.05444328".into(), 2); // gene = 3rd sense
+        ranks.insert("wn:cistron.n.05444328".into(), 0); // most-frequent → omitted
+        let mut buf = String::new();
+        push_noun(
+            &mut buf,
+            &gene,
+            &mut Report::default(),
+            &BTreeMap::new(),
+            &ranks,
+        );
+        // The `gene` entry carries the rank; `cistron` (rank 0) and `factor` (absent) do not.
+        assert!(
+            buf.contains("lexicon:form     = \"gene\";\n    lexicon:cat      = type_expr( lexicon:cat_n(wn:n05444328, lexicon:num_any) );\n    lexicon:sem      = wn:n05444328;\n    lexicon:sem_type = type_expr( Set );\n    lexicon:sense    = \"wn:gene.n.05444328\";\n    lexicon:sense_rank = 2;\n"),
+            "the ranked `gene` entry must carry sense_rank 2, got:\n{buf}"
+        );
+        assert_eq!(
+            buf.matches("lexicon:sense_rank").count(),
+            1,
+            "only the nonzero rank emits"
+        );
+    }
+
+    #[test]
     fn root_noun_is_rooted_at_the_schema_entity_top() {
         // WordNet's hypernym-less root `entity.n.01` is parented at the schema
         // entity top `lexicon:Entity` (D63 §8.3 ii), so the whole noun lattice
         // sits under it.
         let entity = syn("00001740 03 n 01 entity 0 001 ~ 00001930 n 0000 | that which exists");
         let mut buf = String::new();
-        push_noun(&mut buf, &entity, &mut Report::default(), &BTreeMap::new());
+        push_noun(
+            &mut buf,
+            &entity,
+            &mut Report::default(),
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+        );
         assert!(buf.contains("class wn:n00001740 : lexicon:Entity {"));
     }
 
@@ -646,7 +720,13 @@ mod tests {
         let einstein = syn("10954498 18 n 02 Einstein 0 Albert_Einstein 0 002 @i 10428004 n 0000 + 03031247 a 0301 | a physicist");
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_instance(&mut buf, &einstein, &mut rep, &BTreeMap::new());
+        push_instance(
+            &mut buf,
+            &einstein,
+            &mut rep,
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+        );
         // Emitted as a RESOURCE (instance of its class), never a `class`.
         assert!(buf.contains("resource wn:n10954498 : wn:n10428004 {"));
         assert!(!buf.contains("class wn:n10954498"));
@@ -671,7 +751,7 @@ mod tests {
         let v = syn("00000009 18 n 01 Enlightenment 0 002 @i 15254028 n 0000 @ 08473623 n 0000 | a movement");
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_instance(&mut buf, &v, &mut rep, &BTreeMap::new());
+        push_instance(&mut buf, &v, &mut rep, &BTreeMap::new(), &SenseRanks::new());
         // both classes on the resource — @i first, then the rare plain @.
         assert!(buf.contains("resource wn:n00000009 : wn:n15254028, wn:n08473623 {"));
         // one NP entry per class (both type contexts reachable).
@@ -700,7 +780,7 @@ mod tests {
 
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_instance(&mut buf, &pater, &mut rep, &noun_index);
+        push_instance(&mut buf, &pater, &mut rep, &noun_index, &SenseRanks::new());
         // Typed at the nearest CLASS (prayer = n06455990), NOT the instance Lord's_Prayer.
         assert!(
             buf.contains("resource wn:n06457796 : wn:n06455990 {"),
@@ -724,7 +804,7 @@ mod tests {
             syn("10428004 18 n 01 physicist 0 000 | a scientist"),
             syn("10954498 18 n 01 Einstein 0 001 @i 10428004 n 0000 | a physicist"),
         ];
-        let (doc, rep) = render_document(&synsets);
+        let (doc, rep) = render_document(&synsets, &SenseRanks::new());
         assert!(doc.contains("class wn:n10428004 : lexicon:Entity {"));
         assert!(doc.contains("resource wn:n10954498 : wn:n10428004 {"));
         assert!(!doc.contains("class wn:n10954498"));
@@ -737,7 +817,7 @@ mod tests {
         let eat = syn("00275082 30 v 03 corrode 1 eat 0 rust 1 001 @ 00259743 v 0000 01 + 11 00 | to deteriorate");
         let mut rep = Report::default();
         let mut buf = String::new();
-        assert!(push_verb(&mut buf, &eat, &mut rep));
+        assert!(push_verb(&mut buf, &eat, &mut rep, &SenseRanks::new()));
         // frame 11 → transitive; the axiom IRI is kind-tagged (`_t`).
         assert!(buf.contains("axiom wn:v00275082_t : lexicon:Entity -> lexicon:Entity -> Prop"));
         // Finite 3sg has a SINGULAR subject slot (6-agr); object slot stays num_any.
@@ -770,7 +850,12 @@ mod tests {
         // pointing at the SAME axiom, differing only in the result clause's Fin feature.
         let eat = syn("00275082 30 v 03 corrode 1 eat 0 rust 1 001 @ 00259743 v 0000 01 + 11 00 | to deteriorate");
         let mut buf = String::new();
-        assert!(push_verb(&mut buf, &eat, &mut Report::default()));
+        assert!(push_verb(
+            &mut buf,
+            &eat,
+            &mut Report::default(),
+            &SenseRanks::new()
+        ));
         // gerund (regular -ing) + its `ger` category.
         assert!(buf.contains("lexicon:form     = \"eating\";"));
         assert!(buf.contains(
@@ -791,7 +876,12 @@ mod tests {
         // "depend on" (frame 13, PP-oblique → transitive): head inflects, particle kept.
         let v = syn("00000002 31 v 01 depend_on 0 000 01 + 13 00 | rely");
         let mut buf = String::new();
-        assert!(push_verb(&mut buf, &v, &mut Report::default()));
+        assert!(push_verb(
+            &mut buf,
+            &v,
+            &mut Report::default(),
+            &SenseRanks::new()
+        ));
         assert!(buf.contains("lexicon:form     = \"depend on\";")); // bse
         assert!(buf.contains("lexicon:form     = \"depends on\";")); // fin 3sg
         assert!(buf.contains("lexicon:form     = \"depending on\";"));
@@ -805,7 +895,7 @@ mod tests {
         let v = syn("00001740 29 v 01 breathe 0 000 02 + 02 00 + 08 00 | respire");
         let mut rep = Report::default();
         let mut buf = String::new();
-        assert!(push_verb(&mut buf, &v, &mut rep));
+        assert!(push_verb(&mut buf, &v, &mut rep, &SenseRanks::new()));
         assert!(buf.contains("axiom wn:v00001740_i : lexicon:Entity -> Prop"));
         assert!(buf.contains("axiom wn:v00001740_t : lexicon:Entity -> lexicon:Entity -> Prop"));
         assert_eq!(rep.verb_axioms, 2);
@@ -818,7 +908,12 @@ mod tests {
         // frame 14 "Somebody ----s somebody something" → ditransitive.
         let v = syn("00001234 30 v 01 give 0 000 01 + 14 00 | transfer");
         let mut buf = String::new();
-        assert!(push_verb(&mut buf, &v, &mut Report::default()));
+        assert!(push_verb(
+            &mut buf,
+            &v,
+            &mut Report::default(),
+            &SenseRanks::new()
+        ));
         assert!(buf.contains(
             "axiom wn:v00001234_d : lexicon:Entity -> lexicon:Entity -> lexicon:Entity -> Prop"
         ));
@@ -832,7 +927,7 @@ mod tests {
         let v = syn("00000003 31 v 01 show 0 000 01 + 26 00 | demonstrate");
         let mut rep = Report::default();
         let mut buf = String::new();
-        assert!(push_verb(&mut buf, &v, &mut rep));
+        assert!(push_verb(&mut buf, &v, &mut rep, &SenseRanks::new()));
         assert!(buf.contains("axiom wn:v00000003_c : Prop -> lexicon:Entity -> Prop"));
         assert!(buf.contains("lexicon:form     = \"shows\";")); // 3sg
         assert!(buf.contains(
@@ -848,7 +943,7 @@ mod tests {
         let large = syn("00000001 00 a 01 large 0 000 | of great size");
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_adj(&mut buf, &large, &mut rep);
+        push_adj(&mut buf, &large, &mut rep, &SenseRanks::new());
         assert!(buf.contains("axiom wn:deg_a00000001 : lexicon:Entity -> core:float"));
         assert!(buf.contains("axiom wn:std_a00000001 : core:float"));
         assert!(buf.contains("resource wn:pos_sem_a00000001 : lexicon:SemTerm {"));
@@ -875,7 +970,7 @@ mod tests {
         );
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_adj(&mut buf, &atomic, &mut rep);
+        push_adj(&mut buf, &atomic, &mut rep, &SenseRanks::new());
         assert!(buf.contains("axiom wn:a00000004 : lexicon:Entity -> Prop"));
         assert!(buf.contains("lexicon:form     = \"atomic\";"));
         // no measure / comparative for a relational adjective.
@@ -890,7 +985,7 @@ mod tests {
         let v = syn("00000001 00 v 01 cogitate 0 000 01 + 29 00 | think");
         let mut rep = Report::default();
         let mut buf = String::new();
-        assert!(!push_verb(&mut buf, &v, &mut rep));
+        assert!(!push_verb(&mut buf, &v, &mut rep, &SenseRanks::new()));
         assert_eq!(rep.verbs_deferred, 1);
         assert!(buf.is_empty());
     }
@@ -901,7 +996,7 @@ mod tests {
             syn("00001740 03 n 01 entity 0 000 | the root"),
             syn("05444328 08 n 01 gene 0 001 @ 00001740 n 0000 | a gene"),
         ];
-        let (doc, rep) = render_document(&nouns);
+        let (doc, rep) = render_document(&nouns, &SenseRanks::new());
         assert!(doc.contains("namespace wn         = \"urn:eigenius:wn\";"));
         assert!(doc.contains("class wn:n00001740 : lexicon:Entity {"));
         assert!(doc.contains("class wn:n05444328 : wn:n00001740 {"));

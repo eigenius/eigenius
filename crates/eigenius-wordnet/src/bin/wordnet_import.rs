@@ -44,7 +44,7 @@ use eigenius_kernel::validation::Validator;
 use eigenius_kernel::{bootstrap, esl};
 use eigenius_storage_rocksdb::RocksStore;
 use eigenius_wordnet::convert::render_document;
-use eigenius_wordnet::import::{select_synsets, SeedSpec};
+use eigenius_wordnet::import::{read_sense_ranks, select_synsets, SeedSpec};
 use eigenius_wordnet::wndb::Pos;
 
 #[derive(Parser, Debug)]
@@ -130,8 +130,11 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // Sense-frequency ranks → `lexicon:sense_rank` (D63 §8.7 Stage B); a missing index
+    // is non-fatal (ranks default 0).
+    let ranks = read_sense_ranks(&args.dict, &spec.pos).unwrap_or_default();
 
-    let (doc, rep) = render_document(&chosen);
+    let (doc, rep) = render_document(&chosen, &ranks);
     eprintln!(
         "wordnet import: {} synsets selected → {} noun classes, {} instances, {} verb axioms, \
          {} adj axioms, {} entries ({} of them ger/pss participle forms) \

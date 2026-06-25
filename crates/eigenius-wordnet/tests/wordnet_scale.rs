@@ -29,15 +29,16 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use eigenius_kernel::dcg::{Item, LexicalIndex};
+use eigenius_kernel::dcg::{Identity, Item, LexicalIndex};
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
 use eigenius_kernel::nbe::env::Rho;
+use eigenius_kernel::nbe::eval::eval;
 use eigenius_kernel::nbe::readback::readback_val;
 use eigenius_kernel::nbe::term::Exp;
 use eigenius_kernel::{bootstrap, esl};
 use eigenius_wordnet::convert::render_document;
-use eigenius_wordnet::import::{select_synsets, SeedSpec};
+use eigenius_wordnet::import::{read_sense_ranks, select_synsets, SeedSpec};
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 
 /// The in-repo WordNet 3.0 dict (workspace-root-relative to this crate).
@@ -51,7 +52,8 @@ const DICT: &str = concat!(
 /// plus the wall-clock cost of the build (the index-independent stand-up baseline).
 fn stand_up(spec: &SeedSpec) -> (Arc<Layer>, std::time::Duration) {
     let chosen = select_synsets(std::path::Path::new(DICT), spec).expect("read WordNet dict");
-    let (doc, rep) = render_document(&chosen);
+    let ranks = read_sense_ranks(std::path::Path::new(DICT), &spec.pos).expect("read index ranks");
+    let (doc, rep) = render_document(&chosen, &ranks);
     eprintln!(
         "stand_up: {} synsets → {} noun classes, {} instances, {} verb + {} adj axioms, {} entries",
         chosen.len(),
@@ -135,7 +137,76 @@ fn stage_a_battery_parses_to_props_over_real_wordnet() {
             "'{s}' must yield at least one felicitous Prop over real WordNet (forest={})",
             forest.len()
         );
+        // RANK witness (D63 §8.7 Stage B): the forest is returned lowest-cost
+        // (most-frequent-sense) first — non-decreasing in cost.
+        assert!(
+            forest.windows(2).all(|w| w[0].cost <= w[1].cost),
+            "'{s}': forest must be ranked by ascending sense-frequency cost"
+        );
+        // CAP witness: never more than the default cap (the 1.8k blow-up is bounded).
+        assert!(
+            forest.len() <= eigenius_kernel::dcg::DEFAULT_FOREST_CAP,
+            "'{s}': forest must be capped at DEFAULT_FOREST_CAP"
+        );
     }
+}
+
+/// Readback-normalized sem string, for counting DISTINCT meanings in a forest.
+fn sem_key(sem: &Exp) -> String {
+    format!(
+        "{:?}",
+        readback_val(0, &eval(sem, &Rho::Nil).expect("eval sem"))
+    )
+}
+
+#[test]
+fn no_spurious_duplication_from_feature_vars() {
+    // D63 §8.10 — the object determiner now PRESERVES the verb's finiteness +
+    // subject-number (feature variables, not `*_any` laundering). So every parse in
+    // the forest is a DISTINCT sense-tuple: total == distinct, with no byte-identical
+    // copies. (Before the fix, Morphy's `eats → {eat, eats}` let the base + plural verb
+    // forms also pass the singular subject determiner, tripling the forest.)
+    let (_layer, index) = {
+        let (l, _) = stand_up(&SeedSpec::seeded(BATTERY_SEEDS.iter().copied()));
+        let i = LexicalIndex::build(Arc::clone(&l));
+        (l, i)
+    };
+    let lemma = morphy();
+    // Stays under the cap so the WHOLE forest is observable (no truncation hiding dups).
+    let forest = index.parse("no cat eats a fish", &lemma);
+    let mut keys: Vec<String> = forest.iter().map(|p| sem_key(&p.sem)).collect();
+    let total = keys.len();
+    keys.sort();
+    keys.dedup();
+    assert_eq!(
+        total,
+        keys.len(),
+        "every parse must be a distinct meaning — got {total} parses, {} distinct \
+         (spurious duplication regressed)",
+        keys.len()
+    );
+}
+
+#[test]
+fn singular_subject_rejects_bare_and_plural_verb() {
+    // The agreement bite the feature-variable fix restores: a SINGULAR subject with the
+    // bare/plural verb form has NO parse — even though Morphy reaches those forms from
+    // "eats". Before the fix the object determiner laundered finiteness/number to `_any`,
+    // so "every cat eat a fish" wrongly parsed (112×).
+    let (_layer, index) = {
+        let (l, _) = stand_up(&SeedSpec::seeded(BATTERY_SEEDS.iter().copied()));
+        let i = LexicalIndex::build(Arc::clone(&l));
+        (l, i)
+    };
+    let lemma = morphy();
+    assert!(
+        !index.parse("every cat eats a fish", &lemma).is_empty(),
+        "the 3sg verb with a singular subject must parse"
+    );
+    assert!(
+        index.parse("every cat eat a fish", &Identity).is_empty(),
+        "the bare/plural verb form with a singular subject must NOT parse (agreement bites)"
+    );
 }
 
 #[test]

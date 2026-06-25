@@ -45,5 +45,5 @@ pub use category::{
 };
 pub use lemmatizer::{Identity, Lemmatizer, Pos};
 pub use lexicon::{entry_to_item, gate_entry, resolve_sem, resolve_sem_value};
-pub use lookup::{tokenize, LexicalIndex};
+pub use lookup::{tokenize, LexicalIndex, DEFAULT_FOREST_CAP};
 pub use parser::{apply, cky_parse, Combinator, Item};

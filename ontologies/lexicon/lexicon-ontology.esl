@@ -142,6 +142,16 @@ data lexicon:Cat : Type 1 {
     // number agreement) and yields the result category R[T]; e.g. `every` is
     // `cat_forall(sg, λT. S/(S\NP_T))` (D63 §8.2).
     cat_forall : lexicon:Num -> (Set -> lexicon:Cat) -> lexicon:Cat,
+    // ∀f:Fin. R[f] / ∀n:Num. R[n] — FEATURE-polymorphic functors (D63 §8.10). A
+    // category that must PRESERVE a verb's finiteness / subject-number through
+    // composition (the object determiner: `(S[f]\NP[n]) \ ((S[f]\NP[n])/NP[T])`)
+    // binds the feature as a variable the unifier instantiates from the consumed
+    // verb, rather than the `*_any` wildcard (which meets anything AND erases it,
+    // laundering agreement). ⟦·⟧ ERASES features, so the binder is denotation-
+    // transparent: `⟦cat_fin_forall(λf. R)⟧ = ⟦R⟧`. The parser strips the binder at
+    // seed time, leaving `f`/`n` as free vars bound (call-locally) during application.
+    cat_fin_forall : (lexicon:Fin -> lexicon:Cat) -> lexicon:Cat,
+    cat_num_forall : (lexicon:Num -> lexicon:Cat) -> lexicon:Cat,
     // Group[conn,num](C) — a coordinated NP group of members sharing the common
     // supertype C, joined by Conn (D63 §8.4 Phase 6). Unlike `cat_np` (an
     // individual, ⟦NP(T)⟧ = T), a group denotes the **member-retaining list**
@@ -218,6 +228,10 @@ property lexicon:sem_type : core:resource {
 }
 property lexicon:sense : core:string {
     description = "Grounding / disambiguation key — a WordNet sense id or, for a named entity, the committed resource's IRI (sem and sense coincide there).";
+    domain lexicon:LexicalEntry;
+}
+property lexicon:sense_rank : core:integer {
+    description = "Optional 0-based sense-FREQUENCY rank (D63 §8.7 Stage B): for a polysemous lemma, its senses in WordNet `index.<pos>` order are frequency-sorted (sense 1 = most frequent), so rank = sense index − 1. The parser sums leaf ranks into a parse COST and returns the forest lowest-cost-first, capped — so the most-frequent-sense readings rank first. Absent ⇒ 0 (closed-class / domain entries are unranked, hence never penalized).";
     domain lexicon:LexicalEntry;
 }
 property lexicon:grade : core:resource {

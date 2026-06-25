@@ -57,6 +57,15 @@ impl Pos {
         }
     }
 
+    pub fn index_file(self) -> &'static str {
+        match self {
+            Pos::Noun => "index.noun",
+            Pos::Verb => "index.verb",
+            Pos::Adj => "index.adj",
+            Pos::Adv => "index.adv",
+        }
+    }
+
     pub fn data_file(self) -> &'static str {
         match self {
             Pos::Noun => "data.noun",

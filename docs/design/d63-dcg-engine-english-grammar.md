@@ -395,8 +395,9 @@ Each slice ships **with** its check. The order is dependency-forced.
   auxes). **6-aux is complete.** **6-agr ✅** — **subject-verb agreement (§8.10):** the finite verb's
   `num_any` subject slot is replaced by real `sg`/`pl` agreement (sg `affects` / pl-finite `affect`), with
   determiner/proper-noun/group/aux number propagation — closing the verb side of the §5.1 number deferral.
-  (One documented limitation: agreement through an *object* determiner needs a feature-variable unifier
-  extension — deferred.) **6-cl ✅** — **clausal complements (§8.11):** clause-taking
+  Agreement through an *object* determiner is now enforced too, via **feature variables**
+  (`cat_fin_forall`/`cat_num_forall` + `unify_feat`, OpenCCG/Carpenter precedent) — closing the former
+  limitation and removing a ~3× WordNet forest inflation (§8.10). **6-cl ✅** — **clausal complements (§8.11):** clause-taking
   verbs ("X shows that Y") via a `cat_cp` embedded-clause category + a `that` complementizer + an opaque
   `Prop→Entity→Prop` report axiom (intensional — the complement is not asserted); importer frame-26. **6-cmp** —
   **comparatives ✅ (§8.12); superlative deferred (gated on "the").** Degree semantics reusing D52 —
@@ -914,16 +915,25 @@ encoding-institution / LLM-proposer concern, not the engine's; the engine return
 
   | scale | entries | layer build | index build | forest / 4–5-word sentence |
   |---|---|---|---|---|
-  | Stage A seeded (all senses present) | 1,310 | 0.11 s | 0.08 s | **168 – 1,890** |
+  | Stage A seeded (all senses present) | 1,310 | 0.11 s | 0.08 s | **56 – 630** (genuine) |
   | Stage B `--limit 12k` (partial senses) | 169,997 | 13.1 s | 14.1 s | 12 – 42 |
   | Stage C `--all` (validate pass) | 325,259 | — | — | (= Stage A per-word, all senses) |
 
   Per-sentence parse is single-digit ms (≤ ~0.4 s with first-call warmup). The Stage-B `--limit` forest is
   *smaller* only because the cap omits some senses; the **seeded numbers are the honest full-WordNet
-  ambiguity**. Crucially **`props == forest` in every case — the felicity gate prunes nothing; the forest
-  is pure sense-polysemy** — so a Stage-B ranking/cap is *required*, not optional, for the engine to be
-  usable on real vocabulary.
-- **Done-when #4 — DECIDED: rank + cap (design; build pending).** Policy: order the forest by WordNet
+  ambiguity**. *(Correction: the first measurement read 168 – 1,890; investigation traced ~3× of that to
+  the object-determiner feature-laundering bug — now fixed via feature variables, §8.10. The deduped figures
+  above are the genuine per-word polysemy.)* Even deduped, **`props == forest` — the felicity gate prunes
+  nothing; the forest is pure sense-polysemy** — so a Stage-B ranking/cap is *required*, not optional, for
+  the engine to be usable on real vocabulary. The genuine forest is a **sense product**: `no cat eats a
+  fish` = 56 = 7 (`cat`: feline / lion / Caterpillar-tractor / cat-o'-nine-tails / khat / spiteful-woman /
+  "guy") × 4 (`eat`: corrode / consume / ingest / worry) × 2 (`fish`: animal / flesh) — all type-correct
+  because every noun roots at `Entity` and every transitive verb is `Entity → Entity → Prop` (§8.7.4), so
+  felicity can't distinguish "ingest(fish)" from "corrode(fish-flesh)". The in-kernel lever to prune these
+  felicitous-but-implausible combinations is **selectional restrictions** (more-specific verb argument
+  types), tracked as **issue #93** — complementary to the rank (which already surfaces the all-sense-1
+  reading first) and to downstream WSD (§6).
+- **Done-when #4 — ✅ BUILT: rank + cap.** Policy: order the forest by WordNet
   **sense frequency**, return the top-K, and **log the dropped-tail count** (never silently truncate). The
   mechanism keeps the engine sense-agnostic (the §6 forest-returns boundary intact) by carrying a *generic*
   parse-cost, sourced from the lexicon:
@@ -935,13 +945,15 @@ encoding-institution / LLM-proposer concern, not the engine's; the engine return
     combinators (`apply`, composition, coordination, the 6-mod/3b engine rules) **sum the children's costs**.
     The kernel never learns the cost *means* "sense frequency"; it only sums an abstract weight.
   - **`LexicalIndex::parse`** returns the forest **sorted by ascending cost** (all-sense-1 readings first)
-    and **capped to K** (configurable; default chosen from the baselines — the 1,890-parse case must
-    bound), logging `dropped = forest.len() − K`. Cost 0 throughout (closed-class/demo) ⇒ existing
-    single-parse tests are order- and cap-stable (K well above their forest sizes).
+    and **capped to `DEFAULT_FOREST_CAP` = 256**, logging `dropped = forest.len() − K`. Cost 0 throughout
+    (closed-class/demo) ⇒ existing single-parse tests are order- and cap-stable (K well above their forest
+    sizes). Witnesses (`wordnet_scale`): the Stage-A battery asserts the forest is cost-sorted and
+    cap-bounded; the cap log fires on the genuinely-large cases ("a dog sees a bird" 630→256).
 
-  This is a cross-cutting slice (`lexicon-ontology.esl` schema + `eigenius-wordnet` importer +
-  `kernel::dcg` `Item`/`apply`/`parse`). Other D62 §8.7 residuals (#91 multi-class NP — already handled by
-  the check-mode resource rule; troponymy subsumption) re-confirm at battery time.
+  Built across `lexicon-ontology.esl` (the `sense_rank` property), `eigenius-wordnet` (`read_sense_ranks`
+  from `index.<pos>` + emit; 111,698 of 325,259 `--all` entries carry a non-zero rank), and `kernel::dcg`
+  (`Item.cost` summed by the combinators; `parse` sorts + caps). Other D62 §8.7 residuals (#91 multi-class
+  NP — already handled by the check-mode resource rule; troponymy subsumption) re-confirm at battery time.
 
 ### 8.8 Slice 3 — copula, predication, predicate nominals
 
@@ -1186,13 +1198,24 @@ their `Num` into the VP slot (`fin`-tightened to exclude `bse`); the finite auxi
 `auxiliary_agreement_bites` (`HeLa is/has …` ✓ / `*HeLa are/have …` ✗); corpus import stays felicity-clean
 (the 5-form paradigm: bse/sg-fin/pl-fin/ger/pss, all admitted by `--validate`).
 
-**Documented limitation (a real finding beyond the original design):** subject agreement is **not enforced
-through an *object* determiner** — `a_obj`/`some_obj`/… relax the verb's subject slot to `num_any` (their
-category fixes the subject slot as a constant, not a variable), so `*HeLa affect a cell line` slips through.
-Enforcing it requires a **feature variable** in the unifier (so the object determiner can thread the verb's
-subject `Num` rather than constant-`num_any`) — a `unify_cat`/`feat_meets` extension that is its own change;
-deferred. The *direct* cases (proper-noun and subject-determiner subjects, plain objects, coordinated
-groups, auxiliaries) all enforce agreement correctly.
+**Feature variables (✅ resolved — was a documented limitation).** Subject agreement is now enforced
+**through an *object* determiner** too. The bug: `a_obj`/`every_obj`/… fixed the verb's result-clause
+finiteness + subject-number as the constant `*_any`, which both *accepts* a non-finite/plural verb and
+*launders* its features, so the laundered VP slipped past the subject determiner — admitting `*every cat eat
+a fish` **and** inflating the WordNet forest ~3× (Morphy reaches a verb's base/plural forms from the 3sg
+surface, and all three then completed identically). The precedent (OpenCCG `tiny.ccg`, Carpenter 1997 —
+typed feature structures with unification) is **feature variables**, not `*_any` wildcards. Implemented
+(D63 §8.10): two denotation-transparent binders `cat_fin_forall`/`cat_num_forall` (⟦·⟧ erases features, so
+they add no Π and the determiner's `sem_type` is unchanged); `unify_feat` (the binding-aware generalization
+of `feat_meets`, parallel to `unify_type` for the type index) binds a feature variable from the consumed
+verb, and `subst_cat` propagates it; the object determiners are retyped `(S[f]\NP[n]) \ ((S[f]\NP[n])/NP[T])`
+so the verb's real finiteness/number flow through to the VP. The parser strips the binders at seed time, so
+`f`/`n` are free vars bound call-locally during application. Result: a base verb → `S[bse]` VP → rejected at
+the finite root; a plural verb → `NP[pl]` subject → rejected by the singular subject determiner; only the
+3sg reading survives. Witnesses: `feature_variable_binds_meets_and_is_occurs_consistent` +
+`feature_binder_is_denotation_transparent` (`dcg::category`), `singular_subject_rejects_bare_and_plural_verb`
++ `no_spurious_duplication_from_feature_vars` (`wordnet_scale`). The ~3× forest inflation is gone (e.g. "no
+cat eats a fish" 168→56, = its distinct-meaning count).
 
 Closes the verb side of the §5.1 number deferral. *Determiner–noun*
 agreement landed in Slice 2 (`cat_forall` carries the determiner's `Num`; `apply` checks it; `LexicalIndex`

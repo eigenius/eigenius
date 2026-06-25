@@ -811,7 +811,7 @@ resource lexicon:every_subj : lexicon:LexicalEntry {
 }
 resource lexicon:every_obj : lexicon:LexicalEntry {
     lexicon:form     = "every";
-    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_forall_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "every"; 
@@ -837,7 +837,7 @@ resource lexicon:all_subj : lexicon:LexicalEntry {
 }
 resource lexicon:all_obj : lexicon:LexicalEntry {
     lexicon:form     = "all";
-    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_forall_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "all"; 
@@ -854,7 +854,7 @@ resource lexicon:a_subj : lexicon:LexicalEntry {
 }
 resource lexicon:a_obj : lexicon:LexicalEntry {
     lexicon:form     = "a";
-    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "a"; 
@@ -871,7 +871,7 @@ resource lexicon:some_subj : lexicon:LexicalEntry {
 }
 resource lexicon:some_obj : lexicon:LexicalEntry {
     lexicon:form     = "some";
-    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "some"; 
@@ -888,7 +888,7 @@ resource lexicon:no_subj : lexicon:LexicalEntry {
 }
 resource lexicon:no_obj : lexicon:LexicalEntry {
     lexicon:form     = "no";
-    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_no_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "no"; 

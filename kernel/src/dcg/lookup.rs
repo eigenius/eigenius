@@ -54,6 +54,14 @@ use super::lemmatizer::{Lemmatizer, Pos};
 use super::lexicon::entry_to_item;
 use super::parser::{apply, Combinator, Item};
 
+/// Default forest cap (D63 §8.7 Stage B): `parse` returns at most this many parses,
+/// the lowest-cost (most-frequent-sense) first; the rest are dropped with a log line.
+/// Chosen from the scale-up baselines — short sentences over full-WordNet polysemy
+/// reach ~2k well-typed parses, so this bounds the forest while keeping every
+/// plausible reading; it sits far above any closed-class / demo forest, so those are
+/// unaffected (no truncation, order preserved by the stable cost-0 sort).
+pub const DEFAULT_FOREST_CAP: usize = 256;
+
 /// Split prose into lowercased word tokens. Each token is trimmed of leading and
 /// trailing non-alphanumerics (so `"BRCA1,"` → `"brca1"`); empties are dropped.
 /// Multiword forms are recovered by re-joining spans at lookup time, not here.
@@ -155,7 +163,8 @@ impl LexicalIndex {
         let kinds: Vec<Item> = out
             .iter()
             .filter_map(|it| {
-                crate::dcg::kind_subject(&it.cat, &it.sem).map(|(cat, sem)| Item::new(cat, sem))
+                crate::dcg::kind_subject(&it.cat, &it.sem)
+                    .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost))
             })
             .collect();
         out.extend(kinds);
@@ -252,7 +261,11 @@ impl LexicalIndex {
                                 if let Some(sem) =
                                     coordinate_sem(op, &l.cat, &l.sem, &r.sem, &self.layer)
                                 {
-                                    produced.push(Item::new(l.cat.clone(), sem));
+                                    produced.push(Item::with_cost(
+                                        l.cat.clone(),
+                                        sem,
+                                        l.cost.saturating_add(r.cost),
+                                    ));
                                 }
                             } else if let Some((cat, sem)) =
                                 coordinate_np(op, &l.cat, &l.sem, &r.cat, &r.sem, &self.layer)
@@ -267,7 +280,11 @@ impl LexicalIndex {
                                 // right conjunct to be a plain NP, keeping groups
                                 // left-branching for the n-ary case (the
                                 // `is_coordination` analogue here).
-                                produced.push(Item::new(cat, sem));
+                                produced.push(Item::with_cost(
+                                    cat,
+                                    sem,
+                                    l.cost.saturating_add(r.cost),
+                                ));
                             }
                         }
                     }
@@ -288,7 +305,11 @@ impl LexicalIndex {
                                 if let Some((cat, sem)) =
                                     reciprocate(&subj.cat, &subj.sem, &tv.cat, &tv.sem, &self.layer)
                                 {
-                                    produced.push(Item::new(cat, sem));
+                                    produced.push(Item::with_cost(
+                                        cat,
+                                        sem,
+                                        subj.cost.saturating_add(tv.cost),
+                                    ));
                                 }
                             }
                         }
@@ -311,7 +332,11 @@ impl LexicalIndex {
                     for noun in &nouns {
                         for body in &bodies {
                             if let Some((cat, sem)) = relativize(&noun.cat, &body.cat, &body.sem) {
-                                produced.push(Item::new(cat, sem));
+                                produced.push(Item::with_cost(
+                                    cat,
+                                    sem,
+                                    noun.cost.saturating_add(body.cost),
+                                ));
                             }
                         }
                     }
@@ -330,7 +355,7 @@ impl LexicalIndex {
         //    kernel confirms inhabits `Prop`. Reducing first is essential: a
         //    composed determiner sentence is a redex-heavy `App(λ…, …)` tree, and
         //    `check_infer` cannot synthesize a bare lambda's type.
-        chart[0][n - 1]
+        let mut forest: Vec<Item> = chart[0][n - 1]
             .iter()
             .filter(|it| {
                 // Complete results: a **finite** declarative/polar `S` (denotes `Prop`)
@@ -341,7 +366,27 @@ impl LexicalIndex {
                 is_finite_clause(&it.cat) || is_ctor(&it.cat, "cat_q").is_some()
             })
             .filter_map(|it| self.reduced_felicitous(it))
-            .collect()
+            .collect();
+
+        // RANK + CAP (D63 §8.7 Stage B): order the forest by ascending cost — the sum
+        // of the parse's leaf `sense_rank`s — so the most-frequent-sense readings come
+        // first, then cap to [`DEFAULT_FOREST_CAP`]. WordNet sense-polysemy yields
+        // 100s–1000s of well-typed parses for a short sentence (the felicity gate prunes
+        // none of it), so an unbounded forest is unusable; the cap bounds it without
+        // silent loss — the dropped tail is logged. Stable sort + cost 0 everywhere
+        // (closed-class / demo entries) ⇒ no ranking or cap effect there (order
+        // preserved, sizes well under the cap), so exact-count tests are unaffected.
+        forest.sort_by_key(|it| it.cost);
+        if forest.len() > DEFAULT_FOREST_CAP {
+            let dropped = forest.len() - DEFAULT_FOREST_CAP;
+            eprintln!(
+                "dcg::parse: ranked forest capped {} → {DEFAULT_FOREST_CAP} \
+                 (dropped {dropped} higher-cost / rarer-sense parses)",
+                forest.len(),
+            );
+            forest.truncate(DEFAULT_FOREST_CAP);
+        }
+        forest
     }
 
     /// Normalize `it.sem` (NbE β-reduction → a normal form) and keep the item —
@@ -359,6 +404,7 @@ impl LexicalIndex {
             cat: it.cat.clone(),
             sem: nf,
             prov: it.prov,
+            cost: it.cost,
         })
     }
 }
@@ -378,6 +424,7 @@ fn raise_nps(items: &[Item], layer: &Arc<Layer>) -> Vec<Item> {
                 cat,
                 sem,
                 prov: Combinator::TypeRaised,
+                cost: it.cost,
             })
         })
         .collect()
@@ -427,6 +474,7 @@ fn with_noun_num(it: &Item, num_name: &str) -> Item {
                         ),
                         sem: it.sem.clone(),
                         prov: it.prov,
+                        cost: it.cost,
                     };
                 }
             }

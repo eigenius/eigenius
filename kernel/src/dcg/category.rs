@@ -90,6 +90,20 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
                 Box::new(denote_cat(r)?),
             ))
         }
+        // ⟦cat_fin_forall(λf. R)⟧ = ⟦R⟧ / ⟦cat_num_forall(λn. R)⟧ = ⟦R⟧ (D63 §8.10):
+        // a FEATURE binder is denotation-TRANSPARENT — features are erased by `⟦·⟧`, so
+        // the bound `f`/`n` is free in `R` but never reached (every feature position is
+        // discarded above), and `⟦R⟧` stays closed. Unlike `cat_forall` (a Π over the
+        // noun TYPE), this binds no value — it only carries a unification variable the
+        // parser instantiates from the consumed verb's real feature.
+        ("cat_fin_forall", [body]) | ("cat_num_forall", [body]) => {
+            let Exp::Lam(_patt, r) = body else {
+                return Err(format!(
+                    "denote_cat: {name} body must be a λ (Fin/Num -> Cat), got {body:?}"
+                ));
+            };
+            denote_cat(r)
+        }
         (n, a) => Err(format!(
             "denote_cat: unexpected ctor `{n}` of arity {}",
             a.len()
@@ -161,34 +175,34 @@ pub fn unify_cat(slot: &Exp, arg: &Exp, layer: &Arc<Layer>) -> Option<CatSubst> 
 }
 
 fn unify_into(slot: &Exp, arg: &Exp, layer: &Arc<Layer>, subst: &mut CatSubst) -> bool {
-    // cat_np(T, num): unify the type-index (var-aware), meet the number.
+    // cat_np(T, num): unify the type-index (var-aware), unify the number (var-aware).
     if let (Some(s), Some(a)) = (is_ctor(slot, "cat_np"), is_ctor(arg, "cat_np")) {
         if s.len() == 2 && a.len() == 2 {
-            return unify_type(&s[0], &a[0], layer, subst) && feat_meets(&s[1], &a[1]);
+            return unify_type(&s[0], &a[0], layer, subst) && unify_feat(&s[1], &a[1], subst);
         }
     }
-    // cat_n(T, num): unify the type-index (var-aware), meet the number.
+    // cat_n(T, num): unify the type-index (var-aware), unify the number (var-aware).
     if let (Some(s), Some(a)) = (is_ctor(slot, "cat_n"), is_ctor(arg, "cat_n")) {
         if s.len() == 2 && a.len() == 2 {
-            return unify_type(&s[0], &a[0], layer, subst) && feat_meets(&s[1], &a[1]);
+            return unify_type(&s[0], &a[0], layer, subst) && unify_feat(&s[1], &a[1], subst);
         }
     }
     // cat_group(C, conn, num): a group fills a COLLECTIVE verb's group slot
     // (D63 §8.4 Phase 6). Unify the member type-index (var-aware + subclass
-    // subsumption), and meet the connective and number features. The connective
+    // subsumption), and unify the connective and number features. The connective
     // match is what restricts collective verbs to `and`-groups (no `conn_any`, so
     // `conn_and` accepts only `conn_and`); "X or Y form a complex" gets no parse.
     if let (Some(s), Some(a)) = (is_ctor(slot, "cat_group"), is_ctor(arg, "cat_group")) {
         if s.len() == 3 && a.len() == 3 {
             return unify_type(&s[0], &a[0], layer, subst)
-                && feat_meets(&s[1], &a[1])
-                && feat_meets(&s[2], &a[2]);
+                && unify_feat(&s[1], &a[1], subst)
+                && unify_feat(&s[2], &a[2], subst);
         }
     }
-    // cat_s(mood, fin): mood matches exactly (semantic); fin meets.
+    // cat_s(mood, fin): mood matches exactly (semantic); fin unifies (var-aware).
     if let (Some(s), Some(a)) = (is_ctor(slot, "cat_s"), is_ctor(arg, "cat_s")) {
         if s.len() == 2 && a.len() == 2 {
-            return s[0] == a[0] && feat_meets(&s[1], &a[1]);
+            return s[0] == a[0] && unify_feat(&s[1], &a[1], subst);
         }
     }
     // Higher-order functors `A/B` (`fwd`) and `A\B` (`bwd`), D63 §8.2 item 4:
@@ -256,6 +270,30 @@ fn type_subsumes(sup: &Exp, sub: &Exp, layer: &Arc<Layer>) -> bool {
 /// `apply` can check determiner/noun number agreement on `cat_forall`.
 pub fn feat_meets(a: &Exp, b: &Exp) -> bool {
     a == b || is_any_feat(a) || is_any_feat(b)
+}
+
+/// Feature **unification** (D63 §8.10) — the binding-aware generalization of
+/// [`feat_meets`], parallel to [`unify_type`] for the type index. A feature
+/// **variable** (`Exp::Var`, introduced by `cat_fin_forall` / `cat_num_forall` and
+/// freed at seed time) binds — occurs-consistently — to the other side's feature,
+/// and the binding propagates into the result via [`subst_cat`]; so the object
+/// determiner carries the consumed verb's real finiteness / subject-number through
+/// to the VP it produces, instead of laundering it to `*_any`. The variable may be
+/// on EITHER side (the `bwd` argument check swaps operands — contravariance).
+/// Concrete-vs-concrete falls back to the meet.
+fn unify_feat(slot: &Exp, arg: &Exp, subst: &mut CatSubst) -> bool {
+    for (var_side, other) in [(slot, arg), (arg, slot)] {
+        if let Exp::Var(name) = var_side {
+            return match subst.get(name) {
+                Some(bound) => bound == other,
+                None => {
+                    subst.insert(name.clone(), other.clone());
+                    true
+                }
+            };
+        }
+    }
+    feat_meets(slot, arg)
 }
 
 fn is_any_feat(e: &Exp) -> bool {
@@ -710,6 +748,59 @@ mod tests {
     // so a directly-built `cat_group` ctor is faithful here.
     fn ctor(name: &str, args: Vec<Exp>) -> Exp {
         Exp::InductiveCtor(list_decl(), name.into(), args)
+    }
+
+    #[test]
+    fn feature_variable_binds_meets_and_is_occurs_consistent() {
+        // D63 §8.10 — `unify_feat`: a feature VARIABLE binds to the other side's
+        // concrete feature (either side — contravariance), occurs-consistently; a
+        // concrete pair falls back to the `*_any` meet.
+        let f = Exp::Var("f".into());
+        let (fin, bse, sg, any) = (
+            ctor("fin", vec![]),
+            ctor("bse", vec![]),
+            ctor("sg", vec![]),
+            ctor("num_any", vec![]),
+        );
+
+        let mut subst = CatSubst::new();
+        assert!(unify_feat(&f, &fin, &mut subst), "var binds to concrete");
+        assert_eq!(subst.get("f"), Some(&fin));
+        assert!(
+            unify_feat(&f, &fin, &mut subst),
+            "rebinding the same value is consistent"
+        );
+        assert!(
+            !unify_feat(&f, &bse, &mut subst),
+            "f is bound to fin — it cannot also be bse"
+        );
+
+        // The variable may be on the ARGUMENT side (the bwd contravariant swap).
+        let mut s2 = CatSubst::new();
+        assert!(unify_feat(&fin, &Exp::Var("g".into()), &mut s2));
+        assert_eq!(s2.get("g"), Some(&fin));
+
+        // Concrete vs concrete → the meet: `*_any` = ⊤, distinct values fail.
+        let mut s3 = CatSubst::new();
+        assert!(unify_feat(&any, &sg, &mut s3), "num_any meets sg");
+        assert!(!unify_feat(&fin, &bse, &mut s3), "fin does not meet bse");
+    }
+
+    #[test]
+    fn feature_binder_is_denotation_transparent() {
+        // ⟦cat_fin_forall(λf. cat_s(dcl, f))⟧ = ⟦cat_s(dcl, _)⟧ = Prop — the binder is
+        // erased by `⟦·⟧` (features never appear in the denotation), so it never adds a
+        // Π and the determiner's sem_type is unchanged.
+        let inner = ctor("cat_s", vec![ctor("dcl", vec![]), Exp::Var("f".into())]);
+        let cat = ctor(
+            "cat_fin_forall",
+            vec![Exp::Lam(Patt::Var("f".into()), Box::new(inner))],
+        );
+        assert_eq!(
+            denote_cat(&cat).expect("feature binder denotes"),
+            Exp::Sort(0),
+            "the feature binder must be denotation-transparent (⟦·⟧ = Prop)"
+        );
     }
 
     #[test]
