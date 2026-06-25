@@ -246,6 +246,61 @@ fn comparative_requires_than() {
     );
 }
 
+// ── D63 §8.13 Slice 6-mod — compound nouns + PP adjuncts ──────────────
+/// Whether `e`'s App-spine head is the named opaque axiom.
+fn head_is_axiom(e: &Exp, iri: &str) -> bool {
+    let mut cur = e;
+    while let Exp::App(f, _) = cur {
+        cur = f;
+    }
+    matches!(cur, Exp::EigonAxiom(i) if i.as_str() == iri)
+}
+
+#[test]
+fn compound_noun_refines_the_head() {
+    // "a BRCA1 cell line affects HeLa": [NP BRCA1] + [N cell line] → the refined noun
+    // Σx:CellLine. compound(x, brca1); `a` quantifies it (Fst), the verb applies. That it
+    // parses to Prop at all *is* the witness the compound rule fired (without it, `a` has
+    // no noun and there is no parse).
+    let (_layer, index) = index_over_bootstrap();
+    let forest = index.parse("a BRCA1 cell line affects HeLa", &Identity);
+    assert!(
+        !forest.is_empty(),
+        "the compound-noun sentence must parse (the compound rule must fire)"
+    );
+    assert_parses_to_prop("a BRCA1 cell line affects HeLa");
+}
+
+#[test]
+fn pp_adjunct_adds_an_opaque_conjunct() {
+    // "HeLa affects BRCA1 in HeLa" → And(affects(brca1, hela), prep_in(hela, hela)) : Prop.
+    // The PP modifies the VP, conjoining the opaque locative.
+    let (layer, index) = index_over_bootstrap();
+    let forest = index.parse("HeLa affects BRCA1 in HeLa", &Identity);
+    assert!(!forest.is_empty(), "the PP-adjunct sentence must parse");
+    let has_prep = forest.iter().any(|p| {
+        matches!(&p.sem, Exp::InductiveType(decl, args)
+            if decl.name == "And" && args.len() == 2
+                && head_is_axiom(&args[1], "urn:eigenius:ontology:prep_in"))
+    });
+    assert!(
+        has_prep,
+        "a parse is And(VP-predication, prep_in(s, x)); got {:?}",
+        forest[0].sem
+    );
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let p = forest
+        .iter()
+        .find(|p| matches!(&p.sem, Exp::InductiveType(decl, _) if decl.name == "And"))
+        .unwrap();
+    let ty = check_infer(&mut ctx, &p.sem).expect("PP-adjunct sem type-checks");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "PP-adjunct clause denotes Prop"
+    );
+}
+
 #[test]
 fn committed_object_determiner_parses() {
     // `a` (object, type-raised) from the committed closed-class layer.

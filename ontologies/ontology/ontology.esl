@@ -30,3 +30,19 @@ axiom ontology:is_a : lexicon:Entity -> Set -> Prop
 // plurals / generics — deferred); declared here as the relational vocabulary so the
 // reasoning layer and a later kind-subject reading share one canonical relation.
 axiom ontology:subclass_of : Set -> Set -> Prop
+
+// ── Nominal-modification relations (D63 §8.13 Slice 6-mod) ────────────
+// OPAQUE modifier relations the compound-noun and PP-adjunct rules produce. The
+// modifier↔head relation is vague (compound: "WRN depletion" = depletion *of* WRN; PP:
+// "apoptosis in MSI" = located/scoped *in* MSI), so — like is_a / the modal operators —
+// these are kernel-uninterpreted axioms; the grammar guarantees a felicitous typed tree
+// exposing the parts, and the precise relation is grounding-supplied by the encoding
+// institution (D62). `compound(x, m)`: head entity x is a compound modified by entity m
+// ("WRN depletion" → Σx:Depletion. compound(x, WRN)). `prep_*(s, y)`: the predication s
+// stands in the prepositional relation to y ("… in MSI" → … ∧ prep_in(s, MSI)).
+axiom ontology:compound : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_in   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_for  : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_with : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_on   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_from : lexicon:Entity -> lexicon:Entity -> Prop

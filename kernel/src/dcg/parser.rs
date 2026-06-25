@@ -272,6 +272,40 @@ pub fn apply(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
             }
         }
     }
+    // Compound noun (D63 §8.13 Slice 6-mod): a named-entity modifier `cat_np` (left) +
+    // a head common noun `cat_n(C)` (right) → the refined noun
+    // `cat_n(Σx:C. ontology:compound(x, m))` over the concrete `C`, where `m` is the
+    // modifier entity (the NP's sem). The compound relation is OPAQUE (institution-mapped);
+    // the rule reuses 3b's Σ + the determiner-over-refined-noun `Fst` machinery. "BRCA1
+    // cell line" → `Σx:CellLine. compound(x, brca1)`.
+    if let (Some(_), Some([c, noun_num])) =
+        (is_ctor(&left.cat, "cat_np"), is_ctor(&right.cat, "cat_n"))
+    {
+        if let Exp::InductiveCtor(decl, _, _) = &right.cat {
+            let x = "__cmp_x";
+            let compound = Exp::EigonAxiom(
+                crate::ontology::iri::Iri::parse("urn:eigenius:ontology:compound")
+                    .expect("valid compound iri"),
+            );
+            let sigma = Exp::Sig(
+                Patt::Var(x.into()),
+                Box::new(c.clone()),
+                Box::new(Exp::App(
+                    Box::new(Exp::App(Box::new(compound), Box::new(Exp::Var(x.into())))),
+                    Box::new(left.sem.clone()),
+                )),
+            );
+            return Some(Item {
+                cat: Exp::InductiveCtor(
+                    decl.clone(),
+                    "cat_n".into(),
+                    vec![sigma.clone(), noun_num.clone()],
+                ),
+                sem: sigma,
+                prov: Combinator::Other,
+            });
+        }
+    }
     None
 }
 

@@ -404,9 +404,14 @@ Each slice ships **with** its check. The order is dependency-forced.
   Entity→float`; "X is larger than Y" → `gt(deg_large(x), deg_large(y))`, "X is large" →
   `gt(deg_large(x), std_large)` (unified positive). The comparison-morphology generator (grounded suppletive
   table + periphrastic) is built; the importer flags gradability by the WordNet pertainym pointer
-  (descriptive ⇒ gradable measure + comparative; relational ⇒ Boolean) — corpus felicity-clean. Deferred: **6-tail** (case + pronouns — case is the syntactic half, pronouns gated on **anaphora
-  resolution**, designed in [D64](d64-llm-anaphora-resolution.md): an LLM resolver behind the felicity
-  oracle, pronouns → committed-resource IRIs).
+  (descriptive ⇒ gradable measure + comparative; relational ⇒ Boolean) — corpus felicity-clean.
+  **6-mod** — **nominal modification (§8.13): named-entity compound ✅ + PP VP-adjunct ✅; N-N compound +
+  PP-as-noun-modifier deferred.** The highest-leverage gap for real scientific prose (most of the WRN
+  litmus). Opaque modification reusing 3b's Σ-refine: `[NP] [N] → Σx:C. compound(x, m)` (engine rule) +
+  prepositions as `(S\NP)\(S\NP)` VP-adjuncts (`λx.λV.λs. And(V(s), prep_*(s, x))`); the `compound`/`prep_*`
+  relations are kernel-uninterpreted, institution-mapped. Deferred: **6-tail** (case + pronouns — case is the syntactic half, pronouns gated on
+  **anaphora resolution**, designed in [D64](d64-llm-anaphora-resolution.md): an LLM resolver behind the
+  felicity oracle, pronouns → committed-resource IRIs).
 - **Slice 7 — full-WordNet operationalization (scale-up).** *Orthogonal to the grammar slices* —
   gated only on Slice 2 + the closed-class track (both done), **not** on Slice 5. The 204k-entry WordNet
   content layer (§4a) is already imported and kernel-validated; this slice turns it from a *generatable
@@ -1364,6 +1369,94 @@ WordNet pertainym flag** (descriptive ⇒ gradable, relational ⇒ not), validat
 reused for the predicate. *Deferred:* superlative (gated on the definite "the"), equatives ("as large as" →
 `ge`), measure phrases ("3cm long"), comparative *clauses* ("larger than Y is"), attributive comparatives
 ("a larger gene").
+
+### 8.13 Slice 6-mod — nominal modification: compound nouns + PP adjuncts
+
+**Partially built — named-entity compound ✅ + PP VP-adjunct ✅; N-N kind compound + PP-as-noun-modifier
+deferred.** *Built and green:* the opaque relation axioms (`ontology:compound`, `ontology:prep_in`/`for`/
+`with`/`on`/`from`) in [`ontology.esl`]; the **compound-noun engine rule** in [`parser.rs`] — a `cat_np`
+modifier + head `cat_n(C)` → `cat_n(Σx:C. compound(x, m))` (reusing 3b's Σ + the determiner-`Fst` rule:
+"a BRCA1 cell line affects HeLa" parses, the compound rule firing being the witness); the **PP VP-adjuncts**
+as closed-class prepositions in [`closed-class.esl`] (`((S[dcl,fin]\NP)\(S[dcl,fin]\NP))/NP`, sem
+`λx.λV.λs. logic:And(V(s), prep_*(s, x))`): "HeLa affects BRCA1 in HeLa" → `And(affects(brca1, hela),
+prep_in(hela, hela))`. The relations are **opaque** (institution-mapped, like `is_a`); no kernel change
+(Σ-refine + functor shapes + `logic:And` all exist). Witnesses (`closed_class_determiners`):
+`compound_noun_refines_the_head`, `pp_adjunct_adds_an_opaque_conjunct`. *Deferred (the parallel
+extensions):* the **N-N kind compound** ("mutator load" — `compound_kind : Entity → Set → Prop`, modifier =
+the head noun's type), the **PP-as-noun-modifier** ("biomarker of X" — the same Σ-refine over a head noun,
+an engine rule), the **left-branching bracketing NF** for compound chains, and (as below) the larger
+deferrals. The original design follows.
+
+The **nominal/adjunct layer** — the single highest-leverage gap for real scientific prose. The WRN litmus (`experiments/publications/wrn-helicase/sentence-corpus.md`) shows it
+bluntly: **compound nouns** ("WRN depletion", "mutator load", "helicase activity") block ~26 of 31
+sentences and **PP adjuncts** ("in MSI", "of WRN dependency", "for the dependence") block ~19 — they are in
+nearly every sentence, dwarfing the rest of the tail. The verb-argument spine (Slices 1–6) is necessary but
+parses almost none of this corpus without them.
+
+*The unifying idea — opaque modification, two attachment sites, Σ-reuse.* Both constructions are
+**modifiers** that contribute an **opaque relation** (the modifier-head relation is notoriously vague —
+"WRN depletion" = depletion *of* WRN, "baby oil" = oil *for* babies; the relation is grounding-supplied,
+not compositional). So, faithful to the opaque-predicate philosophy (`is_a`, the modal operators), the
+relation is a **kernel-uninterpreted axiom**; the grammar delivers a *felicitous typed tree exposing the
+parts*, and the **D62 institution maps it onto the domain predicate's argument structure** (e.g. "WRN
+depletion causes apoptosis in MSI" → `CausesApoptosis(WRN, MSI)` — "WRN" from the compound head's modifier,
+"MSI" from the PP). The grammar's job is **felicity + part-exposure**, not getting the vague relation right.
+
+Two attachment sites, both reusing existing machinery:
+
+**(A) Nominal modification → Σ-refinement (reuses 3b).** A modifier refines the head noun, exactly as the
+attributive adjective did ("primary cell line" = `Σx:CellLine. is_primary(x)`):
+- **Compound noun** — a modifier noun/NP `M` + head `cat_n(C)` → `cat_n(Σx:C. compound(x, ⟦M⟧))`, an opaque
+  `axiom lexicon:compound : Entity → Entity → Prop`. "WRN depletion" = `Σx:Depletion. compound(x, WRN)`.
+  An engine rule on adjacent `[N|NP] [N]` (the relativizer/attributive pattern); the refined noun then
+  rides the determiner-over-refined-noun `Fst` rule unchanged.
+- **PP as post-nominal modifier** — head `cat_n(C)` + PP "of X" → `cat_n(Σx:C. of(x, X))`, a per-preposition
+  opaque relation. "biomarker of WRN dependency" = `Σy:Biomarker. of(y, WRN_dependency)`.
+
+**(B) Verbal adjunction → VP post-modifier.** A PP modifies a VP: "affects X **in MSI**" — `in MSI :
+(S\NP)\(S\NP)`, sem `λV.λs. logic:And(V(s), in(s, MSI))` (the locative as an opaque conjunct; no event
+variables — neo-Davidsonian event semantics is the heavier alternative, deferred). The preposition is the
+PP-former + attachment: `in : ((S\NP)\(S\NP)) / NP` (VP-adjunct reading) and `(N\N)/NP`-style (nominal
+reading) — **PP attachment is genuinely ambiguous** ("causes apoptosis in MSI": `in MSI` on the VP vs. on
+"apoptosis"), so both readings are produced and **carried in the forest** (the institution / felicity
+oracle selects — not resolved in the grammar).
+
+*Opaque relations.* A small **closed set of prepositions** (`in`/`of`/`for`/`with`/`on`/`from`/`to`/…) each
+an opaque `axiom : Entity → Entity → Prop` in a `prep` (or `lexicon`) layer — kernel-uninterpreted,
+witnessed/mapped downstream, like the modal operators. Plus the one `compound` relation. (The `by`-passive
+agent (§8.9) is the special, already-built case of a PP.)
+
+*Ambiguity controls.* **Compound bracketing** ("DNA double-strand breaks" = `[DNA [double-strand breaks]]`
+vs `[[DNA double-strand] breaks]`) → a **left-branching normal form** (as for coordination, §8.4). The
+**MWE-vs-compound** competition ("cell line" the lexicalized term vs. `[cell + line]` productive compound)
+is already carried as competing chart edges (§8.4) — the domain lexicon supplies fixed terms; the
+productive rule covers the rest. **PP attachment** (N vs VP) is *not* normalized — it is real ambiguity the
+forest carries.
+
+*Kernel.* No new capability — the `compound` / preposition relations are opaque axioms over existing types
+(as `is_a`/modals); the Σ-refine + `Fst` machinery is 3b's; the VP-adjunct `(S\NP)\(S\NP)` is an existing
+functor shape. (`logic:And` for the locative conjunct already exists.)
+
+*Importer.* Productive compounding + PP attachment are **engine rules**, not per-word emission — so the
+importer needs no per-noun change. The **prepositions** are closed-class entries (like determiners/auxes);
+the `compound`/preposition **relation axioms** go in a small committed layer. A **domain lexicon** (MSI,
+WRN, gene names) is the separate prerequisite for the corpus to actually run (D62 §8.7.8).
+
+*Build order (when taken):* (1) the `compound` + preposition opaque-relation axioms + the closed-class
+preposition entries; (2) the **compound-noun engine rule** (`[N|NP] [N] → Σ-refined cat_n`, reuse 3b) +
+left-branching NF — verify on `[Gene + N]` compounds; (3) **PP-as-N-modifier** (reuse 3b Σ-refine) and
+**PP-as-VP-adjunct** (`(S\NP)\(S\NP)`, `And`-conjunct) — verify both attachment readings appear. *Target
+witnesses (with a small domain lexicon):* "WRN depletion causes apoptosis in MSI" → a felicitous tree whose
+parts ("WRN", "depletion", "apoptosis", "MSI") are exposed; "MSI is a strong biomarker of WRN dependency" →
+the `of`-PP refines "biomarker".
+
+*Decisions:* opaque `compound` + per-preposition relations (kernel-uninterpreted, institution-mapped, like
+`is_a`); nominal modification reuses 3b's Σ-refine; PP-VP adjunct = opaque `And`-conjunct (no event vars);
+compound bracketing left-branching; PP attachment carried (not normalized); the precise relation is
+grounding-supplied (D62), the grammar guarantees only felicity + part-exposure. *Deferred:* neo-Davidsonian
+event semantics; compound-internal sense disambiguation; measure/degree PPs ("3cm long"), "relative to",
+fronted/focus PPs ("Among …, only WRN …"), multi-PP scope ambiguity beyond the carried forest; the
+**domain lexicon** (its own track) that makes the corpus runnable.
 
 ## 9. References
 
