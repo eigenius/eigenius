@@ -24,6 +24,7 @@
 //! layers domain vocabulary on top of this framework (§8.7.8).
 
 pub mod convert;
+pub mod import;
 pub mod inflect;
 pub mod lemmatizer;
 pub mod morphy;

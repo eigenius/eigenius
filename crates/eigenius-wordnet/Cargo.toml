@@ -8,6 +8,7 @@ description = "Import WordNet — the general English lexicon — into Eigon lex
 
 [dependencies]
 eigenius-kernel = { path = "../../kernel" }
+eigenius-storage-rocksdb = { path = "../../storage/rocksdb" }
 clap = { version = "4", features = ["derive"] }
 
 [[bin]]

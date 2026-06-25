@@ -897,11 +897,51 @@ encoding-institution / LLM-proposer concern, not the engine's; the engine return
   `subclass_of` always reference a `core:Class`; the intermediate instances collapse into co-referential
   individuals of that class. Witness: `instance_of_instance_chain_resolves_to_nearest_class` +
   `instance_synset_is_an_individual_not_a_class`; confirmed by the 301→0 drop on `--all --validate`.
-- **Done-when #2/#3/#4 — pending.** The standing-layer + `LexicalIndex::build` + representative-battery
-  parse, the parse-time / forest-size baselines, and the Stage-B **sense-ambiguity policy** (the genuine
-  decision — rank by WordNet sense frequency vs. hard beam vs. return-all) are next. Other D62 §8.7
-  residuals (#91 multi-class NP — already handled by the check-mode resource rule; troponymy subsumption)
-  re-confirm at battery time.
+- **Done-when #2 — ✅ met (Derived).** The **standing layer + `LexicalIndex::build` + battery** is wired
+  (`crates/eigenius-wordnet/tests/wordnet_scale.rs`): `select_synsets` → `render_document` → compile over
+  the bootstrap head → `LayerBuilder::build` → hold the `Arc<Layer>` → `LexicalIndex::build` → `parse` with
+  WordNet's Morphy → kernel-gate. The Stage-A battery (5 declaratives over **real** WordNet nouns/verbs +
+  the committed determiners, vocabulary guaranteed by seeding) all yield ≥1 felicitous `Prop`
+  (`stage_a_battery_parses_to_props_over_real_wordnet`, always-on).
+- **Two ways the layer "stands" — both built.** *(a) In-process* (the harness): build once, hold the
+  `Arc<Layer>`, index + parse. *(b) Persisted* (`wordnet-import --commit <db>` → `--from <db>`): commit the
+  import onto a **RocksStore** as a child of the bootstrap chain and advance `main`, so a later process
+  reloads it in **≈1.5 ms** + index-build (vs re-compiling) — the real standing layer, the server chain
+  model. The selection logic now lives in `eigenius_wordnet::import` (`SeedSpec` + `select_synsets`), shared
+  by the bin and the harness.
+- **Done-when #3 — ✅ baselines recorded (Derived).** Build cost scales with corpus size; **forest size is
+  driven by per-word polysemy, not corpus size**. Measured (release):
+
+  | scale | entries | layer build | index build | forest / 4–5-word sentence |
+  |---|---|---|---|---|
+  | Stage A seeded (all senses present) | 1,310 | 0.11 s | 0.08 s | **168 – 1,890** |
+  | Stage B `--limit 12k` (partial senses) | 169,997 | 13.1 s | 14.1 s | 12 – 42 |
+  | Stage C `--all` (validate pass) | 325,259 | — | — | (= Stage A per-word, all senses) |
+
+  Per-sentence parse is single-digit ms (≤ ~0.4 s with first-call warmup). The Stage-B `--limit` forest is
+  *smaller* only because the cap omits some senses; the **seeded numbers are the honest full-WordNet
+  ambiguity**. Crucially **`props == forest` in every case — the felicity gate prunes nothing; the forest
+  is pure sense-polysemy** — so a Stage-B ranking/cap is *required*, not optional, for the engine to be
+  usable on real vocabulary.
+- **Done-when #4 — DECIDED: rank + cap (design; build pending).** Policy: order the forest by WordNet
+  **sense frequency**, return the top-K, and **log the dropped-tail count** (never silently truncate). The
+  mechanism keeps the engine sense-agnostic (the §6 forest-returns boundary intact) by carrying a *generic*
+  parse-cost, sourced from the lexicon:
+  - **Importer** emits a per-entry **`lexicon:sense_rank`** (a 0-based frequency rank): for each lemma, its
+    senses in `index.<pos>` order are already frequency-sorted (sense 1 = most frequent), so rank = the
+    lemma's sense index. Read `index.<pos>` (today only `data.<pos>` is read) to recover it; closed-class /
+    demo entries default to rank 0.
+  - **Parser** gains a generic `cost: u32` on `Item` — a leaf's cost is its entry's `sense_rank`; the
+    combinators (`apply`, composition, coordination, the 6-mod/3b engine rules) **sum the children's costs**.
+    The kernel never learns the cost *means* "sense frequency"; it only sums an abstract weight.
+  - **`LexicalIndex::parse`** returns the forest **sorted by ascending cost** (all-sense-1 readings first)
+    and **capped to K** (configurable; default chosen from the baselines — the 1,890-parse case must
+    bound), logging `dropped = forest.len() − K`. Cost 0 throughout (closed-class/demo) ⇒ existing
+    single-parse tests are order- and cap-stable (K well above their forest sizes).
+
+  This is a cross-cutting slice (`lexicon-ontology.esl` schema + `eigenius-wordnet` importer +
+  `kernel::dcg` `Item`/`apply`/`parse`). Other D62 §8.7 residuals (#91 multi-class NP — already handled by
+  the check-mode resource rule; troponymy subsumption) re-confirm at battery time.
 
 ### 8.8 Slice 3 — copula, predication, predicate nominals
 
