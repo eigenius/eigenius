@@ -16,11 +16,12 @@
 // schema layer + this demo compile against core→reflection(+eigentt) and the
 // kernel Validator reports 0 errors; every entry is felicity-gated.
 
-namespace core       = "urn:eigenius:core";
-namespace reflection = "urn:eigenius:reflection";
-namespace epistemic  = "urn:eigenius:reflection:epistemic";
-namespace eigentt    = "urn:eigenius:eigentt";
-namespace lexicon    = "urn:eigenius:lexicon";
+namespace core         = "urn:eigenius:core";
+namespace reflection   = "urn:eigenius:reflection";
+namespace epistemic    = "urn:eigenius:reflection:epistemic";
+namespace eigentt      = "urn:eigenius:eigentt";
+namespace lexicon      = "urn:eigenius:lexicon";
+namespace measurements = "urn:eigenius:measurements";
 
 // ── Demo domain types the worked entries ground against ───────────────
 // A real lexicon's `sem` targets live in the domain ontologies it is built
@@ -93,7 +94,8 @@ resource lexicon:e_cell_line : lexicon:LexicalEntry {
 // (2) named entity → a WITNESS, referenced by IRI.
 resource lexicon:e_brca1 : lexicon:LexicalEntry {
     lexicon:form     = "BRCA1";
-    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:num_any) );
+    // Proper nouns are singular (D63 §8.10 6-agr) → `HeLa affects` ✓ / `*HeLa affect` ✗.
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:sg) );
     lexicon:sem      = lexicon:brca1;
     lexicon:sem_type = type_expr( lexicon:Gene );
     lexicon:sense    = "urn:eigenius:lexicon:brca1";
@@ -104,7 +106,7 @@ resource lexicon:e_brca1 : lexicon:LexicalEntry {
 //      worked sentence "HeLa depends on BRCA1".
 resource lexicon:e_hela : lexicon:LexicalEntry {
     lexicon:form     = "HeLa";
-    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:CellLine, lexicon:num_any) );
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:CellLine, lexicon:sg) );
     lexicon:sem      = lexicon:hela;
     lexicon:sem_type = type_expr( lexicon:CellLine );
     lexicon:sense    = "urn:eigenius:lexicon:hela";
@@ -115,7 +117,7 @@ resource lexicon:e_hela : lexicon:LexicalEntry {
 //     object-first: ⟦cat⟧ = Gene → CellLine → Prop = typeof(depends_on).
 resource lexicon:e_depends_on : lexicon:LexicalEntry {
     lexicon:form     = "depends on";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:CellLine, lexicon:num_any)), lexicon:cat_np(lexicon:Gene, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:CellLine, lexicon:sg)), lexicon:cat_np(lexicon:Gene, lexicon:num_any)) );
     lexicon:sem      = lexicon:depends_on;
     lexicon:sem_type = type_expr( lexicon:Gene -> lexicon:CellLine -> Prop );
     lexicon:sense    = "wn:depend.v.01";
@@ -138,15 +140,95 @@ resource lexicon:e_primary : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 
+// (4b) a GRADABLE adjective — degree semantics (D63 §8.12 Slice 6-cmp). Unlike the
+//      NON-gradable Boolean `primary` above, a gradable adjective is a MEASURE
+//      `deg_large : Entity → core:float`; the positive "X is large" is the measure vs. a
+//      contextual standard `std_large` (`gt(deg_large(x), std_large)`), and the
+//      comparative "X is larger than Y" compares degrees (`gt(deg_large(x), deg_large(y))`)
+//      via the opaque float ordering `measurements:gt` (reusing D52). Positive + comparative
+//      are unified under the one measure (combo 1).
+axiom lexicon:deg_large : lexicon:Entity -> core:float
+axiom lexicon:std_large : core:float
+resource lexicon:large_pos_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) => measurements:gt(lexicon:deg_large(x), lexicon:std_large)
+          : lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:larger_cmp_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            measurements:gt(lexicon:deg_large(x), lexicon:deg_large(y))
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+// positive "large": an adjectival predicate (like `primary`), but measure-derived.
+resource lexicon:e_large : lexicon:LexicalEntry {
+    lexicon:form     = "large";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:large_pos_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:large.a.01";
+    lexicon:grade    = epistemic:declared;
+}
+// comparative "larger": (S[adj]\NP)/cat_pp_than, λy.λx. gt(deg_large(x), deg_large(y)).
+resource lexicon:e_larger : lexicon:LexicalEntry {
+    lexicon:form     = "larger";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than) );
+    lexicon:sem      = lexicon:larger_cmp_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:large.a.01";
+    lexicon:grade    = epistemic:declared;
+}
+
 // (5) a GENERAL transitive verb typed at the supertype. ⟦cat⟧ = Entity → Entity
 //     → Prop = typeof(affects). Composes with Gene/CellLine arguments by
 //     subsumption (parser_composes_general_verb_via_subsumption: "HeLa affects BRCA1").
 resource lexicon:e_affects : lexicon:LexicalEntry {
     lexicon:form     = "affects";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    // Finite 3sg → SINGULAR subject slot (D63 §8.10 6-agr). Object slot stays `num_any`
+    // (agreement is subject-only). `HeLa affects BRCA1` ✓ / `*genes affects …` ✗.
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (5b) the PLURAL-finite form of the general verb — same surface as the base ("affect")
+//      but `fin` with a PLURAL subject slot (D63 §8.10 6-agr). Heads a clause with a
+//      plural subject: `genes affect …` / `HeLa and BRCA1 affect …` ✓; with a singular
+//      subject `*HeLa affect …` fails the subject-number meet. Distinct from the `bse`
+//      entry below (which is non-finite, the do-support/modal complement).
+resource lexicon:e_affect_pl : lexicon:LexicalEntry {
+    lexicon:form     = "affect";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:affects;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:affect.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (5c) a CLAUSE-TAKING (report) verb — category `(S\NP)/CP`, an opaque attitude axiom
+//      `Prop → Entity → Prop` (intensional — the complement is NOT asserted, so
+//      shows(P, x) ⊬ P). "HeLa shows that BRCA1 affects HeLa" →
+//      shows(affects(brca1, hela), hela) : Prop (D63 §8.11 Slice 6-cl). sg "shows" /
+//      pl "show" finite forms (6-agr).
+axiom lexicon:shows : Prop -> lexicon:Entity -> Prop
+resource lexicon:e_shows : lexicon:LexicalEntry {
+    lexicon:form     = "shows";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_cp) );
+    lexicon:sem      = lexicon:shows;
+    lexicon:sem_type = type_expr( Prop -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:show.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:e_show_pl : lexicon:LexicalEntry {
+    lexicon:form     = "show";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_cp) );
+    lexicon:sem      = lexicon:shows;
+    lexicon:sem_type = type_expr( Prop -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:show.v.01";
     lexicon:grade    = epistemic:declared;
 }
 

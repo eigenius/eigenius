@@ -224,7 +224,9 @@ return **(lemma, features)**, not bare lemma strings — Morphy knows which deta
 *has* the feature; the current `Vec<String>` API discards it. This is **not needed for Slice 1**: the
 feature *mechanism* (inductive + erasure + meet) lands first with features inert (everything `Any`);
 the morphological *instantiation* that makes agreement actually bite arrives in Slice 2 with the
-determiners that exercise it. (Touches `dcg::lemmatizer`, `dcg::lookup`, `MorphyLemmatizer`.)
+determiners that exercise it. (Touches `dcg::lemmatizer`, `dcg::lookup`, `MorphyLemmatizer`.) *Determiner–
+noun* agreement landed in Slice 2; *subject–verb* agreement (the verb side of this deferral) is designed in
+**§8.10 (Slice 6-agr)**.
 
 *Question denotation: deferred to Slice 5.* The *eventual* `⟦S[q]⟧` is `Entity→Prop` (or a set of
 Props); until Slice 5, `S[q]` is a **syntactic tag only** (denotation trapped/`unimplemented!`), used so
@@ -390,7 +392,20 @@ Each slice ships **with** its check. The order is dependency-forced.
   reusing `copula_sem`), **short/agentless passive ✅** (`be` over the unsaturated `pss` TV, ∃-closing the
   agent), **agentive long passive ✅** ("…by HeLa" via a `pass` voice feature + `by` agent-marker), and
   **modals ✅** (opaque `logic:Possible`/`Necessary : Prop→Prop`; `can`/`must` etc. do-support-shaped
-  auxes). **6-aux is complete.** Deferred: **6-tail** (case + pronouns — case is the syntactic half, pronouns gated on **anaphora
+  auxes). **6-aux is complete.** **6-agr ✅** — **subject-verb agreement (§8.10):** the finite verb's
+  `num_any` subject slot is replaced by real `sg`/`pl` agreement (sg `affects` / pl-finite `affect`), with
+  determiner/proper-noun/group/aux number propagation — closing the verb side of the §5.1 number deferral.
+  (One documented limitation: agreement through an *object* determiner needs a feature-variable unifier
+  extension — deferred.) **6-cl ✅** — **clausal complements (§8.11):** clause-taking
+  verbs ("X shows that Y") via a `cat_cp` embedded-clause category + a `that` complementizer + an opaque
+  `Prop→Entity→Prop` report axiom (intensional — the complement is not asserted); importer frame-26. **6-cmp** —
+  **comparatives/superlatives (§8.12): grammar core ✅ + morphology ✅; importer scale-out + superlative
+  pending.** Degree semantics reusing D52 — degrees are `core:float`, comparison is the opaque `stats:gt`,
+  a gradable adjective is a measure `deg_A : Entity→float`; "X is larger than Y" →
+  `gt(deg_large(x), deg_large(y))`, "X is large" → `gt(deg_large(x), std_large)` (unified positive). The
+  comparison-morphology generator (grounded suppletive table + periphrastic) is built. Pending: the WordNet
+  importer scale-out (wndb pertainym gradability flag + `push_adj` measure/comparative emission) and the
+  superlative (gated on "the"). Deferred: **6-tail** (case + pronouns — case is the syntactic half, pronouns gated on **anaphora
   resolution**, designed in [D64](d64-llm-anaphora-resolution.md): an LLM resolver behind the felicity
   oracle, pronouns → committed-resource IRIs).
 - **Slice 7 — full-WordNet operationalization (scale-up).** *Orthogonal to the grammar slices* —
@@ -1082,13 +1097,273 @@ With the forms in the lexicon, each auxiliary is unblocked on the morphology sid
   epistemic "may/might" → the Declared **grade** rather than `Possible`; `should`/`will`/`shall`; flavor
   tags harvested from use.
 
-**6-tail — case + the long tail. Deferred (demand-driven).** Pronoun case (he/him), complementizers,
-comparatives, … — each its own construction. The big one, **pronouns**, is only useful with **anaphora
+**6-tail — case + the long tail. Deferred (demand-driven).** Pronoun case (he/him), who/whom, possessives,
+adverbs, non-restrictive/reduced relatives, … — each its own construction. (Two items have graduated out of
+the tail into designed slices: **clausal complements** — "X shows that Y" — **§8.11 (6-cl)**, and
+**comparatives/superlatives** — "X is larger than Y" — **§8.12 (6-cmp)**.) The big one, **pronouns**, is only useful with **anaphora
 resolution** (resolve to a chain resource by IRI, §5.3) — a real feature, not a lexical entry, **designed
 in [D64](d64-llm-anaphora-resolution.md)**: an LLM resolver behind the felicity oracle (a *dispatched
 institution*, §5.3), pronouns parse to typed `Exp::Anaphor` holes that resolve to committed-resource IRIs
 and re-gate through the kernel (Derived verdict, D61). Case is the cheap syntactic half (a `Case` feature),
 folded into the pronoun lexicon. Not a discrete deliverable; items land as the target corpus demands them.
+
+### 8.10 Slice 6-agr — subject-verb agreement
+
+**✅ Done (full scope, one documented limitation).** *As built:* the demo + the importer (`push_verb`)
+emit the verb as sg-`fin` (3sg, subject `sg`) + pl-`fin` (lemma surface, subject `pl`) alongside
+`bse`/`ger`/`pss` (subject `num_any`); proper nouns / `@i` instances are `sg`; the subject determiners carry
+their `Num` into the VP slot (`fin`-tightened to exclude `bse`); the finite auxiliaries are sg/pl
+(`is`/`has`/`does`/`was` → `sg`, `are`/`have`/`do`/`were` → `pl`; `did`/`had`/modals/kind-copula stay
+`num_any`); and the distributive-subject rule ([`parser.rs`]) checks the group's `Num` against the VP
+([`feat_meets`]). Witnesses (`closed_class_determiners`): `subject_verb_agreement_bites`
+(`HeLa affects` ✓ / `*HeLa affect`, `*every cell line affect`, `*HeLa and BRCA1 affects` ✗),
+`auxiliary_agreement_bites` (`HeLa is/has …` ✓ / `*HeLa are/have …` ✗); corpus import stays felicity-clean
+(the 5-form paradigm: bse/sg-fin/pl-fin/ger/pss, all admitted by `--validate`).
+
+**Documented limitation (a real finding beyond the original design):** subject agreement is **not enforced
+through an *object* determiner** — `a_obj`/`some_obj`/… relax the verb's subject slot to `num_any` (their
+category fixes the subject slot as a constant, not a variable), so `*HeLa affect a cell line` slips through.
+Enforcing it requires a **feature variable** in the unifier (so the object determiner can thread the verb's
+subject `Num` rather than constant-`num_any`) — a `unify_cat`/`feat_meets` extension that is its own change;
+deferred. The *direct* cases (proper-noun and subject-determiner subjects, plain objects, coordinated
+groups, auxiliaries) all enforce agreement correctly.
+
+Closes the verb side of the §5.1 number deferral. *Determiner–noun*
+agreement landed in Slice 2 (`cat_forall` carries the determiner's `Num`; `apply` checks it; `LexicalIndex`
+refines a noun's `num_any` to the surface number — `every gene` ✓ / `*every genes` ✗). *Subject–verb*
+agreement is the gap: the finite verb's subject slot is `cat_np(Entity, num_any)`, so no agreement bites
+(`*every gene affect`, `*HeLa and BRCA1 affects` both slip through), and the 6-aux morphology completion
+(§8.9), by splitting the lemma into `bse` + 3sg-`fin`, removed the *accidental* plural-finite coverage the
+old base-as-`fin` mistag provided. This slice makes agreement actually bite.
+
+*The phenomenon.* English present tense: a **3sg** subject takes verb **+s** ("the gene affect**s**"); a
+**non-3sg** (plural; also 1sg/2sg) takes the **base** ("genes affect"). So the finite verb has two
+present forms — sg `affects` (subject `sg`) and **pl-finite `affect`** (subject `pl`, `fin`). The pl-finite
+surface equals the base, but it is a **distinct entry** from the `bse` form (the do-support / modal
+complement): `bse` only fills an auxiliary's base slot, `fin`-pl only heads a clause with a plural subject.
+*(Person is number-only for now — entities are 3rd person, so `sg`=3sg→+s, `pl`→base; 1st/2nd person
+arrive with pronouns, D64, and fold into agreement then, per §5.1.)*
+
+*The mechanism (reuses `feat_meets`).* Agreement = **the subject's `Num` meets the finite verb's
+subject-slot `Num`**. No new feature or kernel change — `Num`/`feat_meets` already exist; this is a
+category-shape + lexical-entry change (+ importer emission). Touch points (full scope):
+1. **Lexical finite verb → two forms:** sg `affects` (subject slot `sg`) + pl-finite `affect` (subject slot
+   `pl`, `fin`). The importer emits both (sg via `third_singular`; pl = the lemma surface, no generation);
+   the demo gains the pl-finite entry. (`bse`/`ger`/`pss` unchanged.)
+2. **Determiners carry their number into the VP slot:** `every`/`each`/`a`/`some`/`no` → `sg`, `all` → `pl`
+   (the VP slot's subject `Num`). And **tighten the determiner VP clause-feature `fin_any → fin`** so the
+   `bse` form can't slip in as a spurious second parse of a determiner subject.
+3. **Proper nouns / `@i` instances → `sg`** (a KG entity is singular; was `num_any`) — `HeLa affects` ✓ /
+   `*HeLa affect` ✗.
+4. **Coordinated groups are `pl`** (already) — the distributive / collective / reciprocal VP takes a
+   `pl` subject, so `HeLa and BRCA1 affect …` ✓ / `*… affects …` ✗.
+5. **Finite auxiliaries get `sg`/`pl` subject slots** (they already exist as pairs): `is`/`has`/`does`/`was`
+   → `sg`, `are`/`have`/`do`/`were` → `pl`. **Modals do not inflect** (`can`/`must` — "he can", not
+   "he cans"), so they stay number-invariant (`num_any`) — correct, not an omission.
+
+*Number-invariant subjects.* Kind subjects (`cat_kind`, the bare-plural / generic path) carry no `Num` and
+read as plural ("Genes are cell lines"); the kind copula `are` is the `pl` form — consistent. Mass /
+uncountable subjects are deferred.
+
+*Test churn (honest heads-up — this slice changes which sentences are grammatical).* The current
+distributive / disjunctive / reciprocal / n-ary tests pair a **plural** coordinated subject with the **sg**
+verb `affects` ("HeLa and BRCA1 **affects** HeLa") — under agreement these become `… **affect** …`. ~6–8
+test sentences move to the agreeing form (object-distribution and singular-subject tests are unaffected —
+their subject is singular `HeLa`). This is the feature doing its job, not a regression.
+
+*Build order (when taken):* (1) lexical sg/pl finite forms + proper-noun/instance `sg` + the importer
+pl-finite emission; (2) determiner VP-`Num` + the `fin_any → fin` tightening; (3) aux `sg`/`pl` subject
+slots; (4) group/distributive `pl`. *Verify:* agreement bites (`*HeLa affect`, `*every gene affect`,
+`*genes affects`, `*does genes affect`/`*HeLa are affecting`) and the agreeing forms parse single; the
+churned coordination tests pass on the corrected sentences; corpus import stays felicity-clean.
+
+*Decisions:* full scope (verbs + determiners + proper nouns + groups + finite auxes); proper nouns `sg`;
+modals number-invariant; person + mass nouns deferred (person with pronouns, D64).
+
+### 8.11 Slice 6-cl — clausal complements
+
+**✅ Done.** *As built:* the `cat_cp` constructor + its `denote_cat` arm (⟦·⟧ = Prop); the complementizer
+`that_comp` (`cat_cp / cat_s(dcl,fin)`, sem `λp.p`) in [`closed-class.esl`]; a demo report verb (`shows`,
+an opaque `Prop → Entity → Prop` axiom, sg/pl finite forms) + the importer un-deferring **frame 26** →
+`FrameKind::Clausal` (emitting `(S\NP)/cat_cp` + the report axiom, full agreement paradigm). Witnesses
+(`closed_class_determiners`): `clausal_complement_parses_intensionally` ("HeLa shows that BRCA1 affects
+HeLa" → `shows(affects(hela, brca1), hela)`, single parse, head = the opaque `shows` so the complement is
+**not** asserted), `embedded_cp_is_not_a_clause_root_and_relativizer_still_works` (leading "that …" no
+parse; the 6-rel relativizer `that` unaffected); convert test `clausal_verb_emits_report_axiom_and_cp_category`;
+corpus import felicity-clean with frame-26 verbs (`--validate`). Graduated the most tractable 6-tail item:
+**clause-taking verbs**
+("Smith **shows that** BRCA1 affects HeLa", "the assay **demonstrated that** …") — subject + verb + a
+*that*-clause complement. High-value for scientific prose, and it un-defers a WordNet verb frame the
+importer currently drops. No new subsystem; it's a higher-order verb category over an embedded clause.
+
+*Scope.* **In:** subject + clause-taking verb + `that` + a **finite declarative** complement (WordNet
+**frame 26**, "Somebody ----s that CLAUSE"). **Deferred:** interrogative complements ("knows **whether** Y"
+— the complement is a question, frames 29/34); **subject** clauses ("That Y is surprising"); **bare**
+(that-less) complements ("shows Y affects Z"); the **expletive** "it is known that Y" (needs the
+pronoun/expletive `it`, D64) and the passive of report verbs; **control / raising** ("wants **to** affect",
+frames 24/25/… — infinitival, a different construction).
+
+*The categorial treatment.* Three pieces:
+- **`cat_cp`** — a new `Cat` constructor for the **embedded complement clause**, `⟦cat_cp⟧ = Prop`. It is
+  **not a clause root** (the root filter checks `cat_s`), which is what keeps a stray leading "that …" from
+  parsing as a standalone sentence.
+- **Complementizer `that`** — a closed-class lexical entry `cat_cp / cat_s(dcl, fin)`, sem `λp. p`
+  (semantically vacuous — the embedded clause's `Prop`). "that BRCA1 affects HeLa" → `cat_cp`, sem
+  `affects(brca1, hela)`.
+- **Clause-taking verb** — `(S[dcl,fin]\NP) / cat_cp`, **object-first**, `⟦cat⟧ = Prop → Entity → Prop`; an
+  **opaque axiom** `shows : Prop → Entity → Prop` (the agent–proposition report relation). "Smith shows
+  that Y" → `shows(Y, smith)`.
+
+*Opacity / intensionality (the load-bearing semantic point).* `shows(Y, x)` does **not** assert `Y` — the
+complement sits in a **non-veridical** context (Smith may be wrong; `shows(P, x) ⊬ P`). The opaque-axiom
+treatment gives this for free (felicity ≠ truth; the report's truth is a grounding judgment / `ChainWitness`
+downstream, like `is_a` and the modal operators). This is *why* the verb is an `axiom`, not a reduction —
+collapsing the complement to its truth value would wrongly make every reported claim asserted.
+
+*The `that` overload (relativizer vs. complementizer) — no interference.* `that` already drives the
+**relativizer** reserved-word rule (§8.9 6-rel: `[noun] that [gapped body]`). The complementizer is a
+distinct **lexical** `cat_cp/S` entry (`[CTV] that [full S]`). They never collide: the relativizer needs a
+**noun** on the left and a **gapped** body (`S\NP` / `S/NP`) on the right; the complementizer needs a
+**verb** on the left and a **full finite S** on the right. Distinct left and right contexts, and `cat_cp`
+not being a root kills the leading-"that" spurious sentence. (Verified by a no-regression check on the
+relative-clause tests.)
+
+*Kernel.* The clause-taking axiom takes a **`Prop` argument** — the same capability the modal operators
+already exercise (§8.9; impredicative `Prop`); `axiom : Prop → Entity → Prop` to confirm at build (expected
+fine). Adds one `denote_cat` arm (`cat_cp → Prop`) and the `cat_cp` ctor to the lexicon schema.
+
+*Importer.* Un-defer **frame 26** in `convert.rs` `classify` → a new `FrameKind::Clausal`, emitting the
+verb as the opaque axiom `Prop → Entity → Prop` with cat `(S\NP)/cat_cp`. The full morphology paradigm
+(§8.9: `bse`/`fin`-3sg/`ger`/`pss`) applies unchanged (shows / show / showing / shown). The `whether`
+frames (29/34) and control/raising frames stay deferred.
+
+*Build order (when taken):* (1) `cat_cp` ctor + `denote_cat` arm + the complementizer `that` entry +
+a demo clause-taking verb (axiom + paradigm entries); (2) importer frame-26 → `Clausal` emission;
+(3) tests. *Verify:* "HeLa shows that BRCA1 affects HeLa" → `shows(affects(brca1, hela), hela) : Prop`,
+single parse; the embedded proposition is **not** independently asserted (the sem is headed by the opaque
+`shows`, not by `affects`); a leading "that …" does not parse as a sentence; the 6-rel relativizer tests
+still pass (no regression from the `that` overload).
+
+*Decisions:* `cat_cp` (not bare-`S`, which would let a leading "that" form a sentence and overload the
+relativizer); `that` **required** (optional that-less complements = a follow-on unary `S → cat_cp` shift);
+declarative complements only; the verb is an **opaque** `Prop → Entity → Prop` axiom (intensional). Deferred:
+interrogative / subject / expletive / control complements.
+
+### 8.12 Slice 6-cmp — comparatives & superlatives (degree semantics)
+
+**Partially built — grammar core ✅ + morphology ✅; importer scale-out + superlative pending.** *Built and
+green:* the `cat_pp_than` constructor + `denote_cat` arm (⟦·⟧ = Entity); the `than` marker (`cat_pp_than /
+cat_np(Entity)`, sem `λy.y`) in [`closed-class.esl`]; a demo gradable adjective `large` (the opaque measure
+`deg_large : Entity → core:float` + standard `std_large`), with the **comparative** `larger`
+(`(S[adj]\NP)/cat_pp_than`, `λy.λx. measurements:gt(deg_large(x), deg_large(y))`) and the **measure-based
+positive** `large` (`gt(deg_large(x), std_large)` — combo 1), both reusing the copula. The
+**comparison-morphology generator** ([`eigenius-wordnet::inflect`] `comparison`): regular `-er`/`-est` +
+the grounded suppletive table (good/bad/little/much/many/far/old + shy) + the periphrastic heuristic, all
+validated. Witnesses: `comparative_compares_degrees`, `positive_gradable_adjective_is_measure_based`,
+`comparative_requires_than` (`closed_class_determiners`); `comparison_regular_irregular_and_periphrastic`
+(`inflect`). *Pending (the WordNet importer scale-out + superlative):* the **wndb pertainym flag**
+(gradability signal — a clean `Synset` addition) and the **`push_adj` gradable path** (emit `deg_A`/`std_A`
++ SemTerm-based measure-positive + comparative/superlative entries for gradable adjectives, Boolean for
+relational — needs the importer to emit `SemTerm` blocks, a new emission pattern); and the **superlative**
+(gated on the definite "the"). The original design follows.
+
+The genuine *degree-semantics* foundation: gradable adjectives and their
+comparison — "X is **larger than** Y", "the **largest** gene". High-value for scientific prose ("higher
+expression than", "the most dependent cell line"), and it has a real payoff: it **reuses the D52 measurement
+machinery** rather than inventing a scale.
+
+*The key grounding — degrees are `core:float`, ordered by the existing opaque relations.* The chain already
+ships `stats:lt`/`le`/`gt`/`ge : core:float → core:float → Prop` (opaque orderings, witnessed downstream)
+and measurement functionals (`mean_of : core:string → core:float`, …). So **no new `Degree` type**: a degree
+is a `core:float`, comparison is the existing opaque `stats:gt`/`lt`. This is the right foundation for a
+*scientific* KG, where comparatives are largely over measured quantities — "X has higher expression than Y"
+is exactly `gt(expression_of(x), expression_of(y))`.
+
+*Gradable adjective = a measure (recommended over an opaque comparison relation).* Each gradable adjective
+`A` gets an opaque **measure** `deg_A : lexicon:Entity → core:float` (the degree-of-`A` function; e.g.
+`deg_large`). Then:
+- **Comparative** "X is larger than Y" → `stats:gt(deg_large(x), deg_large(y))`.
+- **Positive** "X is large" → `stats:gt(deg_large(x), std_large)` for an opaque contextual standard
+  `std_large : core:float` — **unifying** the positive with the comparative under one measure (the standard
+  degree-semantics analysis: the positive is the measure vs. a threshold). *(For gradable adjectives only;
+  relational adjectives keep the Boolean `is_A` — see the resolved gradability + positive decisions below.)*
+- **Superlative** "the largest gene" → the unique `g : Gene` maximal in the comparison class:
+  `∀g':Gene. g' ≠ g → gt(deg_large(g), deg_large(g'))` — **deferred**, gated on the definite **"the"**
+  determiner (§8.3 follow-on) + maximality quantification over the noun's class.
+The alternative — an **opaque comparison relation** `more(A, x, y)` with no degrees — was **rejected**: it
+can't reach equatives / measure phrases / superlative-maximality, has no transitivity structure, and (the
+decisive point) doesn't connect to the measurement layer that scientific comparatives live in.
+
+*The categorial pieces (comparative; the in-scope core).*
+- A **`than`-phrase** category (`cat_pp_than`, a complement marking the standard) + the function word
+  `than : cat_pp_than / NP`, sem identity (supplies the standard entity `y`).
+- The **comparative adjective** `larger : (S[dcl,adj]\NP) / cat_pp_than`, sem
+  `λy. λx. stats:gt(deg_large(x), deg_large(y))`. So "larger than Y" → the adjectival predicate
+  `λx. gt(deg_large(x), deg_large(y))`, which the **copula `is` lifts** (reusing 3a) → "X is larger than Y"
+  → `gt(deg_large(x), deg_large(y))`.
+
+*Comparison morphology (grounded; parallels the verb-form work).* Two strategies. **Synthetic**
+`-er`/`-est` ("large→larger→largest"), regular with the same orthographics as the verb inflector
+(`e`-final → `+r`/`+st`, consonant-`y → -ier`/`-iest`, monosyllabic-CVC doubling). A validation against a
+~200-adjective comparison list confirmed the **rule reproduces ≈96%** of forms by itself; the
+**irregular table is small and textbook-stable** — the suppletives `good→better/best`, `bad→worse/worst`,
+`little→less/least`, `much`·`many→more/most`, `far→farther·further/…`, `old→older·elder/…`, plus
+`shy→shyer/shyest` (keeps the `y`). It is **witnessed against the in-repo WordNet `adj.exc`** (which
+attests `better`/`worse`/`shyer` and the orthographic regulars `bigger`/`cuter`/`happier`; the
+`more`/`most`/`less`/`least` suppletives are separate headwords, not inflections, so they are the
+hand-fixed textbook residual). The witness also **catches source typos** fail-closed (a listed form that is
+neither the rule output nor attested — e.g. `clear→clear`, `lonely→lonlier` — is dropped, and the rule's
+form is used). **Periphrastic** "more"/"most" for the rest ("more beautiful") — a *fuzzy, low-stakes*
+heuristic (monosyllabic / `-y` / `-le` / `-er` / `-ow` → synthetic; else periphrastic; silent final `e`
+must **not** be counted as a syllable), low-stakes because the synthetic/periphrastic choice is genuinely
+variable in English (`politer` ~ `more polite`) and **fail-closed** (a wrong synthetic guess simply isn't
+looked up; `more X` via the grammar still parses). The generator lives in `eigenius-wordnet::inflect`
+(alongside the verb forms); the importer emits the synthetic `-er`/`-est` entries and the grammar admits
+`more`/`most` + base for the periphrastic case.
+
+*Kernel.* No new capability — `deg_A : Entity → core:float` and the `stats:gt` application are ordinary
+opaque axioms over existing types; adds the `cat_pp_than` ctor + a `denote_cat` arm. Reuses the 3a copula
+and the existing adjective `adj` category.
+
+*Gradability detection (resolved — WordNet descriptive-vs-relational).* Gradability cannot come from
+morphology (the `-er` rule will happily generate "primarier"), so it comes from **WordNet structure**:
+**relational** adjectives carry a **pertainym pointer `\`** ("atomic"\→"atom", "presidential"\→"president")
+and are **non-gradable**; **descriptive** adjectives (antonym/similar-clustered) lack it and are
+**gradable**. So `gradable ⟺ no pertainym`. This covers all ~18k adjectives and is grounded in WordNet's own
+classification; a curated comparison list (~200 adjectives, validated to come out gradable) is the
+**validation set** + curated override. Requires a small **`wndb` extension** — capture the `\` pertainym
+pointer (today `wndb` walks the pointer block but keeps only `@`/`@i`/frames). *Accepted, fail-closed:* a
+minority of descriptive adjectives are non-gradable (dead, pregnant, unique, perfect) — flagged gradable →
+mild "more pregnant" over-generation, never ill-typed; the curated list can override the worst.
+
+*Positive unification (resolved — combo 1, enabled by the gradability flag).* Because gradability is now
+reliably flagged, the **positive unifies with the comparative** for gradable adjectives: the gradable `A`
+is the measure `deg_A`, and "X is large" is the derived `gt(deg_large(x), std_large)` (`std_large :
+core:float`, an opaque contextual standard). **Non-gradable (relational) adjectives keep the Boolean**
+`is_A : Entity → Prop` unchanged. (This refines `push_adj` for gradable adjectives only — the relational
+ones, and the existing demo, are untouched.)
+
+*Importer.* For each adjective, read the pertainym flag from `wndb`. **Gradable** → mint `deg_A : Entity →
+core:float` + `std_A : core:float`, emit the positive as `gt(deg_A(x), std_A)` and the synthetic
+comparative/superlative forms (§ morphology). **Relational** → keep the current Boolean `is_A` (no `deg_A`,
+no comparatives). The comparison-form generator lives in `eigenius-wordnet::inflect`.
+
+*Build order (when taken):* (1) `wndb` pertainym capture + a `gradable` flag on the adjective synset,
+validated against the comparison list; (2) `cat_pp_than` + `than` + comparative adjective entries +
+`deg_A`/`std_A` axioms + the unified positive for gradable adjectives + a demo gradable adjective ("large");
+(3) comparison morphology in `inflect` (`-er`/`-est` + the suppletive table + periphrastic policy, already
+grounded above) + importer emission; (4) superlative, once the definite "the" lands. *Verify:* "HeLa is
+larger than BRCA1" → `gt(deg_large(hela), deg_large(brca1)) : Prop`, single parse; "X is large" →
+`gt(deg_large(x), std_large)`; a relational adjective stays Boolean (`is_atomic`, no comparative); the
+comparison list all flags gradable.
+
+*Decisions (settled):* degrees = `core:float`, comparison = the opaque `stats:gt`/`lt` (reuse D52, not a new
+scale); gradable adjective = a **measure** `deg_A` (not an opaque comparison relation); **gradability =
+WordNet pertainym flag** (descriptive ⇒ gradable, relational ⇒ not), validated by the curated list;
+**positive unified** (`gt(deg_A, std_A)`) for gradable adjectives, **Boolean `is_A`** for relational; copula
+reused for the predicate. *Deferred:* superlative (gated on the definite "the"), equatives ("as large as" →
+`ge`), measure phrases ("3cm long"), comparative *clauses* ("larger than Y is"), attributive comparatives
+("a larger gene").
 
 ## 9. References
 

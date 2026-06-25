@@ -1142,8 +1142,8 @@ resource lexicon:e_det_result : lexicon:LexicalEntry {
         lexicon:fwd(
             lexicon:cat_s(lexicon:dcl, lexicon:fin_any),
             lexicon:bwd(
-                lexicon:cat_s(lexicon:dcl, lexicon:fin_any),
-                lexicon:cat_np(lexicon:Gene, lexicon:num_any)
+                lexicon:cat_s(lexicon:dcl, lexicon:fin),
+                lexicon:cat_np(lexicon:Gene, lexicon:sg)
             )
         )
     );

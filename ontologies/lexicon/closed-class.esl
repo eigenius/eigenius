@@ -165,7 +165,7 @@ resource lexicon:do_aux_sem : lexicon:SemTerm {
 // does — present, 3sg do-support.
 resource lexicon:does_aux : lexicon:LexicalEntry {
     lexicon:form     = "does";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
     lexicon:sem      = lexicon:do_aux_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> Prop );
     lexicon:sense    = "does";
@@ -174,7 +174,7 @@ resource lexicon:does_aux : lexicon:LexicalEntry {
 // do — present, non-3sg do-support.
 resource lexicon:do_aux : lexicon:LexicalEntry {
     lexicon:form     = "do";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:pl)) );
     lexicon:sem      = lexicon:do_aux_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> Prop );
     lexicon:sense    = "do";
@@ -207,7 +207,7 @@ resource lexicon:copula_sem : lexicon:SemTerm {
 // is — copula, 3sg.
 resource lexicon:is_copula : lexicon:LexicalEntry {
     lexicon:form     = "is";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -216,7 +216,7 @@ resource lexicon:is_copula : lexicon:LexicalEntry {
 // are — copula, plural / non-3sg.
 resource lexicon:are_copula : lexicon:LexicalEntry {
     lexicon:form     = "are";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -304,7 +304,7 @@ resource lexicon:not_adj : lexicon:LexicalEntry {
 // Declarative do-support (verbal negation / emphatic) — finiteness-lifting `λP.P`.
 resource lexicon:does_decl : lexicon:LexicalEntry {
     lexicon:form     = "does";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "do";
@@ -312,7 +312,7 @@ resource lexicon:does_decl : lexicon:LexicalEntry {
 }
 resource lexicon:do_decl : lexicon:LexicalEntry {
     lexicon:form     = "do";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "do";
@@ -342,7 +342,7 @@ resource lexicon:did_decl : lexicon:LexicalEntry {
 // Progressive `be` (over `ger`): is/are (present), was/were (past — tense erased).
 resource lexicon:is_prog : lexicon:LexicalEntry {
     lexicon:form     = "is";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -350,7 +350,7 @@ resource lexicon:is_prog : lexicon:LexicalEntry {
 }
 resource lexicon:are_prog : lexicon:LexicalEntry {
     lexicon:form     = "are";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -358,7 +358,7 @@ resource lexicon:are_prog : lexicon:LexicalEntry {
 }
 resource lexicon:was_prog : lexicon:LexicalEntry {
     lexicon:form     = "was";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -366,7 +366,7 @@ resource lexicon:was_prog : lexicon:LexicalEntry {
 }
 resource lexicon:were_prog : lexicon:LexicalEntry {
     lexicon:form     = "were";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -376,7 +376,7 @@ resource lexicon:were_prog : lexicon:LexicalEntry {
 // Perfect `have` (over `pss`): has/have (present), had (past — tense erased).
 resource lexicon:has_perf : lexicon:LexicalEntry {
     lexicon:form     = "has";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "have";
@@ -384,7 +384,7 @@ resource lexicon:has_perf : lexicon:LexicalEntry {
 }
 resource lexicon:have_perf : lexicon:LexicalEntry {
     lexicon:form     = "have";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "have";
@@ -422,7 +422,7 @@ resource lexicon:passive_sem : lexicon:SemTerm {
 }
 resource lexicon:is_passive : lexicon:LexicalEntry {
     lexicon:form     = "is";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:passive_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -430,7 +430,7 @@ resource lexicon:is_passive : lexicon:LexicalEntry {
 }
 resource lexicon:are_passive : lexicon:LexicalEntry {
     lexicon:form     = "are";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:passive_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -438,7 +438,7 @@ resource lexicon:are_passive : lexicon:LexicalEntry {
 }
 resource lexicon:was_passive : lexicon:LexicalEntry {
     lexicon:form     = "was";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:passive_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -446,7 +446,7 @@ resource lexicon:was_passive : lexicon:LexicalEntry {
 }
 resource lexicon:were_passive : lexicon:LexicalEntry {
     lexicon:form     = "were";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:passive_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -484,7 +484,7 @@ resource lexicon:by_agent : lexicon:LexicalEntry {
 // not "affected BRCA1".
 resource lexicon:is_passive_by : lexicon:LexicalEntry {
     lexicon:form     = "is";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -492,7 +492,7 @@ resource lexicon:is_passive_by : lexicon:LexicalEntry {
 }
 resource lexicon:are_passive_by : lexicon:LexicalEntry {
     lexicon:form     = "are";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -500,7 +500,7 @@ resource lexicon:are_passive_by : lexicon:LexicalEntry {
 }
 resource lexicon:was_passive_by : lexicon:LexicalEntry {
     lexicon:form     = "was";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -508,7 +508,7 @@ resource lexicon:was_passive_by : lexicon:LexicalEntry {
 }
 resource lexicon:were_passive_by : lexicon:LexicalEntry {
     lexicon:form     = "were";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "be";
@@ -576,6 +576,45 @@ resource lexicon:must_modal : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 
+// ── Clausal complements: complementizer `that` (D63 §8.11 Slice 6-cl) ──
+// "HeLa shows that BRCA1 affects HeLa" → shows(affects(brca1, hela), hela). The
+// complementizer `that` wraps a finite declarative clause into an embedded CP
+// (`cat_cp`, ⟦·⟧ = Prop), semantically vacuous (`λp. p`). A clause-taking verb is then
+// `(S\NP)/cat_cp` — an opaque report axiom `Prop → Entity → Prop` (the complement is NOT
+// asserted; intensional). Distinct from the relativizer `that` (a reserved-word rule
+// over a *gapped* body): the complementizer needs a FULL finite S on its right and a
+// VERB on its left; `cat_cp` not being a clause root keeps a leading "that …" from
+// parsing as a standalone sentence.
+resource lexicon:that_comp_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (p : Prop) => p : Prop -> Prop ) );
+}
+resource lexicon:that_comp : lexicon:LexicalEntry {
+    lexicon:form     = "that";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_cp, lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:that_comp_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop );
+    lexicon:sense    = "that";
+    lexicon:grade    = epistemic:declared;
+}
+
+// ── Comparative `than` marker (D63 §8.12 Slice 6-cmp) ─────────────────
+// "X is larger than Y": `than` marks the comparison STANDARD `Y`. It consumes the
+// standard NP and yields a `cat_pp_than` (⟦·⟧ = Entity), semantically the identity on the
+// standard entity (`λy. y`); the comparative adjective `(S[adj]\NP)/cat_pp_than` then
+// builds `λx. gt(deg_A(x), deg_A(y))`. A distinct `cat_pp_than` (not a bare NP) forces
+// the `than`, so `*X is larger Y` has no parse.
+resource lexicon:than_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (y : lexicon:Entity) => y : lexicon:Entity -> lexicon:Entity ) );
+}
+resource lexicon:than_marker : lexicon:LexicalEntry {
+    lexicon:form     = "than";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_than, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:than_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "than";
+    lexicon:grade    = epistemic:declared;
+}
+
 // ── Determiner entries (D63 §8.3 Phase 2) ─────────────────────────────
 // Subject category:  cat_forall(num, λT. S/(S\NP_T))
 // Object category:   cat_forall(num, λT. (S\NP_E)\((S\NP_E)/NP_T)),  E = lexicon:Entity
@@ -585,7 +624,7 @@ resource lexicon:must_modal : lexicon:LexicalEntry {
 // every — universal, singular.
 resource lexicon:every_subj : lexicon:LexicalEntry {
     lexicon:form     = "every";
-    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:forall_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "every"; 
@@ -602,7 +641,7 @@ resource lexicon:every_obj : lexicon:LexicalEntry {
 // each — universal, singular (≈ every truth-conditionally).
 resource lexicon:each_subj : lexicon:LexicalEntry {
     lexicon:form     = "each";
-    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:forall_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "each"; 
@@ -611,7 +650,7 @@ resource lexicon:each_subj : lexicon:LexicalEntry {
 // all — universal, plural.
 resource lexicon:all_subj : lexicon:LexicalEntry {
     lexicon:form     = "all";
-    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
     lexicon:sem      = lexicon:forall_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "all"; 
@@ -628,7 +667,7 @@ resource lexicon:all_obj : lexicon:LexicalEntry {
 // a — existential, singular.
 resource lexicon:a_subj : lexicon:LexicalEntry {
     lexicon:form     = "a";
-    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:exists_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "a"; 
@@ -645,7 +684,7 @@ resource lexicon:a_obj : lexicon:LexicalEntry {
 // some — existential, singular.
 resource lexicon:some_subj : lexicon:LexicalEntry {
     lexicon:form     = "some";
-    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:exists_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "some"; 
@@ -662,7 +701,7 @@ resource lexicon:some_obj : lexicon:LexicalEntry {
 // no — negative, singular.
 resource lexicon:no_subj : lexicon:LexicalEntry {
     lexicon:form     = "no";
-    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:no_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "no"; 

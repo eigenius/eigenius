@@ -52,6 +52,14 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
         // ⟦Kind⟧ = Set — a kind-denoting NP denotes a type (the kind as a value of
         // `Set`); the predicate over it is `Set → Prop` (D63 §8.5, kind subjects).
         ("cat_kind", []) => Ok(Exp::Sort(1)),
+        // ⟦CP⟧ = Prop — an embedded complement clause denotes the embedded proposition
+        // (D63 §8.11, clausal complements); a clause-taking verb is `(S\NP)/cat_cp`.
+        ("cat_cp", []) => Ok(Exp::Sort(0)),
+        // ⟦PP[than]⟧ = Entity — the than-phrase supplies the comparison STANDARD, an
+        // entity (D63 §8.12, comparatives). `than : cat_pp_than / cat_np(Entity)`.
+        ("cat_pp_than", []) => Ok(Exp::EigonClass(
+            Iri::parse("urn:eigenius:lexicon:Entity").map_err(|e| e.to_string())?,
+        )),
         ("fwd", [a, b]) | ("bwd", [a, b]) => Ok(Exp::Arrow(
             Box::new(denote_cat(b)?),
             Box::new(denote_cat(a)?),

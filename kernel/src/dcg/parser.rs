@@ -200,16 +200,20 @@ pub fn apply(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
             }
         }
     }
-    // Distributive SUBJECT (D63 §8.4 Phase 6): a `cat_group(C, _, _)` subject
+    // Distributive SUBJECT (D63 §8.4 Phase 6): a `cat_group(C, _, num)` subject
     // meeting a VP `S\NP_C'` (backward) distributes — `P` mapped over the members
     // and ⊕-folded (∧/∨ per the group's connective) — when each member fits the
-    // predicate's slot (`C ≤ C'`). This is the type-shift that lets a coordinated NP
-    // ("HeLa and BRCA1") serve as a distributive subject; ordinary backward
+    // predicate's slot (`C ≤ C'`) AND the group's number agrees with the verb
+    // (D63 §8.10 6-agr: a plural group takes the plural-finite verb, so
+    // `HeLa and BRCA1 affect …` ✓ / `*… affects …` ✗). This is the type-shift that
+    // lets a coordinated NP serve as a distributive subject; ordinary backward
     // application can't (a `List C` group sem doesn't fill an individual `NP_C'`).
-    if let (Some([c, ..]), Some([result, slot])) =
+    if let (Some([c, _conn, gnum]), Some([result, slot])) =
         (is_ctor(&left.cat, "cat_group"), is_ctor(&right.cat, "bwd"))
     {
-        if group_member_fits(slot, c, layer) {
+        let num_agrees =
+            matches!(is_ctor(slot, "cat_np"), Some([_, snum]) if feat_meets(gnum, snum));
+        if num_agrees && group_member_fits(slot, c, layer) {
             if let Some(sem) = distribute(&left.cat, &left.sem, &right.sem, layer) {
                 return Some(Item {
                     cat: result.clone(),

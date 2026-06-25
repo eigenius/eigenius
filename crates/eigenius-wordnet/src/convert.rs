@@ -71,6 +71,9 @@ enum FrameKind {
     Intransitive,
     Transitive,
     Ditransitive,
+    /// Clause-taking (report) verb — frame 26, "Somebody ----s that CLAUSE" (D63 §8.11
+    /// 6-cl): an opaque `Prop → Entity → Prop` axiom, category `(S\NP)/cat_cp`.
+    Clausal,
 }
 
 impl FrameKind {
@@ -79,11 +82,13 @@ impl FrameKind {
             FrameKind::Intransitive => "i",
             FrameKind::Transitive => "t",
             FrameKind::Ditransitive => "d",
+            FrameKind::Clausal => "c",
         }
     }
 
     /// The axiom / `sem_type` arrow — every slot generic at the noun root
-    /// (stage-1; §8.7.4), so the verb composes with any noun by subsumption.
+    /// (stage-1; §8.7.4), so the verb composes with any noun by subsumption. The
+    /// clausal report verb leads with the propositional complement (`Prop`).
     fn arrow(self) -> String {
         match self {
             FrameKind::Intransitive => format!("{ENTITY_TOP} -> Prop"),
@@ -91,6 +96,7 @@ impl FrameKind {
             FrameKind::Ditransitive => {
                 format!("{ENTITY_TOP} -> {ENTITY_TOP} -> {ENTITY_TOP} -> Prop")
             }
+            FrameKind::Clausal => format!("Prop -> {ENTITY_TOP} -> Prop"),
         }
     }
 
@@ -99,15 +105,21 @@ impl FrameKind {
     /// declarative with the supplied finiteness — `fin` for the lemma entry, `ger` / `pss`
     /// for the participle entries (D63 §5.1, §8.9 6-aux). Finiteness is erased by `⟦·⟧`,
     /// so [`Self::arrow`] (the `sem_type`) is unchanged across forms.
-    fn cat(self, fin: &str) -> String {
-        let np = format!("lexicon:cat_np({ENTITY_TOP}, lexicon:num_any)");
+    fn cat(self, fin: &str, subj_num: &str) -> String {
+        // Subject slot carries the agreement number (D63 §8.10 6-agr: `sg` for the
+        // 3sg `fin`, `pl` for the plural-finite, `num_any` for `bse`/`ger`/`pss` where
+        // the auxiliary supplies agreement); object slots stay `num_any`.
+        let subj = format!("lexicon:cat_np({ENTITY_TOP}, lexicon:{subj_num})");
+        let obj = format!("lexicon:cat_np({ENTITY_TOP}, lexicon:num_any)");
         let s = format!("lexicon:cat_s(lexicon:dcl, lexicon:{fin})");
         match self {
-            FrameKind::Intransitive => format!("lexicon:bwd({s}, {np})"),
-            FrameKind::Transitive => format!("lexicon:fwd(lexicon:bwd({s}, {np}), {np})"),
+            FrameKind::Intransitive => format!("lexicon:bwd({s}, {subj})"),
+            FrameKind::Transitive => format!("lexicon:fwd(lexicon:bwd({s}, {subj}), {obj})"),
             FrameKind::Ditransitive => {
-                format!("lexicon:fwd(lexicon:fwd(lexicon:bwd({s}, {np}), {np}), {np})")
+                format!("lexicon:fwd(lexicon:fwd(lexicon:bwd({s}, {subj}), {obj}), {obj})")
             }
+            // Clause-taking: `(S\NP)/cat_cp` — the complement is an embedded clause.
+            FrameKind::Clausal => format!("lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_cp)"),
         }
     }
 }
@@ -126,7 +138,8 @@ fn classify(frame: u8) -> Option<FrameKind> {
         1 | 2 | 3 | 4 | 22 | 23 => Some(FrameKind::Intransitive),
         8 | 9 | 10 | 11 | 12 | 13 | 20 | 21 | 27 => Some(FrameKind::Transitive),
         14 | 15 | 16 | 17 | 18 | 19 | 31 => Some(FrameKind::Ditransitive),
-        _ => None, // 5,6,7 predicative; 24,25,26,28,29,30,32,33,34,35 clausal/control
+        26 => Some(FrameKind::Clausal), // "Somebody ----s that CLAUSE" (D63 §8.11 6-cl)
+        _ => None, // 5,6,7 predicative; 29,34 whether-clause; 24,25,28,30,32,33,35 control/raising
     }
 }
 
@@ -234,7 +247,8 @@ fn push_instance(buf: &mut String, syn: &Synset, rep: &mut Report) {
     ));
     rep.instances += 1;
     for (ci, class) in classes.iter().enumerate() {
-        let cat = format!("lexicon:cat_np({class}, lexicon:num_any)");
+        // Proper-noun individuals are singular (D63 §8.10 6-agr) → they take the 3sg verb.
+        let cat = format!("lexicon:cat_np({class}, lexicon:sg)");
         for (li, lemma) in syn.words.iter().enumerate() {
             push_entry(
                 buf,
@@ -297,11 +311,12 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report) -> bool {
         rep.verb_axioms += 1;
         let sem = format!("v{off}_{tag}");
         let arrow = kind.arrow();
-        let (cat_bse, cat_fin) = (kind.cat("bse"), kind.cat("fin"));
-        let (cat_ger, cat_pss) = (kind.cat("ger"), kind.cat("pss"));
+        let cat_bse = kind.cat("bse", "num_any");
+        let (cat_fin_sg, cat_fin_pl) = (kind.cat("fin", "sg"), kind.cat("fin", "pl"));
+        let (cat_ger, cat_pss) = (kind.cat("ger", "num_any"), kind.cat("pss", "num_any"));
         for (i, lemma) in syn.words.iter().enumerate() {
             let sense = sense_key(syn, lemma);
-            // Base form — the lemma surface (do-support / modal complement).
+            // Base form — the lemma surface (do-support / modal complement; num_any).
             push_entry(
                 buf,
                 &format!("e_v{off}_{tag}_{i}_b"),
@@ -312,13 +327,25 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report) -> bool {
                 &sense,
             );
             rep.entries += 1;
-            // Finite 3sg ("affects") — heads a declarative; generated from the lemma head.
+            // Finite 3sg ("affects") — SINGULAR subject (D63 §8.10 6-agr).
             let fin = inflect_head(lemma, third_singular);
             push_entry(
                 buf,
                 &format!("e_v{off}_{tag}_{i}"),
                 &fin,
-                &cat_fin,
+                &cat_fin_sg,
+                &sem,
+                &arrow,
+                &sense,
+            );
+            rep.entries += 1;
+            // Finite plural ("affect", = the lemma surface) — PLURAL subject (6-agr):
+            // heads a clause with a plural/coordinated subject. Distinct from `bse`.
+            push_entry(
+                buf,
+                &format!("e_v{off}_{tag}_{i}_fp"),
+                lemma,
+                &cat_fin_pl,
                 &sem,
                 &arrow,
                 &sense,
@@ -451,9 +478,11 @@ mod tests {
         assert_eq!(classify(13), Some(FrameKind::Transitive)); // "----s on something"
         assert_eq!(classify(14), Some(FrameKind::Ditransitive));
         assert_eq!(classify(31), Some(FrameKind::Ditransitive));
-        // deferred higher-order frames → None (never guessed).
+        // frame 26 "that CLAUSE" → clause-taking (D63 §8.11 6-cl).
+        assert_eq!(classify(26), Some(FrameKind::Clausal));
+        // still-deferred higher-order frames → None (never guessed).
         assert_eq!(classify(5), None); // predicative complement
-        assert_eq!(classify(26), None); // that CLAUSE
+        assert_eq!(classify(29), None); // whether CLAUSE (interrogative — deferred)
         assert_eq!(classify(32), None); // bare INFINITIVE (control)
                                         // every frame 1..=35 is classified deliberately (no silent gap).
         for f in 1u8..=35 {
@@ -506,9 +535,8 @@ mod tests {
         assert!(buf.contains("resource wn:e_n10954498_0_0 : lexicon:LexicalEntry {"));
         assert!(buf.contains("lexicon:form     = \"Einstein\";"));
         assert!(buf.contains("lexicon:form     = \"Albert Einstein\";"));
-        assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:cat_np(wn:n10428004, lexicon:num_any) );"
-        ));
+        assert!(buf
+            .contains("lexicon:cat      = type_expr( lexicon:cat_np(wn:n10428004, lexicon:sg) );"));
         assert!(buf.contains("lexicon:sem      = wn:n10954498;"));
         assert!(buf.contains("lexicon:sem_type = type_expr( wn:n10428004 );"));
         assert_eq!(rep.instances, 1);
@@ -527,12 +555,10 @@ mod tests {
         // both classes on the resource — @i first, then the rare plain @.
         assert!(buf.contains("resource wn:n00000009 : wn:n15254028, wn:n08473623 {"));
         // one NP entry per class (both type contexts reachable).
-        assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:cat_np(wn:n15254028, lexicon:num_any) );"
-        ));
-        assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:cat_np(wn:n08473623, lexicon:num_any) );"
-        ));
+        assert!(buf
+            .contains("lexicon:cat      = type_expr( lexicon:cat_np(wn:n15254028, lexicon:sg) );"));
+        assert!(buf
+            .contains("lexicon:cat      = type_expr( lexicon:cat_np(wn:n08473623, lexicon:sg) );"));
         assert_eq!(rep.instances, 1);
         assert_eq!(rep.entries, 2); // 2 classes × 1 lemma
     }
@@ -561,20 +587,26 @@ mod tests {
         assert!(push_verb(&mut buf, &eat, &mut rep));
         // frame 11 → transitive; the axiom IRI is kind-tagged (`_t`).
         assert!(buf.contains("axiom wn:v00275082_t : lexicon:Entity -> lexicon:Entity -> Prop"));
+        // Finite 3sg has a SINGULAR subject slot (6-agr); object slot stays num_any.
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
         assert!(buf.contains("lexicon:sem      = wn:v00275082_t;"));
-        // base (lemma) + finite 3sg forms (the do-support/declarative pair).
-        assert!(buf.contains("lexicon:form     = \"eat\";")); // bse
+        // base (num_any) + finite 3sg ("eats", sg) + finite plural ("eat", pl) forms.
+        assert!(buf.contains("lexicon:form     = \"eat\";")); // bse + fin-pl (lemma surface)
         assert!(buf.contains("lexicon:form     = \"eats\";")); // fin 3sg
+                                                               // bse keeps a num_any subject (the aux supplies agreement).
         assert!(buf.contains(
             "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
+        // plural-finite has a PLURAL subject slot (6-agr).
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+        ));
         assert_eq!(rep.verb_axioms, 1);
-        // Per lemma: base + finite 3sg + gerund + past participle → 3 lemmas × 4 = 12
-        // entries; 6 of them participles (ger + pss).
-        assert_eq!(rep.entries, 12);
+        // Per lemma: base + finite 3sg + finite plural + gerund + past participle →
+        // 3 lemmas × 5 = 15 entries; 6 of them participles (ger + pss).
+        assert_eq!(rep.entries, 15);
         assert_eq!(rep.participle_entries, 6);
     }
 
@@ -624,8 +656,8 @@ mod tests {
         assert!(buf.contains("axiom wn:v00001740_i : lexicon:Entity -> Prop"));
         assert!(buf.contains("axiom wn:v00001740_t : lexicon:Entity -> lexicon:Entity -> Prop"));
         assert_eq!(rep.verb_axioms, 2);
-        // one lemma × two kinds × (base + finite 3sg + gerund + 1 regular past participle) = 8.
-        assert_eq!(rep.entries, 8);
+        // one lemma × two kinds × (base + 3sg + plural-finite + gerund + 1 pp) = 10.
+        assert_eq!(rep.entries, 10);
     }
 
     #[test]
@@ -637,13 +669,30 @@ mod tests {
         assert!(buf.contains(
             "axiom wn:v00001234_d : lexicon:Entity -> lexicon:Entity -> lexicon:Entity -> Prop"
         ));
-        assert!(buf.contains("lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))"));
+        assert!(buf.contains("lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))"));
+    }
+
+    #[test]
+    fn clausal_verb_emits_report_axiom_and_cp_category() {
+        // frame 26 → clause-taking report verb (D63 §8.11 6-cl): an opaque
+        // `Prop → Entity → Prop` axiom and the category `(S\NP)/cat_cp`.
+        let v = syn("00000003 31 v 01 show 0 000 01 + 26 00 | demonstrate");
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        assert!(push_verb(&mut buf, &v, &mut rep));
+        assert!(buf.contains("axiom wn:v00000003_c : Prop -> lexicon:Entity -> Prop"));
+        assert!(buf.contains("lexicon:form     = \"shows\";")); // 3sg
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_cp) );"
+        ));
+        assert!(buf.contains("lexicon:sem      = wn:v00000003_c;"));
     }
 
     #[test]
     fn verb_with_only_deferred_frames_is_skipped() {
-        // frame 26 "Somebody ----s that CLAUSE" — clausal, deferred (not guessed).
-        let v = syn("00000001 00 v 01 cogitate 0 000 01 + 26 00 | think");
+        // frame 29 "Somebody ----s whether CLAUSE" — interrogative complement, still
+        // deferred (not guessed). (Frame 26, the declarative that-clause, is now emitted.)
+        let v = syn("00000001 00 v 01 cogitate 0 000 01 + 29 00 | think");
         let mut rep = Report::default();
         let mut buf = String::new();
         assert!(!push_verb(&mut buf, &v, &mut rep));

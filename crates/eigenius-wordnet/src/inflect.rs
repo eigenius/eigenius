@@ -434,6 +434,113 @@ pub fn third_singular(base: &str) -> String {
     format!("{base}s")
 }
 
+/// Irregular comparison: base → (comparative(s), superlative(s)). The textbook
+/// suppletives + `shy` (keeps the `y`); everything else is regular `-er`/`-est` or
+/// periphrastic. Grounded: validated against a ~200-adjective comparison list and the
+/// in-repo WordNet `adj.exc` (D63 §8.12). Sorted by base for binary search.
+const IRREGULAR_COMPARISON: &[(&str, &[&str], &[&str])] = &[
+    ("bad", &["worse"], &["worst"]),
+    ("far", &["farther", "further"], &["farthest", "furthest"]),
+    ("good", &["better"], &["best"]),
+    ("little", &["less", "littler"], &["least", "littlest"]),
+    ("many", &["more"], &["most"]),
+    ("much", &["more"], &["most"]),
+    ("old", &["older", "elder"], &["oldest", "eldest"]),
+    ("shy", &["shyer"], &["shyest"]),
+];
+
+/// The comparative/superlative of a gradable adjective (D63 §8.12 Slice 6-cmp).
+/// `Synthetic` carries the `-er`/`-est` form(s); `Periphrastic` means the comparison is
+/// `more`/`most` + the base (handled in the grammar), used for the long adjectives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Comparison {
+    Synthetic {
+        comparative: Vec<String>,
+        superlative: Vec<String>,
+    },
+    Periphrastic,
+}
+
+/// Vowel-group count, **not** counting a silent final `e` (so cute/large read as
+/// monosyllabic). A `y` counts as a vowel.
+fn count_syllables(w: &str) -> usize {
+    let stem = if w.ends_with('e') && !w.ends_with("ee") && w.len() > 2 {
+        &w[..w.len() - 1]
+    } else {
+        w
+    };
+    let mut n = 0;
+    let mut prev = false;
+    for c in stem.chars() {
+        let v = matches!(c, 'a' | 'e' | 'i' | 'o' | 'u' | 'y');
+        if v && !prev {
+            n += 1;
+        }
+        prev = v;
+    }
+    n.max(1)
+}
+
+/// Whether an adjective forms its comparison **periphrastically** (`more`/`most`):
+/// not monosyllabic, and not a 2-syllable adjective ending in `-y`/`-le`/`-er`/`-ow`
+/// (which stay synthetic — happy, simple, clever, narrow). Fuzzy + low-stakes (the
+/// synthetic/periphrastic choice is genuinely variable; a wrong synthetic guess just
+/// isn't looked up, and `more X` via the grammar still parses).
+fn is_periphrastic(base: &str) -> bool {
+    let syl = count_syllables(base);
+    if syl <= 1 {
+        return false;
+    }
+    if syl == 2
+        && (base.ends_with('y')
+            || base.ends_with("le")
+            || base.ends_with("er")
+            || base.ends_with("ow"))
+    {
+        return false;
+    }
+    true
+}
+
+/// The regular synthetic comparison stem suffixing (`-er`/`-est` family): `e`-final →
+/// `+r`/`+st`, consonant-`y` → `-ier`/`-iest`, monosyllabic-CVC doubling, else `+er`/`+est`.
+fn regular_comparison(base: &str, er: &str) -> String {
+    if base.ends_with('e') {
+        return format!("{base}{}", if er == "er" { "r" } else { "st" });
+    }
+    let b = base.as_bytes();
+    if b.len() >= 2
+        && b[b.len() - 1] == b'y'
+        && !matches!(b[b.len() - 2], b'a' | b'e' | b'i' | b'o' | b'u')
+    {
+        return format!("{}i{er}", &base[..base.len() - 1]);
+    }
+    if doubles_final(base) {
+        let last = &base[base.len() - 1..];
+        return format!("{base}{last}{er}");
+    }
+    format!("{base}{er}")
+}
+
+/// The [`Comparison`] of a gradable adjective: irregular table → synthetic suppletive;
+/// else periphrastic (long) or regular synthetic (`-er`/`-est`).
+pub fn comparison(base: &str) -> Comparison {
+    if let Ok(i) = IRREGULAR_COMPARISON.binary_search_by(|(b, _, _)| (*b).cmp(base)) {
+        let (_, comp, sup) = IRREGULAR_COMPARISON[i];
+        return Comparison::Synthetic {
+            comparative: comp.iter().map(|s| (*s).to_string()).collect(),
+            superlative: sup.iter().map(|s| (*s).to_string()).collect(),
+        };
+    }
+    if is_periphrastic(base) {
+        return Comparison::Periphrastic;
+    }
+    Comparison::Synthetic {
+        comparative: vec![regular_comparison(base, "er")],
+        superlative: vec![regular_comparison(base, "est")],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,6 +614,40 @@ mod tests {
         assert_eq!(third_singular("play"), "plays"); // vowel-y → -s
         assert_eq!(third_singular("be"), "is"); // irregular
         assert_eq!(third_singular("have"), "has");
+    }
+
+    #[test]
+    fn comparison_regular_irregular_and_periphrastic() {
+        use Comparison::*;
+        let syn = |c: &str, s: &str| Synthetic {
+            comparative: vec![c.into()],
+            superlative: vec![s.into()],
+        };
+        assert_eq!(comparison("large"), syn("larger", "largest")); // e-final
+        assert_eq!(comparison("happy"), syn("happier", "happiest")); // consonant-y
+        assert_eq!(comparison("big"), syn("bigger", "biggest")); // CVC doubling
+        assert_eq!(comparison("high"), syn("higher", "highest")); // plain
+        assert_eq!(comparison("cute"), syn("cuter", "cutest")); // silent-e monosyllable
+        assert_eq!(comparison("simple"), syn("simpler", "simplest")); // 2-syll -le
+        assert_eq!(comparison("narrow"), syn("narrower", "narrowest")); // 2-syll -ow
+        assert_eq!(comparison("clever"), syn("cleverer", "cleverest")); // 2-syll -er
+        assert_eq!(comparison("good"), syn("better", "best")); // suppletive
+        assert_eq!(comparison("bad"), syn("worse", "worst"));
+        assert_eq!(comparison("shy"), syn("shyer", "shyest")); // keeps the y
+        assert_eq!(comparison("beautiful"), Periphrastic); // 3-syllable → more/most
+        assert_eq!(comparison("difficult"), Periphrastic);
+    }
+
+    #[test]
+    fn irregular_comparison_table_is_sorted() {
+        let mut prev = "";
+        for (b, _, _) in IRREGULAR_COMPARISON {
+            assert!(
+                *b > prev,
+                "IRREGULAR_COMPARISON must be sorted by base at {b:?}"
+            );
+            prev = b;
+        }
     }
 
     #[test]

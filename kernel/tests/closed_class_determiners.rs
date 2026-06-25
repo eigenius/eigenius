@@ -77,6 +77,175 @@ fn committed_subject_determiners_parse() {
     assert_parses_to_prop("no cell line affects HeLa"); //    ∀c:CellLine. ¬affects(HeLa, c)
 }
 
+// ── D63 §8.10 Slice 6-agr — subject-verb number agreement ─────────────
+#[test]
+fn subject_verb_agreement_bites() {
+    // A singular subject takes the 3sg verb `affects`; the plural-finite `affect`
+    // (subject `pl`) is rejected — proper noun (HeLa = sg) and singular determiner alike.
+    let (_layer, index) = index_over_bootstrap();
+    assert_eq!(
+        index.parse("HeLa affects BRCA1", &Identity).len(),
+        1,
+        "sg subject + 3sg verb parses (single)"
+    );
+    assert!(
+        index.parse("HeLa affect BRCA1", &Identity).is_empty(),
+        "sg subject + plural-finite verb has no parse"
+    );
+    assert!(
+        !index
+            .parse("every cell line affects HeLa", &Identity)
+            .is_empty(),
+        "every (sg) + 3sg verb parses"
+    );
+    assert!(
+        index
+            .parse("every cell line affect HeLa", &Identity)
+            .is_empty(),
+        "every (sg) + plural-finite verb has no parse (agreement bites)"
+    );
+    // A coordinated (plural) group takes the plural-finite verb, not the 3sg:
+    // "HeLa and BRCA1 affect HeLa" ✓ (churned tests) / "… affects …" ✗ (distributive
+    // num-check, D63 §8.10).
+    assert!(
+        index
+            .parse("HeLa and BRCA1 affects HeLa", &Identity)
+            .is_empty(),
+        "plural group + 3sg verb has no parse (distributive agreement bites)"
+    );
+}
+
+#[test]
+fn auxiliary_agreement_bites() {
+    // Finite auxiliaries agree with the subject: a singular subject (HeLa) takes the
+    // sg aux (is/has), and the plural aux (are/have) is rejected.
+    let (_layer, index) = index_over_bootstrap();
+    assert!(
+        !index.parse("HeLa is affecting BRCA1", &Identity).is_empty(),
+        "is (sg) + sg subject parses"
+    );
+    assert!(
+        index
+            .parse("HeLa are affecting BRCA1", &Identity)
+            .is_empty(),
+        "are (pl) + sg subject has no parse (aux agreement bites)"
+    );
+    assert!(
+        !index.parse("HeLa has affected BRCA1", &Identity).is_empty(),
+        "has (sg) + sg subject parses"
+    );
+    assert!(
+        index
+            .parse("HeLa have affected BRCA1", &Identity)
+            .is_empty(),
+        "have (pl) + sg subject has no parse"
+    );
+}
+
+// ── D63 §8.11 Slice 6-cl — clausal complements ────────────────────────
+#[test]
+fn clausal_complement_parses_intensionally() {
+    // "HeLa shows that BRCA1 affects HeLa" → shows(affects(hela, brca1), hela) : Prop.
+    // The complement is NOT asserted — the sem is headed by the opaque report axiom
+    // `shows`, not by `affects` (intensional context).
+    let (layer, index) = index_over_bootstrap();
+    let forest = index.parse("HeLa shows that BRCA1 affects HeLa", &Identity);
+    assert_eq!(forest.len(), 1, "exactly one clausal-complement parse");
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let ty = check_infer(&mut ctx, &forest[0].sem).expect("clausal sem type-checks");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "a report clause denotes Prop"
+    );
+    match &forest[0].sem {
+        Exp::App(f, _) => match &**f {
+            Exp::App(g, _) => assert!(
+                matches!(&**g, Exp::EigonAxiom(iri) if iri.as_str() == "urn:eigenius:lexicon:shows"),
+                "clausal head is the opaque report axiom `shows`, got {g:?}"
+            ),
+            other => panic!("expected shows(P, subj), got {other:?}"),
+        },
+        other => panic!("expected a report application, got {other:?}"),
+    }
+}
+
+#[test]
+fn embedded_cp_is_not_a_clause_root_and_relativizer_still_works() {
+    // `cat_cp` is not a clause root: a bare "that BRCA1 affects HeLa" does not parse as a
+    // standalone sentence (it's an embedded complement awaiting a clause-taking verb).
+    let (_layer, index) = index_over_bootstrap();
+    assert!(
+        index.parse("that BRCA1 affects HeLa", &Identity).is_empty(),
+        "a leading complementizer-'that' clause is not a standalone sentence"
+    );
+    // No regression: the relativizer `that` (6-rel) still composes (distinct context:
+    // noun + gapped body, not verb + full clause).
+    assert!(
+        !index
+            .parse("every cell line that affects HeLa is primary", &Identity)
+            .is_empty(),
+        "the relativizer 'that' still composes after adding the complementizer"
+    );
+}
+
+// ── D63 §8.12 Slice 6-cmp — comparatives (degree semantics) ───────────
+/// Whether `sem` is headed by the opaque float ordering `measurements:gt`.
+fn is_gt_headed(sem: &Exp) -> bool {
+    match sem {
+        Exp::App(f, _) => matches!(&**f, Exp::App(g, _)
+            if matches!(&**g, Exp::EigonAxiom(iri) if iri.as_str() == "urn:eigenius:measurements:gt")),
+        _ => false,
+    }
+}
+
+#[test]
+fn comparative_compares_degrees() {
+    // "HeLa is larger than BRCA1" → gt(deg_large(hela), deg_large(brca1)) : Prop — the
+    // comparative compares the two entities' degrees via the opaque float ordering.
+    let (layer, index) = index_over_bootstrap();
+    let forest = index.parse("HeLa is larger than BRCA1", &Identity);
+    assert_eq!(forest.len(), 1, "exactly one comparative parse");
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let ty = check_infer(&mut ctx, &forest[0].sem).expect("comparative sem type-checks");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "comparative denotes Prop"
+    );
+    assert!(
+        is_gt_headed(&forest[0].sem),
+        "comparative is headed by measurements:gt, got {:?}",
+        forest[0].sem
+    );
+}
+
+#[test]
+fn positive_gradable_adjective_is_measure_based() {
+    // "HeLa is large" → gt(deg_large(hela), std_large) : Prop — the positive unified with
+    // the comparative under one measure (combo 1).
+    let (_layer, index) = index_over_bootstrap();
+    let forest = index.parse("HeLa is large", &Identity);
+    assert_eq!(forest.len(), 1, "exactly one positive parse");
+    assert!(
+        is_gt_headed(&forest[0].sem),
+        "the measure-based positive is headed by measurements:gt, got {:?}",
+        forest[0].sem
+    );
+    assert_parses_to_prop("HeLa is large");
+}
+
+#[test]
+fn comparative_requires_than() {
+    // `cat_pp_than` forces the `than` marker: a bare NP standard `*HeLa is larger BRCA1`
+    // has no parse.
+    let (_layer, index) = index_over_bootstrap();
+    assert!(
+        index.parse("HeLa is larger BRCA1", &Identity).is_empty(),
+        "the comparative requires the `than` marker (no bare-NP standard)"
+    );
+}
+
 #[test]
 fn committed_object_determiner_parses() {
     // `a` (object, type-raised) from the committed closed-class layer.
@@ -138,14 +307,14 @@ fn and_conjuncts(sem: &Exp) -> Option<Vec<Exp>> {
 
 #[test]
 fn distributive_np_coordination_parses() {
-    // "HeLa and BRCA1 affects HeLa": the coordinated subject is a group
+    // "HeLa and BRCA1 affect HeLa": the coordinated subject is a group
     // [hela, brca1] : List Entity (CellLine ⊔ Gene = Entity); the predicate
     // `affects HeLa` = λs. affects(hela, s) distributes over the members →
     // affects(hela, hela) ∧ affects(hela, brca1) : Prop.
-    assert_parses_to_prop("HeLa and BRCA1 affects HeLa");
+    assert_parses_to_prop("HeLa and BRCA1 affect HeLa");
 
     let (_layer, index) = index_over_bootstrap();
-    let forest = index.parse("HeLa and BRCA1 affects HeLa", &Identity);
+    let forest = index.parse("HeLa and BRCA1 affect HeLa", &Identity);
     assert_eq!(forest.len(), 1, "exactly one distributive parse");
     let conjuncts = and_conjuncts(&forest[0].sem)
         .expect("distributive sem is a logic:And of the per-member predications");
@@ -159,12 +328,12 @@ fn distributive_np_coordination_parses() {
 
 #[test]
 fn disjunctive_np_coordination_distributes_with_or() {
-    // "HeLa or BRCA1 affects HeLa": an `or`-group distributes with ∨ →
+    // "HeLa or BRCA1 affect HeLa": an `or`-group distributes with ∨ →
     // affects(hela, hela) ∨ affects(hela, brca1) : Prop.
-    assert_parses_to_prop("HeLa or BRCA1 affects HeLa");
+    assert_parses_to_prop("HeLa or BRCA1 affect HeLa");
 
     let (_layer, index) = index_over_bootstrap();
-    let forest = index.parse("HeLa or BRCA1 affects HeLa", &Identity);
+    let forest = index.parse("HeLa or BRCA1 affect HeLa", &Identity);
     assert_eq!(
         forest.len(),
         1,
@@ -256,13 +425,13 @@ fn collective_rejects_an_or_group() {
 
 #[test]
 fn reciprocal_np_coordination_parses() {
-    // "HeLa and BRCA1 affects each other": the verb is related over every ordered
+    // "HeLa and BRCA1 affect each other": the verb is related over every ordered
     // distinct pair of the subject group's members → affects(brca1, hela) ∧
     // affects(hela, brca1) : Prop. ("each other" is a reserved reciprocal anaphor.)
-    assert_parses_to_prop("HeLa and BRCA1 affects each other");
+    assert_parses_to_prop("HeLa and BRCA1 affect each other");
 
     let (_layer, index) = index_over_bootstrap();
-    let forest = index.parse("HeLa and BRCA1 affects each other", &Identity);
+    let forest = index.parse("HeLa and BRCA1 affect each other", &Identity);
     assert_eq!(forest.len(), 1, "exactly one reciprocal parse");
     // 2 members ⇒ 2 ordered distinct pairs ⇒ 2 conjuncts.
     assert_eq!(
@@ -276,7 +445,7 @@ fn reciprocal_np_coordination_parses() {
 fn reciprocal_three_members_has_six_ordered_pairs() {
     // n members ⇒ n·(n−1) ordered distinct pairs: 3 members → 6 conjuncts.
     let (_layer, index) = index_over_bootstrap();
-    let forest = index.parse("HeLa and BRCA1 and HeLa affects each other", &Identity);
+    let forest = index.parse("HeLa and BRCA1 and HeLa affect each other", &Identity);
     assert_eq!(forest.len(), 1, "exactly one reciprocal parse");
     assert_eq!(
         and_conjuncts(&forest[0].sem).map(|c| c.len()),
@@ -291,7 +460,7 @@ fn reciprocal_rejects_an_or_group() {
     let (_layer, index) = index_over_bootstrap();
     assert!(
         index
-            .parse("HeLa or BRCA1 affects each other", &Identity)
+            .parse("HeLa or BRCA1 affect each other", &Identity)
             .is_empty(),
         "an or-group must not get a reciprocal reading"
     );
@@ -889,10 +1058,10 @@ fn type_raising_keeps_plain_declaratives_single() {
 fn nary_distributive_group_is_left_branching_single_parse() {
     // n-ary NP coordination builds a single left-branching group (the Phase-4
     // normal form, here enforced by `coordinate_np` requiring a plain-NP right
-    // conjunct): "HeLa and BRCA1 and HeLa affects HeLa" → one parse, three
+    // conjunct): "HeLa and BRCA1 and HeLa affect HeLa" → one parse, three
     // conjuncts.
     let (_layer, index) = index_over_bootstrap();
-    let forest = index.parse("HeLa and BRCA1 and HeLa affects HeLa", &Identity);
+    let forest = index.parse("HeLa and BRCA1 and HeLa affect HeLa", &Identity);
     assert_eq!(
         forest.len(),
         1,

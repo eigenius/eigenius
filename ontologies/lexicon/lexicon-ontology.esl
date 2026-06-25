@@ -165,6 +165,20 @@ data lexicon:Cat : Type 1 {
     // `Set → Prop`, so "Genes are cell lines" → `subclass_of(Gene, CellLine)` (D63
     // §8.5 Slice 3c, kind subjects). Arises from a bare-plural common noun.
     cat_kind : lexicon:Cat,
+    // CP — an embedded **complement clause** ("that BRCA1 affects HeLa"), the argument a
+    // clause-taking verb selects (D63 §8.11 Slice 6-cl). ⟦cat_cp⟧ = Prop (the embedded
+    // proposition). NOT a clause root (the root filter checks `cat_s`), so a stray
+    // leading "that …" cannot parse as a standalone sentence. The complementizer `that`
+    // is `cat_cp / cat_s(dcl, fin)` (sem `λp.p`); the verb is `(S\NP)/cat_cp`, an opaque
+    // report axiom `Prop → Entity → Prop` (intensional — the complement is not asserted).
+    cat_cp : lexicon:Cat,
+    // PP[than] — the **than-phrase** of a comparative ("…than HeLa"), supplying the
+    // STANDARD entity (D63 §8.12 Slice 6-cmp). ⟦cat_pp_than⟧ = Entity. The marker `than`
+    // is `cat_pp_than / cat_np(Entity)` (sem `λy. y`); the comparative adjective is
+    // `(S[adj]\NP) / cat_pp_than`, sem `λy.λx. gt(deg_A(x), deg_A(y))` over the opaque
+    // float ordering `measurements:gt`. A distinct category (not a bare NP) forces the
+    // `than` — so `*HeLa is larger BRCA1` (no `than`) gets no parse.
+    cat_pp_than : lexicon:Cat,
 }
 
 // ── The lexical-entry record ──────────────────────────────────────────
