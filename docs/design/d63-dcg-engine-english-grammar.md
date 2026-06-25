@@ -904,12 +904,16 @@ encoding-institution / LLM-proposer concern, not the engine's; the engine return
   WordNet's Morphy → kernel-gate. The Stage-A battery (5 declaratives over **real** WordNet nouns/verbs +
   the committed determiners, vocabulary guaranteed by seeding) all yield ≥1 felicitous `Prop`
   (`stage_a_battery_parses_to_props_over_real_wordnet`, always-on).
-- **Two ways the layer "stands" — both built.** *(a) In-process* (the harness): build once, hold the
-  `Arc<Layer>`, index + parse. *(b) Persisted* (`wordnet-import --commit <db>` → `--from <db>`): commit the
-  import onto a **RocksStore** as a child of the bootstrap chain and advance `main`, so a later process
-  reloads it in **≈1.5 ms** + index-build (vs re-compiling) — the real standing layer, the server chain
-  model. The selection logic now lives in `eigenius_wordnet::import` (`SeedSpec` + `select_synsets`), shared
-  by the bin and the harness.
+- **How the layer "stands."** *In-process* (the harness): build once, hold the `Arc<Layer>`, index + parse.
+  *Persisted:* **the platform's generic layer-load path, not WordNet-specific** — `eigenius serve --db <path>`
+  then `eigenius --endpoint <addr> load wn.esl` commits the import as an ordinary layer onto the server's
+  RocksDB and advances the branch (a verified round-trip showed ≈1.5 ms layer reload). The importer's job is
+  only to **emit the lexicon** (`--out wn.esl` + `--validate`); committing/loading/persisting it is the same
+  machinery as any layer. *(An earlier `wordnet-import --commit/--from` reimplemented this in the importer —
+  removed as redundant with `serve`+`load`.)* Note the layer reloads fast but the **`LexicalIndex` is an
+  in-memory derived structure, NOT persisted** — rebuilt per load (~14 s at 170k entries); caching it is a
+  separate concern from layer persistence. The selection logic lives in `eigenius_wordnet::import`
+  (`SeedSpec` + `select_synsets`), shared by the bin and the harness.
 - **Done-when #3 — ✅ baselines recorded (Derived).** Build cost scales with corpus size; **forest size is
   driven by per-word polysemy, not corpus size**. Measured (release):
 

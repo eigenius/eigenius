@@ -44,8 +44,38 @@ pub type SenseRanks = BTreeMap<String, u32>;
 /// Provided by the bootstrapped lexicon schema, which the import builds on.
 pub const ENTITY_TOP: &str = "lexicon:Entity";
 
-/// The namespace + schema preamble the emitted entries reference.
+/// The namespace + schema preamble the emitted entries reference, prefixed with the
+/// mandatory **WordNet 3.0 attribution**. Princeton's license requires its copyright
+/// notice + disclaimer on ALL copies *including modifications*; every emitted document is
+/// a WordNet derivative (it embeds glosses, lemmas, and the synset lattice), so the notice
+/// rides at the top of the output to keep any emitted / redistributed artifact compliant.
 pub const ESL_HEADER: &str = "\
+// ════════════════════════════════════════════════════════════════════
+// This file is DERIVED FROM WordNet 3.0 and embeds its content (glosses,
+// lemmas, synset structure). Redistributed under the WordNet 3.0 license:
+//
+//   WordNet 3.0 Copyright 2006 by Princeton University. All rights reserved.
+//
+//   Permission to use, copy, modify and distribute this software and database
+//   and its documentation for any purpose and without fee or royalty is hereby
+//   granted, provided that you agree to comply with the following copyright
+//   notice and statements, including the disclaimer, and that the same appear on
+//   ALL copies of the software, database and documentation, including
+//   modifications that you make for internal use or for distribution.
+//
+//   THIS SOFTWARE AND DATABASE IS PROVIDED \"AS IS\" AND PRINCETON UNIVERSITY
+//   MAKES NO REPRESENTATIONS OR WARRANTIES, EXPRESS OR IMPLIED. BY WAY OF
+//   EXAMPLE, BUT NOT LIMITATION, PRINCETON UNIVERSITY MAKES NO REPRESENTATIONS
+//   OR WARRANTIES OF MERCHANTABILITY OR FITNESS FOR ANY PARTICULAR PURPOSE OR
+//   THAT THE USE OF THE LICENSED SOFTWARE, DATABASE OR DOCUMENTATION WILL NOT
+//   INFRINGE ANY THIRD PARTY PATENTS, COPYRIGHTS, TRADEMARKS OR OTHER RIGHTS.
+//
+//   The name of Princeton University or Princeton may not be used in advertising
+//   or publicity pertaining to distribution of the software and/or database.
+//   Title to copyright in this software, database and any associated
+//   documentation shall at all times remain with Princeton University and
+//   LICENSEE agrees to preserve same.
+// ════════════════════════════════════════════════════════════════════
 namespace core       = \"urn:eigenius:core\";
 namespace reflection = \"urn:eigenius:reflection\";
 namespace epistemic  = \"urn:eigenius:reflection:epistemic\";
@@ -810,6 +840,28 @@ mod tests {
         assert!(!doc.contains("class wn:n10954498"));
         assert_eq!(rep.noun_classes, 1);
         assert_eq!(rep.instances, 1);
+    }
+
+    #[test]
+    fn emitted_document_carries_the_wordnet_attribution() {
+        // License-compliance guard: WordNet 3.0 requires its copyright notice + disclaimer
+        // on ALL copies including modifications, and every emitted document is a WordNet
+        // derivative (it embeds glosses). The notice must lead the output.
+        let (doc, _) = render_document(
+            &[syn("00001740 03 n 01 entity 0 000 | that which exists")],
+            &SenseRanks::new(),
+        );
+        assert!(
+            doc.starts_with("// "),
+            "the attribution comment must lead the document"
+        );
+        assert!(doc
+            .contains("WordNet 3.0 Copyright 2006 by Princeton University. All rights reserved."));
+        assert!(
+            doc.contains("PROVIDED \"AS IS\""),
+            "the disclaimer must be present"
+        );
+        assert!(doc.contains("DERIVED FROM WordNet 3.0"));
     }
 
     #[test]

@@ -1510,7 +1510,6 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "eigenius-kernel",
- "eigenius-storage-rocksdb",
 ]
 
 [[package]]

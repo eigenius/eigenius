@@ -15,11 +15,12 @@
 //! `wordnet-import` — WordNet `data.<pos>` → Eigon lexicon ESL (D62 §8.7 / D63 §8.7 Slice 7).
 //!
 //!     # render + self-validate
-//!     wordnet-import --seed gene --seed depend --out wn.esl --validate
-//!     # stand up a PERSISTED standing layer (commit onto a RocksStore, advance `main`)
-//!     wordnet-import --all --commit /var/lib/eigenius/wn.db
-//!     # reload the persisted standing layer + build the parse index (fast)
-//!     wordnet-import --from /var/lib/eigenius/wn.db
+//!     wordnet-import --all --out wn.esl --validate
+//!
+//! The importer's job is to **emit the lexicon** (ESL). PERSISTENCE is the platform's
+//! generic layer-load path, not WordNet-specific: stand up `eigenius serve --db <path>`
+//! and `eigenius --endpoint <addr> load wn.esl` (the server commits + persists the layer,
+//! advancing the branch — the same as loading any layer).
 //!
 //! Deterministic, no LLM. Noun selection is always **closed under hypernymy** (and
 //! `entity.n.01` added) so the emitted `subclass_of` lattice is rooted; verbs/adjectives
@@ -31,18 +32,14 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::time::Instant;
 
 use clap::Parser;
-use eigenius_kernel::dcg::{gate_entry, LexicalIndex};
-use eigenius_kernel::lattice::commit_layer_default;
+use eigenius_kernel::dcg::gate_entry;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::resource::Resource;
 use eigenius_kernel::ontology::Iri;
-use eigenius_kernel::storage::PersistentBackend;
 use eigenius_kernel::validation::Validator;
 use eigenius_kernel::{bootstrap, esl};
-use eigenius_storage_rocksdb::RocksStore;
 use eigenius_wordnet::convert::render_document;
 use eigenius_wordnet::import::{read_sense_ranks, select_synsets, SeedSpec};
 use eigenius_wordnet::wndb::Pos;
@@ -71,14 +68,6 @@ struct Args {
     /// Compile + validate + felicity-gate the output (self-check; fail-closed).
     #[arg(long)]
     validate: bool,
-    /// Commit the import as a PERSISTED standing layer onto a RocksStore at this path
-    /// (seeds/resumes the bootstrap chain, commits WordNet as its child, advances `main`).
-    #[arg(long)]
-    commit: Option<PathBuf>,
-    /// Reload a persisted standing layer from this RocksStore path and build the parse
-    /// index over it (the fast standing-layer reuse path; ignores selection flags).
-    #[arg(long)]
-    from: Option<PathBuf>,
 }
 
 fn pos_of(s: &str) -> Option<Pos> {
@@ -93,17 +82,6 @@ fn pos_of(s: &str) -> Option<Pos> {
 
 fn main() -> ExitCode {
     let args = Args::parse();
-
-    // Reload path: stand a persisted layer back up and build the parse index.
-    if let Some(db) = &args.from {
-        return match reload(db) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("from: error: {e}");
-                ExitCode::from(1)
-            }
-        };
-    }
 
     if !args.all && args.limit.is_none() && args.seed.is_empty() {
         eprintln!("error: select a bound — one of --seed <lemma>, --limit <N>, or --all");
@@ -179,16 +157,6 @@ fn main() -> ExitCode {
         }
     }
 
-    if let Some(db) = &args.commit {
-        match commit_standing_layer(&doc, db) {
-            Ok(()) => {}
-            Err(e) => {
-                eprintln!("commit: error: {e}");
-                return ExitCode::from(1);
-            }
-        }
-    }
-
     ExitCode::SUCCESS
 }
 
@@ -225,57 +193,6 @@ fn validate(doc: &str) -> Result<(usize, Vec<String>), String> {
         }
     }
     Ok((admitted, rejected))
-}
-
-/// Stand the import up as a PERSISTED standing layer: open the RocksStore,
-/// seed/resume the bootstrap chain, commit the WordNet ESL as its child, and
-/// advance `main` so the layer is the resumable head (D63 §8.7 Slice 7,
-/// "standing, parseable layer").
-fn commit_standing_layer(doc: &str, db: &std::path::Path) -> Result<(), String> {
-    let store: Arc<dyn PersistentBackend> =
-        Arc::new(RocksStore::open(db).map_err(|e| format!("open {}: {e}", db.display()))?);
-    let ctx = bootstrap::bootstrap_persistent(Arc::clone(&store))
-        .map_err(|e| format!("bootstrap_persistent: {e}"))?;
-
-    let resources =
-        esl::compile_against_layer(doc, ctx.head()).map_err(|e| format!("wn compile: {e:?}"))?;
-    let mut b = LayerBuilder::new("wn", Some(Arc::clone(ctx.head())));
-    for r in resources {
-        b.add_resource(r).map_err(|e| format!("wn add: {e:?}"))?;
-    }
-    let t0 = Instant::now();
-    let layer = commit_layer_default(b, ctx.storage().clone(), store.as_ref())
-        .map_err(|e| format!("commit: {e}"))?;
-    store
-        .put_branch("main", layer.id())
-        .map_err(|e| format!("put_branch(main): {e}"))?;
-    eprintln!(
-        "commit: WordNet standing layer committed + `main` advanced to {} in {:.1?} → {}",
-        layer.id(),
-        t0.elapsed(),
-        db.display(),
-    );
-    Ok(())
-}
-
-/// Reload a persisted standing layer and build the parse index over it — the fast
-/// reuse path that turns the on-disk artifact back into a parseable index.
-fn reload(db: &std::path::Path) -> Result<(), String> {
-    let store: Arc<dyn PersistentBackend> =
-        Arc::new(RocksStore::open(db).map_err(|e| format!("open {}: {e}", db.display()))?);
-    let t0 = Instant::now();
-    let ctx = bootstrap::bootstrap_persistent(Arc::clone(&store))
-        .map_err(|e| format!("bootstrap_persistent: {e}"))?;
-    let load = t0.elapsed();
-    let t1 = Instant::now();
-    let index = LexicalIndex::build(Arc::clone(ctx.head()));
-    eprintln!(
-        "from: standing layer reloaded in {load:.1?}, index built in {:.1?} ({} indexed forms) → {}",
-        t1.elapsed(),
-        index.len(),
-        db.display(),
-    );
-    Ok(())
 }
 
 fn build_layer(
