@@ -887,13 +887,68 @@
     ]
   },
   {
+    "@id": "urn:eigenius:core:ValueIndex",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Declares that a target Property's values should be EXACT-indexed for chain-aware `value -> subjects` lookup (D65). The third declared index kind alongside TextIndex (BM25, fuzzy) and VectorIndex (dense, fuzzy); ValueIndex is exact and normalized — the right tool for keyed lookup of a string/literal property (a lexical form, a gene symbol, an accession) where the triple index does not apply (it indexes only IRI-valued properties) and BM25 is wrong (tokenised + ranked). First-class Resource separate from the Property it targets so indexing decisions don't modify the data-model identity; index lifecycle independent of Property lifecycle. Entries are keyed by the ValueIndex IRI (not the target Property IRI) so divergent indexing configurations across branches stay storage-safe. v1 multiplicity constraint: at most one active (non-shadowed) ValueIndex per target Property per chain head.",
+    "urn:eigenius:core:short_name": "ValueIndex",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:target_property"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:value_normalizer"
+    ]
+  },
+  {
     "@id": "urn:eigenius:core:target_property",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The Property an Index Resource targets for indexing. The value is the IRI of a Property resource resolved through the visible chain at Load time. Shared by TextIndex and VectorIndex (an Index Resource of either kind references its target Property via this slot).",
+    "urn:eigenius:core:description": "The Property an Index Resource targets for indexing. The value is the IRI of a Property resource resolved through the visible chain at Load time. Shared by TextIndex, VectorIndex, and ValueIndex (an Index Resource of any kind references its target Property via this slot).",
     "urn:eigenius:core:short_name": "target_property",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
     "urn:eigenius:core:class_types": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:domain": ["urn:eigenius:core:TextIndex", "urn:eigenius:core:VectorIndex"]
+    "urn:eigenius:core:domain": ["urn:eigenius:core:TextIndex", "urn:eigenius:core:VectorIndex", "urn:eigenius:core:ValueIndex"]
+  },
+  {
+    "@id": "urn:eigenius:core:ValueNormalizer",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Names the normalization a ValueIndex applies to a property value before keying it for EXACT lookup. Unlike a text analyzer it NORMALIZES, never tokenizes — the value is kept whole (multiword forms stay a single key). A fixed, closed enum (each corresponds to a normalization function in the kernel), so the `value_normalizer` slot is `allows_only`-narrowed to these instances. v1 ships `identity`, `lowercase`, `lowercase_trim`.",
+    "urn:eigenius:core:short_name": "ValueNormalizer",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:is_a",
+      "urn:eigenius:core:description",
+      "urn:eigenius:core:short_name"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:normalizers:identity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:ValueNormalizer"],
+    "urn:eigenius:core:description": "No normalization — the value is keyed verbatim (byte-exact).",
+    "urn:eigenius:core:short_name": "identity"
+  },
+  {
+    "@id": "urn:eigenius:core:normalizers:lowercase",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:ValueNormalizer"],
+    "urn:eigenius:core:description": "Unicode lowercase. Case-insensitive exact lookup (e.g. the lexicon's `form` index: `BRCA1` and `brca1` key alike).",
+    "urn:eigenius:core:short_name": "lowercase"
+  },
+  {
+    "@id": "urn:eigenius:core:normalizers:lowercase_trim",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:ValueNormalizer"],
+    "urn:eigenius:core:description": "Unicode lowercase plus trimming of surrounding whitespace.",
+    "urn:eigenius:core:short_name": "lowercase_trim"
+  },
+  {
+    "@id": "urn:eigenius:core:value_normalizer",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The normalization a ValueIndex applies to property values (and to the query key) before exact lookup. Fixed enum — see `core:ValueNormalizer`. Default `urn:eigenius:core:normalizers:identity` when omitted.",
+    "urn:eigenius:core:short_name": "value_normalizer",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:ValueNormalizer"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:core:normalizers:identity",
+      "urn:eigenius:core:normalizers:lowercase",
+      "urn:eigenius:core:normalizers:lowercase_trim"
+    ],
+    "urn:eigenius:core:domain": ["urn:eigenius:core:ValueIndex"]
   },
   {
     "@id": "urn:eigenius:core:text_analyzer",

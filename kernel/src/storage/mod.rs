@@ -252,6 +252,14 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// with the CBOR segment layout from D43 §2.4.
     fn vector_index_arc(&self) -> Arc<dyn crate::layer::VectorIndex>;
 
+    /// Arc-shared exact value index view of this backend (D65).
+    ///
+    /// Same pattern as [`Self::triple_index_arc`]: each backend owns its own
+    /// [`ValueIndex`](crate::layer::ValueIndex) impl and hands out `Arc::clone`s
+    /// for `LayerStorage.value_index`. The memory backend uses `MemoryValueIndex`;
+    /// `RocksStore` exposes `RocksValueIndex` backed by its own column family.
+    fn value_index_arc(&self) -> Arc<dyn crate::layer::ValueIndex>;
+
     /// Read a layer's persisted shadowing bloom (D23 §5.2). Returns
     /// `None` if no bloom was persisted — a layer written by an
     /// older kernel build, or any layer for which `store_layer`

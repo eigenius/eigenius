@@ -288,6 +288,9 @@ mod tests {
         fn vector_index_arc(&self) -> Arc<dyn crate::layer::VectorIndex> {
             self.inner.vector_index_arc()
         }
+        fn value_index_arc(&self) -> Arc<dyn crate::layer::ValueIndex> {
+            self.inner.value_index_arc()
+        }
         fn load_bloom(
             &self,
             layer: &crate::layer::LayerId,

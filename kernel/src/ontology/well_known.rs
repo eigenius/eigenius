@@ -59,14 +59,24 @@ pub const TEXT_INDEX_CLASS: &str = "urn:eigenius:core:TextIndex";
 /// D43 §2.4 / §5.
 pub const VECTOR_INDEX_CLASS: &str = "urn:eigenius:core:VectorIndex";
 
+/// Class IRI for a `core:ValueIndex` Resource — the first-class
+/// Resource that declares an EXACT value-index target (D65).
+pub const VALUE_INDEX_CLASS: &str = "urn:eigenius:core:ValueIndex";
+
 /// Property IRI for `target_property` — the Property an Index
-/// Resource (TextIndex or VectorIndex) targets for indexing.
+/// Resource (TextIndex / VectorIndex / ValueIndex) targets for indexing.
 /// Value is a resource reference to a `core:Property`.
 pub const TARGET_PROPERTY: &str = "urn:eigenius:core:target_property";
 
 /// Property IRI for `text_analyzer` — the analyzer ID for a
 /// TextIndex (e.g. `"en-stem-v1"`).
 pub const TEXT_ANALYZER: &str = "urn:eigenius:core:text_analyzer";
+
+/// Property IRI for `value_normalizer` — the normalizer Resource a
+/// ValueIndex applies to values before exact keying (D65). One of
+/// `urn:eigenius:core:normalizers:{identity,lowercase,lowercase_trim}`;
+/// default `identity` when omitted.
+pub const VALUE_NORMALIZER: &str = "urn:eigenius:core:value_normalizer";
 
 /// Property IRI for `vec_model` — the Embedder Component IRI a
 /// VectorIndex uses.

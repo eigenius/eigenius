@@ -78,5 +78,6 @@ The per-subsystem design notes, in number order. New documents are added here as
 | D62 | [The encoding engine: prose → typed trees (generation front-end)](d62-encoding-engine-prose-to-trees.md) |
 | D63 | [The DCG engine: a categorial grammar of English over EigenTT](d63-dcg-engine-english-grammar.md) |
 | D64 | [LLM-based anaphora resolution: pronouns as resolved resource references](d64-llm-anaphora-resolution.md) |
+| D65 | [The lexicon runtime: lazy form-indexed lookup, per-parse scoping, lexicon identity](d65-lexicon-runtime-lazy-scoped.md) |
 
 (Numbers D15–D17 were never assigned.)

@@ -38,6 +38,7 @@ mod redirect;
 mod storage;
 mod supporting;
 mod text_index;
+mod value_index;
 mod vector_index;
 mod witness_index;
 
@@ -61,9 +62,10 @@ pub use index::{
     scan_chain, IndexStats, MemoryTripleIndex, OwnedTriple, Triple, TripleIndex,
 };
 pub use index_discovery::{
-    detect_reindex_targets, resolve_active_text_indexes, resolve_active_vector_indexes,
-    verify_text_index_multiplicity, verify_vector_index_multiplicity, ActiveTextIndex,
-    ActiveVectorIndex, ReindexTarget,
+    detect_reindex_targets, extract_value_entries, resolve_active_text_indexes,
+    resolve_active_value_indexes, resolve_active_vector_indexes, verify_text_index_multiplicity,
+    verify_value_index_multiplicity, verify_vector_index_multiplicity, ActiveTextIndex,
+    ActiveValueIndex, ActiveVectorIndex, ReindexTarget,
 };
 pub use redirect::{
     augment_topology_with_redirects, manufacture_tombstone, MemoryRedirectMap, NoRedirects,
@@ -74,6 +76,9 @@ pub use supporting::compute_supporting_layer;
 pub use text_index::{
     decode_doc_set, encode_doc_set, MemoryTextIndex, TermHit, TextDoc, TextDocs, TextIndex,
     TextIndexStats, TextLayerStats,
+};
+pub use value_index::{
+    normalize_value, MemoryValueIndex, OwnedValueEntry, ValueEntry, ValueIndex, ValueIndexStats,
 };
 pub use vector_index::{
     MemoryVectorIndex, VectorDoc, VectorIndex, VectorIndexStats, VectorSegment,
@@ -1042,6 +1047,22 @@ impl LayerBuilder {
         // (which scans via the triple index for `is_a == TextIndex`)
         // sees this layer's own contributions.
         crate::query::text::indexing::populate_text_indexes(&layer);
+        // D65: pre-populate the exact value index from active `core:ValueIndex`
+        // declarations. Mirrors the triple-index pre-population: same entries the
+        // persistent backend would write at commit, populated up front so exact
+        // lookups against a freshly-built (but not-yet-persisted) layer work
+        // identically to reads after restart. `extract_value_entries` discovers
+        // active indexes via the triple index (already populated above) and reads
+        // each target property's normalized value(s).
+        let value_entries = crate::layer::index_discovery::extract_value_entries(&layer);
+        if !value_entries.is_empty() {
+            let borrowed: Vec<crate::layer::ValueEntry> =
+                value_entries.iter().map(|e| e.as_borrowed()).collect();
+            let _ = layer
+                .storage
+                .value_index
+                .extend_layer(layer.id(), &borrowed);
+        }
         layer
     }
 }

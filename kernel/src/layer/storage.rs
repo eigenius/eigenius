@@ -28,8 +28,8 @@
 
 use crate::layer::{
     BloomCache, BoundedResourceCache, MemoryBloomCache, MemoryResourceBackend, MemoryResourceCache,
-    MemoryTextIndex, MemoryTripleIndex, MemoryVectorIndex, NoRedirects, RedirectMap, ResourceCache,
-    TextIndex, TripleIndex, VectorIndex,
+    MemoryTextIndex, MemoryTripleIndex, MemoryValueIndex, MemoryVectorIndex, NoRedirects,
+    RedirectMap, ResourceCache, TextIndex, TripleIndex, ValueIndex, VectorIndex,
 };
 use crate::storage::{PersistentBackend, ResourceBackend};
 use std::sync::Arc;
@@ -70,6 +70,12 @@ pub struct LayerStorage {
     /// consulted by the EigenQL vector retrieval path (M5+ for the
     /// flat path; M6 for HNSW).
     pub vector_index: Arc<dyn VectorIndex>,
+    /// Per-`(ValueIndex Resource, layer)` exact value index (D65).
+    /// Pre-populated by `LayerBuilder::build` (like the triple index) —
+    /// discovers active `core:ValueIndex` Resources at the head and keys
+    /// each target property's normalized value to its subjects. Consulted
+    /// by the lazy lexicon lookup (and exact literal-property queries).
+    pub value_index: Arc<dyn ValueIndex>,
     /// In-memory cache of installed resolve redirects (D25 §12.8 /
     /// Phase 17f). Populated at `with_persistent` time from the
     /// backend's `list_redirects()`; consulted by `build_chain` to
@@ -98,6 +104,7 @@ impl LayerStorage {
             triple_index: Arc::new(MemoryTripleIndex::new()),
             text_index: Arc::new(MemoryTextIndex::new()),
             vector_index: Arc::new(MemoryVectorIndex::new()),
+            value_index: Arc::new(MemoryValueIndex::new()),
             redirect_map: Arc::new(NoRedirects),
             persistent_backend: None,
         }
@@ -113,6 +120,7 @@ impl LayerStorage {
         let triple_index = pb.triple_index_arc();
         let text_index = pb.text_index_arc();
         let vector_index = pb.vector_index_arc();
+        let value_index = pb.value_index_arc();
         let redirect_map = crate::layer::redirect::redirect_map_from_backend(pb.as_ref());
         Self {
             cache: Arc::new(MemoryResourceCache::new()),
@@ -121,6 +129,7 @@ impl LayerStorage {
             triple_index,
             text_index,
             vector_index,
+            value_index,
             redirect_map,
             persistent_backend: Some(pb),
         }
@@ -142,6 +151,7 @@ impl LayerStorage {
         let triple_index = pb.triple_index_arc();
         let text_index = pb.text_index_arc();
         let vector_index = pb.vector_index_arc();
+        let value_index = pb.value_index_arc();
         let redirect_map = crate::layer::redirect::redirect_map_from_backend(pb.as_ref());
         Self {
             cache: Arc::new(BoundedResourceCache::new(total_entries)),
@@ -150,6 +160,7 @@ impl LayerStorage {
             triple_index,
             text_index,
             vector_index,
+            value_index,
             redirect_map,
             persistent_backend: Some(pb),
         }

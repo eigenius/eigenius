@@ -490,6 +490,96 @@ pub mod index_keys {
             .map_err(|e| format!("subject IRI: {e}"))?;
         Ok((p, o, s))
     }
+
+    // ---- D65 exact value index ----
+    //
+    // Keyed by the `core:ValueIndex` Resource IRI + the normalized string key
+    // (an arbitrary value, not an IRI), mapping to `(subject, layer)`. Same
+    // length-prefixed segment encoding as the triple index; the RocksDB backend
+    // adds its own table prefixes (`vidx_pos:` / `vidx_layer:`) so these never
+    // collide with the triple index's `idx_*` keyspace.
+
+    /// `<index>:<key>:<subject>:<layer>` — value-index read-path key.
+    pub fn value_pos_key(index: &Iri, key: &str, subject: &Iri, layer: &LayerId) -> Vec<u8> {
+        let mut out =
+            Vec::with_capacity(32 + index.as_str().len() + key.len() + subject.as_str().len() + 16);
+        write_segment(&mut out, index.as_str().as_bytes());
+        write_segment(&mut out, key.as_bytes());
+        write_segment(&mut out, subject.as_str().as_bytes());
+        out.extend_from_slice(&layer.0);
+        out
+    }
+
+    /// Prefix matching every value-index entry for a given `(index, key)`.
+    pub fn value_pos_prefix(index: &Iri, key: &str) -> Vec<u8> {
+        let mut out = Vec::with_capacity(index.as_str().len() + key.len() + 8);
+        write_segment(&mut out, index.as_str().as_bytes());
+        write_segment(&mut out, key.as_bytes());
+        out
+    }
+
+    /// `<layer>:<index>:<key>:<subject>` — value-index GC-path reverse key.
+    pub fn value_layer_key(layer: &LayerId, index: &Iri, key: &str, subject: &Iri) -> Vec<u8> {
+        let mut out =
+            Vec::with_capacity(32 + index.as_str().len() + key.len() + subject.as_str().len() + 12);
+        out.extend_from_slice(&layer.0);
+        write_segment(&mut out, index.as_str().as_bytes());
+        write_segment(&mut out, key.as_bytes());
+        write_segment(&mut out, subject.as_str().as_bytes());
+        out
+    }
+
+    /// Decode a forward value-index `(index, key, subject, layer)` key.
+    pub fn decode_value_pos_key(key: &[u8]) -> Result<(Iri, String, Iri, LayerId), String> {
+        let (index_bytes, pos) = read_segment(key, 0)?;
+        let (key_bytes, pos) = read_segment(key, pos)?;
+        let (s_bytes, pos) = read_segment(key, pos)?;
+        if pos + 32 != key.len() {
+            return Err(format!(
+                "expected 32-byte LayerId trailer; got {} bytes at pos {pos}",
+                key.len() - pos
+            ));
+        }
+        let mut layer_bytes = [0u8; 32];
+        layer_bytes.copy_from_slice(&key[pos..pos + 32]);
+        let index = Iri::parse(std::str::from_utf8(index_bytes).map_err(|e| e.to_string())?)
+            .map_err(|e| format!("index IRI: {e}"))?;
+        let key_str = std::str::from_utf8(key_bytes)
+            .map_err(|e| e.to_string())?
+            .to_string();
+        let subject = Iri::parse(std::str::from_utf8(s_bytes).map_err(|e| e.to_string())?)
+            .map_err(|e| format!("subject IRI: {e}"))?;
+        Ok((index, key_str, subject, LayerId(layer_bytes)))
+    }
+
+    /// Decode a reverse value-index `(layer, index, key, subject)` key
+    /// (returns `(index, key, subject)` — caller already knows the layer).
+    pub fn decode_value_layer_key(key: &[u8]) -> Result<(Iri, String, Iri), String> {
+        if key.len() < 32 {
+            return Err(format!(
+                "reverse value key shorter than 32-byte LayerId prefix: {} bytes",
+                key.len()
+            ));
+        }
+        let pos = 32;
+        let (index_bytes, pos) = read_segment(key, pos)?;
+        let (key_bytes, pos) = read_segment(key, pos)?;
+        let (s_bytes, pos) = read_segment(key, pos)?;
+        if pos != key.len() {
+            return Err(format!(
+                "trailing {} bytes after reverse value key segments",
+                key.len() - pos
+            ));
+        }
+        let index = Iri::parse(std::str::from_utf8(index_bytes).map_err(|e| e.to_string())?)
+            .map_err(|e| format!("index IRI: {e}"))?;
+        let key_str = std::str::from_utf8(key_bytes)
+            .map_err(|e| e.to_string())?
+            .to_string();
+        let subject = Iri::parse(std::str::from_utf8(s_bytes).map_err(|e| e.to_string())?)
+            .map_err(|e| format!("subject IRI: {e}"))?;
+        Ok((index, key_str, subject))
+    }
 }
 
 /// Collect every ancestor `LayerId` reachable from `head` via parent

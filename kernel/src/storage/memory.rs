@@ -30,7 +30,8 @@
 
 use crate::layer::{
     BloomFilter, ContentHash, Layer, LayerHandle, LayerId, LayerTopology, MemoryTextIndex,
-    MemoryTripleIndex, MemoryVectorIndex, RedirectEntry, TextIndex, TripleIndex, VectorIndex,
+    MemoryTripleIndex, MemoryValueIndex, MemoryVectorIndex, RedirectEntry, TextIndex, TripleIndex,
+    ValueIndex, VectorIndex,
 };
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
@@ -50,6 +51,9 @@ pub struct MemoryPersistentBackend {
     /// D43 §2.4 vector index (M2.3). In-memory backend uses the
     /// `MemoryVectorIndex` impl from `kernel/src/layer/vector_index.rs`.
     vector_index: Arc<MemoryVectorIndex>,
+    /// D65 exact value index. In-memory backend uses the `MemoryValueIndex`
+    /// impl from `kernel/src/layer/value_index.rs`.
+    value_index: Arc<MemoryValueIndex>,
 }
 
 struct MemoryState {
@@ -121,6 +125,7 @@ impl MemoryPersistentBackend {
             triple_index: Arc::new(MemoryTripleIndex::new()),
             text_index: Arc::new(MemoryTextIndex::new()),
             vector_index: Arc::new(MemoryVectorIndex::new()),
+            value_index: Arc::new(MemoryValueIndex::new()),
         }
     }
 }
@@ -363,6 +368,10 @@ impl PersistentBackend for MemoryPersistentBackend {
 
     fn vector_index_arc(&self) -> Arc<dyn VectorIndex> {
         Arc::clone(&self.vector_index) as Arc<dyn VectorIndex>
+    }
+
+    fn value_index_arc(&self) -> Arc<dyn ValueIndex> {
+        Arc::clone(&self.value_index) as Arc<dyn ValueIndex>
     }
 
     fn load_bloom(&self, layer: &LayerId) -> Result<Option<BloomFilter>, StorageError> {

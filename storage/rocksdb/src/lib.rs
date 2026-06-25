@@ -27,6 +27,7 @@
 
 mod text_index;
 mod triple_index;
+mod value_index;
 mod vector_index;
 
 #[cfg(test)]
@@ -42,6 +43,7 @@ use std::path::Path;
 use std::sync::Arc;
 use text_index::RocksTextIndex;
 use triple_index::RocksTripleIndex;
+use value_index::RocksValueIndex;
 use vector_index::RocksVectorIndex;
 
 /// Run a sync disk-bound block in a way that doesn't starve the
@@ -171,6 +173,11 @@ pub struct RocksStore {
     /// bstr). Its `extend_into_batch` / `drop_into_batch` participate
     /// in `store_layer` / `delete_layer`'s `WriteBatch` (D43 §2.5).
     vector_index: Arc<RocksVectorIndex>,
+    /// D65 exact value index. RocksDB-backed; shares the same
+    /// `Arc<rocksdb::DB>` as `db`. Its `extend_into_batch` /
+    /// `drop_into_batch` participate in `store_layer` / `delete_layer`'s
+    /// `WriteBatch` for atomic-with-layer-commit semantics.
+    value_index: Arc<RocksValueIndex>,
 }
 
 impl RocksStore {
@@ -204,12 +211,14 @@ impl RocksStore {
         let triple_index = Arc::new(RocksTripleIndex::new(Arc::clone(&db)));
         let text_index = Arc::new(RocksTextIndex::new(Arc::clone(&db)));
         let vector_index = Arc::new(RocksVectorIndex::new(Arc::clone(&db)));
+        let value_index = Arc::new(RocksValueIndex::new(Arc::clone(&db)));
 
         Ok(Self {
             db,
             triple_index,
             text_index,
             vector_index,
+            value_index,
         })
     }
 
@@ -765,6 +774,10 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         Arc::clone(&self.vector_index) as Arc<dyn eigenius_kernel::layer::VectorIndex>
     }
 
+    fn value_index_arc(&self) -> Arc<dyn eigenius_kernel::layer::ValueIndex> {
+        Arc::clone(&self.value_index) as Arc<dyn eigenius_kernel::layer::ValueIndex>
+    }
+
     fn load_bloom(&self, layer: &LayerId) -> Result<Option<BloomFilter>, StorageError> {
         run_blocking(|| {
             let key = format!("{BLOOM_PREFIX}{}", hex::encode(layer.0));
@@ -899,6 +912,10 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             // the total index size.
             self.text_index.drop_into_batch(&mut batch, layer)?;
             self.vector_index.drop_into_batch(&mut batch, layer)?;
+
+            // D65: drop this layer's exact-value-index entries in the same
+            // atomic batch, walking the reverse `vidx_layer:<L>:` prefix.
+            self.value_index.drop_into_batch(&mut batch, layer)?;
 
             self.db
                 .write(batch)
@@ -1737,6 +1754,7 @@ mod tests {
             triple_index: store.triple_index_arc(),
             text_index: store.text_index_arc(),
             vector_index: store.vector_index_arc(),
+            value_index: store.value_index_arc(),
             redirect_map: Arc::new(NoRedirects),
             persistent_backend: None,
         };
@@ -1830,6 +1848,88 @@ mod tests {
             store.vector_index_arc().scan_index(&index_iri).count(),
             0,
             "vector segments dropped"
+        );
+    }
+
+    /// D65 — `RocksValueIndex` round-trips exact entries through the shared
+    /// `Arc<rocksdb::DB>`: `extend_layer` across two layers, exact lookup
+    /// returns every subject + its defining layer, and `delete_layer` drops
+    /// only the named layer's contributions inside the atomic batch.
+    #[test]
+    fn value_index_extend_lookup_and_delete_layer() {
+        use eigenius_kernel::layer::{LayerId, ValueEntry};
+        use eigenius_kernel::ontology::iri::Iri;
+        use eigenius_kernel::storage::PersistentBackend;
+
+        let dir = TempDir::new().unwrap();
+        let store = RocksStore::open(dir.path()).unwrap();
+        let vi = store.value_index_arc();
+
+        let index = Iri::parse("urn:eigenius:lexicon:form_index").unwrap();
+        let (l1, l2) = (LayerId([1; 32]), LayerId([2; 32]));
+        let (e1, e2, e3) = (
+            Iri::parse("urn:eigenius:wn:e_cellline").unwrap(),
+            Iri::parse("urn:eigenius:wn:e_cellline2").unwrap(),
+            Iri::parse("urn:eigenius:umls:e_cellline").unwrap(),
+        );
+
+        vi.extend_layer(
+            &l1,
+            &[
+                ValueEntry {
+                    index: &index,
+                    key: "cell line",
+                    subject: &e1,
+                },
+                ValueEntry {
+                    index: &index,
+                    key: "cell line",
+                    subject: &e2,
+                },
+                ValueEntry {
+                    index: &index,
+                    key: "gene",
+                    subject: &e1,
+                },
+            ],
+        )
+        .unwrap();
+        vi.extend_layer(
+            &l2,
+            &[ValueEntry {
+                index: &index,
+                key: "cell line",
+                subject: &e3,
+            }],
+        )
+        .unwrap();
+
+        // Exact lookup returns all subjects + their defining layers.
+        let mut hits: Vec<(Iri, LayerId)> =
+            vi.lookup(&index, "cell line").map(Result::unwrap).collect();
+        hits.sort();
+        let mut expected = vec![
+            (e1.clone(), l1.clone()),
+            (e2.clone(), l1.clone()),
+            (e3.clone(), l2.clone()),
+        ];
+        expected.sort();
+        assert_eq!(hits, expected);
+
+        // Keys are exact, whole-string — no tokenisation, no implicit folding.
+        assert_eq!(vi.lookup(&index, "cell").count(), 0);
+        assert_eq!(vi.lookup(&index, "Cell Line").count(), 0);
+        assert_eq!(vi.lookup(&index, "gene").count(), 1);
+
+        // `delete_layer` drops only l1's contributions via the atomic batch.
+        PersistentBackend::delete_layer(&store, &l1).unwrap();
+        let after: Vec<(Iri, LayerId)> =
+            vi.lookup(&index, "cell line").map(Result::unwrap).collect();
+        assert_eq!(after, vec![(e3, l2)]);
+        assert_eq!(
+            vi.lookup(&index, "gene").count(),
+            0,
+            "l1's gene entry dropped"
         );
     }
 
