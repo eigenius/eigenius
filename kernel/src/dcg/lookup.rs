@@ -96,11 +96,18 @@ pub struct LexicalIndex {
     source: Source,
 }
 
+/// The resolved entries for one surface form, each paired with its
+/// `lexicon:in_lexicon` membership (`None` = untagged / always-available) — the
+/// unit a scope filter (D65 §4) consumes to keep + rank entries by lexicon.
+type FormEntries = Vec<(Item, Option<Iri>)>;
+
 /// The two backings behind [`LexicalIndex`] (lazy probe vs eager materialisation).
 enum Source {
-    /// Materialised `form → items` — used when no form `ValueIndex` is active.
+    /// Materialised `form → (item, in_lexicon)` — used when no form `ValueIndex`
+    /// is active. The per-item `in_lexicon` (D65 §3) is the entry's `lexicon:Lexicon`
+    /// membership, consumed at seed time for scope filtering + precedence ranking.
     Eager {
-        by_form: BTreeMap<String, Vec<Item>>,
+        by_form: BTreeMap<String, FormEntries>,
         /// Word count of the longest indexed form — the multi-span seeding window.
         max_words: usize,
     },
@@ -111,10 +118,40 @@ enum Source {
         /// The normalizer it declares — applied to a lookup key so it matches how
         /// the index was populated (D65: `lowercase`).
         normalizer: Iri,
-        /// `normalized_form → resolved items`. Presence = probed (an empty `Vec`
-        /// records a probed miss, so a missing form is never re-probed).
-        cache: Mutex<BTreeMap<String, Vec<Item>>>,
+        /// `normalized_form → resolved (item, in_lexicon)`. Presence = probed (an
+        /// empty `Vec` records a probed miss, so a missing form is never re-probed).
+        cache: Mutex<BTreeMap<String, FormEntries>>,
     },
+}
+
+/// The `lexicon:in_lexicon` membership of an entry resource (D65 §3), or `None`
+/// for an untagged entry (always-available — e.g. the grammatical closed class).
+fn read_in_lexicon(r: &crate::ontology::resource::Resource) -> Option<Iri> {
+    r.get(&iri("urn:eigenius:lexicon:in_lexicon"))
+        .and_then(|v| v.as_iri_str())
+        .and_then(|s| Iri::parse(s).ok())
+}
+
+/// Resolve a `lexicon:LexiconProfile` IRI to its ordered scope — the
+/// `lexicon:lexica` array of `lexicon:Lexicon` IRIs, in declaration order =
+/// resolution precedence (D65 §4.1). The result is ready to pass as the `scope`
+/// to [`LexicalIndex::parse_scoped`]. Returns `None` if the IRI doesn't resolve or
+/// carries no `lexica`. Resolved against `layer`'s chain so a profile committed
+/// anywhere below the parse head is visible.
+pub fn resolve_lexicon_profile(layer: &Layer, profile: &Iri) -> Option<Vec<Iri>> {
+    let r = layer.resolve(profile)?;
+    match r.get(&iri("urn:eigenius:lexicon:lexica"))? {
+        Value::Array(items) => Some(
+            items
+                .iter()
+                .filter_map(|v| v.as_iri_str().and_then(|s| Iri::parse(s).ok()))
+                .collect(),
+        ),
+        v => v
+            .as_iri_str()
+            .and_then(|s| Iri::parse(s).ok())
+            .map(|i| vec![i]),
+    }
 }
 
 impl LexicalIndex {
@@ -147,10 +184,10 @@ impl LexicalIndex {
     /// The pre-D65 eager scan: walk the chain (`iter_all_resources`, which follows
     /// parent `Arc` pointers — storage-sharing independent) and materialise
     /// `form → items`, tracking the longest form's word count for span seeding.
-    fn scan_eager(layer: &Arc<Layer>) -> (BTreeMap<String, Vec<Item>>, usize) {
+    fn scan_eager(layer: &Arc<Layer>) -> (BTreeMap<String, FormEntries>, usize) {
         let entry_class = iri("urn:eigenius:lexicon:LexicalEntry");
         let form_prop = iri("urn:eigenius:lexicon:form");
-        let mut by_form: BTreeMap<String, Vec<Item>> = BTreeMap::new();
+        let mut by_form: BTreeMap<String, FormEntries> = BTreeMap::new();
         let mut max_words = 1;
         for (_id, r) in layer.iter_all_resources() {
             if !r.is_instance_of(&entry_class) {
@@ -167,7 +204,10 @@ impl LexicalIndex {
                 continue;
             }
             max_words = max_words.max(key.split_whitespace().count());
-            by_form.entry(key).or_default().push(item);
+            by_form
+                .entry(key)
+                .or_default()
+                .push((item, read_in_lexicon(r.as_ref())));
         }
         (by_form, max_words)
     }
@@ -179,7 +219,7 @@ impl LexicalIndex {
     /// [`Layer::resolve`](crate::layer::Layer::resolve), which filters to the head's
     /// chain and shadow-resolves), re-checked to be a `LexicalEntry` whose form
     /// still normalizes to the key, then turned into an [`Item`].
-    fn entries_for(&self, form_lc: &str) -> Vec<Item> {
+    fn entries_for(&self, form_lc: &str) -> FormEntries {
         match &self.source {
             Source::Eager { by_form, .. } => by_form.get(form_lc).cloned().unwrap_or_default(),
             Source::Lazy {
@@ -202,7 +242,7 @@ impl LexicalIndex {
     }
 
     /// Probe the active value index for a normalized form key (lazy path).
-    fn probe_form(&self, index_iri: &Iri, normalizer: &Iri, norm_key: &str) -> Vec<Item> {
+    fn probe_form(&self, index_iri: &Iri, normalizer: &Iri, norm_key: &str) -> FormEntries {
         let entry_class = iri("urn:eigenius:lexicon:LexicalEntry");
         let form_prop = iri("urn:eigenius:lexicon:form");
         let mut seen: BTreeSet<Iri> = BTreeSet::new();
@@ -232,7 +272,7 @@ impl LexicalIndex {
             let Ok(item) = entry_to_item(&self.layer, r.as_ref()) else {
                 continue;
             };
-            items.push(item);
+            items.push((item, read_in_lexicon(r.as_ref())));
         }
         items
     }
@@ -262,11 +302,42 @@ impl LexicalIndex {
         self.len() == 0
     }
 
+    /// Apply the per-parse lexicon **scope** (D65 §4) to one form's resolved
+    /// `(item, in_lexicon)` pairs, returning the surviving [`Item`]s with their
+    /// leaf `cost.lexicon_order` stamped from the scope:
+    ///
+    /// - `scope = None` (default) — keep everything, `lexicon_order` stays 0
+    ///   (behaviour-preserving, unordered whole chain);
+    /// - `scope = Some(order)` — keep an entry iff its `in_lexicon` is in `order`
+    ///   (its position becomes `lexicon_order`, the primary rank key), **or** it is
+    ///   untagged (`in_lexicon = None` ⇒ always-available, e.g. the closed class).
+    ///   A tagged entry whose lexicon is outside the scope is dropped.
+    fn scoped(&self, pairs: FormEntries, scope: Option<&[Iri]>) -> Vec<Item> {
+        pairs
+            .into_iter()
+            .filter_map(|(mut it, lx)| match scope {
+                None => Some(it),
+                Some(order) => match &lx {
+                    None => Some(it), // untagged = always available
+                    Some(lx) => order.iter().position(|s| s == lx).map(|pos| {
+                        it.cost.lexicon_order = pos as u32;
+                        it
+                    }),
+                },
+            })
+            .collect()
+    }
+
     /// The lexical items for one token span's surface: the raw surface plus every
     /// lemma the [`Lemmatizer`] yields across all parts of speech (so an inflected
     /// or collocated form resolves to its base entries). Candidate strings are
-    /// de-duplicated before lookup.
-    fn lookup_span(&self, surface: &str, lemmatizer: &dyn Lemmatizer) -> Vec<Item> {
+    /// de-duplicated before lookup. `scope` filters + ranks by lexicon (§4).
+    fn lookup_span(
+        &self,
+        surface: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+    ) -> Vec<Item> {
         let s_lc = surface.trim().to_lowercase();
         let mut candidates: BTreeSet<String> = BTreeSet::new();
         candidates.insert(s_lc.clone());
@@ -277,7 +348,7 @@ impl LexicalIndex {
         }
         let mut out = Vec::new();
         for c in &candidates {
-            let items = self.entries_for(c);
+            let items = self.scoped(self.entries_for(c), scope);
             if items.is_empty() {
                 continue;
             }
@@ -308,7 +379,26 @@ impl LexicalIndex {
     /// Parse prose into the forest of typed sentence parses: every full-span `S`
     /// derivation whose assembled sem type-checks to `Prop`. Returns the WHOLE
     /// forest (ambiguity included); an empty `Vec` means no admissible parse.
+    ///
+    /// Unscoped (the whole composed chain, unordered) — see [`Self::parse_scoped`]
+    /// for the per-parse lexicon scope (D65 §4).
     pub fn parse(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> Vec<Item> {
+        self.parse_scoped(text, lemmatizer, None)
+    }
+
+    /// Parse with an optional **lexicon scope** (D65 §4): an ordered list of
+    /// `lexicon:Lexicon` IRIs. Only entries whose `lexicon:in_lexicon` is in the
+    /// scope (or untagged — always-available, e.g. the closed class) seed the
+    /// chart, and each entry's position in the list becomes its leaf
+    /// `lexicon_order` — the **primary** rank key, so earlier-listed lexica rank
+    /// first (soft precedence; later lexica stay in the forest, no shadowing).
+    /// `scope = None` is the unordered whole chain (backward-compatible).
+    pub fn parse_scoped(
+        &self,
+        text: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+    ) -> Vec<Item> {
         let tokens = tokenize(text);
         let n = tokens.len();
         if n == 0 {
@@ -338,7 +428,7 @@ impl LexicalIndex {
             let last = (i + span_limit).min(n);
             for j in i..last {
                 let surface = tokens[i..=j].join(" ");
-                let items = self.lookup_span(&surface, lemmatizer);
+                let items = self.lookup_span(&surface, lemmatizer, scope);
                 chart[i][j].extend(items);
             }
         }

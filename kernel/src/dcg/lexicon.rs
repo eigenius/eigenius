@@ -130,12 +130,16 @@ pub fn entry_to_item(layer: &Arc<Layer>, entry: &Resource) -> Result<Item, Strin
     let sem_v = entry
         .get(&iri("urn:eigenius:lexicon:sem"))
         .ok_or("entry has no `sem`")?;
-    let cost = entry
+    let sense_rank = entry
         .get(&iri("urn:eigenius:lexicon:sense_rank"))
         .and_then(Value::as_integer)
         .unwrap_or(0)
         .max(0) as u32;
-    Ok(Item::with_cost(cat, resolve_sem_value(layer, sem_v)?, cost))
+    Ok(Item::with_cost(
+        cat,
+        resolve_sem_value(layer, sem_v)?,
+        super::parser::Cost::from_sense_rank(sense_rank),
+    ))
 }
 
 /// Peel `cat_fin_forall` / `cat_num_forall` binders off a leaf category (D63 §8.10),

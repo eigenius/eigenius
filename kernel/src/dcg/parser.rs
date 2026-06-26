@@ -51,26 +51,68 @@ pub enum Combinator {
     Other,
 }
 
+/// The 2-component additive **rank key** for a parse (D65 §4.2): lexicon
+/// precedence (primary) then sense-frequency (secondary). The combinators **sum**
+/// both components across a parse's leaves; the forest sorts **lexicographically**
+/// by `(lexicon_order, sense_rank)` then caps. Derived `Ord` compares fields in
+/// declaration order, giving exactly that lexicographic order.
+///
+/// The unordered, single-lexicon default leaves `lexicon_order = 0` everywhere —
+/// behaviour-identical to the prior scalar `sense_rank` cost (D63 §8.7 Stage B).
+/// The kernel never learns either component *means* anything — it sums opaque
+/// weights, keeping the engine sense-/lexicon-agnostic (the §6 boundary).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Cost {
+    /// Σ of each leaf's position in the parse scope's ordered lexicon list
+    /// (0 = first / most-preferred; 0 for the unordered default). Primary key.
+    pub lexicon_order: u32,
+    /// Σ of each leaf's `lexicon:sense_rank` (0 = most-frequent sense). Secondary key.
+    pub sense_rank: u32,
+}
+
+impl Cost {
+    /// The zero cost — the default for closed-class / unranked / unscoped leaves.
+    pub const ZERO: Cost = Cost {
+        lexicon_order: 0,
+        sense_rank: 0,
+    };
+
+    /// A leaf cost from just a sense-frequency rank (`lexicon_order = 0`); the
+    /// lexical index stamps this, and the scope (if any) overwrites `lexicon_order`.
+    pub fn from_sense_rank(sense_rank: u32) -> Cost {
+        Cost {
+            lexicon_order: 0,
+            sense_rank,
+        }
+    }
+
+    /// Component-wise saturating sum — how the combinators aggregate child costs.
+    pub fn saturating_add(self, other: Cost) -> Cost {
+        Cost {
+            lexicon_order: self.lexicon_order.saturating_add(other.lexicon_order),
+            sense_rank: self.sense_rank.saturating_add(other.sense_rank),
+        }
+    }
+}
+
 /// A parse item: a category (`lexicon:Cat` term), its assembled EigenTT sem, the
 /// combinator [`Combinator`] that produced it (for Eisner normal form), and its
-/// **cost** — an abstract additive weight summed by the combinators and used to
-/// rank + cap the forest (D63 §8.7 Stage B). A leaf's cost is set by whoever builds
-/// it (the lexical index sets it from the entry's `lexicon:sense_rank`, so a
-/// lower-cost parse uses more-frequent WordNet senses); the kernel never learns the
-/// cost *means* sense frequency — it only sums an opaque weight, keeping the engine
-/// sense-agnostic (the §6 forest-returns boundary). Cost 0 throughout (closed-class
-/// / demo entries) leaves single-parse ordering and the cap unaffected.
+/// **cost** — the additive [`Cost`] rank key summed by the combinators and used to
+/// rank + cap the forest (D63 §8.7 / D65 §4.2). A leaf's cost is set by whoever
+/// builds it (the lexical index from the entry's `sense_rank`, the parse scope from
+/// the entry's lexicon position); the kernel only sums opaque weights, staying
+/// sense-/lexicon-agnostic (the §6 forest-returns boundary).
 #[derive(Clone)]
 pub struct Item {
     pub cat: Exp,
     pub sem: Exp,
     pub prov: Combinator,
-    pub cost: u32,
+    pub cost: Cost,
 }
 
 impl Item {
     /// A leaf / non-combinatory item (a lexical seed, or any constituent not
-    /// produced by a composition rule) — `prov = Other`, cost `0`. The default
+    /// produced by a composition rule) — `prov = Other`, cost zero. The default
     /// constructor for callers outside `apply`; set a non-zero cost with
     /// [`Item::with_cost`].
     pub fn new(cat: Exp, sem: Exp) -> Self {
@@ -78,13 +120,13 @@ impl Item {
             cat,
             sem,
             prov: Combinator::Other,
-            cost: 0,
+            cost: Cost::ZERO,
         }
     }
 
-    /// Same as [`Item::new`] but with an explicit leaf `cost` — used by the lexical
-    /// index to stamp an entry's `sense_rank` onto its leaf item.
-    pub fn with_cost(cat: Exp, sem: Exp, cost: u32) -> Self {
+    /// Same as [`Item::new`] but with an explicit [`Cost`] — used by the lexical
+    /// index to stamp an entry's rank, and by the composition rules that sum costs.
+    pub fn with_cost(cat: Exp, sem: Exp, cost: Cost) -> Self {
         Item {
             cat,
             sem,
@@ -95,7 +137,7 @@ impl Item {
 
     /// This item with its cost replaced (preserving cat/sem/prov) — for unary
     /// transforms (type-raise, number refinement) that carry a child's cost through.
-    fn at_cost(mut self, cost: u32) -> Self {
+    fn at_cost(mut self, cost: Cost) -> Self {
         self.cost = cost;
         self
     }
@@ -157,7 +199,7 @@ fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> 
                         cat: subst_cat(body, &subst),
                         sem,
                         prov: Combinator::ForwardApp,
-                        cost: 0,
+                        cost: Cost::ZERO,
                     });
                 }
                 let mut subst = CatSubst::new();
@@ -166,7 +208,7 @@ fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> 
                     cat: subst_cat(body, &subst),
                     sem: Exp::App(Box::new(left.sem.clone()), Box::new(right.sem.clone())),
                     prov: Combinator::ForwardApp,
-                    cost: 0,
+                    cost: Cost::ZERO,
                 });
             }
         }
@@ -187,7 +229,7 @@ fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> 
                         cat: subst_cat(&args[0], &subst),
                         sem: Exp::App(Box::new(left.sem.clone()), Box::new(right.sem.clone())),
                         prov: Combinator::ForwardApp,
-                        cost: 0,
+                        cost: Cost::ZERO,
                     });
                 }
             }
@@ -200,7 +242,7 @@ fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> 
                     cat: subst_cat(&args[0], &subst),
                     sem: Exp::App(Box::new(right.sem.clone()), Box::new(left.sem.clone())),
                     prov: Combinator::BackwardApp,
-                    cost: 0,
+                    cost: Cost::ZERO,
                 });
             }
         }
@@ -235,7 +277,7 @@ fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> 
                             cat: result,
                             sem,
                             prov: Combinator::ForwardComp,
-                            cost: 0,
+                            cost: Cost::ZERO,
                         });
                     }
                 }
@@ -261,7 +303,7 @@ fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> 
                     cat: result.clone(),
                     sem,
                     prov: Combinator::Other,
-                    cost: 0,
+                    cost: Cost::ZERO,
                 });
             }
         }
@@ -279,7 +321,7 @@ fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> 
                     cat: result.clone(),
                     sem,
                     prov: Combinator::Other,
-                    cost: 0,
+                    cost: Cost::ZERO,
                 });
             }
         }
@@ -312,7 +354,7 @@ fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> 
                     ),
                     sem: sigma,
                     prov: Combinator::Other,
-                    cost: 0,
+                    cost: Cost::ZERO,
                 });
             }
         }
@@ -410,7 +452,7 @@ fn refined_noun(
         ),
         sem: sigma,
         prov: Combinator::Other,
-        cost: 0,
+        cost: Cost::ZERO,
     }
 }
 
@@ -486,4 +528,72 @@ pub fn cky_parse(tokens: &[Item], layer: &Arc<Layer>) -> Vec<Item> {
         }
     }
     chart[0][n - 1].clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Cost;
+
+    #[test]
+    fn cost_sorts_lexicon_order_before_sense_rank() {
+        // D65 §4.2: the rank key is lexicographic — lexicon precedence dominates,
+        // sense-frequency tie-breaks within a precedence level.
+        let mut v = vec![
+            Cost {
+                lexicon_order: 1,
+                sense_rank: 0,
+            }, // preferred lexicon? no — order 1
+            Cost {
+                lexicon_order: 0,
+                sense_rank: 9,
+            },
+            Cost {
+                lexicon_order: 0,
+                sense_rank: 1,
+            },
+        ];
+        v.sort();
+        assert_eq!(
+            v,
+            vec![
+                Cost {
+                    lexicon_order: 0,
+                    sense_rank: 1
+                }, // order 0 beats order 1 …
+                Cost {
+                    lexicon_order: 0,
+                    sense_rank: 9
+                }, // … even at a much worse sense_rank
+                Cost {
+                    lexicon_order: 1,
+                    sense_rank: 0
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn cost_saturating_add_is_componentwise() {
+        let a = Cost {
+            lexicon_order: 2,
+            sense_rank: 3,
+        };
+        let b = Cost {
+            lexicon_order: 1,
+            sense_rank: 4,
+        };
+        assert_eq!(
+            a.saturating_add(b),
+            Cost {
+                lexicon_order: 3,
+                sense_rank: 7
+            }
+        );
+        // Saturates each component independently, no overflow panic.
+        let big = Cost {
+            lexicon_order: u32::MAX,
+            sense_rank: 0,
+        };
+        assert_eq!(big.saturating_add(a).lexicon_order, u32::MAX);
+    }
 }

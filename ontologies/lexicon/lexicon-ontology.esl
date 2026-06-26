@@ -296,6 +296,22 @@ property lexicon:in_lexicon : core:resource {
     domain lexicon:LexicalEntry;
 }
 
+// ── Lexicon profiles = named parse scopes (D65 §4.1) ──────────────────
+// A parse SCOPE is an ordered list of Lexicon IRIs (earlier = higher resolution
+// precedence, a soft rank — not shadowing). A `LexiconProfile` names such a list
+// so a scope can be selected by one IRI. Array order folds into the parse rank as
+// the primary key (D65 §4.2): an entry's position in the scope is its leaf
+// `lexicon_order`, summed across the parse, sorted before sense-frequency.
+class lexicon:LexiconProfile {
+    description = "A named, ordered parse scope: the lexica a parse draws from, in resolution-precedence order. Selectable as a scope by IRI; the parser folds each entry's lexicon position into the rank (primary key, before sense-frequency).";
+    requires lexicon:lexica;
+}
+property lexicon:lexica : core:resource_array {
+    description = "Ordered lexicon:Lexicon references — array order IS resolution precedence (D65 §4.1; earlier ranks first, later stay in the forest, no shadowing). resource_array is triple-indexable, so \"which profiles include WordNet?\" is one scan_predicate_object.";
+    class_types lexicon:Lexicon;
+    domain lexicon:LexiconProfile;
+}
+
 // ── Inline λ-term semantics (function words) ──────────────────────────
 // A committed EigenTT term the lexicon references from `sem` when the
 // semantics is a λ-term rather than a chain entity — e.g. a determiner's

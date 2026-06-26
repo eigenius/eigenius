@@ -797,6 +797,115 @@ fn lexicon_instances_validate_and_available_lexica_is_a_plain_query() {
     assert_eq!(row_count, 2, "both lexica surface as queryable instances");
 }
 
+// D65 §4 slice 4: a parse SCOPE (ordered Lexicon IRIs) filters the lexicon and
+// ranks by lexicon precedence. Two competing "widget" entries — `CellLine` in
+// `lex_a`, `Gene` in `lex_b` — let us observe filtering + precedence directly.
+const SCOPED_LEXICA: &str = r#"
+    namespace lexicon   = "urn:eigenius:lexicon";
+    namespace epistemic = "urn:eigenius:reflection:epistemic";
+
+    resource lexicon:lex_a : lexicon:Lexicon { lexicon:source = "A"; }
+    resource lexicon:lex_b : lexicon:Lexicon { lexicon:source = "B"; }
+
+    resource lexicon:e_widget_a : lexicon:LexicalEntry {
+        lexicon:form       = "widget";
+        lexicon:cat        = type_expr( lexicon:cat_n(lexicon:CellLine, lexicon:num_any) );
+        lexicon:sem        = lexicon:CellLine;
+        lexicon:sem_type   = type_expr( Set );
+        lexicon:grade      = epistemic:declared;
+        lexicon:in_lexicon = lexicon:lex_a;
+    }
+    resource lexicon:e_widget_b : lexicon:LexicalEntry {
+        lexicon:form       = "widget";
+        lexicon:cat        = type_expr( lexicon:cat_n(lexicon:Gene, lexicon:num_any) );
+        lexicon:sem        = lexicon:Gene;
+        lexicon:sem_type   = type_expr( Set );
+        lexicon:grade      = epistemic:declared;
+        lexicon:in_lexicon = lexicon:lex_b;
+    }
+"#;
+
+/// Readback-normalized sem string — distinguishes the CellLine vs Gene reading.
+fn sem_string(it: &Item) -> String {
+    format!(
+        "{:?}",
+        readback_val(0, &eval(&it.sem, &Rho::Nil).expect("eval sem"))
+    )
+}
+
+#[test]
+fn parse_scope_filters_lexica_and_ranks_by_precedence() {
+    let layer = esl_layer("scoped-lex", SCOPED_LEXICA, build_lexicon());
+    let index = LexicalIndex::build(Arc::clone(&layer));
+    let lex_a = Iri::parse("urn:eigenius:lexicon:lex_a").unwrap();
+    let lex_b = Iri::parse("urn:eigenius:lexicon:lex_b").unwrap();
+    let sentence = "every widget affects HeLa";
+
+    // No scope: both widget readings parse (CellLine and Gene).
+    let unscoped = index.parse(sentence, &Identity);
+    assert_eq!(unscoped.len(), 2, "both readings present unscoped");
+
+    // Scope to lex_a only → the lex_b (Gene) reading is filtered out.
+    let only_a = index.parse_scoped(sentence, &Identity, Some(std::slice::from_ref(&lex_a)));
+    assert_eq!(only_a.len(), 1, "lex_b reading filtered out");
+    let only_b = index.parse_scoped(sentence, &Identity, Some(std::slice::from_ref(&lex_b)));
+    assert_eq!(only_b.len(), 1, "lex_a reading filtered out");
+    assert_ne!(
+        sem_string(&only_a[0]),
+        sem_string(&only_b[0]),
+        "the two lexica give genuinely different readings"
+    );
+
+    // Both in scope, lex_a first → the lex_a reading ranks first (lexicon_order 0).
+    let ab = index.parse_scoped(sentence, &Identity, Some(&[lex_a.clone(), lex_b.clone()]));
+    assert_eq!(ab.len(), 2);
+    assert!(
+        ab[0].cost.lexicon_order <= ab[1].cost.lexicon_order,
+        "forest is sorted by lexicon precedence"
+    );
+    assert_eq!(
+        sem_string(&ab[0]),
+        sem_string(&only_a[0]),
+        "lex_a (first-listed) reading ranks first"
+    );
+
+    // Reverse precedence: lex_b first → the lex_b reading ranks first.
+    let ba = index.parse_scoped(sentence, &Identity, Some(&[lex_b, lex_a]));
+    assert_eq!(
+        sem_string(&ba[0]),
+        sem_string(&only_b[0]),
+        "reversing the scope order flips which reading ranks first"
+    );
+}
+
+#[test]
+fn lexicon_profile_resolves_to_ordered_scope() {
+    // D65 §4.1: a LexiconProfile names an ordered scope; resolve_lexicon_profile
+    // returns its `lexica` array in declaration order (= resolution precedence).
+    let snippet = r#"
+        namespace lexicon = "urn:eigenius:lexicon";
+        resource lexicon:lx1 : lexicon:Lexicon { lexicon:source = "1"; }
+        resource lexicon:lx2 : lexicon:Lexicon { lexicon:source = "2"; }
+        resource lexicon:prof : lexicon:LexiconProfile {
+            lexicon:lexica = [ lexicon:lx2, lexicon:lx1 ];
+        }
+    "#;
+    let layer = esl_layer("profile", snippet, build_schema());
+    let scope = eigenius_kernel::dcg::resolve_lexicon_profile(
+        &layer,
+        &Iri::parse("urn:eigenius:lexicon:prof").unwrap(),
+    )
+    .expect("profile resolves to a scope");
+    assert_eq!(
+        scope,
+        vec![
+            Iri::parse("urn:eigenius:lexicon:lx2").unwrap(),
+            Iri::parse("urn:eigenius:lexicon:lx1").unwrap(),
+        ],
+        "scope preserves the lexica array order (precedence)"
+    );
+}
+
 #[test]
 fn bridge_parses_mwe_sentence_to_prop() {
     let index = LexicalIndex::build(build_lexicon());
