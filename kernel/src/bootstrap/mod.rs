@@ -215,11 +215,182 @@ fn build_layer_from_resources(
     Ok(layer)
 }
 
+/// Source format of an embedded bootstrap ontology — selects the loader
+/// ([`load_layer`] for Eigon-JSON, [`load_esl_layer`] for ESL compiled against
+/// its parent).
+#[derive(Clone, Copy)]
+enum OntologyFormat {
+    /// Eigon-JSON (`.json` / `.eigon.json`).
+    Json,
+    /// ESL source, compiled against the parent layer.
+    Esl,
+}
+
+/// One layer of the embedded bootstrap chain: its layer name, embedded source
+/// bytes, and source format.
+struct BootstrapOntology {
+    name: &'static str,
+    source: &'static str,
+    format: OntologyFormat,
+}
+
+/// The embedded bootstrap chain, **root-first**: array order *is* the parent
+/// chain (each layer builds on the one before it). This is the single source of
+/// truth for both [`bootstrap_with_storage`] (which builds + validates the chain)
+/// and [`current_manifest`] (which hashes the sources for D13 seed-drift
+/// detection) — so a layer can never be in one and not the other.
+const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
+    // core — the foundational meta-ontology (Class / Property / is_a / the
+    // primitive data types). Root of the chain (`parent = None`).
+    BootstrapOntology {
+        name: "core",
+        source: include_str!("../../../ontologies/core/core-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    // eigentt-type-fragment (D47) — chain-mirrored EigenTT type language for
+    // axiom and theorem statements (D46 §10 axioms, future propositional
+    // institutions). Depends only on core (`string`, `integer`, `InductiveType`,
+    // `InductiveCtor`, `InductiveArgType`).
+    BootstrapOntology {
+        name: "eigentt-type-fragment",
+        source: include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
+        format: OntologyFormat::Json,
+    },
+    BootstrapOntology {
+        name: "program",
+        source: include_str!("../../../ontologies/program/program-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    BootstrapOntology {
+        name: "reflection",
+        source: include_str!("../../../ontologies/reflection/reflection-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    // obo — shared OBO meta-vocabulary used by the obograph importer (M9.2): the
+    // four synonym Properties + the `inverseOf` RBox axiom imported GO / ChEBI
+    // layers reference. Depends on reflection (entries carry
+    // `is_a: [DeclaredResource]` + `declared_by`).
+    BootstrapOntology {
+        name: "obo",
+        source: include_str!("../../../ontologies/obo/obo-meta-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    BootstrapOntology {
+        name: "institution",
+        source: include_str!("../../../ontologies/institution/institution-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    BootstrapOntology {
+        name: "runtime",
+        source: include_str!("../../../ontologies/runtime/runtime-substrate-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    // formulas (Phase 19d.0.d / D32 §4-5) — FormulaTerm (the shared symbol-algebra
+    // term language across the numerical institutions) + the v1 operator catalog.
+    // Above runtime: `Operator.operator_signature` uses `core:inductive` (19d.0.b).
+    BootstrapOntology {
+        name: "formulas",
+        source: include_str!("../../../ontologies/formulas/formulas-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    // lean-expressions (Phase 20a.2 / D40) — chain-mirrored Lean expression form
+    // (LeanName / LeanLevel / LeanExpr inductives) the Lean institution's
+    // `LeanProofTerm.proposition` refers to.
+    BootstrapOntology {
+        name: "lean-expressions",
+        source: include_str!("../../../ontologies/lean/lean-expressions.eigon.json"),
+        format: OntologyFormat::Json,
+    },
+    // lean-runtime-classes (Phase 20a.5a / D28 §10.3) — the Lean language
+    // runtime's authoring-side resource classes (LeanProject / LeanPackage /
+    // LeanPackagePin / LeanEnvironment).
+    BootstrapOntology {
+        name: "lean-runtime-classes",
+        source: include_str!("../../../ontologies/lean/lean-runtime-classes.eigon.json"),
+        format: OntologyFormat::Json,
+    },
+    // lean-institution (Phase 20a.4 / D28) — the Lean 4 verification institution
+    // and its v1 surface (LeanProofTerm / qc_proof_check QueryClass / ExportFormat).
+    BootstrapOntology {
+        name: "lean-institution",
+        source: include_str!("../../../ontologies/lean/lean-institution.eigon.json"),
+        format: OntologyFormat::Json,
+    },
+    // reasoning (D39 Phase 8) — the Justification Logic institution's chain
+    // artifacts (ChainWitness predicates, JustificationTerm, ReasoningSentence,
+    // the institution + QueryClasses + ExportFormat). ESL source = single source
+    // of truth. Depends on core / eigentt / reflection / institution.
+    BootstrapOntology {
+        name: "reasoning",
+        source: include_str!("../../../ontologies/reasoning/reasoning.esl"),
+        format: OntologyFormat::Esl,
+    },
+    // statistics (D52 Phase 5) — measurement-statistics ontology (claim schema,
+    // SampleSet sum-types, the seven smart-constructor macros, analysis-plan
+    // classes, the §7 stance markers + QueryClasses). Above reasoning so the
+    // notebook sees both (the D52 → D39 composition).
+    BootstrapOntology {
+        name: "statistics",
+        source: include_str!("../../../ontologies/statistics/statistics.esl"),
+        format: OntologyFormat::Esl,
+    },
+    BootstrapOntology {
+        name: "notebook",
+        source: include_str!("../../../ontologies/notebook/notebook-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    // ingest (D53) — PinnedExternalFile (content-hash-tracked external data) +
+    // DatasetSchema. Above reflection (parent of PinnedExternalFile).
+    BootstrapOntology {
+        name: "ingest",
+        source: include_str!("../../../ontologies/ingest/ingest-ontology.json"),
+        format: OntologyFormat::Json,
+    },
+    // reference — bibliographic references + literature-citation warrants
+    // (DOI-identified `Reference`, CiTO-aligned `cites` / `citation_type`).
+    // Depends on core + reflection.
+    BootstrapOntology {
+        name: "reference",
+        source: include_str!("../../../ontologies/reference/reference.esl"),
+        format: OntologyFormat::Esl,
+    },
+    // logic (D63 §8.3 Phase 0) — propositional primitives over `Prop`
+    // (`logic:False`; And/Or arrive with the connectives). Depends only on core.
+    BootstrapOntology {
+        name: "logic",
+        source: include_str!("../../../ontologies/logic/logic.esl"),
+        format: OntologyFormat::Esl,
+    },
+    // lexicon (D62/D63) — the categorial-grammar SCHEMA (`lexicon:Cat`,
+    // LexicalEntry, SemTerm, feature inductives, the `lexicon:form_index`
+    // ValueIndex). Depends on core / eigentt / reflection / logic.
+    BootstrapOntology {
+        name: "lexicon",
+        source: include_str!("../../../ontologies/lexicon/lexicon-ontology.esl"),
+        format: OntologyFormat::Esl,
+    },
+    // ontology (D63 §8.5 Slice 3c) — Prop-valued structural relations over the
+    // class lattice (`ontology:is_a` / `ontology:subclass_of`) a predicate
+    // nominal produces. Depends on the lexicon schema (`lexicon:Entity`).
+    BootstrapOntology {
+        name: "ontology",
+        source: include_str!("../../../ontologies/ontology/ontology.esl"),
+        format: OntologyFormat::Esl,
+    },
+    // closed-class (D63 §8.3) — the determiner lexicon (every/each/all/a/some/no,
+    // subject + object) over the schema's `cat_forall` + `lexicon:Entity`.
+    // Domain-independent committed chain data; WordNet content composes with it.
+    BootstrapOntology {
+        name: "closed-class",
+        source: include_str!("../../../ontologies/lexicon/closed-class.esl"),
+        format: OntologyFormat::Esl,
+    },
+];
+
 /// Bootstrap the Eigenius kernel.
 ///
-/// Loads thirteen ontology layers: core → eigentt-type-fragment → program → reflection → obo → institution → runtime → formulas → lean-expressions → lean-runtime-classes → lean-institution → reasoning → notebook.
-/// All are validated. Returns an `ExecutionContext` with the
-/// notebook layer as head.
+/// Loads + validates the [`BOOTSTRAP_CHAIN`] ontology layers (core → … →
+/// closed-class) and returns an `ExecutionContext` headed at the tip layer.
 ///
 /// Phase 14a-iii: an in-memory cache + backend are created here and shared
 /// across all bootstrap layers and the returned `ExecutionContext`. Persistent
@@ -234,249 +405,22 @@ pub fn bootstrap() -> Result<ExecutionContext, BootstrapError> {
 pub fn bootstrap_with_storage(
     storage: crate::layer::LayerStorage,
 ) -> Result<ExecutionContext, BootstrapError> {
-    let core = load_layer(
-        "core",
-        include_str!("../../../ontologies/core/core-ontology.json"),
-        None,
-        storage.clone(),
-    )?;
-
-    // eigentt-type-fragment layer (D47) — chain-mirrored EigenTT type
-    // language for axiom and theorem statements (D46 §10 axioms,
-    // future propositional institutions). Depends only on core (uses
-    // core:string, core:integer, core:InductiveType, core:InductiveCtor,
-    // core:InductiveArgType).
-    let eigentt_type = load_layer(
-        "eigentt-type-fragment",
-        include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
-        Some(core),
-        storage.clone(),
-    )?;
-
-    let program = load_layer(
-        "program",
-        include_str!("../../../ontologies/program/program-ontology.json"),
-        Some(eigentt_type),
-        storage.clone(),
-    )?;
-
-    let reflection = load_layer(
-        "reflection",
-        include_str!("../../../ontologies/reflection/reflection-ontology.json"),
-        Some(program),
-        storage.clone(),
-    )?;
-
-    // obo layer — shared OBO meta-vocabulary used by the obograph
-    // importer (M9.2). Declares the four synonym Properties
-    // (`has_exact_synonym`, `has_related_synonym`,
-    // `has_broad_synonym`, `has_narrow_synonym`) and the
-    // `inverseOf` RBox axiom so imported GO / ChEBI / etc. layers
-    // can reference them without re-declaring. Depends on
-    // reflection because the entries themselves carry
-    // `is_a: [DeclaredResource]` and `declared_by`.
-    let obo = load_layer(
-        "obo",
-        include_str!("../../../ontologies/obo/obo-meta-ontology.json"),
-        Some(reflection),
-        storage.clone(),
-    )?;
-
-    let institution = load_layer(
-        "institution",
-        include_str!("../../../ontologies/institution/institution-ontology.json"),
-        Some(obo),
-        storage.clone(),
-    )?;
-
-    let runtime = load_layer(
-        "runtime",
-        include_str!("../../../ontologies/runtime/runtime-substrate-ontology.json"),
-        Some(institution),
-        storage.clone(),
-    )?;
-
-    // formulas: layer (Phase 19d.0.d / D32 §4-5) — declares
-    // FormulaTerm (the shared symbol-algebra term language across
-    // every numerical institution) and the v1 operator catalog
-    // (arithmetic, unary numeric, comparisons, derivative). Sits
-    // above runtime since `Operator.operator_signature` uses the
-    // `core:inductive` data type added in 19d.0.b.
-    let formulas = load_layer(
-        "formulas",
-        include_str!("../../../ontologies/formulas/formulas-ontology.json"),
-        Some(runtime),
-        storage.clone(),
-    )?;
-
-    // lean-expressions layer (Phase 20a.2 / D40) — chain-mirrored
-    // Lean expression form: LeanName + LeanLevel + LeanLevelList +
-    // LeanExpr InductiveTypes. Foundational shapes the Lean
-    // verification institution's LeanProofTerm.proposition field
-    // refers to. Lives in the bootstrap chain so subsequent
-    // committed resources (LeanProofTerm instances, the
-    // Lean-institution ontology layer) can reference these types
-    // without needing the Lean institution to be registered first.
-    let lean_expressions = load_layer(
-        "lean-expressions",
-        include_str!("../../../ontologies/lean/lean-expressions.eigon.json"),
-        Some(formulas),
-        storage.clone(),
-    )?;
-
-    // lean-runtime-classes layer (Phase 20a.5a / D28 §10.3) —
-    // declares the authoring-side resource classes the Lean
-    // language runtime owns: `LeanProject` / `LeanPackage` (subclasses
-    // of `RuntimePackage`), `LeanPackagePin` (subclass of
-    // `RuntimePackagePin`), and `LeanEnvironment` (subclass of
-    // `RuntimeEnvironment` with `lean_permitted_axioms` /
-    // `lean_unpermitted_axiom_hard_error` / `lake_lockfile_hash`).
-    // Sits above `lean-expressions` purely for organisational
-    // grouping (all Lean ontology layers cluster here); the
-    // technical dependency is on `runtime` further down.
-    let lean_runtime_classes = load_layer(
-        "lean-runtime-classes",
-        include_str!("../../../ontologies/lean/lean-runtime-classes.eigon.json"),
-        Some(lean_expressions),
-        storage.clone(),
-    )?;
-
-    // lean-institution layer (Phase 20a.4 / D28) — declares the
-    // Lean 4 verification institution and its v1 surface:
-    // LeanProofTerm / LeanProofPayload / LeanAxiomList resource
-    // classes, the qc_proof_check QueryClass (AutoOnLoad + OnDemand
-    // over LeanProofTerm → Verdict), and the ef_lean_proof_payload
-    // ExportFormat. Sits above lean-runtime-classes so future
-    // additions (e.g. a LeanProofTerm.environment property
-    // referencing `lean:LeanEnvironment`) resolve cleanly.
-    let lean_institution = load_layer(
-        "lean-institution",
-        include_str!("../../../ontologies/lean/lean-institution.eigon.json"),
-        Some(lean_runtime_classes),
-        storage.clone(),
-    )?;
-
-    // reasoning layer (D39 Phase 8) — the Justification Logic
-    // institution's chain artifacts: the four `ChainWitness.Is*As`
-    // predicates (D49 §6), `JustificationTerm` + `JustifiedBy`
-    // indexed inductives, `ReasoningSentence` + `VerifiedPropositionView`
-    // resource classes, `EntailmentRequest` + `ConsistencyRequest`
-    // query-input classes, the `reasoning_institution` resource +
-    // three QueryClass declarations + `ef_justification` ExportFormat.
-    // Loaded from ESL source (not JSON) — compiled at bootstrap to
-    // keep `ontologies/reasoning/reasoning.esl` as the single source
-    // of truth. Depends on every layer below it: core (primitives),
-    // eigentt-type-fragment (TypeExpr), reflection (DerivedResource +
-    // canonical_proposition), institution (Institution / QueryClass /
-    // ExportFormat / dispatch roles).
-    let reasoning = load_esl_layer(
-        "reasoning",
-        include_str!("../../../ontologies/reasoning/reasoning.esl"),
-        Some(lean_institution),
-        storage.clone(),
-    )?;
-
-    // D52 Phase 5: measurement-statistics ontology — universal claim
-    // schema, SampleSet sum-types, seven smart-constructor macros
-    // (SingleSampleEstimate, IID, Paired, Factorial, RCBD, SplitPlot,
-    // RepeatedMeasures), StatisticalAnalysisPlan + MethodComparisonAnalysisPlan
-    // classes, the four §7 opinionated-stance marker classes
-    // (PopulationLevel / MeasurementLevel / ImpossibilityWitness), and
-    // two QueryClass registrations bound to the matching in-process
-    // StatisticsInstitution (linked via cli/src/main.rs). Stacked
-    // above reasoning so the notebook layer sees both the reasoning
-    // and statistics ontologies in its parent chain — the D52 → D39
-    // composition the docs describe (D52 emits canonical_proposition,
-    // D39 cites via DerivedEvidence + JustifiedBy.derived consuming
-    // the D49 IsDerivedAs witness) works out of the box.
-    let statistics = load_esl_layer(
-        "statistics",
-        include_str!("../../../ontologies/statistics/statistics.esl"),
-        Some(reasoning),
-        storage.clone(),
-    )?;
-
-    let notebook = load_layer(
-        "notebook",
-        include_str!("../../../ontologies/notebook/notebook-ontology.json"),
-        Some(statistics),
-        storage.clone(),
-    )?;
-
-    // ingest: layer (D53) — declares PinnedExternalFile (a content-hash-tracked
-    // external data file) and DatasetSchema. Sits above reflection (the parent
-    // of PinnedExternalFile via reflection:ObservedResource); placed at the tip.
-    let ingest = load_layer(
-        "ingest",
-        include_str!("../../../ontologies/ingest/ingest-ontology.json"),
-        Some(notebook),
-        storage.clone(),
-    )?;
-
-    // reference: layer — bibliographic references + literature-citation
-    // warrants. `Reference` (DOI-identified, CSL/Dublin-Core metadata) is an
-    // epistemically-neutral record; the imported claim rides a
-    // reflection:DeclaredResource whose typed `reference:cites` /
-    // `reference:citation_type` (CiTO-aligned, allows_only-constrained) link
-    // it to the work. Sourced from ESL; depends only on core + reflection
-    // (DeclaredResource is the domain of the binding properties), placed at the
-    // tip so any study chain can cite literature out of the box.
-    let reference = load_esl_layer(
-        "reference",
-        include_str!("../../../ontologies/reference/reference.esl"),
-        Some(ingest),
-        storage.clone(),
-    )?;
-
-    // logic: layer (D63 §8.3 Phase 0) — propositional primitives over `Prop`
-    // (`logic:False`; `And`/`Or` arrive with the connectives). Depends only on
-    // core (`Prop`); placed at the tip beneath the lexicon, which builds on it.
-    let logic = load_esl_layer(
-        "logic",
-        include_str!("../../../ontologies/logic/logic.esl"),
-        Some(reference),
-        storage.clone(),
-    )?;
-
-    // lexicon: layer (D62/D63) — the categorial-grammar SCHEMA: `lexicon:Cat`
-    // (the category algebra), `lexicon:LexicalEntry`, `lexicon:SemTerm`, the
-    // feature inductives. Depends on core (Set/Prop), eigentt (TypeExpr-valued
-    // `cat`/`sem_type`/`term`), reflection (EpistemicStatus `grade`), and logic.
-    // The closed-class determiner ENTRIES are a separate layer (still staged in
-    // tests) — only the schema is committed here.
-    let lexicon = load_esl_layer(
-        "lexicon",
-        include_str!("../../../ontologies/lexicon/lexicon-ontology.esl"),
-        Some(logic),
-        storage.clone(),
-    )?;
-
-    // ontology: layer (D63 §8.5 Slice 3c) — Prop-valued structural relations over
-    // the class lattice (`ontology:is_a` / `ontology:subclass_of`), the opaque
-    // predicates a predicate nominal ("HeLa is a cell line") produces. Depends on
-    // the lexicon schema (`lexicon:Entity`); placed beneath the closed-class
-    // function words, which reference it.
-    let ontology = load_esl_layer(
-        "ontology",
-        include_str!("../../../ontologies/ontology/ontology.esl"),
-        Some(lexicon),
-        storage.clone(),
-    )?;
-
-    // closed-class: layer (D63 §8.3) — the determiner lexicon (`every`/`each`/
-    // `all`/`a`/`some`/`no`, subject + object variants) over the schema's
-    // `cat_forall` + `lexicon:Entity` + `logic:False`. Domain-independent
-    // (polymorphic in the noun type); the open-class WordNet content composes
-    // with it. The closed-class function words are committed chain data.
-    let closed_class = load_esl_layer(
-        "closed-class",
-        include_str!("../../../ontologies/lexicon/closed-class.esl"),
-        Some(ontology),
-        storage.clone(),
-    )?;
+    let mut parent: Option<Arc<Layer>> = None;
+    for spec in BOOTSTRAP_CHAIN {
+        let layer = match spec.format {
+            OntologyFormat::Json => {
+                load_layer(spec.name, spec.source, parent.clone(), storage.clone())?
+            }
+            OntologyFormat::Esl => {
+                load_esl_layer(spec.name, spec.source, parent.clone(), storage.clone())?
+            }
+        };
+        parent = Some(layer);
+    }
+    let head = parent.expect("BOOTSTRAP_CHAIN must be non-empty");
 
     Ok(ExecutionContext::new(
-        closed_class,
+        head,
         "working",
         ExecutionMode::ReadWrite,
         storage,
@@ -672,97 +616,17 @@ fn check_and_migrate_schema_version(
     Ok(())
 }
 
-fn embedded_ontologies() -> [(&'static str, &'static str); 19] {
-    [
-        (
-            "core",
-            include_str!("../../../ontologies/core/core-ontology.json"),
-        ),
-        (
-            "eigentt-type-fragment",
-            include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
-        ),
-        (
-            "program",
-            include_str!("../../../ontologies/program/program-ontology.json"),
-        ),
-        (
-            "reflection",
-            include_str!("../../../ontologies/reflection/reflection-ontology.json"),
-        ),
-        (
-            "obo",
-            include_str!("../../../ontologies/obo/obo-meta-ontology.json"),
-        ),
-        (
-            "institution",
-            include_str!("../../../ontologies/institution/institution-ontology.json"),
-        ),
-        (
-            "runtime",
-            include_str!("../../../ontologies/runtime/runtime-substrate-ontology.json"),
-        ),
-        (
-            "formulas",
-            include_str!("../../../ontologies/formulas/formulas-ontology.json"),
-        ),
-        (
-            "lean-expressions",
-            include_str!("../../../ontologies/lean/lean-expressions.eigon.json"),
-        ),
-        (
-            "lean-runtime-classes",
-            include_str!("../../../ontologies/lean/lean-runtime-classes.eigon.json"),
-        ),
-        (
-            "lean-institution",
-            include_str!("../../../ontologies/lean/lean-institution.eigon.json"),
-        ),
-        // The reasoning layer is sourced from ESL rather than JSON,
-        // but the manifest's job is content-drift detection — hashing
-        // the raw source bytes is what we want either way. A change
-        // to reasoning.esl bumps the manifest, forcing a SEED rebuild
-        // against a stale persistent DB. Same applies to the
-        // statistics layer below.
-        (
-            "reasoning",
-            include_str!("../../../ontologies/reasoning/reasoning.esl"),
-        ),
-        (
-            "statistics",
-            include_str!("../../../ontologies/statistics/statistics.esl"),
-        ),
-        (
-            "notebook",
-            include_str!("../../../ontologies/notebook/notebook-ontology.json"),
-        ),
-        (
-            "ingest",
-            include_str!("../../../ontologies/ingest/ingest-ontology.json"),
-        ),
-        (
-            "reference",
-            include_str!("../../../ontologies/reference/reference.esl"),
-        ),
-        ("logic", include_str!("../../../ontologies/logic/logic.esl")),
-        (
-            "lexicon",
-            include_str!("../../../ontologies/lexicon/lexicon-ontology.esl"),
-        ),
-        (
-            "closed-class",
-            include_str!("../../../ontologies/lexicon/closed-class.esl"),
-        ),
-    ]
-}
-
 fn current_manifest() -> Vec<u8> {
-    // Newline-separated "<name>:<sha256_hex>" lines, stable ordering.
+    // Newline-separated "<name>:<sha256_hex>" lines over the single-source-of-
+    // truth [`BOOTSTRAP_CHAIN`], in chain order. Hashing the raw source bytes is
+    // exactly the content-drift signal we want for both JSON and ESL layers — a
+    // change to any embedded ontology bumps the manifest, forcing a SEED rebuild
+    // against a stale persistent DB (D13 §8).
     let mut out = String::new();
-    for (name, json) in embedded_ontologies() {
+    for spec in BOOTSTRAP_CHAIN {
         use sha2::Digest;
-        let hash = sha2::Sha256::digest(json.as_bytes());
-        out.push_str(&format!("{name}:{}\n", hex::encode(hash)));
+        let hash = sha2::Sha256::digest(spec.source.as_bytes());
+        out.push_str(&format!("{}:{}\n", spec.name, hex::encode(hash)));
     }
     out.into_bytes()
 }
@@ -770,9 +634,15 @@ fn current_manifest() -> Vec<u8> {
 fn seed_backend(
     backend: Arc<dyn crate::storage::PersistentBackend>,
 ) -> Result<ExecutionContext, BootstrapError> {
-    // Build the embedded ontologies in memory (reusing the existing path)
-    // so they're validated before anything touches the DB.
-    let ctx = bootstrap()?;
+    // Build the embedded ontologies ON the persistent storage — the same
+    // "a layer is built on the storage it is persisted to" rule every committed
+    // layer follows, so each layer's derived indexes (materialised at persist,
+    // below) land in the backend. Build touches nothing in the DB (resources
+    // persist via `persist_layer`; index population is deferred to persist;
+    // bloom/cache are in-memory), so the ontologies are still fully validated
+    // before anything reaches the DB — preserving the seed safety property.
+    let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(&backend));
+    let ctx = bootstrap_with_storage(storage)?;
 
     // Walk the chain from the root (core) up and persist each layer.
     // Layer chain is head → parent → ... → core, so collect bottom-up.
@@ -785,6 +655,10 @@ fn seed_backend(
     }
     chain.reverse(); // root (core) first
 
+    // `store_layer` persists each layer's resources *and* materialises its
+    // derived indexes (into the backend, since the layer was built on it). Root
+    // first so each layer's text/value index discovery sees its ancestors'
+    // already-persisted triple entries.
     for layer in &chain {
         backend
             .store_layer(layer)

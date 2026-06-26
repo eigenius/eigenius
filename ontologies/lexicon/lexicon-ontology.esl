@@ -17,6 +17,7 @@
 // felicity oracle (`gate_entry`).
 
 namespace core       = "urn:eigenius:core";
+namespace normalizers = "urn:eigenius:core:normalizers";
 namespace reflection = "urn:eigenius:reflection";
 namespace epistemic  = "urn:eigenius:reflection:epistemic";
 namespace eigentt    = "urn:eigenius:eigentt";
@@ -211,6 +212,19 @@ class lexicon:LexicalEntry {
 property lexicon:form : core:string {
     description = "The surface form / lemma (concrete side; GF's abstract/concrete split).";
     domain lexicon:LexicalEntry;
+}
+// ── Exact form index (D65 §5 slice 1) ─────────────────────────────────
+// A declared `core:ValueIndex` on `lexicon:form` makes surface-form lookup an
+// indexed, lazy probe (build-time populated, committed and uncommitted alike)
+// instead of an eager full scan of the lexicon layer — the runtime substrate
+// for the lazy `LexicalIndex` (slice 2). The `lowercase` normalizer gives
+// case-insensitive matching (parser lower-cases its lookup key the same way),
+// so "HeLa"/"hela" and "Cell"/"cell" resolve identically. It is active for
+// every layer built on this schema (every lexicon layer), per D65 D2.
+resource lexicon:form_index : core:ValueIndex {
+    core:description     = "Exact-value index on lexicon:form for case-insensitive surface-form lookup (D65). Active for every lexicon layer; the lazy LexicalIndex probes it instead of scanning.";
+    core:target_property = lexicon:form;
+    core:value_normalizer = normalizers:lowercase;
 }
 property lexicon:cat : core:resource {
     description = "The categorial type as a value of the inductive lexicon:Cat (Atom | A/B | A\\B), carried as a type_expr-encoded EigenTT term — NOT a string. Kernel-checked, pattern-matchable, and the source of the ⟦cat⟧ → sem_type homomorphism.";

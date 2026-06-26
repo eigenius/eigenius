@@ -345,10 +345,13 @@ impl RocksStore {
             for item in iter {
                 let (key, value) =
                     item.map_err(|e| StorageError::Internal(format!("topology iter: {e}")))?;
-                let key_str = std::str::from_utf8(&key)
-                    .map_err(|e| StorageError::Internal(format!("non-utf8 topo key: {e}")))?;
-                // Prefix iterator may overshoot — trim.
-                if !key_str.starts_with(TOPO_PREFIX) {
+                // Prefix iterator may overshoot into later keyspaces — e.g.
+                // `vidx_*` value-index keys, which sort after `topo:` (`'v'` >
+                // `'t'`) and carry binary layer-ids. Stop at the first key
+                // outside the `topo:` prefix, checking raw bytes *before* any
+                // utf-8 interpretation so a non-utf8 neighbour key can't trip
+                // the decode.
+                if !key.starts_with(TOPO_PREFIX.as_bytes()) {
                     break;
                 }
                 let handle: LayerHandle = ciborium::from_reader(value.as_ref())
@@ -535,6 +538,14 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
     }
 
     fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError> {
+        // D65 index lifecycle: materialise the layer's derived indexes
+        // (triple → text → value) into this backend's index keyspace. `store_layer`
+        // is the post-validation persist point every commit path funnels through,
+        // so population happens here rather than eagerly at build — a rejected
+        // commit never reaches `store_layer`, and a seeded/committed layer's
+        // indexes are durable. Writes through `layer.storage()`, which is this
+        // backend (the layer was built on it). Idempotent.
+        eigenius_kernel::layer::populate_layer_indexes(layer);
         run_blocking(|| {
             // Per D23 §6.3, a layer commit must atomically write the topology
             // entry, the per-layer bloom (Phase 14b), every `layer:<id>:res:`

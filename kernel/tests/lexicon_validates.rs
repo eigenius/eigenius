@@ -41,7 +41,9 @@ use eigenius_kernel::dcg::{
     Pos,
 };
 use eigenius_kernel::esl;
-use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
+use eigenius_kernel::layer::{
+    normalize_value, resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage,
+};
 use eigenius_kernel::nbe::check::{check, check_infer, CheckCtx};
 use eigenius_kernel::nbe::env::Rho;
 use eigenius_kernel::nbe::eval::eval;
@@ -683,6 +685,59 @@ fn index_covers_the_committed_entries() {
         index.len() >= 6,
         "index should cover the committed lexical entries; got {}",
         index.len()
+    );
+}
+
+// D65 slice 1: the schema declares a `core:ValueIndex` on `lexicon:form` with a
+// `lowercase` normalizer — the runtime substrate the lazy `LexicalIndex`
+// (slice 2) probes (on a shared-storage chain) instead of eagerly scanning, and
+// whose absence-from-the-local-index is the fallback signal in this fresh-
+// storage-per-layer test harness. The generic active-discovery + build-time
+// population over shared storage is proven by the slice-0 integration tests
+// (kernel/tests/value_index_build_population.rs); here we validate the *schema
+// declaration itself* is well-formed and discoverable as an active ValueIndex
+// when its layer's index is consulted directly.
+#[test]
+fn form_value_index_is_declared_on_lexicon_form() {
+    let schema = build_schema();
+
+    // The declared resource resolves as a well-formed `core:ValueIndex`.
+    let idx = schema
+        .resolve(&Iri::parse("urn:eigenius:lexicon:form_index").unwrap())
+        .expect("lexicon:form_index is committed in the schema layer");
+    let is_a = idx
+        .get(&Iri::parse("urn:eigenius:core:is_a").unwrap())
+        .expect("form_index has is_a");
+    let classes: Vec<&str> = match is_a {
+        Value::Array(items) => items.iter().filter_map(|v| v.as_iri_str()).collect(),
+        v => v.as_iri_str().into_iter().collect(),
+    };
+    assert!(
+        classes.contains(&"urn:eigenius:core:ValueIndex"),
+        "form_index is a core:ValueIndex; got {classes:?}"
+    );
+
+    // Discovery (over the schema layer's own index) yields exactly the lexicon
+    // form index, targeting `lexicon:form` with the `lowercase` normalizer.
+    let actives = resolve_active_value_indexes(&schema);
+    let form_idx = actives
+        .iter()
+        .find(|a| a.iri.as_str() == "urn:eigenius:lexicon:form_index")
+        .expect("the form ValueIndex is discoverable as active");
+    assert_eq!(
+        form_idx.target_property.as_str(),
+        "urn:eigenius:lexicon:form"
+    );
+    assert_eq!(
+        form_idx.normalizer.as_str(),
+        "urn:eigenius:core:normalizers:lowercase"
+    );
+
+    // The normalizer the declaration names folds case as specified: the parser
+    // and the index agree on the lookup key for "Cell Line" ⇒ "cell line".
+    assert_eq!(
+        normalize_value(&form_idx.normalizer, "Cell Line"),
+        "cell line"
     );
 }
 

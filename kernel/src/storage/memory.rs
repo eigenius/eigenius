@@ -218,6 +218,11 @@ impl PersistentBackend for MemoryPersistentBackend {
     }
 
     fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError> {
+        // D65 index lifecycle: materialise the layer's derived indexes into this
+        // backend's indexes at the persist step (mirrors `RocksStore::store_layer`),
+        // so index population happens post-validation and seeded/committed layers
+        // are indexed durably. Writes through `layer.storage()` = this backend.
+        crate::layer::populate_layer_indexes(layer);
         let id = layer.id().clone();
         // 14e: persist all topological parents in the LayerHandle so
         // multi-parent merge layers round-trip correctly. The legacy

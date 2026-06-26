@@ -1018,52 +1018,50 @@ impl LayerBuilder {
             witness_index: std::sync::OnceLock::new(),
             axiom_env: std::sync::OnceLock::new(),
         };
-        // Phase 14h: pre-populate the triple index from the layer's
-        // indexable triples. `extract_indexable_triples` consults each
-        // predicate's `Property.data_type` via `Layer::resolve`, which
-        // walks the cache (just populated above) and parents — so this
-        // call is self-contained and doesn't touch the backend.
-        // Mirrors the bloom precomputation: same entries the persistent
-        // backend would write at commit, populated up front so reads
-        // against a freshly-built (but not-yet-persisted) layer work
-        // identically to reads after restart.
-        let owned = crate::layer::index::extract_indexable_triples(&layer);
-        if !owned.is_empty() {
-            let borrowed: Vec<crate::layer::index::Triple> =
-                owned.iter().map(|t| t.as_borrowed()).collect();
-            // `extend_layer` is idempotent by `(layer, p, o, s)` — if
-            // the persistent backend's `store_layer` later replays the
-            // same writes inside its WriteBatch, the second write is a
-            // no-op at the index's logical level (RocksDB will overwrite
-            // the same key with the same empty value).
-            let _ = layer
-                .storage
-                .triple_index
-                .extend_layer(layer.id(), &borrowed);
-        }
-        // D43 M3.5: pre-populate the text index from the layer's
-        // indexable property values. Runs after the triple-index
-        // pre-population so that `resolve_active_text_indexes`
-        // (which scans via the triple index for `is_a == TextIndex`)
-        // sees this layer's own contributions.
-        crate::query::text::indexing::populate_text_indexes(&layer);
-        // D65: pre-populate the exact value index from active `core:ValueIndex`
-        // declarations. Mirrors the triple-index pre-population: same entries the
-        // persistent backend would write at commit, populated up front so exact
-        // lookups against a freshly-built (but not-yet-persisted) layer work
-        // identically to reads after restart. `extract_value_entries` discovers
-        // active indexes via the triple index (already populated above) and reads
-        // each target property's normalized value(s).
-        let value_entries = crate::layer::index_discovery::extract_value_entries(&layer);
-        if !value_entries.is_empty() {
-            let borrowed: Vec<crate::layer::ValueEntry> =
-                value_entries.iter().map(|e| e.as_borrowed()).collect();
-            let _ = layer
-                .storage
-                .value_index
-                .extend_layer(layer.id(), &borrowed);
+        // Index lifecycle (D65): derived indexes are materialised at the
+        // **persist** step — `PersistentBackend::store_layer` calls
+        // `populate_layer_indexes` — which runs *after* validation (every commit
+        // path stores only post-validation), so a rejected commit never writes
+        // index entries and seed/committed layers persist their indexes durably.
+        // The ephemeral no-backend in-memory path has no separate persist step,
+        // so for it build *is* the materialisation: populate here.
+        if layer.storage.persistent_backend.is_none() {
+            populate_layer_indexes(&layer);
         }
         layer
+    }
+}
+
+/// Materialise a layer's derived indexes into the layer's own storage, in the
+/// order their discovery requires: the **triple** index first, then the **text**
+/// and **value** indexes — both discover their active `core:TextIndex` /
+/// `core:ValueIndex` declarations by scanning the triple index, so it must be
+/// populated first (D43 / D65).
+///
+/// Writes through `layer.storage()`, so the layer must be built on the storage it
+/// is being persisted to — the invariant `PersistentBackend::store_layer` relies
+/// on when it calls this. For the ephemeral no-backend path this is the in-memory
+/// index; for a committed layer it is the backend's index. Idempotent.
+pub fn populate_layer_indexes(layer: &Layer) {
+    let owned = crate::layer::index::extract_indexable_triples(layer);
+    if !owned.is_empty() {
+        let borrowed: Vec<crate::layer::index::Triple> =
+            owned.iter().map(|t| t.as_borrowed()).collect();
+        // `extend_layer` is idempotent by `(layer, p, o, s)`.
+        let _ = layer
+            .storage
+            .triple_index
+            .extend_layer(layer.id(), &borrowed);
+    }
+    crate::query::text::indexing::populate_text_indexes(layer);
+    let value_entries = crate::layer::index_discovery::extract_value_entries(layer);
+    if !value_entries.is_empty() {
+        let borrowed: Vec<crate::layer::ValueEntry> =
+            value_entries.iter().map(|e| e.as_borrowed()).collect();
+        let _ = layer
+            .storage
+            .value_index
+            .extend_layer(layer.id(), &borrowed);
     }
 }
 

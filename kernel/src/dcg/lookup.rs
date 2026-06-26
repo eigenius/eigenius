@@ -35,9 +35,9 @@
 //! parse), not an error.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use crate::layer::Layer;
+use crate::layer::{normalize_value, resolve_active_value_indexes, Layer};
 use crate::nbe::check::{check, CheckCtx};
 use crate::nbe::env::Rho;
 use crate::nbe::eval::eval;
@@ -75,24 +75,79 @@ pub fn tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// A `form → entries` index over a layer's committed `lexicon:LexicalEntry`
-/// resources, with every entry pre-resolved to a parse [`Item`] (category +
-/// sem). Built once per layer; `parse` reuses it. Keys are **lowercased** forms
-/// (case-insensitive lookup, the v1 choice; case-sensitive acronym
-/// disambiguation is a refinement).
+/// A `form → entries` lookup over a layer's committed `lexicon:LexicalEntry`
+/// resources, each resolvable to a parse [`Item`] (category + sem). Built once per
+/// layer; `parse` reuses it. Keys are **lowercased** forms (case-insensitive
+/// lookup, the v1 choice; case-sensitive acronym disambiguation is a refinement).
+///
+/// Two backing modes (D65 §2.2, decisions D1/D2):
+/// - **Lazy** — when a `core:ValueIndex` on `lexicon:form` is active at the layer
+///   head (the production path: a shared-storage chain rooted at `bootstrap`). Form
+///   lookups probe that exact index on demand and memoise per form, so `build` is
+///   O(1) and a parse touches only the forms its sentence mentions — essential at
+///   WordNet scale (325k entries), where the eager full-chain scan dominated.
+/// - **Eager** — the fallback when no such index is active (e.g. an isolated-storage
+///   chain, where [`scan_chain`](crate::layer)'s shared-index requirement keeps the
+///   schema's declaration invisible from a child layer). Scans the whole chain once
+///   into a materialised `form → items` map. This is the pre-D65 implementation,
+///   retained verbatim as the no-index path; the two modes are behaviour-identical.
 pub struct LexicalIndex {
     layer: Arc<Layer>,
-    by_form: BTreeMap<String, Vec<Item>>,
-    /// Word count of the longest indexed form — the multi-span seeding window.
-    max_words: usize,
+    source: Source,
+}
+
+/// The two backings behind [`LexicalIndex`] (lazy probe vs eager materialisation).
+enum Source {
+    /// Materialised `form → items` — used when no form `ValueIndex` is active.
+    Eager {
+        by_form: BTreeMap<String, Vec<Item>>,
+        /// Word count of the longest indexed form — the multi-span seeding window.
+        max_words: usize,
+    },
+    /// On-demand probe of the active `lexicon:form` `ValueIndex`, memoised per form.
+    Lazy {
+        /// The `core:ValueIndex` Resource IRI its entries are keyed under.
+        index_iri: Iri,
+        /// The normalizer it declares — applied to a lookup key so it matches how
+        /// the index was populated (D65: `lowercase`).
+        normalizer: Iri,
+        /// `normalized_form → resolved items`. Presence = probed (an empty `Vec`
+        /// records a probed miss, so a missing form is never re-probed).
+        cache: Mutex<BTreeMap<String, Vec<Item>>>,
+    },
 }
 
 impl LexicalIndex {
-    /// Scan the layer chain for `lexicon:LexicalEntry` resources and index each by
-    /// its (lowercased) `lexicon:form`, resolving its `cat`/`sem` to an [`Item`].
-    /// Entries whose `cat`/`sem` fail to resolve are skipped (they would have been
-    /// caught by the felicity gate at import; a parse cannot use them regardless).
+    /// Build the lookup over `layer`. Prefers the **lazy** path — a declared, active
+    /// `core:ValueIndex` on `lexicon:form` — and falls back to the **eager** full-
+    /// chain scan when none is active. Entries whose `cat`/`sem` fail to resolve are
+    /// skipped (the felicity gate caught them at import; a parse cannot use them).
     pub fn build(layer: Arc<Layer>) -> Self {
+        let form_prop = iri("urn:eigenius:lexicon:form");
+        if let Some(active) = resolve_active_value_indexes(&layer)
+            .into_iter()
+            .find(|a| a.target_property == form_prop)
+        {
+            return LexicalIndex {
+                layer,
+                source: Source::Lazy {
+                    index_iri: active.iri,
+                    normalizer: active.normalizer,
+                    cache: Mutex::new(BTreeMap::new()),
+                },
+            };
+        }
+        let (by_form, max_words) = Self::scan_eager(&layer);
+        LexicalIndex {
+            layer,
+            source: Source::Eager { by_form, max_words },
+        }
+    }
+
+    /// The pre-D65 eager scan: walk the chain (`iter_all_resources`, which follows
+    /// parent `Arc` pointers — storage-sharing independent) and materialise
+    /// `form → items`, tracking the longest form's word count for span seeding.
+    fn scan_eager(layer: &Arc<Layer>) -> (BTreeMap<String, Vec<Item>>, usize) {
         let entry_class = iri("urn:eigenius:lexicon:LexicalEntry");
         let form_prop = iri("urn:eigenius:lexicon:form");
         let mut by_form: BTreeMap<String, Vec<Item>> = BTreeMap::new();
@@ -104,7 +159,7 @@ impl LexicalIndex {
             let Some(Value::String(form)) = r.get(&form_prop) else {
                 continue;
             };
-            let Ok(item) = entry_to_item(&layer, r.as_ref()) else {
+            let Ok(item) = entry_to_item(layer, r.as_ref()) else {
                 continue;
             };
             let key = form.trim().to_lowercase();
@@ -114,20 +169,97 @@ impl LexicalIndex {
             max_words = max_words.max(key.split_whitespace().count());
             by_form.entry(key).or_default().push(item);
         }
-        LexicalIndex {
-            layer,
-            by_form,
-            max_words,
+        (by_form, max_words)
+    }
+
+    /// Items for one exact, already-lowercased form key. **Eager**: a map lookup.
+    /// **Lazy**: a memoised probe of the active `lexicon:form` `ValueIndex` —
+    /// `value_index.lookup(index, normalize(form))` yields candidate `(subject,
+    /// layer)` across the DAG; each distinct subject is resolved chain-nearest (via
+    /// [`Layer::resolve`](crate::layer::Layer::resolve), which filters to the head's
+    /// chain and shadow-resolves), re-checked to be a `LexicalEntry` whose form
+    /// still normalizes to the key, then turned into an [`Item`].
+    fn entries_for(&self, form_lc: &str) -> Vec<Item> {
+        match &self.source {
+            Source::Eager { by_form, .. } => by_form.get(form_lc).cloned().unwrap_or_default(),
+            Source::Lazy {
+                index_iri,
+                normalizer,
+                cache,
+            } => {
+                let key = normalize_value(normalizer, form_lc);
+                if let Some(hit) = cache.lock().expect("LexicalIndex cache poisoned").get(&key) {
+                    return hit.clone();
+                }
+                let items = self.probe_form(index_iri, normalizer, &key);
+                cache
+                    .lock()
+                    .expect("LexicalIndex cache poisoned")
+                    .insert(key, items.clone());
+                items
+            }
         }
     }
 
-    /// Number of distinct indexed forms.
+    /// Probe the active value index for a normalized form key (lazy path).
+    fn probe_form(&self, index_iri: &Iri, normalizer: &Iri, norm_key: &str) -> Vec<Item> {
+        let entry_class = iri("urn:eigenius:lexicon:LexicalEntry");
+        let form_prop = iri("urn:eigenius:lexicon:form");
+        let mut seen: BTreeSet<Iri> = BTreeSet::new();
+        let mut items = Vec::new();
+        for hit in self.layer.storage().value_index.lookup(index_iri, norm_key) {
+            let Ok((subject, _defining)) = hit else {
+                continue;
+            };
+            if !seen.insert(subject.clone()) {
+                continue; // a subject can be hit once per defining layer; resolve once
+            }
+            // Resolve the chain-nearest definition (None ⇒ out of this head's chain).
+            let Some(r) = self.layer.resolve(&subject) else {
+                continue;
+            };
+            if !r.is_instance_of(&entry_class) {
+                continue;
+            }
+            // Shadow safety: the resolved (nearest) definition's form must still
+            // normalize to the queried key — a closer layer may have redefined it.
+            let Some(Value::String(form)) = r.get(&form_prop) else {
+                continue;
+            };
+            if normalize_value(normalizer, form) != norm_key {
+                continue;
+            }
+            let Ok(item) = entry_to_item(&self.layer, r.as_ref()) else {
+                continue;
+            };
+            items.push(item);
+        }
+        items
+    }
+
+    /// The multi-span seeding window: how far a lexical span may reach from token
+    /// `i`. **Eager** knows the longest indexed form (`max_words`); **lazy** seeds
+    /// every span up to the sentence length `n` (D65 §2.3 / D3 — no `max_words`
+    /// stat; an over-long span is a cheap empty probe, memoised).
+    fn span_limit(&self, n: usize) -> usize {
+        match &self.source {
+            Source::Eager { max_words, .. } => *max_words,
+            Source::Lazy { .. } => n,
+        }
+    }
+
+    /// Number of distinct indexed forms. **Eager**: the total materialised forms.
+    /// **Lazy**: the forms probed into the cache so far (forms are discovered on
+    /// demand, so the full count is not known without enumerating the value index).
     pub fn len(&self) -> usize {
-        self.by_form.len()
+        match &self.source {
+            Source::Eager { by_form, .. } => by_form.len(),
+            Source::Lazy { cache, .. } => cache.lock().expect("LexicalIndex cache poisoned").len(),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.by_form.is_empty()
+        self.len() == 0
     }
 
     /// The lexical items for one token span's surface: the raw surface plus every
@@ -145,16 +277,18 @@ impl LexicalIndex {
         }
         let mut out = Vec::new();
         for c in &candidates {
-            if let Some(items) = self.by_form.get(c) {
-                // Morphological number (D63 §5.1, the Slice-1 deferral): a surface
-                // that morphology *reduced* to this lemma was inflected (plural,
-                // for nouns); a surface equal to the lemma is singular. Refine the
-                // common noun's underspecified `num_any` to that number so
-                // determiner/noun agreement (`every gene` ✓ / `every genes` ✗)
-                // bites at composition.
-                let num = if *c == s_lc { "sg" } else { "pl" };
-                out.extend(items.iter().map(|it| with_noun_num(it, num)));
+            let items = self.entries_for(c);
+            if items.is_empty() {
+                continue;
             }
+            // Morphological number (D63 §5.1, the Slice-1 deferral): a surface
+            // that morphology *reduced* to this lemma was inflected (plural,
+            // for nouns); a surface equal to the lemma is singular. Refine the
+            // common noun's underspecified `num_any` to that number so
+            // determiner/noun agreement (`every gene` ✓ / `every genes` ✗)
+            // bites at composition.
+            let num = if *c == s_lc { "sg" } else { "pl" };
+            out.extend(items.iter().map(|it| with_noun_num(it, num)));
         }
         // Bare-plural → kind-subject shift (D63 §8.5 Slice 3c): a plural common noun
         // also seeds a `cat_kind` edge (the kind it denotes), so "genes" can serve as
@@ -199,8 +333,9 @@ impl LexicalIndex {
         // 1. Seed lexical spans (multi-span MWE seeding). A multiword form at
         //    [i,j] is seeded ALONGSIDE the items of its parts, so both readings
         //    survive into the chart.
+        let span_limit = self.span_limit(n);
         for i in 0..n {
-            let last = (i + self.max_words).min(n);
+            let last = (i + span_limit).min(n);
             for j in i..last {
                 let surface = tokens[i..=j].join(" ");
                 let items = self.lookup_span(&surface, lemmatizer);

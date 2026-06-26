@@ -204,8 +204,13 @@ fn build_go_layer(report: &ConvertReport) -> PersistentLayer {
 
     let t_build = Instant::now();
     let layer = Arc::new(b.build(storage));
+    // D65 index lifecycle: derived indexes (triple/text/value) are now
+    // materialised at the **persist** step, not eagerly at build. Persist the
+    // go-corpus layer so its `core:description` TextIndex is populated in the
+    // backend before we query it (mirrors a real commit).
+    backend.store_layer(&layer).expect("store go-corpus layer");
     eprintln!(
-        "LayerBuilder::build (bloom + triple + text index): {:.2}s",
+        "LayerBuilder::build + persist (bloom + triple + text index): {:.2}s",
         t_build.elapsed().as_secs_f64()
     );
 

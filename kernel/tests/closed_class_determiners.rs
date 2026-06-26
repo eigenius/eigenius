@@ -26,6 +26,7 @@ use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
 use eigenius_kernel::nbe::env::Rho;
+use eigenius_kernel::nbe::eval::eval;
 use eigenius_kernel::nbe::readback::readback_val;
 use eigenius_kernel::nbe::term::Exp;
 
@@ -1250,5 +1251,82 @@ fn nary_coordination_has_a_single_left_branching_parse() {
         1,
         "n-ary coordination must have a single (left-branching) parse; got {}",
         forest.len()
+    );
+}
+
+// ── D65 §2.2 / slice 2 — the lazy `LexicalIndex` over the form `ValueIndex` ──
+//
+// On a SHARED-storage chain (bootstrap + a child layer on the same storage), the
+// `lexicon:form_index` `core:ValueIndex` is active, so `LexicalIndex::build` takes
+// the lazy path: O(1) build, forms resolved on demand and memoised. This proves
+// (a) the lazy path activates, (b) it is behaviourally lazy (no forms cached until
+// a parse touches them), and (c) it yields the SAME parse forest as the eager scan.
+
+/// Bootstrap + the demo domain on the SAME storage as the bootstrap chain, so the
+/// declared `lexicon:form` `ValueIndex` is discoverable/active ⇒ lazy `LexicalIndex`.
+fn index_over_bootstrap_shared() -> (Arc<Layer>, LexicalIndex) {
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let resources =
+        esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles on bootstrap");
+    let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
+    for r in resources {
+        b.add_resource(r).expect("add demo resource");
+    }
+    // Build on the bootstrap chain's OWN storage (shared) — not a fresh in_memory().
+    let layer = Arc::new(b.build(ctx.head().storage().clone()));
+    let index = LexicalIndex::build(Arc::clone(&layer));
+    (layer, index)
+}
+
+/// Multiset of reduced-sem keys for a forest — order-independent equivalence.
+fn sem_keys(forest: &[eigenius_kernel::dcg::Item]) -> Vec<String> {
+    let mut keys: Vec<String> = forest
+        .iter()
+        .map(|p| {
+            format!(
+                "{:?} :: {:?}",
+                p.cat,
+                readback_val(0, &eval(&p.sem, &Rho::Nil).expect("eval sem"))
+            )
+        })
+        .collect();
+    keys.sort();
+    keys
+}
+
+#[test]
+fn lazy_index_is_lazy_and_matches_eager() {
+    let sentence = "every cell line affects HeLa";
+
+    // Lazy (shared storage): nothing is cached until a parse touches a form.
+    let (_shared_layer, lazy) = index_over_bootstrap_shared();
+    assert_eq!(
+        lazy.len(),
+        0,
+        "the lazy index caches no forms before any parse (it probes the ValueIndex on demand)"
+    );
+    let lazy_forest = lazy.parse(sentence, &Identity);
+    assert!(
+        !lazy.is_empty(),
+        "after a parse the lazy index has memoised the forms its sentence touched"
+    );
+    assert!(
+        !lazy_forest.is_empty(),
+        "the lazy path must yield at least one felicitous parse"
+    );
+
+    // Eager (isolated storage): the same content scanned up front.
+    let (_eager_layer, eager) = index_over_bootstrap();
+    assert!(
+        eager.len() >= 6,
+        "the eager index materialises every committed form up front"
+    );
+    let eager_forest = eager.parse(sentence, &Identity);
+
+    // Behaviour-equivalence: identical parse forests (as reduced-sem multisets).
+    assert_eq!(
+        sem_keys(&lazy_forest),
+        sem_keys(&eager_forest),
+        "the lazy and eager paths must produce the same forest"
     );
 }

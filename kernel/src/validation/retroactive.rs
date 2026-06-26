@@ -465,6 +465,8 @@ mod tests {
         root_b.add_resource(req_prop).unwrap();
 
         let root = Arc::new(root_b.build(storage.clone()));
+        // Commit (persist + index) the lower layer the way production does, so
+        // retroactive validation's `scan_chain` sees its triple entries.
         backend.store_layer(&root).unwrap();
 
         (root, storage, backend)
@@ -533,7 +535,7 @@ mod tests {
     /// The retroactive pass must surface those violations.
     #[test]
     fn class_redef_with_new_requires_invalidates_instances() {
-        let (root, storage, _backend) = build_chain_with_class_instances();
+        let (root, storage, backend) = build_chain_with_class_instances();
 
         // Mid layer: defines `demo:Foo` (a Class) with no requires
         // beyond the meta-ontology baseline, plus an instance `foo_1`
@@ -550,6 +552,7 @@ mod tests {
             .unwrap();
             Arc::new(b.build(storage.clone()))
         };
+        backend.store_layer(&mid).unwrap();
         // Confirm baseline: mid is valid.
         let mut ws = CommitWorkingSet::in_memory();
         retroactive_validate(&mid, &mut ws).unwrap();
@@ -586,7 +589,7 @@ mod tests {
     /// the lower-layer reference.
     #[test]
     fn user_defined_iri_typed_predicate_triggers_case_3() {
-        let (root, storage, _backend) = build_chain_with_class_instances();
+        let (root, storage, backend) = build_chain_with_class_instances();
 
         // Mid layer: declares `demo:GoodKind` and `demo:BadKind`
         // classes, plus a user-defined property `demo:references`
@@ -638,6 +641,7 @@ mod tests {
             b.add_resource(caller).unwrap();
             Arc::new(b.build(storage.clone()))
         };
+        backend.store_layer(&mid).unwrap();
         let mut ws = CommitWorkingSet::in_memory();
         retroactive_validate(&mid, &mut ws).unwrap();
         assert_eq!(
@@ -695,7 +699,7 @@ mod tests {
     ///   `inst_C` — all three lack `description`.
     #[test]
     fn transitive_subclass_closure_enumerates_indirect_instances() {
-        let (root, storage, _backend) = build_chain_with_class_instances();
+        let (root, storage, backend) = build_chain_with_class_instances();
 
         let mid = {
             let mut b = LayerBuilder::new("mid", Some(Arc::clone(&root)));
@@ -739,6 +743,7 @@ mod tests {
             .unwrap();
             Arc::new(b.build(storage.clone()))
         };
+        backend.store_layer(&mid).unwrap();
         let mut ws = CommitWorkingSet::in_memory();
         retroactive_validate(&mid, &mut ws).unwrap();
         assert_eq!(
