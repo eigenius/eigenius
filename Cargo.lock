@@ -1344,6 +1344,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-ncbi-gene"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "eigenius-kernel",
+]
+
+[[package]]
 name = "eigenius-obograph"
 version = "0.1.0"
 dependencies = [

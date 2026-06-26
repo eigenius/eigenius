@@ -8,6 +8,7 @@ members = [
     "crates/eigenius-schemaorg",
     "crates/eigenius-schemaorg-worker",
     "crates/eigenius-wordnet",
+    "crates/eigenius-ncbi-gene",
     "crates/eigenius-oci",
     "crates/runtime-substrate",
     "crates/eigenius-julia",
