@@ -1,0 +1,15 @@
+[package]
+name = "eigenius-umls"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Import the UMLS Metathesaurus (RRF) into Eigenius: a faithful typed mirror (umls:Concept classes subclassed under their umls:SemanticType class, rooted at lexicon:Entity) plus a derived domain lexicon (English atom strings → common-noun N entries, tagged lexicon:umls). Honors UMLS source restriction levels (SRL-0 only). Deterministic; no LLM (D65 §5)."
+
+[dependencies]
+eigenius-kernel = { path = "../../kernel" }
+clap = { version = "4", features = ["derive"] }
+
+[[bin]]
+name = "umls-import"
+path = "src/bin/umls_import.rs"

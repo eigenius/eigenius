@@ -77,3 +77,4 @@ Thumbs.db
 .claude/scheduled_tasks.lock
 wordnet-full.esl
 ncbi-gene.esl
+umls.esl

@@ -1498,6 +1498,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-umls"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "eigenius-kernel",
+]
+
+[[package]]
 name = "eigenius-wasm-runtime"
 version = "0.1.0"
 dependencies = [
