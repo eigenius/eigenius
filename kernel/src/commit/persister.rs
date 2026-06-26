@@ -56,6 +56,18 @@ pub trait LayerPersister: Send + Sync {
         branch: &str,
         layer: &Arc<Layer>,
     ) -> Result<PersistedLayerInfo, ValidationError>;
+
+    /// Whether `layer` is already proven valid in this exact context — i.e. the
+    /// anchored-commit cache (D33 §6) holds an entry for `(content_hash, supporting
+    /// content_hash)`. That entry is written only after a full, *validated* commit, and
+    /// a layer's validity is a function of its content plus the chain below it (both
+    /// pinned by the key). So a hit means structural + retroactive validation already
+    /// passed for this exact content-on-this-exact-support, and the commit pipeline can
+    /// skip re-running them (it still runs `persist`, where the same cache hit also
+    /// skips `store_layer`). Default `false` — only a cache-backed persister overrides.
+    fn already_validated(&self, _layer: &Layer) -> bool {
+        false
+    }
 }
 
 /// Result of a single [`LayerPersister::persist`] call — the

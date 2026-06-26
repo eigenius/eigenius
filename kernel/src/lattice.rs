@@ -1627,13 +1627,32 @@ mod tests {
         r
     }
 
+    /// The self-referential `core:Class` definition. Every root test layer must
+    /// include it so the placeholder `is_a core:Class` on `make_resource` fixtures
+    /// resolves (reference-integrity, Rule 22) — these layers carry no real core
+    /// ontology, so the class they type against has to live in the root itself.
+    fn class_def() -> Resource {
+        let mut r = Resource::new(iri("urn:eigenius:core:Class"));
+        set_default_is_a(&mut r);
+        r
+    }
+
+    /// A root (`parent = None`) `LayerBuilder` pre-seeded with [`class_def`], so the
+    /// `is_a core:Class` placeholder on its fixtures resolves. Use instead of
+    /// `LayerBuilder::new(name, None)` for test root layers.
+    fn root_layer(name: &str) -> LayerBuilder {
+        let mut b = LayerBuilder::new(name, None);
+        b.add_resource(class_def()).unwrap();
+        b
+    }
+
     /// Build a small root layer via the lattice commit primitive.
     fn commit_root(
         backend: &dyn PersistentBackend,
         name: &str,
         storage: &LayerStorage,
     ) -> Arc<Layer> {
-        let mut b = LayerBuilder::new(name, None);
+        let mut b = root_layer(name);
         b.add_resource(make_resource("urn:eigenius:core:r"))
             .unwrap();
         commit_layer_default(b, storage.clone(), backend).unwrap()
@@ -1888,7 +1907,7 @@ mod tests {
         let storage = LayerStorage::in_memory();
 
         // Root defines demo:X — the IRI A will tombstone.
-        let mut root_b = LayerBuilder::new("root", None);
+        let mut root_b = root_layer("root");
         let mut root_resource = Resource::new(iri("urn:eigenius:demo:X"));
         // Validator requires non-empty `is_a`; the trivial-merge tests
         // don't exercise class-typing semantics so any value satisfies
@@ -1976,7 +1995,7 @@ mod tests {
         let storage = LayerStorage::in_memory();
 
         // Root defines demo:X.
-        let mut root_b = LayerBuilder::new("root", None);
+        let mut root_b = root_layer("root");
         let mut root_resource = Resource::new(iri("urn:eigenius:demo:X"));
         // Validator requires non-empty `is_a`; the trivial-merge tests
         // don't exercise class-typing semantics so any value satisfies
@@ -3014,7 +3033,7 @@ mod tests {
         name: &str,
         storage: &LayerStorage,
     ) -> Arc<Layer> {
-        let mut b = LayerBuilder::new(name, None);
+        let mut b = root_layer(name);
         b.add_resource(make_resource("urn:eigenius:core:description"))
             .unwrap();
         commit_layer_default(b, storage.clone(), backend).unwrap()
@@ -3130,14 +3149,14 @@ mod tests {
         // (otherwise they'd collapse to one layer per content
         // addressing), so we give each a unique marker resource in
         // addition to `core:description`.
-        let mut rb_a = LayerBuilder::new("root_a", None);
+        let mut rb_a = root_layer("root_a");
         rb_a.add_resource(make_resource("urn:eigenius:core:description"))
             .unwrap();
         rb_a.add_resource(make_resource("urn:eigenius:demo:a_marker"))
             .unwrap();
         let root_a = commit_layer_default(rb_a, storage.clone(), &backend).unwrap();
 
-        let mut rb_b = LayerBuilder::new("root_b", None);
+        let mut rb_b = root_layer("root_b");
         rb_b.add_resource(make_resource("urn:eigenius:core:description"))
             .unwrap();
         rb_b.add_resource(make_resource("urn:eigenius:demo:b_marker"))
@@ -3227,7 +3246,7 @@ mod tests {
 
         // A root layer is self-contained — no external references,
         // no supporting layer.
-        let mut rb = LayerBuilder::new("self-contained", None);
+        let mut rb = root_layer("self-contained");
         rb.add_resource(make_resource("urn:eigenius:core:r"))
             .unwrap();
         let outcome = commit_layer_with_cache(rb, storage, &backend).unwrap();

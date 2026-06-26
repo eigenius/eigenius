@@ -46,10 +46,10 @@ use eigenius_kernel::ontology::resource::Resource;
 use eigenius_kernel::ontology::Iri;
 use eigenius_kernel::validation::Validator;
 use eigenius_kernel::{bootstrap, esl};
-use eigenius_umls::convert::render_document;
+use eigenius_umls::convert::{header, render_base, render_concept_block, render_document};
 use eigenius_umls::rrf::{
     parse_mrconso_line, parse_mrdef_line, parse_mrrank, parse_mrsab, parse_mrsty_line,
-    srl0_allowlist, ConceptBuilder,
+    srl0_allowlist, ConceptBuilder, Subset,
 };
 
 #[derive(Parser, Debug)]
@@ -74,10 +74,23 @@ struct Args {
     /// Cap to the first N concepts (sorted by CUI) — a bounded import.
     #[arg(long)]
     limit: Option<usize>,
-    /// Write the ESL here.
+    /// Write the ESL as a SINGLE file here.
     #[arg(long)]
     out: Option<PathBuf>,
-    /// Compile + validate + felicity-gate the output (self-check; fail-closed).
+    /// Write the ESL as a PARTITIONED chain into this directory: `umls-000-base.esl`
+    /// (semantic-type classes + the lexicon descriptor) then `umls-NNN.esl` concept
+    /// batches, each under `--split-bytes`. Load them in filename order as a layer
+    /// chain (each concept chunk resolves against the base). Use this for large imports
+    /// (full Level-0) that exceed the gRPC message-size limit as one document.
+    #[arg(long)]
+    out_dir: Option<PathBuf>,
+    /// Max bytes per partition file (default 100 MiB — safely under the kernel's
+    /// 128 MiB gRPC Load limit). Only used with `--out-dir`.
+    #[arg(long, default_value_t = 100 * 1024 * 1024)]
+    split_bytes: usize,
+    /// Compile + validate + felicity-gate the output (self-check; fail-closed). Single
+    /// `--out`/in-memory mode only — in `--out-dir` mode the kernel validates each
+    /// layer at load time (the chain is the validation context).
     #[arg(long)]
     validate: bool,
 }
@@ -163,6 +176,12 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
 
+    // Partitioned emit: a base layer (semantic types + descriptor) + concept-batch
+    // chunks, each under the size cap. The single-document path stays for small imports.
+    if let Some(dir) = &args.out_dir {
+        return emit_partitioned(&subset, &args.version, dir, args.split_bytes);
+    }
+
     let (doc, rep) = render_document(&subset, &args.version);
     eprintln!(
         "umls import ({}): {} semantic-type classes, {} concept classes → {} lexical entries",
@@ -197,6 +216,81 @@ fn main() -> ExitCode {
         }
     }
 
+    ExitCode::SUCCESS
+}
+
+/// Emit the subset as a layer chain into `dir`: `umls-000-base.esl` (semantic-type
+/// classes + the `lexicon:umls` descriptor) then `umls-NNN.esl` concept-batch chunks,
+/// each ≤ `split_bytes`. Every file carries the full header (license notice +
+/// namespaces). Load them in filename order; each concept chunk resolves its
+/// `subclass_of umlssty:*` against the base layer below it.
+fn emit_partitioned(subset: &Subset, version: &str, dir: &Path, split_bytes: usize) -> ExitCode {
+    if let Err(e) = fs::create_dir_all(dir) {
+        eprintln!("error: creating {}: {e}", dir.display());
+        return ExitCode::from(1);
+    }
+
+    let hdr = header(version);
+    let (base, sty) = render_base(subset, version);
+
+    let mut files: Vec<PathBuf> = Vec::new();
+    let base_path = dir.join("umls-000-base.esl");
+    if let Err(e) = fs::write(&base_path, &base) {
+        eprintln!("error: writing {}: {e}", base_path.display());
+        return ExitCode::from(1);
+    }
+    files.push(base_path);
+
+    let mut idx = 1usize;
+    let mut cur = hdr.clone();
+    let mut total_entries = 0usize;
+    let mut chunk_concepts = 0usize;
+
+    let flush = |idx: usize, cur: &str| -> std::io::Result<PathBuf> {
+        let path = dir.join(format!("umls-{idx:03}.esl"));
+        fs::write(&path, cur)?;
+        Ok(path)
+    };
+
+    for c in &subset.concepts {
+        let (block, entries) = render_concept_block(c);
+        // Roll over before exceeding the cap (but never write an empty chunk).
+        if chunk_concepts > 0 && cur.len() + block.len() > split_bytes {
+            match flush(idx, &cur) {
+                Ok(p) => files.push(p),
+                Err(e) => {
+                    eprintln!("error: writing chunk {idx}: {e}");
+                    return ExitCode::from(1);
+                }
+            }
+            idx += 1;
+            cur = hdr.clone();
+            chunk_concepts = 0;
+        }
+        cur.push_str(&block);
+        total_entries += entries;
+        chunk_concepts += 1;
+    }
+    if chunk_concepts > 0 {
+        match flush(idx, &cur) {
+            Ok(p) => files.push(p),
+            Err(e) => {
+                eprintln!("error: writing final chunk: {e}");
+                return ExitCode::from(1);
+            }
+        }
+    }
+
+    eprintln!(
+        "umls import ({version}): {sty} semantic-type classes, {} concept classes → {total_entries} lexical entries",
+        subset.concepts.len(),
+    );
+    eprintln!(
+        "wrote {} files → {} (base + {} concept chunks; load in filename order as a chain)",
+        files.len(),
+        dir.display(),
+        files.len() - 1,
+    );
     ExitCode::SUCCESS
 }
 

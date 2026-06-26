@@ -578,6 +578,12 @@
     ]
   },
   {
+    "@id": "urn:eigenius:core:Macro",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "The class of macro-definition resources — the chain-resident form of an ESL `macro` declaration (its AST is stored on `core:macro_decl_json`). Macros expand at compile time and emit no chain resources of their own; this class is the type their definition resources are instances of, so `is_a core:Macro` resolves like any other type reference.",
+    "urn:eigenius:core:short_name": "Macro"
+  },
+  {
     "@id": "urn:eigenius:core:ctors",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "Ordered list of constructor declarations on an InductiveType.",
@@ -601,13 +607,9 @@
   {
     "@id": "urn:eigenius:core:ctor_name",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The local name of a constructor — used on InductiveCtor declarations (the constructor's authored name, e.g. `nil`, `cons`) and on chain-resident inductive-value resources (the constructor the value chose at instantiation, e.g. the kernel-emitted Verdict resource's `Holds` / `Fails` / `Undecidable`). The two domains land at the same property because both store the same kind of payload (an unqualified ctor-name string keyed into the parent inductive's ctor set), and downstream consumers (the witness emitter, EigenQL queries projecting verdict ctors) read the property uniformly across both shapes.",
+    "urn:eigenius:core:description": "The local name of a constructor — the unqualified ctor-name string keyed into the parent inductive's ctor set. Carried by `InductiveCtor` declarations (which `require` it) and reused by higher-layer inductive-value resources (e.g. the institution layer's kernel-emitted `Verdict`, carrying `Holds` / `Fails` / `Undecidable`). No `domain` whitelist: applicability is declared class-side via `requires`, and a property-side whitelist could not span the core/institution layer boundary without an upward reference — the reuse across layers is intentional.",
     "urn:eigenius:core:short_name": "ctor_name",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
-    "urn:eigenius:core:domain": [
-      "urn:eigenius:core:InductiveCtor",
-      "urn:eigenius:institution:Verdict"
-    ]
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string"
   },
   {
     "@id": "urn:eigenius:core:arg_types",

@@ -37,6 +37,7 @@ pub mod lemmatizer;
 pub mod lexicon;
 pub mod lookup;
 pub mod parser;
+pub mod pretty;
 
 pub use category::{
     cat_subsumes, cats_coordinate, common_super, coordinate_np, coordinate_sem, denote_cat,
@@ -47,3 +48,4 @@ pub use lemmatizer::{Identity, Lemmatizer, Pos};
 pub use lexicon::{entry_to_item, gate_entry, resolve_sem, resolve_sem_value};
 pub use lookup::{resolve_lexicon_profile, tokenize, LexicalIndex, DEFAULT_FOREST_CAP};
 pub use parser::{apply, cky_parse, Combinator, Cost, Item};
+pub use pretty::pretty_term;

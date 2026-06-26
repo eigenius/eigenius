@@ -163,29 +163,62 @@ fn lexicon_descriptor(version: &str) -> String {
     )
 }
 
-/// Render the full mirror + derived lexicon document for `subset`. `version` labels the
-/// header notice and the lexicon descriptor (e.g. `"2026AA"`).
-pub fn render_document(subset: &Subset, version: &str) -> (String, Report) {
-    let mut rep = Report::default();
-    let mut body = String::new();
+/// The document header (license notice + namespace declarations). Public so a
+/// partitioned emit can prepend it to every chunk file — each chunk must carry the
+/// UMLS license notice and the namespaces it references.
+pub fn header(version: &str) -> String {
+    esl_header(version)
+}
 
-    body.push_str("// ── Semantic-type classes (the UMLS semantic network, flat at Entity) ──\n");
+/// Render the **base layer**: the semantic-type classes (`umlssty:*`) + the
+/// `lexicon:umls` descriptor. In a partitioned import this is layer 0; every concept
+/// chunk resolves its `subclass_of umlssty:*` and `in_lexicon lexicon:umls` against it.
+/// Returns the document (header + base) and the count of semantic-type classes.
+pub fn render_base(subset: &Subset, version: &str) -> (String, usize) {
+    let mut body = String::from(
+        "// ── Semantic-type classes (the UMLS semantic network, flat at Entity) ──\n",
+    );
     for st in &subset.semantic_types {
         push_semantic_type(&mut body, &st.tui, &st.name);
-        rep.semantic_types += 1;
     }
-
     body.push_str(&lexicon_descriptor(version));
+    (
+        format!("{}\n{body}", esl_header(version)),
+        subset.semantic_types.len(),
+    )
+}
 
-    body.push_str("// ── Concept classes (the mirror) + derived common-noun entries ──\n");
+/// Render one concept's block — its class (the mirror) plus its derived common-noun
+/// entries. No header; callers concatenate blocks into chunk bodies. Returns the
+/// rendered text and the number of lexical entries it contains.
+pub fn render_concept_block(c: &crate::rrf::Concept) -> (String, usize) {
+    let mut buf = String::new();
+    let mut rep = Report::default();
+    let desc = concept_description(&c.preferred_name, c.definition.as_ref(), &c.cui);
+    push_concept(&mut buf, &c.cui, &c.tuis, &desc);
+    push_entries(&mut buf, &c.cui, &c.forms, &mut rep);
+    (buf, rep.entries)
+}
+
+/// Render the full mirror + derived lexicon as a SINGLE document for `subset`.
+/// `version` labels the header notice and the lexicon descriptor (e.g. `"2026AA"`).
+/// For large imports use the partitioned emit (the binary's `--out-dir`) instead, so
+/// each layer stays under the gRPC message-size limit.
+pub fn render_document(subset: &Subset, version: &str) -> (String, Report) {
+    let mut rep = Report::default();
+    let (base, sty) = render_base(subset, version);
+    rep.semantic_types = sty;
+
+    let mut body = base;
+    body.push_str("\n// ── Concept classes (the mirror) + derived common-noun entries ──\n");
     for c in &subset.concepts {
-        let desc = concept_description(&c.preferred_name, c.definition.as_ref(), &c.cui);
-        push_concept(&mut body, &c.cui, &c.tuis, &desc);
-        push_entries(&mut body, &c.cui, &c.forms, &mut rep);
+        let (block, entries) = render_concept_block(c);
+        body.push_str(&block);
+        rep.entries += entries;
         rep.concepts += 1;
     }
 
-    (format!("{}\n{body}", esl_header(version)), rep)
+    (body, rep)
 }
 
 #[cfg(test)]

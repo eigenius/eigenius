@@ -247,6 +247,11 @@ impl Validator {
         // Rule 14: Class-definition reference integrity (eigenius#26).
         errors.extend(self.check_class_definition_references(resource, &res_id));
 
+        // Rule 22: Reference integrity — every `is_a` class and every resource-typed
+        // property value must resolve to a chain resident (closes the open-world
+        // "skip — might be external" hole; enforces the same-or-lower invariant).
+        errors.extend(self.check_reference_integrity(resource, &res_id));
+
         // Rule 15: Comorphism well-formedness (D14 §4.5 / §5).
         // For Comorphism resources, verify that `export_format` and
         // `import_format` references resolve to ExportFormat /

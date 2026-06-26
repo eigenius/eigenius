@@ -176,6 +176,17 @@ impl BackendPersister {
 }
 
 impl LayerPersister for BackendPersister {
+    /// A positive anchored-commit probe means this exact `(content, supporting content)`
+    /// was already committed-and-validated, so the pipeline can skip revalidation
+    /// (D33 §6). A no-backend persister or a miss returns `false` (full validation).
+    fn already_validated(&self, layer: &Layer) -> bool {
+        let Some(backend) = self.backend.as_ref() else {
+            return false;
+        };
+        self.probe_anchored_commit(backend.as_ref(), layer)
+            .is_some()
+    }
+
     fn persist(
         &self,
         branch: &str,
@@ -295,5 +306,108 @@ impl LayerPersister for BackendPersister {
             merge_outcome: Some(outcome),
             cache_hit_different_position: false,
         })
+    }
+}
+
+#[cfg(test)]
+mod already_validated_tests {
+    //! Task 2 — the anchored-commit revalidation skip seam. A `(content, supporting
+    //! content)` already recorded in the anchored-commit cache is proven valid, so
+    //! `already_validated` returns true and the commit pipeline skips re-running
+    //! structural + retroactive validation on an identical re-commit.
+
+    use super::*;
+    use crate::layer::LayerBuilder;
+    use crate::ontology::iri::Iri;
+    use crate::ontology::resource::{Resource, Value};
+    use crate::storage::memory::MemoryPersistentBackend;
+
+    fn iri(s: &str) -> Iri {
+        Iri::parse(s).unwrap()
+    }
+
+    fn res_of(id: &str, class: &str) -> Resource {
+        let mut r = Resource::new(iri(id));
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::ResourceRef(iri(class))]),
+        );
+        r
+    }
+
+    #[test]
+    fn already_validated_true_only_for_cached_content_and_support() {
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+
+        // Root R defines a class the child depends on, so the child has a *supporting
+        // layer* (the anchored-commit key is keyed on it).
+        let mut rb = LayerBuilder::new("root", None);
+        rb.add_resource(res_of("urn:eigenius:demo:Kind", "urn:eigenius:core:Class"))
+            .unwrap();
+        let root = Arc::new(rb.build(storage.clone()));
+        backend.store_layer(&root).unwrap();
+
+        // Child C is_a demo:Kind (defined in R) ⇒ its supporting layer is R.
+        let mut cb = LayerBuilder::new("child", Some(Arc::clone(&root)));
+        cb.add_resource(res_of("urn:eigenius:demo:C", "urn:eigenius:demo:Kind"))
+            .unwrap();
+        let child = Arc::new(cb.build(storage.clone()));
+        backend.store_layer(&child).unwrap();
+        assert_eq!(child.supporting_layer(), Some(root.id()));
+
+        let persister = BackendPersister::new(Some(Arc::clone(&backend)));
+
+        // No cache entry yet ⇒ must revalidate.
+        assert!(
+            !persister.already_validated(&child),
+            "no anchored-commit entry ⇒ not yet proven valid"
+        );
+
+        // Record the anchored-commit entry a successful prior commit would write.
+        let support_hash = backend
+            .load_handle(root.id())
+            .unwrap()
+            .unwrap()
+            .content_hash;
+        backend
+            .put_anchored_commit(child.content_hash(), &support_hash, child.id())
+            .unwrap();
+
+        // Identical (content, support) ⇒ proven valid ⇒ skip revalidation.
+        assert!(
+            persister.already_validated(&child),
+            "cached (content, support) ⇒ already validated"
+        );
+
+        // Different content (uncached) ⇒ must revalidate.
+        let mut cb2 = LayerBuilder::new("child2", Some(Arc::clone(&root)));
+        cb2.add_resource(res_of("urn:eigenius:demo:Other", "urn:eigenius:demo:Kind"))
+            .unwrap();
+        let child2 = Arc::new(cb2.build(storage.clone()));
+        assert!(
+            !persister.already_validated(&child2),
+            "uncached content ⇒ must revalidate"
+        );
+
+        // A root (no supporting layer) is never short-circuited.
+        assert!(
+            !persister.already_validated(&root),
+            "a layer with no supporting layer is never skipped"
+        );
+    }
+
+    #[test]
+    fn already_validated_false_without_backend() {
+        let persister = BackendPersister::new(None);
+        let storage = LayerStorage::in_memory();
+        let mut rb = LayerBuilder::new("root", None);
+        rb.add_resource(res_of("urn:eigenius:demo:R", "urn:eigenius:core:Class"))
+            .unwrap();
+        let root = Arc::new(rb.build(storage));
+        assert!(
+            !persister.already_validated(&root),
+            "no backend ⇒ no cache ⇒ always revalidate"
+        );
     }
 }

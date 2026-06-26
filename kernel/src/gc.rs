@@ -450,12 +450,25 @@ mod tests {
         r
     }
 
+    /// The self-referential `core:Class` definition, so the `is_a core:Class`
+    /// placeholder on `make_resource` fixtures resolves (reference-integrity, Rule 22)
+    /// in these core-ontology-free test roots.
+    fn class_def() -> Resource {
+        let mut r = Resource::new(iri("urn:eigenius:core:Class"));
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String("urn:eigenius:core:Class".into())]),
+        );
+        r
+    }
+
     /// Helper: commit a small root layer.
     fn commit_root(
         backend: &dyn PersistentBackend,
         storage: &LayerStorage,
     ) -> Arc<crate::layer::Layer> {
         let mut b = LayerBuilder::new("root", None);
+        b.add_resource(class_def()).unwrap();
         b.add_resource(make_resource("urn:eigenius:core:r"))
             .unwrap();
         commit_layer_default(b, storage.clone(), backend).unwrap()
