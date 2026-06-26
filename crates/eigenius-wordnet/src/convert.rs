@@ -85,6 +85,21 @@ namespace measurements = \"urn:eigenius:measurements\";
 namespace wn         = \"urn:eigenius:wn\";
 ";
 
+/// The WordNet `lexicon:Lexicon` descriptor (D65 §3) — the stable logical identity
+/// of "the WordNet lexicon", decoupled from the version-specific layer this import
+/// produces. Emitted once per document; every `lexicon:LexicalEntry` binds back via
+/// `lexicon:in_lexicon = lexicon:wordnet`, so a parse scope can select WordNet and
+/// "available lexica" is a plain EigenQL query over `lexicon:Lexicon` instances.
+pub const WORDNET_LEXICON: &str = "\
+resource lexicon:wordnet : lexicon:Lexicon {
+    lexicon:source   = \"WordNet 3.0, Princeton University\";
+    lexicon:version  = \"3.0\";
+    lexicon:language = \"en\";
+    lexicon:domain   = \"general\";
+    lexicon:license  = \"WordNet 3.0 License (Princeton University)\";
+}
+";
+
 /// Coverage of one import run.
 #[derive(Debug, Default, Clone)]
 pub struct Report {
@@ -230,6 +245,7 @@ fn push_entry(
          \x20   lexicon:sense    = \"{sense}\";\n\
          {rank_line}\
          \x20   lexicon:grade    = epistemic:declared;\n\
+         \x20   lexicon:in_lexicon = lexicon:wordnet;\n\
          }}\n\n",
         form = esc(form),
     ));
@@ -628,7 +644,9 @@ pub fn render_document(synsets: &[Synset], ranks: &SenseRanks) -> (String, Repor
         }
     }
 
-    let doc = format!("{ESL_HEADER}\n{decls}{entries}");
+    // The `lexicon:wordnet` descriptor (D65 §3) leads the body — every entry's
+    // `lexicon:in_lexicon` points at it, so it must resolve in the same document.
+    let doc = format!("{ESL_HEADER}\n{WORDNET_LEXICON}\n{decls}{entries}");
     (doc, rep)
 }
 
@@ -862,6 +880,36 @@ mod tests {
             "the disclaimer must be present"
         );
         assert!(doc.contains("DERIVED FROM WordNet 3.0"));
+    }
+
+    #[test]
+    fn emitted_document_declares_the_wordnet_lexicon_and_tags_every_entry() {
+        // D65 §3 slice 3: every import emits a single `lexicon:wordnet` Lexicon
+        // descriptor (stable identity + provenance) and tags each LexicalEntry with
+        // `lexicon:in_lexicon = lexicon:wordnet` (membership = the inverse).
+        let (doc, _) = render_document(
+            &[syn("00001740 03 n 01 entity 0 000 | that which exists")],
+            &SenseRanks::new(),
+        );
+
+        // The descriptor is emitted exactly once, carrying provenance metadata.
+        assert_eq!(
+            doc.matches("resource lexicon:wordnet : lexicon:Lexicon")
+                .count(),
+            1,
+            "the lexicon:wordnet descriptor must be emitted exactly once"
+        );
+        assert!(doc.contains("lexicon:source   = \"WordNet 3.0, Princeton University\";"));
+        assert!(doc.contains("lexicon:domain   = \"general\";"));
+
+        // Every LexicalEntry binds back to it — no entry left untagged.
+        let entry_count = doc.matches(": lexicon:LexicalEntry {").count();
+        let tag_count = doc.matches("lexicon:in_lexicon = lexicon:wordnet;").count();
+        assert!(entry_count > 0, "the import must emit at least one entry");
+        assert_eq!(
+            entry_count, tag_count,
+            "every LexicalEntry ({entry_count}) must carry in_lexicon ({tag_count})"
+        );
     }
 
     #[test]

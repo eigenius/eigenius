@@ -741,6 +741,62 @@ fn form_value_index_is_declared_on_lexicon_form() {
     );
 }
 
+// D65 §3 slice 3: a `lexicon:Lexicon` is a first-class Resource with a stable IRI
+// + provenance metadata; each entry binds back via `lexicon:in_lexicon`. Because a
+// lexicon is just a Resource, "available lexica" needs no new machinery — it is an
+// ordinary EigenQL class-membership query over `lexicon:Lexicon` instances.
+#[test]
+fn lexicon_instances_validate_and_available_lexica_is_a_plain_query() {
+    let src = r#"
+        namespace lexicon = "urn:eigenius:lexicon";
+        resource lexicon:wn : lexicon:Lexicon {
+            lexicon:source   = "WordNet 3.0, Princeton University";
+            lexicon:version  = "3.0";
+            lexicon:language = "en";
+            lexicon:domain   = "general";
+        }
+        resource lexicon:bio : lexicon:Lexicon {
+            lexicon:source = "UMLS";
+            lexicon:domain = "biomedical";
+        }
+    "#;
+    let layer = esl_layer("lexica", src, build_schema());
+
+    // Both instances satisfy the Lexicon class (requires lexicon:source).
+    let errors = Validator::new(Arc::clone(&layer)).validate();
+    assert!(
+        errors.is_empty(),
+        "lexicon instances must validate: {errors:?}"
+    );
+
+    // The descriptor + metadata resolve.
+    let wn = layer
+        .resolve(&Iri::parse("urn:eigenius:lexicon:wn").unwrap())
+        .expect("lexicon:wn resolves");
+    assert!(
+        matches!(wn.get(&Iri::parse("urn:eigenius:lexicon:domain").unwrap()),
+                 Some(Value::String(s)) if s == "general")
+    );
+
+    // "Available lexica" = every `lexicon:Lexicon` instance, via a plain query.
+    let rows = eigenius_kernel::query::execute_with(
+        r#"MATCH "urn:eigenius:lexicon:Lexicon"(?l) {} RETURN [] { l: ?l } LIMIT 10"#,
+        &layer,
+        eigenius_kernel::query::evaluate::FiberRuntime::default(),
+    )
+    .expect("available-lexica query runs");
+    let row_count = rows
+        .iter()
+        .find_map(
+            |r| match r.get(&Iri::parse("urn:eigenius:query:row_count").unwrap()) {
+                Some(Value::Integer(n)) => Some(*n),
+                _ => None,
+            },
+        )
+        .expect("result carries a row_count");
+    assert_eq!(row_count, 2, "both lexica surface as queryable instances");
+}
+
 #[test]
 fn bridge_parses_mwe_sentence_to_prop() {
     let index = LexicalIndex::build(build_lexicon());

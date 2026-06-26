@@ -206,7 +206,7 @@ data lexicon:Cat : Type 1 {
 class lexicon:LexicalEntry {
     description = "One categorial lexical entry: a surface form bound to its category, its EigenTT semantics (by reference) + the type that semantics inhabits, a grounding sense, and an epistemic grade. The unit the D62 bootstrap loop (§8) produces.";
     requires   lexicon:form, lexicon:cat, lexicon:sem, lexicon:sem_type, lexicon:grade;
-    recommends lexicon:sense;
+    recommends lexicon:sense, lexicon:in_lexicon;
 }
 
 property lexicon:form : core:string {
@@ -253,6 +253,46 @@ property lexicon:grade : core:resource {
     class_types reflection:EpistemicStatus;
     allows_only epistemic:observed, epistemic:declared,
                 epistemic:derived, epistemic:verified;
+    domain lexicon:LexicalEntry;
+}
+
+// ── Lexicon identity (D65 §3) ─────────────────────────────────────────
+// A lexicon is a first-class Resource with a STABLE IRI (e.g. lexicon:wordnet),
+// decoupled from the version-specific layer(s) that hold its entries: the logical
+// identity ("the WordNet lexicon") lives here; the physical version lives in the
+// layer, so re-importing doesn't change the IRI. "Available lexica" is an ordinary
+// EigenQL query over Lexicon instances; a parse SCOPE (slice 4) is a set of these
+// IRIs. Each LexicalEntry points back via `lexicon:in_lexicon` (membership is the
+// inverse of this property; enumerating a lexicon is one scan_predicate_object).
+class lexicon:Lexicon {
+    description = "A named lexicon — a coherent body of lexical entries (WordNet, a domain importer's output, …) — as a first-class Resource with a stable IRI, decoupled from the layer(s) holding its entries. Carries provenance metadata; entries bind back via lexicon:in_lexicon.";
+    requires   lexicon:source;
+    recommends lexicon:version, lexicon:language, lexicon:domain, lexicon:license;
+}
+property lexicon:source : core:string {
+    description = "Provenance of the lexicon — the upstream resource it derives from (e.g. \"WordNet 3.0, Princeton University\", a UMLS/NCBI release name).";
+    domain lexicon:Lexicon;
+}
+property lexicon:version : core:string {
+    description = "Version / release identifier of the source the lexicon was built from (e.g. \"3.0\").";
+    domain lexicon:Lexicon;
+}
+property lexicon:language : core:string {
+    description = "Primary natural language of the lexicon's surface forms, as a BCP-47 / ISO-639 tag (e.g. \"en\").";
+    domain lexicon:Lexicon;
+}
+property lexicon:domain : core:string {
+    description = "Subject domain the lexicon covers — \"general\" for a broad lexicon like WordNet, or a field (\"biomedical\", \"chemistry\") for a domain importer. A human label, not a class reference.";
+    domain lexicon:Lexicon;
+}
+property lexicon:license : core:string {
+    description = "License under which the lexicon (and its derived entries) may be used / redistributed.";
+    domain lexicon:Lexicon;
+}
+
+property lexicon:in_lexicon : core:resource {
+    description = "The Lexicon this entry belongs to (membership — the inverse of the lexicon's content). Read at resolve time for per-parse scope filtering (D65 §3.1/§4): a scope keeps only entries whose in_lexicon is in the scope set, and the entry's lexicon order feeds the rank. Absent ⇒ unscoped / always-available (e.g. the grammatical closed class).";
+    class_types lexicon:Lexicon;
     domain lexicon:LexicalEntry;
 }
 
