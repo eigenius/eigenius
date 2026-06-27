@@ -734,6 +734,7 @@ fn on_demand_dispatch_invokes_julia_institution_via_kernel_runtime() {
     let fiber_query = format!(
         r#"
 USING INSTITUTION "{INSTITUTION_IRI}" AS cap
+USING NAMESPACE "urn:eigenius:intervals:query_classes:"
 FIBER cap:qc_compute_bounds {{
     expr: "{ANCHOR_EXPR_IRI}",
     domain: "{ANCHOR_DOMAIN_IRI}"

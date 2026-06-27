@@ -120,9 +120,24 @@ pub(super) fn evaluate_match_part(
     let mut bindings: Vec<Binding> = vec![BTreeMap::new()];
     for pattern in part.patterns() {
         if pattern.negated {
-            bindings = apply_negated_pattern(pattern, layer, derived, &[], bindings)?;
+            bindings = apply_negated_pattern(
+                pattern,
+                layer,
+                derived,
+                &[],
+                bindings,
+                &part.using_namespaces,
+            )?;
         } else {
-            bindings = apply_pattern(pattern, layer, derived, &[], bindings, &part.conditions)?;
+            bindings = apply_pattern(
+                pattern,
+                layer,
+                derived,
+                &[],
+                bindings,
+                &part.conditions,
+                &part.using_namespaces,
+            )?;
         }
     }
 
@@ -175,7 +190,14 @@ pub(super) fn evaluate_match_part_with_fiber(
         match clause {
             Clause::Pattern(pattern) => {
                 bindings = if pattern.negated {
-                    apply_negated_pattern(pattern, layer, derived, &overlay.entries, bindings)?
+                    apply_negated_pattern(
+                        pattern,
+                        layer,
+                        derived,
+                        &overlay.entries,
+                        bindings,
+                        &part.using_namespaces,
+                    )?
                 } else {
                     apply_pattern(
                         pattern,
@@ -184,6 +206,7 @@ pub(super) fn evaluate_match_part_with_fiber(
                         &overlay.entries,
                         bindings,
                         &part.conditions,
+                        &part.using_namespaces,
                     )?
                 };
             }

@@ -68,16 +68,37 @@ use std::sync::{Arc, RwLock};
 /// `is_a` must be an indexable predicate (`data_type = resource_array`) for step 1 —
 /// true on any core-rooted chain; step 2 covers in-flight content regardless.
 pub fn resolve_typed_resources(layer: &Layer, metaclasses: &[&str]) -> Vec<Arc<Resource>> {
+    let candidates = typed_resource_iris(layer, metaclasses);
+    // Resolve each candidate through the head: merged top view + filters to this chain.
+    let mut out: Vec<Arc<Resource>> = Vec::with_capacity(candidates.len());
+    for subject in candidates {
+        if let Some(resource) = layer.resolve(&subject) {
+            out.push(resource);
+        }
+    }
+    out
+}
+
+/// Discover the IRIs of every chain-resident resource whose `is_a` *directly* contains
+/// one of `metaclasses`, **without resolving any bodies** — the cheap first half of
+/// [`resolve_typed_resources`]. Returns subjects as found in each layer's own storage
+/// (triple index for stored layers, `pending` for in-flight ones), deduped, but NOT yet
+/// filtered to this chain (the caller resolves through the head to do that).
+///
+/// Exposed so callers that only need a *subset* of the matches (e.g. short-name
+/// resolution scoped to an imported namespace prefix) can filter the IRIs first and
+/// resolve only the survivors — keeping body materialisation O(survivors) rather than
+/// O(all matches). See the indexability/staging contract on [`resolve_typed_resources`].
+pub fn typed_resource_iris(layer: &Layer, metaclasses: &[&str]) -> BTreeSet<Iri> {
+    let mut candidates: BTreeSet<Iri> = BTreeSet::new();
     let Ok(is_a) = Iri::parse(wk::IS_A) else {
-        return Vec::new();
+        return candidates;
     };
     let metaclass_iris: Vec<Iri> = metaclasses
         .iter()
         .filter_map(|m| Iri::parse(m).ok())
         .collect();
 
-    // Candidate subjects gathered from each layer's own storage (deduped).
-    let mut candidates: BTreeSet<Iri> = BTreeSet::new();
     // Triple indexes already scanned, by `Arc` identity — a shared-storage chain scans
     // once rather than once per layer.
     let mut scanned: Vec<Arc<dyn TripleIndex>> = Vec::new();
@@ -117,14 +138,7 @@ pub fn resolve_typed_resources(layer: &Layer, metaclasses: &[&str]) -> Vec<Arc<R
         current = l.parent().map(|p| p.as_ref());
     }
 
-    // Resolve each candidate through the head: merged top view + filters to this chain.
-    let mut out: Vec<Arc<Resource>> = Vec::with_capacity(candidates.len());
-    for subject in candidates {
-        if let Some(resource) = layer.resolve(&subject) {
-            out.push(resource);
-        }
-    }
-    out
+    candidates
 }
 
 /// A single subject-predicate-object triple, borrowed from a `Resource`'s

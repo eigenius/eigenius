@@ -283,6 +283,7 @@ fn d35_worked_example_returns_topk_by_relevance() {
         r#"
         USING "urn:eigenius:se:CodeArtifact",
               "urn:eigenius:contracts:BoundaryContract"
+        USING NAMESPACE "urn:eigenius:se:"
         MATCH CodeArtifact(?a) {
             "urn:eigenius:se:description": ?desc,
             "urn:eigenius:se:contracted_by": ?bc
@@ -346,6 +347,7 @@ fn d35_worked_example_disjunctive_two_topics_ranks_both() {
         r#"
         USING "urn:eigenius:se:CodeArtifact",
               "urn:eigenius:contracts:BoundaryContract"
+        USING NAMESPACE "urn:eigenius:se:"
         MATCH CodeArtifact(?a) {
             "urn:eigenius:se:description": ?desc,
             "urn:eigenius:se:contracted_by": ?bc
@@ -392,6 +394,7 @@ fn d35_worked_example_text_only_via_hint_pins_text_path() {
         r#"
         USING "urn:eigenius:se:CodeArtifact",
               "urn:eigenius:contracts:BoundaryContract"
+        USING NAMESPACE "urn:eigenius:se:"
         MATCH CodeArtifact(?a) {
             "urn:eigenius:se:description": ?desc,
             "urn:eigenius:se:contracted_by": ?bc

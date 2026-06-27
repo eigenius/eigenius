@@ -93,6 +93,7 @@ export async function searchPublishedNotebooks(
   }
 
   const eigenql = `USING "${NB_NS}:Notebook"
+USING NAMESPACE "${NB_NS}:"
 MATCH Notebook(?n) {
   ${matchProps.join(",\n  ")}
 }

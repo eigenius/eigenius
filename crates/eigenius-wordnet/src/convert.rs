@@ -602,12 +602,41 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks
 /// `ranks` supplies each lemma's sense-frequency rank → `lexicon:sense_rank` (D63
 /// §8.7 Stage B); pass an empty map to omit ranks (all default 0).
 pub fn render_document(synsets: &[Synset], ranks: &SenseRanks) -> (String, Report) {
+    let (decls, entries, rep) = render_core(synsets, ranks);
+    // The `lexicon:wordnet` descriptor (D65 §3) leads the body — every entry's
+    // `lexicon:in_lexicon` points at it, so it must resolve in the same document.
+    let doc = format!(
+        "{ESL_HEADER}\n{WORDNET_LEXICON}\n{decls}{}",
+        entries.concat()
+    );
+    (doc, rep)
+}
+
+/// Render the import as two independently-loadable sections for the partitioned
+/// (`--out-dir`) emit: the **base body** (`ESL_HEADER` + the `lexicon:wordnet`
+/// descriptor + every class/axiom declaration), and the list of **`LexicalEntry`
+/// blocks** (each a self-contained paragraph that references its synset class and the
+/// descriptor *by IRI*, so it resolves against the base layer below it). The base is
+/// ~20 MB (all decls); the entries are the bulk (~150 MB) and are what the caller
+/// batches under the gRPC size cap. Same split `render_document` makes internally —
+/// exposed so a chain emit can put decls in layer 0 and stream entries into chunks
+/// without any cross-chunk dependency (entries depend only on the base).
+pub fn render_sections(synsets: &[Synset], ranks: &SenseRanks) -> (String, Vec<String>, Report) {
+    let (decls, entries, rep) = render_core(synsets, ranks);
+    let base = format!("{ESL_HEADER}\n{WORDNET_LEXICON}\n{decls}");
+    (base, entries, rep)
+}
+
+/// Shared core: render every synset to a declaration section (`decls`) and a vector of
+/// `LexicalEntry` blocks (`entries`), keeping the two separable so both the
+/// single-document and partitioned emits can assemble them.
+fn render_core(synsets: &[Synset], ranks: &SenseRanks) -> (String, Vec<String>, Report) {
     let mut sorted: Vec<&Synset> = synsets.iter().collect();
     sorted.sort_by(|a, b| (a.pos, &a.offset).cmp(&(b.pos, &b.offset)));
 
     let mut rep = Report::default();
     let mut decls = String::new(); // classes + axioms
-    let mut entries = String::new();
+    let mut entries: Vec<String> = Vec::new();
 
     // Noun offset → synset, for resolving instance-of-instance `@i` chains to a
     // class ([`nearest_classes`]). The caller closes the set under hypernymy, so
@@ -644,22 +673,19 @@ pub fn render_document(synsets: &[Synset], ranks: &SenseRanks) -> (String, Repor
         }
     }
 
-    // The `lexicon:wordnet` descriptor (D65 §3) leads the body — every entry's
-    // `lexicon:in_lexicon` points at it, so it must resolve in the same document.
-    let doc = format!("{ESL_HEADER}\n{WORDNET_LEXICON}\n{decls}{entries}");
-    (doc, rep)
+    (decls, entries, rep)
 }
 
-/// Split a rendered synset block (decl + entries) into the two output sections.
-/// A block is `<class|axiom …>\n\n<resource …>\n\n…`; the first paragraph is the
-/// declaration, the rest are entries.
-fn route(block: &str, decls: &mut String, entries: &mut String) {
+/// Split a rendered synset block (decl + entries) into the declaration section and the
+/// list of entry blocks. A block is `<class|axiom …>\n\n<resource …>\n\n…`; the first
+/// paragraph is the declaration, the rest are entries.
+fn route(block: &str, decls: &mut String, entries: &mut Vec<String>) {
     let mut paras = block.split_inclusive("\n\n");
     if let Some(decl) = paras.next() {
         decls.push_str(decl);
     }
     for entry in paras {
-        entries.push_str(entry);
+        entries.push(entry.to_string());
     }
 }
 

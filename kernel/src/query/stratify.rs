@@ -191,6 +191,7 @@ mod tests {
             body: MatchPart {
                 using: vec![],
                 using_institutions: vec![],
+                using_namespaces: vec![],
                 clauses: patterns
                     .into_iter()
                     .map(|(class, negated)| {

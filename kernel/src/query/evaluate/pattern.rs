@@ -30,6 +30,10 @@ use std::collections::{BTreeMap, BTreeSet};
 /// A binding maps variable names to values.
 pub(super) type Binding = BTreeMap<String, Value>;
 
+/// A pattern's candidate rows: `(subject IRI, property map)` pairs collected from
+/// the layer chain (and FIBER overlay) before brace refinement / join.
+type Candidates = Vec<(Option<Iri>, BTreeMap<Iri, Value>)>;
+
 /// Apply a positive pattern: join with existing bindings.
 ///
 /// `overlay` is the slice of transient fiber-response resources (possibly
@@ -43,6 +47,7 @@ pub(super) fn apply_pattern(
     overlay: &[(Iri, Resource)],
     existing: Vec<Binding>,
     conditions: &[Expression],
+    namespaces: &[String],
 ) -> Result<Vec<Binding>, QueryError> {
     // Subject-predicate pushdown: if a WHERE conjunct constrains this pattern's
     // subject to an IRI prefix (`LIKE "p%"`), a single IRI (`= "iri"`), or a set
@@ -56,7 +61,8 @@ pub(super) fn apply_pattern(
         derived,
         overlay,
         subject_constraint.as_ref(),
-    );
+        namespaces,
+    )?;
     let mut result = Vec::new();
 
     for binding in &existing {
@@ -75,10 +81,11 @@ pub(super) fn apply_negated_pattern(
     derived: &BTreeMap<String, Vec<Binding>>,
     overlay: &[(Iri, Resource)],
     existing: Vec<Binding>,
+    namespaces: &[String],
 ) -> Result<Vec<Binding>, QueryError> {
     // No subject pushdown for negated patterns — narrowing the candidate set of a
     // `NOT` pattern would change its semantics. Always the full candidate view.
-    let candidates = collect_candidates(pattern, layer, derived, overlay, None);
+    let candidates = collect_candidates(pattern, layer, derived, overlay, None, namespaces)?;
     let mut result = Vec::new();
 
     for binding in &existing {
@@ -102,13 +109,15 @@ pub(super) fn apply_negated_pattern(
 /// scan that pre-14h code used. The scan path remains as a fallback for
 /// untyped patterns and for setups where `is_a` somehow lost its
 /// indexable data_type.
+#[allow(clippy::too_many_arguments)]
 fn collect_candidates<'a>(
     pattern: &Pattern,
     layer: &'a Layer,
     derived: &'a BTreeMap<String, Vec<Binding>>,
     overlay: &'a [(Iri, Resource)],
     subject_constraint: Option<&SubjectConstraint>,
-) -> Vec<(Option<Iri>, BTreeMap<Iri, Value>)> {
+    namespaces: &[String],
+) -> Result<Candidates, QueryError> {
     // Check if this references a derived relation. Derived rows are stored as
     // positional tuples ("0" = the relation's first/subject column; see
     // `project_onto_head` in mod.rs). A pattern references a derived relation by
@@ -122,7 +131,7 @@ fn collect_candidates<'a>(
     // brace refinement can match it.
     if let Some(Name::ShortName(ref name)) = pattern.class {
         if let Some(derived_bindings) = derived.get(name) {
-            return derived_bindings
+            return Ok(derived_bindings
                 .iter()
                 .filter_map(|b| {
                     // The subject column may be a `Value::String` (a subject
@@ -138,44 +147,46 @@ fn collect_candidates<'a>(
                         .unwrap_or_default();
                     Some((Some(iri), props))
                 })
-                .collect();
+                .collect());
         }
     }
 
-    let class_iri = pattern.class.as_ref().and_then(|n| resolve_name(n, layer));
+    let class_iri = match pattern.class.as_ref() {
+        Some(n) => resolve_name(n, layer, namespaces)?,
+        None => None,
+    };
     let is_a_iri = Iri::parse(wk::IS_A).expect("well-known is_a IRI");
 
     // Indexed path: bound class + indexable is_a predicate.
-    let mut candidates: Vec<(Option<Iri>, BTreeMap<Iri, Value>)> =
-        if let Some(ref class) = class_iri {
-            if is_indexable_predicate(layer, &is_a_iri) {
-                let class_closure = class_with_subclass_closure(class, layer);
-                let mut subjects: BTreeSet<Iri> = BTreeSet::new();
-                for concrete in &class_closure {
-                    for s in scan_chain(layer, &is_a_iri, concrete) {
-                        subjects.insert(s);
-                    }
+    let mut candidates: Candidates = if let Some(ref class) = class_iri {
+        if is_indexable_predicate(layer, &is_a_iri) {
+            let class_closure = class_with_subclass_closure(class, layer);
+            let mut subjects: BTreeSet<Iri> = BTreeSet::new();
+            for concrete in &class_closure {
+                for s in scan_chain(layer, &is_a_iri, concrete) {
+                    subjects.insert(s);
                 }
-                subjects
-                    .into_iter()
-                    .filter_map(|iri| {
-                        layer
-                            .resolve(&iri)
-                            .map(|r| (Some(iri), r.properties().clone()))
-                    })
-                    .collect()
-            } else {
-                collect_candidates_via_scan(layer, Some(class))
             }
-        } else if let Some(constraint) = subject_constraint {
-            // Untyped pattern with a subject-bound WHERE conjunct: collect by IRI
-            // (prefix range over `defined_iris`, or direct resolve) instead of
-            // materialising the whole chain.
-            collect_candidates_via_subject(layer, constraint)
+            subjects
+                .into_iter()
+                .filter_map(|iri| {
+                    layer
+                        .resolve(&iri)
+                        .map(|r| (Some(iri), r.properties().clone()))
+                })
+                .collect()
         } else {
-            // Untyped pattern, no usable constraint: fall back to the full scan.
-            collect_candidates_via_scan(layer, None)
-        };
+            collect_candidates_via_scan(layer, Some(class))
+        }
+    } else if let Some(constraint) = subject_constraint {
+        // Untyped pattern with a subject-bound WHERE conjunct: collect by IRI
+        // (prefix range over `defined_iris`, or direct resolve) instead of
+        // materialising the whole chain.
+        collect_candidates_via_subject(layer, constraint)
+    } else {
+        // Untyped pattern, no usable constraint: fall back to the full scan.
+        collect_candidates_via_scan(layer, None)
+    };
 
     for (iri, resource) in overlay {
         let matches = if let Some(ref class) = class_iri {
@@ -188,16 +199,13 @@ fn collect_candidates<'a>(
         }
     }
 
-    candidates
+    Ok(candidates)
 }
 
 /// Pre-14h scan path retained for the untyped-pattern case and as
 /// fallback when `is_a`'s data_type isn't indexable. Walks the entire
 /// chain via `iter_all_resources`.
-fn collect_candidates_via_scan(
-    layer: &Layer,
-    class_iri: Option<&Iri>,
-) -> Vec<(Option<Iri>, BTreeMap<Iri, Value>)> {
+fn collect_candidates_via_scan(layer: &Layer, class_iri: Option<&Iri>) -> Candidates {
     layer
         .iter_all_resources()
         .filter(|(_, resource)| {
@@ -294,10 +302,7 @@ fn like_pure_prefix(pat: &str) -> Option<String> {
 
 /// Collect candidates for an untyped pattern via a subject constraint, never
 /// materialising non-matching resources.
-fn collect_candidates_via_subject(
-    layer: &Layer,
-    constraint: &SubjectConstraint,
-) -> Vec<(Option<Iri>, BTreeMap<Iri, Value>)> {
+fn collect_candidates_via_subject(layer: &Layer, constraint: &SubjectConstraint) -> Candidates {
     let iris: BTreeSet<Iri> = match constraint {
         SubjectConstraint::Prefix(prefix) => {
             // Walk the chain gathering defined IRIs (metadata — no bodies) that share
@@ -506,21 +511,19 @@ fn is_subclass_instance(resource: &Resource, class_iri: &Iri, layer: &Layer) -> 
         .any(|res_class| layer.is_subclass_of(res_class, class_iri))
 }
 
-/// Resolve a Name to an IRI.
-fn resolve_name(name: &Name, layer: &Layer) -> Option<Iri> {
+/// Resolve a pattern-class `Name` to an IRI. `FullIri` passes through; a
+/// `ShortName` resolves to a `core:Class` within the imported `namespaces`
+/// (`USING NAMESPACE`) via the index-driven, namespace-scoped resolver —
+/// never a whole-chain scan. Ambiguity (more than one match) is an error.
+fn resolve_name(
+    name: &Name,
+    layer: &Layer,
+    namespaces: &[String],
+) -> Result<Option<Iri>, QueryError> {
     match name {
-        Name::FullIri(iri) => Some(iri.clone()),
+        Name::FullIri(iri) => Ok(Some(iri.clone())),
         Name::ShortName(s) => {
-            // Search layer for a resource with this shortname
-            let short_name_iri = Iri::parse(wk::SHORT_NAME).ok()?;
-            for (iri, resource) in layer.iter_all_resources() {
-                if let Some(Value::String(sn)) = resource.get(&short_name_iri) {
-                    if sn == s {
-                        return Some(iri.clone());
-                    }
-                }
-            }
-            None
+            crate::query::resolve::resolve_scoped_name(layer, namespaces, &[wk::CLASS], s)
         }
     }
 }

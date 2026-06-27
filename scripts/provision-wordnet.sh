@@ -79,17 +79,27 @@ else
   echo "wordnet: extracted → $REFDIR/WordNet-3.0/"
 fi
 
-# 2. CONVERT (+ --validate = compile + felicity-gate, an in-memory load proof). The full
-#    import is heavy (~325k entries, a few minutes to validate); a --seed/--limit slice is fast.
-echo "wordnet: converting → $OUT  (importer args: ${IMPORT_ARGS[*]} --validate)"
-cargo run --release -p eigenius-wordnet --bin wordnet-import -- \
-  "${IMPORT_ARGS[@]}" --dict "$DICT" --out "$OUT" --validate
-
-# 3. LOAD into a running service (optional, persistent). Requires `eigenius serve --db <path>`
-#    running at $ENDPOINT; the layer is committed + persisted like any layer.
+# 2. CONVERT + LOAD.
+#    - With --endpoint: emit a PARTITIONED chain (--out-dir) and load each file in
+#      filename order. The full lexicon (~165 MB) exceeds the kernel's 128 MiB gRPC
+#      Load limit as a single document, so it MUST be chained; the kernel validates
+#      each layer at load time (the chain is the validation context).
+#    - Without --endpoint: emit a SINGLE document and self-validate in memory (a
+#      compile + felicity-gate load proof). The full import is ~325k entries.
 if [[ -n "$ENDPOINT" ]]; then
-  echo "wordnet: loading $OUT into eigenius service at $ENDPOINT"
-  cargo run --release -p eigenius-cli --bin eigenius -- --endpoint "$ENDPOINT" load "$OUT"
+  OUTDIR="${OUTDIR:-wordnet-chain}"
+  echo "wordnet: converting → $OUTDIR/  (partitioned; importer args: ${IMPORT_ARGS[*]})"
+  cargo run --release -p eigenius-wordnet --bin wordnet-import -- \
+    "${IMPORT_ARGS[@]}" --dict "$DICT" --out-dir "$OUTDIR"
+  echo "wordnet: loading chain from $OUTDIR/ into eigenius service at $ENDPOINT"
+  for f in "$OUTDIR"/wordnet-*.esl; do
+    echo ">> loading $f"
+    cargo run --release -p eigenius-cli --bin eigenius -- --endpoint "http://$ENDPOINT" load "$f"
+  done
+else
+  echo "wordnet: converting → $OUT  (single document; importer args: ${IMPORT_ARGS[*]} --validate)"
+  cargo run --release -p eigenius-wordnet --bin wordnet-import -- \
+    "${IMPORT_ARGS[@]}" --dict "$DICT" --out "$OUT" --validate
 fi
 
 echo "wordnet: done → $OUT"

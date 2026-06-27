@@ -96,15 +96,30 @@ else
   echo ">> importing ALL semantic types (this is large)"
 fi
 
-echo ">> converting (release=$RELEASE) → $OUT"
-# shellcheck disable=SC2086
-cargo run -q -p eigenius-umls --bin umls-import -- \
-  --meta-dir "$META" --version "$RELEASE" --out "$OUT" --validate "${TUI_ARGS[@]}" $LIMIT
-
-# ── load into a running service (optional) ─────────────────────────────
+# CONVERT + LOAD.
+#   - With --endpoint: emit a PARTITIONED chain (--out-dir) and load each file in
+#     filename order. Full Level-0 (--all) is millions of concept classes / lexical
+#     entries — far over the 128 MiB gRPC Load limit and too large to validate in
+#     memory — so it MUST be chained; the kernel validates each layer at load time.
+#   - Without --endpoint: emit a SINGLE document and self-validate in memory. Suitable
+#     for a bounded subset; for --all prefer --endpoint (the in-memory validate of the
+#     whole import will exhaust memory).
 if [[ -n "$ENDPOINT" ]]; then
-  echo ">> loading into eigenius serve @ $ENDPOINT"
-  cargo run -q -p eigenius-cli -- --endpoint "http://$ENDPOINT" load "$OUT"
+  OUTDIR="${OUTDIR:-umls-chain}"
+  echo ">> converting (release=$RELEASE) → $OUTDIR/ (partitioned)"
+  # shellcheck disable=SC2086
+  cargo run -q -p eigenius-umls --bin umls-import -- \
+    --meta-dir "$META" --version "$RELEASE" --out-dir "$OUTDIR" "${TUI_ARGS[@]}" $LIMIT
+  echo ">> loading chain from $OUTDIR/ into eigenius serve @ $ENDPOINT"
+  for f in "$OUTDIR"/umls-*.esl; do
+    echo ">> loading $f"
+    cargo run -q -p eigenius-cli -- --endpoint "http://$ENDPOINT" load "$f"
+  done
+else
+  echo ">> converting (release=$RELEASE) → $OUT (single document)"
+  # shellcheck disable=SC2086
+  cargo run -q -p eigenius-umls --bin umls-import -- \
+    --meta-dir "$META" --version "$RELEASE" --out "$OUT" --validate "${TUI_ARGS[@]}" $LIMIT
 fi
 
 echo ">> done."

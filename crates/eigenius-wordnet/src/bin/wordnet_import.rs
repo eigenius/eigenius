@@ -29,7 +29,7 @@
 //! fail-closed.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -40,7 +40,7 @@ use eigenius_kernel::ontology::resource::Resource;
 use eigenius_kernel::ontology::Iri;
 use eigenius_kernel::validation::Validator;
 use eigenius_kernel::{bootstrap, esl};
-use eigenius_wordnet::convert::render_document;
+use eigenius_wordnet::convert::{render_document, render_sections, ESL_HEADER};
 use eigenius_wordnet::import::{read_sense_ranks, select_synsets, SeedSpec};
 use eigenius_wordnet::wndb::Pos;
 
@@ -62,10 +62,24 @@ struct Args {
     /// POS to import.
     #[arg(long, value_delimiter = ',', default_value = "noun,verb,adj")]
     pos: Vec<String>,
-    /// Write the ESL here.
+    /// Write the ESL as a SINGLE file here.
     #[arg(long)]
     out: Option<PathBuf>,
-    /// Compile + validate + felicity-gate the output (self-check; fail-closed).
+    /// Write the ESL as a PARTITIONED chain into this directory: `wordnet-000-base.esl`
+    /// (the `lexicon:wordnet` descriptor + every synset class/axiom) then
+    /// `wordnet-NNN.esl` LexicalEntry batches, each under `--split-bytes`. Load them in
+    /// filename order as a layer chain (each entry chunk resolves against the base).
+    /// Use this for the full lexicon (`--all`): the single document is ~165 MB, over the
+    /// kernel's 128 MiB gRPC Load limit, so it cannot be loaded whole.
+    #[arg(long)]
+    out_dir: Option<PathBuf>,
+    /// Max bytes per partition file (default 100 MiB — safely under the kernel's
+    /// 128 MiB gRPC Load limit). Only used with `--out-dir`.
+    #[arg(long, default_value_t = 100 * 1024 * 1024)]
+    split_bytes: usize,
+    /// Compile + validate + felicity-gate the output (self-check; fail-closed). Single
+    /// `--out`/in-memory mode only — in `--out-dir` mode the kernel validates each layer
+    /// at load time (the chain is the validation context).
     #[arg(long)]
     validate: bool,
 }
@@ -112,6 +126,12 @@ fn main() -> ExitCode {
     // is non-fatal (ranks default 0).
     let ranks = read_sense_ranks(&args.dict, &spec.pos).unwrap_or_default();
 
+    // Partitioned emit: a base layer (descriptor + all synset classes/axioms) + entry
+    // batches, each under the size cap. The single-document path stays for small imports.
+    if let Some(dir) = &args.out_dir {
+        return emit_partitioned(&chosen, &ranks, dir, args.split_bytes);
+    }
+
     let (doc, rep) = render_document(&chosen, &ranks);
     eprintln!(
         "wordnet import: {} synsets selected → {} noun classes, {} instances, {} verb axioms, \
@@ -157,6 +177,90 @@ fn main() -> ExitCode {
         }
     }
 
+    ExitCode::SUCCESS
+}
+
+/// Emit the import as a layer chain into `dir`: `wordnet-000-base.esl` (the
+/// `lexicon:wordnet` descriptor + every synset class/axiom) then `wordnet-NNN.esl`
+/// LexicalEntry batches, each ≤ `split_bytes`. Every entry chunk carries the full
+/// header (license + namespaces) and references its synset class + the descriptor by
+/// IRI, so it resolves against the base layer below it — no cross-chunk dependency.
+/// Load in filename order. Mirrors `umls-import`'s partitioned emit.
+fn emit_partitioned(
+    synsets: &[eigenius_wordnet::wndb::Synset],
+    ranks: &eigenius_wordnet::convert::SenseRanks,
+    dir: &Path,
+    split_bytes: usize,
+) -> ExitCode {
+    if let Err(e) = fs::create_dir_all(dir) {
+        eprintln!("error: creating {}: {e}", dir.display());
+        return ExitCode::from(1);
+    }
+
+    let (base, entries, rep) = render_sections(synsets, ranks);
+
+    let mut files: Vec<PathBuf> = Vec::new();
+    let base_path = dir.join("wordnet-000-base.esl");
+    if let Err(e) = fs::write(&base_path, &base) {
+        eprintln!("error: writing {}: {e}", base_path.display());
+        return ExitCode::from(1);
+    }
+    files.push(base_path);
+
+    let mut idx = 1usize;
+    let mut cur = format!("{ESL_HEADER}\n");
+    let mut chunk_entries = 0usize;
+
+    let flush = |idx: usize, cur: &str| -> std::io::Result<PathBuf> {
+        let path = dir.join(format!("wordnet-{idx:03}.esl"));
+        fs::write(&path, cur)?;
+        Ok(path)
+    };
+
+    for block in &entries {
+        // Roll over before exceeding the cap (but never write an empty chunk).
+        if chunk_entries > 0 && cur.len() + block.len() > split_bytes {
+            match flush(idx, &cur) {
+                Ok(p) => files.push(p),
+                Err(e) => {
+                    eprintln!("error: writing chunk {idx}: {e}");
+                    return ExitCode::from(1);
+                }
+            }
+            idx += 1;
+            cur = format!("{ESL_HEADER}\n");
+            chunk_entries = 0;
+        }
+        cur.push_str(block);
+        chunk_entries += 1;
+    }
+    if chunk_entries > 0 {
+        match flush(idx, &cur) {
+            Ok(p) => files.push(p),
+            Err(e) => {
+                eprintln!("error: writing final chunk: {e}");
+                return ExitCode::from(1);
+            }
+        }
+    }
+
+    eprintln!(
+        "wordnet import: {} synsets → {} noun classes, {} instances, {} verb axioms, \
+         {} adj axioms, {} entries ({} ger/pss participle forms)",
+        synsets.len(),
+        rep.noun_classes,
+        rep.instances,
+        rep.verb_axioms,
+        rep.adj_axioms,
+        rep.entries,
+        rep.participle_entries,
+    );
+    eprintln!(
+        "wrote {} files → {} (base + {} entry chunks; load in filename order as a chain)",
+        files.len(),
+        dir.display(),
+        files.len() - 1,
+    );
     ExitCode::SUCCESS
 }
 

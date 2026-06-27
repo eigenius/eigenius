@@ -59,8 +59,8 @@ pub use consolidate::{
 pub use handle::{ChainIter, LayerHandle, LayerTopology};
 pub use index::{
     collect_ancestors, extract_indexable_triples, index_keys, is_indexable_predicate, is_shadowed,
-    resolve_typed_resources, scan_chain, IndexStats, MemoryTripleIndex, OwnedTriple, Triple,
-    TripleIndex,
+    resolve_typed_resources, scan_chain, typed_resource_iris, IndexStats, MemoryTripleIndex,
+    OwnedTriple, Triple, TripleIndex,
 };
 pub use index_discovery::{
     detect_reindex_targets, extract_value_entries, resolve_active_text_indexes,

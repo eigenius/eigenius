@@ -25,6 +25,14 @@ pub fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("well-known IRI constants must be valid")
 }
 
+// --- Namespaces ---
+
+/// The core-ontology IRI prefix. Core is the root layer present on every chain,
+/// so its vocabulary acts as an always-available prelude — e.g. EigenQL short-name
+/// resolution treats this namespace as implicitly imported (see
+/// [`crate::query::resolve`]).
+pub const CORE_NAMESPACE: &str = "urn:eigenius:core:";
+
 // --- Classes ---
 
 pub const CLASS: &str = "urn:eigenius:core:Class";
