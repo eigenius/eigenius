@@ -354,6 +354,52 @@ impl fmt::Debug for Layer {
     }
 }
 
+/// Pass-scoped memo for [`Layer::resolve`], keyed by `(LayerId, Iri)` via a nested
+/// map (outer `LayerId`, inner `Iri`) so hot lookups borrow both keys without
+/// allocating. `None` = inactive (resolve walks the chain directly); `Some(map)` =
+/// active for the lifetime of a [`ResolveMemoScope`]. Per-thread, since a pass runs
+/// on one thread and the cached `Arc<Resource>`s aren't shared across threads.
+type ResolveMemoMap =
+    std::collections::HashMap<LayerId, std::collections::HashMap<Iri, Option<Arc<Resource>>>>;
+thread_local! {
+    static RESOLVE_MEMO: std::cell::RefCell<Option<ResolveMemoMap>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// RAII guard that installs a [`RESOLVE_MEMO`] for its lifetime. Held across a
+/// validation pass (an immutable-chain read burst): every `resolve` of the same
+/// `(layer, iri)` after the first returns the cached result instead of re-walking
+/// the chain. Nesting-safe — the previous memo (if any) is restored on drop, so a
+/// re-entrant pass (e.g. cascade revalidation) gets its own scope.
+///
+/// Soundness: only correct while the chain reachable from the resolving layers does
+/// not change. That holds for a validation/commit pass over already-built,
+/// immutable `Arc<Layer>`s; do NOT hold a scope across a commit that advances the
+/// chain.
+pub struct ResolveMemoScope {
+    prev: Option<ResolveMemoMap>,
+}
+
+impl ResolveMemoScope {
+    /// Install a fresh memo for the current thread, saving any existing one.
+    pub fn new() -> Self {
+        let prev = RESOLVE_MEMO.with(|m| m.borrow_mut().replace(ResolveMemoMap::new()));
+        Self { prev }
+    }
+}
+
+impl Default for ResolveMemoScope {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for ResolveMemoScope {
+    fn drop(&mut self) {
+        RESOLVE_MEMO.with(|m| *m.borrow_mut() = self.prev.take());
+    }
+}
+
 impl Layer {
     /// Construct a Layer from already-stored content. Used by storage
     /// backends when reconstructing a chain — caller passes the metadata
@@ -654,6 +700,42 @@ impl Layer {
     /// Iterative rather than recursive so the bloom-cache `Result`
     /// doesn't have to thread through a recursive call chain.
     pub fn resolve(&self, iri: &Iri) -> Option<Arc<Resource>> {
+        // Pass-scoped memo (installed by `ResolveMemoScope`, e.g. for the duration
+        // of a validation pass). The chain is immutable within a pass, so
+        // `resolve(self, iri)` is a pure function of `(self.id, iri)`; caching it
+        // collapses the millions of redundant resolves a bulk-load validation
+        // issues — the same ~handful of property definitions and lattice classes
+        // are otherwise re-resolved (each a full chain walk) once per resource.
+        // Keyed by `(LayerId, Iri)` via a nested map so lookups need no key
+        // allocation. No-op (direct walk) when no scope is active.
+        if RESOLVE_MEMO.with(|m| m.borrow().is_some()) {
+            if let Some(hit) = RESOLVE_MEMO.with(|m| {
+                m.borrow()
+                    .as_ref()
+                    .unwrap()
+                    .get(&self.id)
+                    .and_then(|inner| inner.get(iri).cloned())
+            }) {
+                return hit;
+            }
+            let result = self.resolve_uncached(iri);
+            RESOLVE_MEMO.with(|m| {
+                m.borrow_mut()
+                    .as_mut()
+                    .unwrap()
+                    .entry(self.id.clone())
+                    .or_default()
+                    .insert(iri.clone(), result.clone());
+            });
+            return result;
+        }
+        self.resolve_uncached(iri)
+    }
+
+    /// The actual head→root chain walk behind [`resolve`](Self::resolve). Split
+    /// out so `resolve` can wrap it in the pass-scoped memo without that cache
+    /// logic cluttering the walk.
+    fn resolve_uncached(&self, iri: &Iri) -> Option<Arc<Resource>> {
         let mut current: Option<&Layer> = Some(self);
         let mut visited: BTreeSet<LayerId> = BTreeSet::new();
         while let Some(layer) = current {

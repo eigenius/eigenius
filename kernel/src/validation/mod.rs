@@ -142,59 +142,6 @@ pub struct Validator {
     pub(crate) layer: Arc<Layer>,
 }
 
-// ── Profiling-only per-rule timing (EIG_RULE_TIMING) ──────────────────
-// Accumulates (call_count, total_nanos) per labelled rule into a thread-local,
-// dumped at the end of `validate()`. Zero cost when the env var is unset (the
-// `enabled()` check short-circuits before any `Instant::now()`). Removed once the
-// D65 load-scaling profiling is done.
-thread_local! {
-    static RULE_TIMES: std::cell::RefCell<std::collections::BTreeMap<&'static str, (u64, u128)>> =
-        std::cell::RefCell::new(std::collections::BTreeMap::new());
-}
-
-fn rule_timing_enabled() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("EIG_RULE_TIMING").is_ok())
-}
-
-/// Time `f` under label `name`, accumulating into the thread-local. When timing is
-/// off this is a direct call with no overhead beyond the bool check.
-#[inline]
-fn vtime<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
-    if !rule_timing_enabled() {
-        return f();
-    }
-    let t0 = std::time::Instant::now();
-    let out = f();
-    let ns = t0.elapsed().as_nanos();
-    RULE_TIMES.with(|m| {
-        let mut m = m.borrow_mut();
-        let e = m.entry(name).or_insert((0, 0));
-        e.0 += 1;
-        e.1 += ns;
-    });
-    out
-}
-
-/// Print + clear the accumulated per-rule timings (called at end of `validate()`).
-fn dump_rule_times() {
-    if !rule_timing_enabled() {
-        return;
-    }
-    RULE_TIMES.with(|m| {
-        let mut entries: Vec<_> = m.borrow().iter().map(|(k, v)| (*k, v.0, v.1)).collect();
-        entries.sort_by(|a, b| b.2.cmp(&a.2));
-        for (name, calls, ns) in entries {
-            eprintln!(
-                "RULE_TIMING rule={name} calls={calls} total_ms={:.1} us_per_call={:.2}",
-                ns as f64 / 1e6,
-                ns as f64 / 1e3 / calls.max(1) as f64
-            );
-        }
-        m.borrow_mut().clear();
-    });
-}
-
 impl Validator {
     pub fn new(layer: Arc<Layer>) -> Self {
         Self { layer }
@@ -202,12 +149,17 @@ impl Validator {
 
     /// Validate all resources in this layer.
     pub fn validate(&self) -> Vec<ValidationError> {
+        // Memoize `Layer::resolve` for the duration of the pass. The chain is
+        // immutable here, so the same property definitions and lattice classes —
+        // re-resolved once per resource by the per-property and is_a rules — are
+        // walked once instead of millions of times (D65 load-scaling fix). Dropped
+        // at end of scope, releasing the cached `Arc`s.
+        let _memo = crate::layer::ResolveMemoScope::new();
         let mut errors = Vec::new();
         for arc_resource in self.layer.iter_resources().map(|(_, r)| r) {
             let resource: &Resource = &arc_resource;
             errors.extend(self.validate_resource(resource));
         }
-        dump_rule_times();
         errors
     }
 
@@ -222,21 +174,14 @@ impl Validator {
 
         // Rule 0: every resource must declare at least one `is_a`
         // class. (See `rules::is_a` for the full story.)
-        vtime("r0_missing_is_a", || {
-            errors.extend(self.check_missing_is_a(resource, &res_id))
-        });
+        errors.extend(self.check_missing_is_a(resource, &res_id));
 
         // Collect effective requires/recommends from all classes + ancestors
-        let (required_props, _recommended_props) =
-            vtime("collect_effective_properties", || {
-                self.collect_effective_properties(&class_refs)
-            });
+        let (required_props, _recommended_props) = self.collect_effective_properties(&class_refs);
 
         // Also collect conditional requirements
         let (conditional_required, _conditional_recommended) =
-            vtime("evaluate_conditional_requires", || {
-                self.evaluate_conditional_requires(&class_refs, resource)
-            });
+            self.evaluate_conditional_requires(&class_refs, resource);
 
         let all_required: BTreeSet<Iri> = required_props
             .into_iter()
@@ -258,90 +203,60 @@ impl Validator {
         // Validate each property on the resource
         for (prop_iri, value) in resource.properties() {
             // Look up the property definition
-            let prop_def = vtime("resolve_prop_def", || self.layer.resolve(prop_iri));
+            let prop_def = self.layer.resolve(prop_iri);
 
             if let Some(prop_def_arc) = prop_def {
                 let prop_def: &Resource = &prop_def_arc;
                 // Rule 10: Domain checking
-                vtime("r10_domain", || {
-                    errors.extend(self.check_domain(prop_def, resource, prop_iri, &res_id))
-                });
+                errors.extend(self.check_domain(prop_def, resource, prop_iri, &res_id));
 
                 // Rule 3: Type checking
-                vtime("r3_type", || {
-                    errors.extend(self.check_type(prop_def, value, prop_iri, &res_id))
-                });
+                errors.extend(self.check_type(prop_def, value, prop_iri, &res_id));
 
                 // Rule 4: Format checking
-                vtime("r4_format", || {
-                    errors.extend(self.check_format(prop_def, value, prop_iri, &res_id))
-                });
+                errors.extend(self.check_format(prop_def, value, prop_iri, &res_id));
 
                 // Rule 5: Pattern checking
-                vtime("r5_pattern", || {
-                    errors.extend(self.check_pattern(prop_def, value, prop_iri, &res_id))
-                });
+                errors.extend(self.check_pattern(prop_def, value, prop_iri, &res_id));
 
                 // Rule 6: Range checking
-                vtime("r6_range", || {
-                    errors.extend(self.check_range(prop_def, value, prop_iri, &res_id))
-                });
+                errors.extend(self.check_range(prop_def, value, prop_iri, &res_id));
 
                 // Rule 7: Length checking
-                vtime("r7_length", || {
-                    errors.extend(self.check_length(prop_def, value, prop_iri, &res_id))
-                });
+                errors.extend(self.check_length(prop_def, value, prop_iri, &res_id));
 
                 // Rule 8: Class type checking
-                vtime("r8_class_types", || {
-                    errors.extend(self.check_class_types(prop_def, value, prop_iri, &res_id))
-                });
+                errors.extend(self.check_class_types(prop_def, value, prop_iri, &res_id));
 
                 // Rule 9: Allowed values checking
-                vtime("r9_allows_only", || {
-                    errors.extend(self.check_allows_only(prop_def, value, prop_iri, &res_id))
-                });
+                errors.extend(self.check_allows_only(prop_def, value, prop_iri, &res_id));
 
                 // Rule 16: Inductive value type-checking (D32 §3.5).
-                vtime("r16_inductive", || {
-                    errors.extend(self.check_inductive_value(prop_def, value, prop_iri, &res_id))
-                });
+                errors.extend(self.check_inductive_value(prop_def, value, prop_iri, &res_id));
 
                 // Rule 17: FormulaTerm App-spine rank check against
                 // the leftmost operator's declared arity (D32 §5.4 /
                 // Phase 19d.0.d). No-op for non-FormulaTerm values.
-                vtime("r17_formula_arity", || {
-                    errors.extend(self.check_formula_term_arity(prop_def, value, prop_iri, &res_id))
-                });
+                errors.extend(self.check_formula_term_arity(prop_def, value, prop_iri, &res_id));
 
                 // Rule 21: eigentt:TypeExpr fields must decode AND type-check
                 // against the chain — generalizes Rule 20's decode-only check
                 // to every type_expr slot; lands the deferred felicity check.
-                vtime("r21_type_expr_well_typed", || {
-                    errors.extend(
-                        self.check_type_expr_well_typed(prop_def, value, prop_iri, &res_id),
-                    )
-                });
+                errors.extend(self.check_type_expr_well_typed(prop_def, value, prop_iri, &res_id));
             }
             // Rule 12 (open world): unknown properties are allowed
         }
 
         // Rule 13: Universe stratification (D6b §7, Phase 10b)
-        vtime("r13_universe", || {
-            errors.extend(self.check_universe_stratification(resource, &res_id))
-        });
+        errors.extend(self.check_universe_stratification(resource, &res_id));
 
         // Rule 14: Class-definition reference integrity (eigenius#26).
-        vtime("r14_class_def_refs", || {
-            errors.extend(self.check_class_definition_references(resource, &res_id))
-        });
+        errors.extend(self.check_class_definition_references(resource, &res_id));
 
         // Rule 22: Reference integrity — every `is_a` class and every resource-typed
         // property value must resolve to a chain resident (closes the open-world
         // "skip — might be external" hole; enforces the same-or-lower invariant).
-        vtime("r22_reference_integrity", || {
-            errors.extend(self.check_reference_integrity(resource, &res_id))
-        });
+        errors.extend(self.check_reference_integrity(resource, &res_id));
 
         // Rule 15: Comorphism well-formedness (D14 §4.5 / §5).
         // For Comorphism resources, verify that `export_format` and
@@ -351,9 +266,7 @@ impl Validator {
         // signature-equality check between transformation Component
         // and the export/import payload types is deferred until the
         // institution dispatch evaluator lands (M5 of the D14 plan).
-        vtime("r15_comorphism", || {
-            errors.extend(self.check_comorphism_well_formedness(resource, &res_id))
-        });
+        errors.extend(self.check_comorphism_well_formedness(resource, &res_id));
 
         // Rule 18: MergeComorphism shape (D37 §5.2). The witness
         // contract is `(A, A, Option<A>) -> A` where A is
@@ -361,9 +274,7 @@ impl Validator {
         // `merge_transformation` is a Lambda chain matching that
         // shape. Catches mismatched witnesses at commit time rather
         // than at apply time.
-        vtime("r18_merge_comorphism", || {
-            errors.extend(self.check_merge_comorphism_shape(resource, &res_id))
-        });
+        errors.extend(self.check_merge_comorphism_shape(resource, &res_id));
 
         // Rule 19: Standalone Lambda well-typedness (D37 §5.1).
         // When a Lambda resource is committed at a top-level IRI
@@ -374,9 +285,7 @@ impl Validator {
         // the Pi. Body-internal errors (unbound var, wrong return
         // type, operator arity mismatch) surface as the
         // `nbe::check` diagnostic.
-        vtime("r19_standalone_lambda", || {
-            errors.extend(self.check_standalone_lambda_well_typedness(resource, &res_id))
-        });
+        errors.extend(self.check_standalone_lambda_well_typedness(resource, &res_id));
 
         errors
     }
