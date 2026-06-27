@@ -71,7 +71,9 @@ pub use redirect::{
     augment_topology_with_redirects, manufacture_tombstone, MemoryRedirectMap, NoRedirects,
     RedirectEntry, RedirectMap,
 };
-pub use storage::LayerStorage;
+pub use storage::{
+    cache_budget, set_cache_budget, LayerStorage, PendingStage, DEFAULT_CACHE_BUDGET_ENTRIES,
+};
 pub use supporting::compute_supporting_layer;
 pub use text_index::{
     decode_doc_set, encode_doc_set, MemoryTextIndex, TermHit, TextDoc, TextDocs, TextIndex,
@@ -597,6 +599,20 @@ impl Layer {
         if !self.defined_iris.contains(iri) {
             return None;
         }
+        // Freshly-built, not-yet-persisted resources live in the storage's `pending`
+        // stage (D23 write path) until `store_layer` drains them — consult it first, so
+        // a layer larger than the bounded cache still resolves every resource it defines
+        // before it's persisted.
+        if let Some(r) = self
+            .storage
+            .pending
+            .read()
+            .expect("pending stage poisoned")
+            .get(&self.id)
+            .and_then(|m| m.get(iri).cloned())
+        {
+            return Some(r);
+        }
         let key = ResourceKey::new(self.id.clone(), iri.clone());
         if let Some(r) = self.storage.cache.get(&key) {
             return Some(r);
@@ -979,13 +995,22 @@ impl LayerBuilder {
         // means everything below LCA is reachable via the first parent.
         let supporting_layer =
             compute_supporting_layer(&self.resources, &defined_iris, self.parents.first());
-        for (iri, resource) in self.resources {
-            let key = ResourceKey::new(id.clone(), iri);
-            // Freshly-built layers are top-of-stack by definition.
-            storage
-                .cache
-                .put(key, Arc::new(resource), CacheTier::Active);
-        }
+        // Stage the built resources in the storage's `pending` buffer (NOT the resource
+        // cache). A built layer is metadata-only and its resources have no durable home
+        // until `store_layer` persists them; staging them where the (bounded) cache
+        // can't evict them is what lets a layer larger than the cache budget commit
+        // without losing resources. `store_layer` drains this entry once the resources
+        // are on the backend; thereafter reads page through the cache. (D23 write path.)
+        let staged: BTreeMap<Iri, Arc<Resource>> = self
+            .resources
+            .into_iter()
+            .map(|(iri, resource)| (iri, Arc::new(resource)))
+            .collect();
+        storage
+            .pending
+            .write()
+            .expect("pending stage poisoned")
+            .insert(id.clone(), staged);
         // Pre-populate the bloom cache. Same bloom value the persistent
         // backend will write on commit (deterministic from the
         // `defined_iris ∪ tombstoned_iris` union), so if the layer is

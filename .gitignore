@@ -75,6 +75,15 @@ Thumbs.db
 # copied into the orchestrator Docker image at build time).
 /notebooks/dist
 .claude/scheduled_tasks.lock
+# Emitted lexicon artifacts — derived from third-party corpora (WordNet / UMLS /
+# NCBI). Provisioned on demand, never vendored. Covers single-file, seeded-slice,
+# and partitioned-chain (`--out-dir`) outputs.
+wordnet-*.esl
+umls-*.esl
+ncbi-gene*.esl
 wordnet-full.esl
 ncbi-gene.esl
 umls.esl
+umls-chain/
+wordnet-chain/
+ncbi-chain/

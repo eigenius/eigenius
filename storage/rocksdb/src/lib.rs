@@ -656,6 +656,20 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             self.db
                 .write_opt(batch, &write_opts)
                 .map_err(|e| StorageError::Internal(format!("store_layer batch: {e}")))?;
+            // Resources are now durable on the backend — drain this layer's `pending`
+            // stage (D23 write path) so its in-memory copy is released; later reads page
+            // through the bounded cache. Drained only on success, and only when the
+            // layer's storage is backed by a persistent backend (so reads can page the
+            // resources back): for backend-less `in_memory()` storage the stage is the
+            // only read home, so it must persist.
+            if layer.storage().persistent_backend.is_some() {
+                layer
+                    .storage()
+                    .pending
+                    .write()
+                    .expect("pending stage poisoned")
+                    .remove(layer.id());
+            }
             Ok(id)
         })
     }
@@ -1768,6 +1782,7 @@ mod tests {
             value_index: store.value_index_arc(),
             redirect_map: Arc::new(NoRedirects),
             persistent_backend: None,
+            pending: eigenius_kernel::layer::PendingStage::default(),
         };
         let builder = LayerBuilder::new("test", None);
         let layer = builder.build(storage);

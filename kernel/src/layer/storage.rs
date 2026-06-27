@@ -27,12 +27,59 @@
 //! update to the constructors below; call sites stay unchanged.
 
 use crate::layer::{
-    BloomCache, BoundedResourceCache, MemoryBloomCache, MemoryResourceBackend, MemoryResourceCache,
-    MemoryTextIndex, MemoryTripleIndex, MemoryValueIndex, MemoryVectorIndex, NoRedirects,
-    RedirectMap, ResourceCache, TextIndex, TripleIndex, ValueIndex, VectorIndex,
+    BloomCache, BoundedResourceCache, LayerId, MemoryBloomCache, MemoryResourceBackend,
+    MemoryResourceCache, MemoryTextIndex, MemoryTripleIndex, MemoryValueIndex, MemoryVectorIndex,
+    NoRedirects, RedirectMap, ResourceCache, TextIndex, TripleIndex, ValueIndex, VectorIndex,
 };
+use crate::ontology::iri::Iri;
+use crate::ontology::resource::Resource;
 use crate::storage::{PersistentBackend, ResourceBackend};
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, OnceLock, RwLock};
+
+/// Staging for a freshly-**built** layer's resources, held until `store_layer` persists
+/// them to the backend (D23 write path). A built `Layer` is metadata-only — its
+/// resources have no durable home until the persist step — so they cannot live solely
+/// in the (bounded) resource cache: a layer larger than the cache budget would have its
+/// own resources evicted before `store_layer` reads them, silently losing data. The
+/// `PendingStage` is that durable-until-persist home: `LayerBuilder::build` inserts the
+/// layer's resources here, `Layer::get_resource` consults it first, and `store_layer`
+/// **drains** the entry once the resources are on the backend. So at any moment it holds
+/// only the in-flight (built-but-unpersisted) layers — typically one — while committed
+/// layers live on the backend and page through the bounded cache. Keyed by `LayerId`.
+pub type PendingStage = Arc<RwLock<HashMap<LayerId, BTreeMap<Iri, Arc<Resource>>>>>;
+
+/// A fresh, empty [`PendingStage`].
+fn new_pending() -> PendingStage {
+    Arc::new(RwLock::new(HashMap::new()))
+}
+
+/// Default bounded resource-cache budget (entry count) for a persistent-backed
+/// [`LayerStorage`] when the process hasn't configured one (D23 §5.3). ~250k resource
+/// entries — at a ~1 KiB mean, a few hundred MB resident — with cold reads paging from
+/// the backend. Bounding is essential: over a durable backend an *unbounded* cache holds
+/// every resource ever touched, so a bulk load (e.g. a domain-lexicon import) grows the
+/// process without limit. Override per-process via [`set_cache_budget`] (the
+/// `serve --cache-budget` flag) or per-call via [`LayerStorage::with_persistent_bounded`].
+pub const DEFAULT_CACHE_BUDGET_ENTRIES: u64 = 250_000;
+
+static CACHE_BUDGET: OnceLock<u64> = OnceLock::new();
+
+/// Set the process-wide resource-cache budget (entry count) that
+/// [`LayerStorage::with_persistent`] sizes its bounded cache to. Call once at startup
+/// (e.g. from `serve`), before any persistent storage is constructed; set-once, so later
+/// calls are ignored. Unset ⇒ [`DEFAULT_CACHE_BUDGET_ENTRIES`].
+pub fn set_cache_budget(total_entries: u64) {
+    let _ = CACHE_BUDGET.set(total_entries);
+}
+
+/// The configured process-wide resource-cache budget, or [`DEFAULT_CACHE_BUDGET_ENTRIES`].
+pub fn cache_budget() -> u64 {
+    CACHE_BUDGET
+        .get()
+        .copied()
+        .unwrap_or(DEFAULT_CACHE_BUDGET_ENTRIES)
+}
 
 /// Bundle of storage handles a `Layer` consults to read its content,
 /// resolve through its parent chain, and produce committed children.
@@ -89,6 +136,9 @@ pub struct LayerStorage {
     /// redirects can't be resolved there, but `redirect_map` is also
     /// empty so the case never arises.
     pub persistent_backend: Option<Arc<dyn PersistentBackend>>,
+    /// Resources of freshly-built, not-yet-persisted layers (see [`PendingStage`]).
+    /// Shared across all layers built on this storage; drained by `store_layer`.
+    pub pending: PendingStage,
 }
 
 impl LayerStorage {
@@ -107,16 +157,28 @@ impl LayerStorage {
             value_index: Arc::new(MemoryValueIndex::new()),
             redirect_map: Arc::new(NoRedirects),
             persistent_backend: None,
+            pending: new_pending(),
         }
     }
 
-    /// Storage bound to a `PersistentBackend` (typically `RocksStore`)
-    /// with an unbounded in-memory resource cache. Suitable for
-    /// short-lived processes, tests, and small workloads where the
-    /// memory pressure of holding every resolved resource is fine.
-    /// For long-running production workloads, use
-    /// `with_persistent_bounded`.
+    /// Storage bound to a `PersistentBackend` (typically `RocksStore`) with a
+    /// **bounded** two-pool resource cache sized to the process-wide [`cache_budget`]
+    /// ([`DEFAULT_CACHE_BUDGET_ENTRIES`] unless `serve --cache-budget` set otherwise).
+    /// This is the production constructor: over a durable backend the cache is a
+    /// bounded *hint* (misses page from the backend), never the source of truth, so
+    /// bounding it caps resident memory regardless of how much is loaded. Use
+    /// [`with_persistent_bounded`](Self::with_persistent_bounded) to pin an explicit
+    /// per-call budget; [`in_memory`](Self::in_memory) for the backend-less path (whose
+    /// cache *is* the source of truth and so stays unbounded).
     pub fn with_persistent(pb: Arc<dyn PersistentBackend>) -> Self {
+        Self::with_persistent_bounded(pb, cache_budget())
+    }
+
+    /// Like [`with_persistent`](Self::with_persistent) but with an explicitly unbounded
+    /// resource cache — every resolved resource is retained until its layer is evicted.
+    /// Only for short-lived processes / small workloads where holding everything is fine;
+    /// production should prefer the bounded `with_persistent`.
+    pub fn with_persistent_unbounded(pb: Arc<dyn PersistentBackend>) -> Self {
         let triple_index = pb.triple_index_arc();
         let text_index = pb.text_index_arc();
         let vector_index = pb.vector_index_arc();
@@ -132,6 +194,7 @@ impl LayerStorage {
             value_index,
             redirect_map,
             persistent_backend: Some(pb),
+            pending: new_pending(),
         }
     }
 
@@ -163,6 +226,7 @@ impl LayerStorage {
             value_index,
             redirect_map,
             persistent_backend: Some(pb),
+            pending: new_pending(),
         }
     }
 }

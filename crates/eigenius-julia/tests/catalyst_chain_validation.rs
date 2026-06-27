@@ -22,10 +22,17 @@
 //! - the validator accepts the whole chain without errors,
 //! - typed cross-references resolve (the QueryClass's `query_class`
 //!   points at ConservationLaw, the signature's `input_types` reach
-//!   ConservationLaw, the institution's `requires_environment` is a
-//!   placeholder env IRI that doesn't need to resolve at validation
-//!   time — the env Resource itself is committed during the
-//!   live-stack demo, not by this test).
+//!   ConservationLaw, the institution's `requires_environment` resolves
+//!   to a committed `RuntimeEnvironment`).
+//!
+//! Closed-world reference integrity (D62 Rule 22) requires every typed
+//! reference to resolve on the chain — including the institution's
+//! `requires_environment`. The live-stack demo (`demo/catalyst/run.sh`)
+//! commits the `RuntimeEnvironment` Resource (step 5) *before* installing
+//! the institution (step 6); this test mirrors that ordering by committing
+//! a stub env at `catalyst:env:v1` first. The stub carries only the
+//! declaration-time `requires` fields — the deploy-time `image_digest`
+//! (a `recommends` field produced by `env build`) is intentionally absent.
 
 use eigenius_kernel::bootstrap::bootstrap_with_storage;
 use eigenius_kernel::lattice::commit_layer_default;
@@ -48,6 +55,8 @@ const CATALYST_INSTITUTION_JSON: &str = include_str!(
 const DIFFEQ_ONTOLOGY_JSON: &str =
     include_str!("../../../julia/institutions/diffeq/declarations/diffeq-ontology.eigon.json");
 
+mod common;
+
 fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("static IRI must parse")
 }
@@ -62,12 +71,19 @@ fn catalyst_ontology_and_institution_validate_cleanly() {
     let storage = LayerStorage::with_persistent(Arc::clone(&backend) as Arc<dyn PersistentBackend>);
     let mut ctx = bootstrap_with_storage(storage).expect("bootstrap");
 
+    // Commit the env before the institution (mirrors the demo's
+    // step-5-before-step-6 ordering) so `requires_environment` resolves.
+    let catalyst_env = common::stub_env_json("urn:eigenius:catalyst:env:v1", "julia");
     for (label, json) in [
-        ("diffeq_ontology", DIFFEQ_ONTOLOGY_JSON),
-        ("catalyst_ontology", CATALYST_ONTOLOGY_JSON),
-        ("catalyst_institution", CATALYST_INSTITUTION_JSON),
+        ("diffeq_ontology", DIFFEQ_ONTOLOGY_JSON.to_string()),
+        ("catalyst_ontology", CATALYST_ONTOLOGY_JSON.to_string()),
+        ("catalyst_env", catalyst_env),
+        (
+            "catalyst_institution",
+            CATALYST_INSTITUTION_JSON.to_string(),
+        ),
     ] {
-        for r in eigon_json::parse_document(json).expect("parse") {
+        for r in eigon_json::parse_document(&json).expect("parse") {
             ctx.add_resource(r).expect("add_resource");
         }
         let working = ctx.take_working(label).expect("take_working");

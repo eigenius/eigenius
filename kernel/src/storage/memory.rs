@@ -282,6 +282,20 @@ impl PersistentBackend for MemoryPersistentBackend {
             .entry(content_hash)
             .or_default()
             .insert(id.clone());
+        drop(state);
+        // Resources are now in the backend — drain the layer's `pending` stage (D23
+        // write path) so its in-memory copy is released; later reads page through the
+        // cache/backend. Only when the layer's storage is backed by a persistent backend
+        // (which can page the resources back): backend-less `in_memory()` storage keeps
+        // the stage as its only read home.
+        if layer.storage().persistent_backend.is_some() {
+            layer
+                .storage()
+                .pending
+                .write()
+                .expect("pending stage poisoned")
+                .remove(layer.id());
+        }
         Ok(id)
     }
 

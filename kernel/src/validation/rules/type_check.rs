@@ -44,16 +44,20 @@ impl Validator {
             wk::FLOAT => matches!(value, Value::Float(_) | Value::Integer(_)),
             wk::BOOLEAN => matches!(value, Value::Boolean(_)),
             wk::RESOURCE => {
-                // Post-canonicalisation (see `LayerBuilder::build` ->
-                // `canonicalise_resource_refs`), every resource-typed
-                // value on a committed layer is either `ResourceRef`
-                // (an IRI) or `Embedded` (an inlined Resource).
-                // `Value::String` for a `data_type: resource`
-                // property is a malformed declaration the
-                // canonicaliser couldn't normalise (typically because
-                // the property def is missing or its data_type isn't
-                // resolvable) — flag it as a type mismatch rather
-                // than silently accepting a non-canonical shape.
+                // A resource reference is canonically an IRI-valued text.
+                // `LayerBuilder::build` -> `canonicalise_resource_refs`
+                // upgrades a wire `Value::String` IRI to `Value::ResourceRef`
+                // in memory, but that distinction is deliberately NOT durable:
+                // the CBOR codec serialises both as `Text` and the content
+                // hash treats them as identical (`value_to_cbor`), so a
+                // committed layer reloaded from the backend carries
+                // `Value::String` for its resource-typed properties. Rule 3
+                // is the wire-level *shape* gate and must therefore be
+                // invariant under persist/reload: it accepts `String` (the
+                // canonical persisted/wire ref form), `ResourceRef` (the
+                // in-memory canonical form), and `Embedded` (an inlined
+                // Resource). Whether the IRI actually *resolves* is reference
+                // integrity's job (Rule 22), not this rule's.
                 //
                 // When `class_types` declares an `InductiveType`, also
                 // accept `Value::Json` — the tagged-dict carrier for
@@ -63,10 +67,16 @@ impl Validator {
                 if self.class_types_inductive_target(prop_def).is_some() {
                     matches!(
                         value,
-                        Value::ResourceRef(_) | Value::Embedded(_) | Value::Json(_)
+                        Value::String(_)
+                            | Value::ResourceRef(_)
+                            | Value::Embedded(_)
+                            | Value::Json(_)
                     )
                 } else {
-                    matches!(value, Value::ResourceRef(_) | Value::Embedded(_))
+                    matches!(
+                        value,
+                        Value::String(_) | Value::ResourceRef(_) | Value::Embedded(_)
+                    )
                 }
             }
             wk::RESOURCE_ARRAY => match value {
@@ -75,12 +85,19 @@ impl Validator {
                         arr.iter().all(|v| {
                             matches!(
                                 v,
-                                Value::ResourceRef(_) | Value::Embedded(_) | Value::Json(_)
+                                Value::String(_)
+                                    | Value::ResourceRef(_)
+                                    | Value::Embedded(_)
+                                    | Value::Json(_)
                             )
                         })
                     } else {
-                        arr.iter()
-                            .all(|v| matches!(v, Value::ResourceRef(_) | Value::Embedded(_)))
+                        arr.iter().all(|v| {
+                            matches!(
+                                v,
+                                Value::String(_) | Value::ResourceRef(_) | Value::Embedded(_)
+                            )
+                        })
                     }
                 }
                 _ => false,

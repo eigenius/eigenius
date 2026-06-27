@@ -249,8 +249,21 @@ impl CommitPipeline {
         // didPersist hooks are not run. On Err we still partition any
         // Sibling emissions phases-before-the-failing-phase queued —
         // that's the audit-anchor rescue path (§3.4 / §6.1).
+        let timing = std::env::var("EIG_PHASE_TIMING").is_ok();
         for phase in self.phases {
-            match phase(&mut state) {
+            let t0 = std::time::Instant::now();
+            let result = phase(&mut state);
+            if timing {
+                let ms = t0.elapsed().as_secs_f64() * 1e3;
+                let pname = phase_name(*phase);
+                let rcount = state
+                    .layer
+                    .as_ref()
+                    .map(|l| l.defined_iris().len())
+                    .unwrap_or(0);
+                eprintln!("PHASE_TIMING phase={pname} rcount={rcount} ms={ms:.1}");
+            }
+            match result {
                 Ok(PhaseControl::Continue) => {}
                 Ok(PhaseControl::SkipEmptyCommit) => {
                     // Phase D still leaves the empty-commit path
@@ -376,6 +389,24 @@ pub struct PipelineRunErr {
 // trap, but defining the slices is sound and lets the rest of the
 // pipeline machinery compile cleanly during Phase A.
 // -------------------------------------------------------------------
+
+/// Name a phase fn for `EIG_PHASE_TIMING` profiling output. Pointer-compared
+/// against the known phase fns; profiling-only, not on any hot path.
+fn phase_name(phase: Phase) -> &'static str {
+    if std::ptr::fn_addr_eq(phase, build as Phase) {
+        "build"
+    } else if std::ptr::fn_addr_eq(phase, structural_validate as Phase) {
+        "structural_validate"
+    } else if std::ptr::fn_addr_eq(phase, retroactive_with_cascade as Phase) {
+        "retroactive_with_cascade"
+    } else if std::ptr::fn_addr_eq(phase, persist as Phase) {
+        "persist"
+    } else if std::ptr::fn_addr_eq(phase, autoonload_dispatch as Phase) {
+        "autoonload_dispatch"
+    } else {
+        "unknown"
+    }
+}
 
 /// `structural_only` phase slice — D41 §5.
 static STRUCTURAL_ONLY_PHASES: &[Phase] = &[build, structural_validate, persist];

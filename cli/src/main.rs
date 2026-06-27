@@ -284,6 +284,18 @@ enum Commands {
         /// See D13 — Durable Kernel State.
         #[arg(long, env = "EIGENIUS_DB", value_name = "PATH")]
         db: Option<String>,
+
+        /// Resource-cache budget: max resource entries held in memory before
+        /// eviction (D23 §5.3). Cold reads page from the backend on demand,
+        /// so this caps resident memory for large graphs / bulk loads without
+        /// bounding what the kernel can serve. Default 250k.
+        #[arg(
+            long,
+            env = "EIGENIUS_CACHE_BUDGET",
+            value_name = "ENTRIES",
+            default_value_t = 250_000
+        )]
+        cache_budget: u64,
     },
 
     /// Database administration
@@ -1222,7 +1234,8 @@ async fn main() {
             port,
             orchestrator,
             db,
-        } => cmd_serve(port, orchestrator.as_deref(), db.as_deref()).await,
+            cache_budget,
+        } => cmd_serve(port, orchestrator.as_deref(), db.as_deref(), cache_budget).await,
         Commands::Compile { file } => cmd_compile(&file, cli.json),
         Commands::Lexicon { command } => match command {
             LexiconCommands::Gate { files } => cmd_lexicon_gate(&files, cli.json),
@@ -2113,7 +2126,13 @@ fn cmd_db(command: DbCommands) {
     }
 }
 
-async fn cmd_serve(port: u16, orchestrator: Option<&str>, db: Option<&str>) {
+async fn cmd_serve(port: u16, orchestrator: Option<&str>, db: Option<&str>, cache_budget: u64) {
+    // Set the process-wide resource-cache budget before any persistent storage is
+    // constructed (set-once; D23 §5.3). Bounds resident memory; cold reads page from
+    // the backend on demand.
+    eigenius_kernel::layer::set_cache_budget(cache_budget);
+    println!("Resource-cache budget: {cache_budget} entries");
+
     let backend: Option<std::sync::Arc<dyn eigenius_kernel::storage::PersistentBackend>> = match db
     {
         Some(path) => {

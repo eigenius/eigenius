@@ -33,6 +33,8 @@ const DIFFEQ_ONTOLOGY_JSON: &str =
 const DIFFEQ_INSTITUTION_JSON: &str =
     include_str!("../../../julia/institutions/diffeq/declarations/diffeq-institution.eigon.json");
 
+mod common;
+
 fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("static IRI must parse")
 }
@@ -47,11 +49,14 @@ fn diffeq_ontology_and_institution_validate_cleanly() {
     let storage = LayerStorage::with_persistent(Arc::clone(&backend) as Arc<dyn PersistentBackend>);
     let mut ctx = bootstrap_with_storage(storage).expect("bootstrap");
 
+    // Env before institution (closed-world `requires_environment`).
+    let diffeq_env = common::stub_env_json("urn:eigenius:diffeq:env:v1", "julia");
     for (label, json) in [
-        ("diffeq_ontology", DIFFEQ_ONTOLOGY_JSON),
-        ("diffeq_institution", DIFFEQ_INSTITUTION_JSON),
+        ("diffeq_ontology", DIFFEQ_ONTOLOGY_JSON.to_string()),
+        ("diffeq_env", diffeq_env),
+        ("diffeq_institution", DIFFEQ_INSTITUTION_JSON.to_string()),
     ] {
-        for r in eigon_json::parse_document(json).expect("parse") {
+        for r in eigon_json::parse_document(&json).expect("parse") {
             ctx.add_resource(r).expect("add_resource");
         }
         let working = ctx.take_working(label).expect("take_working");

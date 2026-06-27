@@ -247,25 +247,45 @@ impl LayerPersister for BackendPersister {
                     cache_hit_different_position: false,
                 });
             }
-            // Different-position cache hit — the canonical layer is
-            // elsewhere. Skip both `store_layer` and `update_branch`;
-            // the branch stays where it is (D33 §6 supporting-
-            // equivalent context). No CAS attempted, so merge_outcome
-            // is None.
+            // Different-position cache hit — the canonical layer has a different parent
+            // chain. Only treat it as "branch unchanged" (D33 §6 supporting-equivalent
+            // context) if that canonical layer is actually **reachable on this branch**
+            // — i.e. it's an ancestor of the current head, so its content is already
+            // visible here. If it lives on a *different* chain (a fork or another
+            // branch), reusing it and leaving the branch unchanged would silently drop
+            // the content from this branch: a content-equivalent layer existing
+            // somewhere is not the same as it being committed here. In that case fall
+            // through to the standard store + advance so the freshly-built layer is
+            // published onto this branch.
+            let reachable_here = layer
+                .parent()
+                .map(|p| crate::layer::collect_ancestors(p.as_ref()).contains(&cached_id))
+                .unwrap_or(false);
+            if reachable_here {
+                tracing::debug!(
+                    { field::OPERATION } = operation::LAYER_COMMIT,
+                    { field::LAYER_ID } = %layer.id(),
+                    cached_layer = %cached_id,
+                    branch = branch,
+                    cache = "hit_different_position_reachable",
+                    "anchored-commit cache hit (different position, reachable) — branch unchanged"
+                );
+                return Ok(PersistedLayerInfo {
+                    layer_id: cached_id,
+                    branch_advanced: false,
+                    merge_outcome: None,
+                    cache_hit_different_position: true,
+                });
+            }
             tracing::debug!(
                 { field::OPERATION } = operation::LAYER_COMMIT,
                 { field::LAYER_ID } = %layer.id(),
                 cached_layer = %cached_id,
                 branch = branch,
-                cache = "hit_different_position",
-                "anchored-commit cache hit (different position) — branch unchanged"
+                cache = "hit_different_position_off_branch",
+                "anchored-commit equivalent is off-branch — committing onto this branch"
             );
-            return Ok(PersistedLayerInfo {
-                layer_id: cached_id,
-                branch_advanced: false,
-                merge_outcome: None,
-                cache_hit_different_position: true,
-            });
+            // fall through to the standard store + advance path below.
         }
 
         // Cache miss — standard persist path.
@@ -408,6 +428,92 @@ mod already_validated_tests {
         assert!(
             !persister.already_validated(&root),
             "no backend ⇒ no cache ⇒ always revalidate"
+        );
+    }
+
+    /// The anchored-commit different-position dedup must NOT suppress a commit when the
+    /// content-equivalent canonical layer lives on a *different chain* (not reachable
+    /// from the branch being committed to). Otherwise the content is silently dropped
+    /// from this branch. Here a layer `A` (content X, supporting R) sits on the `R→M→A`
+    /// chain; committing the same content `B` (supporting R) onto a branch whose head is
+    /// `R` must publish `B` and advance the branch — not dedup to the off-branch `A`.
+    #[test]
+    fn off_branch_equivalent_does_not_suppress_commit() {
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+
+        // R defines Kind.
+        let mut rb = LayerBuilder::new("root", None);
+        rb.add_resource(res_of("urn:eigenius:demo:Kind", "urn:eigenius:core:Class"))
+            .unwrap();
+        let root = Arc::new(rb.build(storage.clone()));
+        backend.store_layer(&root).unwrap();
+
+        // M on R — an intervening layer, so A (on M) and B (on R) get different parents.
+        let mut mb = LayerBuilder::new("mid", Some(Arc::clone(&root)));
+        mb.add_resource(res_of("urn:eigenius:demo:M", "urn:eigenius:demo:Kind"))
+            .unwrap();
+        let mid = Arc::new(mb.build(storage.clone()));
+        backend.store_layer(&mid).unwrap();
+
+        // Same content X (is_a Kind ⇒ supporting layer R) on two different parents:
+        // A on M, B on R ⇒ same content_hash + same supporting content, different position.
+        let x = || res_of("urn:eigenius:demo:X", "urn:eigenius:demo:Kind");
+        let a = {
+            let mut b = LayerBuilder::new("A", Some(Arc::clone(&mid)));
+            b.add_resource(x()).unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        backend.store_layer(&a).unwrap();
+        let b_layer = {
+            let mut b = LayerBuilder::new("B", Some(Arc::clone(&root)));
+            b.add_resource(x()).unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+        backend.store_layer(&b_layer).unwrap();
+
+        assert_eq!(a.content_hash(), b_layer.content_hash(), "same content");
+        assert_ne!(
+            a.id(),
+            b_layer.id(),
+            "different position (different parent)"
+        );
+        assert_eq!(a.supporting_layer(), Some(root.id()));
+        assert_eq!(b_layer.supporting_layer(), Some(root.id()));
+
+        // Seed the anchored-commit cache so probe(B) finds A (the off-branch equivalent).
+        let r_hash = backend
+            .load_handle(root.id())
+            .unwrap()
+            .unwrap()
+            .content_hash;
+        backend
+            .put_anchored_commit(a.content_hash(), &r_hash, a.id())
+            .unwrap();
+
+        // `main` is at R; A (on the R→M→A chain) is NOT reachable from R.
+        backend.put_branch("main", root.id()).unwrap();
+
+        let persister = BackendPersister::new(Some(Arc::clone(&backend)));
+        let info = persister.persist("main", &b_layer).expect("persist B");
+
+        assert!(
+            !info.cache_hit_different_position,
+            "must NOT dedup to the off-branch equivalent"
+        );
+        assert_eq!(
+            info.layer_id,
+            *b_layer.id(),
+            "B itself is committed, not the cached off-branch A"
+        );
+        assert!(
+            info.branch_advanced,
+            "the branch must advance so the content lands here"
+        );
+        assert_eq!(
+            backend.get_branch("main").unwrap().as_ref(),
+            Some(b_layer.id()),
+            "main advanced to B"
         );
     }
 }
