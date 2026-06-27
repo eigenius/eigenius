@@ -210,16 +210,43 @@ pub fn scan_and_register(layer: &Layer, components: &mut ComponentRegistry) -> S
 /// layer's `runtime: in_process` declaration with `runtime: wasm` +
 /// `wasm_binary`).
 pub fn build_wasm_institution_runtime(layer: &Layer) -> (InstitutionRuntime, RegistrationReport) {
+    build_wasm_runtime_from(layer, layer.iter_all_resources().map(|(_, r)| r))
+}
+
+/// Index-driven variant of [`build_wasm_institution_runtime`]: discovers `Institution`
+/// resources through the triple index instead of materialising the whole chain. This
+/// is the per-commit rebuild path (D23) — O(institution declarations), not O(chain),
+/// so a chain carrying a large domain lexicon doesn't pay a full-chain scan on every
+/// commit. Identical output to the full scan on a core-rooted chain (every committed
+/// chain); see the `wasm_runtime_indexed_matches_full_scan` test.
+pub fn build_wasm_institution_runtime_indexed(
+    layer: &Layer,
+) -> (InstitutionRuntime, RegistrationReport) {
+    let institutions =
+        crate::layer::resolve_typed_resources(layer, &["urn:eigenius:institution:Institution"]);
+    build_wasm_runtime_from(layer, institutions.into_iter())
+}
+
+/// Shared body: build the WASM institution runtime from a stream of candidate
+/// resources (either the full merged chain or the index-discovered subset). Filters
+/// to `Institution` resources declaring `runtime: wasm`, loads each, and registers it.
+fn build_wasm_runtime_from(
+    layer: &Layer,
+    resources: impl Iterator<Item = std::sync::Arc<crate::ontology::resource::Resource>>,
+) -> (InstitutionRuntime, RegistrationReport) {
     let mut report = RegistrationReport::default();
     let mut runtime = InstitutionRuntime::new();
 
     let runtime_prop = Iri::parse(wk::RUNTIME).expect("well-known IRI");
     let institution_class_iri = Iri::parse("urn:eigenius:institution:Institution").expect("IRI");
 
-    for (iri, resource) in layer.iter_all_resources() {
+    for resource in resources {
         if !resource.is_instance_of(&institution_class_iri) {
             continue;
         }
+        let Some(iri) = resource.id().cloned() else {
+            continue;
+        };
         // `runtime` is `data_type: resource`; canonicalises to
         // `ResourceRef`. `as_iri` accepts both that and the
         // pre-canonical `String` shape.
@@ -300,16 +327,25 @@ pub fn validate_external_institution_chain(
     let mut errors = Vec::new();
 
     let runtime_prop = Iri::parse(wk::RUNTIME).expect("well-known IRI");
-    let institution_class_iri = Iri::parse("urn:eigenius:institution:Institution").expect("IRI");
+    let institution_class_str = "urn:eigenius:institution:Institution";
+    let institution_class_iri = Iri::parse(institution_class_str).expect("IRI");
     let env_ref_prop = Iri::parse(wk::INSTITUTION_REQUIRES_ENVIRONMENT).expect("well-known IRI");
     let image_digest_prop = Iri::parse(wk::RUNTIME_IMAGE_DIGEST).expect("well-known IRI");
     let method_name_prop = Iri::parse(wk::RUNTIME_METHOD_NAME).expect("well-known IRI");
     let language_prop = Iri::parse(wk::RUNTIME_LANGUAGE).expect("well-known IRI");
 
-    for (iri, resource) in layer.iter_all_resources() {
+    // Index-driven discovery (D23): only the chain's `Institution` declarations,
+    // found via the triple index, rather than materialising the whole chain. The
+    // single transitive caller is the commit-time rebuild hook (always core-rooted),
+    // so `is_a` is indexable. `is_instance_of` below is then a redundant-but-cheap
+    // guard.
+    for resource in crate::layer::resolve_typed_resources(layer, &[institution_class_str]) {
         if !resource.is_instance_of(&institution_class_iri) {
             continue;
         }
+        let Some(iri) = resource.id().cloned() else {
+            continue;
+        };
         // `runtime` is `data_type: resource` post-canonicalisation,
         // so the value is a `ResourceRef`. `Value::as_iri` accepts
         // both ResourceRef and (legacy/parse-time) String, so this

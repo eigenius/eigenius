@@ -333,6 +333,28 @@ impl EigeniusService {
                     }
                 }
             }
+            // Commit the program resource itself when it carries an `@id` and isn't
+            // already chain-resident or among the produced/output resources — so the
+            // committed `ProgramTrace`'s `reflection:program` reference resolves
+            // (reference integrity, Rule 22). Inline `RunProgram` supplies the program
+            // as bytes that never otherwise reach the chain; `RunProgramByIri`'s program
+            // is already committed (`resolve` finds it), so this is a no-op there. Same
+            // provenance fix as the output-resource commit above (`reflection:resource`).
+            if let Some(prog_id) = program.id().cloned() {
+                let already = produced_resources.iter().any(|r| r.id() == Some(&prog_id))
+                    || output.id() == Some(&prog_id);
+                if !already && ctx.head().resolve(&prog_id).is_none() {
+                    if let Err(e) = ctx.add_resource(program.clone()) {
+                        errors.push(ValidationError {
+                            resource_iri: prog_id.as_str().to_string(),
+                            property_iri: String::new(),
+                            rule: "internal".to_string(),
+                            message: format!("failed to add program resource: {e}"),
+                            severity: "error".to_string(),
+                        });
+                    }
+                }
+            }
             // Capture the trace IRI before moving the resource — needed
             // for the failure path's error message (trace_iri_str is
             // semantically the same value, but reading it off the

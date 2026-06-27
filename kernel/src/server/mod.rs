@@ -61,6 +61,7 @@ mod hooks;
 mod inspect;
 mod lifecycle;
 mod load;
+mod parse;
 mod programs;
 mod query;
 mod reflect;
@@ -830,6 +831,13 @@ impl EigeniusKernel for EigeniusService {
         request: Request<RunGcRequest>,
     ) -> Result<Response<RunGcResponse>, Status> {
         self.handle_run_gc(request.into_inner()).await
+    }
+
+    async fn parse_sentence(
+        &self,
+        request: Request<ParseSentenceRequest>,
+    ) -> Result<Response<ParseSentenceResponse>, Status> {
+        self.handle_parse_sentence(request.into_inner()).await
     }
 }
 

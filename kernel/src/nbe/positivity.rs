@@ -156,6 +156,7 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
             has_ind_occurrence(decl, a) || has_ind_occurrence(decl, b)
         }
         Exp::Lam(_, body) => has_ind_occurrence(decl, body),
+        Exp::Ann(e, t) => has_ind_occurrence(decl, e) || has_ind_occurrence(decl, t),
         Exp::App(f, x) => has_ind_occurrence(decl, f) || has_ind_occurrence(decl, x),
         Exp::Pair(a, b) => has_ind_occurrence(decl, a) || has_ind_occurrence(decl, b),
         Exp::Con(_, e) => has_ind_occurrence(decl, e),

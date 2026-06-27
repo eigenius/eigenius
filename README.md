@@ -529,6 +529,33 @@ Deno on the host. Install Docker Engine and Compose v2 per your
 distribution's instructions; then see the [Docker Compose](#docker-compose)
 section below.
 
+**Domain corpora (optional — lexicon / knowledge-graph sources)**
+
+Three third-party corpora can be imported as typed layers: **WordNet** (the
+general lexicon behind the DCG / natural-language engine, D63) and **NCBI Gene**
+and **UMLS** (domain knowledge-graph sources, D65). None is vendored
+(`references/` is gitignored); each is provisioned on demand by a deterministic
+importer (no LLM) that validates through the kernel and, with `--endpoint <addr>`,
+persists the layer like any other. Emitted `.esl` docs are gitignored
+(regenerable) and carry their source's license notice.
+
+```bash
+# WordNet 3.0 — the DCG lexicon
+scripts/provision-wordnet.sh                 # download + convert + validate (full, ~minutes)
+scripts/provision-wordnet.sh --seed gene     # a small seeded slice (fast, for trying it out)
+
+# NCBI Gene — typed ncbi:Gene mirror + lexicon (public-domain; auto-downloaded)
+scripts/provision-ncbi-gene.sh               # Homo sapiens (TAX_ID=9606 by default)
+
+# UMLS — typed umls:Concept mirror + lexicon. LICENSED: you must supply your own
+# Metathesaurus Level-0 zip at references/umls-<release>-metathesaurus-level0.zip.
+scripts/provision-umls.sh                     # WRN-relevant semantic-type subset
+scripts/provision-umls.sh --all               # all semantic types (large)
+```
+
+See [Installation §2.6](docs/guides/platform/02-installation.md) for the full
+list of flags, env overrides, and the UMLS licensing constraints.
+
 **Note for WSL 2 users:** all of the above installs into the WSL
 distribution (Ubuntu or similar), not Windows itself. VS Code's WSL
 remote extension is the smoothest way to edit the repo from Windows

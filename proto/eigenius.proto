@@ -216,6 +216,12 @@ service EigeniusKernel {
   // unreachable from the current root set and older than the kernel's
   // `min_age` protection window.
   rpc RunGc(RunGcRequest) returns (RunGcResponse);
+
+  // Parse a natural-language sentence against the served lexicon (D63/D65).
+  // Builds the lazy LexicalIndex over the read layer's chain and returns the
+  // typed parse forest. An optional per-parse scope (a set of lexicon:Lexicon
+  // IRIs, or a lexicon:LexiconProfile IRI) restricts which lexica are in play.
+  rpc ParseSentence(ParseSentenceRequest) returns (ParseSentenceResponse);
 }
 
 // --- Load ---
@@ -430,6 +436,38 @@ message InspectRequest {
 message InspectResponse {
   bool found = 1;
   bytes resource = 2;           // Resource as CBOR
+}
+
+message ParseSentenceRequest {
+  // The sentence to parse.
+  string sentence = 1;
+  // Optional per-parse scope: a set of lexicon:Lexicon IRIs (D65 §4). Order is
+  // resolution precedence (earlier ranks first). Empty = whole chain, unscoped.
+  repeated string scope = 2;
+  // Optional lexicon:LexiconProfile IRI naming an ordered scope. Mutually
+  // exclusive with `scope`; resolved against the read layer.
+  string profile = 3;
+  // Optional hex-encoded LayerId to pin the read (like Inspect.at_layer).
+  string at_layer = 4;
+  // Optional branch name. Mutually exclusive with at_layer. Empty = "main".
+  string branch = 5;
+}
+
+message Parse {
+  // The result category, pretty-printed (e.g. a cat_s(dcl, fin) sentence).
+  string category = 1;
+  // The assembled EigenTT semantics, pretty-printed.
+  string sem = 2;
+  // Whether the category is a sentence (cat_s) — a complete parse.
+  bool is_sentence = 3;
+  // Rank key (D65 §4.1): lexicon-scope order, then sense frequency.
+  uint32 lexicon_order = 4;
+  uint32 sense_rank = 5;
+}
+
+message ParseSentenceResponse {
+  // The parse forest, in rank order (the engine sorts + caps it).
+  repeated Parse parses = 1;
 }
 
 // --- Query ---

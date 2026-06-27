@@ -1,0 +1,307 @@
+// ════════════════════════════════════════════════════════════════════
+// D62 §8 — the worked lexicon DEMO (a domain over the lexicon schema).
+// ════════════════════════════════════════════════════════════════════
+//
+// The schema (`lexicon:Cat`, `lexicon:LexicalEntry`, `lexicon:Sentence`) lives
+// in `ontologies/lexicon/lexicon-ontology.esl`; this layer is built ON it and
+// carries only DEMO domain vocabulary + the four worked categorial archetypes,
+// each mapped onto an existing kernel constructor:
+//
+//   N    common noun  → a TYPE        (CN-as-type)        : EigonClass
+//   NP   named entity  → a WITNESS     (by reference)      : ResourceRef → Var
+//   (S\NP)/NP  t. verb → a PREDICATE   (typed constant)    : EigonAxiom
+//   N/N  adjective     → a PREDICATE   (Σ-refinement on composition) : EigonAxiom
+//
+// VALIDATION CONTRACT (witnessed by kernel/tests/lexicon_validates.rs): the
+// schema layer + this demo compile against core→reflection(+eigentt) and the
+// kernel Validator reports 0 errors; every entry is felicity-gated.
+
+namespace core         = "urn:eigenius:core";
+namespace reflection   = "urn:eigenius:reflection";
+namespace epistemic    = "urn:eigenius:reflection:epistemic";
+namespace eigentt      = "urn:eigenius:eigentt";
+namespace lexicon      = "urn:eigenius:lexicon";
+namespace measurements = "urn:eigenius:measurements";
+
+// ── Demo domain types the worked entries ground against ───────────────
+// A real lexicon's `sem` targets live in the domain ontologies it is built
+// over; these stand in so the entries type-check end to end. The entity top
+// `lexicon:Entity` is now declared in the SCHEMA (D63 §8.3, decision ii — the
+// foundational subject top, grounded in WordNet's `entity.n.01`); these demo
+// types are its subclasses, and Gene/CellLine arguments flow into a general
+// predicate's slots by CN-as-types subsumption (Luo 2012; D62 §8.6).
+class lexicon:Gene : lexicon:Entity {
+    description = "A gene (demo domain type). A common noun denotes a TYPE — CN-as-type, the kernel's native model: a class IS a type (EigonClass : Set).";
+}
+class lexicon:CellLine : lexicon:Entity {
+    description = "A cell line (demo domain type).";
+}
+
+// ── Predicates: verbs and adjectives as typed opaque constants ────────
+// EigonAxiom — a predicate is a typed constant in the chain, NOT an ad-hoc
+// invented proposition symbol. Its proofs are grounding witnesses, not
+// enumerated constructors, which is why `axiom` (not `data`) is faithful.
+axiom lexicon:depends_on : lexicon:Gene -> lexicon:CellLine -> Prop
+// Adjective predicate typed at the Entity top (D63 §8.3 decision ii + §8.5 Slice 3a),
+// matching the WordNet importer's adjectives; specific subjects reach it by
+// coercive subtyping. ("primary" applies to any entity; the CellLine restriction
+// was a demo artifact, dropped to align with the import + enable the general copula.)
+axiom lexicon:is_primary : lexicon:Entity -> Prop
+
+// A GENERAL relation over entities — the faithful typing for a verb that relates
+// entities of ANY kind (the "Gene and CellLine are too limiting for depends on"
+// point): it types at the Entity supertype, and specific-typed arguments flow in
+// by subsumption. This is the reason for modeling subclass_of (Luo 2012; D62 §8.6).
+axiom lexicon:affects : lexicon:Entity -> lexicon:Entity -> Prop
+
+// A COLLECTIVE predicate — typed over the GROUP, not an individual: it relates a
+// `List` of entities as a whole (D63 §8.4 Phase 6). `core:List` is the kernel's
+// canonical list inductive (by-IRI-equal to the built-in the group sem is built
+// with), so a coordinated NP group "(HeLa and BRCA1)" : List Entity is its
+// argument directly — no mereological sum entity invented.
+axiom lexicon:forms_complex : core:List(lexicon:Entity) -> Prop
+
+// ── Committed resources the proper-noun entries reference by IRI ──────
+resource lexicon:brca1 : lexicon:Gene {
+    core:description = "The BRCA1 gene — a committed chain resource. The named-entity entry's `sem` is a ResourceRef to this; that same IRI is its grounding `sense`.";
+}
+resource lexicon:hela : lexicon:CellLine {
+    core:description = "The HeLa cell line — a committed chain resource; the subject NP in the parser's worked sentence (kernel/tests/lexicon_validates.rs).";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// The worked entries — one per archetype (+ a general verb).
+// ════════════════════════════════════════════════════════════════════
+//
+// `cat` vs `sem_type`: `cat` is the categorial type — a type-indexed `lexicon:Cat`
+// term (the entity atom `cat_np(T)` carries its class) — and `sem_type` is the
+// EigenTT type the `sem` inhabits. They are **machine-unified**: the homomorphism
+// ⟦·⟧ : Cat → Type (the recursor `denote_cat`, D62 §8.6) computes ⟦cat⟧, and
+// `kernel/tests/lexicon_validates.rs::cat_denotation_matches_sem_type` asserts
+// ⟦cat⟧ = sem_type for every entry. Convention: `(S\NP)/NP` is **object-first** —
+// ⟦fwd(bwd(cat_s, SUBJ), OBJ)⟧ = ⟦OBJ⟧ → ⟦SUBJ⟧ → Prop.
+
+// (1) common noun → a TYPE. CN-as-type: ⟦cat_n⟧ = Set, and the sem IS the class.
+resource lexicon:e_cell_line : lexicon:LexicalEntry {
+    lexicon:form     = "cell line";
+    // A common noun is number-UNDERSPECIFIED in the lexicon (`num_any`); the lookup index
+    // sets the SURFACE number per token (D63 §5.1, `with_noun_num`) — "cell line" → sg,
+    // "cell lines" → pl — so determiner/noun agreement bites at composition, not here.
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:CellLine, lexicon:num_any) );
+    lexicon:sem      = lexicon:CellLine;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "wn:cell_line.n.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (1b) a second common noun — the modifier of an N-N kind compound (D63 §8.13 6-mod):
+// "gene cell line" → Σx:CellLine. compound_kind(x, Gene). Its sem is the kind `Gene`.
+resource lexicon:e_gene : lexicon:LexicalEntry {
+    lexicon:form     = "gene";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Gene, lexicon:num_any) );
+    lexicon:sem      = lexicon:Gene;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "wn:gene.n.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (2) named entity → a WITNESS, referenced by IRI.
+resource lexicon:e_brca1 : lexicon:LexicalEntry {
+    lexicon:form     = "BRCA1";
+    // Proper nouns are singular (D63 §8.10 6-agr) → `HeLa affects` ✓ / `*HeLa affect` ✗.
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:sg) );
+    lexicon:sem      = lexicon:brca1;
+    lexicon:sem_type = type_expr( lexicon:Gene );
+    lexicon:sense    = "urn:eigenius:lexicon:brca1";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (2b) a second named entity (a CellLine) — the subject NP for the parser's
+//      worked sentence "HeLa depends on BRCA1".
+resource lexicon:e_hela : lexicon:LexicalEntry {
+    lexicon:form     = "HeLa";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:CellLine, lexicon:sg) );
+    lexicon:sem      = lexicon:hela;
+    lexicon:sem_type = type_expr( lexicon:CellLine );
+    lexicon:sense    = "urn:eigenius:lexicon:hela";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (3) transitive verb → a PREDICATE (EigonAxiom), category `(S\NP)/NP`,
+//     object-first: ⟦cat⟧ = Gene → CellLine → Prop = typeof(depends_on).
+resource lexicon:e_depends_on : lexicon:LexicalEntry {
+    lexicon:form     = "depends on";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:CellLine, lexicon:sg)), lexicon:cat_np(lexicon:Gene, lexicon:num_any)) );
+    lexicon:sem      = lexicon:depends_on;
+    lexicon:sem_type = type_expr( lexicon:Gene -> lexicon:CellLine -> Prop );
+    lexicon:sense    = "wn:depend.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (4) adjective → a PREDICATE (EigonAxiom), **predicative** form, the adjectival
+//     form `adj` (distinct from base verbs) so it requires the copula:
+//     `S[dcl,adj]\NP_Entity`, ⟦cat⟧ = Entity → Prop = typeof(is_primary). "HeLa is
+//     primary" composes `is` + this; a bare `*HeLa primary` is not a finite root,
+//     and `*does HeLa primary` is rejected (do-support selects base verbs, not
+//     adjectives) — D63 §8.5 Slice 3a/3b. The attributive `adj`+noun use (Σ-
+//     refinement) is the engine rule in Slice 3b.
+resource lexicon:e_primary : lexicon:LexicalEntry {
+    lexicon:form     = "primary";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:is_primary;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:primary.a.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (4b) a GRADABLE adjective — degree semantics (D63 §8.12 Slice 6-cmp). Unlike the
+//      NON-gradable Boolean `primary` above, a gradable adjective is a MEASURE
+//      `deg_large : Entity → core:float`; the positive "X is large" is the measure vs. a
+//      contextual standard `std_large` (`gt(deg_large(x), std_large)`), and the
+//      comparative "X is larger than Y" compares degrees (`gt(deg_large(x), deg_large(y))`)
+//      via the opaque float ordering `measurements:gt` (reusing D52). Positive + comparative
+//      are unified under the one measure (combo 1).
+axiom lexicon:deg_large : lexicon:Entity -> core:float
+axiom lexicon:std_large : core:float
+resource lexicon:large_pos_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) => measurements:gt(lexicon:deg_large(x), lexicon:std_large)
+          : lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:larger_cmp_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            measurements:gt(lexicon:deg_large(x), lexicon:deg_large(y))
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+// positive "large": an adjectival predicate (like `primary`), but measure-derived.
+resource lexicon:e_large : lexicon:LexicalEntry {
+    lexicon:form     = "large";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:large_pos_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:large.a.01";
+    lexicon:grade    = epistemic:declared;
+}
+// comparative "larger": (S[adj]\NP)/cat_pp_than, λy.λx. gt(deg_large(x), deg_large(y)).
+resource lexicon:e_larger : lexicon:LexicalEntry {
+    lexicon:form     = "larger";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than) );
+    lexicon:sem      = lexicon:larger_cmp_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:large.a.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (5) a GENERAL transitive verb typed at the supertype. ⟦cat⟧ = Entity → Entity
+//     → Prop = typeof(affects). Composes with Gene/CellLine arguments by
+//     subsumption (parser_composes_general_verb_via_subsumption: "HeLa affects BRCA1").
+resource lexicon:e_affects : lexicon:LexicalEntry {
+    lexicon:form     = "affects";
+    // Finite 3sg → SINGULAR subject slot (D63 §8.10 6-agr). Object slot stays `num_any`
+    // (agreement is subject-only). `HeLa affects BRCA1` ✓ / `*genes affects …` ✗.
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:affects;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:affect.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (5b) the PLURAL-finite form of the general verb — same surface as the base ("affect")
+//      but `fin` with a PLURAL subject slot (D63 §8.10 6-agr). Heads a clause with a
+//      plural subject: `genes affect …` / `HeLa and BRCA1 affect …` ✓; with a singular
+//      subject `*HeLa affect …` fails the subject-number meet. Distinct from the `bse`
+//      entry below (which is non-finite, the do-support/modal complement).
+resource lexicon:e_affect_pl : lexicon:LexicalEntry {
+    lexicon:form     = "affect";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:affects;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:affect.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (5c) a CLAUSE-TAKING (report) verb — category `(S\NP)/CP`, an opaque attitude axiom
+//      `Prop → Entity → Prop` (intensional — the complement is NOT asserted, so
+//      shows(P, x) ⊬ P). "HeLa shows that BRCA1 affects HeLa" →
+//      shows(affects(brca1, hela), hela) : Prop (D63 §8.11 Slice 6-cl). sg "shows" /
+//      pl "show" finite forms (6-agr).
+axiom lexicon:shows : Prop -> lexicon:Entity -> Prop
+resource lexicon:e_shows : lexicon:LexicalEntry {
+    lexicon:form     = "shows";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_cp) );
+    lexicon:sem      = lexicon:shows;
+    lexicon:sem_type = type_expr( Prop -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:show.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:e_show_pl : lexicon:LexicalEntry {
+    lexicon:form     = "show";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_cp) );
+    lexicon:sem      = lexicon:shows;
+    lexicon:sem_type = type_expr( Prop -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:show.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (6) a COLLECTIVE verb — category `S\Group(Entity)`: it takes a coordinated NP
+//     GROUP as its subject (not an individual). ⟦bwd(S, cat_group(Entity,…))⟧ =
+//     List Entity → Prop = typeof(forms_complex). The `conn_and` slot restricts it
+//     to `and`-groups ("HeLa and BRCA1 form a complex"); an `or`-group gets no
+//     collective parse (D63 §8.4 Phase 6).
+resource lexicon:e_form_complex : lexicon:LexicalEntry {
+    lexicon:form     = "form a complex";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_group(lexicon:Entity, lexicon:conn_and, lexicon:num_any)) );
+    lexicon:sem      = lexicon:forms_complex;
+    lexicon:sem_type = type_expr( core:List(lexicon:Entity) -> Prop );
+    lexicon:sense    = "wn:form.v.04";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (7) the BASE form of the general verb (`Fin = bse`) — the form an auxiliary
+//     selects ("does HeLa affect …", D63 §8.5 Slice 5a). Same predicate (`affects`
+//     axiom; finiteness is syntactic, erased by ⟦·⟧), `Fin = bse` instead of `fin`.
+//     The `Fin`-meet then blocks `*does HeLa affects` and `*HeLa affect BRCA1`
+//     (a bare base clause is not a finite root).
+resource lexicon:e_affect_bse : lexicon:LexicalEntry {
+    lexicon:form     = "affect";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:affects;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:affect.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (7b/7c) the PARTICIPLE forms of the general verb — `Fin = ger` (present participle,
+// "affecting") and `Fin = pss` (past participle, "affected"), the forms the progressive
+// and perfect auxiliaries select (D63 §8.9 Slice 6-aux). Same predicate (`affects`;
+// finiteness is syntactic, erased by ⟦·⟧). These mirror what the WordNet importer now
+// generates (`eigenius-wordnet::inflect`) — here hand-added for the demo so the worked
+// auxiliary sentences ("HeLa is affecting BRCA1", "HeLa has affected BRCA1") parse.
+resource lexicon:e_affect_ger : lexicon:LexicalEntry {
+    lexicon:form     = "affecting";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:affects;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:affect.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:e_affect_pss : lexicon:LexicalEntry {
+    lexicon:form     = "affected";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:affects;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:affect.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// ── A stored composed sentence (Expressible; the felicity FILTER itself is
+//    demonstrated through the program→check vehicle in lexicon_validates.rs). ──
+// "a gene depends on a cell line" — depends_on applied to NPs of the
+// categorially-required types. typeof = Prop ⇒ felicitous.
+resource lexicon:s_gene_depends : lexicon:Sentence {
+    lexicon:gloss = "a gene depends on a cell line";
+    lexicon:prop  = type_expr( forall (g : lexicon:Gene, c : lexicon:CellLine) => lexicon:depends_on(g, c) );
+}

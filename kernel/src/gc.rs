@@ -447,16 +447,31 @@ mod tests {
             iri("urn:eigenius:core:description"),
             Value::String("v".into()),
         );
+        // Real `core:Class` requires `short_name` — supply it so fixtures validate
+        // against real core (the chain is rooted on the core base, below).
+        r.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String("test_fixture".into()),
+        );
         r
     }
 
-    /// Helper: commit a small root layer.
+    /// Helper: commit a small root layer. The root is **self-contained** — it carries
+    /// the real core ontology (parent=None) plus the test resource, so fixtures'
+    /// property KEYS resolve to declared `core:Property` resources within the layer
+    /// (reference integrity, Rule 22 §(c)). Carrying core *in* the root rather than as a
+    /// separate base keeps the GC tests' layer **counts** unchanged (the root is one
+    /// layer, just larger), so their reachability/sweep assertions hold as written.
     fn commit_root(
         backend: &dyn PersistentBackend,
         storage: &LayerStorage,
     ) -> Arc<crate::layer::Layer> {
+        let core_json = include_str!("../../ontologies/core/core-ontology.json");
         let mut b = LayerBuilder::new("root", None);
-        b.add_resource(make_resource("urn:eigenius:core:r"))
+        for r in crate::ontology::eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        b.add_resource(make_resource("urn:eigenius:test:r"))
             .unwrap();
         commit_layer_default(b, storage.clone(), backend).unwrap()
     }

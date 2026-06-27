@@ -40,6 +40,8 @@ const CATALYST_INSTITUTION_JSON: &str = include_str!(
 const COMORPHISM_JSON: &str =
     include_str!("../../../julia/comorphisms/catalyst-to-diffeq.eigon.json");
 
+mod common;
+
 fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("static IRI must parse")
 }
@@ -56,14 +58,23 @@ fn catalyst_to_diffeq_comorphism_validates_cleanly() {
     // institution declarations reference `diffeq:OdeProblem` (in
     // `payload_type` and `result_class`); the validator resolves
     // those references at commit time.
+    // Each institution's env committed before it (closed-world
+    // `requires_environment`).
+    let diffeq_env = common::stub_env_json("urn:eigenius:diffeq:env:v1", "julia");
+    let catalyst_env = common::stub_env_json("urn:eigenius:catalyst:env:v1", "julia");
     for (label, json) in [
-        ("diffeq_ontology", DIFFEQ_ONTOLOGY_JSON),
-        ("diffeq_institution", DIFFEQ_INSTITUTION_JSON),
-        ("catalyst_ontology", CATALYST_ONTOLOGY_JSON),
-        ("catalyst_institution", CATALYST_INSTITUTION_JSON),
-        ("comorphism", COMORPHISM_JSON),
+        ("diffeq_ontology", DIFFEQ_ONTOLOGY_JSON.to_string()),
+        ("diffeq_env", diffeq_env),
+        ("diffeq_institution", DIFFEQ_INSTITUTION_JSON.to_string()),
+        ("catalyst_ontology", CATALYST_ONTOLOGY_JSON.to_string()),
+        ("catalyst_env", catalyst_env),
+        (
+            "catalyst_institution",
+            CATALYST_INSTITUTION_JSON.to_string(),
+        ),
+        ("comorphism", COMORPHISM_JSON.to_string()),
     ] {
-        for r in eigon_json::parse_document(json).expect("parse") {
+        for r in eigon_json::parse_document(&json).expect("parse") {
             ctx.add_resource(r).expect("add_resource");
         }
         let working = ctx.take_working(label).expect("take_working");

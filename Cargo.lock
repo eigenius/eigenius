@@ -1344,6 +1344,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-ncbi-gene"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "eigenius-kernel",
+]
+
+[[package]]
 name = "eigenius-obograph"
 version = "0.1.0"
 dependencies = [
@@ -1490,6 +1498,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-umls"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "eigenius-kernel",
+]
+
+[[package]]
 name = "eigenius-wasm-runtime"
 version = "0.1.0"
 dependencies = [
@@ -1502,6 +1518,14 @@ version = "0.1.0"
 dependencies = [
  "ciborium",
  "ciborium-io",
+]
+
+[[package]]
+name = "eigenius-wordnet"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "eigenius-kernel",
 ]
 
 [[package]]

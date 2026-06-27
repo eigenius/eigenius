@@ -227,9 +227,14 @@ export interface LayerTopologyOptions {
   maxDepth?: number;
 
   /**
-   * When true, emits a node per Resource (any class). When false
-   * (default), only Class / Property / Institution become nodes;
-   * ordinary instances are aggregated into per-layer counts.
+   * When false (default) the walk is the lightweight stack view: only per-layer
+   * summary nodes carrying per-kind counts (classes / properties / institutions /
+   * instances), computed from the triple index — no resource bodies are loaded and
+   * no per-resource nodes are returned, so a chain carrying a large domain lexicon
+   * stays cheap. When true, additionally emits a node per resource (Class /
+   * Property / Institution / instance) plus their structural edges. To inspect a
+   * single layer's contents, set `rootLayer = <layer id>`, `maxDepth = 1`, and
+   * `includeResources = true`.
    */
   includeResources?: boolean;
 }

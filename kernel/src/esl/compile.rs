@@ -133,10 +133,6 @@ pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> CtorSeed {
     use crate::ontology::iri::Iri;
     use crate::ontology::well_known as wk;
     let mut out = CtorSeed::default();
-    let inductive_class = match Iri::parse(wk::INDUCTIVE_TYPE) {
-        Ok(i) => i,
-        Err(_) => return out,
-    };
     let ctor_name_iri = match Iri::parse(wk::CTOR_NAME) {
         Ok(i) => i,
         Err(_) => return out,
@@ -145,10 +141,17 @@ pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> CtorSeed {
         Ok(i) => i,
         Err(_) => return out,
     };
-    for (parent_iri, resource) in layer.iter_all_resources() {
-        if !resource.is_instance_of(&inductive_class) {
+    // D23 scaling: discover `InductiveType` resources via `resolve_typed_resources`
+    // (triple index for stored layers + `pending` for freshly-built ones) instead of
+    // materialising the whole chain. O(inductive types), not O(chain) — the difference
+    // between a fast ESL compile and a multi-second one on a large knowledge-graph
+    // chain. The in-flight (`pending`) pass is what makes this safe during bootstrap,
+    // where `compile_full` runs against not-yet-stored layers (e.g. `lexicon:Cat`
+    // while compiling `closed-class.esl`).
+    for resource in crate::layer::resolve_typed_resources(layer, &[wk::INDUCTIVE_TYPE]) {
+        let Some(parent_iri) = resource.id().cloned() else {
             continue;
-        }
+        };
         let ctors = match resource.get(&ctors_iri) {
             Some(Value::Array(a)) => a,
             _ => continue,
@@ -211,18 +214,17 @@ pub fn collect_macros_from_layer(layer: &crate::layer::Layer) -> BTreeMap<String
     use crate::ontology::iri::Iri;
     use crate::ontology::well_known as wk;
     let mut out: BTreeMap<String, ast::MacroDecl> = BTreeMap::new();
-    let macro_class = match Iri::parse(wk::MACRO) {
-        Ok(i) => i,
-        Err(_) => return out,
-    };
     let decl_json_iri = match Iri::parse(wk::MACRO_DECL_JSON) {
         Ok(i) => i,
         Err(_) => return out,
     };
-    for (iri_key, resource) in layer.iter_all_resources() {
-        if !resource.is_instance_of(&macro_class) {
+    // D23 scaling: discover `core:Macro` resources via `resolve_typed_resources`
+    // (index for stored + `pending` for in-flight), not a full-chain scan — O(macros),
+    // not O(chain). See `collect_ctors_from_layer`.
+    for resource in crate::layer::resolve_typed_resources(layer, &[wk::MACRO]) {
+        let Some(iri_key) = resource.id().cloned() else {
             continue;
-        }
+        };
         let decl_json = match resource.get(&decl_json_iri) {
             Some(Value::Json(j)) => j,
             _ => continue,
@@ -396,6 +398,11 @@ fn expand_aliases(typ: &ast::TypeExpr, env: &BTreeMap<String, ast::TypeExpr>) ->
         } => ast::TypeExpr::Arrow {
             domain: Box::new(expand_aliases(domain, env)),
             codomain: Box::new(expand_aliases(codomain, env)),
+            pos: pos.clone(),
+        },
+        ast::TypeExpr::Ann { expr, typ, pos } => ast::TypeExpr::Ann {
+            expr: Box::new(expand_aliases(expr, env)),
+            typ: Box::new(expand_aliases(typ, env)),
             pos: pos.clone(),
         },
         ast::TypeExpr::BinderArrow {
@@ -960,7 +967,24 @@ impl Compiler {
                 let mut pr = Resource::new_embedded();
                 set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
                 pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
-                let kind = self.resolve(&p.kind)?;
+                // A parameter's kind is a qualified-name class (possibly an
+                // earlier parameter in scope) or a sort literal — the latter
+                // for Lean-style sort-parametrized inductives (`And (P : Prop,
+                // Q : Prop)`). Same lowering as indices (see `decl.indices`).
+                let kind = match &p.kind {
+                    ast::IndexKind::Named(qn) => {
+                        if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
+                            qn.name.clone()
+                        } else {
+                            self.resolve(qn)?
+                        }
+                    }
+                    ast::IndexKind::Sort(sk) => match sk {
+                        ast::SortKind::Prop => "Prop".to_string(),
+                        ast::SortKind::Set => "Set".to_string(),
+                        ast::SortKind::Type(n) => format!("Type:{n}"),
+                    },
+                };
                 pr.set(iri(wk::PARAM_KIND), Value::String(kind));
                 Ok(Value::Embedded(Box::new(pr)))
             })
@@ -1048,6 +1072,16 @@ impl Compiler {
                 );
                 Ok(Value::Embedded(Box::new(ar)))
             }
+            // A term-level annotation `(e : T)` is a category error in a
+            // type-declaration position (codata observation type / inductive ctor
+            // arg type). Annotations belong in `type_expr(...)` term slots, which
+            // compile via `encode_type_expr_to_json`, not here.
+            ast::TypeExpr::Ann { pos, .. } => Err(EslError::compiler(
+                Some(pos.clone()),
+                "a type annotation `(e : T)` is not valid in a type-declaration \
+                 position; it belongs in a term `type_expr(...)`"
+                    .to_string(),
+            )),
             ast::TypeExpr::BinderArrow {
                 name,
                 kind,
@@ -1379,6 +1413,12 @@ impl Compiler {
                 let body = self.lower_type_expr_to_exp(codomain, scope)?;
                 Ok(Exp::arrow(dom, body))
             }
+            // `(e : T)` — bidirectional annotation → `Exp::Ann`.
+            ast::TypeExpr::Ann { expr, typ, .. } => {
+                let e = self.lower_type_expr_to_exp(expr, scope)?;
+                let t = self.lower_type_expr_to_exp(typ, scope)?;
+                Ok(Exp::Ann(Box::new(e), Box::new(t)))
+            }
             ast::TypeExpr::Pi {
                 params, codomain, ..
             } => {
@@ -1588,6 +1628,17 @@ impl Compiler {
                     "args": ["", dom_json, cod_json],
                 }))
             }
+            // `(e : T)` — bidirectional annotation. Recurse into both children so
+            // a `fun` lambda inside `e` keeps its binder annotations (the whole
+            // reason `sem` can carry a λ-term that `check_infer` then accepts).
+            ast::TypeExpr::Ann { expr, typ, .. } => {
+                let e_json = self.encode_type_expr_to_json(expr, scope)?;
+                let t_json = self.encode_type_expr_to_json(typ, scope)?;
+                Ok(json!({
+                    "ctor": "Ann",
+                    "args": [e_json, t_json],
+                }))
+            }
             ast::TypeExpr::BinderArrow {
                 name,
                 kind,
@@ -1729,7 +1780,24 @@ impl Compiler {
                 let mut pr = Resource::new_embedded();
                 set_is_a(&mut pr, wk::INDUCTIVE_PARAM);
                 pr.set(iri(wk::PARAM_NAME), Value::String(p.name.clone()));
-                let kind = self.resolve(&p.kind)?;
+                // A parameter's kind is a qualified-name class (possibly an
+                // earlier parameter in scope) or a sort literal — the latter
+                // for Lean-style sort-parametrized inductives (`And (P : Prop,
+                // Q : Prop)`). Same lowering as indices (see `decl.indices`).
+                let kind = match &p.kind {
+                    ast::IndexKind::Named(qn) => {
+                        if qn.namespace.is_none() && param_names.contains(qn.name.as_str()) {
+                            qn.name.clone()
+                        } else {
+                            self.resolve(qn)?
+                        }
+                    }
+                    ast::IndexKind::Sort(sk) => match sk {
+                        ast::SortKind::Prop => "Prop".to_string(),
+                        ast::SortKind::Set => "Set".to_string(),
+                        ast::SortKind::Type(n) => format!("Type:{n}"),
+                    },
+                };
                 pr.set(iri(wk::PARAM_KIND), Value::String(kind));
                 Ok(Value::Embedded(Box::new(pr)))
             })

@@ -333,6 +333,319 @@
 
 
 % -----------------------------------------------------------------------------
+% Type-theoretic semantics — natural-language meaning built on (record) types
+%
+% The "meaning as types, not possible worlds" tradition. Cooper's TTR is
+% records-first: a record type (labelled fields of types) is exactly the
+% Class-as-record-signature Eigenius uses (requires/recommends as fields; a
+% Resource is a record = a witness). A mature semantics natively on the substrate
+% Eigenius already is. (Carpenter and Luo now in this section; Ranta / GF still to
+% join in a later prior-art pass.)
+% -----------------------------------------------------------------------------
+
+@book{cooper2023perception,
+  author    = {Cooper, Robin},
+  title     = {From Perception to Communication: A Theory of Types for Action
+               and Meaning},
+  publisher = {Oxford University Press},
+  series    = {Oxford Studies in Semantics and Pragmatics},
+  number    = {16},
+  year      = {2023},
+  isbn      = {978-0-19-287131-2},
+  doi       = {10.1093/oso/9780192871312.001.0001},
+  note      = {TTR (Type Theory with Records). Records = labelled fields of
+               objects; record types = labelled fields of types; a record is a
+               witness for a record type iff the fields match; a proposition is a
+               type, true iff witnessed. Intensional, types-not-possible-worlds
+               (Ch. 6); first-class types + reflection. Records-first --- the same
+               record-type / Sigma-type structure as an Eigenius Class
+               (requires/recommends as fields; Resource = record = witness): the
+               closest external substrate match. Open access (CC BY-NC-ND 4.0).
+               Primary-read (intro + TOC); local copy sha256
+               4ac02f9d1e555ee22f1a3490afd2d822215d39633cd45e8693b240e0b233f3f9.}
+}
+
+@book{chatzikyriakidis-luo-2020,
+  author    = {Chatzikyriakidis, Stergios and Luo, Zhaohui},
+  title     = {Formal Semantics in Modern Type Theories},
+  publisher = {ISTE Ltd / John Wiley \& Sons},
+  year      = {2020},
+  isbn      = {9781786301284},
+  doi       = {10.1002/9781119489252},
+  note      = {MTT-semantics: natural-language meaning in Modern Type Theories
+               (dependent types; coercive subtyping; an impredicative universe
+               Prop --- cf. Eigenius's Prop universe, D46). Argues MTT-semantics
+               is BOTH model-theoretic AND proof-theoretic --- a dual nature not
+               available before MTTs, i.e. a framework-level resolution of the
+               model-vs-proof tension. Includes Coq verification of NL semantics
+               (the proof-assistant precedent for the engine's check; cf.
+               D28/D30) and dependent event types. The comprehensive reference for
+               the Luo / D18 anchor. Main chapters paywalled; front matter +
+               appendices (the formal system LF-Delta, impredicative Prop, Coq
+               codes) are open access. Also: the impredicative MTTs are UTT
+               (Luo 1994) / pCIC; lineage from Ranta's application of MTT to
+               semantics (1994; Grammatical Framework); CNs-as-types and
+               CNs-as-setoids (types with a criterion of identity); and Ch.7.3
+               develops dependent categorial grammars (DCGs) --- dependent Lambek
+               categories AS MTT semantic types, unifying categorial composition
+               with the type substrate. Characterized from the abstract + preface
+               + TOC + free appendices (main case-study chapters paywalled).}
+}
+
+% Z. Luo's focused 2012 primaries — the D18 anchor that Chatzikyriakidis & Luo
+% (2020) above is the comprehensive reference for. Together they are the warrant
+% for honoring core:subclass_of as subsumption in the checker (D62 §8.6).
+@inproceedings{luo2012cnt,
+  author    = {Luo, Zhaohui},
+  title     = {Common Nouns as Types},
+  booktitle = {Logical Aspects of Computational Linguistics (LACL 2012)},
+  editor    = {B{\'e}chet, Denis and Dikovsky, Alexandre},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {7351},
+  pages     = {173--185},
+  publisher = {Springer},
+  year      = {2012},
+  doi       = {10.1007/978-3-642-31262-5_12},
+  note      = {CNs-as-types: a common noun denotes a TYPE, not a predicate over
+               entities --- so a Class IS a type, the exact move Eigenius makes
+               (EigonClass : Set; "cell line" -> the type CellLine, D62 §8.6).
+               This is what makes cat_np(T) type-indexing well-founded. Subsumption
+               between CNs is coercive subtyping (Gene <= Entity), so a general
+               predicate typed at a supertype applies to specific-typed arguments
+               without re-typing: the primary warrant for reflecting
+               core:subclass_of as the EigonClass subtype rule (the
+               inclusion-coercion fragment). Author copy (open):
+               cs.rhul.ac.uk/home/zhaohui/LACL12.pdf. DOI verified via dblp +
+               Springer (LACL 2012 = LNCS 7351, pp. 173--185).}
+}
+
+@article{luo2012coercive,
+  author  = {Luo, Zhaohui},
+  title   = {Formal Semantics in Modern Type Theories with Coercive Subtyping},
+  journal = {Linguistics and Philosophy},
+  volume  = {35},
+  number  = {6},
+  pages   = {491--513},
+  year    = {2012},
+  doi     = {10.1007/s10988-013-9126-4},
+  note    = {The focused primary for coercive subtyping as the MTT-semantics
+               device for selectional restrictions, copredication, and multiple
+               categorization: an argument slot at type A admits a value of type B
+               via a coherent coercion B -> A; the inclusion case B <= A is
+               subsumption. This is the mechanism behind "depends on : Entity ->
+               Entity -> Prop" admitting Gene / CellLine arguments because Gene,
+               CellLine <= Entity --- i.e. behind making the kernel's EigonClass
+               subtype check consult core:subclass_of (D62 §8.6). Companion to the
+               comprehensive Chatzikyriakidis & Luo (2020). Author copy (open):
+               cs.rhul.ac.uk/~zhaohui/LP12final3.pdf. DOI verified via Springer +
+               PhilPapers (LUOFSI); Ling.&Phil. 35(6):491--513, 2012.}
+}
+
+% Parsing algorithm for the D62 engine's composition / parsing front-end.
+@inproceedings{mclean-horspool-1996-earley,
+  author    = {McLean, Philippe and Horspool, R. Nigel},
+  title     = {A Faster {Earley} Parser},
+  booktitle = {Compiler Construction (CC)},
+  series    = {Lecture Notes in Computer Science},
+  year      = {1996},
+  note      = {LRE(k): a hybrid of Earley parsing and LR(k). Precomputed LR(k)
+               item-sets make Earley ~10-15x faster with <half the storage, while
+               still parsing arbitrary (incl. ambiguous) CFGs. The chart-parsing
+               backbone for the D62 engine's composition / parsing front-end:
+               ambiguity-tolerant (parse forest), incremental (cf. Cooper's TTR
+               "chart type"), and friendly to attaching semantic actions (build
+               the typed term during the parse). Lifted to the type-logical / DCG
+               composition via "parsing as deduction" (Pereira & Warren).
+               Venue/pages (CC'96, LNCS 1060?) to verify --- not shown in the
+               dropped PDF.}
+}
+
+% Dependent Type Semantics (DTS) + the lightblue parser — the closest existing
+% prose->Sigma-type system (D62 §4.1; verified via deep-research wea30vq2b).
+@misc{bekki-lightblue,
+  author       = {Bekki, Daisuke and others},
+  title        = {lightblue: a {CCG} parser with Dependent Type Semantics ({DTS}) representations},
+  howpublished = {\url{https://github.com/DaisukeBekki/lightblue}},
+  note         = {CCG parser whose derivation maps homomorphically (Curry-Howard) to
+                  DTS preterms --- a Martin-Lof dependent type theory over Sigma-types
+                  with proof-carrying witnesses; lexical entries are (form, CCG
+                  category, DTS preterm) triples. Built-in type-checker (Semantic
+                  Felicity Condition) + the Wani DTT theorem prover = the CHECK stage.
+                  Covers the engine's stages 2/4/5 natively. BSD-3-Clause (LICENSE
+                  file; package.yaml has a stray AllRightsReserved Cabal default).
+                  Active (2026). Japanese-strong, English less mature (the key risk).
+                  The fourth records-first / Sigma-type semantics (with TTR, MTT,
+                  Carpenter) and the only verified one shipping a parser + native
+                  check. See also Bekki et al., BriGap 2025,
+                  aclanthology.org/2025.brigap-1.1. Verified: deep-research wea30vq2b.}
+}
+
+@book{carpenter1997,
+  author    = {Carpenter, Bob},
+  title     = {Type-Logical Semantics},
+  publisher = {MIT Press},
+  series    = {Language, Speech, and Communication},
+  year      = {1997},
+  isbn      = {978-0-262-03248-3},
+  note      = {Categorial grammar built on the Lambek calculus + typed-lambda
+               semantics. The compositional mechanism Eigenius's composition
+               front-end needs spelled out: a "composition slot" is a type, and
+               a derivation is a term under the Curry-Howard correspondence ---
+               syntactic combination and semantic combination are the same
+               operation over the type substrate. The classic worked reference
+               for NL -> typed-term translation by categorial composition; the
+               Lambek-categories-as-types view is the precursor the dependent
+               categorial grammars of Chatzikyriakidis & Luo (Ch. 7.3) lift into
+               MTT. Primary-read.}
+}
+
+@misc{lai2020dependently,
+  author        = {Lai, Zhangsheng and Ng, Aik Beng and Wong, Liang Ze and
+                   See, Simon and Lin, Shaowei},
+  title         = {Dependently Typed Knowledge Graphs},
+  year          = {2020},
+  eprint        = {2003.03785},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LO},
+  url           = {https://arxiv.org/abs/2003.03785},
+  note          = {Reproduces RDF + SPARQL inside the Calculus of Inductive
+                   Constructions (Coq): graph triples become typed terms, and a
+                   query is reformulated AS A TYPE whose inhabitants are the
+                   answers, each carrying a proof witness ("queries as types,
+                   answers as proof-carrying witnesses"). The direct external
+                   precedent for Eigenius's "queries-as-types" stance (D30) and
+                   for the certificate/witness shape of D39's JustifiedBy
+                   (answers that carry their own justification). Explicitly a
+                   proof-of-concept, not a production system. Primary-read.}
+}
+
+
+% -----------------------------------------------------------------------------
+% LLM ontology learning / autoformalization
+%
+% The contemporary landscape for getting typed knowledge graphs (and formal
+% statements) out of LLMs over natural-language text: ontology-conformance and
+% hallucination benchmarks (Text2KGBench), the ontology-learning task taxonomy
+% (LLMs4OL), schema-constrained extraction grounded to ontology IDs (SPIRES),
+% and the autoformalization-faithfulness literature (Herald, miniF2F-Lean
+% Revisited, ReForm) that motivates Eigenius's insistence on checking a Lean
+% translation for FAITHFULNESS, not merely type-correctness.
+% -----------------------------------------------------------------------------
+
+@misc{mihindukulasooriya2023text2kgbench,
+  author        = {Mihindukulasooriya, Nandana and Tiwari, Sanju and
+                   Enguix, Carlos F. and Lata, Kusum},
+  title         = {{Text2KGBench}: A Benchmark for Ontology-Driven Knowledge
+                   Graph Generation from Text},
+  year          = {2023},
+  eprint        = {2308.02357},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  url           = {https://arxiv.org/abs/2308.02357},
+  note          = {Benchmark for generating ontology-conformant knowledge graphs
+                   from text: scores both ontology conformance (do the produced
+                   triples respect the target ontology's classes/relations) and
+                   subject / relation / object hallucination (do they introduce
+                   entities or relations absent from the source and ontology).
+                   The external precedent for D50's typed-KG-generation metrics.}
+}
+
+@inproceedings{babaeigiglou2023llms4ol,
+  author        = {Babaei Giglou, Hamed and D'Souza, Jennifer and Auer, S{\"o}ren},
+  title         = {{LLMs4OL}: Large Language Models for Ontology Learning},
+  booktitle     = {The Semantic Web --- ISWC 2023},
+  year          = {2023},
+  eprint        = {2307.16648},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  url           = {https://arxiv.org/abs/2307.16648},
+  note          = {Casts ontology learning as three LLM tasks --- term typing,
+                   taxonomy (is-a) discovery, and non-taxonomic relation
+                   extraction --- and evaluates foundational LLMs across them.
+                   Finding: foundational LLMs alone are insufficient for
+                   high-reasoning ontology construction. The task taxonomy for
+                   D50's ontology-learning landscape.}
+}
+
+@article{caufield2024spires,
+  author  = {Caufield, J. Harry and Hegde, Harshad and Emonet, Vincent and
+             Harris, Nomi L. and Joachimiak, Marcin P. and Matentzoglu, Nicolas
+             and Kim, HyeongSik and Moxon, Sierra and Reese, Justin T. and
+             Haendel, Melissa A. and Robinson, Peter N. and Mungall, Christopher J.},
+  title   = {{SPIRES}: a method for populating knowledge bases using zero-shot
+             learning to extract the contents of texts},
+  journal = {Bioinformatics},
+  volume  = {40},
+  number  = {3},
+  pages   = {btae104},
+  year    = {2024},
+  doi     = {10.1093/bioinformatics/btae104},
+  note    = {Structured Prompt Interrogation and Recursive Extraction of
+             Semantics: a LinkML schema constrains the LLM extraction, which
+             recurses over the text and grounds every extracted entity to an
+             ontology ID. The schema-constrained, ontology-grounded extraction
+             precedent for D50; same shape as the "tool produces typed output
+             grounded to the ontology" boundary the pilot uses.}
+}
+
+@misc{gao2024herald,
+  author        = {Gao, Guoxiong and Wang, Yutong and Jiang, Jiedong and
+                   Gao, Qi and Qin, Zihan and Xu, Tianyi and Dong, Bin},
+  title         = {Herald: A Natural Language Annotated {Lean} 4 Dataset},
+  year          = {2024},
+  eprint        = {2410.10878},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  url           = {https://arxiv.org/abs/2410.10878},
+  note          = {ICLR 2025. A natural-language <-> Lean 4 dataset built with
+                   back-translation, using an LLM-judge as the faithfulness check
+                   on the autoformalized statements. NOTE: the LLM-judge is the
+                   reported faithfulness mechanism; the much lower human-audited
+                   pass rate is a finding of Ospanov et al. (miniF2F-Lean
+                   Revisited), not a Herald claim --- see ospanov2025minif2f.}
+}
+
+@misc{ospanov2025minif2f,
+  author        = {Ospanov, Azim and Farnia, Farzan and Yousefzadeh, Roozbeh},
+  title         = {{miniF2F-Lean} Revisited: Reviewing Limitations and Charting
+                   a Path Forward},
+  year          = {2025},
+  eprint        = {2511.03108},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LG},
+  url           = {https://arxiv.org/abs/2511.03108},
+  note          = {NeurIPS 2025. Audits autoformalization-faithfulness claims.
+                   CORRECTION it supplies to the Herald numbers: Herald's
+                   statement formalization, reported ~97% faithful by its
+                   LLM-judge, drops to ~66% under human evaluation, with an
+                   end-to-end correct rate of ~34.8%. These figures are this
+                   paper's audit OF Herald, not Herald's own claims --- evidence
+                   that an LLM-judge faithfulness check is not a substitute for
+                   the kernel-checked faithfulness D30 requires.}
+}
+
+@misc{chen2025reform,
+  author        = {Chen, Guoxin and Wang, Jing and Xu, Tianyi and Zhang, Kai and
+                   Liu, Pengfei and Dong, Bin},
+  title         = {{ReForm}: Reflective Autoformalization with Prospective
+                   Bounded Sequence Optimization},
+  year          = {2025},
+  eprint        = {2510.24592},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  url           = {https://arxiv.org/abs/2510.24592},
+  note          = {ICLR 2026. Reflective autoformalization with an LLM-judge
+                   semantic check whose ceiling is reported at 85.8%. CORRECTION
+                   on the headline error rates: the 16.4% (miniF2F) and 38.5%
+                   (ProofNet) semantic-error figures are error rates in the
+                   HUMAN-WRITTEN benchmark statements ReForm audited, not the
+                   error rate of ReForm's own autoformalizer output. Further
+                   evidence that "type-checks" is not "faithful" --- the gap D30
+                   is built to close.}
+}
+
+
+% -----------------------------------------------------------------------------
 % Onto-axiomatic method, state formalization, and integrative methodology
 % -----------------------------------------------------------------------------
 

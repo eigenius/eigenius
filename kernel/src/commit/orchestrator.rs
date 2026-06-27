@@ -152,6 +152,13 @@ impl<'a> CommitOrchestrator<'a> {
         // first pipeline advances. Used as the `top_layer` for
         // `didDrain` and as the revert target for `!branch_advanced`.
         let mut last_advanced: Option<Arc<crate::layer::Layer>> = Some(Arc::clone(ctx.head()));
+        // Did any pipeline actually advance the branch this drain? `didDrain`
+        // (the institution-index rebuild) is a no-op when nothing landed — the
+        // chain is unchanged, so its index is too. Critically, the rebuild scans
+        // the whole chain, so running it on a fully-deduped re-run (anchored-commit
+        // cache hit) would pay O(chain) for nothing — pure latency on a "cached"
+        // commit. Gate on a real advance.
+        let mut any_advanced = false;
 
         while let Some((depth, em)) = pending.pop_front() {
             if depth >= MAX_EMISSION_DEPTH {
@@ -226,6 +233,7 @@ impl<'a> CommitOrchestrator<'a> {
                         continue;
                     }
                     last_advanced = Some(Arc::clone(&outcome.layer));
+                    any_advanced = true;
                     // Drain emissions in FIFO order at depth+1. Both
                     // Child and Sibling drain identically here —
                     // when the parent landed, the routing
@@ -292,7 +300,7 @@ impl<'a> CommitOrchestrator<'a> {
             hook_errors: Vec::new(),
             _marker: std::marker::PhantomData,
         };
-        if !did_drain.is_empty() {
+        if any_advanced && !did_drain.is_empty() {
             let hook_span = tracing::info_span!(operation::COMMIT_DID_DRAIN);
             let _hook_enter = hook_span.enter();
             for hook in did_drain {

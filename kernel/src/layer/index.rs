@@ -32,11 +32,114 @@
 
 use crate::layer::{Layer, LayerId};
 use crate::ontology::iri::Iri;
-use crate::ontology::resource::Value;
+use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
 use crate::storage::StorageError;
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::{Arc, RwLock};
+
+/// Resolve every chain-resident resource whose `is_a` *directly* contains one of
+/// `metaclasses`, without materialising the whole chain (`iter_all_resources`). Each
+/// matching subject is resolved to its merged top view — overrides win, tombstoned
+/// IRIs drop out — and deduplicated across metaclasses.
+///
+/// This is the index-driven replacement for the "scan the whole chain to find the
+/// handful of resources of type X" anti-pattern. Cost scales with the number of
+/// matching resources, not chain size — essential now that large sources (domain
+/// lexica, UMLS, and further knowledge-graph content) live on the interactive chain.
+///
+/// Each chain layer's content is discoverable via **its own storage** in one of two
+/// states:
+/// 1. **Stored** (committed / loaded from disk) → its `is_a` triples are in that
+///    storage's triple index (populated at `store_layer`). Found via
+///    `scan_predicate_object`.
+/// 2. **In-flight** (built this session, not yet stored) → not in the index, but its
+///    resources are staged in that storage's `pending`. Found by reading the staged
+///    entry for the layer.
+///
+/// So we walk the chain and consult each layer's own storage — deduping triple indexes
+/// by `Arc` identity, so the common case (one shared storage for the whole chain) scans
+/// once, while still covering chains whose layers were built on separate storages (some
+/// tests). Discovered subjects are then resolved through the head, which yields the
+/// merged top view AND filters out any subject not reachable from this chain (the
+/// triple index is DAG-wide, so it may surface subjects from other branches). No
+/// per-layer persisted artifact, no whole-chain materialisation.
+///
+/// `is_a` must be an indexable predicate (`data_type = resource_array`) for step 1 —
+/// true on any core-rooted chain; step 2 covers in-flight content regardless.
+pub fn resolve_typed_resources(layer: &Layer, metaclasses: &[&str]) -> Vec<Arc<Resource>> {
+    let candidates = typed_resource_iris(layer, metaclasses);
+    // Resolve each candidate through the head: merged top view + filters to this chain.
+    let mut out: Vec<Arc<Resource>> = Vec::with_capacity(candidates.len());
+    for subject in candidates {
+        if let Some(resource) = layer.resolve(&subject) {
+            out.push(resource);
+        }
+    }
+    out
+}
+
+/// Discover the IRIs of every chain-resident resource whose `is_a` *directly* contains
+/// one of `metaclasses`, **without resolving any bodies** — the cheap first half of
+/// [`resolve_typed_resources`]. Returns subjects as found in each layer's own storage
+/// (triple index for stored layers, `pending` for in-flight ones), deduped, but NOT yet
+/// filtered to this chain (the caller resolves through the head to do that).
+///
+/// Exposed so callers that only need a *subset* of the matches (e.g. short-name
+/// resolution scoped to an imported namespace prefix) can filter the IRIs first and
+/// resolve only the survivors — keeping body materialisation O(survivors) rather than
+/// O(all matches). See the indexability/staging contract on [`resolve_typed_resources`].
+pub fn typed_resource_iris(layer: &Layer, metaclasses: &[&str]) -> BTreeSet<Iri> {
+    let mut candidates: BTreeSet<Iri> = BTreeSet::new();
+    let Ok(is_a) = Iri::parse(wk::IS_A) else {
+        return candidates;
+    };
+    let metaclass_iris: Vec<Iri> = metaclasses
+        .iter()
+        .filter_map(|m| Iri::parse(m).ok())
+        .collect();
+
+    // Triple indexes already scanned, by `Arc` identity — a shared-storage chain scans
+    // once rather than once per layer.
+    let mut scanned: Vec<Arc<dyn TripleIndex>> = Vec::new();
+    let mut current: Option<&Layer> = Some(layer);
+    let mut visited: BTreeSet<LayerId> = BTreeSet::new();
+    while let Some(l) = current {
+        if !visited.insert(l.id().clone()) {
+            break;
+        }
+        let storage = l.storage();
+
+        // Stored content — that storage's triple index (once per distinct index).
+        let triple_index = storage.triple_index.clone();
+        if !scanned.iter().any(|s| Arc::ptr_eq(s, &triple_index)) {
+            scanned.push(triple_index.clone());
+            for object in &metaclass_iris {
+                for (subject, _defining_layer) in
+                    triple_index.scan_predicate_object(&is_a, object).flatten()
+                {
+                    candidates.insert(subject);
+                }
+            }
+        }
+
+        // In-flight content — that storage's staged entry for this layer.
+        {
+            let pending = storage.pending.read().expect("pending stage poisoned");
+            if let Some(staged) = pending.get(l.id()) {
+                for (subject, resource) in staged {
+                    if metaclass_iris.iter().any(|mc| resource.is_instance_of(mc)) {
+                        candidates.insert(subject.clone());
+                    }
+                }
+            }
+        }
+
+        current = l.parent().map(|p| p.as_ref());
+    }
+
+    candidates
+}
 
 /// A single subject-predicate-object triple, borrowed from a `Resource`'s
 /// property values at indexing time. All three positions are IRIs in v1
@@ -489,6 +592,96 @@ pub mod index_keys {
         let s = Iri::parse(std::str::from_utf8(s_bytes).map_err(|e| e.to_string())?)
             .map_err(|e| format!("subject IRI: {e}"))?;
         Ok((p, o, s))
+    }
+
+    // ---- D65 exact value index ----
+    //
+    // Keyed by the `core:ValueIndex` Resource IRI + the normalized string key
+    // (an arbitrary value, not an IRI), mapping to `(subject, layer)`. Same
+    // length-prefixed segment encoding as the triple index; the RocksDB backend
+    // adds its own table prefixes (`vidx_pos:` / `vidx_layer:`) so these never
+    // collide with the triple index's `idx_*` keyspace.
+
+    /// `<index>:<key>:<subject>:<layer>` — value-index read-path key.
+    pub fn value_pos_key(index: &Iri, key: &str, subject: &Iri, layer: &LayerId) -> Vec<u8> {
+        let mut out =
+            Vec::with_capacity(32 + index.as_str().len() + key.len() + subject.as_str().len() + 16);
+        write_segment(&mut out, index.as_str().as_bytes());
+        write_segment(&mut out, key.as_bytes());
+        write_segment(&mut out, subject.as_str().as_bytes());
+        out.extend_from_slice(&layer.0);
+        out
+    }
+
+    /// Prefix matching every value-index entry for a given `(index, key)`.
+    pub fn value_pos_prefix(index: &Iri, key: &str) -> Vec<u8> {
+        let mut out = Vec::with_capacity(index.as_str().len() + key.len() + 8);
+        write_segment(&mut out, index.as_str().as_bytes());
+        write_segment(&mut out, key.as_bytes());
+        out
+    }
+
+    /// `<layer>:<index>:<key>:<subject>` — value-index GC-path reverse key.
+    pub fn value_layer_key(layer: &LayerId, index: &Iri, key: &str, subject: &Iri) -> Vec<u8> {
+        let mut out =
+            Vec::with_capacity(32 + index.as_str().len() + key.len() + subject.as_str().len() + 12);
+        out.extend_from_slice(&layer.0);
+        write_segment(&mut out, index.as_str().as_bytes());
+        write_segment(&mut out, key.as_bytes());
+        write_segment(&mut out, subject.as_str().as_bytes());
+        out
+    }
+
+    /// Decode a forward value-index `(index, key, subject, layer)` key.
+    pub fn decode_value_pos_key(key: &[u8]) -> Result<(Iri, String, Iri, LayerId), String> {
+        let (index_bytes, pos) = read_segment(key, 0)?;
+        let (key_bytes, pos) = read_segment(key, pos)?;
+        let (s_bytes, pos) = read_segment(key, pos)?;
+        if pos + 32 != key.len() {
+            return Err(format!(
+                "expected 32-byte LayerId trailer; got {} bytes at pos {pos}",
+                key.len() - pos
+            ));
+        }
+        let mut layer_bytes = [0u8; 32];
+        layer_bytes.copy_from_slice(&key[pos..pos + 32]);
+        let index = Iri::parse(std::str::from_utf8(index_bytes).map_err(|e| e.to_string())?)
+            .map_err(|e| format!("index IRI: {e}"))?;
+        let key_str = std::str::from_utf8(key_bytes)
+            .map_err(|e| e.to_string())?
+            .to_string();
+        let subject = Iri::parse(std::str::from_utf8(s_bytes).map_err(|e| e.to_string())?)
+            .map_err(|e| format!("subject IRI: {e}"))?;
+        Ok((index, key_str, subject, LayerId(layer_bytes)))
+    }
+
+    /// Decode a reverse value-index `(layer, index, key, subject)` key
+    /// (returns `(index, key, subject)` — caller already knows the layer).
+    pub fn decode_value_layer_key(key: &[u8]) -> Result<(Iri, String, Iri), String> {
+        if key.len() < 32 {
+            return Err(format!(
+                "reverse value key shorter than 32-byte LayerId prefix: {} bytes",
+                key.len()
+            ));
+        }
+        let pos = 32;
+        let (index_bytes, pos) = read_segment(key, pos)?;
+        let (key_bytes, pos) = read_segment(key, pos)?;
+        let (s_bytes, pos) = read_segment(key, pos)?;
+        if pos != key.len() {
+            return Err(format!(
+                "trailing {} bytes after reverse value key segments",
+                key.len() - pos
+            ));
+        }
+        let index = Iri::parse(std::str::from_utf8(index_bytes).map_err(|e| e.to_string())?)
+            .map_err(|e| format!("index IRI: {e}"))?;
+        let key_str = std::str::from_utf8(key_bytes)
+            .map_err(|e| e.to_string())?
+            .to_string();
+        let subject = Iri::parse(std::str::from_utf8(s_bytes).map_err(|e| e.to_string())?)
+            .map_err(|e| format!("subject IRI: {e}"))?;
+        Ok((index, key_str, subject))
     }
 }
 

@@ -104,6 +104,18 @@ pub fn structural_validate(state: &mut CommitState<'_>) -> Result<PhaseControl, 
         .as_ref()
         .expect("structural_validate runs after build; layer must be Some");
 
+    // Anchored-commit revalidation skip (D33 §6): this exact (content, supporting
+    // content) already committed-and-validated, so structural validation is a proven
+    // no-op. `persist` will hit the same cache and skip `store_layer` too.
+    if state.persist.already_validated(layer) {
+        tracing::debug!(
+            { field::OPERATION } = operation::COMMIT_STRUCTURAL_VALIDATE,
+            { field::LAYER_ID } = %layer.id(),
+            "commit.structural_validate.skipped_anchored_revalidation"
+        );
+        return Ok(PhaseControl::Continue);
+    }
+
     let validator = Validator::new(Arc::clone(layer));
     let errors = validator.validate();
     if errors.is_empty() {
@@ -162,6 +174,18 @@ pub fn retroactive_with_cascade(state: &mut CommitState<'_>) -> Result<PhaseCont
         .as_ref()
         .expect("retroactive_with_cascade runs after build; layer must be Some")
         .clone();
+
+    // Anchored-commit revalidation skip (D33 §6): a proven-valid (content, supporting
+    // content) has no new retroactive dependents to find — it passed in this exact
+    // context before. Skip the enumeration (the dominant commit cost at scale).
+    if state.persist.already_validated(&layer) {
+        tracing::debug!(
+            { field::OPERATION } = operation::COMMIT_RETROACTIVE,
+            { field::LAYER_ID } = %layer.id(),
+            "commit.retroactive.skipped_anchored_revalidation"
+        );
+        return Ok(PhaseControl::Continue);
+    }
 
     tracing::info!(
         { field::OPERATION } = operation::COMMIT_RETROACTIVE,

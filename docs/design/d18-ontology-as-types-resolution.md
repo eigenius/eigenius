@@ -483,6 +483,22 @@ the uncached version. No changes to `ground.rs` required for §5.
 
 ---
 
+## 9a. Prior art
+
+The "ontology-as-types" stance — a class *is* a dependent record type, an
+instance *is* a record/witness of it — has direct external precedent in
+type-theoretic semantics. Luo's common-nouns-as-types with coercive subtyping
+and Chatzikyriakidis & Luo's MTT-semantics ([`chatzikyriakidis-luo-2020`])
+give natural-language meaning over dependent record types and an impredicative
+`Prop`; Barlatier & Dapoigny build ontologies directly on dependent record
+types; and Cooper's TTR ([`cooper2023perception`]) is records-first, with a
+record type's labelled fields-of-types matching an Eigenius class's
+required/recommended properties exactly. These anchors are developed in detail
+in D61 §10 and D62 §3, which this resolution's field-resolution machinery
+shares a substrate with.
+
+---
+
 ## 10. Implementation plan (for Phase 10a)
 
 1. Introduce `CheckCtx` in `kernel/src/nbe/check.rs`, carrying `rho`,

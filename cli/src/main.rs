@@ -284,6 +284,18 @@ enum Commands {
         /// See D13 — Durable Kernel State.
         #[arg(long, env = "EIGENIUS_DB", value_name = "PATH")]
         db: Option<String>,
+
+        /// Resource-cache budget: max resource entries held in memory before
+        /// eviction (D23 §5.3). Cold reads page from the backend on demand,
+        /// so this caps resident memory for large graphs / bulk loads without
+        /// bounding what the kernel can serve. Default 250k.
+        #[arg(
+            long,
+            env = "EIGENIUS_CACHE_BUDGET",
+            value_name = "ENTRIES",
+            default_value_t = 250_000
+        )]
+        cache_budget: u64,
     },
 
     /// Database administration
@@ -344,6 +356,13 @@ enum Commands {
     Data {
         #[command(subcommand)]
         command: DataCommands,
+    },
+
+    /// Lexicon tooling — the kernel-side felicity gate for the D62 prose→trees
+    /// engine (D62 §8.6)
+    Lexicon {
+        #[command(subcommand)]
+        command: LexiconCommands,
     },
 
     /// Manage external institutions (D31 §5, Phase 19a.5.e)
@@ -747,6 +766,45 @@ enum ScriptCommands {
     },
 }
 
+/// `lexicon` subcommands — the kernel-side, **trusted half** of the D62
+/// prose→trees engine. An *untrusted* tool (WordNet/VerbNet → LLM) drafts
+/// categorial lexical entries as ESL / Eigon-JSON; these subcommands admit or
+/// reject them against the kernel, the felicity oracle.
+#[derive(Subcommand)]
+enum LexiconCommands {
+    /// Run the felicity gate over every `lexicon:LexicalEntry` in a file: for
+    /// each entry, check `⟦cat⟧ ≡ sem_type` and that its `sem` actually inhabits
+    /// `⟦cat⟧`. Fail-closed — any rejection exits non-zero.
+    Gate {
+        /// One or more ESL (`.esl`) / Eigon-JSON files. All load into one layer
+        /// over the bootstrap chain, so entries may reference a schema / domain
+        /// in an earlier file; every `lexicon:LexicalEntry` across them is gated.
+        #[arg(value_name = "FILE", num_args = 1..)]
+        files: Vec<String>,
+    },
+    /// Parse a natural-language sentence against the served lexicon (D63/D65),
+    /// printing the typed parse forest. With `--endpoint` this calls the kernel's
+    /// `ParseSentence` RPC over the committed chain; locally it builds the index over
+    /// the bootstrap chain plus any `--file` domain layers.
+    Parse {
+        /// The sentence to parse, e.g. "every Werner syndrome affects HeLa".
+        #[arg(value_name = "SENTENCE")]
+        sentence: String,
+        /// Restrict the parse to these `lexicon:Lexicon` IRIs (repeatable). Order is
+        /// resolution precedence (earlier ranks first). None = whole chain, unscoped.
+        #[arg(long = "scope", value_name = "LEXICON_IRI")]
+        scope: Vec<String>,
+        /// A `lexicon:LexiconProfile` IRI naming an ordered scope (mutually exclusive
+        /// with `--scope`).
+        #[arg(long, value_name = "PROFILE_IRI")]
+        profile: Option<String>,
+        /// (Local mode only) ESL/Eigon-JSON domain files to load over bootstrap as a
+        /// chain before parsing — e.g. a domain lexicon + the demo verbs.
+        #[arg(long = "file", value_name = "FILE")]
+        files: Vec<String>,
+    },
+}
+
 #[derive(Subcommand)]
 enum DataCommands {
     /// Attach an external file as a content-addressed PinnedExternalFile.
@@ -1047,6 +1105,20 @@ async fn main() {
             }
             Commands::Tasks { command } => remote_tasks(endpoint, command, cli.json).await,
             Commands::Branch { command } => remote_branch(endpoint, command, cli.json).await,
+            Commands::Lexicon { command } => match command {
+                LexiconCommands::Parse {
+                    sentence,
+                    scope,
+                    profile,
+                    files: _,
+                } => remote_parse(endpoint, &sentence, &scope, profile.as_deref(), cli.json).await,
+                LexiconCommands::Gate { .. } => {
+                    eprintln!(
+                        "'lexicon gate' is a local-only operation; drop --endpoint and pass files"
+                    );
+                    std::process::exit(1);
+                }
+            },
             Commands::Db { command } => match command {
                 DbCommands::Consolidate {
                     range,
@@ -1162,8 +1234,18 @@ async fn main() {
             port,
             orchestrator,
             db,
-        } => cmd_serve(port, orchestrator.as_deref(), db.as_deref()).await,
+            cache_budget,
+        } => cmd_serve(port, orchestrator.as_deref(), db.as_deref(), cache_budget).await,
         Commands::Compile { file } => cmd_compile(&file, cli.json),
+        Commands::Lexicon { command } => match command {
+            LexiconCommands::Gate { files } => cmd_lexicon_gate(&files, cli.json),
+            LexiconCommands::Parse {
+                sentence,
+                scope,
+                profile,
+                files,
+            } => cmd_lexicon_parse(&sentence, &scope, profile.as_deref(), &files, cli.json),
+        },
         Commands::Reflect { file } => cmd_reflect(&file, cli.json),
         Commands::ListInstitutions => {
             eprintln!("'list-institutions' requires --endpoint");
@@ -1553,6 +1635,315 @@ fn cmd_compile(file: &str, json_output: bool) {
     }
 }
 
+/// Run the D62 felicity gate (`eigenius_kernel::dcg::gate_entry`) over every
+/// `lexicon:LexicalEntry` in `file`. The kernel is the felicity oracle: an entry
+/// is admitted iff `⟦cat⟧ ≡ sem_type` *and* its `sem` inhabits `⟦cat⟧`. This is
+/// the trusted endpoint a WordNet/VerbNet → LLM proposer's drafts pass through
+/// (D62 §8.6). Fail-closed: any rejection — or no entries at all — exits non-zero.
+fn cmd_lexicon_gate(files: &[String], json_output: bool) {
+    use eigenius_kernel::dcg::gate_entry;
+    use eigenius_kernel::ontology::resource::Value;
+
+    let ctx = match bootstrap::bootstrap() {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            eprintln!("Bootstrap failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let entry_class = Iri::parse("urn:eigenius:lexicon:LexicalEntry").unwrap();
+    let form_prop = Iri::parse("urn:eigenius:lexicon:form").unwrap();
+
+    // Load files as a CHAIN: each compiles AGAINST the layer the prior files
+    // built (`compile_against_layer` seeds the compiler's ctor table from the
+    // chain), so an entries file can reference a `lexicon:Cat` constructor or
+    // domain class declared in an earlier schema file. Standalone-compiling each
+    // file would leave those cross-file ctor references unresolved.
+    let mut layer = Arc::clone(ctx.head());
+    let mut entries: Vec<(Iri, Arc<eigenius_kernel::ontology::resource::Resource>)> = Vec::new();
+    for (idx, file) in files.iter().enumerate() {
+        let resources = load_resources_against_layer(file, &layer);
+        let mut builder =
+            LayerBuilder::new(&format!("lexicon-gate-{idx}"), Some(Arc::clone(&layer)));
+        for resource in resources {
+            if let Err(e) = builder.add_resource(resource) {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
+        }
+        layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+        // Collect this file's own entries (not the chain below it).
+        for (id, resource) in layer.iter_resources() {
+            if resource.is_instance_of(&entry_class) {
+                entries.push((id, resource));
+            }
+        }
+    }
+    // Gate every entry against the FINAL layer — it sees the whole chain, so a
+    // reference from any file resolves.
+    let final_layer = layer;
+    let mut admitted: Vec<(String, String)> = Vec::new(); // (id, form)
+    let mut rejected: Vec<(String, String, String)> = Vec::new(); // (id, form, reason)
+    for (id, resource) in &entries {
+        let form = match resource.get(&form_prop) {
+            Some(Value::String(s)) => s.clone(),
+            _ => String::new(),
+        };
+        match gate_entry(&final_layer, resource) {
+            Ok(_denoted) => admitted.push((id.as_str().to_string(), form)),
+            Err(reason) => rejected.push((id.as_str().to_string(), form, reason)),
+        }
+    }
+    let total = admitted.len() + rejected.len();
+
+    if json_output {
+        let rejected_json: Vec<serde_json::Value> = rejected
+            .iter()
+            .map(|(id, form, reason)| {
+                serde_json::json!({ "entry": id, "form": form, "reason": reason })
+            })
+            .collect();
+        let report = serde_json::json!({
+            "status": if rejected.is_empty() && total > 0 { "ok" } else { "error" },
+            "gated": total,
+            "admitted": admitted.len(),
+            "rejected": rejected_json,
+        });
+        let out = serde_json::to_string(&report).unwrap();
+        if rejected.is_empty() && total > 0 {
+            println!("{out}");
+        } else {
+            eprintln!("{out}");
+        }
+    } else {
+        for (id, form) in &admitted {
+            println!("  ADMIT   {form:<18}  ({id})");
+        }
+        for (id, form, reason) in &rejected {
+            eprintln!("  REJECT  {form:<18}  ({id})  — {reason}");
+        }
+        if total == 0 {
+            eprintln!("No lexicon:LexicalEntry resources found in the given file(s).");
+        } else {
+            eprintln!(
+                "Gated {total} entr{}: {} admitted, {} rejected.",
+                if total == 1 { "y" } else { "ies" },
+                admitted.len(),
+                rejected.len()
+            );
+        }
+    }
+
+    if !rejected.is_empty() || total == 0 {
+        std::process::exit(1);
+    }
+}
+
+/// One projected parse, shared by the local and remote `lexicon parse` renderers:
+/// `(category, sem, is_sentence, lexicon_order, sense_rank)`.
+type ParseRow = (String, String, bool, u32, u32);
+
+/// Render a parse forest (human table or JSON). Exits non-zero on an empty forest —
+/// "no felicitous parse" is fail-closed, like the gate.
+fn print_parse_forest(sentence: &str, parses: &[ParseRow], json_output: bool) {
+    if json_output {
+        let arr: Vec<serde_json::Value> = parses
+            .iter()
+            .map(|(cat, sem, is_s, lo, sr)| {
+                serde_json::json!({
+                    "category": cat, "sem": sem, "is_sentence": is_s,
+                    "lexicon_order": lo, "sense_rank": sr,
+                })
+            })
+            .collect();
+        let report = serde_json::json!({
+            "status": if parses.is_empty() { "error" } else { "ok" },
+            "sentence": sentence,
+            "parses": arr,
+        });
+        let out = serde_json::to_string(&report).unwrap();
+        if parses.is_empty() {
+            eprintln!("{out}");
+        } else {
+            println!("{out}");
+        }
+    } else if parses.is_empty() {
+        eprintln!("No felicitous parse for: {sentence:?}");
+    } else {
+        println!(
+            "{} parse{} for {sentence:?}:",
+            parses.len(),
+            if parses.len() == 1 { "" } else { "s" }
+        );
+        for (i, (cat, sem, is_s, lo, sr)) in parses.iter().enumerate() {
+            let tag = if *is_s { "S" } else { "·" };
+            println!("  [{i}] {tag} rank=({lo},{sr})  {cat}");
+            println!("      {sem}");
+        }
+    }
+    if parses.is_empty() {
+        std::process::exit(1);
+    }
+}
+
+/// Local `lexicon parse`: build the `LexicalIndex` over the bootstrap chain plus any
+/// `--file` domain layers (loaded as a chain), then parse `sentence` (optionally
+/// scoped). The kernel is the parse oracle; this is the offline sibling of the
+/// `ParseSentence` RPC.
+fn cmd_lexicon_parse(
+    sentence: &str,
+    scope: &[String],
+    profile: Option<&str>,
+    files: &[String],
+    json_output: bool,
+) {
+    use eigenius_kernel::dcg::{
+        is_ctor, pretty_term, resolve_lexicon_profile, Identity, LexicalIndex,
+    };
+    use eigenius_kernel::nbe::{env::Rho, eval::eval, readback::readback_val};
+
+    let ctx = match bootstrap::bootstrap() {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            eprintln!("Bootstrap failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Chain-load the domain files (each compiles against the layer below it).
+    let mut layer = Arc::clone(ctx.head());
+    for (idx, file) in files.iter().enumerate() {
+        let resources = load_resources_against_layer(file, &layer);
+        let mut builder =
+            LayerBuilder::new(&format!("parse-domain-{idx}"), Some(Arc::clone(&layer)));
+        for resource in resources {
+            if let Err(e) = builder.add_resource(resource) {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
+        }
+        layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+    }
+
+    if !scope.is_empty() && profile.is_some() {
+        eprintln!("--scope and --profile are mutually exclusive");
+        std::process::exit(1);
+    }
+    let scope_iris: Option<Vec<Iri>> = if !scope.is_empty() {
+        Some(
+            scope
+                .iter()
+                .map(|s| {
+                    Iri::parse(s).unwrap_or_else(|e| {
+                        eprintln!("invalid scope IRI {s:?}: {e:?}");
+                        std::process::exit(1);
+                    })
+                })
+                .collect(),
+        )
+    } else if let Some(p) = profile {
+        let piri = Iri::parse(p).unwrap_or_else(|e| {
+            eprintln!("invalid profile IRI {p:?}: {e:?}");
+            std::process::exit(1);
+        });
+        Some(resolve_lexicon_profile(&layer, &piri).unwrap_or_else(|| {
+            eprintln!("lexicon profile {p} not found in the chain");
+            std::process::exit(1);
+        }))
+    } else {
+        None
+    };
+
+    let index = LexicalIndex::build(Arc::clone(&layer));
+    let forest = index.parse_scoped(sentence, &Identity, scope_iris.as_deref());
+    let rows: Vec<ParseRow> = forest
+        .iter()
+        .map(|item| {
+            let sem = match eval(&item.sem, &Rho::Nil) {
+                Ok(v) => pretty_term(&readback_val(0, &v)),
+                Err(_) => pretty_term(&item.sem),
+            };
+            (
+                pretty_term(&item.cat),
+                sem,
+                is_ctor(&item.cat, "cat_s").is_some(),
+                item.cost.lexicon_order,
+                item.cost.sense_rank,
+            )
+        })
+        .collect();
+    print_parse_forest(sentence, &rows, json_output);
+}
+
+/// Remote `lexicon parse`: call the kernel's `ParseSentence` RPC over the committed
+/// chain. The kernel builds the (lazy) `LexicalIndex` server-side and returns the forest.
+async fn remote_parse(
+    endpoint: &str,
+    sentence: &str,
+    scope: &[String],
+    profile: Option<&str>,
+    json_output: bool,
+) {
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::ParseSentenceRequest {
+        sentence: sentence.to_string(),
+        scope: scope.to_vec(),
+        profile: profile.unwrap_or("").to_string(),
+        at_layer: String::new(),
+        branch: String::new(),
+    };
+    match client.parse_sentence(request).await {
+        Ok(response) => {
+            let rows: Vec<ParseRow> = response
+                .into_inner()
+                .parses
+                .into_iter()
+                .map(|p| {
+                    (
+                        p.category,
+                        p.sem,
+                        p.is_sentence,
+                        p.lexicon_order,
+                        p.sense_rank,
+                    )
+                })
+                .collect();
+            print_parse_forest(sentence, &rows, json_output);
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Like `load_resources_from_file`, but ESL is compiled AGAINST `layer` so
+/// references to constructors / classes declared in earlier (parent) layers
+/// resolve — the chain-load path the `lexicon gate` subcommand needs.
+fn load_resources_against_layer(
+    file: &str,
+    layer: &eigenius_kernel::layer::Layer,
+) -> Vec<eigenius_kernel::ontology::resource::Resource> {
+    let data = std::fs::read_to_string(file).unwrap_or_else(|e| {
+        eprintln!("Failed to read file: {e}");
+        std::process::exit(1);
+    });
+    if file.ends_with(".esl") {
+        eigenius_kernel::esl::compile_against_layer(&data, layer).unwrap_or_else(|errors| {
+            for e in &errors {
+                eprintln!("{file}: {e}");
+            }
+            std::process::exit(1);
+        })
+    } else {
+        eigon_json::parse_document(&data).unwrap_or_else(|e| {
+            eprintln!("Failed to parse {file}: {e}");
+            std::process::exit(1);
+        })
+    }
+}
+
 /// Load resources from a file, auto-detecting ESL (.esl) vs Eigon-JSON.
 fn load_resources_from_file(file: &str) -> Vec<eigenius_kernel::ontology::resource::Resource> {
     let data = std::fs::read_to_string(file).unwrap_or_else(|e| {
@@ -1735,7 +2126,13 @@ fn cmd_db(command: DbCommands) {
     }
 }
 
-async fn cmd_serve(port: u16, orchestrator: Option<&str>, db: Option<&str>) {
+async fn cmd_serve(port: u16, orchestrator: Option<&str>, db: Option<&str>, cache_budget: u64) {
+    // Set the process-wide resource-cache budget before any persistent storage is
+    // constructed (set-once; D23 §5.3). Bounds resident memory; cold reads page from
+    // the backend on demand.
+    eigenius_kernel::layer::set_cache_budget(cache_budget);
+    println!("Resource-cache budget: {cache_budget} entries");
+
     let backend: Option<std::sync::Arc<dyn eigenius_kernel::storage::PersistentBackend>> = match db
     {
         Some(path) => {

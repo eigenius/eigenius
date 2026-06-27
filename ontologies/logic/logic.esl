@@ -1,0 +1,69 @@
+// ════════════════════════════════════════════════════════════════════
+// logic — propositional primitives over `Prop` (D63 §8.3 Phase 0).
+// ════════════════════════════════════════════════════════════════════
+//
+// The `Prop` combinators the DCG determiner/connective semantics need but the
+// kernel doesn't provide built-in. A small, reusable layer: depends only on
+// core (`Prop` = `Sort 0`). The semantics built on it stay kernel-checked — each
+// definition here is a closed `Prop`(-former) the validator admits on commit.
+//
+// `False` (the determiner `no` needs negation, `¬P := P -> logic:False`),
+// `And`, and `Or` — the last two consumed by the generalized-conjunction
+// combinator (D63 §8.4 Phase 3) and eliminated by the FraCaS conjunction
+// inference (Phase 5).
+
+namespace logic = "urn:eigenius:logic";
+
+// Bottom — the empty proposition (zero constructors: no proof can be built).
+// Negation is the idiom `P -> logic:False`; e.g. the determiner `no` denotes
+// `λA. λV. ∀x:A. (V(x) -> logic:False)`. (Mirrors the `stats:False` idiom; this
+// is its namespace-neutral home — statistics may migrate to it later.)
+data logic:False : Prop { }
+
+// Conjunction — the product of two propositions. The DCG generalized-conjunction
+// combinator (D63 §8.4 Phase 3) builds `logic:And(P, Q)` as the meaning of a
+// coordinated `S` (and pointwise-lifts it for `VP`/`TV` coordination).
+//
+// `P`, `Q` are PARAMETERS (sort-typed at `Prop`), mirroring Lean's
+// `And (a b : Prop) : Prop`. Because parameters are fixed across the recursor's
+// motive (only indices are abstracted), first-projection (`P ∧ Q ⊨ P`) is the
+// ordinary parametric recursor — which is what makes the FraCaS conjunction
+// inference (D63 §8.4 Phase 5) a plain elimination rather than needing the
+// harder index-abstracting recursor.
+// The constructor type leads with the parameter binders (`forall (P, Q)`), the
+// kernel convention for parametrized inductives — `peel_ctor_telescope` strips
+// `params.len()` leading binders to expose the constructor's own fields (`P`-proof,
+// `Q`-proof). What makes `P`,`Q` parameters rather than indices is the `(P, Q)` in
+// the *data header*, not the constructor shape.
+data logic:And (P : Prop, Q : Prop) : Prop {
+    conj : forall (P : Prop, Q : Prop) => P -> Q -> logic:And(P, Q)
+}
+
+// Disjunction — the sum of two propositions (`or`). Parameters, as for `And`.
+data logic:Or (P : Prop, Q : Prop) : Prop {
+    inl : forall (P : Prop, Q : Prop) => P -> logic:Or(P, Q),
+    inr : forall (P : Prop, Q : Prop) => Q -> logic:Or(P, Q)
+}
+
+// ── Modality (D63 §8.9 Slice 6-aux) ──────────────────────────────────
+// `Possible` (◇) / `Necessary` (□) — the meanings the modal auxiliaries produce
+// ("HeLa can affect BRCA1" → Possible(affects(brca1, hela)); "… must …" → Necessary(…)).
+//
+// **OPAQUE** `Prop → Prop` operators (eigentt axioms), NOT a Kripke encoding: the
+// kernel does not interpret them (no World type, no possible-worlds quantification),
+// so an ordinary `Prop` stays a `Prop` and the verb axioms are untouched. Whether
+// `Possible(P)` / `Necessary(P)` *holds* is a GROUNDING judgment (a `ChainWitness`,
+// D39/D49) — felicity ≠ truth, exactly as for `ontology:is_a` / `subclass_of` and verb
+// predications. Being opaque (not reduced to ⊤/⊥) is what lets a modal claim be carried
+// as a hypothesis or a conditional antecedent ("if X can affect Y, then …") — the same
+// reason the structural predicates are opaque.
+//
+// **Independent primitives** — no classical duality `◇P ↔ ¬□¬P` is baked in (the
+// logic here is intuitionistic; `¬P := P -> logic:False`). **No modal LAWS** (T `□P→P`,
+// 4, 5, duality) are asserted in this trusted layer: they are flavor-dependent (deontic
+// `□` fails T) and are added as opt-in axioms per domain/flavor when reasoning needs
+// them. The operators are flavor-agnostic (alethic / dynamic / deontic distinctions are
+// grounding-supplied, harvested from use — like `is_a`'s actual membership); epistemic
+// "may/might" may instead route to the epistemic GRADE (Declared) — a later refinement.
+axiom logic:Possible : Prop -> Prop
+axiom logic:Necessary : Prop -> Prop

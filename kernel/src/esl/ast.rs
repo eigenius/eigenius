@@ -341,7 +341,10 @@ pub struct DataDecl {
 #[derive(Debug)]
 pub struct DataParam {
     pub name: String,
-    pub kind: QualifiedName,
+    /// The parameter's kind — a qualified-name class OR a sort literal
+    /// (`Prop` / `Set` / `Type N`). Sort-typed parameters are needed for
+    /// Lean-style parametrized inductives such as `And (P : Prop, Q : Prop)`.
+    pub kind: IndexKind,
     pub pos: Position,
 }
 
@@ -592,6 +595,15 @@ pub enum TypeExpr {
         body: Box<TypeExpr>,
         pos: Position,
     },
+    /// Type annotation `(e : T)` — the bidirectional mode switch. Compiles to
+    /// `Exp::Ann`, letting a checkable term (e.g. a `fun` lambda, which has no
+    /// synthesizable type) appear where a type is inferred — e.g. a determiner's
+    /// λ-semantics in `lexicon:sem` (D63 §8.2).
+    Ann {
+        expr: Box<TypeExpr>,
+        typ: Box<TypeExpr>,
+        pos: Position,
+    },
 }
 
 /// Single binding in an `alias name = expr, ... in body` block.
@@ -621,6 +633,7 @@ impl TypeExpr {
             | TypeExpr::Sort { pos, .. }
             | TypeExpr::Lambda { pos, .. }
             | TypeExpr::Alias { pos, .. }
+            | TypeExpr::Ann { pos, .. }
             | TypeExpr::LitString { pos, .. }
             | TypeExpr::LitInt { pos, .. }
             | TypeExpr::LitFloat { pos, .. } => pos,

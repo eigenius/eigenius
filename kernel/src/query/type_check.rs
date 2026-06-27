@@ -35,16 +35,26 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     let mut errors = Vec::new();
 
     // Build the D14 institution index once for the whole pass — every
-    // FIBER / qualified-call check resolves through it.
-    let (index, _index_errors) = InstitutionIndex::from_layer(layer);
+    // FIBER / qualified-call check resolves through it. Index-driven
+    // (`from_layer_indexed`, not the full-chain `from_layer`): this runs on
+    // EVERY query, so on a large knowledge-graph chain the full scan was a
+    // ~O(chain) per-query floor (≈3.5s on the UMLS chain). The query head is
+    // stored, so the triple index covers it; identical result to the full scan
+    // on a core-rooted chain (`indexed_rebuild_matches_full_scan`).
+    let (index, _index_errors) = InstitutionIndex::from_layer_indexed(layer);
+
+    // DEFINE relation names are valid pattern "classes" (they reference a derived
+    // relation, not a chain class), so short-name class resolution must exempt them.
+    let relation_names: BTreeSet<String> =
+        program.definitions.iter().map(|d| d.name.clone()).collect();
 
     // Check DEFINE rules
     for def in &program.definitions {
-        check_match_part(&def.body, layer, &mut errors);
+        check_match_part(&def.body, layer, &relation_names, &mut errors);
     }
 
     // Check the query
-    check_match_part(&program.query.body, layer, &mut errors);
+    check_match_part(&program.query.body, layer, &relation_names, &mut errors);
 
     // FIBER-clause specifics: USING INSTITUTION alias + IRI resolution,
     // FIBER QueryClass / institution-agreement / OnDemand-role checks,
@@ -123,7 +133,15 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     // checks the LHS is property-bound, the property has an active
     // similarity index of the kind required by `via:` (or any kind
     // by default), and the hint set is internally consistent.
-    let prop_var_index = build_property_variable_index(program, layer);
+    let prop_var_index = match build_property_variable_index(program, layer) {
+        Ok(m) => m,
+        Err(e) => {
+            // Ambiguous short name in a property position — surface as a type
+            // error; continue with an empty typing view so other checks still run.
+            errors.push(e);
+            BTreeMap::new()
+        }
+    };
     let text_indexes = resolve_active_text_indexes(layer);
     let vector_indexes = resolve_active_vector_indexes(layer);
     let check_in_expr = |expr: &Expression, errs: &mut Vec<QueryError>| {
@@ -221,8 +239,17 @@ fn expr_has_similarity(expr: &Expression) -> bool {
     }
 }
 
-/// Check a MatchPart: validate USING IRIs resolve to classes.
-fn check_match_part(part: &MatchPart, layer: &Layer, errors: &mut Vec<QueryError>) {
+/// Check a MatchPart: validate USING IRIs resolve to classes, and that every
+/// short-name pattern class resolves to a class in scope (the implicit core
+/// namespace + any `USING NAMESPACE`) or names a DEFINE relation. Fails closed:
+/// an unresolvable short-name class is an error, not a silent degradation to an
+/// untyped match-all.
+fn check_match_part(
+    part: &MatchPart,
+    layer: &Layer,
+    relation_names: &BTreeSet<String>,
+    errors: &mut Vec<QueryError>,
+) {
     // Check USING IRIs
     let class_iri = Iri::parse(wk::CLASS).unwrap();
     for iri in &part.using {
@@ -240,6 +267,31 @@ fn check_match_part(part: &MatchPart, layer: &Layer, errors: &mut Vec<QueryError
                     "using_unresolved",
                     format!("USING '{}' does not resolve to any resource", iri),
                 ));
+            }
+        }
+    }
+
+    // Check short-name pattern classes resolve in scope.
+    for pattern in part.patterns() {
+        if let Some(Name::ShortName(short)) = &pattern.class {
+            if relation_names.contains(short) {
+                continue; // a DEFINE relation reference, not a chain class
+            }
+            match crate::query::resolve::resolve_scoped_name(
+                layer,
+                &part.using_namespaces,
+                &[wk::CLASS],
+                short,
+            ) {
+                Ok(Some(_)) => {}
+                Ok(None) => errors.push(QueryError::type_check(
+                    "unknown_class",
+                    format!(
+                        "pattern class '{short}' does not resolve to a Class in the core namespace \
+                         or any USING NAMESPACE; add `USING NAMESPACE \"<prefix>\"` or use a full IRI"
+                    ),
+                )),
+                Err(e) => errors.push(e),
             }
         }
     }
@@ -519,7 +571,15 @@ fn check_fiber_clauses(
         //    short_name.
         let qc_iri = match &fc.query_class {
             Name::FullIri(iri) => Some(iri.clone()),
-            Name::ShortName(short) => resolve_short_name_to_query_class(layer, short),
+            Name::ShortName(short) => {
+                match resolve_short_name_to_query_class(layer, &part.using_namespaces, short) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        errors.push(e);
+                        None
+                    }
+                }
+            }
         };
         let qc_entry = qc_iri.as_ref().and_then(|i| index.query_class(i));
         let qc_entry = match qc_entry {
@@ -871,7 +931,13 @@ fn collect_verdict_bound_vars(
             if let Clause::Fiber(fc) = clause {
                 let qc_iri = match &fc.query_class {
                     Name::FullIri(iri) => Some(iri.clone()),
-                    Name::ShortName(short) => resolve_short_name_to_query_class(layer, short),
+                    // Ambiguity here is reported by `check_fiber_clauses`; this
+                    // best-effort verdict scan just skips an unresolved name.
+                    Name::ShortName(short) => {
+                        resolve_short_name_to_query_class(layer, &part.using_namespaces, short)
+                            .ok()
+                            .flatten()
+                    }
                 };
                 if let Some(iri) = qc_iri {
                     if let Some(qc) = index.query_class(&iri) {
@@ -1051,21 +1117,12 @@ fn collect_property_iris(class_resource: &Resource, prop_iri: &Iri) -> Vec<Iri> 
 /// QueryClass declarations. The QueryClass class itself is not a
 /// `urn:eigenius:core:Class` instance — it is its own ontology class
 /// — so the lookup filters on `is_a == QueryClass` directly.
-fn resolve_short_name_to_query_class(layer: &Layer, short: &str) -> Option<Iri> {
-    use crate::ontology::resource::Value;
-    let qc_class_iri = Iri::parse(wk::QUERY_CLASS_CLASS).unwrap();
-    let short_prop = Iri::parse(wk::SHORT_NAME).unwrap();
-    for (iri, res) in layer.iter_all_resources() {
-        if !res.is_instance_of(&qc_class_iri) {
-            continue;
-        }
-        if let Some(Value::String(s)) = res.get(&short_prop) {
-            if s == short {
-                return Some(iri.clone());
-            }
-        }
-    }
-    None
+fn resolve_short_name_to_query_class(
+    layer: &Layer,
+    namespaces: &[String],
+    short: &str,
+) -> Result<Option<Iri>, QueryError> {
+    crate::query::resolve::resolve_scoped_name(layer, namespaces, &[wk::QUERY_CLASS_CLASS], short)
 }
 
 fn query_class_name_display(name: &Name) -> String {
@@ -1091,49 +1148,42 @@ struct PropertyBinding {
 fn build_property_variable_index(
     program: &Program,
     layer: &Layer,
-) -> BTreeMap<String, PropertyBinding> {
+) -> Result<BTreeMap<String, PropertyBinding>, QueryError> {
     let mut out: BTreeMap<String, PropertyBinding> = BTreeMap::new();
-    let mut visit = |patterns: &[Pattern]| {
-        for pat in patterns {
+    let mut visit = |part: &MatchPart| -> Result<(), QueryError> {
+        for pat in part.patterns() {
             for pp in &pat.properties {
                 if let ValueOrVariable::Variable(var) = &pp.object {
-                    if let Some(property_iri) = resolve_property_name(&pp.property, layer) {
+                    if let Some(property_iri) =
+                        resolve_property_name(&pp.property, layer, &part.using_namespaces)?
+                    {
                         out.entry(var.name.clone())
                             .or_insert(PropertyBinding { property_iri });
                     }
                 }
             }
         }
+        Ok(())
     };
-    let collect = |part: &MatchPart| -> Vec<Pattern> { part.patterns().cloned().collect() };
-    visit(&collect(&program.query.body));
+    visit(&program.query.body)?;
     for def in &program.definitions {
-        visit(&collect(&def.body));
+        visit(&def.body)?;
     }
-    out
+    Ok(out)
 }
 
 /// Resolve a property `Name` to its IRI. `FullIri` returns the IRI
 /// directly; `ShortName` scans the chain-merged view for a Property
 /// Resource whose `short_name` matches.
-fn resolve_property_name(name: &Name, layer: &Layer) -> Option<Iri> {
+fn resolve_property_name(
+    name: &Name,
+    layer: &Layer,
+    namespaces: &[String],
+) -> Result<Option<Iri>, QueryError> {
     match name {
-        Name::FullIri(iri) => Some(iri.clone()),
+        Name::FullIri(iri) => Ok(Some(iri.clone())),
         Name::ShortName(s) => {
-            use crate::ontology::resource::Value;
-            let prop_class = Iri::parse(wk::PROPERTY).ok()?;
-            let short_prop = Iri::parse(wk::SHORT_NAME).ok()?;
-            for (iri, res) in layer.iter_all_resources() {
-                if !res.is_instance_of(&prop_class) {
-                    continue;
-                }
-                if let Some(Value::String(sn)) = res.get(&short_prop) {
-                    if sn == s {
-                        return Some(iri.clone());
-                    }
-                }
-            }
-            None
+            crate::query::resolve::resolve_scoped_name(layer, namespaces, &[wk::PROPERTY], s)
         }
     }
 }
@@ -1615,6 +1665,7 @@ mod tests {
             &layer,
             r#"
             USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            USING NAMESPACE "urn:eigenius:demo:d14:"
             MATCH ?x {}
             FIBER assay:not_a_real_query_class { } AS ?v
             RETURN [] { x: ?x }
@@ -1636,6 +1687,7 @@ mod tests {
             &layer,
             r#"
             USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            USING NAMESPACE "urn:eigenius:demo:d14:"
             MATCH ?x {}
             FIBER assay:within_tolerance {
                 "urn:eigenius:demo:d14:predicted_ic50": 1.0,
@@ -1662,6 +1714,7 @@ mod tests {
             &layer,
             r#"
             USING INSTITUTION "urn:eigenius:demo:d14:dock" AS dock
+            USING NAMESPACE "urn:eigenius:demo:d14:"
             MATCH ?x {}
             FIBER dock:validate_prediction {
                 candidate: "urn:eigenius:demo:d14:dock_to_assay"(?x)
@@ -1684,6 +1737,7 @@ mod tests {
             &layer,
             r#"
             USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            USING NAMESPACE "urn:eigenius:demo:d14:"
             MATCH ?x {}
             FIBER assay:validate_prediction {
                 candidate: "urn:eigenius:demo:d14:nonexistent_comorphism"(?x)
@@ -1770,6 +1824,7 @@ mod tests {
             &layer,
             r#"
             USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            USING NAMESPACE "urn:eigenius:demo:d14:"
             MATCH ?x {}
             FIBER assay:validate_prediction {
                 candidate: "urn:eigenius:demo:d14:dock_to_assay"(?x)
@@ -1795,6 +1850,7 @@ mod tests {
             &layer,
             r#"
             USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            USING NAMESPACE "urn:eigenius:demo:d14:"
             MATCH ?x {}
             FIBER assay:validate_prediction {
                 candidate: "urn:eigenius:demo:d14:dock_to_assay"(?x)
@@ -1991,6 +2047,7 @@ mod tests {
         let errors = check(
             &layer,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_body: ?desc }
             WHERE ?desc ~ "WAL truncation"
             "#,
@@ -2004,6 +2061,7 @@ mod tests {
         let errors = check(
             &layer,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_body: ?desc }
             WHERE ?desc ~ "kernel chain consolidation"
             "#,
@@ -2017,6 +2075,7 @@ mod tests {
         let errors = check(
             &layer,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_body: ?desc }
             WHERE ?other ~ "anything"
             "#,
@@ -2073,6 +2132,7 @@ mod tests {
         let errors = check(
             &layer_count,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_count: ?c }
             WHERE ?c ~ "anything"
             "#,
@@ -2092,6 +2152,7 @@ mod tests {
         let errors = check(
             &layer,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_body: ?desc }
             WHERE ?desc ~ "query"
             "#,
@@ -2110,6 +2171,7 @@ mod tests {
         let errors = check(
             &layer,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_body: ?desc }
             WHERE ?desc ~ 42
             "#,
@@ -2128,6 +2190,7 @@ mod tests {
         let errors = check(
             &layer,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_body: ?desc }
             WHERE ?desc ~ "q" { via: text }
             "#,
@@ -2146,6 +2209,7 @@ mod tests {
         let errors = check(
             &layer,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_body: ?desc }
             WHERE ?desc ~ "q" { via: vector }
             "#,
@@ -2164,6 +2228,7 @@ mod tests {
         let errors = check(
             &layer,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_body: ?desc }
             WHERE ?desc ~ "q" { via: hybrid }
             "#,
@@ -2182,6 +2247,7 @@ mod tests {
         let errors = check(
             &layer,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_body: ?desc }
             WHERE ?desc ~ "q" { via: text, model: "urn:eigenius:embed:m1" }
             "#,
@@ -2200,6 +2266,7 @@ mod tests {
         let errors = check(
             &layer,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_body: ?desc }
             WHERE ?desc ~ "q" { model: "urn:eigenius:embed:other" }
             "#,
@@ -2220,6 +2287,7 @@ mod tests {
         let errors = check(
             &layer,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_body: ?desc }
             WHERE ?desc ~ "x"
             TOP 20
@@ -2234,6 +2302,7 @@ mod tests {
         let errors = check(
             &layer,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_body: ?desc }
             WHERE ?desc ~ "x"
             TOP 0
@@ -2251,6 +2320,7 @@ mod tests {
         let errors = check(
             &layer,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_body: ?desc }
             WHERE ?desc ~ "x"
             LIMIT 10
@@ -2269,6 +2339,7 @@ mod tests {
         let errors = check(
             &layer,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_body: ?desc }
             WHERE ?desc ~ "x"
             ORDER BY ?desc
@@ -2287,6 +2358,7 @@ mod tests {
         let errors = check(
             &layer,
             r#"
+            USING NAMESPACE "urn:ex:"
             MATCH ?d { test_body: ?desc }
             TOP 5
             "#,

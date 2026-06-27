@@ -42,6 +42,11 @@ pub struct RuleDefinition {
 pub struct MatchPart {
     pub using: Vec<Iri>,
     pub using_institutions: Vec<InstitutionAlias>,
+    /// `USING NAMESPACE "<prefix>"` declarations — the vocabulary namespaces
+    /// (verbatim IRI prefixes) that bare short names in this part's
+    /// classes/properties/query-classes resolve within. See
+    /// [`crate::query::resolve`].
+    pub using_namespaces: Vec<String>,
     pub clauses: Vec<Clause>,
     pub conditions: Vec<Expression>,
 }

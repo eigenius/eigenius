@@ -36,6 +36,8 @@ const JUMP_ONTOLOGY_JSON: &str =
 const JUMP_HIGHS_INSTITUTION_JSON: &str =
     include_str!("../../../julia/institutions/jump/declarations/jump-highs-institution.eigon.json");
 
+mod common;
+
 fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("static IRI must parse")
 }
@@ -47,11 +49,17 @@ fn jump_ontology_and_highs_institution_validate_cleanly() {
     let storage = LayerStorage::with_persistent(Arc::clone(&backend) as Arc<dyn PersistentBackend>);
     let mut ctx = bootstrap_with_storage(storage).expect("bootstrap");
 
+    // Env before institution (closed-world `requires_environment`).
+    let jump_env = common::stub_env_json("urn:eigenius:jump_highs:env:v1", "julia");
     for (label, json) in [
-        ("jump_ontology", JUMP_ONTOLOGY_JSON),
-        ("jump_highs_institution", JUMP_HIGHS_INSTITUTION_JSON),
+        ("jump_ontology", JUMP_ONTOLOGY_JSON.to_string()),
+        ("jump_highs_env", jump_env),
+        (
+            "jump_highs_institution",
+            JUMP_HIGHS_INSTITUTION_JSON.to_string(),
+        ),
     ] {
-        for r in eigon_json::parse_document(json).expect("parse") {
+        for r in eigon_json::parse_document(&json).expect("parse") {
             ctx.add_resource(r).expect("add_resource");
         }
         let working = ctx.take_working(label).expect("take_working");

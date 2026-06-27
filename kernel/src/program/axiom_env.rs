@@ -230,23 +230,35 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_env_has_only_statistics_axioms() {
-        // Bootstrap chain ships the D52 parameter-symbol + ordering
-        // axiom set (stats:mean_of / stats:variance_of / stats:median_of
-        // / stats:mean_diff_of / stats:slope_of / stats:intercept_of /
-        // stats:lt / stats:le / stats:gt / stats:ge — ten axioms).
-        // Every entry should be in the stats namespace.
+    fn bootstrap_env_has_only_expected_axioms() {
+        // Bootstrap chain ships three opaque-axiom families:
+        // - the D52 measurement parameter-symbol + ordering set
+        //   (`measurements:` — mean_of / variance_of / … / lt / le / gt / ge);
+        // - the D63 §8.5 3c ontology relations `ontology:is_a` / `ontology:subclass_of`
+        //   (predicate-nominal membership / subsumption); and
+        // - the D63 §8.9 6-aux modal operators `logic:Possible` / `logic:Necessary`
+        //   (opaque `Prop → Prop`, witnessed downstream — see `ontologies/logic/logic.esl`).
+        // Every bootstrap axiom should be in one of those families.
         let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
         let env = build_axiom_env(&head).unwrap();
+        let modal = [
+            "urn:eigenius:logic:Possible",
+            "urn:eigenius:logic:Necessary",
+        ];
         let unexpected: Vec<&Iri> = env
             .iter()
             .map(|(iri, _)| iri)
-            .filter(|iri| !iri.as_str().starts_with("urn:eigenius:measurements:"))
+            .filter(|iri| {
+                let s = iri.as_str();
+                !s.starts_with("urn:eigenius:measurements:")
+                    && !s.starts_with("urn:eigenius:ontology:")
+                    && !modal.contains(&s)
+            })
             .collect();
         assert!(
             unexpected.is_empty(),
-            "bootstrap axioms should only be the D52 statistics axiom set; \
-             unexpected non-stats axioms: {unexpected:?}"
+            "bootstrap axioms should be the D52 measurement set + the D63 ontology \
+             relations + the modal operators; unexpected axioms: {unexpected:?}"
         );
     }
 

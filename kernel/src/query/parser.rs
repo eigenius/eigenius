@@ -218,20 +218,28 @@ impl Parser {
     fn parse_match_part(&mut self, allow_fiber: bool) -> Result<MatchPart, QueryError> {
         let mut using = Vec::new();
         let mut using_institutions = Vec::new();
+        let mut using_namespaces = Vec::new();
         while self.at(&TokenKind::Using) {
-            // Peek past USING to distinguish plain USING from USING INSTITUTION.
-            if matches!(self.peek_at(1), Some(TokenKind::Institution)) {
-                if !allow_fiber {
-                    return Err(QueryError::parser(
-                        self.position(),
-                        "USING INSTITUTION is only valid in the top-level query, not in DEFINE"
-                            .to_string(),
-                    ));
+            // Peek past USING to distinguish plain USING from USING INSTITUTION
+            // and USING NAMESPACE.
+            match self.peek_at(1) {
+                Some(TokenKind::Institution) => {
+                    if !allow_fiber {
+                        return Err(QueryError::parser(
+                            self.position(),
+                            "USING INSTITUTION is only valid in the top-level query, not in DEFINE"
+                                .to_string(),
+                        ));
+                    }
+                    using_institutions.push(self.parse_using_institution()?);
                 }
-                using_institutions.push(self.parse_using_institution()?);
-            } else {
-                let more = self.parse_using()?;
-                using.extend(more);
+                Some(TokenKind::Namespace) => {
+                    using_namespaces.extend(self.parse_using_namespace()?);
+                }
+                _ => {
+                    let more = self.parse_using()?;
+                    using.extend(more);
+                }
             }
         }
 
@@ -273,6 +281,7 @@ impl Parser {
         Ok(MatchPart {
             using,
             using_institutions,
+            using_namespaces,
             clauses,
             conditions,
         })
@@ -297,6 +306,32 @@ impl Parser {
             }
         }
         Ok(iris)
+    }
+
+    /// `USING NAMESPACE "<prefix>"` (one or more comma-separated prefixes).
+    /// Each prefix is the IRI-string prefix of a vocabulary namespace
+    /// (e.g. `"urn:eigenius:core:"`) that bare short names resolve within.
+    /// Caller has already peeked that we're at `USING NAMESPACE`.
+    fn parse_using_namespace(&mut self) -> Result<Vec<String>, QueryError> {
+        self.expect(&TokenKind::Using)?;
+        self.expect(&TokenKind::Namespace)?;
+        let mut prefixes = Vec::new();
+        loop {
+            let prefix = self.parse_string_lit()?;
+            if prefix.is_empty() {
+                return Err(QueryError::parser(
+                    self.position(),
+                    "USING NAMESPACE prefix must be non-empty".to_string(),
+                ));
+            }
+            prefixes.push(prefix);
+            if self.at(&TokenKind::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        Ok(prefixes)
     }
 
     /// `USING INSTITUTION "iri" AS alias`
@@ -1341,6 +1376,20 @@ mod tests {
         assert_eq!(pats.len(), 1);
         assert!(pats[0].class.is_none());
         assert!(!pats[0].negated);
+    }
+
+    #[test]
+    fn using_namespace_parses() {
+        let prog = parse_str(
+            r#"USING NAMESPACE "urn:eigenius:core:", "urn:ex:" MATCH Widget(?w) { name: ?n }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            prog.query.body.using_namespaces,
+            vec!["urn:eigenius:core:".to_string(), "urn:ex:".to_string()]
+        );
+        // Plain USING and USING NAMESPACE are distinct lists.
+        assert!(prog.query.body.using.is_empty());
     }
 
     #[test]

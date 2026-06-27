@@ -25,6 +25,14 @@ pub fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("well-known IRI constants must be valid")
 }
 
+// --- Namespaces ---
+
+/// The core-ontology IRI prefix. Core is the root layer present on every chain,
+/// so its vocabulary acts as an always-available prelude — e.g. EigenQL short-name
+/// resolution treats this namespace as implicitly imported (see
+/// [`crate::query::resolve`]).
+pub const CORE_NAMESPACE: &str = "urn:eigenius:core:";
+
 // --- Classes ---
 
 pub const CLASS: &str = "urn:eigenius:core:Class";
@@ -59,14 +67,24 @@ pub const TEXT_INDEX_CLASS: &str = "urn:eigenius:core:TextIndex";
 /// D43 §2.4 / §5.
 pub const VECTOR_INDEX_CLASS: &str = "urn:eigenius:core:VectorIndex";
 
+/// Class IRI for a `core:ValueIndex` Resource — the first-class
+/// Resource that declares an EXACT value-index target (D65).
+pub const VALUE_INDEX_CLASS: &str = "urn:eigenius:core:ValueIndex";
+
 /// Property IRI for `target_property` — the Property an Index
-/// Resource (TextIndex or VectorIndex) targets for indexing.
+/// Resource (TextIndex / VectorIndex / ValueIndex) targets for indexing.
 /// Value is a resource reference to a `core:Property`.
 pub const TARGET_PROPERTY: &str = "urn:eigenius:core:target_property";
 
 /// Property IRI for `text_analyzer` — the analyzer ID for a
 /// TextIndex (e.g. `"en-stem-v1"`).
 pub const TEXT_ANALYZER: &str = "urn:eigenius:core:text_analyzer";
+
+/// Property IRI for `value_normalizer` — the normalizer Resource a
+/// ValueIndex applies to values before exact keying (D65). One of
+/// `urn:eigenius:core:normalizers:{identity,lowercase,lowercase_trim}`;
+/// default `identity` when omitted.
+pub const VALUE_NORMALIZER: &str = "urn:eigenius:core:value_normalizer";
 
 /// Property IRI for `vec_model` — the Embedder Component IRI a
 /// VectorIndex uses.
@@ -146,6 +164,12 @@ pub const MERGE_RECORD_RESTRUCTURE_AFFECTED_CLASS: &str =
 /// Used by `MergeComorphism` to type the optional ancestor argument
 /// of a `(A, A, Option<A>) -> A` witness signature.
 pub const OPTION: &str = "urn:eigenius:core:Option";
+
+/// Canonical list inductive ([`crate::nbe::term::list_decl`]). A kernel
+/// built-in (not a chain resource), so type-expression decoders
+/// short-circuit this IRI to the built-in decl — as they do the
+/// primitive datatypes — rather than resolving it against the chain.
+pub const LIST: &str = "urn:eigenius:core:List";
 
 // --- Inductive types (Phase 11b, D19) ---
 

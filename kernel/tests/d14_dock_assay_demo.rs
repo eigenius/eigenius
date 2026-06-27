@@ -844,6 +844,7 @@ fn eigenql_fiber_coercion_only_produces_verdict_binding() {
     };
     let source = r#"
         USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+        USING NAMESPACE "urn:eigenius:demo:d14:"
 
         MATCH "urn:eigenius:demo:d14:DockingResult"(?d) {
             "urn:eigenius:demo:d14:delta_g": ?dg
@@ -903,6 +904,7 @@ fn eigenql_fiber_with_comorphism_coercion_and_postfix_holds() {
 
     let source = r#"
         USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+        USING NAMESPACE "urn:eigenius:demo:d14:"
 
         MATCH "urn:eigenius:demo:d14:DockingResult"(?d) {
             "urn:eigenius:demo:d14:delta_g": ?dg
@@ -969,6 +971,7 @@ fn eigenql_fiber_into_collects_response_for_chain_commit() {
     let source = format!(
         r#"
         USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+        USING NAMESPACE "urn:eigenius:demo:d14:"
 
         MATCH "urn:eigenius:demo:d14:DockingResult"(?d) {{
             "urn:eigenius:demo:d14:delta_g": ?dg
@@ -1034,6 +1037,7 @@ fn eigenql_postfix_fails_drops_holding_row() {
 
     let source = r#"
         USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+        USING NAMESPACE "urn:eigenius:demo:d14:"
 
         MATCH "urn:eigenius:demo:d14:DockingResult"(?d) {
             "urn:eigenius:demo:d14:delta_g": ?dg

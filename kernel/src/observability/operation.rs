@@ -147,3 +147,5 @@ pub const BOOTSTRAP_LOAD: &str = "kernel.bootstrap.load";
 pub const GC_LOAD_TOPOLOGY: &str = "kernel.gc.load_topology";
 pub const GC_MARK: &str = "kernel.gc.mark";
 pub const GC_SWEEP: &str = "kernel.gc.sweep";
+
+pub const RPC_PARSE_SENTENCE: &str = "kernel.rpc.parse_sentence";

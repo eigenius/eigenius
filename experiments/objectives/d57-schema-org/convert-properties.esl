@@ -1,0 +1,220 @@
+// ════════════════════════════════════════════════════════════════════
+// Typed property set for crates/eigenius-schemaorg/src/convert.rs
+// (the schema.org JSON-LD → Eigon converter).
+// ════════════════════════════════════════════════════════════════════
+//
+// The first concrete output of the D61 D57-redux dogfood
+// (docs/design/d61-llm-based-encoding-methodology.md §8 Phase 1): the converter's
+// desirable properties, faithfulness claims, limitations, and decisions captured
+// as the D61 typed decision layer (objective: §5) — typed Props, NOT prose. Each
+// property is graded by the strongest available evidence (D61 §7):
+//
+//   Tier 1  CompetencyQuestion   — kernel-checkable now (Verified / Verified-by-check)
+//   Tier 2  DesirableProperty+CQ — function invariant (∀-input; proptest → Derived)
+//   Tier 3  DesirableProperty+Axiom — semantic faithfulness (Declared + Anchored)
+//   Tier 4  Limitation / CutItem — honestly unachievable, reframed + recorded
+//
+// Loads against core→reflection→reasoning→reference→objective; witnessed by
+// crates/eigenius-schemaorg/tests/convert_properties_validate.rs (the Expressible
+// gate: it compiles + validates ⇒ the D61 §5 vocabulary holds the real content).
+//
+// HARVEST NOTE (the dogfood validating/refining §5): the content Props below are
+// named predicates over the "schema_org" subject — the proven D57 string-subject
+// idiom (00-objective.esl). A finer, more faithful form would take the constructs
+// themselves as resource arguments, e.g. MapsConstruct(schema:domainIncludes,
+// core:recommends); that needs resource-typed Prop arguments in type_expr — a
+// content-notation extension (D61 §5.2) flagged here for a separate check, not
+// assumed.
+
+namespace core       = "urn:eigenius:core";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace epistemic  = "urn:eigenius:reflection:epistemic";
+namespace objective  = "urn:eigenius:objective";
+namespace obj        = "urn:eigenius:obj:d57:convert";
+
+// ── Content vocabulary: the converter's properties as typed Props ──────
+data obj:OutputValidates       : core:string -> Prop { }  // T1
+data obj:NoDomainRestriction   : core:string -> Prop { }  // T1 (the necessary half of PreservesOpenWorld)
+data obj:EnumClosureTransitive : core:string -> Prop { }  // T1 (the F1 guard)
+data obj:IdentityRoundTrip     : core:string -> Prop { }  // T1
+data obj:CutExhaustive         : core:string -> Prop { }  // T1
+data obj:Deterministic         : core:string -> Prop { }  // T1/T2
+data obj:ReferentialClosure    : core:string -> Prop { }  // T2 (gap)
+data obj:GradeUniform          : core:string -> Prop { }  // T2 (gap)
+data obj:PreservesOpenWorld    : core:string -> Prop { }  // T3 (faithfulness)
+data obj:EntityFirstFaithful   : core:string -> Prop { }  // T3 (a decision)
+data obj:LosslessRoundTrip     : core:string -> Prop { }  // T4 (FALSE — limitation)
+data obj:QuantityPreserved     : core:string -> Prop { }  // T4 (FALSE)
+data obj:RelationsPreserved    : core:string -> Prop { }  // T4 (FALSE by design)
+// option claims
+data obj:MapDomainToRecommends : core:string -> Prop { }
+data obj:MapDomainToDomain     : core:string -> Prop { }
+
+// ════════════════════════════════════════════════════════════════════
+// TIER 1 — kernel-checkable competency questions (Verified / -by-check).
+// Each is GROUNDED by an existing cargo-test witness over V30.0.
+// ════════════════════════════════════════════════════════════════════
+resource obj:cq_validates : objective:CompetencyQuestion {
+    objective:proposition     = type_expr( obj:OutputValidates("schema_org") );
+    objective:query           = "load all 2114 emitted resources onto core+reflection; Validator error count";
+    objective:expected_answer = "0 errors";
+    objective:grounded_by     = "urn:eigenius:test:eigenius-schemaorg:output_validates:output_loads_and_validates";
+}
+resource obj:cq_no_domain : objective:CompetencyQuestion {
+    objective:proposition     = type_expr( obj:NoDomainRestriction("schema_org") );
+    objective:query           = "USING \"urn:eigenius:core:Property\" MATCH ?p { \"urn:eigenius:core:domain\": ?d } RETURN [] { p: ?p } TOP 1";
+    objective:expected_answer = "empty — no property carries core:domain";
+    objective:probes          = obj:dp_open_world;
+    objective:grounded_by     = "urn:eigenius:test:eigenius-schemaorg:output_validates:no_resource_carries_core_domain";
+}
+resource obj:cq_enum_closed : objective:CompetencyQuestion {
+    objective:proposition     = type_expr( obj:EnumClosureTransitive("schema_org") );
+    objective:query           = "Enumeration tier == (properties carrying allows_only) + enumeration_open; allows_only is the TRANSITIVE member closure";
+    objective:expected_answer = "66 == 62 closed + 4 open (member-less enums accounted)";
+    objective:probes          = obj:dp_type_safety;
+    objective:grounded_by     = "urn:eigenius:test:eigenius-schemaorg:output_validates:enumeration_ranged_properties_close_with_allows_only";
+}
+resource obj:cq_round_trip : objective:CompetencyQuestion {
+    objective:proposition     = type_expr( obj:IdentityRoundTrip("schema_org") );
+    objective:query           = "for every emitted r: source_irl reverses to its urn:schema_org: @id under the prefix substitution";
+    objective:expected_answer = "all emitted resources round-trip";
+    objective:grounded_by     = "urn:eigenius:test:eigenius-schemaorg:output_validates:source_irl_round_trips_to_id";
+}
+resource obj:cq_cut : objective:CompetencyQuestion {
+    objective:proposition     = type_expr( obj:CutExhaustive("schema_org") );
+    objective:query           = "independent recount: mapped + folded + excluded + non_vocab == all schema: nodes; reproduces coverage";
+    objective:expected_answer = "partition exhaustive; coverage report reproduced exactly";
+    objective:grounded_by     = "urn:eigenius:test:eigenius-schemaorg:output_validates:cut_partitions_the_schema_namespace";
+}
+resource obj:cq_deterministic : objective:CompetencyQuestion {
+    objective:proposition     = type_expr( obj:Deterministic("schema_org") );
+    objective:query           = "convert twice; serialize both; byte-compare";
+    objective:expected_answer = "byte-identical";
+    objective:grounded_by     = "urn:eigenius:test:eigenius-schemaorg:output_validates:conversion_is_deterministic";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// TIER 2 — function invariants (∀ input). Hold by construction; checked
+// only on V30.0 + the synthetic unit graph today. OPEN: no grounded_by
+// (no ∀-input proptest yet) → the Discovered gate flags the milestone.
+// ════════════════════════════════════════════════════════════════════
+resource obj:dp_referential_closure : objective:DesirableProperty {
+    objective:proposition = type_expr( obj:ReferentialClosure("schema_org") );
+    objective:priority    = 1;
+    objective:checked_by  = obj:cq_referential_closure;
+}
+resource obj:cq_referential_closure : objective:CompetencyQuestion {
+    objective:proposition     = type_expr( obj:ReferentialClosure("schema_org") );
+    objective:query           = "∀ input: every class_types/recommends/allows_only/subclass_of target resolves within output ∪ {core,reflection} (kept_ids filter at every emit site)";
+    objective:expected_answer = "no dangling reference (proptest over random @graphs)";
+    objective:probes          = obj:dp_referential_closure;
+    // OPEN: implied by output_loads_and_validates on V30.0, but neither isolated nor proptested.
+}
+resource obj:dp_grade_uniform : objective:DesirableProperty {
+    objective:proposition = type_expr( obj:GradeUniform("schema_org") );
+    objective:priority    = 2;
+    objective:checked_by  = obj:cq_grade_uniform;
+}
+resource obj:cq_grade_uniform : objective:CompetencyQuestion {
+    objective:proposition     = type_expr( obj:GradeUniform("schema_org") );
+    objective:query           = "every emitted resource is_a DeclaredResource AND has declared_by = urn:schema_org";
+    objective:expected_answer = "all emitted (today only source_irl presence is checked at full scale)";
+    objective:probes          = obj:dp_grade_uniform;
+    // OPEN gap.
+}
+resource obj:hyp_invariants_universal : objective:Hypothesis {
+    objective:proposition = type_expr( obj:ReferentialClosure("schema_org") );
+    objective:outcome     = "open";
+    // resolved_by filled when a proptest over random @graphs passes (→ Derived) or
+    // finds a counterexample (→ refuted, a recorded finding). The Tier-2 needle-mover.
+}
+
+// ════════════════════════════════════════════════════════════════════
+// TIER 3 — semantic faithfulness (Declared + Anchored). The mechanical
+// check (cq_no_domain) is NECESSARY, not SUFFICIENT; the warrant is the
+// cited conformance fact. D57 #9, the running example.
+// ════════════════════════════════════════════════════════════════════
+resource obj:ax_domain_advisory : objective:Axiom {
+    objective:proposition = type_expr( obj:PreservesOpenWorld("schema_org") );
+    objective:axiom_kind  = epistemic:declared;
+    objective:witness     = "urn:eigenius:obj:d57:cite:datamodel_conformance";
+}
+resource obj:dp_open_world : objective:DesirableProperty {
+    objective:proposition = type_expr( obj:PreservesOpenWorld("schema_org") );
+    objective:priority    = 1;
+    objective:checked_by  = obj:cq_no_domain;
+}
+resource obj:dp_type_safety : objective:DesirableProperty {
+    objective:proposition = type_expr( obj:EnumClosureTransitive("schema_org") );
+    objective:priority    = 2;
+}
+resource obj:tn_openworld_vs_enforce : objective:Tension {
+    objective:between     = [obj:dp_open_world, obj:dp_type_safety];
+    objective:resolved_by = "urn:eigenius:obj:d57:convert:dec_domain_mapping";
+}
+resource obj:opt_recommends : objective:Option {
+    objective:option_claim = type_expr( obj:MapDomainToRecommends("schema_org") );
+    core:description = "domainIncludes -> advisory core:recommends (faithful to schema.org's open world).";
+}
+resource obj:opt_domain : objective:Option {
+    objective:option_claim = type_expr( obj:MapDomainToDomain("schema_org") );
+    core:description = "domainIncludes -> restrictive core:domain (would over-enforce; rejected).";
+}
+resource obj:dec_domain_mapping : objective:DecisionPoint {
+    objective:proposition = type_expr( obj:MapDomainToRecommends("schema_org") );
+    objective:options     = [obj:opt_domain, obj:opt_recommends];
+    objective:selected    = obj:opt_recommends;
+    objective:warrant     = [obj:dp_open_world, obj:cq_no_domain, obj:ax_domain_advisory];
+}
+
+// ════════════════════════════════════════════════════════════════════
+// TIER 4 — honest limitations. The unachievable property is reframed into
+// an achievable one (Tier 1/3) plus a recorded Limitation + CutItem.
+// ════════════════════════════════════════════════════════════════════
+resource obj:lim_lossless_round_trip : objective:Limitation {
+    objective:proposition = type_expr( obj:LosslessRoundTrip("schema_org") );
+    objective:reason      = "source_irl round-trips IDENTITY, not semantics: the dropped literal of an entity-first union (e.g. author's Text) is recoverable only by re-reading source_irl's JSON-LD, not from the Eigon resource. Achievable form: IdentityRoundTrip (Verified) + recoverable-via-source (Declared).";
+    objective:consequence = obj:cut_union_literal;
+}
+resource obj:cut_union_literal : objective:CutItem {
+    objective:proposition = type_expr( obj:LosslessRoundTrip("schema_org") );
+    objective:reason      = "entity-first drops the literal option of a mixed union; recoverable via source_irl, not on-chain.";
+    objective:disposition = objective:disp_residual_recorded;
+}
+resource obj:lim_quantity : objective:Limitation {
+    objective:proposition = type_expr( obj:QuantityPreserved("schema_org") );
+    objective:reason      = "the Quantity family folds to a core scalar (string); a structured quantity (value+unit) collapses. Recorded in coverage.datatypes_folded.";
+    objective:consequence = obj:cut_quantity;
+}
+resource obj:cut_quantity : objective:CutItem {
+    objective:proposition = type_expr( obj:QuantityPreserved("schema_org") );
+    objective:reason      = "structured Quantity -> string scalar (v1; acceptable, recorded).";
+    objective:disposition = objective:disp_residual_recorded;
+}
+resource obj:lim_relations : objective:Limitation {
+    objective:proposition = type_expr( obj:RelationsPreserved("schema_org") );
+    objective:reason      = "Tier-3 relational/inference vocabulary (subPropertyOf, inverseOf, supersededBy, equivalentClass|Property, Role) is recorded as inert residual, never active relations — Eigenius adopts a vocabulary, not a reasoner.";
+    objective:consequence = obj:cut_tier3;
+}
+resource obj:cut_tier3 : objective:CutItem {
+    objective:proposition = type_expr( obj:RelationsPreserved("schema_org") );
+    objective:reason      = "no reasoner; relations recorded in coverage.residual_relations.";
+    objective:disposition = objective:disp_excluded;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// A representative thesis Milestone, with the Tier-1/2 CQs as its typed
+// discovery_targets. The Discovered gate (well-posed-discovered.eigenql)
+// would flag this milestone OPEN today — cq_referential_closure and
+// cq_grade_uniform are ungrounded (the two real gaps). That is the point:
+// the gate surfaces undiscovered grounding up front, mechanically.
+// ════════════════════════════════════════════════════════════════════
+resource obj:m_convert_faithful : objective:Milestone {
+    objective:proposition      = type_expr( obj:OutputValidates("schema_org") );
+    objective:acceptance_grade = epistemic:verified;
+    objective:witness_kind     = objective:wk_query;
+    objective:falsifier        = "any Tier-1 competency-question falsifier returns a non-expected result";
+    objective:discovery_target = [obj:cq_validates, obj:cq_no_domain, obj:cq_enum_closed,
+                                  obj:cq_round_trip, obj:cq_cut, obj:cq_deterministic,
+                                  obj:cq_referential_closure, obj:cq_grade_uniform];
+}

@@ -112,6 +112,20 @@ pass. D43 consolidation re-extracts text indexes in `LayerBuilder::build` and
 rebuilds vector indexes on commit (the sweep triggers reindex). Confirm a `~`
 query now surfaces what you just added — that's the loop closing.
 
+### 6. Discover before you conclude — the gated step (D61)
+Retrieving and mapping isn't enough: a faithful encoding rests on the *right facts
+having been discovered*, and the failure mode is concluding before checking the spec
+(D57 #9: `domainIncludes` advisory → `core:recommends`, surfaced only when a human
+asked). So make discovery **first-class and gated**. Before a milestone may conclude,
+enumerate the load-bearing **discovery targets** it rests on, phrased as **competency
+questions** (D61 §3's *descent* — turn the goal into typed, runnable targets:
+decisions, desirable properties, the tensions where faithfulness is at risk). Each
+unanswered target is a **blocker**: the **Discovered gate** (D61 §6;
+[`experiments/objectives/well-posed-discovered.eigenql`](../../experiments/objectives/well-posed-discovered.eigenql),
+run alongside the other on-demand gates — empty result = passes) holds a milestone
+open while any `objective:CompetencyQuestion` it names via `objective:discovery_target`
+is ungrounded. This is `reasoning`'s *fail-closed* moved upstream into grounding.
+
 ## Disciplines
 
 1. **Retrieve before you research.** The kernel first; the web only for the gap.
@@ -126,6 +140,10 @@ query now surfaces what you just added — that's the loop closing.
 7. **Spec over data; cite proactively.** Adopt a standard from its authoritative
    documentation, not just its machine artifact, and commit the citation for each
    load-bearing decision as you make it — not when prompted.
+8. **Discover before you conclude — gate on open targets.** Enumerate the
+   load-bearing discovery targets (competency questions) a milestone rests on; an
+   open target is a blocker (the Discovered gate, D61 §6), not a thing to conclude
+   past.
 
 ## Going deeper
 

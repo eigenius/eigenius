@@ -91,6 +91,26 @@ pub struct ActiveVectorIndex {
     pub embedding_policy: Iri,
 }
 
+/// Description of one active `core:ValueIndex` Resource (D65).
+///
+/// Carries what both index-side population (`extend_layer`) and query-side
+/// lookup need: the Index's own IRI (the key its entries are stored under),
+/// the property it targets, and the normalizer Resource IRI it applies.
+#[derive(Debug, Clone)]
+pub struct ActiveValueIndex {
+    /// The ValueIndex Resource's own IRI — the key under which its entries are stored.
+    pub iri: Iri,
+    /// The Property the ValueIndex targets.
+    pub target_property: Iri,
+    /// The normalizer Resource IRI (one of
+    /// `urn:eigenius:core:normalizers:{identity,lowercase,lowercase_trim}`); default
+    /// `core:normalizers:identity` when omitted.
+    pub normalizer: Iri,
+}
+
+/// Default normalizer applied when a ValueIndex omits `value_normalizer`.
+const VALUE_NORMALIZER_DEFAULT: &str = "urn:eigenius:core:normalizers:identity";
+
 /// Default values applied when a VectorIndex omits a recommended slot.
 mod vec_defaults {
     pub const STRATEGY: &str = "urn:eigenius:core:strategies:auto";
@@ -246,6 +266,97 @@ pub fn verify_text_index_multiplicity(indexes: &[ActiveTextIndex]) -> Result<(),
         if let Some(prior) = seen.get(&active.target_property) {
             return Err(format!(
                 "two active TextIndex Resources target property {} at this head: {} and {}",
+                active.target_property.as_str(),
+                prior.as_str(),
+                active.iri.as_str()
+            ));
+        }
+        seen.insert(&active.target_property, &active.iri);
+    }
+    Ok(())
+}
+
+/// Enumerate every `core:ValueIndex` Resource active at `head` (D65).
+///
+/// Same shape as [`resolve_active_text_indexes`]: find Resources whose `is_a`
+/// contains `core:ValueIndex`, then read each one's `target_property` and
+/// `value_normalizer` slots (normalizer defaulting to `core:normalizers:identity`).
+pub fn resolve_active_value_indexes(head: &Layer) -> Vec<ActiveValueIndex> {
+    let class_iri = match Iri::parse(wk::VALUE_INDEX_CLASS) {
+        Ok(iri) => iri,
+        Err(_) => return Vec::new(),
+    };
+    let is_a_iri = match Iri::parse(wk::IS_A) {
+        Ok(iri) => iri,
+        Err(_) => return Vec::new(),
+    };
+    let candidates = scan_chain(head, &is_a_iri, &class_iri);
+    let mut out = Vec::with_capacity(candidates.len());
+    for subject in candidates {
+        let target_property = match read_iri(head, &subject, wk::TARGET_PROPERTY) {
+            Some(iri) => iri,
+            None => continue,
+        };
+        let normalizer = read_iri(head, &subject, wk::VALUE_NORMALIZER)
+            .unwrap_or_else(|| Iri::parse(VALUE_NORMALIZER_DEFAULT).expect("valid default iri"));
+        out.push(ActiveValueIndex {
+            iri: subject,
+            target_property,
+            normalizer,
+        });
+    }
+    out
+}
+
+/// Extract the value-index entries a layer DEFINES (D65) — for each active
+/// `core:ValueIndex` and each resource carrying a `String` (or `String`-array)
+/// value on the index's target property, an [`OwnedValueEntry`] keyed by the
+/// index IRI + the normalized value. Mirrors `extract_indexable_triples`;
+/// consulted only the resources defined in this layer (`iter_resources`), so the
+/// build-time pre-population is self-contained.
+pub fn extract_value_entries(layer: &Layer) -> Vec<super::value_index::OwnedValueEntry> {
+    use super::value_index::{normalize_value, OwnedValueEntry};
+    let actives = resolve_active_value_indexes(layer);
+    if actives.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for (subject, resource) in layer.iter_resources() {
+        for active in &actives {
+            let Some(value) = resource.get(&active.target_property) else {
+                continue;
+            };
+            let mut push = |s: &str| {
+                out.push(OwnedValueEntry {
+                    index: active.iri.clone(),
+                    key: normalize_value(&active.normalizer, s),
+                    subject: subject.clone(),
+                });
+            };
+            match value {
+                Value::String(s) => push(s),
+                Value::Array(items) => {
+                    for item in items {
+                        if let Value::String(s) = item {
+                            push(s);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+/// Enforce the v1 multiplicity constraint for ValueIndex resources (D65): at
+/// most one active ValueIndex per target Property.
+pub fn verify_value_index_multiplicity(indexes: &[ActiveValueIndex]) -> Result<(), String> {
+    let mut seen: std::collections::BTreeMap<&Iri, &Iri> = std::collections::BTreeMap::new();
+    for active in indexes {
+        if let Some(prior) = seen.get(&active.target_property) {
+            return Err(format!(
+                "two active ValueIndex Resources target property {} at this head: {} and {}",
                 active.target_property.as_str(),
                 prior.as_str(),
                 active.iri.as_str()

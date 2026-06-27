@@ -33,7 +33,7 @@ use crate::ontology::resource::Value;
 use crate::ontology::well_known as wk;
 use crate::program::embedder::EmbedderRegistry;
 use crate::query::ast::{
-    Expression, HintSet, Literal, MatchPart, Name, Pattern, Program, ValueOrVariable, Variable, Via,
+    Expression, HintSet, Literal, MatchPart, Name, Program, ValueOrVariable, Variable, Via,
 };
 use crate::query::error::QueryError;
 use crate::query::text::analyzer::registry as analyzer_registry;
@@ -94,7 +94,7 @@ impl SimilarityContext {
         embedders: Option<&EmbedderRegistry>,
         vector_segment_cache: Option<&SegmentCache>,
     ) -> Result<Self, QueryError> {
-        let prop_var_index = build_property_variable_index(program, layer);
+        let prop_var_index = build_property_variable_index(program, layer)?;
         let text_indexes = resolve_active_text_indexes(layer);
         let vector_indexes = resolve_active_vector_indexes(layer);
 
@@ -187,13 +187,15 @@ struct PropertyVarBinding {
 fn build_property_variable_index(
     program: &Program,
     layer: &Layer,
-) -> BTreeMap<String, PropertyVarBinding> {
+) -> Result<BTreeMap<String, PropertyVarBinding>, QueryError> {
     let mut out: BTreeMap<String, PropertyVarBinding> = BTreeMap::new();
-    let mut visit = |patterns: &[Pattern]| {
-        for pat in patterns {
+    let mut visit = |part: &MatchPart| -> Result<(), QueryError> {
+        for pat in part.patterns() {
             for pp in &pat.properties {
                 if let ValueOrVariable::Variable(var) = &pp.object {
-                    if let Some(property_iri) = resolve_property_name(&pp.property, layer) {
+                    if let Some(property_iri) =
+                        resolve_property_name(&pp.property, layer, &part.using_namespaces)?
+                    {
                         out.entry(var.name.clone()).or_insert(PropertyVarBinding {
                             property_iri,
                             subject_var: pat.subject.name.clone(),
@@ -202,32 +204,24 @@ fn build_property_variable_index(
                 }
             }
         }
+        Ok(())
     };
-    let collect = |part: &MatchPart| -> Vec<Pattern> { part.patterns().cloned().collect() };
-    visit(&collect(&program.query.body));
+    visit(&program.query.body)?;
     for def in &program.definitions {
-        visit(&collect(&def.body));
+        visit(&def.body)?;
     }
-    out
+    Ok(out)
 }
 
-fn resolve_property_name(name: &Name, layer: &Layer) -> Option<Iri> {
+fn resolve_property_name(
+    name: &Name,
+    layer: &Layer,
+    namespaces: &[String],
+) -> Result<Option<Iri>, QueryError> {
     match name {
-        Name::FullIri(iri) => Some(iri.clone()),
+        Name::FullIri(iri) => Ok(Some(iri.clone())),
         Name::ShortName(s) => {
-            let prop_class = Iri::parse(wk::PROPERTY).ok()?;
-            let short_prop = Iri::parse(wk::SHORT_NAME).ok()?;
-            for (iri, res) in layer.iter_all_resources() {
-                if !res.is_instance_of(&prop_class) {
-                    continue;
-                }
-                if let Some(Value::String(sn)) = res.get(&short_prop) {
-                    if sn == s {
-                        return Some(iri.clone());
-                    }
-                }
-            }
-            None
+            crate::query::resolve::resolve_scoped_name(layer, namespaces, &[wk::PROPERTY], s)
         }
     }
 }
@@ -664,6 +658,7 @@ mod tests {
         let rows = execute_with(
             r#"
             USING "urn:ex:Document"
+            USING NAMESPACE "urn:ex:"
             MATCH Document(?d) { "urn:ex:description": ?desc }
             WHERE ?desc ~ "WAL truncation"
             RETURN [] { d: ?d }
@@ -682,6 +677,7 @@ mod tests {
         let rows = execute_with(
             r#"
             USING "urn:ex:Document"
+            USING NAMESPACE "urn:ex:"
             MATCH Document(?d) { "urn:ex:description": ?desc }
             WHERE ?desc ~ "chain"
             RETURN [] { d: ?d }
@@ -704,6 +700,7 @@ mod tests {
         let rows = execute_with(
             r#"
             USING "urn:ex:Document"
+            USING NAMESPACE "urn:ex:"
             MATCH Document(?d) { "urn:ex:description": ?desc }
             WHERE ?desc ~ "WAL" { via: text }
             RETURN [] { d: ?d }
@@ -722,6 +719,7 @@ mod tests {
         let errs = execute_with(
             r#"
             USING "urn:ex:Document"
+            USING NAMESPACE "urn:ex:"
             MATCH Document(?d) { "urn:ex:description": ?desc }
             WHERE ?desc ~ "kernel" { via: vector }
             RETURN [] { d: ?d }
@@ -795,6 +793,7 @@ mod tests {
         let errs = execute_with(
             r#"
             USING "urn:ex:Document"
+            USING NAMESPACE "urn:ex:"
             MATCH Document(?d) { "urn:ex:description": ?desc }
             WHERE ?desc ~ "anything"
             RETURN [] { d: ?d }
@@ -878,6 +877,7 @@ mod tests {
         let rows = execute_with(
             r#"
             USING "urn:ex:Document"
+            USING NAMESPACE "urn:ex:"
             MATCH Document(?d) { "urn:ex:description": ?desc }
             WHERE ?desc ~ "anything"
             RETURN [] { d: ?d }
@@ -900,6 +900,7 @@ mod tests {
         let rows = execute_with(
             r#"
             USING "urn:ex:Document"
+            USING NAMESPACE "urn:ex:"
             MATCH Document(?d) { "urn:ex:description": ?desc }
             WHERE ?desc ~ "chain"
             RETURN [] { d: ?d }
@@ -923,6 +924,7 @@ mod tests {
         let rows = execute_with(
             r#"
             USING "urn:ex:Document"
+            USING NAMESPACE "urn:ex:"
             MATCH Document(?d) { "urn:ex:description": ?desc }
             WHERE ?desc ~ "chain"
             RETURN [] { d: ?d }
@@ -1067,6 +1069,7 @@ mod tests {
         let rows = execute_with(
             r#"
             USING "urn:ex:Document"
+            USING NAMESPACE "urn:ex:"
             MATCH Document(?d) { "urn:ex:description": ?desc }
             WHERE ?desc ~ "chain"
             RETURN [] { d: ?d }
@@ -1101,6 +1104,7 @@ mod tests {
         let rows = execute_with(
             r#"
             USING "urn:ex:Document"
+            USING NAMESPACE "urn:ex:"
             MATCH Document(?d) { "urn:ex:description": ?desc }
             WHERE ?desc ~ "chain" { via: hybrid }
             RETURN [] { d: ?d }
@@ -1130,6 +1134,7 @@ mod tests {
         let rows = execute_with(
             r#"
             USING "urn:ex:Document"
+            USING NAMESPACE "urn:ex:"
             MATCH Document(?d) { "urn:ex:description": ?desc }
             WHERE ?desc ~ "chain" { via: text }
             RETURN [] { d: ?d }
@@ -1157,6 +1162,7 @@ mod tests {
         let rows = execute_with(
             r#"
             USING "urn:ex:Document"
+            USING NAMESPACE "urn:ex:"
             MATCH Document(?d) { "urn:ex:description": ?desc }
             WHERE ?desc ~ "kernel" OR ?desc ~ "chain"
             RETURN [] { d: ?d }

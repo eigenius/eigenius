@@ -24,6 +24,7 @@ pub mod functions;
 pub mod lexer;
 pub mod parser;
 pub mod rank;
+pub mod resolve;
 pub mod stratify;
 pub mod text;
 pub mod type_check;
@@ -175,6 +176,7 @@ mod tests {
         let layer = make_ontology_layer();
         let query_str = r#"
             USING "urn:test:regression:Thing"
+            USING NAMESPACE "urn:test:regression:"
             MATCH Thing(?c) { "urn:eigenius:core:short_name": ?name }
             RETURN [] { iri: ?c, name: ?name }
         "#;

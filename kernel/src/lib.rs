@@ -27,6 +27,7 @@ pub mod bootstrap;
 pub mod capability;
 pub mod commit;
 pub mod context;
+pub mod dcg;
 pub mod esl;
 pub mod gc;
 pub mod institution;

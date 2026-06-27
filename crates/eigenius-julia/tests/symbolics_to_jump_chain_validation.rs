@@ -41,6 +41,8 @@ const SYMBOLICS_INSTITUTION_JSON: &str = include_str!(
 const COMORPHISM_JSON: &str =
     include_str!("../../../julia/comorphisms/symbolics-to-jump.eigon.json");
 
+mod common;
+
 fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("static IRI must parse")
 }
@@ -57,14 +59,26 @@ fn symbolics_to_jump_comorphism_validates_cleanly() {
     // jump:Constraint (in framing properties) and jump:OptimisationProblem
     // (in qc_symb_to_jump's result_class + ef_symb_to_jump_input's
     // payload_type), so those resolve at commit time.
+    // Each institution's env committed before it (closed-world
+    // `requires_environment`).
+    let jump_env = common::stub_env_json("urn:eigenius:jump_highs:env:v1", "julia");
+    let symbolics_env = common::stub_env_json("urn:eigenius:symbolics:env:v1", "julia");
     for (label, json) in [
-        ("jump_ontology", JUMP_ONTOLOGY_JSON),
-        ("jump_highs_institution", JUMP_HIGHS_INSTITUTION_JSON),
-        ("symbolics_ontology", SYMBOLICS_ONTOLOGY_JSON),
-        ("symbolics_institution", SYMBOLICS_INSTITUTION_JSON),
-        ("comorphism", COMORPHISM_JSON),
+        ("jump_ontology", JUMP_ONTOLOGY_JSON.to_string()),
+        ("jump_highs_env", jump_env),
+        (
+            "jump_highs_institution",
+            JUMP_HIGHS_INSTITUTION_JSON.to_string(),
+        ),
+        ("symbolics_ontology", SYMBOLICS_ONTOLOGY_JSON.to_string()),
+        ("symbolics_env", symbolics_env),
+        (
+            "symbolics_institution",
+            SYMBOLICS_INSTITUTION_JSON.to_string(),
+        ),
+        ("comorphism", COMORPHISM_JSON.to_string()),
     ] {
-        for r in eigon_json::parse_document(json).expect("parse") {
+        for r in eigon_json::parse_document(&json).expect("parse") {
             ctx.add_resource(r).expect("add_resource");
         }
         let working = ctx.take_working(label).expect("take_working");

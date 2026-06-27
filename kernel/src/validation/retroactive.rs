@@ -131,7 +131,21 @@ fn enumerate_dependents(
         let is_class = resource.is_instance_of(&core_class);
         let is_property = resource.is_instance_of(&core_property);
 
-        if is_class {
+        // Reference integrity (Rule 22) makes a layer's validity a function of (its
+        // content, the chain below it): every `is_a` / value reference — AND every
+        // property *key* (Rule 22 §(c)) — must resolve same-or-lower at commit. So a
+        // **brand-new** IRI — one not already defined in a lower layer — provably has NO
+        // lower dependents for ANY of the three cases: no lower resource could be an
+        // instance of, reference, or *carry as a property key* an IRI that did not exist
+        // when it committed. We therefore run all three cases only for **redefinitions**
+        // (an IRI that shadows an ancestor definition — a small set). This is what keeps
+        // the otherwise O(chain) carrier scan (case 2) off the hot path: an additive
+        // import's brand-new properties are skipped entirely; only a rare redefinition
+        // pays. Collapses the retroactive pass from O(new_iris × predicates) to
+        // ~O(redefs).
+        let redefines = redefines_ancestor(new_layer, iri);
+
+        if is_class && redefines {
             // Every direct or transitive subclass inherits this
             // Class's `requires` via the validator's recursive
             // `collect_from_class`. We enumerate the full closure,
@@ -147,24 +161,41 @@ fn enumerate_dependents(
                 }
             }
         }
-        if is_property {
-            // Rules 3–10 dependents: every resource carrying this
-            // property. Chain walk — the triple index doesn't cover
-            // literal-valued properties.
+        if is_property && redefines {
+            // Rules 3–10 dependents: every lower resource carrying this property must be
+            // revalidated against the (re)definition. Only a REDEFINITION can have lower
+            // carriers: reference integrity (Rule 22 §(c)) requires a property key to
+            // resolve to a declared `core:Property` same-or-lower at commit, so a
+            // brand-new property was unwritable in any lower layer and provably has no
+            // lower carriers — the same closure that scopes cases (1)/(3) to
+            // redefinitions. (This is what makes the otherwise O(chain) carrier scan
+            // safe on a large chain: it never runs for an additive import's new
+            // properties, only for the rare redefinition.)
             scan_chain_for_property_carriers(new_layer, iri, ws)?;
         }
 
-        // Case (3): IRI is referenced as a value by lower-layer
-        // property values. Enumerate via every IRI-typed predicate
-        // declared in the chain.
-        for pred in &iri_ref_predicates {
-            for subj in crate::layer::scan_chain(new_layer, pred, iri) {
-                ws.pending.push(subj)?;
+        // Case (3): IRI is referenced as a value by lower-layer property values.
+        // Only a redefinition can have lower referrers (closure: a brand-new IRI was
+        // unreferenceable below). Enumerate via every IRI-typed predicate in the chain.
+        if redefines {
+            for pred in &iri_ref_predicates {
+                for subj in crate::layer::scan_chain(new_layer, pred, iri) {
+                    ws.pending.push(subj)?;
+                }
             }
         }
     }
 
     Ok(())
+}
+
+/// Whether `iri` already resolves in the chain **below** `new_layer` — i.e. the new
+/// layer *redefines* (shadows) an ancestor definition rather than introducing a
+/// brand-new IRI. Bloom-gated `resolve`, so this is ~O(chain depth), not O(resources).
+/// Under reference integrity (Rule 22), only a redefinition can have lower instances or
+/// referrers, so this gates the expensive case-(1)/(3) scans.
+fn redefines_ancestor(new_layer: &Arc<Layer>, iri: &Iri) -> bool {
+    new_layer.parents().iter().any(|p| p.resolve(iri).is_some())
 }
 
 /// Drain `ws.pending`; for each IRI not already revalidated, look up
@@ -465,6 +496,8 @@ mod tests {
         root_b.add_resource(req_prop).unwrap();
 
         let root = Arc::new(root_b.build(storage.clone()));
+        // Commit (persist + index) the lower layer the way production does, so
+        // retroactive validation's `scan_chain` sees its triple entries.
         backend.store_layer(&root).unwrap();
 
         (root, storage, backend)
@@ -533,7 +566,7 @@ mod tests {
     /// The retroactive pass must surface those violations.
     #[test]
     fn class_redef_with_new_requires_invalidates_instances() {
-        let (root, storage, _backend) = build_chain_with_class_instances();
+        let (root, storage, backend) = build_chain_with_class_instances();
 
         // Mid layer: defines `demo:Foo` (a Class) with no requires
         // beyond the meta-ontology baseline, plus an instance `foo_1`
@@ -550,6 +583,7 @@ mod tests {
             .unwrap();
             Arc::new(b.build(storage.clone()))
         };
+        backend.store_layer(&mid).unwrap();
         // Confirm baseline: mid is valid.
         let mut ws = CommitWorkingSet::in_memory();
         retroactive_validate(&mid, &mut ws).unwrap();
@@ -586,13 +620,14 @@ mod tests {
     /// the lower-layer reference.
     #[test]
     fn user_defined_iri_typed_predicate_triggers_case_3() {
-        let (root, storage, _backend) = build_chain_with_class_instances();
+        let (root, storage, backend) = build_chain_with_class_instances();
 
-        // Mid layer: declares `demo:GoodKind` and `demo:BadKind`
-        // classes, plus a user-defined property `demo:references`
-        // with class_types: [demo:GoodKind]. Defines a resource that
-        // uses `demo:references` pointing at a yet-undefined IRI
-        // `demo:Target`.
+        // Mid layer: declares `demo:GoodKind` and `demo:BadKind` classes, a
+        // user-defined property `demo:references` (class_types: [demo:GoodKind]),
+        // `demo:Target` AS A GoodKind, and `demo:caller` referencing Target. Under
+        // reference integrity (Rule 22) the caller's reference must resolve same-or-
+        // lower, so Target exists here and the reference is valid — no dangling. The
+        // case-(3) trigger is a *redefinition* of Target below, not a late definition.
         let mid = {
             let mut b = LayerBuilder::new("mid", Some(Arc::clone(&root)));
             b.add_resource(mk_class("urn:eigenius:demo:GoodKind", "GoodKind", vec![]))
@@ -620,11 +655,17 @@ mod tests {
             );
             b.add_resource(prop).unwrap();
 
-            // demo:caller references demo:Target via demo:references.
-            // demo:Target doesn't yet exist — check_class_types
-            // silently skips unresolvable refs at mid commit time
-            // (existing behavior). The IRI shows up to retroactive
-            // validation only after demo:Target gets added.
+            // Target as GoodKind — the reference below will be valid.
+            let mut target = mk_instance(
+                "urn:eigenius:demo:Target",
+                "urn:eigenius:demo:GoodKind",
+                vec![],
+            );
+            target.set(iri(wk::DESCRIPTION), Value::String("good target".into()));
+            target.set(iri(wk::SHORT_NAME), Value::String("Target".into()));
+            b.add_resource(target).unwrap();
+
+            // demo:caller references demo:Target (a GoodKind) — valid, closure-clean.
             let mut caller = mk_instance(
                 "urn:eigenius:demo:caller",
                 wk::CLASS,
@@ -638,17 +679,19 @@ mod tests {
             b.add_resource(caller).unwrap();
             Arc::new(b.build(storage.clone()))
         };
+        backend.store_layer(&mid).unwrap();
         let mut ws = CommitWorkingSet::in_memory();
         retroactive_validate(&mid, &mut ws).unwrap();
         assert_eq!(
             ws.violations.len(),
             0,
-            "mid is valid in isolation (Target unresolvable, Rule 8 skips)"
+            "mid is valid in isolation (Target is GoodKind, caller's reference is allowed)"
         );
 
-        // New layer adds demo:Target with is_a: [demo:BadKind].
-        // demo:caller's `demo:references = demo:Target` now resolves
-        // and Rule 8 should reject (Target is_a BadKind, not GoodKind).
+        // New layer REDEFINES demo:Target as is_a: [demo:BadKind]. demo:caller's
+        // `demo:references = demo:Target` now resolves (shadow-resolves) to a BadKind,
+        // so Rule 8 should reject — and case (3) must fire because Target *redefines*
+        // an ancestor (the brand-new-IRI fast path does not skip redefinitions).
         let new = {
             let mut b = LayerBuilder::new("new", Some(Arc::clone(&mid)));
             let mut target = mk_instance(
@@ -666,7 +709,7 @@ mod tests {
         retroactive_validate(&new, &mut ws).unwrap();
         assert!(
             !ws.violations.is_empty(),
-            "adding Target as wrong class must surface Rule 8 violation on caller"
+            "redefining Target as the wrong class must surface Rule 8 violation on caller"
         );
         let drained = ws.violations.drain(100);
         assert!(
@@ -676,6 +719,42 @@ mod tests {
                 .any(|e| matches!(e.rule, crate::validation::ValidationRule::ClassTypeMismatch)),
             "expected ClassTypeMismatch via user-defined demo:references predicate; got {:?}",
             drained.errors
+        );
+    }
+
+    /// The precondition that lets case (2) skip brand-new properties: a resource may
+    /// NOT carry a property key that isn't defined same-or-lower (reference integrity,
+    /// Rule 22 §(c)). Open-world (Rule 12) only frees a resource from its classes'
+    /// requires/recommends sets — it does NOT permit an undeclared property IRI as a
+    /// key. So the old "carry an undeclared property, declare it later" scenario is
+    /// rejected at commit, which means a brand-new property provably has no lower
+    /// carrier and retroactive validation correctly does not scan for one.
+    #[test]
+    fn undeclared_property_key_is_rejected() {
+        let (root, storage, _backend) = build_chain_with_class_instances();
+
+        let mid = {
+            let mut b = LayerBuilder::new("mid", Some(Arc::clone(&root)));
+            let mut carrier = mk_instance(
+                "urn:eigenius:demo:carrier",
+                wk::CLASS,
+                vec![("urn:eigenius:demo:rank", Value::String("not-an-int".into()))],
+            );
+            carrier.set(iri(wk::DESCRIPTION), Value::String("carrier".into()));
+            carrier.set(iri(wk::SHORT_NAME), Value::String("carrier".into()));
+            b.add_resource(carrier).unwrap();
+            Arc::new(b.build(storage.clone()))
+        };
+
+        // Structural validation rejects the undeclared `demo:rank` key (Rule 22 §(c)).
+        let errors = crate::validation::Validator::new(Arc::clone(&mid)).validate();
+        assert!(
+            errors.iter().any(|e| matches!(
+                e.rule,
+                crate::validation::ValidationRule::UnresolvedClassReference
+            ) && e.property.as_ref().map(|p| p.as_str())
+                == Some("urn:eigenius:demo:rank")),
+            "carrying an undeclared property key (demo:rank) must be rejected; got {errors:?}"
         );
     }
 
@@ -695,7 +774,7 @@ mod tests {
     ///   `inst_C` — all three lack `description`.
     #[test]
     fn transitive_subclass_closure_enumerates_indirect_instances() {
-        let (root, storage, _backend) = build_chain_with_class_instances();
+        let (root, storage, backend) = build_chain_with_class_instances();
 
         let mid = {
             let mut b = LayerBuilder::new("mid", Some(Arc::clone(&root)));
@@ -739,6 +818,7 @@ mod tests {
             .unwrap();
             Arc::new(b.build(storage.clone()))
         };
+        backend.store_layer(&mid).unwrap();
         let mut ws = CommitWorkingSet::in_memory();
         retroactive_validate(&mid, &mut ws).unwrap();
         assert_eq!(

@@ -53,6 +53,8 @@ const JUMP_ONTOLOGY_JSON: &str =
 const COMORPHISM_JSON: &str =
     include_str!("../../../julia/comorphisms/symbolics-to-intervals.eigon.json");
 
+mod common;
+
 fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("static IRI must parse")
 }
@@ -71,15 +73,27 @@ fn symbolics_to_intervals_comorphism_validates_cleanly() {
     //   - symbolics' SymbolicsToJuMPInput references jump:VariableBound
     //     and jump:Constraint via class_types, so jump ontology must be
     //     on the chain before symbolics validates.
+    // Each institution's env committed before it (closed-world
+    // `requires_environment`).
+    let intervals_env = common::stub_env_json("urn:eigenius:intervals:env:v1", "julia");
+    let symbolics_env = common::stub_env_json("urn:eigenius:symbolics:env:v1", "julia");
     for (label, json) in [
-        ("jump_ontology", JUMP_ONTOLOGY_JSON),
-        ("symbolics_ontology", SYMBOLICS_ONTOLOGY_JSON),
-        ("intervals_ontology", INTERVALS_ONTOLOGY_JSON),
-        ("intervals_institution", INTERVALS_INSTITUTION_JSON),
-        ("symbolics_institution", SYMBOLICS_INSTITUTION_JSON),
-        ("comorphism", COMORPHISM_JSON),
+        ("jump_ontology", JUMP_ONTOLOGY_JSON.to_string()),
+        ("symbolics_ontology", SYMBOLICS_ONTOLOGY_JSON.to_string()),
+        ("intervals_ontology", INTERVALS_ONTOLOGY_JSON.to_string()),
+        ("intervals_env", intervals_env),
+        (
+            "intervals_institution",
+            INTERVALS_INSTITUTION_JSON.to_string(),
+        ),
+        ("symbolics_env", symbolics_env),
+        (
+            "symbolics_institution",
+            SYMBOLICS_INSTITUTION_JSON.to_string(),
+        ),
+        ("comorphism", COMORPHISM_JSON.to_string()),
     ] {
-        for r in eigon_json::parse_document(json).expect("parse") {
+        for r in eigon_json::parse_document(&json).expect("parse") {
             ctx.add_resource(r).expect("add_resource");
         }
         let working = ctx.take_working(label).expect("take_working");

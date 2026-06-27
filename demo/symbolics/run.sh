@@ -242,6 +242,7 @@ echo "--- Step 10: FIBER qc_symb_simplify (OnDemand) ---"
 # FormulaTerm tree) and `short_name` for inspection.
 $EIGENIUS --endpoint "$ENDPOINT" query \
     'USING INSTITUTION "urn:eigenius:institutions:symbolics" AS cap
+     USING NAMESPACE "urn:eigenius:symbolics:query_classes:"
      FIBER cap:qc_symb_simplify {
        expr: "urn:eigenius:demo:symbolics:expr:x_plus_0_times_1"
      } AS ?simplified

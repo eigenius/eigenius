@@ -74,5 +74,10 @@ The per-subsystem design notes, in number order. New documents are added here as
 | D58 | [Objective framing and obligation graphs](d58-objective-framing-and-obligation-graphs.md) |
 | D59 | [EigenQL array patterns and derived joins](d59-eigenql-array-patterns-and-derived-joins.md) |
 | D60 | [Generic OCI tool runtime + kernel-tracked env build](d60-native-runtime-and-tracked-env-build.md) |
+| D61 | [Faithful encoding of reasoning: grounding-discovery + a typed decision layer](d61-llm-based-encoding-methodology.md) |
+| D62 | [The encoding engine: prose → typed trees (generation front-end)](d62-encoding-engine-prose-to-trees.md) |
+| D63 | [The DCG engine: a categorial grammar of English over EigenTT](d63-dcg-engine-english-grammar.md) |
+| D64 | [LLM-based anaphora resolution: pronouns as resolved resource references](d64-llm-anaphora-resolution.md) |
+| D65 | [The lexicon runtime: lazy form-indexed lookup, per-parse scoping, lexicon identity](d65-lexicon-runtime-lazy-scoped.md) |
 
 (Numbers D15–D17 were never assigned.)

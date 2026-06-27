@@ -380,6 +380,8 @@ This is what the platform's "debugging cycle for thinking" looks like when appli
 
 **No-confusion for indexed families (eigenius#69).** A no-confusion principle for indexed inductive families would give definitionally-correct disjointness for distinct constructors and would let `JustifiedBy`'s eliminator discharge "different inference rules cannot witness the same proposition shape" obligations without an additional explicit lemma. The issue is filed as a kernel enhancement (D48 §7.2 follow-up); it simplifies but does not block this design.
 
+**Prior art for the witness model.** Beyond the justification-logic lineage (§13), the type-theoretic shape D39 commits to — an answer that carries its own proof — has external precedent in Lai et al.'s *Dependently Typed Knowledge Graphs* ([`lai2020dependently`]), where SPARQL answers over a CIC/Coq-encoded graph are proof-carrying witnesses. That "answers as proof-carrying witnesses" shape is exactly the `JustifiedBy` certificate / `ChainWitness` model here, arrived at independently from the justification-logic direction.
+
 ## 11. Non-goals
 
 To be explicit:

@@ -1,0 +1,53 @@
+// ════════════════════════════════════════════════════════════════════
+// ontology — Prop-valued structural relations over the class lattice.
+// ════════════════════════════════════════════════════════════════════
+//
+// `is_a` / `subclass_of` as **opaque** `Prop`-predicates (eigentt axioms) — the
+// meanings a **predicate nominal** ("HeLa is a cell line") produces (D63 §8.5
+// Slice 3c). They mirror the chain's `core:is_a` / `core:subclass_of` PROPERTIES
+// but are distinct objects: a property is an RDF-style relation on a resource;
+// these are `Prop`-FORMERS the DCG engine and the reasoning layer (D39) consume.
+//
+// **Opaque, not decidable** (felicity ≠ truth): the kernel gate checks only that
+// the proposition is well-formed; whether the membership *holds against the chain*
+// is a separate GROUNDING judgment (a `ChainWitness`, D39/D49). A decidable
+// predicate would reduce the claim to ⊤/⊥ from the lattice and so could never be
+// carried as a hypothesis or conditional antecedent — incompatible with
+// justification logic. (Mirrors how verb predications like `affects(…)` are opaque.)
+//
+// A class is a type (`EigonClass : Set`), so the class argument is a `Set` value.
+
+namespace ontology = "urn:eigenius:ontology";
+namespace lexicon  = "urn:eigenius:lexicon";
+
+// x is_a C — instance membership: the entity x is a member of class C.
+// "HeLa is a cell line" → is_a(hela, CellLine).
+axiom ontology:is_a : lexicon:Entity -> Set -> Prop
+
+// C subclass_of D — class subsumption: the kind C is a subkind of D.
+// "Genes are cell lines" (KIND subject) → subclass_of(Gene, CellLine). The
+// predicate-nominal copula reading that produces this awaits kind subjects (bare
+// plurals / generics — deferred); declared here as the relational vocabulary so the
+// reasoning layer and a later kind-subject reading share one canonical relation.
+axiom ontology:subclass_of : Set -> Set -> Prop
+
+// ── Nominal-modification relations (D63 §8.13 Slice 6-mod) ────────────
+// OPAQUE modifier relations the compound-noun and PP-adjunct rules produce. The
+// modifier↔head relation is vague (compound: "WRN depletion" = depletion *of* WRN; PP:
+// "apoptosis in MSI" = located/scoped *in* MSI), so — like is_a / the modal operators —
+// these are kernel-uninterpreted axioms; the grammar guarantees a felicitous typed tree
+// exposing the parts, and the precise relation is grounding-supplied by the encoding
+// institution (D62). `compound(x, m)`: head entity x is a compound modified by entity m
+// ("WRN depletion" → Σx:Depletion. compound(x, WRN)). `prep_*(s, y)`: the predication s
+// stands in the prepositional relation to y ("… in MSI" → … ∧ prep_in(s, MSI)).
+axiom ontology:compound : lexicon:Entity -> lexicon:Entity -> Prop
+// N-N kind compound — the modifier is a common noun (a kind/`Set`), not an entity:
+// "mutator load" → Σx:Load. compound_kind(x, Mutator). (`compound` above is for a
+// named-entity modifier; `compound_kind` for a common-noun modifier.)
+axiom ontology:compound_kind : lexicon:Entity -> Set -> Prop
+axiom ontology:prep_of   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_in   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_for  : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_with : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_on   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_from : lexicon:Entity -> lexicon:Entity -> Prop

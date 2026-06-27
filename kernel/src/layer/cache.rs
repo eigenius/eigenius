@@ -444,7 +444,11 @@ pub struct MemoryBloomCache {
 
 struct MemoryBloomCacheState {
     entries: BTreeMap<LayerId, Arc<BloomFilter>>,
-    hits: u64,
+    // No `hits` counter: the bloom is the master gate of every chain walk, so
+    // `get_or_load` is among the hottest paths in the kernel (≈157M calls to
+    // validate one large lexicon chunk). A hit counter forced a write lock on
+    // every hit — pure contention for a diagnostic. We keep only `misses`
+    // (tracked on the already-write-locked slow path, so it's free).
     misses: u64,
 }
 
@@ -454,7 +458,6 @@ impl MemoryBloomCache {
         Self {
             inner: RwLock::new(MemoryBloomCacheState {
                 entries: BTreeMap::new(),
-                hits: 0,
                 misses: 0,
             }),
             backend: Some(backend),
@@ -470,7 +473,6 @@ impl MemoryBloomCache {
         Self {
             inner: RwLock::new(MemoryBloomCacheState {
                 entries: BTreeMap::new(),
-                hits: 0,
                 misses: 0,
             }),
             backend: None,
@@ -480,15 +482,12 @@ impl MemoryBloomCache {
 
 impl BloomCache for MemoryBloomCache {
     fn get_or_load(&self, layer: &LayerId) -> Result<Option<Arc<BloomFilter>>, StorageError> {
-        // Fast path: hit under the read lock.
+        // Fast path: hit under the read lock only. No counter bump — see
+        // `MemoryBloomCacheState`: this is a top-N hottest path and a hit
+        // counter would force a write lock on every probe.
         {
             let state = self.inner.read().expect("MemoryBloomCache poisoned");
             if let Some(b) = state.entries.get(layer).cloned() {
-                // Drop the read lock before bumping the hit counter — the
-                // counter goes through a separate write acquire below.
-                drop(state);
-                let mut state = self.inner.write().expect("MemoryBloomCache poisoned");
-                state.hits = state.hits.saturating_add(1);
                 return Ok(Some(b));
             }
         }
@@ -540,7 +539,9 @@ impl BloomCache for MemoryBloomCache {
             // Bloom cache doesn't partition; per-pool counters stay 0.
             active_entries: 0,
             historical_entries: 0,
-            hits: state.hits,
+            // Hits are no longer tracked (the counter cost a write lock on the
+            // hottest path); only misses are reported.
+            hits: 0,
             misses: state.misses,
         }
     }
@@ -700,11 +701,12 @@ mod tests {
             .expect("bloom present in backend");
         assert_eq!(cache.stats().entries, 1);
         assert_eq!(cache.stats().misses, 1);
-        assert_eq!(cache.stats().hits, 0);
 
-        // Second get is a cache hit; same Arc returned.
+        // Second get is a cache hit. Hits aren't counted (the counter cost a
+        // write lock on the hottest path); the hit is proven by the unchanged
+        // miss count + the same Arc being returned (no backend reload).
         let bloom2 = cache.get_or_load(layer.id()).unwrap().expect("hit");
-        assert_eq!(cache.stats().hits, 1);
+        assert_eq!(cache.stats().misses, 1);
         assert!(Arc::ptr_eq(&bloom1, &bloom2));
     }
 

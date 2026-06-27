@@ -45,7 +45,12 @@ impl EigeniusService {
     /// an Institution + `wasm_binary` in the chain auto-installs its
     /// dispatcher on commit.
     pub(super) async fn rebuild_institution_index(&self, layer: &crate::layer::Layer) {
-        let (idx, errors) = crate::institution::registry::InstitutionIndex::from_layer(layer);
+        // Index-driven discovery (D23): find the chain's institution declarations via
+        // the triple index, not by materialising the whole chain. On a chain carrying
+        // a large domain lexicon this is the difference between an O(handful) rebuild
+        // and an O(hundreds-of-thousands) full scan on every commit.
+        let (idx, errors) =
+            crate::institution::registry::InstitutionIndex::from_layer_indexed(layer);
         for err in &errors {
             tracing::warn!(
                 { field::OPERATION } = operation::INSTITUTION_REGISTER,
@@ -66,7 +71,7 @@ impl EigeniusService {
         // then layer in any external-runtime institutions (D31 §5),
         // then layer in any in-process institutions (D28 Phase 20a.1).
         let (mut runtime, mut report) =
-            crate::capability::registration::build_wasm_institution_runtime(layer);
+            crate::capability::registration::build_wasm_institution_runtime_indexed(layer);
         if let Some(client) = self.orchestrator_client.as_ref() {
             crate::capability::registration::register_external_institutions(
                 layer,

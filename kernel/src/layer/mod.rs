@@ -38,6 +38,7 @@ mod redirect;
 mod storage;
 mod supporting;
 mod text_index;
+mod value_index;
 mod vector_index;
 mod witness_index;
 
@@ -58,22 +59,29 @@ pub use consolidate::{
 pub use handle::{ChainIter, LayerHandle, LayerTopology};
 pub use index::{
     collect_ancestors, extract_indexable_triples, index_keys, is_indexable_predicate, is_shadowed,
-    scan_chain, IndexStats, MemoryTripleIndex, OwnedTriple, Triple, TripleIndex,
+    resolve_typed_resources, scan_chain, typed_resource_iris, IndexStats, MemoryTripleIndex,
+    OwnedTriple, Triple, TripleIndex,
 };
 pub use index_discovery::{
-    detect_reindex_targets, resolve_active_text_indexes, resolve_active_vector_indexes,
-    verify_text_index_multiplicity, verify_vector_index_multiplicity, ActiveTextIndex,
-    ActiveVectorIndex, ReindexTarget,
+    detect_reindex_targets, extract_value_entries, resolve_active_text_indexes,
+    resolve_active_value_indexes, resolve_active_vector_indexes, verify_text_index_multiplicity,
+    verify_value_index_multiplicity, verify_vector_index_multiplicity, ActiveTextIndex,
+    ActiveValueIndex, ActiveVectorIndex, ReindexTarget,
 };
 pub use redirect::{
     augment_topology_with_redirects, manufacture_tombstone, MemoryRedirectMap, NoRedirects,
     RedirectEntry, RedirectMap,
 };
-pub use storage::LayerStorage;
+pub use storage::{
+    cache_budget, set_cache_budget, LayerStorage, PendingStage, DEFAULT_CACHE_BUDGET_ENTRIES,
+};
 pub use supporting::compute_supporting_layer;
 pub use text_index::{
     decode_doc_set, encode_doc_set, MemoryTextIndex, TermHit, TextDoc, TextDocs, TextIndex,
     TextIndexStats, TextLayerStats,
+};
+pub use value_index::{
+    normalize_value, MemoryValueIndex, OwnedValueEntry, ValueEntry, ValueIndex, ValueIndexStats,
 };
 pub use vector_index::{
     MemoryVectorIndex, VectorDoc, VectorIndex, VectorIndexStats, VectorSegment,
@@ -347,6 +355,52 @@ impl fmt::Debug for Layer {
     }
 }
 
+/// Pass-scoped memo for [`Layer::resolve`], keyed by `(LayerId, Iri)` via a nested
+/// map (outer `LayerId`, inner `Iri`) so hot lookups borrow both keys without
+/// allocating. `None` = inactive (resolve walks the chain directly); `Some(map)` =
+/// active for the lifetime of a [`ResolveMemoScope`]. Per-thread, since a pass runs
+/// on one thread and the cached `Arc<Resource>`s aren't shared across threads.
+type ResolveMemoMap =
+    std::collections::HashMap<LayerId, std::collections::HashMap<Iri, Option<Arc<Resource>>>>;
+thread_local! {
+    static RESOLVE_MEMO: std::cell::RefCell<Option<ResolveMemoMap>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// RAII guard that installs a [`RESOLVE_MEMO`] for its lifetime. Held across a
+/// validation pass (an immutable-chain read burst): every `resolve` of the same
+/// `(layer, iri)` after the first returns the cached result instead of re-walking
+/// the chain. Nesting-safe — the previous memo (if any) is restored on drop, so a
+/// re-entrant pass (e.g. cascade revalidation) gets its own scope.
+///
+/// Soundness: only correct while the chain reachable from the resolving layers does
+/// not change. That holds for a validation/commit pass over already-built,
+/// immutable `Arc<Layer>`s; do NOT hold a scope across a commit that advances the
+/// chain.
+pub struct ResolveMemoScope {
+    prev: Option<ResolveMemoMap>,
+}
+
+impl ResolveMemoScope {
+    /// Install a fresh memo for the current thread, saving any existing one.
+    pub fn new() -> Self {
+        let prev = RESOLVE_MEMO.with(|m| m.borrow_mut().replace(ResolveMemoMap::new()));
+        Self { prev }
+    }
+}
+
+impl Default for ResolveMemoScope {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for ResolveMemoScope {
+    fn drop(&mut self) {
+        RESOLVE_MEMO.with(|m| *m.borrow_mut() = self.prev.take());
+    }
+}
+
 impl Layer {
     /// Construct a Layer from already-stored content. Used by storage
     /// backends when reconstructing a chain — caller passes the metadata
@@ -592,6 +646,20 @@ impl Layer {
         if !self.defined_iris.contains(iri) {
             return None;
         }
+        // Freshly-built, not-yet-persisted resources live in the storage's `pending`
+        // stage (D23 write path) until `store_layer` drains them — consult it first, so
+        // a layer larger than the bounded cache still resolves every resource it defines
+        // before it's persisted.
+        if let Some(r) = self
+            .storage
+            .pending
+            .read()
+            .expect("pending stage poisoned")
+            .get(&self.id)
+            .and_then(|m| m.get(iri).cloned())
+        {
+            return Some(r);
+        }
         let key = ResourceKey::new(self.id.clone(), iri.clone());
         if let Some(r) = self.storage.cache.get(&key) {
             return Some(r);
@@ -633,8 +701,47 @@ impl Layer {
     /// Iterative rather than recursive so the bloom-cache `Result`
     /// doesn't have to thread through a recursive call chain.
     pub fn resolve(&self, iri: &Iri) -> Option<Arc<Resource>> {
+        // Pass-scoped memo (installed by `ResolveMemoScope`, e.g. for the duration
+        // of a validation pass). The chain is immutable within a pass, so
+        // `resolve(self, iri)` is a pure function of `(self.id, iri)`; caching it
+        // collapses the millions of redundant resolves a bulk-load validation
+        // issues — the same ~handful of property definitions and lattice classes
+        // are otherwise re-resolved (each a full chain walk) once per resource.
+        // Keyed by `(LayerId, Iri)` via a nested map so lookups need no key
+        // allocation. No-op (direct walk) when no scope is active.
+        if RESOLVE_MEMO.with(|m| m.borrow().is_some()) {
+            if let Some(hit) = RESOLVE_MEMO.with(|m| {
+                m.borrow()
+                    .as_ref()
+                    .unwrap()
+                    .get(&self.id)
+                    .and_then(|inner| inner.get(iri).cloned())
+            }) {
+                return hit;
+            }
+            let result = self.resolve_uncached(iri);
+            RESOLVE_MEMO.with(|m| {
+                m.borrow_mut()
+                    .as_mut()
+                    .unwrap()
+                    .entry(self.id.clone())
+                    .or_default()
+                    .insert(iri.clone(), result.clone());
+            });
+            return result;
+        }
+        self.resolve_uncached(iri)
+    }
+
+    /// The actual head→root chain walk behind [`resolve`](Self::resolve). Split
+    /// out so `resolve` can wrap it in the pass-scoped memo without that cache
+    /// logic cluttering the walk.
+    fn resolve_uncached(&self, iri: &Iri) -> Option<Arc<Resource>> {
         let mut current: Option<&Layer> = Some(self);
-        let mut visited: BTreeSet<LayerId> = BTreeSet::new();
+        // Cycle-guard for redirect hops. Allocated lazily: redirects are rare
+        // (v1 refuses redirect chaining), so the common walk pays no allocation —
+        // `resolve` is among the hottest paths in the kernel.
+        let mut visited: Option<BTreeSet<LayerId>> = None;
         while let Some(layer) = current {
             // D25 §12.8 / Phase 17f: if this layer is a redirect source,
             // short-circuit to the target's chain. The original layer's
@@ -644,7 +751,10 @@ impl Layer {
             // against pathological cycles even though v1's
             // refuse-chaining policy prevents installation of any.
             if let Some(target) = layer.redirect_target.as_ref() {
-                if visited.insert(layer.id.clone()) {
+                if visited
+                    .get_or_insert_with(BTreeSet::new)
+                    .insert(layer.id.clone())
+                {
                     current = Some(target.as_ref());
                     continue;
                 }
@@ -716,6 +826,41 @@ impl Layer {
         self.defined_iris
             .iter()
             .filter_map(move |iri| self.get_resource(iri).map(|r| (iri.clone(), r)))
+    }
+
+    /// Reflexive–transitive `core:subclass_of` closure: is `sub` equal to, or a
+    /// transitive subclass of, `super_`? The kernel's single foundation authority
+    /// for CN-as-types subsumption (Luo 2012 — `luo2012cnt` / `luo2012coercive`):
+    /// the `EigonClass` subtype rule (`nbe::check`), the `Validator`'s instance-of
+    /// checks, and EigenQL pattern matching all decide subclass membership here.
+    /// Cycle-guarded.
+    pub fn is_subclass_of(&self, sub: &Iri, super_: &Iri) -> bool {
+        if sub == super_ {
+            return true;
+        }
+        let Ok(prop) = Iri::parse(crate::ontology::well_known::PARENT_CLASSES) else {
+            return false;
+        };
+        let mut stack = vec![sub.clone()];
+        let mut seen: BTreeSet<Iri> = BTreeSet::new();
+        while let Some(cur) = stack.pop() {
+            if !seen.insert(cur.clone()) {
+                continue;
+            }
+            let Some(def) = self.resolve(&cur) else {
+                continue;
+            };
+            let Some(parents) = def.get(&prop) else {
+                continue;
+            };
+            for parent in parents.as_iri_array() {
+                if parent == *super_ {
+                    return true;
+                }
+                stack.push(parent);
+            }
+        }
+        false
     }
 
     /// Iterate over the merged view across the entire chain (top layer wins
@@ -939,13 +1084,22 @@ impl LayerBuilder {
         // means everything below LCA is reachable via the first parent.
         let supporting_layer =
             compute_supporting_layer(&self.resources, &defined_iris, self.parents.first());
-        for (iri, resource) in self.resources {
-            let key = ResourceKey::new(id.clone(), iri);
-            // Freshly-built layers are top-of-stack by definition.
-            storage
-                .cache
-                .put(key, Arc::new(resource), CacheTier::Active);
-        }
+        // Stage the built resources in the storage's `pending` buffer (NOT the resource
+        // cache). A built layer is metadata-only and its resources have no durable home
+        // until `store_layer` persists them; staging them where the (bounded) cache
+        // can't evict them is what lets a layer larger than the cache budget commit
+        // without losing resources. `store_layer` drains this entry once the resources
+        // are on the backend; thereafter reads page through the cache. (D23 write path.)
+        let staged: BTreeMap<Iri, Arc<Resource>> = self
+            .resources
+            .into_iter()
+            .map(|(iri, resource)| (iri, Arc::new(resource)))
+            .collect();
+        storage
+            .pending
+            .write()
+            .expect("pending stage poisoned")
+            .insert(id.clone(), staged);
         // Pre-populate the bloom cache. Same bloom value the persistent
         // backend will write on commit (deterministic from the
         // `defined_iris ∪ tombstoned_iris` union), so if the layer is
@@ -978,36 +1132,50 @@ impl LayerBuilder {
             witness_index: std::sync::OnceLock::new(),
             axiom_env: std::sync::OnceLock::new(),
         };
-        // Phase 14h: pre-populate the triple index from the layer's
-        // indexable triples. `extract_indexable_triples` consults each
-        // predicate's `Property.data_type` via `Layer::resolve`, which
-        // walks the cache (just populated above) and parents — so this
-        // call is self-contained and doesn't touch the backend.
-        // Mirrors the bloom precomputation: same entries the persistent
-        // backend would write at commit, populated up front so reads
-        // against a freshly-built (but not-yet-persisted) layer work
-        // identically to reads after restart.
-        let owned = crate::layer::index::extract_indexable_triples(&layer);
-        if !owned.is_empty() {
-            let borrowed: Vec<crate::layer::index::Triple> =
-                owned.iter().map(|t| t.as_borrowed()).collect();
-            // `extend_layer` is idempotent by `(layer, p, o, s)` — if
-            // the persistent backend's `store_layer` later replays the
-            // same writes inside its WriteBatch, the second write is a
-            // no-op at the index's logical level (RocksDB will overwrite
-            // the same key with the same empty value).
-            let _ = layer
-                .storage
-                .triple_index
-                .extend_layer(layer.id(), &borrowed);
+        // Index lifecycle (D65): derived indexes are materialised at the
+        // **persist** step — `PersistentBackend::store_layer` calls
+        // `populate_layer_indexes` — which runs *after* validation (every commit
+        // path stores only post-validation), so a rejected commit never writes
+        // index entries and seed/committed layers persist their indexes durably.
+        // The ephemeral no-backend in-memory path has no separate persist step,
+        // so for it build *is* the materialisation: populate here.
+        if layer.storage.persistent_backend.is_none() {
+            populate_layer_indexes(&layer);
         }
-        // D43 M3.5: pre-populate the text index from the layer's
-        // indexable property values. Runs after the triple-index
-        // pre-population so that `resolve_active_text_indexes`
-        // (which scans via the triple index for `is_a == TextIndex`)
-        // sees this layer's own contributions.
-        crate::query::text::indexing::populate_text_indexes(&layer);
         layer
+    }
+}
+
+/// Materialise a layer's derived indexes into the layer's own storage, in the
+/// order their discovery requires: the **triple** index first, then the **text**
+/// and **value** indexes — both discover their active `core:TextIndex` /
+/// `core:ValueIndex` declarations by scanning the triple index, so it must be
+/// populated first (D43 / D65).
+///
+/// Writes through `layer.storage()`, so the layer must be built on the storage it
+/// is being persisted to — the invariant `PersistentBackend::store_layer` relies
+/// on when it calls this. For the ephemeral no-backend path this is the in-memory
+/// index; for a committed layer it is the backend's index. Idempotent.
+pub fn populate_layer_indexes(layer: &Layer) {
+    let owned = crate::layer::index::extract_indexable_triples(layer);
+    if !owned.is_empty() {
+        let borrowed: Vec<crate::layer::index::Triple> =
+            owned.iter().map(|t| t.as_borrowed()).collect();
+        // `extend_layer` is idempotent by `(layer, p, o, s)`.
+        let _ = layer
+            .storage
+            .triple_index
+            .extend_layer(layer.id(), &borrowed);
+    }
+    crate::query::text::indexing::populate_text_indexes(layer);
+    let value_entries = crate::layer::index_discovery::extract_value_entries(layer);
+    if !value_entries.is_empty() {
+        let borrowed: Vec<crate::layer::ValueEntry> =
+            value_entries.iter().map(|e| e.as_borrowed()).collect();
+        let _ = layer
+            .storage
+            .value_index
+            .extend_layer(layer.id(), &borrowed);
     }
 }
 

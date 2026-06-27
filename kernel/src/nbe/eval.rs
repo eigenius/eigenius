@@ -276,6 +276,10 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
             ev(e1)?.app_ctx(ev(e2)?, ctx)
         }
 
+        // Type annotations are runtime-erased: `⟦(e : T)⟧ = ⟦e⟧`. (The
+        // annotation only matters to `check_infer` — see check.rs.)
+        Exp::Ann(e, _t) => ev(e),
+
         Exp::Var(x) => match rho.get(x) {
             Ok(val) => Ok(val),
             Err(e) => match ctx {

@@ -55,6 +55,13 @@ pub enum Exp {
     Snd(Box<Exp>),
     /// Application: e₁ e₂
     App(Box<Exp>, Box<Exp>),
+    /// Type annotation: `(e : T)` — the bidirectional mode switch that lets a
+    /// *checkable* term (e.g. a Curry-style `Lam`, which has no synthesizable
+    /// type) appear in *inference* position. `check_infer(Ann(e, T))` checks `e`
+    /// against `T` and returns `T`; `eval` is runtime-erased (`eval(Ann(e,_)) =
+    /// eval(e)`), so NbE normal forms never contain `Ann`. See D46 (bidirectional
+    /// typing) / D63 §8.2 (the determiner λ-semantics need to commit-check).
+    Ann(Box<Exp>, Box<Exp>),
     /// Variable: x
     Var(Name),
     /// Declaration followed by expression: let/letrec d; e

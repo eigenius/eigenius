@@ -47,6 +47,9 @@ pub enum TokenKind {
     // FIBER-clause keywords (D2 §3.3.1, §3.5)
     Fiber,
     Institution,
+    /// `USING NAMESPACE "<prefix>"` — declares a vocabulary namespace whose
+    /// classes/properties bare short names resolve within (D2 short-name scoping).
+    Namespace,
     /// Optional FIBER suffix that names a chain-resident IRI for the
     /// response resource. Without `INTO`, the FIBER response stays in
     /// the transient query overlay; with `INTO "<iri>"`, the response
@@ -635,6 +638,7 @@ impl<'a> Lexer<'a> {
             "OFFSET" => TokenKind::Offset,
             "FIBER" => TokenKind::Fiber,
             "INSTITUTION" => TokenKind::Institution,
+            "NAMESPACE" => TokenKind::Namespace,
             "INTO" => TokenKind::Into,
             "HOLDS" => TokenKind::Holds,
             "FAILS" => TokenKind::Fails,
