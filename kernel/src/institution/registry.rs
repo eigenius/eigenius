@@ -29,7 +29,58 @@ use crate::layer::Layer;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+
+/// The `is_a` meta-classes the institution index dispatches on (see
+/// [`InstitutionIndex::ingest`]). A resource contributes to the index iff its `is_a`
+/// directly contains one of these — so these are exactly what
+/// [`resolve_typed_resources`] scans the triple index for on the commit hot path.
+/// Keep in sync with `ingest`'s dispatch arms.
+const INSTITUTION_METACLASSES: &[&str] = &[
+    wk::COMORPHISM,
+    wk::EXPORT_FORMAT_CLASS,
+    wk::IMPORT_FORMAT_CLASS,
+    wk::QUERY_CLASS_CLASS,
+    "urn:eigenius:institution:Institution",
+];
+
+/// Resolve every chain-resident resource whose `is_a` *directly* contains one of
+/// `metaclasses`, discovered via the triple index (D23 §5.9) rather than by
+/// materialising the whole chain. Each matching subject is resolved to its merged
+/// top view — overrides win, tombstoned IRIs drop out — and deduplicated across
+/// metaclasses. Cost scales with the number of matching resources, not chain size:
+/// the point of the commit-time hot path, where a chain may carry a domain lexicon
+/// of hundreds of thousands of resources but only a handful of institution
+/// declarations.
+///
+/// Requires `is_a` to be an indexable predicate (`data_type = resource_array`),
+/// which holds on any chain rooted at the core ontology — i.e. every committed
+/// chain. On a bare fixture chain with no core, `is_a` isn't indexed and this finds
+/// nothing; such callers use the full-scan [`InstitutionIndex::from_layer`] instead.
+pub(crate) fn resolve_typed_resources(layer: &Layer, metaclasses: &[&str]) -> Vec<Arc<Resource>> {
+    let triple_index = &layer.storage().triple_index;
+    let Ok(is_a) = Iri::parse(wk::IS_A) else {
+        return Vec::new();
+    };
+    let mut seen: BTreeSet<Iri> = BTreeSet::new();
+    let mut out: Vec<Arc<Resource>> = Vec::new();
+    for mc in metaclasses {
+        let Ok(object) = Iri::parse(mc) else {
+            continue;
+        };
+        for (subject, _defining_layer) in
+            triple_index.scan_predicate_object(&is_a, &object).flatten()
+        {
+            if seen.insert(subject.clone()) {
+                if let Some(resource) = layer.resolve(&subject) {
+                    out.push(resource);
+                }
+            }
+        }
+    }
+    out
+}
 
 // ─── Typed entries derived from declaration resources ──────────────────
 
@@ -193,6 +244,24 @@ impl InstitutionIndex {
         let mut errors = Vec::new();
 
         for (_iri, resource) in layer.iter_all_resources() {
+            idx.ingest(&resource, &mut errors);
+        }
+
+        (idx, errors)
+    }
+
+    /// Like [`from_layer`](Self::from_layer) but discovers the institution-related
+    /// resources through the triple index ([`resolve_typed_resources`]) instead of
+    /// materialising the entire chain. O(institution declarations), not O(chain) —
+    /// the per-commit rebuild path (D14 / D23). Produces an identical index to
+    /// `from_layer` on any chain rooted at the core ontology (proven by the
+    /// `indexed_rebuild_matches_full_scan` test); use `from_layer` for bare fixture
+    /// chains with no core (where `is_a` isn't indexed).
+    pub fn from_layer_indexed(layer: &Layer) -> (Self, Vec<IndexError>) {
+        let mut idx = Self::new();
+        let mut errors = Vec::new();
+
+        for resource in resolve_typed_resources(layer, INSTITUTION_METACLASSES) {
             idx.ingest(&resource, &mut errors);
         }
 
@@ -650,7 +719,17 @@ mod tests {
     /// one ExportFormat, one ImportFormat, one QueryClass, one
     /// Comorphism — all tied together. Returns the built layer.
     fn build_test_layer() -> std::sync::Arc<crate::layer::Layer> {
-        let mut b = LayerBuilder::new("test", None);
+        build_test_layer_on(None, crate::layer::LayerStorage::in_memory())
+    }
+
+    /// Like [`build_test_layer`] but with an explicit parent + storage, so the same
+    /// declarations can be committed onto a core-rooted chain (needed by the
+    /// index-driven equivalence test, where `is_a` must be an indexable predicate).
+    fn build_test_layer_on(
+        parent: Option<std::sync::Arc<crate::layer::Layer>>,
+        storage: crate::layer::LayerStorage,
+    ) -> std::sync::Arc<crate::layer::Layer> {
+        let mut b = LayerBuilder::new("test", parent);
 
         // Institution
         let mut inst = Resource::new(iri("urn:eigenius:test:inst:dock"));
@@ -755,7 +834,66 @@ mod tests {
         cm.set(iri(wk::EXACT), Value::Boolean(false));
         b.add_resource(cm).unwrap();
 
-        std::sync::Arc::new(b.build(crate::layer::LayerStorage::in_memory()))
+        std::sync::Arc::new(b.build(storage))
+    }
+
+    /// Safety net for the index-driven commit-time rebuild
+    /// ([`InstitutionIndex::from_layer_indexed`]): on a realistic core-rooted chain
+    /// it must produce the *same* index as the full-chain scan
+    /// ([`InstitutionIndex::from_layer`]). A divergence would mean an institution
+    /// kind silently stops dispatching after a commit. Core is required so `is_a` is
+    /// an indexable predicate (every committed chain has it).
+    #[test]
+    fn indexed_rebuild_matches_full_scan() {
+        let storage = crate::layer::LayerStorage::in_memory();
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let mut core = LayerBuilder::new("core", None);
+        for r in crate::ontology::eigon_json::parse_document(core_json).unwrap() {
+            core.add_resource(r).unwrap();
+        }
+        let core_layer = std::sync::Arc::new(core.build(storage.clone()));
+        let layer = build_test_layer_on(Some(core_layer), storage);
+
+        let (full, full_errs) = InstitutionIndex::from_layer(&layer);
+        let (indexed, indexed_errs) = InstitutionIndex::from_layer_indexed(&layer);
+
+        let inst = |idx: &InstitutionIndex| {
+            idx.institutions()
+                .map(|e| e.iri.clone())
+                .collect::<BTreeSet<_>>()
+        };
+        let ef = |idx: &InstitutionIndex| {
+            idx.export_formats()
+                .map(|e| e.iri.clone())
+                .collect::<BTreeSet<_>>()
+        };
+        let imf = |idx: &InstitutionIndex| {
+            idx.import_formats()
+                .map(|e| e.iri.clone())
+                .collect::<BTreeSet<_>>()
+        };
+        let qc = |idx: &InstitutionIndex| {
+            idx.query_classes()
+                .map(|e| e.iri.clone())
+                .collect::<BTreeSet<_>>()
+        };
+        let cm = |idx: &InstitutionIndex| {
+            idx.comorphisms()
+                .map(|e| e.iri.clone())
+                .collect::<BTreeSet<_>>()
+        };
+
+        assert_eq!(inst(&full), inst(&indexed), "institutions diverge");
+        assert_eq!(ef(&full), ef(&indexed), "export_formats diverge");
+        assert_eq!(imf(&full), imf(&indexed), "import_formats diverge");
+        assert_eq!(qc(&full), qc(&indexed), "query_classes diverge");
+        assert_eq!(cm(&full), cm(&indexed), "comorphisms diverge");
+        assert_eq!(full_errs.len(), indexed_errs.len(), "error counts diverge");
+
+        // Sanity: the fixture actually has declarations (not a vacuous match).
+        assert_eq!(inst(&full).len(), 2);
+        assert_eq!(qc(&full).len(), 1);
+        assert_eq!(cm(&full).len(), 1);
     }
 
     #[test]
