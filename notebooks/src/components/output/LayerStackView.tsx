@@ -181,23 +181,20 @@ export function LayerStackView({ topology }: LayerStackViewProps) {
   const stack = useMemo(() => orderLayersHeadFirst(topology), [topology]);
   const [openLayer, setOpenLayer] = useState<TopologyNode | null>(null);
 
-  // The summary topology is fetched cheaply (`includeResources: false`),
-  // so instance-resource nodes are absent — only their *count* is on
-  // the layer node. When the user opens the per-layer drilldown for a
-  // layer whose resource count > 0, we lazily refetch with
-  // `includeResources: true` so the graph matches what the count
-  // promised.
-  const summaryHasResourcesForOpenLayer = useMemo(() => {
-    if (!openLayer) return true;
-    return topology.nodes.some(
-      (n) => n.kind === NodeKind.RESOURCE && n.attrs?.layer_id === openLayer.id,
-    );
-  }, [openLayer, topology]);
-  const openLayerNeedsRichFetch = useMemo(() => {
+  // The stack summary is fetched cheaply (`includeResources: false`) and contains
+  // ONLY layer nodes + per-layer counts — no class / property / instance nodes at
+  // all. So a layer's contents are fetched ON DEMAND when its drilldown opens, and
+  // released when it closes. Crucially the fetch is scoped to the single layer
+  // (`rootLayer` + `maxDepth: 1`), so opening a layer in a chain that carries a
+  // domain lexicon pages in (and ships) only that one layer — never the whole chain.
+  const openLayerHasContents = useMemo(() => {
     if (!openLayer) return false;
-    const counts = readCounts(openLayer);
-    return (counts.resources ?? 0) > 0 && !summaryHasResourcesForOpenLayer;
-  }, [openLayer, summaryHasResourcesForOpenLayer]);
+    const c = readCounts(openLayer);
+    return (
+      (c.classes ?? 0) + (c.properties ?? 0) + (c.institutions ?? 0) +
+          (c.resources ?? 0) > 0
+    );
+  }, [openLayer]);
 
   const [richTopology, setRichTopology] = useState<
     LayerTopologyResponse | null
@@ -206,7 +203,9 @@ export function LayerStackView({ topology }: LayerStackViewProps) {
   );
   const [richError, setRichError] = useState<string | null>(null);
   useEffect(() => {
-    if (!openLayerNeedsRichFetch) {
+    // No layer open (or an empty one) → hold nothing. This also runs on close,
+    // releasing the previously-fetched layer contents (the `setRichTopology(null)`).
+    if (!openLayer || !openLayerHasContents) {
       setRichTopology(null);
       setRichError(null);
       return;
@@ -214,7 +213,11 @@ export function LayerStackView({ topology }: LayerStackViewProps) {
     let cancelled = false;
     setRichTopology(null);
     setRichError(null);
-    eigen.layerTopology({ includeResources: true })
+    eigen.layerTopology({
+      rootLayer: openLayer.id,
+      maxDepth: 1,
+      includeResources: true,
+    })
       .then((t) => {
         if (!cancelled) setRichTopology(t);
       })
@@ -226,24 +229,23 @@ export function LayerStackView({ topology }: LayerStackViewProps) {
     return () => {
       cancelled = true;
     };
-  }, [eigen, openLayerNeedsRichFetch, openLayer?.id]);
+  }, [eigen, openLayer?.id, openLayerHasContents]);
 
-  // Build the per-layer subgraph when a layer is selected. The kernel
-  // tags each non-LAYER node with `attrs.layer_id` (the layer that
-  // first declared it); we filter the full topology client-side.
+  // Build the per-layer subgraph from the on-demand single-layer fetch. The scoped
+  // walk already returns just this layer (root_layer + max_depth=1), but we still
+  // filter defensively: keep the layer node itself + any node the kernel tagged with
+  // this `layer_id`, drop other layer nodes and parent-layer edges.
   const layerSubgraph = useMemo<LayerTopologyResponse | null>(() => {
-    if (!openLayer) return null;
-    const source = openLayerNeedsRichFetch ? richTopology : topology;
-    if (!source) return null;
+    if (!openLayer || !richTopology) return null;
     const layerId = openLayer.id;
     const keepNode = (n: TopologyNode): boolean => {
       if (n.id === layerId) return true; // include the layer node itself
       if (n.kind === NodeKind.LAYER) return false; // drop other layers
       return n.attrs?.layer_id === layerId;
     };
-    const nodes = source.nodes.filter(keepNode);
+    const nodes = richTopology.nodes.filter(keepNode);
     const ids = new Set(nodes.map((n) => n.id));
-    const edges = source.edges.filter(
+    const edges = richTopology.edges.filter(
       (e) =>
         // Drop parent_layer edges (only one layer in this view) and
         // any edge whose endpoints aren't in the filtered set.
@@ -251,11 +253,11 @@ export function LayerStackView({ topology }: LayerStackViewProps) {
         ids.has(e.target),
     );
     return {
-      ...source,
+      ...richTopology,
       nodes,
       edges,
     } as LayerTopologyResponse;
-  }, [openLayer, openLayerNeedsRichFetch, richTopology, topology]);
+  }, [openLayer, richTopology]);
 
   if (stack.length === 0) {
     return (
@@ -314,7 +316,7 @@ export function LayerStackView({ topology }: LayerStackViewProps) {
             </DialogTitle>
             <DialogContent className={styles.fullScreenContent}>
               <div className={styles.fullScreenGraph}>
-                {openLayerNeedsRichFetch && !richTopology && !richError
+                {openLayerHasContents && !richTopology && !richError
                   ? (
                     <div className={styles.loadingPanel}>
                       <Spinner size="tiny" />

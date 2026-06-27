@@ -216,6 +216,10 @@ impl CommitPipeline {
     ) -> Result<LayerCommitOutcome, PipelineRunErr> {
         let span = tracing::info_span!(operation::COMMIT_PIPELINE_RUN, kind = ?self.kind);
         let _enter = span.enter();
+        // Wall-clock for the whole commit (build → validate → cascade → persist →
+        // didPersist), surfaced as `duration_ms` on the terminal log so commit cost
+        // is visible in the kernel logs without a profiler.
+        let started = std::time::Instant::now();
 
         let mut state = CommitState {
             // Inputs
@@ -271,6 +275,7 @@ impl CommitPipeline {
                         { field::OPERATION } = operation::COMMIT_PIPELINE_RUN,
                         { field::ERROR_KIND } = "phase_failed",
                         rescued_siblings = sibling_emissions.len(),
+                        duration_ms = started.elapsed().as_millis() as u64,
                         "commit.pipeline_run.err"
                     );
                     return Err(PipelineRunErr {
@@ -310,6 +315,7 @@ impl CommitPipeline {
         tracing::info!(
             { field::OPERATION } = operation::COMMIT_PIPELINE_RUN,
             { field::LAYER_ID } = %layer.id(),
+            duration_ms = started.elapsed().as_millis() as u64,
             "commit.pipeline_run.ok"
         );
         Ok(LayerCommitOutcome {

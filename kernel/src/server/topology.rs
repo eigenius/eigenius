@@ -15,23 +15,32 @@
 //! Layer-chain topology walker for the notebook UI (D22 §4.2).
 //!
 //! Walks a layer chain starting from `root_layer` (or the active top
-//! when empty) up to `max_depth` parent hops, emitting per-layer
-//! summary nodes plus optional per-resource nodes (Class / Property /
-//! Institution always; ordinary instance Resources only when
-//! `include_resources` is true). Edges record the structural
-//! relationships the notebook renderers care about: parent layer,
-//! `is_a`, `subclass_of`, `requires`, `recommends`, property
-//! cross-references (via `class_types`), and institution declarations.
+//! when empty) up to `max_depth` parent hops.
+//!
+//! Two modes, keyed on `include_resources`:
+//! - **`false` (the layer-stack view):** emit only per-layer summary nodes
+//!   carrying per-kind *counts* (classes / properties / institutions /
+//!   instances). No resource bodies are materialised — the counts come from the
+//!   triple index — and no per-resource nodes are shipped. This keeps the stack
+//!   view O(layers), independent of how large any layer is (a domain-lexicon
+//!   layer may hold tens of thousands of concept classes / millions of
+//!   instances). To inspect one layer's contents, fetch that layer specifically
+//!   (`root_layer = <id>`, `max_depth = 1`, `include_resources = true`).
+//! - **`true` (the contents/graph view):** additionally emit a node per resource
+//!   (Class / Property / Institution / instance), with the structural edges the
+//!   notebook renderers care about: parent layer, `is_a`, `subclass_of`,
+//!   `requires`, `recommends`, property cross-references (via `class_types`), and
+//!   institution declarations.
 //!
 //! Read-only: no IO, no mutation. Suitable for the kernel's existing
 //! `Read` capability mode.
 
-use crate::layer::Layer;
+use crate::layer::{Layer, LayerId};
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
 use crate::ontology::Iri;
 use crate::server::proto;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 /// Walk `layer` (and parents up to `max_depth` hops) and emit a topology.
 ///
@@ -50,11 +59,18 @@ pub fn walk(
     // and referenced from a child layer should appear once).
     let mut seen_node_ids: BTreeSet<String> = BTreeSet::new();
 
+    // Per-layer taxonomy counts from the triple index — computed once for the whole
+    // DAG up front (a few streaming scans over the is_a index), so no layer's
+    // resource bodies are materialised just to count them. The per-layer "resource"
+    // (instance) count is derived in `walk_layer` as `defined_iris.len() - taxonomy`.
+    let taxonomy = taxonomy_counts_by_layer(layer);
+
     walk_layer(
         layer,
         max_depth,
         0,
         include_resources,
+        &taxonomy,
         &mut nodes,
         &mut edges,
         &mut seen_node_ids,
@@ -63,32 +79,77 @@ pub fn walk(
     proto::LayerTopologyResponse { nodes, edges }
 }
 
+/// Per-layer `(classes, properties, institutions)` counts, computed from the triple
+/// index instead of by materialising resources. Scans the `is_a` index for each
+/// meta-class object and buckets matching subjects by the layer that defines them
+/// (D23 §5.9). Cost scales with the taxonomy size (classes + properties +
+/// institutions), never the instance population — the whole point: a chain carrying
+/// a domain lexicon has tens of thousands of concept *classes* but millions of
+/// *instances*, and counting must not page the instances in.
+///
+/// Matches the previous `is_instance_of`-based counting exactly: both test direct
+/// `is_a` membership of the meta-class ([`Resource::is_instance_of`] is direct, and
+/// the index keys triples by their literal `(s, is_a, o)`). Layers not in the walked
+/// chain may appear in the map; `walk_layer` only reads the entries it needs.
+fn taxonomy_counts_by_layer(layer: &Layer) -> HashMap<LayerId, (u64, u64, u64)> {
+    let triple_index = &layer.storage().triple_index;
+    let is_a = match Iri::parse(wk::IS_A) {
+        Ok(i) => i,
+        Err(_) => return HashMap::new(),
+    };
+    let class_iri = Iri::parse(wk::CLASS).expect("CLASS IRI");
+    let property_iri = Iri::parse(wk::PROPERTY).expect("PROPERTY IRI");
+    let institution_iri =
+        Iri::parse("urn:eigenius:institution:Institution").expect("Institution IRI");
+
+    let mut counts: HashMap<LayerId, (u64, u64, u64)> = HashMap::new();
+    for (object, slot) in [(&class_iri, 0u8), (&property_iri, 1), (&institution_iri, 2)] {
+        // `.flatten()` drops any transient scan error (the topology view is
+        // advisory, never a correctness gate).
+        for (_subject, defining_layer) in
+            triple_index.scan_predicate_object(&is_a, object).flatten()
+        {
+            let entry = counts.entry(defining_layer).or_insert((0, 0, 0));
+            match slot {
+                0 => entry.0 += 1,
+                1 => entry.1 += 1,
+                _ => entry.2 += 1,
+            }
+        }
+    }
+    counts
+}
+
+// Internal recursive walker; the accumulators + read-only context naturally make
+// for a wide signature.
+#[allow(clippy::too_many_arguments)]
 fn walk_layer(
     layer: &Layer,
     max_depth: u32,
     depth: u32,
     include_resources: bool,
+    taxonomy: &HashMap<LayerId, (u64, u64, u64)>,
     nodes: &mut Vec<proto::TopologyNode>,
     edges: &mut Vec<proto::TopologyEdge>,
     seen_node_ids: &mut BTreeSet<String>,
 ) {
     let layer_id = layer.id().to_string();
 
-    // Per-layer counts (recomputed even when include_resources=true,
-    // since the LayerStackView always wants them in attrs).
-    let counts = layer_counts(layer);
+    // Per-layer counts, from the precomputed index buckets — no resource bodies are
+    // loaded. Instances = everything the layer defines minus the taxonomy.
+    let (classes, properties, institutions) =
+        taxonomy.get(layer.id()).copied().unwrap_or((0, 0, 0));
+    let taxonomy_total = classes + properties + institutions;
+    let resources = (layer.defined_iris().len() as u64).saturating_sub(taxonomy_total);
 
     // Emit the layer node.
     if seen_node_ids.insert(layer_id.clone()) {
         let mut attrs = std::collections::BTreeMap::new();
         attrs.insert("name".to_string(), layer.name().to_string());
-        attrs.insert("class_count".to_string(), counts.classes.to_string());
-        attrs.insert("property_count".to_string(), counts.properties.to_string());
-        attrs.insert("resource_count".to_string(), counts.resources.to_string());
-        attrs.insert(
-            "institution_count".to_string(),
-            counts.institutions.to_string(),
-        );
+        attrs.insert("class_count".to_string(), classes.to_string());
+        attrs.insert("property_count".to_string(), properties.to_string());
+        attrs.insert("resource_count".to_string(), resources.to_string());
+        attrs.insert("institution_count".to_string(), institutions.to_string());
         // Commit timestamp (D34 §5.2). Millis since Unix epoch.
         // Consumers render this as the layer's "Last commit" timestamp;
         // the notebook's History panel keys its row ordering on it.
@@ -101,60 +162,56 @@ fn walk_layer(
         });
     }
 
-    // Walk this layer's resources.
-    let class_iri = Iri::parse(wk::CLASS).expect("CLASS IRI");
-    let property_iri = Iri::parse(wk::PROPERTY).expect("PROPERTY IRI");
-    let institution_iri =
-        Iri::parse("urn:eigenius:institution:Institution").expect("Institution IRI");
+    // Per-resource nodes are emitted ONLY when the caller asks for them
+    // (`include_resources`). The layer-stack view fetches with it off and gets just
+    // layer nodes + the counts above — so it never pages in (or ships to the client)
+    // a domain layer's tens of thousands of concept classes / millions of instances.
+    // A client wanting one layer's contents fetches that layer specifically
+    // (`root_layer = <id>`, `max_depth = 1`, `include_resources = true`).
+    if include_resources {
+        let class_iri = Iri::parse(wk::CLASS).expect("CLASS IRI");
+        let property_iri = Iri::parse(wk::PROPERTY).expect("PROPERTY IRI");
+        let institution_iri =
+            Iri::parse("urn:eigenius:institution:Institution").expect("Institution IRI");
 
-    for (iri, arc_resource) in layer.iter_resources() {
-        let resource: &Resource = &arc_resource;
-        let is_class = resource.is_instance_of(&class_iri);
-        let is_property = resource.is_instance_of(&property_iri);
-        let is_institution = resource.is_instance_of(&institution_iri);
-        let is_taxonomy = is_class || is_property || is_institution;
+        for (iri, arc_resource) in layer.iter_resources() {
+            let resource: &Resource = &arc_resource;
+            let kind = if resource.is_instance_of(&institution_iri) {
+                proto::NodeKind::Institution
+            } else if resource.is_instance_of(&class_iri) {
+                proto::NodeKind::Class
+            } else if resource.is_instance_of(&property_iri) {
+                proto::NodeKind::Property
+            } else {
+                proto::NodeKind::Resource
+            };
 
-        if !include_resources && !is_taxonomy {
-            // Skip ordinary instance resources unless the caller asked
-            // for them — they're aggregated into the layer's counts.
-            continue;
-        }
-
-        let kind = if is_institution {
-            proto::NodeKind::Institution
-        } else if is_class {
-            proto::NodeKind::Class
-        } else if is_property {
-            proto::NodeKind::Property
-        } else {
-            proto::NodeKind::Resource
-        };
-
-        let id = iri.as_str().to_string();
-        if seen_node_ids.insert(id.clone()) {
-            let label = node_label(resource, &iri);
-            let mut attrs = resource_attrs(resource);
-            // Attribute the node to the layer that introduced it so
-            // clients can filter "what's in this layer" without
-            // re-querying. Walker visits head-down with a seen-set,
-            // so each resource is attributed to whichever layer first
-            // declared it in the chain.
-            attrs.insert("layer_id".to_string(), layer_id.clone());
-            nodes.push(proto::TopologyNode {
-                id: id.clone(),
-                kind: kind as i32,
-                label,
-                attrs,
-            });
-            // Emit resource edges only on first sighting — gating
-            // alongside the node dedup. Without this, when the same
-            // class/property resource appears in N layers (e.g. the
-            // user re-ran an ESL cell N times, stacking N near-
-            // identical layers), the walker would emit each edge N
-            // times. Head-down traversal means the edges come from
-            // the topmost (most-specific) version of the resource,
-            // matching what the validator/resolver sees.
-            emit_resource_edges(resource, &iri, kind, edges);
+            let id = iri.as_str().to_string();
+            if seen_node_ids.insert(id.clone()) {
+                let label = node_label(resource, &iri);
+                let mut attrs = resource_attrs(resource);
+                // Attribute the node to the layer that introduced it so
+                // clients can filter "what's in this layer" without
+                // re-querying. Walker visits head-down with a seen-set,
+                // so each resource is attributed to whichever layer first
+                // declared it in the chain.
+                attrs.insert("layer_id".to_string(), layer_id.clone());
+                nodes.push(proto::TopologyNode {
+                    id: id.clone(),
+                    kind: kind as i32,
+                    label,
+                    attrs,
+                });
+                // Emit resource edges only on first sighting — gating
+                // alongside the node dedup. Without this, when the same
+                // class/property resource appears in N layers (e.g. the
+                // user re-ran an ESL cell N times, stacking N near-
+                // identical layers), the walker would emit each edge N
+                // times. Head-down traversal means the edges come from
+                // the topmost (most-specific) version of the resource,
+                // matching what the validator/resolver sees.
+                emit_resource_edges(resource, &iri, kind, edges);
+            }
         }
     }
 
@@ -174,42 +231,13 @@ fn walk_layer(
                 max_depth,
                 depth + 1,
                 include_resources,
+                taxonomy,
                 nodes,
                 edges,
                 seen_node_ids,
             );
         }
     }
-}
-
-#[derive(Default)]
-struct LayerCounts {
-    classes: usize,
-    properties: usize,
-    resources: usize,
-    institutions: usize,
-}
-
-fn layer_counts(layer: &Layer) -> LayerCounts {
-    let class_iri = Iri::parse(wk::CLASS).expect("CLASS IRI");
-    let property_iri = Iri::parse(wk::PROPERTY).expect("PROPERTY IRI");
-    let institution_iri =
-        Iri::parse("urn:eigenius:institution:Institution").expect("Institution IRI");
-
-    let mut c = LayerCounts::default();
-    for arc_resource in layer.iter_resources().map(|(_, r)| r) {
-        let resource: &Resource = &arc_resource;
-        if resource.is_instance_of(&class_iri) {
-            c.classes += 1;
-        } else if resource.is_instance_of(&property_iri) {
-            c.properties += 1;
-        } else if resource.is_instance_of(&institution_iri) {
-            c.institutions += 1;
-        } else {
-            c.resources += 1;
-        }
-    }
-    c
 }
 
 fn node_label(resource: &crate::ontology::resource::Resource, iri: &Iri) -> String {
@@ -422,31 +450,69 @@ mod tests {
         Arc::new(top.build(crate::layer::LayerStorage::in_memory()))
     }
 
+    /// Like [`build_chain`] but rooted on the real core ontology, all layers sharing
+    /// one storage. The index-based counts need `core:is_a` to be a known indexable
+    /// predicate (`data_type = resource_array`) and all layers in one triple index —
+    /// both true in production (bootstrap + shared backend), neither true for the
+    /// minimal `build_chain` fixtures. Used by the count-asserting test.
+    fn build_core_rooted_chain() -> Arc<crate::layer::Layer> {
+        let storage = crate::layer::LayerStorage::in_memory();
+        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
+        let mut core = LayerBuilder::new("core", None);
+        for r in crate::ontology::eigon_json::parse_document(core_json).unwrap() {
+            core.add_resource(r).unwrap();
+        }
+        let core_layer = Arc::new(core.build(storage.clone()));
+
+        let mut root = LayerBuilder::new("root", Some(core_layer));
+        root.add_resource(make_class_resource("urn:eigenius:example:Animal", "Animal"))
+            .unwrap();
+        root.add_resource(make_property_resource(
+            "urn:eigenius:example:name",
+            "name",
+            "urn:eigenius:core:string",
+        ))
+        .unwrap();
+        let root_layer = Arc::new(root.build(storage.clone()));
+
+        let mut top = LayerBuilder::new("top", Some(root_layer));
+        let mut dog = make_class_resource("urn:eigenius:example:Dog", "Dog");
+        dog.set(
+            iri(wk::PARENT_CLASSES),
+            Value::Array(vec![Value::String(
+                "urn:eigenius:example:Animal".to_string(),
+            )]),
+        );
+        top.add_resource(dog).unwrap();
+        top.add_resource(make_instance(
+            "urn:eigenius:example:rex",
+            "urn:eigenius:example:Dog",
+        ))
+        .unwrap();
+        Arc::new(top.build(storage))
+    }
+
     #[test]
-    fn walks_two_layer_chain_skipping_instances_by_default() {
-        let layer = build_chain();
+    fn layers_only_by_default_emits_layer_nodes_with_index_counts() {
+        let layer = build_core_rooted_chain();
         let topo = walk(&layer, 0, /* include_resources */ false);
 
-        // 2 layer nodes + Class Animal + Property name + Class Dog = 5 nodes.
-        // Instance `rex` is excluded (include_resources=false).
-        assert_eq!(topo.nodes.len(), 5, "nodes: {:?}", topo.nodes);
-        let kinds: std::collections::BTreeMap<String, i32> =
-            topo.nodes.iter().map(|n| (n.id.clone(), n.kind)).collect();
-        assert_eq!(
-            kinds.get("urn:eigenius:example:Animal"),
-            Some(&(proto::NodeKind::Class as i32))
+        // include_resources=false is the lightweight stack-view path: ONLY the layer
+        // nodes are emitted (core + root + top = 3 here), never the per-resource
+        // class/property/instance nodes. This is what keeps a domain-lexicon chain
+        // (tens of thousands of concept classes) from being paged in and shipped to
+        // the client.
+        assert_eq!(topo.nodes.len(), 3, "nodes: {:?}", topo.nodes);
+        assert!(
+            topo.nodes
+                .iter()
+                .all(|n| n.kind == proto::NodeKind::Layer as i32),
+            "only layer nodes should be emitted with include_resources=false"
         );
-        assert_eq!(
-            kinds.get("urn:eigenius:example:name"),
-            Some(&(proto::NodeKind::Property as i32))
-        );
-        assert_eq!(
-            kinds.get("urn:eigenius:example:Dog"),
-            Some(&(proto::NodeKind::Class as i32))
-        );
-        assert!(!kinds.contains_key("urn:eigenius:example:rex"));
 
-        // Layer counts in attrs.
+        // Counts still come through in attrs — computed from the triple index, not
+        // by materialising bodies. The top layer has Class `Dog` (1) + instance
+        // `rex` (1).
         let top_layer_node = topo
             .nodes
             .iter()
@@ -459,30 +525,37 @@ mod tests {
         assert_eq!(
             top_layer_node.attrs.get("resource_count"),
             Some(&"1".to_string()),
-            "the rex instance should be counted even when not emitted as a node"
+            "the rex instance is counted via the index, not emitted as a node"
+        );
+        // The root layer has Class `Animal` (1) + Property `name` (1).
+        let root_layer_node = topo
+            .nodes
+            .iter()
+            .find(|n| n.kind == proto::NodeKind::Layer as i32 && n.label == "root")
+            .expect("root layer node present");
+        assert_eq!(
+            root_layer_node.attrs.get("class_count"),
+            Some(&"1".to_string())
+        );
+        assert_eq!(
+            root_layer_node.attrs.get("property_count"),
+            Some(&"1".to_string())
         );
 
-        // Edges: parent_layer + Dog→Animal subclass_of + Dog→name requires.
-        let edge_kinds: Vec<i32> = topo.edges.iter().map(|e| e.kind).collect();
+        // The structural parent_layer edge is still emitted (it's layer-level, not
+        // resource-level); resource edges are not (no resource nodes were walked).
         assert!(
-            edge_kinds.contains(&(proto::EdgeKind::ParentLayer as i32)),
+            topo.edges
+                .iter()
+                .any(|e| e.kind == proto::EdgeKind::ParentLayer as i32),
             "parent_layer edge missing"
         );
         assert!(
-            topo.edges
+            !topo
+                .edges
                 .iter()
-                .any(|e| e.kind == proto::EdgeKind::SubclassOf as i32
-                    && e.source == "urn:eigenius:example:Dog"
-                    && e.target == "urn:eigenius:example:Animal"),
-            "subclass_of edge missing"
-        );
-        assert!(
-            topo.edges
-                .iter()
-                .any(|e| e.kind == proto::EdgeKind::Requires as i32
-                    && e.source == "urn:eigenius:example:Dog"
-                    && e.target == "urn:eigenius:example:name"),
-            "requires edge missing"
+                .any(|e| e.kind == proto::EdgeKind::SubclassOf as i32),
+            "no resource edges should be emitted with include_resources=false"
         );
     }
 
@@ -557,7 +630,7 @@ mod tests {
         top.add_resource(foo_v2).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
-        let topo = walk(&layer, 0, false);
+        let topo = walk(&layer, 0, true);
         let foo_nodes: Vec<_> = topo
             .nodes
             .iter()
@@ -600,7 +673,7 @@ mod tests {
         top.add_resource(foo).unwrap();
         let layer = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
 
-        let topo = walk(&layer, 0, false);
+        let topo = walk(&layer, 0, true);
         let requires_edges: Vec<_> = topo
             .edges
             .iter()
@@ -664,7 +737,7 @@ mod tests {
         root.add_resource(dog).unwrap();
         let layer = Arc::new(root.build(crate::layer::LayerStorage::in_memory()));
 
-        let topo = walk(&layer, 0, false);
+        let topo = walk(&layer, 0, true);
 
         let subclass = topo.edges.iter().find(|e| {
             e.kind == proto::EdgeKind::SubclassOf as i32
