@@ -132,17 +132,17 @@ fn enumerate_dependents(
         let is_property = resource.is_instance_of(&core_property);
 
         // Reference integrity (Rule 22) makes a layer's validity a function of (its
-        // content, the chain below it): every `is_a` / value reference must resolve
-        // same-or-lower at commit. So a **brand-new** IRI — one not already defined in a
-        // lower layer — provably has NO lower dependents for cases (1) and (3): no lower
-        // resource could be an instance of, or reference, an IRI that did not exist when
-        // it committed. We therefore run cases (1)/(3) only for **redefinitions** (an
-        // IRI that shadows an ancestor definition — a small set). Case (2) still runs
-        // for brand-new properties: open-world (Rule 12) lets a lower resource carry an
-        // *undeclared* property, and declaring it now subjects that carrier to its rules
-        // — that is not a reference, so closure does not rule it out. (Properties are
-        // few per layer, so the chain walk stays cheap.) This collapses an additive
-        // import's retroactive pass from O(new_iris × predicates) to ~O(redefs + props).
+        // content, the chain below it): every `is_a` / value reference — AND every
+        // property *key* (Rule 22 §(c)) — must resolve same-or-lower at commit. So a
+        // **brand-new** IRI — one not already defined in a lower layer — provably has NO
+        // lower dependents for ANY of the three cases: no lower resource could be an
+        // instance of, reference, or *carry as a property key* an IRI that did not exist
+        // when it committed. We therefore run all three cases only for **redefinitions**
+        // (an IRI that shadows an ancestor definition — a small set). This is what keeps
+        // the otherwise O(chain) carrier scan (case 2) off the hot path: an additive
+        // import's brand-new properties are skipped entirely; only a rare redefinition
+        // pays. Collapses the retroactive pass from O(new_iris × predicates) to
+        // ~O(redefs).
         let redefines = redefines_ancestor(new_layer, iri);
 
         if is_class && redefines {
@@ -161,11 +161,16 @@ fn enumerate_dependents(
                 }
             }
         }
-        if is_property {
-            // Rules 3–10 dependents: every resource carrying this
-            // property. Chain walk — the triple index doesn't cover
-            // literal-valued properties. Runs for new AND redefined
-            // properties (open-world carriers, see above).
+        if is_property && redefines {
+            // Rules 3–10 dependents: every lower resource carrying this property must be
+            // revalidated against the (re)definition. Only a REDEFINITION can have lower
+            // carriers: reference integrity (Rule 22 §(c)) requires a property key to
+            // resolve to a declared `core:Property` same-or-lower at commit, so a
+            // brand-new property was unwritable in any lower layer and provably has no
+            // lower carriers — the same closure that scopes cases (1)/(3) to
+            // redefinitions. (This is what makes the otherwise O(chain) carrier scan
+            // safe on a large chain: it never runs for an additive import's new
+            // properties, only for the rare redefinition.)
             scan_chain_for_property_carriers(new_layer, iri, ws)?;
         }
 
@@ -717,18 +722,17 @@ mod tests {
         );
     }
 
-    /// Case (2) for a **brand-new** property — the path the structural scoping
-    /// deliberately does NOT gate behind `redefines_ancestor`. Open-world (Rule 12)
-    /// lets a lower resource carry an *undeclared* property; declaring that property in
-    /// a higher layer must retroactively revalidate the carrier against its new rules,
-    /// even though the property IRI is brand-new (no ancestor definition).
+    /// The precondition that lets case (2) skip brand-new properties: a resource may
+    /// NOT carry a property key that isn't defined same-or-lower (reference integrity,
+    /// Rule 22 §(c)). Open-world (Rule 12) only frees a resource from its classes'
+    /// requires/recommends sets — it does NOT permit an undeclared property IRI as a
+    /// key. So the old "carry an undeclared property, declare it later" scenario is
+    /// rejected at commit, which means a brand-new property provably has no lower
+    /// carrier and retroactive validation correctly does not scan for one.
     #[test]
-    fn new_property_revalidates_existing_carrier() {
+    fn undeclared_property_key_is_rejected() {
         let (root, storage, _backend) = build_chain_with_class_instances();
 
-        // Mid: a resource carrying an UNDECLARED `demo:rank` with a non-integer value.
-        // Undeclared ⇒ Rule 12 admits it and reference integrity (Rule 22) skips it
-        // (no property def, and the value is a string, not a resource ref).
         let mid = {
             let mut b = LayerBuilder::new("mid", Some(Arc::clone(&root)));
             let mut carrier = mk_instance(
@@ -741,34 +745,16 @@ mod tests {
             b.add_resource(carrier).unwrap();
             Arc::new(b.build(storage.clone()))
         };
-        let mut ws = CommitWorkingSet::in_memory();
-        retroactive_validate(&mid, &mut ws).unwrap();
-        assert_eq!(ws.violations.len(), 0, "mid valid (demo:rank undeclared)");
 
-        // New: declare `demo:rank` as an integer Property for the FIRST time. It does
-        // not redefine any ancestor, yet case (2) must still revalidate the carrier —
-        // whose string value now violates the integer data_type (Rule 3).
-        let new = {
-            let mut b = LayerBuilder::new("new", Some(Arc::clone(&mid)));
-            let mut rank = Resource::new(iri("urn:eigenius:demo:rank"));
-            rank.set(
-                iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
-            );
-            rank.set(iri(wk::DESCRIPTION), Value::String("rank".into()));
-            rank.set(iri(wk::SHORT_NAME), Value::String("rank".into()));
-            rank.set(
-                iri(wk::DATA_TYPE_PROP),
-                Value::ResourceRef(iri(wk::INTEGER)),
-            );
-            b.add_resource(rank).unwrap();
-            Arc::new(b.build(storage.clone()))
-        };
-        let mut ws = CommitWorkingSet::in_memory();
-        retroactive_validate(&new, &mut ws).unwrap();
+        // Structural validation rejects the undeclared `demo:rank` key (Rule 22 §(c)).
+        let errors = crate::validation::Validator::new(Arc::clone(&mid)).validate();
         assert!(
-            !ws.violations.is_empty(),
-            "declaring a brand-new property must revalidate its existing (lower) carrier"
+            errors.iter().any(|e| matches!(
+                e.rule,
+                crate::validation::ValidationRule::UnresolvedClassReference
+            ) && e.property.as_ref().map(|p| p.as_str())
+                == Some("urn:eigenius:demo:rank")),
+            "carrying an undeclared property key (demo:rank) must be rejected; got {errors:?}"
         );
     }
 

@@ -447,29 +447,31 @@ mod tests {
             iri("urn:eigenius:core:description"),
             Value::String("v".into()),
         );
-        r
-    }
-
-    /// The self-referential `core:Class` definition, so the `is_a core:Class`
-    /// placeholder on `make_resource` fixtures resolves (reference-integrity, Rule 22)
-    /// in these core-ontology-free test roots.
-    fn class_def() -> Resource {
-        let mut r = Resource::new(iri("urn:eigenius:core:Class"));
+        // Real `core:Class` requires `short_name` — supply it so fixtures validate
+        // against real core (the chain is rooted on the core base, below).
         r.set(
-            iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::String("urn:eigenius:core:Class".into())]),
+            iri("urn:eigenius:core:short_name"),
+            Value::String("test_fixture".into()),
         );
         r
     }
 
-    /// Helper: commit a small root layer.
+    /// Helper: commit a small root layer. The root is **self-contained** — it carries
+    /// the real core ontology (parent=None) plus the test resource, so fixtures'
+    /// property KEYS resolve to declared `core:Property` resources within the layer
+    /// (reference integrity, Rule 22 §(c)). Carrying core *in* the root rather than as a
+    /// separate base keeps the GC tests' layer **counts** unchanged (the root is one
+    /// layer, just larger), so their reachability/sweep assertions hold as written.
     fn commit_root(
         backend: &dyn PersistentBackend,
         storage: &LayerStorage,
     ) -> Arc<crate::layer::Layer> {
+        let core_json = include_str!("../../ontologies/core/core-ontology.json");
         let mut b = LayerBuilder::new("root", None);
-        b.add_resource(class_def()).unwrap();
-        b.add_resource(make_resource("urn:eigenius:core:r"))
+        for r in crate::ontology::eigon_json::parse_document(core_json).unwrap() {
+            b.add_resource(r).unwrap();
+        }
+        b.add_resource(make_resource("urn:eigenius:test:r"))
             .unwrap();
         commit_layer_default(b, storage.clone(), backend).unwrap()
     }

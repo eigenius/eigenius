@@ -593,6 +593,36 @@
     "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
   },
   {
+    "@id": "urn:eigenius:core:result_sort",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The result sort an InductiveType's constructors produce (e.g. `Prop`, `Set`). A string naming the sort.",
+    "urn:eigenius:core:short_name": "result_sort",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveType"]
+  },
+  {
+    "@id": "urn:eigenius:core:indices",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Index arguments of an indexed inductive family (D48) — the per-index parameter declarations distinguishing an indexed family from a parametric type. Each element is an embedded InductiveParam.",
+    "urn:eigenius:core:short_name": "indices",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array"
+  },
+  {
+    "@id": "urn:eigenius:core:ctor_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The encoded type expression (eigentt) of a constructor — the full arrow type a constructor inhabits. Carried as the tagged-dict JSON encoding the kernel decoder parses back.",
+    "urn:eigenius:core:short_name": "ctor_type",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json"
+  },
+  {
+    "@id": "urn:eigenius:core:macro_decl_json",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The JSON-encoded macro declaration (parameters + expansion) carried by a core:Macro resource; the ESL compiler decodes it back into a MacroDecl at compile time.",
+    "urn:eigenius:core:short_name": "macro_decl_json",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:json",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:Macro"]
+  },
+  {
     "@id": "urn:eigenius:core:type_params",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "Ordered list of type parameters on an InductiveType or CodataType. Empty for non-parametric types (Nat, Bool, non-sized streams).",

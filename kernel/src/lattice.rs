@@ -1615,6 +1615,12 @@ mod tests {
             iri("urn:eigenius:core:is_a"),
             Value::Array(vec![Value::String("urn:eigenius:core:Class".into())]),
         );
+        // Real `core:Class` requires `short_name`; stamp it so any fixture typed against
+        // it validates against real core. (Idempotent with callers that also set it.)
+        r.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String("test_fixture".into()),
+        );
     }
 
     fn make_resource(id: &str) -> Resource {
@@ -1624,36 +1630,70 @@ mod tests {
             iri("urn:eigenius:core:description"),
             Value::String("v".into()),
         );
+        // Real `core:Class` requires `short_name` (the old coreless fixtures typed
+        // against a fake Class with no requires); supply it so these instances validate.
+        r.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String("test_fixture".into()),
+        );
         r
     }
 
-    /// The self-referential `core:Class` definition. Every root test layer must
-    /// include it so the placeholder `is_a core:Class` on `make_resource` fixtures
-    /// resolves (reference-integrity, Rule 22) — these layers carry no real core
-    /// ontology, so the class they type against has to live in the root itself.
-    fn class_def() -> Resource {
-        let mut r = Resource::new(iri("urn:eigenius:core:Class"));
-        set_default_is_a(&mut r);
+    /// A string-typed `core:Property` fixture, for IRIs used as property KEYS (which
+    /// must resolve to a declared Property under reference integrity, Rule 22 §(c)).
+    fn make_property(id: &str) -> Resource {
+        let mut r = Resource::new(iri(id));
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String("urn:eigenius:core:Property".into())]),
+        );
+        r.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String("test_marker".into()),
+        );
+        r.set(
+            iri("urn:eigenius:core:description"),
+            Value::String("test marker property".into()),
+        );
+        r.set(
+            iri("urn:eigenius:core:data_type"),
+            Value::String("urn:eigenius:core:string".into()),
+        );
         r
     }
 
-    /// A root (`parent = None`) `LayerBuilder` pre-seeded with [`class_def`], so the
-    /// `is_a core:Class` placeholder on its fixtures resolves. Use instead of
-    /// `LayerBuilder::new(name, None)` for test root layers.
-    fn root_layer(name: &str) -> LayerBuilder {
-        let mut b = LayerBuilder::new(name, None);
-        b.add_resource(class_def()).unwrap();
-        b
+    /// Commit the real core ontology as the parent=None base layer, persisted to
+    /// `backend`. Test fragments build on this so their property KEYS (`is_a`,
+    /// `description`, …) resolve to declared `core:Property` resources (reference
+    /// integrity, Rule 22 §(c)) — the same chain shape production always has. Replaces
+    /// the old hand-rolled coreless `class_def` root.
+    fn core_base(storage: &LayerStorage, backend: &dyn PersistentBackend) -> Arc<Layer> {
+        let core_json = include_str!("../../ontologies/core/core-ontology.json");
+        let resources = crate::ontology::eigon_json::parse_document(core_json).unwrap();
+        let mut b = LayerBuilder::new("core", None);
+        for r in resources {
+            b.add_resource(r).unwrap();
+        }
+        commit_layer_default(b, storage.clone(), backend).unwrap()
     }
 
-    /// Build a small root layer via the lattice commit primitive.
+    /// A root `LayerBuilder` parented on the committed core base `core`, so its fixtures
+    /// validate against real core vocabulary. Use instead of `LayerBuilder::new(name,
+    /// None)` for test root layers.
+    fn root_layer(name: &str, core: &Arc<Layer>) -> LayerBuilder {
+        LayerBuilder::new(name, Some(Arc::clone(core)))
+    }
+
+    /// Build a small root layer (child of a freshly-committed core base) via the lattice
+    /// commit primitive.
     fn commit_root(
         backend: &dyn PersistentBackend,
         name: &str,
         storage: &LayerStorage,
     ) -> Arc<Layer> {
-        let mut b = root_layer(name);
-        b.add_resource(make_resource("urn:eigenius:core:r"))
+        let core = core_base(storage, backend);
+        let mut b = root_layer(name, &core);
+        b.add_resource(make_resource("urn:eigenius:test:r"))
             .unwrap();
         commit_layer_default(b, storage.clone(), backend).unwrap()
     }
@@ -1669,7 +1709,7 @@ mod tests {
         assert!(topo.get_layer(layer.id()).is_some());
         assert!(backend.load_bloom(layer.id()).unwrap().is_some());
         assert!(backend
-            .load_resource(layer.id(), &iri("urn:eigenius:core:r"))
+            .load_resource(layer.id(), &iri("urn:eigenius:test:r"))
             .is_some());
     }
 
@@ -1907,7 +1947,8 @@ mod tests {
         let storage = LayerStorage::in_memory();
 
         // Root defines demo:X — the IRI A will tombstone.
-        let mut root_b = root_layer("root");
+        let core = core_base(&storage, &backend);
+        let mut root_b = root_layer("root", &core);
         let mut root_resource = Resource::new(iri("urn:eigenius:demo:X"));
         // Validator requires non-empty `is_a`; the trivial-merge tests
         // don't exercise class-typing semantics so any value satisfies
@@ -1919,6 +1960,10 @@ mod tests {
         root_resource.set(
             iri("urn:eigenius:core:description"),
             Value::String("v_root".into()),
+        );
+        root_resource.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String("x".into()),
         );
         root_b.add_resource(root_resource).unwrap();
         let root = commit_layer_default(root_b, storage.clone(), &backend).unwrap();
@@ -1995,7 +2040,8 @@ mod tests {
         let storage = LayerStorage::in_memory();
 
         // Root defines demo:X.
-        let mut root_b = root_layer("root");
+        let core = core_base(&storage, &backend);
+        let mut root_b = root_layer("root", &core);
         let mut root_resource = Resource::new(iri("urn:eigenius:demo:X"));
         // Validator requires non-empty `is_a`; the trivial-merge tests
         // don't exercise class-typing semantics so any value satisfies
@@ -2007,6 +2053,10 @@ mod tests {
         root_resource.set(
             iri("urn:eigenius:core:description"),
             Value::String("v_root".into()),
+        );
+        root_resource.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String("x".into()),
         );
         root_b.add_resource(root_resource).unwrap();
         let root = commit_layer_default(root_b, storage.clone(), &backend).unwrap();
@@ -2036,6 +2086,10 @@ mod tests {
         x_b.set(
             iri("urn:eigenius:core:description"),
             Value::String("from b".into()),
+        );
+        x_b.set(
+            iri("urn:eigenius:core:short_name"),
+            Value::String("x".into()),
         );
         b_b.add_resource(x_b).unwrap();
         let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
@@ -2987,8 +3041,8 @@ mod tests {
         )
         .unwrap();
 
-        // Verify reachable before prune.
-        assert_eq!(backend.load_topology().unwrap().layer_count(), 2);
+        // Verify reachable before prune (core base + root + tip).
+        assert_eq!(backend.load_topology().unwrap().layer_count(), 3);
 
         prune_branch("main", PruneSafety::Force, &backend).unwrap();
 
@@ -3003,7 +3057,10 @@ mod tests {
             &backend,
         )
         .unwrap();
-        assert_eq!(stats.layers_swept, 2, "root + tip both reclaimed");
+        assert_eq!(
+            stats.layers_swept, 3,
+            "core base + root + tip all reclaimed once the only branch is pruned"
+        );
         assert_eq!(backend.load_topology().unwrap().layer_count(), 0);
     }
 
@@ -3033,8 +3090,9 @@ mod tests {
         name: &str,
         storage: &LayerStorage,
     ) -> Arc<Layer> {
-        let mut b = root_layer(name);
-        b.add_resource(make_resource("urn:eigenius:core:description"))
+        let core = core_base(storage, backend);
+        let mut b = root_layer(name, &core);
+        b.add_resource(make_resource("urn:eigenius:test:desc_marker"))
             .unwrap();
         commit_layer_default(b, storage.clone(), backend).unwrap()
     }
@@ -3149,28 +3207,25 @@ mod tests {
         // (otherwise they'd collapse to one layer per content
         // addressing), so we give each a unique marker resource in
         // addition to `core:description`.
-        let mut rb_a = root_layer("root_a");
-        rb_a.add_resource(make_resource("urn:eigenius:core:description"))
-            .unwrap();
+        let core = core_base(&storage, &backend);
+        let mut rb_a = root_layer("root_a", &core);
         rb_a.add_resource(make_resource("urn:eigenius:demo:a_marker"))
             .unwrap();
         let root_a = commit_layer_default(rb_a, storage.clone(), &backend).unwrap();
 
-        let mut rb_b = root_layer("root_b");
-        rb_b.add_resource(make_resource("urn:eigenius:core:description"))
-            .unwrap();
+        let mut rb_b = root_layer("root_b", &core);
         rb_b.add_resource(make_resource("urn:eigenius:demo:b_marker"))
             .unwrap();
         let root_b = commit_layer_default(rb_b, storage.clone(), &backend).unwrap();
         assert_ne!(root_a.id(), root_b.id());
 
         let mut sb_a = LayerBuilder::new("support", Some(Arc::clone(&root_a)));
-        sb_a.add_resource(make_resource("urn:eigenius:demo:Marker"))
+        sb_a.add_resource(make_property("urn:eigenius:demo:Marker"))
             .unwrap();
         let support_a = commit_layer_default(sb_a, storage.clone(), &backend).unwrap();
 
         let mut sb_b = LayerBuilder::new("support", Some(Arc::clone(&root_b)));
-        sb_b.add_resource(make_resource("urn:eigenius:demo:Marker"))
+        sb_b.add_resource(make_property("urn:eigenius:demo:Marker"))
             .unwrap();
         let support_b = commit_layer_default(sb_b, storage.clone(), &backend).unwrap();
 
@@ -3244,10 +3299,17 @@ mod tests {
         let backend = MemoryPersistentBackend::new();
         let storage = LayerStorage::in_memory();
 
-        // A root layer is self-contained — no external references,
-        // no supporting layer.
-        let mut rb = root_layer("self-contained");
-        rb.add_resource(make_resource("urn:eigenius:core:r"))
+        // A root layer is self-contained — it declares its own vocabulary (the core
+        // ontology IS the root, parent=None) so its references resolve within itself,
+        // leaving no supporting layer below. This is the genuine "no supporting layer"
+        // shape under reference integrity (Rule 22 §(c)): a self-contained layer, not a
+        // coreless fragment.
+        let core_json = include_str!("../../ontologies/core/core-ontology.json");
+        let mut rb = LayerBuilder::new("self-contained", None);
+        for r in crate::ontology::eigon_json::parse_document(core_json).unwrap() {
+            rb.add_resource(r).unwrap();
+        }
+        rb.add_resource(make_resource("urn:eigenius:test:r"))
             .unwrap();
         let outcome = commit_layer_with_cache(rb, storage, &backend).unwrap();
         match outcome {

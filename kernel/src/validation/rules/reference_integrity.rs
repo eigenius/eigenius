@@ -116,6 +116,33 @@ impl Validator {
             }
         }
 
+        // (c) Property-key existence. Open-world (Rule 12) lets a resource carry
+        // properties beyond the requires/recommends sets of its `is_a` classes — but a
+        // property IRI used as a *key* must still be DEFINED in the system: it must
+        // resolve to a `core:Property` same-or-lower (the committing layer counts, so a
+        // property declared in the same layer being validated is fine). A key that
+        // resolves to nothing is a typo / dangling reference, not an open-world extra —
+        // the same broken-reference class as (a)/(b). Enforcing this makes the invariant
+        // "a layer only writes property keys known at its commit" real, which lets
+        // retroactive validation skip brand-new properties (a property no lower layer
+        // could have written has no lower carriers to revalidate).
+        let property_class = Iri::parse(wk::PROPERTY).expect("core:Property iri");
+        for prop_iri in resource.properties().keys() {
+            match self.layer.resolve(prop_iri) {
+                Some(def) if def.is_instance_of(&property_class) => {}
+                Some(_) => errors.push(unresolved(
+                    res_id,
+                    prop_iri,
+                    format!("property key '{prop_iri}' resolves to a resource that is not a core:Property"),
+                )),
+                None => errors.push(unresolved(
+                    res_id,
+                    prop_iri,
+                    format!("property key '{prop_iri}' is not defined as a core:Property in the layer chain"),
+                )),
+            }
+        }
+
         errors
     }
 }

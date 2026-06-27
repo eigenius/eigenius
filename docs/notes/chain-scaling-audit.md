@@ -52,7 +52,7 @@ resources) · 🔎 needs review/measurement.
 | `server/inspect.rs` `resource_count = head.iter_all_resources().count()` | total count for inspect/health | 🔎 O(chain) just to count. Prefer summing `LayerHandle.resource_count` over the chain (metadata, no bodies). |
 | `program/axiom_env.rs` | axiom resources for a program run | 🔎 per-program-run; review if it's find-by-type. |
 | `nbe/check.rs` | resources during NbE checking | 🔎 review. |
-| `validation/retroactive.rs` | new layer's resources for retroactive pass | 🔎 measured fast so far (~0.6s); revisit if it grows. |
+| `validation/retroactive.rs` `scan_chain_for_property_carriers` (case 2) | lower-layer carriers of a newly-declared property | ✅ **fixed** — was `iter_all_resources()` over the whole chain (OOM-killed the kernel at 7.6M resources when a commit declared a property). Now gated behind `redefines`: a brand-new property provably has no lower carriers once property **keys** must be declared (Rule 22 §c), so only the rare redefinition scans. See "Retroactive carrier scan" below. |
 | `dcg/lookup.rs` | lexical entries for DCG | 🔎 parse path; the lazy `LexicalIndex` (value index) is meant to cover this — confirm this site isn't a redundant full scan. |
 | `layer/consolidate.rs` | range consolidation | 🔵 bulk maintenance op, inherently whole-range. |
 | `layer/mod.rs` (test helpers) | — | 🔵 tests. |
@@ -96,6 +96,39 @@ chain loaded to date.
 Two readiness gaps this load surfaced and fixed: `provision-wordnet.sh` passed a bare
 endpoint (no `http://`) → transport error; `wordnet-import` had no partitioned emit. Both
 provision scripts now use `--out-dir` + chained load on the `--endpoint` path.
+
+### Retroactive carrier scan — the OOM the 7.6M chain exposed (and the Rule-12 hole behind it)
+
+Running a notebook cell that **declares a property** against the 7.6M-resource chain
+**SIGKILL'd the kernel** (exit 137, host OOM) in `commit.retroactive`. Root cause:
+`scan_chain_for_property_carriers` (retroactive case 2) called `Layer::iter_all_resources()`,
+which materialises **every resource body in the chain into one `BTreeMap`** (multi-GB at
+7.6M) to find lower-layer resources carrying the newly-declared property. It ran for
+**brand-new** properties, justified by an *open-world property-key hole*: Rule 12 admitted
+property keys that resolve to nothing, and Rule 22 skipped them (`unknown property — not our
+concern`), so a lower layer could in principle carry an undeclared key that a later
+declaration must retroactively validate.
+
+**Fix (two coupled changes):**
+1. **Close the hole — `reference_integrity.rs` Rule 22 §(c):** every property *key* must
+   resolve to a declared `core:Property` same-or-lower at commit (the committing layer
+   counts, so intra-layer declarations are fine). Open-world (Rule 12) still frees a
+   resource from its classes' `requires`/`recommends` sets — it does **not** permit an
+   undeclared property IRI as a key. This makes "a layer only writes property keys known
+   at its commit" a real, enforced invariant.
+2. **Gate the scan — `retroactive.rs`:** case (2) now runs only for `redefines` (like
+   cases 1/3). With keys-declared enforced, a brand-new property was unwritable in any
+   lower layer ⇒ no lower carriers ⇒ no scan. Additive imports (and notebook cells
+   declaring new properties) do **zero** chain scans; only the rare redefinition pays.
+
+**Fallout fixed:** closing the hole revealed **4** core vocab gaps — inductive/macro
+declaration fields used as keys but never declared as `core:Property`: `result_sort`,
+`indices`, `ctor_type`, `macro_decl_json` (now declared in `core-ontology.json`). And
+~47 `lattice`/`gc` unit tests validated **coreless** layer fragments (no core in chain →
+`is_a`/`description` keys don't resolve); migrated to build on real core (lattice: a
+committed core base; gc: a self-contained core-carrying root, count-neutral). Per the
+chosen approach (build on real core, not an exemption list) the enforcement is exercised
+by the tests so the hole can't silently reopen. Full kernel + workspace suites green.
 
 ## EigenQL query — what was fixed vs still open
 
