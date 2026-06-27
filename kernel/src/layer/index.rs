@@ -32,11 +32,100 @@
 
 use crate::layer::{Layer, LayerId};
 use crate::ontology::iri::Iri;
-use crate::ontology::resource::Value;
+use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
 use crate::storage::StorageError;
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::{Arc, RwLock};
+
+/// Resolve every chain-resident resource whose `is_a` *directly* contains one of
+/// `metaclasses`, without materialising the whole chain (`iter_all_resources`). Each
+/// matching subject is resolved to its merged top view — overrides win, tombstoned
+/// IRIs drop out — and deduplicated across metaclasses.
+///
+/// This is the index-driven replacement for the "scan the whole chain to find the
+/// handful of resources of type X" anti-pattern. Cost scales with the number of
+/// matching resources, not chain size — essential now that large sources (domain
+/// lexica, UMLS, and further knowledge-graph content) live on the interactive chain.
+///
+/// Each chain layer's content is discoverable via **its own storage** in one of two
+/// states:
+/// 1. **Stored** (committed / loaded from disk) → its `is_a` triples are in that
+///    storage's triple index (populated at `store_layer`). Found via
+///    `scan_predicate_object`.
+/// 2. **In-flight** (built this session, not yet stored) → not in the index, but its
+///    resources are staged in that storage's `pending`. Found by reading the staged
+///    entry for the layer.
+///
+/// So we walk the chain and consult each layer's own storage — deduping triple indexes
+/// by `Arc` identity, so the common case (one shared storage for the whole chain) scans
+/// once, while still covering chains whose layers were built on separate storages (some
+/// tests). Discovered subjects are then resolved through the head, which yields the
+/// merged top view AND filters out any subject not reachable from this chain (the
+/// triple index is DAG-wide, so it may surface subjects from other branches). No
+/// per-layer persisted artifact, no whole-chain materialisation.
+///
+/// `is_a` must be an indexable predicate (`data_type = resource_array`) for step 1 —
+/// true on any core-rooted chain; step 2 covers in-flight content regardless.
+pub fn resolve_typed_resources(layer: &Layer, metaclasses: &[&str]) -> Vec<Arc<Resource>> {
+    let Ok(is_a) = Iri::parse(wk::IS_A) else {
+        return Vec::new();
+    };
+    let metaclass_iris: Vec<Iri> = metaclasses
+        .iter()
+        .filter_map(|m| Iri::parse(m).ok())
+        .collect();
+
+    // Candidate subjects gathered from each layer's own storage (deduped).
+    let mut candidates: BTreeSet<Iri> = BTreeSet::new();
+    // Triple indexes already scanned, by `Arc` identity — a shared-storage chain scans
+    // once rather than once per layer.
+    let mut scanned: Vec<Arc<dyn TripleIndex>> = Vec::new();
+    let mut current: Option<&Layer> = Some(layer);
+    let mut visited: BTreeSet<LayerId> = BTreeSet::new();
+    while let Some(l) = current {
+        if !visited.insert(l.id().clone()) {
+            break;
+        }
+        let storage = l.storage();
+
+        // Stored content — that storage's triple index (once per distinct index).
+        let triple_index = storage.triple_index.clone();
+        if !scanned.iter().any(|s| Arc::ptr_eq(s, &triple_index)) {
+            scanned.push(triple_index.clone());
+            for object in &metaclass_iris {
+                for (subject, _defining_layer) in
+                    triple_index.scan_predicate_object(&is_a, object).flatten()
+                {
+                    candidates.insert(subject);
+                }
+            }
+        }
+
+        // In-flight content — that storage's staged entry for this layer.
+        {
+            let pending = storage.pending.read().expect("pending stage poisoned");
+            if let Some(staged) = pending.get(l.id()) {
+                for (subject, resource) in staged {
+                    if metaclass_iris.iter().any(|mc| resource.is_instance_of(mc)) {
+                        candidates.insert(subject.clone());
+                    }
+                }
+            }
+        }
+
+        current = l.parent().map(|p| p.as_ref());
+    }
+
+    // Resolve each candidate through the head: merged top view + filters to this chain.
+    let mut out: Vec<Arc<Resource>> = Vec::with_capacity(candidates.len());
+    for subject in candidates {
+        if let Some(resource) = layer.resolve(&subject) {
+            out.push(resource);
+        }
+    }
+    out
+}
 
 /// A single subject-predicate-object triple, borrowed from a `Resource`'s
 /// property values at indexing time. All three positions are IRIs in v1

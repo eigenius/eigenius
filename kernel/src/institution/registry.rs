@@ -29,8 +29,7 @@ use crate::layer::Layer;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::collections::BTreeMap;
 
 /// The `is_a` meta-classes the institution index dispatches on (see
 /// [`InstitutionIndex::ingest`]). A resource contributes to the index iff its `is_a`
@@ -45,42 +44,7 @@ const INSTITUTION_METACLASSES: &[&str] = &[
     "urn:eigenius:institution:Institution",
 ];
 
-/// Resolve every chain-resident resource whose `is_a` *directly* contains one of
-/// `metaclasses`, discovered via the triple index (D23 §5.9) rather than by
-/// materialising the whole chain. Each matching subject is resolved to its merged
-/// top view — overrides win, tombstoned IRIs drop out — and deduplicated across
-/// metaclasses. Cost scales with the number of matching resources, not chain size:
-/// the point of the commit-time hot path, where a chain may carry a domain lexicon
-/// of hundreds of thousands of resources but only a handful of institution
-/// declarations.
-///
-/// Requires `is_a` to be an indexable predicate (`data_type = resource_array`),
-/// which holds on any chain rooted at the core ontology — i.e. every committed
-/// chain. On a bare fixture chain with no core, `is_a` isn't indexed and this finds
-/// nothing; such callers use the full-scan [`InstitutionIndex::from_layer`] instead.
-pub(crate) fn resolve_typed_resources(layer: &Layer, metaclasses: &[&str]) -> Vec<Arc<Resource>> {
-    let triple_index = &layer.storage().triple_index;
-    let Ok(is_a) = Iri::parse(wk::IS_A) else {
-        return Vec::new();
-    };
-    let mut seen: BTreeSet<Iri> = BTreeSet::new();
-    let mut out: Vec<Arc<Resource>> = Vec::new();
-    for mc in metaclasses {
-        let Ok(object) = Iri::parse(mc) else {
-            continue;
-        };
-        for (subject, _defining_layer) in
-            triple_index.scan_predicate_object(&is_a, &object).flatten()
-        {
-            if seen.insert(subject.clone()) {
-                if let Some(resource) = layer.resolve(&subject) {
-                    out.push(resource);
-                }
-            }
-        }
-    }
-    out
-}
+use crate::layer::resolve_typed_resources;
 
 // ─── Typed entries derived from declaration resources ──────────────────
 
@@ -694,6 +658,7 @@ mod tests {
     use super::*;
     use crate::layer::LayerBuilder;
     use crate::ontology::resource::{Resource, Value};
+    use std::collections::BTreeSet;
 
     fn iri(s: &str) -> Iri {
         Iri::parse(s).unwrap()

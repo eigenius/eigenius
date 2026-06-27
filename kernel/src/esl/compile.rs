@@ -133,10 +133,6 @@ pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> CtorSeed {
     use crate::ontology::iri::Iri;
     use crate::ontology::well_known as wk;
     let mut out = CtorSeed::default();
-    let inductive_class = match Iri::parse(wk::INDUCTIVE_TYPE) {
-        Ok(i) => i,
-        Err(_) => return out,
-    };
     let ctor_name_iri = match Iri::parse(wk::CTOR_NAME) {
         Ok(i) => i,
         Err(_) => return out,
@@ -145,10 +141,17 @@ pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> CtorSeed {
         Ok(i) => i,
         Err(_) => return out,
     };
-    for (parent_iri, resource) in layer.iter_all_resources() {
-        if !resource.is_instance_of(&inductive_class) {
+    // D23 scaling: discover `InductiveType` resources via `resolve_typed_resources`
+    // (triple index for stored layers + `pending` for freshly-built ones) instead of
+    // materialising the whole chain. O(inductive types), not O(chain) — the difference
+    // between a fast ESL compile and a multi-second one on a large knowledge-graph
+    // chain. The in-flight (`pending`) pass is what makes this safe during bootstrap,
+    // where `compile_full` runs against not-yet-stored layers (e.g. `lexicon:Cat`
+    // while compiling `closed-class.esl`).
+    for resource in crate::layer::resolve_typed_resources(layer, &[wk::INDUCTIVE_TYPE]) {
+        let Some(parent_iri) = resource.id().cloned() else {
             continue;
-        }
+        };
         let ctors = match resource.get(&ctors_iri) {
             Some(Value::Array(a)) => a,
             _ => continue,
@@ -211,18 +214,17 @@ pub fn collect_macros_from_layer(layer: &crate::layer::Layer) -> BTreeMap<String
     use crate::ontology::iri::Iri;
     use crate::ontology::well_known as wk;
     let mut out: BTreeMap<String, ast::MacroDecl> = BTreeMap::new();
-    let macro_class = match Iri::parse(wk::MACRO) {
-        Ok(i) => i,
-        Err(_) => return out,
-    };
     let decl_json_iri = match Iri::parse(wk::MACRO_DECL_JSON) {
         Ok(i) => i,
         Err(_) => return out,
     };
-    for (iri_key, resource) in layer.iter_all_resources() {
-        if !resource.is_instance_of(&macro_class) {
+    // D23 scaling: discover `core:Macro` resources via `resolve_typed_resources`
+    // (index for stored + `pending` for in-flight), not a full-chain scan — O(macros),
+    // not O(chain). See `collect_ctors_from_layer`.
+    for resource in crate::layer::resolve_typed_resources(layer, &[wk::MACRO]) {
+        let Some(iri_key) = resource.id().cloned() else {
             continue;
-        }
+        };
         let decl_json = match resource.get(&decl_json_iri) {
             Some(Value::Json(j)) => j,
             _ => continue,

@@ -222,10 +222,8 @@ pub fn build_wasm_institution_runtime(layer: &Layer) -> (InstitutionRuntime, Reg
 pub fn build_wasm_institution_runtime_indexed(
     layer: &Layer,
 ) -> (InstitutionRuntime, RegistrationReport) {
-    let institutions = crate::institution::registry::resolve_typed_resources(
-        layer,
-        &["urn:eigenius:institution:Institution"],
-    );
+    let institutions =
+        crate::layer::resolve_typed_resources(layer, &["urn:eigenius:institution:Institution"]);
     build_wasm_runtime_from(layer, institutions.into_iter())
 }
 
@@ -341,9 +339,7 @@ pub fn validate_external_institution_chain(
     // single transitive caller is the commit-time rebuild hook (always core-rooted),
     // so `is_a` is indexable. `is_instance_of` below is then a redundant-but-cheap
     // guard.
-    for resource in
-        crate::institution::registry::resolve_typed_resources(layer, &[institution_class_str])
-    {
+    for resource in crate::layer::resolve_typed_resources(layer, &[institution_class_str]) {
         if !resource.is_instance_of(&institution_class_iri) {
             continue;
         }
