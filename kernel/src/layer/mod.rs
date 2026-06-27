@@ -737,7 +737,10 @@ impl Layer {
     /// logic cluttering the walk.
     fn resolve_uncached(&self, iri: &Iri) -> Option<Arc<Resource>> {
         let mut current: Option<&Layer> = Some(self);
-        let mut visited: BTreeSet<LayerId> = BTreeSet::new();
+        // Cycle-guard for redirect hops. Allocated lazily: redirects are rare
+        // (v1 refuses redirect chaining), so the common walk pays no allocation —
+        // `resolve` is among the hottest paths in the kernel.
+        let mut visited: Option<BTreeSet<LayerId>> = None;
         while let Some(layer) = current {
             // D25 §12.8 / Phase 17f: if this layer is a redirect source,
             // short-circuit to the target's chain. The original layer's
@@ -747,7 +750,10 @@ impl Layer {
             // against pathological cycles even though v1's
             // refuse-chaining policy prevents installation of any.
             if let Some(target) = layer.redirect_target.as_ref() {
-                if visited.insert(layer.id.clone()) {
+                if visited
+                    .get_or_insert_with(BTreeSet::new)
+                    .insert(layer.id.clone())
+                {
                     current = Some(target.as_ref());
                     continue;
                 }
