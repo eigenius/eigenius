@@ -83,25 +83,72 @@ brew install gh              # macOS
 gh auth login
 ```
 
-## 2.6. Optional: WordNet lexicon (the DCG / natural-language engine)
+## 2.6. Optional: domain corpora (lexicon / knowledge-graph sources)
 
-The English grammar engine (D63) parses prose against a lexicon imported from **WordNet 3.0**. WordNet is a third-party corpus and is **not vendored** in this repo (`references/` is gitignored, like the `data/` corpora that ship via git-LFS) — it is provisioned on demand. You only need this if you are working on the DCG / lexicon engine.
+Three third-party corpora can be imported as typed layers: **WordNet** (the general
+lexicon behind the DCG engine), **NCBI Gene**, and **UMLS** (domain knowledge-graph
+sources, D65 §5). None is vendored in this repo (`references/` is gitignored) — each is
+provisioned on demand by a script that does download/extract → convert → load. You only
+need these if you are working on the lexicon / DCG engine or the domain knowledge graph.
 
-One script does download → convert → load:
+Each importer is **deterministic** (no LLM); `--validate` (compile + felicity-gate = an
+in-memory load proof) always runs, and `--endpoint 127.0.0.1:50051` additionally commits
+the layer into a running `eigenius serve --db <path>`, persisted like any other layer
+(see [§6 Database management](06-database-management.md)). Emitted `.esl` documents are
+gitignored — they are regenerable build artifacts and carry their source's license
+notice at the head.
+
+### 2.6.1. WordNet (the DCG / natural-language engine)
+
+The English grammar engine (D63) parses prose against a lexicon imported from **WordNet
+3.0**.
 
 ```bash
-scripts/provision-wordnet.sh                          # full import: download + convert + validate
+scripts/provision-wordnet.sh                            # full import: download + convert + validate
 scripts/provision-wordnet.sh --seed gene --seed depend  # a small SEEDED slice (fast — for trying it out)
 scripts/provision-wordnet.sh --endpoint 127.0.0.1:50051 # ... and persist into a running `eigenius serve`
 ```
 
-What it does:
+- **download** — fetches WordNet 3.0 into `references/WordNet-3.0/` (idempotent). Override the source with `WORDNET_URL=<mirror>`, optionally verify with `WORDNET_SHA256=<digest>`.
+- **convert** — `wordnet-import` → an Eigon-ESL lexicon. The full import is ~325k `LexicalEntry` resources (a few minutes to validate); a `--seed`/`--limit` slice is fast. Output `wordnet-full.esl` (~150 MB, gitignored).
 
-- **download** — fetches WordNet 3.0 into `references/WordNet-3.0/` (idempotent; skipped if already present). Override the source with `WORDNET_URL=<mirror>`, and optionally verify with `WORDNET_SHA256=<digest>`.
-- **convert** — runs the **deterministic** importer (`wordnet-import`, no LLM) to an Eigon-ESL lexicon document. The full import is ~325k `LexicalEntry` resources (a few minutes to validate); a `--seed`/`--limit` slice is fast. Output is `wordnet-full.esl` (gitignored — it is regenerable and ~150 MB, so it is **not** committed; treat it as a build artifact).
-- **load** — `--validate` (compile + felicity-gate = an in-memory load proof) always runs; with `--endpoint`, the layer is additionally committed into a running `eigenius serve --db <path>` and persisted like any other layer (see [§6 Database management](06-database-management.md)).
+The emitted lexicon embeds WordNet content (glosses, lemmas, the synset lattice), so it is a derivative work and carries the **WordNet 3.0 license notice** (Princeton's license permits redistribution with that notice).
 
-The emitted lexicon embeds WordNet content (glosses, lemmas, the synset lattice), so it is a derivative work and carries the **WordNet 3.0 license notice** at its head (Princeton's license permits redistribution with that notice).
+### 2.6.2. NCBI Gene
+
+A typed mirror (`ncbi:Gene` witnesses) plus a derived lexicon (`lexicon:ncbi_gene`),
+imported from NCBI Gene's `gene_info`. NCBI data is a U.S. Government public-domain work.
+
+```bash
+scripts/provision-ncbi-gene.sh                          # download + convert + validate (Homo sapiens)
+scripts/provision-ncbi-gene.sh --wordnet-anchor         # also emit ncbi:Gene ⊑ wn:gene.n.01 (needs WordNet on the chain)
+scripts/provision-ncbi-gene.sh --endpoint 127.0.0.1:50051   # ... + load into a service
+```
+
+- **download** — fetches `gene_info` into `references/ncbi/` (idempotent). Override the organism with `TAX_ID=<id>` (default `9606` = human) and the source with `GENE_INFO_URL=<url>`.
+- **convert** — `ncbi-gene-import` → `ncbi-gene.esl` (gitignored). `--wordnet-anchor` only validates on a chain that already has WordNet.
+
+### 2.6.3. UMLS
+
+A typed mirror (`umls:Concept` classes under `umls:SemanticType` classes) plus a derived
+lexicon (`lexicon:umls`), imported from the UMLS Metathesaurus.
+
+> **UMLS is licensed, not public-domain.** You must hold your own UMLS Metathesaurus
+> License and download the release yourself — the script does **not** fetch it. Place the
+> Level-0 Metathesaurus zip at `references/umls-<release>-metathesaurus-level0.zip` (e.g.
+> `references/umls-2026AA-metathesaurus-level0.zip`), then run the script. Only **SRL-0
+> (Level 0)** sources are emitted, and the output carries the UMLS license notice plus the
+> redistribution constraint.
+
+```bash
+scripts/provision-umls.sh                          # WRN-relevant semantic-type subset (default)
+scripts/provision-umls.sh --all                    # ALL semantic types (large — the ~281k-resource chain)
+scripts/provision-umls.sh --tui T047 --tui T028    # custom semantic-type (TUI) allowlist
+scripts/provision-umls.sh --endpoint 127.0.0.1:50051
+```
+
+- **extract** — unzips only the RRF files the importer needs (MRCONSO/MRSTY/MRSAB/MRRANK/MRDEF) into `references/umls/<release>/META/`. Override with `UMLS_ZIP=<path>` and `RELEASE=<label>` (default `2026AA`).
+- **convert** — `umls-import` → `umls.esl` (gitignored). Default keeps a WRN-paper-relevant semantic-type allowlist; `--all` imports everything (large).
 
 ## 2.7. WSL 2 notes
 

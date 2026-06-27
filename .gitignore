@@ -75,6 +75,9 @@ Thumbs.db
 # copied into the orchestrator Docker image at build time).
 /notebooks/dist
 .claude/scheduled_tasks.lock
+# Personal docker-compose dev overrides (local knobs: log levels, cache budget).
+# Auto-merged by docker compose; must stay per-developer, never committed.
+docker-compose.override.yml
 # Emitted lexicon artifacts — derived from third-party corpora (WordNet / UMLS /
 # NCBI). Provisioned on demand, never vendored. Covers single-file, seeded-slice,
 # and partitioned-chain (`--out-dir`) outputs.

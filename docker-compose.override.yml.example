@@ -1,0 +1,29 @@
+# Local dev overrides — NOT committed (see .gitignore).
+#
+# docker-compose automatically merges this file on top of docker-compose.yml.
+# Keep it as a personal "knobs" file: uncomment a line to turn a knob on for
+# your local stack. Everything is commented out by default so the file is a
+# no-op (the committed defaults from docker-compose.yml apply).
+#
+# After changing a value, recreate the affected container for it to take effect:
+#   docker compose up -d --force-recreate <service>
+
+services:
+  orchestrator:
+    environment: []
+      # Orchestrator log level. Default `info`. Set `debug` to surface
+      # withRpcGuard's per-RPC `latency_ms` completion logs
+      # (KERNEL_PASSTHROUGH_*, NOTEBOOK_*) — useful for RPC-timing diagnosis.
+      # - EIGENIUS_LOG_LEVEL=debug
+
+  kernel:
+    environment: []
+      # Kernel (Rust) log level. Default `info`.
+      # - RUST_LOG=debug
+
+    # Cache budget = max resident resource bodies for out-of-core (D23) paging
+    # (default 250_000, see DEFAULT_CACHE_BUDGET_ENTRIES). It's a `serve` flag,
+    # so overriding it means restating the whole command. Lower it to stress
+    # eviction / surface O(chain) paging on big chains (the UMLS scaling
+    # stress test); raise it to keep more resident.
+    # command: ["serve", "--port", "50051", "--orchestrator", "http://orchestrator:8080", "--db", "/var/lib/eigenius/db", "--cache-budget", "50000"]

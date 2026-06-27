@@ -1,6 +1,0 @@
-# TEMP (RPC-timing diagnosis): orchestrator at debug level so withRpcGuard's
-# per-RPC `latency_ms` completion logs (KERNEL_PASSTHROUGH_*, NOTEBOOK_*) surface.
-services:
-  orchestrator:
-    environment:
-      - EIGENIUS_LOG_LEVEL=debug
