@@ -122,7 +122,7 @@ pub(super) fn evaluate_match_part(
         if pattern.negated {
             bindings = apply_negated_pattern(pattern, layer, derived, &[], bindings)?;
         } else {
-            bindings = apply_pattern(pattern, layer, derived, &[], bindings)?;
+            bindings = apply_pattern(pattern, layer, derived, &[], bindings, &part.conditions)?;
         }
     }
 
@@ -177,7 +177,14 @@ pub(super) fn evaluate_match_part_with_fiber(
                 bindings = if pattern.negated {
                     apply_negated_pattern(pattern, layer, derived, &overlay.entries, bindings)?
                 } else {
-                    apply_pattern(pattern, layer, derived, &overlay.entries, bindings)?
+                    apply_pattern(
+                        pattern,
+                        layer,
+                        derived,
+                        &overlay.entries,
+                        bindings,
+                        &part.conditions,
+                    )?
                 };
             }
             Clause::Fiber(fc) => {

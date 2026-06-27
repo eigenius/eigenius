@@ -35,8 +35,13 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     let mut errors = Vec::new();
 
     // Build the D14 institution index once for the whole pass — every
-    // FIBER / qualified-call check resolves through it.
-    let (index, _index_errors) = InstitutionIndex::from_layer(layer);
+    // FIBER / qualified-call check resolves through it. Index-driven
+    // (`from_layer_indexed`, not the full-chain `from_layer`): this runs on
+    // EVERY query, so on a large knowledge-graph chain the full scan was a
+    // ~O(chain) per-query floor (≈3.5s on the UMLS chain). The query head is
+    // stored, so the triple index covers it; identical result to the full scan
+    // on a core-rooted chain (`indexed_rebuild_matches_full_scan`).
+    let (index, _index_errors) = InstitutionIndex::from_layer_indexed(layer);
 
     // Check DEFINE rules
     for def in &program.definitions {

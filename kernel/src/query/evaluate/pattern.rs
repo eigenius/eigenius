@@ -42,8 +42,21 @@ pub(super) fn apply_pattern(
     derived: &BTreeMap<String, Vec<Binding>>,
     overlay: &[(Iri, Resource)],
     existing: Vec<Binding>,
+    conditions: &[Expression],
 ) -> Result<Vec<Binding>, QueryError> {
-    let candidates = collect_candidates(pattern, layer, derived, overlay);
+    // Subject-predicate pushdown: if a WHERE conjunct constrains this pattern's
+    // subject to an IRI prefix (`LIKE "p%"`), a single IRI (`= "iri"`), or a set
+    // (`IN [...]`), collect candidates by IRI instead of scanning the chain. The
+    // WHERE still re-applies the predicate, so this only ever pre-filters — never
+    // drops a valid row. Decisive for untyped `MATCH ?r {}` over a large chain.
+    let subject_constraint = extract_subject_constraint(&pattern.subject.name, conditions);
+    let candidates = collect_candidates(
+        pattern,
+        layer,
+        derived,
+        overlay,
+        subject_constraint.as_ref(),
+    );
     let mut result = Vec::new();
 
     for binding in &existing {
@@ -63,7 +76,9 @@ pub(super) fn apply_negated_pattern(
     overlay: &[(Iri, Resource)],
     existing: Vec<Binding>,
 ) -> Result<Vec<Binding>, QueryError> {
-    let candidates = collect_candidates(pattern, layer, derived, overlay);
+    // No subject pushdown for negated patterns — narrowing the candidate set of a
+    // `NOT` pattern would change its semantics. Always the full candidate view.
+    let candidates = collect_candidates(pattern, layer, derived, overlay, None);
     let mut result = Vec::new();
 
     for binding in &existing {
@@ -92,6 +107,7 @@ fn collect_candidates<'a>(
     layer: &'a Layer,
     derived: &'a BTreeMap<String, Vec<Binding>>,
     overlay: &'a [(Iri, Resource)],
+    subject_constraint: Option<&SubjectConstraint>,
 ) -> Vec<(Option<Iri>, BTreeMap<Iri, Value>)> {
     // Check if this references a derived relation. Derived rows are stored as
     // positional tuples ("0" = the relation's first/subject column; see
@@ -151,8 +167,13 @@ fn collect_candidates<'a>(
             } else {
                 collect_candidates_via_scan(layer, Some(class))
             }
+        } else if let Some(constraint) = subject_constraint {
+            // Untyped pattern with a subject-bound WHERE conjunct: collect by IRI
+            // (prefix range over `defined_iris`, or direct resolve) instead of
+            // materialising the whole chain.
+            collect_candidates_via_subject(layer, constraint)
         } else {
-            // Untyped pattern: no predicate to index by, fall back to scan.
+            // Untyped pattern, no usable constraint: fall back to the full scan.
             collect_candidates_via_scan(layer, None)
         };
 
@@ -187,6 +208,127 @@ fn collect_candidates_via_scan(
             }
         })
         .map(|(iri, resource)| (Some(iri.clone()), resource.properties().clone()))
+        .collect()
+}
+
+/// A pushdown-able constraint on a pattern's subject variable, extracted from a
+/// WHERE conjunct so an untyped `MATCH ?r {}` can collect candidates by IRI rather
+/// than scanning the chain.
+enum SubjectConstraint {
+    /// `?r LIKE "p%"` — a pure trailing-`%` prefix (no other wildcards). Holds the
+    /// prefix with the trailing `%` removed.
+    Prefix(String),
+    /// `?r = "iri"` or `?r IN ["iri", …]` — an explicit subject set.
+    Iris(Vec<Iri>),
+}
+
+/// Extract a pushdown-able constraint on `subject` from the WHERE `conditions`
+/// (top-level conjuncts). Returns the first usable one; the WHERE re-applies every
+/// condition afterwards, so picking any single conjunct is sound. Only the simple
+/// shapes `?subject LIKE "p%"`, `?subject = "iri"`, `?subject IN [...]` are
+/// recognised — disjunctions, mid-string wildcards, and non-IRI literals are left to
+/// the normal scan + WHERE filter.
+fn extract_subject_constraint(
+    subject: &str,
+    conditions: &[Expression],
+) -> Option<SubjectConstraint> {
+    for cond in conditions {
+        let Expression::Binary { op, left, right } = cond else {
+            continue;
+        };
+        // Normalise to `var <op> lit` (also accept `lit = var` for Eq).
+        let (var, lit) = match (left.as_ref(), right.as_ref()) {
+            (Expression::Variable(v), other) => (v, other),
+            (other, Expression::Variable(v)) if matches!(op, BinaryOp::Eq) => (v, other),
+            _ => continue,
+        };
+        if var.name != subject {
+            continue;
+        }
+        match op {
+            BinaryOp::Like => {
+                if let Expression::Literal(Literal::String(pat)) = lit {
+                    if let Some(prefix) = like_pure_prefix(pat) {
+                        return Some(SubjectConstraint::Prefix(prefix));
+                    }
+                }
+            }
+            BinaryOp::Eq => {
+                if let Expression::Literal(Literal::String(s)) = lit {
+                    if let Ok(iri) = Iri::parse(s) {
+                        return Some(SubjectConstraint::Iris(vec![iri]));
+                    }
+                }
+            }
+            BinaryOp::In => {
+                if let Expression::Array(items) = lit {
+                    let iris: Vec<Iri> = items
+                        .iter()
+                        .filter_map(|e| match e {
+                            Expression::Literal(Literal::String(s)) => Iri::parse(s).ok(),
+                            _ => None,
+                        })
+                        .collect();
+                    // Only push down a set that's entirely parseable IRI literals;
+                    // anything mixed/empty falls back to scan + WHERE.
+                    if !iris.is_empty() && iris.len() == items.len() {
+                        return Some(SubjectConstraint::Iris(iris));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// If `pat` is a pure prefix LIKE pattern — a non-empty literal followed by a single
+/// trailing `%`, with no other `%`/`_` wildcards — return the literal prefix.
+fn like_pure_prefix(pat: &str) -> Option<String> {
+    let prefix = pat.strip_suffix('%')?;
+    if prefix.is_empty() || prefix.contains('%') || prefix.contains('_') {
+        return None;
+    }
+    Some(prefix.to_string())
+}
+
+/// Collect candidates for an untyped pattern via a subject constraint, never
+/// materialising non-matching resources.
+fn collect_candidates_via_subject(
+    layer: &Layer,
+    constraint: &SubjectConstraint,
+) -> Vec<(Option<Iri>, BTreeMap<Iri, Value>)> {
+    let iris: BTreeSet<Iri> = match constraint {
+        SubjectConstraint::Prefix(prefix) => {
+            // Walk the chain gathering defined IRIs (metadata — no bodies) that share
+            // the prefix; only those get resolved. A `BTreeSet` range would be
+            // O(matches), but this prefix-filtered iteration is already O(chain-IRIs)
+            // with zero body paging — the materialisation, not the IRI scan, was the
+            // O(chain) cost.
+            let mut out: BTreeSet<Iri> = BTreeSet::new();
+            let mut current: Option<&Layer> = Some(layer);
+            let mut visited: BTreeSet<crate::layer::LayerId> = BTreeSet::new();
+            while let Some(l) = current {
+                if !visited.insert(l.id().clone()) {
+                    break;
+                }
+                for iri in l.defined_iris() {
+                    if iri.as_str().starts_with(prefix.as_str()) {
+                        out.insert(iri.clone());
+                    }
+                }
+                current = l.parent().map(|p| p.as_ref());
+            }
+            out
+        }
+        SubjectConstraint::Iris(iris) => iris.iter().cloned().collect(),
+    };
+    iris.into_iter()
+        .filter_map(|iri| {
+            layer
+                .resolve(&iri)
+                .map(|r| (Some(iri), r.properties().clone()))
+        })
         .collect()
 }
 
@@ -496,6 +638,72 @@ mod tests {
             "#,
         );
         assert_eq!(results.len(), 1);
+    }
+
+    /// Subject-predicate pushdown (untyped `MATCH ?r {}` + a subject-bound WHERE):
+    /// the optimized path must return EXACTLY the rows the full scan + WHERE would.
+    #[test]
+    fn subject_pushdown_equals_scan() {
+        let layer = build_test_layer();
+        let prefix = "urn:eigenius:example:";
+
+        // Pull the bound subject IRI out of each RETURN row (single `{ iri: ?r }`).
+        let row_iris = |rows: &[Resource]| -> std::collections::BTreeSet<String> {
+            rows.iter()
+                .filter_map(|r| {
+                    r.properties()
+                        .values()
+                        .find_map(|v| v.as_iri().map(|i| i.as_str().to_string()))
+                })
+                .collect()
+        };
+
+        // Ground truth: scan everything (no constraint), filter by prefix client-side.
+        let all = run_query(&layer, r#"MATCH ?r {} RETURN [] { iri: ?r }"#);
+        let expected: std::collections::BTreeSet<String> = row_iris(&all)
+            .into_iter()
+            .filter(|i| i.starts_with(prefix))
+            .collect();
+        assert!(
+            !expected.is_empty(),
+            "fixture should have example: resources"
+        );
+
+        // LIKE-prefix pushdown — must equal the scan's prefix subset exactly.
+        let liked = run_query(
+            &layer,
+            &format!(r#"MATCH ?r {{}} WHERE ?r LIKE "{prefix}%" RETURN [] {{ iri: ?r }}"#),
+        );
+        assert_eq!(row_iris(&liked), expected, "LIKE-prefix pushdown != scan");
+
+        // Equality pushdown.
+        let eq = run_query(
+            &layer,
+            r#"MATCH ?r {} WHERE ?r = "urn:eigenius:example:Dog" RETURN [] { iri: ?r }"#,
+        );
+        assert_eq!(eq.len(), 1);
+        assert!(row_iris(&eq).contains("urn:eigenius:example:Dog"));
+
+        // IN pushdown.
+        let in_set = run_query(
+            &layer,
+            r#"MATCH ?r {} WHERE ?r IN ["urn:eigenius:example:Dog", "urn:eigenius:example:Animal"] RETURN [] { iri: ?r }"#,
+        );
+        assert_eq!(
+            row_iris(&in_set),
+            ["urn:eigenius:example:Animal", "urn:eigenius:example:Dog"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect()
+        );
+
+        // Non-prefix LIKE (suffix wildcard) is NOT pushed down — falls back to scan,
+        // and must still be correct.
+        let suffix = run_query(
+            &layer,
+            r#"MATCH ?r {} WHERE ?r LIKE "%:Dog" RETURN [] { iri: ?r }"#,
+        );
+        assert!(row_iris(&suffix).contains("urn:eigenius:example:Dog"));
     }
 
     #[test]
