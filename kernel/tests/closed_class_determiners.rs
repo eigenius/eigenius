@@ -443,6 +443,30 @@ fn disjunction_parses() {
     assert_parses_to_prop("HeLa affects BRCA1 or BRCA1 affects HeLa");
 }
 
+#[test]
+fn coordinators_are_known_to_the_missing_lexeme_signal() {
+    // `and`/`or` are consumed by the parser's coordination rule, NOT lexical entries
+    // (coordination is polymorphic over `Cat`; the felicity gate can't type a
+    // category-polymorphic entry). The missing-lexeme signal `has_token` (D62 §7.6a)
+    // must still report them as KNOWN — else the encoding pipeline routes a
+    // structurally-handled connective to lexical recovery. `but` is deliberately NOT a
+    // coordinator (it is a distinct sentential/subordinator connective — see 2d), so
+    // the signal treats it as an ordinary (here unknown) word.
+    let (_layer, index) = index_over_bootstrap();
+    assert!(
+        index.has_token("and", &Identity),
+        "`and` is a known connective"
+    );
+    assert!(
+        index.has_token("or", &Identity),
+        "`or` is a known connective"
+    );
+    assert!(
+        !index.has_token("but", &Identity),
+        "`but` is not a coordinator and has no lexical entry yet (deferred to 2d)"
+    );
+}
+
 // ── D63 §8.4 Phase 6 — NP coordination as `List`-groups (distributive) ─
 // A coordinated NP is a member-retaining group (`cat_group(C, pl)` over `List C`);
 // the distributive reading maps a one-place predicate over the members and
@@ -1064,6 +1088,37 @@ fn modal_must_wraps_the_proposition_in_necessary() {
         modal_head(&forest[0].sem).as_deref(),
         Some("urn:eigenius:logic:Necessary"),
         "`must` wraps the proposition in the opaque □ (logic:Necessary)"
+    );
+}
+
+#[test]
+fn future_conditional_deontic_modals_each_wrap_their_own_opaque_operator() {
+    // will / would / should are NOT ◇/□ — each carries its own opaque operator
+    // (logic:Will / Would / Should), interpreted on the reasoning side (justification
+    // logic). Distinct heads, so the future/conditional/deontic flavor is preserved.
+    let (layer, index) = index_over_bootstrap();
+    for (modal, op) in [
+        ("will", "urn:eigenius:logic:Will"),
+        ("would", "urn:eigenius:logic:Would"),
+        ("should", "urn:eigenius:logic:Should"),
+    ] {
+        let sentence = format!("HeLa {modal} affect BRCA1");
+        let forest = index.parse(&sentence, &Identity);
+        assert_eq!(forest.len(), 1, "exactly one modal parse for `{modal}`");
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+        let ty = check_infer(&mut ctx, &forest[0].sem)
+            .unwrap_or_else(|e| panic!("`{modal}` sem type-checks: {e}"));
+        assert_eq!(readback_val(0, &ty), Exp::Sort(0), "`{modal}` denotes Prop");
+        assert_eq!(
+            modal_head(&forest[0].sem).as_deref(),
+            Some(op),
+            "`{modal}` wraps the proposition in its own opaque operator {op}"
+        );
+    }
+    // Like the alethic modals, they select a BASE VP: a finite complement is rejected.
+    assert!(
+        index.parse("HeLa will affects BRCA1", &Identity).is_empty(),
+        "`will` selects the base form (rejects a finite complement)"
     );
 }
 

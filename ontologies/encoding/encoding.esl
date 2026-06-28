@@ -1,0 +1,305 @@
+// encoding — the D62 encoding-pipeline contract layer.
+//
+// DRAFT (D62 §6 / §11.3). NOT yet wired into kernel/src/bootstrap BOOTSTRAP_CHAIN —
+// add it AFTER `lexicon` (it references lexicon:, reference:, reflection:, eigentt:,
+// institution:) once the pipeline build begins. Subject to compile + felicity-gate
+// validation at that point.
+//
+// PURPOSE. The encoding pipeline (D62) turns a document into typed, witnessed reasoning
+// by moving each unit through a per-unit state machine (segment → parse → resolve /
+// disambiguate / recover / reformulate → assemble). This layer declares the **typed
+// contracts** for that state machine: every stage is `resource → resource`, so each is
+// testable in isolation and the pipeline state is chain-committed and auditable.
+//
+// REUSE, DON'T MINT. Grades reuse reflection:EpistemicStatus; the encoded proposition
+// reuses reflection:canonical_proposition (eigentt:TypeExpr); warrants reuse
+// reflection:rationale; source works reuse reference:Reference; lexicon scope/entries
+// reuse lexicon:Lexicon / lexicon:LexicalEntry. New vocabulary here is only the
+// pipeline-state shapes that have no existing equivalent.
+
+namespace core        = "urn:eigenius:core";
+namespace reflection  = "urn:eigenius:reflection";
+namespace eigentt     = "urn:eigenius:eigentt";
+namespace reference   = "urn:eigenius:reference";
+namespace lexicon     = "urn:eigenius:lexicon";
+namespace institution = "urn:eigenius:institution";
+namespace formats     = "urn:eigenius:core:formats";
+namespace enc         = "urn:eigenius:encoding";
+
+// ════════════════════════════════════════════════════════════════════
+// S0 — DiscourseUnit: the parsing unit + provenance
+// ════════════════════════════════════════════════════════════════════
+
+class enc:DiscourseUnit {
+    description = "One unit of source text the pipeline attempts to encode — typically a clause/claim (the granularity the grammar parses best). Carries provenance (source work + character span + section) so every downstream EncodedClaim traces back to its span. Non-prose units (equations, citations) are tagged via enc:unit_kind and routed out of the parser (equations → FormulaTerm, citations → reference:Citation).";
+    requires enc:prose, enc:unit_kind;
+    recommends enc:source_document, enc:section, enc:span_start, enc:span_end;
+}
+
+property enc:prose : core:string {
+    description = "The verbatim source text of this unit (the string handed to the parser for prose units).";
+    domain enc:DiscourseUnit;
+}
+
+property enc:unit_kind : core:resource {
+    description = "What kind of unit this is (prose / equation / citation / table) — selects the routing: only `prose` enters the DCG parser.";
+    class_types enc:DiscourseUnitKind;
+    domain enc:DiscourseUnit;
+}
+
+property enc:source_document : core:resource {
+    description = "The published work this unit is drawn from — the bibliographic provenance root.";
+    class_types reference:Reference;
+    domain enc:DiscourseUnit;
+}
+
+property enc:section : core:string {
+    description = "Human-readable section/location label within the source document (e.g. 'Results §2.1').";
+    domain enc:DiscourseUnit;
+}
+
+property enc:span_start : core:integer {
+    description = "0-based character offset of this unit's start in the source document.";
+    domain enc:DiscourseUnit;
+}
+
+property enc:span_end : core:integer {
+    description = "Character offset (exclusive) of this unit's end in the source document.";
+    domain enc:DiscourseUnit;
+}
+
+// Unit-kind enumeration (individuals, like reference:CitationType) — a small closed
+// vocabulary, not a parallel epistemic enum.
+class enc:DiscourseUnitKind {
+    description = "The kind of a DiscourseUnit, selecting how it is routed: prose → DCG parser; equation → FormulaTerm capture; citation → reference:Citation; table → structured capture.";
+}
+
+resource enc:kind_prose : enc:DiscourseUnitKind {
+    core:short_name = "prose";
+    core:description = "Natural-language prose — routed to the DCG parser (S2).";
+}
+resource enc:kind_equation : enc:DiscourseUnitKind {
+    core:short_name = "equation";
+    core:description = "A formula/equation — captured as a FormulaTerm/EigenTT term, not parsed as prose.";
+}
+resource enc:kind_citation : enc:DiscourseUnitKind {
+    core:short_name = "citation";
+    core:description = "An in-text citation — captured as a reference:Citation, not parsed as prose.";
+}
+resource enc:kind_table : enc:DiscourseUnitKind {
+    core:short_name = "table";
+    core:description = "Tabular/figure content — structured capture, deferred.";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// S1 — ScopedUnit: a DiscourseUnit annotated with its lexicon scope (thin)
+// ════════════════════════════════════════════════════════════════════
+
+class enc:ScopedUnit {
+    description = "A DiscourseUnit annotated with the lexicon scope its parse is ranked against (D65). Thin by design — target-discovery is lazy (S5a), triggered only when a parse attempt finds a missing lexeme; this carries only the scope, often defaulted.";
+    requires enc:unit;
+    recommends enc:scope;
+}
+
+property enc:unit : core:resource {
+    description = "The DiscourseUnit this ScopedUnit annotates.";
+    class_types enc:DiscourseUnit;
+    domain enc:ScopedUnit;
+}
+
+property enc:scope : core:resource_array {
+    description = "Ordered lexicon:Lexicon IRIs defining the parse scope (resolution-precedence order; D65 §4). Empty/absent = unscoped (whole chain).";
+    class_types lexicon:Lexicon;
+    domain enc:ScopedUnit;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// S5a — LexicalGap: the on-demand target-discovery record
+// ════════════════════════════════════════════════════════════════════
+
+class enc:LexicalGap {
+    description = "A token a parse attempt could not look up (S5a). Records how it was disposed: bound to an existing lexicon entry found by search, a newly-injected entry, or left unresolvable. The gap stream is a first-class coverage signal (D62 §9).";
+    requires enc:gap_token, enc:gap_disposition;
+    recommends enc:gap_unit, enc:bound_entry;
+}
+
+property enc:gap_token : core:string {
+    description = "The surface token (or multiword span) that failed lexical lookup.";
+    domain enc:LexicalGap;
+}
+
+property enc:gap_unit : core:resource {
+    description = "The ScopedUnit whose parse this gap blocked.";
+    class_types enc:ScopedUnit;
+    domain enc:LexicalGap;
+}
+
+property enc:gap_disposition : core:resource {
+    description = "How the gap was resolved: bound to an existing entry, injected as a new entry, or unresolvable.";
+    class_types enc:GapDisposition;
+    domain enc:LexicalGap;
+}
+
+property enc:bound_entry : core:resource {
+    description = "The lexicon:LexicalEntry this token was bound to (for the bound/injected dispositions).";
+    class_types lexicon:LexicalEntry;
+    domain enc:LexicalGap;
+}
+
+class enc:GapDisposition {
+    description = "The disposition of a LexicalGap.";
+}
+resource enc:gap_bound : enc:GapDisposition {
+    core:short_name = "bound";
+    core:description = "Bound to an existing lexicon entry found by search (synonym/hypernym/inflection).";
+}
+resource enc:gap_injected : enc:GapDisposition {
+    core:short_name = "injected";
+    core:description = "A new lexicon:LexicalEntry was proposed (LLM) and committed (felicity-gated).";
+}
+resource enc:gap_unresolvable : enc:GapDisposition {
+    core:short_name = "unresolvable";
+    core:description = "No target found and none injectable — a recorded vocabulary gap (fail-closed).";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// S4 — DecisionPoint: a structural-disambiguation choice
+// ════════════════════════════════════════════════════════════════════
+//
+// Minimal provenanced record now; the typed-content (Prop-valued warrant) formalization
+// is deferred to the D61 rewrite, which harvests these records.
+
+class enc:DecisionPoint {
+    description = "Records a structural-disambiguation choice (S4): which reading was selected among multiple felicitous parses of one unit, and why. All candidates already type-check, so this is auditable selection, not generation. (Typed-content warrant deferred to D61.)";
+    requires enc:decision_unit, enc:selected_claim;
+    recommends enc:candidate_count, reflection:rationale;
+}
+
+property enc:decision_unit : core:resource {
+    description = "The ScopedUnit whose parse forest this decision selected from.";
+    class_types enc:ScopedUnit;
+    domain enc:DecisionPoint;
+}
+
+property enc:selected_claim : core:resource {
+    description = "The EncodedClaim produced by the chosen reading.";
+    class_types enc:EncodedClaim;
+    domain enc:DecisionPoint;
+}
+
+property enc:candidate_count : core:integer {
+    description = "How many felicitous readings the forest offered before selection (>1 by construction).";
+    domain enc:DecisionPoint;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// S5b — CutItem: an explicit, justified non-encoding (fail-closed)
+// ════════════════════════════════════════════════════════════════════
+
+class enc:CutItem {
+    description = "A unit that could not be encoded within the current grammar/vocabulary, recorded explicitly with a reason and disposition rather than dropped or force-fit (fail-closed; D62 §3). Part of the coverage feedback loop (D62 §9). (Typed-content formalization deferred to D61.)";
+    requires enc:cut_unit, enc:cut_kind;
+    recommends reflection:rationale;
+}
+
+property enc:cut_unit : core:resource {
+    description = "The DiscourseUnit that could not be encoded.";
+    class_types enc:DiscourseUnit;
+    domain enc:CutItem;
+}
+
+property enc:cut_kind : core:resource {
+    description = "Why the cut: a grammar gap (construction unsupported) vs an unresolvable vocabulary gap vs out-of-scope (non-encodable content).";
+    class_types enc:CutKind;
+    domain enc:CutItem;
+}
+
+class enc:CutKind {
+    description = "The reason class for a CutItem.";
+}
+resource enc:cut_grammar : enc:CutKind {
+    core:short_name = "grammar_gap";
+    core:description = "The lexemes resolved but the grammar could not compose the construction (S5b exhausted).";
+}
+resource enc:cut_vocabulary : enc:CutKind {
+    core:short_name = "vocabulary_gap";
+    core:description = "An unresolvable lexical gap (no target, none injectable).";
+}
+resource enc:cut_out_of_scope : enc:CutKind {
+    core:short_name = "out_of_scope";
+    core:description = "Content not intended for prose encoding (e.g. a raw data table).";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// S6 — EncodedClaim: a committed, graded, witnessed Prop
+// ════════════════════════════════════════════════════════════════════
+//
+// Derived by construction: the engine is a generation institution whose output the
+// kernel attests (D56 IsDerivedAs); grade climbs to Verified only via D61 (deferred).
+
+class enc:EncodedClaim : reflection:DerivedResource {
+    description = "One claim of the source document encoded as a Prop-typed EigenTT proposition (reflection:canonical_proposition), produced by the pipeline and attested by the felicity gate. Carries its source unit (provenance) and its grade (reflection:epistemic_status — Derived by construction; Verified only via the D61 faithfulness back-stop, deferred). The fidelity-to-intent check (S7) is deferred to D61.";
+    requires enc:from_unit, reflection:canonical_proposition;
+    recommends enc:confidence;
+}
+
+property enc:from_unit : core:resource {
+    description = "The ScopedUnit this claim was encoded from — the provenance link back to the source span (via enc:unit → enc:DiscourseUnit).";
+    class_types enc:ScopedUnit;
+    domain enc:EncodedClaim;
+}
+
+property enc:confidence : core:float {
+    description = "Pipeline confidence in this encoding (0..1) — from disambiguation/reference/reformulation. Advisory; not a grade. Low confidence routes to human review (D61).";
+    domain enc:EncodedClaim;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// S6 — ReasoningStructure: the assembled per-document encoding
+// ════════════════════════════════════════════════════════════════════
+
+class enc:ReasoningStructure {
+    description = "The assembled output of encoding one document: the set of EncodedClaims (and the gaps/cuts recorded alongside). The chain-resident handle the FormalizeDocument institution returns.";
+    requires enc:claims;
+    recommends enc:document;
+}
+
+property enc:claims : core:resource_array {
+    description = "The EncodedClaims assembled from the document.";
+    class_types enc:EncodedClaim;
+    domain enc:ReasoningStructure;
+}
+
+property enc:document : core:resource {
+    description = "The source work this structure encodes.";
+    class_types reference:Reference;
+    domain enc:ReasoningStructure;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// The engine as an institution (D62 §8)
+// ════════════════════════════════════════════════════════════════════
+//
+// FormalizeDocument is an external (orchestration-hosted) institution: its reasoner runs
+// the S0–S6 pipeline as orchestration components (D31/D56/D60), proposing trees the
+// kernel re-gates. Generation is OnDemand (invoked via FIBER … INTO); output is Derived
+// by construction. The requires_environment IRI is a STUB pending the runtime-env build.
+
+resource enc:FormalizeDocument : institution:Institution {
+    core:short_name = "FormalizeDocument";
+    core:description = "The encoding-engine institution (D62): turns prose units into typed, witnessed EncodedClaims by orchestrating the DCG parser + LLM proposers behind the kernel felicity oracle. Generation institution (Derived); the separate faithfulness/verification half is D61 (deferred).";
+    institution:institution_iri = enc:FormalizeDocument;
+    institution:institution_name = "FormalizeDocument";
+    institution:runtime = institution:runtimes:external;
+    institution:requires_environment = enc:env:v1;   // STUB — define when the runtime env is built
+}
+
+resource enc:qc_formalize_unit : institution:QueryClass {
+    core:short_name = "qc_formalize_unit";
+    core:description = "OnDemand QueryClass: given a ScopedUnit, run the encoding pipeline (parse → resolve/disambiguate/recover/reformulate) and return an EncodedClaim. Dispatched explicitly via EigenQL FIBER … INTO (D2 §3.5); the result commits to the chain. Failures surface as LexicalGap / CutItem records, never a forced encoding.";
+    institution:query_class = enc:ScopedUnit;
+    institution:result_class = enc:EncodedClaim;
+    institution:dispatch_role = [institution:dispatch_roles:on_demand];
+    institution:query_handler = enc:signatures:formalize_unit;
+    institution:institution_ref = enc:FormalizeDocument;
+}

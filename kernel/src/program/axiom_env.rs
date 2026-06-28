@@ -237,6 +237,7 @@ mod tests {
         // - the D63 §8.5 3c ontology relations `ontology:is_a` / `ontology:subclass_of`
         //   (predicate-nominal membership / subsumption); and
         // - the D63 §8.9 6-aux modal operators `logic:Possible` / `logic:Necessary`
+        //   plus the future/conditional/deontic `logic:Will` / `Would` / `Should`
         //   (opaque `Prop → Prop`, witnessed downstream — see `ontologies/logic/logic.esl`).
         // Every bootstrap axiom should be in one of those families.
         let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
@@ -244,6 +245,9 @@ mod tests {
         let modal = [
             "urn:eigenius:logic:Possible",
             "urn:eigenius:logic:Necessary",
+            "urn:eigenius:logic:Will",
+            "urn:eigenius:logic:Would",
+            "urn:eigenius:logic:Should",
         ];
         let unexpected: Vec<&Iri> = env
             .iter()

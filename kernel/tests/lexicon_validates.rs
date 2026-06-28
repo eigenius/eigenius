@@ -2042,3 +2042,26 @@ fn buildout_some_and_no_determiners_parse_to_prop() {
     //   every gene affects no cell line  →  ∀g:Gene. ∀c:CellLine. ¬affects(c, g)
     assert_parses_to_prop(&layer, &index, "every gene affects no cell line");
 }
+
+/// P2.2a — `the` and the demonstratives `this`/`that` are determiners (closed-class
+/// function words gating real prose), modeled on `a` as a definite/demonstrative ≈
+/// existential first-cut (proper iota/deixis deferred). They must parse in both
+/// subject and object position, so the WRN-style NPs they head leave the OOV stream.
+#[test]
+fn buildout_definite_and_demonstrative_determiners_parse_to_prop() {
+    let layer = det_poly_layer();
+    let index = LexicalIndex::build(layer.clone());
+    // the (subject + object)
+    assert_parses_to_prop(&layer, &index, "the gene affects HeLa");
+    assert_parses_to_prop(&layer, &index, "every gene affects the cell line");
+    // this (subject + object)
+    assert_parses_to_prop(&layer, &index, "this gene affects HeLa");
+    assert_parses_to_prop(&layer, &index, "every gene affects this cell line");
+    // that (demonstrative — distinct from the relativizer `that`; subject + object)
+    assert_parses_to_prop(&layer, &index, "that gene affects HeLa");
+    assert_parses_to_prop(&layer, &index, "every gene affects that cell line");
+    // an (pre-vocalic spelling of the indefinite article `a`; subject + object —
+    // a/an phonology is orthographic, so the parser treats `an` exactly as `a`)
+    assert_parses_to_prop(&layer, &index, "an gene affects HeLa");
+    assert_parses_to_prop(&layer, &index, "every gene affects an cell line");
+}

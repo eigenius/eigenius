@@ -62,11 +62,20 @@ use super::parser::{apply, Combinator, Item};
 /// unaffected (no truncation, order preserved by the stable cost-0 sort).
 pub const DEFAULT_FOREST_CAP: usize = 256;
 
-/// Split prose into lowercased word tokens. Each token is trimmed of leading and
-/// trailing non-alphanumerics (so `"BRCA1,"` → `"brca1"`); empties are dropped.
+/// Split prose into lowercased word tokens. Token-internal **separators** — em/en-dashes
+/// (`—`/`–`), slashes, and brackets — are normalised to spaces first, so `"not—can"` →
+/// `["not", "can"]` and `"and/or"` → `["and", "or"]` (D62 S0). Hyphens (`-`) are kept, so
+/// hyphenated compounds (`"double-stranded"`) stay intact. Each token is then trimmed of
+/// leading/trailing non-alphanumerics (so `"BRCA1,"` → `"brca1"`); empties are dropped.
 /// Multiword forms are recovered by re-joining spans at lookup time, not here.
 pub fn tokenize(text: &str) -> Vec<String> {
-    text.split_whitespace()
+    text.chars()
+        .map(|c| match c {
+            '—' | '–' | '‒' | '―' | '/' | '(' | ')' | '[' | ']' | '{' | '}' => ' ',
+            other => other,
+        })
+        .collect::<String>()
+        .split_whitespace()
         .map(|t| {
             t.trim_matches(|c: char| !c.is_alphanumeric())
                 .to_lowercase()
@@ -302,6 +311,33 @@ impl LexicalIndex {
         self.len() == 0
     }
 
+    /// Whether any lexical entry exists for `surface` — the raw lowercased surface, or
+    /// any lemma the [`Lemmatizer`] yields across the parts of speech. Scope-independent.
+    ///
+    /// This is the **missing-lexeme signal** the encoding pipeline (D62 §7.6a) keys lazy
+    /// lexical recovery off: when a parse comes back empty, a token for which this is
+    /// `false` is an unknown word (route to lexical recovery / search+inject), whereas an
+    /// empty parse with all tokens known is a grammar gap (route to reformulation).
+    pub fn has_token(&self, surface: &str, lemmatizer: &dyn Lemmatizer) -> bool {
+        let s_lc = surface.trim().to_lowercase();
+        // Coordinating conjunctions (`and`/`or`/`but`) are consumed by the parser's
+        // coordination rule, not a lexical entry — known, not missing (D63 §8.4).
+        if coord_connective(&s_lc).is_some() {
+            return true;
+        }
+        if !self.entries_for(&s_lc).is_empty() {
+            return true;
+        }
+        for pos in [Pos::Noun, Pos::Verb, Pos::Adj, Pos::Adv] {
+            for lemma in lemmatizer.lemmas(surface, pos) {
+                if !self.entries_for(&lemma.trim().to_lowercase()).is_empty() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Apply the per-parse lexicon **scope** (D65 §4) to one form's resolved
     /// `(item, in_lexicon)` pairs, returning the surviving [`Item`]s with their
     /// leaf `cost.lexicon_order` stamped from the scope:
@@ -413,11 +449,7 @@ impl LexicalIndex {
         // `Cat`, which `⟦·⟧` can't denote), handled by the coordination rule below.
         let coord_op: Vec<Option<&str>> = tokens
             .iter()
-            .map(|t| match t.as_str() {
-                "and" => Some("urn:eigenius:logic:And"),
-                "or" => Some("urn:eigenius:logic:Or"),
-                _ => None,
-            })
+            .map(|t| coord_connective(t.as_str()))
             .collect();
 
         // 1. Seed lexical spans (multi-span MWE seeding). A multiword form at
@@ -664,6 +696,26 @@ fn is_finite_clause(cat: &Exp) -> bool {
             matches!(fin, Exp::InductiveCtor(_, n, _) if n == "fin" || n == "fin_any")
         }
         _ => false,
+    }
+}
+
+/// The `Prop`-connective IRI a coordinating conjunction contributes, or `None` if the
+/// token is not a coordinator. These words are consumed by the parser's **coordination
+/// rule** (D63 §8.4), not via lexical entries — coordination is polymorphic over `Cat`,
+/// which `⟦·⟧` cannot denote. This is the single source of truth shared by the chart's
+/// `coord_op` table and the missing-lexeme signal [`LexicalIndex::has_token`] (so the
+/// pipeline never routes a structurally-handled connective to lexical recovery).
+///
+/// Only the symmetric coordinators `and`/`or` belong here. Contrastive `but` is NOT a
+/// synonym for `and`: the reference grammar (core-en `conj.xsl`) gives `but` its own
+/// sentential-binary family with a distinct `but(Arg1, Arg2)` relation and treats it as
+/// a subordinator — collapsing it to `And` would silently drop the adversative discourse
+/// relation. It is therefore deferred to the subordinator/discourse-connective work.
+pub fn coord_connective(token: &str) -> Option<&'static str> {
+    match token {
+        "and" => Some("urn:eigenius:logic:And"),
+        "or" => Some("urn:eigenius:logic:Or"),
+        _ => None,
     }
 }
 
