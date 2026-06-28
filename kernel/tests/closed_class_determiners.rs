@@ -21,7 +21,7 @@
 use std::sync::Arc;
 
 use eigenius_kernel::bootstrap;
-use eigenius_kernel::dcg::{is_ctor, Identity, LexicalIndex};
+use eigenius_kernel::dcg::{is_ctor, Candidate, Identity, LexicalIndex, ProposeCtx, Proposer};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -29,6 +29,7 @@ use eigenius_kernel::nbe::env::Rho;
 use eigenius_kernel::nbe::eval::eval;
 use eigenius_kernel::nbe::readback::readback_val;
 use eigenius_kernel::nbe::term::Exp;
+use eigenius_kernel::ontology::Iri;
 
 const DEMO: &str = include_str!("../../experiments/lexicon/lexicon.esl");
 
@@ -297,9 +298,9 @@ fn two_pronoun_occurrences_are_two_distinct_holes() {
         "at least one open parse for 'it affects it'"
     );
     let holes = &open[0].holes;
-    assert_eq!(holes.len(), 2, "two distinct referent holes, got {holes:?}");
+    assert_eq!(holes.len(), 2, "two distinct referent holes");
     assert_ne!(
-        holes[0], holes[1],
+        holes[0].var, holes[1].var,
         "the two holes are distinct (per-occurrence identity)"
     );
 }
@@ -380,6 +381,139 @@ fn possessive_determiner_yields_an_open_parse_with_a_possessor_hole() {
         "plural determiner `all` composes (closed)"
     );
     assert!(open_all.is_empty(), "`all` introduces no hole");
+}
+
+#[test]
+fn resolve_open_substitutes_an_antecedent_and_re_gates() {
+    // The trusted resolve primitive (D64 §4): substitute a hole with a proposed chain antecedent
+    // and re-gate. "it affects HeLa" + (?ref := BRCA1) ⇒ a CLOSED parse affects(hela, brca1).
+    let (layer, index) = index_over_bootstrap();
+    let (_c, open) = index.parse_open("it affects HeLa", &Identity);
+    assert_eq!(open.len(), 1, "one open parse");
+    let hole = open[0].holes[0].var.clone();
+
+    // antecedent = the committed chain entity BRCA1 (a Gene <: Entity).
+    let brca1 = layer
+        .resolve(&Iri::parse("urn:eigenius:lexicon:brca1").unwrap())
+        .expect("brca1 resolves");
+    let ante = Exp::EigonResource(Box::new((*brca1).clone()));
+    let resolved = index
+        .resolve_open(&open[0], &[(hole, ante)])
+        .expect("resolves to a closed parse");
+
+    // The resolved parse is closed and type-checks to Prop (re-gated by the kernel).
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let ty = check_infer(&mut ctx, &resolved.sem).expect("resolved sem type-checks");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "the resolved parse denotes Prop"
+    );
+
+    // Fail-closed: an UNRESOLVED hole (no binding) leaves a free var ⇒ no closed parse.
+    assert!(
+        index.resolve_open(&open[0], &[]).is_none(),
+        "an unresolved hole fails closed (no binding ⇒ no admissible parse)"
+    );
+}
+
+/// A deterministic mock [`Proposer`]: picks the in-scope candidate whose surface form equals the
+/// target (a ranked single-element list), else proposes nothing (unresolvable). Stands in for the
+/// LLM proposer to exercise the resolve loop without an LLM.
+struct PickBySurface(&'static str);
+impl Proposer for PickBySurface {
+    fn propose(&self, ctx: &ProposeCtx) -> Vec<eigenius_kernel::ontology::Iri> {
+        ctx.candidates
+            .iter()
+            .filter(|c| c.surface == self.0)
+            .map(|c| c.iri.clone())
+            .collect()
+    }
+}
+
+#[test]
+fn resolve_loop_with_mock_proposer_resolves_and_fails_closed() {
+    // The resolve loop (D64 §4) with a deterministic mock proposer: candidates → propose →
+    // resolve_open (kernel re-gate) → closed parse, or fail-closed when unresolvable.
+    let (layer, index) = index_over_bootstrap();
+    let (_c, open) = index.parse_open("it affects HeLa", &Identity);
+    assert_eq!(open.len(), 1, "one open parse");
+    let candidates = vec![
+        Candidate {
+            iri: Iri::parse("urn:eigenius:lexicon:brca1").unwrap(),
+            surface: "BRCA1".into(),
+        },
+        Candidate {
+            iri: Iri::parse("urn:eigenius:lexicon:hela").unwrap(),
+            surface: "HeLa".into(),
+        },
+    ];
+
+    // The mock proposes BRCA1 → the loop resolves it through the kernel to a closed Prop.
+    let resolved = index
+        .resolve_with(
+            &open[0],
+            "it affects HeLa",
+            &candidates,
+            &PickBySurface("BRCA1"),
+        )
+        .expect("mock-proposed antecedent resolves through the kernel re-gate");
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let ty = check_infer(&mut ctx, &resolved.sem).expect("resolved sem type-checks");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "the resolved parse denotes Prop"
+    );
+
+    // A proposer that suggests nothing ⇒ fail closed (no committed parse).
+    assert!(
+        index
+            .resolve_with(
+                &open[0],
+                "it affects HeLa",
+                &candidates,
+                &PickBySurface("NONE")
+            )
+            .is_none(),
+        "an unresolvable hole fails closed"
+    );
+}
+
+#[cfg(feature = "allms")]
+#[test]
+fn live_anthropic_proposer_resolves_a_referent_through_the_kernel() {
+    // The live-LLM resolver path (D64 §4), behind the `allms` feature: a real Anthropic model
+    // proposes an antecedent for the referent hole, and the kernel re-gates it to a closed Prop.
+    // Skips cleanly if no key is set; runs live when ANTHROPIC_API_KEY is present.
+    use eigenius_kernel::dcg::resolver_allms::AnthropicProposer;
+    let Some(proposer) = AnthropicProposer::from_env() else {
+        eprintln!("SKIP live_anthropic_proposer: ANTHROPIC_API_KEY unset");
+        return;
+    };
+    let (layer, index) = index_over_bootstrap();
+    let (_closed, open) = index.parse_open("it affects HeLa", &Identity);
+    assert_eq!(open.len(), 1, "one open parse with one referent hole");
+    let candidates = vec![
+        Candidate {
+            iri: Iri::parse("urn:eigenius:lexicon:brca1").unwrap(),
+            surface: "BRCA1".into(),
+        },
+        Candidate {
+            iri: Iri::parse("urn:eigenius:lexicon:hela").unwrap(),
+            surface: "HeLa".into(),
+        },
+    ];
+    let resolved = index
+        .resolve_with(&open[0], "it affects HeLa", &candidates, &proposer)
+        .expect("live LLM proposes an antecedent the kernel re-gates to a closed Prop");
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let ty = check_infer(&mut ctx, &resolved.sem).expect("resolved sem type-checks");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "the live-resolved parse denotes Prop"
+    );
 }
 
 /// A `-s`-stripping lemmatizer (`genes` → `gene`, marking the surface plural), enough to

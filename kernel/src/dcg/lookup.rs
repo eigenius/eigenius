@@ -515,10 +515,10 @@ impl LexicalIndex {
                 let j = i + len - 1;
                 let mut produced = Vec::new();
                 for k in i..j {
-                    let lefts = chart[i][k].clone();
-                    let rights = chart[k + 1][j].clone();
-                    for l in &lefts {
-                        for r in &rights {
+                    let lefts = &chart[i][k];
+                    let rights = &chart[k + 1][j];
+                    for l in lefts {
+                        for r in rights {
                             if let Some(item) = apply(l, r, &self.layer) {
                                 produced.push(item);
                             }
@@ -530,10 +530,10 @@ impl LexicalIndex {
                 // (pointwise-lifted connective — D63 §8.4 Phase 3).
                 for c in (i + 1)..j {
                     let Some(op) = coord_op[c] else { continue };
-                    let lefts = chart[i][c - 1].clone();
-                    let rights = chart[c + 1][j].clone();
-                    for l in &lefts {
-                        for r in &rights {
+                    let lefts = &chart[i][c - 1];
+                    let rights = &chart[c + 1][j];
+                    for l in lefts {
+                        for r in rights {
                             // Left-branching normal form (the spurious-ambiguity
                             // control our grammar needs — D63 §8.4 Phase 4): a
                             // coordination's RIGHT conjunct may not itself be a
@@ -586,10 +586,10 @@ impl LexicalIndex {
                 if j >= 3 && tokens[j - 1] == "each" && tokens[j] == "other" {
                     // Verb spans [s, j-2]; subject group spans [i, s-1].
                     for s in (i + 1)..=(j - 2) {
-                        let subjects = chart[i][s - 1].clone();
-                        let verbs = chart[s][j - 2].clone();
-                        for subj in &subjects {
-                            for tv in &verbs {
+                        let subjects = &chart[i][s - 1];
+                        let verbs = &chart[s][j - 2];
+                        for subj in subjects {
+                            for tv in verbs {
                                 if let Some((cat, sem)) =
                                     reciprocate(&subj.cat, &subj.sem, &tv.cat, &tv.sem, &self.layer)
                                 {
@@ -615,10 +615,10 @@ impl LexicalIndex {
                     if tokens[c] != "that" {
                         continue;
                     }
-                    let nouns = chart[i][c - 1].clone();
-                    let bodies = chart[c + 1][j].clone();
-                    for noun in &nouns {
-                        for body in &bodies {
+                    let nouns = &chart[i][c - 1];
+                    let bodies = &chart[c + 1][j];
+                    for noun in nouns {
+                        for body in bodies {
                             if let Some((cat, sem)) = relativize(&noun.cat, &body.cat, &body.sem) {
                                 produced.push(Item::with_cost(
                                     cat,
@@ -771,9 +771,142 @@ impl LexicalIndex {
         if holes.is_empty() {
             Some(FelicitousOutcome::Closed(item))
         } else {
-            Some(FelicitousOutcome::Open(OpenParse { item, holes }))
+            // Slice 1: every hole is an `Entity`-typed referent (`EntityRef`). `ty` carries the
+            // Entity class so a resolver can type-filter candidates; `ProofObligation` holes
+            // (factive) will carry a parse-computed `Prop` here instead.
+            let infos = holes
+                .into_iter()
+                .map(|var| HoleInfo {
+                    var,
+                    ty: Exp::EigonClass(iri(ENTITY_IRI)),
+                    kind: HoleKind::EntityRef,
+                })
+                .collect();
+            Some(FelicitousOutcome::Open(OpenParse { item, holes: infos }))
         }
     }
+
+    /// Resolve an [`OpenParse`] by substituting each hole with a proposed antecedent and
+    /// **re-gating** through the kernel (D64 §4 — the trusted half of anaphora resolution; the
+    /// untrusted proposer only ever *suggests* antecedents). `bindings` maps a hole's
+    /// [`HoleInfo::var`] to its antecedent term (e.g. `EigonResource`/`EigonClass` for a chain
+    /// entity). Each hole is bound to the antecedent's *value* during evaluation, so the
+    /// resulting normal form is **closed**; it is then checked to inhabit `⟦cat⟧`. Returns the
+    /// resolved closed [`Item`] iff every hole is bound and the closed term type-checks — a
+    /// type-mismatched antecedent (e.g. a `Gene` where the predicate needs a `CellLine`) makes
+    /// the check fail and yields `None`, exactly the kernel veto that keeps the LLM from having
+    /// the last word. A leftover (unbound) hole likewise fails closed.
+    pub fn resolve_open(&self, open: &OpenParse, bindings: &[(String, Exp)]) -> Option<Item> {
+        let mut rho = Rho::Nil;
+        for (var, ante) in bindings {
+            let v = eval(ante, &Rho::Nil).ok()?;
+            rho = rho.extend(Patt::Var(var.clone()), v);
+        }
+        let nf = readback_val(0, &eval(&open.item.sem, &rho).ok()?);
+        let expected = denote_cat(&open.item.cat).ok()?;
+        let expected_val = eval(&expected, &Rho::Nil).ok()?;
+        // Closed re-gate: empty Γ, so any leftover hole is an unbound variable ⇒ fail closed.
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.layer));
+        check(&mut ctx, &nf, &expected_val).ok()?;
+        Some(Item {
+            cat: open.item.cat.clone(),
+            sem: nf,
+            prov: open.item.prov,
+            cost: open.item.cost,
+        })
+    }
+
+    /// Resolve **every** hole of an [`OpenParse`] via an (untrusted) [`Proposer`], substituting
+    /// and re-gating through the kernel (D64 §4, the resolve loop). For each hole the proposer
+    /// is asked, given the sentence and the in-scope `candidates`, for a **ranked** list of
+    /// antecedent IRIs; the loop searches those assignments (depth-first, bounded by the
+    /// proposer's list lengths) and returns the first whole-parse assignment the kernel re-gates
+    /// to a closed `Prop`. **Fail-closed**: a hole the proposer leaves empty, or whose every
+    /// candidate the kernel vetoes (type mismatch), yields `None` — no committed parse. The
+    /// proposer never decides felicity; [`Self::resolve_open`] (the kernel) does.
+    pub fn resolve_with(
+        &self,
+        open: &OpenParse,
+        sentence: &str,
+        candidates: &[Candidate],
+        proposer: &dyn Proposer,
+    ) -> Option<Item> {
+        let mut ranked: Vec<Vec<Exp>> = Vec::with_capacity(open.holes.len());
+        for hole in &open.holes {
+            let picks = proposer.propose(&ProposeCtx {
+                sentence,
+                hole,
+                candidates,
+            });
+            let antes: Vec<Exp> = picks
+                .iter()
+                .filter_map(|iri| self.antecedent_exp(iri))
+                .collect();
+            if antes.is_empty() {
+                return None; // unresolvable / unknown antecedent ⇒ fail closed
+            }
+            ranked.push(antes);
+        }
+        self.search_resolve(open, &ranked, &mut Vec::new())
+    }
+
+    /// Depth-first search over per-hole ranked antecedents: assign one antecedent per hole, then
+    /// re-gate the whole assignment via [`Self::resolve_open`]; the first that type-checks closed
+    /// wins, and a kernel veto backtracks to the next candidate (the trust boundary driving
+    /// retry). Bounded by the proposer's list lengths.
+    fn search_resolve(
+        &self,
+        open: &OpenParse,
+        ranked: &[Vec<Exp>],
+        acc: &mut Vec<(String, Exp)>,
+    ) -> Option<Item> {
+        let i = acc.len();
+        if i == ranked.len() {
+            return self.resolve_open(open, acc);
+        }
+        for ante in &ranked[i] {
+            acc.push((open.holes[i].var.clone(), ante.clone()));
+            if let Some(it) = self.search_resolve(open, ranked, acc) {
+                return Some(it);
+            }
+            acc.pop();
+        }
+        None
+    }
+
+    /// The antecedent term for a chain-entity IRI: an `EigonResource` (named entity), `EigonClass`
+    /// (a class), or `EigonAxiom`, per the entity's kind. `None` if the IRI does not resolve in
+    /// the chain (so a hallucinated antecedent fails closed before re-gating).
+    fn antecedent_exp(&self, iri: &Iri) -> Option<Exp> {
+        self.layer.resolve(iri)?;
+        Some(super::lexicon::resolve_sem(&self.layer, iri))
+    }
+}
+
+/// A candidate antecedent for anaphora resolution (D64 §4): an in-scope committed chain entity,
+/// with its surface form for the proposer to rank against. The resolver assembles these from the
+/// discourse context; the (untrusted) [`Proposer`] ranks/selects, and the kernel re-gates.
+#[derive(Clone, Debug)]
+pub struct Candidate {
+    pub iri: Iri,
+    pub surface: String,
+}
+
+/// The context handed to a [`Proposer`] for one referent hole: the sentence, the hole (its type
+/// + kind), and the in-scope candidate antecedents.
+pub struct ProposeCtx<'a> {
+    pub sentence: &'a str,
+    pub hole: &'a HoleInfo,
+    pub candidates: &'a [Candidate],
+}
+
+/// The **untrusted** anaphora proposer (D64 §4): given a hole and the in-scope candidates, return
+/// a **ranked** list of antecedent IRIs (most-preferred first; empty ⇒ unresolvable). It only
+/// *suggests*; the kernel re-gates every suggestion ([`LexicalIndex::resolve_open`]). Impls: a
+/// deterministic mock (tests), a feature-gated live LLM client (`allms`), and the production
+/// orchestrator bridge — all behind this one trait, so the algorithm is impl-agnostic.
+pub trait Proposer {
+    fn propose(&self, ctx: &ProposeCtx) -> Vec<Iri>;
 }
 
 /// IRI of the referent-hole placeholder constant (`axiom lexicon:anaphor : lexicon:Entity`):
@@ -813,14 +946,35 @@ fn freshen_anaphor(exp: &Exp, fresh: &str) -> Exp {
     }
 }
 
+/// What a referent hole dispatches to once resolved (the carrier's resolver tag — D64). Slice 1
+/// produces only `EntityRef` (pronoun/possessive referents → the D64 anaphora resolver);
+/// `ProofObligation` (factive presupposition → grounding) is the planned second arm.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HoleKind {
+    /// An unresolved entity referent (a pronoun / possessor), resolved by substituting a chain
+    /// antecedent and re-gating.
+    EntityRef,
+}
+
+/// One referent hole in an [`OpenParse`]: the free variable standing in the sem, the EigenTT
+/// type it must inhabit (Slice 1: `Entity`), and its resolver [`HoleKind`]. This is what a
+/// `Proposer` consumes (to filter/rank antecedents) and what [`LexicalIndex::resolve_open`]
+/// fills.
+#[derive(Clone, Debug)]
+pub struct HoleInfo {
+    pub var: String,
+    pub ty: Exp,
+    pub kind: HoleKind,
+}
+
 /// An **open** parse (D64): a felicitous full-span `S` whose sem still carries unresolved
-/// referent holes (free variables). `holes` are their readback variable names — the slots the
-/// D64 resolver fills (by substituting a chain antecedent + re-gating). The kernel type-checked
-/// `item.sem` under a context binding each hole to `Entity`; it is NOT a closed final parse.
+/// referent holes (free variables). Each [`HoleInfo`] is a slot the D64 resolver fills (by
+/// substituting a chain antecedent + re-gating — [`LexicalIndex::resolve_open`]). The kernel
+/// type-checked `item.sem` with each hole bound to its type; it is NOT a closed final parse.
 #[derive(Clone)]
 pub struct OpenParse {
     pub item: Item,
-    pub holes: Vec<String>,
+    pub holes: Vec<HoleInfo>,
 }
 
 /// The outcome of classifying a full-span candidate (see [`LexicalIndex::classify_felicitous`]).

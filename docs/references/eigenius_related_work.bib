@@ -460,6 +460,123 @@
                dropped PDF.}
 }
 
+% ─────────────────────────────────────────────────────────────────────────────
+% Parsing scale & pruning (D63/D62 parser front-end). The DCG chart parser's
+% blow-up is LEXICAL (WordNet sense polysemy = CCG lexical-category ambiguity),
+% so the literature's answer is supertagging / adaptive lexical pruning; and our
+% typed kernel affords EXACT (unification/type-failure) pruning, unlike the
+% inexact probabilistic beams below. All identifiers verified (ACL Anthology /
+% DOI) — see docs/notes/d63-parsing-scale-and-pruning.md.
+% ─────────────────────────────────────────────────────────────────────────────
+
+@article{bangalore-joshi-1999-supertagging,
+  author  = {Bangalore, Srinivas and Joshi, Aravind K.},
+  title   = {Supertagging: An Approach to Almost Parsing},
+  journal = {Computational Linguistics},
+  volume  = {25}, number = {2}, pages = {237--265}, year = {1999},
+  note    = {Origin of SUPERTAGGING ("almost parsing"): assign the most-probable
+             rich lexical descriptor per word BEFORE parsing, collapsing the
+             lexical-ambiguity search space. The direct analog of our problem —
+             WordNet sense-polysemy seeding many items per token. ACL J99-2004.}
+}
+
+@inproceedings{clark-curran-2004-supertagging,
+  author    = {Clark, Stephen and Curran, James R.},
+  title     = {The Importance of Supertagging for Wide-Coverage {CCG} Parsing},
+  booktitle = {COLING 2004},
+  pages     = {282--288}, year = {2004},
+  note      = {The precise source of ADAPTIVE (beta-level) supertagging: start
+             with a tight per-word category beam, widen only when the parse
+             fails. The "start tight, widen on failure" policy we adopt for
+             D65 sense_rank-driven seed pruning. ACL C04-1041.}
+}
+
+@article{clark-curran-2007-ccg,
+  author  = {Clark, Stephen and Curran, James R.},
+  title   = {Wide-Coverage Efficient Statistical Parsing with {CCG} and Log-Linear Models},
+  journal = {Computational Linguistics},
+  volume  = {33}, number = {4}, pages = {493--552}, year = {2007},
+  doi     = {10.1162/coli.2007.33.4.493},
+  note    = {The canonical wide-coverage CCG parser; supertagger as a parser
+             front-end filter + the full adaptive-supertagging loop. ACL J07-4004.}
+}
+
+@inproceedings{xu-auli-clark-2015-rnn-supertag,
+  author    = {Xu, Wenduan and Auli, Michael and Clark, Stephen},
+  title     = {{CCG} Supertagging with a Recurrent Neural Network},
+  booktitle = {ACL-IJCNLP 2015 (Short Papers)},
+  pages     = {250--255}, year = {2015},
+  note      = {Neural supertagger conditioning on full-sentence context → tighter,
+             more accurate per-word category beams. Grounds "sense_rank as a
+             learned supertag prior" for our adaptive seed pruning. ACL P15-2041.}
+}
+
+@inproceedings{klein-manning-2003-astar,
+  author    = {Klein, Dan and Manning, Christopher D.},
+  title     = {A* Parsing: Fast Exact {Viterbi} Parse Selection},
+  booktitle = {HLT-NAACL 2003},
+  pages     = {119--126}, year = {2003},
+  note    = {EXACT best-first parsing via an ADMISSIBLE outside heuristic — no
+             search errors, <3% of exhaustive edges. The "exactness via a sound
+             filter" principle our typed felicity oracle affords. ACL N03-1016.}
+}
+
+@article{caraballo-charniak-1998-fom,
+  author  = {Caraballo, Sharon A. and Charniak, Eugene},
+  title   = {New Figures of Merit for Best-First Probabilistic Chart Parsing},
+  journal = {Computational Linguistics},
+  volume  = {24}, number = {2}, pages = {275--298}, year = {1998},
+  note    = {Figure-of-merit (inside x outside estimate) agenda prioritization for
+             best-first chart parsing — the inexact heuristic-ordering family. ACL J98-2004.}
+}
+
+@inproceedings{charniak-etal-2006-coarse-to-fine,
+  author    = {Charniak, Eugene and Johnson, Mark and Elsner, Micha and others},
+  title     = {Multilevel Coarse-to-Fine {PCFG} Parsing},
+  booktitle = {HLT-NAACL 2006},
+  pages     = {168--175}, year = {2006},
+  note    = {COARSE-TO-FINE: parse with a coarse grammar to prune the chart for the
+             finer pass. Cf. a categorial-skeleton-first then type-refine pass. ACL N06-1022.}
+}
+
+@inproceedings{charniak-2000-maxent-parser,
+  author    = {Charniak, Eugene},
+  title     = {A Maximum-Entropy-Inspired Parser},
+  booktitle = {NAACL 2000},
+  pages     = {132--139}, year = {2000},
+  note    = {Canonical source for beam / overparsing-style (inexact) pruning in
+             lexicalized statistical parsing. ACL A00-2018.}
+}
+
+@inproceedings{tomita-1987-glr,
+  author    = {Tomita, Masaru},
+  title     = {An Efficient Augmented-Context-Free Parsing Algorithm},
+  journal   = {Computational Linguistics},
+  volume    = {13}, number = {1-2}, pages = {31--46}, year = {1987},
+  note    = {Generalized LR (GLR) + the SHARED PACKED PARSE FOREST (SPPF): share
+             common sub-derivations so an exponential ambiguity set is stored
+             compactly. The "cheaper items via sharing" lever (vs. our current
+             Box-owned, unshared term trees). ACL J87-1004.}
+}
+
+@inproceedings{billot-lang-1989-shared-forests,
+  author    = {Billot, Sylvie and Lang, Bernard},
+  title     = {The Structure of Shared Forests in Ambiguous Parsing},
+  booktitle = {ACL 1989}, pages = {143--151}, year = {1989},
+  doi       = {10.3115/981623.981641},
+  note    = {Formal account of the cubic-size shared parse forest — sub-derivation
+             sharing as a grammar in its own right. ACL P89-1018.}
+}
+
+@inproceedings{oepen-carroll-2000-ambiguity-packing,
+  author    = {Oepen, Stephan and Carroll, John},
+  title     = {Ambiguity Packing in Constraint-based Parsing --- Practical Results},
+  booktitle = {NAACL 2000}, pages = {162--169}, year = {2000},
+  note    = {LOCAL AMBIGUITY PACKING in a (unification/HPSG) chart: subsumption-
+             and equivalence-based packing of feature structures — the closest
+             prior art to packing + exact type-filtering in a typed chart. ACL A00-2022.}
+}
+
 % Dependent Type Semantics (DTS) + the lightblue parser — the closest existing
 % prose->Sigma-type system (D62 §4.1; verified via deep-research wea30vq2b).
 @misc{bekki-lightblue,

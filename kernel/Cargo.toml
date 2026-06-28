@@ -8,8 +8,16 @@ description = "Eigenius kernel: typed knowledge-graph platform with layered immu
 keywords = ["knowledge-graph", "type-theory", "ontology", "grpc", "provenance"]
 categories = ["science", "data-structures", "web-programming"]
 
+[features]
+# Live-LLM anaphora proposer (D64) via the `allms` client — opt-in, dev/experimentation only.
+# Default builds stay LLM-free (the kernel is the trusted oracle); the resolver algorithm runs
+# against the abstract `Proposer` trait + a mock. See `kernel/src/dcg/resolver_allms.rs`.
+allms = ["dep:allms", "dep:schemars"]
+
 [dependencies]
 async-trait = "0.1"
+allms = { version = "0.42", optional = true }
+schemars = { version = "0.8.12", optional = true }
 ciborium = "0.2"
 hex = "0.4"
 # Concurrent cache for the bounded two-pool resource cache (D23 §5.3 /

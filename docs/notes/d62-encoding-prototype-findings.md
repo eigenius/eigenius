@@ -51,6 +51,33 @@ categories:
 3. **Genuine domain OOV** (`wrn, msi, mss, mmr, helicase, microsatellite, recq,
    crispr–cas9, parp-1, kras, braf, msh2/6, pms2, mlh1`) — real, but masked by (1) and (2).
 
+### Re-measurement (after S0 segmentation + the closed-class/carrier build-out)
+
+Same page, after: the S0 segmenter (47 → 26 units), the closed-class additions (determiners
+`the/this/that/an`, modals incl. `would`, `if`, `but`, coordination signal `and`/`or`,
+pronouns `it/they/its/their/we`), and **lemmatizing the WordNet seed** (the seed matched raw
+plural/inflected *surfaces* against the lemma-keyed dictionary, spuriously inflating OOV —
+the same surface-vs-lemma artifact as the plural-GQ / Identity-lemmatizer cases):
+
+- **26 units → 9 parseable (≤22 tokens), 17 over-length skipped (parsing-scale bound).**
+- **Of the 9: 0 encoded, 9 missing-lexeme.**
+- **OOV: 99 → 24** distinct tokens (lemmatized seeding removed ~75 spuriously-OOV content
+  words like `models/genes/biomarkers/datasets/lineages`).
+
+The **24 genuine OOV** fall entirely into already-planned buckets: domain proper nouns /
+acronyms (~16: `wrn, mlh1, msh2, msh6, pms2, recq, parp-1, dna, mmr, msi, helicase(s),
+germline, hypermethylation, double-stranded, pcr-based, adp-ribose, poly`) → the domain-
+lexicon injection (UMLS/NCBI); `-ly` adverbs (`commonly, preferentially, selectively,
+typically`) → derivational `-ly` morphology (P3); the plural demonstrative `these` → trivial
+closed-class add (sg `this`/`that` done); and `after`.
+
+**Revised blocker ranking (this paper):** (1) **parsing scale** — long, dense sentences
+(17/26 > 22 tokens) OOM the chart with a full polysemous slice — the dominant practical gate;
+(2) **grammar coverage** of long constructions; (3) **residual vocab** (24 tokens, all
+planned). Vocabulary is *not* the primary blocker — confirming Finding 3 — and the prior
+"missing-lexeme" counts were measurement-inflated. Measured by `prototype_over_wrn_first_page`
+(`crates/eigenius-wordnet/tests/encoding_prototype.rs`).
+
 ## Finding 3 — the three lexica cover the content vocabulary (vocabulary is not the blocker)
 
 Measured the page's vocabulary against the **real emitted lexica forms** on disk (WordNet

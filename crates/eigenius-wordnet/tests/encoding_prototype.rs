@@ -35,7 +35,7 @@
 use std::sync::Arc;
 
 use eigenius_kernel::dcg::{
-    is_nonprose, pretty_term, segment_sentences, tokenize, Item, Lemmatizer, LexicalIndex,
+    is_nonprose, pretty_term, segment_sentences, tokenize, Item, Lemmatizer, LexicalIndex, Pos,
 };
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -229,11 +229,24 @@ fn prototype_over_wrn_first_page() {
         }
     };
 
-    // Seed the slice from the page's own alphabetic tokens, so a MissingLexeme is
-    // genuine out-of-vocabulary (not an artefact of a toy slice).
+    // Seed the slice from the page's own alphabetic tokens, so a MissingLexeme is genuine
+    // out-of-vocabulary (not an artefact of a toy slice). The page tokens are SURFACE forms,
+    // but WordNet (and `select_synsets`) is keyed by LEMMA — so we must lemmatize each seed
+    // (`models` → `model`, `analysed` → `analyse`), else a plural/inflected surface fails to
+    // seed its singular synset and the lemma is spuriously reported OOV (the same surface-vs-
+    // lemma mismatch that bit the `Identity`-lemmatizer test artifacts).
+    let seed_lem = morphy();
     let seeds: std::collections::BTreeSet<String> = tokenize(&page)
         .into_iter()
         .filter(|t| t.chars().all(|c| c.is_ascii_alphabetic()) && t.len() > 2)
+        .flat_map(|t| {
+            let mut forms = vec![t.clone()];
+            for pos in [Pos::Noun, Pos::Verb, Pos::Adj, Pos::Adv] {
+                forms.extend(seed_lem.lemmas(&t, pos));
+            }
+            forms
+        })
+        .filter(|t| t.len() > 2)
         .collect();
     let seed_refs: Vec<&str> = seeds.iter().map(String::as_str).collect();
     eprintln!(
@@ -245,7 +258,21 @@ fn prototype_over_wrn_first_page() {
     let index = LexicalIndex::build(Arc::clone(&layer));
     let lem = morphy();
 
-    let report = encode_doc(&page, &index, &lem, &layer);
+    // Parsing scale: the chart for a long, highly-polysemous sentence (a full WordNet slice +
+    // 40-token sentences) blows up and OOMs. Cap unit length for the measurement and count the
+    // over-length units separately as **scale-bound** (a real parsing-scale finding, distinct
+    // from vocabulary/grammar gaps). The cap is the parser-scale ceiling, not a coverage claim.
+    const MAX_UNIT_TOKENS: usize = 22;
+    let mut scale_bound = 0usize;
+    let mut report: Vec<UnitReport> = Vec::new();
+    for text in segment_sentences(&page) {
+        if tokenize(&text).len() > MAX_UNIT_TOKENS {
+            scale_bound += 1;
+            continue;
+        }
+        let outcome = encode_unit(&text, &index, &lem, &layer);
+        report.push(UnitReport { text, outcome });
+    }
 
     let (mut enc, mut amb, mut miss, mut gap) = (0, 0, 0, 0);
     let mut oov: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -261,8 +288,9 @@ fn prototype_over_wrn_first_page() {
         }
     }
     eprintln!(
-        "\n=== WRN first page: {} units → encoded {enc}, ambiguous {amb}, \
-         missing-lexeme {miss}, grammar-gap {gap} ===",
+        "\n=== WRN first page: {} parseable units (≤{MAX_UNIT_TOKENS} tok) → encoded {enc}, \
+         ambiguous {amb}, missing-lexeme {miss}, grammar-gap {gap}; \
+         + {scale_bound} over-length units skipped (parsing-scale bound) ===",
         report.len()
     );
     eprintln!("distinct out-of-vocabulary tokens ({}): {oov:?}", oov.len());

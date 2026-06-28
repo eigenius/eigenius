@@ -40,6 +40,11 @@ pub mod parser;
 pub mod pretty;
 pub mod segment;
 
+/// Live-LLM anaphora proposer (D64 §4) — opt-in via the `allms` feature; default builds stay
+/// LLM-free.
+#[cfg(feature = "allms")]
+pub mod resolver_allms;
+
 pub use category::{
     cat_subsumes, cats_coordinate, common_super, coordinate_np, coordinate_sem, denote_cat,
     distribute, distribute_object, feat_meets, is_ctor, kind_subject, reciprocate, relativize,
@@ -48,8 +53,8 @@ pub use category::{
 pub use lemmatizer::{Identity, Lemmatizer, Pos};
 pub use lexicon::{entry_to_item, gate_entry, resolve_sem, resolve_sem_value};
 pub use lookup::{
-    coord_connective, resolve_lexicon_profile, tokenize, LexicalIndex, OpenParse,
-    DEFAULT_FOREST_CAP,
+    coord_connective, resolve_lexicon_profile, tokenize, Candidate, HoleInfo, HoleKind,
+    LexicalIndex, OpenParse, ProposeCtx, Proposer, DEFAULT_FOREST_CAP,
 };
 pub use parser::{apply, cky_parse, Combinator, Cost, Item};
 pub use pretty::pretty_term;
