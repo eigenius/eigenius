@@ -68,10 +68,19 @@ last use** — not chart-shape windowing.
 
 ## 4. Recommendation — two complementary levers
 
-**Lever A — adaptive supertagging (cut the seed count).** Seed only the top-`N` senses per token
-by `sense_rank`/scope (D65); **widen on parse failure** (the Clark–Curran adaptive-β policy
-[clark-curran-2004-supertagging]). Inexact, but the widen-on-failure loop recovers completeness,
-and it attacks the explosion *at the seed*, before any combination.
+**Lever A — adaptive supertagging (cut the seed count). ✅ Deterministic form IMPLEMENTED.**
+Seed only the top-`N` senses per token by `sense_rank`/scope (D65); **widen on parse failure** (the
+Clark–Curran adaptive-β policy [clark-curran-2004-supertagging]). Inexact, but the widen-on-failure
+loop recovers completeness, and it attacks the explosion *at the seed*, before any combination.
+
+  *Implemented:* `LexicalIndex::with_sense_cap(n)` (`kernel/src/dcg/lookup.rs`) — an **opt-in**
+  per-lemma cap (default off, so no behaviour change to the closed-class grammar) that keeps the
+  lowest-`sense_rank` `n` entries per lemma at seed time. **Unblock measured** on the WRN page
+  (`prototype_over_wrn_first_page`): with `sense_cap = 2`, **25 of 26 units parse (≤60 tokens)
+  without OOM**, up from 9/26 at ≤22 tokens uncapped — i.e. the parser now runs over essentially the
+  whole page. (Still 0 *encoded*, but now for measurable reasons — domain OOV + grammar — not an OOM
+  that blocked measurement.) *Not yet implemented:* the widen-on-failure loop (completeness backstop)
+  — currently a fixed cap; bounded widening is the follow-on.
 
   *Contextual reranking (the strong form of Lever A).* The supertag prior need not be the static
   `sense_rank` (global WordNet frequency) — it can be an **LLM contextual sense reranker**: given a
@@ -94,8 +103,15 @@ and it attacks the explosion *at the seed*, before any combination.
 **Lever B — exact mid-chart felicity pruning (cut the combination count).** Type-check (or a cheap
 type-compat pre-check of) *interior* constituents during CKY and drop the ill-typed ones
 immediately, rather than only at the full span. **Exact** — no search errors — which is the rare
-luxury the typed kernel affords. This is the principled headline fix: it keeps cells small at the
-source, so there is little to clone, retain, share, or cap.
+luxury the typed kernel affords.
+
+  *Caveat (sequencing):* with the **current** lexicon, verbs are generic `Entity → … → Prop`
+  (selectional restrictions are still open — GH #93), so every Entity-subclass sense type-checks and
+  felicity pruning is **largely a no-op for sense polysemy**. Lever B becomes the headline
+  ceiling-lifter once #93 gives predicates narrow argument types (then ill-typed sense-combinations
+  are dropped exactly). Until then, **Lever A (the sense cap) is the effective unblock** — which is
+  why it was implemented first. Lever B still prunes spurious *structural* combinations (bad
+  type-raise/composition) regardless, so it is worth landing, but its big payoff is gated on #93.
 
 Sequencing: **B is the ceiling-lifter** (sense-polysemy makes the *count* explode super-linearly,
 so cutting it beats making an exploding number of items cheaper); **A** shrinks what enters the

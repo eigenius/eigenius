@@ -39,6 +39,7 @@ pub mod lookup;
 pub mod parser;
 pub mod pretty;
 pub mod segment;
+pub mod sense_ranker;
 
 /// Live-LLM anaphora proposer (D64 §4) — opt-in via the `allms` feature; default builds stay
 /// LLM-free.
@@ -59,3 +60,4 @@ pub use lookup::{
 pub use parser::{apply, cky_parse, Combinator, Cost, Item};
 pub use pretty::pretty_term;
 pub use segment::{is_nonprose, segment_sentences};
+pub use sense_ranker::{IdentityRanker, SenseCandidate, SenseRanker, WordSenses};

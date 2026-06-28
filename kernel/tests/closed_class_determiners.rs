@@ -21,7 +21,9 @@
 use std::sync::Arc;
 
 use eigenius_kernel::bootstrap;
-use eigenius_kernel::dcg::{is_ctor, Candidate, Identity, LexicalIndex, ProposeCtx, Proposer};
+use eigenius_kernel::dcg::{
+    is_ctor, Candidate, Identity, LexicalIndex, ProposeCtx, Proposer, SenseRanker, WordSenses,
+};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -47,6 +49,166 @@ fn index_over_bootstrap() -> (Arc<Layer>, LexicalIndex) {
     let layer = Arc::new(b.build(LayerStorage::in_memory()));
     let index = LexicalIndex::build(Arc::clone(&layer));
     (layer, index)
+}
+
+/// Two senses of a synthetic word `zob`, ranked: rank-0 is a **plural** NP (disagrees with the
+/// 3sg verb `affects`), rank-1 is a **singular** NP (agrees). With `sense_cap(1)` only rank-0
+/// seeds, so a sentence needs widen-on-failure to reach rank-1. (Both gate like a proper name.)
+const ZOB_FIXTURE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+resource lexicon:zob_pl : lexicon:LexicalEntry {
+    lexicon:form       = "zob";
+    lexicon:cat        = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:pl) );
+    lexicon:sem        = lexicon:brca1;
+    lexicon:sem_type   = type_expr( lexicon:Gene );
+    lexicon:sense      = "zob.0";
+    lexicon:sense_rank = 0;
+    lexicon:grade      = epistemic:declared;
+}
+resource lexicon:zob_sg : lexicon:LexicalEntry {
+    lexicon:form       = "zob";
+    lexicon:cat        = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:sg) );
+    lexicon:sem        = lexicon:brca1;
+    lexicon:sem_type   = type_expr( lexicon:Gene );
+    lexicon:sense      = "zob.1";
+    lexicon:sense_rank = 1;
+    lexicon:grade      = epistemic:declared;
+}
+"#;
+
+/// Bootstrap + demo + the two-sense `zob` fixture, with an index carrying `sense_cap`.
+fn index_with_zob(cap: usize) -> LexicalIndex {
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
+    for r in demo {
+        b.add_resource(r).expect("add demo");
+    }
+    let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let fix = esl::compile_against_layer(ZOB_FIXTURE, &demo_layer).expect("zob fixture compiles");
+    let mut b2 = LayerBuilder::new("zob", Some(Arc::clone(&demo_layer)));
+    for r in fix {
+        b2.add_resource(r).expect("add zob");
+    }
+    let layer = Arc::new(b2.build(LayerStorage::in_memory()));
+    LexicalIndex::build(layer).with_sense_cap(cap)
+}
+
+#[test]
+fn sense_cap_widens_on_failure_for_known_vocabulary() {
+    // Adaptive supertagging (GH #97): `sense_cap(1)` seeds only `zob`'s rank-0 (plural) sense, so
+    // "zob affects HeLa" fails number agreement (pl subject + 3sg verb). Since every token is
+    // known (not OOV), widen-on-failure doubles the cap, admits the rank-1 (singular) sense, and
+    // the sentence parses — the cap never loses a parse a known-vocabulary sentence would get.
+    let index = index_with_zob(1);
+    assert_eq!(
+        index.parse("zob affects HeLa", &Identity).len(),
+        1,
+        "widen-on-failure recovers the cap-dropped rank-1 sense"
+    );
+
+    // OOV guard: an unknown word must NOT trigger widening (widening can't supply a missing
+    // lexeme) — it fails closed promptly.
+    assert!(
+        index_with_zob(1)
+            .parse("zob affects zzzqnotaword", &Identity)
+            .is_empty(),
+        "an OOV token fails closed without pointless widening"
+    );
+}
+
+/// Two **both-valid** singular senses of a synthetic word `zarg`: rank-0 → the BRCA1 gene, rank-1
+/// → the HeLa cell line. Each makes "zarg affects HeLa" a felicitous `Prop` (both `Entity`-typed
+/// subjects), so — unlike `zob` (where rank-0 fails agreement and widen recovers rank-1) — the
+/// cap is the *only* thing deciding which survives. That isolates the reranker: with `sense_cap(1)`
+/// the static cap keeps rank-0 (BRCA1); a reranker preferring `zarg.1` makes the cap keep HeLa.
+const ZARG_FIXTURE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+resource lexicon:zarg_gene : lexicon:LexicalEntry {
+    lexicon:form       = "zarg";
+    lexicon:cat        = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:sg) );
+    lexicon:sem        = lexicon:brca1;
+    lexicon:sem_type   = type_expr( lexicon:Gene );
+    lexicon:sense      = "zarg.0";
+    lexicon:sense_rank = 0;
+    lexicon:grade      = epistemic:declared;
+}
+resource lexicon:zarg_cell : lexicon:LexicalEntry {
+    lexicon:form       = "zarg";
+    lexicon:cat        = type_expr( lexicon:cat_np(lexicon:CellLine, lexicon:sg) );
+    lexicon:sem        = lexicon:hela;
+    lexicon:sem_type   = type_expr( lexicon:CellLine );
+    lexicon:sense      = "zarg.1";
+    lexicon:sense_rank = 1;
+    lexicon:grade      = epistemic:declared;
+}
+"#;
+
+/// Bootstrap + demo + the two-sense `zarg` fixture, with `sense_cap` and an optional reranker.
+fn index_with_zarg(cap: usize, ranker: Option<Box<dyn SenseRanker + Send + Sync>>) -> LexicalIndex {
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
+    for r in demo {
+        b.add_resource(r).expect("add demo");
+    }
+    let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let fix = esl::compile_against_layer(ZARG_FIXTURE, &demo_layer).expect("zarg fixture compiles");
+    let mut b2 = LayerBuilder::new("zarg", Some(Arc::clone(&demo_layer)));
+    for r in fix {
+        b2.add_resource(r).expect("add zarg");
+    }
+    let layer = Arc::new(b2.build(LayerStorage::in_memory()));
+    let mut index = LexicalIndex::build(layer).with_sense_cap(cap);
+    if let Some(r) = ranker {
+        index = index.with_sense_ranker(r);
+    }
+    index
+}
+
+/// A deterministic mock [`SenseRanker`] that ranks one target sense first for every word
+/// (others keep seed order) — the CI stand-in for "the context prefers this sense".
+struct PreferSense(&'static str);
+impl SenseRanker for PreferSense {
+    fn rank(&self, _sentence: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+        words
+            .iter()
+            .map(|w| {
+                let mut idx: Vec<usize> = (0..w.candidates.len()).collect();
+                idx.sort_by_key(|&i| w.candidates[i].sense != self.0); // target (false) sorts first
+                idx
+            })
+            .collect()
+    }
+}
+
+#[test]
+fn sense_reranker_overrides_static_cap_order() {
+    // Static cap(1), no reranker: keeps rank-0 (BRCA1) → the parse's sem mentions BRCA1.
+    let forest = index_with_zarg(1, None).parse("zarg affects HeLa", &Identity);
+    assert_eq!(forest.len(), 1, "one parse survives the cap");
+    let sem = format!("{:?}", forest[0].sem);
+    assert!(
+        sem.contains("brca1"),
+        "static cap keeps the rank-0 (BRCA1) sense: {sem}"
+    );
+
+    // Same cap(1), but a reranker preferring `zarg.1`: the cap now keeps HeLa, not BRCA1 — the
+    // contextual rank overrode the static `sense_rank`, and the kernel still gated the result.
+    let forest = index_with_zarg(1, Some(Box::new(PreferSense("zarg.1"))))
+        .parse("zarg affects HeLa", &Identity);
+    assert_eq!(forest.len(), 1, "still one parse survives the cap");
+    let sem = format!("{:?}", forest[0].sem);
+    assert!(
+        !sem.contains("brca1"),
+        "the reranker dropped the rank-0 BRCA1 sense from the cap: {sem}"
+    );
+    assert!(
+        sem.contains("hela"),
+        "the reranker kept the contextual HeLa sense: {sem}"
+    );
 }
 
 fn assert_parses_to_prop(sentence: &str) {

@@ -255,14 +255,16 @@ fn prototype_over_wrn_first_page() {
     );
 
     let layer = stand_up(&SeedSpec::seeded(seed_refs));
-    let index = LexicalIndex::build(Arc::clone(&layer));
+    // Adaptive-supertagging sense cap (GH #97): keep the top-2 senses per lemma so WordNet
+    // polysemy doesn't blow up the chart on long sentences — the scaling-plan unblock that lets
+    // us measure over the *whole* page instead of only short units.
+    const SENSE_CAP: usize = 2;
+    let index = LexicalIndex::build(Arc::clone(&layer)).with_sense_cap(SENSE_CAP);
     let lem = morphy();
 
-    // Parsing scale: the chart for a long, highly-polysemous sentence (a full WordNet slice +
-    // 40-token sentences) blows up and OOMs. Cap unit length for the measurement and count the
-    // over-length units separately as **scale-bound** (a real parsing-scale finding, distinct
-    // from vocabulary/grammar gaps). The cap is the parser-scale ceiling, not a coverage claim.
-    const MAX_UNIT_TOKENS: usize = 22;
+    // Length guard remains as a safety backstop, but the sense cap should let much longer units
+    // parse without OOM. Over-length units are still counted separately as scale-bound.
+    const MAX_UNIT_TOKENS: usize = 60;
     let mut scale_bound = 0usize;
     let mut report: Vec<UnitReport> = Vec::new();
     for text in segment_sentences(&page) {
@@ -294,6 +296,51 @@ fn prototype_over_wrn_first_page() {
         report.len()
     );
     eprintln!("distinct out-of-vocabulary tokens ({}): {oov:?}", oov.len());
+
+    // Per-unit OOV load (how blocked each missing-lexeme unit is): minimum OOV-per-unit tells us
+    // how close any unit is to parsing once vocabulary lands.
+    let per_unit: Vec<usize> = report
+        .iter()
+        .filter_map(|u| match &u.outcome {
+            Outcome::MissingLexeme { unknown } => Some(unknown.len()),
+            _ => None,
+        })
+        .collect();
+    if !per_unit.is_empty() {
+        let min = per_unit.iter().min().unwrap();
+        let max = per_unit.iter().max().unwrap();
+        let sum: usize = per_unit.iter().sum();
+        let n1 = per_unit.iter().filter(|&&c| c == 1).count();
+        eprintln!(
+            "OOV-per-unit: min {min}, max {max}, mean {:.1}; units blocked by exactly 1 OOV: {n1}",
+            sum as f64 / per_unit.len() as f64
+        );
+    }
+
+    // Bucket the distinct OOV by the fix that would recover it (quantifies the path to coverage).
+    let connectives: std::collections::BTreeSet<&str> = [
+        "after", "also", "although", "as", "because", "between", "both", "however", "most",
+        "several", "such", "these", "those", "to", "within", "yet", "alone",
+    ]
+    .into_iter()
+    .collect();
+    let (mut adverb_ly, mut stat_leak, mut connective, mut domain) = (0, 0, 0, 0);
+    for t in &oov {
+        if t.chars().count() <= 1 {
+            stat_leak += 1; // single-letter stat/figure symbol leaking past S0 (e/n/p/q)
+        } else if t.ends_with("ly") {
+            adverb_ly += 1; // -ly adverb → derivational morphology (P3)
+        } else if connectives.contains(t.as_str()) {
+            connective += 1; // closed-class connective / function word (follow-on)
+        } else {
+            domain += 1; // gene/protein/cell-line name, acronym, biomedical term → domain lexicon
+        }
+    }
+    eprintln!(
+        "OOV by fix-bucket: domain-lexicon {domain}, connectives/function-words {connective}, \
+         -ly adverbs {adverb_ly}, stat-symbol leaks {stat_leak}"
+    );
+
     eprintln!("\n--- first 8 units (90-char preview) ---");
     for u in report.iter().take(8) {
         let tag = match &u.outcome {

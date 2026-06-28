@@ -78,6 +78,28 @@ planned). Vocabulary is *not* the primary blocker — confirming Finding 3 — a
 "missing-lexeme" counts were measurement-inflated. Measured by `prototype_over_wrn_first_page`
 (`crates/eigenius-wordnet/tests/encoding_prototype.rs`).
 
+### Full-page measurement (after the sense-cap unblock — GH #97)
+
+With `with_sense_cap(2)` (adaptive supertagging), the parsing-scale OOM lifts and the parser runs
+over the **whole page**: **25 of 26 units parse (≤60 tokens), 1 over-length skipped**. Outcome:
+**0 encoded, 25 missing-lexeme, 0 grammar-gap.** OOV = 71 distinct tokens.
+
+- **OOV-per-unit:** min 1, max 21, **mean 6.6**; only **1** unit is one-OOV-away. So units are
+  *far* from parsing on vocab alone — vocabulary saturates the gate.
+- **OOV by fix-bucket:** **domain-lexicon 40 (56%)** · **connectives/function-words 17 (24%)** ·
+  **-ly adverbs 10 (14%)** · **stat-symbol leaks 4 (6%, single letters `e/n/p/q` past S0)**.
+
+**What this tells us:**
+1. **Vocabulary — specifically the domain lexicon — is the encode-gate**, not parsing scale (now
+   unblocked) and not the closed class. Domain-lexicon injection (UMLS/NCBI) clears the majority
+   (56%) of OOV; closed-class connectives/quantifiers (`because/although/however/such/these/those/
+   to/most/several/both/…`) clear 24%; `-ly` derivation 14%; an S0 single-letter route 6%.
+2. **Grammar reach is not yet measurable** — `grammar-gap = 0` only because vocabulary fails first
+   everywhere (mean 6.6 OOV/unit). Grammar gaps will surface only after the vocab buckets are filled.
+3. The parsing-scale work (sense cap; the LLM reranker; widen-on-failure) is what made this
+   measurable, but it does **not** produce encodes — that waits on the **domain-lexicon injection**,
+   now quantified as the critical path to actual WRN encodes.
+
 ## Finding 3 — the three lexica cover the content vocabulary (vocabulary is not the blocker)
 
 Measured the page's vocabulary against the **real emitted lexica forms** on disk (WordNet

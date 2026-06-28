@@ -54,6 +54,7 @@ use super::category::{
 use super::lemmatizer::{Lemmatizer, Pos};
 use super::lexicon::entry_to_item;
 use super::parser::{apply, Combinator, Item};
+use super::sense_ranker::{SenseCandidate, SenseRanker, WordSenses};
 
 /// Default forest cap (D63 §8.7 Stage B): `parse` returns at most this many parses,
 /// the lowest-cost (most-frequent-sense) first; the rest are dropped with a log line.
@@ -62,6 +63,12 @@ use super::parser::{apply, Combinator, Item};
 /// plausible reading; it sits far above any closed-class / demo forest, so those are
 /// unaffected (no truncation, order preserved by the stable cost-0 sort).
 pub const DEFAULT_FOREST_CAP: usize = 256;
+
+/// Upper bound for widen-on-failure of the sense cap (GH #97): when a capped parse of an
+/// all-known-vocabulary sentence yields nothing, the cap is doubled up to this many senses per
+/// lemma, then the attempt is abandoned (rather than going uncapped, which would re-OOM long
+/// sentences). The final β-level of bounded adaptive supertagging.
+pub const SENSE_CAP_WIDEN_MAX: usize = 16;
 
 /// Split prose into lowercased word tokens. Token-internal **separators** — em/en-dashes
 /// (`—`/`–`), slashes, and brackets — are normalised to spaces first, so `"not—can"` →
@@ -104,12 +111,38 @@ pub fn tokenize(text: &str) -> Vec<String> {
 pub struct LexicalIndex {
     layer: Arc<Layer>,
     source: Source,
+    /// Optional **sense cap** (adaptive supertagging, D63 parsing-scale plan / GH #97): seed at
+    /// most this many entries per lemma, the lowest-`sense_rank` (most-frequent / highest-prior)
+    /// first. `None` = uncapped (default; no behaviour change). Caps the WordNet sense-polysemy
+    /// that drives the chart blow-up on long sentences; the closed class (1–few entries per form)
+    /// is unaffected. Pair with widen-on-failure for completeness.
+    sense_cap: Option<usize>,
+    /// Optional **contextual sense reranker** (D63 parsing-scale plan / GH #97) — the *strong*
+    /// form of the sense cap. When set (and a `sense_cap` is active), a per-sentence pre-pass asks
+    /// the (untrusted) ranker to reorder each content word's candidate senses by contextual
+    /// plausibility, so the senses the cap *keeps* are the ones most likely in this sentence — not
+    /// merely the statically most-frequent (`sense_rank`). The ranker only reorders the seed beam;
+    /// the kernel felicity gate still decides validity and widen-on-failure recovers a wrongly
+    /// down-ranked sense, so a bad rank costs a re-parse, never a missed parse. `None` = the plain
+    /// static `sense_rank` cap (no behaviour change).
+    sense_ranker: Option<Box<dyn SenseRanker + Send + Sync>>,
 }
 
-/// The resolved entries for one surface form, each paired with its
-/// `lexicon:in_lexicon` membership (`None` = untagged / always-available) — the
-/// unit a scope filter (D65 §4) consumes to keep + rank entries by lexicon.
-type FormEntries = Vec<(Item, Option<Iri>)>;
+/// One resolved lexical entry at the **seed stage**: its parse [`Item`], its `lexicon:in_lexicon`
+/// membership (the scope filter, D65 §4), and its `lexicon:sense` label (for contextual reranking).
+/// The sense rides *only* here — once a leaf enters the chart its [`Item`] carries no sense (a
+/// composed item has none), so the sense never bloats the hot CKY structure.
+#[derive(Clone)]
+struct SeedEntry {
+    item: Item,
+    in_lexicon: Option<Iri>,
+    sense: Option<String>,
+}
+
+/// The resolved entries for one surface form (each a [`SeedEntry`]) — the unit a scope
+/// filter (D65 §4) consumes to keep + rank entries by lexicon, and the sense cap /
+/// contextual reranker consume to keep entries by sense.
+type FormEntries = Vec<SeedEntry>;
 
 /// The two backings behind [`LexicalIndex`] (lazy probe vs eager materialisation).
 enum Source {
@@ -140,6 +173,24 @@ fn read_in_lexicon(r: &crate::ontology::resource::Resource) -> Option<Iri> {
     r.get(&iri("urn:eigenius:lexicon:in_lexicon"))
         .and_then(|v| v.as_iri_str())
         .and_then(|s| Iri::parse(s).ok())
+}
+
+/// The `lexicon:sense` label of an entry resource — the sense key (e.g. `wn:bank.n.05`) the
+/// contextual reranker reorders by. `None` for an entry that carries no sense (closed class).
+fn read_sense(r: &crate::ontology::resource::Resource) -> Option<String> {
+    match r.get(&iri("urn:eigenius:lexicon:sense")) {
+        Some(Value::String(s)) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+/// The human-readable gloss of a chain entity (its `core:description`) — what the reranker reasons
+/// over for a candidate sense. `None` if the entity has no description.
+fn read_description(r: &crate::ontology::resource::Resource) -> Option<String> {
+    match r.get(&iri("urn:eigenius:core:description")) {
+        Some(Value::String(s)) => Some(s.clone()),
+        _ => None,
+    }
 }
 
 /// Resolve a `lexicon:LexiconProfile` IRI to its ordered scope — the
@@ -182,13 +233,36 @@ impl LexicalIndex {
                     normalizer: active.normalizer,
                     cache: Mutex::new(BTreeMap::new()),
                 },
+                sense_cap: None,
+                sense_ranker: None,
             };
         }
         let (by_form, max_words) = Self::scan_eager(&layer);
         LexicalIndex {
             layer,
             source: Source::Eager { by_form, max_words },
+            sense_cap: None,
+            sense_ranker: None,
         }
+    }
+
+    /// Set the per-lemma **sense cap** (adaptive supertagging — GH #97): keep at most `n` entries
+    /// per lemma, lowest `sense_rank` first. Cuts WordNet sense-polysemy at the seed to keep the
+    /// chart tractable on long sentences. Builder-style; default (unset) is uncapped.
+    pub fn with_sense_cap(mut self, n: usize) -> Self {
+        self.sense_cap = Some(n);
+        self
+    }
+
+    /// Set the **contextual sense reranker** (GH #97) — the strong form of the sense cap. With a
+    /// cap active, a per-sentence pre-pass asks `ranker` to reorder each content word's candidate
+    /// senses by contextual plausibility, so the cap keeps the senses most likely *in this
+    /// sentence*, not merely the statically most-frequent. No-op without a [`Self::with_sense_cap`]
+    /// (the ranker only influences which senses the cap drops). Builder-style; default is the plain
+    /// static `sense_rank` cap.
+    pub fn with_sense_ranker(mut self, ranker: Box<dyn SenseRanker + Send + Sync>) -> Self {
+        self.sense_ranker = Some(ranker);
+        self
     }
 
     /// The pre-D65 eager scan: walk the chain (`iter_all_resources`, which follows
@@ -214,10 +288,11 @@ impl LexicalIndex {
                 continue;
             }
             max_words = max_words.max(key.split_whitespace().count());
-            by_form
-                .entry(key)
-                .or_default()
-                .push((item, read_in_lexicon(r.as_ref())));
+            by_form.entry(key).or_default().push(SeedEntry {
+                item,
+                in_lexicon: read_in_lexicon(r.as_ref()),
+                sense: read_sense(r.as_ref()),
+            });
         }
         (by_form, max_words)
     }
@@ -282,7 +357,11 @@ impl LexicalIndex {
             let Ok(item) = entry_to_item(&self.layer, r.as_ref()) else {
                 continue;
             };
-            items.push((item, read_in_lexicon(r.as_ref())));
+            items.push(SeedEntry {
+                item,
+                in_lexicon: read_in_lexicon(r.as_ref()),
+                sense: read_sense(r.as_ref()),
+            });
         }
         items
     }
@@ -349,45 +428,69 @@ impl LexicalIndex {
     ///   (its position becomes `lexicon_order`, the primary rank key), **or** it is
     ///   untagged (`in_lexicon = None` ⇒ always-available, e.g. the closed class).
     ///   A tagged entry whose lexicon is outside the scope is dropped.
-    fn scoped(&self, pairs: FormEntries, scope: Option<&[Iri]>) -> Vec<Item> {
-        pairs
+    fn scoped(&self, entries: FormEntries, scope: Option<&[Iri]>) -> Vec<SeedEntry> {
+        entries
             .into_iter()
-            .filter_map(|(mut it, lx)| match scope {
-                None => Some(it),
-                Some(order) => match &lx {
-                    None => Some(it), // untagged = always available
+            .filter_map(|mut e| match scope {
+                None => Some(e),
+                Some(order) => match &e.in_lexicon {
+                    None => Some(e), // untagged = always available
                     Some(lx) => order.iter().position(|s| s == lx).map(|pos| {
-                        it.cost.lexicon_order = pos as u32;
-                        it
+                        e.item.cost.lexicon_order = pos as u32;
+                        e
                     }),
                 },
             })
             .collect()
     }
 
-    /// The lexical items for one token span's surface: the raw surface plus every
-    /// lemma the [`Lemmatizer`] yields across all parts of speech (so an inflected
-    /// or collocated form resolves to its base entries). Candidate strings are
-    /// de-duplicated before lookup. `scope` filters + ranks by lexicon (§4).
-    fn lookup_span(
-        &self,
-        surface: &str,
-        lemmatizer: &dyn Lemmatizer,
-        scope: Option<&[Iri]>,
-    ) -> Vec<Item> {
-        let s_lc = surface.trim().to_lowercase();
+    /// Every candidate lemma string for a surface: the raw lowercased surface plus every lemma the
+    /// [`Lemmatizer`] yields across all parts of speech, de-duplicated. The shared seam used by
+    /// both [`Self::lookup_span`] (seeding) and [`Self::contextual_sense_ranks`] (the rerank
+    /// pre-pass), so the two see exactly the same candidate set.
+    fn candidate_lemmas(&self, surface: &str, lemmatizer: &dyn Lemmatizer) -> BTreeSet<String> {
         let mut candidates: BTreeSet<String> = BTreeSet::new();
-        candidates.insert(s_lc.clone());
+        candidates.insert(surface.trim().to_lowercase());
         for pos in [Pos::Noun, Pos::Verb, Pos::Adj, Pos::Adv] {
             for lemma in lemmatizer.lemmas(surface, pos) {
                 candidates.insert(lemma.trim().to_lowercase());
             }
         }
+        candidates
+    }
+
+    /// The lexical items for one token span's surface: the raw surface plus every
+    /// lemma the [`Lemmatizer`] yields across all parts of speech (so an inflected
+    /// or collocated form resolves to its base entries). Candidate strings are
+    /// de-duplicated before lookup. `scope` filters + ranks by lexicon (§4). `ranks`, when
+    /// present, is the per-sentence contextual sense ranking (`sense → rank`) that overrides the
+    /// static `sense_rank` ordering when the cap drops senses.
+    fn lookup_span(
+        &self,
+        surface: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+        cap: Option<usize>,
+        ranks: Option<&BTreeMap<String, u32>>,
+    ) -> Vec<Item> {
+        let s_lc = surface.trim().to_lowercase();
+        let candidates = self.candidate_lemmas(surface, lemmatizer);
         let mut out = Vec::new();
         for c in &candidates {
-            let items = self.scoped(self.entries_for(c), scope);
-            if items.is_empty() {
+            let mut entries = self.scoped(self.entries_for(c), scope);
+            if entries.is_empty() {
                 continue;
+            }
+            // Adaptive-supertagging sense cap (GH #97): keep at most `cap` entries for this lemma —
+            // by contextual plausibility first (the reranker's `ranks`, when present), falling back
+            // to the static `sense_rank` (most-frequent first) — cutting WordNet polysemy at the
+            // seed. The closed class (≤ cap entries) is untouched. A stable sort preserves seed
+            // order within a rank. (`cap` is the per-attempt cap from the widen loop.)
+            if let Some(cap) = cap {
+                if entries.len() > cap {
+                    entries.sort_by_key(|e| sense_cap_key(e, ranks));
+                    entries.truncate(cap);
+                }
             }
             // Morphological number (D63 §5.1, the Slice-1 deferral): a surface
             // that morphology *reduced* to this lemma was inflected (plural,
@@ -396,7 +499,7 @@ impl LexicalIndex {
             // determiner/noun agreement (`every gene` ✓ / `every genes` ✗)
             // bites at composition.
             let num = if *c == s_lc { "sg" } else { "pl" };
-            out.extend(items.iter().map(|it| with_noun_num(it, num)));
+            out.extend(entries.iter().map(|e| with_noun_num(&e.item, num)));
         }
         // Bare-plural → kind-subject shift (D63 §8.5 Slice 3c): a plural common noun
         // also seeds a `cat_kind` edge (the kind it denotes), so "genes" can serve as
@@ -453,11 +556,154 @@ impl LexicalIndex {
         self.parse_scoped_open(text, lemmatizer, None)
     }
 
+    /// Parse with optional scope, returning the closed + open forests. Applies the **sense cap**
+    /// (`with_sense_cap`) with **widen-on-failure** (adaptive supertagging, GH #97): try the cap;
+    /// if it yields *no* parse at all (closed and open both empty) **and** the failure could be a
+    /// cap-dropped sense — i.e. every (prose) token is lexically known, so it is not an OOV miss —
+    /// retry with a doubled cap, up to [`SENSE_CAP_WIDEN_MAX`]. So the cap never *loses* a parse a
+    /// known-vocabulary sentence would otherwise get, while OOV-blocked sentences (the WRN case)
+    /// don't waste retries (widening can't supply a missing word).
     pub fn parse_scoped_open(
         &self,
         text: &str,
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
+    ) -> (Vec<Item>, Vec<OpenParse>) {
+        // Contextual sense ranking (GH #97): computed ONCE up front (one ranker call per parse,
+        // not per widen iteration), then threaded into every capped attempt below.
+        let ranks = self.contextual_sense_ranks(text, lemmatizer, scope);
+        let mut cap = self.sense_cap;
+        loop {
+            let (closed, open) = self.parse_at_cap(text, lemmatizer, scope, cap, ranks.as_ref());
+            if !closed.is_empty() || !open.is_empty() {
+                return (closed, open);
+            }
+            match cap {
+                // Widen only if the cap could be the cause (no OOV token) and we're under the bound.
+                Some(c)
+                    if c < SENSE_CAP_WIDEN_MAX && self.all_prose_tokens_known(text, lemmatizer) =>
+                {
+                    cap = Some((c * 2).min(SENSE_CAP_WIDEN_MAX));
+                }
+                _ => return (closed, open),
+            }
+        }
+    }
+
+    /// Whether every prose token (non-`is_nonprose`) of `text` is lexically known
+    /// ([`Self::has_token`]). Used to gate widen-on-failure: an OOV miss is not a cap miss.
+    fn all_prose_tokens_known(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> bool {
+        tokenize(text)
+            .iter()
+            .filter(|t| !super::is_nonprose(t))
+            .all(|t| self.has_token(t, lemmatizer))
+    }
+
+    /// The per-sentence **contextual sense ranking** (GH #97): for each content-word span with
+    /// more candidate senses than the cap (the only words the cap actually truncates), ask the
+    /// (untrusted) [`SenseRanker`] to reorder its senses by contextual plausibility, and fold the
+    /// result into a flat `sense → rank` map the seed cap then sorts by. Returns `None` — i.e. the
+    /// plain static `sense_rank` cap — when no ranker or no cap is configured, when the sentence
+    /// has no over-cap polysemous word, or when the ranker reply is malformed (it only reorders a
+    /// beam; a bad reply degrades to the static order, never a missed parse).
+    ///
+    /// Run ONCE per parse (before the widen loop), against the *initial* cap: widening only raises
+    /// the cap (fewer words need ranking), so a map computed at the initial cap stays valid — its
+    /// extra entries simply go unused. The ranker reasons over each sense's `core:description`
+    /// gloss, resolved from the entry's `sem` entity.
+    fn contextual_sense_ranks(
+        &self,
+        text: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+    ) -> Option<BTreeMap<String, u32>> {
+        let ranker = self.sense_ranker.as_deref()?;
+        let cap = self.sense_cap?; // ranking only matters when the cap can drop senses
+        let tokens = tokenize(text);
+        let n = tokens.len();
+        if n == 0 {
+            return None;
+        }
+        let span_limit = self.span_limit(n);
+
+        // Gather, per over-cap span, its pooled candidate senses (deduped by sense key).
+        let mut surfaces: Vec<String> = Vec::new();
+        let mut cands: Vec<Vec<SenseCandidate>> = Vec::new();
+        for i in 0..n {
+            let last = (i + span_limit).min(n);
+            for j in i..last {
+                let surface = tokens[i..=j].join(" ");
+                let mut senses: Vec<SenseCandidate> = Vec::new();
+                let mut seen: BTreeSet<String> = BTreeSet::new();
+                for c in self.candidate_lemmas(&surface, lemmatizer) {
+                    for e in self.scoped(self.entries_for(&c), scope) {
+                        let Some(sense) = e.sense else { continue };
+                        if !seen.insert(sense.clone()) {
+                            continue;
+                        }
+                        let gloss = self.sem_gloss(&e.item.sem).unwrap_or_default();
+                        senses.push(SenseCandidate { sense, gloss });
+                    }
+                }
+                // Only words the cap would actually truncate are worth ranking.
+                if senses.len() > cap {
+                    surfaces.push(surface);
+                    cands.push(senses);
+                }
+            }
+        }
+        if cands.is_empty() {
+            return None;
+        }
+
+        let words: Vec<WordSenses> = surfaces
+            .iter()
+            .zip(&cands)
+            .map(|(s, c)| WordSenses {
+                surface: s,
+                candidates: c,
+            })
+            .collect();
+        let rankings = ranker.rank(text, &words);
+        if rankings.len() != words.len() {
+            return None; // malformed reply ⇒ degrade to the static cap
+        }
+        // Flatten to `sense → rank`. A sense shared across overlapping spans keeps its best (min)
+        // contextual rank.
+        let mut map: BTreeMap<String, u32> = BTreeMap::new();
+        for (ranking, word_cands) in rankings.iter().zip(&cands) {
+            for (pos, &ci) in ranking.iter().enumerate() {
+                if let Some(c) = word_cands.get(ci) {
+                    map.entry(c.sense.clone())
+                        .and_modify(|r| *r = (*r).min(pos as u32))
+                        .or_insert(pos as u32);
+                }
+            }
+        }
+        Some(map)
+    }
+
+    /// The `core:description` gloss of a leaf item's `sem` entity — the text the reranker reasons
+    /// over for that sense. An `EigonResource` carries its resource inline; a class/axiom is
+    /// resolved by IRI in the chain. `None` for an inline λ-term sem (function words) or a
+    /// description-less entity.
+    fn sem_gloss(&self, sem: &Exp) -> Option<String> {
+        match sem {
+            Exp::EigonResource(r) => read_description(r),
+            Exp::EigonClass(i) | Exp::EigonAxiom(i) => {
+                read_description(self.layer.resolve(i)?.as_ref())
+            }
+            _ => None,
+        }
+    }
+
+    fn parse_at_cap(
+        &self,
+        text: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+        cap: Option<usize>,
+        ranks: Option<&BTreeMap<String, u32>>,
     ) -> (Vec<Item>, Vec<OpenParse>) {
         let tokens = tokenize(text);
         let n = tokens.len();
@@ -484,7 +730,7 @@ impl LexicalIndex {
             let last = (i + span_limit).min(n);
             for j in i..last {
                 let surface = tokens[i..=j].join(" ");
-                for mut it in self.lookup_span(&surface, lemmatizer, scope) {
+                for mut it in self.lookup_span(&surface, lemmatizer, scope, cap, ranks) {
                     // Referent-hole freshening (D64 open-parse carrier): the placeholder
                     // `lexicon:anaphor` (a bare pronoun's whole sem, or the possessor NESTED
                     // inside a possessive determiner's λ) is replaced with a fresh,
@@ -985,6 +1231,19 @@ enum FelicitousOutcome {
 
 fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("valid lexicon iri")
+}
+
+/// The sort key the per-lemma sense cap (D63 §8.7 / GH #97) truncates by: contextually-ranked
+/// senses first (ordered by the reranker's `ranks` position), then the rest by static `sense_rank`
+/// (most-frequent first). The leading `bool` puts `Some(ctx)` (`false`) ahead of unranked
+/// (`true`). With `ranks = None` every sense is unranked, collapsing to the pure-`sense_rank`
+/// order — the behaviour-identical static cap.
+fn sense_cap_key(e: &SeedEntry, ranks: Option<&BTreeMap<String, u32>>) -> (bool, u32, u32) {
+    let ctx = e
+        .sense
+        .as_ref()
+        .and_then(|s| ranks.and_then(|m| m.get(s).copied()));
+    (ctx.is_none(), ctx.unwrap_or(0), e.item.cost.sense_rank)
 }
 
 /// Forward bounded type-raise (D63 §8.9 Slice 6-T) every name `NP` in a cell's items
