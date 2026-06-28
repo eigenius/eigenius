@@ -78,13 +78,16 @@ form) in `ontologies/lexicon/closed-class.esl` + grammar rules in `kernel/src/dc
   `logic:Will`/`Would`/`Should` axiom (future / conditional / weak-deontic — not ◇/□),
   meaning supplied on the reasoning side by the justification-logic institution. *Done.*
   (Perfect/passive aux already exist; `shall` + epistemic→grade refinement remain follow-ons.)
-- **2d — subordinators + sentence connectives.** `because`, `although`, `however`, `thus`,
-  `to`+infinitive, **and contrastive `but`**. Sentence-level categories; `because`/`however`
-  are the two `core-en` itself lacks — author from the CCG shape. `but` belongs here, not
-  with `and`/`or`: core-en `conj.xsl` gives it a distinct `Conj-Sentential-Binary` family
-  with its own `but(Arg1, Arg2)` relation (and classes it as a subordinator), so it carries
-  an adversative discourse relation that collapsing to `And` would silently drop. *Target:*
-  subordinate/connective clauses parse; `but` joins clauses with its contrast preserved.
+- **2d — subordinators + sentence connectives.** Revised by expert consultation — see
+  [d62-subordinator-design-findings.md](d62-subordinator-design-findings.md). Net: the
+  uniform "opaque binary" plan is wrong. `if` → native implication `p → q` (not opaque);
+  `but` → truth-conditional `And` + an orthogonal contrast tag; `because`/`although`/`while`
+  → a **factive dependent** signature `Π(p q:Prop) → p → q → Prop` (presupposition as a
+  felicity/proof-obligation) — gated on an engine extension (threading hypothetical proof
+  variables); `however`/`thus` → anaphoric, fold into 2e/D64. Two open forks (adopt the
+  factive-dependent signature now vs. stage; add the Tier-2 discourse-relation channel now)
+  recorded in the findings note. *Target:* `if`-clauses parse to native implication; `but`
+  to a tagged conjunction; factive subordinators pending the fork decisions.
 - **2e — pronouns (`we`, `it`, `they`).** Referential pronouns dovetail with **D64**
   (anaphora holes); `we` (1st person, non-anaphoric) is a plain NP. *Target:* pronominal
   subjects parse (referential ones produce open parses → D64).

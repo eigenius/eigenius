@@ -644,6 +644,34 @@ resource lexicon:that_comp : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 
+// ── Clausal subordinators (D62 §2d) ───────────────────────────────────
+// Concrete sentential categories `(S\S)/S` (medial, comma-free first cut), NOT the
+// category-polymorphic coordination rule: a subordinator joins two clauses with a fixed
+// binary connective. Expert-informed (docs/notes/d62-subordinator-design-findings.md).
+//
+// `if` is the CONDITIONAL and is therefore NOT an opaque binary: in a dependent type
+// theory "if P then Q" is the NATIVE implication `P → Q` (a first-class Prop, since an
+// arrow between Props is a Prop — cf. `¬P := P → False`). Encoding it opaquely would
+// forfeit modus ponens in the checker. "S₁ if S₂" ⇒ `⟦S₂⟧ → ⟦S₁⟧` (antecedent S₂ on the
+// right is consumed first by `/S`, then the matrix S₁ on the left by `\S`).
+//   sem: `λs₂:Prop. λs₁:Prop. (s₂ → s₁)`  :  Prop → Prop → Prop
+// (Fronted "If S₂, S₁" + comma, the modal/Kratzer-restrictor conditional, and the factive
+// subordinators because/although/while are follow-ons — see the findings note.)
+resource lexicon:if_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (s2 : Prop) => fun (s1 : Prop) => (s2 -> s1)
+          : Prop -> Prop -> Prop )
+    );
+}
+resource lexicon:if_subord : lexicon:LexicalEntry {
+    lexicon:form     = "if";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:if_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "if";
+    lexicon:grade    = epistemic:declared;
+}
+
 // ── PP adjuncts: prepositions as VP modifiers (D63 §8.13 Slice 6-mod) ──
 // "HeLa affects BRCA1 in MSI" — a PP modifies the VP, adding an OPAQUE prepositional
 // conjunct. Category `((S[dcl,fin]\NP) \ (S[dcl,fin]\NP)) / NP`: consume the standard NP,

@@ -190,6 +190,32 @@ fn embedded_cp_is_not_a_clause_root_and_relativizer_still_works() {
     );
 }
 
+// ── D62 §2d — clausal subordinators ───────────────────────────────────
+#[test]
+fn conditional_if_builds_native_implication() {
+    // "S₁ if S₂" ⇒ ⟦S₂⟧ → ⟦S₁⟧ — the conditional is the type theory's NATIVE implication
+    // (an arrow between Props), NOT an opaque binary operator. So the parsed sem is headed
+    // by Exp::Arrow and type-checks to Prop (felicity gate admits native implication).
+    let (layer, index) = index_over_bootstrap();
+    let forest = index.parse("HeLa affects BRCA1 if BRCA1 affects HeLa", &Identity);
+    assert_eq!(forest.len(), 1, "exactly one conditional parse");
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let ty = check_infer(&mut ctx, &forest[0].sem).expect("conditional sem type-checks");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "a conditional denotes Prop"
+    );
+    // Native implication is a FUNCTION TYPE (`Exp::Pi` — NbE normalizes the non-dependent
+    // arrow to a Pi), NOT an opaque operator application. This is the whole point: a
+    // proof of the antecedent yields the consequent by ordinary function application.
+    assert!(
+        matches!(&forest[0].sem, Exp::Pi(_, _, _)),
+        "`if` builds native implication (a Pi/arrow, not an opaque App), got {:?}",
+        forest[0].sem
+    );
+}
+
 // ── D63 §8.12 Slice 6-cmp — comparatives (degree semantics) ───────────
 /// Whether `sem` is headed by the opaque float ordering `measurements:gt`.
 fn is_gt_headed(sem: &Exp) -> bool {
