@@ -672,6 +672,30 @@ resource lexicon:if_subord : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 
+// `but` — contrastive conjunction (D62 §2d). Sentential-binary `(S\S)/S` (core-en's
+// Conj-Sentential-Binary), NOT the category-polymorphic and/or coordination rule. Maps to
+// `logic:And`: every `but` in the WRN source is "X but (not) Y" — truth-conditionally plain
+// conjunction, the contrast rhetorical and carried by explicit negation, so the adversative
+// relation is not part of the typed claim. "S₁ but S₂" ⇒ `logic:And(⟦S₁⟧, ⟦S₂⟧)` (the right
+// clause S₂ is consumed first by `/S`, then the left clause S₁ by `\S`, so the first λ binds
+// S₂ and the second S₁ — order preserved). A distinct contrast-preserving `logic:But` is the
+// documented upgrade (findings note; GH #95) for when discourse structure is load-bearing.
+//   sem: `λs₂:Prop. λs₁:Prop. logic:And(s₁, s₂)`  :  Prop → Prop → Prop
+resource lexicon:but_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (s2 : Prop) => fun (s1 : Prop) => logic:And(s1, s2)
+          : Prop -> Prop -> Prop )
+    );
+}
+resource lexicon:but_subord : lexicon:LexicalEntry {
+    lexicon:form     = "but";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:but_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "but";
+    lexicon:grade    = epistemic:declared;
+}
+
 // ── PP adjuncts: prepositions as VP modifiers (D63 §8.13 Slice 6-mod) ──
 // "HeLa affects BRCA1 in MSI" — a PP modifies the VP, adding an OPAQUE prepositional
 // conjunct. Category `((S[dcl,fin]\NP) \ (S[dcl,fin]\NP)) / NP`: consume the standard NP,

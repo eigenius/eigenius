@@ -81,3 +81,10 @@ axiom logic:Necessary : Prop -> Prop
 axiom logic:Will : Prop -> Prop
 axiom logic:Would : Prop -> Prop
 axiom logic:Should : Prop -> Prop
+
+// NOTE: contrastive `but` (D62 §2d) maps to `logic:And` — verified adequate against every
+// `but` in the WRN source (all are "X but (not) Y", truth-conditionally plain conjunction;
+// the contrast is rhetorical, carried by explicit negation, and not part of the typed claim).
+// A distinct contrast-preserving operator (`logic:But`) + kernel transparency (GH #95) remain
+// the documented upgrade for if/when discourse/argumentation structure becomes load-bearing
+// (see `docs/notes/d62-subordinator-design-findings.md`).

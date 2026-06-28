@@ -216,6 +216,32 @@ fn conditional_if_builds_native_implication() {
     );
 }
 
+#[test]
+fn contrastive_but_maps_to_conjunction() {
+    // "S₁ but S₂" ⇒ And(⟦S₁⟧, ⟦S₂⟧). Verified adequate against every `but` in the WRN source
+    // (all "X but (not) Y" — truth-conditionally plain conjunction; the contrast is rhetorical,
+    // carried by explicit negation, and not part of the typed claim). So a but-clause denotes
+    // the SAME proposition as the `and`-coordination of its clauses: headed by `logic:And`,
+    // type-checks to Prop, two conjuncts in source order.
+    let (layer, index) = index_over_bootstrap();
+    let forest = index.parse("HeLa affects BRCA1 but BRCA1 affects HeLa", &Identity);
+    assert_eq!(forest.len(), 1, "exactly one but parse");
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let ty = check_infer(&mut ctx, &forest[0].sem).expect("but sem type-checks");
+    assert_eq!(
+        readback_val(0, &ty),
+        Exp::Sort(0),
+        "a but-clause denotes Prop"
+    );
+    let conjuncts = and_conjuncts(&forest[0].sem)
+        .unwrap_or_else(|| panic!("`but` maps to logic:And, got {:?}", forest[0].sem));
+    assert_eq!(
+        conjuncts.len(),
+        2,
+        "but joins exactly two clauses as a conjunction"
+    );
+}
+
 // ── D63 §8.12 Slice 6-cmp — comparatives (degree semantics) ───────────
 /// Whether `sem` is headed by the opaque float ordering `measurements:gt`.
 fn is_gt_headed(sem: &Exp) -> bool {
@@ -476,8 +502,8 @@ fn coordinators_are_known_to_the_missing_lexeme_signal() {
     // category-polymorphic entry). The missing-lexeme signal `has_token` (D62 §7.6a)
     // must still report them as KNOWN — else the encoding pipeline routes a
     // structurally-handled connective to lexical recovery. `but` is deliberately NOT a
-    // coordinator (it is a distinct sentential/subordinator connective — see 2d), so
-    // the signal treats it as an ordinary (here unknown) word.
+    // coordinator (it is a distinct sentential connective); it is now a lexicalized
+    // subordinator (D62 §2d), so the signal sees it via the ordinary lexical path.
     let (_layer, index) = index_over_bootstrap();
     assert!(
         index.has_token("and", &Identity),
@@ -488,8 +514,8 @@ fn coordinators_are_known_to_the_missing_lexeme_signal() {
         "`or` is a known connective"
     );
     assert!(
-        !index.has_token("but", &Identity),
-        "`but` is not a coordinator and has no lexical entry yet (deferred to 2d)"
+        index.has_token("but", &Identity),
+        "`but` is known via its lexical entry (2d subordinator), not the coordination rule"
     );
 }
 
