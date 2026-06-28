@@ -156,15 +156,18 @@ cost is Fork A's engine work (threading the hypotheses through the derivation).
   `axiom logic:forget_contrast : ∀(P Q:Prop) ⇒ logic:But(P,Q) → logic:And(P,Q)` for the
   identity/subsumption friction the expert flagged (intensional TT ⇒ `But(P,Q) ≢ And(P,Q)`;
   propositional anaphora / applying an `A∧B→C` theorem to a `But` need the explicit
-  coercion). *Superseded by the FINAL decision below — `but` ships as a plain opaque axiom,
-  and the coercion is dropped.*
-- **`but` — FINAL: plain opaque axiom, modal-consistent.** Neither Option A (coercion) nor
-  Option B (kernel transparency): the architecturally-consistent choice is an opaque
-  `axiom logic:But : Prop -> Prop -> Prop`, exactly parallel to the modals — a distinct head
-  (tag survives), `But ≢ And` at felicity, and the `But ↔ And` / projection relationships
-  become **reasoning-layer rules**, where modal laws and all flavor-dependent meaning already
-  live. Zero kernel change. Both the coercion and kernel-transparency push the fact
-  `But = And` *down into the kernel*, against our thin-kernel / rich-reasoning-layer stance.
+  coercion). *Superseded — see the FINAL decision below.*
+- **`but` — FINAL: maps to `logic:And` (contrast dropped, verified adequate).** Neither
+  Option A (coercion) nor Option B (kernel transparency) nor even a distinct opaque
+  `logic:But`: checking against the WRN source, **every `but` is "X but (not) Y"** —
+  truth-conditionally plain conjunction, the contrast rhetorical and carried by explicit
+  negation, so the adversative relation is **not part of the typed claim**. So `but`'s lexical
+  `sem` is `λs₂.λs₁. logic:And(s₁, s₂)` — "S₁ but S₂" denotes the *same* proposition as the
+  `and`-coordination of its clauses. Zero kernel change; no new axiom (`logic:But` dropped).
+  The distinct contrast-preserving operator + kernel transparency
+  ([#95](https://github.com/eigenius/eigenius/issues/95)) remain the documented upgrade for
+  if/when discourse/argumentation structure becomes load-bearing (e.g. D61 faithfulness) —
+  not needed for D62's prose→typed-claims goal.
 - **Controllable unfolding (Option B) — re-assessed as cheap, filed as
   [#95](https://github.com/eigenius/eigenius/issues/95).** In NbE opacity = "evaluate to a
   neutral" (the `EigonAxiom` path), so conversion/readback handle it for free; given our
@@ -186,11 +189,12 @@ cost is Fork A's engine work (threading the hypotheses through the derivation).
    (*"S₁ if S₂"* ⇒ `⟦S₂⟧ → ⟦S₁⟧`). Non-factive, independent of both forks; uses the
    kernel's native arrow (no new logic type), highest type-theoretic payoff. Validates that
    native implication passes the felicity gate end-to-end.
-2. **`but` → plain opaque `axiom logic:But : Prop -> Prop -> Prop`** (FINAL): modal-consistent;
-   distinct head (tag survives), `But ≢ And` at felicity, `But ↔ And` deferred to reasoning-
-   layer rules. Lexical `(S\S)/S`, sem `λs₂.λs₁. logic:But(s₁, s₂)`. Zero kernel change.
-   Kernel-level transparency (the `But := And` definition) is filed separately as
-   [#95](https://github.com/eigenius/eigenius/issues/95).
+2. **`but` → `logic:And`** (FINAL): verified adequate against every WRN `but` (all "X but (not)
+   Y", truth-conditionally conjunction; contrast rhetorical, carried by explicit negation, not
+   part of the typed claim). Lexical `(S\S)/S`, sem `λs₂.λs₁. logic:And(s₁, s₂)` — same
+   proposition as `and`-coordination. Zero kernel change, no new axiom. Contrast-preserving
+   `logic:But` + kernel transparency ([#95](https://github.com/eigenius/eigenius/issues/95))
+   are the documented upgrade for when discourse structure is load-bearing.
 3. **`because`/`although`/`while`** — Fork A = v2 factive-dependent; **gated on the expert
    confirming the §5 scoping account** + the proof-variable engine extension.
 4. **`however`/`thus`** — anaphoric; deferred to the pronoun/D64 anaphora slice (2e).

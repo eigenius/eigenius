@@ -48,7 +48,8 @@ pub use category::{
 pub use lemmatizer::{Identity, Lemmatizer, Pos};
 pub use lexicon::{entry_to_item, gate_entry, resolve_sem, resolve_sem_value};
 pub use lookup::{
-    coord_connective, resolve_lexicon_profile, tokenize, LexicalIndex, DEFAULT_FOREST_CAP,
+    coord_connective, resolve_lexicon_profile, tokenize, LexicalIndex, OpenParse,
+    DEFAULT_FOREST_CAP,
 };
 pub use parser::{apply, cky_parse, Combinator, Cost, Item};
 pub use pretty::pretty_term;

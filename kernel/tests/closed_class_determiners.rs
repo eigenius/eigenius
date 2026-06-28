@@ -242,6 +242,161 @@ fn contrastive_but_maps_to_conjunction() {
     );
 }
 
+// ── D62 §2e / D64 Phase A — referential pronouns as open-parse holes ───
+#[test]
+fn referential_pronoun_yields_an_open_parse_with_a_hole() {
+    // The open-parse carrier: a referential pronoun seeds a referent HOLE (a fresh free var),
+    // so "it affects HeLa" has NO closed parse — it is an OPEN parse carrying one Entity hole,
+    // type-checked (the hole bound to Entity) but awaiting the D64 resolver. A fully-referring
+    // sentence stays closed with an empty open forest (no regression to the closed grammar).
+    let (_layer, index) = index_over_bootstrap();
+
+    let (closed, open) = index.parse_open("it affects HeLa", &Identity);
+    assert!(
+        closed.is_empty(),
+        "a pronoun-subject sentence has no CLOSED parse (got {})",
+        closed.len()
+    );
+    assert_eq!(
+        open.len(),
+        1,
+        "exactly one open parse for 'it affects HeLa'"
+    );
+    assert_eq!(
+        open[0].holes.len(),
+        1,
+        "carries exactly one referent hole, got {:?}",
+        open[0].holes
+    );
+    assert!(
+        is_ctor(&open[0].item.cat, "cat_s").is_some(),
+        "the open parse is a sentence (S)"
+    );
+
+    // No regression: a fully-referring sentence is closed, with no holes.
+    let (closed2, open2) = index.parse_open("HeLa affects BRCA1", &Identity);
+    assert_eq!(closed2.len(), 1, "fully-referring sentence parses closed");
+    assert!(
+        open2.is_empty(),
+        "no open parses when there are no pronouns"
+    );
+}
+
+#[test]
+fn two_pronoun_occurrences_are_two_distinct_holes() {
+    // Per-occurrence identity (the point of a hole vs. a shared constant): "it affects it"
+    // carries TWO distinct referent holes.
+    let (_layer, index) = index_over_bootstrap();
+    let (closed, open) = index.parse_open("it affects it", &Identity);
+    assert!(
+        closed.is_empty(),
+        "no closed parse (both arguments are holes)"
+    );
+    assert!(
+        !open.is_empty(),
+        "at least one open parse for 'it affects it'"
+    );
+    let holes = &open[0].holes;
+    assert_eq!(holes.len(), 2, "two distinct referent holes, got {holes:?}");
+    assert_ne!(
+        holes[0], holes[1],
+        "the two holes are distinct (per-occurrence identity)"
+    );
+}
+
+#[test]
+fn deictic_we_is_a_closed_referring_np() {
+    // `we` is deictic, not anaphoric: it denotes the author(s) via the fixed `lexicon:speaker`
+    // constant, so "we affect HeLa" is a CLOSED parse (no hole) — unlike `it`/`they`.
+    let (_layer, index) = index_over_bootstrap();
+    let (closed, open) = index.parse_open("we affect HeLa", &Identity);
+    assert_eq!(closed.len(), 1, "deictic `we` yields one closed parse");
+    assert!(
+        open.is_empty(),
+        "`we` introduces no referent hole (deictic, not anaphoric)"
+    );
+}
+
+#[test]
+fn possessive_determiner_yields_an_open_parse_with_a_possessor_hole() {
+    // `its`/`their` are possessive DETERMINERS carrying an anaphoric possessor hole nested in
+    // the determiner λ. "its gene affects HeLa" ⇒ ∃x:Gene. poss_of(x, ?ref) ∧ affects(hela, x)
+    // — an OPEN parse with one possessor hole, type-checked (the hole bound to Entity).
+    let (_layer, index) = index_over_bootstrap();
+    let (closed, open) = index.parse_open("its gene affects HeLa", &Identity);
+    assert!(
+        closed.is_empty(),
+        "a possessive-headed subject has no closed parse"
+    );
+    assert!(
+        !open.is_empty(),
+        "at least one open parse for 'its gene affects HeLa'"
+    );
+    assert_eq!(
+        open[0].holes.len(),
+        1,
+        "exactly one possessor hole, got {:?}",
+        open[0].holes
+    );
+    assert!(
+        is_ctor(&open[0].item.cat, "cat_s").is_some(),
+        "the open parse is a sentence (S)"
+    );
+
+    // The possessive works in OBJECT position too: "HeLa affects its gene" ⇒ an open parse
+    // with one possessor hole (its_obj, the object determiner shape).
+    let (closed_o, open_o) = index.parse_open("HeLa affects its gene", &Identity);
+    assert!(closed_o.is_empty(), "object possessive has no closed parse");
+    assert_eq!(
+        open_o.len(),
+        1,
+        "one open parse for 'HeLa affects its gene'"
+    );
+    assert_eq!(
+        open_o[0].holes.len(),
+        1,
+        "one possessor hole (object position)"
+    );
+
+    // `their` (plural) works too — with a plural-aware lemmatizer (so the plural noun `genes`
+    // reduces to the lexicon form `gene` and is marked pl; the `Identity` lemmatizer above does
+    // not, which is why these use `PluralS`). "their genes affect HeLa" ⇒ an open parse with one
+    // possessor hole; the plural determiner `all` likewise composes ("all genes affect HeLa").
+    let (closed_t, open_t) = index.parse_open("their genes affect HeLa", &PluralS);
+    assert!(
+        closed_t.is_empty(),
+        "their-possessive subject has no closed parse"
+    );
+    assert_eq!(
+        open_t.len(),
+        1,
+        "one open parse for 'their genes affect HeLa'"
+    );
+    assert_eq!(open_t[0].holes.len(), 1, "one possessor hole for `their`");
+    let (closed_all, open_all) = index.parse_open("all genes affect HeLa", &PluralS);
+    assert_eq!(
+        closed_all.len(),
+        1,
+        "plural determiner `all` composes (closed)"
+    );
+    assert!(open_all.is_empty(), "`all` introduces no hole");
+}
+
+/// A `-s`-stripping lemmatizer (`genes` → `gene`, marking the surface plural), enough to
+/// exercise plural common nouns in this crate's tests without the full WordNet Morphy. The
+/// `Identity` lemmatizer used elsewhere does not reduce plurals, so a plural surface never
+/// matches its singular lexicon form.
+struct PluralS;
+impl eigenius_kernel::dcg::Lemmatizer for PluralS {
+    fn lemmas(&self, surface: &str, _pos: eigenius_kernel::dcg::Pos) -> Vec<String> {
+        let s = surface.trim().to_lowercase();
+        match s.strip_suffix('s') {
+            Some(b) if !b.is_empty() => vec![s.clone(), b.to_string()],
+            _ => vec![s],
+        }
+    }
+}
+
 // ── D63 §8.12 Slice 6-cmp — comparatives (degree semantics) ───────────
 /// Whether `sem` is headed by the opaque float ordering `measurements:gt`.
 fn is_gt_headed(sem: &Exp) -> bool {

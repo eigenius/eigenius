@@ -20,7 +20,9 @@ and the institution wrapper. It references — and does not re-specify — the s
   `Prop` trees), the felicity gate, the categorial spine. *The composition/target the old §2–3
   described is realized here.*
 - **D64** — reference (anaphora) resolution: the **open (hole-bearing) forest** and the
-  resolver-institution that fills holes and re-gates. *The first concrete resolver stage (S3).*
+  resolver **component** that fills holes and re-gates — a *step* in this pipeline (S3), not its
+  own institution; the institution is the whole-pipeline wrapper (§8). *The first concrete
+  resolver stage (S3).*
 - **D65** — the lexicon runtime (lazy, scoped) backing parse-time lookup and scope.
 - **D61** — the encoding method & faithfulness framework. **Deferred** (§11); D62 emits the
   raw material D61 will later formalize.
@@ -199,7 +201,9 @@ not just a failure log; on the WRN litmus it is likely the most valuable early s
 **Contracts first** (define the §6 encoding-ontology classes), then slices, each independently
 verifiable behind its contract:
 
-1. **Grammar open-forest + `Exp::Anaphor`** (D63/D64 grammar side) — unblocks S2's open outcome + S3.
+1. **Grammar open-forest + open-parse carrier** (D63/D64 grammar side; engine-side free-var holes +
+   context, kernel stays hole-free — see `docs/notes/d62-d64-open-parse-carrier.md`) — unblocks S2's
+   open outcome + S3.
 2. **S3 reference resolver** (D64) — lays the reusable **proposer → re-gate → (deferred faithfulness)**
    spine that S4/S5 reuse.
 3. **S5a lexical recovery** — high-value early: lets the parser make progress on real prose without a
@@ -261,7 +265,9 @@ committed prefix via EigenQL** — no new kernel surface, just `kernel_client.qu
   `ScopedUnit`, `LexicalGap`, `DecisionPoint`, `CutItem`, `EncodedClaim`, `ReasoningStructure`) +
   the `FormalizeDocument` Institution and its OnDemand `QueryClass`. Insert into `BOOTSTRAP_CHAIN`
   (`kernel/src/bootstrap/mod.rs`) **after `lexicon`** (it references `lexicon:`/EigenTT vocab).
-- D64 grammar side (`kernel/src/dcg/` + `nbe/term.rs`): `Exp::Anaphor`, `Case`, the **open forest**.
+- D64 grammar side (`kernel/src/dcg/`): the **open-parse carrier** (engine-side free-var holes +
+  context — *no* new `nbe/term.rs` node; the kernel stays hole-free), `Case`, the **open forest**
+  (`docs/notes/d62-d64-open-parse-carrier.md`).
 - A small **lexical-entry constructor** reusing the importer shape (`construct_lexical_entry(form,
   cat, sem, sem_type, rank) -> Resource`) for S5a — factor from `eigenius-wordnet::convert`.
 
@@ -304,11 +310,50 @@ Small, localized — the spine exists; these are the seams:
    currently internal to the similarity pre-pass. Recommendation: **reuse EigenQL** and skip this.
 6. **D64 re-gate reachable from the resolver** — the resolver substitutes a binding and needs the
    kernel to re-check the resolved `sem : Prop`. `reduced_felicitous` already does this; expose it
-   on the resolved-tree path (a focused RPC, or fold into the D64 resolver institution).
+   on the resolved-tree path (a focused RPC, or fold into the S3 resolver component of the
+   `FormalizeDocument` pipeline institution).
+7. **Open parses carrying proof obligations** (the *factive-subordinator* engine extension —
+   `dcg/parser.rs`, `dcg/lexicon.rs`, the bridge in `dcg/lookup.rs`, and the felicity gate). This is
+   **not small** — it is the substantive prerequisite for factive connectives (`because`/`although`/
+   `while`, D62 §2d) and, more broadly, for **presupposition-as-felicity**. Today a parse produces a
+   **closed** sem term and the felicity gate `check_infer`s it in a fixed context. A factive entry has
+   the dependent signature `Π(p q:Prop) → p → q → Prop`, so its derivation must introduce **fresh
+   proof hypotheses** `h_p : p`, `h_q : q` into the typing context and build `Because(p, q, h_p, h_q)`.
+   The parse item's sem is then **no longer closed** — it carries free proof variables, the gate must
+   type-check it in a context that *binds* them, and the result shape changes from "a closed `Prop`"
+   to "**a `Prop` in a context of proof obligations**" that travel out of the parser to the
+   grounding/reasoning layer (where they are discharged: `Holds`/`Open`/`Fails`, with *local
+   accommodation* = local discharge — the same mechanism as attitude-verb **plugs**, which also makes
+   the existing intensional `shows` complement-verb (D63 §8.11) need plug-binding rather than its
+   current opaque treatment). The presupposition-projection account (free-in-Γ = projected through
+   negation/modals; locally λ-bound = filtered) is recorded in
+   `docs/notes/d62-subordinator-design-findings.md` §5.
 
-Net new kernel surface is small: the parse-failure/open-forest fields on `ParseSentence`, a lexical
--entry constructor, and the D64 grammar nodes. Everything else is **data** (the encoding ontology +
-`FormalizeDocument` declaration) and **orchestration components** over existing RPCs.
+   **This is one capability, two instances — and it also subsumes pronominal reference (S3/D64).** A
+   referential pronoun (`it`/`they`/`its`/`their`) is categorially a plain NP (core-en `ProNP` = NP)
+   whose semantics is a **free referent variable** — "it affects HeLa" ⇒ `affects(hela, ?ref)` with
+   `?ref : Entity` unbound. That is the *same* open-parse shape as a factive's proof obligation,
+   differing only in the **hole's type and resolver**: an `Entity`-typed hole resolved by **D64**
+   (anaphora), vs. a `Prop`/proof-typed hole resolved by **grounding**. (Our existing finding — a bare
+   chain `ResourceRef` lowers to an unbound `Var`; "named-entity references need explicit
+   binding/resolution" — is the same gap.) So the real foundational piece is: **a parse whose `sem`
+   is open under a context of typed holes, carried out of the parser for downstream resolution.**
+   Building it once unblocks both the factive connectives *and* referential pronouns. The unified
+   design — one **engine-side** carrier (free-var holes + context; **kernel stays hole-free**, no new
+   `Exp` node, per the `nanoda_lib`/Lean elaborator-vs-kernel split), two resolver dispatches
+   (`EntityRef`→D64 substitution; `ProofObligation`→grounding witness), pronouns (D64 Phase A) as the
+   carrier MVP — is in `docs/notes/d62-d64-open-parse-carrier.md`.
+
+   **Sequencing:** the *closed-term* lexicon ships without it — determiners, modals, `if` (native
+   `→`), `but` (→ `logic:And`) are done; the deictic/non-anaphoric `we` and the discourse
+   connectives `however`/`thus` may admit a closed first cut, but `it`/`they`/`its`/`their` and the
+   factive subordinators both require this capability. Scope it as its own deliberate engine piece.
+
+Net new kernel surface is small *except* for item 7: the parse-failure/open-forest fields on
+`ParseSentence`, a lexical-entry constructor, and the D64 grammar nodes are minor; the
+open-parse/proof-obligation extension (item 7) is the one substantive engine change, and is gated and
+scoped on its own. Everything else is **data** (the encoding ontology + `FormalizeDocument`
+declaration) and **orchestration components** over existing RPCs.
 
 ## 12. Deferred D61 seams
 

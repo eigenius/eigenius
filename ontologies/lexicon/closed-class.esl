@@ -696,6 +696,116 @@ resource lexicon:but_subord : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 
+// ── Referential pronouns (D62 §2e / D64 Phase A — the open-parse carrier) ──
+// A referential pronoun is categorially a plain NP (core-en `ProNP` = NP) whose semantics
+// is an UNRESOLVED referent — an open-parse *hole* (D64). The committed entry stores the
+// typed placeholder `lexicon:anaphor : lexicon:Entity`, so it gate-passes closed (the kernel
+// stays hole-free at rest); the lookup bridge freshens that placeholder into a per-occurrence
+// free variable at parse time, yielding an **open** parse the D64 resolver later fills (by
+// substituting a chain antecedent + re-gating). Slice 1 is the deterministic carrier only —
+// no resolver; `Case` (he/him) and morphosyntactic features are deferred. `it` = sg, `they`
+// = pl; both refer to an `Entity` (the referent's narrower type is recovered at resolution).
+axiom lexicon:anaphor : lexicon:Entity
+resource lexicon:anaphor_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( lexicon:anaphor );
+}
+resource lexicon:it_pron : lexicon:LexicalEntry {
+    lexicon:form     = "it";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:sg) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "it";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:they_pron : lexicon:LexicalEntry {
+    lexicon:form     = "they";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:pl) );
+    lexicon:sem      = lexicon:anaphor_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "they";
+    lexicon:grade    = epistemic:declared;
+}
+
+// `we` — DEICTIC 1st-person-plural pronoun. Unlike `it`/`they` it is NOT anaphoric: it
+// denotes the utterance's author(s), a fixed discourse referent. So it is a CLOSED NP (no
+// hole) whose sem is the designated `lexicon:speaker` constant — "we analysed X" ⇒
+// analysed(X, speaker). (A later refinement may resolve `speaker` to the document's actual
+// author entity; for now it is a stable deictic constant, plural.)
+axiom lexicon:speaker : lexicon:Entity
+resource lexicon:speaker_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( lexicon:speaker );
+}
+resource lexicon:we_pron : lexicon:LexicalEntry {
+    lexicon:form     = "we";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:pl) );
+    lexicon:sem      = lexicon:speaker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity );
+    lexicon:sense    = "we";
+    lexicon:grade    = epistemic:declared;
+}
+
+// ── Possessive determiners `its` / `their` (D62 §2e / D64; core-en `PossPro` = a
+// determiner `NP/N` whose LF links the formed NP to a possessor) ───────────────
+// A possessive is a DETERMINER (not a bare NP) carrying an anaphoric *possessor* hole. It
+// existentially quantifies the noun (first-cut, like `a`/`the`) and restricts the referent
+// to one POSSESSED BY the (held-open) possessor: "its N" ⇒ `∃x:N. poss_of(x, ?ref) ∧ V(x)`.
+// `poss_of` is a **polymorphic** possession relation — `∀(A:Set) => A → Entity → Prop` — so it
+// applies to a noun-typed `x:A` for any noun type `A` (the Entity-typed prepositions cannot).
+// The possessor `lexicon:anaphor` is the same referent hole the parser freshens (here NESTED
+// inside the determiner λ — see `freshen_anaphor`), so a possessive yields an OPEN parse the
+// D64 resolver fills. `its` = sg, `their` = pl; subject + object positions, mirroring `a`.
+// (`their` composes like the existing plural determiner `all` — "their genes affect HeLa" ⇒ an
+// open parse with one possessor hole — given a plural-aware lemmatizer that reduces the plural
+// noun to its lexicon form; with the bare `Identity` lemmatizer the plural noun simply never
+// seeds, which is a lemmatizer concern, not a grammar gap.)
+axiom lexicon:poss_of : forall (A : Set) => A -> lexicon:Entity -> Prop
+resource lexicon:poss_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : Set) => fun (V : A -> Prop) =>
+            forall (C : Prop) => (forall (x : A) => (lexicon:poss_of(A, x, lexicon:anaphor) -> V(x) -> C)) -> C
+          : forall (A : Set) => (A -> Prop) -> Prop )
+    );
+}
+resource lexicon:poss_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (C : Prop) => (forall (x : T) => (lexicon:poss_of(T, x, lexicon:anaphor) -> TV(x, subj) -> C)) -> C
+          : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:its_subj : lexicon:LexicalEntry {
+    lexicon:form     = "its";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "its";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:its_obj : lexicon:LexicalEntry {
+    lexicon:form     = "its";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "its";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:their_subj : lexicon:LexicalEntry {
+    lexicon:form     = "their";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "their";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:their_obj : lexicon:LexicalEntry {
+    lexicon:form     = "their";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "their";
+    lexicon:grade    = epistemic:declared;
+}
+
 // ── PP adjuncts: prepositions as VP modifiers (D63 §8.13 Slice 6-mod) ──
 // "HeLa affects BRCA1 in MSI" — a PP modifies the VP, adding an OPAQUE prepositional
 // conjunct. Category `((S[dcl,fin]\NP) \ (S[dcl,fin]\NP)) / NP`: consume the standard NP,

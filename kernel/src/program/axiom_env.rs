@@ -238,7 +238,9 @@ mod tests {
         //   (predicate-nominal membership / subsumption); and
         // - the D63 §8.9 6-aux modal operators `logic:Possible` / `logic:Necessary`
         //   plus the future/conditional/deontic `logic:Will` / `Would` / `Should`
-        //   (opaque `Prop → Prop`, witnessed downstream — see `ontologies/logic/logic.esl`).
+        //   (opaque `Prop → Prop`, witnessed downstream — see `ontologies/logic/logic.esl`); and
+        // - the D62 §2e / D64 referent-hole placeholder `lexicon:anaphor : Entity` (a pronoun
+        //   stores it; the parser freshens it into an open-parse hole — `closed-class.esl`).
         // Every bootstrap axiom should be in one of those families.
         let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
         let env = build_axiom_env(&head).unwrap();
@@ -248,6 +250,11 @@ mod tests {
             "urn:eigenius:logic:Will",
             "urn:eigenius:logic:Would",
             "urn:eigenius:logic:Should",
+            // D64 referent-hole placeholder + the deictic speaker + possession relation
+            // (open-parse carrier / possessive determiners, `closed-class.esl`)
+            "urn:eigenius:lexicon:anaphor",
+            "urn:eigenius:lexicon:speaker",
+            "urn:eigenius:lexicon:poss_of",
         ];
         let unexpected: Vec<&Iri> = env
             .iter()

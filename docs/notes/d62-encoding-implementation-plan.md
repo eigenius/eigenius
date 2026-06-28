@@ -78,19 +78,25 @@ form) in `ontologies/lexicon/closed-class.esl` + grammar rules in `kernel/src/dc
   `logic:Will`/`Would`/`Should` axiom (future / conditional / weak-deontic — not ◇/□),
   meaning supplied on the reasoning side by the justification-logic institution. *Done.*
   (Perfect/passive aux already exist; `shall` + epistemic→grade refinement remain follow-ons.)
-- **2d — subordinators + sentence connectives.** Revised by expert consultation — see
-  [d62-subordinator-design-findings.md](d62-subordinator-design-findings.md). Net: the
-  uniform "opaque binary" plan is wrong. `if` → native implication `p → q` (not opaque);
-  `but` → truth-conditional `And` + an orthogonal contrast tag; `because`/`although`/`while`
-  → a **factive dependent** signature `Π(p q:Prop) → p → q → Prop` (presupposition as a
-  felicity/proof-obligation) — gated on an engine extension (threading hypothetical proof
-  variables); `however`/`thus` → anaphoric, fold into 2e/D64. Two open forks (adopt the
-  factive-dependent signature now vs. stage; add the Tier-2 discourse-relation channel now)
-  recorded in the findings note. *Target:* `if`-clauses parse to native implication; `but`
-  to a tagged conjunction; factive subordinators pending the fork decisions.
-- **2e — pronouns (`we`, `it`, `they`).** Referential pronouns dovetail with **D64**
-  (anaphora holes); `we` (1st person, non-anaphoric) is a plain NP. *Target:* pronominal
-  subjects parse (referential ones produce open parses → D64).
+- **2d — subordinators + sentence connectives.** Expert-revised — see
+  [d62-subordinator-design-findings.md](d62-subordinator-design-findings.md). The uniform
+  "opaque binary" plan was wrong. **Done:** `if` → native implication `p → q` (not opaque);
+  `but` → `logic:And` (verified adequate against every WRN `but` — all "X but (not) Y", plain
+  conjunction; contrast rhetorical, carried by explicit negation; contrast-preserving
+  `logic:But`/kernel-transparency are the documented upgrade, GH #95). **Gated:**
+  `because`/`although`/`while` → a **factive dependent** signature `Π(p q:Prop) → p → q →
+  Prop` (presupposition as a felicity/proof-obligation), which needs the **open-parse engine
+  extension** (D62 §11.5 item 7), not a fork decision. `however`/`thus` → anaphoric, fold into
+  2e/D64.
+- **2e — pronouns (`we`, `it`, `they`).** Reference grammar: core-en `ProNP` *is* an NP
+  (= a proper name categorially) introducing a **discourse referent**; binding is anaphora
+  resolution (D64), not grammar (`np.xsl:156`, `dict.xsl:70-115`). So a referential pronoun's
+  sem is a **free `Entity` referent variable** → an **open parse** (D64 hole), *the same
+  open-parse capability the factive subordinators need* (D62 §11.5 item 7), differing only in
+  hole type/resolver (`Entity`/D64 vs. proof/grounding). `it`/`they`/`its`/`their` therefore
+  need that capability; only deictic `we` (and possibly `however`/`thus`) may admit a closed
+  first cut. *Target:* the unified open-parse/typed-hole mechanism, then pronoun + factive
+  entries on top.
 
 **Verify (ratchet):** missing-lexeme units drop sharply; grammar-gap rises then falls as
 each construction lands; first **encoded** units appear. Track per sub-slice.

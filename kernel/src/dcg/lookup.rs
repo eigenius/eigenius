@@ -38,11 +38,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use crate::layer::{normalize_value, resolve_active_value_indexes, Layer};
-use crate::nbe::check::{check, CheckCtx};
-use crate::nbe::env::Rho;
+use crate::nbe::check::{check, exp_mentions_var, CheckCtx};
+use crate::nbe::env::{Gamma, Rho};
 use crate::nbe::eval::eval;
 use crate::nbe::readback::readback_val;
-use crate::nbe::term::Exp;
+use crate::nbe::term::{Exp, Patt};
+use crate::nbe::val::{Neut, Val};
 use crate::ontology::resource::Value;
 use crate::ontology::Iri;
 
@@ -435,10 +436,33 @@ impl LexicalIndex {
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
     ) -> Vec<Item> {
+        self.parse_scoped_open(text, lemmatizer, scope).0
+    }
+
+    /// Parse with optional scope, returning **both** the closed forest and the **open**
+    /// (hole-bearing) forest (D64 open-parse carrier). A pronoun seeds a referent *hole*
+    /// (a fresh free variable); a full-span `S` whose felicitous sem still carries holes is
+    /// an [`OpenParse`] — type-checked (each hole bound to `Entity`) but not a closed final
+    /// parse, awaiting the D64 resolver. The closed forest is identical to what
+    /// [`Self::parse_scoped`] returns; `parse` / `parse_scoped` are thin closed-only wrappers.
+    pub fn parse_open(
+        &self,
+        text: &str,
+        lemmatizer: &dyn Lemmatizer,
+    ) -> (Vec<Item>, Vec<OpenParse>) {
+        self.parse_scoped_open(text, lemmatizer, None)
+    }
+
+    pub fn parse_scoped_open(
+        &self,
+        text: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+    ) -> (Vec<Item>, Vec<OpenParse>) {
         let tokens = tokenize(text);
         let n = tokens.len();
         if n == 0 {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
 
         // chart[i][j] = every item spanning tokens i..=j.
@@ -460,8 +484,15 @@ impl LexicalIndex {
             let last = (i + span_limit).min(n);
             for j in i..last {
                 let surface = tokens[i..=j].join(" ");
-                let items = self.lookup_span(&surface, lemmatizer, scope);
-                chart[i][j].extend(items);
+                for mut it in self.lookup_span(&surface, lemmatizer, scope) {
+                    // Referent-hole freshening (D64 open-parse carrier): the placeholder
+                    // `lexicon:anaphor` (a bare pronoun's whole sem, or the possessor NESTED
+                    // inside a possessive determiner's λ) is replaced with a fresh,
+                    // per-occurrence free variable so distinct occurrences are distinct holes.
+                    // The freshened var rides through CKY and is typed (`Entity`) at felicity.
+                    it.sem = freshen_anaphor(&it.sem, &hole_base(i, j));
+                    chart[i][j].push(it);
+                }
             }
         }
 
@@ -612,20 +643,40 @@ impl LexicalIndex {
         //    kernel confirms inhabits `Prop`. Reducing first is essential: a
         //    composed determiner sentence is a redex-heavy `App(λ…, …)` tree, and
         //    `check_infer` cannot synthesize a bare lambda's type.
-        let mut forest: Vec<Item> = chart[0][n - 1]
-            .iter()
-            .filter(|it| {
-                // Complete results: a **finite** declarative/polar `S` (denotes `Prop`)
-                // or a wh-question `Q(T)` (denotes `T → Prop`, D63 §8.5). The finiteness
-                // gate rejects a bare base/infinitival clause (`S[_,bse]` — the VP an
-                // auxiliary selects) as a standalone root, so `*HeLa affect BRCA1` does
-                // not parse. Partial functors are dropped.
-                is_finite_clause(&it.cat) || is_ctor(&it.cat, "cat_q").is_some()
-            })
-            .filter_map(|it| self.reduced_felicitous(it))
+        // The referent-hole context for classification: every per-position hole base name,
+        // and the `Entity` type each hole inhabits (Slice-1: all holes are `Entity`).
+        let hole_bases: Vec<String> = (0..n)
+            .flat_map(|i| (i..n).map(move |j| hole_base(i, j)))
             .collect();
+        let entity = eval(&Exp::EigonClass(iri(ENTITY_IRI)), &Rho::Nil).ok();
 
-        // RANK + CAP (D63 §8.7 Stage B): order the forest by ascending cost — the sum
+        // Split the full-span candidates into the CLOSED forest (felicitous closed `Prop`)
+        // and the OPEN forest (felicitous but carrying unresolved referent holes — D64).
+        let mut forest: Vec<Item> = Vec::new();
+        let mut open: Vec<OpenParse> = Vec::new();
+        for it in chart[0][n - 1].iter().filter(|it| {
+            // Complete results: a **finite** declarative/polar `S` (denotes `Prop`) or a
+            // wh-question `Q(T)` (denotes `T → Prop`, D63 §8.5). The finiteness gate rejects
+            // a bare base/infinitival clause (`S[_,bse]`) as a standalone root. Partial
+            // functors are dropped.
+            is_finite_clause(&it.cat) || is_ctor(&it.cat, "cat_q").is_some()
+        }) {
+            match entity.as_ref() {
+                Some(e) => match self.classify_felicitous(it, &hole_bases, e) {
+                    Some(FelicitousOutcome::Closed(c)) => forest.push(c),
+                    Some(FelicitousOutcome::Open(o)) => open.push(o),
+                    None => {}
+                },
+                // Entity type unavailable (should not happen): closed path only.
+                None => {
+                    if let Some(c) = self.reduced_felicitous(it) {
+                        forest.push(c);
+                    }
+                }
+            }
+        }
+
+        // RANK + CAP (D63 §8.7 Stage B): order each forest by ascending cost — the sum
         // of the parse's leaf `sense_rank`s — so the most-frequent-sense readings come
         // first, then cap to [`DEFAULT_FOREST_CAP`]. WordNet sense-polysemy yields
         // 100s–1000s of well-typed parses for a short sentence (the felicity gate prunes
@@ -643,7 +694,11 @@ impl LexicalIndex {
             );
             forest.truncate(DEFAULT_FOREST_CAP);
         }
-        forest
+        open.sort_by_key(|o| o.item.cost);
+        if open.len() > DEFAULT_FOREST_CAP {
+            open.truncate(DEFAULT_FOREST_CAP);
+        }
+        (forest, open)
     }
 
     /// Normalize `it.sem` (NbE β-reduction → a normal form) and keep the item —
@@ -664,6 +719,114 @@ impl LexicalIndex {
             cost: it.cost,
         })
     }
+
+    /// Classify a full-span candidate as a CLOSED felicitous parse or an OPEN one carrying
+    /// unresolved referent holes (D64), or reject it. Generalizes [`Self::reduced_felicitous`]
+    /// to hole-bearing sems: a referent hole is a free variable, so it must be bound in `rho`
+    /// to a generic neutral (else Pure `eval` errors `UnboundVariable`) and in `gamma` to its
+    /// type (`Entity`, Slice-1) so `check` types it. `Neut::Gen(0, h)` reads back as
+    /// `Var("{h}0")`, so the gamma key and the reported hole name use that readback form. With
+    /// no holes present this is exactly `reduced_felicitous` (empty `rho`/`gamma`) — the closed
+    /// path is unchanged.
+    fn classify_felicitous(
+        &self,
+        it: &Item,
+        hole_bases: &[String],
+        entity: &Val,
+    ) -> Option<FelicitousOutcome> {
+        // Referent holes carried by this parse (tested on the raw, pre-reduction sem).
+        let present: Vec<String> = hole_bases
+            .iter()
+            .filter(|h| exp_mentions_var(&it.sem, h))
+            .cloned()
+            .collect();
+        let expected = denote_cat(&it.cat).ok()?;
+        let expected_val = eval(&expected, &Rho::Nil).ok()?;
+        // Evaluate the assembled sem with each freshened hole base bound to a generic neutral
+        // (else Pure eval errors on the free var). `Neut::Gen(0, base)` reads back as
+        // `Var("{base}0")`, so the holes in the normal form carry that suffixed name.
+        let mut eval_rho = Rho::Nil;
+        for h in &present {
+            eval_rho = eval_rho.extend(Patt::Var(h.clone()), Val::Nt(Neut::Gen(0, h.clone())));
+        }
+        let nf = readback_val(0, &eval(&it.sem, &eval_rho).ok()?);
+        // Check the normal form under a context binding each (readback-named) hole in BOTH
+        // `rho` (a neutral value — `check` evaluates subterms, which would otherwise error on
+        // the free var) and `gamma` (its type — `Entity`, Slice-1).
+        let holes: Vec<String> = present.iter().map(|h| format!("{h}0")).collect();
+        let mut chk_rho = Rho::Nil;
+        let mut gamma: Gamma = Vec::new();
+        for hn in &holes {
+            chk_rho = chk_rho.extend(Patt::Var(hn.clone()), Val::Nt(Neut::Gen(0, hn.clone())));
+            gamma.push((hn.clone(), entity.clone()));
+        }
+        let mut ctx = CheckCtx::with_layer(chk_rho, gamma, Arc::clone(&self.layer));
+        check(&mut ctx, &nf, &expected_val).ok()?;
+        let item = Item {
+            cat: it.cat.clone(),
+            sem: nf,
+            prov: it.prov,
+            cost: it.cost,
+        };
+        if holes.is_empty() {
+            Some(FelicitousOutcome::Closed(item))
+        } else {
+            Some(FelicitousOutcome::Open(OpenParse { item, holes }))
+        }
+    }
+}
+
+/// IRI of the referent-hole placeholder constant (`axiom lexicon:anaphor : lexicon:Entity`):
+/// a pronoun entry stores this, and the lookup bridge freshens it into a per-occurrence free
+/// variable at parse time (D64 open-parse carrier).
+const ANAPHOR_IRI: &str = "urn:eigenius:lexicon:anaphor";
+/// IRI of the universal entity class — the type of a (Slice-1) referent hole.
+const ENTITY_IRI: &str = "urn:eigenius:lexicon:Entity";
+
+/// Base name of the referent-hole free variable for a pronoun/possessive spanning tokens
+/// `[i, j]`. Position-keyed, so distinct occurrences are distinct holes.
+fn hole_base(i: usize, j: usize) -> String {
+    format!("$anaphor${i}_{j}")
+}
+
+/// Replace every `lexicon:anaphor` placeholder in `exp` with the free variable `fresh` (the
+/// referent-hole freshening, D64). The anaphor is a leaf constant (no binders to capture), so
+/// this is a plain structural replace. It appears only in authored pronoun sems (the whole
+/// sem) and possessive-determiner sems (nested inside the λ — `poss_of(A, x, anaphor)`); the
+/// compound forms those traverse are covered below, and every other form is returned
+/// unchanged (no anaphor occurs there).
+fn freshen_anaphor(exp: &Exp, fresh: &str) -> Exp {
+    let go = |e: &Exp| freshen_anaphor(e, fresh);
+    match exp {
+        Exp::EigonAxiom(a) if a.as_str() == ANAPHOR_IRI => Exp::Var(fresh.to_string()),
+        Exp::App(f, x) => Exp::App(Box::new(go(f)), Box::new(go(x))),
+        Exp::Lam(p, b) => Exp::Lam(p.clone(), Box::new(go(b))),
+        Exp::Pi(p, a, b) => Exp::Pi(p.clone(), Box::new(go(a)), Box::new(go(b))),
+        Exp::Sig(p, a, b) => Exp::Sig(p.clone(), Box::new(go(a)), Box::new(go(b))),
+        Exp::Arrow(a, b) => Exp::Arrow(Box::new(go(a)), Box::new(go(b))),
+        Exp::Times(a, b) => Exp::Times(Box::new(go(a)), Box::new(go(b))),
+        Exp::Fst(e) => Exp::Fst(Box::new(go(e))),
+        Exp::Snd(e) => Exp::Snd(Box::new(go(e))),
+        Exp::Pair(a, b) => Exp::Pair(Box::new(go(a)), Box::new(go(b))),
+        Exp::Ann(e, t) => Exp::Ann(Box::new(go(e)), Box::new(go(t))),
+        other => other.clone(),
+    }
+}
+
+/// An **open** parse (D64): a felicitous full-span `S` whose sem still carries unresolved
+/// referent holes (free variables). `holes` are their readback variable names — the slots the
+/// D64 resolver fills (by substituting a chain antecedent + re-gating). The kernel type-checked
+/// `item.sem` under a context binding each hole to `Entity`; it is NOT a closed final parse.
+#[derive(Clone)]
+pub struct OpenParse {
+    pub item: Item,
+    pub holes: Vec<String>,
+}
+
+/// The outcome of classifying a full-span candidate (see [`LexicalIndex::classify_felicitous`]).
+enum FelicitousOutcome {
+    Closed(Item),
+    Open(OpenParse),
 }
 
 fn iri(s: &str) -> Iri {

@@ -1,12 +1,18 @@
 # D64 — LLM-based anaphora resolution: pronouns as resolved resource references
 
 *Status: design (not yet implemented). The decision — anaphora is resolved by an **LLM proposer behind
-the kernel felicity oracle**, as a dispatched institution (D63 §5.3), not a core engine dependency nor a
-compositional-dynamic-semantics rewrite. This doc specifies the three-layer subsystem: the grammar's
-referent **holes** (D63), the **resolver** component (D62 institution), and the kernel **re-gate** +
-faithfulness verdict (D61). Builds directly on D63 §5.3 (anaphora → committed-resource IRI references;
-the donkey-anaphora Σ-truncation escape hatch) and is the first concrete consumer of the D61 faithfulness
-machinery.*
+the kernel felicity oracle**, not a core engine dependency nor a compositional-dynamic-semantics rewrite.
+This doc specifies the three-layer subsystem: the grammar's referent **holes** (D63), the **resolver
+component** — a *step in the D62 `FormalizeDocument` pipeline institution* (§8 of D62), **not its own
+institution** — and the kernel **re-gate** + faithfulness verdict (D61). Builds directly on D63 §5.3
+(anaphora → committed-resource IRI references; the donkey-anaphora Σ-truncation escape hatch) and is the
+first concrete consumer of the D61 faithfulness machinery.*
+
+> **Layering note.** The *dispatched-institution* property (untrusted LLM proposer behind the kernel
+> felicity boundary, like Lean/R/Julia) belongs to the **whole encoding pipeline** — the single D62
+> `FormalizeDocument` institution wraps all of S0–S7. The reference resolver is **one component/step
+> (S3)** inside that pipeline, not a separate institution. Earlier wording in this doc that calls the
+> resolver itself "a dispatched institution" is superseded by this note.
 
 ## 1. The problem, and the decision
 
@@ -19,7 +25,8 @@ different:
   has relied on — that meaning is **sentence-level and context-free** (lookup → CKY → felicity yields a
   closed `Prop` per sentence, no cross-sentence state). Anaphora is inherently discourse-level.
 
-**Decision (this doc): resolve anaphora with LLM-based machinery, as a post-parse dispatched institution.**
+**Decision (this doc): resolve anaphora with LLM-based machinery, as a post-parse component of the D62
+`FormalizeDocument` pipeline institution (not a separate institution — see the layering note above).**
 The two rejected alternatives:
 - *Compositional dynamic semantics* (DRT / dynamic predicate logic): thread a discourse context through
   composition, changing the sem type of **everything** to context-passing. Powerful (handles donkey
@@ -40,7 +47,7 @@ re-checks the *resolved* tree. We get the LLM's reach without trusting it.
 ```
 prose ──parse(D63)──▶  tree with referent HOLES        (felicitous-modulo-resolution; NOT a closed Prop)
                               │
-                  resolve(D62 institution, LLM)         hole → antecedent  (chain IRI / bound var)
+                  resolve(S3 component, LLM)            hole → antecedent  (chain IRI / bound var)
                               │  substitute
                               ▼
                        resolved tree ──re-gate(kernel)──▶  closed Prop ✓   (LLM proposes, kernel disposes)
@@ -52,25 +59,42 @@ The **felicity oracle stays the trusted boundary** (D62). The LLM lives entirely
 its output is re-checked by the kernel before anything commits. An ill-typed resolution is rejected by
 the *kernel*, not the LLM.
 
-This is exactly the **dispatched-institution** shape D63 §5.3 anticipated (anaphora resolution "fits as a
-dispatched institution, like the Lean/R/Julia computations, never a core engine dependency"), and the
+This is exactly the **untrusted-proposer-behind-the-felicity-oracle** shape D63 §5.3 anticipated
+(anaphora resolution "fits as a dispatched institution, like the Lean/R/Julia computations, never a core
+engine dependency" — realized here as a *component* of the one pipeline institution, per the layering
+note above), and the
 **antecedent is a committed resource referenced by IRI** ("our antecedents are committed resources
 referenced by IRI … linguistic anaphora resolves to a *resource reference*"). D64 makes the resolver an
 LLM.
 
 ## 3. The grammar side (D63): referent holes + case
 
+> **Carrier note (revises the `Exp::Anaphor`-node recommendation below).** The referent hole here
+> is the **entity instance** of a general open-parse carrier shared with D62's factive-subordinator
+> proof obligations — one carrier, two resolver dispatches (`EntityRef` → this D64 LLM resolver via
+> substitution; `ProofObligation` → grounding via witness), and a single sentence can carry both at
+> once. **But the carrier is a DCG-engine (elaboration) extension, not a kernel term node.** The
+> `nanoda_lib`/Lean precedent is decisive: the kernel `Expr` has *no* metavariable — holes are an
+> elaborator concept and the kernel only checks fully-elaborated terms. So represent a hole as a
+> **fresh free variable** (already a neutral in NbE) plus an **engine-side context** carrying its
+> `id`/`kind`/features, type-checked under that context and resolved before commit — **no
+> `Exp::Anaphor` node, the kernel and chain stay hole-free.** This addresses the bare-`Var`
+> objections below (fresh-var namespace; features in the engine-side context; free vars are already
+> neutrals — no NbE special-casing). D64 Phase A is the carrier MVP. See
+> `docs/notes/d62-d64-open-parse-carrier.md` (§2, §7).
+
 **Pronouns are case-marked NPs whose sem is a referent hole.** A pronoun does not denote; it marks a slot
 the resolver fills.
 
-- **Hole node (recommended): a new `Exp::Anaphor { id, ty, features }`** term node — an explicit,
-  typed placeholder carrying its EigenTT type (`lexicon:Entity`, or narrower) and morphosyntactic
-  **features** (number, gender, person) for candidate matching. The pronoun lexical entry's `sem` is an
-  `Anaphor`.
-  - *Why a dedicated node over a bare free `Var`:* a free variable collides with binder-introduced
-    variables, has nowhere to carry features, and would force special-casing throughout NbE
-    (`eval`/`readback`). `Exp::Anaphor` is inert under evaluation (it reduces to itself, like a neutral)
-    and is trivially detectable by the felicity gate.
+- **Hole representation — SUPERSEDED (see the carrier note above).** *Original recommendation: a new
+  `Exp::Anaphor { id, ty, features }` kernel term node.* The revised design keeps the **kernel
+  hole-free** (per the `nanoda_lib`/Lean precedent — metavariables are an elaborator concept, absent
+  from the kernel `Expr`): a hole is a **fresh free variable** (already a neutral in NbE) plus an
+  **engine-side context** carrying `id`/`ty`/`features`, keyed by the variable. The pronoun lexical
+  entry's `sem` introduces such a hole-var. This meets the original objections to a bare `Var` without
+  a node — *collision* → a reserved fresh-var namespace; *nowhere for features* → the engine-side
+  context; *NbE special-casing* → none (free vars are already neutrals) — and adds **zero** kernel
+  surface. See `docs/notes/d62-d64-open-parse-carrier.md` §2/§7.
 - **Case feature.** Add `Case` (`nom` / `acc` / `case_any`) to `cat_np` (mirrors the `Num`/`Fin`
   `feat_meets` machinery — `*_any` meets anything). Verb **subject** slot requires `nom`, **object**
   slots `acc`; **full NPs** (HeLa, the gene) are `case_any` (unchanged from today); **pronouns** are
@@ -85,7 +109,7 @@ the resolver fills.
 
 The grammar layer is otherwise unchanged: pronoun entries are ordinary closed-class lexical entries.
 
-## 4. The resolver (D62 institution): the LLM step
+## 4. The resolver (S3 component of the D62 pipeline institution): the LLM step
 
 A new orchestration component (sibling of `complete_json.ts`, using `llm/adapter.ts` and the kernel
 bridge `kernel_client.ts`):
@@ -141,8 +165,11 @@ faithful*). Therefore:
 ## 7. Decisions — resolved and open
 
 *Resolved:*
-- LLM resolver, dispatched institution, post-parse (not dynamic semantics, not symbolic).
-- Hole = `Exp::Anaphor { id, ty, features }` (not a bare free `Var`).
+- LLM resolver as a **post-parse component of the D62 `FormalizeDocument` pipeline institution** (not
+  its own institution; not dynamic semantics, not symbolic).
+- Hole = a **fresh free variable + engine-side context** (`id`/`ty`/`features`), **kernel hole-free** —
+  *revised from the original `Exp::Anaphor` kernel node* per the carrier note (`nanoda_lib`/Lean: no
+  kernel metavariable). See `docs/notes/d62-d64-open-parse-carrier.md`.
 - Antecedent = committed chain-resource IRI (Phase A); bound `Var` via Σ-truncation (Phase B).
 - Kernel re-gates the resolved term; verdict **Derived**, never auto-Verified; unresolved ⇒ fail-closed
   finding.
@@ -157,7 +184,8 @@ faithful*). Therefore:
 
 ## 8. Implementation plan (phased; each independently verifiable)
 
-1. **Grammar holes + case (kernel/D63).** `Exp::Anaphor` node (inert in `eval`/`readback`); `Case`
+1. **Grammar holes + case (D63 engine).** Open-parse carrier — a hole = fresh free var + engine-side
+   context, **kernel hole-free** (carrier note; *not* an `Exp::Anaphor` node); `Case`
    feature on `cat_np` + the verb-slot case constraints; pronoun lexical entries (`it`/`they`/`he`/`him`/
    `she`/`her`/…); `parse` returns the open (hole-bearing) forest distinctly. *Verify:* "it is primary"
    parses to a hole-bearing tree (open, not admitted closed); `*him affects he` fails the case-meet;
@@ -178,7 +206,8 @@ Phase B (donkey via Σ-truncation) is a later slice, gated on a real corpus need
   donkey Σ-truncation escape hatch); D62 (the encoding institution, proposer/oracle split, felicity
   boundary); D61 (the faithfulness gap; back-translation; Derived-not-Verified); D46 §… (Prop universe,
   the `‖Σ‖`-truncation); D56 (kernel bridge); D8 (`complete_json` component pattern). Code touch-points:
-  `kernel/src/nbe/term.rs` (`Exp::Anaphor`), `kernel/src/dcg/{category,lookup}.rs` (Case + open forest),
+  `kernel/src/dcg/{category,lookup}.rs` (the open-parse carrier: free-var holes + engine-side context,
+  Case, open forest — **no `nbe/term.rs` node; kernel hole-free**),
   `ontologies/lexicon/{lexicon-ontology,closed-class}.esl` (Case feature + pronoun entries),
   `orchestration/src/components/` (the resolver), `orchestration/src/llm/adapter.ts`.
 - **Prior art (named; bib entries to be verified before citing as load-bearing anchors, per the D61
