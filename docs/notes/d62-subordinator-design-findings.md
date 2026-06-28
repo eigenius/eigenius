@@ -186,10 +186,11 @@ cost is Fork A's engine work (threading the hypotheses through the derivation).
    (*"S₁ if S₂"* ⇒ `⟦S₂⟧ → ⟦S₁⟧`). Non-factive, independent of both forks; uses the
    kernel's native arrow (no new logic type), highest type-theoretic payoff. Validates that
    native implication passes the felicity gate end-to-end.
-2. **`but` → distinct `logic:But` former** (Fork B resolved): `logic:But(p,q)` with `And`'s
-   shape (projections recover both conjuncts; distinct head for the reasoning layer).
-   Ready to implement; held only to keep it in step with the expert reply that raises the
-   propositions-as-types translation.
+2. **`but` → plain opaque `axiom logic:But : Prop -> Prop -> Prop`** (FINAL): modal-consistent;
+   distinct head (tag survives), `But ≢ And` at felicity, `But ↔ And` deferred to reasoning-
+   layer rules. Lexical `(S\S)/S`, sem `λs₂.λs₁. logic:But(s₁, s₂)`. Zero kernel change.
+   Kernel-level transparency (the `But := And` definition) is filed separately as
+   [#95](https://github.com/eigenius/eigenius/issues/95).
 3. **`because`/`although`/`while`** — Fork A = v2 factive-dependent; **gated on the expert
    confirming the §5 scoping account** + the proof-variable engine extension.
 4. **`however`/`thus`** — anaphoric; deferred to the pronoun/D64 anaphora slice (2e).
