@@ -446,6 +446,37 @@ fn bare_plural_np_is_a_deferred_quantifier_argument() {
     );
 }
 
+/// D63 §8.5 — a **predicate nominal over an adjective-refined noun** (`HeLa is a large gene`). The
+/// predicate-nominal determiner `a_pred` (`λT.λs. is_a(s,T)`) does NOT bind a predicate over the noun
+/// type `T` (its body is `S[adj]\NP(Entity)`), so the GQ Fst-projection refined-noun case must NOT
+/// fire for it — doing so produced an ill-formed term that applied the **subject** as a function
+/// (`NotAFunction` panic in readback). Regression guard: with the Fst case gated on `tvar ∈ body`,
+/// `a_pred(Σ) = λs. is_a(s, Σ)` parses cleanly, for both a proper-noun (resource) and a determiner
+/// subject; and the GQ-over-refined-noun path (`every large gene …`) still works.
+#[test]
+fn predicate_nominal_over_refined_noun_parses() {
+    let (_layer, index) = index_over_bootstrap();
+    // Proper-noun (cat_np resource) subject — the shape that panicked (HeLa ≈ the WRN gene).
+    assert!(
+        !index.parse("HeLa is a large gene", &Identity).is_empty(),
+        "resource subject + adjective-refined predicate nominal must parse (no readback panic)"
+    );
+    // Determiner subject — same refined predicate nominal.
+    assert!(
+        !index
+            .parse("a cell line is a large gene", &Identity)
+            .is_empty(),
+        "determiner subject + adjective-refined predicate nominal must parse"
+    );
+    // The GQ-over-refined-noun path (Fst projection) is unaffected — `tvar` ∈ the GQ body.
+    assert!(
+        !index
+            .parse("every large gene affects HeLa", &Identity)
+            .is_empty(),
+        "GQ over a refined noun still parses (Fst projection path intact)"
+    );
+}
+
 /// DE-RISK PROBE for the D62 bare-plural design (`docs/notes/d62-bare-plural-quantification.md` §6):
 /// verify the felicity gate (`eval → readback → check : Prop`) accepts a **free neutral `Q`** of the
 /// dependent quantifier type `Π(A:Set).(A→Prop)→Prop` in **head position**, applied to a `Set`

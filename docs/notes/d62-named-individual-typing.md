@@ -94,16 +94,45 @@ the author's authoritative definition and rely on ambiguous lexicon lookup. The 
 document-locally, bind later bare uses to it. This is a *sense/faithfulness* improvement (grounded in
 the document, D61), **not** an OOV blocker — a separate track from the typing work here.
 
-## 5. Implementation plan
+## 5. Implementation — DONE + validated
 
-1. **Importer (`crates/eigenius-umls`).** Track per-CUI SAB/TTY in `ConceptBuilder`; classify a CUI as
-   a **named individual** by the §3 rule (HGNC first). For named individuals: emit the CUI as an
-   **instance** of its TUI class (`umlscui:CUI : umlssty:T028`, not a *subclass*), and emit `cat_np`
-   lexical entries (`cat_np(umlssty:T028, sg)`, `sem =` the instance) — using the symbol form. Concept
-   classes stay as today (`cat_n`). TDD on the crate's `convert`/`rrf` unit tests (no DB).
-2. **Reseed** the snapshot with the new importer (genes become `cat_np`).
-3. **Validate** over the reseeded store: `WRN is a synthetic lethal vulnerability`, `the helicase
-   activity of WRN`, `KRAS mutations` parse (was grammar-gap).
+1. **Importer (`crates/eigenius-umls`).** `ConceptBuilder` tracks the per-CUI symbol from
+   `NAMED_INDIVIDUAL_SABS` atoms (HGNC `ACR`>`PT`) → `Concept.symbol`. A named individual emits as an
+   **instance** of its primary TUI class (`resource umlscui:CUI : umlssty:T028`) with `cat_np(umlssty:T028,
+   sg)` entries (`sem =` the instance); concept classes stay `cat_n`. Also fixed a latent bug: a
+   `resource` body needs qualified `core:description` (bare `description` is a *class*-item keyword).
+   TDD: 9 builder + 2 convert unit tests; real-data validate of 3k genes → 27,557 `cat_np` entries
+   felicity-gate clean.
+2. **Reseed** (`scripts/reseed-lexicon-db.sh`, WordNet `--all` + UMLS WRN-TUI subset incl. T028) →
+   634 MB snapshot `wordnet-umls-2026-06-29`; both chains loaded clean (the gene `cat_np` entries
+   validated at load).
+3. **Validated** over the reseeded store (`diagnose_grammar_gap_fragments`):
+
+   | fragment | before | after |
+   |---|---|---|
+   | `WRN is a vulnerability` | grammar-gap | **CLOSED×2** |
+   | `WRN is a vulnerability and a target` | grammar-gap | **CLOSED×2** |
+   | `WRN is a vulnerability for MSI cancers` | grammar-gap | **CLOSED×8** |
+
+   WRN now parses as a proper-noun subject (and `the WRN gene` as a modifier — verified on the small
+   lexicon). Full WRN page: 0 panics; the residual is an OOV tail, **inflated by the TUI-*subset*
+   reseed** (it omits `microsatellite`/`biomarker`/`crispr`/`germline`/`vitro`/`vivo` — TUIs outside
+   the 8) — use `--umls-all` for a clean full-page number.
+
+### 5a. Latent readback panic the gene-typing exposed — FIXED
+
+Making genes `cat_np` (resource sems) surfaced a pre-existing composition bug: a **proper-noun
+(resource) subject + an adjective-refined predicate nominal** (`HeLa is a large gene` /
+`WRN is a synthetic lethal vulnerability`) built an ill-formed term that applied the **subject** as a
+function → `readback_val` `NotAFunction` panic. Root cause: the refined-noun **Fst-projection** case
+(`parser.rs`, D63 §8.5 3b) — correct only for a **GQ** determiner (2nd arg = a restrictor predicate
+`V` over the noun type) — misfired for the **predicate-nominal** `a_pred` (`λT.λs. is_a(s,T)`), whose
+2nd arg is the *subject* and whose body (`S[adj]\NP(Entity)`) does **not** mention `T`. Fix: **gate the
+Fst case on `tvar ∈ body`** (the determiner actually binds a predicate over the noun type); else use
+the simple case (`a_pred(Σ) = λs. is_a(s, Σ)`). The `readback_val` `.expect()` invariant is kept
+(readback never sees an un-type-checked term *because we no longer build one*); 83 determiner + full
+kernel tests green, with a regression test `predicate_nominal_over_refined_noun_parses`.
 
 Out of scope here: cell lines (no authority — needs Cellosaurus or a heuristic), organisms/proteins,
-and the in-document abbreviation track (§4).
+the in-document abbreviation track (§4), and stacked-adjective predicate nominals (`synthetic lethal`
+— a clean grammar-gap now, not a crash).

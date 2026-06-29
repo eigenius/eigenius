@@ -178,29 +178,41 @@ fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> 
                 // By Σ/Π currying this yields the correct restrictor for *both*
                 // quantifiers (∀z:Σ.V(Fst z) = ∀x:C. P(x)→V(x); ∃ likewise with ∧),
                 // with no kernel coercion (the `Fst` is inserted here).
-                if let Exp::Sig(_, comp, _) = t {
-                    let mut subst = CatSubst::new();
-                    subst.insert(tvar.clone(), (**comp).clone());
-                    let (v, z) = ("__refine_v", "__refine_z");
-                    let sem = Exp::Lam(
-                        Patt::Var(v.into()),
-                        Box::new(Exp::App(
-                            Box::new(Exp::App(Box::new(left.sem.clone()), Box::new(t.clone()))),
-                            Box::new(Exp::Lam(
-                                Patt::Var(z.into()),
-                                Box::new(Exp::App(
-                                    Box::new(Exp::Var(v.into())),
-                                    Box::new(Exp::Fst(Box::new(Exp::Var(z.into())))),
+                //
+                // GATE: the Fst projection is correct ONLY for a determiner whose result category
+                // binds a **predicate over the noun type `T`** — i.e. `tvar` occurs in `body` (a
+                // GQ's `cat_np(T, …)` VP/argument slot). The predicate-nominal `a_pred` does NOT
+                // mention `T` in its body (`S[adj]\NP(Entity)`); `T` feeds only its `is_a(s, T)` sem,
+                // and its 2nd argument is the *subject*, not a restrictor `V`. Applying the Fst
+                // wrapper to it would land `λz.V(Fst z)` in `is_a`'s subject slot and bind the real
+                // subject as a function (an ill-formed term — `NotAFunction` at readback). When
+                // `tvar` is absent from `body`, fall through to the simple case (`T := Σ` directly:
+                // `a_pred(Σ) = λs. is_a(s, Σ)`), which is correct for the predicate nominal.
+                if crate::nbe::check::exp_mentions_var(body, tvar) {
+                    if let Exp::Sig(_, comp, _) = t {
+                        let mut subst = CatSubst::new();
+                        subst.insert(tvar.clone(), (**comp).clone());
+                        let (v, z) = ("__refine_v", "__refine_z");
+                        let sem = Exp::Lam(
+                            Patt::Var(v.into()),
+                            Box::new(Exp::App(
+                                Box::new(Exp::App(Box::new(left.sem.clone()), Box::new(t.clone()))),
+                                Box::new(Exp::Lam(
+                                    Patt::Var(z.into()),
+                                    Box::new(Exp::App(
+                                        Box::new(Exp::Var(v.into())),
+                                        Box::new(Exp::Fst(Box::new(Exp::Var(z.into())))),
+                                    )),
                                 )),
                             )),
-                        )),
-                    );
-                    return Some(Item {
-                        cat: subst_cat(body, &subst),
-                        sem,
-                        prov: Combinator::ForwardApp,
-                        cost: Cost::ZERO,
-                    });
+                        );
+                        return Some(Item {
+                            cat: subst_cat(body, &subst),
+                            sem,
+                            prov: Combinator::ForwardApp,
+                            cost: Cost::ZERO,
+                        });
+                    }
                 }
                 let mut subst = CatSubst::new();
                 subst.insert(tvar.clone(), t.clone());
