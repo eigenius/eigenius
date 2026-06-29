@@ -146,8 +146,8 @@ resource lexicon:zarg_cell : lexicon:LexicalEntry {
 }
 "#;
 
-/// Bootstrap + demo + the two-sense `zarg` fixture, with `sense_cap` and an optional reranker.
-fn index_with_zarg(cap: usize, ranker: Option<Box<dyn SenseRanker + Send + Sync>>) -> LexicalIndex {
+/// Bootstrap + demo + the two-sense `zarg` fixture committed as a layer chain.
+fn zarg_layer() -> Arc<Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
     let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
@@ -160,8 +160,12 @@ fn index_with_zarg(cap: usize, ranker: Option<Box<dyn SenseRanker + Send + Sync>
     for r in fix {
         b2.add_resource(r).expect("add zarg");
     }
-    let layer = Arc::new(b2.build(LayerStorage::in_memory()));
-    let mut index = LexicalIndex::build(layer).with_sense_cap(cap);
+    Arc::new(b2.build(LayerStorage::in_memory()))
+}
+
+/// The `zarg` index with `sense_cap` and an optional reranker.
+fn index_with_zarg(cap: usize, ranker: Option<Box<dyn SenseRanker + Send + Sync>>) -> LexicalIndex {
+    let mut index = LexicalIndex::build(zarg_layer()).with_sense_cap(cap);
     if let Some(r) = ranker {
         index = index.with_sense_ranker(r);
     }
@@ -182,6 +186,42 @@ impl SenseRanker for PreferSense {
             })
             .collect()
     }
+}
+
+#[test]
+fn cell_beam_bounds_a_cell_and_is_a_noop_when_generous() {
+    // Lever B (per-cell beam, GH #97). Both senses of `zarg` are valid singular subjects, so
+    // "zarg affects HeLa" has TWO full parses unbeamed (affects(HeLa, BRCA1) and affects(HeLa,
+    // HeLa)). No `sense_cap` here — the beam is the only lever, acting on the leaf cell.
+    let unbeamed = LexicalIndex::build(zarg_layer());
+    assert_eq!(
+        unbeamed.parse("zarg affects HeLa", &Identity).len(),
+        2,
+        "both senses parse with no beam"
+    );
+
+    // A generous beam is a no-op — both readings survive.
+    let generous = LexicalIndex::build(zarg_layer()).with_cell_beam(16);
+    assert_eq!(
+        generous.parse("zarg affects HeLa", &Identity).len(),
+        2,
+        "a generous cell beam keeps both parses (no-op)"
+    );
+
+    // A tight beam (2) drops the higher-`Cost` (sr1 → HeLa) sense at the leaf, keeping only the
+    // cheaper (sr0 → BRCA1) reading: the beam prunes by Cost and bounds the cell.
+    let tight = LexicalIndex::build(zarg_layer()).with_cell_beam(2);
+    let forest = tight.parse("zarg affects HeLa", &Identity);
+    assert_eq!(
+        forest.len(),
+        1,
+        "a tight cell beam drops the costlier sense"
+    );
+    let sem = format!("{:?}", forest[0].sem);
+    assert!(
+        sem.contains("brca1"),
+        "the surviving (cheaper, sr0) reading is the BRCA1 sense: {sem}"
+    );
 }
 
 #[test]

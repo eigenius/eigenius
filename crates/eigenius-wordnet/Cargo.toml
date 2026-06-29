@@ -13,3 +13,13 @@ clap = { version = "4", features = ["derive"] }
 [[bin]]
 name = "wordnet-import"
 path = "src/bin/wordnet_import.rs"
+
+[features]
+# Forward the kernel's live-LLM reranker (allms) so the DB-backed (d) harness can use the
+# contextual `AnthropicSenseRanker`; default builds stay LLM-free (deterministic `IdentityRanker`).
+allms = ["eigenius-kernel/allms"]
+
+[dev-dependencies]
+# The on-disk RocksDB backend — so the DB-backed encoding measurement (D62 (d)) can open a
+# snapshot of the served store (full WordNet+UMLS) in-process and parse over the lazy LexicalIndex.
+eigenius-storage-rocksdb = { path = "../../storage/rocksdb" }

@@ -60,4 +60,6 @@ pub use lookup::{
 pub use parser::{apply, cky_parse, Combinator, Cost, Item};
 pub use pretty::pretty_term;
 pub use segment::{is_nonprose, segment_sentences};
+#[cfg(feature = "allms")]
+pub use sense_ranker::AnthropicSenseRanker;
 pub use sense_ranker::{IdentityRanker, SenseCandidate, SenseRanker, WordSenses};

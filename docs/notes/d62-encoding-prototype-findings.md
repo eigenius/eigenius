@@ -100,6 +100,79 @@ over the **whole page**: **25 of 26 units parse (≤60 tokens), 1 over-length sk
    measurable, but it does **not** produce encodes — that waits on the **domain-lexicon injection**,
    now quantified as the critical path to actual WRN encodes.
 
+### DB-backed full-lexicon measurement — the *true* (d) (WordNet + UMLS, served store)
+
+The prior full-page run seeded a WordNet *slice* from the page's own words. This run parses over the
+**actual served store** — the full WordNet + UMLS chain (7.6M resources, 51-layer chain) in a
+snapshot of the docker-volume RocksDB DB — opened in-process via the persistent backend and the
+**lazy** `LexicalIndex` (on-demand `lexicon:form` value-index probes; the eager scan OOMs). Driver:
+`crates/eigenius-wordnet/tests/db_backed_encoding.rs` (`wrn_first_page_over_full_lexicon`,
+`#[ignore]`d; `EIGENIUS_DB_SNAPSHOT` points at the store). Sense cap = 2.
+
+**Bootstrap caveat (load-bearing for reading the numbers).** The snapshot's chain is rooted at the
+bootstrap it was seeded with (commit `ff7f6cc`), so resuming it requires the code's
+`logic`/`closed-class` to match (else `ManifestDrift`, fail-closed). That seeded `closed-class`
+**predates** the determiner (`the/this/that/an`), pronoun (`we/their/those`), and modal (`would`)
+additions — so those words are reported OOV here as an **artifact of the resumed bootstrap**, not a
+real gap in current code (verified by direct probe: `has_token` = false for `the/we/their/would`).
+
+**Result — 26 units → 0 encoded, 24 missing-lexeme, 1 grammar-gap, 1 scale-bound.** OOV = **34
+distinct** tokens (was 71 on the slice).
+
+- **OOV-per-unit:** min 1, max 7, **mean 2.6** (was 6.6) — the full lexicon **roughly halved**
+  per-unit OOV, and **7 units are now one OOV away** from parsing (was 1).
+- **OOV by fix-bucket (raw):** domain-lexicon 17 · connectives/function-words 7 · -ly adverbs 10 ·
+  stat leaks 0. **Adjusted for the bootstrap caveat:** ~4 of the "domain 17" are closed-class words
+  the current bootstrap already has (`the/we/their/would`) → genuine domain residual ≈ **13**.
+- **Two newly-isolated real gaps** (both confirmed OOV by direct probe over the full store):
+  1. **-ly adverbs (10)** — `commonly/typically/selectively/preferentially/…` are OOV *even over
+     full WordNet* (`has_token("commonly") = false`). So this is **not** "just inject more lexicon"
+     — WordNet adverbs aren't reachable as loaded; this needs the `-ly` derivational route (P3) or
+     an adverb-import fix.
+  2. **Hyphenated compounds + true domain terms** — `cas9-mediated, double-stranded, genome-scale,
+     next-generation, pcr-based, msi-predominant, hypermutable, recq, wilcoxon, cas9` — a mix of S0
+     compound-tokenization gaps and genuine domain OOV (`recq`, `wilcoxon`).
+
+**What this revises vs the slice finding:**
+1. **Full domain coverage does materially help** — per-unit OOV halves and most units come within
+   1–2 tokens of parsing. The slice run's "domain-lexicon 56%" overstated the *residual* domain gap
+   (the slice lacked the page's own multiword/related terms that the full UMLS supplies).
+2. **The residual encode-gate is now a long tail, not one bucket:** ~13 domain/compound terms +
+   10 -ly adverbs + (in current code) the already-fixed closed-class words. Still **0 encoded** only
+   because every dense sentence carries ≥1 of these (a hyphenated compound or an -ly adverb).
+3. **Parsing scale was a hard wall at full-lexicon density — now cleared by Lever B.** A
+   *fully-known* 17-token sentence (`These findings show that WRN is …`) **OOM'd the chart even at
+   cap=2** (clausal embedding × coordination × full-lexicon polysemy; the per-lemma sense cap is not
+   enough). **Lever B (per-cell beam, GH #97)** — `LexicalIndex::with_cell_beam(n)`, capping every
+   non-top CKY cell to its `n` lowest-`Cost` items (orthogonal to Lever A: A caps senses *per lemma
+   at the leaf*, B caps derivations *per composed cell*) — fixes it. Unit-tested
+   (`cell_beam_bounds_a_cell_and_is_a_noop_when_generous`); harness wires `CELL_BEAM=64`.
+
+### Fresh-DB full-lexicon measurement — Lever B validated (2026-06-28)
+
+Reran over a **freshly reseeded** store (current HEAD bootstrap, WordNet `--all` + UMLS WRN-relevant
+TUI subset; `scripts/reseed-lexicon-db.sh`), so no bootstrap drift — the prior run's `the/we/their/
+would` OOV artifacts are gone (`has_token` = true). **26 units → 0 encoded, 24 missing-lexeme, 2
+grammar-gap, 0 scale-bound.** OOV = 51 distinct, mean 3.2/unit.
+
+- **Lever B holds at scale:** the 17-token fully-known unit that previously SIGKILL'd now parses in
+  **0.2 s**, the beam dropping up to ~830 items per cell; **no OOM, nothing scale-bound** (`beam=64`
+  was sufficient, no tuning needed). This was the binding constraint for fully-known sentences.
+- **Grammar reach is now measurable:** **2 grammar-gaps** (units 6, 13 — fully known, parsed, no
+  felicitous reading) surfaced *because* the beam let those known-vocab units parse to completion.
+  The "grammar gaps appear once parsing scale is unblocked" prediction is confirmed.
+- **OOV buckets:** domain-lexicon 24 · connectives/function-words 15 · -ly adverbs 12 · stat 0.
+  The **-ly adverbs remain OOV even over full WordNet** (`has_token("commonly") = false`) — a real
+  coverage gap (derivational `-ly`, P3), not "inject more lexicon". The **domain-lexicon 24** is
+  higher than the prior run's because this store used the UMLS **subset** (8 TUIs); terms like
+  `microsatellite/biomarker/germline/crispr` fall under TUIs outside the subset — rerun with
+  `reseed-lexicon-db.sh --umls-all` for full domain coverage.
+- A real importer bug was found + worked around en route: the UMLS **subset** path was loaded with a
+  **stale `umls-import` binary** that emitted `subclass_of` to semantic-type classes the base layer
+  didn't declare (base 30 vs concepts referencing 125) → fail-closed chunk rejection. A fresh
+  release build is consistent (base == referenced); the reseed script force-builds release binaries
+  and adds a pre-load dangling-STY guard.
+
 ## Finding 3 — the three lexica cover the content vocabulary (vocabulary is not the blocker)
 
 Measured the page's vocabulary against the **real emitted lexica forms** on disk (WordNet

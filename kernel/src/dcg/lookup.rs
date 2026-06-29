@@ -126,6 +126,15 @@ pub struct LexicalIndex {
     /// down-ranked sense, so a bad rank costs a re-parse, never a missed parse. `None` = the plain
     /// static `sense_rank` cap (no behaviour change).
     sense_ranker: Option<Box<dyn SenseRanker + Send + Sync>>,
+    /// Optional **per-cell beam** (Lever B — D63 parsing-scale plan / GH #97). Each CKY chart cell
+    /// is capped to this many lowest-`Cost` items after it is built. Bounds the chart's intermediate
+    /// growth — the source of the full-lexicon OOM (sense-cap Lever A caps senses *per lemma* at the
+    /// leaf; it does not stop a *fully-known* structurally-complex sentence's composed cells from
+    /// blowing up over a dense lexicon). Applied to every non-top cell (`len < n`); leaf cells stay
+    /// governed by `sense_cap` and the top cell by [`DEFAULT_FOREST_CAP`]. **Inexact** — like any
+    /// beam it may drop a constituent the only full parse needed (the beam/A* tradeoff) — so it is
+    /// opt-in; `None` = exact (unbounded) chart, the default (no behaviour change).
+    cell_beam: Option<usize>,
 }
 
 /// One resolved lexical entry at the **seed stage**: its parse [`Item`], its `lexicon:in_lexicon`
@@ -235,6 +244,7 @@ impl LexicalIndex {
                 },
                 sense_cap: None,
                 sense_ranker: None,
+                cell_beam: None,
             };
         }
         let (by_form, max_words) = Self::scan_eager(&layer);
@@ -243,6 +253,7 @@ impl LexicalIndex {
             source: Source::Eager { by_form, max_words },
             sense_cap: None,
             sense_ranker: None,
+            cell_beam: None,
         }
     }
 
@@ -251,6 +262,16 @@ impl LexicalIndex {
     /// chart tractable on long sentences. Builder-style; default (unset) is uncapped.
     pub fn with_sense_cap(mut self, n: usize) -> Self {
         self.sense_cap = Some(n);
+        self
+    }
+
+    /// Set the **per-cell beam** (Lever B — GH #97): cap every non-top CKY cell to `n`
+    /// lowest-`Cost` items, bounding the chart's intermediate growth so a fully-known
+    /// structurally-complex sentence doesn't OOM over a dense lexicon (where the per-lemma
+    /// `sense_cap` alone is insufficient). Inexact (may drop a constituent the only full parse
+    /// needed); builder-style, default (unset) is the exact unbounded chart.
+    pub fn with_cell_beam(mut self, n: usize) -> Self {
+        self.cell_beam = Some(n);
         self
     }
 
@@ -748,9 +769,20 @@ impl LexicalIndex {
         // per leaf cell here; multi-token / composed cells are raised once each in the
         // CKY loop below. ENF (the `TypeRaised` provenance) keeps these inert outside
         // extraction — a raised functor may only compose, never apply.
+        // Lever B (per-cell beam, GH #97): drop-count accumulated across every beamed cell, logged
+        // once below. Leaf cells are beamed here (after type-raise), composed cells in the loop.
+        let mut beam_drops = 0usize;
         for (i, row) in chart.iter_mut().enumerate() {
             let raised = raise_nps(&row[i], &self.layer);
             row[i].extend(raised);
+            // A leaf cell is non-top iff the sentence has >1 token (else it is the full-span root,
+            // left to the forest cap). `sense_cap` already bounds it per-lemma; the beam caps it
+            // across all candidate lemmas/POS of the token.
+            if n > 1 {
+                if let Some(beam) = self.cell_beam {
+                    beam_drops += beam_cell(&mut row[i], beam);
+                }
+            }
         }
 
         // 2. CKY composition, appending combined items to each cell's seeds (so a
@@ -881,7 +913,21 @@ impl LexicalIndex {
                 // NP can also seed an extraction body. Raised once per cell.
                 let raised = raise_nps(&chart[i][j], &self.layer);
                 chart[i][j].extend(raised);
+                // Lever B: beam this composed cell (non-top; the top cell `len == n` is left to the
+                // forest cap). Done after type-raise so the raised items compete in the beam too.
+                if len < n {
+                    if let Some(beam) = self.cell_beam {
+                        beam_drops += beam_cell(&mut chart[i][j], beam);
+                    }
+                }
             }
+        }
+        if beam_drops > 0 {
+            eprintln!(
+                "dcg::parse: cell-beam (Lever B) dropped {beam_drops} items \
+                 (beam={})",
+                self.cell_beam.unwrap_or(0),
+            );
         }
 
         // 3. The forest: full-span `S` items whose assembled sem — once **NbE-
@@ -1238,6 +1284,22 @@ fn iri(s: &str) -> Iri {
 /// (most-frequent first). The leading `bool` puts `Some(ctx)` (`false`) ahead of unranked
 /// (`true`). With `ranks = None` every sense is unranked, collapsing to the pure-`sense_rank`
 /// order — the behaviour-identical static cap.
+/// Cap a CKY chart cell to its `beam` lowest-[`Cost`] items (Lever B — per-cell beam, GH #97),
+/// returning how many were dropped. A **stable** sort by `Cost` keeps the cheapest
+/// (most-frequent-sense / preferred-lexicon) derivations and preserves insertion order within a
+/// cost tie (so closed-class / cost-0 cells are order-preserved and deterministic). Inexact: a
+/// dropped constituent may have been the only route to a full parse — the beam/A* tradeoff, why the
+/// beam is opt-in.
+fn beam_cell(cell: &mut Vec<Item>, beam: usize) -> usize {
+    if cell.len() <= beam {
+        return 0;
+    }
+    let dropped = cell.len() - beam;
+    cell.sort_by_key(|it| it.cost);
+    cell.truncate(beam);
+    dropped
+}
+
 fn sense_cap_key(e: &SeedEntry, ranks: Option<&BTreeMap<String, u32>>) -> (bool, u32, u32) {
     let ctx = e
         .sense
