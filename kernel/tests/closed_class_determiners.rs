@@ -22,7 +22,8 @@ use std::sync::Arc;
 
 use eigenius_kernel::bootstrap;
 use eigenius_kernel::dcg::{
-    is_ctor, Candidate, Identity, LexicalIndex, ProposeCtx, Proposer, SenseRanker, WordSenses,
+    is_ctor, pretty_term, Candidate, Identity, LexicalIndex, ProposeCtx, Proposer, SenseRanker,
+    WordSenses,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -222,6 +223,96 @@ fn cell_beam_bounds_a_cell_and_is_a_noop_when_generous() {
         sem.contains("brca1"),
         "the surviving (cheaper, sr0) reading is the BRCA1 sense: {sem}"
     );
+}
+
+// ── D62 Phase 3 — transparent `-ly` adverbs ───────────────────────────
+#[test]
+fn transparent_ly_adverb_is_recognized_and_does_not_change_the_claim() {
+    // The `-ly` derivational rule recognizes an adverb when its adjective base is known to the
+    // lexicon (data-driven), seeds transparent modifier items, and the identity sem leaves the
+    // claim unchanged. Bases here are demo adjectives: `primarily`←`primary`, `largely`←`large`.
+    let (_layer, index) = index_over_bootstrap();
+
+    // Adjective modifier: "primarily" modifies the predicative adjective "primary".
+    let base_adj = index.parse("HeLa is primary", &Identity);
+    assert_eq!(base_adj.len(), 1, "baseline copular adjective parses once");
+    let mod_adj = index.parse("HeLa is primarily primary", &Identity);
+    assert!(!mod_adj.is_empty(), "the adverb-modified adjective parses");
+    assert_eq!(
+        pretty_term(&mod_adj[0].sem),
+        pretty_term(&base_adj[0].sem),
+        "the `-ly` adverb is transparent — same claim as unmodified"
+    );
+
+    // VP modifier (forward): "largely" modifies the VP "affects BRCA1".
+    let base_vp = index.parse("HeLa affects BRCA1", &Identity);
+    assert_eq!(base_vp.len(), 1, "baseline transitive clause parses once");
+    let mod_vp = index.parse("HeLa largely affects BRCA1", &Identity);
+    assert!(!mod_vp.is_empty(), "the adverb-modified VP parses");
+    assert_eq!(
+        pretty_term(&mod_vp[0].sem),
+        pretty_term(&base_vp[0].sem),
+        "the `-ly` VP adverb is transparent — same claim as unmodified"
+    );
+}
+
+#[test]
+fn ly_adverb_recognition_requires_a_known_adjective_base() {
+    // Data-driven gate: an `-ly` token whose base is NOT a known adjective is not an adverb, so the
+    // sentence has no parse (the unrecognized token leaves a gap) — confirms recognition isn't a
+    // blind `-ly` strip.
+    let (_layer, index) = index_over_bootstrap();
+    assert!(
+        index.parse("HeLa is zorply primary", &Identity).is_empty(),
+        "an `-ly` token with no adjective base does not seed an adverb"
+    );
+}
+
+// ── D62 connectives batch — plural demonstratives, prepositions, discourse adverbs ──
+#[test]
+fn connectives_batch_parses() {
+    let (_layer, index) = index_over_bootstrap();
+
+    // Plural demonstratives `these`/`those` (plural noun via PluralS; mirror `all`).
+    assert!(
+        !index.parse("these genes affect HeLa", &PluralS).is_empty(),
+        "`these` + plural noun + plural verb parses"
+    );
+    assert!(
+        !index.parse("those genes affect HeLa", &PluralS).is_empty(),
+        "`those` + plural noun + plural verb parses"
+    );
+
+    // Prepositions `between`/`within` (VP-adjunct, mirror `in`).
+    assert!(
+        !index
+            .parse("HeLa affects a cell line within HeLa", &Identity)
+            .is_empty(),
+        "`within` PP-adjunct parses"
+    );
+    assert!(
+        !index
+            .parse("HeLa affects a cell line between HeLa", &Identity)
+            .is_empty(),
+        "`between` PP-adjunct parses"
+    );
+
+    // Discourse adverbs `also`/`however`/`yet` — transparent (same claim as unmodified).
+    let base = index.parse("HeLa affects BRCA1", &Identity);
+    assert_eq!(base.len(), 1, "baseline parses once");
+    for sent in [
+        "HeLa also affects BRCA1",    // VP-medial modifier
+        "however HeLa affects BRCA1", // sentence-initial S/S
+        "HeLa affects BRCA1 yet",     // sentence-final S\S
+    ] {
+        let f = index.parse(sent, &Identity);
+        assert!(!f.is_empty(), "`{sent}` parses");
+        assert_eq!(
+            pretty_term(&f[0].sem),
+            pretty_term(&base[0].sem),
+            "discourse adverb is transparent (same claim): `{sent}`"
+        );
+    }
 }
 
 #[test]

@@ -850,6 +850,67 @@ resource lexicon:prep_from_sem : lexicon:SemTerm {
           : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
+// `between` / `within` (D62 connectives batch): opaque prepositional relations, mirroring `in` —
+// the VP-adjunct sem (`λx.λV.λs. And(V(s), prep(s,x))`) and the noun-modifier sem
+// (`λy.λx. prep(x,y)`); the two entries reuse `in`'s VP-adjunct and `cat_pp` categories.
+resource lexicon:prep_between_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            logic:And(V(s), ontology:prep_between(s, x))
+          : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:prep_within_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            logic:And(V(s), ontology:prep_within(s, x))
+          : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:nmod_between_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => ontology:prep_between(x, y)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:nmod_within_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => ontology:prep_within(x, y)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:between_prep : lexicon:LexicalEntry {
+    lexicon:form     = "between";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_between_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "between";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:within_prep : lexicon:LexicalEntry {
+    lexicon:form     = "within";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_within_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "within";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:between_nmod : lexicon:LexicalEntry {
+    lexicon:form     = "between";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_between_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "between";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:within_nmod : lexicon:LexicalEntry {
+    lexicon:form     = "within";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_within_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "within";
+    lexicon:grade    = epistemic:declared;
+}
 resource lexicon:in_prep : lexicon:LexicalEntry {
     lexicon:form     = "in";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
@@ -1177,5 +1238,40 @@ resource lexicon:that_dem_obj : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:obj_exists_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "that_dem";
+    lexicon:grade    = epistemic:declared;
+}
+
+// Plural demonstratives `these`/`those` (D62 connectives batch): the plural of `this`/`that`
+// — same existential treatment (`exists_sem`), plural number (mirrors `all`'s `pl` cat shape).
+resource lexicon:these_subj : lexicon:LexicalEntry {
+    lexicon:form     = "these";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "these";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:these_obj : lexicon:LexicalEntry {
+    lexicon:form     = "these";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "these";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:those_subj : lexicon:LexicalEntry {
+    lexicon:form     = "those";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "those";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:those_obj : lexicon:LexicalEntry {
+    lexicon:form     = "those";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "those";
     lexicon:grade    = epistemic:declared;
 }

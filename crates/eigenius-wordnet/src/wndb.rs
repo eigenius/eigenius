@@ -105,6 +105,20 @@ pub struct Synset {
     pub relational: bool,
 }
 
+/// Strip a WordNet **adjective syntactic marker** — `(a)` attributive, `(p)` predicative,
+/// `(ip)` immediately-postnominal — from a `data.adj` lemma. The marker records the adjective's
+/// syntactic *position*, not its lemma, so `respective(a)` is the lemma `respective`; leaving it on
+/// pollutes the emitted `lexicon:form`/`sense` and breaks lookup. Markers occur only in `data.adj`;
+/// other POS lemmas never carry a trailing `(a)`/`(p)`/`(ip)`, so this is a no-op there.
+fn strip_adj_marker(word: &str) -> String {
+    for marker in ["(a)", "(ip)", "(p)"] {
+        if let Some(stripped) = word.strip_suffix(marker) {
+            return stripped.to_string();
+        }
+    }
+    word.to_string()
+}
+
 /// Parse one `data.<pos>` line, or `None` for the license preamble (which begins
 /// with two spaces, not an 8-digit offset).
 pub fn parse_data_line(line: &str) -> Option<Synset> {
@@ -125,7 +139,7 @@ pub fn parse_data_line(line: &str) -> Option<Synset> {
     let mut i = 4;
     let mut words = Vec::with_capacity(w_cnt);
     for _ in 0..w_cnt {
-        words.push(tok.get(i)?.replace('_', " "));
+        words.push(strip_adj_marker(&tok.get(i)?.replace('_', " ")));
         i += 2; // skip the lex_id following each word
     }
 
@@ -196,6 +210,29 @@ mod tests {
     // the `+` is a derivational pointer, not a hypernym.
     const EINSTEIN_N: &str = "10954498 18 n 02 Einstein 0 Albert_Einstein 0 002 @i 10428004 n 0000 + 03031247 a 0301 | physicist born in Germany who formulated the theory of relativity (1879-1955)  ";
     const PREAMBLE: &str = "  1 This software and database is being provided to you  ";
+
+    // Real adjective satellite: `respective(a)` / `several(a)` / `various(a)` — each carries the
+    // attributive `(a)` syntactic marker, which is NOT part of the lemma.
+    const RESPECTIVE_A: &str =
+        "00494409 00 s 03 respective(a) 0 several(a) 0 various(a) 0 001 & 00493460 a 0000 | ";
+
+    #[test]
+    fn adjective_syntactic_markers_are_stripped_from_lemmas() {
+        let s = parse_data_line(RESPECTIVE_A).unwrap();
+        assert_eq!(s.pos, Pos::Adj);
+        // (a) attributive markers stripped → clean lemmas usable as `lexicon:form`.
+        assert_eq!(s.words, ["respective", "several", "various"]);
+    }
+
+    #[test]
+    fn strip_adj_marker_handles_each_position_marker_and_leaves_others() {
+        assert_eq!(strip_adj_marker("respective(a)"), "respective");
+        assert_eq!(strip_adj_marker("asleep(p)"), "asleep");
+        assert_eq!(strip_adj_marker("elect(ip)"), "elect");
+        // No marker / other POS lemmas are untouched (no trailing (a)/(p)/(ip)).
+        assert_eq!(strip_adj_marker("common"), "common");
+        assert_eq!(strip_adj_marker("gene"), "gene");
+    }
 
     #[test]
     fn noun_root_has_no_hypernym() {

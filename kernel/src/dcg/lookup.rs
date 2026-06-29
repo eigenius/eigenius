@@ -48,8 +48,8 @@ use crate::ontology::resource::Value;
 use crate::ontology::Iri;
 
 use super::category::{
-    cats_coordinate, coordinate_np, coordinate_sem, denote_cat, is_ctor, reciprocate, relativize,
-    type_raise,
+    adverb_modifier_cats, cats_coordinate, coordinate_np, coordinate_sem, denote_cat, is_ctor,
+    reciprocate, relativize, sentence_modifier_cats, type_raise,
 };
 use super::lemmatizer::{Lemmatizer, Pos};
 use super::lexicon::entry_to_item;
@@ -436,7 +436,9 @@ impl LexicalIndex {
                 }
             }
         }
-        false
+        // A productive `-ly` adverb whose adjective base is known, or a lexicalized discourse
+        // adverb, is parseable (D62 Phase 3) — *known*, not a missing lexeme.
+        self.is_derived_adverb(&s_lc) || is_lexicalized_adverb(&s_lc)
     }
 
     /// Apply the per-parse lexicon **scope** (D65 §4) to one form's resolved
@@ -535,6 +537,53 @@ impl LexicalIndex {
             .collect();
         out.extend(kinds);
         out
+    }
+
+    /// Transparent `-ly` **adverb** items (D62 Phase 3 — `docs/notes/d62-adverb-semantics-decision.md`).
+    /// If `surface` is a single `-ly` form whose adjective base is **known to the lexicon**
+    /// (data-driven probe — no hardcoded adverb list; WordNet doesn't store productive `-ly`
+    /// adverbs), seed identity-sem modifier items at the WRN attachment categories
+    /// ([`adverb_modifier_cats`]). The adverb composes and contributes nothing to the claim `Prop`
+    /// — the science-transparent default; the measurement subset's obligation semantics is a later
+    /// arm. Empty when the surface isn't an `-ly` form, no adjective base resolves, or the `Cat`
+    /// inductives are unavailable.
+    /// Whether `surface` is a productive `-ly` adverb whose adjective base is **known to the
+    /// lexicon** (the data-driven recognition gate, D62 Phase 3). Shared by [`Self::adverb_items`]
+    /// (seeding) and [`Self::has_token`] (the missing-lexeme diagnostic), so a derived adverb counts
+    /// as *known* — not routed to lexical recovery.
+    fn is_derived_adverb(&self, surface: &str) -> bool {
+        let s = surface.trim().to_lowercase();
+        adverb_bases(&s).iter().any(|b| {
+            self.entries_for(b)
+                .iter()
+                .any(|e| is_adjective_cat(&e.item.cat))
+        })
+    }
+
+    fn adverb_items(&self, surface: &str) -> Vec<Item> {
+        let s = surface.trim().to_lowercase();
+        let lexicalized = is_lexicalized_adverb(&s);
+        if !lexicalized && !self.is_derived_adverb(&s) {
+            return Vec::new();
+        }
+        // Manner positions (adjective + VP modifier) for every transparent adverb; discourse
+        // adverbs (`also`/`however`/`yet`) ALSO attach at the clause level (`S/S`, `S\S`).
+        let mut cats = adverb_modifier_cats(&self.layer).unwrap_or_default();
+        if lexicalized {
+            cats.extend(sentence_modifier_cats(&self.layer).unwrap_or_default());
+        }
+        if cats.is_empty() {
+            return Vec::new();
+        }
+        // Identity sem `λx. x`: forward/backward application leaves the modified phrase's sem
+        // unchanged (β-reduces away at felicity), so the claim `Prop` is exactly the unmodified one.
+        let ident = Exp::Lam(
+            Patt::Var("__adv_x".to_string()),
+            Box::new(Exp::Var("__adv_x".to_string())),
+        );
+        cats.into_iter()
+            .map(|cat| Item::new(cat, ident.clone()))
+            .collect()
     }
 
     /// Parse prose into the forest of typed sentence parses: every full-span `S`
@@ -759,6 +808,14 @@ impl LexicalIndex {
                     // The freshened var rides through CKY and is typed (`Entity`) at felicity.
                     it.sem = freshen_anaphor(&it.sem, &hole_base(i, j));
                     chart[i][j].push(it);
+                }
+                // Derived `-ly` adverbs (D62 Phase 3): transparent modifier items for a single
+                // `-ly` token whose adjective base is known. Single-token spans only (adverbs are
+                // one word); the identity sem carries no holes, so no freshening.
+                if i == j {
+                    for it in self.adverb_items(&surface) {
+                        chart[i][j].push(it);
+                    }
                 }
             }
         }
@@ -1277,6 +1334,55 @@ enum FelicitousOutcome {
 
 fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("valid lexicon iri")
+}
+
+/// Candidate adjective bases for a productive `-ly` adverb (D62 Phase 3 derivational rule).
+/// Orthographic reverse-derivation; each candidate is probed against the lexicon (data-driven — no
+/// hardcoded adverb list), so over-generated noise (a non-word base) simply fails the probe.
+fn adverb_bases(surface: &str) -> Vec<String> {
+    // Non-adverb `-ly` tokens: chemistry/maths fragments mis-split by S0 (`poly(ADP-ribose)` →
+    // `poly`) that happen to end in `-ly` but are never adverbs. An explicit exception so they are
+    // not derived even if a base accidentally resolves.
+    const NON_ADVERB_LY: &[&str] = &["poly"];
+    if surface.len() < 4 || !surface.ends_with("ly") || NON_ADVERB_LY.contains(&surface) {
+        return Vec::new();
+    }
+    let stem = &surface[..surface.len() - 2]; // strip "ly": commonly→common, selectively→selective
+    let mut bases = vec![stem.to_string(), format!("{stem}le")]; // stem+le: simply→simple
+    if let Some(p) = surface.strip_suffix("ily") {
+        bases.push(format!("{p}y")); // -ily→-y: easily→easy
+    }
+    if let Some(p) = surface.strip_suffix("bly") {
+        bases.push(format!("{p}ble")); // -bly→-ble: favourably→favourable
+    }
+    match surface {
+        "truly" => bases.push("true".to_string()),
+        "fully" => bases.push("full".to_string()),
+        "wholly" => bases.push("whole".to_string()),
+        _ => {}
+    }
+    bases.sort();
+    bases.dedup();
+    bases
+}
+
+/// Lexicalized (non-`-ly`) transparent **discourse adverbs** (D62 connectives batch): closed-class
+/// adverbs that don't derive from an adjective but are inert for a scientific claim, so they get the
+/// same transparent treatment as `-ly` adverbs (plus clause-level `S/S`/`S\S` attachment).
+fn is_lexicalized_adverb(surface: &str) -> bool {
+    const LEXICALIZED_ADVERBS: &[&str] = &["also", "however", "yet"];
+    LEXICALIZED_ADVERBS.contains(&surface)
+}
+
+/// Whether a category is a **predicative adjective** `S[adj]\NP` — `bwd(cat_s(_, adj), _)`. Used to
+/// confirm a derived `-ly` adverb's base is a known adjective (D62 Phase 3).
+fn is_adjective_cat(cat: &Exp) -> bool {
+    if let Some([s, _np]) = is_ctor(cat, "bwd") {
+        if let Some([_mood, fin]) = is_ctor(s, "cat_s") {
+            return matches!(fin, Exp::InductiveCtor(_, n, _) if n == "adj");
+        }
+    }
+    false
 }
 
 /// The sort key the per-lemma sense cap (D63 §8.7 / GH #97) truncates by: contextually-ranked

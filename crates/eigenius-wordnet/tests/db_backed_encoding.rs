@@ -42,7 +42,7 @@ use std::sync::Arc;
 
 use eigenius_kernel::bootstrap::bootstrap_persistent;
 use eigenius_kernel::dcg::{
-    is_nonprose, segment_sentences, tokenize, Identity, Item, Lemmatizer, LexicalIndex,
+    is_nonprose, segment_sentences, tokenize, Identity, Lemmatizer, LexicalIndex,
 };
 use eigenius_kernel::layer::{resolve_active_value_indexes, Layer};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -170,6 +170,11 @@ enum Outcome {
         unknown: Vec<String>,
     },
     GrammarGap,
+    /// All tokens known; no CLOSED parse but a felicitous OPEN parse (referent holes — `we`/`its`/
+    /// pronouns, D64). NOT a grammar gap — it parses, awaiting reference resolution.
+    Open {
+        holes: usize,
+    },
     /// All tokens known, but the unit exceeds [`PARSE_BUDGET`] — parse skipped (would OOM the
     /// beam-less chart over the full lexicon). A *parsing-scale* gap, distinct from a vocab gap.
     ScaleBound {
@@ -210,16 +215,26 @@ fn encode_unit(
     if toks.len() > PARSE_BUDGET {
         return Outcome::ScaleBound { ntok: toks.len() };
     }
-    // Parse to distinguish the fully-known outcomes.
-    let forest: Vec<Item> = index.parse_scoped(text, lem, None);
-    match forest.len() {
-        0 => Outcome::GrammarGap,
+    // Parse to distinguish the fully-known outcomes. Use the open-parse carrier so a unit that only
+    // yields an OPEN parse (referent holes from `we`/`its`/pronouns, D64) is NOT misfiled as a
+    // grammar gap — it parses, awaiting reference resolution.
+    let (closed, open) = index.parse_open(text, lem);
+    match closed.len() {
+        0 => {
+            if open.is_empty() {
+                Outcome::GrammarGap
+            } else {
+                Outcome::Open {
+                    holes: open.iter().map(|o| o.holes.len()).max().unwrap_or(0),
+                }
+            }
+        }
         1 => Outcome::Encoded {
-            is_prop: gates_to_prop(layer, &forest[0].sem),
+            is_prop: gates_to_prop(layer, &closed[0].sem),
         },
         n => Outcome::Ambiguous {
             count: n,
-            is_prop: gates_to_prop(layer, &forest[0].sem),
+            is_prop: gates_to_prop(layer, &closed[0].sem),
         },
     }
 }
@@ -319,12 +334,13 @@ fn tag(o: &Outcome) -> &'static str {
         Outcome::Ambiguous { .. } => "AMBIG",
         Outcome::MissingLexeme { .. } => "MISSING",
         Outcome::GrammarGap => "GRAMMAR-GAP",
+        Outcome::Open { .. } => "OPEN",
         Outcome::ScaleBound { .. } => "SCALE-BOUND",
     }
 }
 
 fn summarize(report: &[UnitReport]) {
-    let (mut enc, mut amb, mut miss, mut gap, mut scale) = (0, 0, 0, 0, 0);
+    let (mut enc, mut amb, mut miss, mut gap, mut scale, mut open) = (0, 0, 0, 0, 0, 0);
     let mut oov: BTreeSet<String> = BTreeSet::new();
     for u in report {
         match &u.outcome {
@@ -334,7 +350,17 @@ fn summarize(report: &[UnitReport]) {
                 miss += 1;
                 oov.extend(unknown.iter().cloned());
             }
-            Outcome::GrammarGap => gap += 1,
+            Outcome::Open { holes } => {
+                open += 1;
+                eprintln!(
+                    "  open (referent holes={holes}, awaiting resolution): {:?}",
+                    u.text
+                );
+            }
+            Outcome::GrammarGap => {
+                gap += 1;
+                eprintln!("  grammar-gap (all known, no parse): {:?}", u.text);
+            }
             Outcome::ScaleBound { ntok } => {
                 scale += 1;
                 eprintln!("  scale-bound (known, {ntok} tok): {:?}", u.text);
@@ -343,7 +369,8 @@ fn summarize(report: &[UnitReport]) {
     }
     eprintln!(
         "\n=== WRN first page over FULL lexicon: {} units → encoded {enc}, ambiguous {amb}, \
-         missing-lexeme {miss}, grammar-gap {gap}, scale-bound (known, >{PARSE_BUDGET} tok) {scale} ===",
+         open {open}, missing-lexeme {miss}, grammar-gap {gap}, \
+         scale-bound (known, >{PARSE_BUDGET} tok) {scale} ===",
         report.len()
     );
     eprintln!("distinct OOV tokens ({}): {oov:?}", oov.len());

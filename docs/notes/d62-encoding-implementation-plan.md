@@ -8,6 +8,10 @@ vocabulary (the three lexica already cover ~all content words) and not disambigu
 the cleaned WRN first page** via the prototype ratchet (Phase 0). Spans D63 (grammar +
 lexicon) and D62 (driver).*
 
+> **Output contract** — what the pipeline returns (graded propositions + typed obligations) and
+> how the wrapping institution is shaped to it: `docs/notes/d62-encoding-output-contract.md`.
+> Adverb semantics decision: `docs/notes/d62-adverb-semantics-decision.md`.
+
 ## The ratchet — how every phase is measured
 
 **Phase 0 — make the prototype a standing benchmark.** Promote
@@ -106,25 +110,36 @@ core — sequence it carefully and watch forest size.
 
 ---
 
-## Phase 3 — productive `-ly` adverb derivation (not import)
+## Phase 3 — productive `-ly` adverbs: recognize, then transparent / justification-route
 
-**Goal.** Resolve the productive `-ly` adverbs (`commonly, selectively, respectively, …`)
-that WordNet does **not** store (its adverb file is tiny/lexicalized) and Morphy (inflectional)
-won't derive.
+**Semantics decided in `docs/notes/d62-adverb-semantics-decision.md`** (read it first). For science,
+adverbs are mostly **not load-bearing** → handled **transparently**; the load-bearing minority is
+**measurement/quantification-associated** → routed to **justification logic** (not Davidsonian
+manner-on-event, which is decoupled and deferred). The fresh-DB run confirmed `-ly` adverbs are OOV
+**even over full WordNet** (`has_token("commonly") = false`), so recognition needs derivation.
 
-**Build:** a lookup-time **derivational `-ly` rule** in `kernel/src/dcg/lookup.rs` (a sibling
-to Morphy, kept separate from the inflectional port): a `-ly` surface not found is
-reverse-derived to its adjective base via orthographic rules (`-ily→-y`, `-ly→-le`,
-`-ally→-ic/-al`, `truly→true`, `fully→full`, else strip), and if the adjective exists, emit an
-**adverb-categorized** item. Category from `adv.xsl`: default VP/manner modifier
-(`(s\np)\(s\np)`), with sentential adverbs (`correspondingly`, `however`) special-cased
-(`s/s`/`s\s`). Optionally import WordNet's small lexicalized adverb set (`hardly/mostly/really`)
-separately.
+**Build (two parts):**
+1. **Recognize** — a lookup-time **derivational `-ly` rule** in `kernel/src/dcg/lookup.rs` (a sibling
+   to Morphy, kept separate from the inflectional port): a `-ly` surface not found is reverse-derived
+   to its adjective base (`-ily→-y`, `-ly→-le`, `-ally→-ic/-al`, `truly→true`, `fully→full`, else
+   strip); if the adjective exists, emit an **adverb-categorized** item (category from `adv.xsl`:
+   manner `(s\np)\(s\np)`, sentential `s/s`/`s\s`, transitional with comma).
+2. **Route the sem** — a curated **inert-vs-measurement classification**: inert bulk (`commonly,
+   typically, respectively, …`) → **identity** sem (`λV.V`, transparent, recorded cut); measurement
+   subset (`selectively, preferentially, significantly, highly, …`) → the **WRN measure+evidence
+   pattern** (decision note §4a): a differential/graded **domain predicate** over a contrast + a
+   **measurement obligation** (Declared, discharged to Derived/Verified by a
+   `stats:StatisticalAnalysisResult`) carried in a **justification-logic certificate** — reusing the
+   D64 `ProofObligation` carrier, not an opaque adverb operator. Optionally import WordNet's small
+   lexicalized adverb set separately.
 
-**Verify (ratchet):** the `-ly` adverbs leave the OOV list; adverb-modified clauses parse.
+**Verify (ratchet):** the `-ly` adverbs leave the OOV list; inert-modified clauses parse to the same
+claim as unmodified; a measurement adverb attaches a graded qualifier.
 
-**Deps:** Phase 2 (need adjectives + a clause to modify). **Risk:** medium (category
-assignment for sentential vs manner).
+**Deps:** Phase 2 (adjectives + a clause to modify); the justification-logic surface for part 2's
+measurement encoding (may be a follow-on slice). **Risk:** low for transparent recognition; medium
+for the justification encoding + the inert/measurement boundary. **Not a dep:** event semantics /
+`schema:Action` reification — deferred per the decision note (revisit for *verb* reification only).
 
 ---
 

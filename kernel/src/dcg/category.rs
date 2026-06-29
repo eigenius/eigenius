@@ -314,6 +314,74 @@ fn resolve_inductive(layer: &Arc<Layer>, iri_str: &str) -> Option<Arc<InductiveD
     }
 }
 
+/// The transparent **adverb modifier** categories (D62 Phase 3 — `docs/notes/d62-adverb-semantics-decision.md`).
+/// A productive `-ly` adverb seeds these, each with an identity sem, so the clause composes and the
+/// adverb contributes nothing to the claim `Prop` (the science-transparent default; the
+/// measurement subset's obligation semantics is a later arm). Grounded in the WRN attachment
+/// positions:
+/// 1. **adjective modifier** `(S[adj]\NP)/(S[adj]\NP)` — "selectively essential", "highly concordant";
+/// 2. **VP modifier, forward** `(S\NP)/(S\NP)` — "commonly affects …";
+/// 3. **VP modifier, backward** `(S\NP)\(S\NP)` — "arrest selectively".
+///
+/// The VP modifier fixes the clause feature to `fin` (so it matches a *verbal* clause but not an
+/// `adj` clause — keeping it disjoint from the adjective modifier, no spurious duplicate parses) and
+/// keeps the subject **number** a free variable, so agreement flows through the modifier unchanged.
+/// The adjective modifier is fixed (`adj`, `num_any`), since predicative adjectives are uniform.
+/// `None` if the `lexicon:Cat`/`Mood`/`Fin`/`Num` inductives don't resolve.
+pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
+    let cat = resolve_inductive(layer, "urn:eigenius:lexicon:Cat")?;
+    let mood = resolve_inductive(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin = resolve_inductive(layer, "urn:eigenius:lexicon:Fin")?;
+    let num = resolve_inductive(layer, "urn:eigenius:lexicon:Num")?;
+    let entity = Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:Entity").ok()?);
+    let dcl = Exp::InductiveCtor(mood, "dcl".to_string(), vec![]);
+    let ctor = |n: &str, args: Vec<Exp>| Exp::InductiveCtor(cat.clone(), n.to_string(), args);
+
+    // 1. Adjective modifier — fixed `adj` / `num_any` (predicative adjectives are uniform).
+    let adj = Exp::InductiveCtor(fin.clone(), "adj".to_string(), vec![]);
+    let num_any = Exp::InductiveCtor(num.clone(), "num_any".to_string(), vec![]);
+    let adjp = ctor(
+        "bwd",
+        vec![
+            ctor("cat_s", vec![dcl.clone(), adj]),
+            ctor("cat_np", vec![entity.clone(), num_any]),
+        ],
+    );
+    let adj_mod = ctor("fwd", vec![adjp.clone(), adjp]);
+
+    // 2/3. VP modifier — fixed `fin` clause (verbal, disjoint from `adj`), free subject number.
+    let fin_c = Exp::InductiveCtor(fin, "fin".to_string(), vec![]);
+    let nvar = Exp::Var("__adv_num".to_string());
+    let vp = ctor(
+        "bwd",
+        vec![
+            ctor("cat_s", vec![dcl, fin_c]),
+            ctor("cat_np", vec![entity, nvar]),
+        ],
+    );
+    let vp_mod_fwd = ctor("fwd", vec![vp.clone(), vp.clone()]);
+    let vp_mod_bwd = ctor("bwd", vec![vp.clone(), vp]);
+
+    Some(vec![adj_mod, vp_mod_fwd, vp_mod_bwd])
+}
+
+/// The transparent **sentence modifier** categories `S/S` and `S\S` (D62 Phase 3) — for
+/// *discourse* adverbs (`also`, `however`, `yet`) that attach at the clause level
+/// (sentence-initial / sentence-final), as in `adv.xsl`'s `Adverb` Initial/Backward entries. The
+/// clause feature is `fin_any` so they wrap any finite declarative. Identity sem (transparent).
+/// Used in addition to [`adverb_modifier_cats`] for lexicalized discourse adverbs.
+pub fn sentence_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
+    let cat = resolve_inductive(layer, "urn:eigenius:lexicon:Cat")?;
+    let mood = resolve_inductive(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin = resolve_inductive(layer, "urn:eigenius:lexicon:Fin")?;
+    let dcl = Exp::InductiveCtor(mood, "dcl".to_string(), vec![]);
+    let fin_any = Exp::InductiveCtor(fin, "fin_any".to_string(), vec![]);
+    let s = Exp::InductiveCtor(cat.clone(), "cat_s".to_string(), vec![dcl, fin_any]);
+    let fwd = Exp::InductiveCtor(cat.clone(), "fwd".to_string(), vec![s.clone(), s.clone()]);
+    let bwd = Exp::InductiveCtor(cat, "bwd".to_string(), vec![s.clone(), s]);
+    Some(vec![fwd, bwd])
+}
+
 /// A denotation is **conjoinable** iff it ends in `Prop` after peeling arrows
 /// (`Prop`, `A→Prop`, `A→B→Prop`, …) — the Partee & Rooth conjoinable types.
 fn prop_ending(d: &Exp) -> bool {

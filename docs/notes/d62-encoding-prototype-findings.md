@@ -163,7 +163,13 @@ grammar-gap, 0 scale-bound.** OOV = 51 distinct, mean 3.2/unit.
   The "grammar gaps appear once parsing scale is unblocked" prediction is confirmed.
 - **OOV buckets:** domain-lexicon 24 · connectives/function-words 15 · -ly adverbs 12 · stat 0.
   The **-ly adverbs remain OOV even over full WordNet** (`has_token("commonly") = false`) — a real
-  coverage gap (derivational `-ly`, P3), not "inject more lexicon". The **domain-lexicon 24** is
+  coverage gap (derivational `-ly`, P3), not "inject more lexicon". *(Update: Phase 3 part 1 — the
+  transparent `-ly` recognizer (`docs/notes/d62-adverb-semantics-decision.md`) — landed and cut this
+  bucket **12 → 2**: `has_token("commonly")=true`, 10 adverbs now parse transparently;
+  grammar-gaps 2 → 3 as the cleared OOV surfaced more structure. The 2 left are `poly` (not an
+  adverb — a `poly(ADP-ribose)` fragment, correctly rejected) and `respectively` (base `respective`
+  is a relational adjective emitted with a non-predicative cat — a follow-on to broaden base
+  detection).)* The **domain-lexicon 24** is
   higher than the prior run's because this store used the UMLS **subset** (8 TUIs); terms like
   `microsatellite/biomarker/germline/crispr` fall under TUIs outside the subset — rerun with
   `reseed-lexicon-db.sh --umls-all` for full domain coverage.
@@ -172,6 +178,33 @@ grammar-gap, 0 scale-bound.** OOV = 51 distinct, mean 3.2/unit.
   didn't declare (base 30 vs concepts referencing 125) → fail-closed chunk rejection. A fresh
   release build is consistent (base == referenced); the reseed script force-builds release binaries
   and adds a pre-load dangling-STY guard.
+
+### Full-UMLS + closed-class/adverb batch — the limiter shifts to GRAMMAR (2026-06-28)
+
+Reseeded with **WordNet --all + UMLS --all** (full domain coverage) against a HEAD bootstrap carrying
+the closed-class/adverb batch (plural demonstratives `these`/`those`; prepositions `between`/`within`;
+transparent discourse adverbs `also`/`however`/`yet`; transparent `-ly` adverbs; the adjective
+syntactic-marker importer fix). **26 units → 0 encoded, 14 missing-lexeme, 12 grammar-gap, 0
+scale-bound.** OOV = **15 distinct, mean 1.4/unit, 9 units one-OOV-away**.
+
+Deltas vs the prior (subset, pre-batch) run: missing-lexeme 24→14; **grammar-gap 3→12**; OOV 51→15;
+mean 3.2→1.4; -ly adverbs 12→**0**; connectives 15→**2**; domain 24→13.
+
+**The headline: vocabulary is no longer the dominant blocker — grammar coverage is.** Nearly half the
+page is now *fully known* yet yields no felicitous parse (grammar-gap), confirming the long-standing
+prediction that grammar gaps surface only once the vocab buckets are filled. The remaining buckets are
+sharply diagnostic:
+- **connectives = 2 = exactly `because` + `although`** — the deferred **factive subordinators (the
+  D64 `ProofObligation` arm)**; everything else in the batch cleared.
+- **domain = 13, now dominated by hyphenated compounds** (`cas9-mediated`, `double-stranded`,
+  `genome-scale`, `next-generation`, `pcr-based`, `msi-predominant`, `rank-sum`) + a few true OOV
+  (`recq`, `wilcoxon`, `cas9`, `hypermutable/hypermutations`, `datasets`). The domain tail is now an
+  **S0 compound-tokenization** problem, not a lexicon-coverage one.
+- **-ly = 0** (importer marker fix + transparent adverb handling).
+
+Critical path to actual WRN encodes is now: (1) **grammar coverage** of the 12 known-but-unparsed
+units; (2) **S0 hyphenated-compound** tokenization; (3) the **factive subordinator** arm for
+`because`/`although`.
 
 ## Finding 3 — the three lexica cover the content vocabulary (vocabulary is not the blocker)
 
