@@ -938,16 +938,20 @@ impl LexicalIndex {
                         }
                     }
                 }
-                // Relative clause (D63 §8.9 Slice 6-rel): `[noun] that [body]` → a
-                // **refined noun** `cat_n(Σx:C. body(x))`. `that` is a reserved
-                // relativizer (like `and`/`or`, `each other`); the body is a
+                // Relative clause (D63 §8.9 Slice 6-rel): `[noun] that/which [body]` → a
+                // **refined noun** `cat_n(Σx:C. body(x))`. `that`/`which` are reserved
+                // relativizers (like `and`/`or`, `each other`); the body is a
                 // subject-relative VP `S\NP` ("that affects HeLa") or an object-relative
                 // `S/NP` ("that HeLa affects", built by `T` + forward `B`). Both have
                 // sem `body : X → Prop`, so a single rule Σ-refines the noun over the
                 // concrete `C` (reusing 3b). The noun spans `[i, c-1]`, the body
                 // `[c+1, j]`. The refined noun then rides 3b's determiner+`Fst` rule.
+                // `which` covers the restrictive `which`-relative; the non-restrictive
+                // (comma) reading collapses to the same refinement here (the comma is S0-
+                // stripped — the contrast is semantic, deferred). A sentence-initial
+                // wh-`which` never matches (no noun spans `[i, c-1]`).
                 for c in (i + 1)..j {
-                    if tokens[c] != "that" {
+                    if !matches!(tokens[c].as_str(), "that" | "which") {
                         continue;
                     }
                     let nouns = &chart[i][c - 1];

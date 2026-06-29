@@ -1858,6 +1858,23 @@ fn subject_relative_clause_parses() {
 }
 
 #[test]
+fn which_relative_clause_parses() {
+    // D62 grammar-gap batch: `which` is a relativizer too (restrictive; the non-restrictive comma
+    // reading collapses here — the comma is S0-stripped, the contrast is semantic/deferred).
+    assert_parses_to_prop("every cell line which affects HeLa is primary");
+    let (_layer, index) = index_over_bootstrap();
+    let forest = index.parse("every cell line which affects HeLa is primary", &Identity);
+    assert_eq!(forest.len(), 1, "exactly one which-relative parse");
+    // A sentence-initial wh-`which` must NOT be captured by the relativizer (no noun precedes).
+    assert!(
+        !index
+            .parse("which cell line affects HeLa", &Identity)
+            .is_empty(),
+        "sentence-initial wh-which still parses (unaffected by the relativizer extension)"
+    );
+}
+
+#[test]
 fn object_relative_clause_parses() {
     // "every cell line that HeLa affects is primary": the object relative body "HeLa
     // affects" has an object gap — built by type-raising HeLa (NP → S/(S\NP)) then

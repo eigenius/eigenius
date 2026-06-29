@@ -64,6 +64,34 @@ Two axes: **recurrence** (unblocks many) and **nearest-unit** (unblocks a specif
 **Then:** non-restrictive/pied-piping relatives (#2), fronted participials (#5), long passives (#7),
 and finally stress-test deep NP stacking (#9). And the S0 abbreviation-merge for unit 10.
 
+## 3a. Structural correction — half of these are S0-gated, not grammar (Derived)
+
+`tokenize` **strips all structural punctuation** (`tokenize("p53, (BRCA1)") → ["p53","brca1"]` — commas,
+parens, em-dashes gone). So the markers that *signal* several constructions are invisible to the parser:
+
+- **Apposition (#1)** — the parenthetical `(MSI)` / em-dash / comma-appositive *is* the only signal;
+  stripped, `microsatellite instability (MSI)` is three adjacent NPs. **Cannot be a grammar rule until
+  S0 preserves the markers.**
+- **Multi-item lists (#3)** — without the commas, `X, Y, Z and W` → `X Y Z and W`, which the binary
+  `and` rule can't join. **S0-gated.**
+
+The rest are **word-driven, not punctuation-gated**: relatives (#2 — teach the relativizer `which` /
+`in which`; the comma is only semantic), predicate nominals (#6), numerals (#4), passive (#7),
+`but not X` (#8). So the campaign is two tracks:
+
+- **Track A — S0 punctuation foundation, then marker-keyed constructions** (apposition, lists,
+  comma-boundary adjuncts). Reference design: core-en treats **punctuation as typed lexical tokens** —
+  a `Comma` family (`pos=","`, `punct.xsl:153`) with **List-Comma** (`comma.conj.np`, builds a list)
+  and **Appositive-Comma** (`comma.vp.ng`) entries. Our analogue: preserve `,`/`(`/`)`/`—`/`;` in S0
+  and make them **parser-reserved words** with list / apposition rules (mirroring how `and`/`or` are
+  reserved). Parser-side → measurable via `cargo test`, no reseed.
+- **Track B — word-driven constructions**: relatives (`which`/pied-piping), predicate nominals,
+  numerals, passive, `but not X`. Parser-code parts re-measure with no reseed; the bootstrap parts
+  (numerals, copula, `but`) batch into **one** reseed.
+
+Per-construction validation = synthetic **unit tests** (as for the adverb slice); full-WRN re-measures
+are the milestone view (a long unit flips only once its *whole* construction set lands).
+
 ## 4. Note on method / next step
 
 This is the *map*, not the *fix*. The honest next step before building is to **chart-instrument** one
