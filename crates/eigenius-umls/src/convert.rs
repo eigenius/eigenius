@@ -106,12 +106,22 @@ fn push_semantic_type(buf: &mut String, tui: &str, name: &str) {
     ));
 }
 
-/// Emit one concept class (`umlscui:<CUI> : <TUI classes>`) — the mirror.
-fn push_concept(buf: &mut String, cui: &str, tuis: &[String], desc: &str) {
+/// Emit one concept's chain node. A **concept class** (`class umlscui:<CUI> : <TUI classes>`) by
+/// default; a **named individual** (`is_individual`, D62 — `docs/notes/d62-named-individual-typing.md`)
+/// is instead an **instance** (`resource umlscui:<CUI> : <TUI classes>`) of its semantic-type
+/// class(es), so a `cat_np` entry can name it.
+fn push_concept(buf: &mut String, cui: &str, tuis: &[String], desc: &str, is_individual: bool) {
     let parents: Vec<String> = tuis.iter().map(|t| format!("umlssty:{t}")).collect();
+    // A `class` body takes the bare `description` class-item keyword; a `resource` (instance) body
+    // takes the qualified `core:description` property.
+    let (keyword, desc_prop) = if is_individual {
+        ("resource", "core:description")
+    } else {
+        ("class", "description")
+    };
     buf.push_str(&format!(
-        "class umlscui:{cui} : {} {{\n\
-         \x20   description = \"{}\";\n\
+        "{keyword} umlscui:{cui} : {} {{\n\
+         \x20   {desc_prop} = \"{}\";\n\
          }}\n\n",
         parents.join(", "),
         esc(desc),
@@ -131,15 +141,35 @@ fn concept_description(
     }
 }
 
-/// Emit the derived common-noun N entries for one concept — one per surface form.
-fn push_entries(buf: &mut String, cui: &str, forms: &[String], rep: &mut Report) {
+/// Emit the derived lexical entries for one concept — one per surface form. A **concept class**
+/// yields **common-noun** `cat_n(umlscui:CUI)` entries (`sem_type = Set`). A **named individual**
+/// (`named_tui = Some(primary TUI)`, D62) yields **proper-noun** `cat_np(umlssty:TUI, sg)` entries
+/// whose `sem` is the instance `umlscui:CUI` (every form is a name of the individual). The proper-noun
+/// typing is what makes a gene symbol work as both a bare NP and a prenominal modifier.
+fn push_entries(
+    buf: &mut String,
+    cui: &str,
+    forms: &[String],
+    named_tui: Option<&str>,
+    rep: &mut Report,
+) {
+    let (cat, sem_type) = match named_tui {
+        Some(tui) => (
+            format!("lexicon:cat_np(umlssty:{tui}, lexicon:sg)"),
+            format!("umlssty:{tui}"),
+        ),
+        None => (
+            format!("lexicon:cat_n(umlscui:{cui}, lexicon:num_any)"),
+            "Set".to_string(),
+        ),
+    };
     for (i, form) in forms.iter().enumerate() {
         buf.push_str(&format!(
             "resource umlscui:e_{cui}_{i} : lexicon:LexicalEntry {{\n\
              \x20   lexicon:form       = \"{form}\";\n\
-             \x20   lexicon:cat        = type_expr( lexicon:cat_n(umlscui:{cui}, lexicon:num_any) );\n\
+             \x20   lexicon:cat        = type_expr( {cat} );\n\
              \x20   lexicon:sem        = umlscui:{cui};\n\
-             \x20   lexicon:sem_type   = type_expr( Set );\n\
+             \x20   lexicon:sem_type   = type_expr( {sem_type} );\n\
              \x20   lexicon:sense      = \"umls:{cui}\";\n\
              \x20   lexicon:grade      = epistemic:declared;\n\
              \x20   lexicon:in_lexicon = lexicon:umls;\n\
@@ -195,8 +225,11 @@ pub fn render_concept_block(c: &crate::rrf::Concept) -> (String, usize) {
     let mut buf = String::new();
     let mut rep = Report::default();
     let desc = concept_description(&c.preferred_name, c.definition.as_ref(), &c.cui);
-    push_concept(&mut buf, &c.cui, &c.tuis, &desc);
-    push_entries(&mut buf, &c.cui, &c.forms, &mut rep);
+    // A named individual (a nomenclature symbol, e.g. an HGNC gene) is emitted as an INSTANCE of its
+    // primary semantic-type class with `cat_np` entries; otherwise a concept class with `cat_n`.
+    let named_tui: Option<&str> = c.symbol.as_ref().and(c.tuis.first()).map(|t| t.as_str());
+    push_concept(&mut buf, &c.cui, &c.tuis, &desc, named_tui.is_some());
+    push_entries(&mut buf, &c.cui, &c.forms, named_tui, &mut rep);
     (buf, rep.entries)
 }
 
@@ -244,6 +277,28 @@ mod tests {
                     "MSH".to_string(),
                     "An autosomal recessive disorder.".to_string(),
                 )),
+                symbol: None, // a disease concept → stays a class (cat_n)
+            }],
+        }
+    }
+
+    /// The WRN **gene** (HGNC) — a NAMED INDIVIDUAL: `symbol = Some("WRN")`, TUI T028.
+    fn wrn_gene_subset() -> Subset {
+        Subset {
+            semantic_types: vec![SemanticType {
+                tui: "T028".to_string(),
+                name: "Gene or Genome".to_string(),
+            }],
+            concepts: vec![Concept {
+                cui: "C1337007".to_string(),
+                tuis: vec!["T028".to_string()],
+                preferred_name: "WRN".to_string(),
+                forms: vec![
+                    "WRN".to_string(),
+                    "Werner syndrome RecQ like helicase".to_string(),
+                ],
+                definition: None,
+                symbol: Some("WRN".to_string()),
             }],
         }
     }
@@ -283,6 +338,27 @@ mod tests {
             doc.matches(": lexicon:LexicalEntry {").count(),
             doc.matches("lexicon:in_lexicon = lexicon:umls;").count()
         );
+    }
+
+    #[test]
+    fn named_individual_gene_renders_as_instance_with_cat_np_entries() {
+        // A gene (HGNC symbol → named individual, D62) is an INSTANCE of its semantic-type class
+        // with PROPER-NOUN (cat_np) entries — so it works as both a bare NP and a prenominal modifier.
+        let (doc, _) = render_document(&wrn_gene_subset(), "2026AA");
+        // The CUI is a `resource` (instance), NOT a `class`, typed by its semantic type.
+        assert!(doc.contains("resource umlscui:C1337007 : umlssty:T028 {"));
+        assert!(!doc.contains("class umlscui:C1337007"));
+        // Proper-noun (cat_np) entry over the semantic-type class, sem = the instance, sg.
+        assert!(doc.contains("lexicon:form       = \"WRN\";"));
+        assert!(doc.contains(
+            "lexicon:cat        = type_expr( lexicon:cat_np(umlssty:T028, lexicon:sg) );"
+        ));
+        assert!(doc.contains("lexicon:sem        = umlscui:C1337007;"));
+        assert!(doc.contains("lexicon:sem_type   = type_expr( umlssty:T028 );"));
+        // No common-noun (cat_n) entry for a named individual.
+        assert!(!doc.contains("lexicon:cat_n(umlscui:C1337007"));
+        // Every form is a name of the individual (both cat_np).
+        assert!(doc.contains("lexicon:form       = \"Werner syndrome RecQ like helicase\";"));
     }
 
     #[test]

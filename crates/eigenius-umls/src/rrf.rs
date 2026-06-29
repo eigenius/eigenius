@@ -198,10 +198,32 @@ pub struct Concept {
     /// The canonical name (highest-ranked English atom) → drives the `description`.
     pub preferred_name: String,
     /// Distinct English surface strings (preferred name first, rest sorted) → one
-    /// common-noun lexical entry each.
+    /// lexical entry each.
     pub forms: Vec<String>,
     /// A definition (best available SRL-0 source), with the source SAB, if any.
     pub definition: Option<(String, String)>,
+    /// The concept's **proper-noun symbol** when it is a NAMED INDIVIDUAL (D62 —
+    /// `docs/notes/d62-named-individual-typing.md`): present iff an atom from a nomenclature
+    /// authority ([`NAMED_INDIVIDUAL_SABS`], e.g. HGNC for genes) supplied a symbol (`ACR`/`PT`).
+    /// `Some` ⇒ emit as an **instance** of its semantic-type class with `cat_np` entries; `None` ⇒
+    /// a concept **class** with `cat_n` entries (the default).
+    pub symbol: Option<String>,
+}
+
+/// Nomenclature authorities whose symbols mark a concept a **named individual** (`cat_np`) rather
+/// than a concept class (D62 — `docs/notes/d62-named-individual-typing.md`). HGNC is the gene-symbol
+/// authority; extend deliberately (a short, auditable allow-list). A symbol-type atom (`ACR`/`PT`)
+/// from such a source supplies the proper-noun form.
+const NAMED_INDIVIDUAL_SABS: &[&str] = &["HGNC"];
+
+/// Priority of a term-type as a NAMED-INDIVIDUAL **symbol** (higher wins): `ACR` (the approved
+/// acronym/symbol) over `PT` (preferred term, also the symbol for HGNC). `0` = not a symbol type.
+fn symbol_tty_priority(tty: &str) -> u8 {
+    match tty {
+        "ACR" => 2,
+        "PT" => 1,
+        _ => 0,
+    }
 }
 
 /// The result of the join: the concepts to mirror plus the semantic-type classes they
@@ -252,6 +274,7 @@ pub struct ConceptBuilder {
     selected: BTreeSet<String>,
     cui_forms: BTreeMap<String, Forms>,
     cui_def: BTreeMap<String, (usize, String, String)>, // (priority, sab, def)
+    cui_symbol: BTreeMap<String, (u8, String)>, // named-individual symbol: (tty-priority, string)
 }
 
 impl ConceptBuilder {
@@ -274,6 +297,7 @@ impl ConceptBuilder {
             selected: BTreeSet::new(),
             cui_forms: BTreeMap::new(),
             cui_def: BTreeMap::new(),
+            cui_symbol: BTreeMap::new(),
         }
     }
 
@@ -331,6 +355,22 @@ impl ConceptBuilder {
             .by_key
             .entry(str_.to_lowercase())
             .or_insert_with(|| str_.to_string());
+
+        // Named-individual symbol (D62): a nomenclature-authority atom (HGNC) with a symbol
+        // term-type (`ACR`/`PT`) marks this concept a NAMED INDIVIDUAL and supplies its proper-noun
+        // (`cat_np`) form. Keep the highest-priority symbol (ACR > PT) seen.
+        if NAMED_INDIVIDUAL_SABS.contains(&a.sab.as_str()) {
+            let prio = symbol_tty_priority(&a.tty);
+            if prio > 0 {
+                let slot = self
+                    .cui_symbol
+                    .entry(a.cui.clone())
+                    .or_insert((0, String::new()));
+                if prio > slot.0 {
+                    *slot = (prio, str_.to_string());
+                }
+            }
+        }
     }
 
     /// Record a definition. Kept for a selected concept from an SRL-0 source, not
@@ -398,6 +438,7 @@ impl ConceptBuilder {
                     .cui_def
                     .get(cui)
                     .map(|(_, sab, def)| (sab.clone(), def.clone())),
+                symbol: self.cui_symbol.get(cui).map(|(_, s)| s.clone()),
             });
         }
 
@@ -577,5 +618,38 @@ C0920269|A6|AT12||SNOMEDCT_US|should be filtered (restricted source).|N||";
         assert_eq!(sub.concepts[0].cui, "C0043119");
         assert_eq!(sub.semantic_types.len(), 1);
         assert_eq!(sub.semantic_types[0].tui, "T047");
+    }
+
+    #[test]
+    fn non_nomenclature_concepts_are_not_named_individuals() {
+        // The Werner disease + MSI concepts have no HGNC atom ⇒ stay concept classes (symbol None).
+        let sub = build_subset(MRSAB, MRRANK, MRSTY, MRCONSO, MRDEF, None, "ENG", None);
+        for c in &sub.concepts {
+            assert!(
+                c.symbol.is_none(),
+                "{} should not be a named individual",
+                c.cui
+            );
+        }
+    }
+
+    #[test]
+    fn hgnc_symbol_marks_a_named_individual_with_its_symbol() {
+        // An HGNC gene concept: the ACR atom is the symbol ⇒ named individual (D62). The descriptive
+        // name (a non-symbol TTY) does NOT override the symbol; the ACR wins.
+        const SAB: &str =
+            "C1|C1|HGNC2026|HGNC|HGNC|HGNC|2026|||||||0|1|1|FULL|ACR||ENG|UTF-8|Y|Y|HGNC|;|";
+        const RANK: &str = "0300|HGNC|ACR|N|\n0290|HGNC|NA|N|";
+        const STY: &str = "C1337007|T028|A1.2.3.5|Gene or Genome|AT1||";
+        const CONSO: &str = "C1337007|ENG|P|L1|PF|S1|Y|A1||||HGNC|ACR|HGNC:12791|WRN|0|N||\n\
+C1337007|ENG|S|L2|VO|S2|N|A2||||HGNC|NA|HGNC:12791|Werner syndrome RecQ like helicase|0|N||";
+        let sub = build_subset(SAB, RANK, STY, CONSO, "", None, "ENG", None);
+        let gene = sub.concepts.iter().find(|c| c.cui == "C1337007").unwrap();
+        assert_eq!(
+            gene.symbol.as_deref(),
+            Some("WRN"),
+            "HGNC ACR atom marks the gene a named individual with symbol WRN"
+        );
+        assert_eq!(gene.tuis, vec!["T028"]);
     }
 }
