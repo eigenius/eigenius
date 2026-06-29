@@ -64,6 +64,17 @@ use super::sense_ranker::{SenseCandidate, SenseRanker, WordSenses};
 /// unaffected (no truncation, order preserved by the stable cost-0 sort).
 pub const DEFAULT_FOREST_CAP: usize = 256;
 
+/// **Felicity-eval budget** (fail-closed OOM guard): the number of full-span candidates the
+/// felicity loop will NbE-eval, after cost-sorting. The top chart cell is unbeamed (Lever B beams
+/// only `len < n`), so with sub-cells beamed to `cell_beam` it can hold up to ~`cell_beam²·n`
+/// candidates; over the full lexicon, widen-on-failure escalation makes that thousands, and each
+/// felicity check is a full eval/readback/check of an **impredicative-∃** GQ sem — evaluating all of
+/// them OOMs (witnessed: ~400 doubly-∃ candidates SIGKILL the process). Cost-sorting first and
+/// classifying only the lowest-cost `CLASSIFY_BUDGET` bounds the work without changing the result
+/// for normal forests (which have far fewer candidates): the kept readings are the most-frequent /
+/// most-preferred, exactly what the forest cap would keep.
+pub const CLASSIFY_BUDGET: usize = DEFAULT_FOREST_CAP;
+
 /// Upper bound for widen-on-failure of the sense cap (GH #97): when a capped parse of an
 /// all-known-vocabulary sentence yields nothing, the cap is doubled up to this many senses per
 /// lemma, then the attempt is abandoned (rather than going uncapped, which would re-OOM long
@@ -77,19 +88,77 @@ pub const SENSE_CAP_WIDEN_MAX: usize = 16;
 /// leading/trailing non-alphanumerics (so `"BRCA1,"` → `"brca1"`); empties are dropped.
 /// Multiword forms are recovered by re-joining spans at lookup time, not here.
 pub fn tokenize(text: &str) -> Vec<String> {
-    text.chars()
-        .map(|c| match c {
-            '—' | '–' | '‒' | '―' | '/' | '(' | ')' | '[' | ']' | '{' | '}' => ' ',
-            other => other,
-        })
-        .collect::<String>()
+    // Bracket/dash/slash separators → spaces; the **comma** is preserved as a standalone `,` token
+    // (D62 S0) so the parser can key multi-item list coordination on it. Other punctuation is still
+    // trimmed off token edges.
+    let mut spaced = String::with_capacity(text.len());
+    for c in strip_bracketed_asides(text).chars() {
+        match c {
+            '—' | '–' | '‒' | '―' | '/' | '(' | ')' | '[' | ']' | '{' | '}' => {
+                spaced.push(' ')
+            }
+            ',' => spaced.push_str(" , "),
+            other => spaced.push(other),
+        }
+    }
+    let mut toks: Vec<String> = spaced
         .split_whitespace()
-        .map(|t| {
-            t.trim_matches(|c: char| !c.is_alphanumeric())
-                .to_lowercase()
+        .filter_map(|t| {
+            if t == "," {
+                Some(",".to_string())
+            } else {
+                let s = t
+                    .trim_matches(|c: char| !c.is_alphanumeric())
+                    .to_lowercase();
+                (!s.is_empty()).then_some(s)
+            }
         })
-        .filter(|t| !t.is_empty())
-        .collect()
+        .collect();
+    // A comma is only a separator BETWEEN content tokens: drop dangling (leading/trailing) commas
+    // and collapse runs, so a stray `,` never blocks a full-span parse.
+    while toks.first().is_some_and(|t| t == ",") {
+        toks.remove(0);
+    }
+    while toks.last().is_some_and(|t| t == ",") {
+        toks.pop();
+    }
+    toks.dedup_by(|a, b| a == "," && b == ",");
+    toks
+}
+
+/// Drop **bracketed asides** before tokenizing (D62 S0): parenthetical `(…)`/`[…]`/`{…}` glosses
+/// (depth-aware) and **em-dash-bracketed appositives** `—…—` (paired U+2014). These are droppable
+/// for a *scientific claim* — an abbreviation gloss (`microsatellite instability (MSI)`), a figure
+/// ref (`(Fig. 1a)`), or a defining appositive (`lethality—an interaction…—can be exploited`) leaves
+/// the head + matrix asserting the same fact. A deliberate, recorded cut (apposition-as-renaming is
+/// discourse-level, out of scope for the claim — `docs/notes/d62-grammar-gap-analysis.md`). Content
+/// punctuation (commas/lists) is NOT dropped here — that is the marker-keyed list slice.
+/// A single (unpaired) em-dash is left for the tokenizer to split (it isn't a bracketing pair).
+fn strip_bracketed_asides(text: &str) -> String {
+    // 1. Parentheticals/brackets, depth-aware (handles nesting like `poly(ADP(x))`).
+    let mut no_parens = String::with_capacity(text.len());
+    let mut depth = 0u32;
+    for c in text.chars() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => no_parens.push(c),
+            _ => {}
+        }
+    }
+    // 2. Paired em-dash appositives: with an even number of `—`, the bracketed asides are the
+    // odd-indexed segments; keep the even-indexed matrix. An odd count (a lone `—`) is left as-is.
+    let parts: Vec<&str> = no_parens.split('\u{2014}').collect();
+    if parts.len() >= 3 && parts.len() % 2 == 1 {
+        parts
+            .iter()
+            .step_by(2) // 0, 2, 4, … = the matrix segments
+            .copied()
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else {
+        no_parens
+    }
 }
 
 /// A `form → entries` lookup over a layer's committed `lexicon:LexicalEntry`
@@ -780,6 +849,9 @@ impl LexicalIndex {
         if n == 0 {
             return (Vec::new(), Vec::new());
         }
+        // Parse-failure instrumentation (set `EIGENIUS_PARSE_DEBUG=1`): per-cell stats, flushed, so
+        // the last line before an OOM/SIGKILL localizes the blow-up cell + cap level.
+        let debug = std::env::var("EIGENIUS_PARSE_DEBUG").is_ok();
 
         // chart[i][j] = every item spanning tokens i..=j.
         let mut chart: Vec<Vec<Vec<Item>>> = vec![vec![Vec::new(); n]; n];
@@ -968,6 +1040,7 @@ impl LexicalIndex {
                         }
                     }
                 }
+                let produced_n = produced.len();
                 chart[i][j].extend(produced);
                 // Type-raise `T` (D63 §8.9 Slice 6-T) the cell's name NPs (after its
                 // composition + relativizer items are in place), so a non-leaf / composed
@@ -980,6 +1053,12 @@ impl LexicalIndex {
                     if let Some(beam) = self.cell_beam {
                         beam_drops += beam_cell(&mut chart[i][j], beam);
                     }
+                }
+                if debug {
+                    eprintln!(
+                        "  [parse-debug cap={cap:?}] cell[{i}..{j}] len={len} produced={produced_n} kept={}",
+                        chart[i][j].len()
+                    );
                 }
             }
         }
@@ -1003,17 +1082,49 @@ impl LexicalIndex {
             .collect();
         let entity = eval(&Exp::EigonClass(iri(ENTITY_IRI)), &Rho::Nil).ok();
 
-        // Split the full-span candidates into the CLOSED forest (felicitous closed `Prop`)
-        // and the OPEN forest (felicitous but carrying unresolved referent holes — D64).
+        // Full-span candidates: a **finite** declarative/polar `S` (denotes `Prop`) or a
+        // wh-question `Q(T)` (denotes `T → Prop`, D63 §8.5). The finiteness gate rejects a bare
+        // base/infinitival clause as a standalone root; partial functors are dropped.
+        // FAIL-CLOSED OOM GUARD: cost-sort and keep only the lowest-cost [`CLASSIFY_BUDGET`] BEFORE
+        // the felicity loop — the top cell is unbeamed and can hold thousands of candidates over the
+        // full lexicon, and each felicity check NbE-evals an impredicative-∃ GQ sem, so classifying
+        // all of them OOMs. (Normal forests have far fewer candidates → no-op.)
+        let mut candidates: Vec<&Item> = chart[0][n - 1]
+            .iter()
+            .filter(|it| {
+                // Complete results: a **finite** declarative/polar `S` (denotes `Prop`) or a
+                // wh-question `Q(T)` (denotes `T → Prop`, D63 §8.5). The finiteness gate rejects a
+                // bare base/infinitival clause (`S[_,bse]`) as a standalone root; partial functors
+                // are dropped. NOTE: the sem shape cannot discriminate here — a well-formed
+                // determiner-subject clause is an unreduced `App` redex (subject-GQ applied to the
+                // VP), structurally identical to a pathological reading; only β-reduction in the
+                // felicity gate below tells them apart.
+                is_finite_clause(&it.cat) || is_ctor(&it.cat, "cat_q").is_some()
+            })
+            .collect();
+        let n_candidates = candidates.len();
+        candidates.sort_by_key(|it| it.cost);
+        candidates.truncate(CLASSIFY_BUDGET);
+        if debug && n_candidates > candidates.len() {
+            eprintln!(
+                "  [parse-debug cap={cap:?}] full-span candidates {n_candidates} → felicity-checking \
+                 {} (CLASSIFY_BUDGET)",
+                candidates.len()
+            );
+        }
+
+        // Split into the CLOSED forest (felicitous closed `Prop`) and the OPEN forest (felicitous
+        // but carrying unresolved referent holes — D64).
         let mut forest: Vec<Item> = Vec::new();
         let mut open: Vec<OpenParse> = Vec::new();
-        for it in chart[0][n - 1].iter().filter(|it| {
-            // Complete results: a **finite** declarative/polar `S` (denotes `Prop`) or a
-            // wh-question `Q(T)` (denotes `T → Prop`, D63 §8.5). The finiteness gate rejects
-            // a bare base/infinitival clause (`S[_,bse]`) as a standalone root. Partial
-            // functors are dropped.
-            is_finite_clause(&it.cat) || is_ctor(&it.cat, "cat_q").is_some()
-        }) {
+        for (k, it) in candidates.into_iter().enumerate() {
+            if debug {
+                eprintln!(
+                    "  [parse-debug cap={cap:?}] classify candidate {k}/{n_candidates}\n      cat={}\n      sem={}",
+                    super::pretty_term(&it.cat),
+                    super::pretty_term(&it.sem)
+                );
+            }
             match entity.as_ref() {
                 Some(e) => match self.classify_felicitous(it, &hole_bases, e) {
                     Some(FelicitousOutcome::Closed(c)) => forest.push(c),
@@ -1102,7 +1213,18 @@ impl LexicalIndex {
         for h in &present {
             eval_rho = eval_rho.extend(Patt::Var(h.clone()), Val::Nt(Neut::Gen(0, h.clone())));
         }
-        let nf = readback_val(0, &eval(&it.sem, &eval_rho).ok()?);
+        // STEP-TIMING instrumentation (set `EIGENIUS_PARSE_DEBUG=1`): each step is flushed BEFORE
+        // it runs, so the last line printed before an OOM/SIGKILL names the exploding step
+        // (eval / readback / check) — the felicity gate is the witnessed full-lexicon blow-up site.
+        let dbg = std::env::var("EIGENIUS_PARSE_DEBUG").is_ok();
+        if dbg {
+            eprintln!("    [felicity] eval start");
+        }
+        let evaled = eval(&it.sem, &eval_rho).ok()?;
+        if dbg {
+            eprintln!("    [felicity] readback start");
+        }
+        let nf = readback_val(0, &evaled);
         // Check the normal form under a context binding each (readback-named) hole in BOTH
         // `rho` (a neutral value — `check` evaluates subterms, which would otherwise error on
         // the free var) and `gamma` (its type — `Entity`, Slice-1).
@@ -1114,6 +1236,9 @@ impl LexicalIndex {
             gamma.push((hn.clone(), entity.clone()));
         }
         let mut ctx = CheckCtx::with_layer(chk_rho, gamma, Arc::clone(&self.layer));
+        if dbg {
+            eprintln!("    [felicity] check start");
+        }
         check(&mut ctx, &nf, &expected_val).ok()?;
         let item = Item {
             cat: it.cat.clone(),
@@ -1454,14 +1579,19 @@ fn is_finite_clause(cat: &Exp) -> bool {
 /// `coord_op` table and the missing-lexeme signal [`LexicalIndex::has_token`] (so the
 /// pipeline never routes a structurally-handled connective to lexical recovery).
 ///
-/// Only the symmetric coordinators `and`/`or` belong here. Contrastive `but` is NOT a
-/// synonym for `and`: the reference grammar (core-en `conj.xsl`) gives `but` its own
-/// sentential-binary family with a distinct `but(Arg1, Arg2)` relation and treats it as
-/// a subordinator — collapsing it to `And` would silently drop the adversative discourse
-/// relation. It is therefore deferred to the subordinator/discourse-connective work.
+/// The symmetric coordinators `and`/`or`, plus the **list comma** `,` (D62 S0): a comma in a
+/// multi-item list (`A, B, C and D`) is a conjunctive separator, so it maps to `And` and the existing
+/// left-branching coordination builds the member group (`A, B` → group, `… and D` closes it). This is
+/// **structural** coverage; a mixed-connective list (`A, B or C`) has its comma-joined members
+/// approximated as `And` (the disjunction surfaces only at the final `or`) — a recorded approximation,
+/// faithful per-list connective propagation (core-en's list-completion, `conj.xsl`) is the follow-on.
+///
+/// Contrastive `but` is NOT here: core-en gives it its own family with a distinct `but(Arg1, Arg2)`
+/// relation — collapsing it to `And` would drop the adversative relation; deferred to the
+/// subordinator/discourse-connective work.
 pub fn coord_connective(token: &str) -> Option<&'static str> {
     match token {
-        "and" => Some("urn:eigenius:logic:And"),
+        "and" | "," => Some("urn:eigenius:logic:And"),
         "or" => Some("urn:eigenius:logic:Or"),
         _ => None,
     }
@@ -1518,14 +1648,48 @@ mod tests {
             tokenize("HeLa depends on BRCA1."),
             ["hela", "depends", "on", "brca1"]
         );
-        assert_eq!(tokenize("  A,  b!  "), ["a", "b"]);
+        // The comma between content tokens is preserved as a `,` token (D62 S0 list coordination).
+        assert_eq!(tokenize("  A,  b!  "), ["a", ",", "b"]);
         assert!(tokenize("   ").is_empty());
         assert!(tokenize("").is_empty());
     }
 
     #[test]
+    fn tokenize_preserves_list_commas_and_drops_dangling() {
+        // Internal commas survive as separators; leading/trailing/duplicate commas are dropped.
+        assert_eq!(
+            tokenize("a, b, c and d"),
+            ["a", ",", "b", ",", "c", "and", "d"]
+        );
+        assert_eq!(tokenize("a,, b,"), ["a", ",", "b"]); // collapsed run + trailing dropped
+        assert_eq!(tokenize(", a"), ["a"]); // leading dropped
+    }
+
+    #[test]
     fn tokenize_keeps_internal_alphanumerics() {
-        // intra-token digits/letters survive; only the edges are trimmed.
-        assert_eq!(tokenize("p53, (BRCA1)"), ["p53", "brca1"]);
+        // intra-token digits/letters survive; only the edges are trimmed. The `(BRCA1)` is now a
+        // dropped parenthetical aside (D62 S0), so only `p53` survives.
+        assert_eq!(tokenize("p53, (BRCA1)"), ["p53"]);
+    }
+
+    #[test]
+    fn tokenize_drops_bracketed_asides() {
+        // Parenthetical gloss dropped, head + matrix kept.
+        assert_eq!(
+            tokenize("microsatellite instability (MSI) results"),
+            ["microsatellite", "instability", "results"]
+        );
+        // Nested parens dropped wholesale.
+        assert_eq!(
+            tokenize("poly(ADP(x)-ribose) polymerase"),
+            ["poly", "polymerase"]
+        );
+        // Paired em-dash appositive dropped; head + matrix kept.
+        assert_eq!(
+            tokenize("lethality\u{2014}an interaction here\u{2014}can be exploited"),
+            ["lethality", "can", "be", "exploited"]
+        );
+        // A single (unpaired) em-dash is NOT a bracket pair → split, both sides kept.
+        assert_eq!(tokenize("not\u{2014}can"), ["not", "can"]);
     }
 }

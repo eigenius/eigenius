@@ -316,6 +316,32 @@ fn connectives_batch_parses() {
 }
 
 #[test]
+fn comma_list_coordination_parses() {
+    // D62 S0 slice 2: a comma is a conjunctive list separator, so a multi-item subject list builds
+    // the (left-branching) member group the distributive subject rule consumes.
+    let (_layer, index) = index_over_bootstrap();
+    // Comma-only 2-member list (no final `and`).
+    assert!(
+        !index.parse("HeLa, BRCA1 affect HeLa", &Identity).is_empty(),
+        "comma joins a two-member subject group"
+    );
+    // 3-member `A, B and C` list (commas + final `and`, left-branching).
+    assert!(
+        !index
+            .parse("HeLa, BRCA1 and HeLa affect HeLa", &Identity)
+            .is_empty(),
+        "comma + `and` builds a three-member group"
+    );
+    // Baseline binary `and` (no comma) still parses — no regression.
+    assert!(
+        !index
+            .parse("HeLa and BRCA1 affect HeLa", &Identity)
+            .is_empty(),
+        "binary `and` coordination unaffected"
+    );
+}
+
+#[test]
 fn sense_reranker_overrides_static_cap_order() {
     // Static cap(1), no reranker: keeps rank-0 (BRCA1) → the parse's sem mentions BRCA1.
     let forest = index_with_zarg(1, None).parse("zarg affects HeLa", &Identity);

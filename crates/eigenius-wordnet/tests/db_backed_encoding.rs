@@ -239,6 +239,76 @@ fn encode_unit(
     }
 }
 
+/// Fragment bisection (D62 grammar-gap diagnosis): parse curated sub-spans of the nearest
+/// grammar-gap units against the full lexicon and report which compose (closed / open / —), to
+/// localize the actual stall points instead of inferring them. `#[ignore]`d; run manually:
+///   cargo test -p eigenius-wordnet --test db_backed_encoding diagnose_grammar_gap_fragments \
+///       -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic: localize grammar-gap stalls; run with --ignored --nocapture"]
+fn diagnose_grammar_gap_fragments() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+
+    // CONTROL probes — isolate the fundamental blocker (determiner vs bare noun; proper-noun subj;
+    // copula) using common full-lexicon words.
+    let controls = [
+        "a gene affects a cell", // determiners + known noun/verb — basic SVO control
+        "genes affect cells",    // bare plurals — same clause without determiners
+        "a cell is a gene",      // copula + predicate-nominal with determiners
+        "a gene is large",       // copula + predicative adjective
+    ];
+    eprintln!("\n=== control probes (determiner vs bare; copula) ===");
+    for f in controls {
+        eprintln!("  probing {f:?} …"); // printed BEFORE the parse, so a hang/OOM names the culprit
+        let t = std::time::Instant::now();
+        let (closed, open) = index.parse_open(f, &lem);
+        let s = if !closed.is_empty() {
+            format!("CLOSED×{}", closed.len())
+        } else if !open.is_empty() {
+            format!("open×{}", open.len())
+        } else {
+            "—".into()
+        };
+        eprintln!("  {s:<10} [{:.1}s] {f:?}", t.elapsed().as_secs_f64());
+    }
+
+    // Fragments ordered small→large for unit 4 / unit 5 / unit 8 (the shortest grammar-gaps).
+    let fragments = [
+        // unit 4: "MSI cancer models required the helicase activity of WRN, but not its …"
+        "MSI cancer models",
+        "the helicase activity",
+        "the helicase activity of WRN",
+        "MSI cancer models required HeLa",
+        "MSI cancer models required the helicase activity of WRN",
+        // unit 5: "WRN is a synthetic lethal vulnerability and promising drug target for MSI cancers"
+        "WRN is a vulnerability",
+        "WRN is a synthetic lethal vulnerability",
+        "WRN is a vulnerability and a target",
+        "WRN is a vulnerability for MSI cancers",
+        // unit 8: "Thus, novel therapies are needed for tumours with MSI"
+        "novel therapies",
+        "therapies are needed",
+        "novel therapies are needed for tumours",
+        "thus novel therapies are needed",
+    ];
+    eprintln!("\n=== fragment bisection (closed / open / —) ===");
+    for f in fragments {
+        let (closed, open) = index.parse_open(f, &lem);
+        let ntok = tokenize(f).len();
+        let status = if !closed.is_empty() {
+            format!("CLOSED×{}", closed.len())
+        } else if !open.is_empty() {
+            format!("open×{}", open.len())
+        } else {
+            "—".to_string()
+        };
+        eprintln!("  [{ntok:>2} tok] {status:<10} {f:?}");
+    }
+}
+
 /// De-risk gate: the store opens, the chain resumes, and the `lexicon:form` value-index is ACTIVE
 /// (→ lazy LexicalIndex path; the eager full-chain scan would OOM on 7.6M resources). Cheap — runs
 /// by default (not `#[ignore]`d) so the harness wiring stays green even without the heavy run.

@@ -135,7 +135,19 @@ pub fn build_axiom_env(layer: &Arc<Layer>) -> Result<AxiomEnv, AxiomEnvError> {
 
     let mut env = AxiomEnv::new();
 
-    for (iri, resource) in layer.iter_all_resources() {
+    // INDEX-DRIVEN enumeration of `eigentt:Axiom` instances (was a full-chain
+    // `iter_all_resources()` scan that eagerly materialised the ENTIRE merged chain into a
+    // BTreeMap — O(all resources) — to filter for the handful of axioms; over a 7.6M-resource
+    // lexicon chain that OOMs, and it is triggered lazily by the first `EigonAxiom` type-check in
+    // the DCG felicity gate). `typed_resource_iris` consults each layer's triple index
+    // (`scan_predicate_object(is_a, eigentt:Axiom)`) plus staged/pending entries, so this is
+    // O(#axioms). The post-`resolve` `is_axiom` guard is retained: a higher layer may tombstone or
+    // redefine an indexed subject so its *effective* resource is no longer an axiom.
+    for iri in crate::layer::typed_resource_iris(layer, &[AXIOM_CLASS_IRI]) {
+        let resource = match layer.resolve(&iri) {
+            Some(r) => r,
+            None => continue,
+        };
         if !is_axiom(&resource, &axiom_class) {
             continue;
         }

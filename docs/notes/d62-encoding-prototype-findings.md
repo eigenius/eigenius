@@ -256,3 +256,43 @@ until sentences parse structurally.
   Mirror it.
 - **`ParseSentence` must report the open forest + missed tokens** (D62 §11.5) — the missed-
   token signal the prototype gets in-process via `has_token`.
+
+## Felicity-gate OOM on full lexicon — root cause (Derived, 2026-06-29)
+
+A *fully-known* short clause — control probe `a gene affects a cell` (5 tokens) — **SIGKILLs**
+the parser over the full WordNet+UMLS store, even with Lever B (cell beam) active. Chart
+instrumentation (`EIGENIUS_PARSE_DEBUG=1`, per-cell + per-candidate dump) localized it precisely:
+
+- The full span yields **36 finite-clause candidates**; classifying **candidate 0** OOMs. Its sem
+  prints `λA. λV. … C(n05436752, …)` but `exp_kind` reports `<term>` (an `Exp::App`): the top node
+  is an **unreduced `App` redex** (subject-GQ determiner applied to the VP). `pretty_term`'s
+  App-spine rendering fuses the impredicative body's trailing `→ C` with the appended args, so it
+  *looks* like a leading `λ` — a pretty-printer artifact, not a malformed lambda.
+- All 36 finite clauses are `App`-redexes. **A well-formed determiner clause and the explosive one
+  are structurally identical** (both `App`); only β-reduction in the felicity gate tells them apart.
+  ⇒ a sem-shape pre-filter (drop top-level-λ finite clauses) is the **wrong tool** — it can't see
+  the difference, and was removed.
+- Candidate 0 is the **doubly-impredicative-∃ SVO** reading (`∃gene.∃cell. affects(cell,gene)`).
+
+**The encoding is sound; the blow-up is SCALE-driven, not inherent to the ∃ encoding.** The same
+shape — `a cell line affects a cell line` — parses to exactly **1** felicitous `Prop` in **0.003 s**
+on the small bootstrap lexicon (throwaway diagnostic test). So the cost is lexicon-scale, not depth.
+
+**Exact site (Derived — live gdb backtrace at 7 GB RSS during the explosion):** the felicity
+`check` of the verb's `EigonAxiom` calls `Layer::axiom_env()` (a per-layer `OnceLock`), whose lazy
+builder `program::axiom_env::build_axiom_env` iterated **`Layer::iter_all_resources()`** — which
+*eagerly materialises the entire merged 51-layer / 7.6M-resource chain into a `BTreeMap`* — merely
+to filter for the handful of `eigentt:Axiom` resources. O(all resources) → multi-GB → SIGKILL.
+Trivial on the small lexicon (dozens of resources). **Not** an NbE blow-up (`eval`/`readback`
+completed; the counters for `check_infer` and `is_subclass_of` never reached 1 M; `resolve_class_type`
+was never called) — a classic **O(chain) full-scan** anti-pattern, cf. [[institution_rebuild_indexed]].
+
+**Fix (implemented):** `build_axiom_env` now enumerates `eigentt:Axiom` instances via the
+**index-driven** `layer::typed_resource_iris` (per-layer `triple_index.scan_predicate_object(is_a,
+eigentt:Axiom)` + staged/pending), then `resolve`s each — O(#axioms). The post-`resolve` `is_axiom`
+guard is kept (a higher layer may tombstone/redefine an indexed subject). Bootstrap + 1594 kernel
+tests pass (incl. `bootstrap_env_has_only_expected_axioms`).
+
+This makes fork **(A) fuel-bounded NbE moot for this bug** — the OOM was a one-time index
+materialisation, not NbE work; a fuel bound would not have helped. (A general fail-closed NbE bound
+remains a reasonable *separate* robustness investment, not required here.)
