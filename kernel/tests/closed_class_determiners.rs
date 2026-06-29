@@ -398,6 +398,128 @@ fn committed_subject_determiners_parse() {
     assert_parses_to_prop("no cell line affects HeLa"); //    ∀c:CellLine. ¬affects(HeLa, c)
 }
 
+/// D62 — bare-plural NP arguments (core-en `bnp`; `docs/notes/d62-bare-plural-quantification.md`). A
+/// determiner-less PLURAL common noun serves as a subject/object NP whose quantifier is **deferred**
+/// to a `Quantification` hole, so the clause is an **open** parse (not closed). Agreement still
+/// bites (a bare plural is `pl`), and a bare *singular* count noun does not shift.
+#[test]
+fn bare_plural_np_is_a_deferred_quantifier_argument() {
+    let (_layer, index) = index_over_bootstrap();
+
+    // Bare-plural subject / object / both: each parses (as an OPEN parse carrying ≥1 quant hole).
+    for s in [
+        "genes affect HeLa",
+        "HeLa affects genes",
+        "genes affect genes",
+    ] {
+        let (closed, open) = index.parse_open(s, &PluralS);
+        assert!(
+            closed.is_empty(),
+            "'{s}': a bare plural defers its quantifier ⇒ no CLOSED parse"
+        );
+        assert!(!open.is_empty(), "'{s}': must yield an OPEN parse");
+        let max_holes = open.iter().map(|o| o.holes.len()).max().unwrap_or(0);
+        assert!(max_holes >= 1, "'{s}': the open parse carries ≥1 hole");
+    }
+
+    // `genes affect genes` carries TWO quantification holes (subject + object).
+    let (_c, open) = index.parse_open("genes affect genes", &PluralS);
+    let two = open.iter().any(|o| {
+        o.holes
+            .iter()
+            .filter(|h| h.kind == eigenius_kernel::dcg::HoleKind::Quantification)
+            .count()
+            == 2
+    });
+    assert!(two, "`genes affect genes` has two quantification holes");
+
+    // (Agreement — a bare plural is `pl`, so a 3sg verb rejects it as subject — holds in the real
+    // grammar via the `pl` NP num reused from `these_subj`; it is verified by
+    // `subject_verb_agreement_bites`. It cannot be checked here because the test's `PluralS`
+    // lemmatizer strips `-s` from `affects` → `affect`, so `affects` also seeds the plural verb.)
+
+    // A bare SINGULAR count noun does NOT shift (core-en: pl-or-mass only).
+    let (c2, o2) = index.parse_open("gene affects HeLa", &PluralS);
+    assert!(
+        c2.is_empty() && o2.is_empty(),
+        "bare singular count noun is not an argument NP"
+    );
+}
+
+/// DE-RISK PROBE for the D62 bare-plural design (`docs/notes/d62-bare-plural-quantification.md` §6):
+/// verify the felicity gate (`eval → readback → check : Prop`) accepts a **free neutral `Q`** of the
+/// dependent quantifier type `Π(A:Set).(A→Prop)→Prop` in **head position**, applied to a `Set`
+/// argument and a predicate — the exact shape a bare-plural NP's deferred-quantification hole would
+/// carry: `Q(Entity, λg. is_primary(g))`. The D64 holes proven today are first-order `Entity`
+/// neutrals in *argument* position; this is the untested higher-order / head-position combination.
+/// `Ok` ⇒ the carrier-generalization + parser-shift slices are safe to build; a failure names which
+/// kernel step (head-position neutral, type-valued application, or Pi-typed `gamma` binding) breaks.
+#[test]
+fn probe_kernel_gates_a_higher_order_quantifier_typed_hole() {
+    use eigenius_kernel::nbe::check::check;
+    use eigenius_kernel::nbe::eval::eval;
+    use eigenius_kernel::nbe::term::Patt;
+    use eigenius_kernel::nbe::val::{Neut, Val};
+
+    let (layer, _index) = index_over_bootstrap();
+
+    let set = Exp::Sort(1);
+    let prop = Exp::Sort(0);
+    let cell_line = Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:CellLine").unwrap());
+    let is_primary = Exp::EigonAxiom(Iri::parse("urn:eigenius:lexicon:is_primary").unwrap());
+
+    // Q : Π(A:Set). (A→Prop) → Prop — the deferred-quantifier hole type (see `quant_hole_type`).
+    let q_type = Exp::Pi(
+        Patt::Var("A".into()),
+        Box::new(set),
+        Box::new(Exp::Arrow(
+            Box::new(Exp::Arrow(
+                Box::new(Exp::Var("A".into())),
+                Box::new(prop.clone()),
+            )),
+            Box::new(prop.clone()),
+        )),
+    );
+
+    // sem = Q(CellLine, λg. is_primary(g)) — hole in HEAD position, applied to a SUBCLASS restrictor
+    // and an η-EXPANDED scope (exactly how the bare-plural shift builds it: `λx. V(x)`, so the
+    // `x:CellLine`-against-`Entity` subsumption happens at the λ body, as the concrete `∃` does).
+    let pred = Exp::Lam(
+        Patt::Var("g".into()),
+        Box::new(Exp::App(
+            Box::new(is_primary),
+            Box::new(Exp::Var("g".into())),
+        )),
+    );
+    let sem = Exp::App(
+        Box::new(Exp::App(
+            Box::new(Exp::Var("Q".into())),
+            Box::new(cell_line),
+        )),
+        Box::new(pred),
+    );
+
+    // Replicate `classify_felicitous`'s hole handling exactly: bind the hole to a generic neutral in
+    // `rho` (so Pure eval doesn't error on the free var), readback to a normal form, then `check`
+    // that nf against `Prop` under a `gamma` binding the (readback-named `Q0`) hole to its quantifier
+    // type.
+    let eval_rho = Rho::Nil.extend(Patt::Var("Q".into()), Val::Nt(Neut::Gen(0, "Q".into())));
+    let nf = readback_val(0, &eval(&sem, &eval_rho).expect("eval sem"));
+    eprintln!("nf = {}", eigenius_kernel::dcg::pretty_term(&nf));
+
+    let q_ty_val = eval(&q_type, &Rho::Nil).expect("eval q_type");
+    let chk_rho = Rho::Nil.extend(Patt::Var("Q0".into()), Val::Nt(Neut::Gen(0, "Q0".into())));
+    let gamma = vec![("Q0".to_string(), q_ty_val)];
+    let prop_val = eval(&prop, &Rho::Nil).expect("eval Prop");
+    let mut ctx = CheckCtx::with_layer(chk_rho, gamma, Arc::clone(&layer));
+    let result = check(&mut ctx, &nf, &prop_val);
+    eprintln!("check result = {result:?}");
+    assert!(
+        result.is_ok(),
+        "kernel must gate a higher-order quantifier-typed hole: {result:?}"
+    );
+}
+
 // ── D63 §8.10 Slice 6-agr — subject-verb number agreement ─────────────
 #[test]
 fn subject_verb_agreement_bites() {

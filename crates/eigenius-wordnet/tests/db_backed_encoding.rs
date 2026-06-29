@@ -294,18 +294,35 @@ fn diagnose_grammar_gap_fragments() {
         "novel therapies are needed for tumours",
         "thus novel therapies are needed",
     ];
-    eprintln!("\n=== fragment bisection (closed / open / —) ===");
+    eprintln!("\n=== fragment bisection (closed / open / — ; OOV split out) ===");
     for f in fragments {
+        let toks = tokenize(f);
+        let ntok = toks.len();
+        // OOV-FIRST: a `—` from an unknown lexeme is a VOCABULARY gap, not a grammar gap. Report the
+        // missed tokens so the genuine grammar gaps (fully-known, still no parse) are not conflated
+        // with OOV (e.g. `WRN` is a gene-symbol OOV — its `—` is NOT a predicate-nominal gap, which
+        // the small-lexicon `HeLa is a cell line` parse proves the grammar already covers).
+        let unknown: Vec<String> = toks
+            .iter()
+            .filter(|t| !is_nonprose(t) && !index.has_token(t, &lem))
+            .cloned()
+            .collect();
+        if !unknown.is_empty() {
+            eprintln!(
+                "  [{ntok:>2} tok] OOV{:<7} {f:?}  (unknown: {unknown:?})",
+                ""
+            );
+            continue;
+        }
         let (closed, open) = index.parse_open(f, &lem);
-        let ntok = tokenize(f).len();
         let status = if !closed.is_empty() {
             format!("CLOSED×{}", closed.len())
         } else if !open.is_empty() {
             format!("open×{}", open.len())
         } else {
-            "—".to_string()
+            "GRAMMAR-GAP".to_string()
         };
-        eprintln!("  [{ntok:>2} tok] {status:<10} {f:?}");
+        eprintln!("  [{ntok:>2} tok] {status:<11} {f:?}");
     }
 }
 

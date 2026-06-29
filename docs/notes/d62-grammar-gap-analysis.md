@@ -1,5 +1,32 @@
 # D62 — grammar-gap analysis: why the 12 fully-known WRN units don't parse
 
+> **CORRECTION 2026-06-29 (Derived — read this first).** Two premises below are now revised by
+> measurement after the felicity-gate OOM fix ([[axiom_env_fullscan_oom]], `build_axiom_env` made
+> index-driven), which unblocked clean full-lexicon re-measurement:
+>
+> 1. **Predicate nominals (§2 #6) ALREADY WORK — not a gap.** On the small lexicon `HeLa is a
+>    cell line` and `a cell is a gene` both parse (kernel test, fast). The WRN clause `WRN is a
+>    vulnerability` fails for a *different* reason: `WRN` is imported as a **common noun**, so as a
+>    bare *singular* subject it needs a determiner (`*gene is a vulnerability` is genuinely
+>    ungrammatical). The real issue is **gene/entity symbols used as proper nouns** in science text
+>    but modeled as CNs — a lexicon-modeling gap, not a copula-grammar gap.
+> 2. **NEW highest-leverage gap — bare-plural NP arguments.** `genes affect cells` does **not**
+>    parse (full lexicon → `—`; reproduced on the small lexicon with a plural-aware lemmatizer:
+>    `genes affect HeLa`, `HeLa affects genes`, `genes are large` all 0 parses), while
+>    `a gene affects a cell` and `these genes affect HeLa` (determiner) do. Cause: a bare plural
+>    common noun `cat_n(T, pl)` gets number-refined and a `kind_subject` edge, but has **no
+>    type-shift to an argument `cat_np(T, pl)`** — only determiners produce argument NPs. Bare
+>    plurals (existential/generic) are pervasive in scientific prose → this blocks the most basic
+>    clause shape. Fix: a unary shift `cat_n(T,pl) → cat_np(T,pl)` with the existential GQ sem,
+>    mirroring `a`/`some` (`exists_sem` subject / `obj_exists_sem` object); existential is the
+>    established first-cut convention (closed-class.esl §"definite/demonstrative ≈ existential").
+>    Generic semantics is a later refinement.
+>
+> Also: the OOV/grammar split is now **per-fragment** in `diagnose_grammar_gap_fragments` (it reports
+> missed tokens), and sub-clausal NP fragments (`MSI cancer models`, `the helicase activity`) are
+> *expected* non-clauses, not gaps — the diagnostic seeks a full-span `S`.
+
+
 *Analysis note. After the full-UMLS + closed-class/adverb batch, the WRN first page is **grammar-limited,
 not vocabulary-limited** (`d62-encoding-prototype-findings.md`): 12 of 26 units are fully known yet
 yield no parse. This note diagnoses the blocking constructions and maps each to a remediation in the
