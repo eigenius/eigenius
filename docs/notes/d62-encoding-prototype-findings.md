@@ -257,6 +257,27 @@ until sentences parse structurally.
 - **`ParseSentence` must report the open forest + missed tokens** (D62 §11.5) — the missed-
   token signal the prototype gets in-process via `has_token`.
 
+## Rerun after gene-typing + past tense (Derived, 2026-06-29, `--umls-all`)
+
+Snapshot `wordnet-umls-2026-06-29` (WordNet `--all` + UMLS **all** TUIs, 1.9 GB), built with: gene
+symbols as `cat_np` named individuals ([[d62-named-individual-typing]]), the predicate-nominal
+refined-noun panic fix, **simple past tense** (finite past verbs in the importer + `was`/`were` past
+copula), and the bare-plural / quantification-hole carrier.
+
+**26 units → 0 encoded, 13 missing-lexeme, 13 grammar-gap, 0 scale-bound; 0 panics.** OOV back to 13
+(broad coverage restored): `because`/`although` (subordinators), `cas9`/`recq` (domain), the S0
+hyphenated compounds (`cas9-mediated`, `double-stranded`, `genome-scale`, `next-generation`,
+`pcr-based`, `msi-predominant`), `datasets`/`hypermutable`/`hypermutations` (morphology).
+
+The batch cleared the dominant **lexical + tense** blockers; encoded is still 0 because the 13
+grammar-gap units are **long** and each needs the remaining **§2 syntactic** constructions to fully
+compose (see `d62-grammar-gap-analysis.md`). Fragment-level wins confirm the pieces work:
+`WRN is a vulnerability` CLOSED×3, `… and a target` CLOSED×8, `… for MSI cancers` CLOSED×32;
+`HeLa affected BRCA1` / `HeLa was a gene` / `HeLa was large` parse (past tense). Remaining
+fragment gaps are now clean (no crash) and **parser-side, no reseed**: N-N compound stacking
+(`MSI cancer models`), stacked adjectives (`synthetic lethal`), adjective+passive+PP
+(`novel therapies are needed for tumours`), `thus` discourse adverb, and apposition/lists/relatives.
+
 ## Felicity-gate OOM on full lexicon — root cause (Derived, 2026-06-29)
 
 A *fully-known* short clause — control probe `a gene affects a cell` (5 tokens) — **SIGKILLs**

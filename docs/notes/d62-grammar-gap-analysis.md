@@ -25,6 +25,16 @@
 > Also: the OOV/grammar split is now **per-fragment** in `diagnose_grammar_gap_fragments` (it reports
 > missed tokens), and sub-clausal NP fragments (`MSI cancer models`, `the helicase activity`) are
 > *expected* non-clauses, not gaps — the diagnostic seeks a full-span `S`.
+>
+> **NEW (not in the §2 inventory) — SIMPLE PAST TENSE, now fixed.** The inventory was built by
+> inspecting *constructions* and assumed verbs parse; in fact only present (3sg/pl) + participles were
+> emitted, so **no simple-past clause parsed** (`HeLa affected BRCA1` → 0) — the dominant blocker for a
+> past-tense narrative like the WRN page. Fixed: the WordNet importer now emits a **finite simple-past**
+> verb form (`e_v…_fpast`, `Fin=fin`, `num_any` subject — past tense has no number agreement; reuses
+> the past-participle surface, with the `went`/`gone` irregular-past class a known follow-on), and the
+> bootstrap adds the **past copula** `was`/`were` (over a predicate nominal/adjective). The §2 items
+> below remain (apposition, relatives, lists, numerals, fronted adjuncts, by-agent passives, `but not
+> X`, deep NPs); **predicate nominals (#6) + bare-plural NP args + gene-symbol proper nouns are done**.
 
 
 *Analysis note. After the full-UMLS + closed-class/adverb batch, the WRN first page is **grammar-limited,

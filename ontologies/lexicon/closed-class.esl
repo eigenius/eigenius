@@ -222,6 +222,26 @@ resource lexicon:are_copula : lexicon:LexicalEntry {
     lexicon:sense    = "be";
     lexicon:grade    = epistemic:declared;
 }
+// was/were — PAST copula (predicate nominal/adjective): "WRN was a vulnerability", "WRN was
+// essential", "cell lines were distinct". Mirror is/are_copula (over the `adj` complement) with past
+// finiteness. The past copula KEEPS number agreement (was = sg, were = pl) — unlike past lexical
+// verbs, which are number-agnostic. Tense is erased by ⟦·⟧, so the sem is the same vacuous `λP.P`.
+resource lexicon:was_copula : lexicon:LexicalEntry {
+    lexicon:form     = "was";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:were_copula : lexicon:LexicalEntry {
+    lexicon:form     = "were";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+    lexicon:grade    = epistemic:declared;
+}
 
 // ── Predicate-nominal `a` (D63 §8.5, Slice 3c) ────────────────────────
 // The PREDICATIVE indefinite article: "HeLa is **a cell line**". Distinct from the

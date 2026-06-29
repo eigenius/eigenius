@@ -398,6 +398,30 @@ fn committed_subject_determiners_parse() {
     assert_parses_to_prop("no cell line affects HeLa"); //    ∀c:CellLine. ¬affects(HeLa, c)
 }
 
+/// D63 §8.10 — **simple past tense**: a finite past-tense verb heads a declarative clause
+/// (`HeLa affected BRCA1`), and the **past copula** `was`/`were` carries a predicate nominal /
+/// adjective (`HeLa was a gene`, `HeLa was large`). Past-tense finite verbs have no number agreement
+/// (`num_any` subject); the copula keeps it (`was` sg / `were` pl). The WRN page is past-tense
+/// narrative, so without these almost nothing on it parses. (Present-tense forms still parse.)
+#[test]
+fn past_tense_clauses_parse() {
+    let (_layer, index) = index_over_bootstrap();
+    // Finite simple-past lexical verb (demo `e_affect_fin_past`; importer `e_v…_fpast`).
+    assert_parses_to_prop("HeLa affected BRCA1");
+    // Past copula + predicate nominal / adjective.
+    assert_parses_to_prop("HeLa was a gene");
+    assert_parses_to_prop("HeLa was large");
+    // `were` (plural past copula) over a bare-plural subject + predicate adjective. A bare plural
+    // defers its quantifier ⇒ an OPEN parse (not closed), so check the open forest.
+    let (_c, open) = index.parse_open("genes were large", &PluralS);
+    assert!(
+        !open.is_empty(),
+        "`genes were large` — were (pl past copula) + bare-plural subject + predicate adjective"
+    );
+    // Sanity: present tense still parses.
+    assert_parses_to_prop("HeLa affects BRCA1");
+}
+
 /// D62 — bare-plural NP arguments (core-en `bnp`; `docs/notes/d62-bare-plural-quantification.md`). A
 /// determiner-less PLURAL common noun serves as a subject/object NP whose quantifier is **deferred**
 /// to a `Quantification` hole, so the clause is an **open** parse (not closed). Agreement still

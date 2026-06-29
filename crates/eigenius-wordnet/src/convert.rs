@@ -433,6 +433,11 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
         let cat_bse = kind.cat("bse", "num_any");
         let (cat_fin_sg, cat_fin_pl) = (kind.cat("fin", "sg"), kind.cat("fin", "pl"));
         let (cat_ger, cat_pss) = (kind.cat("ger", "num_any"), kind.cat("pss", "num_any"));
+        // Finite SIMPLE PAST ("HeLa affected BRCA1"): `fin` (a finite declarative root) with a
+        // `num_any` subject — English past tense has NO number agreement ("it/they affected"). This
+        // is what makes the WRN page's past-tense narrative parse at all; without it only present
+        // (3sg/pl) and the participles existed.
+        let cat_fin_past = kind.cat("fin", "num_any");
         for (i, lemma) in syn.words.iter().enumerate() {
             let sense = sense_key(syn, lemma);
             // Base form — the lemma surface (do-support / modal complement; num_any).
@@ -493,6 +498,15 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
                 push_entry(buf, &id, pp, &cat_pss, &sem, &arrow, &sense, ranks);
                 rep.entries += 1;
                 rep.participle_entries += 1;
+            }
+            // Finite SIMPLE PAST — the past-tense surface heading a declarative ("affected"). Reuses
+            // the past-participle surface(s): correct for regular verbs and the many irregulars where
+            // past = participle ("found", "led", "said"); the `went`/`gone` class (past ≠ participle)
+            // is a known edge — its true past surface isn't emitted (a follow-on irregular-past table).
+            for (k, pp) in head_pps(lemma).iter().enumerate() {
+                let id = format!("e_v{off}_{tag}_{i}_fpast{k}");
+                push_entry(buf, &id, pp, &cat_fin_past, &sem, &arrow, &sense, ranks);
+                rep.entries += 1;
             }
         }
     }
@@ -962,10 +976,16 @@ mod tests {
         assert!(buf.contains(
             "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
+        // Finite SIMPLE PAST — same surface as the participle but a finite (`fin`) clause head with a
+        // `num_any` subject (past tense has no number agreement). The object slot stays num_any.
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+        ));
         assert_eq!(rep.verb_axioms, 1);
-        // Per lemma: base + finite 3sg + finite plural + gerund + past participle →
-        // 3 lemmas × 5 = 15 entries; 6 of them participles (ger + pss).
-        assert_eq!(rep.entries, 15);
+        // Per lemma: base + finite 3sg + finite plural + gerund + past participle + finite simple
+        // past → 3 lemmas × 6 = 18 entries; 6 of them participles (ger + pss; the finite-past is not
+        // counted a participle).
+        assert_eq!(rep.entries, 18);
         assert_eq!(rep.participle_entries, 6);
     }
 
@@ -1025,8 +1045,8 @@ mod tests {
         assert!(buf.contains("axiom wn:v00001740_i : lexicon:Entity -> Prop"));
         assert!(buf.contains("axiom wn:v00001740_t : lexicon:Entity -> lexicon:Entity -> Prop"));
         assert_eq!(rep.verb_axioms, 2);
-        // one lemma × two kinds × (base + 3sg + plural-finite + gerund + 1 pp) = 10.
-        assert_eq!(rep.entries, 10);
+        // one lemma × two kinds × (base + 3sg + plural-finite + gerund + 1 pp + 1 finite-past) = 12.
+        assert_eq!(rep.entries, 12);
     }
 
     #[test]
