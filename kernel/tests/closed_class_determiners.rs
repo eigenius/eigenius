@@ -398,6 +398,42 @@ fn committed_subject_determiners_parse() {
     assert_parses_to_prop("no cell line affects HeLa"); //    ∀c:CellLine. ¬affects(HeLa, c)
 }
 
+/// D62/D63 — **N-N compound stacking** (`MSI cancer models` shape) and **bare-plural over a composed
+/// compound**. 3-noun stacking already left-branches (`[[A B] C]`); the gap was that the bare-plural
+/// NP shift ran only at lexical leaves, so a *composed* plural compound could never be a bare argument
+/// NP. The shift now also runs on composed `cat_n(_, pl)` cells.
+#[test]
+fn compound_stacking_and_bare_plural_compound() {
+    let (_layer, index) = index_over_bootstrap();
+    // 3-noun stacking under a determiner: [[gene gene] cell line].
+    assert!(
+        !index
+            .parse("a gene gene cell line affects HeLa", &Identity)
+            .is_empty(),
+        "3-noun compound stacking must parse"
+    );
+    // Bare-plural over a composed compound: [gene genes] (modifier + plural head), bare subject →
+    // an OPEN parse (deferred-quantification hole), like a bare plural leaf.
+    let (_c, open) = index.parse_open("gene genes affect HeLa", &PluralS);
+    assert!(
+        !open.is_empty(),
+        "a bare-plural composed compound must be an argument NP (open parse)"
+    );
+}
+
+/// D63 §8.5 — **stacked attributive adjectives** (`synthetic lethal vulnerability`). Refining an
+/// already-refined noun conjoins over the **same base** (`Σx:Base. P(x) ∧ adj(x)`) rather than nesting
+/// (`Σy:Σ. adj(y)`, which applied the adjective to the Σ *pair* — ill-typed, so stacked adjectives
+/// didn't parse). A flat Σ keeps every adjective over the base entity.
+#[test]
+fn stacked_attributive_adjectives_parse() {
+    // 1 attributive adjective (baseline).
+    assert_parses_to_prop("HeLa is a large gene");
+    // 2 stacked attributive adjectives — predicate-nominal and determiner-subject positions.
+    assert_parses_to_prop("HeLa is a large primary gene");
+    assert_parses_to_prop("a large primary gene affects HeLa");
+}
+
 /// D63 §8.10 — **simple past tense**: a finite past-tense verb heads a declarative clause
 /// (`HeLa affected BRCA1`), and the **past copula** `was`/`were` carries a predicate nominal /
 /// adjective (`HeLa was a gene`, `HeLa was large`). Past-tense finite verbs have no number agreement

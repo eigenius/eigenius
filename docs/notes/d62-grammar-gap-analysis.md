@@ -35,6 +35,23 @@
 > bootstrap adds the **past copula** `was`/`were` (over a predicate nominal/adjective). The §2 items
 > below remain (apposition, relatives, lists, numerals, fronted adjuncts, by-agent passives, `but not
 > X`, deep NPs); **predicate nominals (#6) + bare-plural NP args + gene-symbol proper nouns are done**.
+>
+> **Parser-side §2 batch (2026-06-29, no reseed) — two more done:**
+> - **N-N compound stacking + bare-plural over a composed compound** (`MSI cancer models`): 3-noun
+>   stacking already left-branched; the gap was the bare-plural NP shift ran only at lexical *leaves*,
+>   so a composed `cat_n(_, pl)` (compound / adjective-refined) could never be a bare argument. The
+>   shift now also runs on composed cells. → `MSI cancer models required HeLa` open×2,
+>   `… required the helicase activity of WRN` open×189, `thus novel therapies are needed` open×12 (all
+>   were grammar-gap).
+> - **Stacked attributive adjectives** (`synthetic lethal vulnerability`): refining an already-refined
+>   noun now **conjoins over the same base** (`Σx:Base. P(x) ∧ adj(x)`) instead of nesting
+>   (`Σy:Σ. adj(y)`, which applied the adjective to the Σ pair — ill-typed). →
+>   `WRN is a synthetic lethal vulnerability` **CLOSED×6** (was a readback panic, then grammar-gap).
+>
+> **Remaining genuine clause gaps:** for-PP on a passive (`novel therapies are needed for tumours`),
+> plus the still-open §2 list (apposition, comma-lists, relatives, numerals, `because`/`although`
+> subordinators, S0 hyphenated compounds). The NP-only fragments (`MSI cancer models`, `the helicase
+> activity`) are expected non-clauses, not gaps.
 
 
 *Analysis note. After the full-UMLS + closed-class/adverb batch, the WRN first page is **grammar-limited,

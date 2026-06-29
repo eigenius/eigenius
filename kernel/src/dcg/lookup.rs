@@ -1089,6 +1089,20 @@ impl LexicalIndex {
                 }
                 let produced_n = produced.len();
                 chart[i][j].extend(produced);
+                // Bare-plural NP shift for COMPOSED plural common nouns (D62 — N-N compounds like
+                // "MSI cancer models", adjective-refined nouns like "novel therapies"): the leaf shift
+                // in `lookup_span` only covers lexical nouns, so a *composed* `cat_n(_, pl)` cell needs
+                // the shift here too — else such a compound can never be a bare argument NP. The quant
+                // sentinel is freshened with THIS span's `quant_hole_base` (distinct hole per span).
+                let bare: Vec<Item> = chart[i][j]
+                    .iter()
+                    .flat_map(|it| self.bare_plural_nps(it))
+                    .map(|mut np| {
+                        np.sem = freshen_quant(&np.sem, &quant_hole_base(i, j));
+                        np
+                    })
+                    .collect();
+                chart[i][j].extend(bare);
                 // Type-raise `T` (D63 §8.9 Slice 6-T) the cell's name NPs (after its
                 // composition + relativizer items are in place), so a non-leaf / composed
                 // NP can also seed an extraction body. Raised once per cell.

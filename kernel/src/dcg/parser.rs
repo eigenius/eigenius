@@ -349,15 +349,37 @@ fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> 
     {
         if is_adj_clause(adj_s) {
             if let Exp::InductiveCtor(decl, _, _) = &right.cat {
-                let x = "__refine_x";
-                let sigma = Exp::Sig(
-                    Patt::Var(x.into()),
-                    Box::new(c.clone()),
-                    Box::new(Exp::App(
-                        Box::new(left.sem.clone()),
-                        Box::new(Exp::Var(x.into())),
-                    )),
-                );
+                // Refine the noun's type with the adjective restriction. If `C` is ALREADY a refined
+                // noun `Σx:Base. P(x)` (a stacked adjective — "synthetic **lethal** vulnerability"),
+                // CONJOIN over the SAME base: `Σx:Base. P(x) ∧ adj(x)` — a FLAT Σ where every
+                // adjective applies to the base entity. Nesting (`Σy:Σ. adj(y)`) would apply `adj` to
+                // the Σ *pair* (not `<: Entity`), which is ill-typed — why stacked attributive
+                // adjectives didn't parse. The plain (first-adjective) case stays `Σx:C. adj(x)`.
+                let sigma = match c {
+                    Exp::Sig(Patt::Var(bx), base, p_body)
+                        if super::category::resolve_inductive(layer, "urn:eigenius:logic:And")
+                            .is_some() =>
+                    {
+                        let and =
+                            super::category::resolve_inductive(layer, "urn:eigenius:logic:And")
+                                .unwrap();
+                        let adj_at =
+                            Exp::App(Box::new(left.sem.clone()), Box::new(Exp::Var(bx.clone())));
+                        Exp::Sig(
+                            Patt::Var(bx.clone()),
+                            base.clone(),
+                            Box::new(Exp::InductiveType(and, vec![(**p_body).clone(), adj_at])),
+                        )
+                    }
+                    _ => Exp::Sig(
+                        Patt::Var("__refine_x".into()),
+                        Box::new(c.clone()),
+                        Box::new(Exp::App(
+                            Box::new(left.sem.clone()),
+                            Box::new(Exp::Var("__refine_x".into())),
+                        )),
+                    ),
+                };
                 return Some(Item {
                     cat: Exp::InductiveCtor(
                         decl.clone(),

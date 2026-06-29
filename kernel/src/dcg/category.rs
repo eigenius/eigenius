@@ -305,7 +305,7 @@ fn is_any_feat(e: &Exp) -> bool {
 
 /// Resolve an inductive (e.g. `logic:And` / `logic:Or`, or `lexicon:Conn`) from
 /// the layer to its decl, so the combinator can build its terms.
-fn resolve_inductive(layer: &Arc<Layer>, iri_str: &str) -> Option<Arc<InductiveDecl>> {
+pub(crate) fn resolve_inductive(layer: &Arc<Layer>, iri_str: &str) -> Option<Arc<InductiveDecl>> {
     let iri = Iri::parse(iri_str).ok()?;
     let resource = layer.resolve(&iri)?;
     match crate::program::ground::resolve_inductive_type(&iri, &resource, layer).ok()? {
