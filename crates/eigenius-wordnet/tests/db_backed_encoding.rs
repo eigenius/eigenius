@@ -430,13 +430,17 @@ fn wrn_first_page_over_full_lexicon() {
         eprintln!("SKIP: WordNet dict not found under {DICT}");
         return;
     }
-    let page = match std::fs::read_to_string(WRN_PAGE) {
+    // The page path is overridable (`EIGENIUS_WRN_PAGE`) so the same measurement can run against a
+    // controlled-language rewrite (D62 CNL experiment, `first-page-cnl.txt`) for a coverage A/B.
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let page = match std::fs::read_to_string(&page_path) {
         Ok(s) => s,
         Err(_) => {
-            eprintln!("SKIP: {WRN_PAGE} not found");
+            eprintln!("SKIP: {page_path} not found");
             return;
         }
     };
+    eprintln!("measuring page: {page_path}");
 
     let Some(head) = open_head(&path) else { return };
     let index = build_index(&head);

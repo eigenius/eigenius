@@ -147,6 +147,16 @@
 > now split — vanishingly rare in body prose, and no test required it.)
 >
 > **Chosen follow-up approaches (decisions, 2026-06-29):**
+> - **#1 apposition → naming/ALIAS (not a claim); scope after re-measuring.** Decision: honor the
+>   recorded "apposition is discourse-level, out of scope for the *claim*" stance — do NOT encode it as
+>   a typed identity/`same_as` claim in the parse tree. Instead an abbreviation/appositive introduction
+>   (`microsatellite instability (MSI)`) registers `MSI` as an ALIAS for the same referent so later
+>   mentions resolve, contributing nothing to the parse tree. (Needs document-level alias state —
+>   cross-sentence — so it is larger than a single-sentence parser rule, and ties to the named-
+>   individual / lexicon-injection track, not the grammar.) Sequencing: **reseed + re-measure the full
+>   page FIRST**, then scope #1 against the *real* per-unit blockers (the current "apposition blocks 6
+>   units" finding predates this whole campaign; `(MSI)` is already dropped today, so the live residual
+>   is more likely comma-appositive naming vs comma-lists). Do not build #1 blind.
 > - **#8 cross-type object coordination → Option A (structural).** Verified the gap is GENERAL, not
 >   `but-not`-specific: `affects a gene and a cell line` also GAPs (cross-type), while `… a gene and a
 >   gene` is CLOSED — the `_obj` determiners bake the noun type `T` into the object-GQ category

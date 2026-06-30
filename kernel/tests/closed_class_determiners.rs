@@ -553,6 +553,26 @@ fn non_restrictive_relative_is_a_separate_assertion() {
 }
 
 #[test]
+fn plural_definite_the_parses() {
+    // D62 CNL fix 1: `the` + a PLURAL noun (`the genes affect HeLa`) now parses — the singular `the`
+    // failed determiner/noun number agreement on a plural noun. Subject + object positions.
+    let (_layer, index) = index_over_bootstrap();
+    assert!(
+        !index.parse("the genes affect HeLa", &PluralS).is_empty(),
+        "`the` + plural noun (subject) parses"
+    );
+    assert!(
+        !index.parse("HeLa affects the genes", &PluralS).is_empty(),
+        "`the` + plural noun (object) parses"
+    );
+    // Singular `the` unaffected.
+    assert!(
+        !index.parse("the gene affects HeLa", &Identity).is_empty(),
+        "`the` + singular noun still parses"
+    );
+}
+
+#[test]
 fn but_not_contrastive_object_ellipsis() {
     // D62 §2 #8: `[verb] O₁ but not O₂` — the shared verb applies affirmatively to O₁ and negatively
     // to the elided O₂: `V(O₁) ∧ ¬V(O₂)` (intuitionistic `¬P = P → logic:False`). Two paths: a

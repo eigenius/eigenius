@@ -1228,6 +1228,26 @@ resource lexicon:the_obj : lexicon:LexicalEntry {
     lexicon:sense    = "the";
     lexicon:grade    = epistemic:declared;
 }
+// Plural definite `the` (D62 CNL experiment): `the genes`, `the MMR genes`, `the lines`. The
+// singular `the` above is `sg`; without these, `the` + a PLURAL noun fails determiner/noun number
+// agreement (a high-frequency gap in real prose — `the X(plural)` is ubiquitous). Same first-cut
+// existential treatment as the singular `the` and the plural demonstratives `these`/`those`.
+resource lexicon:the_subj_pl : lexicon:LexicalEntry {
+    lexicon:form     = "the";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "the";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:the_obj_pl : lexicon:LexicalEntry {
+    lexicon:form     = "the";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "the";
+    lexicon:grade    = epistemic:declared;
+}
 resource lexicon:this_subj : lexicon:LexicalEntry {
     lexicon:form     = "this";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
