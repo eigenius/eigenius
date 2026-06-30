@@ -351,6 +351,15 @@ grammar blockers** for S1/S2/S3/S5; those four gap at the page beam **only from 
 constraint for S1/S3/S5 is now the page-beam cell cap (they parse only when the beam is widened). GH#97
 Lever B (exact mid-chart felicity pruning, gated on GH#93) and/or a larger page beam is now the lever.
 
+**Reconciliation — removed the earlier UMLS `MASS_FORMS` stopgap (2026-06-30).** The pre-session
+"Fix 2" hardcoded 5 acronyms (`MSI`/`MMR`/`MSS`/`DNA`/`RNA`) as mass in the UMLS importer. With the
+general lexicon built, that hack is removed: `DNA`/`RNA` are WordNet noun lemmas already mass-marked by
+the `--countability` path (so nothing is lost), and `MSI`/`MMR`/`MSS` are **not mass nouns** — they are
+abbreviations for phenomena (`microsatellite instability`, whose head `instability` IS mass via the
+lexicon). Their bare-argument use belongs to the **abbreviation/alias model** (#1), not a mass
+common-noun shim — so they now route there rather than being propped up by a curated list. Net: one
+general, externally-sourced countability mechanism (WordNet side); no per-importer hardcode.
+
 **One residual real gap: S4.** `Scientists can exploit synthetic lethality for cancer therapeutics.`
 gaps **even at wide beam**, localized to a **compound noun as a *preposition* object**: `for therapies`
 (single bare plural) works, `cancer therapeutics` as a *direct* object works (open×36), but `for cancer

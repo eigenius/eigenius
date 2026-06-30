@@ -146,19 +146,15 @@ fn concept_description(
 /// (`named_tui = Some(primary TUI)`, D62) yields **proper-noun** `cat_np(umlssty:TUI, sg)` entries
 /// whose `sem` is the instance `umlscui:CUI` (every form is a name of the individual). The proper-noun
 /// typing is what makes a gene symbol work as both a bare NP and a prenominal modifier.
-/// Curated MASS / uncountable abbreviations (D62 CNL — `is_mass`): biomedical terms used BARE as
-/// arguments (no determiner) and grammatically singular, so their common-noun entries carry `mass`
-/// (the bare-singular-mass shift gives them an argument reading). A short, auditable allow-list — the
-/// pattern the named-individual `NAMED_INDIVIDUAL_SABS` set uses; a general heuristic (semantic-type
-/// or acronym-shape) is the follow-on once impact is measured. Matched case-insensitively on a form.
-const MASS_FORMS: &[&str] = &["MSI", "MMR", "MSS", "DNA", "RNA"];
-
-fn is_mass_concept(forms: &[String]) -> bool {
-    forms
-        .iter()
-        .any(|f| MASS_FORMS.iter().any(|m| f.eq_ignore_ascii_case(m)))
-}
-
+// Countability (D62 CNL bare-mass arguments) is handled by the GENERAL mechanism on the WordNet
+// side: the `--countability` lexicon (Wiktionary `Category:English uncountable nouns` ∩ WordNet,
+// `scripts/provision-countability.sh`) emits an additive `cat_n(C, mass)` entry per uncountable
+// lemma. UMLS concepts that ARE English nouns (`DNA`, `RNA`, …) are already mass-marked there — so
+// UMLS carries NO countability list of its own (the earlier `MASS_FORMS` 5-acronym hardcode was a
+// stopgap, now removed). The remaining acronyms (`MSI`/`MMR`/`MSS`) are NOT mass nouns — they are
+// abbreviations for phenomena ("microsatellite instability", whose head `instability` IS mass via
+// the WordNet lexicon); their bare-argument use belongs to the abbreviation/alias model (#1), not a
+// mass common-noun shim.
 fn push_entries(
     buf: &mut String,
     cui: &str,
@@ -166,20 +162,13 @@ fn push_entries(
     named_tui: Option<&str>,
     rep: &mut Report,
 ) {
-    // A mass common noun carries `mass` instead of `num_any` (D62 CNL) — only when it is NOT a named
-    // individual (named individuals are `cat_np`, a separate path).
-    let noun_num = if named_tui.is_none() && is_mass_concept(forms) {
-        "lexicon:mass"
-    } else {
-        "lexicon:num_any"
-    };
     let (cat, sem_type) = match named_tui {
         Some(tui) => (
             format!("lexicon:cat_np(umlssty:{tui}, lexicon:sg)"),
             format!("umlssty:{tui}"),
         ),
         None => (
-            format!("lexicon:cat_n(umlscui:{cui}, {noun_num})"),
+            format!("lexicon:cat_n(umlscui:{cui}, lexicon:num_any)"),
             "Set".to_string(),
         ),
     };
@@ -300,29 +289,6 @@ mod tests {
                 symbol: None, // a disease concept → stays a class (cat_n)
             }],
         }
-    }
-
-    #[test]
-    fn mass_abbreviation_concept_renders_cat_n_mass() {
-        // D62 CNL Fix 2: a concept with a curated mass abbreviation form (`MSI`) renders its
-        // common-noun entries as `cat_n(_, mass)` (bare-usable), not `num_any`.
-        let c = Concept {
-            cui: "C0026620".to_string(),
-            tuis: vec!["T049".to_string()],
-            preferred_name: "Microsatellite Instability".to_string(),
-            forms: vec!["Microsatellite Instability".to_string(), "MSI".to_string()],
-            definition: None,
-            symbol: None,
-        };
-        let (block, _) = render_concept_block(&c);
-        assert!(
-            block.contains("lexicon:cat_n(umlscui:C0026620, lexicon:mass)"),
-            "mass abbreviation concept emits a `mass` common noun; got:\n{block}"
-        );
-        assert!(
-            !block.contains("lexicon:num_any"),
-            "no num_any entry for a mass concept"
-        );
     }
 
     /// The WRN **gene** (HGNC) — a NAMED INDIVIDUAL: `symbol = Some("WRN")`, TUI T028.
