@@ -49,8 +49,8 @@ use crate::ontology::Iri;
 
 use super::category::{
     adverb_modifier_cats, cats_coordinate, coordinate_np, coordinate_sem, denote_cat,
-    front_participial, is_ctor, reciprocate, relativize, relativize_appos, sentence_modifier_cats,
-    type_raise,
+    front_participial, is_ctor, pied_pipe, reciprocate, relativize, relativize_appos,
+    sentence_modifier_cats, subst_cat, type_raise, CatSubst,
 };
 use super::lemmatizer::{Lemmatizer, Pos};
 use super::lexicon::entry_to_item;
@@ -652,6 +652,67 @@ impl LexicalIndex {
             .collect()
     }
 
+    /// Object-position non-restrictive (appositive) relative NP (D62 §2 #2A, object slot): the
+    /// antecedent NP `cat_np(C, _)` + a comma-set-off relative `, which/that [body]` raised into a
+    /// transitive verb's OBJECT slot (mirroring `a_obj`), conjoining the appositive assertion —
+    /// `(S\NP)\((S\NP)/NP)` with sem `λTV. λs. logic:And(TV(r)(s), body(r))`. Reuses the `a` object
+    /// determiner's raised cat (instantiating its bound `T := C`), as [`Self::bare_plural_nps`]
+    /// reuses `these`, so it composes with any transitive verb. The SUBJECT-position appositive is
+    /// [`relativize_appos`] (type-raised `S/(S\NP)`); prep-object position rides that subject form
+    /// through the GQ-as-preposition-object rule. `None` unless the antecedent is a `cat_np`, the body
+    /// a declarative `S/NP`/`S\NP`, the `a_obj` cat is loaded, and `logic:And` resolves.
+    fn appositive_obj(&self, ante: &Item, body: &Item) -> Option<Item> {
+        let [c, _num] = is_ctor(&ante.cat, "cat_np")? else {
+            return None;
+        };
+        let body_args = is_ctor(&body.cat, "fwd").or_else(|| is_ctor(&body.cat, "bwd"))?;
+        let [s, _np] = body_args else {
+            return None;
+        };
+        if !matches!(is_ctor(s, "cat_s"),
+            Some([mood, _]) if matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl"))
+        {
+            return None;
+        }
+        let and = super::category::resolve_inductive(&self.layer, "urn:eigenius:logic:And")?;
+        // The `a` object determiner's raised cat `cat_forall(sg, λT. (S\NP)\((S\NP)/NP_T))` (the
+        // `bwd`-headed body); instantiate `T := C` for this antecedent's class.
+        let entries = self.entries_for("a");
+        let det = entries
+            .iter()
+            .find(|d| cat_forall_body_head(&d.item.cat) == Some("bwd"))?;
+        let [_dnum, body_lam] = is_ctor(&det.item.cat, "cat_forall")? else {
+            return None;
+        };
+        let Exp::Lam(Patt::Var(tvar), obj_body) = body_lam else {
+            return None;
+        };
+        let mut subst = CatSubst::new();
+        subst.insert(tvar.clone(), c.clone());
+        let cat = subst_cat(obj_body, &subst);
+        // sem: λTV. λsubj. And(TV(r)(subj), body(r)) — the in-situ object raise conjoining the
+        // appositive assertion on the antecedent referent `r`.
+        let (tv, sj) = ("__appos_tv", "__appos_s");
+        let r = ante.sem.clone();
+        let tv_r_s = Exp::App(
+            Box::new(Exp::App(Box::new(Exp::Var(tv.into())), Box::new(r.clone()))),
+            Box::new(Exp::Var(sj.into())),
+        );
+        let body_r = Exp::App(Box::new(body.sem.clone()), Box::new(r));
+        let sem = Exp::Lam(
+            Patt::Var(tv.into()),
+            Box::new(Exp::Lam(
+                Patt::Var(sj.into()),
+                Box::new(Exp::InductiveType(and, vec![tv_r_s, body_r])),
+            )),
+        );
+        Some(Item::with_cost(
+            cat,
+            sem,
+            ante.cost.saturating_add(body.cost),
+        ))
+    }
+
     /// Transparent `-ly` **adverb** items (D62 Phase 3 — `docs/notes/d62-adverb-semantics-decision.md`).
     /// If `surface` is a single `-ly` form whose adjective base is **known to the lexicon**
     /// (data-driven probe — no hardcoded adverb list; WordNet doesn't store productive `-ly`
@@ -965,6 +1026,18 @@ impl LexicalIndex {
                     for it in self.adverb_items(&surface) {
                         chart[i][j].push(it);
                     }
+                    // Fronted participial from a single-token (intransitive) `ger` VP ("arising,
+                    // …"); composed `ger` VPs ("affecting BRCA1", "hypothesizing that P") are shifted
+                    // in the CKY loop. Same controlled-subject referent hole, freshened per cell.
+                    let fronted: Vec<Item> = chart[i][j]
+                        .iter()
+                        .filter_map(|it| {
+                            front_participial(&it.cat, &it.sem, &self.layer).map(|(c, s)| {
+                                Item::with_cost(c, freshen_anaphor(&s, &hole_base(i, j)), it.cost)
+                            })
+                        })
+                        .collect();
+                    chart[i][j].extend(fronted);
                 }
                 // Degree-modified adverb (`more commonly`): a 2-token transparent sentence adverb.
                 if j == i + 1 {
@@ -1146,6 +1219,8 @@ impl LexicalIndex {
                     let bodies = &chart[c + 1][body_end];
                     for ante in antes {
                         for body in bodies {
+                            // Subject-position (type-raised `S/(S\NP)`); prep-object rides this form
+                            // through the GQ-as-preposition-object rule.
                             if let Some((cat, sem)) = relativize_appos(
                                 &ante.cat,
                                 &ante.sem,
@@ -1158,6 +1233,66 @@ impl LexicalIndex {
                                     sem,
                                     ante.cost.saturating_add(body.cost),
                                 ));
+                            }
+                            // Verb-object position (in-situ object raise, mirroring `a_obj`).
+                            if let Some(it) = self.appositive_obj(ante, body) {
+                                produced.push(it);
+                            }
+                        }
+                    }
+                }
+                // Pied-piping restrictive relative (D62 §2 #2B): `[noun] [prep] which [subj] [VP]` →
+                // refine the noun with the clause + the FRONTED preposition relating the antecedent to
+                // the clause subject (`Σg:C. And(VP(subj), prep(subj,g))`). Reuses the VP-adjunct prep
+                // sem (no PP-gap extraction). The clause after `prep which` is decomposed into its
+                // subject NP + `S\NP` VP at every split, so it handles the ordinary subject-predicate
+                // clause; `which` here is the fronted prep's object, distinct from the bare relativizer.
+                for p in (i + 1)..j {
+                    if tokens.get(p + 1).map(|t| t.as_str()) != Some("which") {
+                        continue;
+                    }
+                    if p < i + 1 || p + 2 > j {
+                        continue;
+                    }
+                    let preps: Vec<Exp> = self
+                        .entries_for(tokens[p].as_str())
+                        .iter()
+                        .filter(|e| is_vp_adjunct_prep(&e.item.cat))
+                        .map(|e| e.item.sem.clone())
+                        .collect();
+                    if preps.is_empty() {
+                        continue;
+                    }
+                    for k in (p + 2)..j {
+                        for noun in &chart[i][p - 1] {
+                            if is_ctor(&noun.cat, "cat_n").is_none() {
+                                continue;
+                            }
+                            for subj in &chart[p + 2][k] {
+                                if is_ctor(&subj.cat, "cat_np").is_none() {
+                                    continue;
+                                }
+                                for vp in &chart[k + 1][j] {
+                                    // VP must be `S\NP` (a clause missing its subject).
+                                    if !matches!(is_ctor(&vp.cat, "bwd"),
+                                        Some([s, _]) if is_ctor(s, "cat_s").is_some())
+                                    {
+                                        continue;
+                                    }
+                                    for prep_sem in &preps {
+                                        if let Some((cat, sem)) =
+                                            pied_pipe(&noun.cat, prep_sem, &subj.sem, &vp.sem)
+                                        {
+                                            produced.push(Item::with_cost(
+                                                cat,
+                                                sem,
+                                                noun.cost
+                                                    .saturating_add(subj.cost)
+                                                    .saturating_add(vp.cost),
+                                            ));
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1851,6 +1986,14 @@ fn is_lexicalized_adverb(surface: &str) -> bool {
 fn is_sentence_premod(cat: &Exp) -> bool {
     matches!(is_ctor(cat, "fwd"),
         Some([a, b]) if is_ctor(a, "cat_s").is_some() && is_ctor(b, "cat_s").is_some())
+}
+
+/// Whether `cat` is a VP-adjunct preposition `((S\NP)\(S\NP))/NP` (`fwd(bwd(VP,VP), NP)`) — as
+/// opposed to the `cat_pp / NP` noun-modifier reading. Used by pied-piping (#2B) to pick the prep
+/// whose sem (`λx.λV.λs. And(V(s), prep(s,x))`) threads the fronted antecedent into the VP.
+fn is_vp_adjunct_prep(cat: &Exp) -> bool {
+    matches!(is_ctor(cat, "fwd"),
+        Some([res, np]) if is_ctor(res, "bwd").is_some() && is_ctor(np, "cat_np").is_some())
 }
 
 /// Whether a category is a **predicative adjective** `S[adj]\NP` — `bwd(cat_s(_, adj), _)`. Used to

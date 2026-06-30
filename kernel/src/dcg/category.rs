@@ -799,6 +799,49 @@ pub fn relativize(noun_cat: &Exp, body_cat: &Exp, body_sem: &Exp) -> Option<(Exp
     Some((cat, sigma))
 }
 
+/// **Pied-piping** restrictive relativizer (D62 §2 #2B): `[noun] [prep] which [subject] [VP]`
+/// ("the gene in which HeLa affects BRCA1", "the interaction through which the co-occurrence leads
+/// to cell death") → the refined noun `cat_n(Σg:C. prep(g)(VP)(subj), num)`, i.e. the antecedent is
+/// the FRONTED preposition's object, threaded into the clause as a VP-adjunct: with the VP-adjunct
+/// prep sem `λx.λV.λs. And(V(s), prep(s,x))`, the restrictor is `And(VP(subj), prep(subj, g))`.
+/// Reuses the VP-adjunct preposition's own sem (no PP-gap extraction / crossed-composition needed),
+/// then rides the determiner-over-refined-noun `Fst` machinery. `prep_sem` is the VP-adjunct prep,
+/// `subj_sem` the relative-clause subject, `vp_sem` its `S\NP` predicate. `None` if the antecedent
+/// is not a `cat_n`.
+pub fn pied_pipe(
+    noun_cat: &Exp,
+    prep_sem: &Exp,
+    subj_sem: &Exp,
+    vp_sem: &Exp,
+) -> Option<(Exp, Exp)> {
+    let [c, num] = is_ctor(noun_cat, "cat_n")? else {
+        return None;
+    };
+    let Exp::InductiveCtor(decl, _, _) = noun_cat else {
+        return None;
+    };
+    let g = "__pied_g";
+    // restr(g) = prep_sem(g)(vp)(subj) = And(vp(subj), prep(subj, g)) — the VP-adjunct prep sem
+    // builds the conjunction; the antecedent `g` fills the fronted preposition's object slot.
+    let restr = Exp::App(
+        Box::new(Exp::App(
+            Box::new(Exp::App(
+                Box::new(prep_sem.clone()),
+                Box::new(Exp::Var(g.into())),
+            )),
+            Box::new(vp_sem.clone()),
+        )),
+        Box::new(subj_sem.clone()),
+    );
+    let sigma = Exp::Sig(Patt::Var(g.into()), Box::new(c.clone()), Box::new(restr));
+    let cat = Exp::InductiveCtor(
+        decl.clone(),
+        "cat_n".into(),
+        vec![sigma.clone(), num.clone()],
+    );
+    Some((cat, sigma))
+}
+
 /// The **non-restrictive (appositive) relativizer** rule (D62 §2 #2A): a *referring* NP
 /// `cat_np(C, num)` (a name, or any assembled NP) followed by a comma-set-off relative
 /// `, which/that [body]` → the antecedent **type-raised to a conjoining quantifier**

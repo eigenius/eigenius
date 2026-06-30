@@ -53,12 +53,20 @@ const ABBREV: &[&str] = &[
     "pp",
 ];
 
-/// Whether `word`'s trailing `.` is an abbreviation period (so not a sentence boundary): a
-/// single letter (an initial, or one half of `e.g.`/`i.e.`) or a known abbreviation.
-fn is_abbrev(word: &str) -> bool {
+/// Whether `word`'s trailing `.` is an abbreviation period (so not a sentence boundary): a known
+/// abbreviation, or a single letter (an initial, or one half of `e.g.`/`i.e.`). `next` is the next
+/// **non-whitespace** char after the period (or `'\0'` at end-of-text). A single letter is an
+/// abbreviation/initial UNLESS it is followed by a sentence start (an uppercase letter) — that marks
+/// a real boundary, e.g. a figure-panel letter ending a clause: `… (Extended Data Fig. 1d, e). MSI …`
+/// (the letter is `e)`, alnum-reduced to `e`; the following `M` of `MSI` is the boundary signal). A
+/// single letter followed by a lowercase letter is the abbreviation case (`e.g.` → `g`).
+fn is_abbrev(word: &str, next: char) -> bool {
     let w: String = word.chars().filter(|c| c.is_alphanumeric()).collect();
     let w = w.to_lowercase();
-    w.chars().count() <= 1 || ABBREV.contains(&w.as_str())
+    if ABBREV.contains(&w.as_str()) {
+        return true;
+    }
+    w.chars().count() == 1 && !next.is_uppercase()
 }
 
 /// Split a document into sentence units. A `.` ends a sentence EXCEPT inside a decimal
@@ -78,8 +86,15 @@ pub fn segment_sentences(doc: &str) -> Vec<String> {
                 if prev.is_ascii_digit() && next.is_ascii_digit() {
                     false // decimal point
                 } else {
+                    // The next NON-whitespace char disambiguates a single-letter abbreviation/initial
+                    // from a real boundary (an uppercase start). `'\0'` = end-of-text.
+                    let next_word = chars[i + 1..]
+                        .iter()
+                        .copied()
+                        .find(|c| !c.is_whitespace())
+                        .unwrap_or('\0');
                     let seg: String = chars[start..i].iter().collect();
-                    !is_abbrev(seg.split_whitespace().next_back().unwrap_or(""))
+                    !is_abbrev(seg.split_whitespace().next_back().unwrap_or(""), next_word)
                 }
             }
             _ => false,
@@ -131,6 +146,27 @@ mod tests {
             s.len(),
             2,
             "two sentences, not split on 0.56/Fig./et al./e.g.; got {s:?}"
+        );
+    }
+
+    #[test]
+    fn splits_after_a_figure_panel_letter_ending_a_sentence() {
+        // D62 §2 S0-c: `… (Extended Data Fig. 1d, e). MSI …` — the panel letter `e)` was alnum-reduced
+        // to a single `e` and treated as an initial, MERGING the two sentences (unit-10 over-merge).
+        // A single letter followed by an UPPERCASE start is a real boundary.
+        let s = segment_sentences(
+            "We evaluated MSI (Extended Data Fig. 1d, e). MSI is most commonly observed in cancers.",
+        );
+        assert_eq!(
+            s.len(),
+            2,
+            "the figure-panel letter `e).` ends the first sentence; got {s:?}"
+        );
+        // A bare single-letter clause-end before an uppercase start also splits.
+        assert_eq!(
+            segment_sentences("This is shown in panel d. The next result follows.").len(),
+            2,
+            "a panel letter `d.` before an uppercase start ends the sentence"
         );
     }
 

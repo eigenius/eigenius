@@ -72,8 +72,8 @@
 >   comma, then forward-applies. → `affecting BRCA1 , HeLa affects BRCA1` open×1 ::
 >   `And(affects(brca1,hela), affects(brca1, ?))`. Fixed en route: `freshen_anaphor`/`freshen_quant`
 >   now recurse into `InductiveType`/`InductiveCtor` (the controlled-subject hole nests inside a
->   `logic:And`, so without it the hole stayed an unfreshened closed constant). *Follow-on:*
->   intransitive single-token participles (leaf cells) not yet shifted (only composed `ger` VPs).
+>   `logic:And`, so without it the hole stayed an unfreshened closed constant). Both composed `ger`
+>   VPs (CKY loop) AND single-token intransitive participles (leaf cells, "arising, …") are shifted.
 > - **#5b transitional adverbs + fronted-comma absorption** — `thus`/`therefore`/`hence`/… added to
 >   the lexicalized (transparent, clause-level `S/S`) adverb set; a sentence-initial fronted `S/S`
 >   modifier now ABSORBS a trailing comma (the comma is otherwise a reserved coordinator with no chart
@@ -88,14 +88,49 @@
 >   competes with the restrictive rule (whose noun must be relativizer-adjacent); a trailing comma is
 >   absorbed into the appositive NP span. **Correction to the close-out read:** the comma variant was a
 >   coverage GAP (the comma broke restrictive adjacency), *not* the silent restrictive-collapse the
->   code-comment at `lookup.rs` suggested. *Follow-on:* the OBJECT-position antecedent
->   (`HeLa affects BRCA1, which …`) needs the object-raised conjoining form (test
->   `object_position_non_restrictive_relative_is_a_known_gap`).
-> - **#7 light-verb `give rise to`** — NOT done here: it is lexical *data* (a multiword `(S\NP)/NP`
->   entry + a causation axiom), so it rides the numerals reseed, not this parser-side batch.
+>   code-comment at `lookup.rs` suggested. **All three antecedent positions now covered:** SUBJECT
+>   (the type-raise above); VERB-OBJECT (`lookup.rs::appositive_obj` — the in-situ object raise reusing
+>   `a_obj`'s cat: `HeLa affects BRCA1, which affects HeLa` ⇒ `And(affects(brca1,hela),
+>   affects(hela,brca1))`); and PREP-OBJECT (the subject-raise riding the GQ-as-preposition-object
+>   rule: `a gene within BRCA1, which affects HeLa, is large` ⇒ `And(prep_within(g,brca1),
+>   affects(hela,brca1))`).
+> - **#2B pied-piping restrictive relative** — `[noun] [prep] which [subject] [VP]` ("the gene in
+>   which HeLa affects BRCA1", "the interaction through which …") → the antecedent fills the FRONTED
+>   preposition's object, threaded into the clause as a VP-adjunct: `Σg:C. And(VP(subj), prep(subj,g))`
+>   (`category.rs::pied_pipe`, a CKY branch that decomposes the post-`which` clause into subject + VP
+>   and reuses the VP-adjunct prep's own sem `λx.λV.λs. And(V(s), prep(s,x))`). Crucially this needs
+>   **no PP-gap extraction / crossed-composition** — the prep sem already conjoins the relation, so the
+>   antecedent just slots into its object. → `the gene in which HeLa affects BRCA1 is large` CLOSED ::
+>   `Σg:Gene. And(affects(brca1,hela), prep_in(hela,g))`. *Limit:* the post-`which` clause must
+>   decompose as subject + `S\NP` VP (the ordinary case); deeply-embedded clauses are a follow-on.
 >
-> **Remaining genuine clause gaps:** the still-open §2 list (apposition, comma-lists, relatives,
-> numerals, `because`/`although` subordinators, S0 hyphenated compounds). NB: `novel therapies are
+> **Reseed batch (2026-06-29, bootstrap `closed-class.esl` + demo data — needs a snapshot reseed):**
+> - **#4 cardinal numerals** — word forms `two`..`ten` seeded as plural determiners in `closed-class.esl`
+>   (subject + in-situ object), mirroring `these`/`those` exactly. FIRST-CUT semantics: existential,
+>   **count dropped** (`exists_sem`/`obj_exists_sem`), so `two genes affect HeLa` / `HeLa affects two
+>   genes` PARSE as `∃ genes …`; exact cardinality is a faithfulness follow-on (a `Card`/measure
+>   predicate). *Follow-on:* DIGIT numerals (`14`, `37`) need a generative numeral tokenizer hook.
+> - **#7 light-verb `give rise to`** — a 3-token transitive MWE `(S\NP)/NP` over an opaque causation
+>   axiom (`give_rise_to`), seeded via the existing multiword span lookup (like `cell line`/`depends
+>   on`); present 3sg/pl + past forms. `HeLa gives rise to BRCA1` ⇒ `give_rise_to(brca1, hela)`. Added
+>   to the **demo** lexicon to exercise the light-verb shape end-to-end; production placement is
+>   importer-generated WordNet collocations (a deployment step, not grammar).
+>
+> Both are **data**, validated on the small lexicon (the test bootstrap rebuilds from the `.esl`
+> sources); the persisted wordnet+umls snapshot ManifestDrifts on the bootstrap change and must be
+> reseeded before the full-lexicon battery runs again.
+>
+> **S0-c segmenter fix (2026-06-29, no reseed).** The unit-10 over-merge — `… (Extended Data Fig.
+> 1d, e). MSI …` joined two sentences because the figure-panel letter `e)` alnum-reduced to a single
+> `e` and was treated as an initial (`is_abbrev`, `kernel/src/dcg/segment.rs`). Fixed: a single-letter
+> abbreviation/initial period IS a sentence boundary when the next non-space char is UPPERCASE (a real
+> start), while `e.g.`/`i.e.` (followed by a lowercase letter) and known abbreviations are unchanged.
+> The full page now segments to 27 units (U10 split into two parseable sentences); the decimal/abbrev
+> regression test still passes. (Accepted minor regression: `F. Smith`-style initials before a capital
+> now split — vanishingly rare in body prose, and no test required it.)
+>
+> **Remaining genuine clause gaps:** the still-open §2 list (apposition, comma-lists,
+> `because`/`although` subordinators, S0 hyphenated compounds). NB: `novel therapies are
 > needed for tumours` is **NOT** a prep-object gap (Derived: `therapies are needed for a gene` is
 > CLOSED but `novel therapies are needed for a gene` is grammar-gap at the page beam=64, yet **open×216
 > at beam=1024**) — the residual is ambiguity explosion from the attributive adjective `novel` over a

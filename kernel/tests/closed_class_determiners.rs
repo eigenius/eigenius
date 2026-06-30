@@ -385,18 +385,36 @@ fn already_covered_constructions_are_derived() {
 }
 
 #[test]
-fn object_position_non_restrictive_relative_is_a_known_gap() {
-    // D62 §2 #2A residual: the non-restrictive relative is implemented for the SUBJECT-raised
-    // antecedent only. An antecedent in OBJECT position (`HeLa affects BRCA1, which affects HeLa`)
-    // needs the object-raised conjoining form — a documented follow-on. (Subject-position is covered
-    // by `non_restrictive_relative_is_a_separate_assertion`.)
-    let (_layer, index) = index_over_bootstrap();
+fn pied_piping_relative_threads_the_antecedent_into_the_fronted_preposition() {
+    // D62 §2 #2B: pied-piping `[noun] [prep] which [subject VP]` — the antecedent is the FRONTED
+    // preposition's object, threaded into the clause as a VP-adjunct: "the gene in which HeLa affects
+    // BRCA1" ⇒ Σg:Gene. And(affects(brca1,hela), prep_in(hela, g)). Reuses the VP-adjunct prep sem.
+    let (layer, index) = index_over_bootstrap();
+    for (s, prep) in [
+        ("the gene in which HeLa affects BRCA1 is large", "prep_in"),
+        (
+            "the gene within which HeLa affects BRCA1 is large",
+            "prep_within",
+        ),
+    ] {
+        let forest = index.parse(s, &Identity);
+        assert!(!forest.is_empty(), "pied-piping parses: {s}");
+        let sem = pretty_term(&forest[0].sem);
+        assert!(
+            sem.contains(prep) && sem.contains("affects"),
+            "pied-piping threads the antecedent into the `{prep}` relation: {sem}"
+        );
+        // Kernel-gated to Prop.
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+        let ty = check_infer(&mut ctx, &forest[0].sem).expect("type-checks");
+        assert_eq!(readback_val(0, &ty), Exp::Sort(0), "inhabits Prop: {s}");
+    }
+    // Restrictive (non-pied) relative still parses — no regression.
     assert!(
-        index
-            .parse_open("HeLa affects BRCA1 , which affects HeLa", &Identity)
-            .0
+        !index
+            .parse("a gene which affects HeLa is large", &Identity)
             .is_empty(),
-        "object-position non-restrictive relative not yet covered (update when the object-raise lands)"
+        "plain restrictive relative unaffected"
     );
 }
 
@@ -424,12 +442,60 @@ fn fronted_participial_adjunct_is_an_open_parse_with_a_controlled_subject() {
         "exactly one hole — the controlled subject: {sem}"
     );
 
+    // Leaf (single-token, intransitive) participle: "arising, HeLa affects BRCA1" — the `ger` VP is
+    // the leaf itself, shifted in the seeding loop (not the composed CKY loop).
+    let (lc, lo) = index.parse_open("arising , HeLa affects BRCA1", &Identity);
+    assert!(
+        lc.is_empty() && !lo.is_empty(),
+        "leaf intransitive participle yields an open parse"
+    );
+    assert_eq!(
+        lo[0].holes.len(),
+        1,
+        "leaf participle has one controlled-subject hole"
+    );
+    assert!(
+        pretty_term(&lo[0].item.sem).contains("arises"),
+        "leaf participial proposition asserted: {}",
+        pretty_term(&lo[0].item.sem)
+    );
+
     // The comma is required by the construction but the absorption makes the comma-less variant parse
     // too; the baseline (no adjunct) is unaffected.
     assert_eq!(
         index.parse("HeLa affects BRCA1", &Identity).len(),
         1,
         "baseline declarative unaffected"
+    );
+}
+
+#[test]
+fn non_restrictive_relative_in_object_and_prep_object_position() {
+    // D62 §2 #2A (object + prep-object): the appositive relative composes when its antecedent is a
+    // verb's direct object (in-situ object raise, mirroring `a_obj`) or a preposition's object (the
+    // subject-raise riding the GQ-as-preposition-object rule). Both conjoin the appositive assertion.
+    let (_layer, index) = index_over_bootstrap();
+
+    // Verb direct object: "HeLa affects [BRCA1, which affects HeLa]".
+    let vo = index.parse("HeLa affects BRCA1 , which affects HeLa", &Identity);
+    assert!(!vo.is_empty(), "verb-object appositive parses");
+    let vsem = pretty_term(&vo[0].sem);
+    assert!(
+        vsem.starts_with("And(") && vsem.matches("affects").count() == 2,
+        "verb-object appositive conjoins matrix + relative assertion: {vsem}"
+    );
+
+    // Preposition object: "[a gene within [BRCA1, which affects HeLa]] is large".
+    let po = index.parse(
+        "a gene within BRCA1 , which affects HeLa , is large",
+        &Identity,
+    );
+    assert!(!po.is_empty(), "prep-object appositive parses");
+    assert!(
+        pretty_term(&po[0].sem).contains("affects")
+            && pretty_term(&po[0].sem).contains("prep_within"),
+        "prep-object appositive conjoins the relative assertion into the PP: {}",
+        pretty_term(&po[0].sem)
     );
 }
 
@@ -483,6 +549,52 @@ fn non_restrictive_relative_is_a_separate_assertion() {
             .parse("a gene which affects HeLa is large", &Identity)
             .is_empty(),
         "restrictive relative unaffected"
+    );
+}
+
+#[test]
+fn cardinal_numerals_are_plural_determiners() {
+    // D62 §2 #4: word-form cardinals (`two`..`ten`) parse as plural determiners in subject and object
+    // position. First-cut semantics is existential with the count DROPPED (`two genes` ≈ `∃ genes`);
+    // the exact cardinality is a faithfulness follow-on.
+    let (_layer, index) = index_over_bootstrap();
+    assert!(
+        !index.parse("two genes affect HeLa", &PluralS).is_empty(),
+        "numeral subject parses"
+    );
+    assert!(
+        !index.parse("HeLa affects two genes", &PluralS).is_empty(),
+        "numeral object parses"
+    );
+    // Numerals mirror the existing plural determiners (`these`/`those`) exactly, including their
+    // (pre-existing) agreement behaviour; no numeral-specific agreement claim is made here.
+    assert!(
+        !index.parse("four genes affect HeLa", &PluralS).is_empty(),
+        "another cardinal (`four`) parses"
+    );
+}
+
+#[test]
+fn light_verb_give_rise_to_is_a_multiword_transitive() {
+    // D62 §2 #7: a light-verb MWE (`give rise to`) seeds as a 3-token span and composes as a
+    // transitive verb `(S\NP)/NP` over an opaque causation axiom. Present (3sg/pl) + past forms.
+    let (_layer, index) = index_over_bootstrap();
+    let f = index.parse("HeLa gives rise to BRCA1", &Identity);
+    assert!(!f.is_empty(), "3sg light verb parses");
+    assert!(
+        pretty_term(&f[0].sem).contains("give_rise_to"),
+        "maps to the causation axiom: {}",
+        pretty_term(&f[0].sem)
+    );
+    assert!(
+        !index.parse("HeLa gave rise to BRCA1", &Identity).is_empty(),
+        "past light verb parses"
+    );
+    // Bare-plural subject defers its quantifier ⇒ an open parse.
+    let (c, o) = index.parse_open("genes give rise to HeLa", &PluralS);
+    assert!(
+        c.is_empty() && !o.is_empty(),
+        "bare-plural subject of the light verb yields an open parse"
     );
 }
 
