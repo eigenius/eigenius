@@ -445,6 +445,52 @@ fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> 
             }
         }
     }
+    // GQ-as-preposition-object (D62 §2): a `cat_pp / NP` preposition (left) consuming a
+    // type-raised subject-form GQ `S/(S\NP)` (right) in its object slot — the in-situ scope
+    // shift for a quantified or bare-plural NP as a preposition object ("within a gene",
+    // "for tumours", "of inhibitors"). This is the parser-side analogue of the verb-object
+    // raise (`a_obj`), polymorphic in the functor (the preposition) rather than minting a
+    // per-determiner lexical entry: a name fills the prep's `cat_np` slot directly (plain
+    // forward application), but a GQ — `λV. Q(A, V)` of type `(Entity→Prop)→Prop` — cannot,
+    // so it scopes OVER the preposition instead. ⟦cat_pp⟧ = Entity → Prop; with the prep sem
+    // `λy.λx. prep(x, y)` the result is `λx. GQ(λy. prep(x, y))`. The SAME rule covers a
+    // closed GQ (`a/the/this gene` ⇒ a closed `cat_pp`) and a deferred bare-plural GQ
+    // (`genes` ⇒ a `cat_pp` carrying the quantifier hole `Q`, discharged downstream), since
+    // both surface as a subject-form `S/(S\NP)` item. Restricted to the `cat_pp` functor so
+    // it never re-derives the verb-object raise (`(S\NP)/NP`, already `a_obj`).
+    if let (Some([pp_res, pp_obj]), Some([gq_s, gq_vp])) =
+        (is_ctor(&left.cat, "fwd"), is_ctor(&right.cat, "fwd"))
+    {
+        let prep_is_ppmod =
+            is_ctor(pp_res, "cat_pp").is_some() && is_ctor(pp_obj, "cat_np").is_some();
+        let gq_is_raised_subject = is_ctor(gq_s, "cat_s").is_some()
+            && matches!(is_ctor(gq_vp, "bwd"),
+                Some([s, np]) if is_ctor(s, "cat_s").is_some() && is_ctor(np, "cat_np").is_some());
+        if prep_is_ppmod && gq_is_raised_subject {
+            let (x, y) = ("__pobj_x", "__pobj_y");
+            // λy. (prep y) x  — the prep's relation with the head entity `x` fixed, scoped by Q.
+            let inner = Exp::Lam(
+                Patt::Var(y.into()),
+                Box::new(Exp::App(
+                    Box::new(Exp::App(
+                        Box::new(left.sem.clone()),
+                        Box::new(Exp::Var(y.into())),
+                    )),
+                    Box::new(Exp::Var(x.into())),
+                )),
+            );
+            let sem = Exp::Lam(
+                Patt::Var(x.into()),
+                Box::new(Exp::App(Box::new(right.sem.clone()), Box::new(inner))),
+            );
+            return Some(Item {
+                cat: pp_res.clone(),
+                sem,
+                prov: Combinator::Other,
+                cost: Cost::ZERO,
+            });
+        }
+    }
     None
 }
 

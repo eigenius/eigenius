@@ -799,6 +799,49 @@ pub fn relativize(noun_cat: &Exp, body_cat: &Exp, body_sem: &Exp) -> Option<(Exp
     Some((cat, sigma))
 }
 
+/// The **non-restrictive (appositive) relativizer** rule (D62 §2 #2A): a *referring* NP
+/// `cat_np(C, num)` (a name, or any assembled NP) followed by a comma-set-off relative
+/// `, which/that [body]` → the antecedent **type-raised to a conjoining quantifier**
+/// `λP. logic:And(P(r), body(r))`, where `r` is the antecedent's referent (its sem) and
+/// `body : X → Prop` is the gap-abstracted relative clause. Unlike the RESTRICTIVE
+/// [`relativize`] (which Σ-*restricts* a common noun's denotation), a non-restrictive
+/// relative is a **separate assertion** about an already-identified referent — core-en's
+/// `RelPro-Appos` (`misc.xsl`: an `s\s` `Trib` contributory relation, *not* an `n\n`
+/// restriction). We realize "separate assertion" by reusing the type-raise cat shape
+/// (`S/(S\NP_C)`, so it composes exactly like any subject NP / GQ) with a sem that
+/// conjoins `body(r)` alongside the matrix predicate `P(r)`. `None` if the antecedent is
+/// not a `cat_np`, the body is not a declarative `S/NP` / `S\NP`, or `logic:And` is absent.
+pub fn relativize_appos(
+    np_cat: &Exp,
+    np_sem: &Exp,
+    body_cat: &Exp,
+    body_sem: &Exp,
+    layer: &Arc<Layer>,
+) -> Option<(Exp, Exp)> {
+    is_ctor(np_cat, "cat_np")?;
+    // Body is a clause missing one NP (`S/NP` object-relative or `S\NP` subject-relative),
+    // result a declarative clause — same shape the restrictive rule accepts.
+    let body_args = is_ctor(body_cat, "fwd").or_else(|| is_ctor(body_cat, "bwd"))?;
+    let [s, _np] = body_args else {
+        return None;
+    };
+    if !is_decl_clause(s) {
+        return None;
+    }
+    let and = resolve_inductive(layer, "urn:eigenius:logic:And")?;
+    // Reuse the type-raise CAT (`S/(S\NP_C)`); swap its `λP. P(r)` sem for the conjoining
+    // `λP. And(P(r), body(r))` — the appositive's separate assertion rides alongside.
+    let (raised_cat, _) = type_raise(np_cat, np_sem, layer)?;
+    let p = "__appos_p";
+    let p_at_r = Exp::App(Box::new(Exp::Var(p.into())), Box::new(np_sem.clone()));
+    let body_at_r = Exp::App(Box::new(body_sem.clone()), Box::new(np_sem.clone()));
+    let sem = Exp::Lam(
+        Patt::Var(p.into()),
+        Box::new(Exp::InductiveType(and, vec![p_at_r, body_at_r])),
+    );
+    Some((raised_cat, sem))
+}
+
 /// Whether `s` is a declarative clause `cat_s(dcl, _)` — the result type a relative
 /// clause body abstracts over (D63 §8.9). The finiteness is irrelevant here (a VP
 /// result is `fin`, an object-extraction `S/NP` result is the `T` target's `fin`);

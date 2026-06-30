@@ -49,7 +49,7 @@ use crate::ontology::Iri;
 
 use super::category::{
     adverb_modifier_cats, cats_coordinate, coordinate_np, coordinate_sem, denote_cat, is_ctor,
-    reciprocate, relativize, sentence_modifier_cats, type_raise,
+    reciprocate, relativize, relativize_appos, sentence_modifier_cats, type_raise,
 };
 use super::lemmatizer::{Lemmatizer, Pos};
 use super::lexicon::entry_to_item;
@@ -698,6 +698,35 @@ impl LexicalIndex {
             .collect()
     }
 
+    /// Degree-modified adverb items (D62 §2 #5b — `more commonly`, `most notably`, `less frequently`):
+    /// a degree word (`more`/`most`/`less`) over a known adverb (derived `-ly` or lexicalized) forms a
+    /// transparent **sentence** adverb. Two-token span; the degree contributes nothing to the claim
+    /// (transparent, like the bare adverb), so the whole phrase reuses [`sentence_modifier_cats`] +
+    /// [`adverb_modifier_cats`] with the identity sem. Empty unless `w0` is a degree word and `w1` a
+    /// recognized adverb.
+    fn degree_adverb_items(&self, w0: &str, w1: &str) -> Vec<Item> {
+        let d = w0.trim().to_lowercase();
+        if !matches!(d.as_str(), "more" | "most" | "less" | "least") {
+            return Vec::new();
+        }
+        let a = w1.trim().to_lowercase();
+        if !self.is_derived_adverb(&a) && !is_lexicalized_adverb(&a) {
+            return Vec::new();
+        }
+        let mut cats = adverb_modifier_cats(&self.layer).unwrap_or_default();
+        cats.extend(sentence_modifier_cats(&self.layer).unwrap_or_default());
+        if cats.is_empty() {
+            return Vec::new();
+        }
+        let ident = Exp::Lam(
+            Patt::Var("__adv_x".to_string()),
+            Box::new(Exp::Var("__adv_x".to_string())),
+        );
+        cats.into_iter()
+            .map(|cat| Item::new(cat, ident.clone()))
+            .collect()
+    }
+
     /// Parse prose into the forest of typed sentence parses: every full-span `S`
     /// derivation whose assembled sem type-checks to `Prop`. Returns the WHOLE
     /// forest (ambiguity included); an empty `Vec` means no admissible parse.
@@ -936,6 +965,12 @@ impl LexicalIndex {
                         chart[i][j].push(it);
                     }
                 }
+                // Degree-modified adverb (`more commonly`): a 2-token transparent sentence adverb.
+                if j == i + 1 {
+                    for it in self.degree_adverb_items(&tokens[i], &tokens[j]) {
+                        chart[i][j].push(it);
+                    }
+                }
             }
         }
 
@@ -1087,6 +1122,45 @@ impl LexicalIndex {
                         }
                     }
                 }
+                // Non-restrictive (appositive) relative (D62 §2 #2A): `[NP] , which/that [body] [,]` →
+                // the antecedent NP type-raised to a CONJOINING quantifier (`λP. And(P(r), body(r))`) —
+                // a SEPARATE assertion on an already-referring NP, NOT a Σ-restriction (core-en
+                // `RelPro-Appos`: `s\s`+`Trib`). Signalled by the comma BEFORE the relativizer (so it
+                // never competes with the restrictive rule, whose noun must be relativizer-adjacent). A
+                // trailing comma after the clause is absorbed into this span so the appositive NP is
+                // adjacent to the matrix VP.
+                for c in (i + 2)..=j {
+                    if !matches!(tokens[c].as_str(), "that" | "which") {
+                        continue;
+                    }
+                    if tokens[c - 1] != "," {
+                        continue;
+                    }
+                    let ante_end = c - 2; // antecedent NP is [i, c-2] (before the comma)
+                    let body_end = if tokens[j] == "," { j - 1 } else { j };
+                    if c + 1 > body_end {
+                        continue;
+                    }
+                    let antes = &chart[i][ante_end];
+                    let bodies = &chart[c + 1][body_end];
+                    for ante in antes {
+                        for body in bodies {
+                            if let Some((cat, sem)) = relativize_appos(
+                                &ante.cat,
+                                &ante.sem,
+                                &body.cat,
+                                &body.sem,
+                                &self.layer,
+                            ) {
+                                produced.push(Item::with_cost(
+                                    cat,
+                                    sem,
+                                    ante.cost.saturating_add(body.cost),
+                                ));
+                            }
+                        }
+                    }
+                }
                 let produced_n = produced.len();
                 chart[i][j].extend(produced);
                 // Bare-plural NP shift for COMPOSED plural common nouns (D62 — N-N compounds like
@@ -1108,6 +1182,19 @@ impl LexicalIndex {
                 // NP can also seed an extraction body. Raised once per cell.
                 let raised = raise_nps(&chart[i][j], &self.layer);
                 chart[i][j].extend(raised);
+                // Fronted-modifier comma absorption (D62 §2 #5): a SENTENCE-INITIAL `S/S` modifier
+                // (`Thus,` / `More commonly,` / later a fronted participial) absorbs a trailing comma
+                // so it can then forward-apply to the matrix clause. The comma is otherwise a reserved
+                // coordinator with no chart item, leaving a gap the modifier can't bridge. Restricted to
+                // `i == 0` (sentence-initial) to avoid competing with list-coordination commas.
+                if i == 0 && len >= 2 && tokens[j] == "," {
+                    let absorbed: Vec<Item> = chart[i][j - 1]
+                        .iter()
+                        .filter(|it| is_sentence_premod(&it.cat))
+                        .cloned()
+                        .collect();
+                    chart[i][j].extend(absorbed);
+                }
                 // Lever B: beam this composed cell (non-top; the top cell `len == n` is left to the
                 // forest cap). Done after type-raise so the raised items compete in the beam too.
                 if len < n {
@@ -1706,8 +1793,38 @@ fn adverb_bases(surface: &str) -> Vec<String> {
 /// adverbs that don't derive from an adjective but are inert for a scientific claim, so they get the
 /// same transparent treatment as `-ly` adverbs (plus clause-level `S/S`/`S\S` attachment).
 fn is_lexicalized_adverb(surface: &str) -> bool {
-    const LEXICALIZED_ADVERBS: &[&str] = &["also", "however", "yet"];
+    // Discourse / TRANSITIONAL connective adverbs (core-en `adv.xsl` `Transitional-Adverb`): inert
+    // for a scientific claim (transparent sem) but attaching at the clause level (`S/S`/`S\S`), so a
+    // sentence-initial `Thus, …` / `Hence, …` wraps the matrix. The comma after a sentence-initial one
+    // is absorbed in the CKY (fronted-modifier comma absorption).
+    const LEXICALIZED_ADVERBS: &[&str] = &[
+        "also",
+        "however",
+        "yet",
+        "thus",
+        "therefore",
+        "hence",
+        "consequently",
+        "moreover",
+        "furthermore",
+        "additionally",
+        "subsequently",
+        "similarly",
+        "conversely",
+        "notably",
+        "importantly",
+        "thereby",
+        "nonetheless",
+        "nevertheless",
+    ];
     LEXICALIZED_ADVERBS.contains(&surface)
+}
+
+/// Whether `cat` is a sentence PRE-modifier `S/S` (`fwd(cat_s, cat_s)`) — the category a fronted
+/// transitional adverb / participial adjunct carries. Used by the fronted-modifier comma absorption.
+fn is_sentence_premod(cat: &Exp) -> bool {
+    matches!(is_ctor(cat, "fwd"),
+        Some([a, b]) if is_ctor(a, "cat_s").is_some() && is_ctor(b, "cat_s").is_some())
 }
 
 /// Whether a category is a **predicative adjective** `S[adj]\NP` — `bwd(cat_s(_, adj), _)`. Used to

@@ -48,11 +48,85 @@
 >   (`Σy:Σ. adj(y)`, which applied the adjective to the Σ pair — ill-typed). →
 >   `WRN is a synthetic lethal vulnerability` **CLOSED×6** (was a readback panic, then grammar-gap).
 >
-> **Remaining genuine clause gaps:** for-PP on a passive (`novel therapies are needed for tumours`),
-> plus the still-open §2 list (apposition, comma-lists, relatives, numerals, `because`/`although`
-> subordinators, S0 hyphenated compounds). The NP-only fragments (`MSI cancer models`, `the helicase
-> activity`) are expected non-clauses, not gaps.
+> - **GQ-as-preposition-object** (`within a gene`, `for a gene`, `within cells`): before, only a bare
+>   NAME could fill a preposition's `cat_np` object slot (`within HeLa` ✓ / `within a gene` ✗) —
+>   because a quantified NP is *type-raised* (`S/(S\NP)`, `λV. Q(A,V)`), not a plain `cat_np`. Unlike
+>   OpenCCG (where a determined NP stays a plain `np` and scope is separate), our grammar bakes scope
+>   into the category, so the GQ must scope *over* the preposition. New parser rule (no new lexical
+>   entry, **no reseed**): a `cat_pp/NP` preposition consuming a subject-form GQ on its right yields
+>   `cat_pp` with `λx. GQ(λy. prep(x,y))` — the parser-side analogue of the verb-object raise
+>   (`a_obj`), polymorphic in the functor. ONE rule covers **both** prep families (post-nominal
+>   `cat_pp` noun-mod *and* VP-adjunct, since both surface the GQ as `S/(S\NP)`) and **all three**
+>   object kinds (name / singular ∃-GQ closed / bare-plural deferred-Q open): →
+>   `WRN is a vulnerability for a gene` **CLOSED×14**, `therapies are needed for a gene` **CLOSED×184**,
+>   `HeLa affects a gene within cells` **open×4**, `WRN is a vulnerability for MSI cancers` **CLOSED×16**
+>   (all were grammar-gap). Restricted to `cat_pp` functors so it never re-derives `a_obj`.
+>
+> **Parser-side no-reseed batch (2026-06-29, after the measurement pass) — three more:**
+> - **#5b transitional adverbs + fronted-comma absorption** — `thus`/`therefore`/`hence`/… added to
+>   the lexicalized (transparent, clause-level `S/S`) adverb set; a sentence-initial fronted `S/S`
+>   modifier now ABSORBS a trailing comma (the comma is otherwise a reserved coordinator with no chart
+>   item, leaving a gap), so `Thus, S` composes. Plus **degree-modified adverbs** (`more commonly`,
+>   `most notably`) as transparent sentence adverbs (2-token seed). → `thus , HeLa affects BRCA1`,
+>   `more largely , HeLa affects BRCA1` CLOSED, transparent (same claim).
+> - **#2A non-restrictive (appositive) relative — subject position** — `BRCA1, which affects HeLa, is
+>   primary` ⇒ `And(is_primary(brca1), affects(…, brca1))`. The antecedent NP is type-raised to a
+>   **conjoining quantifier** `λP. And(P(r), body(r))` (`category.rs::relativize_appos`, reusing the
+>   type-raise cat so it composes like any subject GQ) — a SEPARATE assertion, NOT a Σ-restriction
+>   (core-en `RelPro-Appos`: `s\s`+`Trib`). Signalled by the comma BEFORE the relativizer, so it never
+>   competes with the restrictive rule (whose noun must be relativizer-adjacent); a trailing comma is
+>   absorbed into the appositive NP span. **Correction to the close-out read:** the comma variant was a
+>   coverage GAP (the comma broke restrictive adjacency), *not* the silent restrictive-collapse the
+>   code-comment at `lookup.rs` suggested. *Follow-on:* the OBJECT-position antecedent
+>   (`HeLa affects BRCA1, which …`) needs the object-raised conjoining form (test
+>   `object_position_non_restrictive_relative_is_a_known_gap`).
+> - **#7 light-verb `give rise to`** — NOT done here: it is lexical *data* (a multiword `(S\NP)/NP`
+>   entry + a causation axiom), so it rides the numerals reseed, not this parser-side batch.
+>
+> **Remaining genuine clause gaps:** the still-open §2 list (apposition, comma-lists, relatives,
+> numerals, `because`/`although` subordinators, S0 hyphenated compounds). NB: `novel therapies are
+> needed for tumours` is **NOT** a prep-object gap (Derived: `therapies are needed for a gene` is
+> CLOSED but `novel therapies are needed for a gene` is grammar-gap at the page beam=64, yet **open×216
+> at beam=1024**) — the residual is ambiguity explosion from the attributive adjective `novel` over a
+> bare-plural subject *plus* a PP, a Lever-B per-cell-beam scale issue (GH #97), not a missing rule.
+> The NP-only fragments (`MSI cancer models`, `the helicase activity`) are expected non-clauses, not
+> gaps.
+>
+> **The fix is derivation-level, not sense-level (Derived, 2026-06-29, `--features allms` live).**
+> Re-ran the same sentence at the page beam (64) with the live `AnthropicSenseRanker` (sentence-
+> contextual sense reranking) ON: still **GRAMMAR-GAP** (one span still explodes to ~10.8k items,
+> capped to 64). So contextual *sense* disambiguation does not rescue it — the bottleneck is the cell
+> beam ranking *derivations* by a context-blind scalar `Cost`, and the LLM reranker only reorders a
+> word's senses (cap already ≤2). The real GH #97 lever is a contextual **derivation/constituent**
+> ranker (adaptive supertagging), not the sense reranker. Test: `llm_reranker_on_structural_residual`.
 
+
+> **MEASUREMENT-FIRST CLOSE-OUT PASS (2026-06-29, Derived — supersedes the §2 status column).** Before
+> writing any more grammar code, the §2 table was re-probed on the small lexicon (fast, deterministic;
+> tests `already_covered_constructions_are_derived` + `non_restrictive_comma_relative_is_a_known_gap` in
+> `kernel/tests/closed_class_determiners.rs`). Result: **roughly half of §2 is already covered or was
+> mis-recorded.** Now-**DONE** (Derived):
+> - **#3 comma lists** — subject *and* object position (`HeLa affects BRCA1, BRCA1 and BRCA1` CLOSED).
+>   `tokenize` already preserves `,` and maps it to `logic:And`; §3a's "tokenize strips all punctuation"
+>   is now false.
+> - **#6 predicate / VP coordination — fully done**, all three shapes: coordinated NP-predicate
+>   (`is a gene and a cell line`), same-feature VP, and **cross-feature** adj-pred + verbal VP
+>   (`is primary and affects BRCA1`) — the last was predicted to fail on a `Fin`-feature mismatch; it
+>   doesn't (generalized conjunction handles it).
+> - **#7 passive — done**, both by-agent long passive (`is affected by HeLa`) and agentless short
+>   passive (`is affected`). `are needed` was already open×12.
+>
+> **Genuine remaining gaps** (Derived): **#2A** non-restrictive comma-relative (does NOT parse — the
+> comma breaks the restrictive rule's noun-adjacency; a coverage gap, *not* the silent restrictive-
+> collapse a code-read suggested — flag to recheck `lookup.rs:1068` when implementing); **#1**
+> apposition (parenthetical asides are *dropped*, not parsed); **#2B** pied-piping (`in which`); **#4**
+> numerals (the one reseed-gated item); **#5a** fronted participials; **#5b** `thus`/`more commonly`;
+> **#7** light-verb MWE (`give rise to`); **#8** `but not X`; plus S0 work — **S0-b** preserve `( ) —`
+> for apposition, **S0-c** the `Fig. 1d, e.` over-merge in `is_abbrev`. Core-en blueprints + our change
+> sites are mapped per item (close-out analysis, 2026-06-29). **Reseed-gated: only numerals.** Highest
+> risk: #1 (ambiguity vs the working comma-list) and #8 (argument-cluster gapping, which core-en itself
+> defers). Cross-cutting: long units also need the GH #97 **derivation**-level ranker (adaptive
+> supertagging) to survive the cell beam — sense reranking proven insufficient (see above).
 
 *Analysis note. After the full-UMLS + closed-class/adverb batch, the WRN first page is **grammar-limited,
 not vocabulary-limited** (`d62-encoding-prototype-findings.md`): 12 of 26 units are fully known yet

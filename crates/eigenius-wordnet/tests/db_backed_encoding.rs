@@ -293,6 +293,15 @@ fn diagnose_grammar_gap_fragments() {
         "therapies are needed",
         "novel therapies are needed for tumours",
         "thus novel therapies are needed",
+        // PREP-OBJECT isolation probes (D62 §2 GQ-as-prep-object): name vs GQ object, and the
+        // cat_pp (noun-mod) family vs the VP-adjunct family, to locate the residual gap.
+        // D62 §2 GQ-as-prep-object coverage anchors: a quantified/bare-plural NP scopes into a
+        // preposition's object slot (was: only a bare NAME could). Both prep families — the
+        // post-nominal `cat_pp` noun-mod ("vulnerability for …") and the VP-adjunct ("needed
+        // for …") — and all three object kinds (name / singular ∃-GQ / bare-plural deferred-Q).
+        "therapies are needed for a gene", // VP-adjunct prep, singular GQ object  ⇒ CLOSED
+        "WRN is a vulnerability for a gene", // cat_pp noun-mod, singular GQ object ⇒ CLOSED
+        "HeLa affects a gene within cells", // bare-plural prep object (one deferred hole) ⇒ open
     ];
     eprintln!("\n=== fragment bisection (closed / open / — ; OOV split out) ===");
     for f in fragments {
@@ -324,6 +333,54 @@ fn diagnose_grammar_gap_fragments() {
         };
         eprintln!("  [{ntok:>2} tok] {status:<11} {f:?}");
     }
+
+    // BEAM-PRESSURE probe (records the §2 prep-object residual's cause): "novel therapies are
+    // needed for a/an … " is GRAMMAR-GAP at the page beam (64) yet OPENS at a wide beam — so the
+    // residual is ambiguity explosion (attributive-adj `novel` over a bare-plural subject + a PP),
+    // a Lever-B scale issue (GH #97), NOT a missing prep-object rule (the singular/bare-plural prep
+    // objects above already parse). Witnessed: at cell_beam=1024 it yields open×216.
+    let wide = LexicalIndex::build(Arc::clone(&head))
+        .with_sense_cap(SENSE_CAP)
+        .with_cell_beam(1024);
+    let (wclosed, wopen) = wide.parse_open("novel therapies are needed for a gene", &lem);
+    eprintln!(
+        "\n=== beam-pressure probe (cell_beam=1024) ===\n  closed×{} open×{}  \"novel therapies are needed for a gene\"",
+        wclosed.len(),
+        wopen.len()
+    );
+}
+
+/// Controlled experiment (does contextual SENSE reranking rescue a STRUCTURAL-ambiguity residual?):
+/// parse "novel therapies are needed for a gene" at the PAGE beam (64) — the exact config where it is
+/// GRAMMAR-GAP cap-only — using whatever reranker `build_index` wires. Built without `--features
+/// allms` ⇒ cap-only (baseline GRAMMAR-GAP). Built `--features allms` with `ANTHROPIC_API_KEY` ⇒ the
+/// live `AnthropicSenseRanker` reorders the over-cap words' senses in sentence context. Hypothesis
+/// (Declared): no rescue, because the explosion is derivational (Σ-refine × bare-plural shift × PP
+/// attachment) over already-≤2 senses, and the cell beam ranks DERIVATIONS, which the sense ranker
+/// never touches. Run live:
+///     cargo test -p eigenius-wordnet --features allms --test db_backed_encoding \
+///         llm_reranker_on_structural_residual -- --ignored --nocapture
+#[test]
+#[ignore = "live-LLM experiment; needs a snapshot and (for the on-arm) --features allms + ANTHROPIC_API_KEY"]
+fn llm_reranker_on_structural_residual() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head); // wires the live LLM reranker iff --features allms + key
+    let lem = morphy();
+    let sentence = "novel therapies are needed for a gene";
+    let t = std::time::Instant::now();
+    let (closed, open) = index.parse_open(sentence, &lem);
+    let status = if !closed.is_empty() {
+        format!("CLOSED×{}", closed.len())
+    } else if !open.is_empty() {
+        format!("open×{}", open.len())
+    } else {
+        "GRAMMAR-GAP".to_string()
+    };
+    eprintln!(
+        "\n=== LLM-reranker @ page beam (64): {status} [{:.1}s] {sentence:?} ===",
+        t.elapsed().as_secs_f64()
+    );
 }
 
 /// De-risk gate: the store opens, the chain resumes, and the `lexicon:form` value-index is ACTIVE

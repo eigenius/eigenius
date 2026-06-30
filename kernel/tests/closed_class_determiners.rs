@@ -316,6 +316,144 @@ fn connectives_batch_parses() {
 }
 
 #[test]
+fn quantified_np_as_preposition_object_parses() {
+    // D62 §2 GQ-as-prep-object: a quantified/bare-plural NP scopes into a `cat_pp/NP`
+    // preposition's object slot ("a cell line within a gene"), mirroring the verb-object
+    // raise (`a_obj`) but parser-side and polymorphic in the functor. Before this, only a
+    // bare NAME could be a preposition object (`within HeLa` ✓, `within a gene` ✗).
+    let (_layer, index) = index_over_bootstrap();
+
+    // Baseline (name object) — the post-nominal PP refine over a plain `cat_np`.
+    assert!(
+        !index
+            .parse("a cell line within HeLa affects BRCA1", &Identity)
+            .is_empty(),
+        "name as preposition object parses (baseline)"
+    );
+
+    // Singular existential GQ as a preposition object — the gap. Closed parse.
+    assert!(
+        !index
+            .parse("a cell line within a gene affects BRCA1", &Identity)
+            .is_empty(),
+        "`within a gene` (existential GQ object) parses"
+    );
+
+    // Bare-plural GQ as a preposition object — deferred quantifier ⇒ OPEN parse.
+    let (closed, open) = index.parse_open("a cell line within genes affects BRCA1", &PluralS);
+    assert!(
+        closed.is_empty(),
+        "bare-plural prep object defers its quantifier (no closed parse)"
+    );
+    assert!(
+        !open.is_empty(),
+        "`within genes` (bare-plural GQ object) yields an open parse with a deferred hole"
+    );
+}
+
+#[test]
+fn already_covered_constructions_are_derived() {
+    // Measurement-first pass (D62 close-out, 2026-06-29): several §2 "gaps" in
+    // `docs/notes/d62-grammar-gap-analysis.md` are in fact ALREADY COVERED — proven here on the
+    // small lexicon, converting them from Declared to Derived and locking them as regression gates.
+    let (_layer, index) = index_over_bootstrap();
+    let closes = |s: &str| {
+        assert!(
+            !index.parse(s, &Identity).is_empty(),
+            "expected a closed parse (already-covered construction): {s:?}"
+        );
+    };
+
+    // #6 — predicate/VP coordination, ALL three shapes (the inventory listed coordinated predicates
+    // as a gap; only basic `is a NP` was assumed working).
+    closes("HeLa is a gene and a cell line"); //          coordinated NP-predicate
+    closes("HeLa affects BRCA1 and affects BRCA1"); //    coordinated VP, same clause feature
+    closes("HeLa is primary and affects BRCA1"); //       CROSS-feature VP (adj-pred + verbal) — works
+    closes("HeLa affects BRCA1 and is primary");
+
+    // #7 — passive, BOTH the by-agent (long) and agentless (short) forms.
+    closes("BRCA1 is affected by HeLa"); //               long passive with by-agent
+    closes("BRCA1 is affected"); //                       agentless passive
+
+    // #3 — coordination at OBJECT position (binary + comma list); subject lists are covered by
+    // `comma_list_coordination_parses`.
+    closes("HeLa affects BRCA1 and BRCA1");
+    closes("HeLa affects BRCA1, BRCA1 and BRCA1");
+
+    // Restrictive relative (the covered baseline; the NON-restrictive comma variant is the real gap).
+    closes("a gene which affects HeLa is large");
+}
+
+#[test]
+fn object_position_non_restrictive_relative_is_a_known_gap() {
+    // D62 §2 #2A residual: the non-restrictive relative is implemented for the SUBJECT-raised
+    // antecedent only. An antecedent in OBJECT position (`HeLa affects BRCA1, which affects HeLa`)
+    // needs the object-raised conjoining form — a documented follow-on. (Subject-position is covered
+    // by `non_restrictive_relative_is_a_separate_assertion`.)
+    let (_layer, index) = index_over_bootstrap();
+    assert!(
+        index
+            .parse_open("HeLa affects BRCA1 , which affects HeLa", &Identity)
+            .0
+            .is_empty(),
+        "object-position non-restrictive relative not yet covered (update when the object-raise lands)"
+    );
+}
+
+#[test]
+fn transitional_adverbs_and_fronted_comma_parse() {
+    // D62 §2 #5b: sentence-initial TRANSITIONAL adverbs (`thus`/`therefore`/…) attach at the clause
+    // level and are transparent (same claim as unmodified); a comma after the fronted adverb is
+    // absorbed; and a DEGREE-modified adverb (`more largely`) forms a transparent sentence adverb.
+    let (_layer, index) = index_over_bootstrap();
+    let base = index.parse("HeLa affects BRCA1", &Identity);
+    assert_eq!(base.len(), 1, "baseline parses once");
+    let base_sem = pretty_term(&base[0].sem);
+    for s in [
+        "thus HeLa affects BRCA1",      // sentence-initial transitional, no comma
+        "thus , HeLa affects BRCA1",    // + fronted-comma absorption
+        "therefore HeLa affects BRCA1", // another transitional
+        "more largely , HeLa affects BRCA1", // degree-modified adverb + comma
+    ] {
+        let f = index.parse(s, &Identity);
+        assert!(!f.is_empty(), "`{s}` parses");
+        assert_eq!(
+            pretty_term(&f[0].sem),
+            base_sem,
+            "transitional/degree adverb is transparent (same claim): `{s}`"
+        );
+    }
+}
+
+#[test]
+fn non_restrictive_relative_is_a_separate_assertion() {
+    // D62 §2 #2A: a NON-restrictive (comma-set-off) relative on a referring NP is a SEPARATE
+    // assertion — the antecedent type-raised to a conjoining quantifier `λP. And(P(r), body(r))`,
+    // NOT a Σ-restriction (core-en `RelPro-Appos`). `BRCA1, which affects HeLa, is primary` ⇒
+    // `And(is_primary(brca1), affects(…, brca1))` — both conjuncts about the same referent.
+    let (layer, index) = index_over_bootstrap();
+    let forest = index.parse("BRCA1 , which affects HeLa , is primary", &Identity);
+    assert!(!forest.is_empty(), "non-restrictive relative parses");
+    let sem = pretty_term(&forest[0].sem);
+    assert!(
+        sem.contains("And") && sem.contains("is_primary") && sem.contains("affects"),
+        "non-restrictive relative conjoins the matrix and the relative assertion: {sem}"
+    );
+    // Each parse still inhabits Prop (kernel-gated).
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let ty = check_infer(&mut ctx, &forest[0].sem).expect("type-checks");
+    assert_eq!(readback_val(0, &ty), Exp::Sort(0), "inhabits Prop");
+
+    // Regression: the RESTRICTIVE relative (no comma) still Σ-refines the noun (not conjoined).
+    assert!(
+        !index
+            .parse("a gene which affects HeLa is large", &Identity)
+            .is_empty(),
+        "restrictive relative unaffected"
+    );
+}
+
+#[test]
 fn comma_list_coordination_parses() {
     // D62 S0 slice 2: a comma is a conjunctive list separator, so a multi-item subject list builds
     // the (left-branching) member group the distributive subject rule consumes.
