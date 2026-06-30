@@ -221,6 +221,15 @@ pub struct LexicalIndex {
     /// established rule-by-rule path, byte-identical. (Spike: normal-form control is partial; expect
     /// extra ambiguity until the NF is rebuilt.)
     combinatory_core: bool,
+
+    /// **Cross-POS prune** experiment (GH#97): when a surface token has a CLOSED-class (grammatical,
+    /// `in_lexicon = None`) reading — it's a known function word — drop its open-class **nominal**
+    /// (`cat_n`/`cat_np`) readings, the dense-lexicon noise that feeds the compound rule (`can`→
+    /// container, `for`→noun, `is`→beryllium) into the sentence-spanning noun-pile. Open-class VERB/
+    /// ADJ readings are KEPT (so `is`→the `be`-verb copula survives — the case blanket closed-class-
+    /// wins wrongly killed). Acts at seed time, so widen-on-failure can't re-admit the dropped nouns.
+    /// Opt-in; default off.
+    pos_prune: bool,
 }
 
 /// One resolved lexical entry at the **seed stage**: its parse [`Item`], its `lexicon:in_lexicon`
@@ -332,6 +341,7 @@ impl LexicalIndex {
                 sense_ranker: None,
                 cell_beam: None,
                 combinatory_core: false,
+                pos_prune: false,
             };
         }
         let (by_form, max_words) = Self::scan_eager(&layer);
@@ -342,6 +352,7 @@ impl LexicalIndex {
             sense_ranker: None,
             cell_beam: None,
             combinatory_core: false,
+            pos_prune: false,
         }
     }
 
@@ -368,6 +379,13 @@ impl LexicalIndex {
     /// Builder-style; default off (the established rule-by-rule path). For the A/B port measurement.
     pub fn with_combinatory_core(mut self, on: bool) -> Self {
         self.combinatory_core = on;
+        self
+    }
+
+    /// Enable the **cross-POS prune** experiment (GH#97): drop a function word's open-class nominal
+    /// readings (see the `pos_prune` field doc). Builder-style; default off.
+    pub fn with_pos_prune(mut self, on: bool) -> Self {
+        self.pos_prune = on;
         self
     }
 
@@ -621,9 +639,24 @@ impl LexicalIndex {
     ) -> Vec<Item> {
         let s_lc = surface.trim().to_lowercase();
         let candidates = self.candidate_lemmas(surface, lemmatizer);
+        // Cross-POS prune (GH#97 experiment): a surface that itself has a closed-class grammatical
+        // reading is a known function word; drop the open-class NOMINAL readings of all its candidate
+        // lemmas (the compound-rule noise), keeping closed-class + open-class verb/adj/etc.
+        let surface_is_function = self.pos_prune
+            && self
+                .entries_for(&s_lc)
+                .iter()
+                .any(|e| e.in_lexicon.is_none());
         let mut out = Vec::new();
         for c in &candidates {
             let mut entries = self.scoped(self.entries_for(c), scope);
+            if surface_is_function {
+                entries.retain(|e| {
+                    e.in_lexicon.is_none()
+                        || !(is_ctor(&e.item.cat, "cat_n").is_some()
+                            || is_ctor(&e.item.cat, "cat_np").is_some())
+                });
+            }
             if entries.is_empty() {
                 continue;
             }
@@ -956,20 +989,25 @@ impl LexicalIndex {
             if !self.all_prose_tokens_known(text, lemmatizer) {
                 return (closed, open);
             }
-            // Escalate the sense cap and the cell beam together; stop once neither can grow.
-            let mut widened = false;
-            if let Some(c) = cap {
-                if c < SENSE_CAP_WIDEN_MAX {
-                    cap = Some((c * 2).min(SENSE_CAP_WIDEN_MAX));
-                    widened = true;
-                }
-            }
-            if let Some(b) = beam {
-                if b < CELL_BEAM_WIDEN_MAX {
+            // Escalate **beam-first**: grow the cell beam (keeping the sense cap LOW) until it maxes,
+            // then grow the sense cap. Raising the cap admits more senses per lemma, which re-crowds
+            // the chart and can beam out the very constituent a wider beam was meant to keep — so a
+            // beam-limited sentence is best recovered at a low cap + wide beam, not both wide at once.
+            let grew_beam = match beam {
+                Some(b) if b < CELL_BEAM_WIDEN_MAX => {
                     beam = Some((b * 2).min(CELL_BEAM_WIDEN_MAX));
-                    widened = true;
+                    true
                 }
-            }
+                _ => false,
+            };
+            let widened = grew_beam
+                || match cap {
+                    Some(c) if c < SENSE_CAP_WIDEN_MAX => {
+                        cap = Some((c * 2).min(SENSE_CAP_WIDEN_MAX));
+                        true
+                    }
+                    _ => false,
+                };
             if !widened {
                 return (closed, open);
             }
@@ -1684,7 +1722,7 @@ impl LexicalIndex {
     fn reduced_felicitous(&self, it: &Item) -> Option<Item> {
         let expected = denote_cat(&it.cat).ok()?;
         let expected_val = eval(&expected, &Rho::Nil).ok()?;
-        let nf = readback_val(0, &eval(&it.sem, &Rho::Nil).ok()?);
+        let nf = felicity_readback(&eval(&it.sem, &Rho::Nil).ok()?)?;
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.layer));
         check(&mut ctx, &nf, &expected_val).ok()?;
         Some(Item {
@@ -1736,7 +1774,7 @@ impl LexicalIndex {
         if dbg {
             eprintln!("    [felicity] readback start");
         }
-        let nf = readback_val(0, &evaled);
+        let nf = felicity_readback(&evaled)?;
         // Check the normal form under a context binding each (readback-named) hole in BOTH
         // `rho` (a neutral value — `check` evaluates subterms, which would otherwise error on the
         // free var) and `gamma` (its **own** type — `Entity` for a referent, the GQ type for a
@@ -2245,6 +2283,18 @@ fn cell_histogram(cell: &[Item]) -> String {
         .map(|(s, c)| format!("{s}×{c}"))
         .collect();
     format!("shapes={distinct} top: {}", top.join(", "))
+}
+
+/// Readback for the **felicity oracle** — total where [`readback_val`] is partial. The gate evaluates
+/// UNTRUSTED candidate sems off the chart, and a spurious derivation can produce a stuck application
+/// (e.g. a resource applied as a function — witnessed for a named-individual subject under
+/// do-support/modal + a PP), on which `readback_val` panics (`apply failed`). Such a candidate is
+/// simply **not felicitous** — reject it (`None`) rather than crash the parser. `catch_unwind`
+/// converts the panic into a rejection; `eval` is already fallible (`.ok()?`), this restores the same
+/// totality to the readback half. (A fully fallible `readback_val` is the cleaner follow-up; until
+/// then the caught panic may still print to stderr.)
+fn felicity_readback(val: &Val) -> Option<Exp> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| readback_val(0, val))).ok()
 }
 
 fn sense_cap_key(e: &SeedEntry, ranks: Option<&BTreeMap<String, u32>>) -> (bool, u32, u32) {

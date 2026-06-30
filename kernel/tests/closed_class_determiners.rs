@@ -683,6 +683,41 @@ fn modal_clause_takes_a_vp_adjunct_pp() {
     closes("HeLa can affect a gene to BRCA1"); //     modal + GQ object + VP-adjunct prep name object
 }
 
+/// D62/GH#97 — **mood-polymorphic VP-adjunct preposition.** The VP-adjunct prep cats were
+/// `fin`-locked (`cat_s(dcl, fin)`), so a PP could attach only to a FINITE VP — never to a BASE VP
+/// under do-support / a modal, which is what `does not lead to cell death` / `can … for …` need.
+/// Making the prep `fin_any` lets the PP attach INSIDE the base VP, with the correct scope (the PP
+/// falls under `Possible`/negation), and the reading is a real verb+prep term (not a noun-pile).
+#[test]
+fn vp_adjunct_pp_attaches_inside_a_base_vp() {
+    let (_layer, index) = index_over_bootstrap();
+    let sem_of = |s: &str| -> Vec<String> {
+        index
+            .parse(s, &Identity)
+            .iter()
+            .map(|it| match eval(&it.sem, &Rho::Nil) {
+                Ok(v) => pretty_term(&readback_val(0, &v)),
+                Err(_) => pretty_term(&it.sem),
+            })
+            .collect()
+    };
+    // Modal: the PP scopes UNDER `Possible` (attached to the base VP the modal consumes).
+    let modal = sem_of("HeLa can affect BRCA1 to HeLa");
+    assert!(
+        modal
+            .iter()
+            .any(|s| s.contains("Possible(And(") && s.contains("prep_to")),
+        "the `to`-PP attaches inside the modal's base VP (under Possible); got: {modal:?}"
+    );
+    // Do-support negation: the PP scopes UNDER the negation (`(affect ∧ to) → False`).
+    let neg = sem_of("HeLa does not affect BRCA1 to HeLa");
+    assert!(
+        neg.iter()
+            .any(|s| s.contains("prep_to") && s.contains("False") && s.contains("And(")),
+        "the `to`-PP attaches inside the negated base VP; got: {neg:?}"
+    );
+}
+
 #[test]
 fn to_preposition_parses() {
     // D62 CNL: `to` added as a preposition (VP-adjunct + noun-modifier), mirroring `in`/`for` —

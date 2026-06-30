@@ -122,6 +122,70 @@ Catalan-bracketing × sense-product explosion (685k) that crowds the intended `c
 forest/felicity budget (`DEFAULT_FOREST_CAP`). Neither the sense cap, the beam, nor the LLM
 sense-reranker resolves it — it's structural.
 
+**Cross-POS prune experiment (2026-06-30, flag-gated `with_pos_prune`, off by default).** Prototyped
+the seed-time cross-POS prune: a surface with a closed-class (grammatical) reading drops its open-class
+**nominal** (`cat_n`/`cat_np`) readings — the compound-rule noise (`can`→container, `for`→noun,
+`is`→beryllium) — while keeping open-class **verb/adj** (so `is`→`be`-verb survives, the case blanket
+closed-class-wins wrongly killed). Test-run result (page beam + adaptive widen, full lexicon):
+
+| | default (no prune) | + cross-POS prune |
+|---|---|---|
+| S1 | open×183 (**59.5s**) | open×256 (**0.9s**) |
+| S2 | open×212 | open×16 |
+| S3 | open×192 | **GAP (over-pruned)** |
+| S4 | **GAP** | **open×256** ✓ |
+| S5 | open×210 | open×208 |
+
+Findings: the prune **cracks S4** (the noun-pile holdout) and gives a **~60× speedup** (the pile noise
+is gone), and `is`→`be`-verb is preserved — strong evidence it's the right lever for the noun-pile.
+
+**S3 "regression" investigated — the prune is CORRECT (not a regression).** Localized the S3 gap to the
+**do-support + to-PP** case (`does not lead to cell death`; do-support *transitive* — `WRN does not
+affect cells` — is prune-safe, CLOSED×1). Reading the sems settled it:
+- `WRN does not affect cells` → `affect(WRN, cells) → False` — the **real** negation.
+- `WRN does not lead to cell death` → `$quant$(Σ. compound_kind(…, Σ. compound_kind(…)), λ. vNNN_t(…))`
+  — a **noun-pile** ("lead to cell death" chained as nouns), deferred quantifier, **no negation** —
+  junk. The full-S3 `open×192` (without prune) has the same noun-pile shape.
+
+So S3 had **no real parse** with or without prune; the without-prune `open×192` was junk, and the prune
+removed it instead of masking the real gap behind it. The genuine blocker is structural: the VP-adjunct
+prep `to` is **finite-mood-locked** (`cat_s(dcl, fin)` in its category), so `lead to cell death` cannot
+form as a **base** VP under do-support (`does not [lead to cell death]`), and the real `¬(lead→death)`
+reading never assembles — only the noun-pile does. **This is the same mood-lock behind S4's modal+PP.**
+
+**⇒ The next fix (helps S3 *and* S4 robustly): make the VP-adjunct prep mood-polymorphic** (accept a
+base VP as well as finite), so PPs attach under do-support/modals and the real reading forms — which,
+being verb/prep-based, then survives the prune. A Lever-3 follow-on on the prep category (closed-class
+bootstrap → reseed).
+
+**IMPLEMENTED (2026-06-30).** Changed all 8 VP-adjunct prep cats (`to`/`for`/`in`/`with`/`on`/`from`/
+`between`/`within`) in `closed-class.esl` from `cat_s(dcl, fin)` to `cat_s(dcl, fin_any)` (the
+underspecified mood that `feat_meets` accepts against `fin` and `bse`). Verified on the small lexicon
+(regression test `vp_adjunct_pp_attaches_inside_a_base_vp`): the PP now attaches INSIDE the base VP with
+the **correct scope** — `HeLa can affect BRCA1 to HeLa` → `Possible(And(affects(…), prep_to(…)))` (PP
+under the modal), `HeLa does not affect BRCA1 to HeLa` → `And(affects(…), prep_to(…)) → False` (PP under
+the negation) — real verb+prep readings, not noun-piles. Battery 104 green, clippy clean.
+
+**VALIDATED on the full lexicon (reseeded 2026-06-30) — 5/5.** With mood-poly + the cross-POS prune, all
+five CNL sentences parse at the page beam (adaptive widen), fast: S1 open×256 (1.1s), S2 open×16 (0.9s),
+**S3 open×232 (4.6s)**, **S4 open×256 (0.6s)**, S5 open×232 (0.9s) — vs the prior 4/5-at-best and 17–60s
+times. S3's reading is now real: `… And(…, prep_to(…)) → False …` (the `to`-PP inside the negation),
+not the negation-less noun-pile. The intransitive `lead`+to-PP reading surfaces (`v…_i` + `prep_to`)
+where before only the transitive mis-parse did.
+
+**Robustness fix (mood-poly surfaced a crash).** A spurious candidate for a **named-individual subject
++ do-support/modal + PP** (e.g. `WRN does not lead to cell death`) builds a stuck application (the WRN
+resource applied as a function); the felicity gate's `readback_val` **panicked** (`apply failed`) — a
+parser crash, live on the reseed (the WRN page would hit it). Fixed by making the felicity readback
+**total**: `felicity_readback` wraps `readback_val` in `catch_unwind`, so a malformed candidate is
+**rejected** (not felicitous) instead of crashing — restoring the totality `eval` already had
+(`.ok()?`). The oracle must never panic on an untrusted chart candidate. (A fully fallible
+`readback_val` is the cleaner follow-up; the caught panic may still print to stderr.) Regression test
+`vp_adjunct_pp_attaches_inside_a_base_vp`; battery 104 green; the previously-crashing probe now passes. With that, the cross-POS prune looks like a near-pure win (cracks S4, ~60× faster,
+removes junk) rather than a trade. Also landed this session: **beam-first widen** (grow the beam at a
+low cap before widening the cap — raising the cap re-crowds the chart and beams out the constituent a
+wider beam was meant to keep).
+
 **The S4 structural fix (future Lever 2 work):** stop the compound/adjective rules from chaining across
 tokens that have a **grammatical (closed-class) or verbal** role — a *targeted* guard on the compound
 rule (not the reverted blanket closed-class-wins, which wrongly dropped needed open-class senses like

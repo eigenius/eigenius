@@ -137,10 +137,17 @@ fn build_index(head: &Arc<Layer>) -> LexicalIndex {
     if core {
         eprintln!("combinatory-core: ON");
     }
+    // Cross-POS prune experiment (GH#97): EIGENIUS_POS_PRUNE=1 drops function words' open-class
+    // nominal readings at seed time (can→container, for→noun, is→beryllium).
+    let pos_prune = std::env::var("EIGENIUS_POS_PRUNE").is_ok();
+    if pos_prune {
+        eprintln!("cross-POS prune: ON");
+    }
     let index = LexicalIndex::build(Arc::clone(head))
         .with_sense_cap(SENSE_CAP)
         .with_cell_beam(CELL_BEAM)
-        .with_combinatory_core(core);
+        .with_combinatory_core(core)
+        .with_pos_prune(pos_prune);
     #[cfg(feature = "allms")]
     {
         if let Some(ranker) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
@@ -314,6 +321,84 @@ fn verify_sense_lever_at_page_beam() {
             .map(|(l, idx)| format!("{l}={}", outcome(idx, s)))
             .collect();
         eprintln!("  {}  {s:?}", cells.join("  "));
+    }
+}
+
+/// S3 over-prune localization (GH#97): `Each event alone does not lead to cell death` gaps WITH the
+/// cross-POS prune but parses without. This dumps what the prune drops for each of S3's function words
+/// (closed / open-nominal=dropped / open-other=kept) and A/B-parses S3 sub-variants, to find which
+/// dropped nominal reading S3 needs. Run with and without `EIGENIUS_POS_PRUNE=1`:
+///   [EIGENIUS_POS_PRUNE=1] cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       probe_s3_localization -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic: localize the S3 over-prune; run with --ignored --nocapture"]
+fn probe_s3_localization() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head); // honors EIGENIUS_POS_PRUNE
+    let lem = morphy();
+
+    eprintln!("=== S3 function-word entries (closed / open-NOMINAL=pruned / open-other=kept) ===");
+    for w in [
+        "each", "alone", "does", "not", "to", "lead", "cell", "death",
+    ] {
+        let es = index.debug_form_entries(w, &lem);
+        let closed = es.iter().filter(|e| e.0).count();
+        let open_nominal = es
+            .iter()
+            .filter(|e| {
+                !e.0 && (e.2.starts_with("cat_n(")
+                    || e.2.starts_with("cat_np(")
+                    || e.1.contains("cat_n("))
+            })
+            .count();
+        // crude: an entry is nominal if its cat string contains cat_n( or cat_np(
+        let nominal = es
+            .iter()
+            .filter(|e| !e.0 && (e.1.contains("cat_n(") || e.1.contains("cat_np(")))
+            .count();
+        let open_other = es.iter().filter(|e| !e.0).count() - nominal;
+        eprintln!("  {w:<7} closed={closed} open-nominal(pruned)={nominal} open-other(kept)={open_other}  [{open_nominal}]");
+    }
+
+    eprintln!("\n=== S3 sub-variants (outcome under current build_index config) ===");
+    let variants = [
+        "WRN leads to cell death",         // control: lead + to-PP, name subject
+        "each event leads to cell death",  // + each
+        "events alone lead to cell death", // + alone
+        "WRN does not lead to cell death", // + do-support negation
+        "WRN does not affect cells",       // do-support TRANSITIVE, no to-PP
+        "WRN does not affect a gene",      // do-support transitive, GQ object
+        "WRN affects cells",               // control: finite transitive, no do-support
+        "each event alone leads to cell death", // each + alone, no do-support
+        "each event does not lead to cell death", // each + do-support, no alone
+        "Each event alone does not lead to cell death.", // full S3
+    ];
+    for s in variants {
+        let (c, o) = index.parse_open(s, &lem);
+        let tag = if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("open×{}", o.len())
+        } else {
+            "GAP".to_string()
+        };
+        // Print the first parse's sem so we can tell a REAL reading from noun-pile junk.
+        let sem = c
+            .first()
+            .map(|it| &it.sem)
+            .or_else(|| o.first().map(|op| &op.item.sem));
+        // Raw pretty-print (no eval — open parses carry unbound `$quant$` holes that can't be
+        // evaluated), enough to tell a real verb/prep reading from noun-pile / mis-typed junk.
+        let sem_s = sem
+            .map(|e| {
+                eigenius_kernel::dcg::pretty_term(e)
+                    .chars()
+                    .take(160)
+                    .collect::<String>()
+            })
+            .unwrap_or_default();
+        eprintln!("  {tag:<11} {s:?}\n      → {sem_s}");
     }
 }
 
