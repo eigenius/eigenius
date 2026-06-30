@@ -139,6 +139,29 @@ composed-cell shift [lookup.rs:1446](kernel/src/dcg/lookup.rs#L1446) — **scope
 
 ## Lever 3 — Compound-as-preposition-object gap (S4)
 
+**Status: IMPLEMENTED (2026-06-30).** The small-lexicon repro showed the gap is **not**
+compound-specific: it's the **VP-adjunct preposition** (`to`/`for` = `(S\NP)\(S\NP)/NP`) object slot,
+which only accepted a bare NAME — `to a gene`, `to a gene cell line`, `to gene genes` ALL gapped, while
+the noun-modifier `within` accepted every object kind. Root cause: the GQ-as-preposition-object raise
+([parser.rs](kernel/src/dcg/parser.rs#L460)) was **restricted to the `cat_pp` functor**. Fix: extended
+the raise to the VP-adjunct functor (`bwd(VP,VP)/NP`) with the narrow-scope sem `λV.λs. Q(λx.
+prep(x)(V)(s))` (valid because the VP conjunct `V(s)` is independent of the object `x`). Regression
+test `vp_adjunct_preposition_takes_quantified_and_compound_objects`
+([closed_class_determiners.rs](kernel/tests/closed_class_determiners.rs)); battery 100 + dcg 14 green,
+clippy clean. Full-lexicon payoff witnessed: `scientists exploit synthetic lethality for cancer
+therapeutics` GAP → **open×72**.
+
+**Newly exposed (separate, backlog) — the full S4 still gaps because of MODAL interactions, not
+prep-objects:** on the small lexicon `HeLa can affect a gene` parses (2) but **`HeLa can affect BRCA1`
+gaps** (modal + base-verb + NAME object), and a VP-adjunct PP under a modal (a *base* VP) appears not to
+attach (mood mismatch — the prep's VP-adjunct vs `S[bse]\NP`). Both are pre-existing and independent of
+Lever 3 (no preposition in `can affect BRCA1`); they are the remaining S4 blockers. → backlog item
+"modal + base-verb application / VP-adjunct-under-modal".
+
+---
+
+### Original diagnosis (superseded by the above)
+
 **Witnessed asymmetry.** A composed compound NP feeds a **verb** object (`genes affect cancer
 therapeutics` → open×36) but not a **preposition** object (`… for cancer therapeutics` → GAP even at a
 wide beam), while a single-noun prep object works (`… for therapies`). So a feature/shape mismatch

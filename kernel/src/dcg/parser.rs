@@ -473,28 +473,68 @@ fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> 
     if let (Some([pp_res, pp_obj]), Some([gq_s, gq_vp])) =
         (is_ctor(&left.cat, "fwd"), is_ctor(&right.cat, "fwd"))
     {
-        let prep_is_ppmod =
-            is_ctor(pp_res, "cat_pp").is_some() && is_ctor(pp_obj, "cat_np").is_some();
+        let obj_is_np = is_ctor(pp_obj, "cat_np").is_some();
+        // A VP `S\NP` = `bwd(cat_s, cat_np)`.
+        let is_vp = |e: &Exp| {
+            matches!(is_ctor(e, "bwd"),
+                Some([s, np]) if is_ctor(s, "cat_s").is_some() && is_ctor(np, "cat_np").is_some())
+        };
+        // Two prep functors share the `/NP` object slot: the post-nominal noun-modifier
+        // `cat_pp / NP` ("within a gene"), and the VP-adjunct `(S\NP)\(S\NP) / NP`
+        // ("affects BRCA1 to a gene", "essential for tumours"). The GQ-as-prep-object raise must
+        // cover BOTH — restricting it to `cat_pp` (the original) left every VP-adjunct PP unable to
+        // take a quantified/bare object (only a bare NAME filled the slot), the S4 gap (GH#97).
+        let prep_is_ppmod = is_ctor(pp_res, "cat_pp").is_some() && obj_is_np;
+        let prep_is_vpadjunct =
+            obj_is_np && matches!(is_ctor(pp_res, "bwd"), Some([a, b]) if is_vp(a) && is_vp(b));
         let gq_is_raised_subject = is_ctor(gq_s, "cat_s").is_some()
             && matches!(is_ctor(gq_vp, "bwd"),
                 Some([s, np]) if is_ctor(s, "cat_s").is_some() && is_ctor(np, "cat_np").is_some());
-        if prep_is_ppmod && gq_is_raised_subject {
-            let (x, y) = ("__pobj_x", "__pobj_y");
-            // λy. (prep y) x  — the prep's relation with the head entity `x` fixed, scoped by Q.
-            let inner = Exp::Lam(
-                Patt::Var(y.into()),
-                Box::new(Exp::App(
+        if (prep_is_ppmod || prep_is_vpadjunct) && gq_is_raised_subject {
+            let sem = if prep_is_ppmod {
+                // Noun-modifier: ⟦cat_pp⟧ = Entity → Prop. Scope Q over the head entity `x`:
+                // `λx. Q(λy. (prep y) x)`.
+                let (x, y) = ("__pobj_x", "__pobj_y");
+                let inner = Exp::Lam(
+                    Patt::Var(y.into()),
                     Box::new(Exp::App(
-                        Box::new(left.sem.clone()),
-                        Box::new(Exp::Var(y.into())),
+                        Box::new(Exp::App(
+                            Box::new(left.sem.clone()),
+                            Box::new(Exp::Var(y.into())),
+                        )),
+                        Box::new(Exp::Var(x.into())),
                     )),
-                    Box::new(Exp::Var(x.into())),
-                )),
-            );
-            let sem = Exp::Lam(
-                Patt::Var(x.into()),
-                Box::new(Exp::App(Box::new(right.sem.clone()), Box::new(inner))),
-            );
+                );
+                Exp::Lam(
+                    Patt::Var(x.into()),
+                    Box::new(Exp::App(Box::new(right.sem.clone()), Box::new(inner))),
+                )
+            } else {
+                // VP-adjunct: the prep sem is `λx.λV.λs. And(V(s), prep(s, x))`. Scope Q over the
+                // object `x` inside the conjunction: `λV.λs. Q(λx. prep_sem(x)(V)(s))`. Because the
+                // VP conjunct `V(s)` does not depend on `x`, pulling it inside the quantifier is
+                // logically equivalent for both ∃ and ∀ — so this single form is correct without
+                // re-deriving the prep's internal structure.
+                let (x, v, s) = ("__pobj_x", "__pobj_V", "__pobj_s");
+                let applied = Exp::App(
+                    Box::new(Exp::App(
+                        Box::new(Exp::App(
+                            Box::new(left.sem.clone()),
+                            Box::new(Exp::Var(x.into())),
+                        )),
+                        Box::new(Exp::Var(v.into())),
+                    )),
+                    Box::new(Exp::Var(s.into())),
+                );
+                let scoped = Exp::App(
+                    Box::new(right.sem.clone()),
+                    Box::new(Exp::Lam(Patt::Var(x.into()), Box::new(applied))),
+                );
+                Exp::Lam(
+                    Patt::Var(v.into()),
+                    Box::new(Exp::Lam(Patt::Var(s.into()), Box::new(scoped))),
+                )
+            };
             return Some(Item {
                 cat: pp_res.clone(),
                 sem,

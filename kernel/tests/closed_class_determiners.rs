@@ -552,6 +552,39 @@ fn non_restrictive_relative_is_a_separate_assertion() {
     );
 }
 
+/// D62/GH#97 Lever 3 — **VP-adjunct preposition takes a quantified / bare / compound object.**
+/// The S4 gap (witnessed on the full lexicon as `… for cancer therapeutics`) localized on the small
+/// lexicon to the VP-adjunct prep (`to`/`for` = `(S\NP)\(S\NP)/NP`): its object slot only accepted a
+/// bare NAME, because the GQ-as-preposition-object raise was restricted to the noun-modifier `cat_pp`
+/// functor. Extending the raise to the VP-adjunct functor closes it — for single, compound, and
+/// bare-plural objects alike (the noun-modifier `within` already worked, kept here as the control).
+#[test]
+fn vp_adjunct_preposition_takes_quantified_and_compound_objects() {
+    let (_layer, index) = index_over_bootstrap();
+    let closes = |s: &str| {
+        assert!(
+            !index.parse(s, &Identity).is_empty(),
+            "expected a closed parse: {s:?}"
+        );
+    };
+    let opens = |s: &str| {
+        let (closed, open) = index.parse_open(s, &PluralS);
+        assert!(
+            closed.is_empty(),
+            "bare-plural object defers ⇒ no closed parse: {s:?}"
+        );
+        assert!(!open.is_empty(), "expected an open parse: {s:?}");
+    };
+
+    // VP-adjunct prep (`to`) — the fixed cases: determined single, determined compound, bare compound.
+    closes("HeLa affects BRCA1 to a gene"); //                    GQ (determined single) object
+    closes("HeLa affects BRCA1 to a gene cell line"); //          compound (determined) object
+    opens("HeLa affects BRCA1 to gene genes"); //                 compound (bare-plural) object
+                                               // Noun-modifier prep (`within`) — control, already supported (still must hold).
+    closes("a cell line within a gene cell line affects BRCA1");
+    opens("a cell line within gene genes affects BRCA1");
+}
+
 #[test]
 fn to_preposition_parses() {
     // D62 CNL: `to` added as a preposition (VP-adjunct + noun-modifier), mirroring `in`/`for` —
