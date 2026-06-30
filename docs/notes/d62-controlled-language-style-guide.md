@@ -225,3 +225,135 @@ dropping it would still parse:
 
 A simplification may drop *data* (numbers, citations) — those are out of the claim by design — but it
 **may not drop a qualifier that changes the claim's strength, scope, or modality.**
+
+## Final diagnosis (2026-06-30): the grammar grind is done; the residual is non-grammar
+
+Worked the per-construction backlog (the "diverse long tail" above) systematically. The decisive
+outcome is not "fixed N constructions" — it is that **three of the suspected grammar blockers turned
+out to be non-issues**, and the genuine residual is **outside the grammar**. Each finding is witnessed
+(small-lexicon kernel tests in `closed_class_determiners.rs`, full-lexicon probes).
+
+- **Modals are not a gap — they already exist.** `can`/`could`/`may`/`might`/`must`/`will`/`would` map
+  to `logic:Possible`/`Necessary`/`Will`/`Would`/`Should` as opaque sentential operators, cat
+  `(S[dcl,fin]\NP)/(S[bse]\NP)`, with a passing test (`modal_can_wraps_the_proposition_in_possible`). I
+  briefly built duplicate modal infrastructure before discovering this — reverted. *Lesson: retrieve
+  before building.*
+- **Composition-interactions are not a grammar gap.** Numeral+of-PP, of-PP-modified determined NP as
+  argument, det+plural predicate-nominal, compound-as-prep-object — all **parse on the small lexicon**.
+  Their full-lexicon GAPs are **beam/sense pressure** (the chart is beam-less over 7.6M entries), i.e.
+  GH#97, *not* a missing rule. Witnessed by the beam-pressure probe (`novel therapies are needed for a
+  gene`: GRAMMAR-GAP at page beam 64, `open×216` at cell_beam 1024).
+- **Verb frames are not the blocker.** Every probed verb (`encodes`/`arises`/`exhibits`/`contributes
+  to`/`occurs`/`responds`/`affects`/`results from`) parses **CLOSED with a name subject**. The earlier
+  `WRN results from … GAP` was a sense/beam artifact, not a missing frame.
+- **The one genuine isolated grammar-adjacent blocker: bare mass-noun (and adj+mass-noun) arguments.**
+  Probe: `WRN affects mismatch repair` → open, but `WRN affects deficient repair` / `WRN affects
+  deficient DNA mismatch repair` → GAP. The head `repair`/`instability` is grammatically a bare
+  mass/uncountable noun used as an argument; the lexicon marks only 5 curated abbreviations `mass`.
+  **Countability is lexical, not derivable from UMLS semantic types** — broad mass-marking by semantic
+  type would wrongly break count uses (`a DNA repair pathway` is countable). So clearing this needs a
+  **countability lexicon**, not a grammar rule. Fix 2 (the `mass` Num value + `bare_mass_nps` shift +
+  the 5 curated abbreviations) is the *mechanism*; it gives +2 on the page and is correct, but the
+  long tail behind it is a data-acquisition problem.
+- **The CCG combinatory core is inert without re-shaped lexical families.** Implemented the full
+  combinator set (>Bx/<B/<Bx crossed/backward composition + ENF guard) behind
+  `EIGENIUS_COMBINATORY_CORE` and measured: **identical** parse counts core-on vs core-off on both the
+  CNL and original pages. The combinators have nothing to compose because the lexical *families* are
+  still type-indexed application categories, not the feature-shaped categories the combinators assume.
+  Kept flag-off as a record (combinatory-core branch); a real port would re-shape the lexicon, a
+  separate large effort. Confirms the earlier "combinators are formalism-bound, can't bulk-port"
+  analysis.
+
+**Strategic conclusion (witnessed).** The per-construction grammar grind has reached **diminishing
+returns**: each remaining fix yields +0–2 units because the faithful page's units are **multiply
+blocked**, and the grammar *primitives* are essentially complete. The three dominant residual blockers
+are all **non-grammar**:
+1. **Countability lexicon** — bare mass-noun arguments; needs countability data (not in UMLS/WordNet).
+2. **Beam/sense at scale (GH#97)** — the beam-less chart over the full lexicon; the single biggest
+   lever for long real sentences. *This is where coverage work should now go.*
+3. **OOV domain vocab** — `recq`/`double-stranded`/`pcr-based`/`hypermutable`; a small mechanical import.
+
+The remaining backlog items that *are* grammar (comparatives; `because`/`although`) are real but small
+and, for `because`/`although`, **deliberately deferred** (they need the factive-dependent-signature
+engine extension — proof-threading — not an opaque closed-class add; see
+`d62-subordinator-design-findings`). They should not be added opaquely just to move the counter.
+
+### Per-sentence diagnosis of the first 5 CNL v2 sentences (2026-06-30) — countability dominates
+
+Ran a minimal-pair fragment ladder over the full lexicon (snapshot `wordnet-umls-2026-06-29`, cap-only)
+for the first 5 CNL v2 sentences, varying one construction at a time against the known-good anchors
+`genes are attractive targets` (CLOSED) / `genes affect cells` (open). Witnessed by the `#[ignore]`d
+`diagnose_first_five_cnl` test in `crates/eigenius-wordnet/tests/db_backed_encoding.rs`.
+
+**The 5 sentences reduce to exactly 3 root blockers** — and the dominant one is **countability**, not
+the abstract "GH#97 beam/GH#93" prioritization:
+
+| Sentence | Exact blocker | Category |
+|---|---|---|
+| S1 *Synthetic lethality is an interaction between two genetic events.* | `synthetic lethality` bare-singular common-noun **subject** | **bare-mass argument** |
+| S2 *The co-occurrence of these two events leads to cell death.* | `leads to …` + `cell death` bare-singular object | **to-prep** (fixed) + **bare-mass arg** |
+| S3 *Each event alone does not lead to cell death.* | `lead to …` + `cell death` bare-singular object | **to-prep** (fixed) + **bare-mass arg** |
+| S4 *Scientists can exploit synthetic lethality for cancer therapeutics.* | `synthetic lethality` bare-singular common-noun **object** | **bare-mass argument** |
+| S5 *DNA repair processes are attractive synthetic lethal targets.* | `DNA repair processes` 3-noun compound subject | **beam pressure (GH#97)** |
+
+1. **Bare-mass argument (countability) — blocks 4 of 5 (S1–S4).** A bare *plural* common noun shifts to
+   a deferred-quantification NP and parses (`genes affect cells` → open); a bare *singular* common noun
+   in **argument** position does NOT (`genes affect lethality` GAP, `lethality affects cells` GAP,
+   `a gene affects cell death` GAP). The same noun in **predicate** position is fine (`genes are cell
+   death` CLOSED) — so it is specifically the NP-argument shift that's missing for bare singulars. The
+   linguistically-correct fix is to treat bare singular **mass** nouns like bare plurals (the
+   `bare_mass_nps` shift, which exists), gated on the noun being mass. **The blocker is coverage**: only
+   5 UMLS abbreviations are mass-marked; `lethality`/`death`/`co-occurrence`/`instability` are
+   unmarked. And countability is **not morphologically derivable** — `mutation`/`solution`/`function`
+   are countable `-tion`/`-ion` nouns, `inactivation`/`recombination`/`co-occurrence` are mass; same
+   suffix, opposite countability. So this needs a **countability lexicon** (curated for the domain, or
+   an external source like Wiktionary `uncountable` / COMLEX `NUNCOUNT`), not a heuristic.
+2. **to-preposition — blocks S2, S3.** `lead(s) to …` needs `to_prep`; **already implemented** in the
+   working tree (closed-class `to_prep` + `prep_to` axiom + kernel test `to_preposition_parses`), not
+   yet in the snapshot — pending reseed. (Even with `to`-prep, S2/S3 still need the `cell death`
+   bare-mass object — blocker 1.)
+3. **Beam pressure (GH#97 Lever B) — blocks S5 only.** `DNA repair processes are attractive targets` is
+   GRAMMAR-GAP at the page beam (64) but **open×196 at cell_beam=1024** — the 3-noun compound subject's
+   sub-constituents are beamed out at 64 (the 2-noun `repair processes …` already hits `open×64`, the
+   beam ceiling). A scale issue, not a missing compound rule.
+
+**Revised priority (witnessed, supersedes the abstract ordering above):** the single highest-leverage
+lever for the CNL is the **countability lexicon** (bare-mass arguments, 4/5 sentences) — *not* GH#93 or
+Lever B. `to`-prep is done (reseed to realize it). GH#97 Lever B / beam is real but, for these
+sentences, blocks only S5.
+
+### Countability lexicon BUILT + reseeded — 4/5 now parse; blocker shifted to beam (2026-06-30)
+
+Implemented the external countability lexicon (the chosen path) and re-measured against a fresh
+`--umls-all` reseed (`wordnet-umls-2026-06-30`) carrying it:
+
+- **Data:** Wiktionary `Category:English uncountable nouns` (CC-BY-SA) ∩ WordNet noun lemmas =
+  **32,120 mass lemmas** (`scripts/provision-countability.sh` → `references/wiktionary/uncountable-nouns.txt`).
+  Precision validated: `lethality`/`instability`/`death`/`co-occurrence`/`apoptosis`/`toxicity` tagged;
+  `gene`/`function`/`pathway`/`cell` not. `mutation` is tagged (it has a mass sense) — harmless under
+  the **additive** design.
+- **Importer:** `wordnet-import --countability <list>` emits an *additive* `cat_n(C, mass)` entry
+  ALONGSIDE the count entry for each flagged lemma (so `a mutation`/`three mutations` keep parsing while
+  bare `mutation` shifts). The `--all` reseed emitted **43,309** additive mass entries; the WordNet
+  layer validated clean against the `mass`-`Num` bootstrap.
+- **Parser fix (necessary complement):** the composed-cell bare-NP shift in `lookup.rs` ran
+  `bare_plural_nps` but not `bare_mass_nps` — so a bare *leaf* mass noun (`lethality`) shifted but an
+  *adjective-modified / compound* one (`synthetic lethality`, `cell death`) did not. Added the mass arm
+  (symmetric with the leaf path). Witnessed: `genes affect synthetic lethality` GAP → **open×12**.
+
+**Result (fresh snapshot).** Bare-mass arguments now parse (`genes affect lethality` / `lethality
+affects cells` / `a gene affects cell death` — all open). For the 5 sentences, at the page beam (64)
+**S2 parses (open×20)**; at a **wide beam (1024) 4 of 5 parse** — S1 (open×183), S2 (open×200),
+S3 (open×192), S5 (open×210). The countability + `to`-prep + composed-mass-shift fixes **resolved the
+grammar blockers** for S1/S2/S3/S5; those four gap at the page beam **only from beam pressure (GH#97)**.
+
+**The blocker has shifted: countability → GH#97 beam.** With the grammar gaps closed, the binding
+constraint for S1/S3/S5 is now the page-beam cell cap (they parse only when the beam is widened). GH#97
+Lever B (exact mid-chart felicity pruning, gated on GH#93) and/or a larger page beam is now the lever.
+
+**One residual real gap: S4.** `Scientists can exploit synthetic lethality for cancer therapeutics.`
+gaps **even at wide beam**, localized to a **compound noun as a *preposition* object**: `for therapies`
+(single bare plural) works, `cancer therapeutics` as a *direct* object works (open×36), but `for cancer
+therapeutics` gaps. Single-noun prep-objects and compound direct-objects both parse — only
+compound-as-prep-object fails. Likely a prep-object/composed-shift interaction (or a beam effect even at
+1024); needs small-lexicon isolation to call definitively. Tracked as a follow-up.

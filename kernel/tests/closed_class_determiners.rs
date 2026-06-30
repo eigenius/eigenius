@@ -553,6 +553,48 @@ fn non_restrictive_relative_is_a_separate_assertion() {
 }
 
 #[test]
+fn to_preposition_parses() {
+    // D62 CNL: `to` added as a preposition (VP-adjunct + noun-modifier), mirroring `in`/`for` —
+    // pervasive (`leads to`, `respond to`, `compared to`, `essential to`).
+    let (_layer, index) = index_over_bootstrap();
+    assert!(
+        !index
+            .parse("HeLa affects BRCA1 to HeLa", &Identity)
+            .is_empty(),
+        "`to` VP-adjunct PP parses"
+    );
+    assert!(
+        !index
+            .parse("HeLa affects a gene to HeLa", &Identity)
+            .is_empty(),
+        "`to` PP with a determined object parses (GQ-as-prep-object)"
+    );
+}
+
+#[test]
+fn mass_noun_is_a_bare_argument() {
+    // D62 CNL Fix 2: a mass noun (`cat_n(_, mass)`) is a bare argument (subject + object), deferred
+    // quantifier ⇒ open parse; `*a instability` correctly fails (mass meets neither sg nor pl).
+    let (_layer, index) = index_over_bootstrap();
+    let (c, o) = index.parse_open("instability affects HeLa", &Identity);
+    assert!(
+        c.is_empty() && !o.is_empty(),
+        "bare mass noun as subject yields an open parse (deferred quantifier)"
+    );
+    let (co, oo) = index.parse_open("HeLa affects instability", &Identity);
+    assert!(
+        co.is_empty() && !oo.is_empty(),
+        "bare mass noun as object yields an open parse"
+    );
+    assert!(
+        index
+            .parse("a instability affects HeLa", &Identity)
+            .is_empty(),
+        "`a` + mass noun correctly fails (mass is not singular-countable)"
+    );
+}
+
+#[test]
 fn plural_definite_the_parses() {
     // D62 CNL fix 1: `the` + a PLURAL noun (`the genes affect HeLa`) now parses — the singular `the`
     // failed determiner/noun number agreement on a plural noun. Subject + object positions.

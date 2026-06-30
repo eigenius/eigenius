@@ -36,6 +36,22 @@ use crate::wndb::{Offset, Pos, Synset};
 /// polysemous lemma's rarer senses get a higher `lexicon:sense_rank` (D63 §8.7 Stage B).
 pub type SenseRanks = BTreeMap<String, u32>;
 
+/// **Countability lexicon** (D62 bare-mass arguments): the set of noun lemmas that have an
+/// *uncountable* (mass) sense, so a bare singular occurrence is a felicitous NP argument
+/// (`mutation occurs`, `lethality matters`), the same way a bare plural is. Sourced externally
+/// (Wiktionary's `Category:English uncountable nouns` ∩ the WordNet noun lemmas — see
+/// `scripts/provision-countability.sh`); countability is **not** morphologically derivable
+/// (`mutation`/`function` share a suffix yet differ), so it must come from a lexicon, not a rule.
+/// Keys are normalized by [`norm_lemma`]. Threaded into [`render_document`] / [`render_sections`];
+/// an empty set ⇒ no mass marking (every noun stays count-only, the prior behaviour).
+pub type MassNouns = BTreeSet<String>;
+
+/// Normalize a WordNet lemma to a [`MassNouns`] lookup key: lowercase, `_` → space (WordNet
+/// multiword lemmas use `_`; the Wiktionary-derived list uses spaces).
+fn norm_lemma(lemma: &str) -> String {
+    lemma.to_lowercase().replace('_', " ")
+}
+
 /// The **entity top** (D63 §8.3, decision ii): the schema-level foundational
 /// entity type (`lexicon:Entity`) that verb/adjective argument slots — and the
 /// determiners' subject `E` — are typed at. WordNet's `entity.n.01`
@@ -116,6 +132,10 @@ pub struct Report {
     /// Verb synsets with no emittable frame (only predicative / clausal /
     /// control frames, or no frame) — deferred, never guessed.
     pub verbs_deferred: usize,
+    /// Of `entries`, the additive **mass** noun entries (D62 countability lexicon): a second
+    /// `cat_n(C, mass)` entry emitted for a lemma flagged uncountable, enabling the bare-mass
+    /// argument shift. Zero when no countability lexicon is supplied.
+    pub mass_entries: usize,
 }
 
 /// The emittable categorial shapes a verb frame maps to. Higher-order shapes
@@ -259,6 +279,7 @@ fn push_noun(
     rep: &mut Report,
     noun: &BTreeMap<Offset, &Synset>,
     ranks: &SenseRanks,
+    mass: &MassNouns,
 ) {
     // `@` hypernyms → `subclass_of`, each resolved to the nearest CLASS. WordNet has
     // class synsets whose `@` parent is an INSTANCE (British_West_Indies `@` West_Indies
@@ -286,6 +307,11 @@ fn push_noun(
     // `cat_n` carries the noun's own class as its (denotation-erased) type index
     // — load-bearing for polymorphic determiners (D63 §8.2).
     let cat = format!("lexicon:cat_n(wn:{}, lexicon:num_any)", local(syn));
+    // The mass-Num cat for the same class: emitted ADDITIVELY (alongside the count entry) for a
+    // lemma the countability lexicon flags uncountable, so a bare singular occurrence shifts to an
+    // NP argument (D62 `bare_mass_nps`) WITHOUT removing count uses — `mutation` is tagged
+    // uncountable yet `a mutation`/`three mutations` must still parse (the count entry handles them).
+    let mass_cat = format!("lexicon:cat_n(wn:{}, lexicon:mass)", local(syn));
     for (i, lemma) in syn.words.iter().enumerate() {
         push_entry(
             buf,
@@ -298,6 +324,20 @@ fn push_noun(
             ranks,
         );
         rep.entries += 1;
+        if mass.contains(&norm_lemma(lemma)) {
+            push_entry(
+                buf,
+                &format!("e_{}_{i}_mass", local(syn)),
+                lemma,
+                &mass_cat,
+                &local(syn),
+                "Set",
+                &sense_key(syn, lemma),
+                ranks,
+            );
+            rep.entries += 1;
+            rep.mass_entries += 1;
+        }
     }
 }
 
@@ -615,8 +655,12 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks
 /// synsets are emitted sorted by `(pos, offset)`, declarations before entries.
 /// `ranks` supplies each lemma's sense-frequency rank → `lexicon:sense_rank` (D63
 /// §8.7 Stage B); pass an empty map to omit ranks (all default 0).
-pub fn render_document(synsets: &[Synset], ranks: &SenseRanks) -> (String, Report) {
-    let (decls, entries, rep) = render_core(synsets, ranks);
+pub fn render_document(
+    synsets: &[Synset],
+    ranks: &SenseRanks,
+    mass: &MassNouns,
+) -> (String, Report) {
+    let (decls, entries, rep) = render_core(synsets, ranks, mass);
     // The `lexicon:wordnet` descriptor (D65 §3) leads the body — every entry's
     // `lexicon:in_lexicon` points at it, so it must resolve in the same document.
     let doc = format!(
@@ -635,8 +679,12 @@ pub fn render_document(synsets: &[Synset], ranks: &SenseRanks) -> (String, Repor
 /// batches under the gRPC size cap. Same split `render_document` makes internally —
 /// exposed so a chain emit can put decls in layer 0 and stream entries into chunks
 /// without any cross-chunk dependency (entries depend only on the base).
-pub fn render_sections(synsets: &[Synset], ranks: &SenseRanks) -> (String, Vec<String>, Report) {
-    let (decls, entries, rep) = render_core(synsets, ranks);
+pub fn render_sections(
+    synsets: &[Synset],
+    ranks: &SenseRanks,
+    mass: &MassNouns,
+) -> (String, Vec<String>, Report) {
+    let (decls, entries, rep) = render_core(synsets, ranks, mass);
     let base = format!("{ESL_HEADER}\n{WORDNET_LEXICON}\n{decls}");
     (base, entries, rep)
 }
@@ -644,7 +692,11 @@ pub fn render_sections(synsets: &[Synset], ranks: &SenseRanks) -> (String, Vec<S
 /// Shared core: render every synset to a declaration section (`decls`) and a vector of
 /// `LexicalEntry` blocks (`entries`), keeping the two separable so both the
 /// single-document and partitioned emits can assemble them.
-fn render_core(synsets: &[Synset], ranks: &SenseRanks) -> (String, Vec<String>, Report) {
+fn render_core(
+    synsets: &[Synset],
+    ranks: &SenseRanks,
+    mass: &MassNouns,
+) -> (String, Vec<String>, Report) {
     let mut sorted: Vec<&Synset> = synsets.iter().collect();
     sorted.sort_by(|a, b| (a.pos, &a.offset).cmp(&(b.pos, &b.offset)));
 
@@ -666,7 +718,7 @@ fn render_core(synsets: &[Synset], ranks: &SenseRanks) -> (String, Vec<String>, 
             Pos::Noun => {
                 let mut block = String::new();
                 if syn.instance_of.is_empty() {
-                    push_noun(&mut block, syn, &mut rep, &noun_index, ranks);
+                    push_noun(&mut block, syn, &mut rep, &noun_index, ranks, mass);
                 } else {
                     push_instance(&mut block, syn, &mut rep, &noun_index, ranks);
                 }
@@ -744,6 +796,7 @@ mod tests {
             &mut rep,
             &BTreeMap::new(),
             &SenseRanks::new(),
+            &MassNouns::new(),
         );
         assert!(buf.contains("class wn:n05444328 : wn:n08476263 {"));
         assert!(buf.contains("description = \"a segment of DNA\";"));
@@ -756,6 +809,38 @@ mod tests {
         assert!(buf.contains("lexicon:sem_type = type_expr( Set );"));
         assert_eq!(rep.noun_classes, 1);
         assert_eq!(rep.entries, 3); // gene, cistron, factor
+    }
+
+    #[test]
+    fn countability_lexicon_adds_an_additive_mass_entry() {
+        // D62 countability: a lemma flagged uncountable gets a SECOND `cat_n(C, mass)` entry
+        // ALONGSIDE the count one (so `a gene`/`genes` still parse while bare `gene` can shift).
+        // A multi-lemma synset only mass-marks the flagged lemma(s).
+        let gene = syn(
+            "05444328 08 n 03 gene 0 cistron 0 factor 0 001 @ 00001740 n 0000 | a segment of DNA",
+        );
+        let mut mass = MassNouns::new();
+        mass.insert("gene".into()); // flag only `gene`, not `cistron`/`factor`
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_noun(
+            &mut buf,
+            &gene,
+            &mut rep,
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+            &mass,
+        );
+        // count entry (unchanged) + an additive mass entry, both for `gene`.
+        assert!(buf.contains("resource wn:e_n05444328_0 : lexicon:LexicalEntry {"));
+        assert!(buf.contains("resource wn:e_n05444328_0_mass : lexicon:LexicalEntry {"));
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:cat_n(wn:n05444328, lexicon:mass) );"
+        ));
+        // unflagged lemmas get NO mass entry.
+        assert!(!buf.contains("wn:e_n05444328_1_mass"));
+        assert_eq!(rep.entries, 4); // gene, cistron, factor + gene-mass
+        assert_eq!(rep.mass_entries, 1);
     }
 
     #[test]
@@ -772,6 +857,7 @@ mod tests {
             &mut Report::default(),
             &BTreeMap::new(),
             &ranks,
+            &MassNouns::new(),
         );
         // The `gene` entry carries the rank; `cistron` (rank 0) and `factor` (absent) do not.
         assert!(
@@ -798,6 +884,7 @@ mod tests {
             &mut Report::default(),
             &BTreeMap::new(),
             &SenseRanks::new(),
+            &MassNouns::new(),
         );
         assert!(buf.contains("class wn:n00001740 : lexicon:Entity {"));
     }
@@ -892,7 +979,7 @@ mod tests {
             syn("10428004 18 n 01 physicist 0 000 | a scientist"),
             syn("10954498 18 n 01 Einstein 0 001 @i 10428004 n 0000 | a physicist"),
         ];
-        let (doc, rep) = render_document(&synsets, &SenseRanks::new());
+        let (doc, rep) = render_document(&synsets, &SenseRanks::new(), &MassNouns::new());
         assert!(doc.contains("class wn:n10428004 : lexicon:Entity {"));
         assert!(doc.contains("resource wn:n10954498 : wn:n10428004 {"));
         assert!(!doc.contains("class wn:n10954498"));
@@ -908,6 +995,7 @@ mod tests {
         let (doc, _) = render_document(
             &[syn("00001740 03 n 01 entity 0 000 | that which exists")],
             &SenseRanks::new(),
+            &MassNouns::new(),
         );
         assert!(
             doc.starts_with("// "),
@@ -930,6 +1018,7 @@ mod tests {
         let (doc, _) = render_document(
             &[syn("00001740 03 n 01 entity 0 000 | that which exists")],
             &SenseRanks::new(),
+            &MassNouns::new(),
         );
 
         // The descriptor is emitted exactly once, carrying provenance metadata.
@@ -1142,7 +1231,7 @@ mod tests {
             syn("00001740 03 n 01 entity 0 000 | the root"),
             syn("05444328 08 n 01 gene 0 001 @ 00001740 n 0000 | a gene"),
         ];
-        let (doc, rep) = render_document(&nouns, &SenseRanks::new());
+        let (doc, rep) = render_document(&nouns, &SenseRanks::new(), &MassNouns::new());
         assert!(doc.contains("namespace wn         = \"urn:eigenius:wn\";"));
         assert!(doc.contains("class wn:n00001740 : lexicon:Entity {"));
         assert!(doc.contains("class wn:n05444328 : wn:n00001740 {"));

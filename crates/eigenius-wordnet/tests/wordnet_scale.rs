@@ -37,7 +37,7 @@ use eigenius_kernel::nbe::eval::eval;
 use eigenius_kernel::nbe::readback::readback_val;
 use eigenius_kernel::nbe::term::Exp;
 use eigenius_kernel::{bootstrap, esl};
-use eigenius_wordnet::convert::render_document;
+use eigenius_wordnet::convert::{render_document, MassNouns};
 use eigenius_wordnet::import::{read_sense_ranks, select_synsets, SeedSpec};
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 
@@ -69,7 +69,7 @@ fn dict_missing() -> bool {
 fn stand_up(spec: &SeedSpec) -> (Arc<Layer>, std::time::Duration) {
     let chosen = select_synsets(std::path::Path::new(DICT), spec).expect("read WordNet dict");
     let ranks = read_sense_ranks(std::path::Path::new(DICT), &spec.pos).expect("read index ranks");
-    let (doc, rep) = render_document(&chosen, &ranks);
+    let (doc, rep) = render_document(&chosen, &ranks, &MassNouns::new());
     eprintln!(
         "stand_up: {} synsets → {} noun classes, {} instances, {} verb + {} adj axioms, {} entries",
         chosen.len(),

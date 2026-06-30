@@ -86,6 +86,9 @@ data lexicon:Num {
     pl,       // plural — "genes", "all genes"
     num_any,  // underspecified ⊤: meets sg AND pl. WordNet imports carry this;
               // the lookup bridge refines it to the surface number.
+    mass,     // mass / uncountable (D62 CNL) — "MSI", "DNA", "apoptosis": used BARE as an argument
+              // (no determiner) and grammatically singular. Does not meet sg/pl (so `*a MSI` /
+              // `*two MSI` fail); the bare-singular-mass shift gives it an argument NP reading.
 }
 
 // Fin — clause/predicate form (finiteness / non-finite shape + the adjectival

@@ -79,8 +79,15 @@ loop recovers completeness, and it attacks the explosion *at the seed*, before a
   (`prototype_over_wrn_first_page`): with `sense_cap = 2`, **25 of 26 units parse (≤60 tokens)
   without OOM**, up from 9/26 at ≤22 tokens uncapped — i.e. the parser now runs over essentially the
   whole page. (Still 0 *encoded*, but now for measurable reasons — domain OOV + grammar — not an OOM
-  that blocked measurement.) *Not yet implemented:* the widen-on-failure loop (completeness backstop)
-  — currently a fixed cap; bounded widening is the follow-on.
+  that blocked measurement.) *Now implemented (2026-06-30 — supersedes the earlier "not yet"):* the
+  **widen-on-failure loop** is in `parse_scoped_open` (`lookup.rs`): try the cap; if the parse comes
+  back empty *and* every prose token is lexically known (so it is not an OOV miss), double the cap up to
+  `SENSE_CAP_WIDEN_MAX = 16` and retry — so the cap never loses a parse a known-vocabulary sentence
+  would otherwise get, while OOV-blocked sentences don't waste retries. The **contextual LLM sense
+  reranker** (strong-form Lever A) is also implemented (`AnthropicSenseRanker`, `allms` feature, wired
+  via `contextual_sense_ranks` as a one-call-per-sentence pre-pass that reorders each over-cap word's
+  senses before the cap truncates). **Lever A is therefore complete** (deterministic cap + widen +
+  contextual rerank).
 
   *Contextual reranking (the strong form of Lever A).* The supertag prior need not be the static
   `sense_rank` (global WordNet frequency) — it can be an **LLM contextual sense reranker**: given a
@@ -122,6 +129,21 @@ is still the wall after the count is controlled — note `Rc<Exp>` is a foundati
 
 Out of scope unless count-control proves insufficient: A\* / coarse-to-fine multi-pass machinery —
 our exact filter (B) is the simpler sound pruner for a typed grammar.
+
+**GH#97 status (2026-06-30).** Lever A is **complete** (deterministic cap + widen-on-failure +
+contextual LLM rerank); Lever B's *inexact* per-cell cost beam (`with_cell_beam`) is implemented. The
+**only remaining GH#97 piece is Lever B's exact mid-chart felicity pruning**, and per the §4 caveat its
+sense-polysemy payoff is **gated on GH#93** (narrow verb argument types) — until predicates carry
+narrow argument types, every WordNet sense subsumes every slot and an interior felicity check cuts no
+sense combinations (only spurious structural ones), at the cost of a per-cell NbE check that is itself
+expensive. **So the real ceiling-lifter is the chain GH#93 → Lever B, and GH#93 must land first.**
+GH#93 is design-gated (4 deliberation points); its decision #3 is a live hazard for *this* corpus —
+naively tightening a verb's subject to `Animal` would reject gene/protein subjects (`WRN affects …`).
+Conservative resolution to carry into the #93 design: source selectional types from **WordNet sentence
+frames** (the `Somebody ----s` / `Something ----s` animacy split that already ships with WordNet), which
+prunes the `eat`/`think`-style nonsense senses *without* touching the `Something`-frame scientific verbs
+(`affect`/`cause`/`encode`/`regulate`/`contribute`) that admit domain entities — so the pruning that
+matters for `no cat eats a fish` leaves `WRN affects mismatch repair` untouched.
 
 ## 5. Verification plan
 

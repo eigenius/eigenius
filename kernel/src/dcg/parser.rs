@@ -40,6 +40,12 @@ pub enum Combinator {
     BackwardApp,
     /// Forward composition (`>B`) — the one ENF's forward constraint blocks as a functor.
     ForwardComp,
+    /// Backward harmonic composition (`<B`, combinatory-core spike): `Y\Z · X\Y → X\Z`.
+    BackwardComp,
+    /// Crossed composition (`>Bx` / `<Bx`, combinatory-core spike): `A/B · B\C → A\C` and
+    /// `Y/Z · X\Y → X/Z`. Like `ForwardComp`, an ENF-constrained functor (may not be the primary
+    /// of a subsequent application/composition).
+    CrossedComp,
     /// Forward bounded **type-raising** (`T`, D63 §8.9 Slice 6-T): an `NP_X` raised to
     /// `S/(S\NP_X)`. ENF blocks it from forward *application* — a raised functor may
     /// only *compose* (`>B`), which is what builds the object-extraction `S/NP` body
@@ -231,7 +237,13 @@ fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> 
     // This prunes the spurious composition / type-raise derivations while leaving the
     // extraction case (where the `>B` output is consumed as an *argument*, not a
     // functor) untouched.
-    let left_is_fwd_comp = left.prov == Combinator::ForwardComp;
+    // ENF: a composition output (any of `>B`/`>Bx`/`<B`/`<Bx`) may not be the primary functor of a
+    // subsequent application/composition. The crossed/backward variants only exist under the
+    // combinatory-core flag, so flag-off behaviour is unchanged.
+    let left_is_fwd_comp = matches!(
+        left.prov,
+        Combinator::ForwardComp | Combinator::CrossedComp | Combinator::BackwardComp
+    );
     let left_is_raised = left.prov == Combinator::TypeRaised;
     if !left_is_fwd_comp && !left_is_raised {
         if let Some(args) = is_ctor(&left.cat, "fwd") {
@@ -492,6 +504,89 @@ fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> 
         }
     }
     None
+}
+
+/// **Combinatory-core spike** (porting core-en's `rules.xml`): the additional CCG composition
+/// combinators not in [`apply_combine`] — **forward crossed** (`>Bx`: `A/B · B\C → A\C`), **backward
+/// harmonic** (`<B`: `Y\Z · X\Y → X\Z`), and **backward crossed** (`<Bx`: `Y/Z · X\Y → X/Z`). Returns
+/// ALL that apply (a pair may admit more than one), for the CKY to add alongside the hand-built rules
+/// when the flag is set. Forward harmonic (`>B`) already lives in `apply_combine`. Sem is functional
+/// composition `λz. f(g(z))` with the primary functor outermost. ENF: outputs carry a composition
+/// provenance so they can't be a subsequent primary functor (the guard in `apply_combine`); a
+/// composition output is also barred here from being a primary, mirroring that guard.
+pub fn apply_core(left: &Item, right: &Item, layer: &Arc<Layer>) -> Vec<Item> {
+    let mut out = Vec::new();
+    let primary_blocked = |p: Combinator| {
+        matches!(
+            p,
+            Combinator::ForwardComp | Combinator::CrossedComp | Combinator::BackwardComp
+        )
+    };
+    let z = "__core_z";
+    // λz. f(g(z)) — compose `f` (outer/primary) after `g` (inner/secondary).
+    let compose_sem = |f: &Exp, g: &Exp| {
+        Exp::Lam(
+            Patt::Var(z.into()),
+            Box::new(Exp::App(
+                Box::new(f.clone()),
+                Box::new(Exp::App(Box::new(g.clone()), Box::new(Exp::Var(z.into())))),
+            )),
+        )
+    };
+    let mk = |decl: &Arc<crate::nbe::term::InductiveDecl>, ctor: &str, a: Exp, b: Exp| {
+        Exp::InductiveCtor(decl.clone(), ctor.into(), vec![a, b])
+    };
+
+    // Forward family: left is the primary functor `A/B` (fwd); not itself a composition output.
+    if !primary_blocked(left.prov) {
+        if let (Exp::InductiveCtor(decl, _, _), Some([a, b])) =
+            (&left.cat, is_ctor(&left.cat, "fwd"))
+        {
+            // >Bx (crossed): `A/B · B\C → A\C`. left.arg(B) unifies right.result(B).
+            if let Some([rr, rc]) = is_ctor(&right.cat, "bwd") {
+                if let Some(subst) = unify_cat(b, rr, layer) {
+                    out.push(Item {
+                        cat: mk(decl, "bwd", subst_cat(a, &subst), subst_cat(rc, &subst)),
+                        sem: compose_sem(&left.sem, &right.sem),
+                        prov: Combinator::CrossedComp,
+                        cost: Cost::ZERO,
+                    });
+                }
+            }
+        }
+    }
+    // Backward family: right is the primary functor `X\Y` (bwd); not itself a composition output.
+    if !primary_blocked(right.prov) {
+        if let (Exp::InductiveCtor(decl, _, _), Some([x, y])) =
+            (&right.cat, is_ctor(&right.cat, "bwd"))
+        {
+            // <B (harmonic): `Y\Z · X\Y → X\Z`. left=Y\Z (bwd), unify left.result(Y) ~ right.arg(Y).
+            if let Some([ly, lz]) = is_ctor(&left.cat, "bwd") {
+                if let Some(subst) = unify_cat(ly, y, layer) {
+                    out.push(Item {
+                        cat: mk(decl, "bwd", subst_cat(x, &subst), subst_cat(lz, &subst)),
+                        sem: compose_sem(&right.sem, &left.sem),
+                        prov: Combinator::BackwardComp,
+                        cost: Cost::ZERO,
+                    });
+                }
+            }
+            // <Bx (crossed): `Y/Z · X\Y → X/Z`. left=Y/Z (fwd), unify left.result(Y) ~ right.arg(Y).
+            if let Some([ly, lz]) = is_ctor(&left.cat, "fwd") {
+                if let Some(subst) = unify_cat(ly, y, layer) {
+                    out.push(Item {
+                        cat: mk(decl, "fwd", subst_cat(x, &subst), subst_cat(lz, &subst)),
+                        sem: compose_sem(&right.sem, &left.sem),
+                        prov: Combinator::CrossedComp,
+                        cost: Cost::ZERO,
+                    });
+                }
+            }
+        }
+    }
+    out.into_iter()
+        .map(|it| it.at_cost(left.cost.saturating_add(right.cost)))
+        .collect()
 }
 
 /// The bound variable of every 6-mod Σ-refinement (D63 §8.13).

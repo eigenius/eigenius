@@ -129,9 +129,18 @@ fn open_head(path: &std::path::Path) -> Option<Arc<Layer>> {
 /// Build the lazy `LexicalIndex` over the head with the sense cap, plus the live contextual
 /// reranker when built with `--features allms` and `ANTHROPIC_API_KEY` is set.
 fn build_index(head: &Arc<Layer>) -> LexicalIndex {
+    // Combinatory-core spike: `EIGENIUS_COMBINATORY_CORE=1` enables the extra CCG combinators for the
+    // A/B port measurement (default off = the established rule-by-rule path).
+    let core = std::env::var("EIGENIUS_COMBINATORY_CORE")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    if core {
+        eprintln!("combinatory-core: ON");
+    }
     let index = LexicalIndex::build(Arc::clone(head))
         .with_sense_cap(SENSE_CAP)
-        .with_cell_beam(CELL_BEAM);
+        .with_cell_beam(CELL_BEAM)
+        .with_combinatory_core(core);
     #[cfg(feature = "allms")]
     {
         if let Some(ranker) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
@@ -236,6 +245,205 @@ fn encode_unit(
             count: n,
             is_prop: gates_to_prop(layer, &closed[0].sem),
         },
+    }
+}
+
+/// Per-sentence blocker diagnosis for the FIRST 5 CNL v2 sentences (user request 2026-06-30):
+/// for each sentence, print token-level OOV, the full-sentence parse outcome, and a fragment
+/// ladder that localizes the exact construction that stalls. `#[ignore]`d; run manually:
+///   cargo test -p eigenius-wordnet --test db_backed_encoding diagnose_first_five_cnl \
+///       -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic: localize per-sentence blockers of CNL v2's first 5; run with --ignored --nocapture"]
+fn diagnose_first_five_cnl() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+
+    // SENTENCE-SHAPED minimal pairs (parse_open only returns full-span S parses, so a bare NP
+    // fragment is always GRAMMAR-GAP and tells us nothing). Each group varies ONE construction at a
+    // time, anchored on the known-good `genes are attractive targets` / `genes affect cells`, using
+    // small-lexicon generic slot fillers (genes/cells) so the GRAMMAR is isolated from the specific
+    // domain word's vocabulary/countability — the domain word is then swapped in as the LAST probe.
+    let sentences: &[(&str, &[&str])] = &[
+        (
+            "THE 5 ACTUAL CNL v2 SENTENCES (end-to-end verdict)",
+            &[
+                "Synthetic lethality is an interaction between two genetic events.",
+                "The co-occurrence of these two events leads to cell death.",
+                "Each event alone does not lead to cell death.",
+                "Scientists can exploit synthetic lethality for cancer therapeutics.",
+                "DNA repair processes are attractive synthetic lethal targets.",
+            ],
+        ),
+        (
+            "ANCHORS (known-good)",
+            &[
+                "genes are attractive targets", // copula pred-nom, bare-pl subj + adj+noun pred
+                "genes affect cells",           // bare-plural SVO control
+            ],
+        ),
+        (
+            "COPULA: number / bare predicate / stacked adjectives (S5, S1)",
+            &[
+                "genes are targets",                             // bare-plural predicate nominal
+                "genes are attractive synthetic lethal targets", // 3 stacked attributive adjs
+                "genes are interactions", // plural=plural pred-nom (S1 skeleton)
+                "a gene is an interaction", // sg=sg pred-nom (S1 determiners)
+            ],
+        ),
+        (
+            "COMPOUND SUBJECT (S5 'DNA repair processes', S2 'co-occurrence')",
+            &[
+                "processes are attractive targets", // single common-noun plural subject
+                "repair processes are attractive targets", // 2-noun compound subject
+                "DNA repair processes are attractive targets", // 3-noun compound subject
+            ],
+        ),
+        (
+            "BARE-MASS OBJECT / SUBJECT (S4 'synthetic lethality', S1)",
+            &[
+                "genes exploit cells",    // verb 'exploit' + plain plural object (control)
+                "genes affect lethality", // bare common-noun object (countability probe)
+                "genes affect synthetic lethality", // adj + bare common-noun object
+                "lethality affects cells", // bare common-noun SUBJECT
+            ],
+        ),
+        (
+            "DETERMINERS: each / these+numeral (S2, S3)",
+            &[
+                "each gene affects cells",      // 'each' determiner subject
+                "these genes affect cells",     // plural 'these' subject
+                "these two genes affect cells", // 'these' + numeral subject
+                "the two genes affect cells",   // 'the' + numeral subject
+            ],
+        ),
+        (
+            "MODAL / DO-SUPPORT / NEGATION (S3, S4)",
+            &[
+                "genes can affect cells",       // modal + bare-plural subject
+                "genes do not affect cells",    // do-support negation, bare plural
+                "a gene does not affect cells", // do-support negation, singular
+            ],
+        ),
+        (
+            "PP ADJUNCTS: for / between (S4, S1)",
+            &[
+                "genes affect cells for therapies", // 'for' VP-adjunct, bare-plural object
+                "a gene affects cells for a therapy", // 'for' VP-adjunct, singular objects
+                "a gene is an interaction between cells", // 'between' noun-mod PP
+            ],
+        ),
+    ];
+
+    // Confirmatory probes for the two non-`to`-prep blockers + remaining constructions.
+    let extras: &[&str] = &[
+        "the impairment of a gene affects cells", // the + N + of-PP SUBJECT (S2 skeleton, no to-PP)
+        "each gene alone affects cells",          // 'alone' floating adverb (S3)
+        "a gene affects cell death",              // bare-compound singular OBJECT 'cell death' (S2)
+        "genes are cell death", // 'death' bare-mass as predicate (probe countability)
+    ];
+    eprintln!("\n════════════════════════════════════════════════════════════════");
+    eprintln!("EXTRAS (of-PP subj / 'alone' / bare-compound object)");
+    for f in extras {
+        let ft = tokenize(f);
+        let unk: Vec<String> = ft
+            .iter()
+            .filter(|t| !is_nonprose(t) && !index.has_token(t, &lem))
+            .cloned()
+            .collect();
+        if !unk.is_empty() {
+            eprintln!(
+                "    [{:>2}t] OOV         {f:?} (unknown: {unk:?})",
+                ft.len()
+            );
+            continue;
+        }
+        let (c, o) = index.parse_open(f, &lem);
+        let s = if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("open×{}", o.len())
+        } else {
+            "GRAMMAR-GAP".into()
+        };
+        eprintln!("    [{:>2}t] {s:<12} {f:?}", ft.len());
+    }
+    // WIDE-BEAM test: does the 3-noun compound subject parse at cell_beam=1024? CLOSED/open ⇒ the
+    // page-beam GAP is BEAM PRESSURE (GH #97 Lever B), not a missing compound rule.
+    let wide = LexicalIndex::build(Arc::clone(&head))
+        .with_sense_cap(SENSE_CAP)
+        .with_cell_beam(1024);
+    for f in [
+        "DNA repair processes are attractive targets",
+        "DNA repair processes are targets",
+        // The 5 actual sentences at a wide beam — beam pressure (GH #97) vs a real composition gap.
+        "Synthetic lethality is an interaction between two genetic events.",
+        "The co-occurrence of these two events leads to cell death.",
+        "Each event alone does not lead to cell death.",
+        "Scientists can exploit synthetic lethality for cancer therapeutics.",
+        "DNA repair processes are attractive synthetic lethal targets.",
+        // S4 localization (gaps even at wide beam) — peel off modal / for-PP / each object.
+        "scientists exploit synthetic lethality",
+        "scientists exploit cells for therapies",
+        "scientists exploit synthetic lethality for therapies",
+        "scientists exploit synthetic lethality for cancer therapeutics",
+        "scientists can exploit cells",
+        "genes affect cancer therapeutics",
+    ] {
+        let (c, o) = wide.parse_open(f, &lem);
+        let s = if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("open×{}", o.len())
+        } else {
+            "GRAMMAR-GAP".into()
+        };
+        eprintln!("    [wide beam 1024] {s:<12} {f:?}");
+    }
+
+    for (sentence, ladder) in sentences {
+        eprintln!("\n════════════════════════════════════════════════════════════════");
+        eprintln!("SENTENCE: {sentence:?}");
+        // token-level OOV
+        let toks = tokenize(sentence);
+        let oov: Vec<String> = toks
+            .iter()
+            .filter(|t| !is_nonprose(t) && !index.has_token(t, &lem))
+            .cloned()
+            .collect();
+        eprintln!("  tokens: {} | OOV: {oov:?}", toks.len());
+        eprintln!("  --- fragment ladder (small→large) ---");
+        for f in *ladder {
+            let ftoks = tokenize(f);
+            let unknown: Vec<String> = ftoks
+                .iter()
+                .filter(|t| !is_nonprose(t) && !index.has_token(t, &lem))
+                .cloned()
+                .collect();
+            if !unknown.is_empty() {
+                eprintln!(
+                    "    [{:>2}t] OOV         {f:?}  (unknown: {unknown:?})",
+                    ftoks.len()
+                );
+                continue;
+            }
+            let t = std::time::Instant::now();
+            let (closed, open) = index.parse_open(f, &lem);
+            let status = if !closed.is_empty() {
+                format!("CLOSED×{}", closed.len())
+            } else if !open.is_empty() {
+                format!("open×{}", open.len())
+            } else {
+                "GRAMMAR-GAP".to_string()
+            };
+            eprintln!(
+                "    [{:>2}t] {status:<12} [{:.1}s] {f:?}",
+                ftoks.len(),
+                t.elapsed().as_secs_f64()
+            );
+        }
     }
 }
 

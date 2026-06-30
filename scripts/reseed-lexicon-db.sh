@@ -110,9 +110,14 @@ done
 echo "kernel healthy @ $ENDPOINT"
 
 # ── 4. convert (release importers) ────────────────────────────────────
+# Countability lexicon (D62 bare-mass args): if present, the importer mass-marks uncountable
+# nouns so bare singulars ("lethality matters") shift to NP arguments. Provisioned separately
+# (scripts/provision-countability.sh); absent ⇒ count-only nouns (non-fatal).
+COUNTABILITY="${COUNTABILITY:-references/wiktionary/uncountable-nouns.txt}"
+[[ -f "$COUNTABILITY" ]] || say "note: $COUNTABILITY absent — WordNet nouns will be count-only (run scripts/provision-countability.sh)"
 say "converting WordNet (--all) → wordnet-chain/"
 rm -rf wordnet-chain
-cargo run --release -q -p eigenius-wordnet --bin wordnet-import -- --all --dict "$DICT" --out-dir wordnet-chain
+cargo run --release -q -p eigenius-wordnet --bin wordnet-import -- --all --dict "$DICT" --countability "$COUNTABILITY" --out-dir wordnet-chain
 
 say "converting UMLS → umls-chain/  ($([[ $UMLS_ALL == 1 ]] && echo 'all semantic types' || echo "TUIs: ${UMLS_TUIS[*]}"))"
 rm -rf umls-chain

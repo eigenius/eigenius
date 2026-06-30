@@ -856,6 +856,13 @@ resource lexicon:prep_with_sem : lexicon:SemTerm {
           : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
+resource lexicon:prep_to_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            logic:And(V(s), ontology:prep_to(s, x))
+          : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
 resource lexicon:prep_on_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
@@ -945,6 +952,14 @@ resource lexicon:for_prep : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:prep_for_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "for";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:to_prep : lexicon:LexicalEntry {
+    lexicon:form     = "to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_to_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "to";
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:with_prep : lexicon:LexicalEntry {
@@ -1063,6 +1078,20 @@ resource lexicon:from_nmod : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:nmod_from_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "from";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:nmod_to_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => ontology:prep_to(x, y)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:to_nmod : lexicon:LexicalEntry {
+    lexicon:form     = "to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_to_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "to";
     lexicon:grade    = epistemic:declared;
 }
 

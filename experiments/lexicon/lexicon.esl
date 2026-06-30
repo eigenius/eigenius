@@ -36,6 +36,12 @@ class lexicon:Gene : lexicon:Entity {
 class lexicon:CellLine : lexicon:Entity {
     description = "A cell line (demo domain type).";
 }
+// A MASS / uncountable domain type (D62 CNL) — like MSI/DNA/apoptosis: a bare-usable, grammatically
+// singular noun (`instability affects HeLa`, no determiner). The `mass` number on its `cat_n` triggers
+// the bare-singular-mass shift.
+class lexicon:Instability : lexicon:Entity {
+    description = "Microsatellite-instability-like mass type (demo); a mass noun used bare.";
+}
 
 // ── Predicates: verbs and adjectives as typed opaque constants ────────
 // EigonAxiom — a predicate is a typed constant in the chain, NOT an ad-hoc
@@ -91,6 +97,18 @@ resource lexicon:e_cell_line : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:CellLine;
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "wn:cell_line.n.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (1c) a MASS noun — `cat_n(Instability, mass)`. Used BARE as an argument ("instability affects
+// HeLa") via the bare-singular-mass shift (deferred quantifier → open parse); `*a instability` /
+// `*two instability` correctly fail (mass meets neither sg nor pl).
+resource lexicon:e_instability : lexicon:LexicalEntry {
+    lexicon:form     = "instability";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Instability, lexicon:mass) );
+    lexicon:sem      = lexicon:Instability;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "wn:instability.n.01";
     lexicon:grade    = epistemic:declared;
 }
 

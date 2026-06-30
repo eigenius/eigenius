@@ -53,3 +53,4 @@ axiom ontology:prep_on   : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_from : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_between : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_within  : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_to      : lexicon:Entity -> lexicon:Entity -> Prop

@@ -54,7 +54,7 @@ use super::category::{
 };
 use super::lemmatizer::{Lemmatizer, Pos};
 use super::lexicon::entry_to_item;
-use super::parser::{apply, Combinator, Item};
+use super::parser::{apply, apply_core, Combinator, Item};
 use super::sense_ranker::{SenseCandidate, SenseRanker, WordSenses};
 
 /// Default forest cap (D63 §8.7 Stage B): `parse` returns at most this many parses,
@@ -205,6 +205,13 @@ pub struct LexicalIndex {
     /// beam it may drop a constituent the only full parse needed (the beam/A* tradeoff) — so it is
     /// opt-in; `None` = exact (unbounded) chart, the default (no behaviour change).
     cell_beam: Option<usize>,
+    /// **Combinatory-core spike** (porting core-en's full rule set): when set, the CKY also applies
+    /// the additional CCG combinators — crossed composition (`>Bx`/`<Bx`), backward harmonic
+    /// composition (`<B`), and generalized type-raising — alongside the hand-built rules, to measure
+    /// how much of the composition long tail the general combinators subsume. Default `false` = the
+    /// established rule-by-rule path, byte-identical. (Spike: normal-form control is partial; expect
+    /// extra ambiguity until the NF is rebuilt.)
+    combinatory_core: bool,
 }
 
 /// One resolved lexical entry at the **seed stage**: its parse [`Item`], its `lexicon:in_lexicon`
@@ -315,6 +322,7 @@ impl LexicalIndex {
                 sense_cap: None,
                 sense_ranker: None,
                 cell_beam: None,
+                combinatory_core: false,
             };
         }
         let (by_form, max_words) = Self::scan_eager(&layer);
@@ -324,6 +332,7 @@ impl LexicalIndex {
             sense_cap: None,
             sense_ranker: None,
             cell_beam: None,
+            combinatory_core: false,
         }
     }
 
@@ -342,6 +351,14 @@ impl LexicalIndex {
     /// needed); builder-style, default (unset) is the exact unbounded chart.
     pub fn with_cell_beam(mut self, n: usize) -> Self {
         self.cell_beam = Some(n);
+        self
+    }
+
+    /// Enable the **combinatory-core spike**: apply the additional CCG combinators (crossed +
+    /// backward-harmonic composition, generalized type-raising) alongside the hand-built rules.
+    /// Builder-style; default off (the established rule-by-rule path). For the A/B port measurement.
+    pub fn with_combinatory_core(mut self, on: bool) -> Self {
+        self.combinatory_core = on;
         self
     }
 
@@ -612,7 +629,50 @@ impl LexicalIndex {
         // copula-subclass reading; this is the general argument-position reading.)
         let bare: Vec<Item> = out.iter().flat_map(|it| self.bare_plural_nps(it)).collect();
         out.extend(bare);
+        // Bare-MASS NP shift (D62 CNL): a mass noun `cat_n(C, mass)` ("MSI", "DNA", "apoptosis") is
+        // a bare argument too, grammatically singular, with the same deferred quantifier.
+        let bare_mass: Vec<Item> = out.iter().flat_map(|it| self.bare_mass_nps(it)).collect();
+        out.extend(bare_mass);
         out
+    }
+
+    /// Bare-MASS NP shift (D62 CNL): a **mass** common noun `cat_n(C, mass)` serves as a bare argument
+    /// NP (subject + object), grammatically **singular**, with a deferred [`HoleKind::Quantification`]
+    /// hole `Q` — the mass/uncountable analogue of [`Self::bare_plural_nps`]. The mass noun is
+    /// presented as **singular** to the existential determiner (`a`) shapes (mass meets neither sg nor
+    /// pl, so it can't use `these`/`a` directly), reusing their subject- + object-raised categories
+    /// with the deferred sem. `Q` is freshened per span and typed at the felicity gate ⇒ an open parse.
+    fn bare_mass_nps(&self, noun: &Item) -> Vec<Item> {
+        let Some([c, num]) = is_ctor(&noun.cat, "cat_n") else {
+            return Vec::new();
+        };
+        if !matches!(num, Exp::InductiveCtor(_, n, _) if n == "mass") {
+            return Vec::new();
+        }
+        // Present the mass noun as singular (so the `a` determiner's sg cat composes).
+        let Exp::InductiveCtor(num_decl, _, _) = num else {
+            return Vec::new();
+        };
+        let Exp::InductiveCtor(cat_decl, _, _) = &noun.cat else {
+            return Vec::new();
+        };
+        let sg = Exp::InductiveCtor(num_decl.clone(), "sg".into(), vec![]);
+        let sg_cat = Exp::InductiveCtor(cat_decl.clone(), "cat_n".into(), vec![c.clone(), sg]);
+        let sg_noun = Item::with_cost(sg_cat, noun.sem.clone(), noun.cost);
+        let subj = deferred_quant_subj_sem();
+        let obj = deferred_quant_obj_sem();
+        self.entries_for("a")
+            .iter()
+            .filter_map(|det| {
+                let sem = match cat_forall_body_head(&det.item.cat)? {
+                    "fwd" => subj.clone(),
+                    "bwd" => obj.clone(),
+                    _ => return None,
+                };
+                let synthetic = Item::with_cost(det.item.cat.clone(), sem, det.item.cost);
+                apply(&synthetic, &sg_noun, &self.layer)
+            })
+            .collect()
     }
 
     /// Bare-plural NP shift (D62 — core-en's `bnp` unary rule; `det=nil`). A **plural** common noun
@@ -1085,6 +1145,11 @@ impl LexicalIndex {
                             if let Some(item) = apply(l, r, &self.layer) {
                                 produced.push(item);
                             }
+                            // Combinatory-core spike: the extra CCG combinators (crossed + backward
+                            // composition), applied alongside the hand-built rules when enabled.
+                            if self.combinatory_core {
+                                produced.extend(apply_core(l, r, &self.layer));
+                            }
                         }
                     }
                 }
@@ -1344,14 +1409,22 @@ impl LexicalIndex {
                 }
                 let produced_n = produced.len();
                 chart[i][j].extend(produced);
-                // Bare-plural NP shift for COMPOSED plural common nouns (D62 — N-N compounds like
-                // "MSI cancer models", adjective-refined nouns like "novel therapies"): the leaf shift
-                // in `lookup_span` only covers lexical nouns, so a *composed* `cat_n(_, pl)` cell needs
-                // the shift here too — else such a compound can never be a bare argument NP. The quant
-                // sentinel is freshened with THIS span's `quant_hole_base` (distinct hole per span).
+                // Bare-NP shift for COMPOSED common nouns (D62 — N-N compounds like "MSI cancer
+                // models", adjective-refined nouns like "novel therapies" / "synthetic lethality"):
+                // the leaf shift in `lookup_span` only covers lexical nouns, so a *composed*
+                // `cat_n(_, pl)` (plural) or `cat_n(_, mass)` (uncountable) cell needs the shift here
+                // too — else such a compound/adjective-modified noun can never be a bare argument NP.
+                // BOTH the plural and mass shifts apply, symmetric with the leaf path (which runs both);
+                // the mass arm was missing here, so `synthetic lethality` / `deficient repair` (adj +
+                // mass/plural head) gapped while the bare leaf `lethality` shifted. The quant sentinel
+                // is freshened with THIS span's `quant_hole_base` (distinct hole per span).
                 let bare: Vec<Item> = chart[i][j]
                     .iter()
-                    .flat_map(|it| self.bare_plural_nps(it))
+                    .flat_map(|it| {
+                        let mut v = self.bare_plural_nps(it);
+                        v.extend(self.bare_mass_nps(it));
+                        v
+                    })
                     .map(|mut np| {
                         np.sem = freshen_quant(&np.sem, &quant_hole_base(i, j));
                         np
