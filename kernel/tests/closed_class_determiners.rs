@@ -553,6 +553,53 @@ fn non_restrictive_relative_is_a_separate_assertion() {
 }
 
 #[test]
+fn but_not_contrastive_object_ellipsis() {
+    // D62 §2 #8: `[verb] O₁ but not O₂` — the shared verb applies affirmatively to O₁ and negatively
+    // to the elided O₂: `V(O₁) ∧ ¬V(O₂)` (intuitionistic `¬P = P → logic:False`). Two paths: a
+    // contrastive `conn_but_not` GROUP for bare-name objects (not Prop-ending), and the general
+    // contrastive conjunction for determined-NP / GQ objects (the WRN shape).
+    let (_layer, index) = index_over_bootstrap();
+
+    // Bare-name objects (group path).
+    let f = index.parse("HeLa affects BRCA1 but not HeLa", &Identity);
+    assert!(!f.is_empty(), "bare-name `but not` parses");
+    let sem = pretty_term(&f[0].sem);
+    assert!(
+        sem.starts_with("And(") && sem.contains("False"),
+        "affirms O₁, negates O₂ (`→ False`): {sem}"
+    );
+
+    // Determined-NP objects, same base type, with a POSSESSIVE O₂ (the `… but not its …` WRN shape):
+    // the possessor is a referent hole ⇒ an OPEN parse.
+    let (closed, open) = index.parse_open("HeLa affects the gene but not its gene", &Identity);
+    assert!(
+        closed.is_empty() && !open.is_empty(),
+        "possessive O₂ yields an open parse (the WRN `but not its …` shape)"
+    );
+    let osem = pretty_term(&open[0].item.sem);
+    assert!(
+        osem.contains("And(") && osem.contains("False") && osem.contains("poss_of"),
+        "the contrastive conjunction negates the possessive conjunct: {osem}"
+    );
+    assert_eq!(open[0].holes.len(), 1, "one hole — the possessor of O₂");
+}
+
+#[test]
+fn but_not_cross_type_objects_is_a_known_gap() {
+    // D62 §2 #8 limitation: two determined objects of DIFFERENT base types
+    // (`a gene but not a cell line`) don't coordinate — the object-raise (`a_obj`) bakes the noun
+    // type into the GQ category, so the two GQs aren't the same category. Widening the shared verb
+    // slot to the common supertype is a follow-on. (The WRN case has the SAME base type — `… activity`
+    // — so it is covered; see `but_not_contrastive_object_ellipsis`.)
+    let (_layer, index) = index_over_bootstrap();
+    let (closed, open) = index.parse_open("HeLa affects a gene but not a cell line", &Identity);
+    assert!(
+        closed.is_empty() && open.is_empty(),
+        "cross-type `but not` objects not yet coordinated (update when slot-widening lands)"
+    );
+}
+
+#[test]
 fn cardinal_numerals_are_plural_determiners() {
     // D62 §2 #4: word-form cardinals (`two`..`ten`) parse as plural determiners in subject and object
     // position. First-cut semantics is existential with the count DROPPED (`two genes` ≈ `∃ genes`);

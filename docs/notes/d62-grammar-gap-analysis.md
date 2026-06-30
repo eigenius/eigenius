@@ -101,8 +101,10 @@
 >   and reuses the VP-adjunct prep's own sem `λx.λV.λs. And(V(s), prep(s,x))`). Crucially this needs
 >   **no PP-gap extraction / crossed-composition** — the prep sem already conjoins the relation, so the
 >   antecedent just slots into its object. → `the gene in which HeLa affects BRCA1 is large` CLOSED ::
->   `Σg:Gene. And(affects(brca1,hela), prep_in(hela,g))`. *Limit:* the post-`which` clause must
->   decompose as subject + `S\NP` VP (the ordinary case); deeply-embedded clauses are a follow-on.
+>   `Σg:Gene. And(affects(brca1,hela), prep_in(hela,g))`. *Limit (Derived):* the shipped
+>   `pied_pipe` requires a bare-NAME subject in the relative clause (`is_ctor(subj.cat, "cat_np")`);
+>   a DETERMINED / bare-plural subject gaps — **so it does NOT yet cover the WRN instance**
+>   (`the interaction through which the co-occurrence leads to cell death`, a determined subject).
 >
 > **Reseed batch (2026-06-29, bootstrap `closed-class.esl` + demo data — needs a snapshot reseed):**
 > - **#4 cardinal numerals** — word forms `two`..`ten` seeded as plural determiners in `closed-class.esl`
@@ -116,9 +118,24 @@
 >   to the **demo** lexicon to exercise the light-verb shape end-to-end; production placement is
 >   importer-generated WordNet collocations (a deployment step, not grammar).
 >
-> Both are **data**, validated on the small lexicon (the test bootstrap rebuilds from the `.esl`
-> sources); the persisted wordnet+umls snapshot ManifestDrifts on the bootstrap change and must be
-> reseeded before the full-lexicon battery runs again.
+> - **#8 `but not X` contrastive ellipsis** — `[verb] O₁ but not O₂` ⇒ `V(O₁) ∧ ¬V(O₂)`
+>   (intuitionistic `¬P = P → logic:False`). `but not` is a 2-token reserved coordinator (keyed as a
+>   sequence; bare `but` stays the sentential `but_subord`). Two paths: (a) the GENERAL contrastive
+>   conjunction `coordinate_but_not_sem` — pointwise `a ∧ ¬b` over any same-cat Prop-ending pair
+>   (determined-NP / GQ objects, VPs, clauses), which covers the WRN shape
+>   `required the helicase activity but not its exonuclease activity` (both are determined NPs over the
+>   SAME base `… activity`, Fst-projected, so the object-GQ cats match; the possessive `its …` makes it
+>   an OPEN parse via the possessor hole); and (b) a `conn_but_not` `Conn` ctor + `coordinate_but_not`
+>   GROUP for bare-NAME objects (not Prop-ending), which the verb distributes over asymmetrically
+>   (`distribute`/`distribute_object` negate every member after the first). *Limit (`but_not_cross_type
+>   _objects_is_a_known_gap`):* two determined objects of DIFFERENT base types
+>   (`a gene but not a cell line`) don't coordinate — `a_obj` bakes the noun type into the GQ cat;
+>   widening the shared verb slot to the common supertype is a follow-on. **Reseed** (the `Conn` ctor is
+>   in `lexicon-ontology.esl`).
+>
+> All of #4/#7/#8 are validated on the small lexicon (the test bootstrap rebuilds from the `.esl`
+> sources); the persisted wordnet+umls snapshot ManifestDrifts on the bootstrap change (numerals +
+> `conn_but_not`) and must be reseeded before the full-lexicon battery runs again.
 >
 > **S0-c segmenter fix (2026-06-29, no reseed).** The unit-10 over-merge — `… (Extended Data Fig.
 > 1d, e). MSI …` joined two sentences because the figure-panel letter `e)` alnum-reduced to a single
@@ -128,6 +145,32 @@
 > The full page now segments to 27 units (U10 split into two parseable sentences); the decimal/abbrev
 > regression test still passes. (Accepted minor regression: `F. Smith`-style initials before a capital
 > now split — vanishingly rare in body prose, and no test required it.)
+>
+> **Chosen follow-up approaches (decisions, 2026-06-29):**
+> - **#8 cross-type object coordination → Option A (structural).** Verified the gap is GENERAL, not
+>   `but-not`-specific: `affects a gene and a cell line` also GAPs (cross-type), while `… a gene and a
+>   gene` is CLOSED — the `_obj` determiners bake the noun type `T` into the object-GQ category
+>   (`NP[T]` as the verb-object slot), so different-typed GQs don't share a category. The decided fix is
+>   **Option A**: change the `_obj` determiner cats to use `NP[Entity]` for the verb-object slot and
+>   keep the restrictor type only in the sem (`∃x:T`); selectional restriction then bites at the
+>   felicity gate (a typed verb given a wrong-typed object still type-errors) rather than at the
+>   category. Touches every `_obj` determiner in `closed-class.esl` (**reseed**); must verify
+>   typed-verb selectional restriction still rejects, and watch the extra-chart-edge / beam cost
+>   (restriction moves from category to felicity). A proper follow-up, not a quick slice.
+> - **Pied-piping → Tier 2 (real PP-gap extraction), and core-en validates the shape.** OpenCCG's
+>   standard rule set (e.g. `flights/rules.xml`, `worldcup/rules.xml`) enables **backward crossed
+>   composition** (`<composition dir="backward" harmonic="false"/>`) + type-raising + substitution;
+>   core-en ships lexicon `.xsl` only and inherits it. So the reference handles pied-piping the
+>   canonical Steedman way — the relative body composes (via Bx) into an `S/PP`, the preposition
+>   pied-pipes with `which`, the relativizer abstracts the gap — with **no dedicated pied-piping
+>   family**. Our engine omits crossed composition by design (application + forward composition +
+>   lexical type-raising + coordination only, the scope of the Eisner-NF `Combinator` provenance), so
+>   Tier 2 work is: (1) add backward (and likely forward) crossed composition to `apply_combine`;
+>   (2) **extend the Eisner normal form to constrain it** — the load-bearing part (crossed composition
+>   is a spurious-ambiguity multiplier; without matching NF constraints the single-parse regression
+>   gate breaks and the chart explodes; OpenCCG uses NF constraints + `useDollar` bounded type-raising);
+>   (3) thread the PP-gap through the relativizer. Multi-day; the centre of gravity is the NF work, not
+>   the rule. Supersedes the localized Tier-1 `pied_pipe` generalization (which is *not* being pursued).
 >
 > **Remaining genuine clause gaps:** the still-open §2 list (apposition, comma-lists,
 > `because`/`although` subordinators, S0 hyphenated compounds). NB: `novel therapies are

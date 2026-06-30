@@ -424,6 +424,44 @@ pub fn cats_coordinate(x: &Exp, y: &Exp, layer: &Arc<Layer>) -> bool {
         && denote_cat(x).map(|d| prop_ending(&d)).unwrap_or(false)
 }
 
+/// The sem of `a but not b` for same-category, Prop-ending constituents (D62 §2 #8): the
+/// pointwise-lifted **contrastive** conjunction `a ∧ ¬b` — at `Prop`, `And(a, b→False)`; at an
+/// arrow, η-expand and recurse (so two VPs give `λs. And(a s, ¬(b s))`, two object-raised GQs give
+/// `λTV.λsubj. And(a TV subj, ¬(b TV subj))`). This is the general contrastive-ellipsis treatment —
+/// the shared functor (verb / TV) applies affirmatively to `a` and negatively to the elided `b`,
+/// covering determined-NP / GQ objects (`required the helicase activity but not its exonuclease
+/// activity`), VP-level, and clause-level `but not`. `None` if `cat` isn't conjoinable or `logic:And`
+/// / `logic:False` don't resolve. (Bare-NAME objects, which are not Prop-ending, use the
+/// [`coordinate_but_not`] group path instead.)
+pub fn coordinate_but_not_sem(cat: &Exp, a: &Exp, b: &Exp, layer: &Arc<Layer>) -> Option<Exp> {
+    let denote = denote_cat(cat).ok()?;
+    let and = resolve_inductive(layer, "urn:eigenius:logic:And")?;
+    but_not_coord(&and, &denote, a, b, 0, layer)
+}
+
+fn but_not_coord(
+    and: &Arc<InductiveDecl>,
+    denote: &Exp,
+    a: &Exp,
+    b: &Exp,
+    depth: usize,
+    layer: &Arc<Layer>,
+) -> Option<Exp> {
+    match denote {
+        Exp::Sort(0) => Some(Exp::InductiveType(
+            and.clone(),
+            vec![a.clone(), negate(b.clone(), layer)?],
+        )),
+        Exp::Arrow(_, cod) | Exp::Pi(_, _, cod) => {
+            let var = format!("bn{depth}");
+            let app = |f: &Exp| Exp::App(Box::new(f.clone()), Box::new(Exp::Var(var.clone())));
+            let body = but_not_coord(and, cod, &app(a), &app(b), depth + 1, layer)?;
+            Some(Exp::Lam(Patt::Var(var), Box::new(body)))
+        }
+        _ => None,
+    }
+}
+
 /// The sem of `a <op> b` for same-category, Prop-ending constituents of category
 /// `cat`: the pointwise-lifted `op` (`op_iri` = `logic:And` / `logic:Or`).
 /// Returns `None` if `cat` is not conjoinable or the connective doesn't resolve.
@@ -581,6 +619,60 @@ pub fn coordinate_np(
     Some((group_cat, list_term(&all)))
 }
 
+/// The raw `Conn` constructor name on a `cat_group` (`conn_and`/`conn_or`/`conn_but_not`).
+fn group_conn_name(group_cat: &Exp) -> Option<&str> {
+    let [_c, conn, _num] = is_ctor(group_cat, "cat_group")? else {
+        return None;
+    };
+    match conn {
+        Exp::InductiveCtor(_, n, _) => Some(n.as_str()),
+        _ => None,
+    }
+}
+
+/// Intuitionistic negation of a `Prop`: `prop → logic:False` (matching `closed-class.esl`'s
+/// `neg_sem`, `λP.λs. P(s) → logic:False`). `None` if `logic:False` is unavailable.
+fn negate(prop: Exp, layer: &Arc<Layer>) -> Option<Exp> {
+    let f = resolve_inductive(layer, "urn:eigenius:logic:False")?;
+    Some(Exp::Arrow(
+        Box::new(prop),
+        Box::new(Exp::InductiveType(f, vec![])),
+    ))
+}
+
+/// Coordinate two NPs into a **contrastive `but not` group** `cat_group(C, conn_but_not, pl)`
+/// (D62 §2 #8): `[O₁] but not [O₂]`. Binary (no n-ary chaining) — the second member is the
+/// negated/elided one. The shared predicate is applied downstream by [`distribute`] /
+/// [`distribute_object`], which negate every member after the first. `None` unless both sides are
+/// `cat_np` sharing a common supertype.
+pub fn coordinate_but_not(
+    l_cat: &Exp,
+    l_sem: &Exp,
+    r_cat: &Exp,
+    r_sem: &Exp,
+    layer: &Arc<Layer>,
+) -> Option<(Exp, Exp)> {
+    let [lt, _ln] = is_ctor(l_cat, "cat_np")? else {
+        return None;
+    };
+    let [rt, _rn] = is_ctor(r_cat, "cat_np")? else {
+        return None;
+    };
+    let Exp::InductiveCtor(cat_decl, _, _) = l_cat else {
+        return None;
+    };
+    let c = common_super(lt, rt, layer)?;
+    let conn = Exp::InductiveCtor(
+        resolve_inductive(layer, "urn:eigenius:lexicon:Conn")?,
+        "conn_but_not".into(),
+        vec![],
+    );
+    let num_decl = resolve_inductive(layer, "urn:eigenius:lexicon:Num")?;
+    let pl = Exp::InductiveCtor(num_decl, "pl".into(), vec![]);
+    let group_cat = Exp::InductiveCtor(cat_decl.clone(), "cat_group".into(), vec![c, conn, pl]);
+    Some((group_cat, list_term(&[l_sem.clone(), r_sem.clone()])))
+}
+
 /// Left-fold a non-empty list of `Prop`s with the connective `op` (`logic:And` /
 /// `logic:Or`): `op(op(p₀, p₁), p₂)…` — the left-branching coordination normal
 /// form. `None` if `preds` is empty.
@@ -606,12 +698,44 @@ pub fn distribute(
     layer: &Arc<Layer>,
 ) -> Option<Exp> {
     let members = group_members(group_sem)?;
+    // Contrastive `but not` (D62 §2 #8): `P(m₀) ∧ ¬P(m₁) ∧ …` — first positive, rest negated,
+    // ∧-folded. Otherwise the symmetric `conn_and`/`conn_or` fold.
+    if group_conn_name(group_cat) == Some("conn_but_not") {
+        let and = resolve_inductive(layer, "urn:eigenius:logic:And")?;
+        let preds = but_not_preds(
+            members,
+            |m| Exp::App(Box::new(pred_sem.clone()), Box::new(m)),
+            layer,
+        )?;
+        return fold_conn(&and, preds);
+    }
     let op = resolve_inductive(layer, group_conn_op(group_cat)?)?;
     let preds = members
         .into_iter()
         .map(|m| Exp::App(Box::new(pred_sem.clone()), Box::new(m)))
         .collect();
     fold_conn(&op, preds)
+}
+
+/// Apply `mk` to each group member, negating every member AFTER the first — the `conn_but_not`
+/// distribution (D62 §2 #8). `mk` builds the affirmative predicate-application for a member.
+fn but_not_preds(
+    members: Vec<Exp>,
+    mk: impl Fn(Exp) -> Exp,
+    layer: &Arc<Layer>,
+) -> Option<Vec<Exp>> {
+    members
+        .into_iter()
+        .enumerate()
+        .map(|(idx, m)| {
+            let p = mk(m);
+            if idx == 0 {
+                Some(p)
+            } else {
+                negate(p, layer)
+            }
+        })
+        .collect()
 }
 
 /// The **distributive object** reading: a transitive verb `V : obj → subj → Prop`
@@ -626,18 +750,21 @@ pub fn distribute_object(
     layer: &Arc<Layer>,
 ) -> Option<Exp> {
     let members = group_members(group_sem)?;
-    let op = resolve_inductive(layer, group_conn_op(group_cat)?)?;
     let s = Exp::Var("__dist_subj".into());
-    let preds = members
-        .into_iter()
-        .map(|m| {
-            Exp::App(
-                Box::new(Exp::App(Box::new(tv_sem.clone()), Box::new(m))),
-                Box::new(s.clone()),
-            )
-        })
-        .collect();
-    let body = fold_conn(&op, preds)?;
+    let mk = |m: Exp| {
+        Exp::App(
+            Box::new(Exp::App(Box::new(tv_sem.clone()), Box::new(m))),
+            Box::new(s.clone()),
+        )
+    };
+    // Contrastive `but not` (D62 §2 #8): `V(m₀,s) ∧ ¬V(m₁,s) ∧ …`. Otherwise the symmetric fold.
+    let body = if group_conn_name(group_cat) == Some("conn_but_not") {
+        let and = resolve_inductive(layer, "urn:eigenius:logic:And")?;
+        fold_conn(&and, but_not_preds(members, mk, layer)?)?
+    } else {
+        let op = resolve_inductive(layer, group_conn_op(group_cat)?)?;
+        fold_conn(&op, members.into_iter().map(mk).collect())?
+    };
     Some(Exp::Lam(Patt::Var("__dist_subj".into()), Box::new(body)))
 }
 

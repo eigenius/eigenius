@@ -48,9 +48,9 @@ use crate::ontology::resource::Value;
 use crate::ontology::Iri;
 
 use super::category::{
-    adverb_modifier_cats, cats_coordinate, coordinate_np, coordinate_sem, denote_cat,
-    front_participial, is_ctor, pied_pipe, reciprocate, relativize, relativize_appos,
-    sentence_modifier_cats, subst_cat, type_raise, CatSubst,
+    adverb_modifier_cats, cats_coordinate, coordinate_but_not, coordinate_but_not_sem,
+    coordinate_np, coordinate_sem, denote_cat, front_participial, is_ctor, pied_pipe, reciprocate,
+    relativize, relativize_appos, sentence_modifier_cats, subst_cat, type_raise, CatSubst,
 };
 use super::lemmatizer::{Lemmatizer, Pos};
 use super::lexicon::entry_to_item;
@@ -1131,6 +1131,51 @@ impl LexicalIndex {
                                 // right conjunct to be a plain NP, keeping groups
                                 // left-branching for the n-ary case (the
                                 // `is_coordination` analogue here).
+                                produced.push(Item::with_cost(
+                                    cat,
+                                    sem,
+                                    l.cost.saturating_add(r.cost),
+                                ));
+                            }
+                        }
+                    }
+                }
+                // Contrastive `but not` (D62 §2 #8): `[O₁] but not [O₂]` builds a `conn_but_not`
+                // group (binary), which the verb then distributes over as `V(O₁) ∧ ¬V(O₂)` (the
+                // shared predicate applies affirmatively to O₁ and negatively to the elided O₂). A
+                // two-token reserved coordinator (`but` + `not`), keyed like `and`/`or` but matched as
+                // a sequence; `but` alone stays the sentential `but_subord`, so no conflict.
+                for c in (i + 1)..j {
+                    if tokens[c] != "but" || tokens.get(c + 1).map(String::as_str) != Some("not") {
+                        continue;
+                    }
+                    if c + 2 > j {
+                        continue;
+                    }
+                    let lefts = &chart[i][c - 1];
+                    let rights = &chart[c + 2][j];
+                    for l in lefts {
+                        for r in rights {
+                            // Prop-ending constituents (determined-NP / GQ objects, VPs, clauses):
+                            // the general contrastive conjunction `a ∧ ¬b` — covers the WRN case
+                            // `required the helicase activity but not its exonuclease activity`.
+                            if cats_coordinate(&l.cat, &r.cat, &self.layer) {
+                                if !is_coordination(&r.sem) {
+                                    if let Some(sem) =
+                                        coordinate_but_not_sem(&l.cat, &l.sem, &r.sem, &self.layer)
+                                    {
+                                        produced.push(Item::with_cost(
+                                            l.cat.clone(),
+                                            sem,
+                                            l.cost.saturating_add(r.cost),
+                                        ));
+                                    }
+                                }
+                            } else if let Some((cat, sem)) =
+                                coordinate_but_not(&l.cat, &l.sem, &r.cat, &r.sem, &self.layer)
+                            {
+                                // Bare-NAME objects (not Prop-ending): the `conn_but_not` group the
+                                // verb then distributes over as `V(O₁) ∧ ¬V(O₂)`.
                                 produced.push(Item::with_cost(
                                     cat,
                                     sem,

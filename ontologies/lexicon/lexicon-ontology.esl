@@ -115,8 +115,11 @@ data lexicon:Fin {
 // because distribution is *deferred* to a later combination (the group meets its
 // predicate downstream), so the connective must travel with the phrase.
 data lexicon:Conn {
-    conn_and,  // "X and Y" — conjunctive group (distributive ∧; collective/reciprocal)
-    conn_or,   // "X or Y"  — disjunctive group (distributive ∨)
+    conn_and,     // "X and Y" — conjunctive group (distributive ∧; collective/reciprocal)
+    conn_or,      // "X or Y"  — disjunctive group (distributive ∨)
+    conn_but_not, // "X but not Y" (D62 §2 #8) — contrastive ellipsis: distributes ASYMMETRICALLY,
+                  // the first member positive and the rest negated (`P(m₀) ∧ ¬P(m₁) ∧ …`), so a
+                  // shared predicate applies affirmatively to X and negatively to the elided Y.
 }
 
 // Cat — the categorial type (a small inductive at Type 1, since cat_n/cat_np
