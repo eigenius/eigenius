@@ -248,6 +248,132 @@ fn encode_unit(
     }
 }
 
+/// VERIFY the sense lever (D62/GH#97): A/B the PAGE-beam (64) parse outcome for the 5 sentences
+/// with the static cap (`baseline`) vs the contextual LLM reranker (`+llm`, only with
+/// `--features allms` + ANTHROPIC_API_KEY). Measures whether contextual sense ranking frees enough
+/// beam to parse at the operational beam. (The deterministic "closed-class-wins" filter was tried
+/// and REVERTED — harmful; it can't distinguish `be`-verb from beryllium — see the d63 note.)
+///   cargo test -p eigenius-wordnet --features allms --test db_backed_encoding \
+///       verify_sense_lever_at_page_beam -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic: A/B the sense lever at the page beam; run with --ignored --nocapture"]
+fn verify_sense_lever_at_page_beam() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let sentences = [
+        "Synthetic lethality is an interaction between two genetic events.",
+        "The co-occurrence of these two events leads to cell death.",
+        "Each event alone does not lead to cell death.",
+        "Scientists can exploit synthetic lethality for cancer therapeutics.",
+        "DNA repair processes are attractive synthetic lethal targets.",
+    ];
+    let outcome = |idx: &LexicalIndex, s: &str| -> String {
+        let (c, o) = idx.parse_open(s, &lem);
+        if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("open×{}", o.len())
+        } else {
+            "GAP".to_string()
+        }
+    };
+    let mk = || {
+        LexicalIndex::build(Arc::clone(&head))
+            .with_sense_cap(SENSE_CAP)
+            .with_cell_beam(CELL_BEAM)
+    };
+
+    // The variants to compare. The LLM variant only exists with `--features allms` +
+    // ANTHROPIC_API_KEY (one reranker call per sentence).
+    #[allow(unused_mut)]
+    let mut variants: Vec<(String, LexicalIndex)> = vec![("baseline".into(), mk())];
+    #[cfg(feature = "allms")]
+    {
+        if let Some(r) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
+            variants.push(("+llm".into(), mk().with_sense_ranker(Box::new(r))));
+        }
+    }
+
+    eprintln!("\n=== sense-lever A/B at PAGE beam ({CELL_BEAM}) ===");
+    eprintln!(
+        "variants: {:?}",
+        variants.iter().map(|(l, _)| l).collect::<Vec<_>>()
+    );
+    for s in sentences {
+        let cells: Vec<String> = variants
+            .iter()
+            .map(|(l, idx)| format!("{l}={}", outcome(idx, s)))
+            .collect();
+        eprintln!("  {}  {s:?}", cells.join("  "));
+    }
+}
+
+/// Function-word-noise enumeration (D62/GH#97): for each function word in the 5 sentences, list its
+/// CLOSED-class (grammatical) vs OPEN-class (wordnet/umls noun/verb/adj) entries. The open-class
+/// senses on function words are what let the compound rule chain across copulas/determiners into the
+/// spurious refined-noun piles that saturate the beam. `#[ignore]`d; run:
+///   cargo test -p eigenius-wordnet --test db_backed_encoding enumerate_function_word_noise \
+///       -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic: enumerate function-word open-class noise; run with --ignored --nocapture"]
+fn enumerate_function_word_noise() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    // The function/closed-class words occurring across the 5 CNL sentences.
+    let words = [
+        "is", "an", "a", "the", "are", "between", "two", "these", "each", "of", "for", "to", "can",
+        "does", "not", "alone", "this", "and", "or",
+    ];
+    for w in words {
+        let entries = index.debug_form_entries(w, &lem);
+        let closed: Vec<&(bool, String, String)> = entries.iter().filter(|e| e.0).collect();
+        let open: Vec<&(bool, String, String)> = entries.iter().filter(|e| !e.0).collect();
+        eprintln!(
+            "\n{w:?}: {} closed-class, {} OPEN-class (noise candidates)",
+            closed.len(),
+            open.len()
+        );
+        for (_, cat, sense) in &open {
+            eprintln!("    OPEN  {sense:<20} {cat}");
+        }
+    }
+}
+
+/// Chart-cell population analysis for the 5 CNL v2 sentences (user request 2026-06-30): parse each
+/// at a WIDE beam (1024 ≈ uncapped at sense_cap=2) with `EIGENIUS_PARSE_DEBUG=1`, so the per-cell
+/// shape histograms (`cat_shape`, type-indices erased) show WHERE the chart population concentrates
+/// and WHETHER it is lexical/sense variation (one shape, many indices ⇒ a GH#93 type-narrowing
+/// candidate) or structural ambiguity (many shapes ⇒ narrowing won't help). `#[ignore]`d; run:
+///   EIGENIUS_PARSE_DEBUG=1 cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       analyze_chart_cells_first_five -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic: chart-cell population analysis; run with EIGENIUS_PARSE_DEBUG=1 --ignored --nocapture"]
+fn analyze_chart_cells_first_five() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    // Wide beam so the dumped cells show the true population, not the page-beam-capped view.
+    let index = LexicalIndex::build(Arc::clone(&head))
+        .with_sense_cap(2)
+        .with_cell_beam(1024);
+    let lem = morphy();
+    let sentences = [
+        "Synthetic lethality is an interaction between two genetic events.",
+        "The co-occurrence of these two events leads to cell death.",
+        "Each event alone does not lead to cell death.",
+        "Scientists can exploit synthetic lethality for cancer therapeutics.",
+        "DNA repair processes are attractive synthetic lethal targets.",
+    ];
+    for s in sentences {
+        eprintln!("\n════════════════════════════════════════════════════════════════");
+        eprintln!("ANALYZE: {s:?}");
+        let (closed, open) = index.parse_open(s, &lem);
+        eprintln!("  → closed×{} open×{}", closed.len(), open.len());
+    }
+}
+
 /// Per-sentence blocker diagnosis for the FIRST 5 CNL v2 sentences (user request 2026-06-30):
 /// for each sentence, print token-level OOV, the full-sentence parse outcome, and a fragment
 /// ladder that localizes the exact construction that stalls. `#[ignore]`d; run manually:

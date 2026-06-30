@@ -1905,6 +1905,7 @@ dependencies = [
  "eigenius-runtime-substrate",
  "eigenius-statistics",
  "eigenius-storage-rocksdb",
+ "eigenius-wordnet",
  "futures",
  "humantime",
  "serde_json",

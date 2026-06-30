@@ -345,6 +345,7 @@ pub async fn start_server(
     backend: Option<Arc<dyn crate::storage::PersistentBackend>>,
     in_process_institutions: Vec<Arc<dyn crate::institution::runtime::Institution>>,
     embedders: EmbedderStartupConfig,
+    parse_config: super::ParseConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("0.0.0.0:{port}").parse()?;
 
@@ -420,6 +421,10 @@ pub async fn start_server(
         }
         service = service.with_embedders(registry, embedders.batch_size);
     }
+
+    // D63/GH#97 Lever 1 — install the ParseSentence parse config (lemmatizer + cap/beam + opt-in
+    // reranker). The binary injects a real lemmatizer here (the kernel can't depend on WordNet).
+    service = service.with_parse_config(parse_config);
 
     // On a persistent backend, walk the rehydrated chain and
     // re-register every WASM capability it finds. Institutions go

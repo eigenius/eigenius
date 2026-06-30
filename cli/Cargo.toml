@@ -15,6 +15,9 @@ path = "src/main.rs"
 [dependencies]
 eigenius-kernel = { path = "../kernel" }
 eigenius-storage-rocksdb = { path = "../storage/rocksdb" }
+# D63/GH#97 Lever 1: the binary injects WordNet's Morphy lemmatizer into the served parse path
+# (the kernel can't depend on WordNet — cycle — so it holds only the `Lemmatizer` trait).
+eigenius-wordnet = { path = "../crates/eigenius-wordnet" }
 # 19a.5.a: pulled in for the JuliaMirrorGenerator; the CLI runs mirror
 # generation client-side via a RemoteChainAccessor over gRPC.
 eigenius-julia = { path = "../crates/eigenius-julia" }
@@ -71,3 +74,6 @@ tracing-subscriber.workspace = true
 default = []
 cuda = ["eigenius-embedder-candle/cuda"]
 metal = ["eigenius-embedder-candle/metal"]
+# D63/GH#97 Lever 1: enable the contextual LLM sense reranker in the served/local parse path
+# (the kernel's `AnthropicSenseRanker`, opt-in, needs ANTHROPIC_API_KEY at runtime).
+allms = ["eigenius-kernel/allms"]

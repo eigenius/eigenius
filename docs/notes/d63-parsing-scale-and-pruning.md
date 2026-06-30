@@ -145,6 +145,69 @@ prunes the `eat`/`think`-style nonsense senses *without* touching the `Something
 (`affect`/`cause`/`encode`/`regulate`/`contribute`) that admit domain entities — so the pruning that
 matters for `no cat eats a fish` leaves `WRN affects mismatch repair` untouched.
 
+**Correction (see §4a, 2026-06-30):** the empirical chart-cell analysis of the CNL corpus shows the
+"#93 → Lever B" chain is **not** this corpus's critical path. The CNL explosion is **nominal**
+(compound-rule sense-product over content nouns), not verb-argument polysemy — so selectional
+restrictions on verbs prune none of it. For the CNL the validated lever is the **contextual LLM sense
+reranker**, with a **nominal-modification normal form** as the structural follow-on. #93 stays valid
+for general WordNet (`eat`/`think`), just off the CNL path.
+
+## 4a. Chart-cell analysis of the CNL corpus (2026-06-30) — what actually explodes
+
+Instrumented the chart (PARSE_DEBUG per-cell **shape histograms** via `cat_shape`, type-indices
+erased; + an `EIGENIUS_DUMP_CELL=i..j` full-category dump) and analysed the 5 CNL v2 sentences at a
+wide beam. Findings (witnessed; `analyze_chart_cells_first_five` / `enumerate_function_word_noise` /
+`verify_sense_lever_at_page_beam` in `crates/eigenius-wordnet/tests/db_backed_encoding.rs`):
+
+- **The explosion is nominal, not verbal.** The cells saturating the beam are almost entirely
+  `cat_n(Σ_, sg)` — refined (adjective-modified / N-N compound) nouns — often `shapes=1` (every kept
+  item the same shape). Dumping one such cell (`cell[0..5]` of S1) showed the **same compound skeleton**
+  (`compound_kind` nesting + Σ refinements) repeated with **different sense IRIs per slot**: each noun
+  filled by a WordNet sense (`n…`) *or* a UMLS sense (`C…`), the compound enumerating the **Cartesian
+  product** of per-noun senses. So the driver is **sense polysemy × the compound rule**, NOT verb
+  argument polysemy.
+- **⇒ GH#93 (selectional restrictions) is NOT the lever for this corpus.** Our verbs
+  (`affect`/`cause`/`encode`/`regulate`/`lead`) are all `Something`-frame; the `eat`/`think` animacy
+  litmus that motivates #93 doesn't occur. The explosion is `compound_kind` (opaque `Entity → Set →
+  Prop`) enumerating noun senses — selectional typing on verbs touches none of it. (#93 remains valid
+  for general WordNet, just orthogonal to the CNL beam pressure.)
+- **Function-word noun-sense noise is real but not dominant.** Function words pick up dense-lexicon
+  open-class senses: `is`→`be`=**beryllium** (`wn:Be.n.14631295`) + 50 `be`-verbs + UMLS; `an`→`AN`
+  noun + gene-symbol named-individuals; `a`→letter/ampere/**adenine**/vitamin-A. These let the compound
+  rule chain *across* a copula/determiner into a bogus noun pile. **Why the static cap doesn't drop
+  them:** `sense_rank` is per-(lemma, POS) (`read_sense_ranks`), so beryllium is rank 0 *among nouns of
+  `be`* — indistinguishable from the rank-0 `be`-verb under the per-lemma cap. The cap is a within-POS
+  frequency prior, with no cross-POS or plausibility judgment.
+- **The contextual LLM reranker is the effective sense lever; the deterministic POS rule is not.**
+  A/B at the page beam (64), 5 sentences:
+
+  | | baseline | +closed-class-wins | +llm | +llm+ccw |
+  |---|---|---|---|---|
+  | S1 | GAP | GAP | **open×80** | GAP |
+  | S2 | open×20 | GAP | open×8 | GAP |
+  | S3/S4/S5 | GAP | GAP | GAP | GAP |
+
+  The **LLM reranker recovers S1** (downranks beryllium/adenine in context so the junk falls below the
+  cap). The **deterministic "closed-class-wins"** (drop all open-class senses of any function word) is
+  **harmful** — it regresses S2 and, with the LLM, breaks even S1, because the grammatical reading of
+  "X is Y" *relies on* an open-class `be`-verb sense, and a blanket POS rule can't tell `be`-verb
+  (needed) from beryllium (junk). Only contextual *sense* plausibility makes that cut. **`ccw` was
+  reverted** (kept only as this recorded negative result); the LLM reranker is retained as the sense
+  lever.
+- **Residual after the sense lever.** S1 recovers but S3/S4/S5 don't. S4 gaps even at a wide beam — the
+  real **compound-as-preposition-object** grammar gap (`for cancer therapeutics`: single-noun prep
+  objects and compound *direct* objects both parse; only the combination fails). S3/S5 are beam-limited
+  by **compound bracketing/derivation multiplicity** (the Catalan blowup of a stacked modifier chain —
+  `DNA repair processes`, `attractive synthetic lethal targets`), which sense-ranking does not reduce.
+
+**Updated lever order for the CNL** (supersedes "B is the ceiling-lifter via #93" for this corpus):
+1. **Contextual LLM sense reranker** (Lever A strong form) — validated, recovers S1; the cheapest win.
+2. **A normal form for nominal modification** (canonical bracketing of the adjective/compound stack,
+   the analogue of the existing coordination + Eisner NFs) — the structural lever for S3/S5, which
+   neither sense-ranking nor selectional typing addresses.
+3. The compound-as-prep-object grammar gap (S4) — separate, small.
+GH#93/Lever-B selectional pruning is **not** on this corpus's critical path.
+
 ## 5. Verification plan
 
 - A length-capped baseline exists (`prototype_over_wrn_first_page`, `MAX_UNIT_TOKENS = 22`). After

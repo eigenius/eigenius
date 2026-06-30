@@ -58,7 +58,7 @@ pub use lookup::{
     LexicalIndex, OpenParse, ProposeCtx, Proposer, DEFAULT_FOREST_CAP,
 };
 pub use parser::{apply, cky_parse, Combinator, Cost, Item};
-pub use pretty::pretty_term;
+pub use pretty::{cat_shape, pretty_term};
 pub use segment::{is_nonprose, segment_sentences};
 #[cfg(feature = "allms")]
 pub use sense_ranker::AnthropicSenseRanker;

@@ -528,6 +528,33 @@ impl LexicalIndex {
         self.is_derived_adverb(&s_lc) || is_lexicalized_adverb(&s_lc)
     }
 
+    /// Diagnostic (D62/GH#97 function-word-noise analysis): every resolved entry for `surface`
+    /// (raw lowercased + each lemma across POS), tagged **closed-class** (`in_lexicon = None`, the
+    /// grammatical core) vs **open-class** (a wordnet/umls sense). Returns `(closed_class, cat,
+    /// sense)` per entry. Used to enumerate the spurious open-class noun senses that function words
+    /// (`is`/`an`/`a`/`between`) pick up from the dense lexicon and feed into the compound rule.
+    pub fn debug_form_entries(
+        &self,
+        surface: &str,
+        lemmatizer: &dyn Lemmatizer,
+    ) -> Vec<(bool, String, String)> {
+        let mut out = Vec::new();
+        let mut seen: BTreeSet<(bool, String, String)> = BTreeSet::new();
+        for cand in self.candidate_lemmas(surface, lemmatizer) {
+            for e in self.scoped(self.entries_for(&cand), None) {
+                let row = (
+                    e.in_lexicon.is_none(),
+                    super::pretty_term(&e.item.cat),
+                    e.sense.clone().unwrap_or_default(),
+                );
+                if seen.insert(row.clone()) {
+                    out.push(row);
+                }
+            }
+        }
+        out
+    }
+
     /// Apply the per-parse lexicon **scope** (D65 §4) to one form's resolved
     /// `(item, in_lexicon)` pairs, returning the surviving [`Item`]s with their
     /// leaf `cost.lexicon_order` stamped from the scope:
@@ -1128,6 +1155,13 @@ impl LexicalIndex {
                     beam_drops += beam_cell(&mut row[i], beam);
                 }
             }
+            if debug {
+                eprintln!(
+                    "  [parse-debug leaf] cell[{i}..{i}] tok={:?} | {}",
+                    tokens[i],
+                    cell_histogram(&row[i])
+                );
+            }
         }
 
         // 2. CKY composition, appending combined items to each cell's seeds (so a
@@ -1472,9 +1506,29 @@ impl LexicalIndex {
                 }
                 if debug {
                     eprintln!(
-                        "  [parse-debug cap={cap:?}] cell[{i}..{j}] len={len} produced={produced_n} kept={}",
-                        chart[i][j].len()
+                        "  [parse-debug cap={cap:?}] cell[{i}..{j}] len={len} produced={produced_n} kept={} | {}",
+                        chart[i][j].len(),
+                        cell_histogram(&chart[i][j])
                     );
+                }
+                // Targeted dump (set `EIGENIUS_DUMP_CELL=i..j`): print the FULL category (indices
+                // intact) + provenance of a sample of this cell's items, to see exactly which
+                // sense/derivation combinations accumulate.
+                if let Ok(want) = std::env::var("EIGENIUS_DUMP_CELL") {
+                    if want == format!("{i}..{j}") {
+                        eprintln!(
+                            "  ===== DUMP cell[{i}..{j}] ({} items, sample 20) =====",
+                            chart[i][j].len()
+                        );
+                        for it in chart[i][j].iter().take(20) {
+                            eprintln!(
+                                "    [{:?} cost={:?}] {}",
+                                it.prov,
+                                it.cost,
+                                super::pretty_term(&it.cat)
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -2144,6 +2198,26 @@ fn beam_cell(cell: &mut Vec<Item>, beam: usize) -> usize {
     cell.sort_by_key(|it| it.cost);
     cell.truncate(beam);
     dropped
+}
+
+/// Diagnostic (PARSE_DEBUG): a compact category-SHAPE histogram of a chart cell — total
+/// items, count of distinct shapes ([`super::cat_shape`], type-indices erased), and the top
+/// shapes by frequency. Many items under ONE shape ⇒ lexical/sense variation (a type-narrowing
+/// candidate, GH#93); many distinct shapes ⇒ structural ambiguity (type-narrowing won't help).
+fn cell_histogram(cell: &[Item]) -> String {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for it in cell {
+        *counts.entry(super::cat_shape(&it.cat)).or_default() += 1;
+    }
+    let distinct = counts.len();
+    let mut pairs: Vec<(String, usize)> = counts.into_iter().collect();
+    pairs.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let top: Vec<String> = pairs
+        .iter()
+        .take(4)
+        .map(|(s, c)| format!("{s}×{c}"))
+        .collect();
+    format!("shapes={distinct} top: {}", top.join(", "))
 }
 
 fn sense_cap_key(e: &SeedEntry, ranks: Option<&BTreeMap<String, u32>>) -> (bool, u32, u32) {

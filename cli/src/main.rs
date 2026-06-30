@@ -296,6 +296,18 @@ enum Commands {
             default_value_t = 250_000
         )]
         cache_budget: u64,
+
+        /// WordNet dict directory for the Morphy lemmatizer used by the `ParseSentence` RPC
+        /// (surface→lemma, e.g. `events`→`event`). Defaults to the in-repo path; if it can't be
+        /// loaded the server falls back to the no-op `Identity` lemmatizer. (D63/GH#97 Lever 1 —
+        /// will move to orchestrator-owned lexicon provisioning.)
+        #[arg(
+            long,
+            env = "EIGENIUS_MORPHY_DICT",
+            value_name = "PATH",
+            default_value = "references/WordNet-3.0/dict"
+        )]
+        morphy_dict: String,
     },
 
     /// Database administration
@@ -1235,7 +1247,17 @@ async fn main() {
             orchestrator,
             db,
             cache_budget,
-        } => cmd_serve(port, orchestrator.as_deref(), db.as_deref(), cache_budget).await,
+            morphy_dict,
+        } => {
+            cmd_serve(
+                port,
+                orchestrator.as_deref(),
+                db.as_deref(),
+                cache_budget,
+                &morphy_dict,
+            )
+            .await
+        }
         Commands::Compile { file } => cmd_compile(&file, cli.json),
         Commands::Lexicon { command } => match command {
             LexiconCommands::Gate { files } => cmd_lexicon_gate(&files, cli.json),
@@ -1798,9 +1820,7 @@ fn cmd_lexicon_parse(
     files: &[String],
     json_output: bool,
 ) {
-    use eigenius_kernel::dcg::{
-        is_ctor, pretty_term, resolve_lexicon_profile, Identity, LexicalIndex,
-    };
+    use eigenius_kernel::dcg::{is_ctor, pretty_term, resolve_lexicon_profile, LexicalIndex};
     use eigenius_kernel::nbe::{env::Rho, eval::eval, readback::readback_val};
 
     let ctx = match bootstrap::bootstrap() {
@@ -1855,8 +1875,24 @@ fn cmd_lexicon_parse(
         None
     };
 
-    let index = LexicalIndex::build(Arc::clone(&layer));
-    let forest = index.parse_scoped(sentence, &Identity, scope_iris.as_deref());
+    // Same parse config as the served RPC (D63/GH#97 Lever 1): cap + beam + the Morphy lemmatizer
+    // (default in-repo dict), so local `lexicon parse` matches the server. The contextual reranker
+    // is wired here too under `--features allms` (+ ANTHROPIC_API_KEY), for parity.
+    let pc = build_parse_config("references/WordNet-3.0/dict");
+    let mut index = LexicalIndex::build(Arc::clone(&layer));
+    if let Some(n) = pc.sense_cap {
+        index = index.with_sense_cap(n);
+    }
+    if let Some(m) = pc.cell_beam {
+        index = index.with_cell_beam(m);
+    }
+    #[cfg(feature = "allms")]
+    if pc.use_ranker {
+        if let Some(r) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
+            index = index.with_sense_ranker(Box::new(r));
+        }
+    }
+    let forest = index.parse_scoped(sentence, &*pc.lemmatizer, scope_iris.as_deref());
     let rows: Vec<ParseRow> = forest
         .iter()
         .map(|item| {
@@ -2126,7 +2162,41 @@ fn cmd_db(command: DbCommands) {
     }
 }
 
-async fn cmd_serve(port: u16, orchestrator: Option<&str>, db: Option<&str>, cache_budget: u64) {
+/// Build the `ParseSentence` [`ParseConfig`] (D63/GH#97 Lever 1): load WordNet's Morphy from
+/// `morphy_dict` (falling back to the no-op `Identity` lemmatizer if it can't be loaded), keep the
+/// cap+beam defaults (the full-lexicon OOM defense), and enable the contextual LLM reranker iff the
+/// binary was built `--features allms` (the kernel still requires `ANTHROPIC_API_KEY` at runtime).
+fn build_parse_config(morphy_dict: &str) -> eigenius_kernel::server::ParseConfig {
+    use eigenius_kernel::dcg::{Identity, Lemmatizer};
+    let lemmatizer: std::sync::Arc<dyn Lemmatizer + Send + Sync> =
+        match eigenius_wordnet::lemmatizer::MorphyLemmatizer::load(std::path::Path::new(
+            morphy_dict,
+        )) {
+            Ok(m) => {
+                eprintln!("Parse lemmatizer: Morphy ({morphy_dict})");
+                std::sync::Arc::new(m)
+            }
+            Err(e) => {
+                eprintln!(
+                    "Parse lemmatizer: Identity (no-op) — Morphy dict {morphy_dict} not loadable: {e}"
+                );
+                std::sync::Arc::new(Identity)
+            }
+        };
+    eigenius_kernel::server::ParseConfig {
+        lemmatizer,
+        use_ranker: cfg!(feature = "allms"),
+        ..Default::default()
+    }
+}
+
+async fn cmd_serve(
+    port: u16,
+    orchestrator: Option<&str>,
+    db: Option<&str>,
+    cache_budget: u64,
+    morphy_dict: &str,
+) {
     // Set the process-wide resource-cache budget before any persistent storage is
     // constructed (set-once; D23 §5.3). Bounds resident memory; cold reads page from
     // the backend on demand.
@@ -2184,12 +2254,15 @@ async fn cmd_serve(port: u16, orchestrator: Option<&str>, db: Option<&str>, cach
         std::process::exit(1);
     });
 
+    let parse_config = build_parse_config(morphy_dict);
+
     if let Err(e) = eigenius_kernel::server::start_server(
         port,
         orchestrator,
         backend,
         in_process_institutions,
         embedder_cfg,
+        parse_config,
     )
     .await
     {
