@@ -401,6 +401,39 @@ fn object_position_non_restrictive_relative_is_a_known_gap() {
 }
 
 #[test]
+fn fronted_participial_adjunct_is_an_open_parse_with_a_controlled_subject() {
+    // D62 §2 #5a: a subject-gapped present-participle VP fronted as a sentence adjunct
+    // ("affecting BRCA1, HeLa affects BRCA1" — schematically "hypothesizing that P, we Q") asserts
+    // the participial proposition alongside the matrix, with the participle's subject CONTROLLED — a
+    // referent hole (D64) ⇒ an OPEN parse. Sem: `And(matrix, participle(hole))`.
+    let (_layer, index) = index_over_bootstrap();
+    let (closed, open) = index.parse_open("affecting BRCA1 , HeLa affects BRCA1", &Identity);
+    assert!(
+        closed.is_empty(),
+        "the controlled subject is unresolved ⇒ not a closed parse"
+    );
+    assert!(!open.is_empty(), "fronted participial yields an open parse");
+    let sem = pretty_term(&open[0].item.sem);
+    assert!(
+        sem.starts_with("And(") && sem.matches("affects").count() == 2,
+        "conjoins the matrix and the participial proposition (controlled subject a hole): {sem}"
+    );
+    assert_eq!(
+        open[0].holes.len(),
+        1,
+        "exactly one hole — the controlled subject: {sem}"
+    );
+
+    // The comma is required by the construction but the absorption makes the comma-less variant parse
+    // too; the baseline (no adjunct) is unaffected.
+    assert_eq!(
+        index.parse("HeLa affects BRCA1", &Identity).len(),
+        1,
+        "baseline declarative unaffected"
+    );
+}
+
+#[test]
 fn transitional_adverbs_and_fronted_comma_parse() {
     // D62 §2 #5b: sentence-initial TRANSITIONAL adverbs (`thus`/`therefore`/…) attach at the clause
     // level and are transparent (same claim as unmodified); a comma after the fronted adverb is

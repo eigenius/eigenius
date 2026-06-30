@@ -48,8 +48,9 @@ use crate::ontology::resource::Value;
 use crate::ontology::Iri;
 
 use super::category::{
-    adverb_modifier_cats, cats_coordinate, coordinate_np, coordinate_sem, denote_cat, is_ctor,
-    reciprocate, relativize, relativize_appos, sentence_modifier_cats, type_raise,
+    adverb_modifier_cats, cats_coordinate, coordinate_np, coordinate_sem, denote_cat,
+    front_participial, is_ctor, reciprocate, relativize, relativize_appos, sentence_modifier_cats,
+    type_raise,
 };
 use super::lemmatizer::{Lemmatizer, Pos};
 use super::lexicon::entry_to_item;
@@ -1182,6 +1183,20 @@ impl LexicalIndex {
                 // NP can also seed an extraction body. Raised once per cell.
                 let raised = raise_nps(&chart[i][j], &self.layer);
                 chart[i][j].extend(raised);
+                // Fronted participial adjunct (D62 §2 #5a): a subject-gapped `ger` VP in this cell
+                // ("affecting BRCA1", "hypothesizing that P") also serves as a sentence pre-modifier
+                // `S/S` asserting the participial proposition with a CONTROLLED-subject referent hole
+                // (freshened with this span's `hole_base`, so it is the open-parse controller). The
+                // comma absorption below then carries it over a trailing comma to front the matrix.
+                let fronted: Vec<Item> = chart[i][j]
+                    .iter()
+                    .filter_map(|it| {
+                        front_participial(&it.cat, &it.sem, &self.layer).map(|(cat, sem)| {
+                            Item::with_cost(cat, freshen_anaphor(&sem, &hole_base(i, j)), it.cost)
+                        })
+                    })
+                    .collect();
+                chart[i][j].extend(fronted);
                 // Fronted-modifier comma absorption (D62 §2 #5): a SENTENCE-INITIAL `S/S` modifier
                 // (`Thus,` / `More commonly,` / later a fronted participial) absorbs a trailing comma
                 // so it can then forward-apply to the matrix clause. The comma is otherwise a reserved
@@ -1623,6 +1638,13 @@ fn freshen_anaphor(exp: &Exp, fresh: &str) -> Exp {
         Exp::Snd(e) => Exp::Snd(Box::new(go(e))),
         Exp::Pair(a, b) => Exp::Pair(Box::new(go(a)), Box::new(go(b))),
         Exp::Ann(e, t) => Exp::Ann(Box::new(go(e)), Box::new(go(t))),
+        // Inductive nodes (e.g. `logic:And(P, Q)` as an `InductiveType`) carry subterms too — a
+        // fronted-participial conjunct nests the anaphor inside an `And`, so the freshener must
+        // descend into them (else the hole stays an unfreshened closed constant).
+        Exp::InductiveType(d, args) => Exp::InductiveType(d.clone(), args.iter().map(go).collect()),
+        Exp::InductiveCtor(d, n, args) => {
+            Exp::InductiveCtor(d.clone(), n.clone(), args.iter().map(go).collect())
+        }
         other => other.clone(),
     }
 }
@@ -1649,6 +1671,10 @@ fn freshen_quant(exp: &Exp, fresh: &str) -> Exp {
         Exp::Snd(e) => Exp::Snd(Box::new(go(e))),
         Exp::Pair(a, b) => Exp::Pair(Box::new(go(a)), Box::new(go(b))),
         Exp::Ann(e, t) => Exp::Ann(Box::new(go(e)), Box::new(go(t))),
+        Exp::InductiveType(d, args) => Exp::InductiveType(d.clone(), args.iter().map(go).collect()),
+        Exp::InductiveCtor(d, n, args) => {
+            Exp::InductiveCtor(d.clone(), n.clone(), args.iter().map(go).collect())
+        }
         other => other.clone(),
     }
 }

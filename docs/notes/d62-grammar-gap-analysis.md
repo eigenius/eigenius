@@ -62,7 +62,18 @@
 >   `HeLa affects a gene within cells` **open×4**, `WRN is a vulnerability for MSI cancers` **CLOSED×16**
 >   (all were grammar-gap). Restricted to `cat_pp` functors so it never re-derives `a_obj`.
 >
-> **Parser-side no-reseed batch (2026-06-29, after the measurement pass) — three more:**
+> **Parser-side no-reseed batch (2026-06-29, after the measurement pass):**
+> - **#5a fronted participial adjunct** — a subject-gapped `ger` VP (`affecting BRCA1`,
+>   schematically `hypothesizing that P`) fronted as a sentence pre-modifier `S/S` asserting the
+>   participial proposition alongside the matrix: `λm. And(m, body(hole))`
+>   (`category.rs::front_participial`), where the participle's subject is CONTROLLED — a referent hole
+>   (D64) ⇒ an **OPEN** parse resolvable to the matrix subject. core-en `purp-i`/`tpc` fronted-`s`
+>   type-changes. The produced `S/S` rides the fronted-comma absorption (#5b) to span the trailing
+>   comma, then forward-applies. → `affecting BRCA1 , HeLa affects BRCA1` open×1 ::
+>   `And(affects(brca1,hela), affects(brca1, ?))`. Fixed en route: `freshen_anaphor`/`freshen_quant`
+>   now recurse into `InductiveType`/`InductiveCtor` (the controlled-subject hole nests inside a
+>   `logic:And`, so without it the hole stayed an unfreshened closed constant). *Follow-on:*
+>   intransitive single-token participles (leaf cells) not yet shifted (only composed `ger` VPs).
 > - **#5b transitional adverbs + fronted-comma absorption** — `thus`/`therefore`/`hence`/… added to
 >   the lexicalized (transparent, clause-level `S/S`) adverb set; a sentence-initial fronted `S/S`
 >   modifier now ABSORBS a trailing comma (the comma is otherwise a reserved coordinator with no chart

@@ -842,6 +842,53 @@ pub fn relativize_appos(
     Some((raised_cat, sem))
 }
 
+/// Fronted **participial adjunct** (D62 §2 #5a): a subject-gapped present-participle VP
+/// `cat_s(dcl, ger)\NP` ("affecting BRCA1", "hypothesizing that P") fronted as a sentence
+/// pre-modifier `S/S`, asserting the participial proposition alongside the matrix —
+/// `λm. logic:And(m, body(hole))`. The participle's subject is CONTROLLED: a referent hole
+/// (the `lexicon:anaphor` placeholder, freshened per-span by the caller so it is typed
+/// `Entity`/`EntityRef` at the felicity gate → an OPEN parse resolvable to the matrix subject,
+/// D64). Reference grammar: core-en's `purp-i`/`tpc` fronted-`s` type-changes (`unary-rules.xsl`).
+/// The resulting `S/S` then absorbs a trailing comma (CKY) and forward-applies to the matrix
+/// clause. `None` unless `cat` is a subject-gapped `ger` VP, or `logic:And` is unavailable.
+pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Exp, Exp)> {
+    let Exp::InductiveCtor(cat_decl, _, _) = cat else {
+        return None;
+    };
+    let [s, _np] = is_ctor(cat, "bwd")? else {
+        return None;
+    };
+    let [mood, fin] = is_ctor(s, "cat_s")? else {
+        return None;
+    };
+    if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
+        return None;
+    }
+    if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "ger") {
+        return None;
+    }
+    let and = resolve_inductive(layer, "urn:eigenius:logic:And")?;
+    let mood_d = resolve_inductive(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin_d = resolve_inductive(layer, "urn:eigenius:lexicon:Fin")?;
+    let dcl = Exp::InductiveCtor(mood_d, "dcl".into(), vec![]);
+    let fin_any = Exp::InductiveCtor(fin_d, "fin_any".into(), vec![]);
+    let s_full = Exp::InductiveCtor(cat_decl.clone(), "cat_s".into(), vec![dcl, fin_any]);
+    let ss = Exp::InductiveCtor(cat_decl.clone(), "fwd".into(), vec![s_full.clone(), s_full]);
+    // The controlled-subject referent hole: the `lexicon:anaphor` placeholder (freshened by the
+    // caller, exactly as a pronoun's sem is). `body(hole)` is the participial proposition.
+    let anaphor = Exp::EigonAxiom(Iri::parse("urn:eigenius:lexicon:anaphor").ok()?);
+    let body_at_hole = Exp::App(Box::new(sem.clone()), Box::new(anaphor));
+    let m = "__front_m";
+    let new_sem = Exp::Lam(
+        Patt::Var(m.into()),
+        Box::new(Exp::InductiveType(
+            and,
+            vec![Exp::Var(m.into()), body_at_hole],
+        )),
+    );
+    Some((ss, new_sem))
+}
+
 /// Whether `s` is a declarative clause `cat_s(dcl, _)` — the result type a relative
 /// clause body abstracts over (D63 §8.9). The finiteness is irrelevant here (a VP
 /// result is `fin`, an object-extraction `S/NP` result is the `T` target's `fin`);
