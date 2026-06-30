@@ -255,6 +255,14 @@ fn encode_unit(
 /// and REVERTED — harmful; it can't distinguish `be`-verb from beryllium — see the d63 note.)
 ///   cargo test -p eigenius-wordnet --features allms --test db_backed_encoding \
 ///       verify_sense_lever_at_page_beam -- --ignored --nocapture
+///
+/// Beam-sensitivity (Lever 2, GH#97, measured 2026-06-30): at a fixed cell beam the 5
+/// grammar-complete sentences cross to parsing at — S2 b64, S3 b128, S1/S5 b256, S4 not even at
+/// b1024 (needs structural reduction). That measurement motivated **beam widen-on-failure**
+/// (`CELL_BEAM_WIDEN_MAX`): `parse_scoped_open` now escalates the beam (with the sense cap) for a
+/// known sentence that gaps, so the base beam stays the long-sentence OOM defense while
+/// beam-limited short sentences are recovered. (So a fixed-beam sweep is no longer meaningful here —
+/// `parse_scoped_open` auto-widens.)
 #[test]
 #[ignore = "diagnostic: A/B the sense lever at the page beam; run with --ignored --nocapture"]
 fn verify_sense_lever_at_page_beam() {

@@ -82,6 +82,15 @@ pub const CLASSIFY_BUDGET: usize = DEFAULT_FOREST_CAP;
 /// sentences). The final β-level of bounded adaptive supertagging.
 pub const SENSE_CAP_WIDEN_MAX: usize = 16;
 
+/// Upper bound for widen-on-failure of the **cell beam** (GH #97 Lever 2): when a capped parse of an
+/// all-known-vocabulary sentence yields nothing, the per-cell beam is doubled (alongside the sense
+/// cap) up to this many items per cell, then the attempt is abandoned. This pays the wider beam ONLY
+/// for known sentences that need the structural headroom (measured: the CNL's grammar-complete
+/// sentences cross at beam 128–256), while sentences that parse at the base beam never widen — so the
+/// base beam stays the OOM defense for the long-sentence common case. Bounded (not uncapped) so a
+/// genuinely intractable sentence can't re-OOM the chart.
+pub const CELL_BEAM_WIDEN_MAX: usize = 512;
+
 /// Split prose into lowercased word tokens. Token-internal **separators** — em/en-dashes
 /// (`—`/`–`), slashes, and brackets — are normalised to spaces first, so `"not—can"` →
 /// `["not", "can"]` and `"and/or"` → `["and", "or"]` (D62 S0). Hyphens (`-`) are kept, so
@@ -917,12 +926,15 @@ impl LexicalIndex {
     }
 
     /// Parse with optional scope, returning the closed + open forests. Applies the **sense cap**
-    /// (`with_sense_cap`) with **widen-on-failure** (adaptive supertagging, GH #97): try the cap;
-    /// if it yields *no* parse at all (closed and open both empty) **and** the failure could be a
-    /// cap-dropped sense — i.e. every (prose) token is lexically known, so it is not an OOV miss —
-    /// retry with a doubled cap, up to [`SENSE_CAP_WIDEN_MAX`]. So the cap never *loses* a parse a
-    /// known-vocabulary sentence would otherwise get, while OOV-blocked sentences (the WRN case)
-    /// don't waste retries (widening can't supply a missing word).
+    /// (`with_sense_cap`) and **cell beam** (`with_cell_beam`) with **widen-on-failure** (GH #97): try
+    /// at the base cap+beam; if it yields *no* parse at all (closed and open both empty) **and** the
+    /// failure could be a pruning artifact — i.e. every (prose) token is lexically known, so it is not
+    /// an OOV miss — retry with **both** doubled (sense cap up to [`SENSE_CAP_WIDEN_MAX`], cell beam up
+    /// to [`CELL_BEAM_WIDEN_MAX`]). So neither the cap (a dropped sense) nor the beam (a dropped
+    /// structural constituent — the dominant blocker for the grammar-complete CNL sentences, which
+    /// cross at beam 128–256) ever *loses* a parse a known-vocabulary sentence would get, while
+    /// OOV-blocked sentences don't waste retries and sentences that parse at the base settings never
+    /// pay the wider ones. Escalating both each round bounds the retries to ~log2 of the wider span.
     pub fn parse_scoped_open(
         &self,
         text: &str,
@@ -933,19 +945,33 @@ impl LexicalIndex {
         // not per widen iteration), then threaded into every capped attempt below.
         let ranks = self.contextual_sense_ranks(text, lemmatizer, scope);
         let mut cap = self.sense_cap;
+        let mut beam = self.cell_beam;
         loop {
-            let (closed, open) = self.parse_at_cap(text, lemmatizer, scope, cap, ranks.as_ref());
+            let (closed, open) =
+                self.parse_at_cap(text, lemmatizer, scope, cap, ranks.as_ref(), beam);
             if !closed.is_empty() || !open.is_empty() {
                 return (closed, open);
             }
-            match cap {
-                // Widen only if the cap could be the cause (no OOV token) and we're under the bound.
-                Some(c)
-                    if c < SENSE_CAP_WIDEN_MAX && self.all_prose_tokens_known(text, lemmatizer) =>
-                {
+            // Widen only if a pruning artifact could be the cause (no OOV token).
+            if !self.all_prose_tokens_known(text, lemmatizer) {
+                return (closed, open);
+            }
+            // Escalate the sense cap and the cell beam together; stop once neither can grow.
+            let mut widened = false;
+            if let Some(c) = cap {
+                if c < SENSE_CAP_WIDEN_MAX {
                     cap = Some((c * 2).min(SENSE_CAP_WIDEN_MAX));
+                    widened = true;
                 }
-                _ => return (closed, open),
+            }
+            if let Some(b) = beam {
+                if b < CELL_BEAM_WIDEN_MAX {
+                    beam = Some((b * 2).min(CELL_BEAM_WIDEN_MAX));
+                    widened = true;
+                }
+            }
+            if !widened {
+                return (closed, open);
             }
         }
     }
@@ -1064,6 +1090,7 @@ impl LexicalIndex {
         scope: Option<&[Iri]>,
         cap: Option<usize>,
         ranks: Option<&BTreeMap<String, u32>>,
+        beam: Option<usize>,
     ) -> (Vec<Item>, Vec<OpenParse>) {
         let tokens = tokenize(text);
         let n = tokens.len();
@@ -1151,8 +1178,8 @@ impl LexicalIndex {
             // left to the forest cap). `sense_cap` already bounds it per-lemma; the beam caps it
             // across all candidate lemmas/POS of the token.
             if n > 1 {
-                if let Some(beam) = self.cell_beam {
-                    beam_drops += beam_cell(&mut row[i], beam);
+                if let Some(b) = beam {
+                    beam_drops += beam_cell(&mut row[i], b);
                 }
             }
             if debug {
@@ -1500,8 +1527,8 @@ impl LexicalIndex {
                 // Lever B: beam this composed cell (non-top; the top cell `len == n` is left to the
                 // forest cap). Done after type-raise so the raised items compete in the beam too.
                 if len < n {
-                    if let Some(beam) = self.cell_beam {
-                        beam_drops += beam_cell(&mut chart[i][j], beam);
+                    if let Some(b) = beam {
+                        beam_drops += beam_cell(&mut chart[i][j], b);
                     }
                 }
                 if debug {
@@ -1536,7 +1563,7 @@ impl LexicalIndex {
             eprintln!(
                 "dcg::parse: cell-beam (Lever B) dropped {beam_drops} items \
                  (beam={})",
-                self.cell_beam.unwrap_or(0),
+                beam.unwrap_or(0),
             );
         }
 

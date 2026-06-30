@@ -79,7 +79,7 @@ resource lexicon:zob_sg : lexicon:LexicalEntry {
 "#;
 
 /// Bootstrap + demo + the two-sense `zob` fixture, with an index carrying `sense_cap`.
-fn index_with_zob(cap: usize) -> LexicalIndex {
+fn zob_layer() -> Arc<Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
     let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
@@ -92,8 +92,55 @@ fn index_with_zob(cap: usize) -> LexicalIndex {
     for r in fix {
         b2.add_resource(r).expect("add zob");
     }
-    let layer = Arc::new(b2.build(LayerStorage::in_memory()));
-    LexicalIndex::build(layer).with_sense_cap(cap)
+    Arc::new(b2.build(LayerStorage::in_memory()))
+}
+
+fn index_with_zob(cap: usize) -> LexicalIndex {
+    LexicalIndex::build(zob_layer()).with_sense_cap(cap)
+}
+
+/// Like `zob` but with the polarities flipped: rank-0 is the **singular** (agreeing, parsing) sense,
+/// rank-1 the **plural** (disagreeing, failing) one. So at `sense_cap(1)` the *static* order keeps the
+/// PARSING sense (no widen needed) — which lets a mock reranker that prefers the failing rank-1 sense
+/// genuinely diverge from static, forcing the failure that widen-on-failure must then recover.
+const ZWORP_FIXTURE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+resource lexicon:zworp_sg : lexicon:LexicalEntry {
+    lexicon:form       = "zworp";
+    lexicon:cat        = type_expr( lexicon:cat_np(lexicon:CellLine, lexicon:sg) );
+    lexicon:sem        = lexicon:hela;
+    lexicon:sem_type   = type_expr( lexicon:CellLine );
+    lexicon:sense      = "zworp.0";
+    lexicon:sense_rank = 0;
+    lexicon:grade      = epistemic:declared;
+}
+resource lexicon:zworp_pl : lexicon:LexicalEntry {
+    lexicon:form       = "zworp";
+    lexicon:cat        = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:pl) );
+    lexicon:sem        = lexicon:brca1;
+    lexicon:sem_type   = type_expr( lexicon:Gene );
+    lexicon:sense      = "zworp.1";
+    lexicon:sense_rank = 1;
+    lexicon:grade      = epistemic:declared;
+}
+"#;
+
+fn zworp_layer() -> Arc<Layer> {
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
+    for r in demo {
+        b.add_resource(r).expect("add demo");
+    }
+    let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let fix =
+        esl::compile_against_layer(ZWORP_FIXTURE, &demo_layer).expect("zworp fixture compiles");
+    let mut b2 = LayerBuilder::new("zworp", Some(Arc::clone(&demo_layer)));
+    for r in fix {
+        b2.add_resource(r).expect("add zworp");
+    }
+    Arc::new(b2.build(LayerStorage::in_memory()))
 }
 
 #[test]
@@ -116,6 +163,37 @@ fn sense_cap_widens_on_failure_for_known_vocabulary() {
             .parse("zob affects zzzqnotaword", &Identity)
             .is_empty(),
         "an OOV token fails closed without pointless widening"
+    );
+}
+
+/// GH#97 / D64 — **widen-on-failure overrides a mis-ranking reranker** ("a bad rank costs a re-parse,
+/// never a missed parse" — the proposer-behind-oracle guarantee that makes the untrusted LLM reranker
+/// safe). `zworp`'s static order keeps the agreeing **singular** sense at `sense_cap(1)`, so a plain
+/// cap parses with no widen. A mock ranker that prefers the **failing plural** sense (`zworp.1`)
+/// diverges from static: the cap now seeds only the disagreeing sense, "zworp affects HeLa" cannot
+/// parse at the initial cap — and widen-on-failure doubles the cap, admits the singular sense, and
+/// recovers the parse. The reranker can reorder but cannot starve a needed sense.
+#[test]
+fn widen_on_failure_overrides_a_misranking_reranker() {
+    // Control: static cap(1) keeps the agreeing singular (rank-0) sense — parses without widening.
+    assert_eq!(
+        LexicalIndex::build(zworp_layer())
+            .with_sense_cap(1)
+            .parse("zworp affects HeLa", &Identity)
+            .len(),
+        1,
+        "static cap(1) keeps the agreeing sense"
+    );
+    // Mis-ranking reranker prefers the FAILING plural sense → the cap seeds only it → the parse can
+    // only succeed via widen-on-failure admitting the singular sense.
+    assert_eq!(
+        LexicalIndex::build(zworp_layer())
+            .with_sense_cap(1)
+            .with_sense_ranker(Box::new(PreferSense("zworp.1")))
+            .parse("zworp affects HeLa", &Identity)
+            .len(),
+        1,
+        "widen-on-failure recovers the parse despite the reranker preferring the failing sense"
     );
 }
 
@@ -583,6 +661,26 @@ fn vp_adjunct_preposition_takes_quantified_and_compound_objects() {
                                                // Noun-modifier prep (`within`) — control, already supported (still must hold).
     closes("a cell line within a gene cell line affects BRCA1");
     opens("a cell line within gene genes affects BRCA1");
+}
+
+/// D62/GH#97 — a **modal clause composes with a VP-adjunct PP whose object is quantified** (the
+/// Lever-3 raise interacting with the modal's base VP). Confirms S4's `can … for <obj>` shape is
+/// grammar-complete on the clean lexicon: the modal `can` takes the base VP `affect BRCA1 to a gene`
+/// (the `to`-PP attaches to the base VP, then the modal wraps it). (S4's full-lexicon gap is beam/sense
+/// scale — uniform with S1/S3/S5 — not a grammar gap; see d63-cnl-parse-levers-plan.)
+#[test]
+fn modal_clause_takes_a_vp_adjunct_pp() {
+    let (_layer, index) = index_over_bootstrap();
+    let closes = |s: &str| {
+        assert!(
+            !index.parse(s, &Identity).is_empty(),
+            "expected a closed parse: {s:?}"
+        );
+    };
+    closes("HeLa can affect BRCA1"); //               modal + base + name object
+    closes("HeLa can affect a gene"); //              modal + base + GQ object
+    closes("HeLa can affect BRCA1 to a gene"); //     modal + VP-adjunct prep GQ object (Lever 3)
+    closes("HeLa can affect a gene to BRCA1"); //     modal + GQ object + VP-adjunct prep name object
 }
 
 #[test]

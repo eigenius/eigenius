@@ -98,6 +98,39 @@ binary startup wiring (Morphy injection).
 
 ## Lever 2 — Nominal-modification residual (measure-first; the bracketing NF already exists)
 
+**Status: PARTIAL (2026-06-30) — adaptive beam-widen landed (2/5 → 4/5); S4 needs structural work.**
+Measured the post-all-fixes page-beam coverage: the LLM alone got 2/5 (S1,S2); the residual was
+beam-limited (deterministic beam sweep: S2 b64, S3 b128, S1/S5 b256, S4 not even at b1024). Rather than
+a flat beam bump (which would re-OOM long sentences — why beam=64 exists), added **beam
+widen-on-failure** (`CELL_BEAM_WIDEN_MAX=512` in `lookup.rs`): `parse_scoped_open` escalates the cell
+beam alongside the sense cap for a known sentence that gaps, so beam-limited short sentences recover
+while the base beam stays the long-sentence OOM defense. Result: **4/5 parse deterministically**
+(S1 open×178, S2 open×38, S3 open×180, S5 open×80); the LLM tightens forests but doesn't change
+coverage. Regression-safe (battery 103 + widen tests green; bare/cap-only indices don't widen).
+
+**S4 detailed analysis (`Scientists can exploit synthetic lethality for cancer therapeutics.`) — the
+lone holdout.** It is grammar-complete on the small lexicon (modal + prep-object + compound all parse),
+yet gaps even at beam 1024 + LLM. Cause, witnessed in the full-span cell `cell[0..7]`: it is dominated
+by the **whole-sentence noun-pile reading** — `cat_n(Σ_, …)` refined nouns, **685k items at cap=16**
+(and at cap=2 the top cell is `shapes=1 cat_n(Σ_,sg)` — *only* the noun pile, no `cat_s` at all). Every
+token carries a noun sense the N-N-compound + attributive-adjective rules chain into one giant refined
+noun: `scientists`(n) · **`can`(n=container)** · **`exploit`(n=feat)** · `synthetic`(n/adj) ·
+`lethality`(n) · **`for`**(noun noise) · `cancer`(n) · `therapeutics`(n). Unlike S1/S3/S5 — where
+non-nominal tokens (`is`/`are`/`does`/`between`/`two`/`each`) break the chain into sub-spans — S4 has
+**no chain-breaker** (`can`/`exploit`/`for` all carry noun senses), so the pile spans all 8 tokens in a
+Catalan-bracketing × sense-product explosion (685k) that crowds the intended `cat_s` reading out of the
+forest/felicity budget (`DEFAULT_FOREST_CAP`). Neither the sense cap, the beam, nor the LLM
+sense-reranker resolves it — it's structural.
+
+**The S4 structural fix (future Lever 2 work):** stop the compound/adjective rules from chaining across
+tokens that have a **grammatical (closed-class) or verbal** role — a *targeted* guard on the compound
+rule (not the reverted blanket closed-class-wins, which wrongly dropped needed open-class senses like
+the `be`-verb) — and/or **cost-penalize compound/refinement depth** so the `cat_s` reading outranks the
+deep noun-piles within the forest cap. This is the genuine nominal-residual reduction; the dual-POS /
+shift-fan-out items below are part of the same explosion.
+
+### Original framing (still valid background)
+
 **Correction from grounding.** Canonical bracketing is *already* enforced:
 - N-N compounds: **left-branching NF** — a compound's head may not itself be a compound
   ([parser.rs:412](kernel/src/dcg/parser.rs#L412)), so `[[DNA repair] processes]` is the single
@@ -151,12 +184,14 @@ test `vp_adjunct_preposition_takes_quantified_and_compound_objects`
 clippy clean. Full-lexicon payoff witnessed: `scientists exploit synthetic lethality for cancer
 therapeutics` GAP → **open×72**.
 
-**Newly exposed (separate, backlog) — the full S4 still gaps because of MODAL interactions, not
-prep-objects:** on the small lexicon `HeLa can affect a gene` parses (2) but **`HeLa can affect BRCA1`
-gaps** (modal + base-verb + NAME object), and a VP-adjunct PP under a modal (a *base* VP) appears not to
-attach (mood mismatch — the prep's VP-adjunct vs `S[bse]\NP`). Both are pre-existing and independent of
-Lever 3 (no preposition in `can affect BRCA1`); they are the remaining S4 blockers. → backlog item
-"modal + base-verb application / VP-adjunct-under-modal".
+**S4 is now grammar-complete (correction).** An initial read that the full S4 still gapped on a "modal
++ base-verb" grammar issue was a **measurement artifact** — the CLI prints `1 parse` (singular) for a
+single parse, and a counting regex that matched only `parses` (plural) reported those as `0`. On the
+clean lexicon **every S4 construction parses**, including the modal+PP combos (regression test
+`modal_clause_takes_a_vp_adjunct_pp`: `HeLa can affect BRCA1`, `HeLa can affect a gene`, `HeLa can
+affect BRCA1 to a gene` all CLOSED). So after Lever 3 **all five sentences are grammar-complete**; S4's
+full-lexicon gap is **beam/sense scale**, uniform with S1/S3/S5 — addressed by Levers 1 (LLM reranker)
+and 2 (nominal residual), not by any further grammar work.
 
 ---
 
