@@ -159,6 +159,33 @@ produce a steady drip of gaps. **No single fix clears the page.** Fix 2 (bare do
 identifiable bucket and worth doing, but yields *partial* gains; the rest is incremental long-tail
 work, not a two-fix finish.
 
+### Full CNL v2 page re-measured (2026-06-30) — 9 → 33 parses
+
+After the GH#97 lever work (countability lexicon + composed-mass shift, Lever-3 VP-adjunct prep-object
+raise, mood-polymorphic VP-adjunct prep, adaptive beam-first widen, cross-POS prune, felicity-readback
+made total) over a fresh `--umls-all` reseed, the whole 62-sentence v2 page measures (prune on):
+
+| metric | start of session | now |
+|---|---|---|
+| parses (open + ambiguous) | 9 | **33** (30 open + 3 ambig) |
+| grammar-gap | 47 | **23** |
+| missing-lexeme (OOV) | 6 | 6 (`recq`, `double-stranded`, `pcr-based`, `hypermutable`) |
+| encoded-closed / scale-bound | — | 0 / 0 |
+
+Parse times mostly <1s; a few 14-token sentences ~35s (the noun-pile tax persists on the *longest*
+sentences even with the prune). The 23 residual grammar-gaps cluster into **known backlog**, not new
+mysteries:
+- **Bare `MSI`/`MMR` abbreviation as argument** (~6) — the direct cost of removing the UMLS
+  `MASS_FORMS` hack; routed to the **abbreviation/alias model** (#1), not yet built. (The hack parsed
+  these as mass common nouns — the wrong shape.)
+- **Comparatives** (~4: `compared to`, `greater … than`, `fewer … than`).
+- **Multi-item comma lists** (~3: `colon, gastric, endometrial and ovarian cancers`).
+- **Clausal-complement / apposition / long sentences** (the rest).
+
+Measured WITH the cross-POS prune flag; without it coverage is lower and far slower. `encoded`=0 because
+the carrier returns these as OPEN parses (referent/quant holes), not closed `Prop`s — resolution is the
+downstream D64 step, not a parse failure.
+
 ## Faithfulness audit — the CNL rewrite vs the original (2026-06-29)
 
 The rewrite gained parse coverage, but a meaning-level audit of the CNL against the original shows it

@@ -435,6 +435,141 @@ fn enumerate_function_word_noise() {
     }
 }
 
+/// Pretty-print the EigenTT sem (`Prop`) of the best parse of each of the first 5 CNL v2 sentences.
+/// The parses are OPEN (referent/quant holes), so this shows the reduced normal form of the
+/// lowest-cost parse. Honors `EIGENIUS_POS_PRUNE`. Run:
+///   EIGENIUS_POS_PRUNE=1 cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       pretty_print_first_five_sems -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic: pretty-print the first-5 sems; run with --ignored --nocapture"]
+fn pretty_print_first_five_sems() {
+    let Some(head) = snapshot_path().and_then(|p| open_head(&p)) else {
+        return;
+    };
+    let index = build_index(&head);
+    let lem = morphy();
+    let sentences = [
+        "Synthetic lethality is an interaction between two genetic events.",
+        "The co-occurrence of these two events leads to cell death.",
+        "Each event alone does not lead to cell death.",
+        "Scientists can exploit synthetic lethality for cancer therapeutics.",
+        "DNA repair processes are attractive synthetic lethal targets.",
+        "Many cancers exhibit an impairment of a DNA repair pathway.",
+        "This impairment can lead to dependence on specific repair proteins.",
+    ];
+    for (i, s) in sentences.iter().enumerate() {
+        let (c, o) = index.parse_open(s, &lem);
+        let (n, sem) = if !c.is_empty() {
+            (c.len(), Some(&c[0].sem))
+        } else if !o.is_empty() {
+            (o.len(), Some(&o[0].item.sem))
+        } else {
+            (0, None)
+        };
+        eprintln!("\n════════════════════════════════════════════════════════════════");
+        eprintln!("S{}  {s}", i + 1);
+        eprintln!("     ({n} parse(s); best shown)");
+        match sem {
+            Some(e) => {
+                eprintln!("  ⟦·⟧ = {}", eigenius_kernel::dcg::pretty_term(e));
+                let mut iris: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+                collect_iris(e, &mut iris);
+                eprintln!("  where:");
+                for iri_s in &iris {
+                    let local = iri_s.rsplit(':').next().unwrap_or(iri_s);
+                    // Only the opaque synset/CUI/axiom codes need glossing.
+                    if !(local.starts_with('n')
+                        || local.starts_with('C')
+                        || local.starts_with('v')
+                        || local.starts_with("deg_")
+                        || local.starts_with('a'))
+                    {
+                        continue;
+                    }
+                    let gloss = Iri::parse(iri_s)
+                        .ok()
+                        .and_then(|i| head.resolve(&i))
+                        .and_then(|r| match r.get(&Iri::parse("urn:eigenius:core:description").unwrap())
+                        {
+                            Some(eigenius_kernel::ontology::resource::Value::String(s)) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .map(|d| d.chars().take(60).collect::<String>());
+                    if let Some(g) = gloss {
+                        eprintln!("     {local:<14} = {g}");
+                    }
+                }
+            }
+            None => eprintln!("  (no parse)"),
+        }
+    }
+    eprintln!();
+}
+
+/// Collect the opaque IRIs (synset classes, verb/adjective axioms, resources) a sem references.
+fn collect_iris(e: &Exp, out: &mut std::collections::BTreeSet<String>) {
+    use eigenius_kernel::nbe::term::Exp as E;
+    match e {
+        E::EigonClass(iri) | E::EigonAxiom(iri) => {
+            out.insert(iri.as_str().to_string());
+        }
+        E::EigonResource(r) => {
+            if let Some(id) = r.id() {
+                out.insert(id.as_str().to_string());
+            }
+        }
+        E::App(f, a) | E::Arrow(f, a) | E::Times(f, a) | E::Pair(f, a) => {
+            collect_iris(f, out);
+            collect_iris(a, out);
+        }
+        E::Lam(_, b) | E::Con(_, b) | E::Fst(b) | E::Snd(b) | E::Ann(b, _) => collect_iris(b, out),
+        E::Pi(_, t, b) | E::Sig(_, t, b) => {
+            collect_iris(t, out);
+            collect_iris(b, out);
+        }
+        E::InductiveCtor(_, _, args) | E::InductiveType(_, args) => {
+            for a in args {
+                collect_iris(a, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The 7 worst noun-pile sentences (CNL v2, GH#97) — outcome + parse TIME, to measure the
+/// compound-depth cost penalty (were 36–565s + GRAMMAR-GAP). Honors `EIGENIUS_POS_PRUNE`. Run:
+///   EIGENIUS_POS_PRUNE=1 cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       probe_noun_pile_sentences -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic: noun-pile sentences after the compound penalty; run with --ignored --nocapture"]
+fn probe_noun_pile_sentences() {
+    let Some(head) = snapshot_path().and_then(|p| open_head(&p)) else {
+        return;
+    };
+    let index = build_index(&head);
+    let lem = morphy();
+    for s in [
+        "Some cancers do not respond to immune checkpoint blockade.",
+        "Project Achilles screened cell lines with a CRISPR library.",
+        "These observations suggest that WRN dependency is not simply a result of MMR deficiency.",
+        "WRN dependency may require specific lineages or a stronger mutation phenotype.",
+        "These cell lines contained fewer deletion mutations in microsatellite regions than typical lineages.",
+        "We analysed these data sets for genes that are selectively essential in cancer cells with MSI.",
+        "Project Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines.",
+    ] {
+        let t = std::time::Instant::now();
+        let (c, o) = index.parse_open(s, &lem);
+        let tag = if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("open×{}", o.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  {tag:<11} [{:>6.1}s] {s:?}", t.elapsed().as_secs_f64());
+    }
+}
+
 /// Chart-cell population analysis for the 5 CNL v2 sentences (user request 2026-06-30): parse each
 /// at a WIDE beam (1024 ≈ uncapped at sense_cap=2) with `EIGENIUS_PARSE_DEBUG=1`, so the per-cell
 /// shape histograms (`cat_shape`, type-indices erased) show WHERE the chart population concentrates
@@ -448,9 +583,11 @@ fn analyze_chart_cells_first_five() {
     let Some(path) = snapshot_path() else { return };
     let Some(head) = open_head(&path) else { return };
     // Wide beam so the dumped cells show the true population, not the page-beam-capped view.
+    // Honors EIGENIUS_POS_PRUNE so the pile shown is the residual AFTER the cross-POS prune.
     let index = LexicalIndex::build(Arc::clone(&head))
         .with_sense_cap(2)
-        .with_cell_beam(1024);
+        .with_cell_beam(1024)
+        .with_pos_prune(std::env::var("EIGENIUS_POS_PRUNE").is_ok());
     let lem = morphy();
     let sentences = [
         "Synthetic lethality is an interaction between two genetic events.",

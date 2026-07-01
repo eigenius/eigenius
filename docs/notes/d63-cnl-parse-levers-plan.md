@@ -186,6 +186,36 @@ removes junk) rather than a trade. Also landed this session: **beam-first widen*
 low cap before widening the cap — raising the cap re-crowds the chart and beams out the constituent a
 wider beam was meant to keep).
 
+**Noun-pile analysis of the CNL v2 residual (2026-06-30) — the 7 worst.** The slowest/biggest-pile
+units are all long, content-noun-compound-dense, and all GRAMMAR-GAP: unit 47 (21 tok) **565s, 5.3M
+items dropped**; unit 38 (16 tok) 244s; unit 57 (13 tok) 219s; unit 54 (16 tok) 155s; units 46/60/61
+36–47s. Witnessed on unit 32 (`Some cancers do not respond to immune checkpoint blockade`): the
+full-span cell is **32,424 / 34,472 items `cat_n(Σ_, sg)`** — the whole sentence read as a compound
+noun. Three properties, all witnessed: (1) **prune-resistant** — persists with the cross-POS prune ON,
+because the chain links are *content* nouns (`cell lines`, `data sets`, `deletion mutations`,
+`microsatellite regions`, `WRN dependency`, `MMR deficiency`, `mutation phenotype`, `MSI/MSS cell
+lines`), not function words; (2) **cap-growing** — 5,610 → 20,456 → 34,472 as the sense cap widens 2→4→8
+(the per-noun Cartesian product); (3) **length-catastrophic** — O(n²) cells × the product → millions at
+14–21 tokens. Comparatives/relatives/coordination don't *cause* it; they add the length/ambiguity that
+makes it worse. (These sentences are also multiply-blocked — most carry `MSI` (alias gap) and/or a
+comparative — so taming the pile removes the 565s/OOM risk and lets the real parse survive the beam, but
+the gap fixes are still needed for them to *parse*.)
+
+**Fix #1 landed — compound-depth cost PENALTY (ranking; partial).** Each nominal-modification step
+(N-N/named/PP compound + attributive-adj) now carries a `Cost` penalty (`Combinator::Compound` +
+`COMPOUND_STEP_PENALTY=8`), summed by the combinators, so a deep pile ranks below the shallow correct
+parse. Runtime change (no reseed). **Measured (prune on):** it **recovers parses** — unit 60 GAP→open
+(40s→13s), unit 39 parses — and the 5/5 first-5 still hold, battery 104 green, no regression. **But it
+does NOT fix construction time**: the penalty re-ranks *after* the chart is built, so the longest
+sentences still explode in *construction* (unit 57 219→129s GAP, unit 38 244→191s GAP, unit 47 still
+>500s). Time is dominated by *building* millions of compound items × the adaptive-widen re-parses.
+
+**Fix #2 needed — compound-depth CAP (construction).** To cut the time (not just the ranking), limit
+compound BUILD depth: refuse to form a compound past ~4–5 nouns (real English compounds rarely exceed
+that; the spurious piles chain 6–8 content nouns across a whole sentence). Caps the chart at
+construction, so the explosion never materializes. A grammar-behaviour change (max compound depth) —
+the construction-time complement to the ranking penalty.
+
 **The S4 structural fix (future Lever 2 work):** stop the compound/adjective rules from chaining across
 tokens that have a **grammatical (closed-class) or verbal** role — a *targeted* guard on the compound
 rule (not the reverted blanket closed-class-wins, which wrongly dropped needed open-class senses like

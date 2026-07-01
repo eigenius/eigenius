@@ -52,10 +52,23 @@ pub enum Combinator {
     /// of a relative clause. This kills the spurious `T`-application duplicate of plain
     /// backward application, keeping declaratives single-parse (the regression gate).
     TypeRaised,
+    /// A **nominal-modification** step (N-N compound / named-entity compound / PP-noun-modifier /
+    /// attributive-adjective refinement) — every one builds a refined noun `cat_n(Σ…)`. Carried so
+    /// [`apply`] can add a per-step **cost penalty** ([`COMPOUND_STEP_PENALTY`]): summed by the
+    /// combinators, a DEEP noun-pile (many modification steps) then costs strictly more than the
+    /// shallow correct parse, so the beam / forest cap keeps the real reading and thins the pile
+    /// (GH#97 — the content-noun-compound explosion the cross-POS prune can't touch). ENF-inert.
+    Compound,
     /// Any other producer (lexical leaf, coordination, group/distributive rules) —
     /// not a composition output, so ENF never constrains it.
     Other,
 }
+
+/// Per-step cost penalty for a nominal-modification ([`Combinator::Compound`]) output (GH#97). Added
+/// to `Cost::sense_rank`, which is summed across a parse's steps — so cost grows with modification
+/// DEPTH, ranking a deep noun-pile below the shallow correct parse. Small enough not to disturb the
+/// lexicon-order primary key; large enough to dominate per-leaf sense-rank noise at a few steps.
+pub const COMPOUND_STEP_PENALTY: u32 = 8;
 
 /// The 2-component additive **rank key** for a parse (D65 §4.2): lexicon
 /// precedence (primary) then sense-frequency (secondary). The combinators **sum**
@@ -163,7 +176,15 @@ impl Item {
 /// leaves' costs — the additive weight the forest is ranked + capped by. The inner
 /// [`apply_combine`] builds the cat/sem/prov; this wrapper stamps the summed cost.
 pub fn apply(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
-    apply_combine(left, right, layer).map(|it| it.at_cost(left.cost.saturating_add(right.cost)))
+    apply_combine(left, right, layer).map(|it| {
+        let mut cost = left.cost.saturating_add(right.cost);
+        // Compound-depth penalty (GH#97): each nominal-modification step costs more, so a deep
+        // noun-pile ranks below the shallow correct parse and the beam/forest cap keeps the latter.
+        if it.prov == Combinator::Compound {
+            cost.sense_rank = cost.sense_rank.saturating_add(COMPOUND_STEP_PENALTY);
+        }
+        it.at_cost(cost)
+    })
 }
 
 fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
@@ -399,7 +420,7 @@ fn apply_combine(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> 
                         vec![sigma.clone(), noun_num.clone()],
                     ),
                     sem: sigma,
-                    prov: Combinator::Other,
+                    prov: Combinator::Compound,
                     cost: Cost::ZERO,
                 });
             }
@@ -666,7 +687,7 @@ fn refined_noun(
             vec![sigma.clone(), noun_num.clone()],
         ),
         sem: sigma,
-        prov: Combinator::Other,
+        prov: Combinator::Compound,
         cost: Cost::ZERO,
     }
 }
