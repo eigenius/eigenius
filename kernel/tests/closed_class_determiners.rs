@@ -1015,12 +1015,25 @@ fn packing_router_decision_is_correct() {
     assert!(on.routes_packed("HeLa affects BRCA1", &Identity));
     assert!(on.routes_packed("every cell line affects HeLa", &Identity));
     assert!(on.routes_packed("HeLa is a large gene", &Identity));
+    // Restrictive `that`-relative is packed now (§11 3g.3).
+    assert!(on.routes_packed("a gene that affects HeLa is large", &Identity));
+    // Coordination (`and`/`or`) is packed now (§11 3g.3 — the `Coordinate` edge).
+    assert!(on.routes_packed("HeLa and BRCA1 affect HeLa", &Identity));
+    // The restrictive which-relative and the wh-determiner `which` are packed now (§11 3g.3):
+    // `which` is no longer a blanket guard — only its pied-piping use routes unpacked.
+    assert!(on.routes_packed("a gene which affects HeLa is large", &Identity));
+    assert!(on.routes_packed("which cell line affects HeLa", &Identity));
+
+    // Comma constructs are packed now (§11 3g.3): list coordination (Coordinate), the appositive
+    // (Appositive*), and fronted-modifier comma absorption (AbsorbComma).
+    assert!(on.routes_packed("HeLa, BRCA1 affect HeLa", &Identity)); // list coordination
+    assert!(on.routes_packed("BRCA1 , which affects HeLa , is primary", &Identity)); // appositive
+    assert!(on.routes_packed("thus , HeLa affects BRCA1", &Identity)); // fronted-comma absorption
 
     // Selectional (`depends on`: Gene/CellLine slots) ⇒ UNPACKED (fail-closed).
     assert!(!on.routes_packed("HeLa depends on BRCA1", &Identity));
-    // Token-keyed constructs ⇒ UNPACKED.
-    assert!(!on.routes_packed("HeLa and BRCA1 affect HeLa", &Identity)); // coordination
-    assert!(!on.routes_packed("the gene that affects HeLa is large", &Identity)); // relative
+    // Pied-piping (`[prep] which`) is ternary + non-piling ⇒ routed UNPACKED (structural detection).
+    assert!(!on.routes_packed("the gene in which HeLa affects BRCA1 is large", &Identity));
 
     // Flag off ⇒ never packs, even for a packable sentence.
     assert!(!off.routes_packed("HeLa affects BRCA1", &Identity));
@@ -1045,6 +1058,28 @@ fn packed_forest_equals_unpacked_on_core_grammar() {
         "HeLa is a large gene",
         "a large primary gene affects HeLa",
         "HeLa affects a gene",
+        // Restrictive `that`-relative (§11 3g.3 — packed via the Relativize edge):
+        "a gene that affects HeLa is large",
+        "every gene that affects HeLa is large",
+        // Coordination (§11 3g.3 — the Coordinate edge + group distribution):
+        "HeLa affects BRCA1 and HeLa affects BRCA1", // same-category Prop conjunction
+        "HeLa and BRCA1 affect HeLa",                // NP-group subject, distributed over the verb
+        "HeLa affects BRCA1 or HeLa affects BRCA1",  // disjunction
+        // Reciprocal (§11 3g.3 — the Reciprocal edge over a coordinated group):
+        "HeLa and BRCA1 affect each other", // every ordered distinct pair related by the verb
+        "HeLa or BRCA1 affect each other", // or-group gets NO reciprocal reading (both paths agree)
+        // Contrastive `but not` (§11 3g.3 — the ButNot edge) + plain `but` (the subordinator leaf):
+        "HeLa affects BRCA1 but not HeLa", // bare-name contrastive object ellipsis
+        "HeLa affects BRCA1 but HeLa affects BRCA1", // plain `but` subordinator (ordinary leaf)
+        // Restrictive which-relative + wh-determiner `which` (§11 3g.3 — Relativize edge / leaves):
+        "every cell line which affects HeLa is primary", // which-relative (Relativize)
+        "which cell line affects HeLa", // subject wh-determiner (cat_q, lexical leaf)
+        // Comma constructs (§11 3g.3 — Coordinate / Appositive* / AbsorbComma edges):
+        "HeLa, BRCA1 affect HeLa", // comma list coordination (2-member group)
+        "HeLa affects BRCA1 , which affects HeLa", // verb-object appositive
+        "BRCA1 , which affects HeLa , is primary", // subject appositive (trailing comma absorbed)
+        "thus , HeLa affects BRCA1", // fronted transitional + comma absorption
+        "more largely , HeLa affects BRCA1", // degree-modified fronted adverb + comma
     ] {
         let (co, oo) = off.parse_open(s, &Identity);
         let (cn, on2) = on.parse_open(s, &Identity);

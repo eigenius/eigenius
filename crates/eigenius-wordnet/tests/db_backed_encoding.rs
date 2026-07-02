@@ -589,10 +589,13 @@ fn packed_win_probe() {
         return;
     };
     let lem = morphy();
-    // Packable pile sentences (no token-keyed constructs; index-independent verbs).
+    // Packable pile sentences (no `which`/comma/coordination; index-independent verbs). `that` (both
+    // restrictive-relative and complementizer) now packs (§11 3g.3).
     let sentences = [
         "DNA repair processes are attractive synthetic lethal targets.",
         "Synthetic lethality is an interaction between two genetic events.",
+        // that-RELATIVE pile sentence — one of the worst unpacked (~199s in the noun-pile probe):
+        "We analysed these data sets for genes that are selectively essential in cancer cells with MSI.",
     ];
     let unpacked = build_index(&head);
     let packed = build_index(&head).with_packing(true);

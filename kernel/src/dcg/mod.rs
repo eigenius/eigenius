@@ -39,6 +39,7 @@ pub mod lookup;
 mod packed;
 pub mod parser;
 pub mod pretty;
+mod reserved;
 pub mod segment;
 pub mod sense_ranker;
 

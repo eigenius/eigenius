@@ -49,8 +49,43 @@ pub(crate) type NodeId = usize;
 /// shifts of the unpacked CKY, applied per item at extraction).
 pub(crate) enum Edge {
     Leaf(Item),
-    Combine { left: NodeId, right: NodeId },
-    Unary { child: NodeId, kind: UnaryKind },
+    Combine {
+        left: NodeId,
+        right: NodeId,
+    },
+    Unary {
+        child: NodeId,
+        kind: UnaryKind,
+    },
+    /// A **token-keyed sem-reading binary rule** (D63 §11 3g.3): the reserved word(s) between (or
+    /// after) the two spans have no node, the DECISION is category-based, and the result embeds the
+    /// children's sems — materialised per (left, right) item-pair at extraction, via [`BinRule`].
+    /// Covers relative clauses, coordination, `but not`, the reciprocal, and appositives.
+    Binary {
+        left: NodeId,
+        right: NodeId,
+        rule: BinRule,
+    },
+}
+
+/// Which token-keyed binary rule a [`Edge::Binary`] applies at materialisation (D63 §11 3g.3). Each
+/// has a cat-based *decision* (checked on representatives at construction) and a sem-*building* rule.
+#[derive(Clone, Copy)]
+pub(crate) enum BinRule {
+    /// `[noun] that/which [body] → refined noun` (`relativize`).
+    Relativize,
+    /// `[X] and/or [Y]` → a Prop-conjunction (same category) or a `cat_group` (`coordinate_sem` /
+    /// `coordinate_np`); `op` is the connective IRI (`logic:And` / `logic:Or`).
+    Coordinate(&'static str),
+    /// `[O₁] but not [O₂]` → contrastive `a ∧ ¬b` or a `conn_but_not` group.
+    ButNot,
+    /// `[group] <TV> each other → S` (`reciprocate`).
+    Reciprocal,
+    /// Non-restrictive appositive `[NP] , that/which [body]` — subject/prep-object position
+    /// (`relativize_appos`).
+    AppositiveSubj,
+    /// Non-restrictive appositive in verb-object position (the in-situ object raise).
+    AppositiveObj,
 }
 
 /// Which composed-cell unary shift a [`Edge::Unary`] represents (D63 blueprint §11 3c.4b).
@@ -62,6 +97,11 @@ pub(crate) enum UnaryKind {
     BareNp,
     /// Fronted participial adjunct: a subject-gapped `ger` VP → a sentence pre-modifier `S/S`.
     FrontParticipial,
+    /// Fronted-modifier comma absorption (D62 §2 #5): a sentence-initial `S/S` pre-modifier at
+    /// `[0, j-1]` absorbs a trailing comma at `j`, yielding the same modifier over `[0, j]` (so it can
+    /// forward-apply across the otherwise node-less comma to the matrix clause). The child is the
+    /// narrower `[0, j-1]` node, NOT a same-span transform; the item is carried through unchanged.
+    AbsorbComma,
 }
 
 /// A packed forest node: all derivations of one `(span, Sig)` equivalence class.

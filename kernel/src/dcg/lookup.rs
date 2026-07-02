@@ -55,6 +55,7 @@ use super::category::{
 use super::lemmatizer::{Lemmatizer, Pos};
 use super::lexicon::entry_to_item;
 use super::parser::{apply, apply_core, Combinator, Item};
+use super::reserved;
 use super::sense_ranker::{SenseCandidate, SenseRanker, WordSenses};
 
 /// Default forest cap (D63 §8.7 Stage B): `parse` returns at most this many parses,
@@ -1018,13 +1019,14 @@ impl LexicalIndex {
     }
 
     /// Per-parse index-independence guard (D63 Option A, blueprint §11 3b.2). Returns `true` if this
-    /// sentence must use the UNPACKED path. Three fail-closed carve-outs:
-    /// 1. a **coordinator** (`and`/`or` ⇒ a `cat_group` combination, which reads the sem, §4);
-    /// 2. any other **token-keyed special construct** — reserved relativizers (`that`/`which`),
-    ///    `but`(-not), `each other`, or a comma (list/appositive/fronted-comma rules). These are
-    ///    sem-reading binary rules the packed node-level CKY does not mirror (a follow-up), so any
-    ///    sentence using them is handled unpacked;
-    /// 3. a seeded functor with a concrete SELECTIONAL argument slot
+    /// sentence must use the UNPACKED path. As of §11 3g.3 the packed CKY mirrors every token-keyed
+    /// sem-reading construct (coordination, the reciprocal, `but not`, the restrictive relative, the
+    /// appositive, the fronted-modifier comma) plus the wh-determiner `which` (an ordinary leaf), so
+    /// only two fail-closed carve-outs remain:
+    /// 1. **pied-piping** (`[prep] which [subj] [VP]`) — a ternary rule with no packing benefit (a
+    ///    rare, non-piling construct), detected structurally (a `which` right after a VP-adjunct
+    ///    preposition) and routed to the proven unpacked path rather than given a ternary edge;
+    /// 2. a seeded functor with a concrete SELECTIONAL argument slot
     ///    ([`super::category::cat_has_selectional_slot`]) — combinability would be index-dependent, so
     ///    node-level packing by `cat_shape` is unsound.
     ///
@@ -1036,18 +1038,25 @@ impl LexicalIndex {
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
     ) -> bool {
-        // Token-keyed special constructs (coordination / relatives / but-not / reciprocal / comma):
-        // sem-reading rules not yet mirrored by the packed CKY — route unpacked.
-        if tokens.iter().any(|t| {
-            coord_connective(t.as_str()).is_some()
-                || matches!(
-                    t.as_str(),
-                    "that" | "which" | "but" | "," | "each" | "other"
-                )
-        }) {
-            return true;
-        }
         let n = tokens.len();
+        // (1) Pied-piping `[prep] which`: the antecedent noun-pile isn't collapsed by packing (the
+        // construct is ternary and rare), so route it unpacked. A `which` right after a VP-adjunct
+        // preposition is pied-piping; a `which` after a noun is the packed which-relative, and a
+        // sentence-initial / post-determiner `which` is the packed wh-determiner.
+        for p in 1..n {
+            if tokens[p] != reserved::WHICH {
+                continue;
+            }
+            if self
+                .lookup_span(&tokens[p - 1], lemmatizer, scope, None, None)
+                .iter()
+                .any(|it| is_vp_adjunct_prep(it.cat()))
+            {
+                return true;
+            }
+        }
+        // (2) A seeded functor with a concrete SELECTIONAL argument slot — combinability would be
+        // index-dependent, so node-level packing by `cat_shape` is unsound.
         let span_limit = self.span_limit(n);
         for i in 0..n {
             let last = (i + span_limit).min(n);
@@ -1183,7 +1192,16 @@ impl LexicalIndex {
                     let (l, r) = (*left, *right);
                     let lk = self.kbest(forest, l, k, memo);
                     let rk = self.kbest(forest, r, k, memo);
-                    self.cube(&lk, &rk, k, &mut cands);
+                    let layer = &self.layer;
+                    self.cube(&lk, &rk, k, &mut cands, |l, r| apply(l, r, layer));
+                }
+                super::packed::Edge::Binary { left, right, rule } => {
+                    let (l, r, rule) = (*left, *right, *rule);
+                    let lk = self.kbest(forest, l, k, memo);
+                    let rk = self.kbest(forest, r, k, memo);
+                    self.cube(&lk, &rk, k, &mut cands, |l, r| {
+                        self.apply_bin_rule(rule, l, r)
+                    });
                 }
                 super::packed::Edge::Unary { child, kind } => {
                     let (child, kind) = (*child, *kind);
@@ -1200,12 +1218,20 @@ impl LexicalIndex {
         cands
     }
 
-    /// Cube pruning (Huang & Chiang 2005) over a `Combine` edge: enumerate `apply(lk[li], rk[ri])`
+    /// Cube pruning (Huang & Chiang 2005) over a binary edge: enumerate `combine(lk[li], rk[ri])`
     /// best-first by combined child cost, pushing the two grid neighbours after each pop, until `k`
     /// results or the `max_pops` circuit-breaker trips (a dense pocket of non-combining pairs — the
     /// child lists are already combinability-homogeneous under index-independence, so this rarely
-    /// fires). Appends materialised items to `out`.
-    fn cube(&self, lk: &[Item], rk: &[Item], k: usize, out: &mut Vec<Item>) {
+    /// fires). `combine` is the edge's binary rule (`apply` for `Combine`, `relativize` for
+    /// `Relativize`). Appends materialised items to `out`.
+    fn cube<F: Fn(&Item, &Item) -> Option<Item>>(
+        &self,
+        lk: &[Item],
+        rk: &[Item],
+        k: usize,
+        out: &mut Vec<Item>,
+        combine: F,
+    ) {
         use super::packed::CubeCandidate;
         use std::collections::{BTreeSet, BinaryHeap};
         if lk.is_empty() || rk.is_empty() {
@@ -1234,7 +1260,7 @@ impl LexicalIndex {
                 );
                 break;
             }
-            if let Some(item) = apply(&lk[cc.li], &rk[cc.ri], &self.layer) {
+            if let Some(item) = combine(&lk[cc.li], &rk[cc.ri]) {
                 out.push(item);
                 kept += 1;
                 if kept >= k {
@@ -1254,6 +1280,86 @@ impl LexicalIndex {
                     li: cc.li,
                     ri: cc.ri + 1,
                 });
+            }
+        }
+    }
+
+    /// Materialise a token-keyed [`super::packed::BinRule`] for one (left, right) item-pair — the
+    /// combiner the `cube` calls for a `Binary` edge. Each mirrors the corresponding unpacked CKY
+    /// rule exactly; the DECISION (whether it returns `Some`) is category-based (so it is consistent
+    /// across a packed node's items), and the sem is built here per pair.
+    fn apply_bin_rule(&self, rule: super::packed::BinRule, l: &Item, r: &Item) -> Option<Item> {
+        use super::packed::BinRule;
+        let cost = l.cost().saturating_add(r.cost());
+        match rule {
+            BinRule::Relativize => relativize(l.cat(), r.cat(), r.sem())
+                .map(|(cat, sem)| Item::with_cost(cat, sem, cost)),
+            BinRule::Coordinate(op) => {
+                // Left-branching NF: the right conjunct may not itself be a coordination.
+                if is_coordination(r.sem()) {
+                    return None;
+                }
+                if cats_coordinate(l.cat(), r.cat(), &self.layer) {
+                    coordinate_sem(op, l.cat(), l.sem(), r.sem(), &self.layer)
+                        .map(|sem| Item::with_cost(l.cat().clone(), sem, cost))
+                } else {
+                    coordinate_np(op, l.cat(), l.sem(), r.cat(), r.sem(), &self.layer)
+                        .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
+                }
+            }
+            BinRule::ButNot => {
+                if cats_coordinate(l.cat(), r.cat(), &self.layer) {
+                    if is_coordination(r.sem()) {
+                        return None;
+                    }
+                    coordinate_but_not_sem(l.cat(), l.sem(), r.sem(), &self.layer)
+                        .map(|sem| Item::with_cost(l.cat().clone(), sem, cost))
+                } else {
+                    coordinate_but_not(l.cat(), l.sem(), r.cat(), r.sem(), &self.layer)
+                        .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
+                }
+            }
+            BinRule::Reciprocal => reciprocate(l.cat(), l.sem(), r.cat(), r.sem(), &self.layer)
+                .map(|(cat, sem)| Item::with_cost(cat, sem, cost)),
+            BinRule::AppositiveSubj => {
+                relativize_appos(l.cat(), l.sem(), r.cat(), r.sem(), &self.layer)
+                    .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
+            }
+            BinRule::AppositiveObj => self.appositive_obj(l, r),
+        }
+    }
+
+    /// Collect the [`Edge::Binary`] derivations for `rule` over a left span `ls = (i, k)` and a right
+    /// span `rs = (k', j)` (both `(start, end)` inclusive cell coordinates), the token-keyed reserved
+    /// word(s) between/after them having no node. For each `(left, right)` node-pair whose
+    /// REPRESENTATIVES combine under [`Self::apply_bin_rule`], appends `(result-Sig, result-item,
+    /// left, right, rule)` to `out` — the caller inserts them as [`Edge::Binary`] edges once the
+    /// forest borrow is released. Sound under index-independence: the decision is representative-based.
+    fn binary_edges(
+        &self,
+        forest: &super::packed::Forest,
+        ls: (usize, usize),
+        rs: (usize, usize),
+        rule: super::packed::BinRule,
+        out: &mut Vec<(
+            super::packed::Sig,
+            Item,
+            super::packed::NodeId,
+            super::packed::NodeId,
+            super::packed::BinRule,
+        )>,
+    ) {
+        let lefts: Vec<super::packed::NodeId> =
+            forest.cells[ls.0][ls.1].values().copied().collect();
+        let rights: Vec<super::packed::NodeId> =
+            forest.cells[rs.0][rs.1].values().copied().collect();
+        for lid in lefts {
+            for &rid in &rights {
+                if let Some(item) =
+                    self.apply_bin_rule(rule, &forest.nodes[lid].rep, &forest.nodes[rid].rep)
+                {
+                    out.push((super::packed::node_sig(&item), item, lid, rid, rule));
+                }
             }
         }
     }
@@ -1286,6 +1392,10 @@ impl LexicalIndex {
                     out.push(Item::with_cost(cat, sem, it.cost()));
                 }
             }
+            // Comma absorption carries the sentence-premodifier through unchanged (it now spans the
+            // trailing comma). The child is already `is_sentence_premod` (checked at forest build), so
+            // no re-check is needed here; the span widens but the cat/sem/cost are identical.
+            UnaryKind::AbsorbComma => out.push(it.clone()),
         }
     }
 
@@ -1298,12 +1408,15 @@ impl LexicalIndex {
     /// [`super::packed::Edge::Combine`] hyperedge. The differing item-pairs are materialised lazily by
     /// the cube-pruning extractor (3d).
     ///
-    /// After each cell's binary combinations, the composed-cell UNARY shifts (3c.4b) are applied as
+    /// After each cell's binary combinations come the **token-keyed sem-reading binary rules** (§11
+    /// 3g.3) — relatives, coordination, `but not`, the reciprocal, appositives — as
+    /// [`super::packed::Edge::Binary`] edges (materialised per item-pair at extraction via
+    /// [`Self::apply_bin_rule`]), then the composed-cell UNARY shifts (3c.4b) as
     /// [`super::packed::Edge::Unary`] edges, in the unpacked CKY's order: bare-plural/mass NP shift,
-    /// then type-raising (which sees the shifted NPs), then the fronted participial. Token-keyed
-    /// sem-reading rules (coordination, relatives, but-not, reciprocal, comma) are NOT mirrored — the
-    /// router's guard sends any sentence using them to the unpacked path. `#[allow(dead_code)]` until
-    /// the 3d extractor consumes the forest (the differential oracle, 3f, gates on equivalence).
+    /// type-raising (which sees the shifted NPs), the fronted participial, and the fronted-modifier
+    /// comma absorption. The packed CKY now mirrors every construct the unpacked CKY has, so the router
+    /// ([`Self::parse_needs_unpacked`]) only diverts pied-piping (`[prep] which`) and selectional
+    /// lexicons — everything else is packed and gated on the differential oracle (3f).
     fn build_forest(
         &self,
         tokens: &[String],
@@ -1312,7 +1425,7 @@ impl LexicalIndex {
         cap: Option<usize>,
         ranks: Option<&BTreeMap<String, u32>>,
     ) -> super::packed::Forest {
-        use super::packed::{node_sig, Edge, Forest, NodeId, Sig, UnaryKind};
+        use super::packed::{node_sig, BinRule, Edge, Forest, NodeId, Sig, UnaryKind};
         let n = tokens.len();
         let (leaves, _drops) = self.seed_leaves(tokens, lemmatizer, scope, cap, ranks, None);
         let mut forest = Forest::new(n);
@@ -1347,6 +1460,94 @@ impl LexicalIndex {
                 for (sig, result, l, r) in edges {
                     let id = forest.get_or_create(i, j, sig, &result);
                     forest.push_edge(id, Edge::Combine { left: l, right: r });
+                }
+
+                // Token-keyed sem-reading binary rules (§11 3g.3): relative clauses, coordination,
+                // `but not`, appositives, and the reciprocal — each combines two sub-cell node-spans
+                // via a CAT-based decision (mirroring the unpacked CKY), recorded as `Binary` edges
+                // and materialised per item-pair at extraction ([`Self::apply_bin_rule`]). Run before
+                // the unary shifts so a resulting refined noun / group can shift or feed larger cells.
+                let mut bin: Vec<(Sig, Item, NodeId, NodeId, BinRule)> = Vec::new();
+                #[allow(clippy::needless_range_loop)] // `c` indexes tokens AND the sub-cells
+                for c in (i + 1)..j {
+                    // Relative: [noun] that/which [body].
+                    if reserved::is_relativizer(tokens[c].as_str()) {
+                        self.binary_edges(
+                            &forest,
+                            (i, c - 1),
+                            (c + 1, j),
+                            BinRule::Relativize,
+                            &mut bin,
+                        );
+                    }
+                    // Coordination: [X] and/or/`,` [Y].
+                    if let Some(op) = coord_connective(tokens[c].as_str()) {
+                        self.binary_edges(
+                            &forest,
+                            (i, c - 1),
+                            (c + 1, j),
+                            BinRule::Coordinate(op),
+                            &mut bin,
+                        );
+                    }
+                    // Contrastive: [O₁] but not [O₂].
+                    if tokens[c] == reserved::BUT
+                        && tokens.get(c + 1).map(String::as_str) == Some(reserved::NOT)
+                        && c + 2 <= j
+                    {
+                        self.binary_edges(
+                            &forest,
+                            (i, c - 1),
+                            (c + 2, j),
+                            BinRule::ButNot,
+                            &mut bin,
+                        );
+                    }
+                }
+                // Appositive: [NP] , that/which [body] [,] — a comma BEFORE the relativizer.
+                #[allow(clippy::needless_range_loop)]
+                for c in (i + 2)..=j {
+                    if reserved::is_relativizer(tokens[c].as_str())
+                        && tokens[c - 1] == reserved::COMMA
+                    {
+                        let body_end = if tokens[j] == reserved::COMMA {
+                            j - 1
+                        } else {
+                            j
+                        };
+                        if c < body_end {
+                            self.binary_edges(
+                                &forest,
+                                (i, c - 2),
+                                (c + 1, body_end),
+                                BinRule::AppositiveSubj,
+                                &mut bin,
+                            );
+                            self.binary_edges(
+                                &forest,
+                                (i, c - 2),
+                                (c + 1, body_end),
+                                BinRule::AppositiveObj,
+                                &mut bin,
+                            );
+                        }
+                    }
+                }
+                // Reciprocal: [group] <TV> each other → S (the trailing "each other").
+                if j >= 3 && tokens[j - 1] == reserved::EACH && tokens[j] == reserved::OTHER {
+                    for s in (i + 1)..=(j - 2) {
+                        self.binary_edges(
+                            &forest,
+                            (i, s - 1),
+                            (s, j - 2),
+                            BinRule::Reciprocal,
+                            &mut bin,
+                        );
+                    }
+                }
+                for (sig, item, left, right, rule) in bin {
+                    let id = forest.get_or_create(i, j, sig, &item);
+                    forest.push_edge(id, Edge::Binary { left, right, rule });
                 }
 
                 // Composed-cell UNARY shifts (§11 3c.4b), applied per node's representative and
@@ -1390,6 +1591,23 @@ impl LexicalIndex {
                 for (sig, item, child, kind) in unary.drain(..) {
                     let nid = forest.get_or_create(i, j, sig, &item);
                     forest.push_edge(nid, Edge::Unary { child, kind });
+                }
+                // Fronted-modifier comma absorption (§11 3g.3): a sentence-initial `S/S` pre-modifier
+                // at `[0, j-1]` carries over a trailing comma at `j` to span `[0, j]`, so it can then
+                // forward-apply across the node-less comma to the matrix clause. Keyed on `i == 0` (so
+                // it never competes with list-coordination commas); the child keeps its `Sig`, so the
+                // absorbed node packs identically. Mirrors the unpacked CKY's comma-absorption.
+                if i == 0 && j >= 1 && tokens[j] == reserved::COMMA {
+                    for cid in forest.cells[0][j - 1].values().copied().collect::<Vec<_>>() {
+                        let rep = forest.nodes[cid].rep.clone();
+                        if is_sentence_premod(rep.cat()) {
+                            unary.push((node_sig(&rep), rep, cid, UnaryKind::AbsorbComma));
+                        }
+                    }
+                    for (sig, item, child, kind) in unary.drain(..) {
+                        let nid = forest.get_or_create(i, j, sig, &item);
+                        forest.push_edge(nid, Edge::Unary { child, kind });
+                    }
                 }
             }
         }
@@ -1749,7 +1967,9 @@ impl LexicalIndex {
                 // two-token reserved coordinator (`but` + `not`), keyed like `and`/`or` but matched as
                 // a sequence; `but` alone stays the sentential `but_subord`, so no conflict.
                 for c in (i + 1)..j {
-                    if tokens[c] != "but" || tokens.get(c + 1).map(String::as_str) != Some("not") {
+                    if tokens[c] != reserved::BUT
+                        || tokens.get(c + 1).map(String::as_str) != Some(reserved::NOT)
+                    {
                         continue;
                     }
                     if c + 2 > j {
@@ -1797,7 +2017,7 @@ impl LexicalIndex {
                 // members. Keyed on the trailing "each other" tokens, mirroring how
                 // coordination keys on `and`/`or`. The subject must be a (conjunctive)
                 // group — a reciprocal needs ≥2 distinct participants.
-                if j >= 3 && tokens[j - 1] == "each" && tokens[j] == "other" {
+                if j >= 3 && tokens[j - 1] == reserved::EACH && tokens[j] == reserved::OTHER {
                     // Verb spans [s, j-2]; subject group spans [i, s-1].
                     for s in (i + 1)..=(j - 2) {
                         let subjects = &chart[i][s - 1];
@@ -1834,7 +2054,7 @@ impl LexicalIndex {
                 // stripped — the contrast is semantic, deferred). A sentence-initial
                 // wh-`which` never matches (no noun spans `[i, c-1]`).
                 for c in (i + 1)..j {
-                    if !matches!(tokens[c].as_str(), "that" | "which") {
+                    if !reserved::is_relativizer(tokens[c].as_str()) {
                         continue;
                     }
                     let nouns = &chart[i][c - 1];
@@ -1860,14 +2080,18 @@ impl LexicalIndex {
                 // trailing comma after the clause is absorbed into this span so the appositive NP is
                 // adjacent to the matrix VP.
                 for c in (i + 2)..=j {
-                    if !matches!(tokens[c].as_str(), "that" | "which") {
+                    if !reserved::is_relativizer(tokens[c].as_str()) {
                         continue;
                     }
-                    if tokens[c - 1] != "," {
+                    if tokens[c - 1] != reserved::COMMA {
                         continue;
                     }
                     let ante_end = c - 2; // antecedent NP is [i, c-2] (before the comma)
-                    let body_end = if tokens[j] == "," { j - 1 } else { j };
+                    let body_end = if tokens[j] == reserved::COMMA {
+                        j - 1
+                    } else {
+                        j
+                    };
                     if c + 1 > body_end {
                         continue;
                     }
@@ -1904,7 +2128,7 @@ impl LexicalIndex {
                 // subject NP + `S\NP` VP at every split, so it handles the ordinary subject-predicate
                 // clause; `which` here is the fronted prep's object, distinct from the bare relativizer.
                 for p in (i + 1)..j {
-                    if tokens.get(p + 1).map(|t| t.as_str()) != Some("which") {
+                    if tokens.get(p + 1).map(|t| t.as_str()) != Some(reserved::WHICH) {
                         continue;
                     }
                     if p < i + 1 || p + 2 > j {
@@ -2001,7 +2225,7 @@ impl LexicalIndex {
                 // so it can then forward-apply to the matrix clause. The comma is otherwise a reserved
                 // coordinator with no chart item, leaving a gap the modifier can't bridge. Restricted to
                 // `i == 0` (sentence-initial) to avoid competing with list-coordination commas.
-                if i == 0 && len >= 2 && tokens[j] == "," {
+                if i == 0 && len >= 2 && tokens[j] == reserved::COMMA {
                     let absorbed: Vec<Item> = chart[i][j - 1]
                         .iter()
                         .filter(|it| is_sentence_premod(it.cat()))
@@ -2786,8 +3010,8 @@ fn is_finite_clause(cat: &Exp) -> bool {
 /// subordinator/discourse-connective work.
 pub fn coord_connective(token: &str) -> Option<&'static str> {
     match token {
-        "and" | "," => Some("urn:eigenius:logic:And"),
-        "or" => Some("urn:eigenius:logic:Or"),
+        reserved::AND | reserved::COMMA => Some("urn:eigenius:logic:And"),
+        reserved::OR => Some("urn:eigenius:logic:Or"),
         _ => None,
     }
 }

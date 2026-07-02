@@ -264,6 +264,32 @@ Stages 3b–3d are implemented and **validated end-to-end**:
 The *worst* corpus piles contain those and still route unpacked, so extending the win to them is the
 **pack-relative-clauses** follow-up (§11 3g.3), now justified by this measured payoff.
 
+## 10c. 3g.3 — pack RELATIVE CLAUSES (2026-06-30): done + correct, but the win is same-shape-scoped
+
+Implemented restrictive `that`/`which` relatives as a packed `Edge::Relativize` (decision cat-based
+via `relativize`; result embeds `body.sem`, materialised per item-pair by the same cube extractor).
+Unguarded **`that`** (its restrictive-relative use is packed; its complementizer use is a lexical
+leaf; appositive `, that` stays comma-guarded; pied-piping uses `which`, kept guarded). Differential
+oracle **extended with `that`-relative sentences — passes** (packed ≡ unpacked, incl.
+`a/every gene that affects HeLa is large`); battery 107.
+
+**But the win did NOT extend to the hard relative pile sentence.** Measured on the full lexicon,
+"We analysed these data sets for genes that are selectively essential in cancer cells with MSI":
+**unpacked 221.6s vs packed 210.6s (~5%)**, both GAP. The 8× on "DNA repair processes…" was a
+*same-`cat_shape` sense-product* pile (collapses to one node); this sentence's cost is **structural**
+— PP-attachment ambiguity (`for … in … with …`) spawns many *distinct* cat-shapes, so the node count
+itself is large and packing (which collapses *same*-shape) doesn't help. **Finding: packing's win is
+scoped to same-shape piles; structural (multi-shape) ambiguity is a different bottleneck that packing
+does not address.** So relative-packing is correct and free coverage, but the worst prep-heavy
+corpus sentences need a *different* lever (PP-attachment control), not packing.
+
+**Reserved-token refactor (§11 follow-up, done in-code):** the parser's reserved construct tokens
+(`and`/`or`/`that`/`which`/`but`/`not`/`each`/`other`/`,`) are now centralised in
+[`dcg/reserved.rs`](../../kernel/src/dcg/reserved.rs) — the guard, the relative rule,
+`coord_connective`, and the CKY special-construct rules all classify tokens there instead of
+hard-coding literals. Behaviour-identical (battery 107). **Follow-up (reseed-gated):** back the table
+with an ontology declaration so the set is *data*, not code.
+
 ## 11. Phase-3 burn-down — STATUS (2026-06-30) + deviations from plan
 
 **3b — Guard + router + flag** — ✅ DONE, committed.
@@ -303,12 +329,33 @@ map is the source of truth); `rep` is an `Item` (not `CategoryPayload`); **`Grou
 
 ## Deferred (open) — nothing silently dropped
 
-- **3g.3 — pack relative clauses** (L, the big coverage win): the guard routes relatives/commas/
-  coordination to unpacked, so the *worst* corpus piles don't yet benefit. Mirror those token-keyed
-  rules at node level (relatives first). **Justified now by the measured ~8× on packable piles.**
+- **3g.3 restrictive `that`-relatives — DONE** (§10c): packed + oracle-verified. But the win is
+  same-shape-scoped; the hard prep-heavy relative pile sentences are bottlenecked by **structural
+  PP-attachment ambiguity**, not the same-shape sense-product, so packing gives ~5% there.
+- **3g.3 ALL token-keyed constructs — DONE** (§10d): the `Edge::Relativize` special-case was
+  generalized to `Edge::Binary { left, right, rule: BinRule }` (a cat-based decision on
+  representatives, sem materialised per item-pair at extraction via `apply_bin_rule`), covering
+  relatives, coordination (`and`/`or` + list comma → the `Coordinate` edge + group-distribution
+  `Combine`), the reciprocal (`each other` → `Reciprocal`), `but not` (`ButNot`), and appositives
+  (`Appositive{Subj,Obj}`); the fronted-modifier comma is a new `UnaryKind::AbsorbComma`; the
+  wh-determiner `which` is an ordinary lexical leaf. `dcg/reserved.rs::keys_unpacked_construct` was
+  **removed** (no token-keyed construct is unmirrored). Oracle extended with coordination /
+  reciprocal / but-not / which-relative / wh-det / comma sentences — all packed ≡ unpacked; battery
+  107, workspace clippy/fmt clean.
+  - **DEVIATION (recorded):** the plan's "pack `pied_pipe` (ternary)" item was NOT done as a ternary
+    edge. Pied-piping (`[prep] which [subj] [VP]`) is genuinely ternary and forms **no pile**, so a
+    ternary edge (or a `cat_n/(S\NP)` intermediate category existing nowhere else) is disproportionate
+    complexity for zero packing benefit. Instead the router (`parse_needs_unpacked`) detects it
+    **structurally** — a `which` immediately after a VP-adjunct preposition — and routes it to the
+    proven unpacked path. This is the router doing its designed job (divert constructs not
+    beneficially packable), not a wedge; plain which-relatives and the wh-determiner `which` ARE
+    packed, capturing ~all of `which`-usage.
+- **PP-attachment control** (L, NEW — the real lever for the hard corpus piles): the worst sentences
+  spawn many *distinct* cat-shapes via `for … in … with …` attachment, which packing does not
+  collapse. This — not more packing — is what those sentences need. (Separate from packing.)
+- **reserved-token ontology backing** (M, reseed-gated): move the `dcg/reserved.rs` table into a
+  `closed-class.esl` declaration loaded at index build, so the reserved set is data. Ride the next
+  reseed.
 - **3g.1** (M): `apply_core` (combinatory-core spike) into `combinable`/`build` — packing currently
   requires `!combinatory_core` (flag off by default, so not on the critical path).
 - **3g.2** (S): make packed the *default* for index-independent grammars once broadly validated.
-- **guard narrowing** (S, optional): the token guard matches `that`/`each`/`but` unconditionally
-  (over-conservative — excludes demonstratives/determiners/sentential-but that are packable). Sound
-  but shrinks reach; refine to match only the real constructs. Subsumed by 3g.3 if relatives are packed.
