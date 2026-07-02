@@ -36,6 +36,7 @@ pub mod category;
 pub mod lemmatizer;
 pub mod lexicon;
 pub mod lookup;
+mod packed;
 pub mod parser;
 pub mod pretty;
 pub mod segment;

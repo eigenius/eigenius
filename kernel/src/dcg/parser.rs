@@ -32,7 +32,7 @@ use super::category::{
 /// `ForwardComp` (a `>B` output may not be the primary functor of a subsequent
 /// `>` / `>B`) and on `TypeRaised` (a raised functor may only *compose*, never
 /// *apply*).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Combinator {
     /// Forward application (`>`) or the dependent `cat_forall` application.
     ForwardApp,
