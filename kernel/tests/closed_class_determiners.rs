@@ -1001,6 +1001,31 @@ fn packing_flag_router_is_a_safe_noop() {
     );
 }
 
+/// D63 Option A (blueprint §11 3f.2) — the **guard fail-closed** check, asserting the router's
+/// *decision* directly (via `routes_packed`), since packed ≡ unpacked makes the taken path otherwise
+/// invisible. Packable sentences route packed; selectional / token-keyed-construct sentences route
+/// unpacked; flag off never packs.
+#[test]
+fn packing_router_decision_is_correct() {
+    let (layer, _) = index_over_bootstrap();
+    let on = LexicalIndex::build(Arc::clone(&layer)).with_packing(true);
+    let off = LexicalIndex::build(Arc::clone(&layer));
+
+    // Index-independent, construct-free ⇒ PACKED.
+    assert!(on.routes_packed("HeLa affects BRCA1", &Identity));
+    assert!(on.routes_packed("every cell line affects HeLa", &Identity));
+    assert!(on.routes_packed("HeLa is a large gene", &Identity));
+
+    // Selectional (`depends on`: Gene/CellLine slots) ⇒ UNPACKED (fail-closed).
+    assert!(!on.routes_packed("HeLa depends on BRCA1", &Identity));
+    // Token-keyed constructs ⇒ UNPACKED.
+    assert!(!on.routes_packed("HeLa and BRCA1 affect HeLa", &Identity)); // coordination
+    assert!(!on.routes_packed("the gene that affects HeLa is large", &Identity)); // relative
+
+    // Flag off ⇒ never packs, even for a packable sentence.
+    assert!(!off.routes_packed("HeLa affects BRCA1", &Identity));
+}
+
 /// D63 Option A (blueprint §11 3f.1) — the **differential oracle**: on index-independent,
 /// construct-free sentences (where the router actually engages packing), the packed path must produce
 /// the SAME felicitous forests as the unpacked path. Proves the packed forest + cube extractor are

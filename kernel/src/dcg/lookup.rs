@@ -1063,6 +1063,17 @@ impl LexicalIndex {
         false
     }
 
+    /// Whether an (unscoped) parse of `text` would take the **packed** path (D63 Option A): packing
+    /// enabled, no combinatory-core spike, and the sentence index-independent + construct-free (the
+    /// [`Self::parse_needs_unpacked`] guard). The routing decision is otherwise unobservable —
+    /// packed ≡ unpacked by construction (the differential oracle) — so this exposes it for tests to
+    /// assert *which* path a sentence takes (blueprint §11 3f.2).
+    pub fn routes_packed(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> bool {
+        self.packing
+            && !self.combinatory_core
+            && !self.parse_needs_unpacked(&tokenize(text), lemmatizer, None)
+    }
+
     /// Packed-forest parse (D63 Option A, blueprint §11 3d): build the packed shared forest
     /// ([`Self::build_forest`]) and extract the top-span k-best via cube pruning ([`Self::kbest`]),
     /// then apply the felicity pop-filter ([`Self::classify_felicitous`]) — routing each survivor to
@@ -1213,6 +1224,14 @@ impl LexicalIndex {
         while let Some(cc) = heap.pop() {
             pops += 1;
             if pops > max_pops {
+                // Circuit-breaker (a dense pocket of non-combining pairs). Never silent — log the
+                // shortfall so a partial cube is visible (D63 §11 3d.3).
+                eprintln!(
+                    "dcg::parse (packed): cube max_pops={max_pops} hit ({kept} kept of a \
+                     {}×{} grid) — extraction may be partial",
+                    lk.len(),
+                    rk.len(),
+                );
                 break;
             }
             if let Some(item) = apply(&lk[cc.li], &rk[cc.ri], &self.layer) {
