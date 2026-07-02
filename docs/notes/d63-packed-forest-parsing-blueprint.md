@@ -245,6 +245,25 @@ resolve scope *off* the packed structure, after extraction).
   *by construction* (packing never drops the needed constituent). "Delete widen" was premised on
   packing replacing the path — but Option A keeps both, gated.
 
+## 10b. Phase-3 RESULT (2026-06-30) — packing works and pays off
+
+Stages 3b–3d are implemented and **validated end-to-end**:
+- **Correctness (3f.1 differential oracle):** on index-independent, construct-free demo sentences
+  (determiners, attributive, compound, application), the packed path produces the **identical**
+  closed+open forests as the unpacked path (`packed_forest_equals_unpacked_on_core_grammar`). This
+  also confirms felicity ⊇ `unify_type` (deferring selectional pruning to the felicity pop-filter is
+  sound). The oracle **caught a real bug**: `cat_shape` erased the `cat_forall` determiner λ-body,
+  collapsing subject- and object-GQ readings into one node — fixed by shaping the `Lam` body so the
+  signature is a combinability congruence.
+- **Win (3f.4), full 7.6M WordNet+UMLS lexicon:** on a *packable* pile sentence ("DNA repair
+  processes are attractive synthetic lethal targets") packing is **~8× faster with identical output**
+  — unpacked open×232 @ 11.1s vs packed open×232 @ 1.4s; a light sentence is unchanged (no
+  regression). The sense-product pile collapses to O(nodes).
+
+**Honest reach:** this win is on sentences the router packs — no relatives / commas / coordination.
+The *worst* corpus piles contain those and still route unpacked, so extending the win to them is the
+**pack-relative-clauses** follow-up (§11 3g.3), now justified by this measured payoff.
+
 ## 11. Phase-3 burn-down (finer units; each lands green independently unless noted)
 
 Legend: (S/M/L) size · site · verify.

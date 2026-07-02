@@ -160,6 +160,12 @@ pub fn cat_shape(e: &Exp) -> String {
         Exp::EigonClass(_) | Exp::EigonResource(_) | Exp::EigonAxiom(_) => "_".to_string(),
         // A refined noun's index is a `Σ`; keep the shape marker, erase the components.
         Exp::Sig(_, _, _) | Exp::Times(_, _) => "Σ_".to_string(),
+        // A determiner category `cat_forall(num, λT. body)` carries its GQ body as a `Lam`. The body
+        // SHAPE (subject GQ `S/(S\NP)` vs object GQ `(S\NP)\((S\NP)/NP)`) decides combinability, so it
+        // MUST be kept (only the bound type-index `T` erases, via the `Var` arm) — else the packing
+        // signature `(cat_shape, prov)` is not a combinability congruence and packs distinct
+        // determiner readings into one node (D63 §11 3d).
+        Exp::Lam(_, body) => format!("λ.{}", cat_shape(body)),
         Exp::Arrow(a, b) => format!("{} → {}", cat_shape(a), cat_shape(b)),
         Exp::Pi(_, a, b) => format!("{} → {}", cat_shape(a), cat_shape(b)),
         Exp::Var(_) => "_".to_string(),

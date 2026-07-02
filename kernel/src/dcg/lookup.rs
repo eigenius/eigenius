@@ -1018,22 +1018,33 @@ impl LexicalIndex {
     }
 
     /// Per-parse index-independence guard (D63 Option A, blueprint §11 3b.2). Returns `true` if this
-    /// sentence must use the UNPACKED path — because it contains a coordinator (`and`/`or` ⇒ a
-    /// `cat_group` combination, which reads the sem and is not packed, §4 carve-out), OR a seeded
-    /// functor carries a concrete SELECTIONAL argument slot ([`super::category::cat_has_selectional_slot`]:
-    /// combinability would be index-dependent, so node-level packing by `cat_shape` is unsound). The
-    /// scan is over this sentence's seed spans only (feasible for the lazy index) and uncapped
-    /// (`cap = None`) so no beyond-cap selectional entry slips through — fail-closed.
+    /// sentence must use the UNPACKED path. Three fail-closed carve-outs:
+    /// 1. a **coordinator** (`and`/`or` ⇒ a `cat_group` combination, which reads the sem, §4);
+    /// 2. any other **token-keyed special construct** — reserved relativizers (`that`/`which`),
+    ///    `but`(-not), `each other`, or a comma (list/appositive/fronted-comma rules). These are
+    ///    sem-reading binary rules the packed node-level CKY does not mirror (a follow-up), so any
+    ///    sentence using them is handled unpacked;
+    /// 3. a seeded functor with a concrete SELECTIONAL argument slot
+    ///    ([`super::category::cat_has_selectional_slot`]) — combinability would be index-dependent, so
+    ///    node-level packing by `cat_shape` is unsound.
+    ///
+    /// The seed scan is over this sentence's spans only (feasible for the lazy index) and uncapped so
+    /// no beyond-cap selectional entry slips through.
     fn parse_needs_unpacked(
         &self,
         tokens: &[String],
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
     ) -> bool {
-        if tokens
-            .iter()
-            .any(|t| coord_connective(t.as_str()).is_some())
-        {
+        // Token-keyed special constructs (coordination / relatives / but-not / reciprocal / comma):
+        // sem-reading rules not yet mirrored by the packed CKY — route unpacked.
+        if tokens.iter().any(|t| {
+            coord_connective(t.as_str()).is_some()
+                || matches!(
+                    t.as_str(),
+                    "that" | "which" | "but" | "," | "each" | "other"
+                )
+        }) {
             return true;
         }
         let n = tokens.len();
@@ -1052,16 +1063,211 @@ impl LexicalIndex {
         false
     }
 
-    /// Packed-forest parse (D63 Option A). **3b.3 STUB** — the real node-level packed CKY + cube
-    /// extractor lands in burn-down 3c/3d; until then it delegates to the unpacked path, so the router
-    /// is wired and behaviour is byte-identical.
+    /// Packed-forest parse (D63 Option A, blueprint §11 3d): build the packed shared forest
+    /// ([`Self::build_forest`]) and extract the top-span k-best via cube pruning ([`Self::kbest`]),
+    /// then apply the felicity pop-filter ([`Self::classify_felicitous`]) — routing each survivor to
+    /// the closed or open forest, exactly as [`Self::parse_at_cap`] does. Reached only for
+    /// index-independent, construct-free sentences (the router's guard), so it is equivalent to
+    /// [`Self::parse_unpacked`] on those (the differential oracle, 3f). No widen loop — packing never
+    /// drops the needed constituent.
     fn parse_packed(
         &self,
         text: &str,
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
     ) -> (Vec<Item>, Vec<OpenParse>) {
-        self.parse_unpacked(text, lemmatizer, scope)
+        let tokens = tokenize(text);
+        let n = tokens.len();
+        if n == 0 {
+            return (Vec::new(), Vec::new());
+        }
+        let ranks = self.contextual_sense_ranks(text, lemmatizer, scope);
+        let forest = self.build_forest(&tokens, lemmatizer, scope, self.sense_cap, ranks.as_ref());
+        let mut memo: Vec<Option<Vec<Item>>> = vec![None; forest.nodes.len()];
+
+        // Top-span candidates: finite-clause / wh-question nodes spanning the whole sentence.
+        let top: Vec<super::packed::NodeId> = forest.cells[0][n - 1]
+            .values()
+            .copied()
+            .filter(|&id| {
+                let c = forest.nodes[id].rep.cat();
+                is_finite_clause(c) || is_ctor(c, "cat_q").is_some()
+            })
+            .collect();
+        let mut candidates: Vec<Item> = Vec::new();
+        for id in top {
+            candidates.extend(self.kbest(&forest, id, DEFAULT_FOREST_CAP, &mut memo));
+        }
+        candidates.sort_by_key(|it| it.cost());
+        candidates.truncate(CLASSIFY_BUDGET);
+        if std::env::var("EIGENIUS_PARSE_DEBUG").is_ok() {
+            eprintln!(
+                "dcg::parse (packed): {:?} forest nodes={} finite candidates={}",
+                text,
+                forest.nodes.len(),
+                candidates.len()
+            );
+        }
+
+        // Hole context for classification — identical to the unpacked path.
+        let entity_ty = Exp::EigonClass(iri(ENTITY_IRI));
+        let quant_ty = quant_hole_type();
+        let types_ok = eval(&entity_ty, &Rho::Nil).is_ok() && eval(&quant_ty, &Rho::Nil).is_ok();
+        let mut hole_specs: Vec<(String, Exp, HoleKind)> = Vec::new();
+        if types_ok {
+            for i in 0..n {
+                for j in i..n {
+                    hole_specs.push((hole_base(i, j), entity_ty.clone(), HoleKind::EntityRef));
+                    hole_specs.push((
+                        quant_hole_base(i, j),
+                        quant_ty.clone(),
+                        HoleKind::Quantification,
+                    ));
+                }
+            }
+        }
+
+        // Felicity pop-filter → closed / open forests (the only type-check, at the top span).
+        let mut forest_out: Vec<Item> = Vec::new();
+        let mut open: Vec<OpenParse> = Vec::new();
+        for it in &candidates {
+            if types_ok {
+                match self.classify_felicitous(it, &hole_specs) {
+                    Some(FelicitousOutcome::Closed(c)) => forest_out.push(c),
+                    Some(FelicitousOutcome::Open(o)) => open.push(o),
+                    None => {}
+                }
+            } else if let Some(c) = self.reduced_felicitous(it) {
+                forest_out.push(c);
+            }
+        }
+        forest_out.sort_by_key(|it| it.cost());
+        forest_out.truncate(DEFAULT_FOREST_CAP);
+        (forest_out, open)
+    }
+
+    /// Lazy k-best extraction from a packed-forest node (D63 §11 3d). Merges the node's edges — `Leaf`
+    /// (the item), `Combine` (cube pruning over the two children's k-best, materialised by `apply` per
+    /// pop in `(cost, li, ri)` order, bounded by `max_pops`), `Unary` (the composed-cell shift applied
+    /// to each child item) — then cost-sorts and keeps `k`. Memoised per node (the forest is a DAG by
+    /// span). **No felicity here** — the felicity pop-filter runs once at the top span, matching the
+    /// unpacked path (which type-checks only the full span).
+    fn kbest(
+        &self,
+        forest: &super::packed::Forest,
+        node_id: super::packed::NodeId,
+        k: usize,
+        memo: &mut Vec<Option<Vec<Item>>>,
+    ) -> Vec<Item> {
+        if let Some(cached) = &memo[node_id] {
+            return cached.clone();
+        }
+        memo[node_id] = Some(Vec::new()); // DAG re-entrancy guard (no cycles expected).
+        let span = forest.nodes[node_id].span;
+        let mut cands: Vec<Item> = Vec::new();
+        for e in 0..forest.nodes[node_id].edges.len() {
+            match &forest.nodes[node_id].edges[e] {
+                super::packed::Edge::Leaf(it) => cands.push(it.clone()),
+                super::packed::Edge::Combine { left, right } => {
+                    let (l, r) = (*left, *right);
+                    let lk = self.kbest(forest, l, k, memo);
+                    let rk = self.kbest(forest, r, k, memo);
+                    self.cube(&lk, &rk, k, &mut cands);
+                }
+                super::packed::Edge::Unary { child, kind } => {
+                    let (child, kind) = (*child, *kind);
+                    let ck = self.kbest(forest, child, k, memo);
+                    for it in &ck {
+                        self.materialize_unary(it, kind, span, &mut cands);
+                    }
+                }
+            }
+        }
+        cands.sort_by_key(|it| it.cost());
+        cands.truncate(k);
+        memo[node_id] = Some(cands.clone());
+        cands
+    }
+
+    /// Cube pruning (Huang & Chiang 2005) over a `Combine` edge: enumerate `apply(lk[li], rk[ri])`
+    /// best-first by combined child cost, pushing the two grid neighbours after each pop, until `k`
+    /// results or the `max_pops` circuit-breaker trips (a dense pocket of non-combining pairs — the
+    /// child lists are already combinability-homogeneous under index-independence, so this rarely
+    /// fires). Appends materialised items to `out`.
+    fn cube(&self, lk: &[Item], rk: &[Item], k: usize, out: &mut Vec<Item>) {
+        use super::packed::CubeCandidate;
+        use std::collections::{BTreeSet, BinaryHeap};
+        if lk.is_empty() || rk.is_empty() {
+            return;
+        }
+        let mut heap: BinaryHeap<CubeCandidate> = BinaryHeap::new();
+        let mut seen: BTreeSet<(usize, usize)> = BTreeSet::new();
+        heap.push(CubeCandidate {
+            cost: lk[0].cost().saturating_add(rk[0].cost()),
+            li: 0,
+            ri: 0,
+        });
+        seen.insert((0, 0));
+        let (mut kept, mut pops) = (0usize, 0usize);
+        let max_pops = k.saturating_mul(10).max(64);
+        while let Some(cc) = heap.pop() {
+            pops += 1;
+            if pops > max_pops {
+                break;
+            }
+            if let Some(item) = apply(&lk[cc.li], &rk[cc.ri], &self.layer) {
+                out.push(item);
+                kept += 1;
+                if kept >= k {
+                    break;
+                }
+            }
+            if cc.li + 1 < lk.len() && seen.insert((cc.li + 1, cc.ri)) {
+                heap.push(CubeCandidate {
+                    cost: lk[cc.li + 1].cost().saturating_add(rk[cc.ri].cost()),
+                    li: cc.li + 1,
+                    ri: cc.ri,
+                });
+            }
+            if cc.ri + 1 < rk.len() && seen.insert((cc.li, cc.ri + 1)) {
+                heap.push(CubeCandidate {
+                    cost: lk[cc.li].cost().saturating_add(rk[cc.ri + 1].cost()),
+                    li: cc.li,
+                    ri: cc.ri + 1,
+                });
+            }
+        }
+    }
+
+    /// Materialise a `Unary` edge for one child item — the composed-cell shift for [`UnaryKind`],
+    /// with span-pure hole re-freshening (`$quant$i_j` / `$anaphor$i_j`). Mirrors the unpacked path's
+    /// per-item shifts ([`Self::seed_leaves`] / the CKY loop). Appends to `out`.
+    fn materialize_unary(
+        &self,
+        it: &Item,
+        kind: super::packed::UnaryKind,
+        span: (usize, usize),
+        out: &mut Vec<Item>,
+    ) {
+        use super::packed::UnaryKind;
+        let (i, j) = span;
+        match kind {
+            UnaryKind::BareNp => {
+                let mut v = self.bare_plural_nps(it);
+                v.extend(self.bare_mass_nps(it));
+                for mut np in v {
+                    np.set_sem(freshen_quant(np.sem(), &quant_hole_base(i, j)));
+                    out.push(np);
+                }
+            }
+            UnaryKind::Raise => out.extend(raise_nps(std::slice::from_ref(it), &self.layer)),
+            UnaryKind::FrontParticipial => {
+                if let Some((cat, sem)) = front_participial(it.cat(), it.sem(), &self.layer) {
+                    let sem = freshen_anaphor(&sem, &hole_base(i, j));
+                    out.push(Item::with_cost(cat, sem, it.cost()));
+                }
+            }
+        }
     }
 
     /// Build the **packed shared forest** over a sentence (D63 blueprint §11 3c.3/3c.4). Seeds the
@@ -1073,11 +1279,12 @@ impl LexicalIndex {
     /// [`super::packed::Edge::Combine`] hyperedge. The differing item-pairs are materialised lazily by
     /// the cube-pruning extractor (3d).
     ///
-    /// **3c.4a — binary combination only.** The composed-cell UNARY transforms (type-raising for
-    /// relative clauses, the bare-plural / sentence-premod shifts) land in 3c.4b; until then a
-    /// sentence needing those is incomplete in the packed forest (the differential oracle, 3f, gates
-    /// on equivalence). `#[allow(dead_code)]` until the 3d extractor consumes the forest.
-    #[allow(dead_code)]
+    /// After each cell's binary combinations, the composed-cell UNARY shifts (3c.4b) are applied as
+    /// [`super::packed::Edge::Unary`] edges, in the unpacked CKY's order: bare-plural/mass NP shift,
+    /// then type-raising (which sees the shifted NPs), then the fronted participial. Token-keyed
+    /// sem-reading rules (coordination, relatives, but-not, reciprocal, comma) are NOT mirrored — the
+    /// router's guard sends any sentence using them to the unpacked path. `#[allow(dead_code)]` until
+    /// the 3d extractor consumes the forest (the differential oracle, 3f, gates on equivalence).
     fn build_forest(
         &self,
         tokens: &[String],
@@ -1086,7 +1293,7 @@ impl LexicalIndex {
         cap: Option<usize>,
         ranks: Option<&BTreeMap<String, u32>>,
     ) -> super::packed::Forest {
-        use super::packed::{node_sig, Edge, Forest, NodeId, Sig};
+        use super::packed::{node_sig, Edge, Forest, NodeId, Sig, UnaryKind};
         let n = tokens.len();
         let (leaves, _drops) = self.seed_leaves(tokens, lemmatizer, scope, cap, ranks, None);
         let mut forest = Forest::new(n);
@@ -1121,6 +1328,49 @@ impl LexicalIndex {
                 for (sig, result, l, r) in edges {
                     let id = forest.get_or_create(i, j, sig, &result);
                     forest.push_edge(id, Edge::Combine { left: l, right: r });
+                }
+
+                // Composed-cell UNARY shifts (§11 3c.4b), applied per node's representative and
+                // recorded as `Unary` edges (3d re-applies them per item at extraction). Order matches
+                // the unpacked CKY: (1) bare-plural/mass NP shift, (2) type-raise over the updated
+                // cell (so it sees the shifted NPs), (3) fronted participial. Freshening only touches
+                // the sem, never `cat_shape`, so it does not affect the signature — but it is applied
+                // here so the representative sems stay consistent with the unpacked path.
+                let mut unary: Vec<(Sig, Item, NodeId, UnaryKind)> = Vec::new();
+                for id in forest.cells[i][j].values().copied().collect::<Vec<_>>() {
+                    let rep = forest.nodes[id].rep.clone();
+                    let mut shifted = self.bare_plural_nps(&rep);
+                    shifted.extend(self.bare_mass_nps(&rep));
+                    for mut np in shifted {
+                        np.set_sem(freshen_quant(np.sem(), &quant_hole_base(i, j)));
+                        unary.push((node_sig(&np), np, id, UnaryKind::BareNp));
+                    }
+                }
+                for (sig, item, child, kind) in unary.drain(..) {
+                    let nid = forest.get_or_create(i, j, sig, &item);
+                    forest.push_edge(nid, Edge::Unary { child, kind });
+                }
+                for id in forest.cells[i][j].values().copied().collect::<Vec<_>>() {
+                    let rep = forest.nodes[id].rep.clone();
+                    for raised in raise_nps(std::slice::from_ref(&rep), &self.layer) {
+                        unary.push((node_sig(&raised), raised, id, UnaryKind::Raise));
+                    }
+                }
+                for (sig, item, child, kind) in unary.drain(..) {
+                    let nid = forest.get_or_create(i, j, sig, &item);
+                    forest.push_edge(nid, Edge::Unary { child, kind });
+                }
+                for id in forest.cells[i][j].values().copied().collect::<Vec<_>>() {
+                    let rep = forest.nodes[id].rep.clone();
+                    if let Some((cat, sem)) = front_participial(rep.cat(), rep.sem(), &self.layer) {
+                        let sem = freshen_anaphor(&sem, &hole_base(i, j));
+                        let item = Item::with_cost(cat, sem, rep.cost());
+                        unary.push((node_sig(&item), item, id, UnaryKind::FrontParticipial));
+                    }
+                }
+                for (sig, item, child, kind) in unary.drain(..) {
+                    let nid = forest.get_or_create(i, j, sig, &item);
+                    forest.push_edge(nid, Edge::Unary { child, kind });
                 }
             }
         }

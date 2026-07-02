@@ -574,6 +574,43 @@ fn probe_noun_pile_sentences() {
     }
 }
 
+/// WIN PROBE for the packed forest (D63 Option A, blueprint §11 3f.4): parse a *packable* pile
+/// sentence (no relatives/commas/coordination → the router engages packing) over the full lexicon,
+/// with packing OFF vs ON, reporting outcome + wall-clock. With `EIGENIUS_PARSE_DEBUG=1` the packed
+/// run also prints `forest nodes=N` — the pile's sense-product collapsed to O(nodes) vs the ~30k flat
+/// items of the unpacked cell. Same (closed, open) ⇒ the win is a speed/space gain, not a parse
+/// change. Honors `EIGENIUS_POS_PRUNE`. Run:
+///   EIGENIUS_PARSE_DEBUG=1 EIGENIUS_POS_PRUNE=1 cargo test -p eigenius-wordnet \
+///       --test db_backed_encoding packed_win_probe -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic: packed vs unpacked win probe; run with --ignored --nocapture"]
+fn packed_win_probe() {
+    let Some(head) = snapshot_path().and_then(|p| open_head(&p)) else {
+        return;
+    };
+    let lem = morphy();
+    // Packable pile sentences (no token-keyed constructs; index-independent verbs).
+    let sentences = [
+        "DNA repair processes are attractive synthetic lethal targets.",
+        "Synthetic lethality is an interaction between two genetic events.",
+    ];
+    let unpacked = build_index(&head);
+    let packed = build_index(&head).with_packing(true);
+    for s in sentences {
+        eprintln!("\n{s:?}");
+        for (name, idx) in [("unpacked", &unpacked), ("packed", &packed)] {
+            let t = std::time::Instant::now();
+            let (c, o) = idx.parse_open(s, &lem);
+            eprintln!(
+                "  {name:<9} closed×{} open×{} [{:>6.1}s]",
+                c.len(),
+                o.len(),
+                t.elapsed().as_secs_f64()
+            );
+        }
+    }
+}
+
 /// A/B witness for GH#97 Fix #2 (construction-time compound-depth CAP): parse the witnessed
 /// pure-pile sentence (unit 32 — full-span cell recorded at 34,472 items pre-cap) at a WIDE beam,
 /// with `EIGENIUS_PARSE_DEBUG=1`, and report the MAX per-cell `produced` (items BUILT before

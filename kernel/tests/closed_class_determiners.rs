@@ -1001,6 +1001,37 @@ fn packing_flag_router_is_a_safe_noop() {
     );
 }
 
+/// D63 Option A (blueprint §11 3f.1) — the **differential oracle**: on index-independent,
+/// construct-free sentences (where the router actually engages packing), the packed path must produce
+/// the SAME felicitous forests as the unpacked path. Proves the packed forest + cube extractor are
+/// equivalent to the flat CKY (and that deferring selectional pruning to felicity is sound: felicity
+/// ⊇ unify). Compares the closed forest as a sorted multiset of normalized sems, plus the open count.
+#[test]
+fn packed_forest_equals_unpacked_on_core_grammar() {
+    let (layer, _) = index_over_bootstrap();
+    let off = LexicalIndex::build(Arc::clone(&layer));
+    let on = LexicalIndex::build(Arc::clone(&layer)).with_packing(true);
+    for s in [
+        "HeLa affects BRCA1",
+        "every cell line affects HeLa",
+        "no gene affects HeLa",
+        "HeLa is a gene",
+        "HeLa is large",
+        "HeLa is a large gene",
+        "a large primary gene affects HeLa",
+        "HeLa affects a gene",
+    ] {
+        let (co, oo) = off.parse_open(s, &Identity);
+        let (cn, on2) = on.parse_open(s, &Identity);
+        let mut so: Vec<String> = co.iter().map(|it| pretty_term(it.sem())).collect();
+        let mut sn: Vec<String> = cn.iter().map(|it| pretty_term(it.sem())).collect();
+        so.sort();
+        sn.sort();
+        assert_eq!(so, sn, "packed≠unpacked CLOSED forest for {s:?}");
+        assert_eq!(oo.len(), on2.len(), "packed≠unpacked OPEN count for {s:?}");
+    }
+}
+
 /// D63 §8.5 — **stacked attributive adjectives** (`synthetic lethal vulnerability`). Refining an
 /// already-refined noun conjoins over the **same base** (`Σx:Base. P(x) ∧ adj(x)`) rather than nesting
 /// (`Σy:Σ. adj(y)`, which applied the adjective to the Σ *pair* — ill-typed, so stacked adjectives

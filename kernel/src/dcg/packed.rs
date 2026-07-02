@@ -17,26 +17,18 @@
 //! sense-product of same-`cat_shape` items collapses to a single node (Billot & Lang 1989; Harper
 //! 1994). Combination is decided **once per node-pair** (via `apply` on representative items — sound
 //! because the packing router gates on the grammar being *index-independent*, so combinability is a
-//! function of `cat_shape` alone), recorded as a [`Edge::Combine`] hyperedge. The differing
-//! semantics are materialised **lazily** at k-best extraction (the cube-pruning extractor, burn-down
-//! 3d) — this module is only the forest data structure + construction (3c).
+//! function of `cat_shape` alone), recorded as an [`Edge::Combine`] hyperedge; the composed-cell
+//! shifts are [`Edge::Unary`] edges. The differing semantics are materialised **lazily** at k-best
+//! extraction (the cube-pruning extractor, [`super::lookup::LexicalIndex::kbest`]).
 //!
-//! `cat_group` never appears here: the router ([`super::lookup::LexicalIndex::parse_needs_unpacked`])
-//! sends any sentence with a coordinator to the unpacked path (the §4 carve-out), so the forest has
-//! only [`Edge::Leaf`] and [`Edge::Combine`].
-
-// TEMPORARY (burn-down 3c.1/3c.2): the forest is constructed + unit-tested here, but its edges/rep
-// are not *consumed* until the packed CKY construction (3c.4) and the cube-pruning extractor (3d)
-// read them. Remove this `allow` when 3d wires `parse_packed` to build + extract the forest.
-#![allow(dead_code)]
+//! `cat_group` never appears here: the router
+//! ([`super::lookup::LexicalIndex::parse_needs_unpacked`]) sends any sentence with a coordinator (or
+//! other token-keyed sem-reading construct) to the unpacked path (the §4 carve-out).
 
 use std::collections::BTreeMap;
 
-use super::parser::{Combinator, Item};
+use super::parser::{Combinator, Cost, Item};
 use super::pretty::cat_shape;
-
-#[cfg(test)]
-use super::parser::Cost;
 
 /// A packing **signature**: the category shape (type-indices erased, [`cat_shape`]) plus the Eisner
 /// normal-form provenance. Two items share a node iff they share a `Sig` — the equivalence class
@@ -51,16 +43,32 @@ pub(crate) fn node_sig(it: &Item) -> Sig {
 /// Index of a [`PNode`] in [`Forest::nodes`].
 pub(crate) type NodeId = usize;
 
-/// A derivation of a node: either a lexical **leaf** item, or a binary **combination** of two child
-/// nodes (a hyperedge; the cross-product of the children's items is materialised lazily at extraction).
+/// A derivation of a node: a lexical **leaf** item, a binary **combination** of two child nodes (a
+/// hyperedge; the child cross-product is materialised lazily at extraction), or a **unary** transform
+/// of one child node (type-raise / bare-plural·mass shift / fronted participial — the composed-cell
+/// shifts of the unpacked CKY, applied per item at extraction).
 pub(crate) enum Edge {
     Leaf(Item),
     Combine { left: NodeId, right: NodeId },
+    Unary { child: NodeId, kind: UnaryKind },
+}
+
+/// Which composed-cell unary shift a [`Edge::Unary`] represents (D63 blueprint §11 3c.4b).
+#[derive(Clone, Copy)]
+pub(crate) enum UnaryKind {
+    /// Forward bounded type-raising `T`: `NP → S/(S\NP)` (`raise_nps`).
+    Raise,
+    /// Bare-plural / bare-mass argument shift: a plural/mass `cat_n` → a deferred-quantifier NP.
+    BareNp,
+    /// Fronted participial adjunct: a subject-gapped `ger` VP → a sentence pre-modifier `S/S`.
+    FrontParticipial,
 }
 
 /// A packed forest node: all derivations of one `(span, Sig)` equivalence class.
 pub(crate) struct PNode {
-    pub sig: Sig,
+    /// The token span `(i, j)` this node covers (inclusive) — needed to re-freshen span-pure holes
+    /// (`$quant$i_j` / `$anaphor$i_j`) when a [`Edge::Unary`] transform is materialised at extraction.
+    pub span: (usize, usize),
     /// A representative item — used to decide node-level combinability (`apply` on reps) and to carry
     /// the result category for signature computation. Sound under index-independence: every item in
     /// the node combines identically, so any representative gives the correct edge + result `Sig`.
@@ -91,7 +99,7 @@ impl Forest {
         }
         let id = self.nodes.len();
         self.nodes.push(PNode {
-            sig: sig.clone(),
+            span: (i, j),
             rep: rep.clone(),
             edges: Vec::new(),
         });
@@ -102,6 +110,34 @@ impl Forest {
     /// Append a derivation to a node.
     pub fn push_edge(&mut self, id: NodeId, edge: Edge) {
         self.nodes[id].edges.push(edge);
+    }
+}
+
+/// A cube-pruning candidate (Huang & Chiang 2005): the `(li, ri)` grid coordinate into a
+/// combination's two cost-sorted child k-best lists, keyed by the combined child cost. Ordered so a
+/// `BinaryHeap` (max-heap) pops the LOWEST `(cost, li, ri)` first — the `(li, ri)` tie-break makes
+/// extraction byte-deterministic across runs (both child lists are deterministically sorted).
+pub(crate) struct CubeCandidate {
+    pub cost: Cost,
+    pub li: usize,
+    pub ri: usize,
+}
+
+impl PartialEq for CubeCandidate {
+    fn eq(&self, o: &Self) -> bool {
+        (self.cost, self.li, self.ri) == (o.cost, o.li, o.ri)
+    }
+}
+impl Eq for CubeCandidate {}
+impl Ord for CubeCandidate {
+    fn cmp(&self, o: &Self) -> std::cmp::Ordering {
+        // Invert: `BinaryHeap` is a max-heap, so the smallest key pops first.
+        (o.cost, o.li, o.ri).cmp(&(self.cost, self.li, self.ri))
+    }
+}
+impl PartialOrd for CubeCandidate {
+    fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(o))
     }
 }
 
@@ -164,5 +200,25 @@ mod tests {
         );
         assert_eq!(f.nodes[id_a].edges.len(), 2);
         assert_eq!(f.nodes.len(), 2, "two distinct signatures ⇒ two nodes");
+    }
+
+    #[test]
+    fn cube_candidate_pops_lowest_cost_then_grid_order() {
+        use std::collections::BinaryHeap;
+        let c = |lo: u32, li: usize, ri: usize| CubeCandidate {
+            cost: Cost::from_sense_rank(lo),
+            li,
+            ri,
+        };
+        let mut h: BinaryHeap<CubeCandidate> = BinaryHeap::new();
+        h.push(c(5, 0, 0));
+        h.push(c(2, 1, 0));
+        h.push(c(2, 0, 1)); // same cost as (1,0) → (li,ri) tie-break: (0,1) < (1,0)
+        let p1 = h.pop().unwrap();
+        assert_eq!((p1.cost.sense_rank, p1.li, p1.ri), (2, 0, 1));
+        let p2 = h.pop().unwrap();
+        assert_eq!((p2.cost.sense_rank, p2.li, p2.ri), (2, 1, 0));
+        let p3 = h.pop().unwrap();
+        assert_eq!(p3.cost.sense_rank, 5);
     }
 }
