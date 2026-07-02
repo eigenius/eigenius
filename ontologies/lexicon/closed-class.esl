@@ -1497,3 +1497,46 @@ resource lexicon:ten_obj : lexicon:LexicalEntry {
     lexicon:sense    = "ten";
     lexicon:grade    = epistemic:declared;
 }
+
+// ── Reserved construct tokens (D63 §11 3g.3 / B10) ────────────────────
+// The reserved-word FORM set as DATA (see `lexicon:ReservedConstruct` in the schema).
+// The CKY keys its reserved-word rules on `construct_kind`; the parser loads these into
+// a `ReservedTable` index-driven at build. Adding a coordinator/relativizer here needs
+// no code change. NB `that`/`which`/`but` ALSO have LexicalEntry senses (complementizer,
+// wh-determiner, `but_subord`) — a form can be both a reserved construct and a lexeme.
+resource lexicon:rc_and : lexicon:ReservedConstruct {
+    lexicon:construct_form = "and";
+    lexicon:construct_kind = lexicon:rk_coord_and;
+}
+resource lexicon:rc_or : lexicon:ReservedConstruct {
+    lexicon:construct_form = "or";
+    lexicon:construct_kind = lexicon:rk_coord_or;
+}
+resource lexicon:rc_comma : lexicon:ReservedConstruct {
+    lexicon:construct_form = ",";
+    lexicon:construct_kind = lexicon:rk_comma;
+}
+resource lexicon:rc_that : lexicon:ReservedConstruct {
+    lexicon:construct_form = "that";
+    lexicon:construct_kind = lexicon:rk_relativizer;
+}
+resource lexicon:rc_which : lexicon:ReservedConstruct {
+    lexicon:construct_form = "which";
+    lexicon:construct_kind = lexicon:rk_wh_relativizer;
+}
+resource lexicon:rc_but : lexicon:ReservedConstruct {
+    lexicon:construct_form = "but";
+    lexicon:construct_kind = lexicon:rk_contrastive_but;
+}
+resource lexicon:rc_not : lexicon:ReservedConstruct {
+    lexicon:construct_form = "not";
+    lexicon:construct_kind = lexicon:rk_negator;
+}
+resource lexicon:rc_each : lexicon:ReservedConstruct {
+    lexicon:construct_form = "each";
+    lexicon:construct_kind = lexicon:rk_reciprocal_each;
+}
+resource lexicon:rc_other : lexicon:ReservedConstruct {
+    lexicon:construct_form = "other";
+    lexicon:construct_kind = lexicon:rk_reciprocal_other;
+}

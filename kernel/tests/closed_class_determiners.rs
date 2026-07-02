@@ -272,7 +272,10 @@ fn cell_beam_bounds_a_cell_and_is_a_noop_when_generous() {
     // Lever B (per-cell beam, GH #97). Both senses of `zarg` are valid singular subjects, so
     // "zarg affects HeLa" has TWO full parses unbeamed (affects(HeLa, BRCA1) and affects(HeLa,
     // HeLa)). No `sense_cap` here — the beam is the only lever, acting on the leaf cell.
-    let unbeamed = LexicalIndex::build(zarg_layer());
+    // The cell beam is an UNPACKED-path tuning knob (the packed path bounds by cube pruning instead,
+    // not the per-cell beam — see `parse_packed`), so pin the unpacked path to exercise it (B9 made
+    // packing the default). This is path-specific tuning, not a correctness contract like widen.
+    let unbeamed = LexicalIndex::build(zarg_layer()).with_packing(false);
     assert_eq!(
         unbeamed.parse("zarg affects HeLa", &Identity).len(),
         2,
@@ -280,7 +283,9 @@ fn cell_beam_bounds_a_cell_and_is_a_noop_when_generous() {
     );
 
     // A generous beam is a no-op — both readings survive.
-    let generous = LexicalIndex::build(zarg_layer()).with_cell_beam(16);
+    let generous = LexicalIndex::build(zarg_layer())
+        .with_packing(false)
+        .with_cell_beam(16);
     assert_eq!(
         generous.parse("zarg affects HeLa", &Identity).len(),
         2,
@@ -289,7 +294,9 @@ fn cell_beam_bounds_a_cell_and_is_a_noop_when_generous() {
 
     // A tight beam (2) drops the higher-`Cost` (sr1 → HeLa) sense at the leaf, keeping only the
     // cheaper (sr0 → BRCA1) reading: the beam prunes by Cost and bounds the cell.
-    let tight = LexicalIndex::build(zarg_layer()).with_cell_beam(2);
+    let tight = LexicalIndex::build(zarg_layer())
+        .with_packing(false)
+        .with_cell_beam(2);
     let forest = tight.parse("zarg affects HeLa", &Identity);
     assert_eq!(
         forest.len(),
@@ -1009,7 +1016,7 @@ fn packing_flag_router_is_a_safe_noop() {
 fn packing_router_decision_is_correct() {
     let (layer, _) = index_over_bootstrap();
     let on = LexicalIndex::build(Arc::clone(&layer)).with_packing(true);
-    let off = LexicalIndex::build(Arc::clone(&layer));
+    let off = LexicalIndex::build(Arc::clone(&layer)).with_packing(false);
 
     // Index-independent, construct-free ⇒ PACKED.
     assert!(on.routes_packed("HeLa affects BRCA1", &Identity));
@@ -1047,7 +1054,7 @@ fn packing_router_decision_is_correct() {
 #[test]
 fn packed_forest_equals_unpacked_on_core_grammar() {
     let (layer, _) = index_over_bootstrap();
-    let off = LexicalIndex::build(Arc::clone(&layer));
+    let off = LexicalIndex::build(Arc::clone(&layer)).with_packing(false);
     let on = LexicalIndex::build(Arc::clone(&layer)).with_packing(true);
     for s in [
         "HeLa affects BRCA1",

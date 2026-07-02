@@ -55,7 +55,7 @@ use super::category::{
 use super::lemmatizer::{Lemmatizer, Pos};
 use super::lexicon::entry_to_item;
 use super::parser::{apply, apply_core, Combinator, Item};
-use super::reserved;
+use super::reserved::{ReservedKind, ReservedTable};
 use super::sense_ranker::{SenseCandidate, SenseRanker, WordSenses};
 
 /// Default forest cap (D63 §8.7 Stage B): `parse` returns at most this many parses,
@@ -238,8 +238,15 @@ pub struct LexicalIndex {
     /// Packing collapses the same-`cat_shape` sense-product into one node per `(cat_shape, ENF-prov)`,
     /// so combination is O(1) per node-pair; selectional restrictions (if any) are deferred to the
     /// felicity pop-filter. The router falls back to the unpacked path for selectional grammars
-    /// (the guard, [`Self::seeds_have_selectional_slot`]). Opt-in; default off (no behaviour change).
+    /// (the guard, [`Self::parse_needs_unpacked`]). **Default ON** (§11 3g.2 / B9): the packed CKY now
+    /// mirrors every construct and is proven equivalent to the unpacked path (the differential oracle),
+    /// so it is the default; `with_packing(false)` pins the unpacked baseline (the oracle, A/B probes).
     packing: bool,
+
+    /// The **reserved-construct table** (§11 3g.3 / B10): the reserved-word FORM set as *data*, loaded
+    /// index-driven from the ontology (`lexicon:ReservedConstruct`) at build. The CKY's reserved-word
+    /// rules (both paths) classify tokens against this, replacing the former hard-coded string consts.
+    reserved: ReservedTable,
 }
 
 /// One resolved lexical entry at the **seed stage**: its parse [`Item`], its `lexicon:in_lexicon`
@@ -336,6 +343,9 @@ impl LexicalIndex {
     /// skipped (the felicity gate caught them at import; a parse cannot use them).
     pub fn build(layer: Arc<Layer>) -> Self {
         let form_prop = iri("urn:eigenius:lexicon:form");
+        // Reserved-construct table (B10): loaded once, index-driven, before the source branch so both
+        // the lazy and eager indexes carry it.
+        let reserved = ReservedTable::load(&layer);
         if let Some(active) = resolve_active_value_indexes(&layer)
             .into_iter()
             .find(|a| a.target_property == form_prop)
@@ -352,7 +362,8 @@ impl LexicalIndex {
                 cell_beam: None,
                 combinatory_core: false,
                 pos_prune: false,
-                packing: false,
+                packing: true,
+                reserved,
             };
         }
         let (by_form, max_words) = Self::scan_eager(&layer);
@@ -364,7 +375,8 @@ impl LexicalIndex {
             cell_beam: None,
             combinatory_core: false,
             pos_prune: false,
-            packing: false,
+            packing: true,
+            reserved,
         }
     }
 
@@ -401,8 +413,10 @@ impl LexicalIndex {
         self
     }
 
-    /// Enable **packed-forest parsing** ([`Self::packing`]) — node-level packing + cube-pruning
-    /// extraction, gated at parse time on the grammar being index-independent. Builder-style; default off.
+    /// Toggle **packed-forest parsing** ([`Self::packing`]) — node-level packing + cube-pruning
+    /// extraction, gated at parse time on the grammar being index-independent. Builder-style; **default
+    /// ON** (§11 3g.2 / B9). Pass `false` to pin the unpacked baseline (the differential oracle, A/B
+    /// probes) — otherwise packed is used for every index-independent, construct-free sentence.
     pub fn with_packing(mut self, on: bool) -> Self {
         self.packing = on;
         self
@@ -556,7 +570,7 @@ impl LexicalIndex {
         let s_lc = surface.trim().to_lowercase();
         // Coordinating conjunctions (`and`/`or`/`but`) are consumed by the parser's
         // coordination rule, not a lexical entry — known, not missing (D63 §8.4).
-        if coord_connective(&s_lc).is_some() {
+        if self.reserved.coord_connective(&s_lc).is_some() {
             return true;
         }
         if !self.entries_for(&s_lc).is_empty() {
@@ -1044,7 +1058,7 @@ impl LexicalIndex {
         // preposition is pied-piping; a `which` after a noun is the packed which-relative, and a
         // sentence-initial / post-determiner `which` is the packed wh-determiner.
         for p in 1..n {
-            if tokens[p] != reserved::WHICH {
+            if !self.reserved.is(&tokens[p], ReservedKind::WhRelativizer) {
                 continue;
             }
             if self
@@ -1083,26 +1097,58 @@ impl LexicalIndex {
             && !self.parse_needs_unpacked(&tokenize(text), lemmatizer, None)
     }
 
-    /// Packed-forest parse (D63 Option A, blueprint §11 3d): build the packed shared forest
-    /// ([`Self::build_forest`]) and extract the top-span k-best via cube pruning ([`Self::kbest`]),
-    /// then apply the felicity pop-filter ([`Self::classify_felicitous`]) — routing each survivor to
-    /// the closed or open forest, exactly as [`Self::parse_at_cap`] does. Reached only for
-    /// index-independent, construct-free sentences (the router's guard), so it is equivalent to
-    /// [`Self::parse_unpacked`] on those (the differential oracle, 3f). No widen loop — packing never
-    /// drops the needed constituent.
+    /// Packed-forest parse (D63 Option A, blueprint §11 3d) with **widen-on-failure** (§11 3g.2 / B9):
+    /// try the packed extractor at the sense cap; if it yields nothing AND every token is known (not an
+    /// OOV miss), double the cap up to [`SENSE_CAP_WIDEN_MAX`] and retry — the same "a dropped sense
+    /// never loses a known-vocabulary parse" contract the unpacked path keeps ([`Self::parse_unpacked`],
+    /// exercised by `sense_cap_widens_on_failure_for_known_vocabulary`). No cell-beam escalation:
+    /// packing bounds the chart by cube pruning, not the per-cell beam, so only the cap can drop a
+    /// needed sense. Reached only for index-independent, construct-free sentences (the router's guard),
+    /// so it is equivalent to [`Self::parse_unpacked`] on those (the differential oracle, 3f).
     fn parse_packed(
         &self,
         text: &str,
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
     ) -> (Vec<Item>, Vec<OpenParse>) {
+        // Contextual sense ranking computed ONCE (as in the unpacked path), threaded into each attempt.
+        let ranks = self.contextual_sense_ranks(text, lemmatizer, scope);
+        let mut cap = self.sense_cap;
+        loop {
+            let (closed, open) =
+                self.parse_packed_at_cap(text, lemmatizer, scope, cap, ranks.as_ref());
+            if !closed.is_empty() || !open.is_empty() {
+                return (closed, open);
+            }
+            // Widen only if a pruning artifact could be the cause (no OOV token).
+            if !self.all_prose_tokens_known(text, lemmatizer) {
+                return (closed, open);
+            }
+            match cap {
+                Some(c) if c < SENSE_CAP_WIDEN_MAX => cap = Some((c * 2).min(SENSE_CAP_WIDEN_MAX)),
+                _ => return (closed, open),
+            }
+        }
+    }
+
+    /// One packed-forest parse at a fixed sense `cap` (the widen-loop body of [`Self::parse_packed`]):
+    /// build the shared forest ([`Self::build_forest`]), extract the top-span k-best via cube pruning
+    /// ([`Self::kbest`]), and apply the felicity pop-filter ([`Self::classify_felicitous`]) — routing
+    /// each survivor to the closed or open forest, exactly as [`Self::parse_at_cap`] does.
+    fn parse_packed_at_cap(
+        &self,
+        text: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+        cap: Option<usize>,
+        ranks: Option<&BTreeMap<String, u32>>,
+    ) -> (Vec<Item>, Vec<OpenParse>) {
         let tokens = tokenize(text);
         let n = tokens.len();
         if n == 0 {
             return (Vec::new(), Vec::new());
         }
-        let ranks = self.contextual_sense_ranks(text, lemmatizer, scope);
-        let forest = self.build_forest(&tokens, lemmatizer, scope, self.sense_cap, ranks.as_ref());
+        let forest = self.build_forest(&tokens, lemmatizer, scope, cap, ranks);
         let mut memo: Vec<Option<Vec<Item>>> = vec![None; forest.nodes.len()];
 
         // Top-span candidates: finite-clause / wh-question nodes spanning the whole sentence.
@@ -1471,7 +1517,7 @@ impl LexicalIndex {
                 #[allow(clippy::needless_range_loop)] // `c` indexes tokens AND the sub-cells
                 for c in (i + 1)..j {
                     // Relative: [noun] that/which [body].
-                    if reserved::is_relativizer(tokens[c].as_str()) {
+                    if self.reserved.is_relativizer(tokens[c].as_str()) {
                         self.binary_edges(
                             &forest,
                             (i, c - 1),
@@ -1481,7 +1527,7 @@ impl LexicalIndex {
                         );
                     }
                     // Coordination: [X] and/or/`,` [Y].
-                    if let Some(op) = coord_connective(tokens[c].as_str()) {
+                    if let Some(op) = self.reserved.coord_connective(tokens[c].as_str()) {
                         self.binary_edges(
                             &forest,
                             (i, c - 1),
@@ -1491,8 +1537,10 @@ impl LexicalIndex {
                         );
                     }
                     // Contrastive: [O₁] but not [O₂].
-                    if tokens[c] == reserved::BUT
-                        && tokens.get(c + 1).map(String::as_str) == Some(reserved::NOT)
+                    if self.reserved.is(&tokens[c], ReservedKind::ContrastiveBut)
+                        && tokens
+                            .get(c + 1)
+                            .is_some_and(|t| self.reserved.is(t, ReservedKind::Negator))
                         && c + 2 <= j
                     {
                         self.binary_edges(
@@ -1507,10 +1555,10 @@ impl LexicalIndex {
                 // Appositive: [NP] , that/which [body] [,] — a comma BEFORE the relativizer.
                 #[allow(clippy::needless_range_loop)]
                 for c in (i + 2)..=j {
-                    if reserved::is_relativizer(tokens[c].as_str())
-                        && tokens[c - 1] == reserved::COMMA
+                    if self.reserved.is_relativizer(tokens[c].as_str())
+                        && self.reserved.is_comma(&tokens[c - 1])
                     {
-                        let body_end = if tokens[j] == reserved::COMMA {
+                        let body_end = if self.reserved.is_comma(&tokens[j]) {
                             j - 1
                         } else {
                             j
@@ -1534,7 +1582,12 @@ impl LexicalIndex {
                     }
                 }
                 // Reciprocal: [group] <TV> each other → S (the trailing "each other").
-                if j >= 3 && tokens[j - 1] == reserved::EACH && tokens[j] == reserved::OTHER {
+                if j >= 3
+                    && self
+                        .reserved
+                        .is(&tokens[j - 1], ReservedKind::ReciprocalEach)
+                    && self.reserved.is(&tokens[j], ReservedKind::ReciprocalOther)
+                {
                     for s in (i + 1)..=(j - 2) {
                         self.binary_edges(
                             &forest,
@@ -1597,7 +1650,7 @@ impl LexicalIndex {
                 // forward-apply across the node-less comma to the matrix clause. Keyed on `i == 0` (so
                 // it never competes with list-coordination commas); the child keeps its `Sig`, so the
                 // absorbed node packs identically. Mirrors the unpacked CKY's comma-absorption.
-                if i == 0 && j >= 1 && tokens[j] == reserved::COMMA {
+                if i == 0 && j >= 1 && self.reserved.is_comma(&tokens[j]) {
                     for cid in forest.cells[0][j - 1].values().copied().collect::<Vec<_>>() {
                         let rep = forest.nodes[cid].rep.clone();
                         if is_sentence_premod(rep.cat()) {
@@ -1879,7 +1932,7 @@ impl LexicalIndex {
         // `Cat`, which `⟦·⟧` can't denote), handled by the coordination rule below.
         let coord_op: Vec<Option<&str>> = tokens
             .iter()
-            .map(|t| coord_connective(t.as_str()))
+            .map(|t| self.reserved.coord_connective(t.as_str()))
             .collect();
 
         // 1. Seed the leaf cells (shared with the packed path, §11 3c.3).
@@ -1967,8 +2020,10 @@ impl LexicalIndex {
                 // two-token reserved coordinator (`but` + `not`), keyed like `and`/`or` but matched as
                 // a sequence; `but` alone stays the sentential `but_subord`, so no conflict.
                 for c in (i + 1)..j {
-                    if tokens[c] != reserved::BUT
-                        || tokens.get(c + 1).map(String::as_str) != Some(reserved::NOT)
+                    if !self.reserved.is(&tokens[c], ReservedKind::ContrastiveBut)
+                        || !tokens
+                            .get(c + 1)
+                            .is_some_and(|t| self.reserved.is(t, ReservedKind::Negator))
                     {
                         continue;
                     }
@@ -2017,7 +2072,12 @@ impl LexicalIndex {
                 // members. Keyed on the trailing "each other" tokens, mirroring how
                 // coordination keys on `and`/`or`. The subject must be a (conjunctive)
                 // group — a reciprocal needs ≥2 distinct participants.
-                if j >= 3 && tokens[j - 1] == reserved::EACH && tokens[j] == reserved::OTHER {
+                if j >= 3
+                    && self
+                        .reserved
+                        .is(&tokens[j - 1], ReservedKind::ReciprocalEach)
+                    && self.reserved.is(&tokens[j], ReservedKind::ReciprocalOther)
+                {
                     // Verb spans [s, j-2]; subject group spans [i, s-1].
                     for s in (i + 1)..=(j - 2) {
                         let subjects = &chart[i][s - 1];
@@ -2054,7 +2114,7 @@ impl LexicalIndex {
                 // stripped — the contrast is semantic, deferred). A sentence-initial
                 // wh-`which` never matches (no noun spans `[i, c-1]`).
                 for c in (i + 1)..j {
-                    if !reserved::is_relativizer(tokens[c].as_str()) {
+                    if !self.reserved.is_relativizer(tokens[c].as_str()) {
                         continue;
                     }
                     let nouns = &chart[i][c - 1];
@@ -2080,14 +2140,14 @@ impl LexicalIndex {
                 // trailing comma after the clause is absorbed into this span so the appositive NP is
                 // adjacent to the matrix VP.
                 for c in (i + 2)..=j {
-                    if !reserved::is_relativizer(tokens[c].as_str()) {
+                    if !self.reserved.is_relativizer(tokens[c].as_str()) {
                         continue;
                     }
-                    if tokens[c - 1] != reserved::COMMA {
+                    if !self.reserved.is_comma(&tokens[c - 1]) {
                         continue;
                     }
                     let ante_end = c - 2; // antecedent NP is [i, c-2] (before the comma)
-                    let body_end = if tokens[j] == reserved::COMMA {
+                    let body_end = if self.reserved.is_comma(&tokens[j]) {
                         j - 1
                     } else {
                         j
@@ -2128,7 +2188,10 @@ impl LexicalIndex {
                 // subject NP + `S\NP` VP at every split, so it handles the ordinary subject-predicate
                 // clause; `which` here is the fronted prep's object, distinct from the bare relativizer.
                 for p in (i + 1)..j {
-                    if tokens.get(p + 1).map(|t| t.as_str()) != Some(reserved::WHICH) {
+                    if !tokens
+                        .get(p + 1)
+                        .is_some_and(|t| self.reserved.is(t, ReservedKind::WhRelativizer))
+                    {
                         continue;
                     }
                     if p < i + 1 || p + 2 > j {
@@ -2225,7 +2288,7 @@ impl LexicalIndex {
                 // so it can then forward-apply to the matrix clause. The comma is otherwise a reserved
                 // coordinator with no chart item, leaving a gap the modifier can't bridge. Restricted to
                 // `i == 0` (sentence-initial) to avoid competing with list-coordination commas.
-                if i == 0 && len >= 2 && tokens[j] == reserved::COMMA {
+                if i == 0 && len >= 2 && self.reserved.is_comma(&tokens[j]) {
                     let absorbed: Vec<Item> = chart[i][j - 1]
                         .iter()
                         .filter(|it| is_sentence_premod(it.cat()))
@@ -2988,31 +3051,6 @@ fn is_finite_clause(cat: &Exp) -> bool {
             matches!(fin, Exp::InductiveCtor(_, n, _) if n == "fin" || n == "fin_any")
         }
         _ => false,
-    }
-}
-
-/// The `Prop`-connective IRI a coordinating conjunction contributes, or `None` if the
-/// token is not a coordinator. These words are consumed by the parser's **coordination
-/// rule** (D63 §8.4), not via lexical entries — coordination is polymorphic over `Cat`,
-/// which `⟦·⟧` cannot denote. This is the single source of truth shared by the chart's
-/// `coord_op` table and the missing-lexeme signal [`LexicalIndex::has_token`] (so the
-/// pipeline never routes a structurally-handled connective to lexical recovery).
-///
-/// The symmetric coordinators `and`/`or`, plus the **list comma** `,` (D62 S0): a comma in a
-/// multi-item list (`A, B, C and D`) is a conjunctive separator, so it maps to `And` and the existing
-/// left-branching coordination builds the member group (`A, B` → group, `… and D` closes it). This is
-/// **structural** coverage; a mixed-connective list (`A, B or C`) has its comma-joined members
-/// approximated as `And` (the disjunction surfaces only at the final `or`) — a recorded approximation,
-/// faithful per-list connective propagation (core-en's list-completion, `conj.xsl`) is the follow-on.
-///
-/// Contrastive `but` is NOT here: core-en gives it its own family with a distinct `but(Arg1, Arg2)`
-/// relation — collapsing it to `And` would drop the adversative relation; deferred to the
-/// subordinator/discourse-connective work.
-pub fn coord_connective(token: &str) -> Option<&'static str> {
-    match token {
-        reserved::AND | reserved::COMMA => Some("urn:eigenius:logic:And"),
-        reserved::OR => Some("urn:eigenius:logic:Or"),
-        _ => None,
     }
 }
 

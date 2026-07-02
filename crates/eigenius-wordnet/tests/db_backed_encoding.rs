@@ -597,7 +597,7 @@ fn packed_win_probe() {
         // that-RELATIVE pile sentence — one of the worst unpacked (~199s in the noun-pile probe):
         "We analysed these data sets for genes that are selectively essential in cancer cells with MSI.",
     ];
-    let unpacked = build_index(&head);
+    let unpacked = build_index(&head).with_packing(false);
     let packed = build_index(&head).with_packing(true);
     for s in sentences {
         eprintln!("\n{s:?}");

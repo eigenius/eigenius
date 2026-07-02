@@ -351,3 +351,70 @@ property lexicon:prop : core:resource {
     class_types eigentt:TypeExpr;
     domain lexicon:Sentence;
 }
+
+// ── Reserved construct tokens (D63 §11 3g.3 / B10) ────────────────────
+// A grammatical function word that is NOT a lexical entry: a category-polymorphic
+// construct token (coordinator, relativizer, contrastive `but`, negator, reciprocal
+// `each`/`other`, list/appositive comma) the CKY keys reserved-word rules on. `⟦·⟧`
+// cannot denote these (they range over `Cat`), so they are not seeded as lexemes —
+// but the *form set* is data (this table), so a new coordinator/relativizer is added
+// without a code change. The construct *semantics* (which rule fires) stays the parser
+// engine; `construct_kind` is the tag it maps to its internal role. Loaded index-driven
+// at `LexicalIndex` build (`typed_resource_iris` over the `is_a` triple index — NOT a
+// full-chain resource scan), so it costs O(#reserved), not O(chain).
+class lexicon:ReservedConstruct {
+    description = "A reserved construct token (coordinator / relativizer / contrastive `but` / negator / reciprocal `each`·`other` / comma) keyed by a reserved-word CKY rule, not a lexical entry. The form set is data; the construct semantics is the parser engine.";
+    requires lexicon:construct_form, lexicon:construct_kind;
+}
+// A dedicated surface-form property (NOT `lexicon:form`, whose hard domain is `LexicalEntry`): a
+// reserved construct is not a lexical entry, and it is looked up by TYPE at build
+// (typed_resource_iris), never through the `lexicon:form` value index — so it neither belongs to that
+// domain nor should pollute that index.
+property lexicon:construct_form : core:string {
+    description = "The reserved construct's surface form (`and`, `,`, `which`, `each`, …).";
+    domain lexicon:ReservedConstruct;
+}
+// ReservedKind — the CLOSED vocabulary of grammatical roles a reserved construct plays, as a
+// resource enum (core's own `then_recommends` for a `resource` property is `class_types` +
+// `allows_only`, the value-level type check; a free `string` would only recommend a `pattern`). The
+// parser maps each individual's IRI to its internal `ReservedKind`; a coordinator's connective IRI
+// (logic:And / logic:Or) is derived from the kind. Narrowing the set is a retroactively-checked
+// change, and a typo'd `construct_kind` is rejected at commit rather than silently dropped at load.
+class lexicon:ReservedKind {
+    description = "The grammatical role a lexicon:ReservedConstruct plays — a resource enum (allows_only-constrained). The parser keys its reserved-word CKY rules on this.";
+}
+resource lexicon:rk_coord_and : lexicon:ReservedKind {
+    core:description = "`and` — conjunction (the list comma reads as this too).";
+}
+resource lexicon:rk_coord_or : lexicon:ReservedKind {
+    core:description = "`or` — disjunction.";
+}
+resource lexicon:rk_comma : lexicon:ReservedKind {
+    core:description = "The list / appositive / fronted-modifier comma `,` (reads as conjunction for lists).";
+}
+resource lexicon:rk_relativizer : lexicon:ReservedKind {
+    core:description = "`that` — restrictive relativizer (its complementizer use is a lexical leaf).";
+}
+resource lexicon:rk_wh_relativizer : lexicon:ReservedKind {
+    core:description = "`which` — wh-relativizer: the which-relative AND the pied-piping / wh marker.";
+}
+resource lexicon:rk_contrastive_but : lexicon:ReservedKind {
+    core:description = "`but` — the contrastive (first token of `but not`); plain `but` is the `but_subord` lexeme.";
+}
+resource lexicon:rk_negator : lexicon:ReservedKind {
+    core:description = "`not` — the second token of `but not`.";
+}
+resource lexicon:rk_reciprocal_each : lexicon:ReservedKind {
+    core:description = "`each` — first token of the reciprocal `each other`.";
+}
+resource lexicon:rk_reciprocal_other : lexicon:ReservedKind {
+    core:description = "`other` — second token of the reciprocal `each other`.";
+}
+property lexicon:construct_kind : core:resource {
+    description = "The reserved construct's grammatical role the CKY keys on — a lexicon:ReservedKind individual. allows_only enforces the closed vocabulary at commit; the parser maps the referenced IRI to its internal ReservedKind.";
+    class_types lexicon:ReservedKind;
+    allows_only lexicon:rk_coord_and, lexicon:rk_coord_or, lexicon:rk_comma,
+        lexicon:rk_relativizer, lexicon:rk_wh_relativizer, lexicon:rk_contrastive_but,
+        lexicon:rk_negator, lexicon:rk_reciprocal_each, lexicon:rk_reciprocal_other;
+    domain lexicon:ReservedConstruct;
+}
