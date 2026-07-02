@@ -94,6 +94,36 @@ normal-form status that governs future combinability.
   coordination is orthogonal to the `cat_n` pile. Every *pile-forming* rule (application,
   composition, N-N compound, attributive-Σ, determiner) is pack-safe — verified: they embed
   `left.sem`/`right.sem` as **opaque subterms** only.
+- **Erasing the type-index needs a PRECONDITION — the index-independence of functor slots (2026-06-30,
+  Option A).** `cat_shape` erases the type index, but `unify_type` does concrete subsumption
+  (`type_subsumes` → `is_subclass_of`, [category.rs](../../kernel/src/dcg/category.rs)) when a functor
+  argument slot is a **concrete** type. So combinability is index-dependent iff a functor slot is a
+  concrete subtype (not `Entity`-top / not a type variable). Checked both lexicons:
+  - **Imported corpus (WordNet+UMLS, 7.6M — the pile):** every verb/adj slot is
+    `cat_np(lexicon:Entity, …)` ([convert.rs:187](../../crates/eigenius-wordnet/src/convert.rs#L187)) →
+    `type_subsumes(Entity, X)` true for the whole noun lattice → **index-independent → `cat_shape`
+    packing is sound.**
+  - **Demo lexicon (battery):** has real selectional restrictions — `depends_on :
+    (S\NP_CellLine)/NP_Gene` ([lexicon.esl:152](../../experiments/lexicon/lexicon.esl#L152)) →
+    index-dependent → node-level `cat_shape` packing would be **unsound** there.
+
+  **DECISION — Option A (gated node-level packing).** Node-level packing by `(cat_shape, ENF-prov)`
+  collapses combination from O(N×M) per cell to **O(1) per node-pair** (the only thing that scales to
+  7.6M). Correctness is preserved regardless: node-level packing merely **defers selectional pruning
+  from parse-time `unify_type` to the felicity pop-filter** — the exact cube-pruning premise (pack the
+  syntax, defer the fine check). Final k-best is identical **iff felicity ⊇ `unify_type`** (the
+  differential oracle proves this). Its residual risk is a selectional lexicon causing the pop queue
+  to spin on locally-packed items that fail felicity — bounded by `max_pops`.
+
+  **Hardening — the static grammar-load guard + router.** Enforce the index-independence precondition
+  once, at grammar-load (not per parse): scan the active grammar's functor **argument** slots; set
+  `has_selectional_restrictions = true` if any is a concrete type other than `Entity` (or a type
+  variable). Router at parse start: `if !has_selectional_restrictions && packing_enabled` → the
+  **packed** CKY loop; **else** → the current **unpacked** loop (with `pos_prune`) — the default and
+  the fallback for selectional lexicons. So packing is *never* applied where its precondition fails
+  (fail-closed), and the differential oracle validates equivalence on a non-selectional corpus.
+  (Chosen over the shape-aware *beam* (Option C), which bounds a cell's output but still pays the
+  Cartesian `combinable` toll in the inner loop — no O(1) node-pair win.)
 
 ## 5. Data structures (grounded in today's `Item`/`Cost`/`classify_felicitous`)
 

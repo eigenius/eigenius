@@ -265,6 +265,44 @@ fn type_subsumes(sup: &Exp, sub: &Exp, layer: &Arc<Layer>) -> bool {
     }
 }
 
+/// The `lexicon:Entity` top type — the only *concrete* type index a functor argument slot may carry
+/// while remaining index-INDEPENDENT (`type_subsumes(Entity, X)` holds for the whole noun lattice).
+const ENTITY_TOP_IRI: &str = "urn:eigenius:lexicon:Entity";
+
+/// Does this category impose a **selectional restriction** — a functor ARGUMENT slot whose type
+/// index is a concrete class *other than* `Entity` (i.e. not a type variable and not the `Entity`
+/// top)? Such a slot makes combinability **index-dependent** ([`unify_type`] does concrete
+/// subsumption on it), so node-level packing by `cat_shape` — which erases the index — would be
+/// UNSOUND (D63 packed-forest blueprint §4, Option A). The grammar-load guard flags a grammar with
+/// any such slot and routes it to the unpacked CKY path; an index-independent grammar (every functor
+/// arg is a variable or `Entity`, as the WordNet/UMLS importer emits) is safe to pack.
+///
+/// Only ARGUMENT positions count — the `B` in `fwd(A, B)` / `bwd(A, B)`, recursively (a nested
+/// functor argument, e.g. a VP-adjunct's `S\NP`, has its own arg slots). A plain noun leaf
+/// `cat_n(Gene, sg)` is an *argument*, not a *slot*, so its concrete index does **not** flag.
+pub fn cat_has_selectional_slot(cat: &Exp) -> bool {
+    if let Exp::InductiveCtor(_, name, args) = cat {
+        if (name == "fwd" || name == "bwd") && args.len() == 2 {
+            // args[0] = result (covariant, may nest functors); args[1] = the argument slot.
+            return slot_is_concrete_nonentity(&args[1])
+                || cat_has_selectional_slot(&args[0])
+                || cat_has_selectional_slot(&args[1]);
+        }
+    }
+    false
+}
+
+/// Whether `slot` is a `cat_np`/`cat_n` whose type index is a concrete class other than `Entity`
+/// (a variable or the `Entity` top returns `false` — those are index-independent).
+fn slot_is_concrete_nonentity(slot: &Exp) -> bool {
+    for ctor in ["cat_np", "cat_n"] {
+        if let Some([ty, _num]) = is_ctor(slot, ctor) {
+            return matches!(ty, Exp::EigonClass(iri) if iri.as_str() != ENTITY_TOP_IRI);
+        }
+    }
+    false
+}
+
 /// Feature-meet (D63 §5.1): two feature values unify iff equal or either is the
 /// underspecified top (`*_any`). `Any = ⊤`, unification = meet (`⊓`). Public so
 /// `apply` can check determiner/noun number agreement on `cat_forall`.
