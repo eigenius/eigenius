@@ -136,13 +136,13 @@ fn encode_unit(
             }
         }
         1 => {
-            let sem = forest[0].sem.clone();
+            let sem = forest[0].sem().clone();
             let is_prop = gates_to_prop(layer, &sem);
             Outcome::Encoded { sem, is_prop }
         }
         n => {
             // forest is ranked by Cost; rank-0 is the stub selection.
-            let top_sem = forest[0].sem.clone();
+            let top_sem = forest[0].sem().clone();
             let is_prop = gates_to_prop(layer, &top_sem);
             Outcome::Ambiguous {
                 count: n,

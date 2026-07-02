@@ -571,7 +571,7 @@ impl LexicalIndex {
             for e in self.scoped(self.entries_for(&cand), None) {
                 let row = (
                     e.in_lexicon.is_none(),
-                    super::pretty_term(&e.item.cat),
+                    super::pretty_term(e.item.cat()),
                     e.sense.clone().unwrap_or_default(),
                 );
                 if seen.insert(row.clone()) {
@@ -600,7 +600,7 @@ impl LexicalIndex {
                 Some(order) => match &e.in_lexicon {
                     None => Some(e), // untagged = always available
                     Some(lx) => order.iter().position(|s| s == lx).map(|pos| {
-                        e.item.cost.lexicon_order = pos as u32;
+                        e.item.category.cost.lexicon_order = pos as u32;
                         e
                     }),
                 },
@@ -639,22 +639,34 @@ impl LexicalIndex {
     ) -> Vec<Item> {
         let s_lc = surface.trim().to_lowercase();
         let candidates = self.candidate_lemmas(surface, lemmatizer);
-        // Cross-POS prune (GH#97 experiment): a surface that itself has a closed-class grammatical
-        // reading is a known function word; drop the open-class NOMINAL readings of all its candidate
-        // lemmas (the compound-rule noise), keeping closed-class + open-class verb/adj/etc.
-        let surface_is_function = self.pos_prune
-            && self
-                .entries_for(&s_lc)
+        // Cross-POS prune (GH#97): a surface that is a known function word is a lexicon artifact when
+        // read as a noun; drop the open-class NOMINAL readings of all its candidate lemmas (the
+        // compound-rule noise), keeping closed-class + open-class verb/adj/etc. A surface counts as a
+        // function word if (a) it ITSELF carries a closed-class grammatical reading, OR (b) it is a
+        // MULTI-TOKEN surface every token of which does — i.e. a multi-word UMLS entry spanning only
+        // function words (e.g. the concept "Do not" = `cat_n(C3840725)` over the tokens "do"+"not").
+        // Case (b) is the whole-sentence noun-pile BRIDGE (GH#97 dump 2026-06-30): per-token prune
+        // kills each function word's noun reading, but a bilexical stop-word concept bypassed the
+        // single-surface check, so every clause with such a span folded into one giant compound noun.
+        // The LLM reranker cannot remove it (a sole reading is never cap-truncated), so the prune must.
+        let has_closed = |surf: &str| {
+            self.entries_for(surf)
                 .iter()
-                .any(|e| e.in_lexicon.is_none());
+                .any(|e| e.in_lexicon.is_none())
+        };
+        let surface_is_function = self.pos_prune
+            && (has_closed(&s_lc) || {
+                let toks: Vec<&str> = s_lc.split_whitespace().collect();
+                toks.len() > 1 && toks.iter().all(|t| has_closed(t))
+            });
         let mut out = Vec::new();
         for c in &candidates {
             let mut entries = self.scoped(self.entries_for(c), scope);
             if surface_is_function {
                 entries.retain(|e| {
                     e.in_lexicon.is_none()
-                        || !(is_ctor(&e.item.cat, "cat_n").is_some()
-                            || is_ctor(&e.item.cat, "cat_np").is_some())
+                        || !(is_ctor(e.item.cat(), "cat_n").is_some()
+                            || is_ctor(e.item.cat(), "cat_np").is_some())
                 });
             }
             if entries.is_empty() {
@@ -687,8 +699,8 @@ impl LexicalIndex {
         let kinds: Vec<Item> = out
             .iter()
             .filter_map(|it| {
-                crate::dcg::kind_subject(&it.cat, &it.sem)
-                    .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost))
+                crate::dcg::kind_subject(it.cat(), it.sem())
+                    .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
             })
             .collect();
         out.extend(kinds);
@@ -712,7 +724,7 @@ impl LexicalIndex {
     /// pl, so it can't use `these`/`a` directly), reusing their subject- + object-raised categories
     /// with the deferred sem. `Q` is freshened per span and typed at the felicity gate ⇒ an open parse.
     fn bare_mass_nps(&self, noun: &Item) -> Vec<Item> {
-        let Some([c, num]) = is_ctor(&noun.cat, "cat_n") else {
+        let Some([c, num]) = is_ctor(noun.cat(), "cat_n") else {
             return Vec::new();
         };
         if !matches!(num, Exp::InductiveCtor(_, n, _) if n == "mass") {
@@ -722,23 +734,23 @@ impl LexicalIndex {
         let Exp::InductiveCtor(num_decl, _, _) = num else {
             return Vec::new();
         };
-        let Exp::InductiveCtor(cat_decl, _, _) = &noun.cat else {
+        let Exp::InductiveCtor(cat_decl, _, _) = noun.cat() else {
             return Vec::new();
         };
         let sg = Exp::InductiveCtor(num_decl.clone(), "sg".into(), vec![]);
         let sg_cat = Exp::InductiveCtor(cat_decl.clone(), "cat_n".into(), vec![c.clone(), sg]);
-        let sg_noun = Item::with_cost(sg_cat, noun.sem.clone(), noun.cost);
+        let sg_noun = Item::with_cost(sg_cat, noun.sem().clone(), noun.cost());
         let subj = deferred_quant_subj_sem();
         let obj = deferred_quant_obj_sem();
         self.entries_for("a")
             .iter()
             .filter_map(|det| {
-                let sem = match cat_forall_body_head(&det.item.cat)? {
+                let sem = match cat_forall_body_head(det.item.cat())? {
                     "fwd" => subj.clone(),
                     "bwd" => obj.clone(),
                     _ => return None,
                 };
-                let synthetic = Item::with_cost(det.item.cat.clone(), sem, det.item.cost);
+                let synthetic = Item::with_cost(det.item.cat().clone(), sem, det.item.cost());
                 apply(&synthetic, &sg_noun, &self.layer)
             })
             .collect()
@@ -754,7 +766,7 @@ impl LexicalIndex {
     /// (`*gene is a vulnerability`) correctly does not shift. The `Q` sentinel is freshened per-span
     /// at chart placement and typed at the felicity gate.
     fn bare_plural_nps(&self, noun: &Item) -> Vec<Item> {
-        let Some([_c, num]) = is_ctor(&noun.cat, "cat_n") else {
+        let Some([_c, num]) = is_ctor(noun.cat(), "cat_n") else {
             return Vec::new();
         };
         if !matches!(num, Exp::InductiveCtor(_, n, _) if n == "pl") {
@@ -770,12 +782,12 @@ impl LexicalIndex {
         self.entries_for("these")
             .iter()
             .filter_map(|det| {
-                let sem = match cat_forall_body_head(&det.item.cat)? {
+                let sem = match cat_forall_body_head(det.item.cat())? {
                     "fwd" => subj.clone(),
                     "bwd" => obj.clone(),
                     _ => return None,
                 };
-                let synthetic = Item::with_cost(det.item.cat.clone(), sem, det.item.cost);
+                let synthetic = Item::with_cost(det.item.cat().clone(), sem, det.item.cost());
                 apply(&synthetic, noun, &self.layer)
             })
             .collect()
@@ -791,10 +803,10 @@ impl LexicalIndex {
     /// through the GQ-as-preposition-object rule. `None` unless the antecedent is a `cat_np`, the body
     /// a declarative `S/NP`/`S\NP`, the `a_obj` cat is loaded, and `logic:And` resolves.
     fn appositive_obj(&self, ante: &Item, body: &Item) -> Option<Item> {
-        let [c, _num] = is_ctor(&ante.cat, "cat_np")? else {
+        let [c, _num] = is_ctor(ante.cat(), "cat_np")? else {
             return None;
         };
-        let body_args = is_ctor(&body.cat, "fwd").or_else(|| is_ctor(&body.cat, "bwd"))?;
+        let body_args = is_ctor(body.cat(), "fwd").or_else(|| is_ctor(body.cat(), "bwd"))?;
         let [s, _np] = body_args else {
             return None;
         };
@@ -809,8 +821,8 @@ impl LexicalIndex {
         let entries = self.entries_for("a");
         let det = entries
             .iter()
-            .find(|d| cat_forall_body_head(&d.item.cat) == Some("bwd"))?;
-        let [_dnum, body_lam] = is_ctor(&det.item.cat, "cat_forall")? else {
+            .find(|d| cat_forall_body_head(d.item.cat()) == Some("bwd"))?;
+        let [_dnum, body_lam] = is_ctor(det.item.cat(), "cat_forall")? else {
             return None;
         };
         let Exp::Lam(Patt::Var(tvar), obj_body) = body_lam else {
@@ -822,12 +834,12 @@ impl LexicalIndex {
         // sem: λTV. λsubj. And(TV(r)(subj), body(r)) — the in-situ object raise conjoining the
         // appositive assertion on the antecedent referent `r`.
         let (tv, sj) = ("__appos_tv", "__appos_s");
-        let r = ante.sem.clone();
+        let r = ante.sem().clone();
         let tv_r_s = Exp::App(
             Box::new(Exp::App(Box::new(Exp::Var(tv.into())), Box::new(r.clone()))),
             Box::new(Exp::Var(sj.into())),
         );
-        let body_r = Exp::App(Box::new(body.sem.clone()), Box::new(r));
+        let body_r = Exp::App(Box::new(body.sem().clone()), Box::new(r));
         let sem = Exp::Lam(
             Patt::Var(tv.into()),
             Box::new(Exp::Lam(
@@ -838,7 +850,7 @@ impl LexicalIndex {
         Some(Item::with_cost(
             cat,
             sem,
-            ante.cost.saturating_add(body.cost),
+            ante.cost().saturating_add(body.cost()),
         ))
     }
 
@@ -859,7 +871,7 @@ impl LexicalIndex {
         adverb_bases(&s).iter().any(|b| {
             self.entries_for(b)
                 .iter()
-                .any(|e| is_adjective_cat(&e.item.cat))
+                .any(|e| is_adjective_cat(e.item.cat()))
         })
     }
 
@@ -1065,7 +1077,7 @@ impl LexicalIndex {
                         if !seen.insert(sense.clone()) {
                             continue;
                         }
-                        let gloss = self.sem_gloss(&e.item.sem).unwrap_or_default();
+                        let gloss = self.sem_gloss(e.item.sem()).unwrap_or_default();
                         senses.push(SenseCandidate { sense, gloss });
                     }
                 }
@@ -1164,11 +1176,11 @@ impl LexicalIndex {
                     // inside a possessive determiner's λ) is replaced with a fresh,
                     // per-occurrence free variable so distinct occurrences are distinct holes.
                     // The freshened var rides through CKY and is typed (`Entity`) at felicity.
-                    it.sem = freshen_anaphor(&it.sem, &hole_base(i, j));
+                    it.set_sem(freshen_anaphor(it.sem(), &hole_base(i, j)));
                     // Quantification-hole freshening (D62 bare-plural shift): the `$quanthole$`
                     // sentinel a bare-plural NP carries becomes a fresh per-span free var, typed
                     // `Π(A:Set).(A→Prop)→Prop`/`Quantification` at the felicity gate.
-                    it.sem = freshen_quant(&it.sem, &quant_hole_base(i, j));
+                    it.set_sem(freshen_quant(it.sem(), &quant_hole_base(i, j)));
                     chart[i][j].push(it);
                 }
                 // Derived `-ly` adverbs (D62 Phase 3): transparent modifier items for a single
@@ -1184,8 +1196,8 @@ impl LexicalIndex {
                     let fronted: Vec<Item> = chart[i][j]
                         .iter()
                         .filter_map(|it| {
-                            front_participial(&it.cat, &it.sem, &self.layer).map(|(c, s)| {
-                                Item::with_cost(c, freshen_anaphor(&s, &hole_base(i, j)), it.cost)
+                            front_participial(it.cat(), it.sem(), &self.layer).map(|(c, s)| {
+                                Item::with_cost(c, freshen_anaphor(&s, &hole_base(i, j)), it.cost())
                             })
                         })
                         .collect();
@@ -1269,21 +1281,21 @@ impl LexicalIndex {
                             // type-raising normal forms — does not apply: we have
                             // application + lexical type-raising + coordination,
                             // no composition rule. It returns when one lands.)
-                            if is_coordination(&r.sem) {
+                            if is_coordination(r.sem()) {
                                 continue;
                             }
-                            if cats_coordinate(&l.cat, &r.cat, &self.layer) {
+                            if cats_coordinate(l.cat(), r.cat(), &self.layer) {
                                 if let Some(sem) =
-                                    coordinate_sem(op, &l.cat, &l.sem, &r.sem, &self.layer)
+                                    coordinate_sem(op, l.cat(), l.sem(), r.sem(), &self.layer)
                                 {
                                     produced.push(Item::with_cost(
-                                        l.cat.clone(),
+                                        l.cat().clone(),
                                         sem,
-                                        l.cost.saturating_add(r.cost),
+                                        l.cost().saturating_add(r.cost()),
                                     ));
                                 }
                             } else if let Some((cat, sem)) =
-                                coordinate_np(op, &l.cat, &l.sem, &r.cat, &r.sem, &self.layer)
+                                coordinate_np(op, l.cat(), l.sem(), r.cat(), r.sem(), &self.layer)
                             {
                                 // NP coordination → a member-retaining `cat_group`
                                 // tagged with its connective (D63 §8.4 Phase 6).
@@ -1298,7 +1310,7 @@ impl LexicalIndex {
                                 produced.push(Item::with_cost(
                                     cat,
                                     sem,
-                                    l.cost.saturating_add(r.cost),
+                                    l.cost().saturating_add(r.cost()),
                                 ));
                             }
                         }
@@ -1323,27 +1335,30 @@ impl LexicalIndex {
                             // Prop-ending constituents (determined-NP / GQ objects, VPs, clauses):
                             // the general contrastive conjunction `a ∧ ¬b` — covers the WRN case
                             // `required the helicase activity but not its exonuclease activity`.
-                            if cats_coordinate(&l.cat, &r.cat, &self.layer) {
-                                if !is_coordination(&r.sem) {
-                                    if let Some(sem) =
-                                        coordinate_but_not_sem(&l.cat, &l.sem, &r.sem, &self.layer)
-                                    {
+                            if cats_coordinate(l.cat(), r.cat(), &self.layer) {
+                                if !is_coordination(r.sem()) {
+                                    if let Some(sem) = coordinate_but_not_sem(
+                                        l.cat(),
+                                        l.sem(),
+                                        r.sem(),
+                                        &self.layer,
+                                    ) {
                                         produced.push(Item::with_cost(
-                                            l.cat.clone(),
+                                            l.cat().clone(),
                                             sem,
-                                            l.cost.saturating_add(r.cost),
+                                            l.cost().saturating_add(r.cost()),
                                         ));
                                     }
                                 }
                             } else if let Some((cat, sem)) =
-                                coordinate_but_not(&l.cat, &l.sem, &r.cat, &r.sem, &self.layer)
+                                coordinate_but_not(l.cat(), l.sem(), r.cat(), r.sem(), &self.layer)
                             {
                                 // Bare-NAME objects (not Prop-ending): the `conn_but_not` group the
                                 // verb then distributes over as `V(O₁) ∧ ¬V(O₂)`.
                                 produced.push(Item::with_cost(
                                     cat,
                                     sem,
-                                    l.cost.saturating_add(r.cost),
+                                    l.cost().saturating_add(r.cost()),
                                 ));
                             }
                         }
@@ -1362,13 +1377,17 @@ impl LexicalIndex {
                         let verbs = &chart[s][j - 2];
                         for subj in subjects {
                             for tv in verbs {
-                                if let Some((cat, sem)) =
-                                    reciprocate(&subj.cat, &subj.sem, &tv.cat, &tv.sem, &self.layer)
-                                {
+                                if let Some((cat, sem)) = reciprocate(
+                                    subj.cat(),
+                                    subj.sem(),
+                                    tv.cat(),
+                                    tv.sem(),
+                                    &self.layer,
+                                ) {
                                     produced.push(Item::with_cost(
                                         cat,
                                         sem,
-                                        subj.cost.saturating_add(tv.cost),
+                                        subj.cost().saturating_add(tv.cost()),
                                     ));
                                 }
                             }
@@ -1395,11 +1414,12 @@ impl LexicalIndex {
                     let bodies = &chart[c + 1][j];
                     for noun in nouns {
                         for body in bodies {
-                            if let Some((cat, sem)) = relativize(&noun.cat, &body.cat, &body.sem) {
+                            if let Some((cat, sem)) = relativize(noun.cat(), body.cat(), body.sem())
+                            {
                                 produced.push(Item::with_cost(
                                     cat,
                                     sem,
-                                    noun.cost.saturating_add(body.cost),
+                                    noun.cost().saturating_add(body.cost()),
                                 ));
                             }
                         }
@@ -1431,16 +1451,16 @@ impl LexicalIndex {
                             // Subject-position (type-raised `S/(S\NP)`); prep-object rides this form
                             // through the GQ-as-preposition-object rule.
                             if let Some((cat, sem)) = relativize_appos(
-                                &ante.cat,
-                                &ante.sem,
-                                &body.cat,
-                                &body.sem,
+                                ante.cat(),
+                                ante.sem(),
+                                body.cat(),
+                                body.sem(),
                                 &self.layer,
                             ) {
                                 produced.push(Item::with_cost(
                                     cat,
                                     sem,
-                                    ante.cost.saturating_add(body.cost),
+                                    ante.cost().saturating_add(body.cost()),
                                 ));
                             }
                             // Verb-object position (in-situ object raise, mirroring `a_obj`).
@@ -1466,38 +1486,38 @@ impl LexicalIndex {
                     let preps: Vec<Exp> = self
                         .entries_for(tokens[p].as_str())
                         .iter()
-                        .filter(|e| is_vp_adjunct_prep(&e.item.cat))
-                        .map(|e| e.item.sem.clone())
+                        .filter(|e| is_vp_adjunct_prep(e.item.cat()))
+                        .map(|e| e.item.sem().clone())
                         .collect();
                     if preps.is_empty() {
                         continue;
                     }
                     for k in (p + 2)..j {
                         for noun in &chart[i][p - 1] {
-                            if is_ctor(&noun.cat, "cat_n").is_none() {
+                            if is_ctor(noun.cat(), "cat_n").is_none() {
                                 continue;
                             }
                             for subj in &chart[p + 2][k] {
-                                if is_ctor(&subj.cat, "cat_np").is_none() {
+                                if is_ctor(subj.cat(), "cat_np").is_none() {
                                     continue;
                                 }
                                 for vp in &chart[k + 1][j] {
                                     // VP must be `S\NP` (a clause missing its subject).
-                                    if !matches!(is_ctor(&vp.cat, "bwd"),
+                                    if !matches!(is_ctor(vp.cat(), "bwd"),
                                         Some([s, _]) if is_ctor(s, "cat_s").is_some())
                                     {
                                         continue;
                                     }
                                     for prep_sem in &preps {
                                         if let Some((cat, sem)) =
-                                            pied_pipe(&noun.cat, prep_sem, &subj.sem, &vp.sem)
+                                            pied_pipe(noun.cat(), prep_sem, subj.sem(), vp.sem())
                                         {
                                             produced.push(Item::with_cost(
                                                 cat,
                                                 sem,
-                                                noun.cost
-                                                    .saturating_add(subj.cost)
-                                                    .saturating_add(vp.cost),
+                                                noun.cost()
+                                                    .saturating_add(subj.cost())
+                                                    .saturating_add(vp.cost()),
                                             ));
                                         }
                                     }
@@ -1525,7 +1545,7 @@ impl LexicalIndex {
                         v
                     })
                     .map(|mut np| {
-                        np.sem = freshen_quant(&np.sem, &quant_hole_base(i, j));
+                        np.set_sem(freshen_quant(np.sem(), &quant_hole_base(i, j)));
                         np
                     })
                     .collect();
@@ -1543,8 +1563,8 @@ impl LexicalIndex {
                 let fronted: Vec<Item> = chart[i][j]
                     .iter()
                     .filter_map(|it| {
-                        front_participial(&it.cat, &it.sem, &self.layer).map(|(cat, sem)| {
-                            Item::with_cost(cat, freshen_anaphor(&sem, &hole_base(i, j)), it.cost)
+                        front_participial(it.cat(), it.sem(), &self.layer).map(|(cat, sem)| {
+                            Item::with_cost(cat, freshen_anaphor(&sem, &hole_base(i, j)), it.cost())
                         })
                     })
                     .collect();
@@ -1557,7 +1577,7 @@ impl LexicalIndex {
                 if i == 0 && len >= 2 && tokens[j] == "," {
                     let absorbed: Vec<Item> = chart[i][j - 1]
                         .iter()
-                        .filter(|it| is_sentence_premod(&it.cat))
+                        .filter(|it| is_sentence_premod(it.cat()))
                         .cloned()
                         .collect();
                     chart[i][j].extend(absorbed);
@@ -1588,9 +1608,9 @@ impl LexicalIndex {
                         for it in chart[i][j].iter().take(20) {
                             eprintln!(
                                 "    [{:?} cost={:?}] {}",
-                                it.prov,
-                                it.cost,
-                                super::pretty_term(&it.cat)
+                                it.prov(),
+                                it.cost(),
+                                super::pretty_term(it.cat())
                             );
                         }
                     }
@@ -1651,11 +1671,11 @@ impl LexicalIndex {
                 // determiner-subject clause is an unreduced `App` redex (subject-GQ applied to the
                 // VP), structurally identical to a pathological reading; only β-reduction in the
                 // felicity gate below tells them apart.
-                is_finite_clause(&it.cat) || is_ctor(&it.cat, "cat_q").is_some()
+                is_finite_clause(it.cat()) || is_ctor(it.cat(), "cat_q").is_some()
             })
             .collect();
         let n_candidates = candidates.len();
-        candidates.sort_by_key(|it| it.cost);
+        candidates.sort_by_key(|it| it.cost());
         candidates.truncate(CLASSIFY_BUDGET);
         if debug && n_candidates > candidates.len() {
             eprintln!(
@@ -1673,8 +1693,8 @@ impl LexicalIndex {
             if debug {
                 eprintln!(
                     "  [parse-debug cap={cap:?}] classify candidate {k}/{n_candidates}\n      cat={}\n      sem={}",
-                    super::pretty_term(&it.cat),
-                    super::pretty_term(&it.sem)
+                    super::pretty_term(it.cat()),
+                    super::pretty_term(it.sem())
                 );
             }
             if types_ok {
@@ -1697,7 +1717,7 @@ impl LexicalIndex {
         // silent loss — the dropped tail is logged. Stable sort + cost 0 everywhere
         // (closed-class / demo entries) ⇒ no ranking or cap effect there (order
         // preserved, sizes well under the cap), so exact-count tests are unaffected.
-        forest.sort_by_key(|it| it.cost);
+        forest.sort_by_key(|it| it.cost());
         if forest.len() > DEFAULT_FOREST_CAP {
             let dropped = forest.len() - DEFAULT_FOREST_CAP;
             eprintln!(
@@ -1707,30 +1727,25 @@ impl LexicalIndex {
             );
             forest.truncate(DEFAULT_FOREST_CAP);
         }
-        open.sort_by_key(|o| o.item.cost);
+        open.sort_by_key(|o| o.item.cost());
         if open.len() > DEFAULT_FOREST_CAP {
             open.truncate(DEFAULT_FOREST_CAP);
         }
         (forest, open)
     }
 
-    /// Normalize `it.sem` (NbE β-reduction → a normal form) and keep the item —
+    /// Normalize `it.sem()` (NbE β-reduction → a normal form) and keep the item —
     /// carrying the reduced sem — only if the kernel confirms it **inhabits `⟦cat⟧`**:
     /// `Prop` for a declarative `S`, `T → Prop` for a wh-question `Q(T)`. Uses
     /// check-mode (not `check_infer`) so a wh-question's answer-property *lambda* —
     /// which `check_infer` cannot synthesize — is checked against its expected Π/→.
     fn reduced_felicitous(&self, it: &Item) -> Option<Item> {
-        let expected = denote_cat(&it.cat).ok()?;
+        let expected = denote_cat(it.cat()).ok()?;
         let expected_val = eval(&expected, &Rho::Nil).ok()?;
-        let nf = felicity_readback(&eval(&it.sem, &Rho::Nil).ok()?)?;
+        let nf = felicity_readback(&eval(it.sem(), &Rho::Nil).ok()?)?;
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.layer));
         check(&mut ctx, &nf, &expected_val).ok()?;
-        Some(Item {
-            cat: it.cat.clone(),
-            sem: nf,
-            prov: it.prov,
-            cost: it.cost,
-        })
+        Some(Item::from_parts(it.cat().clone(), nf, it.prov(), it.cost()))
     }
 
     /// Classify a full-span candidate as a CLOSED felicitous parse or an OPEN one carrying
@@ -1751,9 +1766,9 @@ impl LexicalIndex {
         // Holes carried by this parse (tested on the raw, pre-reduction sem).
         let present: Vec<&(String, Exp, HoleKind)> = hole_specs
             .iter()
-            .filter(|(base, _, _)| exp_mentions_var(&it.sem, base))
+            .filter(|(base, _, _)| exp_mentions_var(it.sem(), base))
             .collect();
-        let expected = denote_cat(&it.cat).ok()?;
+        let expected = denote_cat(it.cat()).ok()?;
         let expected_val = eval(&expected, &Rho::Nil).ok()?;
         // Evaluate the assembled sem with each freshened hole base bound to a generic neutral
         // (else Pure eval errors on the free var). `Neut::Gen(0, base)` reads back as
@@ -1770,7 +1785,7 @@ impl LexicalIndex {
         if dbg {
             eprintln!("    [felicity] eval start");
         }
-        let evaled = eval(&it.sem, &eval_rho).ok()?;
+        let evaled = eval(it.sem(), &eval_rho).ok()?;
         if dbg {
             eprintln!("    [felicity] readback start");
         }
@@ -1797,12 +1812,7 @@ impl LexicalIndex {
             eprintln!("    [felicity] check start");
         }
         check(&mut ctx, &nf, &expected_val).ok()?;
-        let item = Item {
-            cat: it.cat.clone(),
-            sem: nf,
-            prov: it.prov,
-            cost: it.cost,
-        };
+        let item = Item::from_parts(it.cat().clone(), nf, it.prov(), it.cost());
         if infos.is_empty() {
             Some(FelicitousOutcome::Closed(item))
         } else {
@@ -1826,18 +1836,18 @@ impl LexicalIndex {
             let v = eval(ante, &Rho::Nil).ok()?;
             rho = rho.extend(Patt::Var(var.clone()), v);
         }
-        let nf = readback_val(0, &eval(&open.item.sem, &rho).ok()?);
-        let expected = denote_cat(&open.item.cat).ok()?;
+        let nf = readback_val(0, &eval(open.item.sem(), &rho).ok()?);
+        let expected = denote_cat(open.item.cat()).ok()?;
         let expected_val = eval(&expected, &Rho::Nil).ok()?;
         // Closed re-gate: empty Γ, so any leftover hole is an unbound variable ⇒ fail closed.
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.layer));
         check(&mut ctx, &nf, &expected_val).ok()?;
-        Some(Item {
-            cat: open.item.cat.clone(),
-            sem: nf,
-            prov: open.item.prov,
-            cost: open.item.cost,
-        })
+        Some(Item::from_parts(
+            open.item.cat().clone(),
+            nf,
+            open.item.prov(),
+            open.item.cost(),
+        ))
     }
 
     /// Resolve **every** hole of an [`OpenParse`] via an (untrusted) [`Proposer`], substituting
@@ -2140,7 +2150,7 @@ pub struct HoleInfo {
 /// An **open** parse (D64): a felicitous full-span `S` whose sem still carries unresolved
 /// referent holes (free variables). Each [`HoleInfo`] is a slot the D64 resolver fills (by
 /// substituting a chain antecedent + re-gating — [`LexicalIndex::resolve_open`]). The kernel
-/// type-checked `item.sem` with each hole bound to its type; it is NOT a closed final parse.
+/// type-checked `item.sem()` with each hole bound to its type; it is NOT a closed final parse.
 #[derive(Clone)]
 pub struct OpenParse {
     pub item: Item,
@@ -2260,7 +2270,7 @@ fn beam_cell(cell: &mut Vec<Item>, beam: usize) -> usize {
         return 0;
     }
     let dropped = cell.len() - beam;
-    cell.sort_by_key(|it| it.cost);
+    cell.sort_by_key(|it| it.cost());
     cell.truncate(beam);
     dropped
 }
@@ -2272,7 +2282,7 @@ fn beam_cell(cell: &mut Vec<Item>, beam: usize) -> usize {
 fn cell_histogram(cell: &[Item]) -> String {
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for it in cell {
-        *counts.entry(super::cat_shape(&it.cat)).or_default() += 1;
+        *counts.entry(super::cat_shape(it.cat())).or_default() += 1;
     }
     let distinct = counts.len();
     let mut pairs: Vec<(String, usize)> = counts.into_iter().collect();
@@ -2302,7 +2312,7 @@ fn sense_cap_key(e: &SeedEntry, ranks: Option<&BTreeMap<String, u32>>) -> (bool,
         .sense
         .as_ref()
         .and_then(|s| ranks.and_then(|m| m.get(s).copied()));
-    (ctx.is_none(), ctx.unwrap_or(0), e.item.cost.sense_rank)
+    (ctx.is_none(), ctx.unwrap_or(0), e.item.cost().sense_rank)
 }
 
 /// Forward bounded type-raise (D63 §8.9 Slice 6-T) every name `NP` in a cell's items
@@ -2312,12 +2322,8 @@ fn raise_nps(items: &[Item], layer: &Arc<Layer>) -> Vec<Item> {
     items
         .iter()
         .filter_map(|it| {
-            type_raise(&it.cat, &it.sem, layer).map(|(cat, sem)| Item {
-                cat,
-                sem,
-                prov: Combinator::TypeRaised,
-                cost: it.cost,
-            })
+            type_raise(it.cat(), it.sem(), layer)
+                .map(|(cat, sem)| Item::from_parts(cat, sem, Combinator::TypeRaised, it.cost()))
         })
         .collect()
 }
@@ -2377,22 +2383,18 @@ fn is_coordination(sem: &Exp) -> bool {
 /// names, and multiword leaves pass through unchanged. The `lexicon:Num` decl is
 /// reused from the existing `num_any` ctor, so no decl lookup is needed.
 fn with_noun_num(it: &Item, num_name: &str) -> Item {
-    if let Exp::InductiveCtor(decl, name, args) = &it.cat {
+    if let Exp::InductiveCtor(decl, name, args) = it.cat() {
         if name == "cat_n" && args.len() == 2 {
             if let Exp::InductiveCtor(num_decl, n, _) = &args[1] {
                 if n == "num_any" {
                     let num =
                         Exp::InductiveCtor(num_decl.clone(), num_name.to_string(), Vec::new());
-                    return Item {
-                        cat: Exp::InductiveCtor(
-                            decl.clone(),
-                            name.clone(),
-                            vec![args[0].clone(), num],
-                        ),
-                        sem: it.sem.clone(),
-                        prov: it.prov,
-                        cost: it.cost,
-                    };
+                    return Item::from_parts(
+                        Exp::InductiveCtor(decl.clone(), name.clone(), vec![args[0].clone(), num]),
+                        it.sem().clone(),
+                        it.prov(),
+                        it.cost(),
+                    );
                 }
             }
         }

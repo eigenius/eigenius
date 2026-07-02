@@ -296,7 +296,7 @@ fn cell_beam_bounds_a_cell_and_is_a_noop_when_generous() {
         1,
         "a tight cell beam drops the costlier sense"
     );
-    let sem = format!("{:?}", forest[0].sem);
+    let sem = format!("{:?}", forest[0].sem());
     assert!(
         sem.contains("brca1"),
         "the surviving (cheaper, sr0) reading is the BRCA1 sense: {sem}"
@@ -317,8 +317,8 @@ fn transparent_ly_adverb_is_recognized_and_does_not_change_the_claim() {
     let mod_adj = index.parse("HeLa is primarily primary", &Identity);
     assert!(!mod_adj.is_empty(), "the adverb-modified adjective parses");
     assert_eq!(
-        pretty_term(&mod_adj[0].sem),
-        pretty_term(&base_adj[0].sem),
+        pretty_term(mod_adj[0].sem()),
+        pretty_term(base_adj[0].sem()),
         "the `-ly` adverb is transparent — same claim as unmodified"
     );
 
@@ -328,8 +328,8 @@ fn transparent_ly_adverb_is_recognized_and_does_not_change_the_claim() {
     let mod_vp = index.parse("HeLa largely affects BRCA1", &Identity);
     assert!(!mod_vp.is_empty(), "the adverb-modified VP parses");
     assert_eq!(
-        pretty_term(&mod_vp[0].sem),
-        pretty_term(&base_vp[0].sem),
+        pretty_term(mod_vp[0].sem()),
+        pretty_term(base_vp[0].sem()),
         "the `-ly` VP adverb is transparent — same claim as unmodified"
     );
 }
@@ -386,8 +386,8 @@ fn connectives_batch_parses() {
         let f = index.parse(sent, &Identity);
         assert!(!f.is_empty(), "`{sent}` parses");
         assert_eq!(
-            pretty_term(&f[0].sem),
-            pretty_term(&base[0].sem),
+            pretty_term(f[0].sem()),
+            pretty_term(base[0].sem()),
             "discourse adverb is transparent (same claim): `{sent}`"
         );
     }
@@ -477,14 +477,14 @@ fn pied_piping_relative_threads_the_antecedent_into_the_fronted_preposition() {
     ] {
         let forest = index.parse(s, &Identity);
         assert!(!forest.is_empty(), "pied-piping parses: {s}");
-        let sem = pretty_term(&forest[0].sem);
+        let sem = pretty_term(forest[0].sem());
         assert!(
             sem.contains(prep) && sem.contains("affects"),
             "pied-piping threads the antecedent into the `{prep}` relation: {sem}"
         );
         // Kernel-gated to Prop.
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-        let ty = check_infer(&mut ctx, &forest[0].sem).expect("type-checks");
+        let ty = check_infer(&mut ctx, forest[0].sem()).expect("type-checks");
         assert_eq!(readback_val(0, &ty), Exp::Sort(0), "inhabits Prop: {s}");
     }
     // Restrictive (non-pied) relative still parses — no regression.
@@ -509,7 +509,7 @@ fn fronted_participial_adjunct_is_an_open_parse_with_a_controlled_subject() {
         "the controlled subject is unresolved ⇒ not a closed parse"
     );
     assert!(!open.is_empty(), "fronted participial yields an open parse");
-    let sem = pretty_term(&open[0].item.sem);
+    let sem = pretty_term(open[0].item.sem());
     assert!(
         sem.starts_with("And(") && sem.matches("affects").count() == 2,
         "conjoins the matrix and the participial proposition (controlled subject a hole): {sem}"
@@ -533,9 +533,9 @@ fn fronted_participial_adjunct_is_an_open_parse_with_a_controlled_subject() {
         "leaf participle has one controlled-subject hole"
     );
     assert!(
-        pretty_term(&lo[0].item.sem).contains("arises"),
+        pretty_term(lo[0].item.sem()).contains("arises"),
         "leaf participial proposition asserted: {}",
-        pretty_term(&lo[0].item.sem)
+        pretty_term(lo[0].item.sem())
     );
 
     // The comma is required by the construction but the absorption makes the comma-less variant parse
@@ -557,7 +557,7 @@ fn non_restrictive_relative_in_object_and_prep_object_position() {
     // Verb direct object: "HeLa affects [BRCA1, which affects HeLa]".
     let vo = index.parse("HeLa affects BRCA1 , which affects HeLa", &Identity);
     assert!(!vo.is_empty(), "verb-object appositive parses");
-    let vsem = pretty_term(&vo[0].sem);
+    let vsem = pretty_term(vo[0].sem());
     assert!(
         vsem.starts_with("And(") && vsem.matches("affects").count() == 2,
         "verb-object appositive conjoins matrix + relative assertion: {vsem}"
@@ -570,10 +570,10 @@ fn non_restrictive_relative_in_object_and_prep_object_position() {
     );
     assert!(!po.is_empty(), "prep-object appositive parses");
     assert!(
-        pretty_term(&po[0].sem).contains("affects")
-            && pretty_term(&po[0].sem).contains("prep_within"),
+        pretty_term(po[0].sem()).contains("affects")
+            && pretty_term(po[0].sem()).contains("prep_within"),
         "prep-object appositive conjoins the relative assertion into the PP: {}",
-        pretty_term(&po[0].sem)
+        pretty_term(po[0].sem())
     );
 }
 
@@ -585,7 +585,7 @@ fn transitional_adverbs_and_fronted_comma_parse() {
     let (_layer, index) = index_over_bootstrap();
     let base = index.parse("HeLa affects BRCA1", &Identity);
     assert_eq!(base.len(), 1, "baseline parses once");
-    let base_sem = pretty_term(&base[0].sem);
+    let base_sem = pretty_term(base[0].sem());
     for s in [
         "thus HeLa affects BRCA1",      // sentence-initial transitional, no comma
         "thus , HeLa affects BRCA1",    // + fronted-comma absorption
@@ -595,7 +595,7 @@ fn transitional_adverbs_and_fronted_comma_parse() {
         let f = index.parse(s, &Identity);
         assert!(!f.is_empty(), "`{s}` parses");
         assert_eq!(
-            pretty_term(&f[0].sem),
+            pretty_term(f[0].sem()),
             base_sem,
             "transitional/degree adverb is transparent (same claim): `{s}`"
         );
@@ -611,14 +611,14 @@ fn non_restrictive_relative_is_a_separate_assertion() {
     let (layer, index) = index_over_bootstrap();
     let forest = index.parse("BRCA1 , which affects HeLa , is primary", &Identity);
     assert!(!forest.is_empty(), "non-restrictive relative parses");
-    let sem = pretty_term(&forest[0].sem);
+    let sem = pretty_term(forest[0].sem());
     assert!(
         sem.contains("And") && sem.contains("is_primary") && sem.contains("affects"),
         "non-restrictive relative conjoins the matrix and the relative assertion: {sem}"
     );
     // Each parse still inhabits Prop (kernel-gated).
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &forest[0].sem).expect("type-checks");
+    let ty = check_infer(&mut ctx, forest[0].sem()).expect("type-checks");
     assert_eq!(readback_val(0, &ty), Exp::Sort(0), "inhabits Prop");
 
     // Regression: the RESTRICTIVE relative (no comma) still Σ-refines the noun (not conjoined).
@@ -695,9 +695,9 @@ fn vp_adjunct_pp_attaches_inside_a_base_vp() {
         index
             .parse(s, &Identity)
             .iter()
-            .map(|it| match eval(&it.sem, &Rho::Nil) {
+            .map(|it| match eval(it.sem(), &Rho::Nil) {
                 Ok(v) => pretty_term(&readback_val(0, &v)),
-                Err(_) => pretty_term(&it.sem),
+                Err(_) => pretty_term(it.sem()),
             })
             .collect()
     };
@@ -791,7 +791,7 @@ fn but_not_contrastive_object_ellipsis() {
     // Bare-name objects (group path).
     let f = index.parse("HeLa affects BRCA1 but not HeLa", &Identity);
     assert!(!f.is_empty(), "bare-name `but not` parses");
-    let sem = pretty_term(&f[0].sem);
+    let sem = pretty_term(f[0].sem());
     assert!(
         sem.starts_with("And(") && sem.contains("False"),
         "affirms O₁, negates O₂ (`→ False`): {sem}"
@@ -804,7 +804,7 @@ fn but_not_contrastive_object_ellipsis() {
         closed.is_empty() && !open.is_empty(),
         "possessive O₂ yields an open parse (the WRN `but not its …` shape)"
     );
-    let osem = pretty_term(&open[0].item.sem);
+    let osem = pretty_term(open[0].item.sem());
     assert!(
         osem.contains("And(") && osem.contains("False") && osem.contains("poss_of"),
         "the contrastive conjunction negates the possessive conjunct: {osem}"
@@ -857,9 +857,9 @@ fn light_verb_give_rise_to_is_a_multiword_transitive() {
     let f = index.parse("HeLa gives rise to BRCA1", &Identity);
     assert!(!f.is_empty(), "3sg light verb parses");
     assert!(
-        pretty_term(&f[0].sem).contains("give_rise_to"),
+        pretty_term(f[0].sem()).contains("give_rise_to"),
         "maps to the causation axiom: {}",
-        pretty_term(&f[0].sem)
+        pretty_term(f[0].sem())
     );
     assert!(
         !index.parse("HeLa gave rise to BRCA1", &Identity).is_empty(),
@@ -904,7 +904,7 @@ fn sense_reranker_overrides_static_cap_order() {
     // Static cap(1), no reranker: keeps rank-0 (BRCA1) → the parse's sem mentions BRCA1.
     let forest = index_with_zarg(1, None).parse("zarg affects HeLa", &Identity);
     assert_eq!(forest.len(), 1, "one parse survives the cap");
-    let sem = format!("{:?}", forest[0].sem);
+    let sem = format!("{:?}", forest[0].sem());
     assert!(
         sem.contains("brca1"),
         "static cap keeps the rank-0 (BRCA1) sense: {sem}"
@@ -915,7 +915,7 @@ fn sense_reranker_overrides_static_cap_order() {
     let forest = index_with_zarg(1, Some(Box::new(PreferSense("zarg.1"))))
         .parse("zarg affects HeLa", &Identity);
     assert_eq!(forest.len(), 1, "still one parse survives the cap");
-    let sem = format!("{:?}", forest[0].sem);
+    let sem = format!("{:?}", forest[0].sem());
     assert!(
         !sem.contains("brca1"),
         "the reranker dropped the rank-0 BRCA1 sense from the cap: {sem}"
@@ -935,11 +935,11 @@ fn assert_parses_to_prop(sentence: &str) {
     );
     for p in &forest {
         assert!(
-            is_ctor(&p.cat, "cat_s").is_some(),
+            is_ctor(p.cat(), "cat_s").is_some(),
             "'{sentence}': each parse is an S"
         );
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-        let ty = check_infer(&mut ctx, &p.sem)
+        let ty = check_infer(&mut ctx, p.sem())
             .unwrap_or_else(|e| panic!("'{sentence}' must type-check: {e}"));
         assert_eq!(
             readback_val(0, &ty),
@@ -1244,13 +1244,13 @@ fn clausal_complement_parses_intensionally() {
     let forest = index.parse("HeLa shows that BRCA1 affects HeLa", &Identity);
     assert_eq!(forest.len(), 1, "exactly one clausal-complement parse");
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &forest[0].sem).expect("clausal sem type-checks");
+    let ty = check_infer(&mut ctx, forest[0].sem()).expect("clausal sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
         Exp::Sort(0),
         "a report clause denotes Prop"
     );
-    match &forest[0].sem {
+    match forest[0].sem() {
         Exp::App(f, _) => match &**f {
             Exp::App(g, _) => assert!(
                 matches!(&**g, Exp::EigonAxiom(iri) if iri.as_str() == "urn:eigenius:lexicon:shows"),
@@ -1291,7 +1291,7 @@ fn conditional_if_builds_native_implication() {
     let forest = index.parse("HeLa affects BRCA1 if BRCA1 affects HeLa", &Identity);
     assert_eq!(forest.len(), 1, "exactly one conditional parse");
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &forest[0].sem).expect("conditional sem type-checks");
+    let ty = check_infer(&mut ctx, forest[0].sem()).expect("conditional sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
         Exp::Sort(0),
@@ -1301,9 +1301,9 @@ fn conditional_if_builds_native_implication() {
     // arrow to a Pi), NOT an opaque operator application. This is the whole point: a
     // proof of the antecedent yields the consequent by ordinary function application.
     assert!(
-        matches!(&forest[0].sem, Exp::Pi(_, _, _)),
+        matches!(forest[0].sem(), Exp::Pi(_, _, _)),
         "`if` builds native implication (a Pi/arrow, not an opaque App), got {:?}",
-        forest[0].sem
+        forest[0].sem()
     );
 }
 
@@ -1318,14 +1318,14 @@ fn contrastive_but_maps_to_conjunction() {
     let forest = index.parse("HeLa affects BRCA1 but BRCA1 affects HeLa", &Identity);
     assert_eq!(forest.len(), 1, "exactly one but parse");
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &forest[0].sem).expect("but sem type-checks");
+    let ty = check_infer(&mut ctx, forest[0].sem()).expect("but sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
         Exp::Sort(0),
         "a but-clause denotes Prop"
     );
-    let conjuncts = and_conjuncts(&forest[0].sem)
-        .unwrap_or_else(|| panic!("`but` maps to logic:And, got {:?}", forest[0].sem));
+    let conjuncts = and_conjuncts(forest[0].sem())
+        .unwrap_or_else(|| panic!("`but` maps to logic:And, got {:?}", forest[0].sem()));
     assert_eq!(
         conjuncts.len(),
         2,
@@ -1360,7 +1360,7 @@ fn referential_pronoun_yields_an_open_parse_with_a_hole() {
         open[0].holes
     );
     assert!(
-        is_ctor(&open[0].item.cat, "cat_s").is_some(),
+        is_ctor(open[0].item.cat(), "cat_s").is_some(),
         "the open parse is a sentence (S)"
     );
 
@@ -1430,7 +1430,7 @@ fn possessive_determiner_yields_an_open_parse_with_a_possessor_hole() {
         open[0].holes
     );
     assert!(
-        is_ctor(&open[0].item.cat, "cat_s").is_some(),
+        is_ctor(open[0].item.cat(), "cat_s").is_some(),
         "the open parse is a sentence (S)"
     );
 
@@ -1493,7 +1493,7 @@ fn resolve_open_substitutes_an_antecedent_and_re_gates() {
 
     // The resolved parse is closed and type-checks to Prop (re-gated by the kernel).
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &resolved.sem).expect("resolved sem type-checks");
+    let ty = check_infer(&mut ctx, resolved.sem()).expect("resolved sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
         Exp::Sort(0),
@@ -1549,7 +1549,7 @@ fn resolve_loop_with_mock_proposer_resolves_and_fails_closed() {
         )
         .expect("mock-proposed antecedent resolves through the kernel re-gate");
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &resolved.sem).expect("resolved sem type-checks");
+    let ty = check_infer(&mut ctx, resolved.sem()).expect("resolved sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
         Exp::Sort(0),
@@ -1598,7 +1598,7 @@ fn live_anthropic_proposer_resolves_a_referent_through_the_kernel() {
         .resolve_with(&open[0], "it affects HeLa", &candidates, &proposer)
         .expect("live LLM proposes an antecedent the kernel re-gates to a closed Prop");
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &resolved.sem).expect("resolved sem type-checks");
+    let ty = check_infer(&mut ctx, resolved.sem()).expect("resolved sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
         Exp::Sort(0),
@@ -1639,16 +1639,16 @@ fn comparative_compares_degrees() {
     let forest = index.parse("HeLa is larger than BRCA1", &Identity);
     assert_eq!(forest.len(), 1, "exactly one comparative parse");
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &forest[0].sem).expect("comparative sem type-checks");
+    let ty = check_infer(&mut ctx, forest[0].sem()).expect("comparative sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
         Exp::Sort(0),
         "comparative denotes Prop"
     );
     assert!(
-        is_gt_headed(&forest[0].sem),
+        is_gt_headed(forest[0].sem()),
         "comparative is headed by measurements:gt, got {:?}",
-        forest[0].sem
+        forest[0].sem()
     );
 }
 
@@ -1660,9 +1660,9 @@ fn positive_gradable_adjective_is_measure_based() {
     let forest = index.parse("HeLa is large", &Identity);
     assert_eq!(forest.len(), 1, "exactly one positive parse");
     assert!(
-        is_gt_headed(&forest[0].sem),
+        is_gt_headed(forest[0].sem()),
         "the measure-based positive is headed by measurements:gt, got {:?}",
-        forest[0].sem
+        forest[0].sem()
     );
     assert_parses_to_prop("HeLa is large");
 }
@@ -1711,21 +1711,21 @@ fn pp_adjunct_adds_an_opaque_conjunct() {
     let forest = index.parse("HeLa affects BRCA1 in HeLa", &Identity);
     assert!(!forest.is_empty(), "the PP-adjunct sentence must parse");
     let has_prep = forest.iter().any(|p| {
-        matches!(&p.sem, Exp::InductiveType(decl, args)
+        matches!(p.sem(), Exp::InductiveType(decl, args)
             if decl.name == "And" && args.len() == 2
                 && head_is_axiom(&args[1], "urn:eigenius:ontology:prep_in"))
     });
     assert!(
         has_prep,
         "a parse is And(VP-predication, prep_in(s, x)); got {:?}",
-        forest[0].sem
+        forest[0].sem()
     );
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
     let p = forest
         .iter()
-        .find(|p| matches!(&p.sem, Exp::InductiveType(decl, _) if decl.name == "And"))
+        .find(|p| matches!(p.sem(), Exp::InductiveType(decl, _) if decl.name == "And"))
         .unwrap();
-    let ty = check_infer(&mut ctx, &p.sem).expect("PP-adjunct sem type-checks");
+    let ty = check_infer(&mut ctx, p.sem()).expect("PP-adjunct sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
         Exp::Sort(0),
@@ -1764,9 +1764,9 @@ fn n_n_kind_compound_refines_with_compound_kind() {
     assert!(
         forest
             .iter()
-            .any(|p| sem_mentions_axiom(&p.sem, "urn:eigenius:ontology:compound_kind")),
+            .any(|p| sem_mentions_axiom(p.sem(), "urn:eigenius:ontology:compound_kind")),
         "a parse refines the head with ontology:compound_kind; got {:?}",
-        forest[0].sem
+        forest[0].sem()
     );
     assert_parses_to_prop("a gene cell line affects HeLa");
 }
@@ -1785,9 +1785,9 @@ fn pp_noun_modifier_refines_the_head() {
     assert!(
         forest
             .iter()
-            .any(|p| sem_mentions_axiom(&p.sem, "urn:eigenius:ontology:prep_of")),
+            .any(|p| sem_mentions_axiom(p.sem(), "urn:eigenius:ontology:prep_of")),
         "a parse refines the head with ontology:prep_of; got {:?}",
-        forest[0].sem
+        forest[0].sem()
     );
     assert_parses_to_prop("a cell line of BRCA1 affects HeLa");
 }
@@ -1809,13 +1809,13 @@ fn pp_attachment_is_ambiguous() {
     assert!(
         forest
             .iter()
-            .any(|p| matches!(&p.sem, Exp::InductiveType(d, _) if d.name == "And")),
+            .any(|p| matches!(p.sem(), Exp::InductiveType(d, _) if d.name == "And")),
         "one attachment conjoins the locative at the VP (And-headed)"
     );
     assert!(
         forest
             .iter()
-            .any(|p| !matches!(&p.sem, Exp::InductiveType(d, _) if d.name == "And")),
+            .any(|p| !matches!(p.sem(), Exp::InductiveType(d, _) if d.name == "And")),
         "the other attachment refines the object noun (not top-level And)"
     );
     assert_parses_to_prop("HeLa affects a cell line in HeLa");
@@ -1932,7 +1932,7 @@ fn distributive_np_coordination_parses() {
     let (_layer, index) = index_over_bootstrap();
     let forest = index.parse("HeLa and BRCA1 affect HeLa", &Identity);
     assert_eq!(forest.len(), 1, "exactly one distributive parse");
-    let conjuncts = and_conjuncts(&forest[0].sem)
+    let conjuncts = and_conjuncts(forest[0].sem())
         .expect("distributive sem is a logic:And of the per-member predications");
     assert_eq!(
         conjuncts.len(),
@@ -1955,7 +1955,7 @@ fn disjunctive_np_coordination_distributes_with_or() {
         1,
         "exactly one disjunctive-distributive parse"
     );
-    let disjuncts = conn_chain(&forest[0].sem, "Or")
+    let disjuncts = conn_chain(forest[0].sem(), "Or")
         .expect("disjunctive sem is a logic:Or of the per-member predications");
     assert_eq!(disjuncts.len(), 2, "two members ⇒ two disjuncts");
 }
@@ -1971,7 +1971,7 @@ fn distributive_object_coordination_parses() {
     let forest = index.parse("HeLa affects BRCA1 and HeLa", &Identity);
     assert_eq!(forest.len(), 1, "exactly one distributive-object parse");
     assert_eq!(
-        and_conjuncts(&forest[0].sem).map(|c| c.len()),
+        and_conjuncts(forest[0].sem()).map(|c| c.len()),
         Some(2),
         "two object members ⇒ two conjuncts"
     );
@@ -1986,7 +1986,7 @@ fn distributive_object_coordination_with_or_parses() {
     let forest = index.parse("HeLa affects BRCA1 or HeLa", &Identity);
     assert_eq!(forest.len(), 1, "exactly one disjunctive-object parse");
     assert_eq!(
-        conn_chain(&forest[0].sem, "Or").map(|c| c.len()),
+        conn_chain(forest[0].sem(), "Or").map(|c| c.len()),
         Some(2),
         "two object members ⇒ two disjuncts"
     );
@@ -2015,7 +2015,7 @@ fn collective_np_coordination_parses() {
     let (_layer, index) = index_over_bootstrap();
     let forest = index.parse("HeLa and BRCA1 form a complex", &Identity);
     assert_eq!(forest.len(), 1, "exactly one collective parse");
-    match &forest[0].sem {
+    match forest[0].sem() {
         Exp::App(_head, arg) => assert_eq!(
             cons_len(arg),
             Some(2),
@@ -2051,7 +2051,7 @@ fn reciprocal_np_coordination_parses() {
     assert_eq!(forest.len(), 1, "exactly one reciprocal parse");
     // 2 members ⇒ 2 ordered distinct pairs ⇒ 2 conjuncts.
     assert_eq!(
-        and_conjuncts(&forest[0].sem).map(|c| c.len()),
+        and_conjuncts(forest[0].sem()).map(|c| c.len()),
         Some(2),
         "two members ⇒ two ordered-pair conjuncts"
     );
@@ -2064,7 +2064,7 @@ fn reciprocal_three_members_has_six_ordered_pairs() {
     let forest = index.parse("HeLa and BRCA1 and HeLa affect each other", &Identity);
     assert_eq!(forest.len(), 1, "exactly one reciprocal parse");
     assert_eq!(
-        and_conjuncts(&forest[0].sem).map(|c| c.len()),
+        and_conjuncts(forest[0].sem()).map(|c| c.len()),
         Some(6),
         "three members ⇒ 3·2 = 6 ordered-pair conjuncts"
     );
@@ -2103,14 +2103,14 @@ fn subject_wh_what_parses_to_an_entity_answer_property() {
     let forest = index.parse("what affects HeLa", &Identity);
     assert_eq!(forest.len(), 1, "exactly one subject-wh parse");
     assert_eq!(
-        cat_q_type(&forest[0].cat).as_deref(),
+        cat_q_type(forest[0].cat()).as_deref(),
         Some("urn:eigenius:lexicon:Entity"),
         "'what' queries the Entity top"
     );
     assert!(
-        matches!(&forest[0].sem, Exp::Lam(_, _)),
+        matches!(forest[0].sem(), Exp::Lam(_, _)),
         "the answer-property is a λ (T → Prop), got {:?}",
-        forest[0].sem
+        forest[0].sem()
     );
 }
 
@@ -2125,12 +2125,12 @@ fn subject_wh_which_narrows_the_answer_type_to_the_noun() {
     let forest = index.parse("which cell line affects HeLa", &Identity);
     assert_eq!(forest.len(), 1, "exactly one restricted subject-wh parse");
     assert_eq!(
-        cat_q_type(&forest[0].cat).as_deref(),
+        cat_q_type(forest[0].cat()).as_deref(),
         Some("urn:eigenius:lexicon:CellLine"),
         "'which cell line' narrows the queried type to CellLine"
     );
     assert!(
-        matches!(&forest[0].sem, Exp::Lam(_, _)),
+        matches!(forest[0].sem(), Exp::Lam(_, _)),
         "answer-property is a λ"
     );
 }
@@ -2166,12 +2166,12 @@ fn polar_question_parses_to_a_queried_prop() {
     let forest = index.parse("does HeLa affect BRCA1", &Identity);
     assert_eq!(forest.len(), 1, "exactly one polar parse");
     assert_eq!(
-        sentence_mood(&forest[0].cat).as_deref(),
+        sentence_mood(forest[0].cat()).as_deref(),
         Some("q"),
         "a polar question is tagged mood = q"
     );
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &forest[0].sem).expect("polar sem type-checks");
+    let ty = check_infer(&mut ctx, forest[0].sem()).expect("polar sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
         Exp::Sort(0),
@@ -2220,12 +2220,12 @@ fn object_wh_what_extracts_via_composition() {
     let forest = index.parse("what does HeLa affect", &Identity);
     assert_eq!(forest.len(), 1, "exactly one object-wh parse");
     assert_eq!(
-        cat_q_type(&forest[0].cat).as_deref(),
+        cat_q_type(forest[0].cat()).as_deref(),
         Some("urn:eigenius:lexicon:Entity"),
         "object 'what' queries the Entity top"
     );
     assert!(
-        matches!(&forest[0].sem, Exp::Lam(_, _)),
+        matches!(forest[0].sem(), Exp::Lam(_, _)),
         "the answer-property is a λ"
     );
 }
@@ -2239,7 +2239,7 @@ fn object_wh_which_narrows_to_the_noun() {
     let forest = index.parse("which cell line does HeLa affect", &Identity);
     assert_eq!(forest.len(), 1, "exactly one restricted object-wh parse");
     assert_eq!(
-        cat_q_type(&forest[0].cat).as_deref(),
+        cat_q_type(forest[0].cat()).as_deref(),
         Some("urn:eigenius:lexicon:CellLine"),
         "'which cell line' narrows the queried type to CellLine"
     );
@@ -2256,12 +2256,12 @@ fn copula_with_predicative_adjective_parses() {
     let forest = index.parse("HeLa is primary", &Identity);
     assert_eq!(forest.len(), 1, "exactly one copula parse");
     assert_eq!(
-        sentence_mood(&forest[0].cat).as_deref(),
+        sentence_mood(forest[0].cat()).as_deref(),
         Some("dcl"),
         "a copular predication is a declarative"
     );
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &forest[0].sem).expect("copula sem type-checks");
+    let ty = check_infer(&mut ctx, forest[0].sem()).expect("copula sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
         Exp::Sort(0),
@@ -2322,19 +2322,19 @@ fn predicate_nominal_parses_to_is_a() {
     let forest = index.parse("HeLa is a cell line", &Identity);
     assert_eq!(forest.len(), 1, "exactly one predicate-nominal parse");
     assert_eq!(
-        sentence_mood(&forest[0].cat).as_deref(),
+        sentence_mood(forest[0].cat()).as_deref(),
         Some("dcl"),
         "a predicate nominal is a declarative"
     );
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &forest[0].sem).expect("predicate-nominal sem type-checks");
+    let ty = check_infer(&mut ctx, forest[0].sem()).expect("predicate-nominal sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
         Exp::Sort(0),
         "a predicate nominal denotes Prop"
     );
     // Structure: is_a(hela, CellLine) = App(App(ontology:is_a, hela), CellLine).
-    match &forest[0].sem {
+    match forest[0].sem() {
         Exp::App(f, _) => match &**f {
             Exp::App(g, _) => assert!(
                 matches!(&**g, Exp::EigonAxiom(iri) if iri.as_str() == "urn:eigenius:ontology:is_a"),
@@ -2390,12 +2390,12 @@ fn verbal_negation_parses() {
     let forest = index.parse("HeLa does not affect BRCA1", &Identity);
     assert_eq!(forest.len(), 1, "exactly one verbal-negation parse");
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &forest[0].sem).expect("negation sem type-checks");
+    let ty = check_infer(&mut ctx, forest[0].sem()).expect("negation sem type-checks");
     assert_eq!(readback_val(0, &ty), Exp::Sort(0), "negation denotes Prop");
     assert!(
-        is_negation(&forest[0].sem),
+        is_negation(forest[0].sem()),
         "sem is ¬(…) = … → logic:False, got {:?}",
-        forest[0].sem
+        forest[0].sem()
     );
 }
 
@@ -2407,9 +2407,9 @@ fn copular_negation_parses() {
     let forest = index.parse("HeLa is not primary", &Identity);
     assert_eq!(forest.len(), 1, "exactly one copular-negation parse");
     assert!(
-        is_negation(&forest[0].sem),
+        is_negation(forest[0].sem()),
         "sem is ¬is_primary(hela), got {:?}",
-        forest[0].sem
+        forest[0].sem()
     );
 }
 
@@ -2426,12 +2426,12 @@ fn progressive_auxiliary_parses() {
     let forest = index.parse("HeLa is affecting BRCA1", &Identity);
     assert_eq!(forest.len(), 1, "exactly one progressive parse");
     assert_eq!(
-        sentence_mood(&forest[0].cat).as_deref(),
+        sentence_mood(forest[0].cat()).as_deref(),
         Some("dcl"),
         "a progressive clause is a finite declarative"
     );
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &forest[0].sem).expect("progressive sem type-checks");
+    let ty = check_infer(&mut ctx, forest[0].sem()).expect("progressive sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
         Exp::Sort(0),
@@ -2457,20 +2457,20 @@ fn short_passive_parses_with_existential_agent() {
     let forest = index.parse("BRCA1 is affected", &Identity);
     assert_eq!(forest.len(), 1, "exactly one short-passive parse");
     assert_eq!(
-        sentence_mood(&forest[0].cat).as_deref(),
+        sentence_mood(forest[0].cat()).as_deref(),
         Some("dcl"),
         "a passive clause is a finite declarative"
     );
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &forest[0].sem).expect("passive sem type-checks");
+    let ty = check_infer(&mut ctx, forest[0].sem()).expect("passive sem type-checks");
     assert_eq!(readback_val(0, &ty), Exp::Sort(0), "passive denotes Prop");
     // The agent is existentially closed — impredicative ∃ is `∀C:Prop. (…→C) → C`,
     // i.e. the sem is a Π/→ whose ultimate codomain is the bound `C` (a Var), not a
     // bare predicate application. (Distinguishes it from the active "affects".)
     assert!(
-        matches!(&forest[0].sem, Exp::Pi(_, _, _) | Exp::Arrow(_, _)),
+        matches!(forest[0].sem(), Exp::Pi(_, _, _) | Exp::Arrow(_, _)),
         "short passive closes the agent with an (impredicative) ∃, got {:?}",
-        forest[0].sem
+        forest[0].sem()
     );
 }
 
@@ -2496,14 +2496,14 @@ fn modal_can_wraps_the_proposition_in_possible() {
     let forest = index.parse("HeLa can affect BRCA1", &Identity);
     assert_eq!(forest.len(), 1, "exactly one modal parse");
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &forest[0].sem).expect("modal sem type-checks");
+    let ty = check_infer(&mut ctx, forest[0].sem()).expect("modal sem type-checks");
     assert_eq!(
         readback_val(0, &ty),
         Exp::Sort(0),
         "a modal claim denotes Prop"
     );
     assert_eq!(
-        modal_head(&forest[0].sem).as_deref(),
+        modal_head(forest[0].sem()).as_deref(),
         Some("urn:eigenius:logic:Possible"),
         "`can` wraps the proposition in the opaque ◇ (logic:Possible)"
     );
@@ -2516,7 +2516,7 @@ fn modal_must_wraps_the_proposition_in_necessary() {
     let forest = index.parse("HeLa must affect BRCA1", &Identity);
     assert_eq!(forest.len(), 1, "exactly one modal parse");
     assert_eq!(
-        modal_head(&forest[0].sem).as_deref(),
+        modal_head(forest[0].sem()).as_deref(),
         Some("urn:eigenius:logic:Necessary"),
         "`must` wraps the proposition in the opaque □ (logic:Necessary)"
     );
@@ -2537,11 +2537,11 @@ fn future_conditional_deontic_modals_each_wrap_their_own_opaque_operator() {
         let forest = index.parse(&sentence, &Identity);
         assert_eq!(forest.len(), 1, "exactly one modal parse for `{modal}`");
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-        let ty = check_infer(&mut ctx, &forest[0].sem)
+        let ty = check_infer(&mut ctx, forest[0].sem())
             .unwrap_or_else(|e| panic!("`{modal}` sem type-checks: {e}"));
         assert_eq!(readback_val(0, &ty), Exp::Sort(0), "`{modal}` denotes Prop");
         assert_eq!(
-            modal_head(&forest[0].sem).as_deref(),
+            modal_head(forest[0].sem()).as_deref(),
             Some(op),
             "`{modal}` wraps the proposition in its own opaque operator {op}"
         );
@@ -2573,7 +2573,7 @@ fn agentive_long_passive_parses_with_the_by_agent() {
     let forest = index.parse("BRCA1 is affected by HeLa", &Identity);
     assert_eq!(forest.len(), 1, "exactly one agentive-passive parse");
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
-    let ty = check_infer(&mut ctx, &forest[0].sem).expect("agentive passive type-checks");
+    let ty = check_infer(&mut ctx, forest[0].sem()).expect("agentive passive type-checks");
     assert_eq!(
         readback_val(0, &ty),
         Exp::Sort(0),
@@ -2581,7 +2581,7 @@ fn agentive_long_passive_parses_with_the_by_agent() {
     );
     // Unlike the short passive (an impredicative ∃ = Π/→), the agent is supplied, so the
     // sem is a direct predication `affects(brca1, hela)` = App(App(affects, _), _).
-    match &forest[0].sem {
+    match forest[0].sem() {
         Exp::App(f, _) => assert!(
             matches!(&**f, Exp::App(g, _)
                 if matches!(&**g, Exp::EigonAxiom(iri) if iri.as_str() == "urn:eigenius:lexicon:affects")),
@@ -2733,7 +2733,7 @@ fn nary_distributive_group_is_left_branching_single_parse() {
         forest.len()
     );
     assert_eq!(
-        and_conjuncts(&forest[0].sem).map(|c| c.len()),
+        and_conjuncts(forest[0].sem()).map(|c| c.len()),
         Some(3),
         "three members ⇒ three conjuncts"
     );
@@ -2788,8 +2788,8 @@ fn sem_keys(forest: &[eigenius_kernel::dcg::Item]) -> Vec<String> {
         .map(|p| {
             format!(
                 "{:?} :: {:?}",
-                p.cat,
-                readback_val(0, &eval(&p.sem, &Rho::Nil).expect("eval sem"))
+                p.cat(),
+                readback_val(0, &eval(p.sem(), &Rho::Nil).expect("eval sem"))
             )
         })
         .collect();

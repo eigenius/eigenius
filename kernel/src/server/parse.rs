@@ -135,15 +135,15 @@ fn parse_to_proto(item: &Item) -> Parse {
     // Read the sem back at level 0 so the wire form is the normalized term. On eval
     // failure (an open/partial fragment), fall back to the raw term so we still return
     // a useful rendering rather than dropping the parse.
-    let sem = match eval(&item.sem, &Rho::Nil) {
+    let sem = match eval(item.sem(), &Rho::Nil) {
         Ok(v) => pretty_term(&readback_val(0, &v)),
-        Err(_) => pretty_term(&item.sem),
+        Err(_) => pretty_term(item.sem()),
     };
     Parse {
-        category: pretty_term(&item.cat),
+        category: pretty_term(item.cat()),
         sem,
-        is_sentence: is_ctor(&item.cat, "cat_s").is_some(),
-        lexicon_order: item.cost.lexicon_order,
-        sense_rank: item.cost.sense_rank,
+        is_sentence: is_ctor(item.cat(), "cat_s").is_some(),
+        lexicon_order: item.cost().lexicon_order,
+        sense_rank: item.cost().sense_rank,
     }
 }

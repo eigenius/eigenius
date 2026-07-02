@@ -246,11 +246,11 @@ fn encode_unit(
             }
         }
         1 => Outcome::Encoded {
-            is_prop: gates_to_prop(layer, &closed[0].sem),
+            is_prop: gates_to_prop(layer, closed[0].sem()),
         },
         n => Outcome::Ambiguous {
             count: n,
-            is_prop: gates_to_prop(layer, &closed[0].sem),
+            is_prop: gates_to_prop(layer, closed[0].sem()),
         },
     }
 }
@@ -386,8 +386,8 @@ fn probe_s3_localization() {
         // Print the first parse's sem so we can tell a REAL reading from noun-pile junk.
         let sem = c
             .first()
-            .map(|it| &it.sem)
-            .or_else(|| o.first().map(|op| &op.item.sem));
+            .map(|it| it.sem())
+            .or_else(|| o.first().map(|op| op.item.sem()));
         // Raw pretty-print (no eval — open parses carry unbound `$quant$` holes that can't be
         // evaluated), enough to tell a real verb/prep reading from noun-pile / mis-typed junk.
         let sem_s = sem
@@ -460,9 +460,9 @@ fn pretty_print_first_five_sems() {
     for (i, s) in sentences.iter().enumerate() {
         let (c, o) = index.parse_open(s, &lem);
         let (n, sem) = if !c.is_empty() {
-            (c.len(), Some(&c[0].sem))
+            (c.len(), Some(c[0].sem()))
         } else if !o.is_empty() {
-            (o.len(), Some(&o[0].item.sem))
+            (o.len(), Some(o[0].item.sem()))
         } else {
             (0, None)
         };
@@ -472,7 +472,8 @@ fn pretty_print_first_five_sems() {
         match sem {
             Some(e) => {
                 eprintln!("  ⟦·⟧ = {}", eigenius_kernel::dcg::pretty_term(e));
-                let mut iris: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+                let mut iris: std::collections::BTreeSet<String> =
+                    std::collections::BTreeSet::new();
                 collect_iris(e, &mut iris);
                 eprintln!("  where:");
                 for iri_s in &iris {
@@ -489,10 +490,13 @@ fn pretty_print_first_five_sems() {
                     let gloss = Iri::parse(iri_s)
                         .ok()
                         .and_then(|i| head.resolve(&i))
-                        .and_then(|r| match r.get(&Iri::parse("urn:eigenius:core:description").unwrap())
-                        {
-                            Some(eigenius_kernel::ontology::resource::Value::String(s)) => Some(s.clone()),
-                            _ => None,
+                        .and_then(|r| {
+                            match r.get(&Iri::parse("urn:eigenius:core:description").unwrap()) {
+                                Some(eigenius_kernel::ontology::resource::Value::String(s)) => {
+                                    Some(s.clone())
+                                }
+                                _ => None,
+                            }
                         })
                         .map(|d| d.chars().take(60).collect::<String>());
                     if let Some(g) = gloss {
@@ -568,6 +572,45 @@ fn probe_noun_pile_sentences() {
         };
         eprintln!("  {tag:<11} [{:>6.1}s] {s:?}", t.elapsed().as_secs_f64());
     }
+}
+
+/// A/B witness for GH#97 Fix #2 (construction-time compound-depth CAP): parse the witnessed
+/// pure-pile sentence (unit 32 — full-span cell recorded at 34,472 items pre-cap) at a WIDE beam,
+/// with `EIGENIUS_PARSE_DEBUG=1`, and report the MAX per-cell `produced` (items BUILT before
+/// beaming — the construction cost). Run once with the cap live and once with `MAX_COMPOUND_MODS`
+/// bumped high to see the delta. `#[ignore]`d; run:
+///   EIGENIUS_PARSE_DEBUG=1 EIGENIUS_POS_PRUNE=1 cargo test -p eigenius-wordnet \
+///       --test db_backed_encoding measure_pile_cell_population -- --ignored --nocapture 2>&1 \
+///     | grep -oE 'produced=[0-9]+' | sort -t= -k2 -n | tail -1
+#[test]
+#[ignore = "diagnostic: max cell population of the pure-pile sentence; run with EIGENIUS_PARSE_DEBUG=1 --ignored --nocapture"]
+fn measure_pile_cell_population() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = LexicalIndex::build(Arc::clone(&head))
+        .with_sense_cap(2)
+        .with_cell_beam(1024)
+        .with_pos_prune(std::env::var("EIGENIUS_POS_PRUNE").is_ok());
+    // Attach the live contextual reranker when built with --features allms (mirrors build_index),
+    // so this probe measures the reranked serving path, not cap-only.
+    #[cfg(feature = "allms")]
+    let index = match eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
+        Some(r) => {
+            eprintln!("contextual reranker: AnthropicSenseRanker (live)");
+            index.with_sense_ranker(Box::new(r))
+        }
+        None => {
+            eprintln!("contextual reranker: none (ANTHROPIC_API_KEY unset)");
+            index
+        }
+    };
+    #[cfg(not(feature = "allms"))]
+    eprintln!("contextual reranker: none (cap-only)");
+    let lem = morphy();
+    let s = "Some cancers do not respond to immune checkpoint blockade.";
+    eprintln!("MEASURE (pile cell population): {s:?}");
+    let (closed, open) = index.parse_open(s, &lem);
+    eprintln!("  → closed×{} open×{}", closed.len(), open.len());
 }
 
 /// Chart-cell population analysis for the 5 CNL v2 sentences (user request 2026-06-30): parse each

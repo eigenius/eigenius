@@ -124,7 +124,7 @@ fn scoped_parse_of_every_werner_syndrome_affects_hela() {
         "'every Werner syndrome affects HeLa' must parse with the umls lexicon in scope"
     );
     assert!(
-        forest.iter().all(|p| is_ctor(&p.cat, "cat_s").is_some()),
+        forest.iter().all(|p| is_ctor(p.cat(), "cat_s").is_some()),
         "every parse is a sentence (S)"
     );
 }

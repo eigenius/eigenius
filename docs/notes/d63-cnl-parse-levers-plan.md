@@ -210,11 +210,97 @@ does NOT fix construction time**: the penalty re-ranks *after* the chart is buil
 sentences still explode in *construction* (unit 57 219→129s GAP, unit 38 244→191s GAP, unit 47 still
 >500s). Time is dominated by *building* millions of compound items × the adaptive-widen re-parses.
 
-**Fix #2 needed — compound-depth CAP (construction).** To cut the time (not just the ranking), limit
-compound BUILD depth: refuse to form a compound past ~4–5 nouns (real English compounds rarely exceed
-that; the spurious piles chain 6–8 content nouns across a whole sentence). Caps the chart at
-construction, so the explosion never materializes. A grammar-behaviour change (max compound depth) —
-the construction-time complement to the ranking penalty.
+**Fix #2 TRIED — compound-depth CAP (construction) — REFUTED by A/B (2026-06-30).** Implemented a
+`MAX_COMPOUND_MODS = 4` construction-time cap (refuse to form an N-N/named compound past 4
+modification steps, counting `compound`/`compound_kind` nodes off the category). Cap FIRES
+deterministically on a synthetic deep pile (kernel test `compound_depth_is_capped_at_construction`:
+a 5-noun compound parses, a 6-noun compound is refused). **But an A/B on the real corpus (same
+binary, `MAX_COMPOUND_MODS` = 4 vs 4096, snapshot `wordnet-umls-2026-06-30`, prune on) showed ~0
+benefit — even slightly negative** (the per-attempt `compound_mod_count` walk):
+
+| pile sentence | cap ON (4) | cap OFF (4096) |
+|---|---|---|
+| unit 32 "Some cancers do not respond…" | GAP 6.3s | GAP 6.2s |
+| "We analysed these data sets…" | GAP 199.6s | GAP 183.3s |
+| unit 47 "…DRIVE identified WRN…" (21 tok) | GAP 285.5s | GAP 275.6s |
+
+Max cell population **32,176 items, identical both ways**. **The depth hypothesis is wrong for this
+corpus.** Anatomy of unit 32's full-span cell (`cell[0..8]`, PARSE_DEBUG): **`cat_n(Σ_,sg) × 30,128`
+= 94% is ONE cat-shape** (the whole clause as a single compound noun), differing only in **type
+indices (senses)** — a Cartesian sense-product, not Σ-depth. It grows **147 → 4,374 → 18,340 →
+32,176 as the SENSE cap widens 2→4→8→16**, and the sentence still GAPs: the **adaptive
+widen-on-failure is escalating the sense cap to 16 on a sentence that gaps for STRUCTURAL reasons**,
+rebuilding a bigger pile each pass. The cap was *live* (`cap=Some(4)`) in that run and the pile still
+hit 30,128 — because the chain also mixes attributive adjectives / PP-modifiers (not counted) and,
+decisively, the cost is sense-product *within one shape*, which no depth bound touches. **Fix #2
+REVERTED** (kept only as this recorded negative result + the synthetic cap test's insight).
+
+**Fix #2′ — the ACTUAL levers (from the A/B anatomy).** Two, neither depth:
+1. **Shape-aware cell beam** (= the GH#93 type-narrowing lever): the beam keeps lowest-cost items
+   regardless of shape, so 1024 near-identical `cat_n(Σ_,sg)` pile senses crowd out the real `cat_s`
+   reading. Keep **top-K per distinct `cat_shape`** (indices erased) so the pile shape is bounded and
+   the real clause survives — collapses the 30,128→~K without losing the parse.
+2. **Halt the widen when the top cell has no `cat_s`.** Escalating the sense cap 2→16 cannot fix a
+   *structural* gap; it only rebuilds the pile. Detect "top-span cell is all `cat_n`/no sentence
+   shape" and stop widening (the sentence is grammar-blocked, not sense-blocked). Cuts the doomed
+   re-parses that dominate the long-sentence wall-clock.
+
+**Fix #2″ — the TRUE ROOT CAUSE (dump-verified 2026-06-30): multi-word UMLS stop-word entries defeat
+pos_prune.** Dumping the full-span cell (`EIGENIUS_DUMP_CELL=0..8`, cap-only, NO LLM) showed **51,060
+top-level `cat_n(…)` items** (vs ~5,285 clause fragments) — the whole clause folded into one refined
+common noun. Root cause, traced to a leaf: the span `"do not"` seeds `cat_n(C3840725, sg)` where UMLS
+**`C3840725` = "Do not"** (semantic type T033 *Finding*) — a genuine multi-word UMLS lexical entry.
+`pos_prune` ([lookup.rs:645](kernel/src/dcg/lookup.rs#L645)) drops a nominal reading only when the
+**surface** carries a closed-class entry; `"do"`/`"not"` each do (their single-token noun readings
+ARE pruned), but the 2-token surface `"do not"` does **not**, so `surface_is_function = false` and the
+CUI noun reading survives at cost 0. So even the `do not respond to` region has surviving nouns, and
+with the content-word nouns every token is nominal → the compound/attributive rules bridge the whole
+span; the per-token sense product (cap 2 → 16) → 51k. **This is the highest-leverage, most surgical
+fix** — narrower than the beam/widen levers above, which only *tolerate* the pile:
+- **(prune)** extend `pos_prune` to drop a `cat_n`/`cat_np` reading whose entire surface is composed of
+  grammatical function words (a multi-token surface all of whose tokens have a closed-class entry) —
+  breaks the pile chain at every function-word bridge; or
+- **(import hygiene)** don't emit a content-noun `cat_n` for a UMLS concept whose form is a stop-word
+  / stop-word phrase (`"Do not"`, `"to"`, …) — removes the junk entries at the source.
+Either breaks the whole-span pile at construction (the real Fix #2 goal) by cutting the *bridges*,
+not by capping depth or beaming the aftermath.
+
+**Fix #2″ IMPLEMENTED + measured (2026-06-30) — correct, no-regression, but NARROW.** Extended
+`pos_prune` ([lookup.rs:645](kernel/src/dcg/lookup.rs#L645)): a surface counts as a function word (⇒
+drop its `cat_n`/`cat_np` reading) if it itself has a closed-class entry **OR it is a multi-token
+surface every token of which does** — so the bilexical UMLS "Do not" concept is now pruned. Direct
+witness (`EIGENIUS_DUMP_CELL=2..3`): `cat_n(C3840725)` **gone**, only the correct do-support reading
+survives; unit 32's full-span cell population **32,176 → 1,962 (16×)**. Battery **104 green**; the
+first-7 CNL sems all still parse with identical counts (no over-prune of a real multi-word noun).
+**But the corpus-wide A/B (7 pile sentences, prune on) shows it helps only the one sentence with a
+stop-word bridge:**
+
+| # | sentence | before | after |
+|---|---|---|---|
+| 1 | "Some cancers do not respond…" (has "do not" bridge) | GAP 6.3s | **GAP 3.2s** |
+| 2 | "Project Achilles screened…" | open×256 15.3s | open×256 14.9s |
+| 4 | "WRN dependency may require…" | GAP 45.2s | GAP 45.9s |
+| 6 | "We analysed these data sets…" | GAP 199.6s | GAP 182.5s |
+| 7 | unit 47 "…DRIVE identified WRN…" | GAP 285.5s | GAP 278.2s |
+
+Sentences 2–7 are **content-noun** piles (`cell lines`, `data sets`, `MSI cell lines` — real words,
+no function-word bridge), so this prune cannot touch them (they still drop 500k+ items). **Verdict:**
+KEEP the fix (removes genuine lexicon junk — a UMLS *Finding* "Do not" read as a content noun is
+always wrong — cheap, no regression), but it is a *targeted* fix for the stop-word-bridge subclass,
+NOT a general pile cure. The residual content-noun piles need Fix #2′ (shape-aware beam / halt-widen)
+— that lever is still required for the long GAP sentences whose cost is legitimate-word sense-product.
+
+**The LLM reranker CANNOT fix this — tested 2026-06-30 (`--features allms`, live
+`AnthropicSenseRanker`).** Hypothesis: cross-POS ranking would demote the junk. Refuted, witnessed:
+with the reranker live (39.7s vs ~6s cap-only — API calls confirmed), `cat_n(C3840725)` "Do not"
+**still present**, max cell population **32,176 — identical** to cap-only, outcome still GAP.
+Root reason is structural, in the reranker's own gate ([lookup.rs:1073](kernel/src/dcg/lookup.rs#L1073)
+`if senses.len() > cap`): the ranker is only handed spans with **more than `cap` (=2) competing
+senses** (its job is to reorder which survive truncation). The "do not" span has **exactly one**
+candidate, so it is never sent to the LLM, and ranking-then-truncate never drops a lone reading. So
+cross-POS ranking removes junk only for a *content word with >2 competing POS senses* — never a
+**sole multi-word UMLS stop-word entry**. Confirms the fix must be the prune / import-hygiene lever,
+not ranking.
 
 **The S4 structural fix (future Lever 2 work):** stop the compound/adjective rules from chaining across
 tokens that have a **grammatical (closed-class) or verbal** role — a *targeted* guard on the compound
@@ -222,6 +308,22 @@ rule (not the reverted blanket closed-class-wins, which wrongly dropped needed o
 the `be`-verb) — and/or **cost-penalize compound/refinement depth** so the `cat_s` reading outranks the
 deep noun-piles within the forest cap. This is the genuine nominal-residual reduction; the dual-POS /
 shift-fan-out items below are part of the same explosion.
+
+**Follow-up — multi-word noun (MWE) handling (surfaced 2026-06-30, pretty-print review).** The
+first-7 pretty-print exposed an MWE inconsistency: the term of art *"synthetic lethality"*
+(UMLS `C4280020`, a single named genetic interaction) is encoded **two different ways across the
+same 7 sentences** depending on cost pressure — in **S4** as the multi-word UMLS entry
+(`ΣG1. compound_kind(G1, ΣG2:C4280020…)`), but in **S1** decomposed compositionally into WordNet
+*lethality* (`n04791081`) refined by the everyday "man-made/artificial" sense of *synthetic*
+(`gt(deg_a01573568(x), std_a01573568)`, adj synset `{man-made, semisynthetic, synthetic}`) —
+which is *not* what the term means. Root cause: an available multi-word-expression entry does not
+**out-prefer** the compositional noun+adjective reading, so the lexicalized reading loses on
+`Cost` in some spans and wins in others. Fix direction (a Lever-2 sibling, not the compound
+CAP): a **cost preference for a covering MWE entry** over the token-wise compositional reading of
+the same span (longest-match / lexicalized-term bonus), so a registered term of art is encoded
+consistently by its CUI. Needs measurement first (how many CNL units carry a term-of-art that
+also decomposes). Distinct from the noun-pile explosion (that is *spurious* content-noun
+chaining; this is a *correct-vs-idiom* sense choice).
 
 ### Original framing (still valid background)
 

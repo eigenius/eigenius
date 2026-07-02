@@ -1896,16 +1896,16 @@ fn cmd_lexicon_parse(
     let rows: Vec<ParseRow> = forest
         .iter()
         .map(|item| {
-            let sem = match eval(&item.sem, &Rho::Nil) {
+            let sem = match eval(item.sem(), &Rho::Nil) {
                 Ok(v) => pretty_term(&readback_val(0, &v)),
-                Err(_) => pretty_term(&item.sem),
+                Err(_) => pretty_term(item.sem()),
             };
             (
-                pretty_term(&item.cat),
+                pretty_term(item.cat()),
                 sem,
-                is_ctor(&item.cat, "cat_s").is_some(),
-                item.cost.lexicon_order,
-                item.cost.sense_rank,
+                is_ctor(item.cat(), "cat_s").is_some(),
+                item.cost().lexicon_order,
+                item.cost().sense_rank,
             )
         })
         .collect();

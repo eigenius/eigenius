@@ -577,6 +577,74 @@
              prior art to packing + exact type-filtering in a typed chart. ACL A00-2022.}
 }
 
+% Packed-forest LAZY SEMANTICS + CUBE PRUNING — the D63 packed-forest blueprint
+% (docs/notes/d63-packed-forest-parsing-blueprint.md). The 7.6M-lexicon sense-product
+% blow-up is a same-category OR-ambiguity: pack by (cat_shape, ENF-prov), materialize
+% the differing semantics LAZILY, extract k-best per signature by cube pruning. All
+% identifiers verified (ACL Anthology / arXiv / DOI) via deep-research wf_0cabeba8-96c.
+% ─────────────────────────────────────────────────────────────────────────────
+
+@article{harper-1994-logical-form-forest,
+  author  = {Harper, Mary P.},
+  title   = {Storing Logical Form in a Shared-Packed Forest},
+  journal = {Computational Linguistics},
+  volume  = {20}, number = {4}, year = {1994},
+  note    = {THE direct model for our design ("Method 3"): store a DEFERRED PROCEDURE
+             CALL at each packed forest node and build the logical form ON DEMAND, so
+             the LF-bearing forest has the SAME node count as the bare syntactic forest
+             (9,658 B vs 1,477,644 B eager at 132 parses). Also states the sharing
+             PITFALL: a packed child's semantics may not be affected by the parent's
+             LF construction, else copy-and-modify (= our cat_group carve-out). ACL
+             J94-4006.}
+}
+
+@inproceedings{dorre-1997-underspecified-packing,
+  author    = {D\"orre, Jochen},
+  title     = {Efficient Construction of Underspecified Semantics under Massive Ambiguity},
+  booktitle = {35th ACL / 8th EACL (ACL 1997)}, pages = {386--393}, year = {1997},
+  archivePrefix = {arXiv}, eprint = {cmp-lg/9706028},
+  note    = {Builds ONE packed underspecified semantics (packed UDRS) off the parse
+             forest instead of enumerating readings; an OR-node's semantics is the
+             disjunction of its children under one shared variable. Establishes that
+             UNDERSPECIFIED holes (scope/referent) are COMPATIBLE with packing — grounds
+             our deferred $quant$/$anaphor$ holes riding the packed stream. ACL P97-1050.}
+}
+
+@inproceedings{huang-chiang-2005-kbest,
+  author    = {Huang, Liang and Chiang, David},
+  title     = {Better k-best Parsing},
+  booktitle = {IWPT 2005 (9th Int. Workshop on Parsing Technologies)},
+  pages     = {53--64}, year = {2005},
+  note    = {k-best over a weighted hypergraph (= packed forest); k-best is bounded PER
+             VERTEX (signature), O(|V|.k), NOT globally — exactly what stops the pile
+             evicting the rare correct reading. Algorithm 3 (LazyKthBest) extracts
+             k-best top-down, materializing sub-derivations only as needed (the
+             lazy-unpack our extractor uses). ACL W05-1506.}
+}
+
+@article{chiang-2007-hierarchical,
+  author  = {Chiang, David},
+  title   = {Hierarchical Phrase-Based Translation},
+  journal = {Computational Linguistics},
+  volume  = {33}, number = {2}, pages = {201--228}, year = {2007},
+  doi     = {10.1162/coli.2007.33.2.201},
+  note    = {Origin of CUBE PRUNING: merged (recombined) items retain the multiset of
+             antecedent back-pointers; k-best lists of the antecedents form a sorted
+             cube whose cheap corner is enumerated best-first and the rest pruned. The
+             extraction algorithm for our packed forest. ACL J07-2003.}
+}
+
+@inproceedings{hopkins-langmead-2009-cube-search,
+  author    = {Hopkins, Mark and Langmead, Greg},
+  title     = {Cube Pruning as Heuristic Search},
+  booktitle = {EMNLP 2009}, pages = {62--71}, year = {2009},
+  note    = {The clean formal SEAM our design turns on: an item is keyed for combination
+             by (span, POSTCONDITION = category) while the CARRY (extra scoring info)
+             affects cost ONLY, not combinability. Maps 1:1 onto our felicity-by-category
+             (postcondition) vs. differing semantics (carry) — the licence to erase
+             type-indices from the packing signature. ACL D09-1007.}
+}
+
 % Dependent Type Semantics (DTS) + the lightblue parser — the closest existing
 % prose->Sigma-type system (D62 §4.1; verified via deep-research wea30vq2b).
 @misc{bekki-lightblue,
