@@ -1064,6 +1064,69 @@ impl LexicalIndex {
         self.parse_unpacked(text, lemmatizer, scope)
     }
 
+    /// Build the **packed shared forest** over a sentence (D63 blueprint §11 3c.3/3c.4). Seeds the
+    /// leaf cells (shared [`Self::seed_leaves`], `beam = None` — packing bounds via k-best), groups
+    /// each cell's items into [`super::packed::PNode`]s by [`super::packed::node_sig`], then runs a
+    /// node-level CKY loop: for each adjacent node-pair, `apply` on their REPRESENTATIVE items decides
+    /// combinability + the result signature ONCE (the O(1)-per-node-pair win — sound because the
+    /// packing router gated on the grammar being index-independent), recorded as an
+    /// [`super::packed::Edge::Combine`] hyperedge. The differing item-pairs are materialised lazily by
+    /// the cube-pruning extractor (3d).
+    ///
+    /// **3c.4a — binary combination only.** The composed-cell UNARY transforms (type-raising for
+    /// relative clauses, the bare-plural / sentence-premod shifts) land in 3c.4b; until then a
+    /// sentence needing those is incomplete in the packed forest (the differential oracle, 3f, gates
+    /// on equivalence). `#[allow(dead_code)]` until the 3d extractor consumes the forest.
+    #[allow(dead_code)]
+    fn build_forest(
+        &self,
+        tokens: &[String],
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+        cap: Option<usize>,
+        ranks: Option<&BTreeMap<String, u32>>,
+    ) -> super::packed::Forest {
+        use super::packed::{node_sig, Edge, Forest, NodeId, Sig};
+        let n = tokens.len();
+        let (leaves, _drops) = self.seed_leaves(tokens, lemmatizer, scope, cap, ranks, None);
+        let mut forest = Forest::new(n);
+        // Group leaf items into nodes (one `Leaf` edge each; same-`Sig` items share a node).
+        for (i, row) in leaves.iter().enumerate() {
+            for (j, cell) in row.iter().enumerate().skip(i) {
+                for it in cell {
+                    let id = forest.get_or_create(i, j, node_sig(it), it);
+                    forest.push_edge(id, Edge::Leaf(it.clone()));
+                }
+            }
+        }
+        // Node-level CKY: decide each node-pair ONCE via `apply` on representatives.
+        for len in 2..=n {
+            for i in 0..=(n - len) {
+                let j = i + len - 1;
+                // Collect combinations first (immutable borrow of `forest`), then insert.
+                let mut edges: Vec<(Sig, Item, NodeId, NodeId)> = Vec::new();
+                for k in i..j {
+                    let lefts: Vec<NodeId> = forest.cells[i][k].values().copied().collect();
+                    let rights: Vec<NodeId> = forest.cells[k + 1][j].values().copied().collect();
+                    for &l in &lefts {
+                        for &r in &rights {
+                            let lrep = forest.nodes[l].rep.clone();
+                            let rrep = forest.nodes[r].rep.clone();
+                            if let Some(result) = apply(&lrep, &rrep, &self.layer) {
+                                edges.push((node_sig(&result), result, l, r));
+                            }
+                        }
+                    }
+                }
+                for (sig, result, l, r) in edges {
+                    let id = forest.get_or_create(i, j, sig, &result);
+                    forest.push_edge(id, Edge::Combine { left: l, right: r });
+                }
+            }
+        }
+        forest
+    }
+
     fn parse_unpacked(
         &self,
         text: &str,
@@ -1217,66 +1280,50 @@ impl LexicalIndex {
         }
     }
 
-    fn parse_at_cap(
+    /// Seed the LEAF cells of a CKY chart — the shared front-end of both the unpacked path
+    /// ([`Self::parse_at_cap`]) and the packed forest (D63 blueprint §11 3c.3). Multi-span MWE
+    /// [`Self::lookup_span`] + hole-freshening (`$anaphor$`/`$quant$`) + `-ly`/degree adverbs +
+    /// fronted participials + leaf forward type-raising, optionally per-cell beamed. Returns the
+    /// `n × n` chart (only leaf spans `[i,j]` populated) and the accumulated beam-drop count.
+    /// Behaviour-identical to the inline seeding it replaces — the packed path calls it with
+    /// `beam = None` (packing bounds via k-best, not a beam).
+    fn seed_leaves(
         &self,
-        text: &str,
+        tokens: &[String],
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
         cap: Option<usize>,
         ranks: Option<&BTreeMap<String, u32>>,
         beam: Option<usize>,
-    ) -> (Vec<Item>, Vec<OpenParse>) {
-        let tokens = tokenize(text);
-        let n = tokens.len();
-        if n == 0 {
-            return (Vec::new(), Vec::new());
-        }
-        // Parse-failure instrumentation (set `EIGENIUS_PARSE_DEBUG=1`): per-cell stats, flushed, so
-        // the last line before an OOM/SIGKILL localizes the blow-up cell + cap level.
+    ) -> (Vec<Vec<Vec<Item>>>, usize) {
         let debug = std::env::var("EIGENIUS_PARSE_DEBUG").is_ok();
-
+        let n = tokens.len();
         // chart[i][j] = every item spanning tokens i..=j.
         let mut chart: Vec<Vec<Vec<Item>>> = vec![vec![Vec::new(); n]; n];
 
-        // Coordinator positions (D63 §8.4 Phase 3): `and`/`or` are parser-level
-        // reserved words (NOT lexical entries — coordination is polymorphic over
-        // `Cat`, which `⟦·⟧` can't denote), handled by the coordination rule below.
-        let coord_op: Vec<Option<&str>> = tokens
-            .iter()
-            .map(|t| coord_connective(t.as_str()))
-            .collect();
-
-        // 1. Seed lexical spans (multi-span MWE seeding). A multiword form at
-        //    [i,j] is seeded ALONGSIDE the items of its parts, so both readings
-        //    survive into the chart.
+        // 1. Seed lexical spans (multi-span MWE seeding). A multiword form at [i,j] is seeded
+        //    ALONGSIDE the items of its parts, so both readings survive into the chart.
         let span_limit = self.span_limit(n);
         for i in 0..n {
             let last = (i + span_limit).min(n);
             for j in i..last {
                 let surface = tokens[i..=j].join(" ");
                 for mut it in self.lookup_span(&surface, lemmatizer, scope, cap, ranks) {
-                    // Referent-hole freshening (D64 open-parse carrier): the placeholder
-                    // `lexicon:anaphor` (a bare pronoun's whole sem, or the possessor NESTED
-                    // inside a possessive determiner's λ) is replaced with a fresh,
-                    // per-occurrence free variable so distinct occurrences are distinct holes.
-                    // The freshened var rides through CKY and is typed (`Entity`) at felicity.
+                    // Referent-hole freshening (D64): the `lexicon:anaphor` placeholder becomes a
+                    // fresh per-occurrence free var (typed `Entity` at felicity).
                     it.set_sem(freshen_anaphor(it.sem(), &hole_base(i, j)));
                     // Quantification-hole freshening (D62 bare-plural shift): the `$quanthole$`
-                    // sentinel a bare-plural NP carries becomes a fresh per-span free var, typed
-                    // `Π(A:Set).(A→Prop)→Prop`/`Quantification` at the felicity gate.
+                    // sentinel becomes a fresh per-span free var (typed `Quantification`).
                     it.set_sem(freshen_quant(it.sem(), &quant_hole_base(i, j)));
                     chart[i][j].push(it);
                 }
-                // Derived `-ly` adverbs (D62 Phase 3): transparent modifier items for a single
-                // `-ly` token whose adjective base is known. Single-token spans only (adverbs are
-                // one word); the identity sem carries no holes, so no freshening.
+                // Derived `-ly` adverbs (D62 Phase 3): transparent modifier items for a single `-ly`
+                // token whose adjective base is known. Single-token spans; identity sem, no holes.
                 if i == j {
                     for it in self.adverb_items(&surface) {
                         chart[i][j].push(it);
                     }
-                    // Fronted participial from a single-token (intransitive) `ger` VP ("arising,
-                    // …"); composed `ger` VPs ("affecting BRCA1", "hypothesizing that P") are shifted
-                    // in the CKY loop. Same controlled-subject referent hole, freshened per cell.
+                    // Fronted participial from a single-token (intransitive) `ger` VP ("arising, …").
                     let fronted: Vec<Item> = chart[i][j]
                         .iter()
                         .filter_map(|it| {
@@ -1296,21 +1343,16 @@ impl LexicalIndex {
             }
         }
 
-        // Forward bounded type-raising `T` (D63 §8.9 Slice 6-T) at the LEAF cells: a
-        // name `NP` lifts to `S/(S\NP)`, so it can forward-compose into a relative
-        // clause's object-extraction body `S/NP` ("HeLa affects [gap]"). Applied once
-        // per leaf cell here; multi-token / composed cells are raised once each in the
-        // CKY loop below. ENF (the `TypeRaised` provenance) keeps these inert outside
-        // extraction — a raised functor may only compose, never apply.
-        // Lever B (per-cell beam, GH #97): drop-count accumulated across every beamed cell, logged
-        // once below. Leaf cells are beamed here (after type-raise), composed cells in the loop.
+        // Forward bounded type-raising `T` (D63 §8.9 Slice 6-T) at the LEAF cells: a name `NP` lifts
+        // to `S/(S\NP)` so it can forward-compose into a relative clause's object-extraction body.
+        // ENF (`TypeRaised` provenance) keeps these inert outside extraction. Composed cells are
+        // raised in the CKY loop.
         let mut beam_drops = 0usize;
         for (i, row) in chart.iter_mut().enumerate() {
             let raised = raise_nps(&row[i], &self.layer);
             row[i].extend(raised);
-            // A leaf cell is non-top iff the sentence has >1 token (else it is the full-span root,
-            // left to the forest cap). `sense_cap` already bounds it per-lemma; the beam caps it
-            // across all candidate lemmas/POS of the token.
+            // A leaf cell is non-top iff the sentence has >1 token; the beam caps it across all
+            // candidate lemmas/POS of the token (`sense_cap` already bounds it per-lemma).
             if n > 1 {
                 if let Some(b) = beam {
                     beam_drops += beam_cell(&mut row[i], b);
@@ -1324,6 +1366,38 @@ impl LexicalIndex {
                 );
             }
         }
+        (chart, beam_drops)
+    }
+
+    fn parse_at_cap(
+        &self,
+        text: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+        cap: Option<usize>,
+        ranks: Option<&BTreeMap<String, u32>>,
+        beam: Option<usize>,
+    ) -> (Vec<Item>, Vec<OpenParse>) {
+        let tokens = tokenize(text);
+        let n = tokens.len();
+        if n == 0 {
+            return (Vec::new(), Vec::new());
+        }
+        // Parse-failure instrumentation (set `EIGENIUS_PARSE_DEBUG=1`): per-cell stats, flushed, so
+        // the last line before an OOM/SIGKILL localizes the blow-up cell + cap level.
+        let debug = std::env::var("EIGENIUS_PARSE_DEBUG").is_ok();
+
+        // Coordinator positions (D63 §8.4 Phase 3): `and`/`or` are parser-level
+        // reserved words (NOT lexical entries — coordination is polymorphic over
+        // `Cat`, which `⟦·⟧` can't denote), handled by the coordination rule below.
+        let coord_op: Vec<Option<&str>> = tokens
+            .iter()
+            .map(|t| coord_connective(t.as_str()))
+            .collect();
+
+        // 1. Seed the leaf cells (shared with the packed path, §11 3c.3).
+        let (mut chart, mut beam_drops) =
+            self.seed_leaves(&tokens, lemmatizer, scope, cap, ranks, beam);
 
         // 2. CKY composition, appending combined items to each cell's seeds (so a
         //    multiword leaf and a compositional derivation of the same span both
