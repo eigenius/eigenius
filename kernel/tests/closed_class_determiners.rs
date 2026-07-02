@@ -979,6 +979,28 @@ fn compound_stacking_and_bare_plural_compound() {
     );
 }
 
+/// D63 Option A (blueprint §11 3b) — the **packing router is a safe no-op stub** so far. With
+/// `with_packing(true)`, a selectional sentence (`depends on` — `NP_Gene`/`NP_CellLine` slots) is
+/// routed to the UNPACKED path by the guard, and a generic sentence to the packed *stub* (which also
+/// delegates to unpacked). Both must still parse — proving the router + `parse_needs_unpacked` guard
+/// don't break parsing before the real packed forest (3c/3d) lands.
+#[test]
+fn packing_flag_router_is_a_safe_noop() {
+    let (layer, _) = index_over_bootstrap();
+    let index = LexicalIndex::build(Arc::clone(&layer)).with_packing(true);
+    // Selectional (`depends on` wants a CellLine subject + Gene object; HeLa:CellLine, BRCA1:Gene —
+    // the demo's own worked sentence; routes unpacked via the guard):
+    assert!(
+        !index.parse("HeLa depends on BRCA1", &Identity).is_empty(),
+        "selectional sentence must parse (routed unpacked)"
+    );
+    // Generic (routes to the packed stub → unpacked):
+    assert!(
+        !index.parse("HeLa affects BRCA1", &Identity).is_empty(),
+        "generic sentence must parse (packed stub → unpacked)"
+    );
+}
+
 /// D63 §8.5 — **stacked attributive adjectives** (`synthetic lethal vulnerability`). Refining an
 /// already-refined noun conjoins over the **same base** (`Σx:Base. P(x) ∧ adj(x)`) rather than nesting
 /// (`Σy:Σ. adj(y)`, which applied the adjective to the Σ *pair* — ill-typed, so stacked adjectives

@@ -225,3 +225,75 @@ resolve scope *off* the packed structure, after extraction).
 4. **`cat_group` non-pack-safe — RESOLVED (excluded).** See §4: coordination reads the sem; routed
    off the packed path. The metamorphic audit found it; the guard-test keeps it (and any future
    sem-reading rule) out of the packed classes.
+
+## 10. Implementation status (2026-06-30)
+
+- **Stage 1 (owned split) — DONE, committed.** `Item { category: CategoryPayload, semantics:
+  SemanticPayload }` + accessors. Caught a latent bug (a `lexicon_order` write silently no-op'd via a
+  `cost()` copy).
+- **Stage 2 (sem-blind decision/build) — DONE, committed.** `combinable(&CategoryPayload,
+  &CategoryPayload) -> Option<SemRecipe>` (the compiler-enforced sem-blind decision) + `build(&Item,
+  &Item)` + `apply_group` carve-out. The literal `apply(&CategoryPayload)->CategoryPayload` proved
+  impossible (CN-as-types: nominal rules build the result category from the modifier sem); the
+  achievable form is decision/build, which still gives the guarantee packing needs.
+- **Stage 3a — DONE, committed.** Option A recorded (§4); `category::cat_has_selectional_slot`
+  predicate (the index-independence gate) implemented.
+- **NOTE — the runtime metamorphic audit (§6 layer b) is SUBSUMED** by Stage 2's compile-time
+  guarantee (`combinable` cannot see a sem), so it is not needed as a separate test.
+- **CORRECTION to §8 / the "delete widen-on-failure" note:** widen is **retained** for the UNPACKED
+  path (selectional lexicons + the differential-oracle baseline); the packed path is beam/widen-free
+  *by construction* (packing never drops the needed constituent). "Delete widen" was premised on
+  packing replacing the path — but Option A keeps both, gated.
+
+## 11. Phase-3 burn-down (finer units; each lands green independently unless noted)
+
+Legend: (S/M/L) size · site · verify.
+
+**3b — Guard + router + flag** *(flag off ⇒ zero behavior change)*
+- [ ] **3b.1** (S) `packing: bool` field + `with_packing(bool)` builder; init `false` in the 3 ctors
+  ([lookup.rs:327+](../../kernel/src/dcg/lookup.rs#L327)). *Verify: builds; default off = no change.*
+- [ ] **3b.2** (S) `fn seeds_have_selectional_slot(&[Item]) -> bool` over `cat_has_selectional_slot`
+  (per-parse guard — feasible for the lazy index; fail-closed). *Verify: unit/integration test.*
+- [ ] **3b.3** (M) Router at top of `parse_scoped_open` ([lookup.rs:983](../../kernel/src/dcg/lookup.rs#L983)):
+  gather the sentence's seeds; if `packing && !combinatory_core && !selectional && no cat_group` →
+  `parse_packed` (stub → delegates to the widen loop); else the current loop. *Verify: green, unchanged.*
+- [ ] **3b.4** (S) Test: demo — "gene depends on a cell line" ⇒ selectional=true (routes unpacked);
+  "a gene affects HeLa" ⇒ false. *Proves the predicate + guard on real categories.*
+
+**3c — Packed forest: types, signature, construction**
+- [ ] **3c.1** (S) `type Sig = (String, Combinator)`; `fn node_sig(&Item) -> Sig` = `(cat_shape(cat),
+  prov)`. *Unit test.*
+- [ ] **3c.2** (M) Forest types: `NodeId`, `enum Edge { Leaf(Item), Combine{left,right}, Group{left,right} }`,
+  `struct PNode { sig: Sig, rep: CategoryPayload, edges: Vec<Edge> }`, `struct Forest { nodes, cells:
+  Vec<Vec<BTreeMap<Sig,NodeId>>> }` + get-or-create. *Compile-only (`allow(dead_code)` until wired).*
+- [ ] **3c.3** (M) Seed leaves into the forest from `lookup_span` (incl. the bare-plural/mass/kind
+  shifts + span-pure hole freshening `$quant$i_j`/`$anaphor$i_j`), grouped by sig into `Leaf` edges.
+- [ ] **3c.4** (L) Packed CKY loop: `len 2..=n`, split `k`, node-pair → `combinable(&L.rep, &R.rep)`
+  → result `Sig` (`cat_shape` of the recipe's result) → get-or-create result node + `Combine` edge.
+  O(1) `combinable` per node-pair (the win).
+- [ ] **3c.5** (M) `Group` edges (carve-out): node-pairs involving `cat_group` add a `Group` edge,
+  materialized per-item at extraction via `apply_group` (never node-level).
+
+**3d — Cube-pruning extractor**
+- [ ] **3d.1** (S) `struct CubeCandidate { cost: Cost, li: usize, ri: usize }` + `Ord` on
+  `(cost, li, ri)` (deterministic tie-break; min-heap). *Unit test the ordering.*
+- [ ] **3d.2** (L) `kbest(node, k)` — lazy k-best over edges (memoized): `Leaf`→item; `Combine`→cube
+  over `kbest(left)×kbest(right)` materialized by `build`/`apply` per pop, neighbor-push `(li+1,ri)`/
+  `(li,ri+1)` with a `visited` set; `Group`→per-item `apply_group`. Single min-heap merge across edges.
+- [ ] **3d.3** (S) `max_pops` bound + `log()` shortfall (no silent truncation).
+- [ ] **3d.4** (M) `parse_packed`: build forest → top-span node(s) → `kbest` with the felicity
+  pop-filter (`classify_felicitous`, Closed/Open routed to the two forests, single queue, cap
+  `DEFAULT_FOREST_CAP`). Wire into the 3b.3 router (stub → real).
+
+**3f — Validation**
+- [ ] **3f.1** (M) Differential oracle: an index-independent grammar, packing on vs off ⇒ identical
+  (closed+open) felicitous forests (sems + order). *Proves felicity ⊇ `unify_type` + extractor.*
+- [ ] **3f.2** (S) Guard fail-closed: demo (selectional) + packing on ⇒ router picks unpacked.
+- [ ] **3f.3** (S) Regression: battery 104 + workspace green with packing OFF (default).
+- [ ] **3f.4** (M) Win: pile sentence (imported snapshot), packing on ⇒ real `cat_s` survives +
+  materialized-item count ≪ 30k. *Diagnostic probe.*
+
+**3g — Follow-ups (post-Phase-3)**
+- [ ] **3g.1** (M) `apply_core` (combinatory-core spike) into `combinable`/`build` so packing works
+  with the flag on (packed path currently requires `!combinatory_core`).
+- [ ] **3g.2** (S) Consider making packed the default for index-independent grammars once 3f is green.

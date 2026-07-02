@@ -230,6 +230,15 @@ pub struct LexicalIndex {
     /// wins wrongly killed). Acts at seed time, so widen-on-failure can't re-admit the dropped nouns.
     /// Opt-in; default off.
     pos_prune: bool,
+
+    /// **Packed-forest parsing** (D63 blueprint, GH#97 Option A): when set (and the grammar is
+    /// index-independent — no selectional functor slots — and `combinatory_core` is off), a parse is
+    /// routed to the node-level packed CKY + cube-pruning extractor instead of the flat beamed chart.
+    /// Packing collapses the same-`cat_shape` sense-product into one node per `(cat_shape, ENF-prov)`,
+    /// so combination is O(1) per node-pair; selectional restrictions (if any) are deferred to the
+    /// felicity pop-filter. The router falls back to the unpacked path for selectional grammars
+    /// (the guard, [`Self::seeds_have_selectional_slot`]). Opt-in; default off (no behaviour change).
+    packing: bool,
 }
 
 /// One resolved lexical entry at the **seed stage**: its parse [`Item`], its `lexicon:in_lexicon`
@@ -342,6 +351,7 @@ impl LexicalIndex {
                 cell_beam: None,
                 combinatory_core: false,
                 pos_prune: false,
+                packing: false,
             };
         }
         let (by_form, max_words) = Self::scan_eager(&layer);
@@ -353,6 +363,7 @@ impl LexicalIndex {
             cell_beam: None,
             combinatory_core: false,
             pos_prune: false,
+            packing: false,
         }
     }
 
@@ -386,6 +397,13 @@ impl LexicalIndex {
     /// readings (see the `pos_prune` field doc). Builder-style; default off.
     pub fn with_pos_prune(mut self, on: bool) -> Self {
         self.pos_prune = on;
+        self
+    }
+
+    /// Enable **packed-forest parsing** ([`Self::packing`]) — node-level packing + cube-pruning
+    /// extraction, gated at parse time on the grammar being index-independent. Builder-style; default off.
+    pub fn with_packing(mut self, on: bool) -> Self {
+        self.packing = on;
         self
     }
 
@@ -981,6 +999,72 @@ impl LexicalIndex {
     /// OOV-blocked sentences don't waste retries and sentences that parse at the base settings never
     /// pay the wider ones. Escalating both each round bounds the retries to ~log2 of the wider span.
     pub fn parse_scoped_open(
+        &self,
+        text: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+    ) -> (Vec<Item>, Vec<OpenParse>) {
+        // ROUTER (D63 Option A, blueprint §11 3b.3): route to the packed CKY + cube-pruning extractor
+        // when packing is enabled, the combinatory-core spike is off, and this sentence is
+        // index-independent (the guard — no selectional functor slot, no coordination). Otherwise the
+        // unpacked beamed path (also the fallback for selectional lexicons and the oracle baseline).
+        if self.packing
+            && !self.combinatory_core
+            && !self.parse_needs_unpacked(&tokenize(text), lemmatizer, scope)
+        {
+            return self.parse_packed(text, lemmatizer, scope);
+        }
+        self.parse_unpacked(text, lemmatizer, scope)
+    }
+
+    /// Per-parse index-independence guard (D63 Option A, blueprint §11 3b.2). Returns `true` if this
+    /// sentence must use the UNPACKED path — because it contains a coordinator (`and`/`or` ⇒ a
+    /// `cat_group` combination, which reads the sem and is not packed, §4 carve-out), OR a seeded
+    /// functor carries a concrete SELECTIONAL argument slot ([`super::category::cat_has_selectional_slot`]:
+    /// combinability would be index-dependent, so node-level packing by `cat_shape` is unsound). The
+    /// scan is over this sentence's seed spans only (feasible for the lazy index) and uncapped
+    /// (`cap = None`) so no beyond-cap selectional entry slips through — fail-closed.
+    fn parse_needs_unpacked(
+        &self,
+        tokens: &[String],
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+    ) -> bool {
+        if tokens
+            .iter()
+            .any(|t| coord_connective(t.as_str()).is_some())
+        {
+            return true;
+        }
+        let n = tokens.len();
+        let span_limit = self.span_limit(n);
+        for i in 0..n {
+            let last = (i + span_limit).min(n);
+            for j in i..last {
+                let surface = tokens[i..=j].join(" ");
+                for it in self.lookup_span(&surface, lemmatizer, scope, None, None) {
+                    if super::category::cat_has_selectional_slot(it.cat()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Packed-forest parse (D63 Option A). **3b.3 STUB** — the real node-level packed CKY + cube
+    /// extractor lands in burn-down 3c/3d; until then it delegates to the unpacked path, so the router
+    /// is wired and behaviour is byte-identical.
+    fn parse_packed(
+        &self,
+        text: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+    ) -> (Vec<Item>, Vec<OpenParse>) {
+        self.parse_unpacked(text, lemmatizer, scope)
+    }
+
+    fn parse_unpacked(
         &self,
         text: &str,
         lemmatizer: &dyn Lemmatizer,

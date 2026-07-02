@@ -1184,4 +1184,53 @@ mod tests {
             "⟦cat_group(Gene, _, _)⟧ must be List Gene"
         );
     }
+
+    // ── cat_has_selectional_slot (D63 Option A grammar-load guard, blueprint §11 3b) ──
+    fn np(ty: Exp) -> Exp {
+        ctor("cat_np", vec![ty, ctor("num_any", vec![])])
+    }
+    fn cls(iri: &str) -> Exp {
+        Exp::EigonClass(Iri::parse(iri).unwrap())
+    }
+    fn decl_s() -> Exp {
+        ctor("cat_s", vec![ctor("dcl", vec![]), ctor("fin", vec![])])
+    }
+
+    #[test]
+    fn generic_entity_verb_has_no_selectional_slot() {
+        // `(S\NP_Entity)/NP_Entity` — the WordNet/UMLS importer's shape: index-INDEPENDENT.
+        let entity = cls("urn:eigenius:lexicon:Entity");
+        let vp = ctor("bwd", vec![decl_s(), np(entity.clone())]);
+        let verb = ctor("fwd", vec![vp, np(entity)]);
+        assert!(!cat_has_selectional_slot(&verb));
+    }
+
+    #[test]
+    fn concrete_subtype_slot_is_selectional() {
+        // `(S\NP_CellLine)/NP_Gene` — the demo `depends_on`: index-DEPENDENT ⇒ unpackable.
+        let vp = ctor(
+            "bwd",
+            vec![decl_s(), np(cls("urn:eigenius:lexicon:CellLine"))],
+        );
+        let verb = ctor("fwd", vec![vp, np(cls("urn:eigenius:lexicon:Gene"))]);
+        assert!(cat_has_selectional_slot(&verb));
+    }
+
+    #[test]
+    fn type_variable_slot_is_not_selectional() {
+        // A schematic slot (`Exp::Var`) binds to anything ⇒ index-independent.
+        let vp = ctor("bwd", vec![decl_s(), np(Exp::Var("T".into()))]);
+        let verb = ctor("fwd", vec![vp, np(Exp::Var("T".into()))]);
+        assert!(!cat_has_selectional_slot(&verb));
+    }
+
+    #[test]
+    fn plain_noun_leaf_is_an_argument_not_a_slot() {
+        // `cat_n(Gene, sg)` is an ARGUMENT, not a functor arg SLOT ⇒ its concrete index must NOT flag.
+        let noun = ctor(
+            "cat_n",
+            vec![cls("urn:eigenius:lexicon:Gene"), ctor("sg", vec![])],
+        );
+        assert!(!cat_has_selectional_slot(&noun));
+    }
 }
