@@ -22,7 +22,8 @@ use std::sync::Arc;
 
 use eigenius_kernel::bootstrap;
 use eigenius_kernel::dcg::{
-    is_ctor, pretty_term, Candidate, Identity, LexicalIndex, ProposeCtx, Proposer, SenseRanker,
+    abbreviation_resources, extract_abbreviations, ground_long_form, is_ctor, pretty_term, AbbrDef,
+    AbbreviationBinding, Candidate, Identity, LexicalIndex, ProposeCtx, Proposer, SenseRanker,
     WordSenses,
 };
 use eigenius_kernel::esl;
@@ -2951,5 +2952,124 @@ fn lazy_index_is_lazy_and_matches_eager() {
         sem_keys(&lazy_forest),
         sem_keys(&eager_forest),
         "the lazy and eager paths must produce the same forest"
+    );
+}
+
+// ── D63 Phase 1 — abbreviation-injection lever (document-preprocessing) ─────────
+// `wsi` mirrors `MSI`: a domain abbreviation imported as a `cat_n` common noun (an instance-less
+// concept class), so a BARE `wsi` cannot be an argument NP and gaps as a subject. The abbreviation-
+// definition preprocessor injects a **document-local named individual** (an instance of the concept)
+// + a `cat_np` lexical entry as a chained doc-scoped layer — the "add, not shadow" form. The witness:
+// `wsi affects HeLa` GAPS on the cat_n-only base and PARSES once the cat_np entry is injected.
+const ABBREV_CN: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+resource lexicon:wsi_cn : lexicon:LexicalEntry {
+    lexicon:form     = "wsi";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Gene, lexicon:num_any) );
+    lexicon:sem      = lexicon:Gene;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "wsi-cn";
+    lexicon:grade    = epistemic:declared;
+}
+"#;
+fn layer_on(parent: &Arc<Layer>, name: &str, src: &str) -> Arc<Layer> {
+    let resources = esl::compile_against_layer(src, parent).expect("fixture compiles");
+    let mut b = LayerBuilder::new(name, Some(Arc::clone(parent)));
+    for r in resources {
+        b.add_resource(r).expect("add fixture resource");
+    }
+    Arc::new(b.build(LayerStorage::in_memory()))
+}
+
+/// D63 Phase 1 (the #1 CNL-v2 lever): a bare domain abbreviation imported as a `cat_n` common noun
+/// gaps as an argument NP; injecting a document-local `cat_np` named individual (the abbreviation-
+/// definition preprocessor's output) recovers the parse — with NO parser/grammar change, just a
+/// chained doc-scoped lexicon layer. Proves the injection end-to-end on the in-memory demo (the
+/// committed-doc-layer mechanism; the persistent-store form is the served-branch path, §7-2).
+#[test]
+fn abbreviation_injection_recovers_bare_argument() {
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let demo = layer_on(ctx.head(), "demo", DEMO);
+    // Base: `wsi` is ONLY a cat_n common noun (the MSI-from-UMLS situation).
+    let base_layer = layer_on(&demo, "abbrev-cn", ABBREV_CN);
+    // Injected: emit the doc-local named individual + cat_np entry via the PROGRAMMATIC emitter
+    // (dcg::glossary::abbreviation_resources) — the actual Stage-2 code path, resources built directly
+    // (no ESL round-trip; the load path takes structured CBOR/Eigon-JSON resources).
+    let binding = AbbreviationBinding {
+        abbr: "wsi",
+        concept_iri: "urn:eigenius:lexicon:Gene",
+        doc_ns: "urn:eigenius:doc",
+    };
+    let abbrev_res =
+        abbreviation_resources(&base_layer, &binding).expect("emit abbreviation resources");
+    let mut b = LayerBuilder::new("abbrev-ni", Some(Arc::clone(&base_layer)));
+    for r in abbrev_res {
+        b.add_resource(r).expect("add abbreviation resource");
+    }
+    let injected_layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    let base = LexicalIndex::build(base_layer);
+    let injected = LexicalIndex::build(injected_layer);
+
+    assert!(
+        base.parse("wsi affects HeLa", &Identity).is_empty(),
+        "a bare cat_n abbreviation cannot be a subject NP (the MSI-as-cat_n blocker)"
+    );
+    assert!(
+        !injected.parse("wsi affects HeLa", &Identity).is_empty(),
+        "injecting the cat_np named individual recovers the bare-argument parse (the #1 lever)"
+    );
+}
+
+/// D63 Phase 1 — the full deterministic Stage-A pipeline end to end on the demo: **extract** a
+/// `Long Form (ABBR)` definition (Schwartz-Hearst), **ground** the long form to an existing concept
+/// class (retrieve-first), **emit** the doc-glossary resources, inject them as a chained layer, and
+/// confirm the bare abbreviation — unknown before — now **parses** as a `cat_np` argument. Mirrors the
+/// MSI case with the demo's `cell line` / `CellLine` (its `instability` is even mass, like MSI's head).
+#[test]
+fn abbreviation_pipeline_end_to_end() {
+    let (demo_layer, _) = index_over_bootstrap();
+
+    // Stage A · extract: `the cell line (CL) …` → `CL ← cell line`.
+    let defs = extract_abbreviations("the cell line (CL) was assayed for a gene");
+    assert_eq!(
+        defs,
+        vec![AbbrDef {
+            short_form: "CL".to_string(),
+            long_form: "cell line".to_string(),
+            context: "the cell line".to_string(),
+        }],
+        "Schwartz-Hearst extracts the parenthetical definition"
+    );
+
+    // Stage A · ground: `cell line` → the CellLine concept class (retrieve-first).
+    let concept = ground_long_form(&demo_layer, &defs[0].long_form)
+        .expect("the long form grounds to an existing concept");
+    assert_eq!(concept.as_str(), "urn:eigenius:lexicon:CellLine");
+
+    // Stage A · emit + inject: a doc-local named individual `CL : CellLine` + its cat_np entry.
+    let binding = AbbreviationBinding {
+        abbr: &defs[0].short_form,
+        concept_iri: concept.as_str(),
+        doc_ns: "urn:eigenius:doc",
+    };
+    let res = abbreviation_resources(&demo_layer, &binding).expect("emits glossary resources");
+    let mut b = LayerBuilder::new("doc-glossary", Some(Arc::clone(&demo_layer)));
+    for r in res {
+        b.add_resource(r).expect("add glossary resource");
+    }
+    let doc_layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    // Stage B · parse: bare `CL` was unknown (OOV) before; now it is a cat_np name and parses.
+    let base = LexicalIndex::build(Arc::clone(&demo_layer));
+    let injected = LexicalIndex::build(doc_layer);
+    assert!(
+        base.parse("CL affects HeLa", &Identity).is_empty(),
+        "the abbreviation is unknown before the glossary is injected"
+    );
+    assert!(
+        !injected.parse("CL affects HeLa", &Identity).is_empty(),
+        "extract → ground → emit → inject recovers the bare-abbreviation parse"
     );
 }

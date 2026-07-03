@@ -134,19 +134,28 @@ anything (the `grounding` discipline): probe the lexicon/value-index for the lon
 > globally; we inject a **document-local named individual** that refers to it — faithful to how the
 > paper *uses* MSI (a referring entity), without touching the UMLS import.
 
-### 3c. Typed model + injection (Stage A commit → Stage B read)
-Per abbreviation, the doc layer gets **two resources**, exactly mirroring how the UMLS importer emits a
-named individual (`crates/eigenius-umls/src/convert.rs:162–172`):
-1. the **named individual** — `resource doc:msi : umlscui:C0920269 { … }` (an instance);
-2. a **`lexicon:LexicalEntry`** — `form = "MSI"`, `cat = cat_np(umlscui:C0920269, sg)`,
-   `sem = doc:msi`, `sem_type = umlscui:C0920269`, `in_lexicon = doc:<id>`, grade Declared.
+### 3c. Typed model + injection (Stage A commit → Stage B read) — BUILT
+Per abbreviation, the doc layer gets **two resources**, mirroring the UMLS importer's named-individual
+shape (`crates/eigenius-umls/src/convert.rs:162–172`):
+1. the **named individual** — `doc:ni_<abbr> : <concept>` (an instance);
+2. a **`lexicon:LexicalEntry`** — `form = <abbr>`, `cat = cat_np(<concept>, sg)`,
+   `sem = doc:ni_<abbr>`, `sem_type = <concept>`, grade Declared.
 
-The doc layer is **committed on a per-document branch `doc:<id>`** (kernel-gated at commit — 3d). Stage B
-then calls `ParseSentence` with `branch = "doc:<id>"` (the RPC already supports this,
-`ParseSentenceRequest.branch`/`at_layer`, `proto/eigenius.proto:441`). The parser's `LexicalIndex` is
-built over base-lexicon + doc-layer, so `MSI` now seeds a `cat_np` named individual and parses as a
-bare argument — no parser/grammar change. This is the "load lexica as chained sub-layers" pattern
-(D63/D65), just document-scoped and tiny.
+**Emission is programmatic, not ESL text.** The UMLS/WordNet importers render ESL *strings* that are
+recompiled at load; that round-trip is unnecessary here — the load path takes structured resources
+(`LoadRequest.resources` = CBOR/Eigon-JSON, `proto/eigenius.proto:252`). So these are built **directly
+as in-memory [`Resource`]s** by [`dcg::glossary::abbreviation_resources`](../../kernel/src/dcg/glossary.rs):
+`Resource::new` + `Resource::set`, with the `cat_np(<concept>, sg)` category built as an `Exp` and
+encoded via `encode_type` (`kernel/src/program/eigentt_type_mirror.rs` — the same D47 encoding ESL
+emits). Witnessed by `abbreviation_injection_recovers_bare_argument` (kernel test): bare `wsi` gaps on
+the `cat_n`-only base and parses once these emitted resources are chained on.
+
+The doc layer is **committed on a per-document branch `doc:<id>`** (kernel-gated at commit — 3d, and
+required to be persistent per §7-2). Stage B then calls `ParseSentence` with `branch = "doc:<id>"` (the
+RPC already supports this, `ParseSentenceRequest.branch`/`at_layer`, `proto/eigenius.proto:441`). The
+parser's `LexicalIndex` is built over base-lexicon + doc-layer, so `MSI` now seeds a `cat_np` named
+individual and parses as a bare argument — no parser/grammar change. This is the "load lexica as chained
+sub-layers" pattern (D63/D65), just document-scoped and tiny.
 
 ### 3d. The kernel gate (fail-closed)
 Committing the doc layer runs the extracted bindings through the felicity gate: each named individual
@@ -201,10 +210,17 @@ used. This is what makes the untrusted LLM extraction safe.
 1. **Extraction locus** — deterministic-first with LLM fallback (proposed), vs LLM-only. Schwartz-Hearst
    gives high precision for the parenthetical case with zero LLM cost; the LLM earns its keep only on
    the non-parenthetical tail. Recommend deterministic-first.
-2. **Doc-layer lifecycle** — a committed per-document branch `doc:<id>` (proposed, idiomatic, kernel-
-   gated) vs an inline abbreviation table on `ParseSentenceRequest` (less idiomatic, avoids a commit
-   per document). The committed-branch form reuses everything and keeps the fail-closed gate; the inline
-   form is lighter for throwaway parses. Recommend committed-branch, with inline as a possible fast path.
+2. **Doc-layer lifecycle — SETTLED to committed-branch (witnessed constraint).** A committed
+   per-document branch `doc:<id>` vs an inline abbreviation table on `ParseSentenceRequest`. The Phase-1
+   witness surfaced a hard requirement: an **in-memory doc-layer overlaid on the persistent lexicon
+   OOMs** — the lazy value-index doesn't resolve over the mixed in-memory/persistent chain, so
+   `LexicalIndex::build` falls back to `scan_eager`'s full-chain `iter_all_resources` over the 7.6M
+   snapshot (the "build a layer on the storage it's persisted to" invariant). So the doc-layer **must be
+   committed to the served store** (a persistent branch), where its `LexicalEntry` value-index entries
+   populate in `store_layer` and the lazy path resolves. Inline-on-the-RPC would need the same
+   persistent backing to avoid the eager scan, so it is not a lighter path — committed-branch it is.
+   (The lever itself is proven on the in-memory *demo* bootstrap, where the whole chain is small and the
+   eager scan is fine: `kernel/tests/closed_class_determiners.rs::abbreviation_injection_recovers_bare_argument`.)
 3. **Grounding miss policy** — mint a fresh document-local class (proposed) vs defer/flag. Fresh class
    keeps the parse working (Declared), and the missing grounding is itself a recordable finding.
 4. **Ontology home** — a new `document:` namespace for the doc-structure family vs folding into an

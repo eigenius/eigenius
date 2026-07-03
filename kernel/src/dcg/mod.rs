@@ -33,6 +33,7 @@
 //!   + multi-span lemmatized seeding + CKY + the kernel felicity filter.
 
 pub mod category;
+pub mod glossary;
 pub mod lemmatizer;
 pub mod lexicon;
 pub mod lookup;
@@ -52,6 +53,10 @@ pub use category::{
     cat_subsumes, cats_coordinate, common_super, coordinate_np, coordinate_sem, denote_cat,
     distribute, distribute_object, feat_meets, is_ctor, kind_subject, reciprocate, relativize,
     subst_cat, type_eq, type_raise, unify_cat, CatSubst,
+};
+pub use glossary::{
+    abbreviation_resources, extract_abbreviations, glossary_resources, ground_abbreviation,
+    ground_long_form, AbbrDef, AbbreviationBinding,
 };
 pub use lemmatizer::{Identity, Lemmatizer, Pos};
 pub use lexicon::{entry_to_item, gate_entry, resolve_sem, resolve_sem_value};

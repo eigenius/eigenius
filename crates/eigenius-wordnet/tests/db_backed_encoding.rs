@@ -42,9 +42,10 @@ use std::sync::Arc;
 
 use eigenius_kernel::bootstrap::bootstrap_persistent;
 use eigenius_kernel::dcg::{
-    is_nonprose, segment_sentences, tokenize, Identity, Lemmatizer, LexicalIndex,
+    extract_abbreviations, glossary_resources, ground_abbreviation, is_nonprose, segment_sentences,
+    tokenize, Identity, Lemmatizer, LexicalIndex,
 };
-use eigenius_kernel::layer::{resolve_active_value_indexes, Layer};
+use eigenius_kernel::layer::{resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
 use eigenius_kernel::nbe::env::Rho;
 use eigenius_kernel::nbe::readback::readback_val;
@@ -1617,4 +1618,109 @@ fn probe_beam_crowding() {
             verdict(&wide, s),
         );
     }
+}
+
+/// PHASE 1 MEASUREMENT (D63 `d63-document-preprocessing-scope.md`): run the deterministic Stage-A
+/// pipeline against the served snapshot and measure the recovery. Extract `Long Form (SHORT)`
+/// definitions from the ORIGINAL page (which carries `microsatellite instability (MSI)` — the CNL-v2
+/// rewrite dropped it), ground each long form to its concept, emit the doc-glossary resources, PERSIST
+/// them as a chained layer on the SAME backend (so the value index populates and the index resolves
+/// lazily — an in-memory overlay OOMs via the eager full-chain scan, §7-2), then compare base vs
+/// glossary on the MSI-subject sentences that gapped in the diagnosis. Run:
+///   EIGENIUS_DB_SNAPSHOT=<snap> cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       measure_abbreviation_glossary -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed Phase-1 measurement; run with --ignored --nocapture"]
+fn measure_abbreviation_glossary() {
+    let Some(path) = snapshot_path() else { return };
+    if !std::path::Path::new(DICT).join("data.noun").exists() {
+        eprintln!("SKIP: WordNet dict not found under {DICT}");
+        return;
+    }
+    // Open the store keeping the BACKEND (to persist the doc-glossary layer onto it).
+    let store = Arc::new(RocksStore::open(&path).expect("open RocksStore snapshot"));
+    let backend: Arc<dyn PersistentBackend> = store;
+    let ctx = match bootstrap_persistent(Arc::clone(&backend)) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("SKIP: cannot resume the snapshot — {e:?}");
+            return;
+        }
+    };
+    let head = Arc::clone(ctx.head());
+    let lem = morphy();
+
+    // The ORIGINAL page carries the `Long Form (ABBR)` definitions. `EIGENIUS_WRN_PAGE` overrides.
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let page = std::fs::read_to_string(&page_path).unwrap_or_default();
+
+    // Stage A: extract → ground (ranked cross-check + fuller candidate) → emit (fresh class on miss).
+    let defs = extract_abbreviations(&page);
+    eprintln!("extracted {} abbreviation definition(s):", defs.len());
+    for d in &defs {
+        match ground_abbreviation(&head, &d.short_form, &d.long_form, &d.context) {
+            Some(c) => eprintln!(
+                "  {:<8} ← {:<32?} → {}",
+                d.short_form,
+                d.long_form,
+                c.as_str()
+            ),
+            None => eprintln!(
+                "  {:<8} ← {:<32?} → (miss → fresh doc-local class)",
+                d.short_form, d.long_form
+            ),
+        }
+    }
+    let resources = glossary_resources(&head, &defs);
+
+    // Build + persist the doc-glossary layer on the SAME backend.
+    let mut b = LayerBuilder::new("doc-glossary", Some(Arc::clone(&head)));
+    for r in resources {
+        b.add_resource(r).expect("add glossary resource");
+    }
+    let doc_layer = Arc::new(b.build(LayerStorage::with_persistent(Arc::clone(&backend))));
+    backend
+        .store_layer(&doc_layer)
+        .expect("persist doc-glossary layer");
+    eprintln!(
+        "\ndoc-glossary layer persisted ({} definition(s))\n",
+        defs.len()
+    );
+
+    let base = build_index(&head);
+    let glossary = build_index(&doc_layer);
+    let verdict = |idx: &LexicalIndex, s: &str| {
+        let (c, o) = idx.parse_open(s, &lem);
+        if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("OPEN×{}", o.len())
+        } else {
+            "GAP".to_string()
+        }
+    };
+
+    let sentences = [
+        "MSI is a disease",
+        "MSI causes cancers",
+        "MSI results from deficient DNA mismatch repair",
+        "MSI contributes to several cancers",
+        "MSI can arise from Lynch syndrome",
+    ];
+    let mut recovered = 0usize;
+    eprintln!("── base (bare MSI = cat_n) vs glossary (MSI = cat_np named individual) ──");
+    for s in sentences {
+        let (bv, gv) = (verdict(&base, s), verdict(&glossary, s));
+        let flag = if bv == "GAP" && gv != "GAP" {
+            recovered += 1;
+            "  ← RECOVERED"
+        } else {
+            ""
+        };
+        eprintln!("  base={bv:<10} glossary={gv:<10} :: {s:?}{flag}");
+    }
+    eprintln!(
+        "\nrecovered {recovered}/{} MSI sentences via the abbreviation glossary",
+        sentences.len()
+    );
 }
