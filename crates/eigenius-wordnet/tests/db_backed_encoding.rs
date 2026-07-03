@@ -1224,3 +1224,397 @@ fn summarize(report: &[UnitReport]) {
         }
     }
 }
+
+/// PROBE (D63 next-lever diagnosis): is the prep-verb grammar-gap on CNL-v2 caused by the WordNet
+/// importer DROPPING the PP-complement (a documented stage-1 loss — `convert.rs::classify` maps the
+/// oblique frames 4/13/22 to Intransitive/Transitive with the preposition discarded), or by the
+/// preposition simply not attaching? Minimal pairs over common WordNet verbs/nouns disentangle it:
+/// prep-verb (V + obligatory PP, expect GAP if the complement is unmodelled); the SAME verb bare (no
+/// PP, should parse — the intransitive frame IS emitted); the same verb + a DIFFERENT prep as a
+/// VP-adjunct (isolates whether ANY PP attaches); a transitive control (NPs/lexemes known-good).
+///
+/// Cap-only (the LLM reranker is irrelevant to a grammar/lexicon probe). `#[ignore]`d; run:
+///   EIGENIUS_DB_SNAPSHOT=<snap> cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       probe_prep_verb_gap -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed diagnostic; run with --ignored --nocapture"]
+fn probe_prep_verb_gap() {
+    let Some(path) = snapshot_path() else { return };
+    if !std::path::Path::new(DICT).join("data.noun").exists() {
+        eprintln!("SKIP: WordNet dict not found under {DICT}");
+        return;
+    }
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+
+    eprintln!("── token knownness (function words + probe verbs) ──");
+    for t in [
+        "from",
+        "to",
+        "in",
+        "of",
+        "arise",
+        "result",
+        "respond",
+        "contribute",
+        "occur",
+        "cause",
+    ] {
+        eprintln!("  has_token({t:?}) = {}", index.has_token(t, &lem));
+    }
+
+    let probe = |label: &str, s: &str| {
+        let toks = tokenize(s);
+        let unknown: Vec<String> = toks
+            .iter()
+            .filter(|t| !is_nonprose(t) && !index.has_token(t, &lem))
+            .cloned()
+            .collect();
+        if !unknown.is_empty() {
+            eprintln!("  [{label:<20}] OOV {unknown:?} :: {s:?}");
+            return;
+        }
+        let (c, o) = index.parse_open(s, &lem);
+        let verdict = if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("OPEN×{}", o.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  [{label:<20}] {verdict:<9} :: {s:?}");
+    };
+
+    eprintln!("\n── prep-verb complement (V + obligatory PP) ──");
+    probe("prep result-from", "diseases result from mutations");
+    probe("prep arise-from", "cancers arise from mutations");
+    probe("prep respond-to", "cells respond to genes");
+    probe("prep contribute-to", "genes contribute to cancers");
+    eprintln!("── bare intransitive (same verb, no PP) ──");
+    probe("bare result", "diseases result");
+    probe("bare arise", "cancers arise");
+    probe("bare respond", "cells respond");
+    probe("bare contribute", "genes contribute");
+    eprintln!("── intransitive + a DIFFERENT prep as VP-adjunct ──");
+    probe("adj arise-in", "cancers arise in cells");
+    probe("adj occur-in", "cancers occur in cells");
+    eprintln!("── transitive control (lexemes/NPs known-good) ──");
+    probe("tv cause", "mutations cause cancers");
+
+    // The prep-verb mechanism PARSES (above), so the real blocker is elsewhere. Run the ACTUAL
+    // CNL-v2 grammar-gap sentences (which gapped on FULL-UMLS) here on this snapshot: if they PARSE,
+    // the FULL-UMLS gap was a lexicon-crowding beam artifact, not a grammar gap; if they GAP here
+    // too, bisect one element at a time (subject / compound object / modal / negation / determiner).
+    eprintln!("\n── knownness for the actual-gap tokens ──");
+    for t in [
+        "msi",
+        "lynch",
+        "syndrome",
+        "several",
+        "can",
+        "do",
+        "not",
+        "deficient",
+        "mismatch",
+        "repair",
+        "immune",
+        "checkpoint",
+        "blockade",
+        "regions",
+        "microsatellites",
+    ] {
+        eprintln!("  has_token({t:?}) = {}", index.has_token(t, &lem));
+    }
+    eprintln!("\n── actual CNL-v2 gap sentences (gapped on FULL-UMLS) ──");
+    probe(
+        "gap MSI-result",
+        "MSI results from deficient DNA mismatch repair",
+    );
+    probe("gap MSI-contrib", "MSI contributes to several cancers");
+    probe("gap MSI-can-arise", "MSI can arise from Lynch syndrome");
+    probe("gap respond-neg", "some cancers do not respond to genes");
+    probe("gap copula-plural", "regions are microsatellites");
+    eprintln!("── bisect: MSI subject vs plural, simple vs compound object ──");
+    probe("bis MSI+simple", "MSI results from mutations");
+    probe(
+        "bis plural+compound",
+        "cancers result from deficient DNA mismatch repair",
+    );
+    probe("bis MSI+medium", "MSI results from repair");
+    eprintln!("── bisect: modal / negation / determiner in isolation ──");
+    probe("bis modal", "cancers can arise from mutations");
+    probe("bis negation", "cancers do not respond to genes");
+    probe("bis determiner", "genes contribute to several cancers");
+    eprintln!("── bisect: is `MSI` a usable subject NP at all? ──");
+    probe("bis MSI-bare-tv", "MSI causes cancers");
+    probe("bis MSI-copula", "MSI is a disease");
+    eprintln!(
+        "── confirm mechanism: does a DETERMINER rescue the abbreviation? (→ cat_n, not a name) ──"
+    );
+    probe("det the-MSI-tv", "the MSI causes cancers");
+    probe("det the-MSI-cop", "the MSI is a disease");
+    probe("wrn-bare-cop", "WRN is a gene");
+    probe("wrn-det-cop", "the WRN is a gene");
+    eprintln!("── contrast: a DEMO named individual (HeLa) as bare subject, if present ──");
+    probe("hela-bare", "HeLa is a gene");
+}
+
+/// PROBE (D63 next-lever #2): are the comparative grammar-gaps a genuine construction gap? The
+/// CNL-v2 gaps `greater/fewer/stronger … than`, `compared favourably to` all involve comparatives.
+/// Isolate the construction over clean bare-plural subjects / known nouns (so a gap is the comparative
+/// itself, not the MSI-subject or compound-object confounds already diagnosed). Cap-only; `#[ignore]`d:
+///   EIGENIUS_DB_SNAPSHOT=<snap> cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       probe_comparatives -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed diagnostic; run with --ignored --nocapture"]
+fn probe_comparatives() {
+    let Some(path) = snapshot_path() else { return };
+    if !std::path::Path::new(DICT).join("data.noun").exists() {
+        eprintln!("SKIP: WordNet dict not found under {DICT}");
+        return;
+    }
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+
+    eprintln!("── knownness (comparative function words + -er forms) ──");
+    for t in [
+        "than",
+        "more",
+        "less",
+        "greater",
+        "fewer",
+        "stronger",
+        "larger",
+        "large",
+        "strong",
+        "essential",
+        "common",
+        "compared",
+        "favourably",
+        "dependence",
+        "phenotype",
+        "mutations",
+    ] {
+        eprintln!("  has_token({t:?}) = {}", index.has_token(t, &lem));
+    }
+
+    let probe = |label: &str, s: &str| {
+        let toks = tokenize(s);
+        let unknown: Vec<String> = toks
+            .iter()
+            .filter(|t| !is_nonprose(t) && !index.has_token(t, &lem))
+            .cloned()
+            .collect();
+        if !unknown.is_empty() {
+            eprintln!("  [{label:<22}] OOV {unknown:?} :: {s:?}");
+            return;
+        }
+        let (c, o) = index.parse_open(s, &lem);
+        let verdict = if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("OPEN×{}", o.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  [{label:<22}] {verdict:<9} :: {s:?}");
+    };
+
+    eprintln!("\n── baseline: bare predicative adjective (control, should parse) ──");
+    probe("base large", "genes are large");
+    probe("base essential", "genes are essential");
+    eprintln!("── predicative comparative (X is [more] ADJ than Y) ──");
+    probe("pred -er than", "genes are larger than cells");
+    probe("pred more-adj than", "genes are more essential than cells");
+    probe("pred strong-er than", "cells are stronger than genes");
+    eprintln!("── attributive comparative adjective (a STRONGER N, no `than`) ──");
+    probe("attr stronger-N", "cells require a stronger phenotype");
+    probe("attr greater-mass", "cells show greater dependence");
+    eprintln!("── comparative quantifier over NPs (fewer/greater N than N) ──");
+    probe(
+        "quant fewer-than",
+        "cells contain fewer mutations than genes",
+    );
+    probe(
+        "quant greater-than",
+        "cells show greater dependence than genes",
+    );
+    eprintln!("── comparative verb (compared [ADV] to) ──");
+    probe("vb compared-fav-to", "cancers compared favourably to genes");
+    probe("vb compared-to", "genes compared to cells");
+}
+
+/// PROBE (D63): Derive the CAUSE of the remaining CNL-v2 grammar-gaps (sentences not already pinned to
+/// the MSI-subject / `than NP` levers). Minimal pairs over clean known vocab isolate each hypothesized
+/// construction; the load-bearing one is (G) — whether a domain abbreviation as an attributive
+/// MODIFIER (`MSI cells`, `WRN dependency`) also fails, which would widen the abbreviation lever.
+/// Cap-only; `#[ignore]`d:
+///   EIGENIUS_DB_SNAPSHOT=<snap> cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       probe_gap_tail -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed diagnostic; run with --ignored --nocapture"]
+fn probe_gap_tail() {
+    let Some(path) = snapshot_path() else { return };
+    if !std::path::Path::new(DICT).join("data.noun").exists() {
+        eprintln!("SKIP: WordNet dict not found under {DICT}");
+        return;
+    }
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+
+    eprintln!("── knownness ──");
+    for t in [
+        "msi",
+        "wrn",
+        "mmr",
+        "dependency",
+        "inactivation",
+        "somatic",
+        "independent",
+        "target",
+        "targets",
+        "region",
+        "regions",
+        "process",
+        "state",
+        "lineages",
+        "checkpoint",
+        "blockade",
+        "evaluated",
+        "identified",
+        "analysed",
+        "queried",
+        "arises",
+        "as",
+    ] {
+        eprintln!("  has_token({t:?}) = {}", index.has_token(t, &lem));
+    }
+
+    let probe = |label: &str, s: &str| {
+        let toks = tokenize(s);
+        let unknown: Vec<String> = toks
+            .iter()
+            .filter(|t| !is_nonprose(t) && !index.has_token(t, &lem))
+            .cloned()
+            .collect();
+        if !unknown.is_empty() {
+            eprintln!("  [{label:<24}] OOV {unknown:?} :: {s:?}");
+            return;
+        }
+        let (c, o) = index.parse_open(s, &lem);
+        let verdict = if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("OPEN×{}", o.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  [{label:<24}] {verdict:<9} :: {s:?}");
+    };
+
+    eprintln!("\n── G. abbreviation as attributive MODIFIER (sents 3/14/16/17/19) ──");
+    probe("G MSI-mod-plural", "MSI cells contain genes");
+    probe("G WRN-mod-subject", "WRN genes cause cancers");
+    probe("G MMR-mod-subject", "MMR mutations cause cancers");
+    probe("G control N-N", "cancer cells contain genes");
+    eprintln!("── A. `as`-predicative (X V Y as Z) (sents 14/15) ──");
+    probe("A evaluated-as", "cells evaluated genes as targets");
+    probe("A identified-as", "cells identified genes as targets");
+    eprintln!("── B. plural copula predicate-nominal (sent 4) ──");
+    probe("B plural-predn", "regions are genes");
+    probe("B control sg-predn", "a region is a gene");
+    eprintln!("── C. PP-stack in object (X V Y in Z with W) (sents 1/13) ──");
+    probe("C pp-stack", "cells query genes in cancers with mutations");
+    probe("C control 1pp", "cells query genes in cancers");
+    eprintln!("── D. numeral + adjective + N-N compound (sent 12) ──");
+    probe("D bare", "cells analysed targets");
+    probe("D N-N compound", "cells analysed cancer dependency targets");
+    probe("D numeral+adj", "cells analysed two independent targets");
+    eprintln!("── E. compound-noun prep object (sent 11) ──");
+    probe(
+        "E compound-obj",
+        "cancers respond to immune checkpoint blockade",
+    );
+    eprintln!("── F. modal + or-coordination of objects (sent 19) ──");
+    probe("F modal-or", "genes may require cells or mutations");
+    eprintln!("── H. adjective-modified subject + prep-verb (sents 9/3) ──");
+    probe(
+        "H adj-subj-prepverb",
+        "somatic inactivation arises from mutations",
+    );
+    probe(
+        "H that-essential-in",
+        "cells found that genes were essential in cells",
+    );
+}
+
+/// PROBE (D63): are the residual CNL-v2 grammar-gaps (sentences whose constituent constructions all
+/// PARSE in isolation) genuine grammar gaps, or full-UMLS beam/lexicon-crowding artifacts? Run the
+/// actual sentences VERBATIM on the SUBSET (fewer senses) at the default beam (64, widen→512) and at a
+/// wide fixed beam (2048, above the widen ceiling), and compare to their known FULL-UMLS GAP:
+/// parses on subset@64 → the full-UMLS gap was LEXICON-CROWDING (extra senses), not grammar; gaps@64
+/// but parses@2048 → BEAM-CEILING (the 512 widen cap is too low); gaps at both → a GENUINE grammar gap.
+///
+/// Cap-only; `#[ignore]`d:
+///   EIGENIUS_DB_SNAPSHOT=<subset-snap> cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       probe_beam_crowding -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed diagnostic; run with --ignored --nocapture"]
+fn probe_beam_crowding() {
+    let Some(path) = snapshot_path() else { return };
+    if !std::path::Path::new(DICT).join("data.noun").exists() {
+        eprintln!("SKIP: WordNet dict not found under {DICT}");
+        return;
+    }
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let def = build_index(&head); // CELL_BEAM=64, widen→512
+    let wide = LexicalIndex::build(Arc::clone(&head))
+        .with_sense_cap(SENSE_CAP)
+        .with_cell_beam(2048); // above CELL_BEAM_WIDEN_MAX → a fixed wide beam
+
+    let verdict = |idx: &LexicalIndex, s: &str| {
+        let (c, o) = idx.parse_open(s, &lem);
+        if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("OPEN×{}", o.len())
+        } else {
+            "GAP".to_string()
+        }
+    };
+
+    for (label, s) in [
+        (
+            "sent3 found-that",
+            "We found that WRN was selectively essential in MSI models",
+        ),
+        (
+            "sent12 two-indep",
+            "We analysed two independent cancer dependency data sets",
+        ),
+        (
+            "sent19 may-require",
+            "WRN dependency may require specific lineages or a stronger mutation phenotype",
+        ),
+    ] {
+        let toks = tokenize(s);
+        let unknown: Vec<String> = toks
+            .iter()
+            .filter(|t| !is_nonprose(t) && !def.has_token(t, &lem))
+            .cloned()
+            .collect();
+        if !unknown.is_empty() {
+            eprintln!("  [{label:<20}] OOV {unknown:?} (can't test on subset) :: {s:?}");
+            continue;
+        }
+        eprintln!(
+            "  [{label:<20}] subset@64→512={:<10} subset@2048={:<10} (full-UMLS: GAP)",
+            verdict(&def, s),
+            verdict(&wide, s),
+        );
+    }
+}
