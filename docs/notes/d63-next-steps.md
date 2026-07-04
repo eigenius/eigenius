@@ -14,6 +14,25 @@ Phase B = off-timeline cleanup (done).
 2. **Phase 2 — once the algorithm works, refactor the LLM parts out into the orchestrator** (Deno/TS):
    the served gRPC path. Not before Phase 1 is validated.
 
+## The pipeline abstraction (the anchor)
+
+All the remaining work hangs off one contract — [`DocumentPipeline`](../../kernel/src/dcg/pipeline.rs),
+`encode(document: &str) -> DocumentEncoding` (per-sentence `SentenceOutcome`:
+`Encoded`/`Ambiguous`/`Open`/`Gap`; scope note §1a). Read each remaining item as **which of two
+orthogonal axes it extends** — which is also what the two docs' "Phase" numbers *separately* count:
+
+- **What it produces** (deepen the output) — the *scope-note* phasing. `SentenceOutcome::Encoded(Item)` →
+  a **graded proposition** (reshape Phase C); `DocumentEncoding.glossary` → the full document-context
+  family (figures/tables/citations). The caller reads richer output; the impls are untouched.
+- **How it runs** (more impls, fixed seams) — the *Method* phasing above. Each impl is a choice of
+  proposers (the `AbbreviationProposer` / `Proposer` seams) + where the doc layer lives:
+  `InProcessPipeline` (in-memory, built) → a persistent in-process impl (full lexicon) → a served impl
+  (Phase 2). **Phase 2 is a second `impl DocumentPipeline`, not a rewrite** — the contract is the seam.
+
+So a grade/family item deepens the **output type** (`SentenceOutcome` / `DocumentEncoding`); a served or
+persistent item is another **impl**; an LLM item swaps a **proposer seam**. The checkboxes below stay
+grouped by the Method (run) phasing — this section is the lens to read them through.
+
 ## Done
 - **Reshape Phase A** — `kind_of` axiom + unified `kind_raised_nps` (bare mass + plural, incl.
   compounds). Committed `04bab3d`; validated over full-UMLS re-measure (**OPEN 35 → 0**, any-parse ~61%).
@@ -38,8 +57,14 @@ Phase B = off-timeline cleanup (done).
         (`resolve_document_threads_discourse_across_sentences`); single-sentence + live-LLM paths already
         tested. The resolver primitives (`resolve_open`/`resolve_with`/`AnthropicProposer`) pre-existed;
         the candidate assembly + discourse threading is the new piece.
-  - [ ] **Reshape Phase C grade** — a closed prop → `epistemic:declared`; a `reference:Citation` witness
-        climbs the grade. (Reasoning-layer integration, D39.)
+  - [x] **Reshape Phase C grade** — a closed prop → `epistemic:declared`. Built as
+        `eigenius-reasoning::grade` (`ClaimGrader` trait + `DeclaredClaimGrader`): a parsed `Prop` →
+        a **3-resource claim cluster** (the declaring `reflection:DeclaredResource` carrying
+        `canonical_proposition`, its `DeclarationTrace` emitting the chain witness, the
+        `reasoning:ReasoningSentence` with a `JustifiedBy.declared` certificate) → committed → the D39
+        gate returns **`Holds`**. Tested (`grade.rs`, incl. fail-closed: drop the trace → `Fails`).
+        The `reference:Citation` grade-climb (reshape §4 row 2) is the next increment (`Warrant` is
+        `#[non_exhaustive]`).
   - [ ] Refinements: candidate surfaces = readable labels (not IRI local names); kinds/props as
         antecedents; intra-sentential binding; live-LLM `resolve_document` over a multi-sentence corpus slice.
 - [~] **Phase-1 end-to-end harness** — one in-process Rust run: document text → glossary → parse →
@@ -51,11 +76,28 @@ Phase B = off-timeline cleanup (done).
         (`resolve_document`). The LLM steps sit behind the proposer traits, so **Phase 2 swaps proposer
         impls without touching the contract**. Built + tested (`in_process_pipeline_encodes_a_document_end_to_end`,
         one `encode()` over the demo layer exercising all three stages). *(uncommitted)*
-  - [ ] Remaining for the gate: graded props (reshape Phase C) + a run over the **full lexicon** (DB-backed
-        `base` needs a persistent doc layer, not the in-memory overlay — the `with_storage` seam noted in
-        `pipeline.rs`).
+  - [x] **The grader + ingestion layer** (`eigenius-reasoning::{grade, ingest}`): `DocumentIngestion`
+        trait + `InProcessIngestion` composes `DocumentPipeline` + `ClaimGrader` — encode → grade every
+        `Encoded` sentence → commit the clusters onto the parsed doc chain → validate each through the D39
+        gate, returning per-sentence outcome + claim + verdict. This **is** the harness, promoted from test
+        code to a trait+impl. Tested (`ingest.rs`): `instability affects HeLa` → committed, `Holds`-validated
+        `affects(kind_of(Instability), hela)`. The pipeline exposes its doc layer via an inherent
+        `encode_with_layer` (kept off the trait so the served realization stays clean). *(uncommitted)*
+  - [x] **D47 codec completion** (prerequisite, discovered here): `encode_type`/`resolve_const_ref` now
+        round-trip a **term-level resource individual** (`Exp::EigonResource`) via `ConstRef(iri)`,
+        discriminated on decode by the resolved resource's class — the third sibling of
+        `EigonClass`/`EigonAxiom`. Without it, no parsed proposition naming an entity (`hela`) could be
+        graded. Regression-swept: kernel + reasoning + statistics + schemaorg + lean all green. *(uncommitted)*
+  - [ ] Remaining for the gate: a run over the **full lexicon** (DB-backed `base` needs a persistent doc
+        layer, not the in-memory overlay — the `with_storage` seam noted in `pipeline.rs`), and the
+        `reference:Citation` grade-climb.
 
 ## Phase 2 — orchestrator refactor (LATER; do not start until Phase 1 is validated)
+
+> **A second `impl DocumentPipeline`** (the "how it runs" axis) — the trait/contract from Phase 1 is
+> reused verbatim; only the proposer impls (→ orchestrator RPCs) and the doc-layer home (→ committed
+> branch) change. If Phase 2 forces a change to the *contract*, that is a signal the seam was drawn wrong.
+
 - [ ] Move the LLM steps (abbreviation extraction, sense rerank, anaphora proposal) out of the kernel
       into the orchestrator; expose the deterministic emission server-side.
 - [ ] Served path: the commit+parse plumbing already exists and is **branch-aware** — `CreateBranch` →

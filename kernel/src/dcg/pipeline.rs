@@ -86,10 +86,14 @@ impl<'a> InProcessPipeline<'a> {
             anaphora_proposer,
         }
     }
-}
 
-impl DocumentPipeline for InProcessPipeline<'_> {
-    fn encode(&self, document: &str) -> DocumentEncoding {
+    /// Like [`DocumentPipeline::encode`], but also returns the in-memory doc-glossary layer the
+    /// sentences were parsed over (`base` + the glossary). An in-process downstream stage — claim
+    /// grading in `eigenius-reasoning` — commits onto *this* layer, so a claim whose proposition
+    /// references a doc-glossary-only concept (a grounding-miss minted class) still resolves in the
+    /// chain. The trait's [`DocumentPipeline::encode`] drops it; a served realization returns a
+    /// committed branch instead, which is why the layer is exposed here (inherent), not on the trait.
+    pub fn encode_with_layer(&self, document: &str) -> (DocumentEncoding, Arc<Layer>) {
         // Stage A — extract (Schwartz-Hearst ∪ the LLM proposer) + ground + emit the document glossary,
         // chained as a doc-scoped lexicon layer on `base`. Fail-closed: a binding the felicity gate
         // rejects at `add_resource` is skipped, so a mis-extraction never enters the lexicon.
@@ -103,7 +107,7 @@ impl DocumentPipeline for InProcessPipeline<'_> {
 
         // Stage B + C — parse each body sentence over base + doc-glossary and resolve its referent holes
         // against the threaded discourse (the untrusted proposer suggests, the kernel re-gates).
-        let index = LexicalIndex::build(doc_layer);
+        let index = LexicalIndex::build(Arc::clone(&doc_layer));
         let bodies: Vec<String> = segment_sentences(document)
             .into_iter()
             .filter(|s| !s.trim().is_empty())
@@ -116,9 +120,21 @@ impl DocumentPipeline for InProcessPipeline<'_> {
             .zip(outcomes)
             .map(|(text, outcome)| SentenceEncoding { text, outcome })
             .collect();
-        DocumentEncoding {
-            glossary: defs,
-            sentences,
-        }
+        (
+            DocumentEncoding {
+                glossary: defs,
+                sentences,
+            },
+            doc_layer,
+        )
+    }
+}
+
+impl DocumentPipeline for InProcessPipeline<'_> {
+    /// Composes Stage A (glossary → in-memory doc layer) → Stage B+C (`resolve_document`). See
+    /// [`InProcessPipeline::encode_with_layer`] for the variant that also returns the doc layer, which
+    /// downstream in-process claim grading commits onto.
+    fn encode(&self, document: &str) -> DocumentEncoding {
+        self.encode_with_layer(document).0
     }
 }

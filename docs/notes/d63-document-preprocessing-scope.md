@@ -1,8 +1,12 @@
 # D63 — LLM-assisted document preprocessing + abbreviation injection (scope)
 
-**Status:** scoping (design, not yet built). Motivated by `d63-cnl-v2-parsing-diagnosis.md`: the #1
-CNL-v2 parsing lever (~8 of 19 grammar-gaps) is **bare domain abbreviations used as argument NPs**
-(`MSI` as subject/object), which is a *document-local abbreviation-definition* problem, not grammar.
+**Status:** partially built — the three-stage pipeline is realized in-process as the `DocumentPipeline`
+trait (§1a). Stage A (document glossary) + Stage B (parse) + the Stage C discourse loop are built and
+tested in Rust (`InProcessPipeline`); remaining are the graded-proposition output (reshape Phase C), the
+full-lexicon run, the served impl, and the reference-structure family (figures/tables/citations).
+Motivated by `d63-cnl-v2-parsing-diagnosis.md`: the #1 CNL-v2 parsing lever (~8 of 19 grammar-gaps) is
+**bare domain abbreviations used as argument NPs** (`MSI` as subject/object), which is a *document-local
+abbreviation-definition* problem, not grammar.
 
 This note scopes the **abbreviation lever** as the first concrete piece of a broader **document-
 preprocessing stage** that builds document-scoped lookup structures (abbreviations, tables, figures,
@@ -48,6 +52,39 @@ The discipline is the standard Eigenius stance: **the LLM only proposes** (Stage
 untrusted); **the kernel is the oracle** — every extracted binding is committed as a resource through
 the felicity gate, so a mis-extracted abbreviation fails closed rather than silently corrupting the
 parse. This mirrors the existing sense-reranker / anaphora-proposer pattern (`allms`, D64).
+
+### 1a. Realization — the `DocumentPipeline` trait (the anchor)
+
+The three stages are realized in Rust as **one contract**,
+[`dcg::pipeline::DocumentPipeline`](../../kernel/src/dcg/pipeline.rs) —
+`encode(&self, document: &str) -> DocumentEncoding`:
+
+- **Input** — the raw document text (upstream of tokenization, so Stage-A extraction still sees the
+  parenthetical definitions the tokenizer later strips, §3a).
+- **Output** — `DocumentEncoding { glossary: Vec<AbbrDef>, sentences: Vec<SentenceEncoding> }`, one
+  `SentenceEncoding { text, outcome }` per body sentence. The `outcome` is a **`SentenceOutcome`**:
+  `Encoded(Item)` / `Ambiguous(Vec<Item>)` / `Open(OpenParse)` / `Gap` — the classified per-sentence
+  result. Fail-closed: an un-encodable sentence is `Open`/`Gap`, never a wrong closed parse.
+
+This trait is the spine for the remaining work, and it separates that work into **two orthogonal axes**
+— which is also, exactly, what the two "Phase" numberings in play count (they are *not* the same axis):
+
+1. **What the pipeline produces** — the output contract *deepens*; **this note's** Phase 1→2→3. A closed
+   sentence is `SentenceOutcome::Encoded(Item)` (a typed tree) today; reshape Phase C makes it a **graded
+   proposition** (`epistemic:declared`, a citation warrant climbing the grade — §3c †). The
+   document-context family (§2) is the same axis: `glossary` is member 1 of `DocumentEncoding`;
+   figures/tables/footnotes/citations join it as further members.
+2. **How the pipeline runs** — the *impls multiply* while the contract holds; **`d63-next-steps.md`'s**
+   Phase 1→2. The LLM steps sit behind the proposer traits (`AbbreviationProposer`, `Proposer`), so an
+   impl is just a choice of proposers + where the doc layer is built:
+   - **`InProcessPipeline`** — every stage in Rust, the doc glossary chained on an **in-memory** layer,
+     the LLM steps via `--features allms`. Built + tested (`in_process_pipeline_encodes_a_document_end_to_end`).
+   - a **persistent** in-process impl (a `with_storage` constructor) for the full-lexicon run — an
+     in-memory overlay on the 7.6M snapshot OOMs (§7-2).
+   - a **served** impl — the same trait, proposers backed by orchestrator RPCs.
+
+So the served path is **not a rewrite**: it is a second `impl DocumentPipeline`, and the trait is the
+seam that guarantees the swap changes nothing the caller reads.
 
 ---
 
@@ -198,13 +235,27 @@ finding — never silently used. This is what makes the untrusted LLM extraction
 | typed model — **reference structures** | **new `ontologies/document/…`** (`document:FigureRef`, `TableRef`, `Footnote`) + **reuse `reference:Citation`** | the non-lexicon members (consumed post-parse); small ontology, bootstrap-gated (reseed) |
 | post-parse (Stage C) | D64 anaphora + reference binding | consumes the doc context |
 
+**In-process vs served (the same trait, two impls — §1a).** This table is the **served** decomposition:
+an orchestration component emits a committed doc-branch and `ParseSentence` reads it. The **in-process**
+realization, `InProcessPipeline::encode`, collapses Stage-A extraction + the doc layer + Stage-B
+consumption into one call over an **in-memory** doc layer — no orchestration component, no branch commit.
+Both satisfy `DocumentPipeline`; the served path swaps the proposer impls (deterministic / `allms` → RPC)
+and the doc-layer home (in-memory → committed branch), not the contract.
+
 ---
 
 ## 5. Phasing
 
-- **Phase 1 (the #1 lever):** abbreviation extraction (deterministic + LLM) → doc-layer injection →
-  parse. Closes the ~8 abbreviation gaps. Deliverables: `document:Abbreviation` class, the extraction
-  component, the doc-branch commit, a re-measurement.
+These phases are the **output/coverage axis** (§1a, axis 1) — what the pipeline *extracts and produces*,
+widening from abbreviations outward. The *run* axis (in-process → served) is tracked in
+`d63-next-steps.md`. Both are impls/extensions of the one `DocumentPipeline` contract, not separate
+pipelines.
+
+- **Phase 1 (the #1 lever) — BUILT in-process:** abbreviation extraction (deterministic + LLM) →
+  doc-glossary injection → parse. Closes the ~8 abbreviation gaps; realized as Stage A of
+  `InProcessPipeline` (§1a). The deliverable is the **document glossary** — a *lexicon addition* (§2a),
+  **not** a new `document:Abbreviation` class — built directly as resources by `dcg::glossary`; plus the
+  re-measurement (full-UMLS: bare `MSI` GAP → CLOSED as `kind_of(C0920269)`).
 - **Phase 2:** the rest of the document-context family — figures/tables (`FigureRef`/`TableRef`),
   footnotes, references (`reference:Citation`). Same extraction component, same doc layer.
 - **Phase 3:** controlled-English rewrite as a preprocessing sub-step (the CNL-v2 was hand-authored;

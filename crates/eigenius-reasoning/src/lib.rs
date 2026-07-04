@@ -59,8 +59,16 @@
 pub mod consistency;
 pub mod entailment;
 pub mod extract;
+pub mod grade;
+pub mod ingest;
 pub mod institution;
 pub mod startup;
 pub mod validate;
 
+pub use grade::{
+    ClaimGrader, ClaimSource, DeclaredClaimGrader, Grade, GradeError, GradedClaim, Warrant,
+};
+pub use ingest::{
+    ClaimVerdict, DocumentIngestion, InProcessIngestion, IngestedDocument, IngestedSentence,
+};
 pub use institution::ReasoningInstitution;

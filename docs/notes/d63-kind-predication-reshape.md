@@ -173,8 +173,17 @@ residue is Open Question 5.2.)
   `QUANT_SENTINEL`). The quantification hole **carrier** (`freshen_quant`, the per-span registration,
   `HoleKind::Quantification`) is left INERT, its retirement gated on the corpus re-measure confirming
   committed-only suffices (§7.2). Then update `d62-bare-plural-quantification.md`.
-- **Phase C (grade attachment):** confirm parsed props enter the reasoning layer as `Declared` and that
-  a `reference:Citation` witness climbs the grade — largely existing; integration only.
+- **Phase C (grade attachment) — DONE (Declared floor):** parsed props enter the reasoning layer as
+  `Declared`, built by `eigenius-reasoning::grade` (`ClaimGrader` + `DeclaredClaimGrader`). A closed
+  `Prop` → a **3-resource claim cluster** (declaring `reflection:DeclaredResource` with
+  `canonical_proposition` + its `DeclarationTrace` + the `reasoning:ReasoningSentence` with a
+  `JustifiedBy.declared` certificate) → committed → the D39 gate returns `Holds`. Composed into the
+  document→claims path by `eigenius-reasoning::ingest` (`DocumentIngestion` / `InProcessIngestion`),
+  witnessed end-to-end (`instability affects HeLa` → `affects(kind_of(Instability), hela)`, `Holds`).
+  *Integration was net-new wiring, not "largely existing": it was the first consumer of a term-level
+  resource individual in a proposition, which required completing the D47 codec (`EigonResource ↔
+  ConstRef`).* **Remaining:** the `reference:Citation` witness grade-climb (§4 row 2) — `Warrant` is
+  `#[non_exhaustive]` for it.
 
 ## 7. Open questions
 
