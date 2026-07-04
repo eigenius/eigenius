@@ -737,10 +737,10 @@ impl LexicalIndex {
             })
             .collect();
         out.extend(kinds);
-        // Bare-plural NP shift (D62 — core-en `bnp`, `docs/notes/d62-bare-plural-quantification.md`):
-        // a plural common noun also serves as an ARGUMENT NP (subject + object) whose quantifier is
-        // deferred to a `Quantification` hole — `det=nil`. (The `kind_subject` edge above is only the
-        // copula-subclass reading; this is the general argument-position reading.)
+        // Bare-plural NP shift (core-en `bnp`, `det=nil`): a plural common noun also serves as an
+        // ARGUMENT NP (subject + object), committing to its KIND — `kind_of(t)`, D63 reshape §7.4. (The
+        // `kind_subject` edge above is only the copula-subclass reading; this is the general
+        // argument-position reading.)
         let bare: Vec<Item> = out.iter().flat_map(|it| self.bare_plural_nps(it)).collect();
         out.extend(bare);
         // Bare-MASS NP shift (D62 CNL): a mass noun `cat_n(C, mass)` ("MSI", "DNA", "apoptosis") is
@@ -756,7 +756,7 @@ impl LexicalIndex {
     /// denotes its KIND, and as a bare argument it is that kind *realized as an individual*, `kind_of(t)
     /// : Entity` (Chierchia's ∩): a **closed** reading — "genes affect HeLa" → `affect(hela,
     /// kind_of(Gene))`, "instability affects HeLa" → `affects(kind_of(Instability), hela)`. Not the
-    /// earlier deferred-[`HoleKind::Quantification`] open parse — a generic is a *complete* proposition
+    /// earlier deferred-quantifier (`Quantification`-hole, now retired) open parse — a generic is a *complete* proposition
     /// about the kind, and its warrant (citation / observation / derivation) belongs on the claim's
     /// **grade**, not a parser hole.
     ///
@@ -1185,20 +1185,16 @@ impl LexicalIndex {
             );
         }
 
-        // Hole context for classification — identical to the unpacked path.
+        // Hole context for classification — identical to the unpacked path. Only the referent
+        // (`EntityRef`, pronoun/possessor → D64) hole remains; the bare-plural/mass quantification hole
+        // was retired with the kind-predication reshape (Phase B).
         let entity_ty = Exp::EigonClass(iri(ENTITY_IRI));
-        let quant_ty = quant_hole_type();
-        let types_ok = eval(&entity_ty, &Rho::Nil).is_ok() && eval(&quant_ty, &Rho::Nil).is_ok();
+        let types_ok = eval(&entity_ty, &Rho::Nil).is_ok();
         let mut hole_specs: Vec<(String, Exp, HoleKind)> = Vec::new();
         if types_ok {
             for i in 0..n {
                 for j in i..n {
                     hole_specs.push((hole_base(i, j), entity_ty.clone(), HoleKind::EntityRef));
-                    hole_specs.push((
-                        quant_hole_base(i, j),
-                        quant_ty.clone(),
-                        HoleKind::Quantification,
-                    ));
                 }
             }
         }
@@ -1436,10 +1432,7 @@ impl LexicalIndex {
             UnaryKind::BareNp => {
                 let mut v = self.bare_plural_nps(it);
                 v.extend(self.bare_mass_nps(it));
-                for mut np in v {
-                    np.set_sem(freshen_quant(np.sem(), &quant_hole_base(i, j)));
-                    out.push(np);
-                }
+                out.extend(v);
             }
             UnaryKind::Raise => out.extend(raise_nps(std::slice::from_ref(it), &self.layer)),
             UnaryKind::FrontParticipial => {
@@ -1624,8 +1617,7 @@ impl LexicalIndex {
                     let rep = forest.nodes[id].rep.clone();
                     let mut shifted = self.bare_plural_nps(&rep);
                     shifted.extend(self.bare_mass_nps(&rep));
-                    for mut np in shifted {
-                        np.set_sem(freshen_quant(np.sem(), &quant_hole_base(i, j)));
+                    for np in shifted {
                         unary.push((node_sig(&np), np, id, UnaryKind::BareNp));
                     }
                 }
@@ -1862,9 +1854,6 @@ impl LexicalIndex {
                     // Referent-hole freshening (D64): the `lexicon:anaphor` placeholder becomes a
                     // fresh per-occurrence free var (typed `Entity` at felicity).
                     it.set_sem(freshen_anaphor(it.sem(), &hole_base(i, j)));
-                    // Quantification-hole freshening (D62 bare-plural shift): the `$quanthole$`
-                    // sentinel becomes a fresh per-span free var (typed `Quantification`).
-                    it.set_sem(freshen_quant(it.sem(), &quant_hole_base(i, j)));
                     chart[i][j].push(it);
                 }
                 // Derived `-ly` adverbs (D62 Phase 3): transparent modifier items for a single `-ly`
@@ -2259,18 +2248,13 @@ impl LexicalIndex {
                 // too — else such a compound/adjective-modified noun can never be a bare argument NP.
                 // BOTH the plural and mass shifts apply, symmetric with the leaf path (which runs both);
                 // the mass arm was missing here, so `synthetic lethality` / `deficient repair` (adj +
-                // mass/plural head) gapped while the bare leaf `lethality` shifted. The quant sentinel
-                // is freshened with THIS span's `quant_hole_base` (distinct hole per span).
+                // mass/plural head) gapped while the bare leaf `lethality` shifted.
                 let bare: Vec<Item> = chart[i][j]
                     .iter()
                     .flat_map(|it| {
                         let mut v = self.bare_plural_nps(it);
                         v.extend(self.bare_mass_nps(it));
                         v
-                    })
-                    .map(|mut np| {
-                        np.set_sem(freshen_quant(np.sem(), &quant_hole_base(i, j)));
-                        np
                     })
                     .collect();
                 chart[i][j].extend(bare);
@@ -2354,26 +2338,20 @@ impl LexicalIndex {
         //    kernel confirms inhabits `Prop`. Reducing first is essential: a
         //    composed determiner sentence is a redex-heavy `App(λ…, …)` tree, and
         //    `check_infer` cannot synthesize a bare lambda's type.
-        // The hole context for classification (D64 carrier, generalized to per-hole type+kind): for
-        // every span `[i,j]`, both a referent hole (`Entity`/`EntityRef`, a pronoun/possessor) and a
-        // quantification hole (`Π(A:Set).(A→Prop)→Prop`/`Quantification`, a bare plural's deferred
-        // determiner — `docs/notes/d62-bare-plural-quantification.md`). A candidate mentions only the
-        // hole vars it actually carries; `classify_felicitous` filters to those.
+        // The hole context for classification (D64 carrier): for every span `[i,j]`, a referent hole
+        // (`Entity`/`EntityRef`, a pronoun/possessor). The bare-plural/mass quantification hole was
+        // retired with the kind-predication reshape (Phase B — bare plural/mass now commit to
+        // `kind_of(t)`, `LexicalIndex::kind_raised_nps`). A candidate mentions only the hole vars it
+        // actually carries; `classify_felicitous` filters to those.
         let entity_ty = Exp::EigonClass(iri(ENTITY_IRI));
-        let quant_ty = quant_hole_type();
-        // Degenerate guard (preserved): if the hole types can't even be evaluated, fall back to the
-        // closed-only path. Normally both eval fine.
-        let types_ok = eval(&entity_ty, &Rho::Nil).is_ok() && eval(&quant_ty, &Rho::Nil).is_ok();
+        // Degenerate guard (preserved): if the hole type can't even be evaluated, fall back to the
+        // closed-only path. Normally it evals fine.
+        let types_ok = eval(&entity_ty, &Rho::Nil).is_ok();
         let mut hole_specs: Vec<(String, Exp, HoleKind)> = Vec::new();
         if types_ok {
             for i in 0..n {
                 for j in i..n {
                     hole_specs.push((hole_base(i, j), entity_ty.clone(), HoleKind::EntityRef));
-                    hole_specs.push((
-                        quant_hole_base(i, j),
-                        quant_ty.clone(),
-                        HoleKind::Quantification,
-                    ));
                 }
             }
         }
@@ -2477,11 +2455,10 @@ impl LexicalIndex {
     /// hole-bearing sems: each hole is a free variable, so it is bound in `rho` to a generic neutral
     /// (else Pure `eval` errors `UnboundVariable`) and in `gamma` to **its own type** so `check`
     /// types it. `hole_specs` carries every candidate hole `(base name, type, kind)`; a candidate
-    /// mentions only the subset it actually carries — `EntityRef` holes (`Entity`, in argument
-    /// position) and/or `Quantification` holes (`Π(A:Set).(A→Prop)→Prop`, a bare plural's deferred
-    /// determiner in head position). `Neut::Gen(0, base)` reads back as `Var("{base}0")`, so the
-    /// gamma key and reported hole name use that readback form. With no holes present this is exactly
-    /// `reduced_felicitous` (empty `rho`/`gamma`) — the closed path is unchanged.
+    /// mentions only the subset it actually carries — currently `EntityRef` holes (`Entity`, in
+    /// argument position: a pronoun/possessor referent → D64). `Neut::Gen(0, base)` reads back as
+    /// `Var("{base}0")`, so the gamma key and reported hole name use that readback form. With no holes
+    /// present this is exactly `reduced_felicitous` (empty `rho`/`gamma`) — the closed path is unchanged.
     fn classify_felicitous(
         &self,
         it: &Item,
@@ -2695,35 +2672,6 @@ fn cat_forall_body_head(cat: &Exp) -> Option<&'static str> {
     None
 }
 
-/// Base name of the **quantification-hole** free variable a bare-plural NP spanning tokens `[i, j]`
-/// carries (`docs/notes/d62-bare-plural-quantification.md`). Distinct prefix from [`hole_base`] so
-/// the felicity gate types it as a higher-order [`HoleKind::Quantification`] hole, not an `Entity`
-/// referent. Position-keyed: the two bare plurals in `genes affect cells` are distinct holes.
-fn quant_hole_base(i: usize, j: usize) -> String {
-    format!("$quant${i}_{j}")
-}
-
-/// The type a [`HoleKind::Quantification`] hole inhabits: `Π(A:Set). (A→Prop) → Prop` — a
-/// generalized quantifier over the restrictor class `A` (identical to `exists_sem`/`a`'s `sem_type`),
-/// here a free higher-order hole rather than a committed quantifier. The deferred sems always apply
-/// it to an **η-expanded** scope `λx. V(x)` (not a rigid predicate), so the `x:A`-against-`Entity`
-/// argument subsumption happens at the λ body — exactly as the concrete `∃` does (`∃x:A. V(x)`); a
-/// rigid VP passed whole would need contravariant arrow subtyping the kernel doesn't do. Built in
-/// code (no chain axiom ⇒ no bootstrap change). The probe `probe_kernel_gates_…` guards it.
-fn quant_hole_type() -> Exp {
-    Exp::Pi(
-        Patt::Var("A".into()),
-        Box::new(Exp::Sort(1)), // Set
-        Box::new(Exp::Arrow(
-            Box::new(Exp::Arrow(
-                Box::new(Exp::Var("A".into())),
-                Box::new(Exp::Sort(0)), // Prop
-            )),
-            Box::new(Exp::Sort(0)), // Prop
-        )),
-    )
-}
-
 /// Replace every `lexicon:anaphor` placeholder in `exp` with the free variable `fresh` (the
 /// referent-hole freshening, D64). The anaphor is a leaf constant (no binders to capture), so
 /// this is a plain structural replace. It appears only in authored pronoun sems (the whole
@@ -2755,43 +2703,14 @@ fn freshen_anaphor(exp: &Exp, fresh: &str) -> Exp {
     }
 }
 
-/// The placeholder variable a bare-plural NP carries for its deferred quantifier before per-span
-/// freshening (D62 — `docs/notes/d62-bare-plural-quantification.md`). Never a binder name, so no
-/// capture concern. Replaced per occurrence by [`freshen_quant`] with a [`quant_hole_base`] name.
-const QUANT_SENTINEL: &str = "$quanthole$";
-
-/// Replace every [`QUANT_SENTINEL`] occurrence in `exp` with the free variable `fresh` — the
-/// quantification-hole analogue of [`freshen_anaphor`], so distinct bare-plural occurrences are
-/// distinct holes. A plain structural rename (the sentinel is never bound, so no capture).
-fn freshen_quant(exp: &Exp, fresh: &str) -> Exp {
-    let go = |e: &Exp| freshen_quant(e, fresh);
-    match exp {
-        Exp::Var(v) if v == QUANT_SENTINEL => Exp::Var(fresh.to_string()),
-        Exp::App(f, x) => Exp::App(Box::new(go(f)), Box::new(go(x))),
-        Exp::Lam(p, b) => Exp::Lam(p.clone(), Box::new(go(b))),
-        Exp::Pi(p, a, b) => Exp::Pi(p.clone(), Box::new(go(a)), Box::new(go(b))),
-        Exp::Sig(p, a, b) => Exp::Sig(p.clone(), Box::new(go(a)), Box::new(go(b))),
-        Exp::Arrow(a, b) => Exp::Arrow(Box::new(go(a)), Box::new(go(b))),
-        Exp::Times(a, b) => Exp::Times(Box::new(go(a)), Box::new(go(b))),
-        Exp::Fst(e) => Exp::Fst(Box::new(go(e))),
-        Exp::Snd(e) => Exp::Snd(Box::new(go(e))),
-        Exp::Pair(a, b) => Exp::Pair(Box::new(go(a)), Box::new(go(b))),
-        Exp::Ann(e, t) => Exp::Ann(Box::new(go(e)), Box::new(go(t))),
-        Exp::InductiveType(d, args) => Exp::InductiveType(d.clone(), args.iter().map(go).collect()),
-        Exp::InductiveCtor(d, n, args) => {
-            Exp::InductiveCtor(d.clone(), n.clone(), args.iter().map(go).collect())
-        }
-        other => other.clone(),
-    }
-}
-
-// The deferred-quantifier determiner sems (`quant_apply` / `deferred_quant_subj_sem` /
-// `deferred_quant_obj_sem`) were removed with the D63 kind-predication reshape §7.4 (2026-07-03): bare
-// mass AND bare plural now commit to the closed kind-predication `kind_of(t)` via
-// [`LexicalIndex::kind_raised_nps`], so nothing produces a `QUANT_SENTINEL` any more. The quantification
-// hole CARRIER (`freshen_quant`, `quant_hole_type`, the per-span registration, `HoleKind::Quantification`)
-// is left in place but INERT — its retirement (reshape Phase B) is gated on the corpus re-measure
-// confirming committed-only is sufficient (no episodic/existential residue needs a deferred hole, §7.2).
+// The bare-plural/mass **deferred-quantifier** machinery — the determiner sems (`quant_apply`,
+// `deferred_quant_subj_sem`, `deferred_quant_obj_sem`), the `$quanthole$` sentinel + `freshen_quant`,
+// `quant_hole_type`/`quant_hole_base`, the per-span registration, and the `HoleKind::Quantification`
+// variant — was RETIRED with the D63 kind-predication reshape (Phase B, 2026-07-04). Bare mass AND bare
+// plural now commit to the closed kind-predication `kind_of(t)` (`LexicalIndex::kind_raised_nps`), so no
+// quantification hole is ever produced; the full-UMLS re-measure confirmed OPEN=0 (§7.2), which
+// justified removing it rather than leaving it inert. The `EntityRef` referent hole (pronouns/possessors
+// → D64, `freshen_anaphor`) is unrelated and stays.
 
 /// A `kind_of(A)` application — the class value `A` (a `Set`) realized as the `Entity` that is that
 /// kind (Chierchia's ∩; the axiom `ontology:kind_of : Set -> Entity`, D63 kind-predication reshape).
@@ -2818,22 +2737,16 @@ fn base_class(t: &Exp) -> Exp {
 // there directly, with `kind_of(t)` pre-substituted, so the kind shift never routes through `apply`'s
 // `DetRefine` witness-projection (which mis-fired `Fst(kind_of(Σ))` on refined/compound nouns).
 
-/// What a hole dispatches to once resolved (the carrier's resolver tag — D64). `EntityRef`
-/// (pronoun/possessive referents → the D64 anaphora resolver) is an *internal-resolution* hole;
-/// `Quantification` (a bare plural's deferred determiner → a grounding/citation obligation) is an
-/// *output* obligation (D62 output contract §3). `ProofObligation` (factive presupposition) is the
-/// planned third arm. The carrier now types each hole per its kind, not uniformly `Entity`.
+/// What a hole dispatches to once resolved (the carrier's resolver tag — D64). Currently the single
+/// `EntityRef` (pronoun/possessive referents → the D64 anaphora resolver), an *internal-resolution*
+/// hole. (The `Quantification` variant — a bare plural's deferred determiner — was removed with the
+/// kind-predication reshape Phase B, since bare plural/mass now commit to `kind_of(t)`; `ProofObligation`
+/// for factive presuppositions is a planned future arm.) The carrier types each hole per its kind.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HoleKind {
     /// An unresolved entity referent (a pronoun / possessor), resolved by substituting a chain
     /// antecedent and re-gating. First-order, `Entity`-typed, in argument position.
     EntityRef,
-    /// A bare plural's **deferred quantifier** (`docs/notes/d62-bare-plural-quantification.md`): the
-    /// `det=nil` of core-en's `bnp` rule, rendered as a higher-order hole of type
-    /// `Π(A:Set).(A→Prop)→Prop` in head position. Discharged downstream by binding a quantifier
-    /// **and** citing the literature `Reference` that warrants the generalization (raising the
-    /// claim's grade from Declared) — an *output* obligation, not an internal resolution.
-    Quantification,
 }
 
 /// One referent hole in an [`OpenParse`]: the free variable standing in the sem, the EigenTT

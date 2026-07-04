@@ -1219,79 +1219,11 @@ fn predicate_nominal_over_refined_noun_parses() {
     );
 }
 
-/// DE-RISK PROBE for the D62 bare-plural design (`docs/notes/d62-bare-plural-quantification.md` §6):
-/// verify the felicity gate (`eval → readback → check : Prop`) accepts a **free neutral `Q`** of the
-/// dependent quantifier type `Π(A:Set).(A→Prop)→Prop` in **head position**, applied to a `Set`
-/// argument and a predicate — the exact shape a bare-plural NP's deferred-quantification hole would
-/// carry: `Q(Entity, λg. is_primary(g))`. The D64 holes proven today are first-order `Entity`
-/// neutrals in *argument* position; this is the untested higher-order / head-position combination.
-/// `Ok` ⇒ the carrier-generalization + parser-shift slices are safe to build; a failure names which
-/// kernel step (head-position neutral, type-valued application, or Pi-typed `gamma` binding) breaks.
-#[test]
-fn probe_kernel_gates_a_higher_order_quantifier_typed_hole() {
-    use eigenius_kernel::nbe::check::check;
-    use eigenius_kernel::nbe::eval::eval;
-    use eigenius_kernel::nbe::term::Patt;
-    use eigenius_kernel::nbe::val::{Neut, Val};
-
-    let (layer, _index) = index_over_bootstrap();
-
-    let set = Exp::Sort(1);
-    let prop = Exp::Sort(0);
-    let cell_line = Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:CellLine").unwrap());
-    let is_primary = Exp::EigonAxiom(Iri::parse("urn:eigenius:lexicon:is_primary").unwrap());
-
-    // Q : Π(A:Set). (A→Prop) → Prop — the deferred-quantifier hole type (see `quant_hole_type`).
-    let q_type = Exp::Pi(
-        Patt::Var("A".into()),
-        Box::new(set),
-        Box::new(Exp::Arrow(
-            Box::new(Exp::Arrow(
-                Box::new(Exp::Var("A".into())),
-                Box::new(prop.clone()),
-            )),
-            Box::new(prop.clone()),
-        )),
-    );
-
-    // sem = Q(CellLine, λg. is_primary(g)) — hole in HEAD position, applied to a SUBCLASS restrictor
-    // and an η-EXPANDED scope (exactly how the bare-plural shift builds it: `λx. V(x)`, so the
-    // `x:CellLine`-against-`Entity` subsumption happens at the λ body, as the concrete `∃` does).
-    let pred = Exp::Lam(
-        Patt::Var("g".into()),
-        Box::new(Exp::App(
-            Box::new(is_primary),
-            Box::new(Exp::Var("g".into())),
-        )),
-    );
-    let sem = Exp::App(
-        Box::new(Exp::App(
-            Box::new(Exp::Var("Q".into())),
-            Box::new(cell_line),
-        )),
-        Box::new(pred),
-    );
-
-    // Replicate `classify_felicitous`'s hole handling exactly: bind the hole to a generic neutral in
-    // `rho` (so Pure eval doesn't error on the free var), readback to a normal form, then `check`
-    // that nf against `Prop` under a `gamma` binding the (readback-named `Q0`) hole to its quantifier
-    // type.
-    let eval_rho = Rho::Nil.extend(Patt::Var("Q".into()), Val::Nt(Neut::Gen(0, "Q".into())));
-    let nf = readback_val(0, &eval(&sem, &eval_rho).expect("eval sem"));
-    eprintln!("nf = {}", eigenius_kernel::dcg::pretty_term(&nf));
-
-    let q_ty_val = eval(&q_type, &Rho::Nil).expect("eval q_type");
-    let chk_rho = Rho::Nil.extend(Patt::Var("Q0".into()), Val::Nt(Neut::Gen(0, "Q0".into())));
-    let gamma = vec![("Q0".to_string(), q_ty_val)];
-    let prop_val = eval(&prop, &Rho::Nil).expect("eval Prop");
-    let mut ctx = CheckCtx::with_layer(chk_rho, gamma, Arc::clone(&layer));
-    let result = check(&mut ctx, &nf, &prop_val);
-    eprintln!("check result = {result:?}");
-    assert!(
-        result.is_ok(),
-        "kernel must gate a higher-order quantifier-typed hole: {result:?}"
-    );
-}
+// (Removed `probe_kernel_gates_a_higher_order_quantifier_typed_hole` with the kind-predication reshape
+// Phase B: it was a de-risk probe for the D62 bare-plural **deferred-quantifier** hole
+// (`Π(A:Set).(A→Prop)→Prop` in head position), and that hole is retired — bare plural/mass now commit to
+// `kind_of(t)`. The kernel's higher-order-neutral gating it proved is untested-but-unused now; re-add a
+// focused probe if a future construction (e.g. a `ProofObligation` hole) needs a head-position neutral.)
 
 // ── D63 §8.10 Slice 6-agr — subject-verb number agreement ─────────────
 #[test]

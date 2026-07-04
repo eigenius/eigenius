@@ -1,5 +1,14 @@
 # D62 — bare-plural NPs as deferred-quantification holes, justified by a literature reference
 
+> **SUPERSEDED (2026-07-04) by the D63 kind-predication reshape**
+> (`docs/notes/d63-kind-predication-reshape.md`). This note's central mechanism — a bare plural becomes
+> an argument NP carrying a **deferred `Quantification` hole** whose discharge is quantifier-binding +
+> a warranting citation — was retired in the reshape's Phase B. A bare plural (like a bare mass noun,
+> Carlson 1977) now **commits to its kind**: it parses to a CLOSED `kind_of(t) : Entity` predication
+> (`LexicalIndex::kind_raised_nps`), no hole. A generic is a complete proposition; its warrant belongs
+> on the claim's **grade**, not a parser hole. The full-UMLS re-measure confirmed OPEN=0. The material
+> below is retained for the design rationale and the core-en/`bnp` grounding, which the reshape reuses.
+
 *Design note. Fixes how a **bare plural** common noun (`genes affect cells`) becomes an argument NP,
 and what its underspecified quantification means in our typed kernel. Grading: **Derived** = grounded
 in current code / the core-en reference grammar; **Declared** = a design choice this note makes.*

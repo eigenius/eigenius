@@ -10,11 +10,12 @@ Phase A = the tail of Stage B (done); Phase C = a slice of Stage C; Phase B = of
   served parse path).
 - **Reshape Phase A** — `kind_of` axiom + unified `kind_raised_nps` (bare mass + plural, incl.
   compounds). Committed `04bab3d`; validated over full-UMLS re-measure (**OPEN 35 → 0**, any-parse ~61%).
+- **Reshape Phase B** — retired the `Quantification` hole carrier (`freshen_quant` + 4 call sites,
+  `quant_hole_type`/`quant_hole_base`, `QUANT_SENTINEL`, the 2 per-span registrations, the
+  `HoleKind::Quantification` variant, the de-risk probe); `EntityRef`/anaphora untouched;
+  `d62-bare-plural-quantification.md` marked superseded. Full suite + fmt + clippy green. *(uncommitted)*
 
 ## To do (in order)
-- [ ] **Reshape Phase B** — retire the now-INERT `Quantification` hole carrier (`freshen_quant`, the
-      per-span registration, `HoleKind::Quantification`); update `d62-bare-plural-quantification.md`.
-      Justified: the re-measure confirmed OPEN=0 (§7.2). Small, independent.
 - [ ] **Wire Stage A into the parse path** — inject the document glossary so `MSI`/`MMR` mass-mark and
       the kind shift fires on them (served `ParseSentence(branch="doc:<id>")`). Closes the biggest bucket
       of re-measure grammar-gaps; makes Stage A true end-to-end, not just emission.
