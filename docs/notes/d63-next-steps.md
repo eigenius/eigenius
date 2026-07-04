@@ -33,15 +33,27 @@ Phase B = off-timeline cleanup (done).
   - [x] **The discourse resolve loop** `LexicalIndex::resolve_document(sentences, lemmatizer, proposer)` —
         parse each sentence, resolve `EntityRef` holes against the in-scope candidates (`resolve_with`,
         kernel re-gates), then harvest the sentence's entities (`entity_candidates`, most-recent-first)
-        for later sentences. Fail-closed. Built + tested (`resolve_document_threads_discourse_across_sentences`);
-        single-sentence + live-LLM paths already tested. The resolver primitives (`resolve_open`/`resolve_with`/
-        `AnthropicProposer`) pre-existed; the candidate assembly + discourse threading is the new piece.
+        for later sentences. Fail-closed. Returns a `Vec<SentenceOutcome>` (`Encoded`/`Ambiguous`/`Open`/`Gap`
+        — the classified per-sentence result, not a bare `Option<Item>`). Built + tested
+        (`resolve_document_threads_discourse_across_sentences`); single-sentence + live-LLM paths already
+        tested. The resolver primitives (`resolve_open`/`resolve_with`/`AnthropicProposer`) pre-existed;
+        the candidate assembly + discourse threading is the new piece.
   - [ ] **Reshape Phase C grade** — a closed prop → `epistemic:declared`; a `reference:Citation` witness
         climbs the grade. (Reasoning-layer integration, D39.)
   - [ ] Refinements: candidate surfaces = readable labels (not IRI local names); kinds/props as
         antecedents; intra-sentential binding; live-LLM `resolve_document` over a multi-sentence corpus slice.
-- [ ] **Phase-1 end-to-end harness** — one in-process Rust run: document text → glossary → parse →
+- [~] **Phase-1 end-to-end harness** — one in-process Rust run: document text → glossary → parse →
       resolve → graded props, over the full lexicon. This is the "algorithm works" gate.
+  - [x] **The pipeline contract + in-process impl** (`kernel/src/dcg/pipeline.rs`): the `DocumentPipeline`
+        trait (`encode(&self, document: &str) -> DocumentEncoding`) with the input/output shape —
+        `DocumentEncoding { glossary: Vec<AbbrDef>, sentences: Vec<SentenceEncoding{ text, outcome }> }` —
+        and `InProcessPipeline`, which composes Stage A (glossary → in-memory doc layer) → Stage B+C
+        (`resolve_document`). The LLM steps sit behind the proposer traits, so **Phase 2 swaps proposer
+        impls without touching the contract**. Built + tested (`in_process_pipeline_encodes_a_document_end_to_end`,
+        one `encode()` over the demo layer exercising all three stages). *(uncommitted)*
+  - [ ] Remaining for the gate: graded props (reshape Phase C) + a run over the **full lexicon** (DB-backed
+        `base` needs a persistent doc layer, not the in-memory overlay — the `with_storage` seam noted in
+        `pipeline.rs`).
 
 ## Phase 2 — orchestrator refactor (LATER; do not start until Phase 1 is validated)
 - [ ] Move the LLM steps (abbreviation extraction, sense rerank, anaphora proposal) out of the kernel

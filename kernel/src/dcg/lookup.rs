@@ -2637,28 +2637,55 @@ impl LexicalIndex {
         sentences: &[&str],
         lemmatizer: &dyn Lemmatizer,
         proposer: &dyn Proposer,
-    ) -> Vec<Option<Item>> {
+    ) -> Vec<SentenceOutcome> {
         let mut candidates: Vec<Candidate> = Vec::new();
         let mut out = Vec::with_capacity(sentences.len());
         for s in sentences {
-            let (closed, open) = self.parse_open(s, lemmatizer);
-            let resolved = if let Some(c) = closed.into_iter().next() {
-                Some(c)
+            let (mut closed, open) = self.parse_open(s, lemmatizer);
+            let outcome = if closed.len() == 1 {
+                SentenceOutcome::Encoded(closed.pop().expect("len==1"))
+            } else if closed.len() > 1 {
+                SentenceOutcome::Ambiguous(closed)
             } else if let Some(o) = open.first() {
-                self.resolve_with(o, s, &candidates, proposer)
+                // OPEN: try to resolve its referent holes against the discourse; unresolvable ⇒ stays open.
+                match self.resolve_with(o, s, &candidates, proposer) {
+                    Some(item) => SentenceOutcome::Encoded(item),
+                    None => SentenceOutcome::Open(o.clone()),
+                }
             } else {
-                None
+                SentenceOutcome::Gap
             };
-            if let Some(item) = &resolved {
-                // Prepend this sentence's entities (most-recent-first) ahead of the prior discourse.
-                let mut fresh = entity_candidates(item.sem());
+            // Thread the discourse: harvest the chosen reading's named entities (most-recent-first) into
+            // the candidate set for the following sentences' anaphora.
+            let harvest = match &outcome {
+                SentenceOutcome::Encoded(item) => Some(item.sem()),
+                SentenceOutcome::Ambiguous(items) => items.first().map(Item::sem),
+                _ => None,
+            };
+            if let Some(sem) = harvest {
+                let mut fresh = entity_candidates(sem);
                 fresh.append(&mut candidates);
                 candidates = fresh;
             }
-            out.push(resolved);
+            out.push(outcome);
         }
         out
     }
+}
+
+/// The outcome of encoding one sentence — the classified result of [`LexicalIndex::resolve_document`]
+/// (and the document pipeline). Fail-closed: a sentence that cannot be encoded is `Open` or `Gap`, never
+/// a silently-dropped or wrong closed parse.
+#[derive(Clone)]
+pub enum SentenceOutcome {
+    /// A single closed, resolved proposition — the encoded knowledge (`item.sem()` is the `Prop`).
+    Encoded(Item),
+    /// Multiple closed parses: the sentence parses but carries unresolved sense/structural ambiguity.
+    Ambiguous(Vec<Item>),
+    /// Parsed but carries an unresolved referent hole — the anaphora proposer found no antecedent.
+    Open(OpenParse),
+    /// No parse — an OOV token, or an all-known-tokens grammar gap.
+    Gap,
 }
 
 /// The named-entity antecedent candidates a resolved sem references — every `EigonResource` IRI (a

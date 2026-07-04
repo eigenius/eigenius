@@ -23,8 +23,9 @@ use std::sync::Arc;
 use eigenius_kernel::bootstrap;
 use eigenius_kernel::dcg::{
     abbreviation_resources, extract_abbreviations, glossary_resources, ground_long_form, is_ctor,
-    pretty_term, AbbrDef, AbbreviationBinding, Candidate, Identity, LexicalIndex, ProposeCtx,
-    Proposer, SenseRanker, WordSenses,
+    pretty_term, AbbrDef, AbbreviationBinding, Candidate, DocumentPipeline, Identity,
+    InProcessPipeline, LexicalIndex, NoAbbreviationProposer, ProposeCtx, Proposer, SenseRanker,
+    SentenceEncoding, SentenceOutcome, WordSenses,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -1638,22 +1639,83 @@ fn resolve_document_threads_discourse_across_sentences() {
 
     let resolved = index.resolve_document(&doc, &Identity, &PickBySurface("brca1"));
     assert_eq!(resolved.len(), 2);
-    assert!(resolved[0].is_some(), "sentence 1 parses closed");
-    let s2 = resolved[1]
-        .as_ref()
-        .expect("sentence 2's pronoun resolves against the threaded discourse");
+    assert!(
+        matches!(
+            resolved[0],
+            SentenceOutcome::Encoded(_) | SentenceOutcome::Ambiguous(_)
+        ),
+        "sentence 1 parses closed"
+    );
+    let SentenceOutcome::Encoded(s2) = &resolved[1] else {
+        panic!("sentence 2's pronoun should resolve to a single closed prop");
+    };
     assert!(
         pretty_term(s2.sem()).contains("brca1"),
         "`it` bound to a prior-sentence entity (brca1): {}",
         pretty_term(s2.sem())
     );
 
-    // Fail-closed: a proposer that finds no antecedent ⇒ the sentence does not resolve.
+    // Fail-closed: a proposer that finds no antecedent ⇒ the sentence stays Open, not a wrong closed parse.
     let none = index.resolve_document(&doc, &Identity, &PickBySurface("nonexistent"));
     assert!(
-        none[1].is_none(),
-        "an unresolvable pronoun fails closed (no committed parse)"
+        matches!(none[1], SentenceOutcome::Open(_)),
+        "an unresolvable pronoun stays Open (fail-closed)"
     );
+}
+
+#[test]
+fn in_process_pipeline_encodes_a_document_end_to_end() {
+    // The WHOLE pipeline in one `encode()` call (the `DocumentPipeline` contract): Stage A (glossary —
+    // `instability (INS)` → INS grounded to the mass concept) → Stage B (bare `INS` closes via the kind
+    // shift) → Stage C (`it` resolves against the threaded discourse). Deterministic: the
+    // `NoAbbreviationProposer` for extraction and a mock `PickBySurface` for anaphora stand in for the
+    // LLM steps (Phase 2 swaps those impls, same contract).
+    let (base, _index) = index_over_bootstrap();
+    let doc = "The instability (INS) was assayed. INS affects HeLa. it affects HeLa.";
+    let pipeline = InProcessPipeline::new(
+        Arc::clone(&base),
+        &Identity,
+        &NoAbbreviationProposer,
+        &PickBySurface("hela"),
+    );
+    let enc = pipeline.encode(doc);
+
+    // Stage A — the abbreviation was extracted + grounded into the document glossary.
+    assert!(
+        enc.glossary
+            .iter()
+            .any(|d| d.short_form == "INS" && d.long_form == "instability"),
+        "Stage A extracted `INS ← instability`"
+    );
+    assert_eq!(enc.sentences.len(), 3, "three body sentences");
+
+    // Stage B — bare `INS` (glossary mass alias) parses closed; the Encoded reading is the grounded kind.
+    let ins = find_sentence(&enc.sentences, "INS affects");
+    match &ins.outcome {
+        SentenceOutcome::Encoded(item) => assert!(
+            pretty_term(item.sem()).contains("kind_of(Instability)"),
+            "bare INS is the grounded kind: {}",
+            pretty_term(item.sem())
+        ),
+        SentenceOutcome::Ambiguous(_) => {} // multiple closed readings — still parsed, acceptable
+        SentenceOutcome::Open(_) | SentenceOutcome::Gap => {
+            panic!("`INS affects HeLa` should parse closed (Encoded/Ambiguous), got Open/Gap")
+        }
+    }
+
+    // Stage C — `it` resolves against the discourse (HeLa introduced by the prior sentence) and encodes.
+    let it = find_sentence(&enc.sentences, "it affects");
+    assert!(
+        matches!(it.outcome, SentenceOutcome::Encoded(_)),
+        "`it affects HeLa` resolves its pronoun against the discourse and encodes"
+    );
+}
+
+fn find_sentence<'a>(sentences: &'a [SentenceEncoding], needle: &str) -> &'a SentenceEncoding {
+    sentences
+        .iter()
+        .find(|s| s.text.contains(needle))
+        .unwrap_or_else(|| panic!("no sentence matching {needle:?}"))
 }
 
 #[cfg(feature = "allms")]

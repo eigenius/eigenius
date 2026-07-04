@@ -39,6 +39,7 @@ pub mod lexicon;
 pub mod lookup;
 mod packed;
 pub mod parser;
+pub mod pipeline;
 pub mod pretty;
 mod reserved;
 pub mod segment;
@@ -65,9 +66,10 @@ pub use lemmatizer::{Identity, Lemmatizer, Pos};
 pub use lexicon::{entry_to_item, gate_entry, resolve_sem, resolve_sem_value};
 pub use lookup::{
     resolve_lexicon_profile, tokenize, Candidate, HoleInfo, HoleKind, LexicalIndex, OpenParse,
-    ProposeCtx, Proposer, DEFAULT_FOREST_CAP,
+    ProposeCtx, Proposer, SentenceOutcome, DEFAULT_FOREST_CAP,
 };
 pub use parser::{apply, cky_parse, Combinator, Cost, Item};
+pub use pipeline::{DocumentEncoding, DocumentPipeline, InProcessPipeline, SentenceEncoding};
 pub use pretty::{cat_shape, pretty_term};
 pub use segment::{is_nonprose, segment_sentences};
 #[cfg(feature = "allms")]

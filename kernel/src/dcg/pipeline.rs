@@ -1,0 +1,124 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! **The document→encoding pipeline** (D63, `docs/notes/d63-document-preprocessing-scope.md`): raw
+//! document text → per-sentence typed propositions. It composes the three stages behind one contract,
+//! [`DocumentPipeline`]:
+//!
+//! - **Stage A — preprocess:** extract abbreviation definitions and emit the *document glossary* (a
+//!   doc-scoped lexicon layer chained on the base), so bare domain abbreviations (`MSI`) parse.
+//! - **Stage B — parse:** parse each body sentence over base + doc-glossary.
+//! - **Stage C — resolve:** resolve referent holes (pronouns / `these X`) against the threaded discourse.
+//!
+//! The LLM-backed steps live entirely behind the proposer traits ([`AbbreviationProposer`],
+//! [`Proposer`]) — a deterministic mock in tests, the live `Anthropic*` proposers under `--features
+//! allms`. So the **Phase-2 orchestrator** becomes a different set of proposer impls (RPC-backed)
+//! *without changing this contract* — the trait is the seam between "the pipeline" and "how its LLM
+//! steps run".
+
+use std::sync::Arc;
+
+use crate::layer::{Layer, LayerBuilder, LayerStorage};
+
+use super::glossary::{
+    extract_abbreviations_with, glossary_resources, AbbrDef, AbbreviationProposer,
+};
+use super::lemmatizer::Lemmatizer;
+use super::lookup::{LexicalIndex, Proposer, SentenceOutcome};
+use super::segment::segment_sentences;
+
+/// The document→encoding pipeline: raw document text → typed propositions, one [`SentenceOutcome`] per
+/// body sentence. Fail-closed — an un-encodable sentence is `Open`/`Gap`, never a wrong closed parse.
+pub trait DocumentPipeline {
+    fn encode(&self, document: &str) -> DocumentEncoding;
+}
+
+/// The encoding of a whole document: the Stage-A glossary that was injected + one outcome per body
+/// sentence, in document order.
+#[derive(Clone)]
+pub struct DocumentEncoding {
+    /// The abbreviation definitions extracted and grounded into the document glossary (Stage A).
+    pub glossary: Vec<AbbrDef>,
+    /// One result per body (prose) sentence, in order.
+    pub sentences: Vec<SentenceEncoding>,
+}
+
+/// One body sentence's encoding: its surface text and the classified [`SentenceOutcome`].
+#[derive(Clone)]
+pub struct SentenceEncoding {
+    pub text: String,
+    pub outcome: SentenceOutcome,
+}
+
+/// The Phase-1 **in-process** pipeline: every stage runs in Rust, with the LLM steps behind the proposer
+/// traits. It chains the document glossary onto `base` in an **in-memory** layer — a small demo; a
+/// DB-backed `base` needs a persistent doc layer instead (an in-memory overlay over the persisted
+/// lexicon OOMs, §7-2), a `with_storage` constructor left for that path.
+pub struct InProcessPipeline<'a> {
+    base: Arc<Layer>,
+    lemmatizer: &'a dyn Lemmatizer,
+    abbreviation_proposer: &'a dyn AbbreviationProposer,
+    anaphora_proposer: &'a dyn Proposer,
+}
+
+impl<'a> InProcessPipeline<'a> {
+    pub fn new(
+        base: Arc<Layer>,
+        lemmatizer: &'a dyn Lemmatizer,
+        abbreviation_proposer: &'a dyn AbbreviationProposer,
+        anaphora_proposer: &'a dyn Proposer,
+    ) -> Self {
+        Self {
+            base,
+            lemmatizer,
+            abbreviation_proposer,
+            anaphora_proposer,
+        }
+    }
+}
+
+impl DocumentPipeline for InProcessPipeline<'_> {
+    fn encode(&self, document: &str) -> DocumentEncoding {
+        // Stage A — extract (Schwartz-Hearst ∪ the LLM proposer) + ground + emit the document glossary,
+        // chained as a doc-scoped lexicon layer on `base`. Fail-closed: a binding the felicity gate
+        // rejects at `add_resource` is skipped, so a mis-extraction never enters the lexicon.
+        let defs = extract_abbreviations_with(document, self.abbreviation_proposer);
+        let resources = glossary_resources(&self.base, &defs);
+        let mut builder = LayerBuilder::new("doc-glossary", Some(Arc::clone(&self.base)));
+        for r in resources {
+            let _ = builder.add_resource(r);
+        }
+        let doc_layer = Arc::new(builder.build(LayerStorage::in_memory()));
+
+        // Stage B + C — parse each body sentence over base + doc-glossary and resolve its referent holes
+        // against the threaded discourse (the untrusted proposer suggests, the kernel re-gates).
+        let index = LexicalIndex::build(doc_layer);
+        let bodies: Vec<String> = segment_sentences(document)
+            .into_iter()
+            .filter(|s| !s.trim().is_empty())
+            .collect();
+        let refs: Vec<&str> = bodies.iter().map(String::as_str).collect();
+        let outcomes = index.resolve_document(&refs, self.lemmatizer, self.anaphora_proposer);
+
+        let sentences = bodies
+            .into_iter()
+            .zip(outcomes)
+            .map(|(text, outcome)| SentenceEncoding { text, outcome })
+            .collect();
+        DocumentEncoding {
+            glossary: defs,
+            sentences,
+        }
+    }
+}
