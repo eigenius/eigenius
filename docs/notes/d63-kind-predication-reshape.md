@@ -87,31 +87,35 @@ Why a nominalization operator and not a kind-accepting predicate overload: `kind
 general** mechanism. The alternative — giving every verb a `Set`-accepting variant — multiplies every
 predicate's type. One operator reuses the entire `Entity → … → Prop` relation vocabulary as-is.
 
-## 3. The grammar change
+## 3. The grammar change — one unified shift for mass and plural
 
-The bare mass/kind shift (`bare_mass_nps` [lookup.rs:765](../../kernel/src/dcg/lookup.rs#L765)) currently
-emits a deferred-quant NP (the `Quantification` hole). Reshape it to emit a **committed, type-raised**
-NP whose sem applies the verb-phrase meaning to the kind entity `kind_of(C)`:
+The bare mass **and** plural shifts (formerly deferred-quant NPs carrying the `Quantification` hole) are
+one committed, type-raised rule, [`LexicalIndex::kind_raised_nps`](../../kernel/src/dcg/lookup.rs) (core-en's
+`bnp` is likewise one rule over `pl-or-mass` — §7.4):
 
 | input | today | reshaped |
 |---|---|---|
-| `cat_n(C, mass)` (bare) | raised NP, sem `λV. Q(C, λx. V(x))` — hole | **raised** `S/(S\NP)` (subj) / object raise, sem `λV. V(kind_of(C))` |
-| `cat_n(C, pl)` (bare) | raised NP deferred-quant + `cat_kind` (copula) | (plural deferred for now — reshape §7.4) **and** `cat_kind` (copula) retained |
+| `cat_n(C, mass)` (bare, reuse `a`) | raised NP, sem `λV. Q(C, λx. V(x))` — hole | **raised** `S/(S\NP)` (subj) / object raise, sem `λV. V(kind_of(C))` |
+| `cat_n(C, pl)` (bare, reuse `these`) | raised NP deferred-quant + `cat_kind` (copula) | as above (subj/obj) **and** `cat_kind` (copula) retained |
+| `cat_n(Σx:C. R, pl/mass)` (bare COMPOUND) | (open, or gapped) | raised, base-indexed `S/(S\NP_C)`, sem `λV. V(kind_of(Σx:C. R))` |
 
-- The shift **reuses the singular existential determiner `a`'s subject- and object-raised categories**
-  (mass presented as `sg` so they compose) with a committed kind sem — `kind_subj_sem` /
-  `kind_obj_sem` — exactly the shape of the existing `bare_plural_nps`. `(λV. V(kind_of(C)))` applied to
-  the VP `λs. affects(hela, s)` β-reduces to `affects(hela, kind_of(C))` : a closed `Prop`. No new
-  combinator.
+- The shift **builds the raised NP directly** — it takes the existential determiner's (`a` / `these`)
+  subject- (`fwd`) and object- (`bwd`) raised CATEGORY, substitutes the noun's **base class** for the
+  determiner's type variable, and attaches the kind sem `λV. V(kind_of(t))` — it does **not** call
+  `apply`. Building directly is **load-bearing for refined (compound) nouns**: routing `cat_n(Σx:C.R, …)`
+  through `apply` hits the GQ witness-projection (`DetRefine`, [parser.rs:448](../../kernel/src/dcg/parser.rs#L448)),
+  which wraps the sem as `λv. det(t)(λz. v(Fst z))` and yields the ill-typed `Fst(kind_of(Σ))` — a kind
+  nominalizes the *whole* type, it does not project witnesses. Indexing the raised category by the base
+  `C` (`C ≤ Entity`, in the subsumption lattice) lets it fill a verb slot; nominalizing `kind_of(Σx:C.R)`
+  keeps the compound's content. (This was the "nucleotide repeat regions" / "gene genes" bug.)
 - **Type-raising is load-bearing, not incidental.** A raised `S/(S\NP)` is not a `cat_np`, so it fills a
   verb argument slot by application but **cannot** feed the named-entity compound rule (which keys on
-  `is_ctor(cat_np)`). This is what keeps a mass noun's prenominal reading to the single kind classifier
-  `compound_kind(x, C)` (from its `cat_n`) with **no** spurious `compound(x, kind_of(C))` duplicate — the
-  reason bare plurals never had that problem (they too are raised). A plain-`cat_np` shift *does* leak
-  the duplicate; see §7.5.
+  `is_ctor(cat_np)`). This keeps a noun's prenominal reading to the single kind classifier
+  `compound_kind(x, C)` (from its `cat_n`) with **no** spurious `compound(x, kind_of(C))` duplicate (§7.5).
+  We deliberately diverge from core-en here — core-en's `bnp` yields a *plain* `np` because core-en has
+  no noun-noun compound rule to misuse it; we do, so we raise.
 - `*a MSI` / `*two MSI` still fail — the underlying `cat_n` stays `mass`, so no real determiner composes.
-- The alias emitter's `cat_n(C, mass)` output is unchanged; it now yields a closed subject reading
-  instead of an open one.
+- The alias emitter's `cat_n(C, mass)` output is unchanged; it now yields a closed reading, not an open one.
 
 ### 3.1 The copula case is already anticipated
 
@@ -162,11 +166,13 @@ residue is Open Question 5.2.)
 
 ## 6. Scope & phasing
 
-- **Phase A (kernel + grammar) — DONE (`2026-07-03`, mass; in-memory, no reseed):** the `kind_of` axiom;
-  reshaped the bare-mass shift to the committed **type-raised** form `λV. V(kind_of(C))` (§3); witnesses
-  below, full suite + fmt + clippy green. The load-bearing change. (Bare *plural* still deferred, §7.4.)
-- **Phase B (cleanup):** relegate the `Quantification`-hole machinery to the ∃/∀-alternative path (or
-  remove if that path is committed-only); update `d62-bare-plural-quantification.md`.
+- **Phase A (kernel + grammar) — DONE (`2026-07-03`, mass **and** plural; in-memory, no reseed):** the
+  `kind_of` axiom; the unified `kind_raised_nps` (§3) for bare mass + plural, including refined/compound
+  nouns (the `DetRefine`-bypass, §7.4). Full suite + fmt + clippy green. The load-bearing change.
+- **Phase B (cleanup) — partly done:** the deferred-quant *sems* are removed (nothing produces a
+  `QUANT_SENTINEL`). The quantification hole **carrier** (`freshen_quant`, the per-span registration,
+  `HoleKind::Quantification`) is left INERT, its retirement gated on the corpus re-measure confirming
+  committed-only suffices (§7.2). Then update `d62-bare-plural-quantification.md`.
 - **Phase C (grade attachment):** confirm parsed props enter the reasoning layer as `Declared` and that
   a `reference:Citation` witness climbs the grade — largely existing; integration only.
 
@@ -184,8 +190,16 @@ residue is Open Question 5.2.)
    form, or a surface for an exception-tolerant `GEN[MSI(x)][contribute_to(x, …)]`? Both are closed;
    kind-predication is the economical default. If instance-level truth-conditions are needed, `GEN` is a
    committed dyadic operator over the class, not a hole.
-4. **Mass vs plural unification.** Mass (`kind_of`, sg) and bare-plural kind (`kind_of`, the plural
-   kind) nominalize identically; only surface number differs. Decide whether one unary rule serves both.
+4. **Mass vs plural unification — RESOLVED (`2026-07-03`).** One rule, `kind_raised_nps`, serves both
+   (parameterized by the determiner reused, `a` vs `these`, and the number gate) — matching core-en's
+   single `bnp` over `pl-or-mass`. Resolving it exposed the **composed-compound bug**: a bare-plural
+   compound ("nucleotide repeat regions", "gene genes") is a *refined* noun `cat_n(Σx:C.R, pl)`, and
+   routing it through `apply` hit `DetRefine`'s witness-projection (`λv. det(t)(λz. v(Fst z))`), which
+   for the committed kind sem produces the ill-typed `Fst(kind_of(Σ))` (a kind nominalizes the whole
+   type; it doesn't project witnesses). Fixed by building the raised NP directly (§3) — index by the base
+   `C`, nominalize `kind_of(Σx:C.R)`. (Earlier misdiagnosis: I first blamed `Σ ⊀ Entity` subsumption and
+   added a `type_subsumes` arm — it changed nothing and was reverted; the category was never the problem,
+   the sem was.)
 5. **Spurious modifier reading (found and RESOLVED in Phase A, `2026-07-03`).** A first Phase-A cut
    emitted the kind term as a plain `cat_np(Entity, sg)`. That leaked a spurious prenominal reading: "MSI
    cell lines" parsed **both** as the intended `compound_kind(x, MSI)` (from the `cat_n`) **and** as

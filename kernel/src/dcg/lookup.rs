@@ -750,91 +750,90 @@ impl LexicalIndex {
         out
     }
 
-    /// Bare-MASS NP shift (D63 kind-predication reshape, `docs/notes/d63-kind-predication-reshape.md`):
-    /// a **mass** common noun `cat_n(C, mass)` denotes a KIND, and used as a bare argument it is that
-    /// kind *realized as an individual* — `kind_of(C) : Entity` (Chierchia's ∩ nominalization) — giving
-    /// a **closed** parse ("instability affects HeLa" → `affects(kind_of(Instability), hela) : Prop`),
-    /// not the earlier deferred-[`HoleKind::Quantification`] open parse. A generic is a *complete*
-    /// proposition about the kind; its warrant (literature citation / observation / derivation) belongs
-    /// on the claim's **grade**, not a parser hole.
+    /// The **bare KIND NP shift** (D63 kind-predication reshape §7.4,
+    /// `docs/notes/d63-kind-predication-reshape.md`) — one rule for a determiner-less **mass OR plural**
+    /// common noun (core-en's `bnp`, `det=nil`, is likewise a single rule over `pl-or-mass`). The noun
+    /// denotes its KIND, and as a bare argument it is that kind *realized as an individual*, `kind_of(t)
+    /// : Entity` (Chierchia's ∩): a **closed** reading — "genes affect HeLa" → `affect(hela,
+    /// kind_of(Gene))`, "instability affects HeLa" → `affects(kind_of(Instability), hela)`. Not the
+    /// earlier deferred-[`HoleKind::Quantification`] open parse — a generic is a *complete* proposition
+    /// about the kind, and its warrant (citation / observation / derivation) belongs on the claim's
+    /// **grade**, not a parser hole.
     ///
-    /// **Type-raised**, exactly like [`Self::bare_plural_nps`]: it reuses the singular existential
-    /// determiner (`a`) subject- and object-raised categories (mass is presented as `sg` so they
-    /// compose), swapping in a *committed* kind sem — [`kind_subj_sem`] `λA.λV. V(kind_of(A))` for the
-    /// `fwd` (subject-raised) body, [`kind_obj_sem`] for the `bwd` (object) body. Raising is
-    /// **load-bearing**: the result is `S/(S\NP)`, **not** a `cat_np`, so it fills a verb argument slot
-    /// by application but CANNOT feed the named-entity compound rule — a mass noun's prenominal reading
-    /// stays the kind classifier `compound_kind` (from its `cat_n`), with no spurious
-    /// `compound(x, kind_of(C))` duplicate (reshape §7.5). `*a instability` / `*two instability` still
-    /// fail (the underlying `cat_n` stays `mass`, so no real determiner composes).
-    fn bare_mass_nps(&self, noun: &Item) -> Vec<Item> {
-        let Some([c, num]) = is_ctor(noun.cat(), "cat_n") else {
+    /// `det_form` is the existential determiner whose subject- (`fwd`) and object- (`bwd`) type-raised
+    /// CATEGORIES are reused: `a` for mass (singular agreement), `these` for plural. The raised category
+    /// is built **directly** — substitute the noun's BASE class for the determiner's type variable — NOT
+    /// via [`apply`]. That bypass is **load-bearing**: routing a REFINED (compound / relative) noun
+    /// `cat_n(Σx:C. R, num)` through `apply` hits the GQ witness-projection (`DetRefine`, `parser.rs`),
+    /// producing the ill-typed `Fst(kind_of(Σ))` — a kind nominalizes the WHOLE type, it does not project
+    /// witnesses (this was the bare-plural-compound bug, "nucleotide repeat regions"). Indexing the raised
+    /// category by the base `C` (`C ≤ Entity`) lets it fill a verb slot; the sem nominalizes
+    /// `kind_of(Σx:C. R)`, keeping the compound's content. Type-raising (vs a plain `cat_np`) keeps it
+    /// **argument-only**, so it cannot feed the named-entity compound rule — a noun's prenominal reading
+    /// stays the `compound_kind` classifier, no spurious `compound(x, kind_of(C))` duplicate (§7.5).
+    fn kind_raised_nps(&self, noun: &Item, det_form: &str, want_num: &str) -> Vec<Item> {
+        let Some([t, num]) = is_ctor(noun.cat(), "cat_n") else {
             return Vec::new();
         };
-        if !matches!(num, Exp::InductiveCtor(_, n, _) if n == "mass") {
+        if !matches!(num, Exp::InductiveCtor(_, n, _) if n == want_num) {
             return Vec::new();
         }
-        // Present the mass noun as singular so the `a` determiner's sg category composes.
-        let Exp::InductiveCtor(num_decl, _, _) = num else {
-            return Vec::new();
-        };
-        let Exp::InductiveCtor(cat_decl, _, _) = noun.cat() else {
-            return Vec::new();
-        };
-        let sg = Exp::InductiveCtor(num_decl.clone(), "sg".into(), vec![]);
-        let sg_cat = Exp::InductiveCtor(cat_decl.clone(), "cat_n".into(), vec![c.clone(), sg]);
-        let sg_noun = Item::with_cost(sg_cat, noun.sem().clone(), noun.cost());
-        let subj = kind_subj_sem();
-        let obj = kind_obj_sem();
-        self.entries_for("a")
+        let base = base_class(t); // the raised category's NP index (a class in the subsumption lattice)
+        let kind = kind_of(t.clone()); // the nominalized whole type — `kind_of(Σx:C.R)` for a compound
+        self.entries_for(det_form)
             .iter()
             .filter_map(|det| {
-                let sem = match cat_forall_body_head(det.item.cat())? {
-                    "fwd" => subj.clone(),
-                    "bwd" => obj.clone(),
+                let head = cat_forall_body_head(det.item.cat())?;
+                let Some([_dnum, body_lam]) = is_ctor(det.item.cat(), "cat_forall") else {
+                    return None;
+                };
+                let Exp::Lam(Patt::Var(tvar), body) = body_lam else {
+                    return None;
+                };
+                let mut subst = CatSubst::new();
+                subst.insert(tvar.clone(), base.clone());
+                let cat = subst_cat(body, &subst);
+                let sem = match head {
+                    // subject-raised `S/(S\NP)`: `λV. V(kind)`.
+                    "fwd" => Exp::Lam(
+                        Patt::Var("V".into()),
+                        Box::new(Exp::App(
+                            Box::new(Exp::Var("V".into())),
+                            Box::new(kind.clone()),
+                        )),
+                    ),
+                    // object-raised `(S\NP)\((S\NP)/NP)`: `λTV. λsubj. TV(kind, subj)`.
+                    "bwd" => {
+                        let tv_app = Exp::App(
+                            Box::new(Exp::App(
+                                Box::new(Exp::Var("TV".into())),
+                                Box::new(kind.clone()),
+                            )),
+                            Box::new(Exp::Var("subj".into())),
+                        );
+                        Exp::Lam(
+                            Patt::Var("TV".into()),
+                            Box::new(Exp::Lam(Patt::Var("subj".into()), Box::new(tv_app))),
+                        )
+                    }
                     _ => return None,
                 };
-                let synthetic = Item::with_cost(det.item.cat().clone(), sem, det.item.cost());
-                apply(&synthetic, &sg_noun, &self.layer)
+                Some(Item::with_cost(cat, sem, noun.cost()))
             })
             .collect()
     }
 
-    /// Bare-plural NP shift (D62 — core-en's `bnp` unary rule; `det=nil`). A **plural** common noun
-    /// `cat_n(C, pl)` also serves as an argument NP whose quantifier is **deferred**: a higher-order
-    /// [`HoleKind::Quantification`] hole `Q`. Built by applying the plural-existential determiner's
-    /// *category* (`these`) to the noun, but with the determiner sem replaced by
-    /// [`deferred_quant_det_sem`] (`λA.λV. Q(A,V)` — ∃ replaced by the hole), so the NP sem is
-    /// `λV. Q(C, V)`. Returns the subject + object NP items (`these` carries both raised cats). Gated
-    /// on `pl` — core-en's `pl-or-mass` minus mass (a later feature); a bare *singular* count noun
-    /// (`*gene is a vulnerability`) correctly does not shift. The `Q` sentinel is freshened per-span
-    /// at chart placement and typed at the felicity gate.
+    /// Bare-MASS NP shift — the kind shift over a mass noun, singular agreement (reuse `a`).
+    fn bare_mass_nps(&self, noun: &Item) -> Vec<Item> {
+        self.kind_raised_nps(noun, "a", "mass")
+    }
+
+    /// Bare-PLURAL NP shift — the kind shift over a plural noun, plural agreement (reuse `these`). A bare
+    /// plural denotes its kind (Carlson 1977), identically to a bare mass noun — only surface number
+    /// differs — so it shares [`Self::kind_raised_nps`] (the §7.4 mass/plural unification). A bare
+    /// *singular* count noun (`*gene is a vulnerability`) correctly does not shift.
     fn bare_plural_nps(&self, noun: &Item) -> Vec<Item> {
-        let Some([_c, num]) = is_ctor(noun.cat(), "cat_n") else {
-            return Vec::new();
-        };
-        if !matches!(num, Exp::InductiveCtor(_, n, _) if n == "pl") {
-            return Vec::new();
-        }
-        // The plural-existential determiner (`these`) supplies the subject + object NP categories;
-        // we keep its cat and swap in the matching deferred-quantifier sem. The subject determiner's
-        // (post-`cat_forall`) body is headed `fwd` (a type-raised `S/(S\NP)`), the object's `bwd`
-        // (the in-situ object raise) — so the body head selects the subject vs object deferred sem.
-        // Depends on `these` being a loaded plural existential determiner (closed class).
-        let subj = deferred_quant_subj_sem();
-        let obj = deferred_quant_obj_sem();
-        self.entries_for("these")
-            .iter()
-            .filter_map(|det| {
-                let sem = match cat_forall_body_head(det.item.cat())? {
-                    "fwd" => subj.clone(),
-                    "bwd" => obj.clone(),
-                    _ => return None,
-                };
-                let synthetic = Item::with_cost(det.item.cat().clone(), sem, det.item.cost());
-                apply(&synthetic, noun, &self.layer)
-            })
-            .collect()
+        self.kind_raised_nps(noun, "these", "pl")
     }
 
     /// Object-position non-restrictive (appositive) relative NP (D62 §2 #2A, object slot): the
@@ -2786,62 +2785,13 @@ fn freshen_quant(exp: &Exp, fresh: &str) -> Exp {
     }
 }
 
-/// `Q(A, λx. body)` — the deferred-quantifier hole applied to a restrictor class and an **η-expanded**
-/// scope. The η-expansion is essential: the scope is a λ binding `x:A`, so the `x:A`-against-`Entity`
-/// subsumption happens at `body` (argument position), matching the concrete `∃`. Passing a rigid VP
-/// whole would demand contravariant arrow subtyping the kernel lacks (witnessed: rejected).
-fn quant_apply(a: Exp, x: &str, body: Exp) -> Exp {
-    let scope = Exp::Lam(Patt::Var(x.into()), Box::new(body));
-    Exp::App(
-        Box::new(Exp::App(
-            Box::new(Exp::Var(QUANT_SENTINEL.into())),
-            Box::new(a),
-        )),
-        Box::new(scope),
-    )
-}
-
-/// The **subject** deferred-quantifier determiner sem `λA. λV. Q(A, λx. V(x))` — `exists_sem` with the
-/// `∃x:A.V(x)` body replaced by the deferred hole `Q` applied to the η-expanded VP. Applied to a bare
-/// plural's noun class `C` it yields the subject NP sem `λV. Q(C, λx. V(x))` (core-en `det=nil`,
-/// deferred). D62 `docs/notes/d62-bare-plural-quantification.md`.
-fn deferred_quant_subj_sem() -> Exp {
-    // λA. λV. Q(A, λx. V(x))
-    let body = quant_apply(
-        Exp::Var("A".into()),
-        "x",
-        Exp::App(
-            Box::new(Exp::Var("V".into())),
-            Box::new(Exp::Var("x".into())),
-        ),
-    );
-    Exp::Lam(
-        Patt::Var("A".into()),
-        Box::new(Exp::Lam(Patt::Var("V".into()), Box::new(body))),
-    )
-}
-
-/// The **object** deferred-quantifier determiner sem `λT. λTV. λsubj. Q(T, λx. TV(x, subj))` —
-/// `obj_exists_sem` with the `∃x:T.TV(x,subj)` body replaced by the deferred hole `Q` applied to the
-/// η-expanded scope. Mirrors the object determiner's shape (object-first TV `T→Entity→Prop`).
-fn deferred_quant_obj_sem() -> Exp {
-    // λT. λTV. λsubj. Q(T, λx. TV(x, subj))
-    let tv_app = Exp::App(
-        Box::new(Exp::App(
-            Box::new(Exp::Var("TV".into())),
-            Box::new(Exp::Var("x".into())),
-        )),
-        Box::new(Exp::Var("subj".into())),
-    );
-    let body = quant_apply(Exp::Var("T".into()), "x", tv_app);
-    Exp::Lam(
-        Patt::Var("T".into()),
-        Box::new(Exp::Lam(
-            Patt::Var("TV".into()),
-            Box::new(Exp::Lam(Patt::Var("subj".into()), Box::new(body))),
-        )),
-    )
-}
+// The deferred-quantifier determiner sems (`quant_apply` / `deferred_quant_subj_sem` /
+// `deferred_quant_obj_sem`) were removed with the D63 kind-predication reshape §7.4 (2026-07-03): bare
+// mass AND bare plural now commit to the closed kind-predication `kind_of(t)` via
+// [`LexicalIndex::kind_raised_nps`], so nothing produces a `QUANT_SENTINEL` any more. The quantification
+// hole CARRIER (`freshen_quant`, `quant_hole_type`, the per-span registration, `HoleKind::Quantification`)
+// is left in place but INERT — its retirement (reshape Phase B) is gated on the corpus re-measure
+// confirming committed-only is sufficient (no episodic/existential residue needs a deferred hole, §7.2).
 
 /// A `kind_of(A)` application — the class value `A` (a `Set`) realized as the `Entity` that is that
 /// kind (Chierchia's ∩; the axiom `ontology:kind_of : Set -> Entity`, D63 kind-predication reshape).
@@ -2852,43 +2802,21 @@ fn kind_of(a: Exp) -> Exp {
     )
 }
 
-/// The **subject** committed-kind determiner sem `λA. λV. V(kind_of(A))` — the kind-predication
-/// analogue of [`deferred_quant_subj_sem`], the deferred hole `Q(A, λx. V(x))` replaced by applying
-/// the verb-phrase meaning `V` directly to the kind entity `kind_of(A)`. Applied (via `a`'s
-/// subject-raised category) to a mass noun's class `C`, it yields the raised subject sem
-/// `λV. V(kind_of(C))` — a CLOSED argument, no quantifier hole.
-fn kind_subj_sem() -> Exp {
-    // λA. λV. V(kind_of(A))
-    let body = Exp::App(
-        Box::new(Exp::Var("V".into())),
-        Box::new(kind_of(Exp::Var("A".into()))),
-    );
-    Exp::Lam(
-        Patt::Var("A".into()),
-        Box::new(Exp::Lam(Patt::Var("V".into()), Box::new(body))),
-    )
+/// The base (non-refined) class of a common-noun type: peel `Σx:C. R` down to `C` (recursively, for
+/// stacked refinements), else the type itself. A bare kind NP's raised category is indexed by this base
+/// so it sits in the subsumption lattice (`C ≤ Entity`), while its sem nominalizes the WHOLE type
+/// (`kind_of(Σx:C. R)`) — D63 kind-predication reshape §7.4 ([`LexicalIndex::kind_raised_nps`]).
+fn base_class(t: &Exp) -> Exp {
+    match t {
+        Exp::Sig(_, base, _) => base_class(base),
+        other => other.clone(),
+    }
 }
 
-/// The **object** committed-kind determiner sem `λT. λTV. λsubj. TV(kind_of(T), subj)` — the
-/// object-position analogue of [`kind_subj_sem`] (object-first TV `T→Entity→Prop`), replacing
-/// [`deferred_quant_obj_sem`]'s deferred hole with the kind entity `kind_of(T)` in the object slot.
-fn kind_obj_sem() -> Exp {
-    // λT. λTV. λsubj. TV(kind_of(T), subj)
-    let tv_app = Exp::App(
-        Box::new(Exp::App(
-            Box::new(Exp::Var("TV".into())),
-            Box::new(kind_of(Exp::Var("T".into()))),
-        )),
-        Box::new(Exp::Var("subj".into())),
-    );
-    Exp::Lam(
-        Patt::Var("T".into()),
-        Box::new(Exp::Lam(
-            Patt::Var("TV".into()),
-            Box::new(Exp::Lam(Patt::Var("subj".into()), Box::new(tv_app))),
-        )),
-    )
-}
+// `kind_subj_sem` / `kind_obj_sem` (the Phase-A committed determiner sems) were folded into
+// [`LexicalIndex::kind_raised_nps`] (D63 reshape §7.4): the raised subject/object sems are now built
+// there directly, with `kind_of(t)` pre-substituted, so the kind shift never routes through `apply`'s
+// `DetRefine` witness-projection (which mis-fired `Fst(kind_of(Σ))` on refined/compound nouns).
 
 /// What a hole dispatches to once resolved (the carrier's resolver tag — D64). `EntityRef`
 /// (pronoun/possessive referents → the D64 anaphora resolver) is an *internal-resolution* hole;

@@ -425,15 +425,12 @@ fn quantified_np_as_preposition_object_parses() {
         "`within a gene` (existential GQ object) parses"
     );
 
-    // Bare-plural GQ as a preposition object — deferred quantifier ⇒ OPEN parse.
-    let (closed, open) = index.parse_open("a cell line within genes affects BRCA1", &PluralS);
+    // Bare-plural as a preposition object — commits to its kind (reshape §7.4) ⇒ a CLOSED parse.
     assert!(
-        closed.is_empty(),
-        "bare-plural prep object defers its quantifier (no closed parse)"
-    );
-    assert!(
-        !open.is_empty(),
-        "`within genes` (bare-plural GQ object) yields an open parse with a deferred hole"
+        !index
+            .parse("a cell line within genes affects BRCA1", &PluralS)
+            .is_empty(),
+        "`within genes` (bare-plural kind object) yields a closed parse"
     );
 }
 
@@ -649,26 +646,19 @@ fn vp_adjunct_preposition_takes_quantified_and_compound_objects() {
     let (_layer, index) = index_over_bootstrap();
     let closes = |s: &str| {
         assert!(
-            !index.parse(s, &Identity).is_empty(),
+            !index.parse(s, &PluralS).is_empty(),
             "expected a closed parse: {s:?}"
         );
     };
-    let opens = |s: &str| {
-        let (closed, open) = index.parse_open(s, &PluralS);
-        assert!(
-            closed.is_empty(),
-            "bare-plural object defers ⇒ no closed parse: {s:?}"
-        );
-        assert!(!open.is_empty(), "expected an open parse: {s:?}");
-    };
 
     // VP-adjunct prep (`to`) — the fixed cases: determined single, determined compound, bare compound.
+    // Bare-plural (incl. compound) objects now COMMIT to their kind (reshape §7.4) ⇒ closed.
     closes("HeLa affects BRCA1 to a gene"); //                    GQ (determined single) object
     closes("HeLa affects BRCA1 to a gene cell line"); //          compound (determined) object
-    opens("HeLa affects BRCA1 to gene genes"); //                 compound (bare-plural) object
-                                               // Noun-modifier prep (`within`) — control, already supported (still must hold).
+    closes("HeLa affects BRCA1 to gene genes"); //                compound (bare-plural KIND) object
+                                                // Noun-modifier prep (`within`) — control, already supported (still must hold).
     closes("a cell line within a gene cell line affects BRCA1");
-    opens("a cell line within gene genes affects BRCA1");
+    closes("a cell line within gene genes affects BRCA1"); //     compound bare-plural KIND, noun-mod prep
 }
 
 /// D62/GH#97 — a **modal clause composes with a VP-adjunct PP whose object is quantified** (the
@@ -886,11 +876,10 @@ fn light_verb_give_rise_to_is_a_multiword_transitive() {
         !index.parse("HeLa gave rise to BRCA1", &Identity).is_empty(),
         "past light verb parses"
     );
-    // Bare-plural subject defers its quantifier ⇒ an open parse.
-    let (c, o) = index.parse_open("genes give rise to HeLa", &PluralS);
+    // Bare-plural subject commits to its kind (reshape §7.4) ⇒ a closed parse.
     assert!(
-        c.is_empty() && !o.is_empty(),
-        "bare-plural subject of the light verb yields an open parse"
+        !index.parse("genes give rise to HeLa", &PluralS).is_empty(),
+        "bare-plural kind subject of the light verb yields a closed parse"
     );
 }
 
@@ -991,12 +980,16 @@ fn compound_stacking_and_bare_plural_compound() {
             .is_empty(),
         "3-noun compound stacking must parse"
     );
-    // Bare-plural over a composed compound: [gene genes] (modifier + plural head), bare subject →
-    // an OPEN parse (deferred-quantification hole), like a bare plural leaf.
-    let (_c, open) = index.parse_open("gene genes affect HeLa", &PluralS);
+    // Bare-plural over a composed compound: [gene genes] (modifier + plural head), bare subject → a
+    // CLOSED kind-predication `affect(hela, kind_of(Σx:Gene. compound_kind(x,Gene)))`. The whole refined
+    // type is nominalized (reshape §7.4) — the compound-noun case the DetRefine Fst-projection broke.
+    let closed = index.parse("gene genes affect HeLa", &PluralS);
     assert!(
-        !open.is_empty(),
-        "a bare-plural composed compound must be an argument NP (open parse)"
+        closed
+            .iter()
+            .any(|p| pretty_term(p.sem()).contains("kind_of(")
+                && pretty_term(p.sem()).contains("compound_kind(")),
+        "a bare-plural composed compound is a closed kind-predication over the refined type"
     );
 }
 
@@ -1140,50 +1133,47 @@ fn past_tense_clauses_parse() {
     assert_parses_to_prop("HeLa was a gene");
     assert_parses_to_prop("HeLa was large");
     // `were` (plural past copula) over a bare-plural subject + predicate adjective. A bare plural
-    // defers its quantifier ⇒ an OPEN parse (not closed), so check the open forest.
-    let (_c, open) = index.parse_open("genes were large", &PluralS);
+    // commits to its kind (reshape §7.4) ⇒ a CLOSED parse.
     assert!(
-        !open.is_empty(),
-        "`genes were large` — were (pl past copula) + bare-plural subject + predicate adjective"
+        !index.parse("genes were large", &PluralS).is_empty(),
+        "`genes were large` — were (pl past copula) + bare-plural kind subject + predicate adjective"
     );
     // Sanity: present tense still parses.
     assert_parses_to_prop("HeLa affects BRCA1");
 }
 
-/// D62 — bare-plural NP arguments (core-en `bnp`; `docs/notes/d62-bare-plural-quantification.md`). A
-/// determiner-less PLURAL common noun serves as a subject/object NP whose quantifier is **deferred**
-/// to a `Quantification` hole, so the clause is an **open** parse (not closed). Agreement still
-/// bites (a bare plural is `pl`), and a bare *singular* count noun does not shift.
+/// D63 kind-predication reshape §7.4 — bare-plural NP arguments COMMIT to the kind (Carlson 1977: a
+/// bare plural denotes its kind, exactly like a bare mass noun), so the clause is a **closed** parse:
+/// "genes affect HeLa" → `affect(hela, kind_of(Gene))`, no deferred `Quantification` hole. Agreement
+/// still bites (a bare plural is `pl`), and a bare *singular* count noun does not shift.
 #[test]
-fn bare_plural_np_is_a_deferred_quantifier_argument() {
+fn bare_plural_np_is_a_closed_kind_argument() {
     let (_layer, index) = index_over_bootstrap();
 
-    // Bare-plural subject / object / both: each parses (as an OPEN parse carrying ≥1 quant hole).
-    for s in [
-        "genes affect HeLa",
-        "HeLa affects genes",
-        "genes affect genes",
-    ] {
-        let (closed, open) = index.parse_open(s, &PluralS);
-        assert!(
-            closed.is_empty(),
-            "'{s}': a bare plural defers its quantifier ⇒ no CLOSED parse"
+    // Bare-plural subject / object: each parses CLOSED, the plural nominalized to its kind.
+    for s in ["genes affect HeLa", "HeLa affects genes"] {
+        let closed = index.parse(s, &PluralS);
+        assert_eq!(
+            closed.len(),
+            1,
+            "'{s}': a bare plural is a single closed kind-predication"
         );
-        assert!(!open.is_empty(), "'{s}': must yield an OPEN parse");
-        let max_holes = open.iter().map(|o| o.holes.len()).max().unwrap_or(0);
-        assert!(max_holes >= 1, "'{s}': the open parse carries ≥1 hole");
+        assert!(
+            pretty_term(closed[0].sem()).contains("kind_of(Gene)"),
+            "'{s}': the bare plural is its kind realized as an entity, got {}",
+            pretty_term(closed[0].sem())
+        );
     }
 
-    // `genes affect genes` carries TWO quantification holes (subject + object).
-    let (_c, open) = index.parse_open("genes affect genes", &PluralS);
-    let two = open.iter().any(|o| {
-        o.holes
-            .iter()
-            .filter(|h| h.kind == eigenius_kernel::dcg::HoleKind::Quantification)
-            .count()
-            == 2
-    });
-    assert!(two, "`genes affect genes` has two quantification holes");
+    // `genes affect genes` closes with the kind in BOTH subject and object.
+    let both = index.parse("genes affect genes", &PluralS);
+    assert!(!both.is_empty(), "`genes affect genes` parses closed");
+    assert_eq!(
+        pretty_term(both[0].sem()).matches("kind_of(Gene)").count(),
+        2,
+        "both argument positions nominalize the kind, got {}",
+        pretty_term(both[0].sem())
+    );
 
     // (Agreement — a bare plural is `pl`, so a 3sg verb rejects it as subject — holds in the real
     // grammar via the `pl` NP num reused from `these_subj`; it is verified by
