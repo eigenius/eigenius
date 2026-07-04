@@ -1711,6 +1711,96 @@ fn in_process_pipeline_encodes_a_document_end_to_end() {
     );
 }
 
+#[test]
+fn non_pp_verb_rejects_a_pp_complement() {
+    // Over-generation guard for the PP-frame fix (docs/notes/d63-parse-gap-closure.md Step 2). A
+    // genuinely transitive verb `(S\NP)/NP` (WordNet frame 8, "----s something") takes a *bare NP* and
+    // MUST NOT absorb a `prep + NP`: `*HeLa affects to BRCA1` is ungrammatical and correctly gaps.
+    // The Step-2 fix gives *PP-oblique-frame* verbs a `(S\NP)/cat_pp` category so "contributes to
+    // cancers" parses — it must be FRAME-SPECIFIC and must NOT blanket-license "V prep NP", or it would
+    // wrongly admit `*affects to BRCA1`. (`convert.rs::classify` already distinguishes frame 8 from the
+    // PP-oblique frames 12/13/20/21/27, so the fix can be precise.) This test must stay green after it.
+    let (_layer, index) = index_over_bootstrap();
+    // Clean transitive: a bare NP object closes.
+    assert_eq!(index.parse("HeLa affects BRCA1", &Identity).len(), 1);
+    // A non-PP verb + `prep + NP` where a bare object is expected → correctly no parse.
+    assert!(index.parse("HeLa affects to BRCA1", &Identity).is_empty());
+    // A PP still adjoins once the verb has its bare object (both attachments → ≥1 parse).
+    assert!(!index
+        .parse("HeLa affects BRCA1 in HeLa", &Identity)
+        .is_empty());
+}
+
+/// A verb that subcategorizes for a PP — `contributes : (S\NP)/cat_pp_arg` — reusing the demo `affects`
+/// binary axiom as its relation. The Step-2 fix in miniature (the importer will emit this shape for
+/// PP-oblique WordNet frames).
+const CONTRIB_FIXTURE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+resource lexicon:e_contributes : lexicon:LexicalEntry {
+    lexicon:form     = "contributes";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg) );
+    lexicon:sem      = lexicon:affects;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:contribute.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+"#;
+
+fn contrib_layer() -> Arc<Layer> {
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
+    for r in demo {
+        b.add_resource(r).expect("add demo");
+    }
+    let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let fix =
+        esl::compile_against_layer(CONTRIB_FIXTURE, &demo_layer).expect("contrib fixture compiles");
+    let mut b2 = LayerBuilder::new("contrib", Some(Arc::clone(&demo_layer)));
+    for r in fix {
+        b2.add_resource(r).expect("add contrib");
+    }
+    Arc::new(b2.build(LayerStorage::in_memory()))
+}
+
+#[test]
+fn argument_pp_verb_parses_verb_prep_object() {
+    // The Step-2 fix in miniature (docs/notes/d63-parse-gap-closure.md): a verb subcategorizing for a PP
+    // (`contributes : (S\NP)/cat_pp_arg`) composes with "to <object>" (the argument-marker
+    // `to : cat_pp_arg/NP`), while a plain transitive verb still rejects a stray "to X".
+    let index = LexicalIndex::build(contrib_layer());
+
+    // Argument-PP verb + "to <individual>" → parses; sem reuses the `affects` axiom.
+    let closed = index.parse("HeLa contributes to BRCA1", &Identity);
+    assert!(
+        !closed.is_empty(),
+        "`HeLa contributes to BRCA1` should parse (argument-PP verb)"
+    );
+    assert!(
+        pretty_term(closed[0].sem()).contains("affects"),
+        "sem should apply the verb's binary relation: {}",
+        pretty_term(closed[0].sem())
+    );
+
+    // Felicity guard: the argument-marker does NOT leak to a plain transitive verb.
+    assert!(index.parse("HeLa affects to BRCA1", &Identity).is_empty());
+
+    // Kind object (bare plural → kind_of), the acceptance shape "MSI contributes to cancers": the
+    // argument-marker feeds a *raised* GQ through the extended GqPrepObj rule. Needs `PluralS` to
+    // lemmatize "genes" → "gene".
+    let kind = index.parse("HeLa contributes to genes", &PluralS);
+    assert!(
+        !kind.is_empty(),
+        "`HeLa contributes to genes` (bare-plural kind object) should parse"
+    );
+    assert!(
+        pretty_term(kind[0].sem()).contains("kind_of"),
+        "the object is the kind: {}",
+        pretty_term(kind[0].sem())
+    );
+}
+
 fn find_sentence<'a>(sentences: &'a [SentenceEncoding], needle: &str) -> &'a SentenceEncoding {
     sentences
         .iter()

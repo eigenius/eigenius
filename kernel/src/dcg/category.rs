@@ -60,6 +60,14 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
         ("cat_pp_than", []) => Ok(Exp::EigonClass(
             Iri::parse("urn:eigenius:lexicon:Entity").map_err(|e| e.to_string())?,
         )),
+        // ⟦PP[arg]⟧ = Entity — an argument (oblique-complement) PP supplies the verb's second
+        // ENTITY argument (D63 verb+PP frames). The marker (`to`/`from`/`on`/`with`) is transparent
+        // (`cat_pp_arg / cat_np(Entity)`, sem `λy. y`); a subcategorizing verb is `(S\NP)/cat_pp_arg`,
+        // sem `λy.λx. R(x, y)`. Distinct from a bare NP so only a PP-frame verb accepts it (`affect`,
+        // a plain `(S\NP)/NP`, still rejects `to X`). Same denotation as `cat_pp_than`.
+        ("cat_pp_arg", []) => Ok(Exp::EigonClass(
+            Iri::parse("urn:eigenius:lexicon:Entity").map_err(|e| e.to_string())?,
+        )),
         // ⟦PP[mod]⟧ = Entity → Prop — a noun-postmodifying PP is a predicate over the head
         // noun's entities (D63 §8.13, 6-mod). The post-nominal refine rule applies it under
         // a Σ; `of : cat_pp / cat_np(Entity)`, sem `λy.λx. prep_of(x, y)`.

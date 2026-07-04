@@ -197,6 +197,15 @@ data lexicon:Cat : Type 1 {
     // `than` — so `*HeLa is larger BRCA1` (no `than`) gets no parse.
     cat_pp_than : lexicon:Cat,
 
+    // PP[arg] — an **argument** (oblique-complement) prepositional phrase: the PP a verb
+    // *subcategorizes* for ("contributes **to** cancers", "results **from** X"). ⟦cat_pp_arg⟧ =
+    // Entity — the marker is transparent, exposing the prep's object (sem `λy. y`), so an
+    // argument-PP verb `(S\NP) / cat_pp_arg` binds it as its second entity argument (same
+    // Entity→Entity→Prop sem_type as a transitive verb). A category distinct from a bare NP forces
+    // the preposition — so a genuinely transitive verb `(S\NP)/NP` (e.g. `affect`) cannot absorb a
+    // stray `to X`: `*HeLa affects to BRCA1` has no parse. (Mirrors `cat_pp_than`; D63 verb+PP frames.)
+    cat_pp_arg : lexicon:Cat,
+
     // PP[mod] — a **noun-postmodifying** prepositional phrase ("…of WRN dependency"),
     // supplying a predicate over the head noun's entities (D63 §8.13 Slice 6-mod).
     // ⟦cat_pp⟧ = Entity -> Prop. A noun-modifier preposition is `cat_pp / cat_np(Entity)`

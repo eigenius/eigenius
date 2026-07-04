@@ -1113,6 +1113,50 @@ resource lexicon:than_marker : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 
+// ── Argument-PP markers: prepositions as VERB-subcategorized oblique complements (D63 verb+PP) ──
+// "contributes TO cancers", "results FROM X", "responds TO Y", "associated WITH Z": the verb
+// *requires* the PP. The marker consumes the object NP and yields a `cat_pp_arg` (⟦·⟧ = Entity),
+// transparently exposing the object (`λy. y`); a subcategorizing verb `(S\NP) / cat_pp_arg` binds it as
+// its second entity argument. A distinct `cat_pp_arg` (not a bare NP) FORCES the preposition — a plain
+// transitive verb `(S\NP)/NP` (e.g. `affect`) cannot absorb `to X`. These are IN ADDITION to each
+// preposition's VP-adjunct + noun-modifier entries above (the argument reading is a third parse,
+// selected only by a subcategorizing verb).
+resource lexicon:argmarker_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (y : lexicon:Entity) => y : lexicon:Entity -> lexicon:Entity ) );
+}
+resource lexicon:to_arg : lexicon:LexicalEntry {
+    lexicon:form     = "to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "to";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:from_arg : lexicon:LexicalEntry {
+    lexicon:form     = "from";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "from";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:on_arg : lexicon:LexicalEntry {
+    lexicon:form     = "on";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "on";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:with_arg : lexicon:LexicalEntry {
+    lexicon:form     = "with";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "with";
+    lexicon:grade    = epistemic:declared;
+}
+
 // ── Determiner entries (D63 §8.3 Phase 2) ─────────────────────────────
 // Subject category:  cat_forall(num, λT. S/(S\NP_T))
 // Object category:   cat_forall(num, λT. (S\NP_E)\((S\NP_E)/NP_T)),  E = lexicon:Entity

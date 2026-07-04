@@ -113,14 +113,41 @@ apposition / NP-coordination / passive context, not lists per se.)
 
 ## 4. The step-by-step plan (leverage order)
 
-- [ ] **Step 1 — Diagnose the verb+PP-frame root cause** *before* patching. Is it the WordNet importer
-      emitting the wrong `cat` for verbs that take a PP argument (a *systematic* fix), or a grammar-rule
-      gap? Entry point: the `observe in` (parses) vs `occur in` (gaps) contrast — compare the two verbs'
-      emitted `LexicalEntry` cats. **This determines the shape of the whole step** (import-level vs
-      grammar-level vs per-verb). *Hypothesis (to confirm): the importer gives these verbs an
-      intransitive/transitive cat but no `(S\NP)/PP` frame.*
-- [ ] **Step 2 — Close bucket A (verb+PP frames)** per the Step-1 diagnosis. Systematic if it's the
-      import; closes ~10 of 17. Re-measure the affected units.
+- [x] **Step 1 — verb+PP-frame root cause: DIAGNOSED (importer-side, frame-specific).** Witnessed
+      (code + live probe `non_pp_verb_rejects_a_pp_complement`, `2026-07-04`):
+  - The WordNet importer (`convert.rs::classify`) has **no verb+PP-complement category**: it emits only
+    Intransitive `S\NP` / Transitive `(S\NP)/NP` / Ditransitive / Clausal, and maps PP-oblique frames
+    **coarsely** — 12/13/20/21/27 → transitive (preposition dropped, *bare NP* expected), 4/22 →
+    intransitive (PP dropped). A documented "stage-1 loss".
+  - Prepositions **are** seeded with both a VP-adjunct `(S\NP)\(S\NP)/NP` and a noun-mod `cat_pp/NP`
+    entry (`closed-class.esl`) — so a PP *can* attach; the gap is verb-side.
+  - **Category fact (live):** a transitive `(S\NP)/NP` verb takes a bare NP and cannot consume `prep + NP`
+    (a `cat_pp`): `HeLa affects to BRCA1` → 0 parses; `HeLa affects BRCA1 in HeLa` → 2 (PP adjoins after
+    the object). And `*affects to BRCA1` **should** gap — `affect` is not a PP verb.
+  - So an **argument-PP** verb (`contribute to`, `result from`, `respond to`, `associate with`,
+    `depend on`) — subcategorized for the PP but emitted transitive — gaps: `contributes to cancers`
+    wants a bare NP but gets `to cancers` (a PP). **This is the bug.**
+  - **Refinement:** the two *adjunct-PP* verbs (`occur in`, `arise from`) stand alone; their PP should
+    VP-adjoin already, so their corpus gaps are likely the object (`Lynch syndrome`, coordination), not
+    the verb frame — re-check after the fix (they may re-bucket out of "verb-frame").
+- [~] **Step 2 — the fix: a frame-specific verb+PP-complement category (`cat_pp_arg`).** Mirrors the
+      comparative `cat_pp_than` (an argument-PP whose ⟦·⟧ = Entity). A verb subcategorizing for a PP is
+      `(S\NP)/cat_pp_arg`; a **transparent argument-marker** `to/from/on/with = cat_pp_arg/NP` (sem `λy. y`)
+      exposes the object. A distinct `cat_pp_arg` (not a bare NP) forces the preposition, so a plain
+      transitive verb `(S\NP)/NP` (`affect`) still rejects `to X`. Same `Entity→Entity→Prop` sem_type as
+      transitive → felicity gate unchanged.
+  - [x] **Grammar half — DONE + validated (`2026-07-04`, no reseed; bootstrap recompiles fresh).**
+        `cat_pp_arg` declared (`lexicon-ontology.esl`) + denoted (`category.rs`); argument-marker prep
+        entries (`closed-class.esl`); the `GqPrepObj` parser rule extended (3-way `PrepObj`) so the marker
+        feeds a **raised GQ** (bare-plural/kind object) → the object entity `Q(prep_sem)`. Test
+        `argument_pp_verb_parses_verb_prep_object`: `HeLa contributes to BRCA1` (individual) **and**
+        `HeLa contributes to genes` (bare-plural **kind**, sem has `kind_of`) parse; `affects to BRCA1`
+        gaps (guard `non_pp_verb_rejects_a_pp_complement`). Full kernel suite + clippy green.
+  - [ ] **Importer half + acceptance.** `convert.rs` (`FrameKind`/`classify`): emit `(S\NP)/cat_pp_arg`
+        for the PP-oblique frames (12/13/20/21/27, 4/22) instead of transitive/intransitive. Then reseed
+        + re-measure. **Acceptance:** `MSI contributes to cancers` parses to the kind-predication (unit 25).
+  - *Looseness (stage-1):* WordNet frames don't encode *which* preposition, so `cat_pp_arg` accepts any PP
+    (`contributes in cancers` would also parse) — verb-specific but prep-generic; specific-prep is later.
 - [ ] **Step 3 — Add the 4 OOV** (`double-stranded`, `hypermutable`, `pcr-based` adjectives; `recq`
       named entity) as domain-lexicon entries. Closes all 6 missing-lexeme units.
 - [ ] **Step 4 — Comparative `than`** (bucket B) — the `than`-clause construction. 2 units.

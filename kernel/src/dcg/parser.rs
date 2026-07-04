@@ -248,7 +248,7 @@ enum SemRecipe {
         kind: RefineKind,
     },
     /// GQ-as-preposition-object raise: category `cat`; sem built from `L`/`R`.
-    GqPrepObj { cat: Exp, ppmod: bool },
+    GqPrepObj { cat: Exp, kind: PrepObj },
 }
 
 /// Application direction for [`SemRecipe::Apply`] (also fixes the provenance: forward ⇒ `ForwardApp`,
@@ -270,6 +270,17 @@ enum RefineKind {
     KindCompound,
     /// PP-as-noun-modifier `[cat_n] [cat_pp]` → `Σx:C. pp(x)`.
     PpMod,
+}
+
+/// How a preposition-object combination `[prep] [raised-GQ]` attaches — decided by [`combinable`] from
+/// categories, consumed by [`build`]. `PpMod` → a post-nominal `cat_pp` (noun modifier); `VpAdjunct` →
+/// a `(S\NP)\(S\NP)` VP modifier; `ArgMarker` → an argument `cat_pp_arg` (the object entity itself, for a
+/// verb that subcategorizes for a PP — "contributes to cancers").
+#[derive(Clone, Copy)]
+enum PrepObj {
+    PpMod,
+    VpAdjunct,
+    ArgMarker,
 }
 
 /// The **sem-blind combinability decision** (D63 packed-forest blueprint §4/§6): whether the two
@@ -425,15 +436,25 @@ fn combinable(
                 Some([s, np]) if is_ctor(s, "cat_s").is_some() && is_ctor(np, "cat_np").is_some())
         };
         let prep_is_ppmod = is_ctor(pp_res, "cat_pp").is_some() && obj_is_np;
+        let prep_is_argmarker = is_ctor(pp_res, "cat_pp_arg").is_some() && obj_is_np;
         let prep_is_vpadjunct =
             obj_is_np && matches!(is_ctor(pp_res, "bwd"), Some([a, b]) if is_vp(a) && is_vp(b));
         let gq_is_raised_subject = is_ctor(gq_s, "cat_s").is_some()
             && matches!(is_ctor(gq_vp, "bwd"),
                 Some([s, np]) if is_ctor(s, "cat_s").is_some() && is_ctor(np, "cat_np").is_some());
-        if (prep_is_ppmod || prep_is_vpadjunct) && gq_is_raised_subject {
+        let kind = if prep_is_ppmod {
+            Some(PrepObj::PpMod)
+        } else if prep_is_argmarker {
+            Some(PrepObj::ArgMarker)
+        } else if prep_is_vpadjunct {
+            Some(PrepObj::VpAdjunct)
+        } else {
+            None
+        };
+        if let (Some(kind), true) = (kind, gq_is_raised_subject) {
             return Some(SemRecipe::GqPrepObj {
                 cat: pp_res.clone(),
-                ppmod: prep_is_ppmod,
+                kind,
             });
         }
     }
@@ -495,45 +516,54 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
             noun_num,
             kind,
         } => build_refine(decl, c, noun_num, kind, left, right, layer),
-        SemRecipe::GqPrepObj { cat, ppmod } => {
-            let sem = if ppmod {
-                // Noun-modifier: `λx. Q(λy. (prep y) x)`.
-                let (x, y) = ("__pobj_x", "__pobj_y");
-                let inner = Exp::Lam(
-                    Patt::Var(y.into()),
-                    Box::new(Exp::App(
+        SemRecipe::GqPrepObj { cat, kind } => {
+            let sem = match kind {
+                PrepObj::PpMod => {
+                    // Noun-modifier: `λx. Q(λy. (prep y) x)`.
+                    let (x, y) = ("__pobj_x", "__pobj_y");
+                    let inner = Exp::Lam(
+                        Patt::Var(y.into()),
                         Box::new(Exp::App(
-                            Box::new(left.sem().clone()),
-                            Box::new(Exp::Var(y.into())),
-                        )),
-                        Box::new(Exp::Var(x.into())),
-                    )),
-                );
-                Exp::Lam(
-                    Patt::Var(x.into()),
-                    Box::new(Exp::App(Box::new(right.sem().clone()), Box::new(inner))),
-                )
-            } else {
-                // VP-adjunct: `λV.λs. Q(λx. prep_sem(x)(V)(s))`.
-                let (x, v, s) = ("__pobj_x", "__pobj_V", "__pobj_s");
-                let applied = Exp::App(
-                    Box::new(Exp::App(
-                        Box::new(Exp::App(
-                            Box::new(left.sem().clone()),
+                            Box::new(Exp::App(
+                                Box::new(left.sem().clone()),
+                                Box::new(Exp::Var(y.into())),
+                            )),
                             Box::new(Exp::Var(x.into())),
                         )),
-                        Box::new(Exp::Var(v.into())),
-                    )),
-                    Box::new(Exp::Var(s.into())),
-                );
-                let scoped = Exp::App(
-                    Box::new(right.sem().clone()),
-                    Box::new(Exp::Lam(Patt::Var(x.into()), Box::new(applied))),
-                );
-                Exp::Lam(
-                    Patt::Var(v.into()),
-                    Box::new(Exp::Lam(Patt::Var(s.into()), Box::new(scoped))),
-                )
+                    );
+                    Exp::Lam(
+                        Patt::Var(x.into()),
+                        Box::new(Exp::App(Box::new(right.sem().clone()), Box::new(inner))),
+                    )
+                }
+                PrepObj::VpAdjunct => {
+                    // VP-adjunct: `λV.λs. Q(λx. prep_sem(x)(V)(s))`.
+                    let (x, v, s) = ("__pobj_x", "__pobj_V", "__pobj_s");
+                    let applied = Exp::App(
+                        Box::new(Exp::App(
+                            Box::new(Exp::App(
+                                Box::new(left.sem().clone()),
+                                Box::new(Exp::Var(x.into())),
+                            )),
+                            Box::new(Exp::Var(v.into())),
+                        )),
+                        Box::new(Exp::Var(s.into())),
+                    );
+                    let scoped = Exp::App(
+                        Box::new(right.sem().clone()),
+                        Box::new(Exp::Lam(Patt::Var(x.into()), Box::new(applied))),
+                    );
+                    Exp::Lam(
+                        Patt::Var(v.into()),
+                        Box::new(Exp::Lam(Patt::Var(s.into()), Box::new(scoped))),
+                    )
+                }
+                PrepObj::ArgMarker => {
+                    // Argument-PP: the object entity itself — `Q(prep_sem)`, the raised GQ applied to the
+                    // transparent marker (`to` = `λy. y`). "to genes" (Q = `λV. V(kind_of(Gene))`) →
+                    // `kind_of(Gene)`; a subcategorizing verb `(S\NP)/cat_pp_arg` then binds it.
+                    Exp::App(Box::new(right.sem().clone()), Box::new(left.sem().clone()))
+                }
             };
             Item::from_parts(cat, sem, Combinator::Other, Cost::ZERO)
         }
