@@ -54,9 +54,12 @@ pub use category::{
     distribute, distribute_object, feat_meets, is_ctor, kind_subject, reciprocate, relativize,
     subst_cat, type_eq, type_raise, unify_cat, CatSubst,
 };
+#[cfg(feature = "allms")]
+pub use glossary::AnthropicAbbreviationProposer;
 pub use glossary::{
-    abbreviation_resources, extract_abbreviations, glossary_resources, ground_abbreviation,
-    ground_long_form, AbbrDef, AbbreviationBinding,
+    abbreviation_resources, extract_abbreviations, extract_abbreviations_with, glossary_resources,
+    ground_abbreviation, ground_long_form, AbbrDef, AbbreviationBinding, AbbreviationProposer,
+    NoAbbreviationProposer,
 };
 pub use lemmatizer::{Identity, Lemmatizer, Pos};
 pub use lexicon::{entry_to_item, gate_entry, resolve_sem, resolve_sem_value};

@@ -32,8 +32,8 @@ raw document text
 ┌──────────────────────────────────────────────────────────────────────┐
 │ STAGE B — PARSE (per body sentence; TRUSTED kernel)                   │
 │   • ParseSentence over base-lexicon + the doc layer (branch `doc:<id>`)│
-│   • the injected abbreviation named-individuals make bare `MSI` a      │
-│     cat_np argument NP → the ~8 abbreviation gaps parse                │
+│   • the injected abbreviation alias entries make bare `MSI` an         │
+│     argument NP (mass→generic / individual→ref) → the ~8 gaps parse    │
 └──────────────────────────────────────────────────────────────────────┘
      │  (typed trees, some OPEN awaiting resolution)
      ▼
@@ -58,7 +58,7 @@ binding. They live in a per-document layer and are consumed at Stage B (parse) a
 
 | member | surface | binds to | consumed | ontology |
 |---|---|---|---|---|
-| **Abbreviation** (this note) | `MSI` | a named individual of the long-form concept | Stage B (lexeme) + C | new `document:Abbreviation` |
+| **Abbreviation** (this note) | `MSI` | an alias `LexicalEntry` of the long-form concept | Stage B (lexeme) + C | new `document:Abbreviation` |
 | Figure ref | `Fig. 1c` | a figure object | B/C | new `document:FigureRef` |
 | Table ref | `Table 1` | a table object | B/C | new `document:TableRef` |
 | Footnote | superscript | a footnote object | C | new `document:Footnote` |
@@ -93,7 +93,7 @@ document-scoped instance of the lexicon-injection track, populated by Stage A in
 
 **Precedence unlocks a second win (mitigates lever #2, beam-crowding).** Because the doc glossary
 ranks *first* in `scope` order, a defined term can **shadow** the base lexicon's competing senses:
-`MSI` resolves to the doc-local named individual and the general/domain `cat_n`/junk senses (the
+`MSI` resolves to the doc-local alias entry and the general/domain `cat_n`/junk senses (the
 Microsatellite-Instability dysfunction class *and* the "AML table" collision, diagnosis §4a) can be
 de-prioritized or dropped for that document. That directly reduces the sense-crowding that produced the
 beam artifacts (diagnosis §3d) — so a document glossary that *pins* the sense of its defined terms
@@ -123,46 +123,67 @@ binding exists.
 ### 3b. Grounding the long form (retrieve-first, D43)
 For each `ABBR → long form`, resolve the long form to a concept **already in the kernel** before minting
 anything (the `grounding` discipline): probe the lexicon/value-index for the long form (e.g.
-"microsatellite instability" → `umlscui:C0920269`, T049). Two outcomes:
-- **Hit** — bind the abbreviation's named individual as an *instance of the found concept class*
-  (`<doc:msi> : umlscui:C0920269`). This grounds `MSI` in existing kernel knowledge.
-- **Miss** — mint a fresh document-local class for the long form (`<doc:long_form_class>`) and the
-  individual under it. Recorded as a Declared binding (no false grounding).
+"microsatellite instability" → `umlscui:C0920269`). Two outcomes:
+- **Hit** — the abbreviation is an **alias** of the grounded concept and inherits its category (§3c).
+- **Miss** — mint a fresh document-local class for the long form (`doc:class_<abbr> : lexicon:Entity`)
+  and alias to it. Recorded as a Declared binding (no false grounding).
 
-> Note the modeling subtlety (from the diagnosis §4a): UMLS types Microsatellite Instability as a
-> *dysfunction class* (`cat_n`), which is why bare `MSI` gaps today. We are **not** reclassifying it
-> globally; we inject a **document-local named individual** that refers to it — faithful to how the
-> paper *uses* MSI (a referring entity), without touching the UMLS import.
+> Modeling subtlety, corrected (was: "inject a named individual"). The NP-vs-N fork is **denotational,
+> not syntactic** (witnessed, `abbreviation_np_vs_n…` → `abbreviation_emission_keys_on_ontological_kind`):
+> in the corpus the *same* abbreviation is both a bare identity ("MSI contributes to cancers") and a
+> classifier ("these MSI cell lines"), and both parse regardless of category — the named-entity compound
+> rule bridges the second. What matters is the **denotation**. Minting a named individual for every
+> abbreviation was a wedge: it reified a *phenomenon* (MSI) as a singleton instance and made "MSI cell
+> lines" mean `compound(x, ni_msi)` ("related to the one thing named MSI") instead of the correct
+> `compound_kind(x, MSI)` ("microsatellite-unstable"). We do **not** reclassify anything globally; the
+> abbreviation carries the grounded concept's *own* category — the alias model the UMLS importer already
+> defers bare-argument abbreviations to (`convert.rs:149–157`).
 
-### 3c. Typed model + injection (Stage A commit → Stage B read) — BUILT
-Per abbreviation, the doc layer gets **two resources**, mirroring the UMLS importer's named-individual
-shape (`crates/eigenius-umls/src/convert.rs:162–172`):
-1. the **named individual** — `doc:ni_<abbr> : <concept>` (an instance);
-2. a **`lexicon:LexicalEntry`** — `form = <abbr>`, `cat = cat_np(<concept>, sg)`,
-   `sem = doc:ni_<abbr>`, `sem_type = <concept>`, grade Declared.
+### 3c. Typed model + injection (Stage A commit → Stage B read) — BUILT (alias model)
+Per abbreviation the doc layer gets **one resource** — a `lexicon:LexicalEntry` aliasing the grounded
+concept, its category keyed on the concept's **ontological kind** (D62 named-individual typing) and, for
+common nouns, the long form's **head-noun countability**:
 
-**Emission is programmatic, not ESL text.** The UMLS/WordNet importers render ESL *strings* that are
-recompiled at load; that round-trip is unnecessary here — the load path takes structured resources
-(`LoadRequest.resources` = CBOR/Eigon-JSON, `proto/eigenius.proto:252`). So these are built **directly
-as in-memory [`Resource`]s** by [`dcg::glossary::abbreviation_resources`](../../kernel/src/dcg/glossary.rs):
-`Resource::new` + `Resource::set`, with the `cat_np(<concept>, sg)` category built as an `Exp` and
-encoded via `encode_type` (`kernel/src/program/eigentt_type_mirror.rs` — the same D47 encoding ESL
-emits). Witnessed by `abbreviation_injection_recovers_bare_argument` (kernel test): bare `wsi` gaps on
-the `cat_n`-only base and parses once these emitted resources are chained on.
+| grounded concept | `cat` | `sem` | bare argument | prenominal modifier |
+|---|---|---|---|---|
+| **mass phenomenon** (MSI = "microsatellite instability", head `instability` mass) | `cat_n(C, mass)` | the class `C` | ✓ open — deferred generic over the kind † | `compound_kind(x, C)` |
+| **count common noun** (CL = "cell line") | `cat_n(C, num_any)` | the class `C` | needs a determiner (no bare) | `compound_kind(x, C)` |
+| **named individual** (WRN, an HGNC gene) | `cat_np(sty, sg)` | the SAME instance | ✓ closed entity reference | `compound(x, instance)` |
+
+`sem_type = ⟦cat⟧` (`denote_cat`) by construction, so the felicity gate's `type_eq` holds. Mass vs count
+is inherited from the long form's head noun via the general countability lexicon (`form_is_mass`) — the
+mechanism the UMLS importer points to, not a per-acronym shim. **No parser/grammar change**: the `mass`
+number, the bare-mass shift (`bare_mass_nps`), and `compound_kind` already exist (D62 CNL).
+
+> **† The mass-row `bare argument` reading is under revision.** "✓ open — deferred generic" is the
+> *current* built behaviour: a bare mass subject (*MSI contributes to cancers*) comes back OPEN, carrying
+> a deferred-quantifier hole. Examining that outcome is what prompted
+> [d63-kind-predication-reshape.md](d63-kind-predication-reshape.md): we concluded a generic is a
+> *complete* proposition — a **closed** kind-predication `contribute_to(kind_of(MSI), …)`, graded
+> `epistemic:declared` — and that the warrant (literature citation / observation / derivation) belongs on
+> the **grade**, not a parser hole. The emitter contract in this table (`cat_n(C, mass)`) is **unchanged**;
+> only the grammar's handling of that entry *as a subject* changes (open → closed). Until the reshape
+> lands, this cell and the `open generic` test witness below describe the real, current behaviour.
+
+**Emission is programmatic, not ESL text.** The load path takes structured resources
+(`LoadRequest.resources` = CBOR/Eigon-JSON, `proto/eigenius.proto:252`), so the entry is built **directly
+as an in-memory [`Resource`]** by [`dcg::glossary::abbreviation_resources`](../../kernel/src/dcg/glossary.rs):
+`Resource::new` + `Resource::set`, the `cat` built as an `Exp` and encoded via `encode_type` (the same D47
+encoding ESL emits). Witnessed by `abbreviation_injection_recovers_bare_argument` (bare mass `wsi` OOV →
+recovers as the open generic) and `abbreviation_emission_keys_on_ontological_kind` (the three-way table
+above) — kernel tests.
 
 The doc layer is **committed on a per-document branch `doc:<id>`** (kernel-gated at commit — 3d, and
 required to be persistent per §7-2). Stage B then calls `ParseSentence` with `branch = "doc:<id>"` (the
 RPC already supports this, `ParseSentenceRequest.branch`/`at_layer`, `proto/eigenius.proto:441`). The
-parser's `LexicalIndex` is built over base-lexicon + doc-layer, so `MSI` now seeds a `cat_np` named
-individual and parses as a bare argument — no parser/grammar change. This is the "load lexica as chained
+parser's `LexicalIndex` is built over base-lexicon + doc-layer. This is the "load lexica as chained
 sub-layers" pattern (D63/D65), just document-scoped and tiny.
 
 ### 3d. The kernel gate (fail-closed)
-Committing the doc layer runs the extracted bindings through the felicity gate: each named individual
-must type-check as an instance of its concept class, and each lexical entry's `cat`/`sem`/`sem_type`
-must be kernel-valid (the same gate every lexeme passes). A mis-extracted abbreviation (e.g. binding to
-a non-existent or ill-typed concept) is **rejected at commit**, surfaced as a finding — never silently
-used. This is what makes the untrusted LLM extraction safe.
+Committing the doc layer runs the extracted bindings through the felicity gate: each alias entry's
+`cat`/`sem`/`sem_type` must be kernel-valid (the same gate every lexeme passes). A mis-extracted
+abbreviation (binding to a non-existent or ill-typed concept) is **rejected at commit**, surfaced as a
+finding — never silently used. This is what makes the untrusted LLM extraction safe.
 
 ---
 
@@ -172,7 +193,7 @@ used. This is what makes the untrusted LLM extraction safe.
 |---|---|---|
 | extraction + doc-context build (Stage A) | **new orchestration component** `orchestration/src/components/extract_document_structure.ts` | sibling of `complete_json.ts` / `complete_text.ts`; deterministic Schwartz-Hearst + LLM fallback; emits the doc layer |
 | doc-layer commit | existing commit/branch machinery | per-document branch `doc:<id>`; kernel-gated |
-| parse-time consumption (Stage B) | **no kernel change** | `ParseSentence(branch="doc:<id>")` reads the injected named individuals |
+| parse-time consumption (Stage B) | **no kernel change** | `ParseSentence(branch="doc:<id>")` reads the injected alias entries |
 | typed model — **glossary** | **reuse `lexicon:Lexicon` + `lexicon:LexicalEntry`** (a doc-scoped lexicon layer) + optional provenance slots (`source ∈ {abbrev, glossary, inline}`, `long_form`) | NOT a new `document:Abbreviation` class — a glossary entry *is* a lexicon addition (§2a) |
 | typed model — **reference structures** | **new `ontologies/document/…`** (`document:FigureRef`, `TableRef`, `Footnote`) + **reuse `reference:Citation`** | the non-lexicon members (consumed post-parse); small ontology, bootstrap-gated (reseed) |
 | post-parse (Stage C) | D64 anaphora + reference binding | consumes the doc context |
@@ -228,7 +249,7 @@ used. This is what makes the untrusted LLM extraction safe.
    concept (recommend both: the string is the extraction provenance).
 5. **Scope of the LLM rewrite (Phase 3)** — out of scope here; noted so the pipeline shape accommodates
    it (Stage A produces the body-sentence form Stage B consumes).
-6. **Shadow vs. add for glossary terms (§2a)** — *add* injects the doc-local `cat_np` entry alongside
+6. **Shadow vs. add for glossary terms (§2a)** — *add* injects the doc-local alias entry alongside
    the base senses (simple, closes lever #1, crowding unchanged); *shadow* also suppresses the base
    lexicon's competing senses for the term (also cuts lever #2 crowding), but leans on the layer
    shadowing / `scope`-precedence semantics (`is_shadowed`). Left open: start-with-add-then-measure vs

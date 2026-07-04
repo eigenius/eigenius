@@ -750,12 +750,23 @@ impl LexicalIndex {
         out
     }
 
-    /// Bare-MASS NP shift (D62 CNL): a **mass** common noun `cat_n(C, mass)` serves as a bare argument
-    /// NP (subject + object), grammatically **singular**, with a deferred [`HoleKind::Quantification`]
-    /// hole `Q` — the mass/uncountable analogue of [`Self::bare_plural_nps`]. The mass noun is
-    /// presented as **singular** to the existential determiner (`a`) shapes (mass meets neither sg nor
-    /// pl, so it can't use `these`/`a` directly), reusing their subject- + object-raised categories
-    /// with the deferred sem. `Q` is freshened per span and typed at the felicity gate ⇒ an open parse.
+    /// Bare-MASS NP shift (D63 kind-predication reshape, `docs/notes/d63-kind-predication-reshape.md`):
+    /// a **mass** common noun `cat_n(C, mass)` denotes a KIND, and used as a bare argument it is that
+    /// kind *realized as an individual* — `kind_of(C) : Entity` (Chierchia's ∩ nominalization) — giving
+    /// a **closed** parse ("instability affects HeLa" → `affects(kind_of(Instability), hela) : Prop`),
+    /// not the earlier deferred-[`HoleKind::Quantification`] open parse. A generic is a *complete*
+    /// proposition about the kind; its warrant (literature citation / observation / derivation) belongs
+    /// on the claim's **grade**, not a parser hole.
+    ///
+    /// **Type-raised**, exactly like [`Self::bare_plural_nps`]: it reuses the singular existential
+    /// determiner (`a`) subject- and object-raised categories (mass is presented as `sg` so they
+    /// compose), swapping in a *committed* kind sem — [`kind_subj_sem`] `λA.λV. V(kind_of(A))` for the
+    /// `fwd` (subject-raised) body, [`kind_obj_sem`] for the `bwd` (object) body. Raising is
+    /// **load-bearing**: the result is `S/(S\NP)`, **not** a `cat_np`, so it fills a verb argument slot
+    /// by application but CANNOT feed the named-entity compound rule — a mass noun's prenominal reading
+    /// stays the kind classifier `compound_kind` (from its `cat_n`), with no spurious
+    /// `compound(x, kind_of(C))` duplicate (reshape §7.5). `*a instability` / `*two instability` still
+    /// fail (the underlying `cat_n` stays `mass`, so no real determiner composes).
     fn bare_mass_nps(&self, noun: &Item) -> Vec<Item> {
         let Some([c, num]) = is_ctor(noun.cat(), "cat_n") else {
             return Vec::new();
@@ -763,7 +774,7 @@ impl LexicalIndex {
         if !matches!(num, Exp::InductiveCtor(_, n, _) if n == "mass") {
             return Vec::new();
         }
-        // Present the mass noun as singular (so the `a` determiner's sg cat composes).
+        // Present the mass noun as singular so the `a` determiner's sg category composes.
         let Exp::InductiveCtor(num_decl, _, _) = num else {
             return Vec::new();
         };
@@ -773,8 +784,8 @@ impl LexicalIndex {
         let sg = Exp::InductiveCtor(num_decl.clone(), "sg".into(), vec![]);
         let sg_cat = Exp::InductiveCtor(cat_decl.clone(), "cat_n".into(), vec![c.clone(), sg]);
         let sg_noun = Item::with_cost(sg_cat, noun.sem().clone(), noun.cost());
-        let subj = deferred_quant_subj_sem();
-        let obj = deferred_quant_obj_sem();
+        let subj = kind_subj_sem();
+        let obj = kind_obj_sem();
         self.entries_for("a")
             .iter()
             .filter_map(|det| {
@@ -2828,6 +2839,53 @@ fn deferred_quant_obj_sem() -> Exp {
         Box::new(Exp::Lam(
             Patt::Var("TV".into()),
             Box::new(Exp::Lam(Patt::Var("subj".into()), Box::new(body))),
+        )),
+    )
+}
+
+/// A `kind_of(A)` application — the class value `A` (a `Set`) realized as the `Entity` that is that
+/// kind (Chierchia's ∩; the axiom `ontology:kind_of : Set -> Entity`, D63 kind-predication reshape).
+fn kind_of(a: Exp) -> Exp {
+    Exp::App(
+        Box::new(Exp::EigonAxiom(iri("urn:eigenius:ontology:kind_of"))),
+        Box::new(a),
+    )
+}
+
+/// The **subject** committed-kind determiner sem `λA. λV. V(kind_of(A))` — the kind-predication
+/// analogue of [`deferred_quant_subj_sem`], the deferred hole `Q(A, λx. V(x))` replaced by applying
+/// the verb-phrase meaning `V` directly to the kind entity `kind_of(A)`. Applied (via `a`'s
+/// subject-raised category) to a mass noun's class `C`, it yields the raised subject sem
+/// `λV. V(kind_of(C))` — a CLOSED argument, no quantifier hole.
+fn kind_subj_sem() -> Exp {
+    // λA. λV. V(kind_of(A))
+    let body = Exp::App(
+        Box::new(Exp::Var("V".into())),
+        Box::new(kind_of(Exp::Var("A".into()))),
+    );
+    Exp::Lam(
+        Patt::Var("A".into()),
+        Box::new(Exp::Lam(Patt::Var("V".into()), Box::new(body))),
+    )
+}
+
+/// The **object** committed-kind determiner sem `λT. λTV. λsubj. TV(kind_of(T), subj)` — the
+/// object-position analogue of [`kind_subj_sem`] (object-first TV `T→Entity→Prop`), replacing
+/// [`deferred_quant_obj_sem`]'s deferred hole with the kind entity `kind_of(T)` in the object slot.
+fn kind_obj_sem() -> Exp {
+    // λT. λTV. λsubj. TV(kind_of(T), subj)
+    let tv_app = Exp::App(
+        Box::new(Exp::App(
+            Box::new(Exp::Var("TV".into())),
+            Box::new(kind_of(Exp::Var("T".into()))),
+        )),
+        Box::new(Exp::Var("subj".into())),
+    );
+    Exp::Lam(
+        Patt::Var("T".into()),
+        Box::new(Exp::Lam(
+            Patt::Var("TV".into()),
+            Box::new(Exp::Lam(Patt::Var("subj".into()), Box::new(tv_app))),
         )),
     )
 }

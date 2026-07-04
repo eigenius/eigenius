@@ -22,9 +22,9 @@ use std::sync::Arc;
 
 use eigenius_kernel::bootstrap;
 use eigenius_kernel::dcg::{
-    abbreviation_resources, extract_abbreviations, ground_long_form, is_ctor, pretty_term, AbbrDef,
-    AbbreviationBinding, Candidate, Identity, LexicalIndex, ProposeCtx, Proposer, SenseRanker,
-    WordSenses,
+    abbreviation_resources, extract_abbreviations, glossary_resources, ground_long_form, is_ctor,
+    pretty_term, AbbrDef, AbbreviationBinding, Candidate, Identity, LexicalIndex, ProposeCtx,
+    Proposer, SenseRanker, WordSenses,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -747,18 +747,31 @@ fn to_preposition_parses() {
 
 #[test]
 fn mass_noun_is_a_bare_argument() {
-    // D62 CNL Fix 2: a mass noun (`cat_n(_, mass)`) is a bare argument (subject + object), deferred
-    // quantifier ⇒ open parse; `*a instability` correctly fails (mass meets neither sg nor pl).
+    // D63 kind-predication reshape (Phase A): a mass noun (`cat_n(_, mass)`) is a bare argument
+    // (subject + object) that denotes its KIND realized as an entity — `kind_of(C) : Entity` — so the
+    // parse is CLOSED (`affects(kind_of(Instability), hela)`), not an open deferred quantifier. `*a
+    // instability` still fails (mass meets neither sg nor pl).
     let (_layer, index) = index_over_bootstrap();
-    let (c, o) = index.parse_open("instability affects HeLa", &Identity);
-    assert!(
-        c.is_empty() && !o.is_empty(),
-        "bare mass noun as subject yields an open parse (deferred quantifier)"
+    let subj = index.parse("instability affects HeLa", &Identity);
+    assert_eq!(
+        subj.len(),
+        1,
+        "bare mass subject yields a single closed parse"
     );
-    let (co, oo) = index.parse_open("HeLa affects instability", &Identity);
     assert!(
-        co.is_empty() && !oo.is_empty(),
-        "bare mass noun as object yields an open parse"
+        pretty_term(subj[0].sem()).contains("kind_of(Instability)"),
+        "the mass subject is the kind nominalized to an entity, got {}",
+        pretty_term(subj[0].sem())
+    );
+    let obj = index.parse("HeLa affects instability", &Identity);
+    assert_eq!(
+        obj.len(),
+        1,
+        "bare mass object yields a single closed parse"
+    );
+    assert!(
+        pretty_term(obj[0].sem()).contains("kind_of(Instability)"),
+        "the mass object is likewise the kind nominalized"
     );
     assert!(
         index
@@ -2956,23 +2969,6 @@ fn lazy_index_is_lazy_and_matches_eager() {
 }
 
 // ── D63 Phase 1 — abbreviation-injection lever (document-preprocessing) ─────────
-// `wsi` mirrors `MSI`: a domain abbreviation imported as a `cat_n` common noun (an instance-less
-// concept class), so a BARE `wsi` cannot be an argument NP and gaps as a subject. The abbreviation-
-// definition preprocessor injects a **document-local named individual** (an instance of the concept)
-// + a `cat_np` lexical entry as a chained doc-scoped layer — the "add, not shadow" form. The witness:
-// `wsi affects HeLa` GAPS on the cat_n-only base and PARSES once the cat_np entry is injected.
-const ABBREV_CN: &str = r#"
-namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
-resource lexicon:wsi_cn : lexicon:LexicalEntry {
-    lexicon:form     = "wsi";
-    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Gene, lexicon:num_any) );
-    lexicon:sem      = lexicon:Gene;
-    lexicon:sem_type = type_expr( Set );
-    lexicon:sense    = "wsi-cn";
-    lexicon:grade    = epistemic:declared;
-}
-"#;
 fn layer_on(parent: &Arc<Layer>, name: &str, src: &str) -> Arc<Layer> {
     let resources = esl::compile_against_layer(src, parent).expect("fixture compiles");
     let mut b = LayerBuilder::new(name, Some(Arc::clone(parent)));
@@ -2982,94 +2978,183 @@ fn layer_on(parent: &Arc<Layer>, name: &str, src: &str) -> Arc<Layer> {
     Arc::new(b.build(LayerStorage::in_memory()))
 }
 
-/// D63 Phase 1 (the #1 CNL-v2 lever): a bare domain abbreviation imported as a `cat_n` common noun
-/// gaps as an argument NP; injecting a document-local `cat_np` named individual (the abbreviation-
-/// definition preprocessor's output) recovers the parse — with NO parser/grammar change, just a
-/// chained doc-scoped lexicon layer. Proves the injection end-to-end on the in-memory demo (the
-/// committed-doc-layer mechanism; the persistent-store form is the served-branch path, §7-2).
+/// Inject one abbreviation binding onto the demo via the programmatic alias emitter
+/// (`dcg::glossary::abbreviation_resources`, the actual Stage-2 code path — resources built directly,
+/// no ESL round-trip) and return an index over the resulting chained doc layer.
+fn demo_with_alias(demo: &Arc<Layer>, long: &str, concept: &str) -> LexicalIndex {
+    let binding = AbbreviationBinding {
+        abbr: "wsi",
+        long_form: long,
+        concept_iri: concept,
+        doc_ns: "urn:eigenius:doc",
+    };
+    let res = abbreviation_resources(demo, &binding).expect("emit alias entry");
+    let mut b = LayerBuilder::new("alias", Some(Arc::clone(demo)));
+    for r in res {
+        b.add_resource(r).expect("add alias resource");
+    }
+    LexicalIndex::build(Arc::new(b.build(LayerStorage::in_memory())))
+}
+
+/// D63 Phase 1 (the #1 CNL-v2 lever) × the kind-predication reshape (Phase A): an abbreviation grounded
+/// to a **mass phenomenon** class — the `MSI = "microsatellite instability"` case, here `wsi →
+/// Instability`, head noun `instability` mass — is emitted as `cat_n(concept, mass)`. A bare `wsi`, OOV
+/// before, now recovers as a **closed** kind-predication: the bare-mass shift nominalizes the kind to an
+/// entity (`kind_of(Instability)`), so "wsi affects HeLa" → `affects(hela, kind_of(Instability)) : Prop`
+/// — a complete proposition, not the earlier open deferred quantifier. No parser change per document —
+/// just the chained doc-scoped alias layer over the reshaped grammar.
 #[test]
 fn abbreviation_injection_recovers_bare_argument() {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
     let demo = layer_on(ctx.head(), "demo", DEMO);
-    // Base: `wsi` is ONLY a cat_n common noun (the MSI-from-UMLS situation).
-    let base_layer = layer_on(&demo, "abbrev-cn", ABBREV_CN);
-    // Injected: emit the doc-local named individual + cat_np entry via the PROGRAMMATIC emitter
-    // (dcg::glossary::abbreviation_resources) — the actual Stage-2 code path, resources built directly
-    // (no ESL round-trip; the load path takes structured CBOR/Eigon-JSON resources).
-    let binding = AbbreviationBinding {
-        abbr: "wsi",
-        concept_iri: "urn:eigenius:lexicon:Gene",
-        doc_ns: "urn:eigenius:doc",
-    };
-    let abbrev_res =
-        abbreviation_resources(&base_layer, &binding).expect("emit abbreviation resources");
-    let mut b = LayerBuilder::new("abbrev-ni", Some(Arc::clone(&base_layer)));
-    for r in abbrev_res {
-        b.add_resource(r).expect("add abbreviation resource");
-    }
-    let injected_layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let base = LexicalIndex::build(Arc::clone(&demo));
+    let injected = demo_with_alias(&demo, "instability", "urn:eigenius:lexicon:Instability");
 
-    let base = LexicalIndex::build(base_layer);
-    let injected = LexicalIndex::build(injected_layer);
-
+    // Base: `wsi` is OOV — no parse, closed or open.
+    assert!(base.parse("wsi affects HeLa", &Identity).is_empty());
     assert!(
-        base.parse("wsi affects HeLa", &Identity).is_empty(),
-        "a bare cat_n abbreviation cannot be a subject NP (the MSI-as-cat_n blocker)"
+        base.parse_open("wsi affects HeLa", &Identity).1.is_empty(),
+        "the abbreviation is unknown before the alias is injected"
+    );
+
+    // Injected: the bare mass subject recovers as a CLOSED kind-predication (reshape Phase A) — the
+    // kind nominalized to an entity, not an open deferred quantifier.
+    let closed = injected.parse("wsi affects HeLa", &Identity);
+    assert_eq!(
+        closed.len(),
+        1,
+        "the bare-mass abbreviation recovers a single closed parse"
     );
     assert!(
-        !injected.parse("wsi affects HeLa", &Identity).is_empty(),
-        "injecting the cat_np named individual recovers the bare-argument parse (the #1 lever)"
+        pretty_term(closed[0].sem()).contains("kind_of(Instability)"),
+        "the recovered subject is the grounded kind nominalized to an entity, got {}",
+        pretty_term(closed[0].sem())
     );
 }
 
-/// D63 Phase 1 — the full deterministic Stage-A pipeline end to end on the demo: **extract** a
-/// `Long Form (ABBR)` definition (Schwartz-Hearst), **ground** the long form to an existing concept
-/// class (retrieve-first), **emit** the doc-glossary resources, inject them as a chained layer, and
-/// confirm the bare abbreviation — unknown before — now **parses** as a `cat_np` argument. Mirrors the
-/// MSI case with the demo's `cell line` / `CellLine` (its `instability` is even mass, like MSI's head).
+/// D63 Phase 1 — the abbreviation/alias emitter keys on the grounded concept's ONTOLOGICAL KIND, so
+/// the NP-vs-N denotational fork (witnessed earlier as a real fork) is resolved *at emission*, not
+/// papered over by minting a named individual for every abbreviation (the wedge). The three kinds a
+/// biomedical abbreviation grounds to, each getting the reading its kind licenses:
+///
+///   * **mass phenomenon** (MSI = "microsatellite instability") → `cat_n(C, mass)`, sem = the class:
+///     a bare subject is a CLOSED kind-predication `kind_of(C)` (reshape Phase A), a prenominal modifier
+///     is `compound_kind(x, C)` — the property as a classifier ("MSI cell lines").
+///   * **count common noun** (CL = "cell line") → `cat_n(C, num_any)`: NOT bare-licensed (needs a
+///     determiner, "the CL") — the wedge wrongly made it a bare named individual.
+///   * **named individual** (WRN, an HGNC gene) → `cat_np(sty, sg)`, sem = the SAME instance: a bare
+///     subject is a closed entity reference, a prenominal modifier is `compound(x, instance)`.
+#[test]
+fn abbreviation_emission_keys_on_ontological_kind() {
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let demo = layer_on(ctx.head(), "demo", DEMO);
+
+    // Mass phenomenon: bare subject → CLOSED kind-predication (reshape Phase A); modifier → compound_kind.
+    let mass = demo_with_alias(&demo, "instability", "urn:eigenius:lexicon:Instability");
+    let mass_subj = mass.parse("wsi affects HeLa", &Identity);
+    assert_eq!(
+        mass_subj.len(),
+        1,
+        "the bare mass subject is a single closed kind-predication"
+    );
+    assert!(
+        pretty_term(mass_subj[0].sem()).contains("kind_of(Instability)"),
+        "the mass subject nominalizes the kind to an entity (not a deferred quantifier)"
+    );
+    // As a prenominal classifier the mass noun reads ONLY as the kind classifier `compound_kind(x, C)`.
+    // Because the bare-mass shift is type-raised (`S/(S\NP)`, not a `cat_np`), it cannot feed the
+    // named-entity compound rule, so there is NO spurious `compound(x, kind_of(C))` duplicate (reshape
+    // §7.5). This asserts the single reading — a regression guard against the duplicate returning.
+    let mass_mod = mass.parse("a wsi cell line affects HeLa", &Identity);
+    assert_eq!(mass_mod.len(), 1, "the mass modifier has a single reading");
+    assert!(
+        pretty_term(mass_mod[0].sem()).contains("compound_kind(")
+            && !pretty_term(mass_mod[0].sem()).contains("kind_of("),
+        "the phenomenon classifies the head noun by its kind (compound_kind), with no kind_of-entity compound"
+    );
+
+    // Count common noun: needs a determiner — no bare reading (the wedge over-licensed this).
+    let count = demo_with_alias(&demo, "cell line", "urn:eigenius:lexicon:CellLine");
+    assert!(
+        count.parse("wsi affects HeLa", &Identity).is_empty()
+            && count.parse_open("wsi affects HeLa", &Identity).1.is_empty(),
+        "a count abbreviation is not a bare subject (it needs a determiner)"
+    );
+
+    // Named individual: bare subject → CLOSED reference reusing the SAME instance; modifier → compound.
+    let indiv = demo_with_alias(&demo, "brca one", "urn:eigenius:lexicon:brca1");
+    let subj = indiv.parse("wsi affects HeLa", &Identity);
+    assert_eq!(
+        subj.len(),
+        1,
+        "a named individual is a closed bare reference"
+    );
+    assert!(
+        pretty_term(subj[0].sem()).contains("brca1"),
+        "the alias reuses the SAME instance — no fresh individual is minted"
+    );
+    let indiv_mod = indiv.parse("a wsi cell line affects HeLa", &Identity);
+    assert_eq!(indiv_mod.len(), 1);
+    let mod_sem = pretty_term(indiv_mod[0].sem());
+    assert!(
+        mod_sem.contains("compound(") && !mod_sem.contains("compound_kind("),
+        "an individual modifier is compound(x, instance), not a kind classifier"
+    );
+}
+
+/// D63 Phase 1 — the full deterministic Stage-A pipeline end to end on the demo, the MSI scenario:
+/// **extract** a `Long Form (ABBR)` definition (Schwartz-Hearst), **ground** the long form to an
+/// existing concept class (retrieve-first), **emit** the alias entry via `glossary_resources`, inject
+/// it as a chained layer, and confirm the bare abbreviation — OOV before — now **parses**. The demo's
+/// `instability` is a mass phenomenon (like MSI's head), so the recovered bare argument is a CLOSED
+/// kind-predication (reshape Phase A), exactly as `MSI contributes to cancers` should encode.
 #[test]
 fn abbreviation_pipeline_end_to_end() {
     let (demo_layer, _) = index_over_bootstrap();
 
-    // Stage A · extract: `the cell line (CL) …` → `CL ← cell line`.
-    let defs = extract_abbreviations("the cell line (CL) was assayed for a gene");
+    // Stage A · extract: `the instability (INS) …` → `INS ← instability`.
+    let defs = extract_abbreviations("the instability (INS) was assayed for a gene");
     assert_eq!(
         defs,
         vec![AbbrDef {
-            short_form: "CL".to_string(),
-            long_form: "cell line".to_string(),
-            context: "the cell line".to_string(),
+            short_form: "INS".to_string(),
+            long_form: "instability".to_string(),
+            context: "the instability".to_string(),
         }],
         "Schwartz-Hearst extracts the parenthetical definition"
     );
 
-    // Stage A · ground: `cell line` → the CellLine concept class (retrieve-first).
+    // Stage A · ground: `instability` → the Instability concept class (retrieve-first).
     let concept = ground_long_form(&demo_layer, &defs[0].long_form)
         .expect("the long form grounds to an existing concept");
-    assert_eq!(concept.as_str(), "urn:eigenius:lexicon:CellLine");
+    assert_eq!(concept.as_str(), "urn:eigenius:lexicon:Instability");
 
-    // Stage A · emit + inject: a doc-local named individual `CL : CellLine` + its cat_np entry.
-    let binding = AbbreviationBinding {
-        abbr: &defs[0].short_form,
-        concept_iri: concept.as_str(),
-        doc_ns: "urn:eigenius:doc",
-    };
-    let res = abbreviation_resources(&demo_layer, &binding).expect("emits glossary resources");
+    // Stage A · emit + inject: the alias entry `cat_n(Instability, mass)`, sem = the class (mass,
+    // because the long form's head noun `instability` is uncountable) — via `glossary_resources`.
+    let res = glossary_resources(&demo_layer, &defs);
     let mut b = LayerBuilder::new("doc-glossary", Some(Arc::clone(&demo_layer)));
     for r in res {
         b.add_resource(r).expect("add glossary resource");
     }
     let doc_layer = Arc::new(b.build(LayerStorage::in_memory()));
 
-    // Stage B · parse: bare `CL` was unknown (OOV) before; now it is a cat_np name and parses.
+    // Stage B · parse: bare `INS` was OOV before; now the alias recovers it as a CLOSED kind-predication
+    // (the bare-mass shift nominalizes the kind — reshape Phase A).
     let base = LexicalIndex::build(Arc::clone(&demo_layer));
     let injected = LexicalIndex::build(doc_layer);
     assert!(
-        base.parse("CL affects HeLa", &Identity).is_empty(),
+        base.parse("INS affects HeLa", &Identity).is_empty()
+            && base.parse_open("INS affects HeLa", &Identity).1.is_empty(),
         "the abbreviation is unknown before the glossary is injected"
     );
+    let closed = injected.parse("INS affects HeLa", &Identity);
+    assert_eq!(
+        closed.len(),
+        1,
+        "extract → ground → emit → inject recovers a closed kind-predication"
+    );
     assert!(
-        !injected.parse("CL affects HeLa", &Identity).is_empty(),
-        "extract → ground → emit → inject recovers the bare-abbreviation parse"
+        pretty_term(closed[0].sem()).contains("kind_of(Instability)"),
+        "the recovered parse denotes the grounded kind, nominalized"
     );
 }

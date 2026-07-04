@@ -15,15 +15,24 @@
 //! **Document glossary emission** (D63 Phase 1 — `docs/notes/d63-document-preprocessing-scope.md`).
 //! The abbreviation-definition preprocessor (Stage A) extracts `ABBR → grounded concept` bindings from
 //! a document (`microsatellite instability (MSI)` → `MSI`, grounded to `umlscui:C0920269`). This module
-//! turns each binding into the two resources a chained, document-scoped lexicon layer needs:
+//! turns each binding into the **one** `lexicon:LexicalEntry` a chained, document-scoped lexicon layer
+//! needs: the abbreviation is an **alias** of its grounded concept and carries that concept's own
+//! lexical category (the *abbreviation/alias model*, `crates/eigenius-umls/src/convert.rs`).
 //!
-//! 1. a **named individual** — an *instance* of the grounded concept class (so a bare `MSI` can denote
-//!    a referring entity, not just the class); and
-//! 2. a **`cat_np` `lexicon:LexicalEntry`** — bare `MSI` is a proper-noun name of that individual.
+//! Keyed on the grounded concept's ontological kind (D62 named-individual typing):
 //!
-//! It is the fix for the #1 CNL-v2 parsing gap: a bare domain abbreviation imported as a `cat_n` common
-//! noun cannot be an argument NP (see `d63-cnl-v2-parsing-diagnosis.md`); the injected `cat_np` entry
-//! recovers it, with no parser/grammar change (the "add, not shadow" form).
+//! 1. a **class / phenomenon** (a UMLS CUI, `microsatellite instability`) → a **common noun**
+//!    `cat_n(concept, Num)` whose `sem` IS the class. A bare argument comes from the general
+//!    bare-plural/bare-mass shift; a prenominal classifier (`MSI cell lines`) from `compound_kind`.
+//!    The number class is inherited from the long form's **head noun**: a *mass* head (`microsatellite
+//!    instability` → `instability`, uncountable in the WordNet countability lexicon) licenses the
+//!    bare-singular-mass subject; otherwise `num_any` (a count noun that needs a determiner). This is
+//!    the intended home the UMLS importer defers bare-argument abbreviations to.
+//! 2. a **named individual** (an HGNC gene symbol like `WRN`, imported as an instance) → a proper-noun
+//!    `cat_np(sty, sg)` alias naming the SAME instance (no new individual is minted).
+//!
+//! There is no parser/grammar change — the `mass`/`num_any` shifts and `compound_kind` already exist
+//! (`lexicon:Num::mass`, `bare_mass_nps`, D62 CNL). It is the "add, not shadow" form.
 //!
 //! Unlike the WordNet/UMLS importers (which render ESL *text* that is compiled at load), these are
 //! built **directly as in-memory [`Resource`]s** — the load path takes CBOR/Eigon-JSON resources, so
@@ -33,13 +42,13 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use super::category::resolve_inductive;
+use super::category::{denote_cat, resolve_inductive};
 use crate::layer::{normalize_value, resolve_active_value_indexes, Layer};
 use crate::nbe::term::Exp;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
 use crate::ontology::Iri;
-use crate::program::eigentt_type_mirror::encode_type;
+use crate::program::eigentt_type_mirror::{decode_type, encode_type};
 
 // ── Stage A: abbreviation-definition extraction (Schwartz & Hearst 2003) ─────────
 //
@@ -163,27 +172,69 @@ pub fn extract_abbreviations(text: &str) -> Vec<AbbrDef> {
     out
 }
 
+// ── Stage A: LLM fallback (non-parenthetical definitions) ────────────────────────
+//
+// Schwartz-Hearst only catches `Long Form (SHORT)` parentheticals. Definitions introduced without a
+// paren ("MSI stands for microsatellite instability"; "we refer to … as MSI") need a proposer. Like
+// the sense reranker (`sense_ranker.rs`), the proposer is **untrusted**: it suggests `(short, long)`
+// pairs which are validated ([`extract_abbreviations_with`] — the short form must actually occur in
+// the text, rejecting hallucinations) and then flow through the SAME ground → emit → kernel-gate path
+// as the deterministic ones, so a plausible-but-wrong proposal is caught downstream. Algorithm-in-Rust
+// first (behind `allms`); the orchestrator refactor comes after the algorithm is validated.
+
+/// Proposes abbreviation definitions the deterministic extractor misses (non-parenthetical). Untrusted
+/// — every proposal is validated before use. The no-op default is deterministic-only; a live Anthropic
+/// impl is behind the `allms` feature.
+pub trait AbbreviationProposer {
+    /// Propose `(short, long)` definitions found in `text`. May be empty; may include spurious entries
+    /// (the caller validates). `context` should be set to the long form (the proposer gives it whole).
+    fn propose(&self, text: &str) -> Vec<AbbrDef>;
+}
+
+/// The no-op proposer: deterministic Schwartz-Hearst extraction only (the CI default, no LLM).
+pub struct NoAbbreviationProposer;
+
+impl AbbreviationProposer for NoAbbreviationProposer {
+    fn propose(&self, _text: &str) -> Vec<AbbrDef> {
+        Vec::new()
+    }
+}
+
+/// Deterministic Schwartz-Hearst extraction UNION an untrusted proposer's suggestions, deduped by
+/// short form (deterministic wins). Each proposal is **fail-closed validated**: a well-formed short
+/// form ([`is_valid_short_form`]) that actually occurs in `text` (rejecting hallucinated
+/// abbreviations); grounding + the kernel felicity gate validate the rest downstream.
+pub fn extract_abbreviations_with(text: &str, proposer: &dyn AbbreviationProposer) -> Vec<AbbrDef> {
+    let mut out = extract_abbreviations(text);
+    let mut seen: BTreeSet<String> = out.iter().map(|d| d.short_form.to_lowercase()).collect();
+    let text_lc = text.to_lowercase();
+    for d in proposer.propose(text) {
+        let sf = d.short_form.trim().to_lowercase();
+        if is_valid_short_form(d.short_form.trim())
+            && text_lc.contains(&sf)
+            && !d.long_form.trim().is_empty()
+            && seen.insert(sf)
+        {
+            out.push(d);
+        }
+    }
+    out
+}
+
 // ── Stage A: grounding (long form → an existing concept, retrieve-first) ─────────
 
-/// Every concept a surface `form` denotes in the chain — the `sem` of each matching
-/// `lexicon:LexicalEntry` (deduped, in index order; a `cat_n` common-noun entry's `sem` IS the
-/// concept class). Index-driven (a value-index probe) on the served chain; an eager resource scan
-/// only for small in-memory layers with no active index (mirrors `LexicalIndex::build`'s fallback, so
-/// it never scans the 7.6M-resource served lexicon).
-fn concepts_for_form(layer: &Arc<Layer>, form: &str) -> Vec<Iri> {
-    let (Ok(form_prop), Ok(sem_prop), Ok(entry_class)) = (
+/// Every `lexicon:LexicalEntry` whose surface `form` matches (deduped by resource IRI, in index
+/// order). Index-driven (a value-index probe) on the served chain; an eager resource scan only for
+/// small in-memory layers with no active index (mirrors `LexicalIndex::build`'s fallback, so it never
+/// scans the 7.6M-resource served lexicon).
+fn entries_for_form(layer: &Arc<Layer>, form: &str) -> Vec<Arc<Resource>> {
+    let (Ok(form_prop), Ok(entry_class)) = (
         Iri::parse("urn:eigenius:lexicon:form"),
-        Iri::parse("urn:eigenius:lexicon:sem"),
         Iri::parse("urn:eigenius:lexicon:LexicalEntry"),
     ) else {
         return Vec::new();
     };
-    let read_sem = |r: &Resource| match r.get(&sem_prop) {
-        Some(Value::ResourceRef(iri)) => Some(iri.clone()),
-        Some(Value::String(s)) => Iri::parse(s).ok(),
-        _ => None,
-    };
-    let mut out: Vec<Iri> = Vec::new();
+    let mut out: Vec<Arc<Resource>> = Vec::new();
     let mut seen: BTreeSet<Iri> = BTreeSet::new();
 
     if let Some(active) = resolve_active_value_indexes(layer)
@@ -208,26 +259,44 @@ fn concepts_for_form(layer: &Arc<Layer>, form: &str) -> Vec<Iri> {
             if normalize_value(&active.normalizer, f) != key {
                 continue;
             }
-            if let Some(iri) = read_sem(&r) {
-                if seen.insert(iri.clone()) {
-                    out.push(iri);
-                }
+            if seen.insert(subject.clone()) {
+                out.push(r);
             }
         }
     } else {
         let key = form.trim().to_lowercase();
-        for (_id, r) in layer.iter_all_resources() {
+        for (id, r) in layer.iter_all_resources() {
             if !r.is_instance_of(&entry_class) {
                 continue;
             }
             if let Some(Value::String(f)) = r.get(&form_prop) {
-                if f.trim().to_lowercase() == key {
-                    if let Some(iri) = read_sem(r.as_ref()) {
-                        if seen.insert(iri.clone()) {
-                            out.push(iri);
-                        }
-                    }
+                if f.trim().to_lowercase() == key && seen.insert(id.clone()) {
+                    out.push(r);
                 }
+            }
+        }
+    }
+    out
+}
+
+/// Every concept a surface `form` denotes in the chain — the `sem` of each matching
+/// `lexicon:LexicalEntry` (deduped, in index order; a `cat_n` common-noun entry's `sem` IS the
+/// concept class).
+fn concepts_for_form(layer: &Arc<Layer>, form: &str) -> Vec<Iri> {
+    let Ok(sem_prop) = Iri::parse("urn:eigenius:lexicon:sem") else {
+        return Vec::new();
+    };
+    let read_sem = |r: &Resource| match r.get(&sem_prop) {
+        Some(Value::ResourceRef(iri)) => Some(iri.clone()),
+        Some(Value::String(s)) => Iri::parse(s).ok(),
+        _ => None,
+    };
+    let mut out: Vec<Iri> = Vec::new();
+    let mut seen: BTreeSet<Iri> = BTreeSet::new();
+    for r in entries_for_form(layer, form) {
+        if let Some(iri) = read_sem(&r) {
+            if seen.insert(iri.clone()) {
+                out.push(iri);
             }
         }
     }
@@ -278,12 +347,14 @@ pub fn ground_abbreviation(
         .or_else(|| long_concepts.into_iter().next())
 }
 
-/// One abbreviation binding from Stage-A extraction: the surface `abbr`, the `concept_iri` it is
-/// grounded to (a class already resolvable in the chain — a UMLS CUI, or a fresh document-local class
-/// on a grounding miss), and the `doc_ns` IRI stem the emitted resources are minted under (e.g.
-/// `"urn:eigenius:doc:<docid>"`, per-document so distinct documents don't collide).
+/// One abbreviation binding from Stage-A extraction: the surface `abbr`, the `long_form` it was
+/// defined as (its head noun's countability sets the emitted number class), the `concept_iri` it is
+/// grounded to (already resolvable in the chain — a UMLS CUI class or named individual, or a fresh
+/// document-local class on a grounding miss), and the `doc_ns` IRI stem the emitted resource is minted
+/// under (e.g. `"urn:eigenius:doc:<docid>"`, per-document so distinct documents don't collide).
 pub struct AbbreviationBinding<'a> {
     pub abbr: &'a str,
+    pub long_form: &'a str,
     pub concept_iri: &'a str,
     pub doc_ns: &'a str,
 }
@@ -301,13 +372,60 @@ fn slug(s: &str) -> String {
         .collect()
 }
 
-/// Build the document-scoped resources for one abbreviation binding — a named individual + its
-/// `cat_np(concept, sg)` lexical entry. Returns the pair to `add_resource` into a chained doc layer,
-/// or `None` if the `lexicon:Cat`/`Num` decls or the concept IRI don't resolve against `layer`.
+/// Is the single-word `lemma` a mass/uncountable noun in `layer` — i.e. does it carry a
+/// `cat_n(_, mass)` lexical entry (the general countability lexicon's shape, or the demo's
+/// `e_instability`)? An abbreviation inherits its long form's head-noun countability, so a `mass`
+/// head (`microsatellite instability` → `instability`) licenses the bare-singular-mass subject.
+fn form_is_mass(layer: &Arc<Layer>, lemma: &str) -> bool {
+    entries_for_form(layer, lemma)
+        .iter()
+        .filter_map(|r| entry_cat(layer, r))
+        .any(|cat| cat_is_mass(&cat))
+}
+
+/// Decode a `lexicon:LexicalEntry`'s `cat` property back to a category `Exp` (the D47 type mirror).
+fn entry_cat(layer: &Arc<Layer>, entry: &Resource) -> Option<Exp> {
+    let cat_prop = Iri::parse("urn:eigenius:lexicon:cat").ok()?;
+    decode_type(entry.get(&cat_prop)?, layer).ok()
+}
+
+/// True iff `cat` is `cat_n(_, mass)` — a mass/uncountable common noun.
+fn cat_is_mass(cat: &Exp) -> bool {
+    matches!(cat, Exp::InductiveCtor(_, name, args)
+        if name == "cat_n" && args.len() == 2
+            && matches!(&args[1], Exp::InductiveCtor(_, num, _) if num == "mass"))
+}
+
+/// The class(es) a resource is a *direct instance of* — its `is_a` targets excluding `core:Class`
+/// itself. For a UMLS named individual (`resource umlscui:C : umlssty:T`) this is its semantic-type
+/// class(es); for a class node (`is_a = [core:Class]`) it is empty.
+fn instance_type_classes(r: &Resource) -> Vec<Iri> {
+    let (Ok(is_a), Ok(class)) = (Iri::parse(wk::IS_A), Iri::parse(wk::CLASS)) else {
+        return Vec::new();
+    };
+    match r.get(&is_a) {
+        Some(Value::Array(vs)) => vs
+            .iter()
+            .filter_map(|v| match v {
+                Value::ResourceRef(iri) if *iri != class => Some(iri.clone()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Build the document-scoped lexical entry for one abbreviation binding — the abbreviation as an
+/// **alias** of its grounded concept, carrying that concept's own lexical category (the alias model).
+/// Returns the single entry to `add_resource` into a chained doc layer, or `None` if the
+/// `lexicon:Cat`/`Num` decls or the concept IRI don't resolve against `layer`.
 ///
-/// Mirrors the UMLS importer's named-individual shape (`crates/eigenius-umls/src/convert.rs`), but as
-/// direct structures: `sem` is the individual, `sem_type` is the concept, `cat` is the encoded
-/// `cat_np`. The resources still pass the felicity gate at commit (fail-closed on a bad grounding).
+/// Keyed on the concept's ontological kind (D62): a **class/phenomenon** → a common noun
+/// `cat_n(concept, mass|num_any)`, `sem` = the class (bare argument via the bare-plural/-mass shift;
+/// prenominal classifier via `compound_kind`); a **named individual** → a proper noun
+/// `cat_np(sty, sg)`, `sem` = the SAME instance (no new individual is minted). The `mass` vs `num_any`
+/// choice is inherited from the long form's head-noun countability. The entry passes the felicity gate
+/// at commit (fail-closed on a bad grounding).
 pub fn abbreviation_resources(
     layer: &Arc<Layer>,
     binding: &AbbreviationBinding,
@@ -315,40 +433,56 @@ pub fn abbreviation_resources(
     let cat_decl = resolve_inductive(layer, "urn:eigenius:lexicon:Cat")?;
     let num_decl = resolve_inductive(layer, "urn:eigenius:lexicon:Num")?;
     let concept = Iri::parse(binding.concept_iri).ok()?;
+    let class_iri = Iri::parse(wk::CLASS).ok()?;
 
-    // The category `cat_np(<concept>, sg)` and its denotation `<concept>` (the sem_type), encoded to
-    // resource `Value`s exactly as ESL's `type_expr( … )` would (D47).
-    let concept_ty = Exp::EigonClass(concept.clone());
-    let sg = Exp::InductiveCtor(num_decl, "sg".into(), Vec::new());
-    let cat_np = Exp::InductiveCtor(cat_decl, "cat_np".into(), vec![concept_ty.clone(), sg]);
-    let cat_val = encode_type(&cat_np).ok()?;
-    let sem_type_val = encode_type(&concept_ty).ok()?;
+    // Ontological kind of the grounded concept: a named individual (an instance of some domain class)
+    // vs a class/phenomenon (`is_a core:Class`). A bare/unresolved concept IRI defaults to class — the
+    // grounding-miss shape (a fresh `doc:class_*` rooted at Entity, minted by `glossary_resources`).
+    let concept_res = layer.resolve(&concept);
+    let type_classes = concept_res
+        .as_ref()
+        .map(|r| instance_type_classes(r))
+        .unwrap_or_default();
+    let is_individual = concept_res
+        .as_ref()
+        .map(|r| !r.is_instance_of(&class_iri) && !type_classes.is_empty())
+        .unwrap_or(false);
+
+    // Build the (cat, sem) for the abbreviation as an alias of the concept. `sem_type = ⟦cat⟧`
+    // (`denote_cat`) so the felicity gate's `type_eq(denote_cat(cat), sem_type)` holds by construction.
+    let (cat, sem) = if is_individual {
+        // Proper-noun alias naming the SAME instance; cat_np's type is the concept's semantic-type class.
+        let sty = Exp::EigonClass(type_classes[0].clone());
+        let sg = Exp::InductiveCtor(num_decl, "sg".into(), Vec::new());
+        let cat = Exp::InductiveCtor(cat_decl, "cat_np".into(), vec![sty, sg]);
+        (cat, Value::ResourceRef(concept.clone()))
+    } else {
+        // Common-noun alias whose sem IS the class; number class from the long form's head noun.
+        let head = binding
+            .long_form
+            .split_whitespace()
+            .last()
+            .unwrap_or(binding.long_form);
+        let num_name = if form_is_mass(layer, head) {
+            "mass"
+        } else {
+            "num_any"
+        };
+        let num = Exp::InductiveCtor(num_decl, num_name.into(), Vec::new());
+        let concept_ty = Exp::EigonClass(concept.clone());
+        let cat = Exp::InductiveCtor(cat_decl, "cat_n".into(), vec![concept_ty, num]);
+        (cat, Value::ResourceRef(concept.clone()))
+    };
+    let cat_val = encode_type(&cat).ok()?;
+    let sem_type_val = encode_type(&denote_cat(&cat).ok()?).ok()?;
 
     let key = slug(binding.abbr);
-    let ni_iri = Iri::parse(&format!("{}:ni_{key}", binding.doc_ns)).ok()?;
     let e_iri = Iri::parse(&format!("{}:e_{key}", binding.doc_ns)).ok()?;
     let p = |s: &str| Iri::parse(s).expect("valid well-known iri");
-    let is_a = p(wk::IS_A);
 
-    // (1) named individual: `<doc:ni_msi> : <concept>`.
-    let mut ni = Resource::new(ni_iri.clone());
-    ni.set(
-        is_a.clone(),
-        Value::Array(vec![Value::ResourceRef(concept)]),
-    );
-    ni.set(
-        p(wk::DESCRIPTION),
-        Value::String(format!(
-            "Document-local named individual for the abbreviation {} (grounded to {}). Injected by \
-             the abbreviation-definition preprocessor (D63 Phase 1).",
-            binding.abbr, binding.concept_iri
-        )),
-    );
-
-    // (2) lexical entry: bare `<abbr>` is a `cat_np` name of that individual.
     let mut e = Resource::new(e_iri);
     e.set(
-        is_a,
+        p(wk::IS_A),
         Value::Array(vec![Value::ResourceRef(p(
             "urn:eigenius:lexicon:LexicalEntry",
         ))]),
@@ -358,7 +492,7 @@ pub fn abbreviation_resources(
         Value::String(binding.abbr.to_string()),
     );
     e.set(p("urn:eigenius:lexicon:cat"), cat_val);
-    e.set(p("urn:eigenius:lexicon:sem"), Value::ResourceRef(ni_iri));
+    e.set(p("urn:eigenius:lexicon:sem"), sem);
     e.set(p("urn:eigenius:lexicon:sem_type"), sem_type_val);
     e.set(
         p("urn:eigenius:lexicon:sense"),
@@ -369,14 +503,15 @@ pub fn abbreviation_resources(
         Value::ResourceRef(p("urn:eigenius:reflection:epistemic:declared")),
     );
 
-    Some(vec![ni, e])
+    Some(vec![e])
 }
 
 /// The full document glossary for a set of extracted definitions: for each, **ground** the
-/// abbreviation ([`ground_abbreviation`]) and **emit** its named individual + `cat_np` entry; on a
-/// grounding **miss**, mint a fresh document-local class `doc:class_<abbr> : lexicon:Entity` and bind
-/// to it (§7-3) — so the abbreviation still parses (ungrounded but Entity-typed) rather than being
-/// dropped. Returns every resource to commit into the document's chained glossary layer.
+/// abbreviation ([`ground_abbreviation`]) and **emit** its alias `lexicon:LexicalEntry`
+/// ([`abbreviation_resources`]); on a grounding **miss**, mint a fresh document-local class
+/// `doc:class_<abbr> : lexicon:Entity` and bind to it (§7-3) — so the abbreviation still parses
+/// (ungrounded but Entity-typed) rather than being dropped. Returns every resource to commit into the
+/// document's chained glossary layer.
 pub fn glossary_resources(layer: &Arc<Layer>, defs: &[AbbrDef]) -> Vec<Resource> {
     let mut out = Vec::new();
     for d in defs {
@@ -414,6 +549,7 @@ pub fn glossary_resources(layer: &Arc<Layer>, defs: &[AbbrDef]) -> Vec<Resource>
         };
         let binding = AbbreviationBinding {
             abbr: &d.short_form,
+            long_form: &d.long_form,
             concept_iri: &concept_iri,
             doc_ns: "urn:eigenius:doc",
         };
@@ -424,6 +560,103 @@ pub fn glossary_resources(layer: &Arc<Layer>, defs: &[AbbrDef]) -> Vec<Resource>
     }
     out
 }
+
+// ───────────────────── live Anthropic abbreviation proposer (allms feature) ─────────────────────
+
+#[cfg(feature = "allms")]
+mod anthropic {
+    use super::{AbbrDef, AbbreviationProposer};
+    use allms::llm_models::AnthropicModels;
+    use allms::Completions;
+    use schemars::JsonSchema;
+    use serde::Deserialize;
+
+    /// The model's structured reply: the abbreviation definitions it found in the text.
+    #[derive(Deserialize, JsonSchema)]
+    struct AbbrevReply {
+        /// One entry per abbreviation/acronym definition present in the text.
+        definitions: Vec<AbbrevPair>,
+    }
+    #[derive(Deserialize, JsonSchema)]
+    struct AbbrevPair {
+        /// The abbreviation / short form EXACTLY as it appears in the text (e.g. "MSI").
+        short_form: String,
+        /// The full form it is defined as standing for (e.g. "microsatellite instability").
+        long_form: String,
+    }
+
+    /// An [`AbbreviationProposer`] backed by Anthropic Claude via `allms`, JSON-Schema-constrained. It
+    /// proposes definitions the Schwartz-Hearst parenthetical extractor misses (non-parenthetical
+    /// introductions). On any error it proposes nothing, so the deterministic extraction stands alone.
+    pub struct AnthropicAbbreviationProposer {
+        api_key: String,
+        model: AnthropicModels,
+    }
+
+    impl AnthropicAbbreviationProposer {
+        pub fn new(api_key: impl Into<String>, model: AnthropicModels) -> Self {
+            Self {
+                api_key: api_key.into(),
+                model,
+            }
+        }
+
+        /// From `$ANTHROPIC_API_KEY`, defaulting to a fast model. `None` if the key is unset.
+        pub fn from_env() -> Option<Self> {
+            std::env::var("ANTHROPIC_API_KEY")
+                .ok()
+                .filter(|k| !k.is_empty())
+                .map(|k| Self::new(k, AnthropicModels::ClaudeSonnet4_6))
+        }
+
+        fn ask(&self, instructions: &str) -> Option<AbbrevReply> {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .ok()?;
+            match rt.block_on(
+                Completions::new(self.model.clone(), &self.api_key, None, None)
+                    .get_answer::<AbbrevReply>(instructions),
+            ) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    eprintln!("allms abbreviation-proposer error: {e:?}");
+                    None
+                }
+            }
+        }
+    }
+
+    impl AbbreviationProposer for AnthropicAbbreviationProposer {
+        fn propose(&self, text: &str) -> Vec<AbbrDef> {
+            let prompt = format!(
+                "Find every abbreviation/acronym DEFINITION in the text below — each place a short \
+                 form is introduced as standing for a longer form, INCLUDING non-parenthetical \
+                 introductions (e.g. \"X stands for …\", \"we refer to … as X\", \"…, abbreviated X\"). \
+                 Return `definitions`: for each, the `short_form` exactly as written and the \
+                 `long_form` it stands for. Do NOT invent abbreviations that are not defined in the \
+                 text; return an empty list if there are none.\n\nText:\n{text}"
+            );
+            let Some(reply) = self.ask(&prompt) else {
+                return Vec::new();
+            };
+            reply
+                .definitions
+                .into_iter()
+                .map(|p| AbbrDef {
+                    short_form: p.short_form.trim().to_string(),
+                    // The proposer returns the full long form directly, so the grounding context IS
+                    // the long form (no widening needed, unlike the Schwartz-Hearst minimal form).
+                    context: p.long_form.trim().to_string(),
+                    long_form: p.long_form.trim().to_string(),
+                })
+                .collect()
+        }
+    }
+}
+
+#[cfg(feature = "allms")]
+pub use anthropic::AnthropicAbbreviationProposer;
 
 #[cfg(test)]
 mod tests {
@@ -484,5 +717,80 @@ mod tests {
             defs(text),
             vec![("MSI".to_string(), "microsatellite instability".to_string())],
         );
+    }
+
+    /// A stand-in proposer returning fixed suggestions (the deterministic mirror of the live LLM tail).
+    struct MockProposer(Vec<AbbrDef>);
+    impl AbbreviationProposer for MockProposer {
+        fn propose(&self, _text: &str) -> Vec<AbbrDef> {
+            self.0.clone()
+        }
+    }
+    fn ad(short: &str, long: &str) -> AbbrDef {
+        AbbrDef {
+            short_form: short.to_string(),
+            long_form: long.to_string(),
+            context: long.to_string(),
+        }
+    }
+
+    #[test]
+    fn llm_tail_adds_non_parenthetical_and_rejects_hallucinations() {
+        // No parenthetical → Schwartz-Hearst finds nothing; the proposer supplies the definition.
+        let text = "MSI stands for microsatellite instability. MMR is a repair system.";
+        assert!(extract_abbreviations(text).is_empty());
+
+        let proposer = MockProposer(vec![
+            ad("MSI", "microsatellite instability"), // valid: short form occurs in the text
+            ad("XYZ", "not in the text at all"),     // HALLUCINATION: short form absent → rejected
+            ad("a", "too short a form"),             // invalid short form → rejected
+        ]);
+        let got = extract_abbreviations_with(text, &proposer);
+        assert_eq!(
+            got.iter()
+                .map(|d| d.short_form.as_str())
+                .collect::<Vec<_>>(),
+            vec!["MSI"],
+            "only the valid, text-present proposal survives (fail-closed on hallucinations)"
+        );
+        assert_eq!(got[0].long_form, "microsatellite instability");
+    }
+
+    #[test]
+    fn deterministic_wins_over_the_proposer_on_dedup() {
+        // The parenthetical is extracted deterministically; a conflicting proposal for the same short
+        // form is dropped (deterministic wins).
+        let text = "microsatellite instability (MSI) matters";
+        let proposer = MockProposer(vec![ad("MSI", "a wrong expansion")]);
+        let got = extract_abbreviations_with(text, &proposer);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].long_form, "microsatellite instability");
+    }
+
+    #[test]
+    fn no_proposer_is_deterministic_only() {
+        let text = "MSI stands for microsatellite instability";
+        assert!(extract_abbreviations_with(text, &NoAbbreviationProposer).is_empty());
+    }
+
+    /// Live end-to-end check of the Anthropic proposer: a non-parenthetical definition the
+    /// Schwartz-Hearst extractor cannot see should be recovered. Requires `ANTHROPIC_API_KEY` and
+    /// the `allms` feature; ignored by default (network + cost). Run with:
+    /// `cargo test -p eigenius-kernel --features allms -- --ignored anthropic_proposer_live`
+    #[cfg(feature = "allms")]
+    #[test]
+    #[ignore = "hits the live Anthropic API; requires ANTHROPIC_API_KEY"]
+    fn anthropic_proposer_live_recovers_non_parenthetical() {
+        let Some(proposer) = super::AnthropicAbbreviationProposer::from_env() else {
+            panic!("ANTHROPIC_API_KEY not set");
+        };
+        // No parentheses → the deterministic extractor finds nothing; the LLM must supply it.
+        let text = "The Werner syndrome protein, WRN, is a RecQ helicase. \
+                    Microsatellite instability, or MSI, is a hallmark of mismatch repair deficiency.";
+        assert!(extract_abbreviations(text).is_empty());
+        let got = extract_abbreviations_with(text, &proposer);
+        let shorts: Vec<_> = got.iter().map(|d| d.short_form.as_str()).collect();
+        assert!(shorts.contains(&"WRN"), "expected WRN in {shorts:?}");
+        assert!(shorts.contains(&"MSI"), "expected MSI in {shorts:?}");
     }
 }

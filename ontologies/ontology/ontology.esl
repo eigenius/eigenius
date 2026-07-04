@@ -31,6 +31,15 @@ axiom ontology:is_a : lexicon:Entity -> Set -> Prop
 // reasoning layer and a later kind-subject reading share one canonical relation.
 axiom ontology:subclass_of : Set -> Set -> Prop
 
+// kind_of(C) — the kind C realized as an individual (Chierchia's ∩ nominalization): a
+// class (a `Set` value) mapped to the `Entity` that IS that kind. This lets a bare mass/
+// kind noun be a verb argument — "MSI contributes to cancers" → contribute_to(kind_of(MSI),
+// …) — a CLOSED predication about the kind, not an open deferred quantifier (D63
+// kind-predication reshape, `docs/notes/d63-kind-predication-reshape.md`). Opaque like
+// `is_a`/`compound`: the grammar guarantees the typed tree; the kind↔instances realization
+// is grounding-supplied by the encoding institution (D62).
+axiom ontology:kind_of : Set -> lexicon:Entity
+
 // ── Nominal-modification relations (D63 §8.13 Slice 6-mod) ────────────
 // OPAQUE modifier relations the compound-noun and PP-adjunct rules produce. The
 // modifier↔head relation is vague (compound: "WRN depletion" = depletion *of* WRN; PP:
