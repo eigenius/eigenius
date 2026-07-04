@@ -110,9 +110,17 @@ grouped by the Method (run) phasing — this section is the lens to read them th
 - [ ] Figure / table / citation binding (`document:FigureRef`/`TableRef`/`reference:Citation`) —
       preprocessing-note Phase 2.
 
-## Residuals (separate; not blocking the pipeline)
-- [ ] Sense-crowding → clean single (`encoded`) parses — everything parses ambiguous (×256) over full
-      UMLS (diagnosis lever #2; the reshape does nothing for this).
-- [ ] Residual grammar constructions — comparatives / `than` / "as a biomarker".
-- [ ] OOV — hyphenated / `-based` (double-stranded, hypermutable, pcr-based, recq).
-- [ ] Named-disease handling (Lynch syndrome — `cat_np` injection for named entities).
+## Parse-gap closure (make the test document parse completely)
+
+Full-lexicon baseline measured `2026-07-04` and triaged into an ordered plan:
+**[d63-parse-gap-closure.md](d63-parse-gap-closure.md)**. Headline (62 units, deterministic): 39 AMBIG,
+17 grammar-gap, 6 missing-lexeme, **0 encoded**, 0 open. Target: grammar-gap + missing-lexeme → 0.
+Dominant fix = missing **verb + PP-complement frames** (~10 of 17; `occur in`/`arise from`/`contribute
+to`/… — witnessed by `observe in` parsing vs `occurs in` gapping). Then the 4 OOV
+(double-stranded/hypermutable/pcr-based/recq), `than`, `as a biomarker`, coordination/apposition, the
+`are_kind` compound-subject edge, and named-disease (Lynch). See §4 for the step-by-step.
+
+## Residuals (deferred to *after* the document parses — step 3+)
+- [ ] Sense-crowding → clean single (`encoded`) parses — **0 encoded**: everything that parses is
+      ambiguous (×8–×64) over full UMLS (diagnosis lever #2; the reshape does nothing for this).
+- [ ] Long-sentence perf — Lever B beam drops millions of chart items on 16–21-tok units (3–5 min each).
