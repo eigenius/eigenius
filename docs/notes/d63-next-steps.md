@@ -1,34 +1,64 @@
-# D63 — next steps (phases & stages order)
+# D63 — next steps (method + stages order)
 
-Short running to-do for the two interleaved tracks. Authoritative detail lives in the source docs:
-**Stages** = the document→encoding pipeline (`d63-document-preprocessing-scope.md` §1);
-**Phases** = the kind-predication reshape (`d63-kind-predication-reshape.md` §6). Mapping: reshape
-Phase A = the tail of Stage B (done); Phase C = a slice of Stage C; Phase B = off-timeline cleanup.
+Short running to-do. Authoritative detail in the source docs: **Stages** = the document→encoding
+pipeline (`d63-document-preprocessing-scope.md` §1); **reshape Phases** (`d63-kind-predication-reshape.md`
+§6). Stage/Phase mapping: reshape Phase A = the tail of Stage B (done); Phase C = a slice of Stage C;
+Phase B = off-timeline cleanup (done).
+
+## Method (the plan)
+
+1. **Phase 1 — build + test the whole pipeline ALGORITHM in Rust only, in-process.** Preprocess → parse
+   → anaphora resolution, end to end. The LLM parts stay in Rust via **aLLM + `--features allms`**,
+   exactly as the sense reranker (`AnthropicSenseRanker`) and the abbreviation proposer
+   (`AnthropicAbbreviationProposer`) already do. Validate the algorithm before any service work.
+2. **Phase 2 — once the algorithm works, refactor the LLM parts out into the orchestrator** (Deno/TS):
+   the served gRPC path. Not before Phase 1 is validated.
 
 ## Done
-- **Stage A (emission)** — abbreviation extract/ground/emit alias model (built; not yet wired into the
-  served parse path).
 - **Reshape Phase A** — `kind_of` axiom + unified `kind_raised_nps` (bare mass + plural, incl.
   compounds). Committed `04bab3d`; validated over full-UMLS re-measure (**OPEN 35 → 0**, any-parse ~61%).
-- **Reshape Phase B** — retired the `Quantification` hole carrier (`freshen_quant` + 4 call sites,
-  `quant_hole_type`/`quant_hole_base`, `QUANT_SENTINEL`, the 2 per-span registrations, the
-  `HoleKind::Quantification` variant, the de-risk probe); `EntityRef`/anaphora untouched;
-  `d62-bare-plural-quantification.md` marked superseded. Full suite + fmt + clippy green. *(uncommitted)*
+- **Reshape Phase B** — retired the `Quantification` hole carrier; `EntityRef`/anaphora untouched;
+  `d62-bare-plural-quantification.md` marked superseded. Green. *(uncommitted)*
 
-## To do (in order)
-- [ ] **Wire Stage A into the parse path** — inject the document glossary so `MSI`/`MMR` mass-mark and
-      the kind shift fires on them (served `ParseSentence(branch="doc:<id>")`). Closes the biggest bucket
-      of re-measure grammar-gaps; makes Stage A true end-to-end, not just emission.
-- [ ] **Stage C — post-parse resolution**, in this internal order:
-  - [ ] **Reshape Phase C** — grade attachment: a closed prop enters the reasoning layer as `Declared`;
-        a `reference:Citation` witness climbs the grade.
-  - [ ] **Anaphora / referent resolution (D64)** — pronouns / "these X" / referents.
-  - [ ] **Figure / table / citation binding** — `document:FigureRef` / `TableRef` / `reference:Citation`
-        (Phase 2 of the preprocessing note).
+## Phase 1 — the Rust algorithm (in order)
+- [x] **Stage A · preprocess** — extract (Schwartz-Hearst) / ground / emit glossary aliases;
+      `AnthropicAbbreviationProposer` (LLM, allms) for non-parenthetical defs; reusable
+      `document_glossary_resources[_with]` seam. Built + in-memory tested (`abbreviation_pipeline_end_to_end`).
+  - [x] **Validated on the DB corpus** (full UMLS, in-process, deterministic — `measure_abbreviation_glossary`):
+        MSI/MMR/MSS/PARP-1 ground to real CUIs; bare `MSI` subjects recover GAP→**CLOSED** as
+        `kind_of(C0920269)` (+ the "several cancers" compound-bare-plural → `kind_of(Σx:cancer.…)`).
+        Residual: "Lynch syndrome" (named-disease item); `MMR` already parsed on base (glossary narrows).
+- [x] **Stage B · parse** — chain the doc-glossary layer + `LexicalIndex` + parse. Built.
+- [~] **Stage C · anaphora resolution (D64)** — in Rust.
+  - [x] **The discourse resolve loop** `LexicalIndex::resolve_document(sentences, lemmatizer, proposer)` —
+        parse each sentence, resolve `EntityRef` holes against the in-scope candidates (`resolve_with`,
+        kernel re-gates), then harvest the sentence's entities (`entity_candidates`, most-recent-first)
+        for later sentences. Fail-closed. Built + tested (`resolve_document_threads_discourse_across_sentences`);
+        single-sentence + live-LLM paths already tested. The resolver primitives (`resolve_open`/`resolve_with`/
+        `AnthropicProposer`) pre-existed; the candidate assembly + discourse threading is the new piece.
+  - [ ] **Reshape Phase C grade** — a closed prop → `epistemic:declared`; a `reference:Citation` witness
+        climbs the grade. (Reasoning-layer integration, D39.)
+  - [ ] Refinements: candidate surfaces = readable labels (not IRI local names); kinds/props as
+        antecedents; intra-sentential binding; live-LLM `resolve_document` over a multi-sentence corpus slice.
+- [ ] **Phase-1 end-to-end harness** — one in-process Rust run: document text → glossary → parse →
+      resolve → graded props, over the full lexicon. This is the "algorithm works" gate.
 
-## Separate / pre-existing (not blocking the above)
+## Phase 2 — orchestrator refactor (LATER; do not start until Phase 1 is validated)
+- [ ] Move the LLM steps (abbreviation extraction, sense rerank, anaphora proposal) out of the kernel
+      into the orchestrator; expose the deterministic emission server-side.
+- [ ] Served path: the commit+parse plumbing already exists and is **branch-aware** — `CreateBranch` →
+      `Load(branch)` → `ParseSentence(branch=…)`, no kernel change for Stage B. The **missing** piece is
+      text→grounded-`LexicalEntry` emission over gRPC (a thin RPC calling
+      `extract_abbreviations`+`glossary_resources`, or the planned `orchestration/src/components/
+      extract_document_structure.ts`, which does **not exist yet**).
+  - Gotchas: branch names forbid `:` (use `doc-<id>`, not `doc:<id>`); the CLI `lexicon parse` has no
+    `--branch` flag yet (`remote_parse` hardcodes empty branch); persistent backend required throughout.
+- [ ] Figure / table / citation binding (`document:FigureRef`/`TableRef`/`reference:Citation`) —
+      preprocessing-note Phase 2.
+
+## Residuals (separate; not blocking the pipeline)
 - [ ] Sense-crowding → clean single (`encoded`) parses — everything parses ambiguous (×256) over full
-      UMLS; the reshape does nothing for this (diagnosis lever #2).
+      UMLS (diagnosis lever #2; the reshape does nothing for this).
 - [ ] Residual grammar constructions — comparatives / `than` / "as a biomarker".
-- [ ] OOV — hyphenated/`-based`/`recq` (double-stranded, hypermutable, pcr-based, recq).
+- [ ] OOV — hyphenated / `-based` (double-stranded, hypermutable, pcr-based, recq).
 - [ ] Named-disease handling (Lynch syndrome — `cat_np` injection for named entities).

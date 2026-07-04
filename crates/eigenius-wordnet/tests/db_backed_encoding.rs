@@ -42,8 +42,8 @@ use std::sync::Arc;
 
 use eigenius_kernel::bootstrap::bootstrap_persistent;
 use eigenius_kernel::dcg::{
-    extract_abbreviations, glossary_resources, ground_abbreviation, is_nonprose, segment_sentences,
-    tokenize, Identity, Lemmatizer, LexicalIndex,
+    extract_abbreviations, glossary_resources, ground_abbreviation, is_nonprose, pretty_term,
+    segment_sentences, tokenize, Identity, Lemmatizer, LexicalIndex,
 };
 use eigenius_kernel::layer::{resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -1701,26 +1701,50 @@ fn measure_abbreviation_glossary() {
     };
 
     let sentences = [
+        // MSI — "microsatellite instability", head noun `instability` is mass.
         "MSI is a disease",
         "MSI causes cancers",
-        "MSI results from deficient DNA mismatch repair",
         "MSI contributes to several cancers",
         "MSI can arise from Lynch syndrome",
+        // MMR — "DNA mismatch repair", head noun `repair` is mass.
+        "MMR is deficient in cancers",
+        "MMR contributes to cancers",
     ];
-    let mut recovered = 0usize;
-    eprintln!("── base (bare MSI = cat_n) vs glossary (MSI = cat_np named individual) ──");
+    // Post-reshape: a mass-phenomenon abbreviation grounds to a CLASS → the alias emits `cat_n(C, mass)`,
+    // and a bare subject shifts to the CLOSED kind-predication `kind_of(C)` (no named individual, no
+    // deferred hole). So recovery should be GAP → CLOSED, not GAP → OPEN.
+    let (mut recovered, mut closed) = (0usize, 0usize);
+    eprintln!(
+        "── base (bare MSI/MMR = raw UMLS cat_n count noun → no bare-subject shift) vs glossary \
+         (mass alias → kind_of, closes via the kind shift) ──"
+    );
     for s in sentences {
         let (bv, gv) = (verdict(&base, s), verdict(&glossary, s));
-        let flag = if bv == "GAP" && gv != "GAP" {
+        let flag = if bv == "GAP" && gv.starts_with("CLOSED") {
             recovered += 1;
-            "  ← RECOVERED"
+            closed += 1;
+            "  ← RECOVERED (closed)"
+        } else if bv == "GAP" && gv != "GAP" {
+            recovered += 1;
+            "  ← RECOVERED (open)"
         } else {
             ""
         };
         eprintln!("  base={bv:<10} glossary={gv:<10} :: {s:?}{flag}");
     }
+    // Witness a recovered sem — a CLOSED kind-predication `kind_of(<CUI>)`, not a reified individual.
+    if let Some(p) = glossary
+        .parse("MSI contributes to several cancers", &lem)
+        .first()
+    {
+        eprintln!(
+            "\n  sem(\"MSI contributes to several cancers\") = {}",
+            pretty_term(p.sem())
+        );
+    }
     eprintln!(
-        "\nrecovered {recovered}/{} MSI sentences via the abbreviation glossary",
+        "\nrecovered {recovered}/{} abbreviation sentences ({closed} as CLOSED kind-predications) via \
+         the glossary",
         sentences.len()
     );
 }

@@ -561,6 +561,30 @@ pub fn glossary_resources(layer: &Arc<Layer>, defs: &[AbbrDef]) -> Vec<Resource>
     out
 }
 
+/// **Stage A → the document glossary** — the Stage-A→B seam of the D63 preprocessing pipeline
+/// (`docs/notes/d63-document-preprocessing-scope.md`). Extract every abbreviation definition from a whole
+/// `document` (deterministic Schwartz-Hearst ∪ the untrusted LLM `proposer`, fail-closed), ground each
+/// against `base`, and emit the alias `lexicon:LexicalEntry` resources (+ any fresh doc-local classes)
+/// for a chained, document-scoped lexicon layer.
+///
+/// The caller **commits** the returned resources onto `base` — with the storage of its choice
+/// (`LayerStorage::with_persistent` on the served/persisted path so the value index populates lazily and
+/// the parse resolves lazily, §7-2; `in_memory` for a small demo) — and builds a `LexicalIndex` over the
+/// result to parse the document's body sentences (Stage B). Every emitted binding still passes the
+/// felicity gate at commit, so a mis-extracted abbreviation is rejected, not silently used.
+pub fn document_glossary_resources_with(
+    base: &Arc<Layer>,
+    document: &str,
+    proposer: &dyn AbbreviationProposer,
+) -> Vec<Resource> {
+    glossary_resources(base, &extract_abbreviations_with(document, proposer))
+}
+
+/// [`document_glossary_resources_with`] using only the deterministic Schwartz-Hearst extractor (no LLM).
+pub fn document_glossary_resources(base: &Arc<Layer>, document: &str) -> Vec<Resource> {
+    document_glossary_resources_with(base, document, &NoAbbreviationProposer)
+}
+
 // ───────────────────── live Anthropic abbreviation proposer (allms feature) ─────────────────────
 
 #[cfg(feature = "allms")]

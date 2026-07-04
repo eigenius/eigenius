@@ -1626,6 +1626,36 @@ fn resolve_loop_with_mock_proposer_resolves_and_fails_closed() {
     );
 }
 
+#[test]
+fn resolve_document_threads_discourse_across_sentences() {
+    // Stage C end-to-end (D64 §4, the discourse resolve loop): a 2-sentence document. Sentence 1
+    // (closed) introduces HeLa + BRCA1; sentence 2 "it affects HeLa" carries a referent hole.
+    // `resolve_document` harvests sentence 1's entities into the candidate set and hands them to the
+    // proposer — WITHOUT the caller supplying candidates by hand (that discourse threading is the new
+    // piece) — the mock binds `it` and the kernel re-gates it to a closed Prop.
+    let (_layer, index) = index_over_bootstrap();
+    let doc = ["HeLa affects BRCA1", "it affects HeLa"];
+
+    let resolved = index.resolve_document(&doc, &Identity, &PickBySurface("brca1"));
+    assert_eq!(resolved.len(), 2);
+    assert!(resolved[0].is_some(), "sentence 1 parses closed");
+    let s2 = resolved[1]
+        .as_ref()
+        .expect("sentence 2's pronoun resolves against the threaded discourse");
+    assert!(
+        pretty_term(s2.sem()).contains("brca1"),
+        "`it` bound to a prior-sentence entity (brca1): {}",
+        pretty_term(s2.sem())
+    );
+
+    // Fail-closed: a proposer that finds no antecedent ⇒ the sentence does not resolve.
+    let none = index.resolve_document(&doc, &Identity, &PickBySurface("nonexistent"));
+    assert!(
+        none[1].is_none(),
+        "an unresolvable pronoun fails closed (no committed parse)"
+    );
+}
+
 #[cfg(feature = "allms")]
 #[test]
 fn live_anthropic_proposer_resolves_a_referent_through_the_kernel() {

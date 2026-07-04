@@ -2616,6 +2616,90 @@ impl LexicalIndex {
         self.layer.resolve(iri)?;
         Some(super::lexicon::resolve_sem(&self.layer, iri))
     }
+
+    /// **Stage C — the discourse resolve loop** (D64 §4, `docs/design/d64-llm-anaphora-resolution.md`).
+    /// Parse the document's `sentences` IN ORDER, threading a growing candidate set of antecedents. For
+    /// each sentence: parse; if the best full parse is already CLOSED keep it; if it is OPEN (carries
+    /// `EntityRef` referent holes — a pronoun / "these X"), resolve every hole against the in-scope
+    /// `candidates` via [`Self::resolve_with`] (the untrusted `proposer` suggests, the kernel re-gates);
+    /// a gap or unresolvable hole yields `None` (**fail-closed**). Then harvest the resolved sentence's
+    /// referenced named entities into the candidate set — **most-recent-first** — for later sentences.
+    /// Returns one resolved (closed) [`Item`] per input sentence.
+    ///
+    /// This is the piece D64 §4 leaves to the caller: the resolver primitives already exist, but nothing
+    /// assembled candidates or threaded the discourse. The `proposer` is impl-agnostic — a deterministic
+    /// mock in tests, the live `AnthropicProposer` (`allms`) end to end, or the orchestrator bridge
+    /// (Phase 2). Recency is the only salience signal we model; the proposer does the ranking (§4). First
+    /// cut: candidate surfaces are the entity IRI local names (a readable label is a later refinement),
+    /// and only PRIOR-discourse entities are candidates (intra-sentential binding is a refinement).
+    pub fn resolve_document(
+        &self,
+        sentences: &[&str],
+        lemmatizer: &dyn Lemmatizer,
+        proposer: &dyn Proposer,
+    ) -> Vec<Option<Item>> {
+        let mut candidates: Vec<Candidate> = Vec::new();
+        let mut out = Vec::with_capacity(sentences.len());
+        for s in sentences {
+            let (closed, open) = self.parse_open(s, lemmatizer);
+            let resolved = if let Some(c) = closed.into_iter().next() {
+                Some(c)
+            } else if let Some(o) = open.first() {
+                self.resolve_with(o, s, &candidates, proposer)
+            } else {
+                None
+            };
+            if let Some(item) = &resolved {
+                // Prepend this sentence's entities (most-recent-first) ahead of the prior discourse.
+                let mut fresh = entity_candidates(item.sem());
+                fresh.append(&mut candidates);
+                candidates = fresh;
+            }
+            out.push(resolved);
+        }
+        out
+    }
+}
+
+/// The named-entity antecedent candidates a resolved sem references — every `EigonResource` IRI (a
+/// committed named entity), as a [`Candidate`] whose surface is the IRI local name (the part after the
+/// last `:`), in first-seen order. Used by [`LexicalIndex::resolve_document`] to build the discourse
+/// candidate set. (Kinds / prior propositions as antecedents are a later refinement.)
+fn entity_candidates(sem: &Exp) -> Vec<Candidate> {
+    fn walk(e: &Exp, out: &mut Vec<Candidate>, seen: &mut BTreeSet<Iri>) {
+        match e {
+            Exp::EigonResource(res) => {
+                if let Some(iri) = res.id() {
+                    if seen.insert(iri.clone()) {
+                        let surface = iri.as_str().rsplit(':').next().unwrap_or("").to_string();
+                        out.push(Candidate {
+                            iri: iri.clone(),
+                            surface,
+                        });
+                    }
+                }
+            }
+            Exp::App(a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) | Exp::Pair(a, b) => {
+                walk(a, out, seen);
+                walk(b, out, seen);
+            }
+            Exp::Pi(_, a, b) | Exp::Sig(_, a, b) | Exp::Ann(a, b) => {
+                walk(a, out, seen);
+                walk(b, out, seen);
+            }
+            Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) => walk(b, out, seen),
+            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
+                for a in args {
+                    walk(a, out, seen);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    let mut seen = BTreeSet::new();
+    walk(sem, &mut out, &mut seen);
+    out
 }
 
 /// A candidate antecedent for anaphora resolution (D64 §4): an in-scope committed chain entity,
