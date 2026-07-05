@@ -92,3 +92,14 @@ This project values long-term system health over short-term commit ease. When yo
 This applies to AST/data-model changes, identifier schemes, lookup mechanisms, error-handling shape, public API surfaces, and ontology/resource structure. It does *not* apply to local algorithmic improvements or stylistic preferences — those are properly minimal-scope.
 
 When in doubt, ask: "Am I solving the problem or just hiding it?" If hiding, do the harder thing.
+
+## Writing: report, don't editorialize.
+- Every sentence must add a fact, a number, or a decision. Before keeping one, delete it —
+  if nothing concrete is lost, leave it deleted. (Kills summary/restatement sentences.)
+- No meta-narration of your own work or its significance: not "this is exactly the X problem",
+  "my change pushed on it", "as I'd hoped", "its value is Y".
+- No balanced antithesis for effect ("correct but costly", "X while Y is immediate"). State the
+  facts plainly.
+- Concrete subject-verb-object over nominalized abstractions: "its value is glossary-gated" →
+  "it only helps once the glossary grounds MSI".
+- When a table or number already makes the point, stop. Don't add a sentence interpreting it.

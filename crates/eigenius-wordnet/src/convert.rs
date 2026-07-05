@@ -146,6 +146,12 @@ enum FrameKind {
     Intransitive,
     Transitive,
     Ditransitive,
+    /// Verb + a **single PP complement** the verb subcategorizes for ("contributes **to** cancers",
+    /// "depends **on** X", "----s PP"): category `(S\NP)/cat_pp_arg`, an argument-PP whose ⟦·⟧ = Entity
+    /// (D63 verb+PP frames). Same `Entity → Entity → Prop` axiom as a transitive verb — only the
+    /// category differs, so the argument-marker preposition is forced and a plain transitive verb still
+    /// rejects a stray `to X`. Replaces the old coarse "PP-oblique → transitive/intransitive" mapping.
+    PpOblique,
     /// Clause-taking (report) verb — frame 26, "Somebody ----s that CLAUSE" (D63 §8.11
     /// 6-cl): an opaque `Prop → Entity → Prop` axiom, category `(S\NP)/cat_cp`.
     Clausal,
@@ -157,6 +163,7 @@ impl FrameKind {
             FrameKind::Intransitive => "i",
             FrameKind::Transitive => "t",
             FrameKind::Ditransitive => "d",
+            FrameKind::PpOblique => "p",
             FrameKind::Clausal => "c",
         }
     }
@@ -167,7 +174,10 @@ impl FrameKind {
     fn arrow(self) -> String {
         match self {
             FrameKind::Intransitive => format!("{ENTITY_TOP} -> Prop"),
-            FrameKind::Transitive => format!("{ENTITY_TOP} -> {ENTITY_TOP} -> Prop"),
+            // Same relation shape as transitive — the PP's object is the second entity argument.
+            FrameKind::Transitive | FrameKind::PpOblique => {
+                format!("{ENTITY_TOP} -> {ENTITY_TOP} -> Prop")
+            }
             FrameKind::Ditransitive => {
                 format!("{ENTITY_TOP} -> {ENTITY_TOP} -> {ENTITY_TOP} -> Prop")
             }
@@ -193,6 +203,12 @@ impl FrameKind {
             FrameKind::Ditransitive => {
                 format!("lexicon:fwd(lexicon:fwd(lexicon:bwd({s}, {subj}), {obj}), {obj})")
             }
+            // Argument-PP verb: `(S\NP)/cat_pp_arg` — the object arrives through a transparent
+            // argument-marker preposition (`to`/`on`/…). Distinct from a bare NP so the preposition is
+            // forced; `⟦cat_pp_arg⟧ = Entity`, so the sem_type equals the transitive one above.
+            FrameKind::PpOblique => {
+                format!("lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_pp_arg)")
+            }
             // Clause-taking: `(S\NP)/cat_cp` — the complement is an embedded clause.
             FrameKind::Clausal => format!("lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_cp)"),
         }
@@ -205,13 +221,16 @@ impl FrameKind {
 ///   - 26, 29, 34 — clausal complement (`that` / `whether CLAUSE`);
 ///   - 24, 25, 28, 30, 32, 33, 35 — control / raising (INFINITIVE / V-ing).
 ///
-/// PP-oblique frames are mapped **coarsely** — the PP object becomes an entity
-/// argument: 12/13/27 → transitive (e.g. *depend on*), 20/21 → transitive,
-/// 4/22 → intransitive (the PP is dropped). Documented as a stage-1 loss.
+/// **Single-PP-complement frames** — the verb subcategorizes for one PP ("----s to X" 12/27, "is
+/// ----ing PP" 4, "----s PP" 23) — map to [`FrameKind::PpOblique`] (`(S\NP)/cat_pp_arg`). This replaces
+/// the former coarse handling (12/27 → transitive with the preposition dropped; 4/23 → intransitive with
+/// the PP dropped). **Object+PP** frames (13, 20, 21, 22) and other PP shapes stay coarse for now — a
+/// follow-up (`((S\NP)/cat_pp_arg)/NP`). Frame 14 is left as this importer already classifies it.
 fn classify(frame: u8) -> Option<FrameKind> {
     match frame {
-        1 | 2 | 3 | 4 | 22 | 23 => Some(FrameKind::Intransitive),
-        8 | 9 | 10 | 11 | 12 | 13 | 20 | 21 | 27 => Some(FrameKind::Transitive),
+        1 | 2 | 3 | 22 => Some(FrameKind::Intransitive),
+        4 | 12 | 23 | 27 => Some(FrameKind::PpOblique),
+        8 | 9 | 10 | 11 | 13 | 20 | 21 => Some(FrameKind::Transitive),
         14 | 15 | 16 | 17 | 18 | 19 | 31 => Some(FrameKind::Ditransitive),
         26 => Some(FrameKind::Clausal), // "Somebody ----s that CLAUSE" (D63 §8.11 6-cl)
         _ => None, // 5,6,7 predicative; 29,34 whether-clause; 24,25,28,30,32,33,35 control/raising
@@ -773,7 +792,12 @@ mod tests {
         assert_eq!(classify(13), Some(FrameKind::Transitive)); // "----s on something"
         assert_eq!(classify(14), Some(FrameKind::Ditransitive));
         assert_eq!(classify(31), Some(FrameKind::Ditransitive));
-        // frame 26 "that CLAUSE" → clause-taking (D63 §8.11 6-cl).
+        // single-PP-complement frames → argument-PP verb `(S\NP)/cat_pp_arg` (D63 verb+PP).
+        assert_eq!(classify(12), Some(FrameKind::PpOblique)); // "----s to somebody"
+        assert_eq!(classify(27), Some(FrameKind::PpOblique)); // "----s to somebody"
+        assert_eq!(classify(4), Some(FrameKind::PpOblique)); //  "is ----ing PP"
+        assert_eq!(classify(23), Some(FrameKind::PpOblique)); // "----s PP"
+                                                              // frame 26 "that CLAUSE" → clause-taking (D63 §8.11 6-cl).
         assert_eq!(classify(26), Some(FrameKind::Clausal));
         // still-deferred higher-order frames → None (never guessed).
         assert_eq!(classify(5), None); // predicative complement

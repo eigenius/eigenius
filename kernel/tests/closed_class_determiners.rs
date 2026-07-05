@@ -1799,6 +1799,15 @@ fn argument_pp_verb_parses_verb_prep_object() {
         "the object is the kind: {}",
         pretty_term(kind[0].sem())
     );
+
+    // A MASS/kind subject composes too (not just an individual) — the shape of "MSI contributes to
+    // cancers" once MSI is grounded to a mass concept by the Stage-A glossary.
+    assert!(
+        !index
+            .parse("instability contributes to genes", &PluralS)
+            .is_empty(),
+        "a bare mass subject + argument-PP verb should parse"
+    );
 }
 
 fn find_sentence<'a>(sentences: &'a [SentenceEncoding], needle: &str) -> &'a SentenceEncoding {
