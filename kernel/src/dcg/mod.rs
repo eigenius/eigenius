@@ -32,6 +32,7 @@
 //! - [`lookup`] — the bridge (§8.8.1): `string → tree(s)` via a [`LexicalIndex`]
 //!   + multi-span lemmatized seeding + CKY + the kernel felicity filter.
 
+pub mod augment;
 pub mod category;
 pub mod glossary;
 pub mod lemmatizer;
@@ -55,6 +56,10 @@ mod anthropic_client;
 #[cfg(feature = "use-llm")]
 pub mod resolver_llm;
 
+pub use augment::{
+    augment_document_only, AugmentOptions, Gap, LexicalBinding, LexiconAugmentation, Provenance,
+    ResolutionMethod,
+};
 pub use category::{
     cat_subsumes, cats_coordinate, common_super, coordinate_np, coordinate_sem, denote_cat,
     distribute, distribute_object, feat_meets, is_ctor, kind_subject, reciprocate, relativize,

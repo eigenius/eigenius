@@ -30,8 +30,8 @@ use std::sync::Arc;
 
 use eigenius_kernel::context::{ExecutionContext, ExecutionMode};
 use eigenius_kernel::dcg::{
-    AbbrDef, AbbreviationProposer, InProcessPipeline, Lemmatizer, Proposer, SentenceEncoding,
-    SentenceOutcome,
+    AbbreviationProposer, InProcessPipeline, Lemmatizer, LexiconAugmentation, Proposer,
+    SentenceEncoding, SentenceOutcome,
 };
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::iri::Iri;
@@ -71,10 +71,10 @@ pub struct IngestedSentence {
     pub verdict: Option<ClaimVerdict>,
 }
 
-/// The ingestion of a whole document: the Stage-A glossary, one result per body sentence, and the
-/// committed doc-claims layer (base → glossary → the claim clusters).
+/// The ingestion of a whole document: the Stage-A lexicon augmentation, one result per body sentence, and
+/// the committed doc-claims layer (base → glossary → the claim clusters).
 pub struct IngestedDocument {
-    pub glossary: Vec<AbbrDef>,
+    pub augmentation: LexiconAugmentation,
     pub sentences: Vec<IngestedSentence>,
     /// The committed layer carrying every claim cluster, chained on the parsed doc chain.
     pub layer: Arc<Layer>,
@@ -203,7 +203,7 @@ impl DocumentIngestion for InProcessIngestion<'_> {
         }
 
         IngestedDocument {
-            glossary: encoding.glossary,
+            augmentation: encoding.augmentation,
             sentences,
             layer: claims_layer,
         }

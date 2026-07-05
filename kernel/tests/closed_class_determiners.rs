@@ -1833,6 +1833,47 @@ fn resolve_document_threads_discourse_across_sentences() {
 }
 
 #[test]
+fn document_only_augmentation_harvests_bindings_and_flags_oov() {
+    // D63 lexicon-augmentation Phase 1 (`DocumentOnly`): the document's own abbreviation definition is
+    // harvested as a grounded `LexicalBinding` (method `DefinitionExtracted`, provenance kept), and an
+    // unknown token is a fail-closed `Gap` — never silently dropped.
+    use eigenius_kernel::dcg::{augment_document_only, ResolutionMethod};
+    let (base, _index) = index_over_bootstrap();
+    let doc = "The instability (INS) was assayed. INS affects HeLa. zzqxword affects HeLa.";
+    let aug = augment_document_only(&base, doc, &NoAbbreviationProposer, &Identity);
+
+    // Harvest: INS → a grounded binding wrapping a proposed `lexicon:LexicalEntry`, with provenance.
+    let ins = aug
+        .added
+        .iter()
+        .find(|b| b.provenance.surface == "INS")
+        .expect("INS harvested as a binding");
+    assert_eq!(ins.provenance.long_form.as_deref(), Some("instability"));
+    assert_eq!(ins.provenance.method, ResolutionMethod::DefinitionExtracted);
+    assert!(
+        ins.provenance.grounded_to.is_some(),
+        "INS grounded to the mass concept"
+    );
+    let entry_class = Iri::parse("urn:eigenius:lexicon:LexicalEntry").unwrap();
+    assert!(
+        ins.proposed.is_instance_of(&entry_class),
+        "the proposed resource is a lexicon:LexicalEntry"
+    );
+
+    // Fail closed: the unknown token is a `Gap`; the commit set carries at least the INS entry.
+    assert!(
+        aug.missing_oov
+            .iter()
+            .any(|g| g.surface.to_lowercase() == "zzqxword"),
+        "the OOV token `zzqxword` is a Gap"
+    );
+    assert!(
+        !aug.resources().is_empty(),
+        "the augmentation commits at least the INS entry"
+    );
+}
+
+#[test]
 fn in_process_pipeline_encodes_a_document_end_to_end() {
     // The WHOLE pipeline in one `encode()` call (the `DocumentPipeline` contract): Stage A (glossary —
     // `instability (INS)` → INS grounded to the mass concept) → Stage B (bare `INS` closes via the kind
@@ -1849,12 +1890,14 @@ fn in_process_pipeline_encodes_a_document_end_to_end() {
     );
     let enc = pipeline.encode(doc);
 
-    // Stage A — the abbreviation was extracted + grounded into the document glossary.
+    // Stage A — the abbreviation was harvested as a grounded binding in the document augmentation.
     assert!(
-        enc.glossary
+        enc.augmentation
+            .added
             .iter()
-            .any(|d| d.short_form == "INS" && d.long_form == "instability"),
-        "Stage A extracted `INS ← instability`"
+            .any(|b| b.provenance.surface == "INS"
+                && b.provenance.long_form.as_deref() == Some("instability")),
+        "Stage A harvested `INS ← instability` as a grounded binding"
     );
     assert_eq!(enc.sentences.len(), 3, "three body sentences");
 

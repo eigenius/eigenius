@@ -31,9 +31,8 @@ use std::sync::Arc;
 
 use crate::layer::{Layer, LayerBuilder, LayerStorage};
 
-use super::glossary::{
-    extract_abbreviations_with, glossary_resources, AbbrDef, AbbreviationProposer,
-};
+use super::augment::{augment_document_only, LexiconAugmentation};
+use super::glossary::AbbreviationProposer;
 use super::lemmatizer::Lemmatizer;
 use super::lookup::{LexicalIndex, Proposer, SentenceOutcome};
 use super::segment::segment_sentences;
@@ -44,12 +43,13 @@ pub trait DocumentPipeline {
     fn encode(&self, document: &str) -> DocumentEncoding;
 }
 
-/// The encoding of a whole document: the Stage-A glossary that was injected + one outcome per body
-/// sentence, in document order.
+/// The encoding of a whole document: the lexicon augmentation that was harvested + injected (Stage A) and
+/// one outcome per body sentence, in document order.
 #[derive(Clone)]
 pub struct DocumentEncoding {
-    /// The abbreviation definitions extracted and grounded into the document glossary (Stage A).
-    pub glossary: Vec<AbbrDef>,
+    /// The Stage-A lexicon augmentation: the grounded entries added (each a proposal + provenance) and the
+    /// residual OOV gaps (`docs/notes/d63-lexicon-augmentation.md`).
+    pub augmentation: LexiconAugmentation,
     /// One result per body (prose) sentence, in order.
     pub sentences: Vec<SentenceEncoding>,
 }
@@ -94,13 +94,18 @@ impl<'a> InProcessPipeline<'a> {
     /// chain. The trait's [`DocumentPipeline::encode`] drops it; a served realization returns a
     /// committed branch instead, which is why the layer is exposed here (inherent), not on the trait.
     pub fn encode_with_layer(&self, document: &str) -> (DocumentEncoding, Arc<Layer>) {
-        // Stage A — extract (Schwartz-Hearst ∪ the LLM proposer) + ground + emit the document glossary,
-        // chained as a doc-scoped lexicon layer on `base`. Fail-closed: a binding the felicity gate
-        // rejects at `add_resource` is skipped, so a mis-extraction never enters the lexicon.
-        let defs = extract_abbreviations_with(document, self.abbreviation_proposer);
-        let resources = glossary_resources(&self.base, &defs);
+        // Stage A — the DocumentOnly lexicon augmentation: harvest the document's abbreviation definitions
+        // as grounded proposals (+ the residual OOV gaps), and commit its resources as a doc-scoped lexicon
+        // layer on `base`. Fail-closed: a proposal the felicity gate rejects at `add_resource` is skipped,
+        // so a mis-extraction never enters the lexicon.
+        let augmentation = augment_document_only(
+            &self.base,
+            document,
+            self.abbreviation_proposer,
+            self.lemmatizer,
+        );
         let mut builder = LayerBuilder::new("doc-glossary", Some(Arc::clone(&self.base)));
-        for r in resources {
+        for r in augmentation.resources() {
             let _ = builder.add_resource(r);
         }
         let doc_layer = Arc::new(builder.build(LayerStorage::in_memory()));
@@ -122,7 +127,7 @@ impl<'a> InProcessPipeline<'a> {
             .collect();
         (
             DocumentEncoding {
-                glossary: defs,
+                augmentation,
                 sentences,
             },
             doc_layer,

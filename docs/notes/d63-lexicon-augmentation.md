@@ -220,10 +220,17 @@ the family's *member structure* — a separate enrichment, not the grounding pat
 
 ## 9. Roadmap
 
-- **Phase 1 (deterministic core)** — `AbbrDef → LexicalBinding{proposed, provenance}` + `Gap`;
-  `DocumentEncoding.glossary → augmentation`; `AugmentOptions` + `seed` on `encode`; OOV pre-pass via
-  `has_token`; the `Gap` finding. `DocumentOnly` needs no retrieval/LLM, and already **harvests** the
-  document's abbreviation entries with provenance.
+- **Phase 1 (deterministic core) — IMPLEMENTED (`2026-07-05`).** [`kernel/src/dcg/augment.rs`](../../kernel/src/dcg/augment.rs):
+  `ResolutionMethod`/`Provenance`/`LexicalBinding{proposed, provenance}`/`Gap`/`LexiconAugmentation{added,
+  supporting, missing_oov}`/`AugmentOptions`, and `augment_document_only` (the `DocumentOnly` transducer:
+  abbreviation defs → grounded bindings with `DefinitionExtracted` provenance, wrapping the emitted
+  `lexicon:LexicalEntry`; OOV pre-pass via `has_token` → `Gap`). `DocumentEncoding.glossary → augmentation`
+  ([pipeline.rs](../../kernel/src/dcg/pipeline.rs)); `IngestedDocument.glossary → augmentation`
+  (eigenius-reasoning). Tests: `document_only_augmentation_harvests_bindings_and_flags_oov` +
+  `in_process_pipeline_encodes_a_document_end_to_end` (closed_class_determiners.rs); full suite green.
+  **Deferred to Phase 2:** the `encode(opts, seed)` trait-signature change — `opts`/`seed` are only
+  functional once `LexiconBacked` exists, so threading them now would be speculative API; `encode(&str)`
+  stays (`DocumentOnly` implied) and the `AugmentOptions` enum is defined but not yet routed.
 - **Phase 2 (retrieval, text-first)** — declare a `core:TextIndex` over `lexicon:form` (BM25, **primary** —
   closes `recq` via the already-seeded C0084304 atoms, §6a; no schema change) and optionally over concept
   `core:description` (**secondary**; needs the verb/adjective gloss **converter fix** + reseed). Vector
