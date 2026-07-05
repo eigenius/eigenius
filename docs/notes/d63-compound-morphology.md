@@ -1,0 +1,166 @@
+# D63 — Compound & derived words (hyphen / concatenation) — implementation note
+
+**Status:** design (short). Closes the derived-adjective OOV from the parse-gap triage
+([d63-parse-gap-closure.md](d63-parse-gap-closure.md) §2): `pcr-based`, `double-stranded` (hyphenated),
+`hypermutable` (concatenated). Goal: parse morphologically-composed OOV **without ballooning the
+lexicon**, staying purely symbolic and felicity-gated. `recq` (a gene name, no base) is **out of scope** —
+a named-entity entry, not a derivation.
+
+## 1. Approach — analyze against the lexicon, then synthesize
+
+A recognizer strips the affix / splits at the hyphen, probes the base against the lexicon, and — if the
+base is known — **seeds the derived word directly as a typed `ADJ` `Item`** (§3, "synthesize-on-token").
+The affix's functor *category* (`-based : ADJ\N`, `hyper- : ADJ/ADJ`) characterizes the result, but we do
+**not** seed the affix as a separate lexeme and let CKY compose it — that split-and-compose variant is the
+deferred alternative (§3). This is the analyze-against-the-lexicon family (finite-state / two-level
+morphology; Koskenniemi 1983, Beesley & Karttunen 2003), and it generalizes the mechanism we already ship
+for `-ly` adverbs:
+
+- **[`is_derived_adverb`](../../kernel/src/dcg/lookup.rs) / [`adverb_items`](../../kernel/src/dcg/lookup.rs)**
+  (`lookup.rs:900–937`): a recognition gate (strip the affix via [`adverb_bases`](../../kernel/src/dcg/lookup.rs)
+  `:2897`, probe the base's cat) shared with [`has_token`](../../kernel/src/dcg/lookup.rs) so a derived
+  form counts as **known** (not routed to missing-lexeme), plus a seeder that produces `Item`s (cat + sem).
+
+The derived adjectives then modify nouns through the **existing refine rules** —
+[`RefineKind::Attrib`](../../kernel/src/dcg/parser.rs) (`parser.rs:265`, attributive adjective `S[adj]\NP`
++ `cat_n` → `Σx:C. adj(x)`) and [`RefineKind::PpMod`](../../kernel/src/dcg/parser.rs) (`:272`, `cat_pp`
+noun-modifier) — so **no new composition machinery**, only affix lexemes + a recognizer.
+
+## 2. The three patterns (cats + sems)
+
+`ADJ = bwd(cat_s(dcl, adj), cat_np(Entity, num_any))` (predicative adjective, `S[adj]\NP`; as in the demo
+`primary`/`large`).
+
+| pattern | affix category | sem | reuses |
+|---|---|---|---|
+| **`X-based`** (suffix) | `-based : ADJ\N` = `bwd(ADJ, cat_np(Entity))` | `λn. λx. base(x, n)` — the WordNet **`base` verb axiom** (§2a), a predicate over the head, like the `cat_pp` noun-mod sem `λy.λx. prep_P(x,y)` | `Attrib`/`PpMod` refine |
+| **`hyper-X`** (prefix) | `hyper- : ADJ/ADJ` — the **existing** adjective-modifier cat `(S[adj]\NP)/(S[adj]\NP)` (`adverb_modifier_cats`, `category.rs:368`) | v1: **identity** `λp. p` (like the `-ly` adverbs — degree deferred); v2: a degree operator | adj-mod cat + `Attrib` (noun-mod) |
+| **`A-stranded`** (hyphen compound-adj) | head is the **known** `stranded : ADJ`; `double- : ADJ/ADJ` = the same **existing** adjective-modifier cat | `λp. p` (v1) or a compound predicate | adj-mod cat + `Attrib` |
+
+**Machinery check (`2026-07-04`):** the adjective-modifier cat `(S[adj]\NP)/(S[adj]\NP)` — the compose step
+for `hyper-X` / `A-stranded` — already exists (`category.rs:368`) and is proven: `WRN was **selectively
+essential**…` parsed in the baseline via it (adverb premodifying `essential`). So those two patterns reuse
+existing composition; only the *seeding* of the affix/modifier at that cat is new. `X-based`'s `-based :
+ADJ\N` is the one genuinely new affix category.
+
+Two constraints from the discussion:
+- **Typed sem / felicity gate = the semantic over-generation guard.** Each synthesized sem must
+  type-check at `Prop` and reference a **real relation** — for `X-based`, **reuse the WordNet `base` verb
+  axiom** (§2a), not a freshly-minted `based_on`; a degree `hyper` operator (v2) would need declaring. The
+  gate rejects an ill-typed synthesis, so the ontology bounds what the rule can produce. (Dependency:
+  `X-based` needs the base `X` grounded — `pcr` may itself be an abbreviation, pulling in the same glossary
+  path as `MSI`.)
+- **Closed affix inventory, not frequency splitting.** For biomedical text the productive prefixes are a
+  small closed set `{hyper, hypo, poly, multi, mono}`; a declarative FST-style list is more precise and
+  cheaper than a corpus-frequency splitter (Koehn & Knight 2003 — built for open German compounds, and it
+  injects statistical noise into an otherwise symbolic, gate-checked parser). Use the list.
+
+## 2a. `X-based` ≡ `based on X` — reuse the verb axiom, don't mint a relation
+
+The compound and the phrasal are the same proposition and must share a representation:
+
+- `pcr-based method` → `Σx:method. base(x, PCR)`
+- `method based on PCR` → `Σx:method. base(x, PCR)`
+
+`based on X` is the passive of *base X on Y* — the participle `based` taking an `on`-PP **argument**, which
+is exactly the verb+PP machinery already built: `based : (S[adj]\NP)/cat_pp_arg`, `on : cat_pp_arg/NP`,
+`based on X : S[adj]\NP`, sem `λx. base(x, X)`. The relation is the WordNet **`base` verb's own axiom**
+(`base.v.01`, "use as a basis; found on") — **not** a declared `based_on`.
+
+**The convergence has two independent halves — one per surface form. They are built by different work:**
+- **Compound `X-based` → `base(x, X)`:** the affix rule with sem `λn.λx. base(x, n)` over the `base` axiom.
+  **Built by the morphology impl (§3, Slice 2). Needs no object+PP work.** (The "declare `based_on`"
+  prerequisite dissolves — reuse the verb.)
+- **Phrasal `based on X` → `base(x, X)`:** built by the **object+PP frame extension (Step 2b)** in the
+  closure plan. Today the phrasal *parses* but with a different sem (adjective + adjunct — see the caveat).
+
+So the object+PP extension resolves **only the phrasal half**; the compound half is Slice 2. General shape
+for participial `-Ved` denominal adjectives (`PCR-based`, `cell-mediated`, `receptor-bound`): the affix
+maps to the axiom of whatever verb `X-Ved` derives from.
+- **Caveat (checked + corrected twice, `2026-07-04`).** `base` has two relevant verb senses: **"situate"**
+  (WN3.0 02756196, frames 8–11 transitive) and **"found on"** (WN3.0 00636888 = OEWN 00638550, *"base a
+  claim ON an observation"*), which **does** carry an object+PP frame — WN3.0 **frame 21** ("Somebody
+  ----s somebody PP"), OEWN "----s something PP" (`vtai-pp`). So WordNet *does* encode `base X on Y`. But
+  our importer routes **frame 21 → Transitive** (one of the object+PP frames {13,20,21,22} still handled
+  coarsely — the PP dropped), so the argument reading `base(x, y)` is **not produced**. `based on X` parses
+  anyway — via the **adjective** `based` (`data.adj` 02126140/02351064) + `on X` as an **adjunct**
+  (`based_adj(x) ∧ prep_on(x, X)`), not `base(x, X)` (`Cells are based on genes` → AMBIG×8).
+  **Consequence for §2a:** the compound↔phrasal convergence is the *desired* representation and needs the
+  **object+PP frame extension** (frames 21/22 → `((S\NP)/cat_pp_arg)/NP`, the deferred slice of the verb+PP
+  fix); then both `-based` and `based on X` resolve through the `base`-verb axiom → `base(x, X)`.
+  *(Two corrections: I first said it gaps — wrong; then that WordNet lacks the subcat — wrong, WordNet has
+  it (frame 21), only my importer's handling is coarse. Lesson: check all senses + the adjective entries.)*
+
+## 3. Implementation plan
+
+**Parse-time, no reseed.** Like the `-ly` handling, this lives in `lookup.rs` (the seeder), not the
+importer — so it works over the existing `wordnet-umls-2026-07-04` snapshot immediately. The bases
+(`mutable`, `stranded`, `based`) are already in the lexicon.
+
+**Style: synthesize-on-token** (the `-ly` mechanism, generalized). The recognizer produces **one derived
+`ADJ` `Item` per token** — it does *not* split the token or seed affix-functors. New code:
+`adjective_bases` / `is_derived_adjective` / `derived_adjective_items` (mirroring the `adverb_*` trio),
+wired into seeding (`lookup.rs:~1827`) and `has_token`; plus one affix category `-based : ADJ\N`. Reused:
+the adjective-modifier cat `(S[adj]\NP)/(S[adj]\NP)`, `RefineKind::Attrib`, the `base` verb axiom.
+
+### Scope — all four OOV ship here
+- **Slice 1 — `hyper-X` + `A-stranded`** (identity sem): recognize (prefix from `{hyper,hypo,poly,multi,mono}`
+  or hyphen-split), probe the head/base is `ADJ`, **seed the base/head's own `Item`s on the whole-token
+  span** — so `hypermutable ≡ mutable`, `double-stranded ≡ stranded`. Test: demo fixture, then snapshot
+  units 15 & 21 → parse.
+- **Slice 2 — `X-based`**: recognize (hyphen-split, suffix `based`, `X` a known `N`), seed an `ADJ` with sem
+  `λx. base(x, X)` via the `base` verb axiom. Dependency: `X` grounded — `pcr` is an abbreviation, so
+  `pcr-based` needs the glossary; test via the glossary path or a `pcr : N` fixture. Snapshot units 45, 49.
+- **`recq`** — a named-entity entry (gene name, no base to decompose); separate from the morphology.
+
+**Gate:** over the snapshot, missing-lexeme 6 → 0; re-measure.
+
+### Source touchpoints
+
+**Slices 1 & 2 — parse-time, `kernel/src/dcg/lookup.rs`** (mirror the `-ly` trio; no importer change, no reseed):
+
+| new / change | what | model on |
+|---|---|---|
+| `adjective_bases(surface)` — **new fn** | strip a closed prefix `{hyper,hypo,poly,multi,mono}` / split at `-` → base candidate(s) | `adverb_bases` (`:2897`); prefix-exception list like `NON_ADVERB_LY` (`:2901`) |
+| `is_derived_adjective(&self, surface)` — **new fn** | recognition gate: base resolves to `ADJ` (Slice 1) / `N` (Slice 2). Reuse `is_adjective_cat` (`:2972`) | `is_derived_adverb` (`:912`) |
+| `derived_adjective_items(&self, surface)` — **new fn** | seed the `ADJ` `Item`(s): Slice 1 copies the base/head's own `Item`s; Slice 2 builds sem `λx. base(x, X)` from the `base` axiom | `adverb_items` (`:921`) |
+| `has_token` (`:569`) — **add clause** | count a derived adjective as *known* (not missing-lexeme) | the adverb clause at `:588` |
+| seed loop (`:1862`) — **add call** | invoke `derived_adjective_items(&surface)` beside `adverb_items` | `self.adverb_items(&surface)` (`:1862`) |
+
+**No new grammar rule or category:** the derived `ADJ` reuses `S[adj]\NP` + `RefineKind::Attrib`;
+`hyper-`/`double-` reuse the adjective-modifier cat. (`-based : ADJ\N` is the categorial *analysis*;
+synthesize-on-token builds the `ADJ` item directly, so nothing new is declared.)
+
+**`recq` (separate):** a named-entity `cat_np` entry — mechanism TBD (a small domain-lexicon ESL, or a
+parse-time capitalized-unknown → `cat_np` handler).
+
+**Step 2b (deferred, importer) — `crates/eigenius-wordnet/src/convert.rs`** (mirror the `PpOblique` change,
+commit `2b22705`; then reseed):
+
+| change | what |
+|---|---|
+| `FrameKind` (`:145`) | add a `TransitivePp` variant |
+| `tag`/`arrow`/`cat` (`:166`/`178`/`209`) | arms for `TransitivePp` → `((S\NP)/cat_pp_arg)/NP` |
+| `classify` (`:229`) | route the object+PP frames {13,20,21,22} → `TransitivePp` |
+
+### Explicitly not this work (and not blocking the OOV)
+- **Affix-functor split** (the alternative to synthesize-on-token) — split the token into morpheme-spans
+  and compose via functors. Not built: it needs an affix-aware **pre-tokenizer** (concatenation has no
+  boundary; hyphen-splitting fights the intact-multiword rule `give rise` relies on) *and* it **adds chart
+  items → worse crowding** (the `give rise` beam pressure). Synthesize-on-token seeds one item per word and
+  reuses the existing pattern. Revisit only if the affix inventory grows large.
+- **Phrasal `based on X` argument reading** — the §2a *phrasal* half, built by the object+PP frame
+  extension (**Step 2b**, closure plan: importer change + reseed). Independent of the compound OOV; the
+  compound half is Slice 2.
+
+## 4. Prior art
+
+- **Compound splitting** — Koehn & Knight, *Empirical Methods for Compound Splitting*, EACL 2003
+  ([ACL E03-1076](https://aclanthology.org/E03-1076/); geometric-mean frequency split). Cited as the
+  approach we **reject** for `hyper-` (open-domain, statistical).
+- **Finite-state / two-level morphology** — Koskenniemi (1983); Beesley & Karttunen, *Finite State
+  Morphology* (CSLI, 2003). The analyze-against-a-lexicon family our recognizer sits in. *(Canonical;
+  verify exact bib details before adding to `eigenius_related_work.bib`.)*
+- **Affixes / derivation as lexical rules in categorial grammar** — the CG lexical-rules tradition (an
+  affix as a functor category; the derived word's cat+sem produced by rule, not stored). Our `-ly`
+  handling and this note are instances.

@@ -168,8 +168,18 @@ apposition / NP-coordination / passive context, not lists per se.)
         pass, and sense-crowding is now the pressing blocker (it masks the fix on the raw run).*
   - *Looseness (stage-1):* WordNet frames don't encode *which* preposition, so `cat_pp_arg` accepts any PP
     (`contributes in cancers` would also parse) — verb-specific but prep-generic; specific-prep is later.
-- [ ] **Step 3 — Add the 4 OOV** (`double-stranded`, `hypermutable`, `pcr-based` adjectives; `recq`
-      named entity) as domain-lexicon entries. Closes all 6 missing-lexeme units.
+  - [ ] **Step 2b (deferred) — object+PP frames `((S\NP)/cat_pp_arg)/NP`.** Extend the verb+PP fix to the
+        **object+PP** frames **{13, 20, 21, 22}** (`base X on Y`, `identify X as Y`, `----s something PP`) —
+        currently routed coarsely to transitive (object kept, **PP dropped**) — emitting
+        `((S\NP)/cat_pp_arg)/NP` (object, then the argument-PP). Resolves the argument reading of
+        **`based on X`** (`base` "found on" = frame 21) and the compound↔phrasal convergence in
+        **[d63-compound-morphology.md §2a](d63-compound-morphology.md)**; also the general `V X on/from Y`
+        pattern. Same `cat_pp_arg` + argument-marker machinery as Step 2, with the object slot added.
+- [ ] **Step 3 — the 4 OOV.** Reframed → **[d63-compound-morphology.md](d63-compound-morphology.md)**:
+      3 are **productive derivations** (`pcr-based` = `X-based`, `hypermutable` = `hyper-X`,
+      `double-stranded` = hyphen compound-adj) → **affix-as-functor + decompose-and-seed** (mirror
+      `is_derived_adverb`/`adverb_items`; reuse the `Attrib`/`PpMod` refine), *not* per-word entries.
+      `recq` = a named-entity entry (gene name, no base). Closes all 6 missing-lexeme units.
 - [ ] **Step 4 — Comparative `than`** (bucket B) — the `than`-clause construction. 2 units.
 - [ ] **Step 5 — `V X as Y` predicative** (bucket C) — the "as a biomarker" / "identified as" small
       clause. 2 units.

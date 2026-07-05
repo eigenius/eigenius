@@ -39,8 +39,8 @@ Separate threads, not blocking the parse→encode pipeline; pull onto the stack 
 
 ## Reference / design notes (consulted, not "work")
 Not stack items — background for the above: `d63-{document-preprocessing-scope, kind-predication-reshape,
-coren-coupled-port-design, pp-attachment-control-scoping, packed-forest-parsing-blueprint, cnl-*}`,
-`d62-*`. Pull in when a step needs them.
+compound-morphology, coren-coupled-port-design, pp-attachment-control-scoping, packed-forest-parsing-blueprint,
+cnl-*}`, `d62-*`. Pull in when a step needs them.
 
 ---
 
