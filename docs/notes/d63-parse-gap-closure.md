@@ -130,7 +130,7 @@ apposition / NP-coordination / passive context, not lists per se.)
   - **Refinement:** the two *adjunct-PP* verbs (`occur in`, `arise from`) stand alone; their PP should
     VP-adjoin already, so their corpus gaps are likely the object (`Lynch syndrome`, coordination), not
     the verb frame — re-check after the fix (they may re-bucket out of "verb-frame").
-- [~] **Step 2 — the fix: a frame-specific verb+PP-complement category (`cat_pp_arg`).** Mirrors the
+- [x] **Step 2 — the fix: a frame-specific verb+PP-complement category (`cat_pp_arg`).** Mirrors the
       comparative `cat_pp_than` (an argument-PP whose ⟦·⟧ = Entity). A verb subcategorizing for a PP is
       `(S\NP)/cat_pp_arg`; a **transparent argument-marker** `to/from/on/with = cat_pp_arg/NP` (sem `λy. y`)
       exposes the object. A distinct `cat_pp_arg` (not a bare NP) forces the preposition, so a plain
@@ -143,9 +143,29 @@ apposition / NP-coordination / passive context, not lists per se.)
         `argument_pp_verb_parses_verb_prep_object`: `HeLa contributes to BRCA1` (individual) **and**
         `HeLa contributes to genes` (bare-plural **kind**, sem has `kind_of`) parse; `affects to BRCA1`
         gaps (guard `non_pp_verb_rejects_a_pp_complement`). Full kernel suite + clippy green.
-  - [ ] **Importer half + acceptance.** `convert.rs` (`FrameKind`/`classify`): emit `(S\NP)/cat_pp_arg`
-        for the PP-oblique frames (12/13/20/21/27, 4/22) instead of transitive/intransitive. Then reseed
-        + re-measure. **Acceptance:** `MSI contributes to cancers` parses to the kind-predication (unit 25).
+  - [x] **Importer half — DONE + committed (`2026-07-04`; grammar `f9859fd`, importer `2b22705`).**
+        `convert.rs`: added `FrameKind::PpOblique` (cat `(S\NP)/cat_pp_arg`, sem_type `Entity→Entity→Prop`);
+        `classify` routes the **single-PP** frames **{4, 12, 23, 27}** to it. Obj+PP frames (13/20/21/22)
+        stay coarse; frame 14 stays ditransitive (a mis-route the importer test `frame_classification_*`
+        caught — my recollection of frame 14 was wrong). Reseeded → snapshot `wordnet-umls-2026-07-04`
+        (7,398 `cat_pp_arg` entries). Confirmed emitted: `contributes:(S[fin]\NP_sg)/cat_pp_arg`.
+  - [x] **ACCEPTANCE VERIFIED (glossary path).** `measure_abbreviation_glossary` over the snapshot:
+        `MSI contributes to several cancers` **base=GAP → glossary=CLOSED×8**, sem
+        `v02324478_p(kind_of(Σ…cancer…), kind_of(C0920269))` — the `_p` (PpOblique) verb + `MSI` grounded to
+        the mass concept `C0920269`. The verb+PP fix and the Stage-A glossary **compose**. (3/6 MSI
+        sentences recovered as closed kind-predications; `MSI can arise from Lynch syndrome` still gaps —
+        named-disease bucket.) The verb+PP composition itself is also confirmed lexicon-wide (isolation,
+        `--no-llm`): `instability contributes to cells` → AMBIG; `MSI contributes to cells` → GAP (only the
+        subject differs).
+  - **Observation (not a task) — raw parse-rate (`--no-llm`, whole page): 17 → 18 grammar-gap, a beam
+        artifact, not a real loss.**
+        No raw gaps closed: every verb+PP sentence in the doc has an `MSI`/abbreviation subject, so it needs
+        the glossary (above) to subject-ify. One regression — `We hypothesized … would give rise to …`
+        flipped AMBIG→GAP: `give rise`'s multiword cat is unchanged; standalone `rise` gained a competing
+        `to`-verb reading (`(S\NP)/cat_pp_arg`) that at beam=512 crowds out the winning derivation
+        (1.0s→84.3s). The **live reranker parses it** (AMBIG×256, 26s) — so the raw regression is absent
+        under the operational reranked config. *Implication: the honest metric for this fix is the reranked
+        pass, and sense-crowding is now the pressing blocker (it masks the fix on the raw run).*
   - *Looseness (stage-1):* WordNet frames don't encode *which* preposition, so `cat_pp_arg` accepts any PP
     (`contributes in cancers` would also parse) — verb-specific but prep-generic; specific-prep is later.
 - [ ] **Step 3 — Add the 4 OOV** (`double-stranded`, `hypermutable`, `pcr-based` adjectives; `recq`
