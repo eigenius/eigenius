@@ -25,7 +25,7 @@
 //! down-ranked sense (a bad rank costs a re-parse, never a missed parse).
 //!
 //! Impls: a deterministic mock ([`IdentityRanker`]) for CI, and a feature-gated live Anthropic
-//! ranker ([`AnthropicSenseRanker`], `allms` feature, JSON-Schema-constrained). Both behind the one
+//! ranker ([`AnthropicSenseRanker`], `use-llm` feature, tool-use-constrained). Both behind the one
 //! [`SenseRanker`] trait, so the (future) parser-cap integration is impl-agnostic.
 
 /// One candidate sense of a content word: its lexicon `sense` label (e.g. `wn:bank.n.01`) and a
@@ -65,13 +65,11 @@ impl SenseRanker for IdentityRanker {
     }
 }
 
-// ───────────────────────── live Anthropic ranker (allms feature) ─────────────────────────
+// ───────────────────────── live Anthropic ranker (use-llm feature) ─────────────────────────
 
-#[cfg(feature = "allms")]
+#[cfg(feature = "use-llm")]
 mod anthropic {
     use super::{SenseRanker, WordSenses};
-    use allms::llm_models::AnthropicModels;
-    use allms::Completions;
     use schemars::JsonSchema;
     use serde::Deserialize;
 
@@ -84,19 +82,19 @@ mod anthropic {
         rankings: Vec<Vec<usize>>,
     }
 
-    /// A [`SenseRanker`] backed by Anthropic Claude via `allms`, JSON-Schema-constrained. On any
-    /// error it returns the **seed order** (identity) so the caller degrades gracefully — the
-    /// reranker only reorders a beam, never gates validity.
+    /// A [`SenseRanker`] backed by Anthropic Claude via the direct tool-use client
+    /// ([`crate::dcg::anthropic_client`]). On any error it returns the **seed order** (identity) so
+    /// the caller degrades gracefully — the reranker only reorders a beam, never gates validity.
     pub struct AnthropicSenseRanker {
         api_key: String,
-        model: AnthropicModels,
+        model: String,
     }
 
     impl AnthropicSenseRanker {
-        pub fn new(api_key: impl Into<String>, model: AnthropicModels) -> Self {
+        pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
             Self {
                 api_key: api_key.into(),
-                model,
+                model: model.into(),
             }
         }
 
@@ -105,7 +103,7 @@ mod anthropic {
             std::env::var("ANTHROPIC_API_KEY")
                 .ok()
                 .filter(|k| !k.is_empty())
-                .map(|k| Self::new(k, AnthropicModels::ClaudeSonnet4_6))
+                .map(|k| Self::new(k, crate::dcg::anthropic_client::DEFAULT_MODEL))
         }
 
         fn ask(&self, instructions: &str) -> Option<SenseRankingReply> {
@@ -113,13 +111,13 @@ mod anthropic {
                 .enable_all()
                 .build()
                 .ok()?;
-            match rt.block_on(
-                Completions::new(self.model.clone(), &self.api_key, None, None)
-                    .get_answer::<SenseRankingReply>(instructions),
-            ) {
+            match rt.block_on(crate::dcg::anthropic_client::anthropic_structured::<
+                SenseRankingReply,
+            >(&self.api_key, &self.model, instructions))
+            {
                 Ok(r) => Some(r),
                 Err(e) => {
-                    eprintln!("allms sense-ranker error: {e:?}");
+                    eprintln!("anthropic sense-ranker error: {e}");
                     None
                 }
             }
@@ -184,7 +182,7 @@ mod anthropic {
     }
 }
 
-#[cfg(feature = "allms")]
+#[cfg(feature = "use-llm")]
 pub use anthropic::AnthropicSenseRanker;
 
 #[cfg(test)]
@@ -215,8 +213,8 @@ mod tests {
     }
 
     /// Live WSD: a real model must pick the contextual sense (JSON-Schema-constrained). Skips
-    /// without a key; runs live with `--features allms` + `ANTHROPIC_API_KEY`.
-    #[cfg(feature = "allms")]
+    /// without a key; runs live with `--features use-llm` + `ANTHROPIC_API_KEY`.
+    #[cfg(feature = "use-llm")]
     #[test]
     fn live_anthropic_sense_ranker_picks_the_contextual_sense() {
         let Some(ranker) = AnthropicSenseRanker::from_env() else {

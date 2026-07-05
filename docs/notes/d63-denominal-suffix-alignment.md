@@ -52,18 +52,25 @@ Both surface forms must produce **the same proposition** `rel_E(theme, ground)`:
 
 ## 3. The table
 
-| suffix / element | relation `rel(theme, ground)` | phrasal | link | voice |
-|---|---|---|---|---|
-| `-based` / based | `base_on` ← base.v.01 (`v00636888`) ✓ | based **on** X | on | passive-ptcp |
-| `-like` / like | `resembles` ← like/similar (`01409581`) ✓ | like X / similar **to** X | ∅ / to | adjective |
-| `-mediated` / mediated | `mediate` ← mediate.v | mediated **by** X | by | passive-ptcp |
-| `-dependent` / dependent | `depends` ← depend.v / dependent.a | dependent **on** X | on | adjective |
-| `-derived` / derived | `derive` ← derive.v | derived **from** X | from | passive-ptcp |
-| `-related` / related | `relate` ← relate.v / related.a | related **to** X | to | adjective |
-| `-induced` / induced | `induce` ← induce.v | induced **by** X | by | passive-ptcp |
-| `-specific` / specific | `specific_to` ← specific.a | specific **to** X | to | adjective |
+The `relation` is always a **2-place verb axiom** — adjective-voice suffixes route to the corresponding
+*verb* (`resemble`/`depend`/`relate`), since a 1-place adjective (`like`) is not a relation:
 
-`✓` = axiom Derived (witnessed). The rest are Declared — verify each axiom + its frame at implementation.
+| suffix / element | relation `rel` ← verb | phrasal | link | voice (θ) |
+|---|---|---|---|---|
+| `-based` / based | `base` ← base.v.01 (`v00636888`) ✓ | based **on** X | on | passive-ptcp (θ obj) |
+| `-mediated` / mediated | `mediate` ← mediate.v | mediated **by** X | by | passive-ptcp (θ obj) |
+| `-derived` / derived | `derive` ← derive.v | derived **from** X | from | passive-ptcp (θ obj) |
+| `-induced` / induced | `induce` ← induce.v | induced **by** X | by | passive-ptcp (θ obj) |
+| `-like` / like | `resemble` ← resemble.v | like X / similar **to** X | ∅ / to | adjective (θ subj) |
+| `-dependent` / dependent | `depend` ← depend.v | dependent **on** X | on | adjective (θ subj) |
+| `-related` / related | `relate` ← relate.v | related **to** X | to | adjective (θ subj) |
+| `-specific` / specific | *(no verb — deferred; needs a minted `specific_to`)* | specific **to** X | to | adjective (θ subj) |
+
+`✓` = axiom Derived (witnessed). The rest are Declared — verify each verb axiom + its frame at
+implementation (a missing verb → the token stays OOV, fail-safe). The **compound half of every row above is
+implemented** ([compound-morphology.md](d63-compound-morphology.md) §3b, `2026-07-05`); the phrasal column
+awaits [d63-passive-voice-handling.md](d63-passive-voice-handling.md). Voice sets the argument order:
+`passive-ptcp` → θ is the object → `rel(θ, X)`; `adjective` → θ is the subject → `rel(X, θ)`.
 X's thematic role varies (`on` = ground, `by` = agent, `from` = source, `like` = standard-of-comparison),
 but that role is carried by each `rel_E`'s own meaning, so every entry collapses to a **2-place
 `rel_E(theme, ground)`**; the linker only names the role.

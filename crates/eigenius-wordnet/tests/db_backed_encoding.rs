@@ -21,7 +21,7 @@
 //! exclusive lock) via the kernel's persistent backend, resumes the `main` branch head (the loaded
 //! chain), and builds the **lazy** `LexicalIndex` (on-demand `lexicon:form` value-index probes —
 //! the only tractable path at 7.6M resources; the eager full-chain scan OOMs). The sense cap
-//! (adaptive supertagging) keeps the chart tractable on long sentences; with `--features allms`
+//! (adaptive supertagging) keeps the chart tractable on long sentences; with `--features use-llm`
 //! and `ANTHROPIC_API_KEY`, the contextual reranker reorders which senses the cap keeps.
 //!
 //! NOTE — bootstrap alignment: the snapshot's persisted chain is rooted at the bootstrap it was
@@ -34,7 +34,7 @@
 //! is absent), the tests skip. Run:
 //!
 //!     cargo test -p eigenius-wordnet --test db_backed_encoding -- --ignored --nocapture
-//!     cargo test -p eigenius-wordnet --features allms --test db_backed_encoding -- --ignored --nocapture
+//!     cargo test -p eigenius-wordnet --features use-llm --test db_backed_encoding -- --ignored --nocapture
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -128,7 +128,7 @@ fn open_head(path: &std::path::Path) -> Option<Arc<Layer>> {
 }
 
 /// Build the lazy `LexicalIndex` over the head with the sense cap, plus the live contextual
-/// reranker when built with `--features allms` and `ANTHROPIC_API_KEY` is set.
+/// reranker when built with `--features use-llm` and `ANTHROPIC_API_KEY` is set.
 fn build_index(head: &Arc<Layer>) -> LexicalIndex {
     // Combinatory-core spike: `EIGENIUS_COMBINATORY_CORE=1` enables the extra CCG combinators for the
     // A/B port measurement (default off = the established rule-by-rule path).
@@ -149,7 +149,7 @@ fn build_index(head: &Arc<Layer>) -> LexicalIndex {
         .with_cell_beam(CELL_BEAM)
         .with_combinatory_core(core)
         .with_pos_prune(pos_prune);
-    #[cfg(feature = "allms")]
+    #[cfg(feature = "use-llm")]
     {
         if let Some(ranker) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
             eprintln!("contextual reranker: AnthropicSenseRanker (live)");
@@ -157,8 +157,8 @@ fn build_index(head: &Arc<Layer>) -> LexicalIndex {
         }
         eprintln!("contextual reranker: none (ANTHROPIC_API_KEY unset) — cap-only");
     }
-    #[cfg(not(feature = "allms"))]
-    eprintln!("contextual reranker: none (built without --features allms) — cap-only");
+    #[cfg(not(feature = "use-llm"))]
+    eprintln!("contextual reranker: none (built without --features use-llm) — cap-only");
     index
 }
 
@@ -258,10 +258,10 @@ fn encode_unit(
 
 /// VERIFY the sense lever (D62/GH#97): A/B the PAGE-beam (64) parse outcome for the 5 sentences
 /// with the static cap (`baseline`) vs the contextual LLM reranker (`+llm`, only with
-/// `--features allms` + ANTHROPIC_API_KEY). Measures whether contextual sense ranking frees enough
+/// `--features use-llm` + ANTHROPIC_API_KEY). Measures whether contextual sense ranking frees enough
 /// beam to parse at the operational beam. (The deterministic "closed-class-wins" filter was tried
 /// and REVERTED — harmful; it can't distinguish `be`-verb from beryllium — see the d63 note.)
-///   cargo test -p eigenius-wordnet --features allms --test db_backed_encoding \
+///   cargo test -p eigenius-wordnet --features use-llm --test db_backed_encoding \
 ///       verify_sense_lever_at_page_beam -- --ignored --nocapture
 ///
 /// Beam-sensitivity (Lever 2, GH#97, measured 2026-06-30): at a fixed cell beam the 5
@@ -300,11 +300,11 @@ fn verify_sense_lever_at_page_beam() {
             .with_cell_beam(CELL_BEAM)
     };
 
-    // The variants to compare. The LLM variant only exists with `--features allms` +
+    // The variants to compare. The LLM variant only exists with `--features use-llm` +
     // ANTHROPIC_API_KEY (one reranker call per sentence).
     #[allow(unused_mut)]
     let mut variants: Vec<(String, LexicalIndex)> = vec![("baseline".into(), mk())];
-    #[cfg(feature = "allms")]
+    #[cfg(feature = "use-llm")]
     {
         if let Some(r) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
             variants.push(("+llm".into(), mk().with_sense_ranker(Box::new(r))));
@@ -663,9 +663,9 @@ fn measure_pile_cell_population() {
         .with_sense_cap(2)
         .with_cell_beam(1024)
         .with_pos_prune(std::env::var("EIGENIUS_POS_PRUNE").is_ok());
-    // Attach the live contextual reranker when built with --features allms (mirrors build_index),
+    // Attach the live contextual reranker when built with --features use-llm (mirrors build_index),
     // so this probe measures the reranked serving path, not cap-only.
-    #[cfg(feature = "allms")]
+    #[cfg(feature = "use-llm")]
     let index = match eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
         Some(r) => {
             eprintln!("contextual reranker: AnthropicSenseRanker (live)");
@@ -676,7 +676,7 @@ fn measure_pile_cell_population() {
             index
         }
     };
-    #[cfg(not(feature = "allms"))]
+    #[cfg(not(feature = "use-llm"))]
     eprintln!("contextual reranker: none (cap-only)");
     let lem = morphy();
     let s = "Some cancers do not respond to immune checkpoint blockade.";
@@ -1032,19 +1032,19 @@ fn diagnose_grammar_gap_fragments() {
 /// Controlled experiment (does contextual SENSE reranking rescue a STRUCTURAL-ambiguity residual?):
 /// parse "novel therapies are needed for a gene" at the PAGE beam (64) — the exact config where it is
 /// GRAMMAR-GAP cap-only — using whatever reranker `build_index` wires. Built without `--features
-/// allms` ⇒ cap-only (baseline GRAMMAR-GAP). Built `--features allms` with `ANTHROPIC_API_KEY` ⇒ the
+/// use-llm` ⇒ cap-only (baseline GRAMMAR-GAP). Built `--features use-llm` with `ANTHROPIC_API_KEY` ⇒ the
 /// live `AnthropicSenseRanker` reorders the over-cap words' senses in sentence context. Hypothesis
 /// (Declared): no rescue, because the explosion is derivational (Σ-refine × bare-plural shift × PP
 /// attachment) over already-≤2 senses, and the cell beam ranks DERIVATIONS, which the sense ranker
 /// never touches. Run live:
-///     cargo test -p eigenius-wordnet --features allms --test db_backed_encoding \
+///     cargo test -p eigenius-wordnet --features use-llm --test db_backed_encoding \
 ///         llm_reranker_on_structural_residual -- --ignored --nocapture
 #[test]
-#[ignore = "live-LLM experiment; needs a snapshot and (for the on-arm) --features allms + ANTHROPIC_API_KEY"]
+#[ignore = "live-LLM experiment; needs a snapshot and (for the on-arm) --features use-llm + ANTHROPIC_API_KEY"]
 fn llm_reranker_on_structural_residual() {
     let Some(path) = snapshot_path() else { return };
     let Some(head) = open_head(&path) else { return };
-    let index = build_index(&head); // wires the live LLM reranker iff --features allms + key
+    let index = build_index(&head); // wires the live LLM reranker iff --features use-llm + key
     let lem = morphy();
     let sentence = "novel therapies are needed for a gene";
     let t = std::time::Instant::now();

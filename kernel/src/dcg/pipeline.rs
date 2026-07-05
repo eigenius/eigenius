@@ -23,7 +23,7 @@
 //!
 //! The LLM-backed steps live entirely behind the proposer traits ([`AbbreviationProposer`],
 //! [`Proposer`]) — a deterministic mock in tests, the live `Anthropic*` proposers under `--features
-//! allms`. So the **Phase-2 orchestrator** becomes a different set of proposer impls (RPC-backed)
+//! use-llm`. So the **Phase-2 orchestrator** becomes a different set of proposer impls (RPC-backed)
 //! *without changing this contract* — the trait is the seam between "the pipeline" and "how its LLM
 //! steps run".
 

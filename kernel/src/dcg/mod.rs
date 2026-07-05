@@ -45,17 +45,22 @@ mod reserved;
 pub mod segment;
 pub mod sense_ranker;
 
-/// Live-LLM anaphora proposer (D64 §4) — opt-in via the `allms` feature; default builds stay
+/// Direct Anthropic tool-use client for the reasoning-layer LLM calls (sense ranker / proposers) —
+/// structured output via forced `tool_choice`, replacing the `allms` prompt-inject-and-parse path.
+#[cfg(feature = "use-llm")]
+mod anthropic_client;
+
+/// Live-LLM anaphora proposer (D64 §4) — opt-in via the `use-llm` feature; default builds stay
 /// LLM-free.
-#[cfg(feature = "allms")]
-pub mod resolver_allms;
+#[cfg(feature = "use-llm")]
+pub mod resolver_llm;
 
 pub use category::{
     cat_subsumes, cats_coordinate, common_super, coordinate_np, coordinate_sem, denote_cat,
     distribute, distribute_object, feat_meets, is_ctor, kind_subject, reciprocate, relativize,
     subst_cat, type_eq, type_raise, unify_cat, CatSubst,
 };
-#[cfg(feature = "allms")]
+#[cfg(feature = "use-llm")]
 pub use glossary::AnthropicAbbreviationProposer;
 pub use glossary::{
     abbreviation_resources, document_glossary_resources, document_glossary_resources_with,
@@ -72,6 +77,6 @@ pub use parser::{apply, cky_parse, Combinator, Cost, Item};
 pub use pipeline::{DocumentEncoding, DocumentPipeline, InProcessPipeline, SentenceEncoding};
 pub use pretty::{cat_shape, pretty_term};
 pub use segment::{is_nonprose, segment_sentences};
-#[cfg(feature = "allms")]
+#[cfg(feature = "use-llm")]
 pub use sense_ranker::AnthropicSenseRanker;
 pub use sense_ranker::{IdentityRanker, SenseCandidate, SenseRanker, WordSenses};

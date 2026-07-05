@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D64 §4 — a **live-LLM** [`Proposer`] for anaphora resolution, behind the `allms` feature.
+//! D64 §4 — a **live-LLM** [`Proposer`] for anaphora resolution, behind the `use-llm` feature.
 //!
 //! Opt-in and dev/experimentation only: it lets us validate *resolution quality* with a real
 //! model in-process before the production path (the orchestrator across the process boundary).
@@ -21,8 +21,6 @@
 //! re-gates every suggestion via [`super::LexicalIndex::resolve_open`]). The proposer never
 //! decides felicity, so a hallucinated or type-wrong antecedent is vetoed downstream.
 
-use allms::llm_models::AnthropicModels;
-use allms::Completions;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -38,21 +36,21 @@ struct Ranking {
     ranked_candidate_indices: Vec<usize>,
 }
 
-/// A [`Proposer`] backed by Anthropic Claude via `allms`. Ranks the in-scope candidate
+/// A [`Proposer`] backed by Anthropic Claude via the direct tool-use client. Ranks the in-scope candidate
 /// antecedents for a referent hole; on any error (no answer, transport, deserialize) it
 /// proposes nothing — i.e. *unresolvable* — so the resolve loop fails closed rather than
 /// guessing.
 pub struct AnthropicProposer {
     api_key: String,
-    model: AnthropicModels,
+    model: String,
 }
 
 impl AnthropicProposer {
     /// Build from an explicit key + model.
-    pub fn new(api_key: impl Into<String>, model: AnthropicModels) -> Self {
+    pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
             api_key: api_key.into(),
-            model,
+            model: model.into(),
         }
     }
 
@@ -62,23 +60,26 @@ impl AnthropicProposer {
         std::env::var("ANTHROPIC_API_KEY")
             .ok()
             .filter(|k| !k.is_empty())
-            .map(|k| Self::new(k, AnthropicModels::ClaudeSonnet4_6))
+            .map(|k| Self::new(k, crate::dcg::anthropic_client::DEFAULT_MODEL))
     }
 
     fn ask(&self, instructions: &str) -> Option<Ranking> {
-        // `allms` is async; bridge to the sync `Proposer` trait with a transient current-thread
+        // The client is async; bridge to the sync `Proposer` trait with a transient current-thread
         // runtime (the resolve loop is sync). Any failure → `None` (the loop fails closed).
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .ok()?;
         match rt.block_on(
-            Completions::new(self.model.clone(), &self.api_key, None, None)
-                .get_answer::<Ranking>(instructions),
+            crate::dcg::anthropic_client::anthropic_structured::<Ranking>(
+                &self.api_key,
+                &self.model,
+                instructions,
+            ),
         ) {
             Ok(r) => Some(r),
             Err(e) => {
-                eprintln!("allms proposer error: {e:?}");
+                eprintln!("anthropic proposer error: {e}");
                 None
             }
         }

@@ -1,10 +1,15 @@
 # D63 — Compound & derived words (hyphen / concatenation) — implementation note
 
-**Status:** design (short). Closes the derived-adjective OOV from the parse-gap triage
+**Status: COMPLETED** (`2026-07-05`). Closed the derived-adjective OOV from the parse-gap triage
 ([d63-parse-gap-closure.md](d63-parse-gap-closure.md) §2): `pcr-based`, `double-stranded` (hyphenated),
-`hypermutable` (concatenated). Goal: parse morphologically-composed OOV **without ballooning the
-lexicon**, staying purely symbolic and felicity-gated. `recq` (a gene-*family* name — HGNC gene group 1049,
-no base) is **out of scope** — a named-entity entry, not a derivation.
+`hypermutable` (concatenated) — parsed morphologically **without ballooning the lexicon**, purely symbolic
+and felicity-gated. Shipped: Slice 1 (prefix + hyphen-head identity), Slice 2 (`X-based`), and §3b (the
+full denominal-suffix table `-based`/`-like`/`-mediated`/… + the `-like` over-generation fix), all
+witnessed by tests over the snapshot (missing-lexeme 6 → 2). **Everything deferred was extracted to its own
+track:** the phrasal `E link X` convergence → [d63-denominal-suffix-alignment.md](d63-denominal-suffix-alignment.md);
+the passive-voice machinery it needs → [d63-passive-voice-handling.md](d63-passive-voice-handling.md);
+`recq` (a gene-*family* name — HGNC gene group 1049, no base) → the gene-family track ([[gene_family_lexicon_gap]]).
+Nothing derivational remains here.
 
 ## 1. Approach — analyze against the lexicon, then synthesize
 
@@ -227,15 +232,30 @@ alignment and the passive machinery are separate parked tracks
 [d63-passive-voice-handling.md](d63-passive-voice-handling.md)). Two changes in
 [`kernel/src/dcg/lookup.rs`](../../kernel/src/dcg/lookup.rs):
 
+**Status: implemented** (`2026-07-05`). Three changes in
+[`kernel/src/dcg/lookup.rs`](../../kernel/src/dcg/lookup.rs):
+
 | change | what | anchor |
 |---|---|---|
-| `denominal_based_item` → `denominal_suffix_item` | table-driven: rsplit hyphen → `(X, suffix)`; look up the `DenominalElement` (suffix→relation, denominal-alignment §3); build `λθ. rel(θ, kind_of(X))`. Drop the hardcoded `tail=="based"` / lemma `"base"`. Add an adjective-relation fetch (`is_adjective_cat`) beside `is_transitive_verb_cat` (`:3129`) for adjective-voice elements (like/dependent/related/specific). | `:1007` |
-| `adjective_bases` — `SLICE2_TAILS` | replace with the **full denominal-suffix set**, so Slice-1 hyphen-head identity excludes them all — **fixes the `-like` over-generation** (`like` is a WN adjective `01409581`, so today Slice-1 fires on `RecQ-like`, seeds identity `like`, and drops `RecQ`). | `:3040`, const `:3045` |
+| `DENOMINAL_SUFFIXES` const table | `&[(suffix, relation_lemma, theta_is_object)]` — `based`/`mediated`/`derived`/`induced`→their verb (θ object); `like`/`dependent`/`related`→`resemble`/`depend`/`relate` (θ subject). `-specific` deferred (no verb relation). | new const `:3166` |
+| `denominal_based_item` → `denominal_suffix_item` | table-driven: rsplit hyphen → `(X, suffix)`; fetch the element's 2-place relation axiom; build `λθ. rel(first, second)` with the arg order set by `theta_is_object`. | `:1008` |
+| `adjective_bases` — drop `SLICE2_TAILS` | exclude every `DENOMINAL_SUFFIXES` tail from Slice-1 hyphen-head identity — **fixes the `-like` over-generation** (`like` is a WN adjective, so Slice-1 otherwise seeds identity `like` and drops `X`). | `:3048` |
 
-Reused unchanged: `is_derived_adjective` (`:957`), `derived_adjective_items` (`:979`), `kind_of` (`:2931`),
-`has_token`, the seed loop. **Verification:** the over-generation guard (a `X-like` token no longer takes the
-Slice-1 identity reading) + one compound parse per new suffix. The `⟦X-E⟧ = ⟦E link X⟧` equivalence is the
-*alignment* note's test, gated on the phrasal half.
+**Two deviations from the plan above** (surfaced, not silent):
+1. **Adjective-voice suffixes route to a *verb*, not an adjective fetch.** A 1-place adjective (`like`) is
+   not a 2-place relation, so `-like`/`-dependent`/`-related` use the corresponding verb `resemble`/`depend`/
+   `relate`. `is_transitive_verb_cat` was broadened to **`is_binary_relation_cat`** (`:3138`) to also accept
+   argument-PP verbs `(S\NP)/cat_pp_arg` (e.g. `depend on`) — both carry a 2-place axiom.
+2. **Argument order flips by voice.** Passive-participle (`θ is based on X`) → θ is the object, `rel(θ, X)`;
+   adjective/active (`θ resembles X`) → θ is the subject, `rel(X, θ)`. The `theta_is_object` flag drives it.
+
+Reused unchanged: `is_derived_adjective` (`:957`), `derived_adjective_items` (`:979`), `kind_of`,
+`predicative_adjective_cat`, `has_token`, the seed loop. A suffix whose relation verb is absent from the
+lexicon fails the probe → the token stays OOV (fail-safe), never a wrong reading. **Verified:**
+`denominal_x_based_adjective_predicates_via_the_base_axiom` (verb voice, θ-first) +
+`denominal_like_routes_to_the_verb_relation_and_does_not_drop_x` (adjective voice, X-first, + the
+over-generation guard) in `closed_class_determiners.rs`; full kernel suite green. The `⟦X-E⟧ = ⟦E link X⟧`
+equivalence is the *alignment* note's test, gated on the phrasal half.
 
 ## 4. Prior art
 

@@ -40,7 +40,7 @@ use tonic::{Response, Status};
 /// over the full WordNet+UMLS lexicon — without them a nontrivial sentence over the dense lexicon
 /// blows the chart), the **`Identity` (no-op) lemmatizer** (preserving prior behaviour until a binary
 /// injects a real one — see [`Self::lemmatizer`]), and the **contextual LLM reranker OFF** (so the
-/// server stays deterministic by default; opt in where `--features allms` + `ANTHROPIC_API_KEY`).
+/// server stays deterministic by default; opt in where `--features use-llm` + `ANTHROPIC_API_KEY`).
 pub struct ParseConfig {
     /// Surface→lemma reducer. Defaults to [`Identity`] (no reduction). The kernel cannot depend on
     /// `eigenius-wordnet` (cycle), so a real `MorphyLemmatizer` is injected by the top-level binary
@@ -50,7 +50,7 @@ pub struct ParseConfig {
     pub sense_cap: Option<usize>,
     /// Per-cell beam (Lever B). `None` = unbounded chart.
     pub cell_beam: Option<usize>,
-    /// Enable the contextual LLM sense reranker when built with `--features allms` and
+    /// Enable the contextual LLM sense reranker when built with `--features use-llm` and
     /// `ANTHROPIC_API_KEY` is set (one reranker call per sentence). No effect otherwise.
     pub use_ranker: bool,
 }
@@ -106,7 +106,7 @@ impl EigeniusService {
 
         // Build the index with the configured scale controls (Lever A cap + Lever B beam) — the
         // serving path's only defense against the full-lexicon chart blow-up. The contextual LLM
-        // reranker is opt-in and `allms`-gated; widen-on-failure (in `parse_scoped`) recovers any
+        // reranker is opt-in and `use-llm`-gated; widen-on-failure (in `parse_scoped`) recovers any
         // sense a bad rank or the cap drops, so neither can lose a parse a known sentence would get.
         let cfg = &self.parse_config;
         let mut index = LexicalIndex::build(Arc::clone(&layer));
@@ -116,7 +116,7 @@ impl EigeniusService {
         if let Some(m) = cfg.cell_beam {
             index = index.with_cell_beam(m);
         }
-        #[cfg(feature = "allms")]
+        #[cfg(feature = "use-llm")]
         if cfg.use_ranker {
             if let Some(ranker) = crate::dcg::AnthropicSenseRanker::from_env() {
                 index = index.with_sense_ranker(Box::new(ranker));

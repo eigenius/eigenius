@@ -30,7 +30,7 @@
 # Two gotchas this script handles so you don't rediscover them:
 #   1. EIGENIUS_WRN_PAGE must be ABSOLUTE — the test binary's CWD is the crate dir, not the repo root,
 #      so a relative page path silently "not found" → a 0.00s SKIP that looks like a pass.
-#   2. The live reranker needs BOTH `--features allms` AND ANTHROPIC_API_KEY; without the key the
+#   2. The live reranker needs BOTH `--features use-llm` AND ANTHROPIC_API_KEY; without the key the
 #      harness runs cap-only and silently reports "reranker: none".
 #
 # Usage:
@@ -91,8 +91,8 @@ if [[ "$USE_LLM" == "1" ]]; then
     echo "error: live reranker requested but ANTHROPIC_API_KEY is unset (pass --no-llm for cap-only)" >&2
     exit 1
   }
-  FEATURES=(--features allms)
-  RERANKER="live Anthropic reranker (--features allms)"
+  FEATURES=(--features use-llm)
+  RERANKER="live Anthropic reranker (--features use-llm)"
 else
   RERANKER="cap-only (no reranker)"
 fi

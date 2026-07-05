@@ -962,8 +962,8 @@ impl LexicalIndex {
                 .iter()
                 .any(|e| is_adjective_cat(e.item.cat()))
         });
-        // Slice 2: `X-based` where X is a known noun (and the `base` axiom is available).
-        slice1 || self.denominal_based_item(&s).is_some()
+        // Slice 2: `X-<suffix>` (denominal) where X is a known noun and the relation verb is available.
+        slice1 || self.denominal_suffix_item(&s).is_some()
     }
 
     /// Derived-adjective items (D63 compound morphology §3). If `surface` is a recognized derived
@@ -987,34 +987,38 @@ impl LexicalIndex {
                 }
             }
         }
-        // Slice 2 (denominal `X-based`): the constructed `base(x, X)` predicate.
-        if let Some(it) = self.denominal_based_item(&s) {
+        // Slice 2 (denominal `X-<suffix>`): the constructed `rel(…)` predicate over the element's verb.
+        if let Some(it) = self.denominal_suffix_item(&s) {
             out.push(it);
         }
         out
     }
 
-    /// The denominal participial adjective `X-based` (D63 compound morphology §3, Slice 2, and §2a):
-    /// `X-based` (X a known common noun) seeds a predicative `ADJ` (`S[adj]\NP`) with sem
-    /// `λx. base(x, kind_of(X))`, reusing the WordNet **`base` verb's own axiom** — *not* a
-    /// freshly-minted `based_on`. The verb entry carries the bare 2-place axiom as its sem (like the
-    /// demo `affects`; imported WordNet verbs likewise), so applying it object-slot-first renders
-    /// `base(x, X)` — the compound-and-phrasal shared proposition (§2a). Treating `base` as the
-    /// relation `base(thing, basis)` is the v1 representation; the *phrasal* `based on X` produces the
-    /// same sem only once the object+PP frame extension (Step 2b) gives `base` a real oblique slot.
-    /// `None` unless `surface` is `X-based`, X resolves to a common noun, the `base` transitive verb
-    /// is in the lexicon, and the `S[adj]\NP` inductives resolve.
-    fn denominal_based_item(&self, surface: &str) -> Option<Item> {
+    /// The denominal-suffix adjective `X-E` (D63 compound morphology §3b, generalized from the shipped
+    /// `-based` slice — see [`DENOMINAL_SUFFIXES`]): `X-<suffix>` (X a known common noun) seeds a
+    /// predicative `ADJ` (`S[adj]\NP`) with sem `λθ. rel(…)`, reusing the element's WordNet verb axiom —
+    /// *not* a freshly-minted relation. The verb entry carries the bare 2-place axiom as its sem (like
+    /// the demo `affects`; imported WordNet verbs likewise). Argument order is set by the suffix's
+    /// `theta_is_object` (passive-participle `rel(θ, X)` vs adjective/active `rel(X, θ)`). Treating the
+    /// coarse 2-place axiom as the relation is the v1 representation; the faithful `rel(theme, ground)`
+    /// roles and the phrasal `E link X` convergence are the passive-voice / alignment tracks
+    /// (`docs/notes/d63-{passive-voice-handling,denominal-suffix-alignment}.md`).
+    /// `None` unless `surface` is `X-<suffix>` for a known suffix, X resolves to a common noun, the
+    /// element's relation verb is in the lexicon, and the `S[adj]\NP` inductives resolve.
+    fn denominal_suffix_item(&self, surface: &str) -> Option<Item> {
         let s = surface.trim().to_lowercase();
         let (x_form, tail) = s.rsplit_once('-')?;
-        if tail != "based" || x_form.len() < 2 {
+        if x_form.len() < 2 {
             return None;
         }
-        // The `base` verb's own axiom — its transitive `Item`'s sem is the raw 2-place predicate.
-        let base_ax = self
-            .entries_for("base")
+        let &(_, rel_lemma, theta_is_object) =
+            DENOMINAL_SUFFIXES.iter().find(|(suf, _, _)| *suf == tail)?;
+        // The element's relation — a binary-relation verb (transitive or argument-PP) carries the raw
+        // 2-place `Entity → Entity → Prop` axiom as its sem.
+        let rel_ax = self
+            .entries_for(rel_lemma)
             .into_iter()
-            .find(|e| is_transitive_verb_cat(e.item.cat()))
+            .find(|e| is_binary_relation_cat(e.item.cat()))
             .map(|e| e.item.sem().clone())?;
         // X's entity: the noun's class realized as its kind (`kind_of(C)`), as a bare argument commits.
         let x_class = self.entries_for(x_form).into_iter().find_map(|e| {
@@ -1025,17 +1029,21 @@ impl LexicalIndex {
         })?;
         let x_ent = kind_of(x_class);
         let adj_cat = predicative_adjective_cat(&self.layer)?;
-        // sem `λx. base(x, kind_of(X))` — x in the object slot (applied first), the noun in the
-        // subject slot, so it renders `base(x, X)` under the object-first verb convention (§2a).
-        let xv = "__based_x";
+        // sem `λθ. rel(first, second)` — argument order by voice (`theta_is_object`): θ in the object
+        // slot for a passive participle (`θ is based on X` → `rel(θ, X)`), the noun in the object slot
+        // for an adjective/active element (`θ resembles X` → `rel(X, θ)`).
+        let tv = "__den_theta";
+        let theta = Exp::Var(tv.to_string());
+        let (first, second) = if theta_is_object {
+            (theta, x_ent)
+        } else {
+            (x_ent, theta)
+        };
         let sem = Exp::Lam(
-            Patt::Var(xv.to_string()),
+            Patt::Var(tv.to_string()),
             Box::new(Exp::App(
-                Box::new(Exp::App(
-                    Box::new(base_ax),
-                    Box::new(Exp::Var(xv.to_string())),
-                )),
-                Box::new(x_ent),
+                Box::new(Exp::App(Box::new(rel_ax), Box::new(first))),
+                Box::new(second),
             )),
         );
         Some(Item::new(adj_cat, sem))
@@ -2731,7 +2739,7 @@ impl LexicalIndex {
     ///
     /// This is the piece D64 §4 leaves to the caller: the resolver primitives already exist, but nothing
     /// assembled candidates or threaded the discourse. The `proposer` is impl-agnostic — a deterministic
-    /// mock in tests, the live `AnthropicProposer` (`allms`) end to end, or the orchestrator bridge
+    /// mock in tests, the live `AnthropicProposer` (`use-llm`) end to end, or the orchestrator bridge
     /// (Phase 2). Recency is the only salience signal we model; the proposer does the ranking (§4). First
     /// cut: candidate surfaces are the entity IRI local names (a readable label is a later refinement),
     /// and only PRIOR-discourse entities are candidates (intra-sentential binding is a refinement).
@@ -2852,7 +2860,7 @@ pub struct ProposeCtx<'a> {
 /// The **untrusted** anaphora proposer (D64 §4): given a hole and the in-scope candidates, return
 /// a **ranked** list of antecedent IRIs (most-preferred first; empty ⇒ unresolvable). It only
 /// *suggests*; the kernel re-gates every suggestion ([`LexicalIndex::resolve_open`]). Impls: a
-/// deterministic mock (tests), a feature-gated live LLM client (`allms`), and the production
+/// deterministic mock (tests), a feature-gated live LLM client (`use-llm`), and the production
 /// orchestrator bridge — all behind this one trait, so the algorithm is impl-agnostic.
 pub trait Proposer {
     fn propose(&self, ctx: &ProposeCtx) -> Vec<Iri>;
@@ -3041,13 +3049,14 @@ fn adjective_bases(surface: &str) -> Vec<String> {
     // Productive biomedical adjective prefixes (a declarative closed set, not a corpus-frequency
     // splitter — §2 "closed affix inventory, not frequency splitting").
     const ADJ_PREFIXES: &[&str] = &["hyper", "hypo", "poly", "multi", "mono"];
-    // Denominal participial tails handled by Slice 2 (`X-based` → `base(x, X)`, not identity).
-    const SLICE2_TAILS: &[&str] = &["based"];
     let s = surface.trim().to_lowercase();
     let mut bases = Vec::new();
     if let Some((_, head)) = s.rsplit_once('-') {
-        // Right-headed hyphen compound: the head (last segment) carries the category.
-        if head.len() >= 3 && !SLICE2_TAILS.contains(&head) {
+        // Right-headed hyphen compound: the head (last segment) carries the category — UNLESS it is a
+        // denominal suffix (`-based`/`-like`/…), which are handled by [`denominal_suffix_item`], not the
+        // Slice-1 identity rule. Excluding them fixes the `-like` over-generation (§3b).
+        let is_denominal = DENOMINAL_SUFFIXES.iter().any(|(suf, _, _)| *suf == head);
+        if head.len() >= 3 && !is_denominal {
             bases.push(head.to_string());
         }
     } else {
@@ -3122,15 +3131,15 @@ fn is_adjective_cat(cat: &Exp) -> bool {
     false
 }
 
-/// Whether `cat` is a **transitive verb** `(S\NP)/NP` — `fwd(bwd(cat_s(…), cat_np(…)), cat_np(…))`.
-/// Used by the denominal `X-based` rule (D63 compound morphology §3, Slice 2) to select the `base`
-/// verb entry whose sem is the 2-place `Entity → Entity → Prop` axiom. Disjoint from the argument-PP
-/// verb `(S\NP)/cat_pp_arg` (its object slot is `cat_pp_arg`, not `cat_np`).
-fn is_transitive_verb_cat(cat: &Exp) -> bool {
+/// Whether `cat` is a **binary relation** verb — `(S\NP)/NP` (transitive) or `(S\NP)/cat_pp_arg`
+/// (argument-PP, e.g. `depend on`) — both carrying a raw 2-place `Entity → Entity → Prop` axiom as
+/// their sem. Used by the denominal-suffix rule (D63 compound morphology §3b) to fetch each element's
+/// relation from its verb lemma.
+fn is_binary_relation_cat(cat: &Exp) -> bool {
     let Some([inner, obj]) = is_ctor(cat, "fwd") else {
         return false;
     };
-    if is_ctor(obj, "cat_np").is_none() {
+    if is_ctor(obj, "cat_np").is_none() && is_ctor(obj, "cat_pp_arg").is_none() {
         return false;
     }
     let Some([s, subj]) = is_ctor(inner, "bwd") else {
@@ -3138,6 +3147,31 @@ fn is_transitive_verb_cat(cat: &Exp) -> bool {
     };
     is_ctor(s, "cat_s").is_some() && is_ctor(subj, "cat_np").is_some()
 }
+
+/// The productive denominal-adjective suffixes (D63 compound morphology §3b, generalized from the
+/// shipped `-based` slice). Each row is `(suffix_tail, relation_lemma, theta_is_object)`:
+///   * `relation_lemma` — the verb lemma whose **2-place** axiom is the relation ([`is_binary_relation_cat`]).
+///     Adjective-voice suffixes (`-like`, `-dependent`, `-related`) route to the corresponding *verb*
+///     (`resemble`/`depend`/`relate`), since the 1-place adjective (`like`) is not a relation.
+///   * `theta_is_object` — the modified noun's role, which fixes the argument order. **Passive-participle**
+///     suffixes (`θ is based/mediated/… BY/ON X`) make θ the object → `rel(θ, X)`; **adjective/active**
+///     suffixes (`θ resembles / depends on X`) make θ the subject → `rel(X, θ)`. Under the object-first
+///     verb convention both render `rel(a, b)` = "b ⟨rel⟩ a".
+///
+/// Every tail here is also excluded from the Slice-1 hyphen-head identity rule ([`adjective_bases`]),
+/// which fixes the `-like` over-generation (`like` is a WordNet adjective, so Slice-1 would otherwise
+/// seed identity `like(x)` and drop `X`). A tail whose `relation_lemma` is absent from the lexicon just
+/// fails the probe → the token stays OOV (fail-safe), never a wrong reading. `-specific` is omitted
+/// (no verb relation; needs a minted `specific_to` — deferred).
+const DENOMINAL_SUFFIXES: &[(&str, &str, bool)] = &[
+    ("based", "base", true),
+    ("mediated", "mediate", true),
+    ("derived", "derive", true),
+    ("induced", "induce", true),
+    ("like", "resemble", false),
+    ("dependent", "depend", false),
+    ("related", "relate", false),
+];
 
 /// The sort key the per-lemma sense cap (D63 §8.7 / GH #97) truncates by: contextually-ranked
 /// senses first (ordered by the reranker's `ranks` position), then the rest by static `sense_rank`

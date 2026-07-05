@@ -90,7 +90,7 @@ impl IngestedDocument {
 }
 
 /// The Phase-1 **in-process** ingestion: composes an [`InProcessPipeline`] with a [`ClaimGrader`], all
-/// in Rust (LLM steps behind the proposer traits, `--features allms`). A served realization swaps the
+/// in Rust (LLM steps behind the proposer traits, `--features use-llm`). A served realization swaps the
 /// proposers for RPC-backed ones and commits through the gated path — same [`DocumentIngestion`] contract.
 pub struct InProcessIngestion<'a> {
     base: Arc<Layer>,

@@ -180,11 +180,11 @@ pub fn extract_abbreviations(text: &str) -> Vec<AbbrDef> {
 // pairs which are validated ([`extract_abbreviations_with`] — the short form must actually occur in
 // the text, rejecting hallucinations) and then flow through the SAME ground → emit → kernel-gate path
 // as the deterministic ones, so a plausible-but-wrong proposal is caught downstream. Algorithm-in-Rust
-// first (behind `allms`); the orchestrator refactor comes after the algorithm is validated.
+// first (behind `use-llm`); the orchestrator refactor comes after the algorithm is validated.
 
 /// Proposes abbreviation definitions the deterministic extractor misses (non-parenthetical). Untrusted
 /// — every proposal is validated before use. The no-op default is deterministic-only; a live Anthropic
-/// impl is behind the `allms` feature.
+/// impl is behind the `use-llm` feature.
 pub trait AbbreviationProposer {
     /// Propose `(short, long)` definitions found in `text`. May be empty; may include spurious entries
     /// (the caller validates). `context` should be set to the long form (the proposer gives it whole).
@@ -585,13 +585,11 @@ pub fn document_glossary_resources(base: &Arc<Layer>, document: &str) -> Vec<Res
     document_glossary_resources_with(base, document, &NoAbbreviationProposer)
 }
 
-// ───────────────────── live Anthropic abbreviation proposer (allms feature) ─────────────────────
+// ───────────────────── live Anthropic abbreviation proposer (use-llm feature) ─────────────────────
 
-#[cfg(feature = "allms")]
+#[cfg(feature = "use-llm")]
 mod anthropic {
     use super::{AbbrDef, AbbreviationProposer};
-    use allms::llm_models::AnthropicModels;
-    use allms::Completions;
     use schemars::JsonSchema;
     use serde::Deserialize;
 
@@ -609,19 +607,20 @@ mod anthropic {
         long_form: String,
     }
 
-    /// An [`AbbreviationProposer`] backed by Anthropic Claude via `allms`, JSON-Schema-constrained. It
-    /// proposes definitions the Schwartz-Hearst parenthetical extractor misses (non-parenthetical
-    /// introductions). On any error it proposes nothing, so the deterministic extraction stands alone.
+    /// An [`AbbreviationProposer`] backed by Anthropic Claude via the direct tool-use client
+    /// ([`crate::dcg::anthropic_client`]). It proposes definitions the Schwartz-Hearst parenthetical
+    /// extractor misses (non-parenthetical introductions). On any error it proposes nothing, so the
+    /// deterministic extraction stands alone.
     pub struct AnthropicAbbreviationProposer {
         api_key: String,
-        model: AnthropicModels,
+        model: String,
     }
 
     impl AnthropicAbbreviationProposer {
-        pub fn new(api_key: impl Into<String>, model: AnthropicModels) -> Self {
+        pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
             Self {
                 api_key: api_key.into(),
-                model,
+                model: model.into(),
             }
         }
 
@@ -630,7 +629,7 @@ mod anthropic {
             std::env::var("ANTHROPIC_API_KEY")
                 .ok()
                 .filter(|k| !k.is_empty())
-                .map(|k| Self::new(k, AnthropicModels::ClaudeSonnet4_6))
+                .map(|k| Self::new(k, crate::dcg::anthropic_client::DEFAULT_MODEL))
         }
 
         fn ask(&self, instructions: &str) -> Option<AbbrevReply> {
@@ -638,13 +637,13 @@ mod anthropic {
                 .enable_all()
                 .build()
                 .ok()?;
-            match rt.block_on(
-                Completions::new(self.model.clone(), &self.api_key, None, None)
-                    .get_answer::<AbbrevReply>(instructions),
-            ) {
+            match rt.block_on(crate::dcg::anthropic_client::anthropic_structured::<
+                AbbrevReply,
+            >(&self.api_key, &self.model, instructions))
+            {
                 Ok(r) => Some(r),
                 Err(e) => {
-                    eprintln!("allms abbreviation-proposer error: {e:?}");
+                    eprintln!("anthropic abbreviation-proposer error: {e}");
                     None
                 }
             }
@@ -679,7 +678,7 @@ mod anthropic {
     }
 }
 
-#[cfg(feature = "allms")]
+#[cfg(feature = "use-llm")]
 pub use anthropic::AnthropicAbbreviationProposer;
 
 #[cfg(test)]
@@ -799,9 +798,9 @@ mod tests {
 
     /// Live end-to-end check of the Anthropic proposer: a non-parenthetical definition the
     /// Schwartz-Hearst extractor cannot see should be recovered. Requires `ANTHROPIC_API_KEY` and
-    /// the `allms` feature; ignored by default (network + cost). Run with:
-    /// `cargo test -p eigenius-kernel --features allms -- --ignored anthropic_proposer_live`
-    #[cfg(feature = "allms")]
+    /// the `use-llm` feature; ignored by default (network + cost). Run with:
+    /// `cargo test -p eigenius-kernel --features use-llm -- --ignored anthropic_proposer_live`
+    #[cfg(feature = "use-llm")]
     #[test]
     #[ignore = "hits the live Anthropic API; requires ANTHROPIC_API_KEY"]
     fn anthropic_proposer_live_recovers_non_parenthetical() {

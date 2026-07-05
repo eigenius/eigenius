@@ -43,13 +43,19 @@ Separate threads, not blocking the parse→encode pipeline; pull onto the stack 
   page, or the denominal phrasal half.
 - [d63-denominal-suffix-alignment.md](d63-denominal-suffix-alignment.md) — the **spec**: the
   `DenominalElement` table + the `⟦X-E⟧ = ⟦E link X⟧` alignment invariant for the denominal-adjective suffix
-  class (`-based`/`-like`/`-mediated`/…). The two halves live elsewhere: **compound** →
-  [compound-morphology.md](d63-compound-morphology.md) §3b (self-contained, incl. the `-like` fix);
-  **phrasal** → d63-passive-voice-handling.md. **Trigger:** after both halves land, to gate the equivalence.
+  class (`-based`/`-like`/`-mediated`/…). The **compound half is DONE** (compound-morphology §3b, shipped
+  `2026-07-05`); the **phrasal** half → d63-passive-voice-handling.md. **Trigger:** after the phrasal half
+  lands, to gate the `X-E ≡ E link X` equivalence.
+
+## Completed (record, not work)
+- [d63-compound-morphology.md](d63-compound-morphology.md) — **COMPLETED `2026-07-05`.** Derived-adjective
+  OOV closed (Slices 1–2 + §3b denominal-suffix table + `-like` fix); missing-lexeme 6 → 2 over the
+  snapshot. Deferred pieces extracted to the parked tracks above (alignment / passive-voice) and the
+  gene-family track ([[gene_family_lexicon_gap]] — `recq`).
 
 ## Reference / design notes (consulted, not "work")
 Not stack items — background for the above: `d63-{document-preprocessing-scope, kind-predication-reshape,
-compound-morphology, coren-coupled-port-design, pp-attachment-control-scoping, packed-forest-parsing-blueprint,
+coren-coupled-port-design, pp-attachment-control-scoping, packed-forest-parsing-blueprint,
 cnl-*}`, `d62-*`. Pull in when a step needs them.
 
 ---

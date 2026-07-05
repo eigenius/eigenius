@@ -409,9 +409,10 @@ fn derived_adjective_recognition_requires_a_known_base() {
     );
 }
 
-/// A synthetic transitive `base` verb (`base_rel : Entity → Entity → Prop`), so Slice 2 can build the
-/// denominal `X-based` adjective over its axiom without pulling in the full WordNet `base` verb.
-const BASED_FIXTURE: &str = r#"
+/// Synthetic relations for the denominal-suffix rule (D63 compound morphology §3b): a transitive `base`
+/// and `resemble` (each `Entity → Entity → Prop`), plus a 1-place `like` **adjective** — so a `-like`
+/// token could wrongly take the Slice-1 identity reading if the over-generation fix regressed.
+const DENOMINAL_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
 namespace epistemic = "urn:eigenius:reflection:epistemic";
 axiom lexicon:base_rel : lexicon:Entity -> lexicon:Entity -> Prop
@@ -423,9 +424,27 @@ resource lexicon:e_base : lexicon:LexicalEntry {
     lexicon:sense    = "wn:base.v.01";
     lexicon:grade    = epistemic:declared;
 }
+axiom lexicon:resemble_rel : lexicon:Entity -> lexicon:Entity -> Prop
+resource lexicon:e_resemble : lexicon:LexicalEntry {
+    lexicon:form     = "resemble";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:resemble_rel;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:resemble.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+axiom lexicon:like_adj : lexicon:Entity -> Prop
+resource lexicon:e_like : lexicon:LexicalEntry {
+    lexicon:form     = "like";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:like_adj;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:like.a.01";
+    lexicon:grade    = epistemic:declared;
+}
 "#;
 
-fn based_index() -> LexicalIndex {
+fn denominal_index() -> LexicalIndex {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
     let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
@@ -433,11 +452,11 @@ fn based_index() -> LexicalIndex {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix =
-        esl::compile_against_layer(BASED_FIXTURE, &demo_layer).expect("based fixture compiles");
-    let mut b2 = LayerBuilder::new("based", Some(Arc::clone(&demo_layer)));
+    let fix = esl::compile_against_layer(DENOMINAL_FIXTURE, &demo_layer)
+        .expect("denominal fixture compiles");
+    let mut b2 = LayerBuilder::new("denominal", Some(Arc::clone(&demo_layer)));
     for r in fix {
-        b2.add_resource(r).expect("add base verb");
+        b2.add_resource(r).expect("add denominal relation");
     }
     LexicalIndex::build(Arc::new(b2.build(LayerStorage::in_memory())))
 }
@@ -447,7 +466,7 @@ fn denominal_x_based_adjective_predicates_via_the_base_axiom() {
     // D63 compound morphology §3, Slice 2 (`X-based` → `base(x, X)`): `gene-based` (X = the demo
     // `gene` noun) seeds a predicative adjective `S[adj]\NP` with sem `λx. base_rel(x, kind_of(Gene))`
     // over the `base` verb's OWN axiom — not a minted `based_on` (§2a).
-    let index = based_index();
+    let index = denominal_index();
 
     // Predicative: `HeLa is gene-based` → base_rel(hela, kind_of(Gene)).
     let pred = index.parse("HeLa is gene-based", &Identity);
@@ -476,6 +495,32 @@ fn denominal_x_based_adjective_predicates_via_the_base_axiom() {
     assert!(
         index.parse("HeLa is zorp-based", &Identity).is_empty(),
         "`X-based` with an unknown X-noun is not seeded"
+    );
+}
+
+#[test]
+fn denominal_like_routes_to_the_verb_relation_and_does_not_drop_x() {
+    // D63 compound morphology §3b: `-like` is an ADJECTIVE-voice denominal suffix, so it routes to the
+    // 2-place VERB `resemble` (the 1-place adjective `like` is not a relation) with the subject-voice
+    // arg order `resemble(kind_of(X), θ)`. And because `like` is a WordNet adjective, the Slice-1
+    // hyphen-head identity rule must NOT fire on `gene-like` (which would drop `X` → `like(hela)`).
+    let index = denominal_index();
+
+    let pred = index.parse("HeLa is gene-like", &Identity);
+    assert!(!pred.is_empty(), "`gene-like` predicative adjective parses");
+    // Adjective-voice order: X (`kind_of(Gene)`) is the FIRST argument of `resemble_rel`.
+    assert!(
+        pred.iter()
+            .any(|it| pretty_term(it.sem()).contains("resemble_rel(kind_of")),
+        "`gene-like` → resemble_rel(kind_of(Gene), θ) via the verb relation — got {}",
+        pretty_term(pred[0].sem())
+    );
+    // Over-generation guard: EVERY reading references `kind_of` — X is never dropped (no Slice-1
+    // `like_adj(hela)` identity leak).
+    assert!(
+        pred.iter()
+            .all(|it| pretty_term(it.sem()).contains("kind_of")),
+        "no reading drops X to the bare `like` adjective identity"
     );
 }
 
@@ -1941,13 +1986,13 @@ fn find_sentence<'a>(sentences: &'a [SentenceEncoding], needle: &str) -> &'a Sen
         .unwrap_or_else(|| panic!("no sentence matching {needle:?}"))
 }
 
-#[cfg(feature = "allms")]
+#[cfg(feature = "use-llm")]
 #[test]
 fn live_anthropic_proposer_resolves_a_referent_through_the_kernel() {
-    // The live-LLM resolver path (D64 §4), behind the `allms` feature: a real Anthropic model
+    // The live-LLM resolver path (D64 §4), behind the `use-llm` feature: a real Anthropic model
     // proposes an antecedent for the referent hole, and the kernel re-gates it to a closed Prop.
     // Skips cleanly if no key is set; runs live when ANTHROPIC_API_KEY is present.
-    use eigenius_kernel::dcg::resolver_allms::AnthropicProposer;
+    use eigenius_kernel::dcg::resolver_llm::AnthropicProposer;
     let Some(proposer) = AnthropicProposer::from_env() else {
         eprintln!("SKIP live_anthropic_proposer: ANTHROPIC_API_KEY unset");
         return;

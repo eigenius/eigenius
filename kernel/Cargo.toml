@@ -9,14 +9,15 @@ keywords = ["knowledge-graph", "type-theory", "ontology", "grpc", "provenance"]
 categories = ["science", "data-structures", "web-programming"]
 
 [features]
-# Live-LLM anaphora proposer (D64) via the `allms` client — opt-in, dev/experimentation only.
-# Default builds stay LLM-free (the kernel is the trusted oracle); the resolver algorithm runs
-# against the abstract `Proposer` trait + a mock. See `kernel/src/dcg/resolver_allms.rs`.
-allms = ["dep:allms", "dep:schemars"]
+# Live-LLM reasoning-layer calls (sense ranker / anaphora + abbreviation proposers) via a direct
+# Anthropic tool-use client (`dcg::anthropic_client`) — opt-in, dev/experimentation only. Default
+# builds stay LLM-free (the kernel is the trusted oracle); the algorithms run against the abstract
+# traits + mocks. See `kernel/src/dcg/{anthropic_client,resolver_llm,sense_ranker}.rs`.
+use-llm = ["dep:reqwest", "dep:schemars"]
 
 [dependencies]
 async-trait = "0.1"
-allms = { version = "0.42", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 schemars = { version = "0.8.12", optional = true }
 ciborium = "0.2"
 hex = "0.4"

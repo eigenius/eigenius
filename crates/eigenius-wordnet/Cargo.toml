@@ -15,9 +15,9 @@ name = "wordnet-import"
 path = "src/bin/wordnet_import.rs"
 
 [features]
-# Forward the kernel's live-LLM reranker (allms) so the DB-backed (d) harness can use the
+# Forward the kernel's live-LLM reranker (use-llm) so the DB-backed (d) harness can use the
 # contextual `AnthropicSenseRanker`; default builds stay LLM-free (deterministic `IdentityRanker`).
-allms = ["eigenius-kernel/allms"]
+use-llm = ["eigenius-kernel/use-llm"]
 
 [dev-dependencies]
 # The on-disk RocksDB backend — so the DB-backed encoding measurement (D62 (d)) can open a

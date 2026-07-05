@@ -76,4 +76,4 @@ cuda = ["eigenius-embedder-candle/cuda"]
 metal = ["eigenius-embedder-candle/metal"]
 # D63/GH#97 Lever 1: enable the contextual LLM sense reranker in the served/local parse path
 # (the kernel's `AnthropicSenseRanker`, opt-in, needs ANTHROPIC_API_KEY at runtime).
-allms = ["eigenius-kernel/allms"]
+use-llm = ["eigenius-kernel/use-llm"]

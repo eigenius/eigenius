@@ -1877,7 +1877,7 @@ fn cmd_lexicon_parse(
 
     // Same parse config as the served RPC (D63/GH#97 Lever 1): cap + beam + the Morphy lemmatizer
     // (default in-repo dict), so local `lexicon parse` matches the server. The contextual reranker
-    // is wired here too under `--features allms` (+ ANTHROPIC_API_KEY), for parity.
+    // is wired here too under `--features use-llm` (+ ANTHROPIC_API_KEY), for parity.
     let pc = build_parse_config("references/WordNet-3.0/dict");
     let mut index = LexicalIndex::build(Arc::clone(&layer));
     if let Some(n) = pc.sense_cap {
@@ -1886,7 +1886,7 @@ fn cmd_lexicon_parse(
     if let Some(m) = pc.cell_beam {
         index = index.with_cell_beam(m);
     }
-    #[cfg(feature = "allms")]
+    #[cfg(feature = "use-llm")]
     if pc.use_ranker {
         if let Some(r) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
             index = index.with_sense_ranker(Box::new(r));
@@ -2165,7 +2165,7 @@ fn cmd_db(command: DbCommands) {
 /// Build the `ParseSentence` [`ParseConfig`] (D63/GH#97 Lever 1): load WordNet's Morphy from
 /// `morphy_dict` (falling back to the no-op `Identity` lemmatizer if it can't be loaded), keep the
 /// cap+beam defaults (the full-lexicon OOM defense), and enable the contextual LLM reranker iff the
-/// binary was built `--features allms` (the kernel still requires `ANTHROPIC_API_KEY` at runtime).
+/// binary was built `--features use-llm` (the kernel still requires `ANTHROPIC_API_KEY` at runtime).
 fn build_parse_config(morphy_dict: &str) -> eigenius_kernel::server::ParseConfig {
     use eigenius_kernel::dcg::{Identity, Lemmatizer};
     let lemmatizer: std::sync::Arc<dyn Lemmatizer + Send + Sync> =
@@ -2185,7 +2185,7 @@ fn build_parse_config(morphy_dict: &str) -> eigenius_kernel::server::ParseConfig
         };
     eigenius_kernel::server::ParseConfig {
         lemmatizer,
-        use_ranker: cfg!(feature = "allms"),
+        use_ranker: cfg!(feature = "use-llm"),
         ..Default::default()
     }
 }
