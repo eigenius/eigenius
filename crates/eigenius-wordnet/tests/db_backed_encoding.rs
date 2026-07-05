@@ -356,6 +356,40 @@ fn show_based_on_x_reading() {
     }
 }
 
+/// D63 lexicon-augmentation diagnostic: are the UMLS `RecQ` atoms (C0084304 "RecQ Helicases") seeded as
+/// `lexicon:form` entries in the snapshot? If so, a `TextIndex` over `lexicon:form` (BM25/token) would
+/// ground the OOV surface `recq` → those atoms → the concept — without an HGNC import. The exact
+/// `ValueIndex` misses them (`recq` ≠ `recq helicases`), which is why `recq` is OOV today. Run with:
+///   EIGENIUS_DB_SNAPSHOT=/path cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       probe_recq_atoms_in_snapshot -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic: are RecQ atoms seeded (form-text-index grounding path)? --ignored --nocapture"]
+fn probe_recq_atoms_in_snapshot() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    for form in [
+        "recq",
+        "recq helicase",
+        "recq helicases",
+        "helicase, recq",
+        "recq protein",
+        "recq family of dna helicases",
+        "recq helicase-like",
+    ] {
+        let known = index.has_token(form, &lem);
+        let entries = index.debug_form_entries(form, &lem);
+        eprintln!(
+            "\n=== {form:?} — has_token={known}, {} entries ===",
+            entries.len()
+        );
+        for (closed, cat, sense) in entries.iter().take(10) {
+            eprintln!("  closed={closed}  sense={sense}  cat={cat}");
+        }
+    }
+}
+
 /// S3 over-prune localization (GH#97): `Each event alone does not lead to cell death` gaps WITH the
 /// cross-POS prune but parses without. This dumps what the prune drops for each of S3's function words
 /// (closed / open-nominal=dropped / open-other=kept) and A/B-parses S3 sub-variants, to find which

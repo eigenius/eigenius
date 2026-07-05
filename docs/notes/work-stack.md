@@ -46,6 +46,12 @@ Separate threads, not blocking the parse→encode pipeline; pull onto the stack 
   class (`-based`/`-like`/`-mediated`/…). The **compound half is DONE** (compound-morphology §3b, shipped
   `2026-07-05`); the **phrasal** half → d63-passive-voice-handling.md. **Trigger:** after the phrasal half
   lands, to gate the `X-E ≡ E link X` equivalence.
+- [d63-lexicon-augmentation.md](d63-lexicon-augmentation.md) — the `DocumentPipeline` generalization for
+  **lexical gaps**: `AbbrDef → LexicalBinding{surface, long_form?, grounding}`, the pipeline as a
+  lexicon-augmentation transducer (`AugmentOptions`/`LexiconProfile`/seed-in-added-out + the feedback cache),
+  two-moment grounding with the concept-convergence invariant (`RecQ DNA helicase → C0084304`). **Trigger:**
+  generalizing Stage A / closing `recq` via retrieval-grounding; needs the gene-family source
+  ([[gene_family_lexicon_gap]]) + a lexicon/ontology index.
 
 ## Completed (record, not work)
 - [d63-compound-morphology.md](d63-compound-morphology.md) — **COMPLETED `2026-07-05`.** Derived-adjective
