@@ -374,25 +374,39 @@ pub(crate) fn resolve_inductive(layer: &Arc<Layer>, iri_str: &str) -> Option<Arc
 /// keeps the subject **number** a free variable, so agreement flows through the modifier unchanged.
 /// The adjective modifier is fixed (`adj`, `num_any`), since predicative adjectives are uniform.
 /// `None` if the `lexicon:Cat`/`Mood`/`Fin`/`Num` inductives don't resolve.
-pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
+/// The **predicative adjective** category `S[adj]\NP` = `bwd(cat_s(dcl, adj), cat_np(Entity, num_any))`
+/// — fixed `adj` / `num_any`, since predicative adjectives are uniform. Shared by the adverb
+/// adjective-modifier cat ([`adverb_modifier_cats`]) and the D63 denominal `X-based` adjective
+/// (`docs/notes/d63-compound-morphology.md` §3, Slice 2). `None` if the inductives don't resolve.
+pub fn predicative_adjective_cat(layer: &Arc<Layer>) -> Option<Exp> {
     let cat = resolve_inductive(layer, "urn:eigenius:lexicon:Cat")?;
     let mood = resolve_inductive(layer, "urn:eigenius:lexicon:Mood")?;
     let fin = resolve_inductive(layer, "urn:eigenius:lexicon:Fin")?;
     let num = resolve_inductive(layer, "urn:eigenius:lexicon:Num")?;
     let entity = Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:Entity").ok()?);
     let dcl = Exp::InductiveCtor(mood, "dcl".to_string(), vec![]);
+    let adj = Exp::InductiveCtor(fin, "adj".to_string(), vec![]);
+    let num_any = Exp::InductiveCtor(num, "num_any".to_string(), vec![]);
     let ctor = |n: &str, args: Vec<Exp>| Exp::InductiveCtor(cat.clone(), n.to_string(), args);
-
-    // 1. Adjective modifier — fixed `adj` / `num_any` (predicative adjectives are uniform).
-    let adj = Exp::InductiveCtor(fin.clone(), "adj".to_string(), vec![]);
-    let num_any = Exp::InductiveCtor(num.clone(), "num_any".to_string(), vec![]);
-    let adjp = ctor(
+    Some(ctor(
         "bwd",
         vec![
-            ctor("cat_s", vec![dcl.clone(), adj]),
-            ctor("cat_np", vec![entity.clone(), num_any]),
+            ctor("cat_s", vec![dcl, adj]),
+            ctor("cat_np", vec![entity, num_any]),
         ],
-    );
+    ))
+}
+
+pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
+    let cat = resolve_inductive(layer, "urn:eigenius:lexicon:Cat")?;
+    let mood = resolve_inductive(layer, "urn:eigenius:lexicon:Mood")?;
+    let fin = resolve_inductive(layer, "urn:eigenius:lexicon:Fin")?;
+    let entity = Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:Entity").ok()?);
+    let dcl = Exp::InductiveCtor(mood, "dcl".to_string(), vec![]);
+    let ctor = |n: &str, args: Vec<Exp>| Exp::InductiveCtor(cat.clone(), n.to_string(), args);
+
+    // 1. Adjective modifier — over the uniform predicative-adjective cat `S[adj]\NP`.
+    let adjp = predicative_adjective_cat(layer)?;
     let adj_mod = ctor("fwd", vec![adjp.clone(), adjp]);
 
     // 2/3. VP modifier — fixed `fin` clause (verbal, disjoint from `adj`), free subject number.

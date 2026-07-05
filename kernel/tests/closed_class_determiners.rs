@@ -355,6 +355,130 @@ fn ly_adverb_recognition_requires_a_known_adjective_base() {
     );
 }
 
+#[test]
+fn derived_adjective_reuses_its_base_and_is_transparent() {
+    // D63 compound morphology §3, Slice 1: a closed-prefix concatenation (`hyperprimary` ← `primary`)
+    // and a right-headed hyphen compound (`double-primary` ← `primary`) each seed the base
+    // adjective's own items on the whole-token span, so the derived word parses identically to its
+    // base — the affix / left modifier is transparent in v1 (identity sem, like the `-ly` adverbs).
+    let (_layer, index) = index_over_bootstrap();
+
+    let base = index.parse("HeLa is primary", &Identity);
+    assert_eq!(base.len(), 1, "baseline copular adjective parses once");
+
+    // Concatenated closed prefix `hyper-`.
+    let prefixed = index.parse("HeLa is hyperprimary", &Identity);
+    assert!(!prefixed.is_empty(), "the prefixed adjective parses");
+    assert_eq!(
+        pretty_term(prefixed[0].sem()),
+        pretty_term(base[0].sem()),
+        "`hyperprimary` is transparent — same claim as `primary`"
+    );
+
+    // Right-headed hyphen compound.
+    let compound = index.parse("HeLa is double-primary", &Identity);
+    assert!(!compound.is_empty(), "the hyphen compound adjective parses");
+    assert_eq!(
+        pretty_term(compound[0].sem()),
+        pretty_term(base[0].sem()),
+        "`double-primary` is transparent — same claim as `primary`"
+    );
+
+    // Attributive (prenominal) use — the real target (`hypermutable cells`): the derived adjective
+    // refines the noun through the existing `RefineKind::Attrib` rule.
+    assert!(
+        !index
+            .parse("HeLa is a hyperprimary gene", &Identity)
+            .is_empty(),
+        "the derived adjective modifies a noun attributively"
+    );
+}
+
+#[test]
+fn derived_adjective_recognition_requires_a_known_base() {
+    // Data-driven gate (mirrors the `-ly` gate): a prefix / hyphen compound whose base is NOT a known
+    // adjective is not seeded, so the sentence has no parse — recognition is not a blind strip/split.
+    let (_layer, index) = index_over_bootstrap();
+    assert!(
+        index.parse("HeLa is hyperzorp", &Identity).is_empty(),
+        "a prefix token with no adjective base does not seed a derived adjective"
+    );
+    assert!(
+        index.parse("HeLa is double-zorp", &Identity).is_empty(),
+        "a hyphen compound with no adjective head does not seed a derived adjective"
+    );
+}
+
+/// A synthetic transitive `base` verb (`base_rel : Entity → Entity → Prop`), so Slice 2 can build the
+/// denominal `X-based` adjective over its axiom without pulling in the full WordNet `base` verb.
+const BASED_FIXTURE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+axiom lexicon:base_rel : lexicon:Entity -> lexicon:Entity -> Prop
+resource lexicon:e_base : lexicon:LexicalEntry {
+    lexicon:form     = "base";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:base_rel;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:base.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+"#;
+
+fn based_index() -> LexicalIndex {
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
+    for r in demo {
+        b.add_resource(r).expect("add demo");
+    }
+    let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let fix =
+        esl::compile_against_layer(BASED_FIXTURE, &demo_layer).expect("based fixture compiles");
+    let mut b2 = LayerBuilder::new("based", Some(Arc::clone(&demo_layer)));
+    for r in fix {
+        b2.add_resource(r).expect("add base verb");
+    }
+    LexicalIndex::build(Arc::new(b2.build(LayerStorage::in_memory())))
+}
+
+#[test]
+fn denominal_x_based_adjective_predicates_via_the_base_axiom() {
+    // D63 compound morphology §3, Slice 2 (`X-based` → `base(x, X)`): `gene-based` (X = the demo
+    // `gene` noun) seeds a predicative adjective `S[adj]\NP` with sem `λx. base_rel(x, kind_of(Gene))`
+    // over the `base` verb's OWN axiom — not a minted `based_on` (§2a).
+    let index = based_index();
+
+    // Predicative: `HeLa is gene-based` → base_rel(hela, kind_of(Gene)).
+    let pred = index.parse("HeLa is gene-based", &Identity);
+    assert!(
+        !pred.is_empty(),
+        "`gene-based` predicative adjective parses"
+    );
+    assert!(
+        pred.iter().any(|it| {
+            let s = pretty_term(it.sem());
+            s.contains("base_rel") && s.contains("kind_of")
+        }),
+        "the sem reuses the `base` axiom over the noun's kind — got {}",
+        pretty_term(pred[0].sem())
+    );
+
+    // Attributive (the real use — `pcr-based method`): the derived adjective modifies a noun.
+    assert!(
+        !index
+            .parse("HeLa is a gene-based gene", &Identity)
+            .is_empty(),
+        "`gene-based` modifies a noun attributively"
+    );
+
+    // Gate: X must be a known noun — `zorp-based` (zorp unknown) is not seeded.
+    assert!(
+        index.parse("HeLa is zorp-based", &Identity).is_empty(),
+        "`X-based` with an unknown X-noun is not seeded"
+    );
+}
+
 // ── D62 connectives batch — plural demonstratives, prepositions, discourse adverbs ──
 #[test]
 fn connectives_batch_parses() {

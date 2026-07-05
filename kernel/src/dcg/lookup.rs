@@ -49,8 +49,9 @@ use crate::ontology::Iri;
 
 use super::category::{
     adverb_modifier_cats, cats_coordinate, coordinate_but_not, coordinate_but_not_sem,
-    coordinate_np, coordinate_sem, denote_cat, front_participial, is_ctor, pied_pipe, reciprocate,
-    relativize, relativize_appos, sentence_modifier_cats, subst_cat, type_raise, CatSubst,
+    coordinate_np, coordinate_sem, denote_cat, front_participial, is_ctor, pied_pipe,
+    predicative_adjective_cat, reciprocate, relativize, relativize_appos, sentence_modifier_cats,
+    subst_cat, type_raise, CatSubst,
 };
 use super::lemmatizer::{Lemmatizer, Pos};
 use super::lexicon::entry_to_item;
@@ -583,9 +584,12 @@ impl LexicalIndex {
                 }
             }
         }
-        // A productive `-ly` adverb whose adjective base is known, or a lexicalized discourse
-        // adverb, is parseable (D62 Phase 3) — *known*, not a missing lexeme.
-        self.is_derived_adverb(&s_lc) || is_lexicalized_adverb(&s_lc)
+        // A productive `-ly` adverb whose adjective base is known, a lexicalized discourse adverb, or
+        // a morphologically-derived adjective whose base is known (D63 compound morphology §3), is
+        // parseable — *known*, not a missing lexeme.
+        self.is_derived_adverb(&s_lc)
+            || is_lexicalized_adverb(&s_lc)
+            || self.is_derived_adjective(&s_lc)
     }
 
     /// Diagnostic (D62/GH#97 function-word-noise analysis): every resolved entry for `surface`
@@ -942,6 +946,99 @@ impl LexicalIndex {
         cats.into_iter()
             .map(|cat| Item::new(cat, ident.clone()))
             .collect()
+    }
+
+    /// Whether `surface` is a morphologically-derived adjective whose base is **known to the
+    /// lexicon** (D63 compound morphology, `docs/notes/d63-compound-morphology.md` §3, Slice 1): a
+    /// closed-prefix concatenation (`hypermutable` → `mutable`) or a right-headed hyphen compound
+    /// (`double-stranded` → `stranded`) whose base/head resolves to a predicative adjective. Shared
+    /// by [`Self::derived_adjective_items`] (seeding) and [`Self::has_token`] (the missing-lexeme
+    /// diagnostic), so a derived adjective counts as *known*. Mirrors [`Self::is_derived_adverb`].
+    fn is_derived_adjective(&self, surface: &str) -> bool {
+        let s = surface.trim().to_lowercase();
+        // Slice 1: a closed-prefix / hyphen compound whose base is a known adjective.
+        let slice1 = adjective_bases(&s).iter().any(|b| {
+            self.entries_for(b)
+                .iter()
+                .any(|e| is_adjective_cat(e.item.cat()))
+        });
+        // Slice 2: `X-based` where X is a known noun (and the `base` axiom is available).
+        slice1 || self.denominal_based_item(&s).is_some()
+    }
+
+    /// Derived-adjective items (D63 compound morphology §3). If `surface` is a recognized derived
+    /// adjective ([`Self::is_derived_adjective`]), seed its `ADJ` `Item`(s) on the whole-token span,
+    /// modifying nouns through the existing attributive-adjective refine rule (`RefineKind::Attrib`):
+    ///   * **Slice 1** (`hypermutable`, `double-stranded`) — the base adjective's own items, the
+    ///     prefix / hyphen modifier transparent (identity sem, like the `-ly` adverbs), so
+    ///     `hypermutable ≡ mutable`;
+    ///   * **Slice 2** (`X-based`) — a constructed `λx. base(x, kind_of(X))` predicate over the
+    ///     `base` verb axiom ([`Self::denominal_based_item`]).
+    ///
+    /// Empty when no base resolves.
+    fn derived_adjective_items(&self, surface: &str) -> Vec<Item> {
+        let s = surface.trim().to_lowercase();
+        let mut out = Vec::new();
+        // Slice 1 (identity): reuse the base adjective's own items.
+        for b in adjective_bases(&s) {
+            for e in self.entries_for(&b) {
+                if is_adjective_cat(e.item.cat()) {
+                    out.push(e.item);
+                }
+            }
+        }
+        // Slice 2 (denominal `X-based`): the constructed `base(x, X)` predicate.
+        if let Some(it) = self.denominal_based_item(&s) {
+            out.push(it);
+        }
+        out
+    }
+
+    /// The denominal participial adjective `X-based` (D63 compound morphology §3, Slice 2, and §2a):
+    /// `X-based` (X a known common noun) seeds a predicative `ADJ` (`S[adj]\NP`) with sem
+    /// `λx. base(x, kind_of(X))`, reusing the WordNet **`base` verb's own axiom** — *not* a
+    /// freshly-minted `based_on`. The verb entry carries the bare 2-place axiom as its sem (like the
+    /// demo `affects`; imported WordNet verbs likewise), so applying it object-slot-first renders
+    /// `base(x, X)` — the compound-and-phrasal shared proposition (§2a). Treating `base` as the
+    /// relation `base(thing, basis)` is the v1 representation; the *phrasal* `based on X` produces the
+    /// same sem only once the object+PP frame extension (Step 2b) gives `base` a real oblique slot.
+    /// `None` unless `surface` is `X-based`, X resolves to a common noun, the `base` transitive verb
+    /// is in the lexicon, and the `S[adj]\NP` inductives resolve.
+    fn denominal_based_item(&self, surface: &str) -> Option<Item> {
+        let s = surface.trim().to_lowercase();
+        let (x_form, tail) = s.rsplit_once('-')?;
+        if tail != "based" || x_form.len() < 2 {
+            return None;
+        }
+        // The `base` verb's own axiom — its transitive `Item`'s sem is the raw 2-place predicate.
+        let base_ax = self
+            .entries_for("base")
+            .into_iter()
+            .find(|e| is_transitive_verb_cat(e.item.cat()))
+            .map(|e| e.item.sem().clone())?;
+        // X's entity: the noun's class realized as its kind (`kind_of(C)`), as a bare argument commits.
+        let x_class = self.entries_for(x_form).into_iter().find_map(|e| {
+            match is_ctor(e.item.cat(), "cat_n") {
+                Some([t, _]) => Some(t.clone()),
+                _ => None,
+            }
+        })?;
+        let x_ent = kind_of(x_class);
+        let adj_cat = predicative_adjective_cat(&self.layer)?;
+        // sem `λx. base(x, kind_of(X))` — x in the object slot (applied first), the noun in the
+        // subject slot, so it renders `base(x, X)` under the object-first verb convention (§2a).
+        let xv = "__based_x";
+        let sem = Exp::Lam(
+            Patt::Var(xv.to_string()),
+            Box::new(Exp::App(
+                Box::new(Exp::App(
+                    Box::new(base_ax),
+                    Box::new(Exp::Var(xv.to_string())),
+                )),
+                Box::new(x_ent),
+            )),
+        );
+        Some(Item::new(adj_cat, sem))
     }
 
     /// Degree-modified adverb items (D62 §2 #5b — `more commonly`, `most notably`, `less frequently`):
@@ -1860,6 +1957,12 @@ impl LexicalIndex {
                 // token whose adjective base is known. Single-token spans; identity sem, no holes.
                 if i == j {
                     for it in self.adverb_items(&surface) {
+                        chart[i][j].push(it);
+                    }
+                    // Derived adjectives (D63 compound morphology §3, Slice 1): a closed-prefix /
+                    // hyphen compound whose base is a known adjective seeds the base's transparent
+                    // items on the whole-token span (`hypermutable ≡ mutable`).
+                    for it in self.derived_adjective_items(&surface) {
                         chart[i][j].push(it);
                     }
                     // Fronted participial from a single-token (intransitive) `ger` VP ("arising, …").
@@ -2921,6 +3024,47 @@ fn adverb_bases(surface: &str) -> Vec<String> {
     bases
 }
 
+/// Candidate adjective bases for a morphologically-derived adjective (D63 compound morphology,
+/// `docs/notes/d63-compound-morphology.md` §3, Slice 1) — orthographic reverse-derivation, each
+/// candidate probed against the lexicon in [`LexicalIndex::is_derived_adjective`] (data-driven, no
+/// hardcoded adjective list; a non-adjective base simply fails the probe). Two productive shapes:
+///   * a **closed prefix** `{hyper,hypo,poly,multi,mono}` concatenated onto a known adjective
+///     (`hypermutable` → `mutable`);
+///   * a **right-headed hyphen compound** whose head is a known adjective (`double-stranded` →
+///     `stranded`).
+///
+/// The affix / left modifier is transparent in v1 (identity sem — the derived word reuses the base's
+/// items), so only the base (prefix-stripped stem / compound head) is returned. Participial denominal
+/// tails (`-based`) are Slice 2, handled separately, and are excluded here so they do not pick up a
+/// wrong identity reading.
+fn adjective_bases(surface: &str) -> Vec<String> {
+    // Productive biomedical adjective prefixes (a declarative closed set, not a corpus-frequency
+    // splitter — §2 "closed affix inventory, not frequency splitting").
+    const ADJ_PREFIXES: &[&str] = &["hyper", "hypo", "poly", "multi", "mono"];
+    // Denominal participial tails handled by Slice 2 (`X-based` → `base(x, X)`, not identity).
+    const SLICE2_TAILS: &[&str] = &["based"];
+    let s = surface.trim().to_lowercase();
+    let mut bases = Vec::new();
+    if let Some((_, head)) = s.rsplit_once('-') {
+        // Right-headed hyphen compound: the head (last segment) carries the category.
+        if head.len() >= 3 && !SLICE2_TAILS.contains(&head) {
+            bases.push(head.to_string());
+        }
+    } else {
+        // Concatenated closed prefix.
+        for p in ADJ_PREFIXES {
+            if let Some(stem) = s.strip_prefix(p) {
+                if stem.len() >= 3 {
+                    bases.push(stem.to_string());
+                }
+            }
+        }
+    }
+    bases.sort();
+    bases.dedup();
+    bases
+}
+
 /// Lexicalized (non-`-ly`) transparent **discourse adverbs** (D62 connectives batch): closed-class
 /// adverbs that don't derive from an adjective but are inert for a scientific claim, so they get the
 /// same transparent treatment as `-ly` adverbs (plus clause-level `S/S`/`S\S` attachment).
@@ -2976,6 +3120,23 @@ fn is_adjective_cat(cat: &Exp) -> bool {
         }
     }
     false
+}
+
+/// Whether `cat` is a **transitive verb** `(S\NP)/NP` — `fwd(bwd(cat_s(…), cat_np(…)), cat_np(…))`.
+/// Used by the denominal `X-based` rule (D63 compound morphology §3, Slice 2) to select the `base`
+/// verb entry whose sem is the 2-place `Entity → Entity → Prop` axiom. Disjoint from the argument-PP
+/// verb `(S\NP)/cat_pp_arg` (its object slot is `cat_pp_arg`, not `cat_np`).
+fn is_transitive_verb_cat(cat: &Exp) -> bool {
+    let Some([inner, obj]) = is_ctor(cat, "fwd") else {
+        return false;
+    };
+    if is_ctor(obj, "cat_np").is_none() {
+        return false;
+    }
+    let Some([s, subj]) = is_ctor(inner, "bwd") else {
+        return false;
+    };
+    is_ctor(s, "cat_s").is_some() && is_ctor(subj, "cat_np").is_some()
 }
 
 /// The sort key the per-lemma sense cap (D63 §8.7 / GH #97) truncates by: contextually-ranked

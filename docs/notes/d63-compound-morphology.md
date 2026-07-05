@@ -3,8 +3,8 @@
 **Status:** design (short). Closes the derived-adjective OOV from the parse-gap triage
 ([d63-parse-gap-closure.md](d63-parse-gap-closure.md) §2): `pcr-based`, `double-stranded` (hyphenated),
 `hypermutable` (concatenated). Goal: parse morphologically-composed OOV **without ballooning the
-lexicon**, staying purely symbolic and felicity-gated. `recq` (a gene name, no base) is **out of scope** —
-a named-entity entry, not a derivation.
+lexicon**, staying purely symbolic and felicity-gated. `recq` (a gene-*family* name — HGNC gene group 1049,
+no base) is **out of scope** — a named-entity entry, not a derivation.
 
 ## 1. Approach — analyze against the lexicon, then synthesize
 
@@ -111,7 +111,8 @@ the adjective-modifier cat `(S[adj]\NP)/(S[adj]\NP)`, `RefineKind::Attrib`, the 
 - **Slice 2 — `X-based`**: recognize (hyphen-split, suffix `based`, `X` a known `N`), seed an `ADJ` with sem
   `λx. base(x, X)` via the `base` verb axiom. Dependency: `X` grounded — `pcr` is an abbreviation, so
   `pcr-based` needs the glossary; test via the glossary path or a `pcr : N` fixture. Snapshot units 45, 49.
-- **`recq`** — a named-entity entry (gene name, no base to decompose); separate from the morphology.
+- **`recq`** — a named-entity entry (gene-*family* name, no base to decompose); separate from the
+  morphology (anchor + the general gene-family gap in §Source touchpoints).
 
 **Gate:** over the snapshot, missing-lexeme 6 → 0; re-measure.
 
@@ -131,8 +132,36 @@ the adjective-modifier cat `(S[adj]\NP)/(S[adj]\NP)`, `RefineKind::Attrib`, the 
 `hyper-`/`double-` reuse the adjective-modifier cat. (`-based : ADJ\N` is the categorial *analysis*;
 synthesize-on-token builds the `ADJ` item directly, so nothing new is declared.)
 
-**`recq` (separate):** a named-entity `cat_np` entry — mechanism TBD (a small domain-lexicon ESL, or a
-parse-time capitalized-unknown → `cat_np` handler).
+**`recq` (separate — gene-family named entity):** `RecQ` is not a single gene but a gene *family* —
+authoritatively **HGNC gene group 1049** ("RecQ like helicases": BLM, RECQL, RECQL4, RECQL5, WRN); the
+parallel UMLS/MeSH concept is **C0084304** ("RecQ Helicases" / "RecQ Family of DNA Helicases"). The
+document uses it as a bare modifier (`a RecQ DNA helicase`, `the four other RecQ DNA helicases` = WRN +
+the other four members). It is OOV because a family has no bare-token lexical entry: the NCBI importer
+reads per-gene `gene_info` (no gene-*group* records), and UMLS carries the concept only as ≥2-token
+strings (shortest `RecQ Helicase` / `Helicase, RecQ`), so the single-word surface `recq` matches nothing
+(verified against `MRCONSO.RRF` 2026AA + `Homo_sapiens.gene_info`). The fix is a named-entity `cat_np`
+entry for `RecQ` **aligned to HGNC:1049** (primary — the nomenclature authority for families),
+cross-referenced to UMLS C0084304 — grounding, not a minted symbol.
+
+The five members are **already imported** in `Homo_sapiens.gene_info` (per-gene, each carrying an HGNC
+dbXref and a `… RecQ like helicase` description) — so the family is derivable from data on hand, only the
+group record is missing:
+
+| member | NCBI GeneID | HGNC | description |
+|---|---|---|---|
+| RECQL (RECQL1) | 5965 | HGNC:9948 | RecQ like helicase |
+| WRN | 7486 | HGNC:12791 | WRN RecQ like helicase |
+| BLM | 641 | HGNC:1058 | BLM RecQ like helicase |
+| RECQL4 | 9401 | HGNC:9949 | RecQ like helicase 4 |
+| RECQL5 | 9400 | HGNC:9950 | RecQ like helicase 5 |
+
+**General gap (follow-on, beyond this note):** gene *families* used as bare modifiers are a recurring
+class the current lexicon cannot resolve — the per-gene `gene_info` import has the members but no
+family/group record, and UMLS holds the family only as multi-token strings. Two data paths for a
+family-entity source: **(a) structured** — import HGNC gene groups (group id → label + member HGNC IDs),
+the authority; **(b) derivable** — the members are already imported, each with its HGNC dbXref and a
+shared `RecQ like helicase` descriptor, so a family layer can be synthesized from data on hand. Its own
+domain-lexicon track, not the morphology and not a per-token handler.
 
 **Step 2b (deferred, importer) — `crates/eigenius-wordnet/src/convert.rs`** (mirror the `PpOblique` change,
 commit `2b22705`; then reseed):
