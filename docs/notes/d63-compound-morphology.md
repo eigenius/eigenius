@@ -75,21 +75,54 @@ is exactly the verb+PP machinery already built: `based : (S[adj]\NP)/cat_pp_arg`
   closure plan. Today the phrasal *parses* but with a different sem (adjective + adjunct — see the caveat).
 
 So the object+PP extension resolves **only the phrasal half**; the compound half is Slice 2. General shape
-for participial `-Ved` denominal adjectives (`PCR-based`, `cell-mediated`, `receptor-bound`): the affix
-maps to the axiom of whatever verb `X-Ved` derives from.
+for participial `-Ved` denominal adjectives (`PCR-based`, `cell-mediated`, `receptor-bound`) **and the
+adjectival `-like`/`-dependent`/`-specific` class**: the affix maps to the axiom of the verb/adjective it
+derives from, and compound `X-E` must align with phrasal `E link X`. That generalization — the shared
+`DenominalElement` table + the `⟦X-E⟧ = ⟦E link X⟧` invariant, the `-like` over-generation fix, and the
+per-file code touchpoints — is [d63-denominal-suffix-alignment.md](d63-denominal-suffix-alignment.md).
 - **Caveat (checked + corrected twice, `2026-07-04`).** `base` has two relevant verb senses: **"situate"**
   (WN3.0 02756196, frames 8–11 transitive) and **"found on"** (WN3.0 00636888 = OEWN 00638550, *"base a
   claim ON an observation"*), which **does** carry an object+PP frame — WN3.0 **frame 21** ("Somebody
   ----s somebody PP"), OEWN "----s something PP" (`vtai-pp`). So WordNet *does* encode `base X on Y`. But
-  our importer routes **frame 21 → Transitive** (one of the object+PP frames {13,20,21,22} still handled
-  coarsely — the PP dropped), so the argument reading `base(x, y)` is **not produced**. `based on X` parses
-  anyway — via the **adjective** `based` (`data.adj` 02126140/02351064) + `on X` as an **adjunct**
-  (`based_adj(x) ∧ prep_on(x, X)`), not `base(x, X)` (`Cells are based on genes` → AMBIG×8).
-  **Consequence for §2a:** the compound↔phrasal convergence is the *desired* representation and needs the
-  **object+PP frame extension** (frames 21/22 → `((S\NP)/cat_pp_arg)/NP`, the deferred slice of the verb+PP
-  fix); then both `-based` and `based on X` resolve through the `base`-verb axiom → `base(x, X)`.
-  *(Two corrections: I first said it gaps — wrong; then that WordNet lacks the subcat — wrong, WordNet has
-  it (frame 21), only my importer's handling is coarse. Lesson: check all senses + the adjective entries.)*
+  our importer routes **frame 21 → Transitive** (an object+PP frame handled coarsely — the PP dropped), so
+  the argument reading is **not produced**. What `based on X` produces today (witnessed over
+  `wordnet-umls-2026-07-04`, `db_backed_encoding::show_based_on_x_reading`, `2026-07-05`) is a
+  **noun/adjective/verb pile-up**, and in **every** reading `on X` is a separate `prep_on(x, X)`
+  **adjunct**, never the argument:
+  - `Cells are based on genes` → **×8, all the NOUN reading** `subclass_of(Cell, Σx:Basis.
+    prep_on(x, kind_of(Gene)))` (`based` → the noun *basis*, C1527178);
+  - `The method is based on sequencing` → **×176**, `based` resolving as a gradable **adjective**
+    (`gt(deg_based(x), std_based) ∧ prep_on(x, …)`), as the **verb** with its object slot inert
+    (`(Πg. base_v(x, g)) ∧ prep_on(x, …)`, `base_v` = `v00636888_t`), and as a noun-compound.
+
+  (An earlier draft here said the adjective reading is *the* current reading and that `Cells are based on
+  genes` shows it — wrong on both: it is one of several, and that example actually gives the noun reading.)
+  **Consequence:** the convergence is the *desired* representation and needs the **object+PP frame
+  extension** (Step 2b, §3) so both `-based` and `based on X` resolve through the `base`-verb axiom.
+
+**Faithful target (witnessed `2026-07-05`) — what both surface forms should land on:**
+
+| sentence | faithful encoding |
+|---|---|
+| `Cells are based on genes.` | `base_on(kind_of(Cell), kind_of(Gene))` |
+| `The method is based on sequencing.` | `base_on(m, kind_of(Sequencing))`, `m : Method` (definite referent) |
+
+- **Relation:** `base_on` = the **stative** "found on / rests on" projection of `base.v.01` (WN 00636888) —
+  grounding to the verb, still **not** a free-minted relation.
+- **Arity = 2-place `base_on(theme, ground)`** (theme = subject, ground = the on-object). The active
+  `base.v.01` is 3-role `base(agent, theme, ground)`; the stative passive **drops the agent** (it asserts a
+  foundational relation, not an event), so `∃agent. base(agent, X, Y)` is *less* faithful.
+- **Role correction to Slice 2's shorthand `base(x, X)`:** the coarse 2-place axiom is
+  `v00636888_t(theme, **agent**)` — its second slot is the *agent*, so Slice 2 puts the ground in the agent
+  slot (pragmatic, role-imprecise). Faithful Step 2b emits `base_on(theme, ground)` with the right roles.
+- **Subject term by determiner:** definite `the method` → a specific **referent** `m : Method` (D64 hole),
+  *not* a kind; bare `Cells`/`genes`/`sequencing` → `kind_of(·)`.
+- **Sense caveat:** the parse mis-resolves `sequencing` → C0004793 *"Base Sequence"* (the DNA base
+  sequence); the faithful `ground` is the sequencing *technique* — a grounding/sense-selection fix,
+  orthogonal to the relation.
+- *(History: I first said `based on X` gaps — wrong; then that WordNet lacks the subcat — wrong (frame 21);
+  then that today's reading is the adjective one — wrong (noun/adjective/verb pile-up). Each corrected by
+  witnessing. Lesson: parse it before characterizing it.)*
 
 ## 3. Implementation plan
 
@@ -180,7 +213,29 @@ commit `2b22705`; then reseed):
   reuses the existing pattern. Revisit only if the affix inventory grows large.
 - **Phrasal `based on X` argument reading** — the §2a *phrasal* half, built by the object+PP frame
   extension (**Step 2b**, closure plan: importer change + reseed). Independent of the compound OOV; the
-  compound half is Slice 2.
+  compound half is Slice 2. The phrasal half + its passive machinery are their own tracks —
+  [d63-denominal-suffix-alignment.md](d63-denominal-suffix-alignment.md) (spec + invariant) and
+  [d63-passive-voice-handling.md](d63-passive-voice-handling.md) (promotion/agent/roles).
+
+## 3b. Close-out — generalize the compound half to the full denominal-suffix set
+
+The shipped `-based` slice (Slice 2) is **one row** of a productive class (`-like`, `-mediated`,
+`-dependent`, `-derived`, `-related`, `-induced`, `-specific`, …). Closing out the compound-morphology work
+= generalize the **compound recognizer** to the whole set — the compound half only; the phrasal `E link X`
+alignment and the passive machinery are separate parked tracks
+([d63-denominal-suffix-alignment.md](d63-denominal-suffix-alignment.md),
+[d63-passive-voice-handling.md](d63-passive-voice-handling.md)). Two changes in
+[`kernel/src/dcg/lookup.rs`](../../kernel/src/dcg/lookup.rs):
+
+| change | what | anchor |
+|---|---|---|
+| `denominal_based_item` → `denominal_suffix_item` | table-driven: rsplit hyphen → `(X, suffix)`; look up the `DenominalElement` (suffix→relation, denominal-alignment §3); build `λθ. rel(θ, kind_of(X))`. Drop the hardcoded `tail=="based"` / lemma `"base"`. Add an adjective-relation fetch (`is_adjective_cat`) beside `is_transitive_verb_cat` (`:3129`) for adjective-voice elements (like/dependent/related/specific). | `:1007` |
+| `adjective_bases` — `SLICE2_TAILS` | replace with the **full denominal-suffix set**, so Slice-1 hyphen-head identity excludes them all — **fixes the `-like` over-generation** (`like` is a WN adjective `01409581`, so today Slice-1 fires on `RecQ-like`, seeds identity `like`, and drops `RecQ`). | `:3040`, const `:3045` |
+
+Reused unchanged: `is_derived_adjective` (`:957`), `derived_adjective_items` (`:979`), `kind_of` (`:2931`),
+`has_token`, the seed loop. **Verification:** the over-generation guard (a `X-like` token no longer takes the
+Slice-1 identity reading) + one compound parse per new suffix. The `⟦X-E⟧ = ⟦E link X⟧` equivalence is the
+*alignment* note's test, gated on the phrasal half.
 
 ## 4. Prior art
 

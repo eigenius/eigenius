@@ -325,6 +325,37 @@ fn verify_sense_lever_at_page_beam() {
     }
 }
 
+/// D63 compound-morphology §2a diagnostic: show *exactly* how `based on X` parses TODAY (before the
+/// Step 2b object+PP extension) — the adjective(`based`, data.adj) + `on`-adjunct reading, NOT the
+/// verb-argument `base(x, X)`. Dumps every distinct closed sem. Run with:
+///   EIGENIUS_DB_SNAPSHOT=/path cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       show_based_on_x_reading -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic: show the today `based on X` adjective+adjunct reading; --ignored --nocapture"]
+fn show_based_on_x_reading() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    for s in [
+        "Cells are based on genes.",
+        "The method is based on sequencing.",
+    ] {
+        let (closed, open) = index.parse_open(s, &lem);
+        eprintln!(
+            "\n=== {s:?} — {} closed, {} open ===",
+            closed.len(),
+            open.len()
+        );
+        let mut sems: Vec<String> = closed.iter().map(|it| pretty_term(it.sem())).collect();
+        sems.sort();
+        sems.dedup();
+        for (i, sem) in sems.iter().enumerate() {
+            eprintln!("  [{i}] {sem}");
+        }
+    }
+}
+
 /// S3 over-prune localization (GH#97): `Each event alone does not lead to cell death` gaps WITH the
 /// cross-POS prune but parses without. This dumps what the prune drops for each of S3's function words
 /// (closed / open-nominal=dropped / open-other=kept) and A/B-parses S3 sub-variants, to find which

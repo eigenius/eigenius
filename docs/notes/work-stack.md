@@ -36,6 +36,16 @@ Separate threads, not blocking the parse→encode pipeline; pull onto the stack 
 - [d61-llm-based-encoding-methodology.md](d61-llm-based-encoding-methodology.md) — grounding-discovery +
   typed decision-making layer (the D61 plan).
 - Benchmark pilot (D50/D51) — chem+bio; kernel gaps done, infra gaps remain.
+- [d63-passive-voice-handling.md](d63-passive-voice-handling.md) — general passive-voice infrastructure:
+  object→subject promotion + agent suppression + `rel(theme, ground)` roles (importer `cat_pss` / a grammar
+  passive rule). Serves the denominal phrasal half **and** ordinary passive clauses (`were represented by`,
+  `is associated with`, … — in the current grammar-gap list). **Trigger:** closing passive clauses on the
+  page, or the denominal phrasal half.
+- [d63-denominal-suffix-alignment.md](d63-denominal-suffix-alignment.md) — the **spec**: the
+  `DenominalElement` table + the `⟦X-E⟧ = ⟦E link X⟧` alignment invariant for the denominal-adjective suffix
+  class (`-based`/`-like`/`-mediated`/…). The two halves live elsewhere: **compound** →
+  [compound-morphology.md](d63-compound-morphology.md) §3b (self-contained, incl. the `-like` fix);
+  **phrasal** → d63-passive-voice-handling.md. **Trigger:** after both halves land, to gate the equivalence.
 
 ## Reference / design notes (consulted, not "work")
 Not stack items — background for the above: `d63-{document-preprocessing-scope, kind-predication-reshape,
