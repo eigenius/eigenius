@@ -614,6 +614,89 @@ fn probe_wilcoxon_pcr_grounding() {
     );
 }
 
+/// Grammar-gap ROOT-CAUSE battery (`2026-07-05`): short isolation probes for each construction in the
+/// `--umls-all` run's 20 grammar-gaps, over the augmented index (so subjects like MSI/WRN are grounded +
+/// overlaid — the run's config). Each prints CLOSED×n / OPEN×n / GAP so the blocker is localized to the
+/// construction, not the subject. Run:
+///   EIGENIUS_DB_SNAPSHOT=/…/wordnet-umls-all-… cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       probe_grammar_gap_root_causes -- --ignored --nocapture
+#[test]
+#[ignore = "grammar-gap root-cause battery over the --umls-all snapshot; --ignored --nocapture"]
+fn probe_grammar_gap_root_causes() {
+    use eigenius_kernel::dcg::{
+        augment_lexicon_backed, NoAbbreviationProposer, NominalCategoryProposer,
+    };
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let probes = [
+        // — argument-PP verb (Step-2 fix target): the note's contrast + the actual object —
+        "instability contributes to cells",
+        "MSI contributes to cells",
+        "MSI contributes to several cancers",
+        "MSI results from deficiency",
+        "cells respond to therapy",
+        "MSI is associated with responses",
+        // — adjunct-PP verb (should VP-adjoin per Step-1) —
+        "MSI occurs in cancers",
+        "MSI arises from deficiency",
+        // — comparative `than` —
+        "cells showed greater dependence than counterparts",
+        "cells contained fewer mutations than lineages",
+        // — `V X as Y` predicative —
+        "we evaluated MSI as a biomarker",
+        // — copula compound kind —
+        "regions are microsatellites",
+        "nucleotide repeat regions are microsatellites",
+        // — object coordination (mismatched NPs) —
+        "WRN requires lineages or a phenotype",
+        // — adjective + PP complement —
+        "classifications were concordant with phenotyping",
+        // — linking verb + adjective —
+        "findings remained true",
+        // — named entity —
+        "MSI arises from Lynch syndrome",
+    ];
+    // Augment the whole battery as one document so OOV subjects (MSI/WRN/…) are grounded + overlaid.
+    let doc = probes.join(". ");
+    let aug = augment_lexicon_backed(
+        &head,
+        &doc,
+        &NoAbbreviationProposer,
+        &NominalCategoryProposer,
+        &lem,
+    );
+    eprintln!(
+        "augmentation: {} grounded, {} residual",
+        aug.added.len(),
+        aug.missing_oov.len()
+    );
+    let index = build_index(&head).with_document_augmentation(&aug);
+    for t in [
+        "msi",
+        "wrn",
+        "lynch syndrome",
+        "microsatellites",
+        "concordant",
+        "remained",
+        "biomarker",
+    ] {
+        eprintln!("has_token({t:?}) = {}", index.has_token(t, &lem));
+    }
+    eprintln!("-- probes --");
+    for s in probes {
+        let (closed, open) = index.parse_open(s, &lem);
+        let tag = if !closed.is_empty() {
+            format!("CLOSED×{}", closed.len())
+        } else if !open.is_empty() {
+            format!("OPEN×{}", open.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  [{tag:>9}] {s}");
+    }
+}
+
 /// S3 over-prune localization (GH#97): `Each event alone does not lead to cell death` gaps WITH the
 /// cross-POS prune but parses without. This dumps what the prune drops for each of S3's function words
 /// (closed / open-nominal=dropped / open-other=kept) and A/B-parses S3 sub-variants, to find which

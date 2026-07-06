@@ -1,7 +1,9 @@
 # D63 — Parse-gap closure for the test document (full-lexicon baseline + plan)
 
-**Status:** the **OOV / lexical side is closed** (`2026-07-05`); the residual is **grammar-gaps** (verb+PP
-frames etc., §3 / steps 4–8) plus numbers. Goal (the user's step 2): make the test document **parse
+**Status:** the **OOV / lexical side is closed** (`2026-07-05`); the residual is **grammar-gaps** — §3:
+a bare-UMLS-noun-subject typing gap (RC-1) + missing construction rules (comparative `than`, `V X as Y`,
+adjective+PP, linking verb, coordination) — plus numbers. **The verb+PP frame, once the headline gap, is
+now fixed and validated** (§3). Goal (the user's step 2): make the test document **parse
 completely** — every unit produces ≥1 parse — over the full WordNet+UMLS lexicon. Ambiguity (collapsing
 the many readings to one) and long-sentence perf are the *next* phase, not this one.
 
@@ -78,7 +80,7 @@ distinct OOV tokens (1): {"pcr-based"}
 **Missing-lexeme 6 → 2; distinct OOV 4 → 1.** The augmentation eliminates OOV as a blocker: `recq`,
 `double-stranded`, `hypermutable` all resolve, so their units re-bucket **out of missing-lexeme**. They
 land in grammar-gap (17 → 22), not ambiguous — i.e. the OOV was *masking* an underlying **grammar** gap
-(the verb+PP / construction gaps of §3); closing the lexeme reveals it. So the augmentation does not (by
+(the construction / subject-typing gaps of §3); closing the lexeme reveals it. So the augmentation does not (by
 itself) lift the parse rate — it converts "blocked by an unknown word" into "blocked by a missing frame",
 which is the honest state: **the residual is grammar, not lexicon.** The sole remaining OOV, `pcr-based`,
 needs its base `pcr` — absent from this WRN-subset snapshot (T063), present under `--umls-all` (§1b).
@@ -114,7 +116,7 @@ rather than re-bucketing to grammar-gap. The three-way progression:
 | distinct OOV | 4 | 1 | **0** |
 
 The **Step-9 gate is half met**: `missing-lexeme → 0` ✓; the **20 grammar-gaps** remain — the verb+PP /
-construction gaps of §3 (steps 4–8), which are grammar, not lexicon.
+construction / subject-typing gaps of §3 (steps 4–11), which are grammar, not lexicon.
 
 Two meta-findings (Derived), both **out of scope here** (step 3):
 - **0 encoded** — every parse is ambiguous (AMBIG ×8 to ×64). Sense-crowding; the reranker exists to
@@ -144,47 +146,66 @@ supplies.
 
 ---
 
-## 3. Gap class 2 — grammar-gap (17), and it is *mostly lexical*
+## 3. Gap class 2 — grammar-gap (20 over `--umls-all`): the verb+PP frame is FIXED; the residual is subject-typing + missing construction rules
 
-**The dominant pattern is missing verb + PP-complement frames**, established by a controlled contrast in
-the data (Derived):
+Every token in all 20 is **known** (`has_token=true`, incl. the UMLS terms — `msi`, `wrn`, `lynch
+syndrome`, …) — these are purely *grammatical*. Short isolation probes over the augmented `--umls-all`
+index, run **both** deterministic (`--no-llm`) and with the **live reranker** (`--features use-llm`),
+localize each blocker to its construction, not the beam (all **Derived**, `probe_grammar_gap_root_causes`,
+`2026-07-05`):
 
-> *"MSI **is observed in** colorectal, endometrial, gastric and ovarian cancers"* → **parses (AMBIG)**
-> *"MSI **occurs in** colon, gastric, endometrial and ovarian cancers"* → **grammar-gap**
+| probe | det | reranker | reads as |
+|---|---|---|---|
+| `instability contributes to cells` | CLOSED×11 | CLOSED×4 | **verb+PP frame WORKS** |
+| `MSI contributes to cells` | GAP | GAP | bare UMLS subject fails |
+| `MSI results from deficiency` | GAP | GAP | " |
+| `cells respond to therapy` | CLOSED×36 | CLOSED×12 | **verb+PP frame WORKS** |
+| `MSI is associated with responses` | CLOSED×16 | GAP | det-only artifact; subject fails |
+| `MSI occurs in cancers` / `MSI arises from deficiency` | GAP | GAP | bare UMLS subject fails |
+| `cells showed greater dependence than counterparts` | GAP | GAP | no comparative-`than` rule |
+| `cells contained fewer mutations than lineages` | GAP | GAP | " |
+| `we evaluated MSI as a biomarker` | GAP | GAP | no `V X as Y` rule |
+| `regions are microsatellites` | CLOSED×2 | CLOSED×2 | copula-kind WORKS (simple subj) |
+| `nucleotide repeat regions are microsatellites` | GAP | GAP | copula-kind fails (compound subj) |
+| `WRN requires lineages or a phenotype` | GAP | GAP | object coordination |
+| `classifications were concordant with phenotyping` | GAP | GAP | no adjective+PP-complement |
+| `findings remained true` | GAP | GAP | no linking-verb+predicate |
 
-Same coordination, different verb ⇒ the coordination isn't the blocker; the **verb's PP-complement
-subcategorization frame is**. `observe/limit/depend` compose with their PP; `occur/arise/contribute/
-result/respond/associate/query/compare` do not. This matches the standing finding that the parser is
-~grammar-complete and the residual is lexical.
+**Two headline corrections to the earlier analysis (both Derived):**
 
-The 17 grammar-gap sentences, bucketed (a sentence can carry >1 blocker):
+1. **The verb+PP-complement frame (§4 steps 1–2) is FIXED and validated over `--umls-all`.**
+   WordNet-noun subjects compose — `instability contributes to cells`, `cells respond to therapy` CLOSED
+   under both configs. "Missing verb+PP frame" is **no longer** the dominant grammar-gap.
+2. **The residual "verb+PP" gaps are the SUBJECT, not the verb — and NOT sense-crowding.** A bare
+   UMLS-sourced form (`MSI`) as a finite-verb subject GAPS under **both** the deterministic cap and the
+   reranker — the controlled contrast `instability`✓ / `MSI`✗ (only the subject differs) isolates it to
+   the subject, and the reranker even *removes* the one deterministic "win" (`associate`, CLOSED×16 → GAP),
+   so it is a real compositional gap, not a beam artifact. **Leading mechanism (Declared, to confirm):**
+   UMLS concepts seed as **count** common nouns, and a bare count noun can't be a subject — whereas WordNet
+   `instability` is **mass** (bare-shifts to a subject NP) and the note's glossary ACCEPTANCE (§4 step 2)
+   worked precisely because it grounded MSI to the **mass** concept `C0920269`. Confirming probes next
+   round: `the MSI contributes to cells` (add a determiner) + inspect the UMLS entry's `cat_n` `num` feature.
 
-**A. Verb + PP-complement frame (~10) — highest leverage:**
-- `query … in` — "We queried dependencies in cancers with MSI."
-- `result from` — "MSI results from deficient DNA mismatch repair."
-- `contribute to` — "MSI contributes to several cancers."
-- `occur in` — "MSI occurs in colon, gastric, endometrial and ovarian cancers."
-- `arise from` — "MSI can arise from Lynch syndrome." / "Somatic MMR inactivation … arises from hypermethylation of the MLH1 promoter."
-- `associate with` — "MSI is associated with notable responses to immune checkpoint blockade."
-- `respond to` — "Some cancers do not respond to immune checkpoint blockade."
-- `compare to` — "The MSI relationship compared favourably to other strong biomarkers for vulnerabilities." / "… compared to MSS cell lines" (unit 47).
+### Root causes (witnessed) and the 20 sentences
 
-**B. Comparative `than` (2):** "showed **greater** dependence … **than** their MSS counterparts" /
-"contained **fewer** deletion mutations … **than** typical lineages". (`less dependent on` *alone* parses,
-so the `than`-clause is the blocker.)
+A sentence can carry >1 blocker (**primary** first). Probed causes are Derived; un-probed ones are
+Declared-by-construction (flagged `?`).
 
-**C. `V X as Y` predicative (2):** "evaluated MSI **as a biomarker**" / "identified WRN **as** the top
-preferential dependency".
+| RC | root cause | evidence | sentences (primary) |
+|---|---|---|---|
+| **RC-1** | **Bare UMLS-noun subject** — the verb+PP frame is fine; a bare UMLS term can't be a finite-verb subject (mass-vs-count) | Derived (contrast, both configs) | `MSI results from…` (3), `MSI contributes to…` (5), `MSI occurs in…` (6), `MSI arises from…` (7), `MSI is associated with…` (10) |
+| **RC-2** | **No comparative `than`** construction | Derived (GAP both) | `…greater dependence…than…` (18), `…fewer mutations…than…` (19); `compared to…` in (14) |
+| **RC-3** | **No `V X as Y`** predicative small-clause | Derived (GAP both) | `evaluated MSI as a biomarker` (16); `identified WRN as…` (14) |
+| **RC-4** | **No adjective + PP-complement** (`concordant with X`) | Derived (GAP both) | `…concordant with…and with…` (12) |
+| **RC-5** | **No linking-verb + predicate** (`remain/stay true`) | Derived (GAP both) | `…remained true with…` (15) |
+| **RC-6** | **Coordination in quantified / apposed / mismatched-NP contexts** | Derived (object-`or` GAP) + construction | `…colon, gastric…and ovarian cancers` (6), `the MMR genes MSH2,…or MLH1` apposition (8), `Some…lines and some…lines` (13), `Achilles and DRIVE` (14), `lineages or a…phenotype` (20) |
+| **RC-7** | **Copula kind-predication on a *compound* subject** (`are_kind` fires on simple, not 3-word, subjects) | Derived (simple✓/compound✗) | `Nucleotide repeat regions are microsatellites` (4) |
+| **RC-8** | **Clausal complement + multiword verb** (`hypothesize that`, `give rise to`) | Declared (note's prior `give rise` beam finding) | `We hypothesized that…would give rise to…` (1) |
+| **?** | **verb+PP frame *or* deep object/nested-PP** — non-bare-UMLS subject; needs a probe | Declared | `queried dependencies in cancers with MSI` (2), `arises from hypermethylation of the MLH1 promoter` (9), `compared favourably to…` (17); deep object `…responses to immune checkpoint blockade` (10, 11) |
 
-**D. Coordination / apposition in context (3):** apposition "the MMR genes **MSH2, MSH6, PMS2 or MLH1**";
-"**Some** MSI lines **and some** MSS lines … were represented by …"; "require specific lineages **or** a
-stronger mutation phenotype". (Plain adjective coordination parses — unit 53 — so these gap on the
-apposition / NP-coordination / passive context, not lists per se.)
-
-**E. Copula compound kind (1):** "Nucleotide repeat regions **are** microsatellites" — the reshape's
-`are_kind` (kind–kind subsumption) path not firing on a **3-word compound** subject.
-
-**F. Named disease (1–2):** "**Lynch syndrome**" — named-entity handling (also appears in A/D sentences).
+**Named entities are no longer a bucket.** `Lynch syndrome` / the gene symbols are `has_token=true` over
+`--umls-all` (loaded UMLS concepts) — where they appear (7, 8) the blocker is RC-1 (subject) or RC-6
+(apposition), not named-entity seeding. The old "Named disease (F)" bucket is closed by coverage.
 
 ---
 
@@ -241,17 +262,21 @@ apposition / NP-coordination / passive context, not lists per se.)
         flipped AMBIG→GAP: `give rise`'s multiword cat is unchanged; standalone `rise` gained a competing
         `to`-verb reading (`(S\NP)/cat_pp_arg`) that at beam=512 crowds out the winning derivation
         (1.0s→84.3s). The **live reranker parses it** (AMBIG×256, 26s) — so the raw regression is absent
-        under the operational reranked config. *Implication: the honest metric for this fix is the reranked
-        pass, and sense-crowding is now the pressing blocker (it masks the fix on the raw run).*
+        under the operational reranked config.
+  - **UPDATE (`2026-07-05`, `--umls-all` battery, §3): the "sense-crowding" implication was WRONG.** The
+        `MSI`-subject verb+PP sentences GAP under **both** the deterministic cap **and** the reranker —
+        the reranker does *not* recover them (it even removes the one det-only win). So the blocker is not
+        the beam; the frame is fixed and the residual is the **bare UMLS-noun subject** (RC-1, §3) — a
+        real compositional gap (mass-vs-count), now the highest-leverage item (Step 4 below).
   - *Looseness (stage-1):* WordNet frames don't encode *which* preposition, so `cat_pp_arg` accepts any PP
     (`contributes in cancers` would also parse) — verb-specific but prep-generic; specific-prep is later.
-  - [ ] **Step 2b (deferred) — object+PP frames `((S\NP)/cat_pp_arg)/NP`.** Extend the verb+PP fix to the
-        **object+PP** frames **{13, 20, 21, 22}** (`base X on Y`, `identify X as Y`, `----s something PP`) —
-        currently routed coarsely to transitive (object kept, **PP dropped**) — emitting
-        `((S\NP)/cat_pp_arg)/NP` (object, then the argument-PP). Resolves the argument reading of
-        **`based on X`** (`base` "found on" = frame 21) and the compound↔phrasal convergence in
-        **[d63-compound-morphology.md §2a](d63-compound-morphology.md)**; also the general `V X on/from Y`
-        pattern. Same `cat_pp_arg` + argument-marker machinery as Step 2, with the object slot added.
+  - [ ] **Step 2b (object+PP frames `((S\NP)/cat_pp_arg)/NP`) — folded into the new Steps 7/8 below.**
+        Extend the verb+PP fix to the **object+PP** frames **{13, 20, 21, 22}** (`base X on Y`, `identify
+        X as Y`, `----s something PP`) — currently routed coarsely to transitive (object kept, **PP
+        dropped**) — emitting `((S\NP)/cat_pp_arg)/NP` (object, then the argument-PP). This is the same
+        machinery the current 20 need for **`V X as Y`** (RC-3, Step 7) and the adjective **`concordant
+        with X`** (RC-4, Step 8); it also resolves `based on X` (frame 21, [d63-compound-morphology.md
+        §2a](d63-compound-morphology.md)).
 - [x] **Step 3 — the 4 OOV: CLOSED (`2026-07-05`).** The 3 productive derivations resolve via the shipped
       compound morphology (**[d63-compound-morphology.md](d63-compound-morphology.md)** — `pcr-based` =
       `X-based` Slice 2, `hypermutable` = `hyper-X` / `double-stranded` = hyphen compound-adj, Slice 1),
@@ -260,19 +285,39 @@ apposition / NP-coordination / passive context, not lists per se.)
       lexicon-augmentation §6a), overlaid onto the parse index (`with_document_augmentation`). See §1a/§1b.
       Net: the missing-lexeme units re-bucket to grammar-gap (their tokens are now known), so this step
       lifts the *lexical* blocker, not the parse rate — the residual is the §3 grammar gaps.
-- [ ] **Step 4 — Comparative `than`** (bucket B) — the `than`-clause construction. 2 units.
-- [ ] **Step 5 — `V X as Y` predicative** (bucket C) — the "as a biomarker" / "identified as" small
-      clause. 2 units.
-- [ ] **Step 6 — Coordination / apposition in context** (bucket D) — noun-noun apposition
-      ("the N genes <list>"), NP coordination under a quantifier ("some X and some Y"), object `or`. 3 units.
-- [ ] **Step 7 — Copula compound kind** (bucket E) — make `are_kind` fire on a compound bare-plural
-      subject. 1 unit (a reshape edge case — `Σ`-refined subject on the kind–kind path).
-- [ ] **Step 8 — Named disease** (bucket F) — `cat_np` injection for named entities ("Lynch syndrome").
-- [~] **Step 9 — Re-measure** `scripts/measure-parse-rate.sh --no-llm` over `--umls-all` (§1b). **Gate:**
+**Re-ordered by leverage over the current 20 grammar-gaps (§3 RC counts), `2026-07-05`:**
+
+- [ ] **Step 4 — RC-1: bare UMLS-noun subject (≈5+ units, highest leverage).** The verb+PP frame is fixed;
+      the residual is that a bare UMLS term can't be a finite-verb subject. **First, witness the
+      mechanism** (probes: `the MSI contributes to cells` with a determiner → parses? inspect the UMLS
+      importer's emitted `cat_n` `num` — count vs mass). **Then the fix**, per the mechanism: if it's
+      countability, the UMLS importer should emit a **mass** (or `num_any`-bare-able) reading for
+      abbreviation/uncountable concepts (mirror the WordNet countability lexicon, §OOV), OR the pipeline
+      grounds a bare domain abbreviation to a **single doc-scoped mass sense** (as the glossary path did →
+      CLOSED×8). Gate: `MSI contributes to cells` / `MSI results from …` → parse, deterministic.
+- [ ] **Step 5 — RC-6: coordination in quantified / apposed / mismatched-NP contexts (≈3–5 units).**
+      Object `X or Y` with mismatched NPs (`lineages or a … phenotype`), quantified `some X and some Y`,
+      noun-noun apposition (`the MMR genes MSH2, … or MLH1`), proper-noun coordination (`Achilles and
+      DRIVE`). Plain adjective/NP coordination already parses — so extend the coordination rule to these
+      contexts, not lists per se.
+- [ ] **Step 6 — RC-2: comparative `than` (2 units).** The `than`-clause complement (`greater/fewer X than
+      Y`). Mirror the existing `cat_pp_than` argument-PP machinery for the `than`-phrase.
+- [ ] **Step 7 — RC-3: `V X as Y` predicative small-clause (2 units).** `evaluate/identify X as Y` — the
+      `as`-complement. Same shape as Step-2b's object+PP; likely folds into it (`((S\NP)/cat_as)/NP`).
+- [ ] **Step 8 — RC-4: adjective + PP-complement (1 unit).** `concordant with X` — a predicative adjective
+      subcategorizing for a PP. The adjective analog of Step-2's verb `cat_pp_arg`: `(S[adj]\NP)/cat_pp_arg`.
+- [ ] **Step 9 — RC-5: linking-verb + predicate (1 unit).** `remain/stay/become X` taking an AP/NP
+      predicate — a copula-class beyond `be`.
+- [ ] **Step 10 — RC-7: copula kind on a compound subject (1 unit).** Make `are_kind` fire on a multiword
+      compound bare-plural subject (`nucleotide repeat regions are microsatellites`) — a reshape edge case;
+      the simple-subject path already works (`regions are microsatellites` CLOSED).
+- [ ] **Step 11 — RC-8 + the `?` residual (≈4 units).** `hypothesize that … give rise to …` (clausal +
+      multiword verb), the deep/compound object NPs (`… responses to immune checkpoint blockade`), and the
+      un-probed verb+PP-or-object cases (2, 9, 17). Probe each to localize before fixing.
+- [~] **Step 12 — Re-measure** `scripts/measure-parse-rate.sh --no-llm` over `--umls-all` (§1b). **Gate:**
       grammar-gap + missing-lexeme → 0. **Half met (`2026-07-05`):** `missing-lexeme → 0` (lexical side
-      complete — 0 OOV); **`grammar-gap 20`** remains, so the doc does not yet parse completely. The
-      residual gate is the grammar work — steps 4–8 (verb+PP frames, comparatives, apposition, named
-      disease). Re-run this after each closes.
+      complete); **`grammar-gap 20`** remains (the RC-1..RC-8 work above). Re-run after each RC closes; the
+      reranker pass is the ambiguity metric, the `--no-llm` pass the does-it-parse gate.
 
 Each step re-runs the measure over just its affected sentences (fast) before the full re-measure at Step 9.
 
