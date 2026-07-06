@@ -1,8 +1,23 @@
 # D63 — Parse-gap closure for the test document (full-lexicon baseline + plan)
 
-**Status:** measured baseline + ordered closure plan. Goal (the user's step 2): make the test document
-**parse completely** — every unit produces ≥1 parse — over the full WordNet+UMLS lexicon. Ambiguity
-(collapsing the many readings to one) and long-sentence perf are the *next* phase (step 3), not this one.
+**Status:** the **OOV / lexical side is closed** (`2026-07-05`); the residual is **grammar-gaps** (verb+PP
+frames etc., §3 / steps 4–8) plus numbers. Goal (the user's step 2): make the test document **parse
+completely** — every unit produces ≥1 parse — over the full WordNet+UMLS lexicon. Ambiguity (collapsing
+the many readings to one) and long-sentence perf are the *next* phase, not this one.
+
+What landed since the baseline below (all Derived, `2026-07-05`):
+- **Stage-A augmentation is now injected into the parse.** The `LexiconBacked` transducer
+  (`augment_lexicon_backed`, D63 lexicon-augmentation §6a) grounds OOV atoms against the form/description
+  text indexes, and a new **`LexicalIndex` document-augmentation overlay** (`with_document_augmentation`)
+  seeds those groundings alongside the persisted index — so the parser SEES them, uncommitted, over a
+  DB-backed head. This resolves the §5 "no doc glossary in this run" caveat.
+- **`recq` grounds** (→ `umlscui:C0084304`) via the form-text-index; **the compound adjectives close via
+  the shipped morphology** (`double-stranded`, `hypermutable`, `pcr-based` — §2), `pcr-based` once its base
+  `pcr` (C0032520, **T063**) is present under `--umls-all`.
+- **Corpus coverage widened to UMLS Level-0 full** (`--umls-all`, all 127 semantic types →
+  `wordnet-umls-all-2026-07-05`, 2.4G): concepts outside the prior WRN-relevant TUI subset — e.g.
+  `wilcoxon` (→ `umlscui:C0242931` "Wilcoxon Rank Test", T081) — now ground. The subset's OOV residuals
+  were **coverage**, not grounding/morphology defects.
 
 Sequence this note sits in: **full-lexicon run (done, below) → close lexicon+grammar gaps (this note) →
 address ambiguity + holes → close grading-phase gaps.**
@@ -23,9 +38,12 @@ scripts/measure-parse-rate.sh --no-llm          # page: cnl-v2, deterministic (n
 - **Deterministic:** `--no-llm` (cap-only, no sense reranker) — the clean parse-gap baseline; the
   reranker bears only on *ambiguity* (step 3), not on whether a unit parses at all.
 - **Harness:** `wrn_first_page_over_full_lexicon` (`crates/eigenius-wordnet/tests/db_backed_encoding.rs`).
-  Parses the raw page over the base lexicon — **no Stage-A doc glossary injected** (see §5 caveat).
+  **As of `2026-07-05` it runs Stage-A augmentation** (`augment_lexicon_backed`) and overlays the
+  groundings onto the index (`with_document_augmentation`) before parsing — so OOV atoms the base lexicon
+  misses are grounded + seeded, not gapped. The pre-augmentation baseline below is the *raw* page over the
+  base lexicon (no injection); see §1a for the re-measure with augmentation.
 
-**Result line (Derived — verbatim from the run):**
+**Result line — PRE-augmentation baseline (Derived — verbatim, snapshot `wordnet-umls-all-2026-07-03`):**
 
 ```
 WRN first page over FULL lexicon: 62 units → encoded 0, ambiguous 39, open 0,
@@ -46,6 +64,58 @@ OOV by fix-bucket: domain-lexicon 4, connectives/function-words 0, -ly adverbs 0
 **"Parse completely" target = the 23 gap-units** (6 missing-lexeme + 17 grammar-gap). The 39 ambiguous
 units already parse.
 
+### 1a. Re-measure WITH Stage-A augmentation (Derived, `2026-07-05`, snapshot `wordnet-umls-2026-07-05`)
+
+Same page + harness, now with the augmentation injected (`augmentation: 9 OOV grounded + injected, 1
+residual`):
+
+```
+WRN first page over FULL lexicon: 62 units → encoded 0, ambiguous 38, open 0,
+                                  missing-lexeme 2, grammar-gap 22, scale-bound 0
+distinct OOV tokens (1): {"pcr-based"}
+```
+
+**Missing-lexeme 6 → 2; distinct OOV 4 → 1.** The augmentation eliminates OOV as a blocker: `recq`,
+`double-stranded`, `hypermutable` all resolve, so their units re-bucket **out of missing-lexeme**. They
+land in grammar-gap (17 → 22), not ambiguous — i.e. the OOV was *masking* an underlying **grammar** gap
+(the verb+PP / construction gaps of §3); closing the lexeme reveals it. So the augmentation does not (by
+itself) lift the parse rate — it converts "blocked by an unknown word" into "blocked by a missing frame",
+which is the honest state: **the residual is grammar, not lexicon.** The sole remaining OOV, `pcr-based`,
+needs its base `pcr` — absent from this WRN-subset snapshot (T063), present under `--umls-all` (§1b).
+
+### 1b. Over `--umls-all` (Derived, `2026-07-05`, snapshot `wordnet-umls-all-2026-07-05`)
+
+The full Level-0 corpus closes the last OOV and the coverage gaps (probe `probe_wilcoxon_pcr_grounding`,
+`wrn_page_oov_closure_deterministic`):
+- `has_token("pcr") = true`, `has_token("pcr-based") = true` — the shipped `X-based` rule fires once the
+  base is present; `pcr-based` is no longer OOV.
+- `wilcoxon` (subset-OOV, T170/T081 outside the WRN TUIs) grounds → `umlscui:C0242931` "Wilcoxon Rank
+  Test".
+- Deterministic OOV closure over the *original* (non-CNL) page: baseline 13 → 16 grounded → **1 residual**
+  (`0.56-fold`, a numeric-fold compound — the numbers path, a separate known gap).
+
+**Full 62-unit parse re-measure over `--umls-all` (Derived, `2026-07-05`; the Step-9 run, ~38 min):**
+
+```
+WRN first page over FULL lexicon: 62 units → encoded 0, ambiguous 42, open 0,
+                                  missing-lexeme 0, grammar-gap 20, scale-bound 0
+distinct OOV tokens (0): {}          augmentation: 1 OOV grounded + injected, 0 residual OOV
+```
+
+**The lexical side is fully closed — `missing-lexeme 0`, distinct OOV `0`** — and it lifts the parse rate:
+**ambiguous 42** (vs 38 subset / 39 pre-aug baseline), because with full coverage the ex-OOV units parse
+rather than re-bucketing to grammar-gap. The three-way progression:
+
+| metric | pre-aug baseline | subset + aug (§1a) | `--umls-all` + aug |
+|---|---:|---:|---:|
+| **ambiguous** (parses) | 39 | 38 | **42** |
+| grammar-gap | 17 | 22 | **20** |
+| missing-lexeme | 6 | 2 | **0** |
+| distinct OOV | 4 | 1 | **0** |
+
+The **Step-9 gate is half met**: `missing-lexeme → 0` ✓; the **20 grammar-gaps** remain — the verb+PP /
+construction gaps of §3 (steps 4–8), which are grammar, not lexicon.
+
 Two meta-findings (Derived), both **out of scope here** (step 3):
 - **0 encoded** — every parse is ambiguous (AMBIG ×8 to ×64). Sense-crowding; the reranker exists to
   collapse it.
@@ -54,16 +124,23 @@ Two meta-findings (Derived), both **out of scope here** (step 3):
 
 ---
 
-## 2. Gap class 1 — OOV (small: 4 tokens, all domain-lexicon)
+## 2. Gap class 1 — OOV — CLOSED (`2026-07-05`)
 
-6 units, each blocked by exactly 1 OOV; 4 distinct tokens:
+The 4 baseline OOV tokens all resolve — 3 via the shipped compound morphology
+([d63-compound-morphology.md](d63-compound-morphology.md)), `recq` via the form-text-index augmentation.
+Each closure is Derived (§1a run + `probe_wilcoxon_pcr_grounding`):
 
-| token | units | shape | fix |
+| token | units | shape | resolution |
 |---|---|---|---|
-| `double-stranded` | 15 | hyphenated adjective | domain-lexicon adjective entry |
-| `hypermutable` | 21 | `hyper-` + adjective | domain-lexicon adjective entry |
-| `pcr-based` | 45, 49 | `X-based` denominal adjective | domain-lexicon adjective entry |
-| `recq` | 48, 50 | gene-family name | domain-lexicon named entity (`cat_np`) |
+| `double-stranded` | 15 | hyphen compound-adj | compound morphology (Slice 1, hyphen-head) — known |
+| `hypermutable` | 21 | `hyper-` + adjective | compound morphology (Slice 1, closed prefix) — known |
+| `pcr-based` | 45, 49 | `X-based` denominal adjective | compound morphology (Slice 2, `X-based`) — known **once base `pcr` present** (T063; `--umls-all`, §1b) |
+| `recq` | 48, 50 | gene-family name | form-text-index augmentation → `umlscui:C0084304` (grounded alias, overlaid) |
+
+So "domain-lexicon OOV entry" was the wrong frame for 3 of the 4 — they are **productive derivations** the
+morphology decomposes, not per-word entries; and `recq` is grounded to an existing UMLS concept, not
+minted. The only thing the subset was actually missing was *concept coverage* (`pcr`), which `--umls-all`
+supplies.
 
 ---
 
@@ -175,11 +252,14 @@ apposition / NP-coordination / passive context, not lists per se.)
         **`based on X`** (`base` "found on" = frame 21) and the compound↔phrasal convergence in
         **[d63-compound-morphology.md §2a](d63-compound-morphology.md)**; also the general `V X on/from Y`
         pattern. Same `cat_pp_arg` + argument-marker machinery as Step 2, with the object slot added.
-- [ ] **Step 3 — the 4 OOV.** Reframed → **[d63-compound-morphology.md](d63-compound-morphology.md)**:
-      3 are **productive derivations** (`pcr-based` = `X-based`, `hypermutable` = `hyper-X`,
-      `double-stranded` = hyphen compound-adj) → **affix-as-functor + decompose-and-seed** (mirror
-      `is_derived_adverb`/`adverb_items`; reuse the `Attrib`/`PpMod` refine), *not* per-word entries.
-      `recq` = a named-entity entry (gene name, no base). Closes all 6 missing-lexeme units.
+- [x] **Step 3 — the 4 OOV: CLOSED (`2026-07-05`).** The 3 productive derivations resolve via the shipped
+      compound morphology (**[d63-compound-morphology.md](d63-compound-morphology.md)** — `pcr-based` =
+      `X-based` Slice 2, `hypermutable` = `hyper-X` / `double-stranded` = hyphen compound-adj, Slice 1),
+      *not* per-word entries — as reframed. `recq` was **not** a minted named entity either: it grounds to
+      the existing UMLS concept `umlscui:C0084304` via the **form-text-index augmentation** (D63
+      lexicon-augmentation §6a), overlaid onto the parse index (`with_document_augmentation`). See §1a/§1b.
+      Net: the missing-lexeme units re-bucket to grammar-gap (their tokens are now known), so this step
+      lifts the *lexical* blocker, not the parse rate — the residual is the §3 grammar gaps.
 - [ ] **Step 4 — Comparative `than`** (bucket B) — the `than`-clause construction. 2 units.
 - [ ] **Step 5 — `V X as Y` predicative** (bucket C) — the "as a biomarker" / "identified as" small
       clause. 2 units.
@@ -188,8 +268,11 @@ apposition / NP-coordination / passive context, not lists per se.)
 - [ ] **Step 7 — Copula compound kind** (bucket E) — make `are_kind` fire on a compound bare-plural
       subject. 1 unit (a reshape edge case — `Σ`-refined subject on the kind–kind path).
 - [ ] **Step 8 — Named disease** (bucket F) — `cat_np` injection for named entities ("Lynch syndrome").
-- [ ] **Step 9 — Re-measure** `scripts/measure-parse-rate.sh --no-llm`. **Gate:** grammar-gap +
-      missing-lexeme → 0 (every unit parses, at least AMBIG). That is "the test document parses completely."
+- [~] **Step 9 — Re-measure** `scripts/measure-parse-rate.sh --no-llm` over `--umls-all` (§1b). **Gate:**
+      grammar-gap + missing-lexeme → 0. **Half met (`2026-07-05`):** `missing-lexeme → 0` (lexical side
+      complete — 0 OOV); **`grammar-gap 20`** remains, so the doc does not yet parse completely. The
+      residual gate is the grammar work — steps 4–8 (verb+PP frames, comparatives, apposition, named
+      disease). Re-run this after each closes.
 
 Each step re-runs the measure over just its affected sentences (fast) before the full re-measure at Step 9.
 
@@ -197,11 +280,15 @@ Each step re-runs the measure over just its affected sentences (fast) before the
 
 ## 5. Caveats / notes
 
-- **No doc glossary in this run.** The harness parses the raw page over the base lexicon; the Stage-A
-  document glossary (abbreviation aliases) is *not* injected. This does **not** rescue the grammar-gaps —
-  they are verb-frame / construction gaps, and `MSI` already parses as a modifier/subject in the AMBIG
-  units. The glossary matters for OOV *abbreviations*; the 4 OOV here are adjectives + a gene name, not
-  abbreviations.
+- **~~No doc glossary in this run.~~ RESOLVED (`2026-07-05`).** The harness now injects the Stage-A
+  augmentation — abbreviation aliases **and** form/description-grounded OOV atoms — via the `LexicalIndex`
+  document-augmentation overlay (`with_document_augmentation`), so the parser seeds them uncommitted over
+  the DB head (§1a). As predicted, this closes the *lexical* blocker but does **not** rescue the
+  grammar-gaps — they are verb-frame / construction gaps (§3), independent of the lexicon.
+  - *Implementation note:* the overlay resolves each alias's cat/sem over the Arc chain (storage-
+    independent), so it works over a DB-backed head where the value-index probe can't see uncommitted
+    entries — closing the §7-2 "in-memory overlay over the persisted lexicon OOMs" gap without committing
+    doc-scoped proposals to the store.
 - **Ambiguity (0 encoded) and long-sentence perf are step 3**, deliberately excluded. Closing the gaps
   moves units *into* AMBIG; collapsing AMBIG→encoded is the next phase.
 - **Grade of claims here:** the classification counts and the OOV list are **Derived** (the run). The

@@ -248,6 +248,15 @@ pub struct LexicalIndex {
     /// index-driven from the ontology (`lexicon:ReservedConstruct`) at build. The CKY's reserved-word
     /// rules (both paths) classify tokens against this, replacing the former hard-coded string consts.
     reserved: ReservedTable,
+
+    /// **Document-augmentation overlay** (D63 lexicon-augmentation §6a): an in-memory `form → entries`
+    /// map of a document's OOV groundings, consulted by [`Self::entries_for`] ALONGSIDE the persisted
+    /// value-index probe. It lets a document's grounded aliases (`LexiconAugmentation`) be seeded WITHOUT
+    /// committing them to the store — they are proposals, not committed lexicon
+    /// ([`Self::with_document_augmentation`]). Each entry's cat/sem was resolved over the Arc chain
+    /// (storage-independent), so the overlay works over a DB-backed head where the value-index probe
+    /// cannot see uncommitted entries (§7-2). Empty by default (no behaviour change).
+    overlay: BTreeMap<String, FormEntries>,
 }
 
 /// One resolved lexical entry at the **seed stage**: its parse [`Item`], its `lexicon:in_lexicon`
@@ -365,6 +374,7 @@ impl LexicalIndex {
                 pos_prune: false,
                 packing: true,
                 reserved,
+                overlay: BTreeMap::new(),
             };
         }
         let (by_form, max_words) = Self::scan_eager(&layer);
@@ -378,7 +388,52 @@ impl LexicalIndex {
             pos_prune: false,
             packing: true,
             reserved,
+            overlay: BTreeMap::new(),
         }
+    }
+
+    /// Overlay a document's [`LexiconAugmentation`](crate::dcg::LexiconAugmentation) (D63 §6a) — its
+    /// grounded alias entries become seedable via an in-memory `form → entries` map consulted alongside
+    /// the persisted index, so a DB-backed parse SEES the document's OOV groundings without those
+    /// (proposal-grade) entries being committed to the store. Each alias's cat/sem is resolved over a
+    /// throwaway doc chain (Arc parent = this index's head) — Arc-walk resolution is storage-independent,
+    /// so a committed concept and a doc-local minted class (a grounding miss, carried in
+    /// `LexiconAugmentation::supporting`) both resolve. Entries whose cat/sem don't resolve are skipped
+    /// (fail-closed, as at import). Builder-style; default (unset) is the persisted index alone.
+    pub fn with_document_augmentation(
+        mut self,
+        aug: &crate::dcg::augment::LexiconAugmentation,
+    ) -> Self {
+        use crate::layer::{LayerBuilder, LayerStorage};
+        let form_prop = iri("urn:eigenius:lexicon:form");
+        // Doc chain purely for RESOLUTION: the supporting resources (miss-minted classes) sit on this
+        // index's head, so an alias's `sem` resolves whether the concept is committed (head) or doc-local.
+        let mut b = LayerBuilder::new("doc-overlay", Some(Arc::clone(&self.layer)));
+        for r in aug.supporting.iter().cloned() {
+            let _ = b.add_resource(r);
+        }
+        let doc = Arc::new(b.build(LayerStorage::in_memory()));
+        let mut overlay: BTreeMap<String, FormEntries> = BTreeMap::new();
+        for binding in &aug.added {
+            let entry = &binding.proposed;
+            let Some(Value::String(form)) = entry.get(&form_prop) else {
+                continue;
+            };
+            let key = form.trim().to_lowercase();
+            if key.is_empty() {
+                continue;
+            }
+            let Ok(item) = entry_to_item(&doc, entry) else {
+                continue;
+            };
+            overlay.entry(key).or_default().push(SeedEntry {
+                item,
+                in_lexicon: read_in_lexicon(entry),
+                sense: read_sense(entry),
+            });
+        }
+        self.overlay = overlay;
+        self
     }
 
     /// Set the per-lemma **sense cap** (adaptive supertagging — GH #97): keep at most `n` entries
@@ -474,7 +529,7 @@ impl LexicalIndex {
     /// chain and shadow-resolves), re-checked to be a `LexicalEntry` whose form
     /// still normalizes to the key, then turned into an [`Item`].
     fn entries_for(&self, form_lc: &str) -> FormEntries {
-        match &self.source {
+        let mut out = match &self.source {
             Source::Eager { by_form, .. } => by_form.get(form_lc).cloned().unwrap_or_default(),
             Source::Lazy {
                 index_iri,
@@ -482,17 +537,33 @@ impl LexicalIndex {
                 cache,
             } => {
                 let key = normalize_value(normalizer, form_lc);
-                if let Some(hit) = cache.lock().expect("LexicalIndex cache poisoned").get(&key) {
-                    return hit.clone();
-                }
-                let items = self.probe_form(index_iri, normalizer, &key);
-                cache
+                // Bind the cache hit to a local so the `MutexGuard` temporary drops HERE — before
+                // `probe_form` and the re-`lock()` below. (Holding it across the `else`, as an `if let
+                // Some(hit) = cache.lock()…get()` would, deadlocks on the re-lock — the guard lives to the
+                // end of the `if let`.)
+                let cached = cache
                     .lock()
                     .expect("LexicalIndex cache poisoned")
-                    .insert(key, items.clone());
-                items
+                    .get(&key)
+                    .cloned();
+                if let Some(hit) = cached {
+                    hit
+                } else {
+                    let items = self.probe_form(index_iri, normalizer, &key);
+                    cache
+                        .lock()
+                        .expect("LexicalIndex cache poisoned")
+                        .insert(key, items.clone());
+                    items
+                }
             }
+        };
+        // Merge the document-augmentation overlay (§6a): a doc's OOV groundings, seeded alongside the
+        // persisted entries so a DB-backed parse sees them without their being committed.
+        if let Some(extra) = self.overlay.get(form_lc) {
+            out.extend(extra.iter().cloned());
         }
+        out
     }
 
     /// Probe the active value index for a normalized form key (lazy path).

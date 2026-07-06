@@ -516,6 +516,104 @@ fn verify_grounding_indexes_over_snapshot() {
     );
 }
 
+/// End-to-end **OOV closure** over the WRN first page against the full lexicon — the DETERMINISTIC
+/// (no-LLM) grounding pipeline. Measures the token-level OOV the augmentation leaves: baseline
+/// (`augment_document_only`, deterministic Schwartz-Hearst abbreviations) vs after form+description
+/// grounding (`augment_lexicon_backed`, nominal). The residual gaps are the fail-closed findings — what
+/// the (B) LLM POS proposer (verb/adjective OOVs) and Phase-3 synthesis (genuinely novel terms) would
+/// target next. Run:
+///   EIGENIUS_DB_SNAPSHOT=/path cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       wrn_page_oov_closure_deterministic -- --ignored --nocapture
+#[test]
+#[ignore = "OOV closure over the WRN page (deterministic, nominal); --ignored --nocapture"]
+fn wrn_page_oov_closure_deterministic() {
+    use eigenius_kernel::dcg::{
+        augment_document_only, augment_lexicon_backed, NoAbbreviationProposer,
+        NominalCategoryProposer,
+    };
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let doc = std::fs::read_to_string(&page_path).expect("read WRN page");
+    let lem = morphy();
+
+    let base = augment_document_only(&head, &doc, &NoAbbreviationProposer, &lem);
+    let full = augment_lexicon_backed(
+        &head,
+        &doc,
+        &NoAbbreviationProposer,
+        &NominalCategoryProposer,
+        &lem,
+    );
+
+    eprintln!("=== WRN page OOV closure (deterministic, nominal) ===");
+    eprintln!("baseline OOV (document-only): {}", base.missing_oov.len());
+    eprintln!("added (abbrev + grounded):    {}", full.added.len());
+    eprintln!("residual OOV:                 {}", full.missing_oov.len());
+    eprintln!("\n-- grounded / added --");
+    for b in &full.added {
+        eprintln!(
+            "  {:?} → {:?}  [{:?}]",
+            b.provenance.surface,
+            b.provenance.grounded_to.as_ref().map(|i| i.as_str()),
+            b.provenance.method
+        );
+    }
+    eprintln!("\n-- residual OOV (fail-closed findings) --");
+    let mut res: Vec<&str> = full
+        .missing_oov
+        .iter()
+        .map(|g| g.surface.as_str())
+        .collect();
+    res.sort();
+    res.dedup();
+    for s in &res {
+        eprintln!("  {s:?}");
+    }
+}
+
+/// Verify the `--umls-all` coverage win directly: `wilcoxon` (C0871608, T170 — outside the WRN-subset
+/// TUIs) grounds over the full corpus, and `pcr-based` closes via the SHIPPED `X-based` compound rule
+/// once its base `pcr` (C0032520, T063) is loaded (`docs/notes/d63-compound-morphology.md` §2a). Run:
+///   EIGENIUS_DB_SNAPSHOT=/…/wordnet-umls-all-… cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       probe_wilcoxon_pcr_grounding -- --ignored --nocapture
+#[test]
+#[ignore = "verify wilcoxon/pcr grounding over the --umls-all snapshot; --ignored --nocapture"]
+fn probe_wilcoxon_pcr_grounding() {
+    use eigenius_kernel::dcg::{
+        augment_lexicon_backed, NoAbbreviationProposer, NominalCategoryProposer,
+    };
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index(&head);
+    for t in ["pcr", "pcr-based", "wilcoxon", "cas9-mediated"] {
+        eprintln!("has_token({t:?}) = {}", index.has_token(t, &lem));
+    }
+    let aug = augment_lexicon_backed(
+        &head,
+        "The wilcoxon test compared MSI and MSS cell lines. A pcr-based assay confirmed the result.",
+        &NoAbbreviationProposer,
+        &NominalCategoryProposer,
+        &lem,
+    );
+    eprintln!("-- grounded --");
+    for b in &aug.added {
+        eprintln!(
+            "  {:?} → {:?}",
+            b.provenance.surface,
+            b.provenance.grounded_to.as_ref().map(|i| i.as_str())
+        );
+    }
+    eprintln!(
+        "residual OOV: {:?}",
+        aug.missing_oov
+            .iter()
+            .map(|g| g.surface.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
 /// S3 over-prune localization (GH#97): `Each event alone does not lead to cell death` gaps WITH the
 /// cross-POS prune but parses without. This dumps what the prune drops for each of S3's function words
 /// (closed / open-nominal=dropped / open-other=kept) and A/B-parses S3 sub-variants, to find which
@@ -1282,8 +1380,30 @@ fn wrn_first_page_over_full_lexicon() {
     eprintln!("measuring page: {page_path}");
 
     let Some(head) = open_head(&path) else { return };
-    let index = build_index(&head);
     let lem = morphy();
+    // Stage A — the document augmentation (D63 lexicon-augmentation §6a, this session): ground OOV atoms
+    // against the form/description text indexes and OVERLAY the groundings onto the index, so the parser
+    // SEES them (uncommitted, doc-scoped — the §7-2 in-memory-overlay path) instead of gapping on them.
+    // Deterministic proposers here (reproducible A/B); the live LLM abbreviation/POS proposers are
+    // drop-in behind the traits (exercised by the `--features use-llm` smoke tests).
+    let aug = {
+        use eigenius_kernel::dcg::{
+            augment_lexicon_backed, NoAbbreviationProposer, NominalCategoryProposer,
+        };
+        augment_lexicon_backed(
+            &head,
+            &page,
+            &NoAbbreviationProposer,
+            &NominalCategoryProposer,
+            &lem,
+        )
+    };
+    eprintln!(
+        "augmentation: {} OOV grounded + injected, {} residual OOV",
+        aug.added.len(),
+        aug.missing_oov.len()
+    );
+    let index = build_index(&head).with_document_augmentation(&aug);
 
     // Characterize a few interesting buckets directly (closed-class vs -ly adverb vs domain).
     for probe in [
