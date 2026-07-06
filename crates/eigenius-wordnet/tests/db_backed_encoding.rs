@@ -390,6 +390,124 @@ fn probe_recq_atoms_in_snapshot() {
     }
 }
 
+/// D63 lexicon-augmentation §6a — VERIFY both grounding indexes over the RESEEDED snapshot:
+/// **(a)** the form `core:TextIndex` grounds the OOV surface `recq` → its UMLS concept C0084304
+/// (`augment_lexicon_backed`, the RecQ finding over the real atoms), and **(c)** the concept
+/// `core:description` `core:TextIndex` is populated over verb/adjective **axiom** glosses — the
+/// converter fix (axioms now carry `core:description`; nouns/instances already did). Run:
+///   EIGENIUS_DB_SNAPSHOT=/path cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       verify_grounding_indexes_over_snapshot -- --ignored --nocapture
+#[test]
+#[ignore = "verifies form+description grounding over a reseeded snapshot; --ignored --nocapture"]
+fn verify_grounding_indexes_over_snapshot() {
+    use eigenius_kernel::dcg::{augment_lexicon_backed, NoAbbreviationProposer};
+    use eigenius_kernel::layer::resolve_active_text_indexes;
+    use eigenius_kernel::ontology::resource::Value;
+    use eigenius_kernel::query::text::analyzer::registry::analyzer_for;
+    use eigenius_kernel::query::text::search::run_text_search;
+
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+
+    // Both indexes must be active over the reseeded head (declared in the lexicon schema layer).
+    let active = resolve_active_text_indexes(&head);
+    eprintln!(
+        "=== active text indexes over snapshot head: {} ===",
+        active.len()
+    );
+    for a in &active {
+        eprintln!(
+            "  idx={} target={} analyzer={}",
+            a.iri.as_str(),
+            a.target_property.as_str(),
+            a.analyzer
+        );
+    }
+    let form_prop = Iri::parse("urn:eigenius:lexicon:form").unwrap();
+    let desc_prop = Iri::parse("urn:eigenius:core:description").unwrap();
+    assert!(
+        active.iter().any(|a| a.target_property == form_prop),
+        "form_text_index active over the snapshot"
+    );
+    let desc_idx = active
+        .iter()
+        .find(|a| a.target_property == desc_prop)
+        .expect("description_text_index active over the snapshot");
+
+    // (a) FORM path — bare `recq` (OOV under the exact ValueIndex) grounds to C0084304 via the form
+    // text index (BM25 over the seeded atoms), summed per concept.
+    let lem = morphy();
+    let aug = augment_lexicon_backed(&head, "recq affects HeLa.", &NoAbbreviationProposer, &lem);
+    let recq = aug
+        .added
+        .iter()
+        .find(|b| b.provenance.surface.to_lowercase() == "recq");
+    match &recq {
+        Some(b) => eprintln!(
+            "\n(a) recq grounded_to={:?} confidence={:?}",
+            b.provenance.grounded_to.as_ref().map(|i| i.as_str()),
+            b.provenance.confidence
+        ),
+        None => eprintln!(
+            "\n(a) recq NOT grounded; missing_oov={:?}",
+            aug.missing_oov
+                .iter()
+                .map(|g| g.surface.as_str())
+                .collect::<Vec<_>>()
+        ),
+    }
+    let recq = recq.expect("recq grounds via the form text index");
+    assert!(
+        recq.provenance
+            .grounded_to
+            .as_ref()
+            .map(|i| i.as_str().contains("C0084304"))
+            .unwrap_or(false),
+        "recq grounds to the RecQ family concept C0084304 (got {:?})",
+        recq.provenance.grounded_to.as_ref().map(|i| i.as_str())
+    );
+
+    // (c) DESCRIPTION path — a verb axiom carries its synset gloss on `core:description`, and the
+    // description index retrieves it by a distinctive gloss token (proves the converter fix +
+    // index population over verb/adjective axioms, not just noun classes).
+    let axiom_iri = Iri::parse("urn:eigenius:wn:v00860482_t").unwrap();
+    let axiom = head
+        .resolve(&axiom_iri)
+        .expect("verb axiom wn:v00860482_t resolves in the snapshot");
+    let gloss = match axiom.get(&desc_prop) {
+        Some(Value::String(s)) => s.clone(),
+        other => panic!("verb axiom carries no core:description gloss (got {other:?})"),
+    };
+    eprintln!(
+        "\n(c) axiom {} core:description = {gloss:?}",
+        axiom_iri.as_str()
+    );
+    assert!(
+        gloss.contains("bravo"),
+        "the axiom's description is the synset gloss"
+    );
+    let analyzer = analyzer_for(&desc_idx.analyzer).expect("analyzer for the description index");
+    let hits = run_text_search(
+        &head,
+        head.storage().text_index.as_ref(),
+        &desc_idx.iri,
+        analyzer.as_ref(),
+        "applaud bravo",
+    )
+    .expect("description search ok");
+    eprintln!(
+        "\n(c) description search 'applaud bravo' → {} hits (top 10):",
+        hits.len()
+    );
+    for h in hits.iter().take(10) {
+        eprintln!("  subj={} score={}", h.subject.as_str(), h.score);
+    }
+    assert!(
+        hits.iter().any(|h| h.subject == axiom_iri),
+        "the verb axiom is retrievable via its gloss token in the description index"
+    );
+}
+
 /// S3 over-prune localization (GH#97): `Each event alone does not lead to cell death` gaps WITH the
 /// cross-POS prune but parses without. This dumps what the prune drops for each of S3's function words
 /// (closed / open-nominal=dropped / open-other=kept) and A/B-parses S3 sub-variants, to find which

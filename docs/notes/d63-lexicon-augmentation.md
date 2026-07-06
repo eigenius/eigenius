@@ -156,8 +156,10 @@ index; **vector is deferred** to a demonstrated paraphrase need text can't meet.
   *why* `recq` is OOV. **No schema change** — `form` is already there. This is the index that actually closes
   surface OOV.
 - **Secondary — `core:TextIndex` over the concept's *full* `core:description`** (kept **on the concept**,
-  normalized). Adds recall only for a query term appearing in a *definition* but in *no atom*. Requires the
-  verb/adjective **converter fix** (they drop the gloss today) so all POS carry one.
+  normalized; `core:description_text_index`, homed in the core ontology, IMPLEMENTED `2026-07-05`). Adds recall only for a query term
+  appearing in a *definition* but in *no atom*. The verb/adjective **converter fix** landed with it —
+  `eigentt:Axiom` now recommends `core:description`, the ESL `axiom … desc: "…"` clause carries it, and
+  `push_verb`/`push_adj` emit the synset gloss — so all POS carry a description (nouns/instances already did).
 - **Disambiguation.** BM25 returns *ranked candidates*, often several (`recq` hits C0084304 *and* members
   like C1335609). The resolver **picks** — the top hit when its score margin is clear, else LLM-disambiguated
   against the document context — and the **kernel gates** the chosen alias. A low-margin tie it can't resolve
@@ -212,7 +214,7 @@ the family's *member structure* — a separate enrichment, not the grounding pat
 | `AugmentOptions` | `DocumentOnly \| LexiconBacked(LexiconProfile) \| LlmBacked` on `encode` |
 | OOV pre-pass | tokenize → `has_token` → OOV atoms → resolver |
 | **`core:TextIndex` over `lexicon:form`** | BM25/token grounding index — the **primary** surface→concept path (closes `recq`, §6a); declared beside `form_index`; no schema change |
-| `core:TextIndex` over concept `core:description` | **secondary** recall (definition mentions); needs the verb/adjective gloss **converter fix** so all POS carry a description |
+| `core:TextIndex` over concept `core:description` (`core:description_text_index`, homed in core) | **secondary** recall (definition mentions); IMPLEMENTED with the verb/adjective gloss **converter fix** (axiom `desc:` clause → `core:description`) so all POS carry a description; resolver filters hits by `is_a` (drop predicate axioms) |
 | `OovResolver` (or a unified `LexicalBinder`) | queries the text index(es) (+ LLM for synthesis); produces bindings, kernel-gated |
 | atom-decomposition | split an OOV span → known atoms + one unknown → resolve the atom |
 | phrase-grounding | recognize a composed NP as an ontology concept + cache the alias |
@@ -231,11 +233,59 @@ the family's *member structure* — a separate enrichment, not the grounding pat
   **Deferred to Phase 2:** the `encode(opts, seed)` trait-signature change — `opts`/`seed` are only
   functional once `LexiconBacked` exists, so threading them now would be speculative API; `encode(&str)`
   stays (`DocumentOnly` implied) and the `AugmentOptions` enum is defined but not yet routed.
-- **Phase 2 (retrieval, text-first)** — declare a `core:TextIndex` over `lexicon:form` (BM25, **primary** —
-  closes `recq` via the already-seeded C0084304 atoms, §6a; no schema change) and optionally over concept
-  `core:description` (**secondary**; needs the verb/adjective gloss **converter fix** + reseed). Vector
-  deferred. Atom/phrase grounding queries these. (HGNC gene-group import — [[gene_family_lexicon_gap]] — is a
-  separate *enrichment* for member structure, not required to ground `recq`.)
+- **Phase 2 (retrieval, text-first) — resolver IMPLEMENTED + tested in-process (`2026-07-05`).**
+  [`augment.rs`](../../kernel/src/dcg/augment.rs): `ground_via_form_index` (BM25 `run_text_search` over the
+  active `core:TextIndex` on `lexicon:form` → hit entries → their `lexicon:sem` concepts, **summed per
+  concept** = disambiguation → top concept + confidence) and `augment_lexicon_backed` (grounds each `Gap`
+  via the form index → `RetrievalGrounded` binding aliasing the concept, reusing `abbreviation_resources`;
+  un-grounded gaps stay `Gap` with `tried` recorded — fail-closed). Test:
+  `lexicon_backed_augmentation_grounds_oov_via_the_form_text_index` — bare `recq` is OOV under the exact
+  `ValueIndex` but grounds to the concept via the form `core:TextIndex` (the RecQ finding, mechanized).
+  The whole chain builds on one shared storage, mirroring the production single backend — index discovery
+  scans the per-storage triple index, so a form index declared in an ancestor layer is only visible to a
+  child built on the same storage (`probe_recq_form_index_active_and_populated` isolates this: 2 active
+  indexes, `recq` hits).
+  - **(a) production form index — VERIFIED over the reseed (`2026-07-05`).** `lexicon:form_text_index :
+    core:TextIndex` over `lexicon:form` (analyzer `en-stem-v1`) in
+    [lexicon-ontology.esl](../../ontologies/lexicon/lexicon-ontology.esl), beside `form_index`. A full
+    reseed materialized it (the fresh-index reindex path skips existing layers, so a declaration alone
+    doesn't backfill — the seed does). Over the `wordnet-umls-2026-07-05` snapshot (~2.4M resources),
+    `augment_lexicon_backed("recq …")` grounds bare `recq` → `urn:eigenius:umlscui:C0084304` (RecQ
+    Helicases) — the RecQ finding mechanized over the real atoms, no HGNC import
+    (`verify_grounding_indexes_over_snapshot`). Confidence is low (~0.10 = C0084304's share of summed BM25
+    across every `recq`-bearing form in the full lexicon), but it is the top-summed concept.
+  - **(b) pipeline threading — IMPLEMENTED (`2026-07-05`).** `InProcessPipeline::with_augment_options` +
+    `encode_with_layer` dispatch (`LexiconBacked` → `augment_lexicon_backed`, else `augment_document_only`);
+    `encode(&str)` unchanged (`DocumentOnly` default). [pipeline.rs](../../kernel/src/dcg/pipeline.rs).
+  - **(c) secondary concept-`core:description` index — IMPLEMENTED (`2026-07-05`).**
+    `core:description_text_index : core:TextIndex` over `core:description`. **Homed in the core
+    ontology**, not the lexicon: an index is per-property, so it lives with the property it targets, and
+    `core:description` is a universal core property (any resource may carry a description) — the same
+    reasoning that puts `form_text_index` with `lexicon:form`. It therefore indexes *every*
+    description-bearing resource chain-wide, not just lexicon concepts; that breadth is fine because
+    **grounding eligibility is the resolver's job, not the index's** (see below). The converter fix:
+    nouns/instances already carried the gloss as `core:description`; verbs/adjectives dropped it because
+    they compile from `axiom` one-liners. A verb entry's `lexicon:sem` **is** its axiom, so the axiom is
+    the sense's denotation and the gloss's home. Enabled by: `core:description` added to
+    `eigentt:Axiom.recommends` ([eigentt-type-fragment.json](../../ontologies/eigentt/eigentt-type-fragment.json));
+    an ESL grammar extension `axiom N : <stmt> [desc: "…"] [note: "…"]` (`desc:` → `core:description`) —
+    [parser.rs](../../kernel/src/esl/parser.rs) `parse_axiom`, [compile.rs](../../kernel/src/esl/compile.rs)
+    `compile_axiom`; `push_verb`/`push_adj` emit `desc: "<gloss>"`
+    ([convert.rs](../../crates/eigenius-wordnet/src/convert.rs)). The reseed report confirms all 15578 verb +
+    18156 adjective axioms carry the gloss.
+  - **Resolver-side description grounding — IMPLEMENTED (`2026-07-05`).**
+    [`ground_via_description_index`](../../kernel/src/dcg/augment.rs) is the secondary path in
+    `augment_lexicon_backed`: form index first, then the concept-`core:description` index on a miss. A
+    description hit **is** the concept (no entry→`sem` hop); the resolver applies the eligibility filter —
+    drop hits whose `is_a ∋ eigentt:Axiom` (a *predicate* denotation would mint an incoherent nominal
+    alias), with the kernel felicity gate as the backstop for any residual non-nominal concept. This is
+    the **(A)** choice (nominal-only), which is just the POS-aware **(B)** with the expected category
+    pinned to nominal — same `is_a`-over-the-triple-index mechanism, the query-side category (from the
+    parse's typed open-holes) left for later; nothing here touches indexing or the lexicon data model.
+    Test: `lexicon_backed_augmentation_grounds_oov_via_description_index_dropping_axioms` — an OOV
+    (`supercoils`) that matches both a class gloss and a higher-BM25 verb-axiom gloss grounds to the
+    **class**; the filter, not ranking, selects it. Vector deferred. (HGNC gene-group import —
+    [[gene_family_lexicon_gap]] — is a separate *enrichment*, not the grounding path.)
 - **Phase 3 (synthesis + cache)** — `LlmBacked` `LlmSynthesized` entries (kernel-gated); the promotion filter
   (by `method`/`confidence`) and the seed-in/added-out feedback cache across a corpus.
 

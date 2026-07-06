@@ -1263,6 +1263,12 @@ impl Compiler {
             )]),
         );
         r.set(iri("urn:eigenius:eigentt:axiom_statement"), encoded);
+        if let Some(d) = &decl.description {
+            r.set(
+                iri("urn:eigenius:core:description"),
+                Value::String(d.clone()),
+            );
+        }
         if let Some(j) = &decl.justification {
             r.set(
                 iri("urn:eigenius:eigentt:axiom_justification"),

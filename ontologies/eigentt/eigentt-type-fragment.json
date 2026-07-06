@@ -236,9 +236,9 @@
     "@id": "urn:eigenius:eigentt:Axiom",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:short_name": "Axiom",
-    "urn:eigenius:core:description": "A named axiom: a closed term whose type the kernel admits without checking the term itself. The `axiom_statement` property carries an EigenTT type expression (typically inhabiting Prop) that the axiom is asserted to inhabit. Conversion treats the axiom IRI as opaque — never delta-unfolded. Voiding the layer that introduces an axiom removes it from the kernel environment for any chain resolution that excludes that layer. See D46 §10.",
+    "urn:eigenius:core:description": "A named axiom: a closed term whose type the kernel admits without checking the term itself. The `axiom_statement` property carries an EigenTT type expression (typically inhabiting Prop) that the axiom is asserted to inhabit. Conversion treats the axiom IRI as opaque — never delta-unfolded. Voiding the layer that introduces an axiom removes it from the kernel environment for any chain resolution that excludes that layer. See D46 §10. An axiom is the *denotation* of the lexical entries whose `lexicon:sem` names it (a WordNet verb/adjective sense); its `core:description` carries that sense's natural-language gloss, so the concept-`core:description` text index (D63 lexicon-augmentation §6a index c) makes the gloss searchable for OOV grounding across all parts of speech.",
     "urn:eigenius:core:requires": ["urn:eigenius:eigentt:axiom_statement"],
-    "urn:eigenius:core:recommends": ["urn:eigenius:eigentt:axiom_justification"]
+    "urn:eigenius:core:recommends": ["urn:eigenius:eigentt:axiom_justification", "urn:eigenius:core:description"]
   },
   {
     "@id": "urn:eigenius:eigentt:axiom_statement",

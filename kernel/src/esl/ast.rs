@@ -130,11 +130,18 @@ pub struct MacroParam {
     pub pos: Position,
 }
 
-/// eigenius#72 — `axiom Name : <type-expr> [note: "..."]` declaration.
+/// eigenius#72 — `axiom Name : <type-expr> [desc: "..."] [note: "..."]` declaration.
+///
+/// `desc:` populates `core:description` — the axiom's natural-language gloss (a WordNet
+/// verb/adjective sense's definition), which the concept-`core:description` text index makes
+/// searchable (D63 lexicon-augmentation §6a index c). `note:` populates
+/// `core:axiom_justification` (the warrant for admitting the axiom unchecked). Both optional,
+/// either order.
 #[derive(Debug)]
 pub struct AxiomDecl {
     pub name: QualifiedName,
     pub statement: TypeExpr,
+    pub description: Option<String>,
     pub justification: Option<String>,
     pub pos: Position,
 }

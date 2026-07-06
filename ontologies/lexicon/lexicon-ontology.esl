@@ -241,6 +241,23 @@ resource lexicon:form_index : core:ValueIndex {
     core:target_property = lexicon:form;
     core:value_normalizer = normalizers:lowercase;
 }
+// A declared `core:TextIndex` on `lexicon:form` makes surface-form OOV **grounding** a BM25/token
+// retrieval (D63 lexicon-augmentation §6a): the `LexiconBacked` resolver token-matches an OOV surface
+// (`recq`) to the multiword atoms that CONTAIN it (`recq family of dna helicases` → C0084304) — which the
+// exact `ValueIndex` above misses (`recq` ≠ the full form). Complements, does not replace, form_index
+// (exact lookup vs fuzzy grounding; different index kinds coexist on one property). The `en-stem-v1`
+// analyzer folds plural/singular (`helicases`↔`helicase`); non-words (`recq`) pass through unstemmed.
+resource lexicon:form_text_index : core:TextIndex {
+    core:description     = "BM25 text index on lexicon:form for token/fuzzy surface-form OOV grounding (D63 lexicon-augmentation §6a). Complements the exact form_index ValueIndex; active for every lexicon layer.";
+    core:target_property = lexicon:form;
+    core:text_analyzer   = "en-stem-v1";
+}
+// The SECONDARY OOV grounding signal — a `core:TextIndex` over `core:description` (concept glosses:
+// noun-class/instance definitions and, after the converter fix, verb/adjective `eigentt:Axiom` glosses)
+// — is NOT declared here: `core:description` is a universal core property, so its index lives with the
+// property in the core ontology (`core:description_text_index`), not in this domain layer. Grounding
+// eligibility (a lexicon concept vs an arbitrary description-bearing resource) is a resolver-side `is_a`
+// filter, not the index's concern (D63 lexicon-augmentation §6a index c).
 property lexicon:cat : core:resource {
     description = "The categorial type as a value of the inductive lexicon:Cat (Atom | A/B | A\\B), carried as a type_expr-encoded EigenTT term — NOT a string. Kernel-checked, pattern-matchable, and the source of the ⟦cat⟧ → sem_type homomorphism.";
     class_types eigentt:TypeExpr;

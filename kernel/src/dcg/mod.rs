@@ -57,8 +57,8 @@ mod anthropic_client;
 pub mod resolver_llm;
 
 pub use augment::{
-    augment_document_only, AugmentOptions, Gap, LexicalBinding, LexiconAugmentation, Provenance,
-    ResolutionMethod,
+    augment_document_only, augment_lexicon_backed, AugmentOptions, Gap, LexicalBinding,
+    LexiconAugmentation, Provenance, ResolutionMethod,
 };
 pub use category::{
     cat_subsumes, cats_coordinate, common_super, coordinate_np, coordinate_sem, denote_cat,

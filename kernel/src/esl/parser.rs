@@ -1462,23 +1462,27 @@ impl<'a> Parser<'a> {
         let name = self.parse_qualified_name()?;
         self.expect(&TokenKind::Colon)?;
         let statement = self.parse_type_expr()?;
-        // Optional `note: "..."` clause for the justification text.
-        // We accept it before a closing semicolon to avoid relying on
-        // a separate keyword.
-        let justification = if self.at(&TokenKind::Semicolon) {
-            None
-        } else if let TokenKind::Ident(name) = self.peek().clone() {
-            if name == "note" {
-                self.advance();
-                self.expect(&TokenKind::Colon)?;
-                let s = self.expect_string()?;
-                Some(s)
-            } else {
-                None
+        // Optional `desc: "..."` and/or `note: "..."` annotation clauses, in either order,
+        // before a closing semicolon. `desc:` → `core:description` (the gloss); `note:` →
+        // `core:axiom_justification` (the warrant). Accepted as plain idents to avoid reserving
+        // keywords. A repeated clause overwrites the earlier value (last wins).
+        let mut description = None;
+        let mut justification = None;
+        while let TokenKind::Ident(name) = self.peek().clone() {
+            match name.as_str() {
+                "desc" => {
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    description = Some(self.expect_string()?);
+                }
+                "note" => {
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    justification = Some(self.expect_string()?);
+                }
+                _ => break,
             }
-        } else {
-            None
-        };
+        }
         // Optional trailing semicolon.
         if self.at(&TokenKind::Semicolon) {
             self.advance();
@@ -1486,6 +1490,7 @@ impl<'a> Parser<'a> {
         Ok(AxiomDecl {
             name,
             statement,
+            description,
             justification,
             pos,
         })

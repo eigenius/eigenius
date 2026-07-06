@@ -27,15 +27,18 @@
 //! Phase 1 (here) implements the `DocumentOnly` source (the document's own abbreviation definitions +
 //! the OOV pre-pass). `LexiconBacked` (text-retrieval grounding) and `LlmBacked` (synthesis) are Phase 2/3.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use crate::layer::Layer;
-use crate::ontology::resource::Resource;
+use crate::layer::{resolve_active_text_indexes, Layer};
+use crate::ontology::resource::{Resource, Value};
 use crate::ontology::Iri;
+use crate::query::text::analyzer::registry::analyzer_for;
+use crate::query::text::search::run_text_search;
 
 use super::glossary::{
-    extract_abbreviations_with, glossary_resources, ground_abbreviation, AbbreviationProposer,
+    abbreviation_resources, extract_abbreviations_with, glossary_resources, ground_abbreviation,
+    AbbreviationBinding, AbbreviationProposer,
 };
 use super::lemmatizer::Lemmatizer;
 use super::lookup::{tokenize, LexicalIndex};
@@ -194,4 +197,169 @@ pub fn augment_document_only(
         supporting,
         missing_oov,
     }
+}
+
+/// Ground an OOV `surface` against the committed lexicon via the **form text index** (BM25/token) — the
+/// primary `LexiconBacked` path (`docs/notes/d63-lexicon-augmentation.md` §6a). Runs the active
+/// `core:TextIndex` over `lexicon:form`, maps each hit entry to the ontology concept it aliases (its
+/// `lexicon:sem`), **sums BM25 score per concept**, and returns the top concept + a rough confidence
+/// (its share of the total score) — the disambiguation step. `None` if no form index is active, the
+/// query has no hits, or no hit resolves to a concept.
+fn ground_via_form_index(head: &Arc<Layer>, surface: &str) -> Option<(Iri, f32)> {
+    let form_prop = Iri::parse("urn:eigenius:lexicon:form").ok()?;
+    let sem_prop = Iri::parse("urn:eigenius:lexicon:sem").ok()?;
+    let active = resolve_active_text_indexes(head);
+    let idx = active.iter().find(|a| a.target_property == form_prop)?;
+    let analyzer = analyzer_for(&idx.analyzer)?;
+    let hits = run_text_search(
+        head,
+        head.storage().text_index.as_ref(),
+        &idx.iri,
+        analyzer.as_ref(),
+        surface,
+    )
+    .ok()?;
+
+    // Aggregate BM25 score per concept the matched entries alias. `sem` survives persist as either a
+    // `ResourceRef` (in-memory) or a `String` IRI (CBOR round-trip collapses it) — accept both.
+    let mut by_concept: BTreeMap<Iri, f32> = BTreeMap::new();
+    for h in &hits {
+        let Some(entry) = head.resolve(&h.subject) else {
+            continue;
+        };
+        let concept = match entry.get(&sem_prop) {
+            Some(Value::ResourceRef(iri)) => iri.clone(),
+            Some(Value::String(s)) => match Iri::parse(s) {
+                Ok(i) => i,
+                Err(_) => continue,
+            },
+            _ => continue,
+        };
+        *by_concept.entry(concept).or_default() += h.score;
+    }
+    if by_concept.is_empty() {
+        return None;
+    }
+    let total: f32 = by_concept.values().sum();
+    let (concept, top) = by_concept.into_iter().max_by(|a, b| a.1.total_cmp(&b.1))?;
+    Some((concept, if total > 0.0 { top / total } else { 0.0 }))
+}
+
+/// `core:description` (the concept-gloss index's target) and `eigentt:Axiom` (a *predicate*
+/// denotation — a verb/adjective sense — which a nominal OOV must not ground to).
+const DESCRIPTION: &str = "urn:eigenius:core:description";
+const AXIOM_CLASS: &str = "urn:eigenius:eigentt:Axiom";
+
+/// Ground `surface` against the committed lexicon's **concept `core:description` text index** (§6a
+/// index c) — the SECONDARY recall path, tried when [`ground_via_form_index`] misses (a query term in a
+/// *definition* but in no `lexicon:form`). Unlike the form path, a description hit **is** the concept
+/// (the gloss sits on the noun class / instance / axiom directly — no entry→`sem` hop). Hits that are
+/// verb/adjective **axioms** (`is_a` `eigentt:Axiom`) are dropped: an axiom is a predicate denotation,
+/// and grounding a nominal OOV to a predicate would mint an incoherent alias. Eligibility is the
+/// resolver's call (the index only retrieves); the kernel felicity gate backstops any residual
+/// non-nominal concept when the alias is minted (`abbreviation_resources`). Returns the top-scored
+/// eligible concept + confidence (its score share among eligible hits). `None` if no description index
+/// is active, no hit, or no hit is an eligible concept.
+fn ground_via_description_index(head: &Arc<Layer>, surface: &str) -> Option<(Iri, f32)> {
+    let desc_prop = Iri::parse(DESCRIPTION).ok()?;
+    let axiom_class = Iri::parse(AXIOM_CLASS).ok()?;
+    let active = resolve_active_text_indexes(head);
+    let idx = active.iter().find(|a| a.target_property == desc_prop)?;
+    let analyzer = analyzer_for(&idx.analyzer)?;
+    let hits = run_text_search(
+        head,
+        head.storage().text_index.as_ref(),
+        &idx.iri,
+        analyzer.as_ref(),
+        surface,
+    )
+    .ok()?;
+
+    // A description hit is the concept itself. Keep only eligible NOMINAL targets — drop predicate
+    // axioms (verb/adjective senses). Rank by score (one description ⇒ one hit per concept); confidence
+    // is the top hit's share of the eligible total.
+    let mut best: Option<(Iri, f32)> = None;
+    let mut total = 0.0f32;
+    for h in &hits {
+        let Some(concept) = head.resolve(&h.subject) else {
+            continue;
+        };
+        if concept.is_instance_of(&axiom_class) {
+            continue;
+        }
+        total += h.score;
+        if best.as_ref().map(|(_, s)| h.score > *s).unwrap_or(true) {
+            best = Some((h.subject.clone(), h.score));
+        }
+    }
+    let (concept, top) = best?;
+    Some((concept, if total > 0.0 { top / total } else { 0.0 }))
+}
+
+/// Append a tried method to a gap (fail-closed provenance on the residual).
+fn gap_tried(mut gap: Gap, method: ResolutionMethod) -> Gap {
+    gap.tried.push(method);
+    gap
+}
+
+/// The **`LexiconBacked`** augmentation (Phase 2, §6a): run [`augment_document_only`], then try to ground
+/// each residual OOV `Gap` against the committed lexicon's text indexes — the **form** index first
+/// ([`ground_via_form_index`], the primary surface→concept path), then, on a miss, the concept-gloss
+/// **description** index ([`ground_via_description_index`], secondary recall). A grounded gap becomes a
+/// `RetrievalGrounded` [`LexicalBinding`] — an alias entry naming the concept (the abbreviation alias
+/// model, reused) — and moves from `missing_oov` to `added`; an un-grounded gap stays a `Gap` with
+/// `RetrievalGrounded` recorded in `tried` (fail-closed). Requires an active `core:TextIndex` over
+/// `lexicon:form` (and/or `core:description`) in `base`'s chain; without one it degrades to `DocumentOnly`.
+pub fn augment_lexicon_backed(
+    base: &Arc<Layer>,
+    document: &str,
+    proposer: &dyn AbbreviationProposer,
+    lemmatizer: &dyn Lemmatizer,
+) -> LexiconAugmentation {
+    let mut aug = augment_document_only(base, document, proposer, lemmatizer);
+    let Ok(entry_class) = Iri::parse(LEXICAL_ENTRY) else {
+        return aug;
+    };
+    let mut still_missing = Vec::new();
+    for gap in std::mem::take(&mut aug.missing_oov) {
+        // Form index (primary) → concept-description index (secondary recall). Both yield a
+        // (concept, confidence); the minting + kernel gate are identical downstream.
+        let grounded = ground_via_form_index(base, &gap.surface)
+            .or_else(|| ground_via_description_index(base, &gap.surface));
+        let Some((concept, confidence)) = grounded else {
+            still_missing.push(gap_tried(gap, ResolutionMethod::RetrievalGrounded));
+            continue;
+        };
+        // Emit the alias entry naming the grounded concept (reuse the abbreviation alias model: the OOV
+        // surface is its own "long form"). Fail-closed: if emission fails, keep the gap.
+        let binding = AbbreviationBinding {
+            abbr: gap.surface.as_str(),
+            long_form: gap.surface.as_str(),
+            concept_iri: concept.as_str(),
+            doc_ns: "urn:eigenius:doc",
+        };
+        let Some(resources) = abbreviation_resources(base, &binding) else {
+            still_missing.push(gap_tried(gap, ResolutionMethod::RetrievalGrounded));
+            continue;
+        };
+        let (entries, extra): (Vec<Resource>, Vec<Resource>) = resources
+            .into_iter()
+            .partition(|r| r.is_instance_of(&entry_class));
+        aug.supporting.extend(extra);
+        for proposed in entries {
+            aug.added.push(LexicalBinding {
+                proposed,
+                provenance: Provenance {
+                    surface: gap.surface.clone(),
+                    long_form: None,
+                    context: gap.context.clone(),
+                    method: ResolutionMethod::RetrievalGrounded,
+                    grounded_to: Some(concept.clone()),
+                    confidence: Some(confidence),
+                },
+            });
+        }
+    }
+    aug.missing_oov = still_missing;
+    aug
 }

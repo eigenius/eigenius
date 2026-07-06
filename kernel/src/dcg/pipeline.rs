@@ -31,7 +31,9 @@ use std::sync::Arc;
 
 use crate::layer::{Layer, LayerBuilder, LayerStorage};
 
-use super::augment::{augment_document_only, LexiconAugmentation};
+use super::augment::{
+    augment_document_only, augment_lexicon_backed, AugmentOptions, LexiconAugmentation,
+};
 use super::glossary::AbbreviationProposer;
 use super::lemmatizer::Lemmatizer;
 use super::lookup::{LexicalIndex, Proposer, SentenceOutcome};
@@ -70,6 +72,7 @@ pub struct InProcessPipeline<'a> {
     lemmatizer: &'a dyn Lemmatizer,
     abbreviation_proposer: &'a dyn AbbreviationProposer,
     anaphora_proposer: &'a dyn Proposer,
+    augment_options: AugmentOptions,
 }
 
 impl<'a> InProcessPipeline<'a> {
@@ -84,7 +87,18 @@ impl<'a> InProcessPipeline<'a> {
             lemmatizer,
             abbreviation_proposer,
             anaphora_proposer,
+            // Default: `DocumentOnly` (no retrieval) — deterministic, no `base`-index dependency. Opt into
+            // `LexiconBacked` (form-`TextIndex` OOV grounding) via [`Self::with_augment_options`].
+            augment_options: AugmentOptions::DocumentOnly,
         }
+    }
+
+    /// Set the Stage-A augmentation source (`DocumentOnly` default vs `LexiconBacked` form-index grounding,
+    /// D63 `docs/notes/d63-lexicon-augmentation.md` §6/§6a). `LexiconBacked` requires an active
+    /// `core:TextIndex` over `lexicon:form` in `base`'s chain; without one it degrades to `DocumentOnly`.
+    pub fn with_augment_options(mut self, opts: AugmentOptions) -> Self {
+        self.augment_options = opts;
+        self
     }
 
     /// Like [`DocumentPipeline::encode`], but also returns the in-memory doc-glossary layer the
@@ -94,16 +108,26 @@ impl<'a> InProcessPipeline<'a> {
     /// chain. The trait's [`DocumentPipeline::encode`] drops it; a served realization returns a
     /// committed branch instead, which is why the layer is exposed here (inherent), not on the trait.
     pub fn encode_with_layer(&self, document: &str) -> (DocumentEncoding, Arc<Layer>) {
-        // Stage A — the DocumentOnly lexicon augmentation: harvest the document's abbreviation definitions
-        // as grounded proposals (+ the residual OOV gaps), and commit its resources as a doc-scoped lexicon
-        // layer on `base`. Fail-closed: a proposal the felicity gate rejects at `add_resource` is skipped,
-        // so a mis-extraction never enters the lexicon.
-        let augmentation = augment_document_only(
-            &self.base,
-            document,
-            self.abbreviation_proposer,
-            self.lemmatizer,
-        );
+        // Stage A — the lexicon augmentation: harvest the document's abbreviation definitions (and, under
+        // `LexiconBacked`, ground residual OOV atoms against the form text index) as grounded proposals (+
+        // the residual OOV gaps), and commit its resources as a doc-scoped lexicon layer on `base`.
+        // Fail-closed: a proposal the felicity gate rejects at `add_resource` is skipped, so a
+        // mis-extraction never enters the lexicon.
+        let augmentation = match self.augment_options {
+            AugmentOptions::LexiconBacked(_) => augment_lexicon_backed(
+                &self.base,
+                document,
+                self.abbreviation_proposer,
+                self.lemmatizer,
+            ),
+            // `DocumentOnly` and (until Phase 3) `LlmBacked` use the deterministic document-only harvest.
+            _ => augment_document_only(
+                &self.base,
+                document,
+                self.abbreviation_proposer,
+                self.lemmatizer,
+            ),
+        };
         let mut builder = LayerBuilder::new("doc-glossary", Some(Arc::clone(&self.base)));
         for r in augmentation.resources() {
             let _ = builder.add_resource(r);

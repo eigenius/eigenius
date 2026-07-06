@@ -485,7 +485,14 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
     let off = &syn.offset;
     for kind in kinds {
         let tag = kind.tag();
-        buf.push_str(&format!("axiom wn:v{off}_{tag} : {}\n\n", kind.arrow()));
+        // The axiom is the verb sense's denotation (entries' `lexicon:sem` names it); carry the
+        // synset gloss as its `core:description` so the concept-description text index makes verb
+        // senses searchable for OOV grounding, symmetric with the noun classes (D63 §6a index c).
+        buf.push_str(&format!(
+            "axiom wn:v{off}_{tag} : {} desc: \"{}\"\n\n",
+            kind.arrow(),
+            esc(&syn.gloss)
+        ));
         rep.verb_axioms += 1;
         let sem = format!("v{off}_{tag}");
         let arrow = kind.arrow();
@@ -597,8 +604,12 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks
     let loc = local(syn);
     let prop_arrow = format!("{ENTITY_TOP} -> Prop");
     if syn.relational {
-        // Non-gradable: the existing Boolean predicate.
-        buf.push_str(&format!("axiom wn:{loc} : {prop_arrow}\n\n"));
+        // Non-gradable: the existing Boolean predicate. The axiom is the sense's denotation —
+        // carry the gloss as `core:description` for the concept-description index (D63 §6a index c).
+        buf.push_str(&format!(
+            "axiom wn:{loc} : {prop_arrow} desc: \"{}\"\n\n",
+            esc(&syn.gloss)
+        ));
         rep.adj_axioms += 1;
         let cat = adj_cat();
         for (i, lemma) in syn.words.iter().enumerate() {
@@ -616,9 +627,12 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks
         }
         return;
     }
-    // Gradable: a measure + standard, with measure-based positive + degree comparative.
+    // Gradable: a measure + standard, with measure-based positive + degree comparative. The
+    // measure `deg_{loc}` is the sense's semantic anchor — carry the gloss on it (the standard
+    // `std_{loc}` is a derived threshold, not a sense) for the concept-description index (§6a c).
     buf.push_str(&format!(
-        "axiom wn:deg_{loc} : {ENTITY_TOP} -> core:float\n\n"
+        "axiom wn:deg_{loc} : {ENTITY_TOP} -> core:float desc: \"{}\"\n\n",
+        esc(&syn.gloss)
     ));
     buf.push_str(&format!("axiom wn:std_{loc} : core:float\n\n"));
     rep.adj_axioms += 1;
@@ -1071,8 +1085,11 @@ mod tests {
         let mut rep = Report::default();
         let mut buf = String::new();
         assert!(push_verb(&mut buf, &eat, &mut rep, &SenseRanks::new()));
-        // frame 11 → transitive; the axiom IRI is kind-tagged (`_t`).
-        assert!(buf.contains("axiom wn:v00275082_t : lexicon:Entity -> lexicon:Entity -> Prop"));
+        // frame 11 → transitive; the axiom IRI is kind-tagged (`_t`). The synset gloss rides the
+        // axiom as a `desc:` clause → `core:description` (D63 §6a index c: verb senses searchable).
+        assert!(buf.contains(
+            "axiom wn:v00275082_t : lexicon:Entity -> lexicon:Entity -> Prop desc: \"to deteriorate\""
+        ));
         // Finite 3sg has a SINGULAR subject slot (6-agr); object slot stays num_any.
         assert!(buf.contains(
             "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"

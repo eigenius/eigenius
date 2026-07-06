@@ -1873,6 +1873,199 @@ fn document_only_augmentation_harvests_bindings_and_flags_oov() {
     );
 }
 
+/// A concept + a **multiword** form entry aliasing it — the snapshot shape in miniature (C0084304's atoms
+/// are multiword entries; the exact index can't token-match `recq`, but the bootstrap's `form_text_index`
+/// BM25 index can). The form `core:TextIndex` comes from the lexicon ontology (one per property), not here.
+const RECQ_FORM_INDEX_FIXTURE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+class lexicon:RecqHelicases : lexicon:Entity {
+    description = "The RecQ helicase family (test concept, mirrors UMLS C0084304).";
+}
+resource lexicon:e_recq_family : lexicon:LexicalEntry {
+    lexicon:form     = "recq family of dna helicases";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:RecqHelicases, lexicon:num_any) );
+    lexicon:sem      = lexicon:RecqHelicases;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:grade    = epistemic:declared;
+}
+"#;
+
+#[test]
+fn lexicon_backed_augmentation_grounds_oov_via_the_form_text_index() {
+    // D63 lexicon-augmentation Phase 2 (`LexiconBacked`, §6a): a form `core:TextIndex` token-matches the OOV
+    // surface `recq` to a seeded multiword atom → grounds it to that concept, in-process. The exact
+    // `ValueIndex` misses it (`recq` ≠ `recq family of dna helicases`); the BM25 `TextIndex` closes it.
+    use eigenius_kernel::dcg::{augment_lexicon_backed, ResolutionMethod};
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    // One shared storage across the chain so the bootstrap's `form_text_index` (discovered via the
+    // per-storage triple index) is visible to the recq layer — as in production's single backend.
+    let storage = ctx.head().storage().clone();
+    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
+    for r in demo {
+        b.add_resource(r).expect("add demo");
+    }
+    let demo_layer = Arc::new(b.build(storage.clone()));
+    let fix = esl::compile_against_layer(RECQ_FORM_INDEX_FIXTURE, &demo_layer)
+        .expect("recq fixture compiles");
+    let mut b2 = LayerBuilder::new("recq", Some(Arc::clone(&demo_layer)));
+    for r in fix {
+        b2.add_resource(r).expect("add recq fixture");
+    }
+    let base = Arc::new(b2.build(storage));
+
+    // Sanity: bare `recq` is OOV under the exact index (has_token=false), exactly as on the snapshot.
+    let index = LexicalIndex::build(Arc::clone(&base));
+    assert!(
+        !index.has_token("recq", &Identity),
+        "bare `recq` is OOV under the exact form index"
+    );
+
+    // LexiconBacked grounds it via the form TextIndex → a RetrievalGrounded binding aliasing the concept.
+    let aug = augment_lexicon_backed(
+        &base,
+        "recq affects HeLa.",
+        &NoAbbreviationProposer,
+        &Identity,
+    );
+    let recq = aug
+        .added
+        .iter()
+        .find(|b| b.provenance.surface.to_lowercase() == "recq")
+        .expect("`recq` grounded via retrieval");
+    assert_eq!(recq.provenance.method, ResolutionMethod::RetrievalGrounded);
+    assert_eq!(
+        recq.provenance.grounded_to.as_ref().map(|i| i.as_str()),
+        Some("urn:eigenius:lexicon:RecqHelicases"),
+        "grounded to the family concept"
+    );
+    assert!(
+        !aug.missing_oov
+            .iter()
+            .any(|g| g.surface.to_lowercase() == "recq"),
+        "`recq` moved out of missing_oov"
+    );
+}
+
+#[test]
+fn probe_recq_form_index_active_and_populated() {
+    use eigenius_kernel::layer::resolve_active_text_indexes;
+    use eigenius_kernel::query::text::analyzer::registry::analyzer_for;
+    use eigenius_kernel::query::text::search::run_text_search;
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    // Build the whole chain on ONE storage (the bootstrap's) — index discovery scans the
+    // per-storage triple index, so the bootstrap's form_text_index is only visible to a child
+    // layer built on the same storage. This mirrors production, where a chain lives on a single
+    // backend; a per-layer `LayerStorage::in_memory()` would hide the inherited index.
+    let storage = ctx.head().storage().clone();
+    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
+    for r in demo {
+        b.add_resource(r).expect("add demo");
+    }
+    let demo_layer = Arc::new(b.build(storage.clone()));
+    let fix = esl::compile_against_layer(RECQ_FORM_INDEX_FIXTURE, &demo_layer)
+        .expect("recq fixture compiles");
+    let mut b2 = LayerBuilder::new("recq", Some(Arc::clone(&demo_layer)));
+    for r in fix {
+        b2.add_resource(r).expect("add recq fixture");
+    }
+    let base = Arc::new(b2.build(storage));
+    let active = resolve_active_text_indexes(&base);
+    eprintln!("ACTIVE text indexes over base: {}", active.len());
+    for a in &active {
+        eprintln!(
+            "  idx={} target={} analyzer={}",
+            a.iri.as_str(),
+            a.target_property.as_str(),
+            a.analyzer
+        );
+    }
+    let form_prop =
+        eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:lexicon:form").unwrap();
+    let idx = active
+        .iter()
+        .find(|a| a.target_property == form_prop)
+        .expect("a form text index is active");
+    let analyzer = analyzer_for(&idx.analyzer).expect("analyzer");
+    let hits = run_text_search(
+        &base,
+        base.storage().text_index.as_ref(),
+        &idx.iri,
+        analyzer.as_ref(),
+        "recq",
+    )
+    .expect("search ok");
+    eprintln!("HITS for 'recq': {}", hits.len());
+    for h in &hits {
+        eprintln!("  subj={} score={}", h.subject.as_str(), h.score);
+    }
+    assert!(!hits.is_empty(), "recq should hit e_recq_family");
+}
+
+/// A nominal concept + a verb **axiom**, both carrying a `core:description` that mentions the OOV token
+/// `supercoils` (which has no `lexicon:form`). The concept-`core:description` index (§6a index c) returns
+/// both; the `LexiconBacked` resolver's secondary path must ground to the CLASS and DROP the axiom (a
+/// predicate denotation), per the (A) `is_a ∋ eigentt:Axiom` filter — else a nominal OOV would alias a
+/// predicate. The verb axiom's gloss deliberately outscores the class's longer gloss, so the filter, not
+/// ranking, is what selects the class.
+const DESCRIPTION_GROUNDING_FIXTURE: &str = r#"
+namespace demo    = "urn:eigenius:demo";
+namespace lexicon = "urn:eigenius:lexicon";
+class demo:Gyrase : lexicon:Entity {
+    description = "a bacterial topoisomerase enzyme that supercoils chromosomal dna in living cells";
+}
+axiom demo:v_supercoil : lexicon:Entity -> Prop desc: "supercoils dna"
+"#;
+
+#[test]
+fn lexicon_backed_augmentation_grounds_oov_via_description_index_dropping_axioms() {
+    use eigenius_kernel::dcg::{augment_lexicon_backed, ResolutionMethod};
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    // Shared storage across the chain (see the form-index test) so the core `description_text_index` is
+    // discovered over `base` and both concepts' glosses populate one text index.
+    let storage = ctx.head().storage().clone();
+    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
+    for r in demo {
+        b.add_resource(r).expect("add demo");
+    }
+    let demo_layer = Arc::new(b.build(storage.clone()));
+    let fix = esl::compile_against_layer(DESCRIPTION_GROUNDING_FIXTURE, &demo_layer)
+        .expect("description fixture compiles");
+    let mut b2 = LayerBuilder::new("desc", Some(Arc::clone(&demo_layer)));
+    for r in fix {
+        b2.add_resource(r).expect("add description fixture");
+    }
+    let base = Arc::new(b2.build(storage));
+
+    // `supercoils` is OOV (no form entry) — the form index can't ground it; the description path must.
+    let index = LexicalIndex::build(Arc::clone(&base));
+    assert!(
+        !index.has_token("supercoils", &Identity),
+        "supercoils is OOV under the form index"
+    );
+
+    let aug = augment_lexicon_backed(
+        &base,
+        "supercoils affects HeLa.",
+        &NoAbbreviationProposer,
+        &Identity,
+    );
+    let g = aug
+        .added
+        .iter()
+        .find(|b| b.provenance.surface.to_lowercase() == "supercoils")
+        .expect("supercoils grounded via the description index");
+    assert_eq!(g.provenance.method, ResolutionMethod::RetrievalGrounded);
+    assert_eq!(
+        g.provenance.grounded_to.as_ref().map(|i| i.as_str()),
+        Some("urn:eigenius:demo:Gyrase"),
+        "grounds to the nominal concept, NOT the verb axiom demo:v_supercoil"
+    );
+}
+
 #[test]
 fn in_process_pipeline_encodes_a_document_end_to_end() {
     // The WHOLE pipeline in one `encode()` call (the `DocumentPipeline` contract): Stage A (glossary —
