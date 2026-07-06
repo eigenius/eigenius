@@ -48,10 +48,10 @@ use crate::ontology::resource::Value;
 use crate::ontology::Iri;
 
 use super::category::{
-    adverb_modifier_cats, cats_coordinate, coordinate_but_not, coordinate_but_not_sem,
-    coordinate_np, coordinate_sem, denote_cat, front_participial, is_ctor, pied_pipe,
-    predicative_adjective_cat, reciprocate, relativize, relativize_appos, sentence_modifier_cats,
-    subst_cat, type_raise, CatSubst,
+    adverb_modifier_cats, appose_group, cats_coordinate, coordinate_but_not,
+    coordinate_but_not_sem, coordinate_np, coordinate_sem, denote_cat, front_participial, is_ctor,
+    pied_pipe, predicative_adjective_cat, reciprocate, relativize, relativize_appos,
+    sentence_modifier_cats, subst_cat, type_raise, CatSubst, LIST_CONN,
 };
 use super::lemmatizer::{Lemmatizer, Pos};
 use super::lexicon::entry_to_item;
@@ -1269,6 +1269,13 @@ impl LexicalIndex {
                 }
             }
         }
+        // (3) A list **comma** is a token-keyed, n-ary, sem-reading construct (the neutral-comma
+        // coordination, Step 5b): the comma inherits the list's final connective, folded n-arily over
+        // the conjuncts — which the packed binary-hyperedge model can't express. Route any
+        // comma-bearing sentence unpacked so `parse_at_cap`'s list rule finalizes it.
+        if tokens.iter().any(|t| self.reserved.is_comma(t)) {
+            return true;
+        }
         false
     }
 
@@ -2190,6 +2197,91 @@ impl LexicalIndex {
                                     cat,
                                     sem,
                                     l.cost().saturating_add(r.cost()),
+                                ));
+                            }
+                        }
+                    }
+                }
+                // N-ary comma-list coordination for PROP-ending conjuncts (D63 §8.4 Phase 6, Step 5b):
+                // a prop list `A , B , … [and|or] Z` folds EVERY conjunct with the list's FINAL explicit
+                // connective. The comma is NEUTRAL (`LIST_CONN`), so it does not fold props binarily —
+                // that is what stops `A, B or C` from mis-folding as `Or(And(A,B),C)`. NP conjuncts ride
+                // the `coordinate_np` group path (conn_list + rebind) instead, so this fires only where
+                // the conjuncts are same-cat prop-ending (`cats_coordinate`). Keyed on the trailing
+                // explicit `and`/`or` at `c` with ≥1 comma in the left span `[i, c-1]`.
+                for c in (i + 1)..j {
+                    let op = match coord_op[c] {
+                        Some(o) if o != LIST_CONN => o, // an explicit and/or finalizes the list
+                        _ => continue,
+                    };
+                    let commas: Vec<usize> = ((i + 1)..c)
+                        .filter(|&p| coord_op[p] == Some(LIST_CONN))
+                        .collect();
+                    if commas.is_empty() {
+                        continue; // no comma-list ⇒ the binary coordination above handles it
+                    }
+                    // Atomic conjunct spans: split `[i, c-1]` at the commas, then the right conjunct.
+                    let mut spans: Vec<(usize, usize)> = Vec::new();
+                    let mut start = i;
+                    for &p in &commas {
+                        spans.push((start, p - 1));
+                        start = p + 1;
+                    }
+                    spans.push((start, c - 1));
+                    spans.push((c + 1, j));
+                    // Running left-fold over the conjunct cells (bounded to control the cross-product):
+                    // seed with the first conjunct, extend by each subsequent one via `coordinate_sem`.
+                    const NARY_FOLD_CAP: usize = 64;
+                    let mut partials: Vec<Item> = chart[spans[0].0][spans[0].1].clone();
+                    for &(s, e) in &spans[1..] {
+                        let mut next: Vec<Item> = Vec::new();
+                        for acc in &partials {
+                            for item in &chart[s][e] {
+                                if is_coordination(item.sem()) {
+                                    continue; // left-branching NF: a conjunct is not itself a coordination
+                                }
+                                if cats_coordinate(acc.cat(), item.cat(), &self.layer) {
+                                    if let Some(sem) = coordinate_sem(
+                                        op,
+                                        acc.cat(),
+                                        acc.sem(),
+                                        item.sem(),
+                                        &self.layer,
+                                    ) {
+                                        next.push(Item::with_cost(
+                                            acc.cat().clone(),
+                                            sem,
+                                            acc.cost().saturating_add(item.cost()),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        next.sort_by_key(|it| it.cost());
+                        next.truncate(NARY_FOLD_CAP);
+                        partials = next;
+                    }
+                    produced.extend(partials);
+                }
+                // Close nominal apposition (D63 §8.4 Phase 6, RC-6): a definite/bare common-noun HEAD
+                // immediately followed by a coreferential NAME-GROUP — "the genes BRCA1 and MSH2",
+                // "the MMR genes MSH2, MSH6, PMS2 or MLH1". The named group SPECIFIES the head's
+                // referents, so `appose_group` passes the group through (gated on the members being of
+                // the head noun's base kind); the result rides the existing distributive-subject /
+                // -object machinery unchanged. Head and group are ADJACENT (no reserved token between),
+                // so every split `m` is tried and the rule gates by shape.
+                for m in i..j {
+                    let heads = &chart[i][m];
+                    let groups = &chart[m + 1][j];
+                    for head in heads {
+                        for grp in groups {
+                            if let Some((cat, sem)) =
+                                appose_group(head.cat(), grp.cat(), grp.sem(), &self.layer)
+                            {
+                                produced.push(Item::with_cost(
+                                    cat,
+                                    sem,
+                                    head.cost().saturating_add(grp.cost()),
                                 ));
                             }
                         }

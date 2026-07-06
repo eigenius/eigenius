@@ -610,16 +610,31 @@ fn group_conn_op(group_cat: &Exp) -> Option<&'static str> {
     match conn {
         Exp::InductiveCtor(_, n, _) if n == "conn_and" => Some("urn:eigenius:logic:And"),
         Exp::InductiveCtor(_, n, _) if n == "conn_or" => Some("urn:eigenius:logic:Or"),
+        // A never-finalized comma list (no trailing `and`/`or`) defaults to conjunction — "A, B, C
+        // affect X" ⟿ `∧`. A finalized list carries `conn_and`/`conn_or` and never reaches here.
+        Exp::InductiveCtor(_, n, _) if n == "conn_list" => Some("urn:eigenius:logic:And"),
         _ => None,
     }
 }
 
+/// The **neutral list connective** a comma contributes (D63 §8.4 Phase 6, Step 5b). English list
+/// commas are polarity-neutral — `A, B, C or D` means `A ∨ B ∨ C ∨ D`, `A, B, C and D` means all-`∧`;
+/// the comma inherits the list's FINAL explicit connective. So a comma builds a `conn_list` group that
+/// the trailing `and`/`or` REBINDS (below). This is a PARSER-INTERNAL sentinel — never a logic op and
+/// never a committed `lexicon:Conn` ctor (`denote_cat` erases the `Conn` argument, so it never reaches
+/// the kernel), so no ontology change / reseed is needed. A group left `conn_list` at fold time (a bare
+/// comma list, no explicit connective) defaults to conjunction ([`group_conn_op`]).
+pub(crate) const LIST_CONN: &str = "urn:eigenius:lexicon:conn_list";
+
 /// Coordinate two NP-side constituents into a **group** (`cat_group(C, conn, pl)`
-/// over a `List C` sem) under the connective `op_iri` (`logic:And`/`logic:Or`).
-/// Handles `NP·NP` (a fresh 2-member group) and `Group·NP` (append, the
-/// left-branching n-ary case); the members are re-typed at the new common supertype
-/// `C`. Returns `(group_cat, group_sem)`, or `None` if the constituents aren't
-/// NP/group, share no common type, mix connectives, or `op_iri` isn't a connective.
+/// over a `List C` sem) under the connective `op_iri` (`logic:And`/`logic:Or`, or the neutral
+/// [`LIST_CONN`] a comma contributes). Handles `NP·NP` (a fresh 2-member group) and `Group·NP`
+/// (append, the left-branching n-ary case); the members are re-typed at the new common supertype
+/// `C`. A **neutral `conn_list` left group** accepts ANY `op` — the trailing `and`/`or` rebinds the
+/// whole group to `conn_and`/`conn_or` (list finalization); a FINALIZED (`and`/`or`) left group
+/// requires `op` to match (no `X and Y or Z` mixing). Returns `(group_cat, group_sem)`, or `None` if
+/// the constituents aren't NP/group, share no common type, mix finalized connectives, or `op_iri`
+/// isn't a connective.
 pub fn coordinate_np(
     op_iri: &str,
     l_cat: &Exp,
@@ -636,6 +651,7 @@ pub fn coordinate_np(
     let conn_name = match op_iri {
         "urn:eigenius:logic:And" => "conn_and",
         "urn:eigenius:logic:Or" => "conn_or",
+        LIST_CONN => "conn_list",
         _ => return None,
     };
     let (cat_decl, num_decl) = match l_cat {
@@ -657,9 +673,11 @@ pub fn coordinate_np(
         c if is_ctor(c, "cat_np").is_some() => {
             (is_ctor(c, "cat_np")?[0].clone(), vec![l_sem.clone()])
         }
-        // A left group must share the connective (no `X and Y or Z` mixing).
+        // A neutral `conn_list` left group takes ANY op (the trailing `and`/`or` rebinds it); a
+        // finalized left group must share the op's connective (no `X and Y or Z` mixing).
         c if is_ctor(c, "cat_group").is_some() => {
-            if group_conn_op(c)? != op_iri {
+            let left_conn = group_conn_name(c)?;
+            if left_conn != "conn_list" && left_conn != conn_name {
                 return None;
             }
             (is_ctor(c, "cat_group")?[0].clone(), group_members(l_sem)?)
@@ -731,6 +749,82 @@ pub fn coordinate_but_not(
     let pl = Exp::InductiveCtor(num_decl, "pl".into(), vec![]);
     let group_cat = Exp::InductiveCtor(cat_decl.clone(), "cat_group".into(), vec![c, conn, pl]);
     Some((group_cat, list_term(&[l_sem.clone(), r_sem.clone()])))
+}
+
+/// **Close nominal apposition** (D63 §8.4 Phase 6, RC-6): a definite/bare common-noun HEAD
+/// immediately followed by a coreferential **name-group** — "the genes BRCA1 and MSH2", "the MMR
+/// genes MSH2, MSH6, PMS2 or MLH1". In close apposition the head noun *classifies* the referents and
+/// the named group *specifies* them; the names pick out exactly the members, so the group IS the
+/// referent (the head's determiner quantification is overridden — "the poet Burns" refers to Burns,
+/// not to some poet). We realize this by passing the **group through unchanged**, gated on the
+/// felicity condition that the named members are of the head noun's kind. The result group then rides
+/// the existing distributive-subject / distributive-object machinery unmodified (`distribute` /
+/// `distribute_object`), so "the genes BRCA1 and MSH2 affect cells" ⟿ `affect(cells, brca1) ∧
+/// affect(cells, msh2)` — exactly the bare-group reading, now licensed through the classifying head.
+///
+/// `head_cat` is a **subject GQ** `S/(S\NP_C)` (determined: "the genes") or a **bare common noun**
+/// `cat_n(C, _)` (bare: "genes"); `group_cat` a `cat_group(D, conn, num)`. The felicity gate compares
+/// the head's **base** class `⌊C⌋` (any Σ-refinement peeled — "MMR genes" is `Σx:Gene.
+/// compound_kind(x, MMR)`, and whether each name is specifically an *MMR* gene is what the apposition
+/// ASSERTS, not a precondition) with the group's base member type `⌊D⌋`, and passes iff **one subsumes
+/// the other, EITHER direction**. Bidirectionality is required by cross-importer typing: a named
+/// individual carries its broad UMLS **semantic type** (`umlssty:T028` "Gene or Genome"), while a
+/// common noun carries its narrower **concept** (`umlscui:C0017337` "gene", emitted `: umlssty:T028`,
+/// i.e. `C0017337 ≤ T028`). So "the genes BRCA1 and MSH2" has `⌊head⌋ = C0017337 ≤ T028 = ⌊D⌋` — the
+/// head is a SUBTYPE of the members' type, not a supertype; a one-directional `⌊D⌋ ≤ ⌊C⌋` gate would
+/// reject it. The check still rejects a genuine kind clash: "the cells BRCA1 and MSH2" has `⌊head⌋` a
+/// cell concept and `⌊D⌋ = T028`, neither subsuming the other (UMLS semantic types are siblings under
+/// `Entity`) ⇒ no parse. `None` if the shapes don't match or the gate fails. The determiner's
+/// definiteness and the head's type-assertion (`gene(brca1) ∧ …`, already lexically guaranteed by the
+/// names' types) are dropped — a first-cut approximation, parallel to the existential treatment of
+/// `the` (a faithfulness refinement, D61).
+pub fn appose_group(
+    head_cat: &Exp,
+    group_cat: &Exp,
+    group_sem: &Exp,
+    layer: &Arc<Layer>,
+) -> Option<(Exp, Exp)> {
+    let head_ty = sigma_base(appositive_head_type(head_cat)?);
+    let [group_ty, _conn, _num] = is_ctor(group_cat, "cat_group")? else {
+        return None;
+    };
+    let group_ty = sigma_base(group_ty);
+    // Felicity: the head noun and the named members must name the SAME KIND — one type subsumes the
+    // other (either direction, to bridge the concept-vs-semantic-type granularity gap across importers).
+    if !type_subsumes(head_ty, group_ty, layer) && !type_subsumes(group_ty, head_ty, layer) {
+        return None;
+    }
+    Some((group_cat.clone(), group_sem.clone()))
+}
+
+/// The classifying **type index** of a close-apposition head: a subject GQ `S/(S\NP_C)` (a determined
+/// head, "the genes") yields `C`; a bare common noun `cat_n(C, _)` yields `C`. A transitive verb
+/// `(S\NP)/NP` or a preposition `cat_pp/cat_np` never matches — their `fwd` ARGUMENT is a bare
+/// `cat_np` (object / prep-object), not a `S\NP` VP, so the inner `bwd` probe fails. `None` otherwise.
+fn appositive_head_type(head_cat: &Exp) -> Option<&Exp> {
+    // Determined subject GQ  S/(S\NP_C) = fwd(S, bwd(S, cat_np(C, _))): the ARGUMENT (arg 1) is the VP.
+    if let Some([_result, arg]) = is_ctor(head_cat, "fwd") {
+        if let Some([_s, np]) = is_ctor(arg, "bwd") {
+            if let Some([ty, _num]) = is_ctor(np, "cat_np") {
+                return Some(ty);
+            }
+        }
+    }
+    // Bare common noun  cat_n(C, _).
+    if let Some([ty, _num]) = is_ctor(head_cat, "cat_n") {
+        return Some(ty);
+    }
+    None
+}
+
+/// The base class under any Σ-refinements: `Σx:C. φ → ⌊C⌋` (recursively), else the type itself. A
+/// compound / attributive / relative noun refines a base class with a Σ ("MMR genes" = `Σx:Gene.
+/// compound_kind(x, MMR)`); apposition's felicity checks the named members against that BASE class.
+fn sigma_base(ty: &Exp) -> &Exp {
+    match ty {
+        Exp::Sig(_, comp, _) => sigma_base(comp),
+        other => other,
+    }
 }
 
 /// Left-fold a non-empty list of `Prop`s with the connective `op` (`logic:And` /
@@ -1254,5 +1348,82 @@ mod tests {
             vec![cls("urn:eigenius:lexicon:Gene"), ctor("sg", vec![])],
         );
         assert!(!cat_has_selectional_slot(&noun));
+    }
+
+    // ── appose_group (D63 §8.4 Phase 6, RC-6 close nominal apposition) ──
+    #[test]
+    fn close_apposition_passes_group_through_gated_on_head_kind() {
+        let layer = Arc::new(
+            crate::layer::LayerBuilder::new("appos-test", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        );
+        let gene = cls("urn:eigenius:lexicon:Gene");
+        // The name-group `BRCA1 and MSH2` : cat_group(Gene, conn_and, pl); its sem is a cons-chain.
+        let group = ctor(
+            "cat_group",
+            vec![gene.clone(), ctor("conn_and", vec![]), ctor("pl", vec![])],
+        );
+        let group_sem = ctor("cons", vec![Exp::Unit, ctor("nil", vec![])]);
+        let s_finany = ctor("cat_s", vec![ctor("dcl", vec![]), ctor("fin_any", vec![])]);
+        // Head "the genes" — a subject GQ  S/(S\NP_Gene) = fwd(S, bwd(S, cat_np(Gene, _))).
+        let the_genes = ctor(
+            "fwd",
+            vec![
+                s_finany.clone(),
+                ctor("bwd", vec![decl_s(), np(gene.clone())]),
+            ],
+        );
+        let (cat, sem) = appose_group(&the_genes, &group, &group_sem, &layer)
+            .expect("a gene-typed group apposes a gene-typed head");
+        assert_eq!(cat, group, "the group category passes through unchanged");
+        assert_eq!(sem, group_sem, "the group sem passes through unchanged");
+
+        // Bare common-noun head "genes" : cat_n(Gene, pl) — same pass-through.
+        let bare = ctor("cat_n", vec![gene.clone(), ctor("pl", vec![])]);
+        assert!(
+            appose_group(&bare, &group, &group_sem, &layer).is_some(),
+            "a bare common-noun head also apposes"
+        );
+
+        // Compound-Σ head "the MMR genes" : S/(S\NP_{Σx:Gene. φ}) — the BASE class (Gene) peels out.
+        let sigma = Exp::Sig(
+            Patt::Var("x".into()),
+            Box::new(gene.clone()),
+            Box::new(Exp::Sort(0)),
+        );
+        let mmr_genes = ctor(
+            "fwd",
+            vec![s_finany.clone(), ctor("bwd", vec![decl_s(), np(sigma)])],
+        );
+        assert!(
+            appose_group(&mmr_genes, &group, &group_sem, &layer).is_some(),
+            "the compound-Σ head's base class (Gene) licenses the apposition"
+        );
+
+        // Felicity reject: "the cells BRCA1 and MSH2" — genes are not cells (no lattice link).
+        let the_cells = ctor(
+            "fwd",
+            vec![
+                s_finany,
+                ctor(
+                    "bwd",
+                    vec![decl_s(), np(cls("urn:eigenius:lexicon:CellLine"))],
+                ),
+            ],
+        );
+        assert!(
+            appose_group(&the_cells, &group, &group_sem, &layer).is_none(),
+            "a gene-typed group does not appose a cell-typed head"
+        );
+
+        // A transitive verb `(S\NP)/NP` is NOT an apposition head (its fwd-arg is an object NP).
+        let verb = ctor(
+            "fwd",
+            vec![ctor("bwd", vec![decl_s(), np(gene.clone())]), np(gene)],
+        );
+        assert!(
+            appose_group(&verb, &group, &group_sem, &layer).is_none(),
+            "a verb's fwd-argument is an object NP, not a VP — no apposition head type"
+        );
     }
 }

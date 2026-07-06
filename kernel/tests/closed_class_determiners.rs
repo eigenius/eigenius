@@ -638,6 +638,161 @@ fn already_covered_constructions_are_derived() {
 }
 
 #[test]
+fn comma_list_inherits_the_final_connective() {
+    // D63 §8.4 Phase 6, Step 5b — a list comma is polarity-NEUTRAL: it inherits the list's FINAL
+    // explicit connective (`A, B, C or D` = all-`∨`, `A, B, C and D` = all-`∧`), NOT the hardcoded
+    // `and`. Verified on BOTH coordination paths: the NP-group path (`coordinate_np` conn_list +
+    // rebind) and the prop-ending path (the n-ary fold in `parse_at_cap`). Before Step 5b the NP-`or`
+    // list GAPPED (the same-connective guard) and the prop-`or` list MIS-parsed as `Or(And(a,b),c)`.
+    let (_layer, index) = index_over_bootstrap();
+    let sem = |s: &str| {
+        let ps = index.parse(s, &Identity);
+        assert!(!ps.is_empty(), "expected a parse: {s:?}");
+        pretty_term(ps[0].sem())
+    };
+    // NP-group path (object position → distribute_object over the group).
+    assert!(
+        sem("HeLa affects BRCA1, BRCA1 and BRCA1").starts_with("And(And("),
+        "comma-AND NP list folds all-∧"
+    );
+    let np_or = sem("HeLa affects BRCA1, BRCA1 or BRCA1");
+    assert!(
+        np_or.starts_with("Or(Or(") && !np_or.contains("And"),
+        "comma-OR NP list folds all-∨ (was a GAP before Step 5b): {np_or}"
+    );
+    // Prop-ending path (coordinated predicative NPs after "is").
+    let pred_or = sem("HeLa is a gene, a cell line or a gene");
+    assert!(
+        pred_or.starts_with("Or(Or(") && !pred_or.contains("And"),
+        "comma-OR predicate list folds all-∨, NOT Or(And(a,b),c): {pred_or}"
+    );
+    assert!(
+        sem("HeLa is a gene, a cell line and a gene").starts_with("And(And("),
+        "comma-AND predicate list folds all-∧"
+    );
+    // Prop-ending path (coordinated VPs).
+    let vp_or = sem("HeLa affects BRCA1, affects BRCA1 or affects BRCA1");
+    assert!(
+        vp_or.starts_with("Or(Or(") && !vp_or.contains("And"),
+        "comma-OR VP list folds all-∨: {vp_or}"
+    );
+}
+
+#[test]
+fn close_apposition_subject_and_object() {
+    // D63 §8.4 Phase 6, RC-6 — close nominal apposition: a definite/bare common-noun HEAD + a
+    // coreferential name-group ("the genes BRCA1 and MSH2"). `appose_group` passes the group through
+    // (gated on the members being of the head's base kind), so it rides the distributive-subject /
+    // -object machinery. Both syntactic positions must close.
+    let (_layer, index) = index_over_bootstrap();
+    let closes = |s: &str| {
+        assert!(
+            !index.parse(s, &PluralS).is_empty(),
+            "expected closed: {s:?}"
+        )
+    };
+    let gaps = |s: &str| {
+        assert!(
+            index.parse(s, &PluralS).is_empty(),
+            "expected NO parse (felicity reject): {s:?}"
+        )
+    };
+
+    // Baselines that must already close (isolate the apposition from its parts).
+    closes("the genes affect HeLa"); //          GQ subject
+    closes("BRCA1 and BRCA1 affect HeLa"); //     bare group subject (distribute)
+    closes("HeLa affects BRCA1 and BRCA1"); //    bare group object (distribute_object)
+
+    // Apposition — SUBJECT and OBJECT position.
+    closes("HeLa affects the genes BRCA1 and BRCA1"); // OBJECT apposition
+    closes("the genes BRCA1 and BRCA1 affect HeLa"); //  SUBJECT apposition
+
+    // Felicity reject: a gene-typed group does not appose a cell-typed head.
+    gaps("the cell lines BRCA1 and BRCA1 affect HeLa");
+}
+
+/// A cross-IMPORTER granularity fixture reproducing the real-lexicon typing the *reflexive* felicity
+/// gate missed (d63-parse-gap-closure §4 Step 5). On the full WordNet+UMLS lexicon a NAMED individual
+/// carries its BROAD UMLS semantic type (`umlssty:T028` "Gene or Genome"), while the common NOUN
+/// carries its NARROWER concept (`umlscui:C0017337` "gene", emitted `: umlssty:T028`). Here `WidgetKind`
+/// mirrors the semantic type and `WidgetConcept : WidgetKind` the concept; the name "Wob" is typed at
+/// the KIND, the noun "widget" at the CONCEPT. Close apposition must bridge the two via BIDIRECTIONAL
+/// subsumption (`WidgetConcept ≤ WidgetKind`), which the one-directional `group ≤ head` gate could not.
+const WIDGET_FIXTURE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+namespace demo      = "urn:eigenius:demo";
+class demo:WidgetKind : lexicon:Entity { }
+class demo:WidgetConcept : demo:WidgetKind { }
+resource demo:wob : demo:WidgetKind { }
+resource demo:bit : demo:WidgetKind { }
+resource lexicon:e_widget : lexicon:LexicalEntry {
+    lexicon:form     = "widget";
+    lexicon:cat      = type_expr( lexicon:cat_n(demo:WidgetConcept, lexicon:num_any) );
+    lexicon:sem      = demo:WidgetConcept;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "demo:widget";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:e_wob : lexicon:LexicalEntry {
+    lexicon:form     = "Wob";
+    lexicon:cat      = type_expr( lexicon:cat_np(demo:WidgetKind, lexicon:sg) );
+    lexicon:sem      = demo:wob;
+    lexicon:sem_type = type_expr( demo:WidgetKind );
+    lexicon:sense    = "demo:wob";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:e_bit : lexicon:LexicalEntry {
+    lexicon:form     = "Bit";
+    lexicon:cat      = type_expr( lexicon:cat_np(demo:WidgetKind, lexicon:sg) );
+    lexicon:sem      = demo:bit;
+    lexicon:sem_type = type_expr( demo:WidgetKind );
+    lexicon:sense    = "demo:bit";
+    lexicon:grade    = epistemic:declared;
+}
+"#;
+
+fn widget_index() -> LexicalIndex {
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
+    for r in demo {
+        b.add_resource(r).expect("add demo");
+    }
+    let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let fix =
+        esl::compile_against_layer(WIDGET_FIXTURE, &demo_layer).expect("widget fixture compiles");
+    let mut b2 = LayerBuilder::new("widget", Some(Arc::clone(&demo_layer)));
+    for r in fix {
+        b2.add_resource(r).expect("add widget");
+    }
+    LexicalIndex::build(Arc::new(b2.build(LayerStorage::in_memory())))
+}
+
+#[test]
+fn close_apposition_bridges_concept_and_semantic_type_granularity() {
+    // The real-lexicon regression: a CONCEPT-typed head noun ("widget" : WidgetConcept) apposed to
+    // SEMANTIC-TYPE-typed names ("Wob"/"Bit" : WidgetKind), with WidgetConcept ≤ WidgetKind. The
+    // bidirectional felicity gate accepts (the head is a SUBTYPE of the members' type); a one-directional
+    // `members ≤ head` gate would wrongly reject, gapping every "the <noun> <NAME> and <NAME>" over the
+    // cross-importer lexicon (d63-parse-gap-closure §4 Step 5).
+    let index = widget_index();
+    assert!(
+        !index
+            .parse("the widgets Wob and Bit affect HeLa", &PluralS)
+            .is_empty(),
+        "a concept-typed head must appose semantic-type-typed names (bidirectional felicity)"
+    );
+    // Kind clash still rejected: a widget-kind group does not appose a gene head (neither subsumes).
+    assert!(
+        index
+            .parse("the genes Wob and Bit affect HeLa", &PluralS)
+            .is_empty(),
+        "a widget-kind group must not appose a gene-typed head"
+    );
+}
+
+#[test]
 fn pied_piping_relative_threads_the_antecedent_into_the_fronted_preposition() {
     // D62 §2 #2B: pied-piping `[noun] [prep] which [subject VP]` — the antecedent is the FRONTED
     // preposition's object, threaded into the clause as a VP-adjunct: "the gene in which HeLa affects
@@ -1208,11 +1363,14 @@ fn packing_router_decision_is_correct() {
     assert!(on.routes_packed("a gene which affects HeLa is large", &Identity));
     assert!(on.routes_packed("which cell line affects HeLa", &Identity));
 
-    // Comma constructs are packed now (§11 3g.3): list coordination (Coordinate), the appositive
-    // (Appositive*), and fronted-modifier comma absorption (AbsorbComma).
-    assert!(on.routes_packed("HeLa, BRCA1 affect HeLa", &Identity)); // list coordination
-    assert!(on.routes_packed("BRCA1 , which affects HeLa , is primary", &Identity)); // appositive
-    assert!(on.routes_packed("thus , HeLa affects BRCA1", &Identity)); // fronted-comma absorption
+    // Comma constructs route UNPACKED (Step 5b): a list comma is a token-keyed, n-ary, sem-reading
+    // construct — the comma inherits the list's final connective, folded over the conjuncts — which the
+    // packed binary-hyperedge model can't express. The router keys on any comma (the list vs
+    // appositive vs fronted-comma distinction needs parse-time context), so all three go unpacked; the
+    // unpacked path is the differential oracle, handling every construct the packed path does.
+    assert!(!on.routes_packed("HeLa, BRCA1 affect HeLa", &Identity)); // list coordination
+    assert!(!on.routes_packed("BRCA1 , which affects HeLa , is primary", &Identity)); // appositive
+    assert!(!on.routes_packed("thus , HeLa affects BRCA1", &Identity)); // fronted-comma absorption
 
     // Selectional (`depends on`: Gene/CellLine slots) ⇒ UNPACKED (fail-closed).
     assert!(!on.routes_packed("HeLa depends on BRCA1", &Identity));

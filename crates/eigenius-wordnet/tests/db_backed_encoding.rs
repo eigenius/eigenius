@@ -743,6 +743,94 @@ fn probe_step4_bare_umls_subject() {
     }
 }
 
+/// STEP 5 (RC-6) — localize the coordination gaps (d63-parse-gap-closure §4 Step 5). Isolation probes
+/// for each coordination sub-case (a plain baseline, comma-list, quantified `some X and some Y`,
+/// proper-noun, mismatched-NP `X or a Y`, apposition `the N genes …`) over the current snapshot, so the
+/// fix scope is per-construction, not "coordination" as a monolith. Run:
+///   EIGENIUS_DB_SNAPSHOT=/…/wordnet-umls-all-… cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       probe_step5_coordination -- --ignored --nocapture
+#[test]
+#[ignore = "Step 5 (RC-6): coordination sub-case localization; --ignored --nocapture"]
+fn probe_step5_coordination() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index(&head);
+    let probes = [
+        // baseline — plain 2-item NP / adjective coordination (the plan says this already parses)
+        "cells and genes affect HeLa",
+        "colon and gastric cancers affect HeLa",
+        // (a) comma-LIST coordination (3+ items) modifying a noun
+        "colon, gastric and ovarian cancers affect HeLa",
+        // (c) quantified NP coordination `some X and some Y`
+        "some cells and some genes affect HeLa",
+        // (d) proper-noun coordination as subject
+        "HeLa and BRCA1 affect cells",
+        // (e) MISMATCHED-NP object coordination — bare-plural `or` singular-indefinite (different cats)
+        "WRN affects genes or a phenotype",
+        "WRN affects genes or cells", // matched control (both bare plural) — should coordinate
+        // (b) noun-name APPOSITION + name-list
+        "the genes BRCA1 and MSH2 affect cells",
+        // the actual RC-6 sentences (post-mass-shim status)
+        "some MSI lines and some MSS lines were represented by data sets",
+        "WRN dependency may require specific lineages or a stronger mutation phenotype",
+    ];
+    for s in probes {
+        let (closed, open) = index.parse_open(s, &lem);
+        let tag = if !closed.is_empty() {
+            format!("CLOSED×{}", closed.len())
+        } else if !open.is_empty() {
+            format!("OPEN×{}", open.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  [{tag:>9}] {s}");
+    }
+}
+
+/// STEP 5 (RC-6) — VERIFY the close-apposition rule (`appose_group`, category.rs): a definite/bare
+/// common-noun head + a coreferential name-group passes the group through (gated on the members being
+/// of the head's base kind), so it rides the distributive-subject / -object machinery. Isolates each
+/// syntactic POSITION (subject / bare / object / prep-object) + the felicity reject, so a residual GAP
+/// localizes to the position, not the apposition rule. Run:
+///   EIGENIUS_DB_SNAPSHOT=/…/wordnet-umls-all-2026-07-06 cargo test -p eigenius-wordnet \
+///       --test db_backed_encoding probe_step5_apposition -- --ignored --nocapture
+#[test]
+#[ignore = "Step 5 (RC-6): apposition-rule verification; --ignored --nocapture"]
+fn probe_step5_apposition() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index(&head);
+    let probes = [
+        // Apposition (Step 5) regression witnesses:
+        "the genes BRCA1 and MSH2 affect cells", //             subject apposition
+        "mutations in the genes BRCA1 and MSH2 cause cancer", // prep-object apposition
+        // Comma-list connective inheritance (Step 5b):
+        "MSH2, MSH6, PMS2 or MLH1 affect cells", //             bare comma-OR name list (was GAP)
+        "the MMR genes MSH2, MSH6, PMS2 or MLH1 affect cells", // full corpus-shape apposition (was GAP)
+        "mutations in the MMR genes MSH2, MSH6, PMS2 or MLH1 cause cancer", // corpus prep-obj shape (GAP)
+        // Localize the prep-obj GAP: compound head vs comma-or list, in prep-object position.
+        "mutations in the MMR genes BRCA1 and MSH2 cause cancer", // compound head + simple `and`
+        "mutations in the genes MSH2, MSH6, PMS2 or MLH1 cause cancer", // plain head + comma-`or`
+        "WRN affects the MMR genes MSH2, MSH6, PMS2 or MLH1", // same apposition in OBJECT position
+        "colon, gastric and ovarian cancers affect HeLa", //    adjective comma-AND list (no regression)
+        // FELICITY reject — genes are not cells; the apposition must NOT license "the cells BRCA1 …".
+        "the cells BRCA1 and MSH2 affect HeLa",
+    ];
+    for s in probes {
+        let (closed, open) = index.parse_open(s, &lem);
+        let tag = if !closed.is_empty() {
+            format!("CLOSED×{}", closed.len())
+        } else if !open.is_empty() {
+            format!("OPEN×{}", open.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  [{tag:>9}] {s}");
+    }
+}
+
 /// S3 over-prune localization (GH#97): `Each event alone does not lead to cell death` gaps WITH the
 /// cross-POS prune but parses without. This dumps what the prune drops for each of S3's function words
 /// (closed / open-nominal=dropped / open-other=kept) and A/B-parses S3 sub-variants, to find which

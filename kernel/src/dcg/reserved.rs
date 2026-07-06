@@ -163,12 +163,15 @@ impl ReservedTable {
         self.is(token, ReservedKind::Comma)
     }
 
-    /// The connective IRI a coordinator contributes (`and` / list-comma → `logic:And`, `or` →
-    /// `logic:Or`); `None` if `token` is not a coordinator. Derived from the kind.
+    /// The connective a coordinator contributes: `and` → `logic:And`, `or` → `logic:Or`, and the list
+    /// **comma** → the neutral [`LIST_CONN`](super::category::LIST_CONN) that the trailing `and`/`or`
+    /// finalizes (D63 §8.4 Phase 6, Step 5b — the comma inherits the list's final connective, so it is
+    /// NOT hardcoded to `and`). `None` if `token` is not a coordinator. Derived from the kind.
     pub fn coord_connective(&self, token: &str) -> Option<&'static str> {
         match self.kind(token) {
-            Some(ReservedKind::CoordAnd | ReservedKind::Comma) => Some("urn:eigenius:logic:And"),
+            Some(ReservedKind::CoordAnd) => Some("urn:eigenius:logic:And"),
             Some(ReservedKind::CoordOr) => Some("urn:eigenius:logic:Or"),
+            Some(ReservedKind::Comma) => Some(super::category::LIST_CONN),
             _ => None,
         }
     }

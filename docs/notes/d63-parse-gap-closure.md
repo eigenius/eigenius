@@ -199,7 +199,7 @@ Declared-by-construction (flagged `?`).
 | **RC-3** | **No `V X as Y`** predicative small-clause | Derived (GAP both) | `evaluated MSI as a biomarker` (16); `identified WRN as…` (14) |
 | **RC-4** | **No adjective + PP-complement** (`concordant with X`) | Derived (GAP both) | `…concordant with…and with…` (12) |
 | **RC-5** | **No linking-verb + predicate** (`remain/stay true`) | Derived (GAP both) | `…remained true with…` (15) |
-| **RC-6** | **Coordination in quantified / apposed / mismatched-NP contexts** | Derived (object-`or` GAP) + construction | `…colon, gastric…and ovarian cancers` (6), `the MMR genes MSH2,…or MLH1` apposition (8), `Some…lines and some…lines` (13), `Achilles and DRIVE` (14), `lineages or a…phenotype` (20) |
+| **RC-6** | ~~Coordination in quantified / apposed / mismatched-NP contexts~~ → **apposition FIXED** (Step 5); residual = **comma-list with final `or`** (Step 5b) | Derived (apposition CLOSED×8/12/16/44/60; comma-`or` list GAP) | ~~`the MMR genes MSH2,…or MLH1` apposition (8)~~ FIXED; residual `MSH2, MSH6, PMS2 or MLH1` comma-`or` list. (quantified 13, proper-noun 14, mismatched-NP 20 already CLOSE) |
 | **RC-7** | **Copula kind-predication on a *compound* subject** (`are_kind` fires on simple, not 3-word, subjects) | Derived (simple✓/compound✗) | `Nucleotide repeat regions are microsatellites` (4) |
 | **RC-8** | **Clausal complement + multiword verb** (`hypothesize that`, `give rise to`) | Declared (note's prior `give rise` beam finding) | `We hypothesized that…would give rise to…` (1) |
 | **?** | **verb+PP frame *or* deep object/nested-PP** — non-bare-UMLS subject; needs a probe | Declared | `queried dependencies in cancers with MSI` (2), `arises from hypermethylation of the MLH1 promoter` (9), `compared favourably to…` (17); deep object `…responses to immune checkpoint blockade` (10, 11) |
@@ -323,11 +323,63 @@ Declared-by-construction (flagged `?`).
     ×56) to CLOSED — either mis-categorised mass-noun objects (real) or over-generation (the ×206 ambiguity
     is suspicious). The full-page `--no-llm` re-measure over `wordnet-umls-all-2026-07-06` (Step 12)
     re-baselines the grammar-gap count and settles which of the RC-2..RC-8 buckets actually remain.
-- [ ] **Step 5 — RC-6: coordination in quantified / apposed / mismatched-NP contexts (≈3–5 units).**
-      Object `X or Y` with mismatched NPs (`lineages or a … phenotype`), quantified `some X and some Y`,
-      noun-noun apposition (`the MMR genes MSH2, … or MLH1`), proper-noun coordination (`Achilles and
-      DRIVE`). Plain adjective/NP coordination already parses — so extend the coordination rule to these
-      contexts, not lists per se.
+- [x] **Step 5 — RC-6: coordination (DONE for apposition; comma-`or` list residual).** The Step-5
+      re-measure (`probe_step5_coordination` over `wordnet-umls-all-2026-07-06`) obsoleted most of the
+      original RC-6 framing: list/quantified/proper-noun/mismatched-NP coordination and sentence-13
+      (`some MSI lines and some MSS lines were represented …`) already CLOSE. The one genuine
+      construction gap was **close nominal apposition** (`the genes BRCA1 and MSH2 affect cells` — GAP).
+    - **Fix (built + verified): `appose_group`** (`kernel/src/dcg/category.rs`) — a definite/bare
+      common-noun HEAD (subject GQ `S/(S\NP_C)` or bare `cat_n(C,_)`) + a coreferential name-GROUP
+      `cat_group(D,·,·)` passes the group THROUGH (the names specify the referents; the head classifies),
+      gated on a **felicity** check. Seeded in the unpacked CKY (`lookup.rs`, keyed on head/group
+      adjacency); the group then rides the existing `distribute` / `distribute_object` unchanged.
+    - **Load-bearing finding — the felicity gate must be BIDIRECTIONAL.** Named individuals carry their
+      broad UMLS **semantic type** (`umlssty:T028`), while a common noun carries its narrower **concept**
+      (`umlscui:C0017337`, emitted `: umlssty:T028`, so `C0017337 ≤ T028`). The head is a SUBTYPE of the
+      members' type — a one-directional `members ≤ head` gate rejected every real apposition. Gate =
+      `⌊head⌋ ≤ ⌊group⌋ ∨ ⌊group⌋ ≤ ⌊head⌋` over the Σ-peeled base classes; still rejects a kind clash
+      (`the cells BRCA1 and MSH2` → GAP, cell-concept and T028 subsume neither way).
+    - **Verified over 07-06** (`probe_step5_apposition`): subject `the genes BRCA1 and MSH2 affect cells`
+      CLOSED×8 (was GAP); bare `genes BRCA1 and MSH2 …` CLOSED×12; object `WRN affects the genes BRCA1
+      and MSH2` CLOSED×60; **prep-object** `mutations in the genes BRCA1 and MSH2 cause cancer` CLOSED×16
+      (no bridge needed — `distribute_object` generalizes to prepositions, both `fwd` functors);
+      compound-Σ head `the MMR genes MSH2 and MLH1 …` CLOSED×44; felicity reject `the cells …` GAP.
+      Fast regression: `closed_class_determiners.rs::close_apposition_*` (incl. a cross-importer
+      granularity fixture reproducing the concept↔semantic-type typing).
+    - **Residual (orthogonal, NOT apposition): comma-list NP coordination with a final `or`.**
+      `MSH2, MSH6, PMS2 or MLH1` GAPS even bare — `coord_connective` hardcodes comma → `logic:And`
+      (`reserved.rs`), so the commas build an `and`-group and the final `or` mismatches
+      `coordinate_np`'s same-connective requirement (`colon, gastric AND ovarian`, all-`and`, works).
+      The fix is a **neutral "list" comma** that the trailing `and`/`or` finalizes — a distinct
+      coordination sub-case (new `Conn` semantics), tracked as **Step 5b**.
+- [x] **Step 5b — comma-list connective inheritance (DONE, both paths).** A list comma is
+      polarity-NEUTRAL: it inherits the list's FINAL explicit connective (`A, B, C or D` = all-`∨`,
+      `A, B, C and D` = all-`∧`), not the hardcoded `and`. **Witnessed** (Derived) before design: the
+      NP-group path GAPPED on comma-`or` (the same-connective guard); the prop-ending path silently
+      MIS-parsed comma-`or` as `Or(And(a,b),c)` (fail-open).
+    - **NP-group path**: a comma builds a neutral `conn_list` group ([`LIST_CONN`], a parser-internal
+      sentinel — never a logic op nor a committed `Conn` ctor, so NO reseed); the trailing `and`/`or`
+      REBINDS the whole group in `coordinate_np` (a `conn_list` left group accepts any op; a finalized
+      left group still rejects `X and Y or Z` mixing). A never-finalized list defaults to `∧`
+      (`group_conn_op`).
+    - **Prop-ending path**: the comma no longer folds props binarily (it is `LIST_CONN`, which
+      `coordinate_sem` can't fold); an **n-ary rule** in `parse_at_cap` gathers the comma-separated
+      atomic conjuncts at the trailing `and`/`or` and folds them ALL with that one connective. Because
+      the packed binary-hyperedge model can't express an n-ary fold, **comma-bearing sentences now
+      route unpacked** (`parse_needs_unpacked`).
+    - **Verified over 07-06**: `MSH2, MSH6, PMS2 or MLH1 affect cells` CLOSED×4 (was GAP); the corpus
+      apposition `the MMR genes MSH2, MSH6, PMS2 or MLH1 affect cells` CLOSED×168 (was GAP); adjective
+      `colon, gastric and ovarian cancers …` CLOSED (no regression); felicity reject holds. Fast
+      regression `closed_class_determiners.rs::comma_list_inherits_the_final_connective` asserts all-`∨`
+      / all-`∧` on both paths; full kernel lib 1610, `closed_class` 125 green.
+    - **Residual (orthogonal — a cap/beam issue, NOT a construction gap).** The corpus PREP-OBJECT shape
+      `mutations in the MMR genes MSH2, MSH6, PMS2 or MLH1 cause cancer` still GAPS, but every
+      constituent parses in isolation: compound head + simple `and` in prep-obj CLOSED×116; plain head +
+      comma-`or` in prep-obj CLOSED×48; the full compound + comma-`or` apposition in OBJECT position
+      CLOSED×126. Only the maximal-ambiguity combination in the longest frame gaps — the signature of
+      `DEFAULT_FOREST_CAP` (256) pruning the correct reading under the **mass-shim's ambiguity
+      inflation** (Step 4 over-generation). Tracked with the mass-shim precision follow-ups + the full
+      re-measure, not here.
 - [ ] **Step 6 — RC-2: comparative `than` (2 units).** The `than`-clause complement (`greater/fewer X than
       Y`). Mirror the existing `cat_pp_than` argument-PP machinery for the `than`-phrase.
 - [ ] **Step 7 — RC-3: `V X as Y` predicative small-clause (2 units).** `evaluate/identify X as Y` — the
