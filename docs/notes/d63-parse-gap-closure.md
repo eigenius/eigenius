@@ -1,11 +1,12 @@
 # D63 — Parse-gap closure for the test document (full-lexicon baseline + plan)
 
-**Status:** the **OOV / lexical side is closed** (`2026-07-05`); the residual is **grammar-gaps** — §3:
-a bare-UMLS-noun-subject typing gap (RC-1) + missing construction rules (comparative `than`, `V X as Y`,
-adjective+PP, linking verb, coordination) — plus numbers. **The verb+PP frame, once the headline gap, is
-now fixed and validated** (§3). Goal (the user's step 2): make the test document **parse
-completely** — every unit produces ≥1 parse — over the full WordNet+UMLS lexicon. Ambiguity (collapsing
-the many readings to one) and long-sentence perf are the *next* phase, not this one.
+**Status:** the **OOV / lexical side is closed** (`2026-07-05`); of the grammar-gaps, the **verb+PP frame**
+(§3) and **RC-1 (bare-UMLS-noun subject)** are now **fixed + verified** (§4 Steps 1–2, 4; snapshot
+`wordnet-umls-all-2026-07-06`). The residual is **missing construction rules** — comparative `than` (RC-2),
+`V X as Y` (RC-3), adjective+PP (RC-4), linking verb (RC-5), coordination (RC-6), compound-subject copula
+(RC-7) — plus numbers. Goal (the user's step 2): make the test document **parse completely** — every unit
+produces ≥1 parse — over the full WordNet+UMLS lexicon. Ambiguity (collapsing the many readings to one) and
+long-sentence perf are the *next* phase, not this one.
 
 What landed since the baseline below (all Derived, `2026-07-05`):
 - **Stage-A augmentation is now injected into the parse.** The `LexiconBacked` transducer
@@ -287,14 +288,41 @@ Declared-by-construction (flagged `?`).
       lifts the *lexical* blocker, not the parse rate — the residual is the §3 grammar gaps.
 **Re-ordered by leverage over the current 20 grammar-gaps (§3 RC counts), `2026-07-05`:**
 
-- [ ] **Step 4 — RC-1: bare UMLS-noun subject (≈5+ units, highest leverage).** The verb+PP frame is fixed;
-      the residual is that a bare UMLS term can't be a finite-verb subject. **First, witness the
-      mechanism** (probes: `the MSI contributes to cells` with a determiner → parses? inspect the UMLS
-      importer's emitted `cat_n` `num` — count vs mass). **Then the fix**, per the mechanism: if it's
-      countability, the UMLS importer should emit a **mass** (or `num_any`-bare-able) reading for
-      abbreviation/uncountable concepts (mirror the WordNet countability lexicon, §OOV), OR the pipeline
-      grounds a bare domain abbreviation to a **single doc-scoped mass sense** (as the glossary path did →
-      CLOSED×8). Gate: `MSI contributes to cells` / `MSI results from …` → parse, deterministic.
+- [x] **Step 4 — RC-1: bare UMLS-noun subject — FIXED + VERIFIED (`2026-07-06`).**
+  - **Mechanism (witnessed, `probe_step4_bare_umls_subject`).** The grammar is correct; the lexicon was the
+    gap. A bare **singular count** noun has no subject reading (`gene contributes` GAP); a **determiner**
+    (`the MSI contributes` CLOSED×4), a bare **plural** (`genes contribute`), or a bare **mass**
+    (`instability contributes`) all subject-ify. `MSI` was emitted count-only (`cat_n(C0920269, num_any)`,
+    no `mass`), so it gapped exactly like bare `gene`; `instability` parses bare because the `--countability`
+    lexicon mass-marks it. `MSI` is mass as a *corpus* fact (always "microsatellite instability", head
+    `instability` = mass) — not a per-document one, so the alias model (OOV/in-doc-defined only) never
+    re-typed it.
+  - **Fix (A) — importer mass-shim by head-inheritance.** The UMLS importer emits an ADDITIVE
+    `cat_n(C, mass)` for a concept whose preferred-name **head** is uncountable, reusing the shared
+    `--countability` lexicon: [convert.rs](../../crates/eigenius-umls/src/convert.rs) `concept_is_mass` +
+    `push_entries` (+ `Report.mass_entries`); a `--countability` flag on `umls-import`; the reseed script
+    passes it. Never for named individuals (gene `cat_np`). General — replaces the removed 5-acronym hardcode.
+  - **VERIFIED over `wordnet-umls-all-2026-07-06`** (2.5G; **893,872** additive mass entries): `MSI` now
+    carries `cat_n(C0920269, mass)`, and every RC-1 sentence closes — `MSI contributes` ×4, `results from`
+    ×3, `occurs in` ×4, `arises from` ×8, `is associated` ×72, `arises from Lynch syndrome` ×16
+    (`probe_grammar_gap_root_causes`). RC-2/3/5/7 correctly stay GAP.
+  - **Looseness (accepted; precision follow-ups):**
+    - **Breadth — 894k entries (~16%).** The `head ∈ any-uncountable-sense` test over-fires on partly-count
+      heads (`extension`, `finding`, …) and applies mass to *all* the concept's forms. Largely correct for a
+      biomedical corpus (many concepts ARE mass phenomena), but it inflates ambiguity. **Follow-up:** a
+      **strictly-uncountable** head test (uncountable AND no count sense) — general, sharpens the breadth and
+      drops partly-count heads at once; needs a strictly-uncountable countability source.
+    - **Acronym ↔ domain-word collision — filter (decision `2026-07-06`).** `gene contributes` closes via
+      `GENE` = **G**ross **E**xtra-**N**odal **E**xtension (NCI, `TTY=SY`, `SUPPRESS=N` — a *valid* UMLS
+      atom; head `extension` mass-shimmed). An acronym colliding with a **primary domain term** (`gene`) begs
+      for misunderstanding, so it should be filtered. **Follow-up:** in the UMLS importer, suppress an acronym
+      atom whose normalized form collides with a primary domain common noun — structural, not a per-atom
+      blocklist; `SUPPRESS` doesn't catch these (all `N`). Distinct from the mass-shim — the spurious count
+      entry pre-dated it (the mass reading is just the more-visible symptom).
+  - **Note:** the mass-shim also flipped RC-4 (`concordant with`, CLOSED×206) and RC-6 (`requires … or`,
+    ×56) to CLOSED — either mis-categorised mass-noun objects (real) or over-generation (the ×206 ambiguity
+    is suspicious). The full-page `--no-llm` re-measure over `wordnet-umls-all-2026-07-06` (Step 12)
+    re-baselines the grammar-gap count and settles which of the RC-2..RC-8 buckets actually remain.
 - [ ] **Step 5 — RC-6: coordination in quantified / apposed / mismatched-NP contexts (≈3–5 units).**
       Object `X or Y` with mismatched NPs (`lineages or a … phenotype`), quantified `some X and some Y`,
       noun-noun apposition (`the MMR genes MSH2, … or MLH1`), proper-noun coordination (`Achilles and
@@ -314,12 +342,15 @@ Declared-by-construction (flagged `?`).
 - [ ] **Step 11 — RC-8 + the `?` residual (≈4 units).** `hypothesize that … give rise to …` (clausal +
       multiword verb), the deep/compound object NPs (`… responses to immune checkpoint blockade`), and the
       un-probed verb+PP-or-object cases (2, 9, 17). Probe each to localize before fixing.
-- [~] **Step 12 — Re-measure** `scripts/measure-parse-rate.sh --no-llm` over `--umls-all` (§1b). **Gate:**
-      grammar-gap + missing-lexeme → 0. **Half met (`2026-07-05`):** `missing-lexeme → 0` (lexical side
-      complete); **`grammar-gap 20`** remains (the RC-1..RC-8 work above). Re-run after each RC closes; the
-      reranker pass is the ambiguity metric, the `--no-llm` pass the does-it-parse gate.
+- [~] **Step 12 — Re-measure** `scripts/measure-parse-rate.sh --no-llm` over the current snapshot
+      `wordnet-umls-all-2026-07-06`. **Gate:** grammar-gap + missing-lexeme → 0. **Progress:** `missing-lexeme
+      → 0` (§1b) and **RC-1 fixed** (Step 4). **Immediate next action:** a full-page (62-unit) re-measure over
+      `wordnet-umls-all-2026-07-06` to re-baseline the grammar-gap count post-mass-shim and settle which of
+      RC-2..RC-8 remain (the battery hinted RC-4/RC-6 may have closed — real or the mass-shim's
+      over-generation). Re-run after each RC closes; the reranker pass is the ambiguity metric, the `--no-llm`
+      pass the does-it-parse gate.
 
-Each step re-runs the measure over just its affected sentences (fast) before the full re-measure at Step 9.
+Each step re-runs the measure over just its affected sentences (fast) before the full re-measure at Step 12.
 
 ---
 

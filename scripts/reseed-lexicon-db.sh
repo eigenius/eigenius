@@ -123,8 +123,12 @@ say "converting UMLS → umls-chain/  ($([[ $UMLS_ALL == 1 ]] && echo 'all seman
 rm -rf umls-chain
 UMLS_TUI_ARGS=()
 [[ "$UMLS_ALL" == "1" ]] || for t in "${UMLS_TUIS[@]}"; do UMLS_TUI_ARGS+=(--semantic-type "$t"); done
+# `--countability`: mass-shim a concept whose preferred-name head is uncountable (RC-1 head-inheritance,
+# d63-parse-gap-closure §4 Step 4) so a bare abbreviation of a mass phenomenon (`MSI`) parses as a subject.
+UMLS_COUNTABILITY_ARGS=()
+[[ -f "$COUNTABILITY" ]] && UMLS_COUNTABILITY_ARGS+=(--countability "$COUNTABILITY")
 "$ROOT/target/release/umls-import" --meta-dir "$UMLS_META" --version "$UMLS_RELEASE" \
-  --out-dir umls-chain "${UMLS_TUI_ARGS[@]}"
+  --out-dir umls-chain "${UMLS_TUI_ARGS[@]}" "${UMLS_COUNTABILITY_ARGS[@]}"
 
 # Guard: the base layer must declare EVERY semantic type the concept chunks reference, else the
 # kernel rejects the chunks (UnresolvedClassReference, fail-closed). This catches the dangling-STY

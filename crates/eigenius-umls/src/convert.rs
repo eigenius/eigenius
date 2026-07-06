@@ -78,6 +78,8 @@ pub struct Report {
     pub concepts: usize,
     /// `lexicon:LexicalEntry` entries emitted (one per concept surface form).
     pub entries: usize,
+    /// Additive `cat_n(C, mass)` entries emitted for mass concepts (RC-1 head-inheritance mass shim).
+    pub mass_entries: usize,
 }
 
 /// Escape a string for an ESL double-quoted literal.
@@ -141,25 +143,65 @@ fn concept_description(
     }
 }
 
-/// Emit the derived lexical entries for one concept — one per surface form. A **concept class**
-/// yields **common-noun** `cat_n(umlscui:CUI)` entries (`sem_type = Set`). A **named individual**
-/// (`named_tui = Some(primary TUI)`, D62) yields **proper-noun** `cat_np(umlssty:TUI, sg)` entries
-/// whose `sem` is the instance `umlscui:CUI` (every form is a name of the individual). The proper-noun
-/// typing is what makes a gene symbol work as both a bare NP and a prenominal modifier.
-// Countability (D62 CNL bare-mass arguments) is handled by the GENERAL mechanism on the WordNet
-// side: the `--countability` lexicon (Wiktionary `Category:English uncountable nouns` ∩ WordNet,
-// `scripts/provision-countability.sh`) emits an additive `cat_n(C, mass)` entry per uncountable
-// lemma. UMLS concepts that ARE English nouns (`DNA`, `RNA`, …) are already mass-marked there — so
-// UMLS carries NO countability list of its own (the earlier `MASS_FORMS` 5-acronym hardcode was a
-// stopgap, now removed). The remaining acronyms (`MSI`/`MMR`/`MSS`) are NOT mass nouns — they are
-// abbreviations for phenomena ("microsatellite instability", whose head `instability` IS mass via
-// the WordNet lexicon); their bare-argument use belongs to the abbreviation/alias model (#1), not a
-// mass common-noun shim.
+/// The mass/uncountable-noun lookup set (lowercased lemmas) — the **shared** `--countability` lexicon
+/// (Wiktionary `Category:English uncountable nouns` ∩ WordNet, `scripts/provision-countability.sh`) the
+/// WordNet importer also consumes. Empty ⇒ no mass shim (count-only, the prior behaviour).
+pub type MassNouns = std::collections::BTreeSet<String>;
+
+/// **RC-1 mass shim (head-inheritance, D63 parse-gap-closure §4 Step 4).** A concept is mass iff its
+/// preferred name's HEAD (last word) is an uncountable noun — "microsatellite instability" is mass because
+/// its head "instability" is, so the abbreviation "MSI" inherits the mass reading. Lets a bare occurrence
+/// (`MSI contributes to cancers`) shift to a mass NP subject/argument, exactly as bare "instability" does;
+/// a bare *singular count* noun has no such reading (`MSI` / `gene` bare → grammar-gap). General — the
+/// head governs compound countability — replacing the removed 5-acronym `MASS_FORMS` hardcode.
+fn concept_is_mass(preferred_name: &str, mass: &MassNouns) -> bool {
+    preferred_name
+        .split_whitespace()
+        .last()
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
+        .map(|head| mass.contains(&head))
+        .unwrap_or(false)
+}
+
+/// Emit one `lexicon:LexicalEntry` for `form` under `cat` / `sem_type`, IRI `umlscui:e_{cui}_{i}{suffix}`.
+fn emit_entry(
+    buf: &mut String,
+    cui: &str,
+    i: usize,
+    suffix: &str,
+    form: &str,
+    cat: &str,
+    sem_type: &str,
+) {
+    buf.push_str(&format!(
+        "resource umlscui:e_{cui}_{i}{suffix} : lexicon:LexicalEntry {{\n\
+         \x20   lexicon:form       = \"{form}\";\n\
+         \x20   lexicon:cat        = type_expr( {cat} );\n\
+         \x20   lexicon:sem        = umlscui:{cui};\n\
+         \x20   lexicon:sem_type   = type_expr( {sem_type} );\n\
+         \x20   lexicon:sense      = \"umls:{cui}\";\n\
+         \x20   lexicon:grade      = epistemic:declared;\n\
+         \x20   lexicon:in_lexicon = lexicon:umls;\n\
+         }}\n\n",
+        form = esc(form),
+    ));
+}
+
+// A concept class yields common-noun `cat_n(C, num_any)` entries (`sem_type = Set`); a mass concept
+// (head-inheritance, [`concept_is_mass`]) ALSO gets an additive `cat_n(C, mass)` reading per form, so a
+// bare occurrence shifts to a mass NP (the RC-1 fix — bare `MSI` was a grammar-gap because UMLS typed it
+// count-only). A named individual (gene symbol) yields proper-noun `cat_np(TUI, sg)` entries and is never
+// mass-shimmed. `DNA`/`RNA` etc. that are English nouns get their mass reading here too (same lexicon the
+// WordNet importer uses), a harmless duplicate of any WordNet mass entry (distinct entry IRIs).
 fn push_entries(
     buf: &mut String,
     cui: &str,
     forms: &[String],
     named_tui: Option<&str>,
+    is_mass: bool,
     rep: &mut Report,
 ) {
     let (cat, sem_type) = match named_tui {
@@ -172,20 +214,15 @@ fn push_entries(
             "Set".to_string(),
         ),
     };
+    let mass_cat = format!("lexicon:cat_n(umlscui:{cui}, lexicon:mass)");
     for (i, form) in forms.iter().enumerate() {
-        buf.push_str(&format!(
-            "resource umlscui:e_{cui}_{i} : lexicon:LexicalEntry {{\n\
-             \x20   lexicon:form       = \"{form}\";\n\
-             \x20   lexicon:cat        = type_expr( {cat} );\n\
-             \x20   lexicon:sem        = umlscui:{cui};\n\
-             \x20   lexicon:sem_type   = type_expr( {sem_type} );\n\
-             \x20   lexicon:sense      = \"umls:{cui}\";\n\
-             \x20   lexicon:grade      = epistemic:declared;\n\
-             \x20   lexicon:in_lexicon = lexicon:umls;\n\
-             }}\n\n",
-            form = esc(form),
-        ));
+        emit_entry(buf, cui, i, "", form, &cat, &sem_type);
         rep.entries += 1;
+        if is_mass && named_tui.is_none() {
+            emit_entry(buf, cui, i, "_mass", form, &mass_cat, "Set");
+            rep.entries += 1;
+            rep.mass_entries += 1;
+        }
     }
 }
 
@@ -229,24 +266,26 @@ pub fn render_base(subset: &Subset, version: &str) -> (String, usize) {
 
 /// Render one concept's block — its class (the mirror) plus its derived common-noun
 /// entries. No header; callers concatenate blocks into chunk bodies. Returns the
-/// rendered text and the number of lexical entries it contains.
-pub fn render_concept_block(c: &crate::rrf::Concept) -> (String, usize) {
+/// rendered text and the block's [`Report`] (lexical-entry + additive mass-entry counts).
+pub fn render_concept_block(c: &crate::rrf::Concept, mass: &MassNouns) -> (String, Report) {
     let mut buf = String::new();
     let mut rep = Report::default();
     let desc = concept_description(&c.preferred_name, c.definition.as_ref(), &c.cui);
     // A named individual (a nomenclature symbol, e.g. an HGNC gene) is emitted as an INSTANCE of its
     // primary semantic-type class with `cat_np` entries; otherwise a concept class with `cat_n`.
     let named_tui: Option<&str> = c.symbol.as_ref().and(c.tuis.first()).map(|t| t.as_str());
+    // RC-1 mass shim: a concept whose preferred-name head is uncountable gets an additive `mass` entry.
+    let is_mass = concept_is_mass(&c.preferred_name, mass);
     push_concept(&mut buf, &c.cui, &c.tuis, &desc, named_tui.is_some());
-    push_entries(&mut buf, &c.cui, &c.forms, named_tui, &mut rep);
-    (buf, rep.entries)
+    push_entries(&mut buf, &c.cui, &c.forms, named_tui, is_mass, &mut rep);
+    (buf, rep)
 }
 
 /// Render the full mirror + derived lexicon as a SINGLE document for `subset`.
 /// `version` labels the header notice and the lexicon descriptor (e.g. `"2026AA"`).
 /// For large imports use the partitioned emit (the binary's `--out-dir`) instead, so
 /// each layer stays under the gRPC message-size limit.
-pub fn render_document(subset: &Subset, version: &str) -> (String, Report) {
+pub fn render_document(subset: &Subset, version: &str, mass: &MassNouns) -> (String, Report) {
     let mut rep = Report::default();
     let (base, sty) = render_base(subset, version);
     rep.semantic_types = sty;
@@ -254,9 +293,10 @@ pub fn render_document(subset: &Subset, version: &str) -> (String, Report) {
     let mut body = base;
     body.push_str("\n// ── Concept classes (the mirror) + derived common-noun entries ──\n");
     for c in &subset.concepts {
-        let (block, entries) = render_concept_block(c);
+        let (block, brep) = render_concept_block(c, mass);
         body.push_str(&block);
-        rep.entries += entries;
+        rep.entries += brep.entries;
+        rep.mass_entries += brep.mass_entries;
         rep.concepts += 1;
     }
 
@@ -314,7 +354,7 @@ mod tests {
 
     #[test]
     fn renders_mirror_and_lexicon() {
-        let (doc, rep) = render_document(&werner_subset(), "2026AA");
+        let (doc, rep) = render_document(&werner_subset(), "2026AA", &MassNouns::new());
         assert_eq!(rep.semantic_types, 1);
         assert_eq!(rep.concepts, 1);
         assert_eq!(rep.entries, 2);
@@ -353,7 +393,7 @@ mod tests {
     fn named_individual_gene_renders_as_instance_with_cat_np_entries() {
         // A gene (HGNC symbol → named individual, D62) is an INSTANCE of its semantic-type class
         // with PROPER-NOUN (cat_np) entries — so it works as both a bare NP and a prenominal modifier.
-        let (doc, _) = render_document(&wrn_gene_subset(), "2026AA");
+        let (doc, _) = render_document(&wrn_gene_subset(), "2026AA", &MassNouns::new());
         // The CUI is a `resource` (instance), NOT a `class`, typed by its semantic type.
         assert!(doc.contains("resource umlscui:C1337007 : umlssty:T028 {"));
         assert!(!doc.contains("class umlscui:C1337007"));
@@ -372,10 +412,55 @@ mod tests {
 
     #[test]
     fn header_carries_the_umls_license_and_redistribution_constraint() {
-        let (doc, _) = render_document(&werner_subset(), "2026AA");
+        let (doc, _) = render_document(&werner_subset(), "2026AA", &MassNouns::new());
         assert!(doc.contains("UMLS Metathesaurus"));
         assert!(doc.contains("MUST obtain their own UMLS license"));
         assert!(doc.contains("SRL-0"));
         assert!(doc.contains("2026AA"));
+    }
+
+    /// An MSI-like concept: preferred head `instability` is uncountable → the concept + its abbreviation
+    /// `MSI` are mass (C0920269, "Microsatellite Instability", a T047 phenomenon, no nomenclature symbol).
+    fn msi_subset() -> Subset {
+        Subset {
+            semantic_types: vec![SemanticType {
+                tui: "T047".to_string(),
+                name: "Disease or Syndrome".to_string(),
+            }],
+            concepts: vec![Concept {
+                cui: "C0920269".to_string(),
+                tuis: vec!["T047".to_string()],
+                preferred_name: "Microsatellite Instability".to_string(),
+                forms: vec!["MSI".to_string(), "Microsatellite Instability".to_string()],
+                definition: None,
+                symbol: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn mass_concept_gets_additive_mass_entry_by_head_inheritance() {
+        // RC-1 (§4 Step 4): head `instability` ∈ the countability set ⇒ every form gets an ADDITIVE
+        // `cat_n(C, mass)` entry alongside its `num_any` one — so bare `MSI` shifts to a mass subject.
+        let mut mass = MassNouns::new();
+        mass.insert("instability".to_string());
+        let (doc, rep) = render_document(&msi_subset(), "2026AA", &mass);
+        assert_eq!(rep.entries, 4, "2 forms × (count + mass)");
+        assert_eq!(rep.mass_entries, 2);
+        assert!(doc.contains("lexicon:cat_n(umlscui:C0920269, lexicon:num_any)"));
+        assert!(doc.contains("lexicon:cat_n(umlscui:C0920269, lexicon:mass)"));
+        // The abbreviation `MSI` (form 0) itself carries the mass reading — the fix's whole point.
+        assert!(doc.contains("resource umlscui:e_C0920269_0_mass : lexicon:LexicalEntry {"));
+        assert!(doc.contains("lexicon:form       = \"MSI\";"));
+    }
+
+    #[test]
+    fn count_head_concept_gets_no_mass_entry() {
+        // `Werner Syndrome` head `syndrome` is countable ⇒ no mass entry, even with a populated set.
+        let mut mass = MassNouns::new();
+        mass.insert("instability".to_string()); // present, but `syndrome` is not
+        let (doc, rep) = render_document(&werner_subset(), "2026AA", &mass);
+        assert_eq!(rep.mass_entries, 0);
+        assert!(!doc.contains("lexicon:mass"));
     }
 }

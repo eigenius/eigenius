@@ -697,6 +697,52 @@ fn probe_grammar_gap_root_causes() {
     }
 }
 
+/// STEP 4 (RC-1) — witness the bare-UMLS-noun-subject mechanism (d63-parse-gap-closure §3/§4).
+/// Part 1: the actual `lexicon:cat` of the abbreviation forms in the snapshot (count `num_any` vs `mass`
+/// vs `cat_np`). Part 2: a determiner/number/mass battery isolating whether a determiner or a mass/plural
+/// reading turns the bare `MSI` subject into a parse — confirming the count-vs-mass diagnosis. Run:
+///   EIGENIUS_DB_SNAPSHOT=/…/wordnet-umls-all-… cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       probe_step4_bare_umls_subject -- --ignored --nocapture
+#[test]
+#[ignore = "Step 4 (RC-1): bare-UMLS-subject mechanism; --ignored --nocapture"]
+fn probe_step4_bare_umls_subject() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index(&head);
+    // Part 1 — the emitted cats (count `num_any` vs `mass` vs `cat_np`) for the abbreviation forms and the
+    // WordNet mass baseline (`instability`) + a count baseline (`gene`/`genes`).
+    for form in ["msi", "mmr", "mss", "instability", "gene", "genes"] {
+        let entries = index.debug_form_entries(form, &lem);
+        eprintln!("=== {form:?} — {} entries ===", entries.len());
+        for (closed, cat, sense) in entries.iter().take(8) {
+            eprintln!("  closed={closed} sense={sense:<16} cat={cat}");
+        }
+    }
+    // Part 2 — subject battery: does a determiner / mass / plural fix the bare subject?
+    eprintln!("-- subject battery (all forms known; no augmentation) --");
+    for s in [
+        "MSI contributes to cells",         // bare count (num_any) — GAP expected
+        "the MSI contributes to cells",     // + determiner
+        "MSI contribute to cells",          // bare, plural agreement
+        "instability contributes to cells", // bare MASS (WordNet) — CLOSED expected
+        "the instability contributes to cells", // mass + determiner
+        "genes contribute to cells",        // bare PLURAL count — kind
+        "gene contributes to cells",        // bare SINGULAR count — GAP expected (English)
+        "a gene contributes to cells",      // singular count + determiner
+    ] {
+        let (closed, open) = index.parse_open(s, &lem);
+        let tag = if !closed.is_empty() {
+            format!("CLOSED×{}", closed.len())
+        } else if !open.is_empty() {
+            format!("OPEN×{}", open.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  [{tag:>9}] {s}");
+    }
+}
+
 /// S3 over-prune localization (GH#97): `Each event alone does not lead to cell death` gaps WITH the
 /// cross-POS prune but parses without. This dumps what the prune drops for each of S3's function words
 /// (closed / open-nominal=dropped / open-other=kept) and A/B-parses S3 sub-variants, to find which

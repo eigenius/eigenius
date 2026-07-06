@@ -46,7 +46,9 @@ use eigenius_kernel::ontology::resource::Resource;
 use eigenius_kernel::ontology::Iri;
 use eigenius_kernel::validation::Validator;
 use eigenius_kernel::{bootstrap, esl};
-use eigenius_umls::convert::{header, render_base, render_concept_block, render_document};
+use eigenius_umls::convert::{
+    header, render_base, render_concept_block, render_document, MassNouns,
+};
 use eigenius_umls::rrf::{
     parse_mrconso_line, parse_mrdef_line, parse_mrrank, parse_mrsab, parse_mrsty_line,
     srl0_allowlist, ConceptBuilder, Subset,
@@ -68,6 +70,13 @@ struct Args {
     /// MRCONSO language to keep (LAT).
     #[arg(long, default_value = "ENG")]
     language: String,
+    /// Uncountable-noun lexicon (one lemma per line) — the SHARED `--countability` file the WordNet
+    /// importer uses. A concept whose preferred-name HEAD is uncountable ALSO gets an additive
+    /// `cat_n(C, mass)` entry, so a bare abbreviation of a mass phenomenon (`MSI` = "microsatellite
+    /// instability") shifts to a mass subject/argument (RC-1, d63-parse-gap-closure §4 Step 4). Absent ⇒
+    /// count-only (the prior behaviour).
+    #[arg(long)]
+    countability: Option<PathBuf>,
     /// The Metathesaurus release label, for the license notice + descriptor.
     #[arg(long, default_value = "2026AA")]
     version: String,
@@ -107,9 +116,41 @@ fn stream_lines(path: &Path, mut f: impl FnMut(&str)) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Load the shared uncountable-noun lexicon (one lemma per line, `#` comments) → lowercased set.
+/// Absent/unreadable ⇒ empty (count-only, no mass shim) — the same shape as the WordNet loader.
+fn load_countability(path: Option<&Path>) -> MassNouns {
+    let Some(path) = path else {
+        return MassNouns::new();
+    };
+    match fs::read_to_string(path) {
+        Ok(s) => {
+            let set: MassNouns = s
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(str::to_lowercase)
+                .collect();
+            eprintln!(
+                "countability: {} uncountable lemmas from {}",
+                set.len(),
+                path.display()
+            );
+            set
+        }
+        Err(_) => {
+            eprintln!(
+                "countability: {} not found — no mass marking (count-only)",
+                path.display()
+            );
+            MassNouns::new()
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args = Args::parse();
     let meta = &args.meta_dir;
+    let mass = load_countability(args.countability.as_deref());
 
     // Small files read whole: SRL-0 allowlist + the name-ranking precedence.
     let mrsab = match fs::read_to_string(meta.join("MRSAB.RRF")) {
@@ -179,10 +220,10 @@ fn main() -> ExitCode {
     // Partitioned emit: a base layer (semantic types + descriptor) + concept-batch
     // chunks, each under the size cap. The single-document path stays for small imports.
     if let Some(dir) = &args.out_dir {
-        return emit_partitioned(&subset, &args.version, dir, args.split_bytes);
+        return emit_partitioned(&subset, &args.version, dir, args.split_bytes, &mass);
     }
 
-    let (doc, rep) = render_document(&subset, &args.version);
+    let (doc, rep) = render_document(&subset, &args.version, &mass);
     eprintln!(
         "umls import ({}): {} semantic-type classes, {} concept classes → {} lexical entries",
         args.version, rep.semantic_types, rep.concepts, rep.entries,
@@ -224,7 +265,13 @@ fn main() -> ExitCode {
 /// each ≤ `split_bytes`. Every file carries the full header (license notice +
 /// namespaces). Load them in filename order; each concept chunk resolves its
 /// `subclass_of umlssty:*` against the base layer below it.
-fn emit_partitioned(subset: &Subset, version: &str, dir: &Path, split_bytes: usize) -> ExitCode {
+fn emit_partitioned(
+    subset: &Subset,
+    version: &str,
+    dir: &Path,
+    split_bytes: usize,
+    mass: &MassNouns,
+) -> ExitCode {
     if let Err(e) = fs::create_dir_all(dir) {
         eprintln!("error: creating {}: {e}", dir.display());
         return ExitCode::from(1);
@@ -244,6 +291,7 @@ fn emit_partitioned(subset: &Subset, version: &str, dir: &Path, split_bytes: usi
     let mut idx = 1usize;
     let mut cur = hdr.clone();
     let mut total_entries = 0usize;
+    let mut total_mass = 0usize;
     let mut chunk_concepts = 0usize;
 
     let flush = |idx: usize, cur: &str| -> std::io::Result<PathBuf> {
@@ -253,7 +301,7 @@ fn emit_partitioned(subset: &Subset, version: &str, dir: &Path, split_bytes: usi
     };
 
     for c in &subset.concepts {
-        let (block, entries) = render_concept_block(c);
+        let (block, brep) = render_concept_block(c, mass);
         // Roll over before exceeding the cap (but never write an empty chunk).
         if chunk_concepts > 0 && cur.len() + block.len() > split_bytes {
             match flush(idx, &cur) {
@@ -268,7 +316,8 @@ fn emit_partitioned(subset: &Subset, version: &str, dir: &Path, split_bytes: usi
             chunk_concepts = 0;
         }
         cur.push_str(&block);
-        total_entries += entries;
+        total_entries += brep.entries;
+        total_mass += brep.mass_entries;
         chunk_concepts += 1;
     }
     if chunk_concepts > 0 {
@@ -282,7 +331,7 @@ fn emit_partitioned(subset: &Subset, version: &str, dir: &Path, split_bytes: usi
     }
 
     eprintln!(
-        "umls import ({version}): {sty} semantic-type classes, {} concept classes → {total_entries} lexical entries",
+        "umls import ({version}): {sty} semantic-type classes, {} concept classes → {total_entries} lexical entries ({total_mass} additive mass entries, RC-1 head-inheritance)",
         subset.concepts.len(),
     );
     eprintln!(
