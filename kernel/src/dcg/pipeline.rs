@@ -32,7 +32,8 @@ use std::sync::Arc;
 use crate::layer::{Layer, LayerBuilder, LayerStorage};
 
 use super::augment::{
-    augment_document_only, augment_lexicon_backed, AugmentOptions, LexiconAugmentation,
+    augment_document_only, augment_lexicon_backed, AugmentOptions, CategoryProposer,
+    LexiconAugmentation, NominalCategoryProposer,
 };
 use super::glossary::AbbreviationProposer;
 use super::lemmatizer::Lemmatizer;
@@ -72,8 +73,14 @@ pub struct InProcessPipeline<'a> {
     lemmatizer: &'a dyn Lemmatizer,
     abbreviation_proposer: &'a dyn AbbreviationProposer,
     anaphora_proposer: &'a dyn Proposer,
+    category_proposer: &'a dyn CategoryProposer,
     augment_options: AugmentOptions,
 }
+
+/// The default (deterministic) POS proposer — a `'static` ZST so [`InProcessPipeline::new`] can hand out
+/// a `&dyn CategoryProposer` without the caller supplying one. Grounding stays nominal-only (the (A)
+/// behaviour) until [`InProcessPipeline::with_category_proposer`] installs a live one.
+static NOMINAL_CATEGORY_PROPOSER: NominalCategoryProposer = NominalCategoryProposer;
 
 impl<'a> InProcessPipeline<'a> {
     pub fn new(
@@ -87,6 +94,9 @@ impl<'a> InProcessPipeline<'a> {
             lemmatizer,
             abbreviation_proposer,
             anaphora_proposer,
+            // Default: nominal-only POS proposer (deterministic) — grounding matches the (A) behaviour
+            // until a live one is installed via [`Self::with_category_proposer`].
+            category_proposer: &NOMINAL_CATEGORY_PROPOSER,
             // Default: `DocumentOnly` (no retrieval) — deterministic, no `base`-index dependency. Opt into
             // `LexiconBacked` (form-`TextIndex` OOV grounding) via [`Self::with_augment_options`].
             augment_options: AugmentOptions::DocumentOnly,
@@ -98,6 +108,15 @@ impl<'a> InProcessPipeline<'a> {
     /// `core:TextIndex` over `lexicon:form` in `base`'s chain; without one it degrades to `DocumentOnly`.
     pub fn with_augment_options(mut self, opts: AugmentOptions) -> Self {
         self.augment_options = opts;
+        self
+    }
+
+    /// Install the (untrusted) POS [`CategoryProposer`] the `LexiconBacked` resolver consults to make
+    /// gloss grounding POS-aware (§6a, the (B) step) — a verb/adjective OOV grounds to its predicate
+    /// `eigentt:Axiom`, a nominal OOV to a class. Default is [`NominalCategoryProposer`] (the (A)
+    /// nominal-only behaviour); pass `AnthropicCategoryProposer` (`use-llm`) for the live proposer.
+    pub fn with_category_proposer(mut self, proposer: &'a dyn CategoryProposer) -> Self {
+        self.category_proposer = proposer;
         self
     }
 
@@ -118,6 +137,7 @@ impl<'a> InProcessPipeline<'a> {
                 &self.base,
                 document,
                 self.abbreviation_proposer,
+                self.category_proposer,
                 self.lemmatizer,
             ),
             // `DocumentOnly` and (until Phase 3) `LlmBacked` use the deterministic document-only harvest.

@@ -56,9 +56,12 @@ mod anthropic_client;
 #[cfg(feature = "use-llm")]
 pub mod resolver_llm;
 
+#[cfg(feature = "use-llm")]
+pub use augment::AnthropicCategoryProposer;
 pub use augment::{
-    augment_document_only, augment_lexicon_backed, AugmentOptions, Gap, LexicalBinding,
-    LexiconAugmentation, Provenance, ResolutionMethod,
+    augment_document_only, augment_lexicon_backed, AugmentOptions, CategoryProposer, ExpectedCat,
+    Gap, LexicalBinding, LexiconAugmentation, NominalCategoryProposer, Provenance,
+    ResolutionMethod,
 };
 pub use category::{
     cat_subsumes, cats_coordinate, common_super, coordinate_np, coordinate_sem, denote_cat,

@@ -1896,7 +1896,7 @@ fn lexicon_backed_augmentation_grounds_oov_via_the_form_text_index() {
     // D63 lexicon-augmentation Phase 2 (`LexiconBacked`, §6a): a form `core:TextIndex` token-matches the OOV
     // surface `recq` to a seeded multiword atom → grounds it to that concept, in-process. The exact
     // `ValueIndex` misses it (`recq` ≠ `recq family of dna helicases`); the BM25 `TextIndex` closes it.
-    use eigenius_kernel::dcg::{augment_lexicon_backed, ResolutionMethod};
+    use eigenius_kernel::dcg::{augment_lexicon_backed, NominalCategoryProposer, ResolutionMethod};
     let ctx = bootstrap::bootstrap().expect("bootstrap");
     // One shared storage across the chain so the bootstrap's `form_text_index` (discovered via the
     // per-storage triple index) is visible to the recq layer — as in production's single backend.
@@ -1927,6 +1927,7 @@ fn lexicon_backed_augmentation_grounds_oov_via_the_form_text_index() {
         &base,
         "recq affects HeLa.",
         &NoAbbreviationProposer,
+        &NominalCategoryProposer,
         &Identity,
     );
     let recq = aug
@@ -2004,27 +2005,35 @@ fn probe_recq_form_index_active_and_populated() {
     assert!(!hits.is_empty(), "recq should hit e_recq_family");
 }
 
-/// A nominal concept + a verb **axiom**, both carrying a `core:description` that mentions the OOV token
-/// `supercoils` (which has no `lexicon:form`). The concept-`core:description` index (§6a index c) returns
-/// both; the `LexiconBacked` resolver's secondary path must ground to the CLASS and DROP the axiom (a
-/// predicate denotation), per the (A) `is_a ∋ eigentt:Axiom` filter — else a nominal OOV would alias a
-/// predicate. The verb axiom's gloss deliberately outscores the class's longer gloss, so the filter, not
-/// ranking, is what selects the class.
+/// A nominal concept, a verb **axiom** (with a committed sibling entry), and a `core:description` on each
+/// mentioning `supercoils`. The SAME OOV surface must ground to *different* concepts by the proposed POS
+/// (§6a, the (B) step): a **nominal** OOV → the class `demo:Gyrase` (the form path skips the axiom, the
+/// gloss path keeps the class); a **verb** OOV → the axiom `demo:v_supercoil`, minted with the sibling's
+/// verb cat (not `cat_n`). `supercoils` stems to the sibling form `supercoil`, so the form text index
+/// reaches the axiom — which the POS filter, not ranking, admits or rejects. The sibling's cat is the
+/// transitive base `(S[dcl,bse]\NP)/NP` (verbatim from the WordNet converter) so the minter has a real
+/// verb cat to clone.
 const DESCRIPTION_GROUNDING_FIXTURE: &str = r#"
-namespace demo    = "urn:eigenius:demo";
-namespace lexicon = "urn:eigenius:lexicon";
+namespace demo      = "urn:eigenius:demo";
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
 class demo:Gyrase : lexicon:Entity {
     description = "a bacterial topoisomerase enzyme that supercoils chromosomal dna in living cells";
 }
-axiom demo:v_supercoil : lexicon:Entity -> Prop desc: "supercoils dna"
+axiom demo:v_supercoil : lexicon:Entity -> lexicon:Entity -> Prop desc: "supercoils dna"
+resource demo:e_supercoil : lexicon:LexicalEntry {
+    lexicon:form     = "supercoil";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = demo:v_supercoil;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:grade    = epistemic:declared;
+}
 "#;
 
-#[test]
-fn lexicon_backed_augmentation_grounds_oov_via_description_index_dropping_axioms() {
-    use eigenius_kernel::dcg::{augment_lexicon_backed, ResolutionMethod};
+/// Build `bootstrap → demo → fixture` on one shared storage (so the core `description_text_index` is
+/// discovered over `base`), returning the fixture head.
+fn description_grounding_base() -> Arc<eigenius_kernel::layer::Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    // Shared storage across the chain (see the form-index test) so the core `description_text_index` is
-    // discovered over `base` and both concepts' glosses populate one text index.
     let storage = ctx.head().storage().clone();
     let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
@@ -2034,35 +2043,127 @@ fn lexicon_backed_augmentation_grounds_oov_via_description_index_dropping_axioms
     let demo_layer = Arc::new(b.build(storage.clone()));
     let fix = esl::compile_against_layer(DESCRIPTION_GROUNDING_FIXTURE, &demo_layer)
         .expect("description fixture compiles");
-    let mut b2 = LayerBuilder::new("desc", Some(Arc::clone(&demo_layer)));
+    let mut b2 = LayerBuilder::new("fixture", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add description fixture");
     }
-    let base = Arc::new(b2.build(storage));
+    Arc::new(b2.build(storage))
+}
 
-    // `supercoils` is OOV (no form entry) — the form index can't ground it; the description path must.
+#[test]
+fn lexicon_backed_augmentation_grounds_nominal_oov_to_class_not_axiom() {
+    use eigenius_kernel::dcg::{augment_lexicon_backed, NominalCategoryProposer, ResolutionMethod};
+    let base = description_grounding_base();
+
+    // `supercoils` is OOV under the exact index (Identity; the form is `supercoil`).
     let index = LexicalIndex::build(Arc::clone(&base));
     assert!(
         !index.has_token("supercoils", &Identity),
-        "supercoils is OOV under the form index"
+        "supercoils is OOV under the exact form index"
     );
 
+    // Nominal POS: the form path reaches the axiom (via the stemmed sibling) but the POS filter drops it;
+    // the gloss path keeps the class → grounds to demo:Gyrase, minted a nominal alias.
     let aug = augment_lexicon_backed(
         &base,
         "supercoils affects HeLa.",
         &NoAbbreviationProposer,
+        &NominalCategoryProposer,
         &Identity,
     );
     let g = aug
         .added
         .iter()
         .find(|b| b.provenance.surface.to_lowercase() == "supercoils")
-        .expect("supercoils grounded via the description index");
+        .expect("supercoils grounded (nominal)");
     assert_eq!(g.provenance.method, ResolutionMethod::RetrievalGrounded);
     assert_eq!(
         g.provenance.grounded_to.as_ref().map(|i| i.as_str()),
         Some("urn:eigenius:demo:Gyrase"),
-        "grounds to the nominal concept, NOT the verb axiom demo:v_supercoil"
+        "nominal POS grounds to the class, NOT the verb axiom demo:v_supercoil"
+    );
+}
+
+#[test]
+fn lexicon_backed_augmentation_grounds_verb_oov_to_axiom_with_verb_cat() {
+    use eigenius_kernel::dcg::{augment_lexicon_backed, CategoryProposer, ExpectedCat};
+    use eigenius_kernel::ontology::iri::Iri;
+    // The (untrusted) POS proposer names every OOV a verb — the (B) source, deterministic here.
+    struct AlwaysVerb;
+    impl CategoryProposer for AlwaysVerb {
+        fn propose_category(&self, _surface: &str, _context: &str) -> Option<ExpectedCat> {
+            Some(ExpectedCat::Verb)
+        }
+    }
+    let base = description_grounding_base();
+
+    // SAME OOV surface as the nominal test — but Verb POS grounds it to the AXIOM (predicate denotation),
+    // and the minter clones the sibling's verb cat (not cat_n).
+    let aug = augment_lexicon_backed(
+        &base,
+        "supercoils affects HeLa.",
+        &NoAbbreviationProposer,
+        &AlwaysVerb,
+        &Identity,
+    );
+    let g = aug
+        .added
+        .iter()
+        .find(|b| b.provenance.surface.to_lowercase() == "supercoils")
+        .expect("supercoils grounded (verb)");
+    assert_eq!(
+        g.provenance.grounded_to.as_ref().map(|i| i.as_str()),
+        Some("urn:eigenius:demo:v_supercoil"),
+        "verb POS grounds to the axiom, NOT the class demo:Gyrase"
+    );
+    // The minted alias carries the sibling's verb cat + names the axiom — not a nominal `cat_n`.
+    let cat_prop = Iri::parse("urn:eigenius:lexicon:cat").unwrap();
+    let sem_prop = Iri::parse("urn:eigenius:lexicon:sem").unwrap();
+    let sib = base
+        .resolve(&Iri::parse("urn:eigenius:demo:e_supercoil").unwrap())
+        .unwrap();
+    assert_eq!(
+        g.proposed.get(&cat_prop),
+        sib.get(&cat_prop),
+        "minted verb entry reuses the sibling's verb cat"
+    );
+    assert_eq!(
+        g.proposed.get(&sem_prop),
+        Some(&eigenius_kernel::ontology::resource::Value::ResourceRef(
+            Iri::parse("urn:eigenius:demo:v_supercoil").unwrap()
+        )),
+        "minted verb entry's sem IS the axiom"
+    );
+}
+
+#[test]
+/// Live-LLM smoke test for the (B) POS source: the `AnthropicCategoryProposer` tags a word by its role
+/// in the sentence — a verb as `Verb`, a noun as `Nominal`. Non-deterministic (a live model), so it is
+/// `#[ignore]`d and asserts only the clear cases. Run:
+///   ANTHROPIC_API_KEY=… cargo test -p eigenius-kernel --features use-llm --test closed_class_determiners \
+///       anthropic_category_proposer_tags_pos -- --ignored --nocapture
+#[cfg(feature = "use-llm")]
+#[test]
+#[ignore = "live LLM POS proposer; --features use-llm --ignored --nocapture"]
+fn anthropic_category_proposer_tags_pos_in_context() {
+    use eigenius_kernel::dcg::{AnthropicCategoryProposer, CategoryProposer, ExpectedCat};
+    let Some(p) = AnthropicCategoryProposer::from_env() else {
+        eprintln!("SKIP: ANTHROPIC_API_KEY unset");
+        return;
+    };
+    let sentence = "The kinase phosphorylates the substrate protein.";
+    let verb = p.propose_category("phosphorylates", sentence);
+    let noun = p.propose_category("kinase", sentence);
+    eprintln!("phosphorylates → {verb:?}  |  kinase → {noun:?}");
+    assert_eq!(
+        verb,
+        Some(ExpectedCat::Verb),
+        "a verb in context tags as Verb"
+    );
+    assert_eq!(
+        noun,
+        Some(ExpectedCat::Nominal),
+        "a noun in context tags as Nominal"
     );
 }
 

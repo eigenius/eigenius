@@ -400,7 +400,9 @@ fn probe_recq_atoms_in_snapshot() {
 #[test]
 #[ignore = "verifies form+description grounding over a reseeded snapshot; --ignored --nocapture"]
 fn verify_grounding_indexes_over_snapshot() {
-    use eigenius_kernel::dcg::{augment_lexicon_backed, NoAbbreviationProposer};
+    use eigenius_kernel::dcg::{
+        augment_lexicon_backed, NoAbbreviationProposer, NominalCategoryProposer,
+    };
     use eigenius_kernel::layer::resolve_active_text_indexes;
     use eigenius_kernel::ontology::resource::Value;
     use eigenius_kernel::query::text::analyzer::registry::analyzer_for;
@@ -437,7 +439,13 @@ fn verify_grounding_indexes_over_snapshot() {
     // (a) FORM path — bare `recq` (OOV under the exact ValueIndex) grounds to C0084304 via the form
     // text index (BM25 over the seeded atoms), summed per concept.
     let lem = morphy();
-    let aug = augment_lexicon_backed(&head, "recq affects HeLa.", &NoAbbreviationProposer, &lem);
+    let aug = augment_lexicon_backed(
+        &head,
+        "recq affects HeLa.",
+        &NoAbbreviationProposer,
+        &NominalCategoryProposer,
+        &lem,
+    );
     let recq = aug
         .added
         .iter()

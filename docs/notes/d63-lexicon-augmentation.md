@@ -276,16 +276,33 @@ the family's *member structure* — a separate enrichment, not the grounding pat
   - **Resolver-side description grounding — IMPLEMENTED (`2026-07-05`).**
     [`ground_via_description_index`](../../kernel/src/dcg/augment.rs) is the secondary path in
     `augment_lexicon_backed`: form index first, then the concept-`core:description` index on a miss. A
-    description hit **is** the concept (no entry→`sem` hop); the resolver applies the eligibility filter —
-    drop hits whose `is_a ∋ eigentt:Axiom` (a *predicate* denotation would mint an incoherent nominal
-    alias), with the kernel felicity gate as the backstop for any residual non-nominal concept. This is
-    the **(A)** choice (nominal-only), which is just the POS-aware **(B)** with the expected category
-    pinned to nominal — same `is_a`-over-the-triple-index mechanism, the query-side category (from the
-    parse's typed open-holes) left for later; nothing here touches indexing or the lexicon data model.
-    Test: `lexicon_backed_augmentation_grounds_oov_via_description_index_dropping_axioms` — an OOV
-    (`supercoils`) that matches both a class gloss and a higher-BM25 verb-axiom gloss grounds to the
-    **class**; the filter, not ranking, selects it. Vector deferred. (HGNC gene-group import —
-    [[gene_family_lexicon_gap]] — is a separate *enrichment*, not the grounding path.)
+    description hit **is** the concept (no entry→`sem` hop). Both grounding paths are POS-aware (below);
+    the kernel felicity gate is the backstop on the minted alias. Vector deferred.
+  - **POS-aware grounding — the (B) step — IMPLEMENTED (`2026-07-05`).** The resolver takes the OOV's
+    expected category (`ExpectedCat {Nominal, Verb, Adjective}`) and keeps only concept hits whose kind
+    matches it: nominal ⇒ a non-axiom class/instance; verb/adjective ⇒ a predicate `eigentt:Axiom` — on
+    **both** the form and description paths (`is_a ∋ eigentt:Axiom` over the triple index). The mint then
+    branches on the concept's kind: a class → the nominal `cat_n` alias (`abbreviation_resources`); an
+    axiom → [`predicate_alias_resources`](../../kernel/src/dcg/augment.rs), which **clones a committed
+    sibling entry's verb/adjective cat** (found via `scan_chain` over `lexicon:sem` = the axiom —
+    resource-typed, so triple-indexed even after the persist String-collapse) rather than reconstructing
+    the cat, so the converter's category stays the single source of truth.
+    - **Where the category comes from: an *untrusted proposer*, not the parse.** The earlier note that it
+      would come from "the parse's typed open-holes" was wrong — those holes are anaphora-only
+      (`HoleKind::EntityRef`); an OOV yields `SentenceOutcome::Gap` (no parse, no typed hole). Instead a
+      [`CategoryProposer`](../../kernel/src/dcg/augment.rs) proposes the POS from the OOV's sentence
+      (carried on `Gap.context`), the same "propose → kernel gates" contract as the abbreviation/anaphora
+      proposers: `NominalCategoryProposer` (deterministic default = the nominal-only (A) behaviour) and
+      `AnthropicCategoryProposer` (`use-llm`). Installed on the pipeline via
+      `InProcessPipeline::with_category_proposer`.
+    - **Tests.** `…grounds_nominal_oov_to_class_not_axiom` and `…grounds_verb_oov_to_axiom_with_verb_cat`:
+      the SAME OOV (`supercoils`) grounds to the class under a nominal proposer and to the verb axiom
+      (minting the sibling's verb cat) under a verb proposer — the proposed POS, not ranking, selects the
+      concept kind.
+    - **Deferred refinements:** verb-vs-adjective disambiguation among axioms (both currently match a
+      predicate OOV; sibling-clone gives the concept's own cat regardless); inflection-matching the cloned
+      sibling to the OOV's surface (currently the first sibling by sorted IRI). (HGNC gene-group import —
+      [[gene_family_lexicon_gap]] — is a separate *enrichment*, not the grounding path.)
 - **Phase 3 (synthesis + cache)** — `LlmBacked` `LlmSynthesized` entries (kernel-gated); the promotion filter
   (by `method`/`confidence`) and the seed-in/added-out feedback cache across a corpus.
 
