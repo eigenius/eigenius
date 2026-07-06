@@ -48,10 +48,10 @@ use crate::ontology::resource::Value;
 use crate::ontology::Iri;
 
 use super::category::{
-    adverb_modifier_cats, appose_group, cats_coordinate, coordinate_but_not,
-    coordinate_but_not_sem, coordinate_np, coordinate_sem, denote_cat, front_participial, is_ctor,
+    adverb_modifier_cats, appose_group, cats_coordinate, complete_coord, coordinate_but_not,
+    coordinate_but_not_sem, coordinate_np, coordinate_prop, denote_cat, front_participial, is_ctor,
     pied_pipe, predicative_adjective_cat, reciprocate, relativize, relativize_appos,
-    sentence_modifier_cats, subst_cat, type_raise, CatSubst, LIST_CONN,
+    sentence_modifier_cats, subst_cat, type_raise, CatSubst,
 };
 use super::lemmatizer::{Lemmatizer, Pos};
 use super::lexicon::entry_to_item;
@@ -1269,13 +1269,6 @@ impl LexicalIndex {
                 }
             }
         }
-        // (3) A list **comma** is a token-keyed, n-ary, sem-reading construct (the neutral-comma
-        // coordination, Step 5b): the comma inherits the list's final connective, folded n-arily over
-        // the conjuncts — which the packed binary-hyperedge model can't express. Route any
-        // comma-bearing sentence unpacked so `parse_at_cap`'s list rule finalizes it.
-        if tokens.iter().any(|t| self.reserved.is_comma(t)) {
-            return true;
-        }
         false
     }
 
@@ -1530,17 +1523,13 @@ impl LexicalIndex {
             BinRule::Relativize => relativize(l.cat(), r.cat(), r.sem())
                 .map(|(cat, sem)| Item::with_cost(cat, sem, cost)),
             BinRule::Coordinate(op) => {
-                // Left-branching NF: the right conjunct may not itself be a coordination.
-                if is_coordination(r.sem()) {
-                    return None;
-                }
-                if cats_coordinate(l.cat(), r.cat(), &self.layer) {
-                    coordinate_sem(op, l.cat(), l.sem(), r.sem(), &self.layer)
-                        .map(|sem| Item::with_cost(l.cat().clone(), sem, cost))
-                } else {
-                    coordinate_np(op, l.cat(), l.sem(), r.cat(), r.sem(), &self.layer)
-                        .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
-                }
+                // The list-with-operator model (D63 §8.4 Phase 3): a prop-ending conjunct builds/extends
+                // a deferred `cat_coord` (folded later by the `CoordComplete` unary edge); an NP conjunct
+                // builds a `cat_group`. Each enforces its own left-branching NF (right conjunct is a
+                // single non-list constituent), so no `is_coordination` guard here.
+                coordinate_prop(op, l.cat(), l.sem(), r.cat(), r.sem(), &self.layer)
+                    .or_else(|| coordinate_np(op, l.cat(), l.sem(), r.cat(), r.sem(), &self.layer))
+                    .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
             }
             BinRule::ButNot => {
                 if cats_coordinate(l.cat(), r.cat(), &self.layer) {
@@ -1628,6 +1617,11 @@ impl LexicalIndex {
             // trailing comma). The child is already `is_sentence_premod` (checked at forest build), so
             // no re-check is needed here; the span widens but the cat/sem/cost are identical.
             UnaryKind::AbsorbComma => out.push(it.clone()),
+            UnaryKind::CoordComplete => {
+                if let Some((cat, sem)) = complete_coord(it.cat(), it.sem(), &self.layer) {
+                    out.push(Item::with_cost(cat, sem, it.cost()));
+                }
+            }
         }
     }
 
@@ -1796,6 +1790,20 @@ impl LexicalIndex {
                 // the sem, never `cat_shape`, so it does not affect the signature — but it is applied
                 // here so the representative sems stay consistent with the unpacked path.
                 let mut unary: Vec<(Sig, Item, NodeId, UnaryKind)> = Vec::new();
+                // Coordination list-completion (D63 §8.4 Phase 3): fold each prop-ending `cat_coord`
+                // node in this cell into its base category. The `cat_coord` node stays (a longer list
+                // extends it); the completed base-category node is what a copula / matrix consumes.
+                for id in forest.cells[i][j].values().copied().collect::<Vec<_>>() {
+                    let rep = forest.nodes[id].rep.clone();
+                    if let Some((cat, sem)) = complete_coord(rep.cat(), rep.sem(), &self.layer) {
+                        let item = Item::with_cost(cat, sem, rep.cost());
+                        unary.push((node_sig(&item), item, id, UnaryKind::CoordComplete));
+                    }
+                }
+                for (sig, item, child, kind) in unary.drain(..) {
+                    let nid = forest.get_or_create(i, j, sig, &item);
+                    forest.push_edge(nid, Edge::Unary { child, kind });
+                }
                 for id in forest.cells[i][j].values().copied().collect::<Vec<_>>() {
                     let rep = forest.nodes[id].rep.clone();
                     let mut shifted = self.bare_plural_nps(&rep);
@@ -2150,49 +2158,31 @@ impl LexicalIndex {
                         }
                     }
                 }
-                // Coordination: `[X] and/or [Y] → [X]` for same-category,
-                // Prop-ending conjuncts, with the generalized-conjunction sem
-                // (pointwise-lifted connective — D63 §8.4 Phase 3).
+                // Coordination (D63 §8.4 Phase 3, the list-with-operator model ported from core-en):
+                // `[X] and/or/`,` [Y]`. Prop-ending conjuncts build/extend a deferred `cat_coord` list
+                // (`coordinate_prop`), folded later by the completion shift; NP conjuncts build a
+                // member-retaining `cat_group` (`coordinate_np`), distributed/collected at the verb. BOTH
+                // defer the operator, so a comma is neutral (`LIST_CONN`) and the trailing `and`/`or`
+                // finalizes the list — `A, B, C or D` = all-`∨`. Each builder enforces its own
+                // left-branching NF (the right conjunct is a single, non-list constituent).
                 for c in (i + 1)..j {
                     let Some(op) = coord_op[c] else { continue };
                     let lefts = &chart[i][c - 1];
                     let rights = &chart[c + 1][j];
                     for l in lefts {
                         for r in rights {
-                            // Left-branching normal form (the spurious-ambiguity
-                            // control our grammar needs — D63 §8.4 Phase 4): a
-                            // coordination's RIGHT conjunct may not itself be a
-                            // coordination, so `A and B and C` parses *only* as
-                            // `(A and B) and C`. (Classic Eisner — composition /
-                            // type-raising normal forms — does not apply: we have
-                            // application + lexical type-raising + coordination,
-                            // no composition rule. It returns when one lands.)
-                            if is_coordination(r.sem()) {
-                                continue;
+                            if let Some((cat, sem)) =
+                                coordinate_prop(op, l.cat(), l.sem(), r.cat(), r.sem(), &self.layer)
+                            {
+                                produced.push(Item::with_cost(
+                                    cat,
+                                    sem,
+                                    l.cost().saturating_add(r.cost()),
+                                ));
                             }
-                            if cats_coordinate(l.cat(), r.cat(), &self.layer) {
-                                if let Some(sem) =
-                                    coordinate_sem(op, l.cat(), l.sem(), r.sem(), &self.layer)
-                                {
-                                    produced.push(Item::with_cost(
-                                        l.cat().clone(),
-                                        sem,
-                                        l.cost().saturating_add(r.cost()),
-                                    ));
-                                }
-                            } else if let Some((cat, sem)) =
+                            if let Some((cat, sem)) =
                                 coordinate_np(op, l.cat(), l.sem(), r.cat(), r.sem(), &self.layer)
                             {
-                                // NP coordination → a member-retaining `cat_group`
-                                // tagged with its connective (D63 §8.4 Phase 6).
-                                // Distinct from the Prop-ending generalized
-                                // conjunction above: a coordinated NP is not
-                                // conjoinable as a `Prop`; it denotes the group
-                                // `List C`, distributed (∧ for `and`, ∨ for `or`) or
-                                // collected at the verb. `coordinate_np` requires the
-                                // right conjunct to be a plain NP, keeping groups
-                                // left-branching for the n-ary case (the
-                                // `is_coordination` analogue here).
                                 produced.push(Item::with_cost(
                                     cat,
                                     sem,
@@ -2201,67 +2191,6 @@ impl LexicalIndex {
                             }
                         }
                     }
-                }
-                // N-ary comma-list coordination for PROP-ending conjuncts (D63 §8.4 Phase 6, Step 5b):
-                // a prop list `A , B , … [and|or] Z` folds EVERY conjunct with the list's FINAL explicit
-                // connective. The comma is NEUTRAL (`LIST_CONN`), so it does not fold props binarily —
-                // that is what stops `A, B or C` from mis-folding as `Or(And(A,B),C)`. NP conjuncts ride
-                // the `coordinate_np` group path (conn_list + rebind) instead, so this fires only where
-                // the conjuncts are same-cat prop-ending (`cats_coordinate`). Keyed on the trailing
-                // explicit `and`/`or` at `c` with ≥1 comma in the left span `[i, c-1]`.
-                for c in (i + 1)..j {
-                    let op = match coord_op[c] {
-                        Some(o) if o != LIST_CONN => o, // an explicit and/or finalizes the list
-                        _ => continue,
-                    };
-                    let commas: Vec<usize> = ((i + 1)..c)
-                        .filter(|&p| coord_op[p] == Some(LIST_CONN))
-                        .collect();
-                    if commas.is_empty() {
-                        continue; // no comma-list ⇒ the binary coordination above handles it
-                    }
-                    // Atomic conjunct spans: split `[i, c-1]` at the commas, then the right conjunct.
-                    let mut spans: Vec<(usize, usize)> = Vec::new();
-                    let mut start = i;
-                    for &p in &commas {
-                        spans.push((start, p - 1));
-                        start = p + 1;
-                    }
-                    spans.push((start, c - 1));
-                    spans.push((c + 1, j));
-                    // Running left-fold over the conjunct cells (bounded to control the cross-product):
-                    // seed with the first conjunct, extend by each subsequent one via `coordinate_sem`.
-                    const NARY_FOLD_CAP: usize = 64;
-                    let mut partials: Vec<Item> = chart[spans[0].0][spans[0].1].clone();
-                    for &(s, e) in &spans[1..] {
-                        let mut next: Vec<Item> = Vec::new();
-                        for acc in &partials {
-                            for item in &chart[s][e] {
-                                if is_coordination(item.sem()) {
-                                    continue; // left-branching NF: a conjunct is not itself a coordination
-                                }
-                                if cats_coordinate(acc.cat(), item.cat(), &self.layer) {
-                                    if let Some(sem) = coordinate_sem(
-                                        op,
-                                        acc.cat(),
-                                        acc.sem(),
-                                        item.sem(),
-                                        &self.layer,
-                                    ) {
-                                        next.push(Item::with_cost(
-                                            acc.cat().clone(),
-                                            sem,
-                                            acc.cost().saturating_add(item.cost()),
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                        next.sort_by_key(|it| it.cost());
-                        next.truncate(NARY_FOLD_CAP);
-                        partials = next;
-                    }
-                    produced.extend(partials);
                 }
                 // Close nominal apposition (D63 §8.4 Phase 6, RC-6): a definite/bare common-noun HEAD
                 // immediately followed by a coreferential NAME-GROUP — "the genes BRCA1 and MSH2",
@@ -2515,6 +2444,20 @@ impl LexicalIndex {
                 }
                 let produced_n = produced.len();
                 chart[i][j].extend(produced);
+                // Coordination list-completion (D63 §8.4 Phase 3, core-en's `s-list`/`pred-adj-list`):
+                // fold a prop-ending `cat_coord` list in this cell into its base category (`op(op(m₀,
+                // m₁),…)`). Added ALONGSIDE the `cat_coord` (which stays, so a longer list can still
+                // extend it); the completed base-category item is what a copula / matrix consumes. A
+                // completed coordination can't re-enter `coordinate_prop` (its NF blocks an `And`/`Or`
+                // sem), so this stays single-valued.
+                let completed: Vec<Item> = chart[i][j]
+                    .iter()
+                    .filter_map(|it| {
+                        complete_coord(it.cat(), it.sem(), &self.layer)
+                            .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
+                    })
+                    .collect();
+                chart[i][j].extend(completed);
                 // Bare-NP shift for COMPOSED common nouns (D62 — N-N compounds like "MSI cancer
                 // models", adjective-refined nouns like "novel therapies" / "synthetic lethality"):
                 // the leaf shift in `lookup_span` only covers lexical nouns, so a *composed*

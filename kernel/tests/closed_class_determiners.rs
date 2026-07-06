@@ -638,6 +638,48 @@ fn already_covered_constructions_are_derived() {
 }
 
 #[test]
+fn coordination_unpacked_via_list_completion() {
+    // Exercise the list-with-operator model on the UNPACKED path directly (with_packing(false)), so
+    // plain `and`/`or` binary + n-ary coordination is validated through `coordinate_prop` +
+    // `complete_coord` (not just the comma finalizer). D63 §8.4 Phase 3 refactor.
+    let (layer, _) = index_over_bootstrap();
+    let index = LexicalIndex::build(Arc::clone(&layer)).with_packing(false);
+    let sem = |s: &str| {
+        let ps = index.parse(s, &Identity);
+        assert!(!ps.is_empty(), "expected an unpacked parse: {s:?}");
+        pretty_term(ps[0].sem())
+    };
+    // VP / predicate / clause coordination, binary — folds via the completion.
+    assert!(
+        sem("HeLa affects BRCA1 and affects BRCA1").starts_with("And("),
+        "binary VP coordination folds ∧"
+    );
+    assert!(
+        sem("HeLa is a gene and a cell line").starts_with("And("),
+        "binary predicate coordination folds ∧"
+    );
+    assert!(
+        sem("HeLa affects BRCA1 or affects BRCA1").starts_with("Or("),
+        "binary VP coordination folds ∨"
+    );
+    // N-ary (no comma) — left-branching fold, and a SINGLE parse (the NF holds through the list model).
+    assert!(
+        sem("HeLa affects BRCA1 and affects BRCA1 and affects BRCA1").starts_with("And(And("),
+        "n-ary VP coordination folds left-branching"
+    );
+    assert_eq!(
+        index
+            .parse(
+                "HeLa affects BRCA1 and affects BRCA1 and affects BRCA1",
+                &Identity
+            )
+            .len(),
+        1,
+        "n-ary coordination has a single (left-branching) parse under the list model"
+    );
+}
+
+#[test]
 fn comma_list_inherits_the_final_connective() {
     // D63 §8.4 Phase 6, Step 5b — a list comma is polarity-NEUTRAL: it inherits the list's FINAL
     // explicit connective (`A, B, C or D` = all-`∨`, `A, B, C and D` = all-`∧`), NOT the hardcoded
@@ -1363,14 +1405,14 @@ fn packing_router_decision_is_correct() {
     assert!(on.routes_packed("a gene which affects HeLa is large", &Identity));
     assert!(on.routes_packed("which cell line affects HeLa", &Identity));
 
-    // Comma constructs route UNPACKED (Step 5b): a list comma is a token-keyed, n-ary, sem-reading
-    // construct — the comma inherits the list's final connective, folded over the conjuncts — which the
-    // packed binary-hyperedge model can't express. The router keys on any comma (the list vs
-    // appositive vs fronted-comma distinction needs parse-time context), so all three go unpacked; the
-    // unpacked path is the differential oracle, handling every construct the packed path does.
-    assert!(!on.routes_packed("HeLa, BRCA1 affect HeLa", &Identity)); // list coordination
-    assert!(!on.routes_packed("BRCA1 , which affects HeLa , is primary", &Identity)); // appositive
-    assert!(!on.routes_packed("thus , HeLa affects BRCA1", &Identity)); // fronted-comma absorption
+    // Comma constructs are packed (§11 3g.3): list coordination builds the deferred `cat_coord` /
+    // `cat_group` via `Coordinate` edges + the `CoordComplete` unary shift — all binary/unary, so the
+    // packed hyperedge model expresses the list-with-operator model directly (D63 §8.4 Phase 3, the
+    // coordination refactor). The appositive (`Appositive*`) and fronted-modifier comma (`AbsorbComma`)
+    // are packed too.
+    assert!(on.routes_packed("HeLa, BRCA1 affect HeLa", &Identity)); // list coordination
+    assert!(on.routes_packed("BRCA1 , which affects HeLa , is primary", &Identity)); // appositive
+    assert!(on.routes_packed("thus , HeLa affects BRCA1", &Identity)); // fronted-comma absorption
 
     // Selectional (`depends on`: Gene/CellLine slots) ⇒ UNPACKED (fail-closed).
     assert!(!on.routes_packed("HeLa depends on BRCA1", &Identity));

@@ -64,9 +64,9 @@ pub use augment::{
     ResolutionMethod,
 };
 pub use category::{
-    appose_group, cat_subsumes, cats_coordinate, common_super, coordinate_np, coordinate_sem,
-    denote_cat, distribute, distribute_object, feat_meets, is_ctor, kind_subject, reciprocate,
-    relativize, subst_cat, type_eq, type_raise, unify_cat, CatSubst,
+    appose_group, cat_subsumes, cats_coordinate, common_super, complete_coord, coordinate_np,
+    coordinate_prop, denote_cat, distribute, distribute_object, feat_meets, is_ctor, kind_subject,
+    reciprocate, relativize, subst_cat, type_eq, type_raise, unify_cat, CatSubst,
 };
 #[cfg(feature = "use-llm")]
 pub use glossary::AnthropicAbbreviationProposer;

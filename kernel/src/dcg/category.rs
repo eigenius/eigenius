@@ -46,6 +46,13 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
         // list over its common supertype C (D63 §8.4 Phase 6, the kernel `List`);
         // the connective and number are erased by ⟦·⟧.
         ("cat_group", [c, _conn, _num]) => Ok(Exp::InductiveType(list_decl(), vec![c.clone()])),
+        // ⟦Coord(B)[_]⟧ = List ⟦B⟧ — a coordinated PROP-ending group (clauses / VPs / predicative
+        // adjectives / TVs) denotes the member-retaining list over its base category's denotation
+        // (D63 §8.4 Phase 3, the list-with-operator model ported from core-en `conj.xsl`). The
+        // connective is erased by ⟦·⟧; a list-completion (`complete_coord`) folds the members into
+        // ⟦B⟧ with the operator. Parallel to `cat_group` (which lists an ENTITY type; this lists a
+        // prop-ending category's denotation).
+        ("cat_coord", [b, _conn]) => Ok(Exp::InductiveType(list_decl(), vec![denote_cat(b)?])),
         // ⟦Q(T)⟧ = T → Prop — a wh-question denotes its answer-property (the
         // predicate the answer must satisfy), over the queried type T (D63 §8.5).
         ("cat_q", [t]) => Ok(Exp::Arrow(Box::new(t.clone()), Box::new(Exp::Sort(0)))),
@@ -522,19 +529,125 @@ fn but_not_coord(
     }
 }
 
-/// The sem of `a <op> b` for same-category, Prop-ending constituents of category
-/// `cat`: the pointwise-lifted `op` (`op_iri` = `logic:And` / `logic:Or`).
-/// Returns `None` if `cat` is not conjoinable or the connective doesn't resolve.
-pub fn coordinate_sem(
+/// The `Conn` ctor NAME on a coordination category's connective argument (`conn_and` / `conn_or` /
+/// `conn_list` / `conn_but_not`).
+fn conn_name_of(conn: &Exp) -> Option<&str> {
+    match conn {
+        Exp::InductiveCtor(_, n, _) => Some(n.as_str()),
+        _ => None,
+    }
+}
+
+/// Whether a sem is a completed coordination — an `And`/`Or` after peeling the pointwise λ's. A
+/// `cat_coord` list sem (a `cons`/`nil` chain) is NOT one, so extending a list is unaffected; this only
+/// blocks a *completed* coordination from re-entering `coordinate_prop` as a fresh conjunct.
+fn sem_is_coordination(sem: &Exp) -> bool {
+    let mut e = sem;
+    while let Exp::Lam(_, body) = e {
+        e = body;
+    }
+    matches!(e, Exp::InductiveType(d, _)
+        if matches!(d.iri.as_str(), "urn:eigenius:logic:And" | "urn:eigenius:logic:Or"))
+}
+
+/// Build or extend a **prop-ending coordination list** `cat_coord(BaseCat, conn)` (D63 §8.4 Phase 3,
+/// the list-with-operator model ported from core-en `conj.xsl`). This is the prop-side analogue of
+/// [`coordinate_np`]: instead of folding `a <op> b` EAGERLY (the retired [`coordinate_sem`]), it
+/// DEFERS — accumulating the conjunct sems in a `List` and marking the connective, which the trailing
+/// `and`/`or` finalizes and [`complete_coord`] later folds. The left conjunct `l` is either a fresh
+/// prop-ending constituent (`S` / `S\NP` / `S[adj]\NP` / `TV` — the first coordination) or an existing
+/// `cat_coord` (extend — the left-branching n-ary case); the right `r` is always a single
+/// non-`cat_coord` prop-ending constituent. A neutral `conn_list` left accepts ANY op (the trailing
+/// `and`/`or` rebinds it); a FINALIZED left must share the op (no `X and Y or Z` mixing). `op_iri` is
+/// `logic:And` / `logic:Or` / [`LIST_CONN`] (a comma). `None` unless `l`/`r` coordinate (same
+/// category, prop-ending) and the connectives are compatible.
+pub fn coordinate_prop(
     op_iri: &str,
-    cat: &Exp,
-    a: &Exp,
-    b: &Exp,
+    l_cat: &Exp,
+    l_sem: &Exp,
+    r_cat: &Exp,
+    r_sem: &Exp,
     layer: &Arc<Layer>,
-) -> Option<Exp> {
-    let denote = denote_cat(cat).ok()?;
+) -> Option<(Exp, Exp)> {
+    // Left-branching normal form: the right conjunct is a single constituent — neither a coordination
+    // list (`cat_coord`) nor a completed coordination (an `And`/`Or` sem). So `A and B and C` parses
+    // only as `(A and B) and C`.
+    if is_ctor(r_cat, "cat_coord").is_some() || sem_is_coordination(r_sem) {
+        return None;
+    }
+    let conn_name = match op_iri {
+        "urn:eigenius:logic:And" => "conn_and",
+        "urn:eigenius:logic:Or" => "conn_or",
+        LIST_CONN => "conn_list",
+        _ => return None,
+    };
+    let (base_cat, members): (Exp, Vec<Exp>) = match is_ctor(l_cat, "cat_coord") {
+        // Extend an existing list: a neutral `conn_list` accepts any op; a finalized one must match.
+        Some([base, l_conn]) => {
+            let lc = conn_name_of(l_conn)?;
+            if lc != "conn_list" && lc != conn_name {
+                return None;
+            }
+            (base.clone(), group_members(l_sem)?)
+        }
+        // First coordination: `l` is a fresh prop-ending constituent — NOT a completed coordination
+        // (an `And`/`Or` sem). Blocking that keeps the left-branching normal form single-valued: a list
+        // is built by EXTENDING the `cat_coord` (above), never by completing a sub-list and
+        // re-coordinating it (which would double-derive `A and B and C`).
+        _ => {
+            if sem_is_coordination(l_sem)
+                || !denote_cat(l_cat).map(|d| prop_ending(&d)).unwrap_or(false)
+            {
+                return None;
+            }
+            (l_cat.clone(), vec![l_sem.clone()])
+        }
+    };
+    // The right conjunct must coordinate with the base category (same category, prop-ending).
+    if !cats_coordinate(&base_cat, r_cat, layer) {
+        return None;
+    }
+    let Exp::InductiveCtor(cat_decl, _, _) = r_cat else {
+        return None;
+    };
+    let mut all = members;
+    all.push(r_sem.clone());
+    let conn = Exp::InductiveCtor(
+        resolve_inductive(layer, "urn:eigenius:lexicon:Conn")?,
+        conn_name.into(),
+        vec![],
+    );
+    let coord_cat = Exp::InductiveCtor(cat_decl.clone(), "cat_coord".into(), vec![base_cat, conn]);
+    Some((coord_cat, list_term(&all)))
+}
+
+/// **List-completion** (D63 §8.4 Phase 3, core-en's `s-list` / `pred-adj-list` type-changing rules):
+/// fold a prop-ending coordination `cat_coord(BaseCat, conn)` into its base category, applying the
+/// operator pointwise over the accumulated members — `op(op(m₀, m₁), m₂)…` (left-branching normal
+/// form, via [`generalized_coord`]). A never-finalized `conn_list` (a bare comma list, no `and`/`or`)
+/// defaults to conjunction. Needs ≥2 members. Returns `(BaseCat, folded_sem)`; `None` for an ill-formed
+/// list or an unresolvable operator. Realized as a unary shift in both CKY paths (packable).
+pub fn complete_coord(coord_cat: &Exp, coord_sem: &Exp, layer: &Arc<Layer>) -> Option<(Exp, Exp)> {
+    let [base_cat, conn] = is_ctor(coord_cat, "cat_coord")? else {
+        return None;
+    };
+    let members = group_members(coord_sem)?;
+    if members.len() < 2 {
+        return None;
+    }
+    let op_iri = match conn_name_of(conn)? {
+        "conn_and" | "conn_list" => "urn:eigenius:logic:And",
+        "conn_or" => "urn:eigenius:logic:Or",
+        _ => return None,
+    };
+    let denote = denote_cat(base_cat).ok()?;
     let op = resolve_inductive(layer, op_iri)?;
-    generalized_coord(&op, &denote, a, b, 0)
+    let mut iter = members.into_iter();
+    let mut acc = iter.next()?;
+    for m in iter {
+        acc = generalized_coord(&op, &denote, &acc, &m, 0)?;
+    }
+    Some((base_cat.clone(), acc))
 }
 
 // ── NP coordination as `List`-groups (D63 §8.4 Phase 6) ──────────────
@@ -1424,6 +1537,60 @@ mod tests {
         assert!(
             appose_group(&verb, &group, &group_sem, &layer).is_none(),
             "a verb's fwd-argument is an object NP, not a VP — no apposition head type"
+        );
+    }
+
+    // ── coordinate_prop / complete_coord (D63 §8.4 Phase 3, list-with-operator) ──
+    #[test]
+    fn prop_coordination_builds_a_list_and_completes_by_folding() {
+        // The prop-side list-with-operator model: comma builds a neutral `conn_list` list, the trailing
+        // `or` rebinds the whole list, and `complete_coord` folds it left-branching all-`∨`. Needs the
+        // real `logic:And/Or` + `lexicon:Conn` inductives ⇒ bootstrap.
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let layer = Arc::clone(ctx.head());
+        // A prop-ending base category — a declarative clause `S[dcl,fin]` (⟦·⟧ = Prop).
+        let s = ctor("cat_s", vec![ctor("dcl", vec![]), ctor("fin", vec![])]);
+        let (a, b, c) = (
+            Exp::Var("A".into()),
+            Exp::Var("B".into()),
+            Exp::Var("C".into()),
+        );
+        // `A , B` → cat_coord(S, conn_list) over [A, B].
+        let (c1_cat, c1_sem) =
+            coordinate_prop(LIST_CONN, &s, &a, &s, &b, &layer).expect("comma builds a coord list");
+        assert!(
+            matches!(is_ctor(&c1_cat, "cat_coord"), Some([base, conn])
+                if *base == s && conn_name_of(conn) == Some("conn_list")),
+            "the comma yields a neutral conn_list list over the base clause"
+        );
+        // `... or C` → the `or` rebinds the whole list to conn_or, appending C.
+        let (c2_cat, c2_sem) =
+            coordinate_prop("urn:eigenius:logic:Or", &c1_cat, &c1_sem, &s, &c, &layer)
+                .expect("or finalizes the list");
+        assert!(
+            matches!(is_ctor(&c2_cat, "cat_coord"), Some([_, conn]) if conn_name_of(conn) == Some("conn_or")),
+            "the trailing `or` rebinds the neutral list to conn_or"
+        );
+        // Completion folds left-branching: Or(Or(A, B), C).
+        let (base, folded) = complete_coord(&c2_cat, &c2_sem, &layer).expect("completes");
+        assert_eq!(base, s, "completion returns the base clause category");
+        let expect = |op: &Exp, args: &[Exp]| {
+            matches!(op, Exp::InductiveType(d, a)
+            if d.iri.as_str() == "urn:eigenius:logic:Or" && a.as_slice() == args)
+        };
+        match &folded {
+            Exp::InductiveType(d, args)
+                if d.iri.as_str() == "urn:eigenius:logic:Or" && args.len() == 2 =>
+            {
+                assert!(expect(&args[0], &[a, b]), "inner Or(A, B): {folded:?}");
+                assert_eq!(args[1], c, "outer right conjunct is C");
+            }
+            other => panic!("expected Or(Or(A,B),C), got {other:?}"),
+        }
+        // Mixing a FINALIZED list rejects: `(A or B) and C` — conn_or left, `and` op.
+        assert!(
+            coordinate_prop("urn:eigenius:logic:And", &c2_cat, &c2_sem, &s, &c, &layer).is_none(),
+            "a finalized conn_or list does not accept a following `and` (no X or Y and Z mixing)"
         );
     }
 }

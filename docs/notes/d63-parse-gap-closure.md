@@ -1,12 +1,39 @@
 # D63 — Parse-gap closure for the test document (full-lexicon baseline + plan)
 
-**Status:** the **OOV / lexical side is closed** (`2026-07-05`); of the grammar-gaps, the **verb+PP frame**
-(§3) and **RC-1 (bare-UMLS-noun subject)** are now **fixed + verified** (§4 Steps 1–2, 4; snapshot
-`wordnet-umls-all-2026-07-06`). The residual is **missing construction rules** — comparative `than` (RC-2),
-`V X as Y` (RC-3), adjective+PP (RC-4), linking verb (RC-5), coordination (RC-6), compound-subject copula
-(RC-7) — plus numbers. Goal (the user's step 2): make the test document **parse completely** — every unit
-produces ≥1 parse — over the full WordNet+UMLS lexicon. Ambiguity (collapsing the many readings to one) and
-long-sentence perf are the *next* phase, not this one.
+**Roadmap (four phases, in order).** The parse→encode pipeline closes out in four phases, worked in
+sequence (the user's directive, `2026-07-06` — stop detouring):
+
+| phase | status | measure |
+|---|---|---|
+| **1. OOV / lexical** | ✅ **closed** (`2026-07-05`) | `missing-lexeme 0`, distinct OOV 0 — Stage-A augmentation grounds the whole page |
+| **2. Parsing gaps** | 🔵 **active** | grammar-gap **20 → 12** (Steps 1–2, 4, 5/5b/5c done); the 12 residual gaps below |
+| **3. Ambiguity** | ⏳ next | every closing unit is AMBIG, **0 ENCODED**; median 105 readings/unit, top units at the forest cap 256 |
+| **4. Performance** | ⏳ last | 62 units in 74 min; pathological outliers (up to 930 s) on ambiguity-rich units |
+
+Phases **3 and 4 share one root cause — the mass-shim over-generation** (Step 4 RC-1 head-inheritance is
+loose): killing the spurious `mass` readings collapses ambiguity *and* parse time together. A real
+intermediate-cell beam is the backstop. (§6 / §7.)
+
+**Full re-measure (Derived, `2026-07-06`, snapshot `wordnet-umls-all-2026-07-06`, page cnl-v2, `--no-llm`,
+74 min):** 62 units → **ENCODED 0, AMBIG 50, GRAMMAR-GAP 12, MISSING 0, OPEN 0, SCALE-BOUND 0** — **81%
+close**, up from 68% (AMBIG 42 / gap 20) at the Step-9 baseline (§1b). Step 5 (apposition) + 5b (comma
+inheritance) + 5c (coordination refactor to core-en's list-with-operator shape) closed **8 gaps**; the
+corpus's own `…the MMR genes MSH2, MSH6, PMS2 or MLH1 cause Lynch syndrome` now parses (AMBIG×240).
+
+### Phase-2 backlog — the 12 remaining grammar-gaps (leverage order)
+
+| RC | # | construction — sentence(s) |
+|---|---|---|
+| **RC-2** comparative `than` / `stronger` | 3 | `greater dependence … than their MSS counterparts`; `fewer … than typical lineages`; `a stronger mutation phenotype` (s20) |
+| **RC-8** clausal complement + multiword verb | 2 | `hypothesized that … give rise to`; `suggest that … is not simply a result of` |
+| **deep verb+PP / nested-PP** | 2 | `arises from hypermethylation of the MLH1 promoter`; `compared favourably to … biomarkers for …` |
+| **RC-3** `V X as Y` | 1 | `identified WRN as the top … dependency` |
+| **RC-4** adjective + PP-complement | 1 | `events that are predictive of MMR deficiency` |
+| **RC-5** linking verb + predicate | 1 | `remained true with …` |
+| **RC-7** copula-kind on compound subject | 1 | `Nucleotide repeat regions are microsatellites` |
+| **passive + complex agent** | 1 | `were represented by these screening data sets` |
+
+**Next parsing gap: RC-2 (comparatives) — 3 sentences, the highest-leverage single fix.**
 
 What landed since the baseline below (all Derived, `2026-07-05`):
 - **Stage-A augmentation is now injected into the parse.** The `LexiconBacked` transducer
@@ -22,8 +49,8 @@ What landed since the baseline below (all Derived, `2026-07-05`):
   `wilcoxon` (→ `umlscui:C0242931` "Wilcoxon Rank Test", T081) — now ground. The subset's OOV residuals
   were **coverage**, not grounding/morphology defects.
 
-Sequence this note sits in: **full-lexicon run (done, below) → close lexicon+grammar gaps (this note) →
-address ambiguity + holes → close grading-phase gaps.**
+Sequence this note sits in (the four-phase roadmap above): **OOV ✓ → parsing gaps (this note, active) →
+ambiguity (§6) → performance (§7)** → then the grading-phase gaps ([d63-next-steps.md](d63-next-steps.md)).
 
 ---
 
@@ -380,6 +407,33 @@ Declared-by-construction (flagged `?`).
       `DEFAULT_FOREST_CAP` (256) pruning the correct reading under the **mass-shim's ambiguity
       inflation** (Step 4 over-generation). Tracked with the mass-shim precision follow-ups + the full
       re-measure, not here.
+- [x] **Step 5c — coordination refactor: the list-with-operator model (DONE).** Checking `Step 5b`
+      against the reference grammar `references/openccg/grammars/core-en` (`conj.xsl` / `punct.xsl`)
+      showed the shape it was ported from: ALL coordination is a deferred **linked list** with a single
+      shared operator (`op-index-S`) — the comma is operator-neutral (`indexRel="Next"`, adds a list
+      link), the conjunction sets the operator once, and per-category **list-completion** type-changing
+      rules (`s-list` / `np-list-c/d` / `pred-adj-list`) close the list. Eigenius's NP path already did
+      this (`cat_group` + `List` + `distribute`-at-verb); its PROP path folded EAGERLY (`coordinate_sem`
+      → `And(a,b)` pairwise), which is the sole reason Step 5b needed the n-ary workaround + the
+      `comma → unpacked` routing. This step aligns the prop path:
+    - **`cat_coord(BaseCat, conn)`** (`category.rs`) — a deferred prop-ending coordination list (⟦·⟧ =
+      `List ⟦BaseCat⟧`), the prop-side analogue of `cat_group`. **`coordinate_prop`** builds/extends it
+      binarily (comma → neutral `conn_list`, `and`/`or` set/rebind the operator — the same
+      `LIST_CONN`-neutral logic Step 5b added for NP groups); **`complete_coord`** folds the members
+      with the operator (`op(op(m₀,m₁),…)`) — a **unary shift** in BOTH CKY paths (`UnaryKind::
+      CoordComplete` packed; a composed-cell shift unpacked). The left-branching NF is enforced by
+      `coordinate_prop` (right conjunct is never a list nor a completed `And`/`Or`).
+    - **Retired**: the eager `coordinate_sem`; the Step-5b n-ary `parse_at_cap` fold; the `comma →
+      unpacked` route in `parse_needs_unpacked`. Comma coordination is now **packed** (binary
+      `Coordinate` edges + the `CoordComplete` unary shift — the packed hyperedge model expresses the
+      list model directly), so the router `packing_router_decision_is_correct` re-asserts comma → packed.
+    - **Verified**: kernel lib 1611, `closed_class` 126 (new `coordination_unpacked_via_list_completion`
+      + `prop_coordination_builds_a_list_and_completes_by_folding`), clippy clean. Over 07-06 the refactor
+      is behavior-preserving on every Step-5 case (`the MMR genes MSH2, MSH6, PMS2 or MLH1 …` CLOSED×168,
+      bare comma-`or` CLOSED×4, felicity reject GAP) and **recovers** coverage the workaround dropped
+      (adjective `colon, gastric and ovarian cancers` back to CLOSED×206 from ×54 — the unpacked routing
+      had been more restrictive). The prep-object cap/beam residual is unchanged (still a mass-shim
+      issue, not coordination).
 - [ ] **Step 6 — RC-2: comparative `than` (2 units).** The `than`-clause complement (`greater/fewer X than
       Y`). Mirror the existing `cat_pp_than` argument-PP machinery for the `than`-phrase.
 - [ ] **Step 7 — RC-3: `V X as Y` predicative small-clause (2 units).** `evaluate/identify X as Y` — the
@@ -394,15 +448,14 @@ Declared-by-construction (flagged `?`).
 - [ ] **Step 11 — RC-8 + the `?` residual (≈4 units).** `hypothesize that … give rise to …` (clausal +
       multiword verb), the deep/compound object NPs (`… responses to immune checkpoint blockade`), and the
       un-probed verb+PP-or-object cases (2, 9, 17). Probe each to localize before fixing.
-- [~] **Step 12 — Re-measure** `scripts/measure-parse-rate.sh --no-llm` over the current snapshot
-      `wordnet-umls-all-2026-07-06`. **Gate:** grammar-gap + missing-lexeme → 0. **Progress:** `missing-lexeme
-      → 0` (§1b) and **RC-1 fixed** (Step 4). **Immediate next action:** a full-page (62-unit) re-measure over
-      `wordnet-umls-all-2026-07-06` to re-baseline the grammar-gap count post-mass-shim and settle which of
-      RC-2..RC-8 remain (the battery hinted RC-4/RC-6 may have closed — real or the mass-shim's
-      over-generation). Re-run after each RC closes; the reranker pass is the ambiguity metric, the `--no-llm`
-      pass the does-it-parse gate.
+- [x] **Step 12 — Re-measure (DONE, `2026-07-06`).** `scripts/measure-parse-rate.sh --no-llm` over
+      `wordnet-umls-all-2026-07-06` (cnl-v2, 74 min): 62 units → **ENCODED 0, AMBIG 50, GRAMMAR-GAP 12,
+      MISSING 0** — 81% close (from 68% at Step-9). Step 5/5b/5c closed **8 gaps**. The 12 residual gaps are
+      the phase-2 backlog in the roadmap header (RC-2 first). `missing-lexeme → 0` ✓ (phase 1 closed);
+      grammar-gap → 0 is the remaining phase-2 gate. Re-run after each RC closes; the reranker pass is the
+      phase-3 ambiguity metric, the `--no-llm` pass the does-it-parse gate.
 
-Each step re-runs the measure over just its affected sentences (fast) before the full re-measure at Step 12.
+Each step re-runs the measure over just its affected sentences (fast) before a full re-measure.
 
 ---
 
@@ -422,3 +475,44 @@ Each step re-runs the measure over just its affected sentences (fast) before the
 - **Grade of claims here:** the classification counts and the OOV list are **Derived** (the run). The
   verb+PP-frame *root cause* is a **Declared** hypothesis — Step 1 confirms it against the emitted cats
   before any fix lands.
+
+---
+
+## 6. Phase 3 — Ambiguity (the mass-shim over-generation)
+
+**Witnessed (`2026-07-06` re-measure):** all 50 closing units are AMBIG, **none ENCODED**. Readings/unit
+over the 50: min 4, **median 105, mean 125, max 256** — and 256 is exactly `DEFAULT_FOREST_CAP`, so the
+top units are *capped* (true ambiguity is higher than measured).
+
+**Root cause — the mass-shim over-generation.** The RC-1 fix (Step 4) marks a UMLS concept `mass` when its
+preferred-name HEAD is uncountable (head-inheritance), so bare abbreviations of mass phenomena parse as
+subjects (`MSI`). The head-inheritance is **loose**: it over-generates `mass` readings (e.g. `gene` picked
+up a bogus `mass` from the junk atom `gENE` on "Gross Extranodal Extension", head "extension"). Every such
+extra reading multiplies through the chart. This is the **binding constraint on phases 3 AND 4** (§7).
+
+**Concrete tasks (the mass-shim precision follow-ups, tracked from Step 4):**
+1. **Strictly-uncountable-head test** — mark `mass` only when the head noun is uncountable in *all* its
+   senses (not "some sense is uncountable"), killing the `extension`/`instability`-adjacent false positives.
+2. **Acronym ↔ domain-word collision filter** (user-endorsed) — drop a `mass` (or any) reading for an
+   acronym atom that collides with a primary concept of its own research domain (`gENE` = GENE).
+3. Re-measure `--no-llm` (does the AMBIG×N median drop?) and with the **reranker** (`--features use-llm`,
+   the phase-3 metric proper: AMBIG → single ENCODED per unit).
+
+## 7. Phase 4 — Performance (parse-time under ambiguity)
+
+**Witnessed (`2026-07-06`):** 62 units in **74 min**, with pathological outliers — a 14-token unit took
+**930 s** (and still GAPPED), others 572 s / 286 s / 198 s. Parse time is **not** a function of position or
+length: same-length units vary up to **1500×** (unit 38 @ 16 tok = 0.7 s vs unit 28 @ 16 tok = 198 s; late
+units 48/50/53 = 0.1–0.6 s). The driver is **how many highly-ambiguous domain terms the sentence
+contains** — the candidate-parse count explodes combinatorially and each candidate is kernel-felicity-
+checked over the full lexicon chain. (unit 0's 27.9 s is cold-start warmup, not difficulty.)
+
+**Concrete tasks:**
+1. **Kill the ambiguity at source** — §6's mass-shim precision fixes collapse both the reading count and
+   the parse time (they are the same root cause).
+2. **Intermediate-cell beam** — the forest cap bounds only the TOP cell; a per-cell beam on the composed
+   (non-leaf) cells bounds the blow-up (the `d63-parsing-scale-and-pruning.md` sub-project: adaptive
+   supertagging + mid-chart felicity pruning, GH#97).
+3. **Felicity-check cost** — profile whether the per-candidate kernel type-check over the full chain is the
+   dominant term on the pathological units (cf. the earlier `axiom_env` / `build_axiom_env` full-scan
+   findings); if so, index-drive or memoize it.

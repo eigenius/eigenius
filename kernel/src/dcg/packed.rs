@@ -102,6 +102,10 @@ pub(crate) enum UnaryKind {
     /// forward-apply across the otherwise node-less comma to the matrix clause). The child is the
     /// narrower `[0, j-1]` node, NOT a same-span transform; the item is carried through unchanged.
     AbsorbComma,
+    /// Coordination list-completion (D63 §8.4 Phase 3): fold a prop-ending `cat_coord` list into its
+    /// base category (`op(op(m₀, m₁),…)`, via `complete_coord`). The `cat_coord` node stays available
+    /// (a longer list extends it); this shift adds the folded base-category node a matrix consumes.
+    CoordComplete,
 }
 
 /// A packed forest node: all derivations of one `(span, Sig)` equivalence class.

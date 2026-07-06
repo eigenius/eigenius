@@ -9,11 +9,19 @@ any detour.
 
 ## Stack (top → bottom)
 
-### 1. ▲ ACTIVE — [d63-parse-gap-closure.md](d63-parse-gap-closure.md)
-Make the test document (WRN first page, cnl-v2) **parse completely** over the full WordNet+UMLS lexicon.
-Baseline measured `2026-07-04`: 62 units → 39 AMBIG, 17 grammar-gap, 6 missing-lexeme, 0 encoded.
-Dominant fix = missing **verb + PP-complement frames** (~10 of 17), then 4 OOV + a few constructions.
-**Exit-gate:** re-measure → grammar-gap + missing-lexeme = 0 (every unit parses). Then **pop**.
+### 1. ▲ ACTIVE — [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 2 of 4: parsing gaps**
+Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
+**OOV ✓ → parsing gaps (here) → ambiguity → performance.**
+- **Phase 1 (OOV): CLOSED** — `missing-lexeme 0`, distinct OOV 0 (Stage-A augmentation grounds the page).
+- **Phase 2 (parsing gaps): ACTIVE.** Re-measure (`2026-07-06`, cnl-v2, `--umls-all`, `--no-llm`, 74 min):
+  62 units → **50 AMBIG, 12 grammar-gap, 0 missing, 0 encoded** — **81% close** (from 68% at Step-9).
+  Done: verb+PP frames, RC-1 (bare-UMLS subject), and **Step 5/5b/5c** (apposition + comma-list connective
+  inheritance + the coordination refactor to core-en's list-with-operator shape) — together **−8 gaps**.
+  **Next: RC-2 comparatives (`than`/`stronger`, 3 of the 12).** The ordered 12-gap backlog is the roadmap
+  table in the note's header.
+- **Phases 3 (ambiguity) + 4 (performance): on deck** — one root cause, the **mass-shim over-generation**
+  (RC-1 head-inheritance is loose); see the on-deck entry below.
+**Exit-gate (phase 2):** re-measure → grammar-gap = 0 (every unit parses). Then phase 3 becomes the top.
 
 ### 2. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
 The overall sequence that (1) is a detour from. Remaining once (1) pops, in order:
@@ -26,10 +34,14 @@ done.
 
 ## On deck (pushed onto the stack when its step becomes active)
 
-- [d63-parsing-scale-and-pruning.md](d63-parsing-scale-and-pruning.md) — the CKY chart-explosion /
-  sense-crowding sub-project (adaptive supertagging + mid-chart felicity pruning; issue #97). This is
-  what the **ambiguity + perf** step of (2) concretely becomes — it becomes the top entry when we reach
-  it. Directly relevant to the "0 encoded" and "3–5 min per long sentence" findings from (1)'s baseline.
+- **Phases 3 (ambiguity) + 4 (performance)** — one root cause, worked together once phase 2 pops.
+  Concrete first lever: the **mass-shim precision fixes** (d63-parse-gap-closure.md §6 — strictly-
+  uncountable-head test + acronym↔domain-word collision filter) to kill the spurious `mass` readings that
+  inflate BOTH the reading count (median 105/unit, capped at 256) AND parse time (up to 930 s/unit).
+  Backstop = [d63-parsing-scale-and-pruning.md](d63-parsing-scale-and-pruning.md) — the CKY
+  chart-explosion sub-project (adaptive supertagging + **intermediate-cell** felicity pruning; GH#97) —
+  becomes the top entry when phase 4 is active. The reranker (`--features use-llm`) is the phase-3
+  AMBIG→ENCODED metric.
 
 ## Parked tracks (real, but off this stack)
 Separate threads, not blocking the parse→encode pipeline; pull onto the stack only if picked up:
@@ -54,6 +66,13 @@ Separate threads, not blocking the parse→encode pipeline; pull onto the stack 
   ([[gene_family_lexicon_gap]]) + a lexicon/ontology index.
 
 ## Completed (record, not work)
+- **Phase-2 constructions, Step 5/5b/5c — COMPLETED `2026-07-06`** (uncommitted on `13c5bbe` + the
+  refactor on top). RC-6 apposition (`appose_group`, bidirectional concept↔semantic-type felicity),
+  comma-list connective inheritance (neutral comma finalized by the trailing `and`/`or`), and the
+  **coordination refactor** to core-en's list-with-operator shape (`cat_coord` + `coordinate_prop` +
+  `complete_coord`, retiring the eager `coordinate_sem` + the Step-5b n-ary workaround). Together −8
+  grammar-gaps (20→12). Kernel lib 1611 + `closed_class` 126 green. Detail in d63-parse-gap-closure.md
+  §4 Steps 5/5b/5c.
 - [d63-compound-morphology.md](d63-compound-morphology.md) — **COMPLETED `2026-07-05`.** Derived-adjective
   OOV closed (Slices 1–2 + §3b denominal-suffix table + `-like` fix); missing-lexeme 6 → 2 over the
   snapshot. Deferred pieces extracted to the parked tracks above (alignment / passive-voice) and the
