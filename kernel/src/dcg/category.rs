@@ -67,12 +67,13 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
         ("cat_pp_than", []) => Ok(Exp::EigonClass(
             Iri::parse("urn:eigenius:lexicon:Entity").map_err(|e| e.to_string())?,
         )),
-        // ⟦PP[arg]⟧ = Entity — an argument (oblique-complement) PP supplies the verb's second
-        // ENTITY argument (D63 verb+PP frames). The marker (`to`/`from`/`on`/`with`) is transparent
-        // (`cat_pp_arg / cat_np(Entity)`, sem `λy. y`); a subcategorizing verb is `(S\NP)/cat_pp_arg`,
-        // sem `λy.λx. R(x, y)`. Distinct from a bare NP so only a PP-frame verb accepts it (`affect`,
-        // a plain `(S\NP)/NP`, still rejects `to X`). Same denotation as `cat_pp_than`.
-        ("cat_pp_arg", []) => Ok(Exp::EigonClass(
+        // ⟦PP[arg](prep)⟧ = Entity — an argument (oblique-complement) PP supplies the verb's second
+        // ENTITY argument (D63 verb+PP frames). The marker (`to`/`from`/`on`/`with`/…) is transparent
+        // (`cat_pp_arg(prep) / cat_np(Entity)`, sem `λy. y`); a subcategorizing verb is
+        // `(S\NP)/cat_pp_arg(any)`, sem `λy.λx. R(x, y)`. Distinct from a bare NP so only a PP-frame
+        // verb accepts it. The `prep` feature (C3-precision) is erased by ⟦·⟧ — it only gates the
+        // feature-meet during composition. Same denotation as `cat_pp_than`.
+        ("cat_pp_arg", [_prep]) => Ok(Exp::EigonClass(
             Iri::parse("urn:eigenius:lexicon:Entity").map_err(|e| e.to_string())?,
         )),
         // ⟦PP[mod]⟧ = Entity → Prop — a noun-postmodifying PP is a predicate over the head
@@ -230,6 +231,15 @@ fn unify_into(slot: &Exp, arg: &Exp, layer: &Arc<Layer>, subst: &mut CatSubst) -
             return s[0] == a[0] && unify_feat(&s[1], &a[1], subst);
         }
     }
+    // cat_pp_arg(prep): the oblique-argument PP carries a preposition feature (D63 §5.3
+    // C3-precision). Unify it by the feature-meet: a verb's `prep_any` wildcard meets any
+    // marker's prep, while a gloss-governed adjective's specific `prep_on` meets only the `on`
+    // marker — so `dependent on X` composes but `*dependent to X` fails.
+    if let (Some(s), Some(a)) = (is_ctor(slot, "cat_pp_arg"), is_ctor(arg, "cat_pp_arg")) {
+        if s.len() == 1 && a.len() == 1 {
+            return unify_feat(&s[0], &a[0], subst);
+        }
+    }
     // Higher-order functors `A/B` (`fwd`) and `A\B` (`bwd`), D63 §8.2 item 4:
     // structural subsumption with the standard function variance — the **result**
     // `A` is covariant, the **argument** `B` is contravariant. So an `S\NP_Entity`
@@ -361,7 +371,7 @@ fn unify_feat(slot: &Exp, arg: &Exp, subst: &mut CatSubst) -> bool {
 
 fn is_any_feat(e: &Exp) -> bool {
     matches!(e, Exp::InductiveCtor(_, name, args)
-        if args.is_empty() && matches!(name.as_str(), "num_any" | "fin_any"))
+        if args.is_empty() && matches!(name.as_str(), "num_any" | "fin_any" | "prep_any"))
 }
 
 // ── Generalized coordination (D63 §8.4 Phase 3) ──────────────────────

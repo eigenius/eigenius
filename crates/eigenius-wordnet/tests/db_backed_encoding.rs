@@ -377,9 +377,9 @@ fn verify_degree_comparative_at_scale() {
     let sentences = [
         "cells show greater dependence on genes than mutations", // #8 nominalization + governed prep
         "cells are more dependent on genes than mutations",      // #8 predicative adjective
-        "cells are more sensitive than mutations",               // #8 predicative degree (WN-only adj)
-        "HeLa affects greater dependence on BRCA1 than MSH2",     // #8 demo frame, domain entities
-        "HeLa affects fewer genes than MSH2",                    // #9 cardinality regression
+        "cells are more sensitive than mutations", // #8 predicative degree (WN-only adj)
+        "HeLa affects greater dependence on BRCA1 than MSH2", // #8 demo frame, domain entities
+        "HeLa affects fewer genes than MSH2",      // #9 cardinality regression
     ];
     for s in sentences {
         let (closed, open) = index.parse_open(s, &lem);

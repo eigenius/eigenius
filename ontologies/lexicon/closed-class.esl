@@ -1220,20 +1220,23 @@ resource lexicon:less_deg : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 
-// ── Argument-PP markers: prepositions as VERB-subcategorized oblique complements (D63 verb+PP) ──
-// "contributes TO cancers", "results FROM X", "responds TO Y", "associated WITH Z": the verb
-// *requires* the PP. The marker consumes the object NP and yields a `cat_pp_arg` (⟦·⟧ = Entity),
-// transparently exposing the object (`λy. y`); a subcategorizing verb `(S\NP) / cat_pp_arg` binds it as
-// its second entity argument. A distinct `cat_pp_arg` (not a bare NP) FORCES the preposition — a plain
-// transitive verb `(S\NP)/NP` (e.g. `affect`) cannot absorb `to X`. These are IN ADDITION to each
-// preposition's VP-adjunct + noun-modifier entries above (the argument reading is a third parse,
-// selected only by a subcategorizing verb).
+// ── Argument-PP markers: prepositions as VERB/ADJECTIVE-subcategorized oblique complements ──
+// "contributes TO cancers", "results FROM X", "dependent ON WRN", "associated WITH Z": the head
+// *requires* the PP. The marker consumes the object NP and yields a `cat_pp_arg(prep)` (⟦·⟧ = Entity),
+// transparently exposing the object (`λy. y`); a subcategorizing verb `(S\NP) / cat_pp_arg(any)` or a
+// gloss-governed adjective `cat_measure / cat_pp_arg(prep_on)` binds it. A distinct `cat_pp_arg` (not a
+// bare NP) FORCES the preposition — a plain transitive verb `(S\NP)/NP` (e.g. `affect`) cannot absorb
+// `to X`. The **Prep feature** (D63 §5.3 C3-precision) tags each marker with its preposition, so a
+// governed adjective selects the RIGHT one: `dependent` (prep_on) composes with `on` but not `to`
+// (`*dependent to`). These are IN ADDITION to each preposition's VP-adjunct + noun-modifier entries
+// above (the argument reading is a third parse, selected only by a subcategorizing head). The set
+// mirrors `governed_preposition`'s extracted vocabulary (crates/eigenius-wordnet/src/convert.rs).
 resource lexicon:argmarker_sem : lexicon:SemTerm {
     lexicon:term = type_expr( ( fun (y : lexicon:Entity) => y : lexicon:Entity -> lexicon:Entity ) );
 }
 resource lexicon:to_arg : lexicon:LexicalEntry {
     lexicon:form     = "to";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_to), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
     lexicon:sense    = "to";
@@ -1241,7 +1244,7 @@ resource lexicon:to_arg : lexicon:LexicalEntry {
 }
 resource lexicon:from_arg : lexicon:LexicalEntry {
     lexicon:form     = "from";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_from), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
     lexicon:sense    = "from";
@@ -1249,7 +1252,7 @@ resource lexicon:from_arg : lexicon:LexicalEntry {
 }
 resource lexicon:on_arg : lexicon:LexicalEntry {
     lexicon:form     = "on";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_on), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
     lexicon:sense    = "on";
@@ -1257,10 +1260,66 @@ resource lexicon:on_arg : lexicon:LexicalEntry {
 }
 resource lexicon:with_arg : lexicon:LexicalEntry {
     lexicon:form     = "with";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_with), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
     lexicon:sense    = "with";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:in_arg : lexicon:LexicalEntry {
+    lexicon:form     = "in";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_in), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "in";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:for_arg : lexicon:LexicalEntry {
+    lexicon:form     = "for";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_for), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "for";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:at_arg : lexicon:LexicalEntry {
+    lexicon:form     = "at";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_at), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "at";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:upon_arg : lexicon:LexicalEntry {
+    lexicon:form     = "upon";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_upon), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "upon";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:about_arg : lexicon:LexicalEntry {
+    lexicon:form     = "about";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_about), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "about";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:against_arg : lexicon:LexicalEntry {
+    lexicon:form     = "against";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_against), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "against";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:into_arg : lexicon:LexicalEntry {
+    lexicon:form     = "into";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_into), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "into";
     lexicon:grade    = epistemic:declared;
 }
 

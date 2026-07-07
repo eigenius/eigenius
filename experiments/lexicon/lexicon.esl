@@ -226,7 +226,7 @@ resource lexicon:e_larger : lexicon:LexicalEntry {
 axiom lexicon:deg_dependent : lexicon:Entity -> lexicon:Entity -> core:float
 resource lexicon:e_dependence : lexicon:LexicalEntry {
     lexicon:form     = "dependence";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );
     lexicon:sem      = lexicon:deg_dependent;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> core:float );
     lexicon:sense    = "wn:dependence.n.01";
@@ -243,7 +243,7 @@ resource lexicon:e_dependence : lexicon:LexicalEntry {
 // take it (`*greater dependent`); the importer separates adjective-scale from noun-scale (d63 §5.6).
 resource lexicon:e_dependent_adj : lexicon:LexicalEntry {
     lexicon:form     = "dependent";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );
     lexicon:sem      = lexicon:deg_dependent;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> core:float );
     lexicon:sense    = "wn:dependent.a.01";

@@ -125,6 +125,30 @@ data lexicon:Conn {
                   // shared predicate applies affirmatively to X and negatively to the elided Y.
 }
 
+// Prep — the governing preposition of an oblique **argument** PP (D63 §5.3
+// C3-precision, d63-comparative-phrasal.md). A *syntactic* feature (erased by ⟦·⟧,
+// exactly like Num/Fin): it routes which preposition an `cat_pp_arg`-seeking functor
+// accepts, via the feature-meet. A gloss-governed adjective selects its specific prep
+// (`dependent` → `prep_on`, so `*dependent to` fails); a preposition-agnostic verb
+// frame (WordNet "----s PP") carries the `prep_any` wildcard (meets any marker). The
+// concrete ctors are the closed English oblique prepositions the importer's
+// `governed_preposition` extracts.
+data lexicon:Prep {
+    prep_to,      // "dependent to"? no — "addicted to", "proportional to"
+    prep_on,      // "dependent on", "based on"
+    prep_in,      // "interested in", "results in"
+    prep_with,    // "consistent with", "associated with"
+    prep_from,    // "results from", "different from"
+    prep_for,     // "responsible for", "essential for"
+    prep_at,      // "good at"
+    prep_upon,    // "dependent upon", "contingent upon"
+    prep_about,   // "concerned about"
+    prep_against, // "protective against"
+    prep_into,    // "differentiate into"
+    prep_any,     // underspecified ⊤: meets any specific prep. Prep-agnostic verb frames
+                  // carry this; a specific marker refines it at composition.
+}
+
 // Cat — the categorial type (a small inductive at Type 1, since cat_n/cat_np
 // store a `Set`). The homomorphism ⟦·⟧ : Cat → EigenTT type is a recursor over
 // it (`denote_cat`): ⟦cat_s(m,_)⟧ = ⟦m⟧ ; ⟦cat_n(_,_)⟧ = Set ; ⟦cat_np(T,_)⟧ = T ;
@@ -197,14 +221,18 @@ data lexicon:Cat : Type 1 {
     // `than` — so `*HeLa is larger BRCA1` (no `than`) gets no parse.
     cat_pp_than : lexicon:Cat,
 
-    // PP[arg] — an **argument** (oblique-complement) prepositional phrase: the PP a verb
-    // *subcategorizes* for ("contributes **to** cancers", "results **from** X"). ⟦cat_pp_arg⟧ =
-    // Entity — the marker is transparent, exposing the prep's object (sem `λy. y`), so an
-    // argument-PP verb `(S\NP) / cat_pp_arg` binds it as its second entity argument (same
-    // Entity→Entity→Prop sem_type as a transitive verb). A category distinct from a bare NP forces
-    // the preposition — so a genuinely transitive verb `(S\NP)/NP` (e.g. `affect`) cannot absorb a
-    // stray `to X`: `*HeLa affects to BRCA1` has no parse. (Mirrors `cat_pp_than`; D63 verb+PP frames.)
-    cat_pp_arg : lexicon:Cat,
+    // PP[arg](prep) — an **argument** (oblique-complement) prepositional phrase: the PP a verb or
+    // relational adjective *subcategorizes* for ("contributes **to** cancers", "dependent **on** WRN").
+    // ⟦cat_pp_arg(_)⟧ = Entity (the Prep feature is erased, like Num/Fin) — the marker is transparent,
+    // exposing the prep's object (sem `λy. y`), so an argument-PP verb `(S\NP) / cat_pp_arg(any)` binds
+    // it as its second entity argument (same Entity→Entity→Prop sem_type as a transitive verb). A
+    // category distinct from a bare NP forces the preposition — so a genuinely transitive verb
+    // `(S\NP)/NP` (e.g. `affect`) cannot absorb a stray `to X`: `*HeLa affects to BRCA1` has no parse.
+    // The **Prep feature** (D63 §5.3 C3-precision) is what rejects the WRONG preposition on a
+    // gloss-governed adjective: `dependent : cat_measure / cat_pp_arg(prep_on)` selects only the `on`
+    // marker (`cat_pp_arg(prep_on)`), so `*dependent to WRN` fails the feature-meet; a prep-agnostic
+    // verb frame carries `cat_pp_arg(prep_any)` and accepts any. (Mirrors `cat_pp_than`; D63 verb+PP.)
+    cat_pp_arg : lexicon:Prep -> lexicon:Cat,
 
     // PP[mod] — a **noun-postmodifying** prepositional phrase ("…of WRN dependency"),
     // supplying a predicate over the head noun's entities (D63 §8.13 Slice 6-mod).

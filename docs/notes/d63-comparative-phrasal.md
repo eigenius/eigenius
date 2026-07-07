@@ -197,15 +197,17 @@ follow-on — **incremental on `push_adj`, not undesigned**:
      the right per-lemma prep *within one synset* (`addicted`→`to`, `dependent`→`on`). `Some(prep)` ⇒
      relational (emit `cat_measure/cat_pp_arg[prep]`); `None` ⇒ bare measure (C1) — so the extractor **IS**
      the relational-gradable detector; no hand-curated list.
-   - **Parameterization is entangled + NOT milestone-critical (`2026-07-07` finding).** Making
-     `cat_pp_arg` preposition-specific (`cat_pp_arg(on)` vs `(to)`) is what rejects `*dependent to`. But
-     the importer's PP-oblique **verbs** also emit `cat_pp_arg` from **preposition-agnostic** frames
-     (WordNet frame 23 = "`----s` PP"), so parameterization needs a `prep` FEATURE with a **wildcard**
-     (verbs → `cat_pp_arg(any)`, gloss-detected adjectives → `cat_pp_arg(on)`; `feat_meets` unification) —
-     a new feature dimension parallel to fin/num. Crucially, the generic `cat_pp_arg` (`on_arg`) **already
-     threads the ground faithfully**, so **#8 CLOSES at scale WITHOUT it**; the parameterization only buys
-     the `*dependent to` rejection. → **milestone-first:** relational emission (2-place `deg` +
-     `cat_measure/cat_pp_arg`) + the optional-ground shift first; the prep-feature as a precision follow-on.
+   - **Parameterization — DONE as C3-precision (this session), after the milestone.** Making
+     `cat_pp_arg` preposition-specific (`cat_pp_arg(prep_on)` vs `(prep_to)`) is what rejects
+     `*dependent to`. The importer's PP-oblique **verbs** also emit `cat_pp_arg` from
+     **preposition-agnostic** frames (WordNet frame 23 = "`----s` PP"), so the parameterization is a
+     `prep` FEATURE with a **wildcard** (verbs → `cat_pp_arg(prep_any)`, gloss-detected adjectives →
+     `cat_pp_arg(prep_on)`; `feat_meets` unification) — a new feature dimension parallel to fin/num,
+     realized as `data lexicon:Prep` (11 concrete preps + `prep_any`). The generic `cat_pp_arg` (`on_arg`)
+     **already threaded the ground faithfully**, so **#8 CLOSED at scale WITHOUT it** (C4) — the prep
+     feature only adds the `*dependent to` rejection. Delivered milestone-first (relational emission, C3-wire)
+     then the prep feature (C3-precision); the latter ManifestDrifts the snapshot, so its at-scale check
+     rides the next reseed.
    - **Null-instantiation via TWO measures, not an `∃`-close shift (`2026-07-07` finding — DONE).** The
      dropped-ground reading (`… proved more sensitive than MSS lines` — `to X` omitted) does NOT need a
      unary type-shift: an `∃`-close over the ground is **ill-typed** (`∃g. deg(g, x)` is not a float, and
@@ -331,11 +333,11 @@ The importer already DETECTS gradable adjectives (`wndb.rs` pertainym `\` split)
 "periphrastic more X" follow-on, incremental on `push_adj` — NOT an undesigned effort. Prereq is a
 COVERAGE-VALIDATION grounding pass (not design) + verifying the §6 anchor DOIs.
 
-[ ] C1 — Expose deg_X as a cat_measure reading (a bare deg_X : Entity→float entry alongside the positive S[adj]\NP), so the closed-class more/less (Phase B) operate → closes NON-relational adjectival comparatives (more sensitive than Y). Small push_adj addition.
-[ ] C2 — Nominalization projection: the deadjectival noun (dependence) gets a cat_measure reading, μ = deg_X, via WordNet derivational (+) links (wndb.rs already parses them); + the attribute (=) relation (weight ← heavy). Closes greater dependence.
+[x] C1 — DONE (committed cc5236e). Bare deg_X : Entity→float cat_measure reading alongside the positive S[adj]\NP → closes NON-relational adjectival comparatives (more sensitive than Y).
+[x] C2 — DONE (committed f8b817a). Nominalization projection: the deadjectival noun (dependence) gets a cat_measure reading, μ = deg_X, via WordNet derivational (+) links; verified at scale in C4 — noun and adjective forms give the byte-identical deg_dep_rel term.
 [x] C3-wire — Relational emission DONE (2026-07-07). governed_preposition (gloss-derived: "followed by `PREP'" + lemma-keyed; addicted→to, dependent→on) drives push_adj → relational adjectives emit a 2-place deg_rel + a cat_measure/cat_pp_arg reading + a relational projection onto the nominalization; the bare 1-place deg (C1) covers the dropped-ground reading, so NO parser type-shift is needed (∃-close is ill-typed over a float — 2026-07-07 finding). Unit-tested (relational_gradable_adjective_emits_ground_taking_measure); fmt+clippy clean. #8 EMISSION-COMPLETE; parse mechanism demo-verified (A3/A4). Generic cat_pp_arg (on_arg) threads the ground.
-[ ] C3-precision (FOLLOW-ON, NOT milestone) — cat_pp_arg(prep) as a prep FEATURE with wildcard (verbs→any from prep-agnostic frames, gloss-detected adj→specific) to reject *dependent to. See §5.3.
-[ ] C4 — Reseed + verify #8 at scale, managing ambiguity/beam cost (§5.6: genuinely-gradable only, low rank, beam).
+[x] C4 — #8 VERIFIED AT SCALE (2026-07-07, wordnet-umls-all-2026-07-07-c3 snapshot; diagnostic verify_degree_comparative_at_scale). `greater/more dependence/dependent on genes` → identical `gt(deg_dep_rel(genes, cells), deg_dep_rel(genes, mutations))` (C2 shared scale + C3 governed-prep relational reading); `more sensitive than` (WordNet-only adj) → 1-place `gt(deg_sensitive(cells), deg_sensitive(mutations))`; #9 card regression holds — all ⊨Prop. Residual: comparative `than`-attachment (ground vs subject) is enumerated, not disambiguated.
+[x] C3-precision — DONE (this session). cat_pp_arg carries a `prep` FEATURE (new `data lexicon:Prep`: 11 concrete preps + prep_any), a new feature dimension parallel to Num/Fin: verbs (prep-agnostic WordNet PP frames) → cat_pp_arg(prep_any), gloss-governed adjectives/nominalizations → cat_pp_arg(prep_X) from governed_preposition; unified via feat_meets (wildcard meets any, specific meets equal). 11 closed-class arg-markers tagged (to/from/on/with/in/for/at/upon/about/against/into). Packing stays sound (cat_shape keeps feature ctors, like num/fin). Differential test governed_preposition_gates_the_oblique_pp: `more dependent ON` parses, `*more dependent TO` rejected. 1611 kernel + 130 comparative tests + fmt + clippy clean. AT-SCALE verification pends a reseed (the arity change ManifestDrifts the c3 snapshot).
 
 ## [ ] Phase D — Shared NP-complexity gaps (§5.7; independent, interleavable)
 Needed for the full corpus sentences, independent of the comparative: complex subject (MSI cell lines from these four lineages — modifier + plural compound + these four demonstrative+cardinal) and possessive than-object (their MSS counterparts). Separate gaps (determiner+number, possessive), tracked in d63-parse-gap-closure.md.

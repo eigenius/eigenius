@@ -203,11 +203,16 @@ impl FrameKind {
             FrameKind::Ditransitive => {
                 format!("lexicon:fwd(lexicon:fwd(lexicon:bwd({s}, {subj}), {obj}), {obj})")
             }
-            // Argument-PP verb: `(S\NP)/cat_pp_arg` — the object arrives through a transparent
+            // Argument-PP verb: `(S\NP)/cat_pp_arg(prep_any)` — the object arrives through a transparent
             // argument-marker preposition (`to`/`on`/…). Distinct from a bare NP so the preposition is
-            // forced; `⟦cat_pp_arg⟧ = Entity`, so the sem_type equals the transitive one above.
+            // forced; `⟦cat_pp_arg⟧ = Entity`, so the sem_type equals the transitive one above. WordNet's
+            // PP frames (4, 23) are preposition-AGNOSTIC (no governed prep recorded), so the verb takes the
+            // `prep_any` wildcard — it accepts any marker (C3-precision; the specific-prep gate applies to
+            // gloss-governed ADJECTIVES, where WordNet's gloss does carry the governance).
             FrameKind::PpOblique => {
-                format!("lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_pp_arg)")
+                format!(
+                    "lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_pp_arg(lexicon:prep_any))"
+                )
             }
             // Clause-taking: `(S\NP)/cat_cp` — the complement is an embedded clause.
             FrameKind::Clausal => format!("lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_cp)"),
@@ -635,6 +640,26 @@ fn governed_preposition(gloss: &str, lemma: &str) -> Option<String> {
     None
 }
 
+/// Map a `governed_preposition` result to its `lexicon:Prep` feature constructor (D63 §5.3
+/// C3-precision). The domain is exactly `governed_preposition`'s `PREPS`; anything else falls back
+/// to the `prep_any` wildcard (defensive — the closed set makes the fallback unreachable).
+fn prep_ctor(prep: &str) -> &'static str {
+    match prep {
+        "to" => "lexicon:prep_to",
+        "on" => "lexicon:prep_on",
+        "in" => "lexicon:prep_in",
+        "with" => "lexicon:prep_with",
+        "from" => "lexicon:prep_from",
+        "for" => "lexicon:prep_for",
+        "at" => "lexicon:prep_at",
+        "upon" => "lexicon:prep_upon",
+        "about" => "lexicon:prep_about",
+        "against" => "lexicon:prep_against",
+        "into" => "lexicon:prep_into",
+        _ => "lexicon:prep_any",
+    }
+}
+
 /// Adjective synset → predicative entries. **Relational** (pertainym) adjectives are
 /// non-gradable → a Boolean predicate (`is_X : Entity → Prop`, sem = the axiom).
 /// **Descriptive** (gradable) adjectives (D63 §8.12 6-cmp) become a **measure**
@@ -693,10 +718,14 @@ fn push_adj(
     // (positive + C1 measure) STAY for the ground-less reading (`more dependent than Y`) — two
     // independent opaque measures (the `∃g` relation between them is deferred, §7; an `∃`-close would be
     // ill-typed over a float).
-    let relational = syn
+    // C3-precision: the synset's governed preposition (the first lemma that governs one) tags the
+    // nominalization projection's `cat_pp_arg(prep)`. A per-adjective-lemma prep (which may differ
+    // within one synset — `addicted`→to vs a co-lemma→on) is taken separately in the lemma loop.
+    let syn_prep: Option<String> = syn
         .words
         .iter()
-        .any(|l| governed_preposition(&syn.gloss, l).is_some());
+        .find_map(|l| governed_preposition(&syn.gloss, l));
+    let relational = syn_prep.is_some();
     if relational {
         buf.push_str(&format!(
             "axiom wn:deg_{loc}_rel : {ENTITY_TOP} -> {ENTITY_TOP} -> core:float\n\n"
@@ -748,12 +777,15 @@ fn push_adj(
         rep.entries += 1;
         // C3: relational lemmas (gloss governs a prep) also get the ground-taking cat_measure/cat_pp_arg
         // reading — `deg_rel` (ground, subject); `on X` fills the ground → a cat_measure over the subject.
-        if governed_preposition(&syn.gloss, lemma).is_some() {
+        if let Some(prep) = governed_preposition(&syn.gloss, lemma) {
             push_entry(
                 buf,
                 &format!("e_{loc}_{i}_r"),
                 lemma,
-                "lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg)",
+                &format!(
+                    "lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg({}))",
+                    prep_ctor(&prep)
+                ),
                 &format!("deg_{loc}_rel"),
                 &format!("{ENTITY_TOP} -> {ENTITY_TOP} -> core:float"),
                 &sense,
@@ -803,12 +835,15 @@ fn push_adj(
                 rep.entries += 1;
                 // C3: relational projection — the nominalization (`dependence`) also gets the
                 // ground-taking `cat_measure/cat_pp_arg` reading, so `greater dependence ON WRN` threads.
-                if relational {
+                if let Some(prep) = &syn_prep {
                     push_entry(
                         buf,
                         &format!("e_{loc}_dr_{}_{j}", local(noun)),
                         nlemma,
-                        "lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg)",
+                        &format!(
+                            "lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg({}))",
+                            prep_ctor(prep)
+                        ),
                         &format!("deg_{loc}_rel"),
                         &format!("{ENTITY_TOP} -> {ENTITY_TOP} -> core:float"),
                         &sense_key(noun, nlemma),
@@ -1462,9 +1497,10 @@ mod tests {
         );
         assert!(
             buf.contains(
-                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg) );"
+                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );"
             ),
-            "relational cat_measure/cat_pp_arg reading:\n{buf}"
+            "relational cat_measure/cat_pp_arg(prep_on) reading — the gloss `dependent on` governs `on` \
+             (C3-precision):\n{buf}"
         );
         assert!(buf.contains("lexicon:sem      = wn:deg_a00000001_rel;"));
         // the bare 1-place measure (C1) is STILL present for the ground-less reading.

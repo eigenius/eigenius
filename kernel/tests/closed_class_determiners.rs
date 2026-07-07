@@ -2437,15 +2437,15 @@ fn non_pp_verb_rejects_a_pp_complement() {
         .is_empty());
 }
 
-/// A verb that subcategorizes for a PP — `contributes : (S\NP)/cat_pp_arg` — reusing the demo `affects`
-/// binary axiom as its relation. The Step-2 fix in miniature (the importer will emit this shape for
-/// PP-oblique WordNet frames).
+/// A verb that subcategorizes for a PP — `contributes : (S\NP)/cat_pp_arg(prep_any)` — reusing the demo
+/// `affects` binary axiom as its relation. The Step-2 fix in miniature (the importer emits this shape for
+/// PP-oblique WordNet frames). `prep_any` (the preposition-agnostic verb frame) accepts any marker.
 const CONTRIB_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
 namespace epistemic = "urn:eigenius:reflection:epistemic";
 resource lexicon:e_contributes : lexicon:LexicalEntry {
     lexicon:form     = "contributes";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:contribute.v.01";
@@ -2775,6 +2775,30 @@ fn adjectival_comparative_and_nominal_share_one_scale() {
             .iter()
             .map(|p| pretty_term(p.sem()))
             .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn governed_preposition_gates_the_oblique_pp() {
+    // D63 §5.3 C3-precision (d63-comparative-phrasal.md): the relational adjective `dependent` governs
+    // `on` — its demo category is `cat_measure / cat_pp_arg(prep_on)` — so the WRONG preposition is
+    // rejected at the feature-meet. The two sentences differ ONLY in the preposition, isolating the gate:
+    // `on` (prep_on marker) meets the prep_on slot; `to` (prep_to marker) does not (prep_to ≠ prep_on,
+    // neither is the prep_any wildcard). A plain transitive/PP-agnostic verb would take prep_any and
+    // accept either — the precision is that a *gloss-governed* head pins its preposition.
+    let (_layer, index) = index_over_bootstrap();
+    assert!(
+        !index
+            .parse("HeLa is more dependent on BRCA1 than MSH2", &Identity)
+            .is_empty(),
+        "`more dependent ON BRCA1` composes — the `on` marker's prep_on meets the governed slot"
+    );
+    assert!(
+        index
+            .parse("HeLa is more dependent to BRCA1 than MSH2", &Identity)
+            .is_empty(),
+        "`*more dependent TO BRCA1` must NOT parse — `dependent` governs `on`, so cat_pp_arg(prep_to) \
+         fails the feature-meet against cat_pp_arg(prep_on)"
     );
 }
 
