@@ -189,18 +189,23 @@ follow-on — **incremental on `push_adj`, not undesigned**:
    ground form. **DECISION (`2026-07-07`): a curated `adj → prep` map AND an optional-ground type-shift**
    — the two are complementary, not a choice (options (ii) any-PP / (iii) optional-ground were mis-framed
    as alternatives):
-   - **Curated `adj → prep` map (explicit PP).** Relational-gradable adjectives are Zipfian /
-     closed-class-adjacent in scientific text — the heavy hitters: `dependent→on`, `sensitive→to`,
-     `resistant→to`, `enriched→in`, `associated→with`, `proportional→to`, … A lexicon-generation lookup
-     assigns the **specific** preposition-typed arg-PP (`PP[on]`, not a generic PP); the map *is* the
-     relational-gradable detector (in map → relational `cat_measure/cat_pp_arg[prep]`; else → bare
-     `cat_measure`, C1). WordNet gives no "gradable-and-takes-a-PP" signal (pertainym marks only
-     *non-gradable* relationals), so the map supplies both. Restricting to the specific preposition keeps
-     the parser from swallowing locative/temporal adjuncts into the standard slot (`sensitive [in the
-     assay]`). **Implication:** `cat_pp_arg` must be **preposition-parameterized** (`cat_pp_arg(on)` vs
-     `cat_pp_arg(to)`) — today it is generic; this small arg-PP-infra extension also tightens the existing
-     verb+PP frames. **Fail strict, not fallback-any-PP:** a missing map entry should fail the parse (→ add
-     the adjective) — better KG fidelity than a well-typed but nonsensical form.
+   - **Gloss-derived `adj → prep` (WordNet-internal; `2026-07-07`, SUPERSEDES the curated map).**
+     WordNet has no subcat frame, but the **gloss** carries governance — extracted by
+     `governed_preposition` (convert.rs, built + unit-tested): (1) WordNet's explicit ``followed by `PREP'``
+     convention (67 adj synsets, e.g. `proportional`→`to`); (2) the **lemma** immediately followed by a
+     preposition in the gloss/examples — lemma-keyed, so it dodges verb+prep noise (`spoke in`) and gives
+     the right per-lemma prep *within one synset* (`addicted`→`to`, `dependent`→`on`). `Some(prep)` ⇒
+     relational (emit `cat_measure/cat_pp_arg[prep]`); `None` ⇒ bare measure (C1) — so the extractor **IS**
+     the relational-gradable detector; no hand-curated list.
+   - **Parameterization is entangled + NOT milestone-critical (`2026-07-07` finding).** Making
+     `cat_pp_arg` preposition-specific (`cat_pp_arg(on)` vs `(to)`) is what rejects `*dependent to`. But
+     the importer's PP-oblique **verbs** also emit `cat_pp_arg` from **preposition-agnostic** frames
+     (WordNet frame 23 = "`----s` PP"), so parameterization needs a `prep` FEATURE with a **wildcard**
+     (verbs → `cat_pp_arg(any)`, gloss-detected adjectives → `cat_pp_arg(on)`; `feat_meets` unification) —
+     a new feature dimension parallel to fin/num. Crucially, the generic `cat_pp_arg` (`on_arg`) **already
+     threads the ground faithfully**, so **#8 CLOSES at scale WITHOUT it**; the parameterization only buys
+     the `*dependent to` rejection. → **milestone-first:** relational emission (2-place `deg` +
+     `cat_measure/cat_pp_arg`) + the optional-ground shift first; the prep-feature as a precision follow-on.
    - **Optional ground (parallel unary type-shift).** Null-instantiation is rampant in comparative
      scientific text (`… treated with WRN-inhibitors. They proved more sensitive than MSS lines.` — the
      `to WRN-inhibitors` is dropped but semantically required). A unary shift lifts the relational
@@ -326,7 +331,7 @@ COVERAGE-VALIDATION grounding pass (not design) + verifying the §6 anchor DOIs.
 
 [ ] C1 — Expose deg_X as a cat_measure reading (a bare deg_X : Entity→float entry alongside the positive S[adj]\NP), so the closed-class more/less (Phase B) operate → closes NON-relational adjectival comparatives (more sensitive than Y). Small push_adj addition.
 [ ] C2 — Nominalization projection: the deadjectival noun (dependence) gets a cat_measure reading, μ = deg_X, via WordNet derivational (+) links (wndb.rs already parses them); + the attribute (=) relation (weight ← heavy). Closes greater dependence.
-[ ] C3 — Relational gradable adjectives: DECIDED (2026-07-07) — curated adj→prep map (dependent→on, sensitive→to, resistant→to, enriched→in, associated→with, proportional→to; the map IS the relational detector, fail-strict) with preposition-parameterized cat_pp_arg(prep); PLUS a parallel optional-ground unary type-shift (∃-close / contextual defer) for dropped arguments. See §5.3.
+[~] C3 — Relational gradable adjectives (GLOSS-DERIVED, 2026-07-07). DONE: governed_preposition (convert.rs) extracts the prep from the WordNet gloss — explicit "followed by `PREP'" + lemma-keyed (addicted→to, dependent→on); it IS the relational detector; built + unit-tested. REMAINING (milestone-first): (a) wire into push_adj — relational emission (2-place deg + cat_measure/cat_pp_arg[prep]) + project onto the nominalization; (b) optional-ground unary type-shift (∃-close / contextual defer) for dropped args → #8 CLOSES at scale via the generic cat_pp_arg (on_arg already threads the ground). FOLLOW-ON (precision, NOT milestone): cat_pp_arg(prep) as a prep FEATURE with wildcard (verbs→any, adj→specific) — needed only to reject *dependent to; importer verbs emit cat_pp_arg from prep-agnostic frames. See §5.3.
 [ ] C4 — Reseed + verify #8 at scale, managing ambiguity/beam cost (§5.6: genuinely-gradable only, low rank, beam).
 
 ## [ ] Phase D — Shared NP-complexity gaps (§5.7; independent, interleavable)

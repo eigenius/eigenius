@@ -103,6 +103,10 @@ pub struct Synset {
     /// descriptive (gradable) adjective lacks it. (On adverbs `\` means "derived from
     /// adjective"; only consumed for adjectives in `push_adj`.)
     pub relational: bool,
+    /// `+` **derivational** pointer targets `(offset, pos-char)` — morphosemantic links
+    /// (adjective `dependent` → noun `dependence`). A gradable adjective's `deg` is projected
+    /// onto its nominalization as a `cat_measure` reading (C2, d63-comparative-phrasal.md §5.3).
+    pub derivational: Vec<(Offset, String)>,
 }
 
 /// Strip a WordNet **adjective syntactic marker** — `(a)` attributive, `(p)` predicative,
@@ -148,11 +152,14 @@ pub fn parse_data_line(line: &str) -> Option<Synset> {
     let mut hypernyms = Vec::new();
     let mut instance_of = Vec::new();
     let mut relational = false;
+    let mut derivational = Vec::new();
     for _ in 0..p_cnt {
         match *tok.get(i)? {
             "@" => hypernyms.push(tok.get(i + 1)?.to_string()),
             "@i" => instance_of.push(tok.get(i + 1)?.to_string()),
             "\\" => relational = true, // pertainym → relational (non-gradable) adjective
+            // `+` derivational: (target offset, target pos-char) — the nominalization link.
+            "+" => derivational.push((tok.get(i + 1)?.to_string(), tok.get(i + 2)?.to_string())),
             _ => {}
         }
         i += 4; // sym, offset, pos, source/target
@@ -181,6 +188,7 @@ pub fn parse_data_line(line: &str) -> Option<Synset> {
         instance_of,
         frames,
         relational,
+        derivational,
     })
 }
 

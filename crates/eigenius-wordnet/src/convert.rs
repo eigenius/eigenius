@@ -592,6 +592,49 @@ fn adj_cat() -> String {
     format!("lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))")
 }
 
+/// The preposition governed by a relational gradable adjective, derived from its WordNet **gloss**
+/// (C3, d63-comparative-phrasal.md §5.3 — WordNet has no structured subcat frame, so the gloss is the
+/// only WordNet-internal signal). Two patterns, most-confident first:
+///   1. WordNet's explicit ``followed by `PREP'`` convention (67 adj synsets — `proportional`:
+///      *"usually followed by `to'"*).
+///   2. the **lemma itself** immediately followed by a preposition in the gloss/examples
+///      (`proportional to the crime`, `she is addicted to chocolate`). Keying on the lemma (not any
+///      word) avoids the verb+prep noise of examples (`spoke in`, `came to`) and gives the right
+///      per-lemma preposition within one synset (`addicted`→`to`, `dependent`→`on`).
+///
+/// `None` ⇒ no governance signal → a NON-relational bare measure (C1). Wired into the relational
+/// emission (a 2-place `deg` + `cat_measure/cat_pp_arg` + the optional-ground shift) in the next C3 step.
+#[allow(dead_code)]
+fn governed_preposition(gloss: &str, lemma: &str) -> Option<String> {
+    const PREPS: &[&str] = &[
+        "to", "on", "in", "with", "from", "for", "at", "upon", "about", "against", "into",
+    ];
+    // (1) explicit ``followed by `PREP'``.
+    if let Some(rest) = gloss.split("followed by `").nth(1) {
+        if let Some(p) = rest.split('\'').next() {
+            if PREPS.contains(&p.trim()) {
+                return Some(p.trim().to_string());
+            }
+        }
+    }
+    // (2) `<lemma> <prep>` in the gloss (lemma-keyed).
+    let g = gloss.to_lowercase();
+    let key = format!("{} ", lemma.to_lowercase());
+    let mut from = 0;
+    while let Some(i) = g[from..].find(&key) {
+        let next = g[from + i + key.len()..]
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(|c: char| !c.is_ascii_alphabetic());
+        if PREPS.contains(&next) {
+            return Some(next.to_string());
+        }
+        from += i + key.len();
+    }
+    None
+}
+
 /// Adjective synset → predicative entries. **Relational** (pertainym) adjectives are
 /// non-gradable → a Boolean predicate (`is_X : Entity → Prop`, sem = the axiom).
 /// **Descriptive** (gradable) adjectives (D63 §8.12 6-cmp) become a **measure**
@@ -601,7 +644,13 @@ fn adj_cat() -> String {
 /// Comparative surfaces: the synthetic `-er` from [`comparison`], plus a bare `cat_measure` reading
 /// (C1, d63-comparative-phrasal.md §5.3) exposing `deg_X` so the closed-class `more`/`less` handle the
 /// periphrastic ("more X") comparative at scale. Superlatives ("most") await "the".
-fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks) {
+fn push_adj(
+    buf: &mut String,
+    syn: &Synset,
+    rep: &mut Report,
+    noun_index: &BTreeMap<Offset, &Synset>,
+    ranks: &SenseRanks,
+) {
     let loc = local(syn);
     let prop_arrow = format!("{ENTITY_TOP} -> Prop");
     if syn.relational {
@@ -699,6 +748,31 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks
             }
         }
     }
+
+    // C2 (d63-comparative-phrasal.md §5.3): project `deg_{loc}` onto derivationally-related NOUNS
+    // (`dependent` → `dependence`) as a bare `cat_measure` reading — the nominalization's measure IS
+    // the adjective's degree, so `greater/less <nominalization>` parses at scale. (Relational nouns get
+    // the ground-taking `cat_measure/cat_pp_arg` form via the C3 curated prep map.)
+    for (off, tpos) in &syn.derivational {
+        if tpos != "n" {
+            continue;
+        }
+        if let Some(&noun) = noun_index.get(off) {
+            for (j, nlemma) in noun.words.iter().enumerate() {
+                push_entry(
+                    buf,
+                    &format!("e_{loc}_d_{}_{j}", local(noun)),
+                    nlemma,
+                    "lexicon:cat_measure",
+                    &format!("deg_{loc}"),
+                    &format!("{ENTITY_TOP} -> core:float"),
+                    &sense_key(noun, nlemma),
+                    ranks,
+                );
+                rep.entries += 1;
+            }
+        }
+    }
 }
 
 /// Render a set of synsets to one ESL document. The caller is responsible for
@@ -784,7 +858,7 @@ fn render_core(
             }
             Pos::Adj => {
                 let mut block = String::new();
-                push_adj(&mut block, syn, &mut rep, ranks);
+                push_adj(&mut block, syn, &mut rep, &noun_index, ranks);
                 route(&block, &mut decls, &mut entries);
             }
             Pos::Adv => {} // deferred (§8.7.5)
@@ -1238,7 +1312,13 @@ mod tests {
         let large = syn("00000001 00 a 01 large 0 000 | of great size");
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_adj(&mut buf, &large, &mut rep, &SenseRanks::new());
+        push_adj(
+            &mut buf,
+            &large,
+            &mut rep,
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+        );
         assert!(buf.contains("axiom wn:deg_a00000001 : lexicon:Entity -> core:float"));
         assert!(buf.contains("axiom wn:std_a00000001 : core:float"));
         assert!(buf.contains("resource wn:pos_sem_a00000001 : lexicon:SemTerm {"));
@@ -1260,6 +1340,58 @@ mod tests {
     }
 
     #[test]
+    fn gradable_adjective_projects_deg_onto_its_nominalization() {
+        // C2 (d63-comparative-phrasal.md §5.3): a gradable adjective's `deg` projects onto its
+        // derivationally-related NOUN (`+` link, `dependent` → `dependence`) as a `cat_measure`
+        // reading, so `greater/less <nominalization>` parses. Here `lethal` → `lethality`.
+        let lethal = syn("00000001 00 a 01 lethal 0 001 + 00000002 n 0000 | causing death");
+        let lethality = syn("00000002 00 n 01 lethality 0 000 | the quality of being lethal");
+        assert_eq!(
+            lethal.derivational,
+            vec![("00000002".to_string(), "n".to_string())]
+        );
+        let noun_index: BTreeMap<_, _> = [(lethality.offset.clone(), &lethality)]
+            .into_iter()
+            .collect();
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_adj(&mut buf, &lethal, &mut rep, &noun_index, &SenseRanks::new());
+        // the noun `lethality` gets a `cat_measure` reading whose sem IS the adjective's `deg`.
+        assert!(
+            buf.contains("lexicon:form     = \"lethality\";"),
+            "projected noun entry:\n{buf}"
+        );
+        assert!(
+            buf.contains("lexicon:sem      = wn:deg_a00000001;"),
+            "sem = the adjective's deg:\n{buf}"
+        );
+        assert!(buf.contains("lexicon:cat      = type_expr( lexicon:cat_measure );"));
+    }
+
+    #[test]
+    fn governed_preposition_from_gloss() {
+        // (1) WordNet's explicit `followed by `to'` convention (`proportional`).
+        assert_eq!(
+            governed_preposition(
+                "properly related in size or degree; usually followed by `to'",
+                "proportional"
+            ),
+            Some("to".to_string())
+        );
+        // (2) lemma in the gloss/example → its preposition, PER-LEMMA within one synset.
+        let g = "compulsively or physiologically dependent on something; \"she is addicted to chocolate\"";
+        assert_eq!(governed_preposition(g, "addicted"), Some("to".to_string()));
+        assert_eq!(governed_preposition(g, "dependent"), Some("on".to_string()));
+        // non-relational: no governance signal.
+        assert_eq!(governed_preposition("of great size", "large"), None);
+        // lemma-keyed avoids verb+prep noise (the prep follows a VERB, not the lemma).
+        assert_eq!(
+            governed_preposition("\"she walked with a limp\"", "temperate"),
+            None
+        );
+    }
+
+    #[test]
     fn relational_adjective_stays_boolean() {
         // A relational (pertainym `\`) adjective is non-gradable → the Boolean predicate.
         let atomic = syn("00000004 00 a 01 atomic 0 001 \\ 00000005 n 0000 | of atoms");
@@ -1269,7 +1401,13 @@ mod tests {
         );
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_adj(&mut buf, &atomic, &mut rep, &SenseRanks::new());
+        push_adj(
+            &mut buf,
+            &atomic,
+            &mut rep,
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+        );
         assert!(buf.contains("axiom wn:a00000004 : lexicon:Entity -> Prop"));
         assert!(buf.contains("lexicon:form     = \"atomic\";"));
         // no measure / comparative for a relational adjective.
