@@ -570,6 +570,48 @@ fn sem_is_coordination(sem: &Exp) -> bool {
         if matches!(d.iri.as_str(), "urn:eigenius:logic:And" | "urn:eigenius:logic:Or"))
 }
 
+/// Least common generalization of two categories that share STRUCTURE, widening each corresponding
+/// `cat_np`/`cat_n` **type index** to its [`common_super`]; every other position (ctor, feature,
+/// nested functor, mood) must match exactly. Used to coordinate **type-raised quantifiers over
+/// different noun types** (D63 §8.4 — `a gene or a cell line`, whose object-GQ categories differ only
+/// in the exposed object slot `cat_np(Gene)` vs `cat_np(CellLine)`): the coordinated category widens
+/// that slot to `cat_np(Entity)` so a general verb still fills it, while the per-member semantics —
+/// each quantifier over its own type — are preserved and folded pointwise ([`complete_coord`]). So
+/// `V [a gene or a cell line]` yields `∃g:Gene.V(g) ∨ ∃c:CellLine.V(c)` (the two bound types stay
+/// distinct; only the categorial selectional slot generalizes — a general verb accepts it, a
+/// type-restricted verb over-generates, the documented corner). `None` if the structures differ or a
+/// type pair has no common supertype.
+fn common_cat(x: &Exp, y: &Exp, layer: &Arc<Layer>) -> Option<Exp> {
+    if x == y {
+        return Some(x.clone());
+    }
+    let (Exp::InductiveCtor(dx, nx, ax), Exp::InductiveCtor(_dy, ny, ay)) = (x, y) else {
+        return None;
+    };
+    if nx != ny || ax.len() != ay.len() {
+        return None;
+    }
+    // `cat_np(T, num)` / `cat_n(T, num)`: widen the type index to the common supertype; the number
+    // feature must match (both raised object slots carry `num_any`, so this holds for the GQ case).
+    if (nx == "cat_np" || nx == "cat_n") && ax.len() == 2 {
+        if ax[1] != ay[1] {
+            return None;
+        }
+        let t = common_super(&ax[0], &ay[0], layer)?;
+        return Some(Exp::InductiveCtor(
+            dx.clone(),
+            nx.clone(),
+            vec![t, ax[1].clone()],
+        ));
+    }
+    // Structural (`fwd`/`bwd`/`cat_s`/…): ctor + arity already match; recurse on corresponding args.
+    let mut args = Vec::with_capacity(ax.len());
+    for (a, b) in ax.iter().zip(ay.iter()) {
+        args.push(common_cat(a, b, layer)?);
+    }
+    Some(Exp::InductiveCtor(dx.clone(), nx.clone(), args))
+}
+
 /// Build or extend a **prop-ending coordination list** `cat_coord(BaseCat, conn)` (D63 §8.4 Phase 3,
 /// the list-with-operator model ported from core-en `conj.xsl`). This is the prop-side analogue of
 /// [`coordinate_np`]: instead of folding `a <op> b` EAGERLY (the retired [`coordinate_sem`]), it
@@ -623,10 +665,29 @@ pub fn coordinate_prop(
             (l_cat.clone(), vec![l_sem.clone()])
         }
     };
-    // The right conjunct must coordinate with the base category (same category, prop-ending).
-    if !cats_coordinate(&base_cat, r_cat, layer) {
-        return None;
-    }
+    // The right conjunct coordinates with the base — EXACT (same category, prop-ending) or, for
+    // type-raised quantifiers over DIFFERENT noun types (D63 §8.4: `a gene or a cell line`), at their
+    // type-generalized common category ([`common_cat`]: exposed `cat_np` indices widened to
+    // `common_super`, per-member sems preserved + folded pointwise). Only a prop-ending functor
+    // generalizes — the pointwise fold needs a shared denotation; atoms stay exact.
+    let base_cat = if cats_coordinate(&base_cat, r_cat, layer) {
+        base_cat
+    } else {
+        match common_cat(&base_cat, r_cat, layer) {
+            // Only OBJECT-GQs (backward-headed `(S\NP)\((S\NP)/NP)`) generalize: object coordination has
+            // no subject–verb number agreement, so the pointwise generalized-conjunction fold is safe.
+            // SUBJECT-GQs (`S/(S\NP)`, forward-headed) must NOT take this path — a coordinated subject
+            // needs the plural-group promotion of the NP-list path (`coordinate_np`) so agreement bites
+            // (`*HeLa and BRCA1 affects HeLa`). Gate on the object-GQ shape (top-level `bwd`).
+            Some(gen)
+                if is_ctor(&gen, "bwd").is_some()
+                    && denote_cat(&gen).map(|d| prop_ending(&d)).unwrap_or(false) =>
+            {
+                gen
+            }
+            _ => return None,
+        }
+    };
     let Exp::InductiveCtor(cat_decl, _, _) = r_cat else {
         return None;
     };

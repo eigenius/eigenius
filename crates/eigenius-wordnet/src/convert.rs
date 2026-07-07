@@ -741,6 +741,15 @@ fn push_adj(
         &format!("cmp_sem_{loc}"),
         &format!("( fun (y : {ENTITY_TOP}) => fun (x : {ENTITY_TOP}) => measurements:gt(wn:deg_{loc}(x), wn:deg_{loc}(y)) : {ENTITY_TOP} -> {prop_arrow} )"),
     );
+    // Attributive / elided-`than` comparative (d63-comparative-phrasal §8): `a stronger phenotype` /
+    // `X is stronger` — the comparison STANDARD is anaphoric (`lexicon:anaphor`, freshened to a per-span
+    // hole → an OPEN parse the D64 resolver fills), NOT the positive's absolute `std_{loc}`. A bare
+    // `S[adj]\NP`, so the existing attributive refine rule turns `stronger phenotype` into a refined noun.
+    push_sem_term(
+        buf,
+        &format!("cmp_attrib_sem_{loc}"),
+        &format!("( fun (x : {ENTITY_TOP}) => measurements:gt(wn:deg_{loc}(x), wn:deg_{loc}(lexicon:anaphor)) : {prop_arrow} )"),
+    );
     let pos_cat = adj_cat();
     let cmp_cat = format!("lexicon:fwd({}, lexicon:cat_pp_than)", adj_cat());
     let cmp_arrow = format!("{ENTITY_TOP} -> {prop_arrow}");
@@ -804,6 +813,19 @@ fn push_adj(
                     &cmp_cat,
                     &format!("cmp_sem_{loc}"),
                     &cmp_arrow,
+                    &sense,
+                    ranks,
+                );
+                rep.entries += 1;
+                // Attributive / elided-`than` reading of the same synthetic comparative (bare `S[adj]\NP`,
+                // anaphoric standard) → `a stronger phenotype` refines the noun, opens the standard hole.
+                push_entry(
+                    buf,
+                    &format!("e_{loc}_{i}_ca{k}"),
+                    c,
+                    &pos_cat,
+                    &format!("cmp_attrib_sem_{loc}"),
+                    &prop_arrow,
                     &sense,
                     ranks,
                 );

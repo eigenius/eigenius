@@ -457,6 +457,50 @@ fn verify_governed_preposition_at_scale() {
     );
 }
 
+/// D63 §8.5 / d63-comparative-phrasal §8 — AT-SCALE witness: an attributive comparative (`a stronger
+/// gene`, s20's `a stronger mutation phenotype`) parses OPEN with a comparison-standard hole on the real
+/// WordNet lexicon (the importer's `cmp_attrib_sem` bare `S[adj]\NP` reading). Was a grammar-GAP before.
+///   EIGENIUS_DB_SNAPSHOT=/path cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       verify_attributive_comparative_at_scale -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic+witness: attributive comparative opens with a standard hole at scale; --ignored --nocapture"]
+fn verify_attributive_comparative_at_scale() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    for s in [
+        "cells affect a stronger gene",
+        "cells require a stronger phenotype",
+    ] {
+        let (closed, open) = index.parse_open(s, &lem);
+        // The attributive-comparative reading is an OPEN parse (a comparison-standard hole) whose sem
+        // compares a degree: `gt(deg_X(x), deg_X($anaphor$))`.
+        let attrib = open.iter().find(|o| {
+            !o.holes.is_empty() && {
+                let t = pretty_term(o.item.sem());
+                t.contains("gt(") && t.contains("deg_")
+            }
+        });
+        eprintln!(
+            "\n=== {s:?} — {} closed, {} open ===",
+            closed.len(),
+            open.len()
+        );
+        if let Some(o) = attrib {
+            eprintln!(
+                "  attributive-comparative OPEN (holes={}): {}",
+                o.holes.len(),
+                pretty_term(o.item.sem())
+            );
+        }
+        assert!(
+            attrib.is_some(),
+            "`{s}` must have an OPEN attributive-comparative reading (gt(deg(x),deg(anaphor)) + hole) at scale"
+        );
+    }
+}
+
 /// D63 lexicon-augmentation diagnostic: are the UMLS `RecQ` atoms (C0084304 "RecQ Helicases") seeded as
 /// `lexicon:form` entries in the snapshot? If so, a `TextIndex` over `lexicon:form` (BM25/token) would
 /// ground the OOV surface `recq` → those atoms → the concept — without an HGNC import. The exact

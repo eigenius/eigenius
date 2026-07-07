@@ -3102,6 +3102,122 @@ fn distributive_object_coordination_parses() {
 }
 
 #[test]
+fn s20_shape_parses_open_with_modal_coordination_and_comparative() {
+    // The s20 sentence (`WRN dependency may require specific lineages or a stronger mutation phenotype`)
+    // composes three fixes: the modal (`may` → Possible), heterogeneous object-GQ coordination over
+    // DIFFERENT types (type-preserving `Or`), and the attributive comparative (anaphoric standard hole).
+    // Demo proxy `HeLa may affect a gene or a larger cell line` must parse OPEN — not gap, not closed
+    // (the comparative standard is unresolved) — as `Possible(Or(∃:Gene …, ∃:(Σ CellLine. gt(deg,
+    // anaphor)) …))` with exactly one comparison-standard hole the D64 resolver fills.
+    let (_layer, index) = index_over_bootstrap();
+    let (closed, open) =
+        index.parse_open("HeLa may affect a gene or a larger cell line", &Identity);
+    assert!(
+        closed.is_empty(),
+        "the comparative standard is unresolved → the s20 shape must be OPEN, not closed"
+    );
+    let it = open
+        .iter()
+        .find(|o| o.holes.len() == 1)
+        .expect("an open parse with exactly one comparison-standard hole");
+    let sem = pretty_term(it.item.sem());
+    assert!(
+        sem.contains("Possible(")
+            && sem.contains("Or(")
+            && sem.contains(":Gene.")
+            && sem.contains(":CellLine.")
+            && sem.contains("gt(deg_large")
+            && sem.contains("$anaphor$"),
+        "s20 shape = modal + type-preserving disjunction (Gene ∨ CellLine) + comparative-standard hole: {sem}"
+    );
+}
+
+#[test]
+fn heterogeneous_object_gq_coordination_generalizes_type() {
+    // D63 §8.4 — coordinating type-raised OBJECT quantifiers over DIFFERENT noun types (s20's object
+    // `specific lineages or a stronger mutation phenotype` = Lineage ⊕ Phenotype). The object-GQ
+    // categories differ only in the exposed object slot (`cat_np(Gene)` vs `cat_np(CellLine)`); the
+    // coordination widens that slot to their `common_super` (Entity) so a general verb still fills it,
+    // while the per-disjunct SEMANTICS keep the distinct bound types: `∃g:Gene.V(g) ∨ ∃c:CellLine.V(c)`.
+    let (_layer, index) = index_over_bootstrap();
+
+    // det ⊕ det, different types → closes with a TYPE-PRESERVING disjunction (not collapsed to Entity).
+    let forest = index.parse("HeLa affects a gene or a cell line", &Identity);
+    assert!(
+        !forest.is_empty(),
+        "different-type object-GQ coordination must close"
+    );
+    let sem = pretty_term(forest[0].sem());
+    assert!(
+        sem.starts_with("Or(") && sem.contains(":Gene.") && sem.contains(":CellLine."),
+        "the disjunction preserves BOTH bound types (Gene ∨ CellLine, not widened to Entity): {sem}"
+    );
+
+    // plural ⊕ det, different types — the s20 object shape — also closes.
+    assert!(
+        !index
+            .parse("HeLa affects genes or a cell line", &PluralS)
+            .is_empty(),
+        "plural ⊕ determined, different types (the s20 object shape) closes"
+    );
+
+    // Guard: the object-GQ gate must NOT leak into SUBJECT coordination — a coordinated plural subject
+    // still needs the plural-finite verb, so `*HeLa and BRCA1 affects HeLa` (3sg) stays out (agreement
+    // bites; forward-headed subject-GQs are excluded from the generalization).
+    assert!(
+        index
+            .parse("HeLa and BRCA1 affects HeLa", &Identity)
+            .is_empty(),
+        "the object-GQ generalization does not bypass subject-verb agreement"
+    );
+}
+
+#[test]
+fn attributive_comparative_opens_with_a_standard_hole() {
+    // D63 §8.5 / d63-comparative-phrasal §8: an attributive comparative (`a larger cell line`,
+    // `a stronger mutation phenotype` — s20) has NO explicit `than`-standard; the standard is
+    // anaphoric (a discourse comparison class), unlike the positive's absolute norm `std_large`. So
+    // it parses OPEN — a bare `S[adj]\NP` reading `λx. gt(deg(x), deg(anaphor))` (e_larger_attrib) +
+    // the attributive refine rule → `Σx. gt(deg(x), deg($anaphor$))`, one comparison-standard hole the
+    // D64 resolver fills. It must NOT gap, and must NOT spuriously close (a closed parse would mean the
+    // relative standard was silently invented).
+    let (_layer, index) = index_over_bootstrap();
+
+    // Positive attributive stays CLOSED — absolute `std_large`, no hole.
+    assert!(
+        !index
+            .parse("HeLa affects a large cell line", &Identity)
+            .is_empty(),
+        "positive `a large cell line` closes (absolute standard)"
+    );
+
+    // Comparative attributive: OPEN, not gap, not closed; exactly one comparison-standard hole.
+    let (closed, open) = index.parse_open("HeLa affects a larger cell line", &Identity);
+    assert!(
+        closed.is_empty(),
+        "`a larger cell line` must NOT close — the comparative standard is unresolved"
+    );
+    let one_hole = open.iter().find(|o| o.holes.len() == 1);
+    assert!(
+        one_hole.is_some(),
+        "`a larger cell line` must parse OPEN with one comparison-standard hole, got {} open",
+        open.len()
+    );
+    let sem = pretty_term(one_hole.unwrap().item.sem());
+    assert!(
+        sem.contains("gt(") && sem.contains("deg_large"),
+        "the open sem compares the degree against an anaphoric standard: {sem}"
+    );
+
+    // Works in subject position too.
+    let (c2, o2) = index.parse_open("a larger cell line affects HeLa", &Identity);
+    assert!(
+        c2.is_empty() && o2.iter().any(|o| o.holes.len() == 1),
+        "subject-position attributive comparative also opens with one hole"
+    );
+}
+
+#[test]
 fn distributive_object_coordination_with_or_parses() {
     // Object distribution with `or`: "HeLa affects BRCA1 or HeLa" →
     // affects(brca1, hela) ∨ affects(hela, hela) : Prop.
