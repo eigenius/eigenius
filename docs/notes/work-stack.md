@@ -17,8 +17,13 @@ Four-phase spine (user directive `2026-07-06`, worked in order — stop detourin
   62 units → **50 AMBIG, 12 grammar-gap, 0 missing, 0 encoded** — **81% close** (from 68% at Step-9).
   Done: verb+PP frames, RC-1 (bare-UMLS subject), and **Step 5/5b/5c** (apposition + comma-list connective
   inheritance + the coordination refactor to core-en's list-with-operator shape) — together **−8 gaps**.
-  **Next: RC-2 comparatives (`than`/`stronger`, 3 of the 12).** The ordered 12-gap backlog is the roadmap
-  table in the note's header.
+  **RC-2 comparatives — CLOSED (`2026-07-07`).** Degree (#8) + cardinality (#9) phrasal comparatives
+  ([d63-comparative-phrasal.md](d63-comparative-phrasal.md)); #8 **verified at scale** (C4, diagnostic
+  `verify_degree_comparative_at_scale` over the `2026-07-07-c3` snapshot) — `greater/more dependence/dependent
+  on` → identical `gt(deg_dep_rel(…))`, `more sensitive than` → 1-place; #9 `card` holds. **C3-precision**
+  (prep feature on `cat_pp_arg`; rejects `*dependent to`) added + unit-verified (`3e6c0d5`); its at-scale
+  check rides the next reseed — **blocked on the reseed OOM** ([reseed-oom-memory-investigation.md](reseed-oom-memory-investigation.md), on deck).
+  **Next: the next gap in the ordered 12-gap backlog** — see the note's roadmap table.
 - **Phases 3 (ambiguity) + 4 (performance): on deck** — one root cause, the **mass-shim over-generation**
   (RC-1 head-inheritance is loose); see the on-deck entry below.
 **Exit-gate (phase 2):** re-measure → grammar-gap = 0 (every unit parses). Then phase 3 becomes the top.
@@ -33,6 +38,14 @@ done.
 ---
 
 ## On deck (pushed onto the stack when its step becomes active)
+
+- **Reseed OOM — memory profiling follow-up** ([reseed-oom-memory-investigation.md](reseed-oom-memory-investigation.md)).
+  Full WordNet+UMLS reseed OOMs (~20 GiB) deep into the UMLS load; blocks the at-scale re-verification of
+  C3-precision (and any fresh full reseed). Static analysis is exhausted (named resident terms sum to ~5–7 GiB
+  vs the 20 GiB OOM; the note's §3 lists what is measured-out — text index, RocksDB config, in-memory backend,
+  bounded cache — do not re-tread). **Next action: the jemalloc heap profile in §6** (feature-gated
+  `tikv-jemallocator` on `eigenius-cli`, bounded native `serve` + ~10 UMLS chunks + `jeprof` flame graph) to
+  name the ~15 GiB owner. Diagnostic already in tree: `storage/rocksdb/tests/snapshot_memory_probe.rs`.
 
 - **Phases 3 (ambiguity) + 4 (performance)** — one root cause, worked together once phase 2 pops.
   Concrete first lever: the **mass-shim precision fixes** (d63-parse-gap-closure.md §6 — strictly-
