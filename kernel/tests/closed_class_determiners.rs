@@ -2643,14 +2643,16 @@ fn phrasal_comparative_compares_measure_degrees() {
         &Identity,
     );
     assert!(!forest.is_empty(), "phrasal comparative parses");
-    let sem = pretty_term(forest[0].sem());
+    // EXACT denotation, not merely gt-headed: subject x=hela, than-object y=msh2, ground=brca1, in
+    // the right order — a swapped `gt(μ(msh2), μ(hela))` MUST fail this.
+    let expected = "gt(mu_dependence(brca1, hela), mu_dependence(brca1, msh2))";
     assert!(
-        is_gt_headed(forest[0].sem()),
-        "headed by measurements:gt: {sem}"
-    );
-    assert!(
-        sem.contains("mu_dependence") && sem.contains("brca1"),
-        "the comparison is over μ_dependence(brca1): {sem}"
+        forest.iter().any(|p| pretty_term(p.sem()) == expected),
+        "expected exact `{expected}` among parses, got: {:?}",
+        forest
+            .iter()
+            .map(|p| pretty_term(p.sem()))
+            .collect::<Vec<_>>()
     );
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("phrasal comparative sem type-checks");
