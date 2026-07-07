@@ -356,6 +356,53 @@ fn show_based_on_x_reading() {
     }
 }
 
+/// D63 §8 C4 milestone: verify #8 (degree comparatives) parses AT SCALE — i.e. against the
+/// WordNet-derived `dependence`/`dependent`/`sensitive` entries emitted by the importer (C1 bare
+/// cat_measure, C2 nominalization projection, C3 relational/governed-prep reading), NOT the
+/// hand-authored demo. The closed-class operators (`greater`/`more`/`less`, `than`) come from the
+/// seeded `closed-class.esl`. Expected: `greater dependence on Y` and `more dependent on Y than Z`
+/// produce `gt(deg_dependent(_,_), deg_dependent(_,_))`; `more sensitive than Z` the same over
+/// `deg_sensitive`. #9 cardinality (`fewer genes`) is re-probed as a regression.
+///   EIGENIUS_DB_SNAPSHOT=/path cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       verify_degree_comparative_at_scale -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic: #8 degree comparatives against the WordNet lexicon; --ignored --nocapture"]
+fn verify_degree_comparative_at_scale() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    // #8 all-WordNet frames (bare-plural NPs sidestep domain-entity grounding), plus the demo frame
+    // at scale, plus the #9 regression. `sensitive` is WordNet-only (absent from the demo lexicon).
+    let sentences = [
+        "cells show greater dependence on genes than mutations", // #8 nominalization + governed prep
+        "cells are more dependent on genes than mutations",      // #8 predicative adjective
+        "cells are more sensitive than mutations",               // #8 predicative degree (WN-only adj)
+        "HeLa affects greater dependence on BRCA1 than MSH2",     // #8 demo frame, domain entities
+        "HeLa affects fewer genes than MSH2",                    // #9 cardinality regression
+    ];
+    for s in sentences {
+        let (closed, open) = index.parse_open(s, &lem);
+        let tag = if !closed.is_empty() {
+            format!("CLOSED×{}", closed.len())
+        } else if !open.is_empty() {
+            format!("open×{}", open.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("\n=== {tag}  {s:?} ===");
+        let mut sems: Vec<(String, bool)> = closed
+            .iter()
+            .map(|it| (pretty_term(it.sem()), gates_to_prop(&head, it.sem())))
+            .collect();
+        sems.sort();
+        sems.dedup();
+        for (i, (sem, is_prop)) in sems.iter().enumerate() {
+            eprintln!("  [{i}]{} {sem}", if *is_prop { " ⊨Prop" } else { "" });
+        }
+    }
+}
+
 /// D63 lexicon-augmentation diagnostic: are the UMLS `RecQ` atoms (C0084304 "RecQ Helicases") seeded as
 /// `lexicon:form` entries in the snapshot? If so, a `TextIndex` over `lexicon:form` (BM25/token) would
 /// ground the OOV surface `recq` → those atoms → the concept — without an HGNC import. The exact
