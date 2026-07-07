@@ -2645,7 +2645,7 @@ fn phrasal_comparative_compares_measure_degrees() {
     assert!(!forest.is_empty(), "phrasal comparative parses");
     // EXACT denotation, not merely gt-headed: subject x=hela, than-object y=msh2, ground=brca1, in
     // the right order — a swapped `gt(μ(msh2), μ(hela))` MUST fail this.
-    let expected = "gt(mu_dependence(brca1, hela), mu_dependence(brca1, msh2))";
+    let expected = "gt(deg_dependent(brca1, hela), deg_dependent(brca1, msh2))";
     assert!(
         forest.iter().any(|p| pretty_term(p.sem()) == expected),
         "expected exact `{expected}` among parses, got: {:?}",
@@ -2658,15 +2658,13 @@ fn phrasal_comparative_compares_measure_degrees() {
     let ty = check_infer(&mut ctx, forest[0].sem()).expect("phrasal comparative sem type-checks");
     assert_eq!(readback_val(0, &ty), Exp::Sort(0), "denotes Prop");
 
-    // `fewer` (count comparative, LESS) parses over the same machinery.
+    // `less` (degree-LESS over cat_measure) parses over the same machinery. `fewer` is now count-only
+    // (over cat_n, added in A2), so `*fewer dependence` is ungrammatical (asserted in the A2 test).
     assert!(
         !index
-            .parse(
-                "HeLa affects fewer dependence on BRCA1 than MSH2",
-                &Identity
-            )
+            .parse("HeLa affects less dependence on BRCA1 than MSH2", &Identity)
             .is_empty(),
-        "fewer phrasal comparative parses"
+        "less phrasal comparative parses"
     );
     // Restriction: `greater` selects `cat_measure`, so a non-measure noun gets no comparative parse.
     assert!(
@@ -2674,6 +2672,109 @@ fn phrasal_comparative_compares_measure_degrees() {
             .parse("HeLa affects greater gene on BRCA1 than MSH2", &Identity)
             .is_empty(),
         "`greater` rejects a non-measure noun (`gene` is cat_n, not cat_measure)"
+    );
+}
+
+#[test]
+fn cardinality_comparative_over_a_count_noun() {
+    // #9 (d63-comparative-phrasal.md §5.1): `fewer`/`more` are CARDINALITY operators over any count
+    // noun `cat_n` — the noun is consumed by the cat_forall+cat_n rule and counted by the opaque
+    // `card : Set → Entity → float`. `*fewer dependence` (a cat_measure, not cat_n) has no parse;
+    // `less dependence` (degree over cat_measure) is the scalar counterpart.
+    let (layer, index) = index_over_bootstrap();
+
+    // fewer (x has FEWER than y): gt(card(T,y), card(T,x)), x=subject=hela, y=than-obj=msh2.
+    let fewer = index.parse("HeLa affects fewer genes than MSH2", &PluralS);
+    assert!(
+        fewer
+            .iter()
+            .any(|p| pretty_term(p.sem()) == "gt(card(Gene, msh2), card(Gene, hela))"),
+        "fewer over a count noun compares cardinalities: {:?}",
+        fewer
+            .iter()
+            .map(|p| pretty_term(p.sem()))
+            .collect::<Vec<_>>()
+    );
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let ty = check_infer(&mut ctx, fewer[0].sem()).expect("cardinality sem type-checks");
+    assert_eq!(readback_val(0, &ty), Exp::Sort(0), "denotes Prop");
+
+    // more (x has MORE than y): gt(card(T,x), card(T,y)).
+    let more = index.parse("HeLa affects more genes than MSH2", &PluralS);
+    assert!(
+        more.iter()
+            .any(|p| pretty_term(p.sem()) == "gt(card(Gene, hela), card(Gene, msh2))"),
+        "more over a count noun: {:?}",
+        more.iter()
+            .map(|p| pretty_term(p.sem()))
+            .collect::<Vec<_>>()
+    );
+
+    // Agreement: `*fewer dependence` — dependence is cat_measure, not cat_n → no parse.
+    assert!(
+        index
+            .parse("HeLa affects fewer dependence on BRCA1 than MSH2", &PluralS)
+            .is_empty(),
+        "*fewer dependence has no parse (fewer selects cat_n; dependence is cat_measure)"
+    );
+
+    // Compound count noun composes (KindCompound) before the count — the #9 shape (`deletion
+    // mutations`); here the demo's `gene cell lines` N-N compound.
+    assert!(
+        !index
+            .parse("HeLa affects fewer gene cell lines than MSH2", &PluralS)
+            .is_empty(),
+        "fewer over a COMPOUND count noun parses (KindCompound feeds the cardinality)"
+    );
+}
+
+#[test]
+fn adjectival_comparative_and_nominal_share_one_scale() {
+    // #8 (d63-comparative-phrasal.md §5.2/§5.5b): analytic `more`/`less` over a gradable ADJECTIVE's
+    // `deg_A`, predicative frame `((S[adj]\NP)/cat_pp_than)/cat_measure`. A4: the adjective `dependent`
+    // and the noun `dependence` share ONE scale `deg_dependent`, so `more dependent on WRN` (adjective)
+    // and `greater dependence on WRN` (noun) denote IDENTICALLY.
+    let (layer, index) = index_over_bootstrap();
+    let both = "gt(deg_dependent(brca1, hela), deg_dependent(brca1, msh2))";
+
+    // adjectival: "HeLa is more dependent on BRCA1 than MSH2".
+    let more_adj = index.parse("HeLa is more dependent on BRCA1 than MSH2", &Identity);
+    assert!(
+        more_adj.iter().any(|p| pretty_term(p.sem()) == both),
+        "more (adjectival) → gt(deg(x), deg(y)): {:?}",
+        more_adj
+            .iter()
+            .map(|p| pretty_term(p.sem()))
+            .collect::<Vec<_>>()
+    );
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let ty = check_infer(&mut ctx, more_adj[0].sem()).expect("adjectival comparative type-checks");
+    assert_eq!(readback_val(0, &ty), Exp::Sort(0), "denotes Prop");
+
+    // nominal: "HeLa affects greater dependence on BRCA1 than MSH2" → the SAME term (A4 unification).
+    let greater_noun = index.parse(
+        "HeLa affects greater dependence on BRCA1 than MSH2",
+        &Identity,
+    );
+    assert!(
+        greater_noun.iter().any(|p| pretty_term(p.sem()) == both),
+        "adjectival and nominal comparatives share one deg: {:?}",
+        greater_noun
+            .iter()
+            .map(|p| pretty_term(p.sem()))
+            .collect::<Vec<_>>()
+    );
+
+    // less (adjectival, LESS): gt(deg(y), deg(x)).
+    let less_adj = index.parse("HeLa is less dependent on BRCA1 than MSH2", &Identity);
+    assert!(
+        less_adj.iter().any(|p| pretty_term(p.sem())
+            == "gt(deg_dependent(brca1, msh2), deg_dependent(brca1, hela))"),
+        "less (adjectival): {:?}",
+        less_adj
+            .iter()
+            .map(|p| pretty_term(p.sem()))
+            .collect::<Vec<_>>()
     );
 }
 

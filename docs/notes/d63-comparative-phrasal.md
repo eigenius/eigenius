@@ -266,22 +266,23 @@ semantics — the D61 faithfulness line.
 ## [ ] Phase A — Demo mechanism (no reseed; experiments/lexicon/lexicon.esl + kernel/tests)
 Prove the whole grammar before any bootstrap/importer commitment.
 
-A1 — Fix the mislabeled fewer (§5.8). Rename demo fewer_cmp → less (its gt(μ(y),μ(x)) over cat_measure is correct for less); flip the phrasal test so *fewer dependence gets no parse. Prereq for A2; corrects the committed error.
-A2 — #9 cardinality operator (§5.1). Add fewer/more(count) over cat_n: (((S\NP)/cat_pp_than)\((S\NP)/NP))/cat_n(T,num), sem λN.λV.λy.λx. gt(card(N,y),card(N,x)); add the opaque card : Set→Entity→float axiom. Test the cardinality denotation + the compound (deletion mutations via KindCompound) + restrictive PP (in …) composing before the count.
-A3 — #8 adjectival more/less (§5.2, §5.5(b) surgical). Give a demo gradable adjective a deg_A (cat_measure) reading; add more/less in the predicative frame ((S[adj]\NP)/cat_pp_than)/cat_measure, sem λμ.λy.λx. gt(μ(x),μ(y)). Add a relational dependent on X (deg_dependent, cat_measure/cat_pp_arg). Test X is more/less dependent on Y than Z.
-A4 — Unify the noun & adjective scale (§5.0/§5.2). Make the demo noun dependence's μ = adjective dependent's deg_dependent (one axiom); assert more dependent on WRN and greater dependence on WRN produce the identical denotation.
+[ ] A1 — Fix the mislabeled fewer (§5.8). Rename demo fewer_cmp → less (its gt(μ(y),μ(x)) over cat_measure is correct for less); flip the phrasal test so *fewer dependence gets no parse. Prereq for A2; corrects the committed error.
+[ ] A2 — #9 cardinality operator (§5.1). Add fewer/more(count) over cat_n: (((S\NP)/cat_pp_than)\((S\NP)/NP))/cat_n(T,num), sem λN.λV.λy.λx. gt(card(N,y),card(N,x)); add the opaque card : Set→Entity→float axiom. Test the cardinality denotation + the compound (deletion mutations via KindCompound) + restrictive PP (in …) composing before the count.
+[ ] A3 — #8 adjectival more/less (§5.2, §5.5(b) surgical). Give a demo gradable adjective a deg_A (cat_measure) reading; add more/less in the predicative frame ((S[adj]\NP)/cat_pp_than)/cat_measure, sem λμ.λy.λx. gt(μ(x),μ(y)). Add a relational dependent on X (deg_dependent, cat_measure/cat_pp_arg). Test X is more/less dependent on Y than Z.
+[ ] A4 — Unify the noun & adjective scale (§5.0/§5.2). Make the demo noun dependence's μ = adjective dependent's deg_dependent (one axiom); assert more dependent on WRN and greater dependence on WRN produce the identical denotation.
 
 ## [ ] Phase B — Promote operators to closed-class + reseed → closes #9 at scale
-B1 — Move operators to closed-class.esl (bootstrap). greater/less/more/fewer + the card functor + scale plumbing. (than/cat_pp_than is already closed-class.) Measure nouns / gradable adjectives stay out (demo/importer).
-B2 — Reseed + verify #9 at scale. #9 operates over existing cat_n, so it closes with just the operators — no importer emission needed. Probe cells contained fewer mutations than genes: GAP→CLOSED. #8 still GAPs.
+
+[ ] B1 — Move operators to closed-class.esl (bootstrap). greater/less/more/fewer + the card functor + scale plumbing. (than/cat_pp_than is already closed-class.) Measure nouns / gradable adjectives stay out (demo/importer).
+[ ] B2 — Reseed + verify #9 at scale. #9 operates over existing cat_n, so it closes with just the operators — no importer emission needed. Probe cells contained fewer mutations than genes: GAP→CLOSED. #8 still GAPs.
 
 ## [ ] Phase C — #8 degree at scale: importer gradable emission (the design effort; §5.3)
 Prereq — grounding pass: confirm the WordNet detection signals (gradable/antonym clusters, attribute relation, derivational-link coverage) are good enough before building. Also verify the §6 anchor DOIs.
 
-C1 — Gradable-adjective detection + emission → a deg_A (cat_measure) reading per detected adjective.
-C2 — Relational-adjective emission → deg_A : Entity→Entity→float + the governed preposition.
-C3 — Nominalization projection → the noun's cat_measure reading, μ = the adjective's deg_A, via derivational links.
-C4 — Reseed + verify #8 at scale, managing the ambiguity/beam cost (§5.6: genuinely-gradable only, low rank, beam).
+[ ] C1 — Gradable-adjective detection + emission → a deg_A (cat_measure) reading per detected adjective.
+[ ] C2 — Relational-adjective emission → deg_A : Entity→Entity→float + the governed preposition.
+[ ] C3 — Nominalization projection → the noun's cat_measure reading, μ = the adjective's deg_A, via derivational links.
+[ ] C4 — Reseed + verify #8 at scale, managing the ambiguity/beam cost (§5.6: genuinely-gradable only, low rank, beam).
 
 ## [ ] Phase D — Shared NP-complexity gaps (§5.7; independent, interleavable)
 Needed for the full corpus sentences, independent of the comparative: complex subject (MSI cell lines from these four lineages — modifier + plural compound + these four demonstrative+cardinal) and possessive than-object (their MSS counterparts). Separate gaps (determiner+number, possessive), tracked in d63-parse-gap-closure.md.
