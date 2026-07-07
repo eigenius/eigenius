@@ -795,6 +795,55 @@ fn probe_step5_coordination() {
 /// localizes to the position, not the apposition rule. Run:
 ///   EIGENIUS_DB_SNAPSHOT=/…/wordnet-umls-all-2026-07-06 cargo test -p eigenius-wordnet \
 ///       --test db_backed_encoding probe_step5_apposition -- --ignored --nocapture
+/// RC-2 comparatives — category dump + gap localization. The gap sentences use ATTRIBUTIVE comparatives
+/// (`greater dependence`, `fewer mutations`, `a stronger phenotype`), unlike the existing PREDICATIVE
+/// machinery (`X is larger than Y` — `(S[adj]\NP)/cat_pp_than`). This dumps what category the comparative
+/// forms actually get on the real lexicon (positive? predicative comparative? lemmatized to base?) and
+/// which of the sub-shapes gap. Run:
+///   EIGENIUS_DB_SNAPSHOT=/…/wordnet-umls-all-2026-07-06 cargo test -p eigenius-wordnet \
+///       --test db_backed_encoding probe_rc2_comparatives -- --ignored --nocapture
+#[test]
+#[ignore = "RC-2 comparatives: category dump + gap localization; --ignored --nocapture"]
+fn probe_rc2_comparatives() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index(&head);
+    for form in [
+        "great",
+        "greater",
+        "few",
+        "fewer",
+        "strong",
+        "stronger",
+        "larger",
+        "dependence",
+        "than",
+    ] {
+        eprintln!("  TYPES {form}:");
+        for (aug, cat, sense) in index.debug_form_entries(form, &lem) {
+            let a = if aug { "+" } else { " " };
+            eprintln!("     {a} {cat}   [{sense}]");
+        }
+    }
+    for s in [
+        "a stronger phenotype affects cells", // #12 attributive comparative, NO than
+        "greater dependence affects cells",   // attributive comparative + noun, isolated
+        "WRN showed greater dependence than genes", // the than-clause with a comparative
+        "cells contained fewer mutations than genes", // #9 shape (simplified)
+    ] {
+        let (closed, open) = index.parse_open(s, &lem);
+        let tag = if !closed.is_empty() {
+            format!("CLOSED×{}", closed.len())
+        } else if !open.is_empty() {
+            format!("OPEN×{}", open.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  [{tag:>9}] {s}");
+    }
+}
+
 #[test]
 #[ignore = "Step 5 (RC-6): apposition-rule verification; --ignored --nocapture"]
 fn probe_step5_apposition() {

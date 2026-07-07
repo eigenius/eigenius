@@ -24,14 +24,15 @@ corpus's own `…the MMR genes MSH2, MSH6, PMS2 or MLH1 cause Lynch syndrome` no
 
 | RC | # | construction — sentence(s) |
 |---|---|---|
-| **RC-2** comparative `than` / `stronger` | 3 | `greater dependence … than their MSS counterparts`; `fewer … than typical lineages`; `a stronger mutation phenotype` (s20) |
+| **RC-2** phrasal comparative (`greater/fewer X … than Y`) | 2 | `greater dependence on WRN than …`; `fewer … than typical lineages` → [d63-comparative-phrasal.md](d63-comparative-phrasal.md) (grounded design, expert-consulted: opaque per-dimension μ + direct 3-place `gt`). Attributive comparatives already parse; only the `than`-clause gaps |
+| **modal + compound-subject** | 1 | `WRN dependency **may require** specific lineages or a stronger mutation phenotype` (s20 — refiled from RC-2; its attributive comparative parses) |
 | **RC-8** clausal complement + multiword verb | 2 | `hypothesized that … give rise to`; `suggest that … is not simply a result of` |
 | **deep verb+PP / nested-PP** | 2 | `arises from hypermethylation of the MLH1 promoter`; `compared favourably to … biomarkers for …` |
 | **RC-3** `V X as Y` | 1 | `identified WRN as the top … dependency` |
 | **RC-4** adjective + PP-complement | 1 | `events that are predictive of MMR deficiency` |
 | **RC-5** linking verb + predicate | 1 | `remained true with …` |
 | **RC-7** copula-kind on compound subject | 1 | `Nucleotide repeat regions are microsatellites` |
-| **passive + complex agent** | 1 | `were represented by these screening data sets` |
+| **passive + complex agent** | 1 | `were represented by these screening data sets` → [d63-passive-voice-handling.md](d63-passive-voice-handling.md) (general passive infra: object→subject promotion + `by_arg` + `rel(theme, ground)`) |
 
 **Next parsing gap: RC-2 (comparatives) — 3 sentences, the highest-leverage single fix.**
 

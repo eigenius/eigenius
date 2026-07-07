@@ -2631,6 +2631,50 @@ fn comparative_requires_than() {
     );
 }
 
+#[test]
+fn phrasal_comparative_compares_measure_degrees() {
+    // D63 §8.12 phrasal comparative (d63-comparative-phrasal.md): "X <v> greater dependence on Y than Z"
+    // → gt(μ_dep(Y)(x), μ_dep(Y)(z)). The comparative-quantifier determiner `greater` selects the measure
+    // noun `dependence` (cat_measure), absorbs the light verb, and threads the pending `than` as the
+    // `/cat_pp_than` on the resulting VP.
+    let (layer, index) = index_over_bootstrap();
+    let forest = index.parse(
+        "HeLa affects greater dependence on BRCA1 than MSH2",
+        &Identity,
+    );
+    assert!(!forest.is_empty(), "phrasal comparative parses");
+    let sem = pretty_term(forest[0].sem());
+    assert!(
+        is_gt_headed(forest[0].sem()),
+        "headed by measurements:gt: {sem}"
+    );
+    assert!(
+        sem.contains("mu_dependence") && sem.contains("brca1"),
+        "the comparison is over μ_dependence(brca1): {sem}"
+    );
+    let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));
+    let ty = check_infer(&mut ctx, forest[0].sem()).expect("phrasal comparative sem type-checks");
+    assert_eq!(readback_val(0, &ty), Exp::Sort(0), "denotes Prop");
+
+    // `fewer` (count comparative, LESS) parses over the same machinery.
+    assert!(
+        !index
+            .parse(
+                "HeLa affects fewer dependence on BRCA1 than MSH2",
+                &Identity
+            )
+            .is_empty(),
+        "fewer phrasal comparative parses"
+    );
+    // Restriction: `greater` selects `cat_measure`, so a non-measure noun gets no comparative parse.
+    assert!(
+        index
+            .parse("HeLa affects greater gene on BRCA1 than MSH2", &Identity)
+            .is_empty(),
+        "`greater` rejects a non-measure noun (`gene` is cat_n, not cat_measure)"
+    );
+}
+
 // ── D63 §8.13 Slice 6-mod — compound nouns + PP adjuncts ──────────────
 /// Whether `e`'s App-spine head is the named opaque axiom.
 fn head_is_axiom(e: &Exp, iri: &str) -> bool {

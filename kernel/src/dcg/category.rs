@@ -84,6 +84,16 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
             )),
             Box::new(Exp::Sort(0)),
         )),
+        // ⟦Measure⟧ = Entity → float — a 1-place measure maps an entity to its scalar value on a
+        // dimension's opaque float scale (D63 §8.12 phrasal comparatives, d63-comparative-phrasal.md).
+        // The comparative quantifier `greater`/`fewer` selects this; `μ(x) : float` feeds
+        // `measurements:gt`. Distinct from `cat_pp` (Entity → Prop): a measure is a scalar.
+        ("cat_measure", []) => Ok(Exp::Arrow(
+            Box::new(Exp::EigonClass(
+                Iri::parse("urn:eigenius:lexicon:Entity").map_err(|e| e.to_string())?,
+            )),
+            Box::new(Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::Float)),
+        )),
         ("fwd", [a, b]) | ("bwd", [a, b]) => Ok(Exp::Arrow(
             Box::new(denote_cat(b)?),
             Box::new(denote_cat(a)?),

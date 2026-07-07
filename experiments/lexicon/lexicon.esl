@@ -213,6 +213,71 @@ resource lexicon:e_larger : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 
+// ── PHRASAL comparative (D63 §8.12, d63-comparative-phrasal.md) — the comparative QUANTIFIER over a
+// MEASURE noun. "X showed greater dependence on WRN than Y" → gt(μ_dep(WRN)(x), μ_dep(WRN)(y)).
+// (6a) a MEASURE noun — `cat_measure / cat_pp_arg`, ⟦·⟧ = Entity → (Entity → float). The relational
+// measure `μ_dependence : Entity → Entity → float` (ground, subject → float); the arg-PP `on WRN`
+// supplies the ground → `μ_dependence(WRN) : Entity → float` = `cat_measure`. Only measure nouns get a
+// `cat_measure`, so `*greater cell line` has no parse.
+axiom lexicon:mu_dependence : lexicon:Entity -> lexicon:Entity -> core:float
+resource lexicon:e_dependence : lexicon:LexicalEntry {
+    lexicon:form     = "dependence";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg) );
+    lexicon:sem      = lexicon:mu_dependence;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> core:float );
+    lexicon:sense    = "wn:dependence.n.01";
+    lexicon:grade    = epistemic:declared;
+}
+// (6b) `greater` — the comparative-quantifier determiner. Category
+// `( ((S\NP)/cat_pp_than) \ ((S\NP)/NP) ) / cat_measure` (fin/num threaded like `a_obj`): consumes the
+// measure `μ`, then the transitive verb (object-first, absorbed), yielding the comparative VP that
+// STILL awaits the `than`-phrase (`[comp]` realized as the `/cat_pp_than` on the result, mirroring the
+// predicative comparative). Sem `λμ.λV.λy.λx. gt(μ(x), μ(y))` — V (the light verb) is absorbed into μ.
+resource lexicon:greater_cmp_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (mu : lexicon:Entity -> core:float) => fun (v : lexicon:Entity -> lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            measurements:gt(mu(x), mu(y))
+          : (lexicon:Entity -> core:float) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:greater_cmp : lexicon:LexicalEntry {
+    lexicon:form     = "greater";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:bwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_pp_than), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_measure))) );
+    lexicon:sem      = lexicon:greater_cmp_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> core:float) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:great.a.01";
+    lexicon:grade    = epistemic:declared;
+}
+// (6c) `fewer` — the count comparative (LESS-many). Same category; sem `λμ.λV.λy.λx. gt(μ(y), μ(x))`
+// (x has fewer than y). Over the same measure machinery.
+resource lexicon:fewer_cmp_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (mu : lexicon:Entity -> core:float) => fun (v : lexicon:Entity -> lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            measurements:gt(mu(y), mu(x))
+          : (lexicon:Entity -> core:float) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:fewer_cmp : lexicon:LexicalEntry {
+    lexicon:form     = "fewer";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:bwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_pp_than), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_measure))) );
+    lexicon:sem      = lexicon:fewer_cmp_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> core:float) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:few.a.01";
+    lexicon:grade    = epistemic:declared;
+}
+// A second named gene, so the comparative subject/ground/standard can be three distinct entities.
+resource lexicon:msh2 : lexicon:Gene {
+    core:description = "The MSH2 gene — a second committed demo gene (for phrasal-comparative standards).";
+}
+resource lexicon:e_msh2 : lexicon:LexicalEntry {
+    lexicon:form     = "MSH2";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:sg) );
+    lexicon:sem      = lexicon:msh2;
+    lexicon:sem_type = type_expr( lexicon:Gene );
+    lexicon:sense    = "urn:eigenius:lexicon:msh2";
+    lexicon:grade    = epistemic:declared;
+}
+
 // (5) a GENERAL transitive verb typed at the supertype. ⟦cat⟧ = Entity → Entity
 //     → Prop = typeof(affects). Composes with Gene/CellLine arguments by
 //     subsumption (parser_composes_general_verb_via_subsumption: "HeLa affects BRCA1").

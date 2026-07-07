@@ -215,6 +215,16 @@ data lexicon:Cat : Type 1 {
     // ambiguity carried in the forest), and distinct from a bare adjective (`S[adj]\NP`)
     // so a post-nominal *adjective* never spuriously refines.
     cat_pp : lexicon:Cat,
+
+    // Measure — a **1-place measure** ("(greater) dependence on WRN"), the degree/amount dimension a
+    // PHRASAL comparative quantifier ranges over (D63 §8.12 phrasal comparatives,
+    // `docs/notes/d63-comparative-phrasal.md`). ⟦cat_measure⟧ = Entity → core:float — it maps an entity
+    // to its value on that dimension's opaque float scale. A measure noun `dependence` is
+    // `cat_measure / cat_pp_arg` (sem `λg. μ_dep(g)`, μ parameterized on the ground); the comparative
+    // quantifier `greater`/`fewer` SELECTS `cat_measure` (so `*greater cell line` — a non-measure noun —
+    // has no parse) and builds `λμ.λV.λy.λx. gt(μ(x), μ(y))` over `measurements:gt`. Distinct from
+    // `cat_pp` (⟦·⟧ = Entity → Prop) — a measure is a scalar, not a truth-value.
+    cat_measure : lexicon:Cat,
 }
 
 // ── The lexical-entry record ──────────────────────────────────────────
