@@ -602,9 +602,9 @@ fn adj_cat() -> String {
 ///      word) avoids the verb+prep noise of examples (`spoke in`, `came to`) and gives the right
 ///      per-lemma preposition within one synset (`addicted`→`to`, `dependent`→`on`).
 ///
-/// `None` ⇒ no governance signal → a NON-relational bare measure (C1). Wired into the relational
-/// emission (a 2-place `deg` + `cat_measure/cat_pp_arg` + the optional-ground shift) in the next C3 step.
-#[allow(dead_code)]
+/// `None` ⇒ no governance signal → a NON-relational bare measure (C1). Drives the relational emission
+/// in `push_adj` (a 2-place `deg_rel` + a `cat_measure/cat_pp_arg` reading; the bare 1-place forms stay
+/// for the ground-less reading — two independent measures, no optional-ground shift needed).
 fn governed_preposition(gloss: &str, lemma: &str) -> Option<String> {
     const PREPS: &[&str] = &[
         "to", "on", "in", "with", "from", "for", "at", "upon", "about", "against", "into",
@@ -686,6 +686,22 @@ fn push_adj(
     ));
     buf.push_str(&format!("axiom wn:std_{loc} : core:float\n\n"));
     rep.adj_axioms += 1;
+    // C3 (d63-comparative-phrasal.md §5.3): a RELATIONAL gradable adjective — one whose gloss governs a
+    // preposition (`governed_preposition`) — ALSO gets a 2-place measure `deg_{loc}_rel : Entity(ground)
+    // → Entity(subject) → float` and a `cat_measure/cat_pp_arg` reading (below), so `more dependent ON
+    // WRN` / `greater dependence ON WRN` thread the ground faithfully. The bare 1-place `deg_{loc}` forms
+    // (positive + C1 measure) STAY for the ground-less reading (`more dependent than Y`) — two
+    // independent opaque measures (the `∃g` relation between them is deferred, §7; an `∃`-close would be
+    // ill-typed over a float).
+    let relational = syn
+        .words
+        .iter()
+        .any(|l| governed_preposition(&syn.gloss, l).is_some());
+    if relational {
+        buf.push_str(&format!(
+            "axiom wn:deg_{loc}_rel : {ENTITY_TOP} -> {ENTITY_TOP} -> core:float\n\n"
+        ));
+    }
     push_sem_term(
         buf,
         &format!("pos_sem_{loc}"),
@@ -730,6 +746,21 @@ fn push_adj(
             ranks,
         );
         rep.entries += 1;
+        // C3: relational lemmas (gloss governs a prep) also get the ground-taking cat_measure/cat_pp_arg
+        // reading — `deg_rel` (ground, subject); `on X` fills the ground → a cat_measure over the subject.
+        if governed_preposition(&syn.gloss, lemma).is_some() {
+            push_entry(
+                buf,
+                &format!("e_{loc}_{i}_r"),
+                lemma,
+                "lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg)",
+                &format!("deg_{loc}_rel"),
+                &format!("{ENTITY_TOP} -> {ENTITY_TOP} -> core:float"),
+                &sense,
+                ranks,
+            );
+            rep.entries += 1;
+        }
         // Synthetic `-er` comparative (`larger`); periphrastic "more X" now rides the `cat_measure`
         // reading above + the closed-class `more`/`less`.
         if let Comparison::Synthetic { comparative, .. } = comparison(lemma) {
@@ -770,6 +801,21 @@ fn push_adj(
                     ranks,
                 );
                 rep.entries += 1;
+                // C3: relational projection — the nominalization (`dependence`) also gets the
+                // ground-taking `cat_measure/cat_pp_arg` reading, so `greater dependence ON WRN` threads.
+                if relational {
+                    push_entry(
+                        buf,
+                        &format!("e_{loc}_dr_{}_{j}", local(noun)),
+                        nlemma,
+                        "lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg)",
+                        &format!("deg_{loc}_rel"),
+                        &format!("{ENTITY_TOP} -> {ENTITY_TOP} -> core:float"),
+                        &sense_key(noun, nlemma),
+                        ranks,
+                    );
+                    rep.entries += 1;
+                }
             }
         }
     }
@@ -1389,6 +1435,40 @@ mod tests {
             governed_preposition("\"she walked with a limp\"", "temperate"),
             None
         );
+    }
+
+    #[test]
+    fn relational_gradable_adjective_emits_ground_taking_measure() {
+        // C3: a gradable adjective whose gloss governs a preposition (`dependent on`) also gets a 2-place
+        // measure `deg_rel` + a `cat_measure/cat_pp_arg` reading (the ground `on X` fills the first arg),
+        // so `more dependent on WRN` threads the ground. The bare 1-place measure (C1) stays.
+        let dependent = syn(
+            "00000001 00 a 01 dependent 0 000 | contingent on something; \"dependent on charity\"",
+        );
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_adj(
+            &mut buf,
+            &dependent,
+            &mut rep,
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+        );
+        assert!(
+            buf.contains(
+                "axiom wn:deg_a00000001_rel : lexicon:Entity -> lexicon:Entity -> core:float"
+            ),
+            "2-place relational measure:\n{buf}"
+        );
+        assert!(
+            buf.contains(
+                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg) );"
+            ),
+            "relational cat_measure/cat_pp_arg reading:\n{buf}"
+        );
+        assert!(buf.contains("lexicon:sem      = wn:deg_a00000001_rel;"));
+        // the bare 1-place measure (C1) is STILL present for the ground-less reading.
+        assert!(buf.contains("lexicon:sem      = wn:deg_a00000001;"));
     }
 
     #[test]

@@ -206,12 +206,14 @@ follow-on — **incremental on `push_adj`, not undesigned**:
      threads the ground faithfully**, so **#8 CLOSES at scale WITHOUT it**; the parameterization only buys
      the `*dependent to` rejection. → **milestone-first:** relational emission (2-place `deg` +
      `cat_measure/cat_pp_arg`) + the optional-ground shift first; the prep-feature as a precision follow-on.
-   - **Optional ground (parallel unary type-shift).** Null-instantiation is rampant in comparative
-     scientific text (`… treated with WRN-inhibitors. They proved more sensitive than MSS lines.` — the
-     `to WRN-inhibitors` is dropped but semantically required). A unary shift lifts the relational
-     `cat_measure/cat_pp_arg[prep]` to a bare `cat_measure` that **existentially closes or contextually
-     defers** the ground (`∃g` / an anaphoric slot), so ground-less relational comparatives still parse.
-     Required in *parallel* with the map, not instead of it.
+   - **Null-instantiation via TWO measures, not an `∃`-close shift (`2026-07-07` finding — DONE).** The
+     dropped-ground reading (`… proved more sensitive than MSS lines` — `to X` omitted) does NOT need a
+     unary type-shift: an `∃`-close over the ground is **ill-typed** (`∃g. deg(g, x)` is not a float, and
+     `cat_measure`'s denotation is `Entity → float`). Instead the importer emits **both** measures for a
+     relational adjective — the bare 1-place `deg` (via C1 → the ground-less reading `more sensitive than
+     Y`) **and** the 2-place `deg_rel` (the `cat_measure/cat_pp_arg` reading → `more sensitive on/to X than
+     Y`). Two independent opaque measures (the `∃g` relation between them is deferred, §7). **No parser
+     change**; wired in `push_adj` (C3-wire, unit-tested `relational_gradable_adjective_emits_ground_taking_measure`).
 
 - **Operators** (`more/less/greater/fewer/than`) → closed-class (bootstrap), **not** importer (§5.5, Phase B).
 
@@ -331,7 +333,8 @@ COVERAGE-VALIDATION grounding pass (not design) + verifying the §6 anchor DOIs.
 
 [ ] C1 — Expose deg_X as a cat_measure reading (a bare deg_X : Entity→float entry alongside the positive S[adj]\NP), so the closed-class more/less (Phase B) operate → closes NON-relational adjectival comparatives (more sensitive than Y). Small push_adj addition.
 [ ] C2 — Nominalization projection: the deadjectival noun (dependence) gets a cat_measure reading, μ = deg_X, via WordNet derivational (+) links (wndb.rs already parses them); + the attribute (=) relation (weight ← heavy). Closes greater dependence.
-[~] C3 — Relational gradable adjectives (GLOSS-DERIVED, 2026-07-07). DONE: governed_preposition (convert.rs) extracts the prep from the WordNet gloss — explicit "followed by `PREP'" + lemma-keyed (addicted→to, dependent→on); it IS the relational detector; built + unit-tested. REMAINING (milestone-first): (a) wire into push_adj — relational emission (2-place deg + cat_measure/cat_pp_arg[prep]) + project onto the nominalization; (b) optional-ground unary type-shift (∃-close / contextual defer) for dropped args → #8 CLOSES at scale via the generic cat_pp_arg (on_arg already threads the ground). FOLLOW-ON (precision, NOT milestone): cat_pp_arg(prep) as a prep FEATURE with wildcard (verbs→any, adj→specific) — needed only to reject *dependent to; importer verbs emit cat_pp_arg from prep-agnostic frames. See §5.3.
+[x] C3-wire — Relational emission DONE (2026-07-07). governed_preposition (gloss-derived: "followed by `PREP'" + lemma-keyed; addicted→to, dependent→on) drives push_adj → relational adjectives emit a 2-place deg_rel + a cat_measure/cat_pp_arg reading + a relational projection onto the nominalization; the bare 1-place deg (C1) covers the dropped-ground reading, so NO parser type-shift is needed (∃-close is ill-typed over a float — 2026-07-07 finding). Unit-tested (relational_gradable_adjective_emits_ground_taking_measure); fmt+clippy clean. #8 EMISSION-COMPLETE; parse mechanism demo-verified (A3/A4). Generic cat_pp_arg (on_arg) threads the ground.
+[ ] C3-precision (FOLLOW-ON, NOT milestone) — cat_pp_arg(prep) as a prep FEATURE with wildcard (verbs→any from prep-agnostic frames, gloss-detected adj→specific) to reject *dependent to. See §5.3.
 [ ] C4 — Reseed + verify #8 at scale, managing ambiguity/beam cost (§5.6: genuinely-gradable only, low rank, beam).
 
 ## [ ] Phase D — Shared NP-complexity gaps (§5.7; independent, interleavable)
