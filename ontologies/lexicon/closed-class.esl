@@ -15,6 +15,8 @@ namespace lexicon   = "urn:eigenius:lexicon";
 namespace logic     = "urn:eigenius:logic";
 namespace ontology  = "urn:eigenius:ontology";
 namespace epistemic = "urn:eigenius:reflection:epistemic";
+namespace measurements = "urn:eigenius:measurements";
+namespace core         = "urn:eigenius:core";
 
 // ── Quantifier cores (factored; D63 §8.3 Phase 1) ─────────────────────
 
@@ -1110,6 +1112,111 @@ resource lexicon:than_marker : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:than_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
     lexicon:sense    = "than";
+    lexicon:grade    = epistemic:declared;
+}
+
+// ── PHRASAL / predicative comparative OPERATORS (D63 §8.12, d63-comparative-phrasal.md §5) ──
+// Closed-class function words over the scale category `cat_measure` (⟦·⟧ = Entity→float) / any `cat_n`.
+// The SCALE SOURCE (measure nouns, gradable adjectives) is content-word data — importer-emitted or demo
+// scaffolding, NOT here. `than`/`cat_pp_than` (above) supplies the standard. (Moved from the demo lexicon
+// in B1; #9 cardinality then closes at scale over existing `cat_n` with no importer emission.)
+// (6b) `greater` — degree-MORE over a MEASURE noun (noun/object frame); sem `λμ.λV.λy.λx. gt(μ(x),μ(y))`.
+resource lexicon:greater_cmp_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (mu : lexicon:Entity -> core:float) => fun (v : lexicon:Entity -> lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            measurements:gt(mu(x), mu(y))
+          : (lexicon:Entity -> core:float) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:greater_cmp : lexicon:LexicalEntry {
+    lexicon:form     = "greater";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:bwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_pp_than), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_measure))) );
+    lexicon:sem      = lexicon:greater_cmp_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> core:float) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:great.a.01";
+    lexicon:grade    = epistemic:declared;
+}
+// (6c) `less` — degree-LESS over a MEASURE noun (mirror of `greater`); sem `gt(μ(y),μ(x))`.
+resource lexicon:less_cmp_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (mu : lexicon:Entity -> core:float) => fun (v : lexicon:Entity -> lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            measurements:gt(mu(y), mu(x))
+          : (lexicon:Entity -> core:float) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:less_cmp : lexicon:LexicalEntry {
+    lexicon:form     = "less";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:bwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_pp_than), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_measure))) );
+    lexicon:sem      = lexicon:less_cmp_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> core:float) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "less.deg";
+    lexicon:grade    = epistemic:declared;
+}
+// (6d) `fewer` / `more` — CARDINALITY over ANY count noun `cat_n` (the noun is consumed by the
+// `cat_forall`+`cat_n` rule; `card : Set → Entity → float` is the opaque per-noun cardinality). Sem
+// `λT.λV.λy.λx. gt(card(T,y), card(T,x))` (fewer). The noun-type `cat_forall` sits UNDER the fin/num
+// binders so `strip_feature_binders` exposes it at the top (lexicon.rs:152).
+axiom lexicon:card : Set -> lexicon:Entity -> core:float
+resource lexicon:fewer_card_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (T : Set) => fun (v : lexicon:Entity -> lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            measurements:gt(lexicon:card(T, y), lexicon:card(T, x))
+          : forall (T : Set) => (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:fewer_card : lexicon:LexicalEntry {
+    lexicon:form     = "fewer";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_pp_than), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:fewer_card_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:few.a.01";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:more_card_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (T : Set) => fun (v : lexicon:Entity -> lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            measurements:gt(lexicon:card(T, x), lexicon:card(T, y))
+          : forall (T : Set) => (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:more_card : lexicon:LexicalEntry {
+    lexicon:form     = "more";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_pp_than), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:more_card_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:more.a.01";
+    lexicon:grade    = epistemic:declared;
+}
+// (6e) `more` / `less` — ANALYTIC degree on a gradable ADJECTIVE (predicative
+// `((S[adj]\NP)/cat_pp_than)/cat_measure`); the adjective supplies `cat_measure` (its `deg_A`).
+resource lexicon:more_deg_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (mu : lexicon:Entity -> core:float) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            measurements:gt(mu(x), mu(y))
+          : (lexicon:Entity -> core:float) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:more_deg : lexicon:LexicalEntry {
+    lexicon:form     = "more";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than), lexicon:cat_measure) );
+    lexicon:sem      = lexicon:more_deg_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> core:float) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:more.a.01";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:less_deg_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (mu : lexicon:Entity -> core:float) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            measurements:gt(mu(y), mu(x))
+          : (lexicon:Entity -> core:float) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:less_deg : lexicon:LexicalEntry {
+    lexicon:form     = "less";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than), lexicon:cat_measure) );
+    lexicon:sem      = lexicon:less_deg_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> core:float) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "less.deg";
     lexicon:grade    = epistemic:declared;
 }
 

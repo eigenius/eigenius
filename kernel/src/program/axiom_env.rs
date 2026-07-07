@@ -275,13 +275,17 @@ mod tests {
                 let s = iri.as_str();
                 !s.starts_with("urn:eigenius:measurements:")
                     && !s.starts_with("urn:eigenius:ontology:")
+                    // `card : Set→Entity→float` — the opaque cardinality functor for the `fewer`/`more`
+                    // count comparatives (d63-comparative-phrasal.md §5.1; closed-class.esl).
+                    && s != "urn:eigenius:lexicon:card"
                     && !modal.contains(&s)
             })
             .collect();
         assert!(
             unexpected.is_empty(),
             "bootstrap axioms should be the D52 measurement set + the D63 ontology \
-             relations + the modal operators; unexpected axioms: {unexpected:?}"
+             relations + the modal operators + the `lexicon:card` cardinality functor; \
+             unexpected axioms: {unexpected:?}"
         );
     }
 

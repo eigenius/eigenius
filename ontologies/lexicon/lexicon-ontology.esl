@@ -221,7 +221,8 @@ data lexicon:Cat : Type 1 {
     // `docs/notes/d63-comparative-phrasal.md`). ⟦cat_measure⟧ = Entity → core:float — it maps an entity
     // to its value on that dimension's opaque float scale. A measure noun `dependence` is
     // `cat_measure / cat_pp_arg` (sem `λg. μ_dep(g)`, μ parameterized on the ground); the comparative
-    // quantifier `greater`/`fewer` SELECTS `cat_measure` (so `*greater cell line` — a non-measure noun —
+    // DEGREE operators `greater`/`less` (+ adjectival `more`/`less`) SELECT `cat_measure` (so `*greater
+    // cell line` — a non-measure noun —
     // has no parse) and builds `λμ.λV.λy.λx. gt(μ(x), μ(y))` over `measurements:gt`. Distinct from
     // `cat_pp` (⟦·⟧ = Entity → Prop) — a measure is a scalar, not a truth-value.
     cat_measure : lexicon:Cat,

@@ -598,8 +598,9 @@ fn adj_cat() -> String {
 /// `deg_X : Entity → core:float` (+ standard `std_X`): the **positive** is the measure
 /// vs. the standard (`gt(deg_X(x), std_X)`) and the **comparative** compares degrees
 /// (`gt(deg_X(x), deg_X(y))`) via the opaque float ordering `measurements:gt` (combo 1).
-/// Comparative surfaces come from [`comparison`]; periphrastic ("more X") adjectives emit
-/// only the positive (the `more`/`most` words are a follow-on). Superlatives await "the".
+/// Comparative surfaces: the synthetic `-er` from [`comparison`], plus a bare `cat_measure` reading
+/// (C1, d63-comparative-phrasal.md §5.3) exposing `deg_X` so the closed-class `more`/`less` handle the
+/// periphrastic ("more X") comparative at scale. Superlatives ("most") await "the".
 fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks) {
     let loc = local(syn);
     let prop_arrow = format!("{ENTITY_TOP} -> Prop");
@@ -663,7 +664,25 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks
             ranks,
         );
         rep.entries += 1;
-        // Comparative (synthetic `-er` only; periphrastic "more X" is a follow-on).
+        // C1 (d63-comparative-phrasal.md §5.3): a bare `cat_measure` reading — the degree function
+        // `deg_X : Entity → float` itself — so the closed-class `more`/`less` operators
+        // (`((S[adj]\NP)/cat_pp_than)/cat_measure`) combine with a periphrastic-comparative adjective.
+        // Closes NON-relational adjectival comparatives (`X is more sensitive than Y`) at scale.
+        // (Relational adjectives additionally get the ground-taking `cat_measure/cat_pp_arg` form via
+        // the C3 curated prep map; the synthetic `-er` below is the same operator pre-bundled.)
+        push_entry(
+            buf,
+            &format!("e_{loc}_{i}_m"),
+            lemma,
+            "lexicon:cat_measure",
+            &format!("deg_{loc}"),
+            &format!("{ENTITY_TOP} -> core:float"),
+            &sense,
+            ranks,
+        );
+        rep.entries += 1;
+        // Synthetic `-er` comparative (`larger`); periphrastic "more X" now rides the `cat_measure`
+        // reading above + the closed-class `more`/`less`.
         if let Comparison::Synthetic { comparative, .. } = comparison(lemma) {
             for (k, c) in comparative.iter().enumerate() {
                 push_entry(
@@ -1232,6 +1251,10 @@ mod tests {
         assert!(buf.contains(
             "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than) );"
         ));
+        // C1 (d63-comparative-phrasal.md §5.3): a bare `cat_measure` reading of `deg_X` — so the
+        // closed-class `more`/`less` operators combine (periphrastic comparative at scale).
+        assert!(buf.contains("lexicon:cat      = type_expr( lexicon:cat_measure );"));
+        assert!(buf.contains("lexicon:sem      = wn:deg_a00000001;"));
         // no Boolean is-axiom for a gradable adjective.
         assert!(!buf.contains("axiom wn:a00000001 : lexicon:Entity -> Prop"));
     }

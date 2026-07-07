@@ -161,20 +161,59 @@ greater : ( ((S\NP)/cat_pp_than) \ ((S\NP)/NP) ) / cat_measure   sem  λμ. λV.
 - `more dependent on WRN` and `greater dependence on WRN` route through the *same* `deg_dependent` → the
   same `gt` — identical by construction.
 
-### 5.3 Emission + detection (the importer's job, for #8 only)
+### 5.3 Emission + detection (the importer's job for #8) — core ALREADY BUILT
 
-The count path (#9) is pure grammar; the **degree** path needs a lexical **gradable class**, emitted by
-the importer:
+The count path (#9) is pure grammar. The **degree** path is a lexical **gradable class** emitted by the
+importer — and its detection + core emission are **already implemented** in `crates/eigenius-wordnet`
+(`2026-07-07`, verified against `a016cea`):
 
-- **Gradable adjective** → a `cat_measure` (`deg_A : Entity → float`) reading, in addition to its positive,
-  so `more`/`less`/`-er` can operate. *Detection:* WordNet marks adjective gradability — antonym/gradable
-  clusters + the **`attribute`** relation (`heavy`/`light` ↔ `weight`).
-- **Relational adjective** → `deg_A : Entity → Entity → float` + the subcategorized preposition
-  (`dependent on`, `sensitive to`). *Detection:* the adjective's typical PP complement.
-- **Nominalization** → project the adjective's `deg_A` onto the noun as its `μ` (a `cat_measure` reading of
-  `dependence`, alongside its plain `cat_n`). *Detection:* WordNet **derivational links** (`dependent →
-  dependence`).
-- **Operators** (`more/less/greater/fewer/than`) → closed-class (bootstrap), **not** importer.
+- `wndb.rs` reads the **pertainym (`\`) pointer** → splits **relational** (non-gradable) from
+  **descriptive** (gradable) adjectives (`relational` flag).
+- `convert.rs::push_adj` (595–683) already emits, per gradable adjective: `axiom deg_X : Entity → float`
+  `+ std_X`, the **positive** (`gt(deg_X(x), std_X)`, `S[adj]\NP`), and the **synthetic `-er`
+  comparative** (`gt(deg_X(x), deg_X(y))`, `(S[adj]\NP)/cat_pp_than`). The code itself flags the rest as a
+  follow-on: *"periphrastic 'more X' … emit only the positive; the `more`/`most` words are a follow-on"*
+  (601–602, 666).
+
+So the WordNet method is designed **and its core is built**. #8's remaining work is that documented
+follow-on — **incremental on `push_adj`, not undesigned**:
+
+1. **Expose `deg_X` as a `cat_measure` reading** (a bare `deg_X : Entity → float` entry alongside the
+   positive `S[adj]\NP`), so the closed-class `more`/`less` (§5.5, Phase B) can operate. Closes
+   **non-relational** adjectival comparatives (`more sensitive than Y`) at scale. Small `push_adj`
+   addition.
+2. **Nominalization projection** — give the deadjectival noun (`dependence`) a `cat_measure` reading with
+   `μ = deg_X`, via WordNet **derivational (`+`) links** (already parsed by `wndb.rs`); plus the
+   **`attribute` (`=`)** relation for attribute nouns (`weight` ← `heavy`). Closes `greater dependence`.
+3. **Relational gradable adjectives** (`dependent on`, `sensitive to`) → `cat_measure / cat_pp_arg[prep]`
+   ground form. **DECISION (`2026-07-07`): a curated `adj → prep` map AND an optional-ground type-shift**
+   — the two are complementary, not a choice (options (ii) any-PP / (iii) optional-ground were mis-framed
+   as alternatives):
+   - **Curated `adj → prep` map (explicit PP).** Relational-gradable adjectives are Zipfian /
+     closed-class-adjacent in scientific text — the heavy hitters: `dependent→on`, `sensitive→to`,
+     `resistant→to`, `enriched→in`, `associated→with`, `proportional→to`, … A lexicon-generation lookup
+     assigns the **specific** preposition-typed arg-PP (`PP[on]`, not a generic PP); the map *is* the
+     relational-gradable detector (in map → relational `cat_measure/cat_pp_arg[prep]`; else → bare
+     `cat_measure`, C1). WordNet gives no "gradable-and-takes-a-PP" signal (pertainym marks only
+     *non-gradable* relationals), so the map supplies both. Restricting to the specific preposition keeps
+     the parser from swallowing locative/temporal adjuncts into the standard slot (`sensitive [in the
+     assay]`). **Implication:** `cat_pp_arg` must be **preposition-parameterized** (`cat_pp_arg(on)` vs
+     `cat_pp_arg(to)`) — today it is generic; this small arg-PP-infra extension also tightens the existing
+     verb+PP frames. **Fail strict, not fallback-any-PP:** a missing map entry should fail the parse (→ add
+     the adjective) — better KG fidelity than a well-typed but nonsensical form.
+   - **Optional ground (parallel unary type-shift).** Null-instantiation is rampant in comparative
+     scientific text (`… treated with WRN-inhibitors. They proved more sensitive than MSS lines.` — the
+     `to WRN-inhibitors` is dropped but semantically required). A unary shift lifts the relational
+     `cat_measure/cat_pp_arg[prep]` to a bare `cat_measure` that **existentially closes or contextually
+     defers** the ground (`∃g` / an anaphoric slot), so ground-less relational comparatives still parse.
+     Required in *parallel* with the map, not instead of it.
+
+- **Operators** (`more/less/greater/fewer/than`) → closed-class (bootstrap), **not** importer (§5.5, Phase B).
+
+**Grounding pass = validation, not design.** Confirm the pertainym split + `deg_X` emission + derivational/
+`attribute` pointers give good empirical coverage of the target adjectives/nominalizations. (Correction to
+an earlier framing of §5.3 as an "undesigned effort": the mechanism is built; what remains is items 1–3 +
+this coverage check.)
 
 ### 5.4 The emit-vs-rule fork — resolved, and it splits by mechanism
 
@@ -263,26 +302,32 @@ semantics — the D61 faithfulness line.
 
 ## 8. Implementation Order
 
-## [ ] Phase A — Demo mechanism (no reseed; experiments/lexicon/lexicon.esl + kernel/tests)
-Prove the whole grammar before any bootstrap/importer commitment.
+## [x] Phase A — Demo mechanism (no reseed; experiments/lexicon/lexicon.esl + kernel/tests) — DONE + committed (`2026-07-07`)
+Prove the whole grammar before any bootstrap/importer commitment. Landed: 129 tests green, fmt+clippy clean.
+Build notes: the `cat_forall`+`cat_n` parser rule (parser.rs:298) is how an operator consumes a count noun
+(binds T, T-free VP → plain Apply); `strip_feature_binders` (lexicon.rs:152) peels only LEADING
+fin/num foralls, so the noun-type `cat_forall` must sit UNDER them.
 
-[ ] A1 — Fix the mislabeled fewer (§5.8). Rename demo fewer_cmp → less (its gt(μ(y),μ(x)) over cat_measure is correct for less); flip the phrasal test so *fewer dependence gets no parse. Prereq for A2; corrects the committed error.
-[ ] A2 — #9 cardinality operator (§5.1). Add fewer/more(count) over cat_n: (((S\NP)/cat_pp_than)\((S\NP)/NP))/cat_n(T,num), sem λN.λV.λy.λx. gt(card(N,y),card(N,x)); add the opaque card : Set→Entity→float axiom. Test the cardinality denotation + the compound (deletion mutations via KindCompound) + restrictive PP (in …) composing before the count.
-[ ] A3 — #8 adjectival more/less (§5.2, §5.5(b) surgical). Give a demo gradable adjective a deg_A (cat_measure) reading; add more/less in the predicative frame ((S[adj]\NP)/cat_pp_than)/cat_measure, sem λμ.λy.λx. gt(μ(x),μ(y)). Add a relational dependent on X (deg_dependent, cat_measure/cat_pp_arg). Test X is more/less dependent on Y than Z.
-[ ] A4 — Unify the noun & adjective scale (§5.0/§5.2). Make the demo noun dependence's μ = adjective dependent's deg_dependent (one axiom); assert more dependent on WRN and greater dependence on WRN produce the identical denotation.
+[x] A1 — Fixed the mislabeled fewer (§5.8): demo fewer_cmp → less; phrasal test flipped (*fewer dependence no parse).
+[x] A2 — #9 cardinality: fewer/more(count) over cat_n via cat_forall+cat_n; card : Set→Entity→float; denotation + agreement (*fewer dependence GAP) + compound (gene cell lines) tested.
+[x] A3 — #8 adjectival more/less over a gradable adjective's deg_A (predicative ((S[adj]\NP)/cat_pp_than)/cat_measure); relational dependent on X (cat_measure/cat_pp_arg). Test X is more/less dependent on Y than Z.
+[x] A4 — Noun & adjective share ONE deg_dependent; asserted `more dependent on BRCA1` and `greater dependence on BRCA1` produce the identical gt(deg_dependent(brca1, hela), deg_dependent(brca1, msh2)).
 
 ## [ ] Phase B — Promote operators to closed-class + reseed → closes #9 at scale
 
 [ ] B1 — Move operators to closed-class.esl (bootstrap). greater/less/more/fewer + the card functor + scale plumbing. (than/cat_pp_than is already closed-class.) Measure nouns / gradable adjectives stay out (demo/importer).
 [ ] B2 — Reseed + verify #9 at scale. #9 operates over existing cat_n, so it closes with just the operators — no importer emission needed. Probe cells contained fewer mutations than genes: GAP→CLOSED. #8 still GAPs.
 
-## [ ] Phase C — #8 degree at scale: importer gradable emission (the design effort; §5.3)
-Prereq — grounding pass: confirm the WordNet detection signals (gradable/antonym clusters, attribute relation, derivational-link coverage) are good enough before building. Also verify the §6 anchor DOIs.
+## [ ] Phase C — #8 degree at scale: importer gradable emission (§5.3) — core ALREADY BUILT
+The importer already DETECTS gradable adjectives (`wndb.rs` pertainym `\` split) and EMITS `deg_X` + `std_X`
++ positive + synthetic `-er` (`convert.rs::push_adj`, 595–683). Remaining = the code's own documented
+"periphrastic more X" follow-on, incremental on `push_adj` — NOT an undesigned effort. Prereq is a
+COVERAGE-VALIDATION grounding pass (not design) + verifying the §6 anchor DOIs.
 
-[ ] C1 — Gradable-adjective detection + emission → a deg_A (cat_measure) reading per detected adjective.
-[ ] C2 — Relational-adjective emission → deg_A : Entity→Entity→float + the governed preposition.
-[ ] C3 — Nominalization projection → the noun's cat_measure reading, μ = the adjective's deg_A, via derivational links.
-[ ] C4 — Reseed + verify #8 at scale, managing the ambiguity/beam cost (§5.6: genuinely-gradable only, low rank, beam).
+[ ] C1 — Expose deg_X as a cat_measure reading (a bare deg_X : Entity→float entry alongside the positive S[adj]\NP), so the closed-class more/less (Phase B) operate → closes NON-relational adjectival comparatives (more sensitive than Y). Small push_adj addition.
+[ ] C2 — Nominalization projection: the deadjectival noun (dependence) gets a cat_measure reading, μ = deg_X, via WordNet derivational (+) links (wndb.rs already parses them); + the attribute (=) relation (weight ← heavy). Closes greater dependence.
+[ ] C3 — Relational gradable adjectives: DECIDED (2026-07-07) — curated adj→prep map (dependent→on, sensitive→to, resistant→to, enriched→in, associated→with, proportional→to; the map IS the relational detector, fail-strict) with preposition-parameterized cat_pp_arg(prep); PLUS a parallel optional-ground unary type-shift (∃-close / contextual defer) for dropped arguments. See §5.3.
+[ ] C4 — Reseed + verify #8 at scale, managing ambiguity/beam cost (§5.6: genuinely-gradable only, low rank, beam).
 
 ## [ ] Phase D — Shared NP-complexity gaps (§5.7; independent, interleavable)
 Needed for the full corpus sentences, independent of the comparative: complex subject (MSI cell lines from these four lineages — modifier + plural compound + these four demonstrative+cardinal) and possessive than-object (their MSS counterparts). Separate gaps (determiner+number, possessive), tracked in d63-parse-gap-closure.md.
