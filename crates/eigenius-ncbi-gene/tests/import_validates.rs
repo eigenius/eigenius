@@ -101,7 +101,7 @@ fn scoped_parse_of_wrn_affects_tp53() {
         "'WRN affects TP53' must parse with the ncbi_gene lexicon in scope"
     );
     assert!(
-        forest.iter().all(|p| is_ctor(&p.cat, "cat_s").is_some()),
+        forest.iter().all(|p| is_ctor(p.cat(), "cat_s").is_some()),
         "every parse is a sentence (S)"
     );
 

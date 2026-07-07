@@ -32,20 +32,59 @@
 //! - [`lookup`] — the bridge (§8.8.1): `string → tree(s)` via a [`LexicalIndex`]
 //!   + multi-span lemmatized seeding + CKY + the kernel felicity filter.
 
+pub mod augment;
 pub mod category;
+pub mod glossary;
 pub mod lemmatizer;
 pub mod lexicon;
 pub mod lookup;
+mod packed;
 pub mod parser;
+pub mod pipeline;
 pub mod pretty;
+mod reserved;
+pub mod segment;
+pub mod sense_ranker;
 
+/// Direct Anthropic tool-use client for the reasoning-layer LLM calls (sense ranker / proposers) —
+/// structured output via forced `tool_choice`, replacing the `allms` prompt-inject-and-parse path.
+#[cfg(feature = "use-llm")]
+mod anthropic_client;
+
+/// Live-LLM anaphora proposer (D64 §4) — opt-in via the `use-llm` feature; default builds stay
+/// LLM-free.
+#[cfg(feature = "use-llm")]
+pub mod resolver_llm;
+
+#[cfg(feature = "use-llm")]
+pub use augment::AnthropicCategoryProposer;
+pub use augment::{
+    augment_document_only, augment_lexicon_backed, AugmentOptions, CategoryProposer, ExpectedCat,
+    Gap, LexicalBinding, LexiconAugmentation, NominalCategoryProposer, Provenance,
+    ResolutionMethod,
+};
 pub use category::{
-    cat_subsumes, cats_coordinate, common_super, coordinate_np, coordinate_sem, denote_cat,
-    distribute, distribute_object, feat_meets, is_ctor, kind_subject, reciprocate, relativize,
-    subst_cat, type_eq, type_raise, unify_cat, CatSubst,
+    appose_group, cat_subsumes, cats_coordinate, common_super, complete_coord, coordinate_np,
+    coordinate_prop, denote_cat, distribute, distribute_object, feat_meets, is_ctor, kind_subject,
+    reciprocate, relativize, subst_cat, type_eq, type_raise, unify_cat, CatSubst,
+};
+#[cfg(feature = "use-llm")]
+pub use glossary::AnthropicAbbreviationProposer;
+pub use glossary::{
+    abbreviation_resources, document_glossary_resources, document_glossary_resources_with,
+    extract_abbreviations, extract_abbreviations_with, glossary_resources, ground_abbreviation,
+    ground_long_form, AbbrDef, AbbreviationBinding, AbbreviationProposer, NoAbbreviationProposer,
 };
 pub use lemmatizer::{Identity, Lemmatizer, Pos};
 pub use lexicon::{entry_to_item, gate_entry, resolve_sem, resolve_sem_value};
-pub use lookup::{resolve_lexicon_profile, tokenize, LexicalIndex, DEFAULT_FOREST_CAP};
+pub use lookup::{
+    resolve_lexicon_profile, tokenize, Candidate, HoleInfo, HoleKind, LexicalIndex, OpenParse,
+    ProposeCtx, Proposer, SentenceOutcome, DEFAULT_FOREST_CAP,
+};
 pub use parser::{apply, cky_parse, Combinator, Cost, Item};
-pub use pretty::pretty_term;
+pub use pipeline::{DocumentEncoding, DocumentPipeline, InProcessPipeline, SentenceEncoding};
+pub use pretty::{cat_shape, pretty_term};
+pub use segment::{is_nonprose, segment_sentences};
+#[cfg(feature = "use-llm")]
+pub use sense_ranker::AnthropicSenseRanker;
+pub use sense_ranker::{IdentityRanker, SenseCandidate, SenseRanker, WordSenses};

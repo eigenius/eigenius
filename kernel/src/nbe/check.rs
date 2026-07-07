@@ -1369,8 +1369,9 @@ fn ctor_args_pass_singleton_b(ctor_typ: &Exp, num_params: usize, num_indices: us
 /// Whether `exp` contains a free reference to `Exp::Var(name)`.
 /// Structural walk; binders that shadow `name` cut off the search
 /// in their bodies. Used by the D48 Phase H singleton-elim extension
-/// to decide whether a ctor arg "appears in the conclusion".
-fn exp_mentions_var(exp: &Exp, name: &str) -> bool {
+/// to decide whether a ctor arg "appears in the conclusion", and by the
+/// DCG open-parse carrier (D64) to detect referent-hole free variables.
+pub fn exp_mentions_var(exp: &Exp, name: &str) -> bool {
     match exp {
         Exp::Var(n) => n == name,
         Exp::Lam(patt, body) | Exp::Pi(patt, _, body) | Exp::Sig(patt, _, body) => {
@@ -1393,6 +1394,7 @@ fn exp_mentions_var(exp: &Exp, name: &str) -> bool {
             dom_hit || body_hit
         }
         Exp::App(h, a) => exp_mentions_var(h, name) || exp_mentions_var(a, name),
+        Exp::Ann(e, t) => exp_mentions_var(e, name) || exp_mentions_var(t, name),
         Exp::Arrow(a, b) | Exp::Times(a, b) => {
             exp_mentions_var(a, name) || exp_mentions_var(b, name)
         }

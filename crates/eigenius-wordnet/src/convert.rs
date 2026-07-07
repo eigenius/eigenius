@@ -36,6 +36,22 @@ use crate::wndb::{Offset, Pos, Synset};
 /// polysemous lemma's rarer senses get a higher `lexicon:sense_rank` (D63 §8.7 Stage B).
 pub type SenseRanks = BTreeMap<String, u32>;
 
+/// **Countability lexicon** (D62 bare-mass arguments): the set of noun lemmas that have an
+/// *uncountable* (mass) sense, so a bare singular occurrence is a felicitous NP argument
+/// (`mutation occurs`, `lethality matters`), the same way a bare plural is. Sourced externally
+/// (Wiktionary's `Category:English uncountable nouns` ∩ the WordNet noun lemmas — see
+/// `scripts/provision-countability.sh`); countability is **not** morphologically derivable
+/// (`mutation`/`function` share a suffix yet differ), so it must come from a lexicon, not a rule.
+/// Keys are normalized by [`norm_lemma`]. Threaded into [`render_document`] / [`render_sections`];
+/// an empty set ⇒ no mass marking (every noun stays count-only, the prior behaviour).
+pub type MassNouns = BTreeSet<String>;
+
+/// Normalize a WordNet lemma to a [`MassNouns`] lookup key: lowercase, `_` → space (WordNet
+/// multiword lemmas use `_`; the Wiktionary-derived list uses spaces).
+fn norm_lemma(lemma: &str) -> String {
+    lemma.to_lowercase().replace('_', " ")
+}
+
 /// The **entity top** (D63 §8.3, decision ii): the schema-level foundational
 /// entity type (`lexicon:Entity`) that verb/adjective argument slots — and the
 /// determiners' subject `E` — are typed at. WordNet's `entity.n.01`
@@ -116,6 +132,10 @@ pub struct Report {
     /// Verb synsets with no emittable frame (only predicative / clausal /
     /// control frames, or no frame) — deferred, never guessed.
     pub verbs_deferred: usize,
+    /// Of `entries`, the additive **mass** noun entries (D62 countability lexicon): a second
+    /// `cat_n(C, mass)` entry emitted for a lemma flagged uncountable, enabling the bare-mass
+    /// argument shift. Zero when no countability lexicon is supplied.
+    pub mass_entries: usize,
 }
 
 /// The emittable categorial shapes a verb frame maps to. Higher-order shapes
@@ -126,6 +146,12 @@ enum FrameKind {
     Intransitive,
     Transitive,
     Ditransitive,
+    /// Verb + a **single PP complement** the verb subcategorizes for ("contributes **to** cancers",
+    /// "depends **on** X", "----s PP"): category `(S\NP)/cat_pp_arg`, an argument-PP whose ⟦·⟧ = Entity
+    /// (D63 verb+PP frames). Same `Entity → Entity → Prop` axiom as a transitive verb — only the
+    /// category differs, so the argument-marker preposition is forced and a plain transitive verb still
+    /// rejects a stray `to X`. Replaces the old coarse "PP-oblique → transitive/intransitive" mapping.
+    PpOblique,
     /// Clause-taking (report) verb — frame 26, "Somebody ----s that CLAUSE" (D63 §8.11
     /// 6-cl): an opaque `Prop → Entity → Prop` axiom, category `(S\NP)/cat_cp`.
     Clausal,
@@ -137,6 +163,7 @@ impl FrameKind {
             FrameKind::Intransitive => "i",
             FrameKind::Transitive => "t",
             FrameKind::Ditransitive => "d",
+            FrameKind::PpOblique => "p",
             FrameKind::Clausal => "c",
         }
     }
@@ -147,7 +174,10 @@ impl FrameKind {
     fn arrow(self) -> String {
         match self {
             FrameKind::Intransitive => format!("{ENTITY_TOP} -> Prop"),
-            FrameKind::Transitive => format!("{ENTITY_TOP} -> {ENTITY_TOP} -> Prop"),
+            // Same relation shape as transitive — the PP's object is the second entity argument.
+            FrameKind::Transitive | FrameKind::PpOblique => {
+                format!("{ENTITY_TOP} -> {ENTITY_TOP} -> Prop")
+            }
             FrameKind::Ditransitive => {
                 format!("{ENTITY_TOP} -> {ENTITY_TOP} -> {ENTITY_TOP} -> Prop")
             }
@@ -173,6 +203,17 @@ impl FrameKind {
             FrameKind::Ditransitive => {
                 format!("lexicon:fwd(lexicon:fwd(lexicon:bwd({s}, {subj}), {obj}), {obj})")
             }
+            // Argument-PP verb: `(S\NP)/cat_pp_arg(prep_any)` — the object arrives through a transparent
+            // argument-marker preposition (`to`/`on`/…). Distinct from a bare NP so the preposition is
+            // forced; `⟦cat_pp_arg⟧ = Entity`, so the sem_type equals the transitive one above. WordNet's
+            // PP frames (4, 23) are preposition-AGNOSTIC (no governed prep recorded), so the verb takes the
+            // `prep_any` wildcard — it accepts any marker (C3-precision; the specific-prep gate applies to
+            // gloss-governed ADJECTIVES, where WordNet's gloss does carry the governance).
+            FrameKind::PpOblique => {
+                format!(
+                    "lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_pp_arg(lexicon:prep_any))"
+                )
+            }
             // Clause-taking: `(S\NP)/cat_cp` — the complement is an embedded clause.
             FrameKind::Clausal => format!("lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_cp)"),
         }
@@ -185,13 +226,16 @@ impl FrameKind {
 ///   - 26, 29, 34 — clausal complement (`that` / `whether CLAUSE`);
 ///   - 24, 25, 28, 30, 32, 33, 35 — control / raising (INFINITIVE / V-ing).
 ///
-/// PP-oblique frames are mapped **coarsely** — the PP object becomes an entity
-/// argument: 12/13/27 → transitive (e.g. *depend on*), 20/21 → transitive,
-/// 4/22 → intransitive (the PP is dropped). Documented as a stage-1 loss.
+/// **Single-PP-complement frames** — the verb subcategorizes for one PP ("----s to X" 12/27, "is
+/// ----ing PP" 4, "----s PP" 23) — map to [`FrameKind::PpOblique`] (`(S\NP)/cat_pp_arg`). This replaces
+/// the former coarse handling (12/27 → transitive with the preposition dropped; 4/23 → intransitive with
+/// the PP dropped). **Object+PP** frames (13, 20, 21, 22) and other PP shapes stay coarse for now — a
+/// follow-up (`((S\NP)/cat_pp_arg)/NP`). Frame 14 is left as this importer already classifies it.
 fn classify(frame: u8) -> Option<FrameKind> {
     match frame {
-        1 | 2 | 3 | 4 | 22 | 23 => Some(FrameKind::Intransitive),
-        8 | 9 | 10 | 11 | 12 | 13 | 20 | 21 | 27 => Some(FrameKind::Transitive),
+        1 | 2 | 3 | 22 => Some(FrameKind::Intransitive),
+        4 | 12 | 23 | 27 => Some(FrameKind::PpOblique),
+        8 | 9 | 10 | 11 | 13 | 20 | 21 => Some(FrameKind::Transitive),
         14 | 15 | 16 | 17 | 18 | 19 | 31 => Some(FrameKind::Ditransitive),
         26 => Some(FrameKind::Clausal), // "Somebody ----s that CLAUSE" (D63 §8.11 6-cl)
         _ => None, // 5,6,7 predicative; 29,34 whether-clause; 24,25,28,30,32,33,35 control/raising
@@ -259,6 +303,7 @@ fn push_noun(
     rep: &mut Report,
     noun: &BTreeMap<Offset, &Synset>,
     ranks: &SenseRanks,
+    mass: &MassNouns,
 ) {
     // `@` hypernyms → `subclass_of`, each resolved to the nearest CLASS. WordNet has
     // class synsets whose `@` parent is an INSTANCE (British_West_Indies `@` West_Indies
@@ -286,6 +331,11 @@ fn push_noun(
     // `cat_n` carries the noun's own class as its (denotation-erased) type index
     // — load-bearing for polymorphic determiners (D63 §8.2).
     let cat = format!("lexicon:cat_n(wn:{}, lexicon:num_any)", local(syn));
+    // The mass-Num cat for the same class: emitted ADDITIVELY (alongside the count entry) for a
+    // lemma the countability lexicon flags uncountable, so a bare singular occurrence shifts to an
+    // NP argument (D62 `bare_mass_nps`) WITHOUT removing count uses — `mutation` is tagged
+    // uncountable yet `a mutation`/`three mutations` must still parse (the count entry handles them).
+    let mass_cat = format!("lexicon:cat_n(wn:{}, lexicon:mass)", local(syn));
     for (i, lemma) in syn.words.iter().enumerate() {
         push_entry(
             buf,
@@ -298,6 +348,20 @@ fn push_noun(
             ranks,
         );
         rep.entries += 1;
+        if mass.contains(&norm_lemma(lemma)) {
+            push_entry(
+                buf,
+                &format!("e_{}_{i}_mass", local(syn)),
+                lemma,
+                &mass_cat,
+                &local(syn),
+                "Set",
+                &sense_key(syn, lemma),
+                ranks,
+            );
+            rep.entries += 1;
+            rep.mass_entries += 1;
+        }
     }
 }
 
@@ -426,13 +490,25 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
     let off = &syn.offset;
     for kind in kinds {
         let tag = kind.tag();
-        buf.push_str(&format!("axiom wn:v{off}_{tag} : {}\n\n", kind.arrow()));
+        // The axiom is the verb sense's denotation (entries' `lexicon:sem` names it); carry the
+        // synset gloss as its `core:description` so the concept-description text index makes verb
+        // senses searchable for OOV grounding, symmetric with the noun classes (D63 §6a index c).
+        buf.push_str(&format!(
+            "axiom wn:v{off}_{tag} : {} desc: \"{}\"\n\n",
+            kind.arrow(),
+            esc(&syn.gloss)
+        ));
         rep.verb_axioms += 1;
         let sem = format!("v{off}_{tag}");
         let arrow = kind.arrow();
         let cat_bse = kind.cat("bse", "num_any");
         let (cat_fin_sg, cat_fin_pl) = (kind.cat("fin", "sg"), kind.cat("fin", "pl"));
         let (cat_ger, cat_pss) = (kind.cat("ger", "num_any"), kind.cat("pss", "num_any"));
+        // Finite SIMPLE PAST ("HeLa affected BRCA1"): `fin` (a finite declarative root) with a
+        // `num_any` subject — English past tense has NO number agreement ("it/they affected"). This
+        // is what makes the WRN page's past-tense narrative parse at all; without it only present
+        // (3sg/pl) and the participles existed.
+        let cat_fin_past = kind.cat("fin", "num_any");
         for (i, lemma) in syn.words.iter().enumerate() {
             let sense = sense_key(syn, lemma);
             // Base form — the lemma surface (do-support / modal complement; num_any).
@@ -494,6 +570,15 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
                 rep.entries += 1;
                 rep.participle_entries += 1;
             }
+            // Finite SIMPLE PAST — the past-tense surface heading a declarative ("affected"). Reuses
+            // the past-participle surface(s): correct for regular verbs and the many irregulars where
+            // past = participle ("found", "led", "said"); the `went`/`gone` class (past ≠ participle)
+            // is a known edge — its true past surface isn't emitted (a follow-on irregular-past table).
+            for (k, pp) in head_pps(lemma).iter().enumerate() {
+                let id = format!("e_v{off}_{tag}_{i}_fpast{k}");
+                push_entry(buf, &id, pp, &cat_fin_past, &sem, &arrow, &sense, ranks);
+                rep.entries += 1;
+            }
         }
     }
     true
@@ -512,20 +597,94 @@ fn adj_cat() -> String {
     format!("lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))")
 }
 
+/// The preposition governed by a relational gradable adjective, derived from its WordNet **gloss**
+/// (C3, d63-comparative-phrasal.md §5.3 — WordNet has no structured subcat frame, so the gloss is the
+/// only WordNet-internal signal). Two patterns, most-confident first:
+///   1. WordNet's explicit ``followed by `PREP'`` convention (67 adj synsets — `proportional`:
+///      *"usually followed by `to'"*).
+///   2. the **lemma itself** immediately followed by a preposition in the gloss/examples
+///      (`proportional to the crime`, `she is addicted to chocolate`). Keying on the lemma (not any
+///      word) avoids the verb+prep noise of examples (`spoke in`, `came to`) and gives the right
+///      per-lemma preposition within one synset (`addicted`→`to`, `dependent`→`on`).
+///
+/// `None` ⇒ no governance signal → a NON-relational bare measure (C1). Drives the relational emission
+/// in `push_adj` (a 2-place `deg_rel` + a `cat_measure/cat_pp_arg` reading; the bare 1-place forms stay
+/// for the ground-less reading — two independent measures, no optional-ground shift needed).
+fn governed_preposition(gloss: &str, lemma: &str) -> Option<String> {
+    const PREPS: &[&str] = &[
+        "to", "on", "in", "with", "from", "for", "at", "upon", "about", "against", "into",
+    ];
+    // (1) explicit ``followed by `PREP'``.
+    if let Some(rest) = gloss.split("followed by `").nth(1) {
+        if let Some(p) = rest.split('\'').next() {
+            if PREPS.contains(&p.trim()) {
+                return Some(p.trim().to_string());
+            }
+        }
+    }
+    // (2) `<lemma> <prep>` in the gloss (lemma-keyed).
+    let g = gloss.to_lowercase();
+    let key = format!("{} ", lemma.to_lowercase());
+    let mut from = 0;
+    while let Some(i) = g[from..].find(&key) {
+        let next = g[from + i + key.len()..]
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(|c: char| !c.is_ascii_alphabetic());
+        if PREPS.contains(&next) {
+            return Some(next.to_string());
+        }
+        from += i + key.len();
+    }
+    None
+}
+
+/// Map a `governed_preposition` result to its `lexicon:Prep` feature constructor (D63 §5.3
+/// C3-precision). The domain is exactly `governed_preposition`'s `PREPS`; anything else falls back
+/// to the `prep_any` wildcard (defensive — the closed set makes the fallback unreachable).
+fn prep_ctor(prep: &str) -> &'static str {
+    match prep {
+        "to" => "lexicon:prep_to",
+        "on" => "lexicon:prep_on",
+        "in" => "lexicon:prep_in",
+        "with" => "lexicon:prep_with",
+        "from" => "lexicon:prep_from",
+        "for" => "lexicon:prep_for",
+        "at" => "lexicon:prep_at",
+        "upon" => "lexicon:prep_upon",
+        "about" => "lexicon:prep_about",
+        "against" => "lexicon:prep_against",
+        "into" => "lexicon:prep_into",
+        _ => "lexicon:prep_any",
+    }
+}
+
 /// Adjective synset → predicative entries. **Relational** (pertainym) adjectives are
 /// non-gradable → a Boolean predicate (`is_X : Entity → Prop`, sem = the axiom).
 /// **Descriptive** (gradable) adjectives (D63 §8.12 6-cmp) become a **measure**
 /// `deg_X : Entity → core:float` (+ standard `std_X`): the **positive** is the measure
 /// vs. the standard (`gt(deg_X(x), std_X)`) and the **comparative** compares degrees
 /// (`gt(deg_X(x), deg_X(y))`) via the opaque float ordering `measurements:gt` (combo 1).
-/// Comparative surfaces come from [`comparison`]; periphrastic ("more X") adjectives emit
-/// only the positive (the `more`/`most` words are a follow-on). Superlatives await "the".
-fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks) {
+/// Comparative surfaces: the synthetic `-er` from [`comparison`], plus a bare `cat_measure` reading
+/// (C1, d63-comparative-phrasal.md §5.3) exposing `deg_X` so the closed-class `more`/`less` handle the
+/// periphrastic ("more X") comparative at scale. Superlatives ("most") await "the".
+fn push_adj(
+    buf: &mut String,
+    syn: &Synset,
+    rep: &mut Report,
+    noun_index: &BTreeMap<Offset, &Synset>,
+    ranks: &SenseRanks,
+) {
     let loc = local(syn);
     let prop_arrow = format!("{ENTITY_TOP} -> Prop");
     if syn.relational {
-        // Non-gradable: the existing Boolean predicate.
-        buf.push_str(&format!("axiom wn:{loc} : {prop_arrow}\n\n"));
+        // Non-gradable: the existing Boolean predicate. The axiom is the sense's denotation —
+        // carry the gloss as `core:description` for the concept-description index (D63 §6a index c).
+        buf.push_str(&format!(
+            "axiom wn:{loc} : {prop_arrow} desc: \"{}\"\n\n",
+            esc(&syn.gloss)
+        ));
         rep.adj_axioms += 1;
         let cat = adj_cat();
         for (i, lemma) in syn.words.iter().enumerate() {
@@ -543,12 +702,35 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks
         }
         return;
     }
-    // Gradable: a measure + standard, with measure-based positive + degree comparative.
+    // Gradable: a measure + standard, with measure-based positive + degree comparative. The
+    // measure `deg_{loc}` is the sense's semantic anchor — carry the gloss on it (the standard
+    // `std_{loc}` is a derived threshold, not a sense) for the concept-description index (§6a c).
     buf.push_str(&format!(
-        "axiom wn:deg_{loc} : {ENTITY_TOP} -> core:float\n\n"
+        "axiom wn:deg_{loc} : {ENTITY_TOP} -> core:float desc: \"{}\"\n\n",
+        esc(&syn.gloss)
     ));
     buf.push_str(&format!("axiom wn:std_{loc} : core:float\n\n"));
     rep.adj_axioms += 1;
+    // C3 (d63-comparative-phrasal.md §5.3): a RELATIONAL gradable adjective — one whose gloss governs a
+    // preposition (`governed_preposition`) — ALSO gets a 2-place measure `deg_{loc}_rel : Entity(ground)
+    // → Entity(subject) → float` and a `cat_measure/cat_pp_arg` reading (below), so `more dependent ON
+    // WRN` / `greater dependence ON WRN` thread the ground faithfully. The bare 1-place `deg_{loc}` forms
+    // (positive + C1 measure) STAY for the ground-less reading (`more dependent than Y`) — two
+    // independent opaque measures (the `∃g` relation between them is deferred, §7; an `∃`-close would be
+    // ill-typed over a float).
+    // C3-precision: the synset's governed preposition (the first lemma that governs one) tags the
+    // nominalization projection's `cat_pp_arg(prep)`. A per-adjective-lemma prep (which may differ
+    // within one synset — `addicted`→to vs a co-lemma→on) is taken separately in the lemma loop.
+    let syn_prep: Option<String> = syn
+        .words
+        .iter()
+        .find_map(|l| governed_preposition(&syn.gloss, l));
+    let relational = syn_prep.is_some();
+    if relational {
+        buf.push_str(&format!(
+            "axiom wn:deg_{loc}_rel : {ENTITY_TOP} -> {ENTITY_TOP} -> core:float\n\n"
+        ));
+    }
     push_sem_term(
         buf,
         &format!("pos_sem_{loc}"),
@@ -576,7 +758,43 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks
             ranks,
         );
         rep.entries += 1;
-        // Comparative (synthetic `-er` only; periphrastic "more X" is a follow-on).
+        // C1 (d63-comparative-phrasal.md §5.3): a bare `cat_measure` reading — the degree function
+        // `deg_X : Entity → float` itself — so the closed-class `more`/`less` operators
+        // (`((S[adj]\NP)/cat_pp_than)/cat_measure`) combine with a periphrastic-comparative adjective.
+        // Closes NON-relational adjectival comparatives (`X is more sensitive than Y`) at scale.
+        // (Relational adjectives additionally get the ground-taking `cat_measure/cat_pp_arg` form via
+        // the C3 curated prep map; the synthetic `-er` below is the same operator pre-bundled.)
+        push_entry(
+            buf,
+            &format!("e_{loc}_{i}_m"),
+            lemma,
+            "lexicon:cat_measure",
+            &format!("deg_{loc}"),
+            &format!("{ENTITY_TOP} -> core:float"),
+            &sense,
+            ranks,
+        );
+        rep.entries += 1;
+        // C3: relational lemmas (gloss governs a prep) also get the ground-taking cat_measure/cat_pp_arg
+        // reading — `deg_rel` (ground, subject); `on X` fills the ground → a cat_measure over the subject.
+        if let Some(prep) = governed_preposition(&syn.gloss, lemma) {
+            push_entry(
+                buf,
+                &format!("e_{loc}_{i}_r"),
+                lemma,
+                &format!(
+                    "lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg({}))",
+                    prep_ctor(&prep)
+                ),
+                &format!("deg_{loc}_rel"),
+                &format!("{ENTITY_TOP} -> {ENTITY_TOP} -> core:float"),
+                &sense,
+                ranks,
+            );
+            rep.entries += 1;
+        }
+        // Synthetic `-er` comparative (`larger`); periphrastic "more X" now rides the `cat_measure`
+        // reading above + the closed-class `more`/`less`.
         if let Comparison::Synthetic { comparative, .. } = comparison(lemma) {
             for (k, c) in comparative.iter().enumerate() {
                 push_entry(
@@ -593,6 +811,49 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks
             }
         }
     }
+
+    // C2 (d63-comparative-phrasal.md §5.3): project `deg_{loc}` onto derivationally-related NOUNS
+    // (`dependent` → `dependence`) as a bare `cat_measure` reading — the nominalization's measure IS
+    // the adjective's degree, so `greater/less <nominalization>` parses at scale. (Relational nouns get
+    // the ground-taking `cat_measure/cat_pp_arg` form via the C3 curated prep map.)
+    for (off, tpos) in &syn.derivational {
+        if tpos != "n" {
+            continue;
+        }
+        if let Some(&noun) = noun_index.get(off) {
+            for (j, nlemma) in noun.words.iter().enumerate() {
+                push_entry(
+                    buf,
+                    &format!("e_{loc}_d_{}_{j}", local(noun)),
+                    nlemma,
+                    "lexicon:cat_measure",
+                    &format!("deg_{loc}"),
+                    &format!("{ENTITY_TOP} -> core:float"),
+                    &sense_key(noun, nlemma),
+                    ranks,
+                );
+                rep.entries += 1;
+                // C3: relational projection — the nominalization (`dependence`) also gets the
+                // ground-taking `cat_measure/cat_pp_arg` reading, so `greater dependence ON WRN` threads.
+                if let Some(prep) = &syn_prep {
+                    push_entry(
+                        buf,
+                        &format!("e_{loc}_dr_{}_{j}", local(noun)),
+                        nlemma,
+                        &format!(
+                            "lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg({}))",
+                            prep_ctor(prep)
+                        ),
+                        &format!("deg_{loc}_rel"),
+                        &format!("{ENTITY_TOP} -> {ENTITY_TOP} -> core:float"),
+                        &sense_key(noun, nlemma),
+                        ranks,
+                    );
+                    rep.entries += 1;
+                }
+            }
+        }
+    }
 }
 
 /// Render a set of synsets to one ESL document. The caller is responsible for
@@ -601,8 +862,12 @@ fn push_adj(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks
 /// synsets are emitted sorted by `(pos, offset)`, declarations before entries.
 /// `ranks` supplies each lemma's sense-frequency rank → `lexicon:sense_rank` (D63
 /// §8.7 Stage B); pass an empty map to omit ranks (all default 0).
-pub fn render_document(synsets: &[Synset], ranks: &SenseRanks) -> (String, Report) {
-    let (decls, entries, rep) = render_core(synsets, ranks);
+pub fn render_document(
+    synsets: &[Synset],
+    ranks: &SenseRanks,
+    mass: &MassNouns,
+) -> (String, Report) {
+    let (decls, entries, rep) = render_core(synsets, ranks, mass);
     // The `lexicon:wordnet` descriptor (D65 §3) leads the body — every entry's
     // `lexicon:in_lexicon` points at it, so it must resolve in the same document.
     let doc = format!(
@@ -621,8 +886,12 @@ pub fn render_document(synsets: &[Synset], ranks: &SenseRanks) -> (String, Repor
 /// batches under the gRPC size cap. Same split `render_document` makes internally —
 /// exposed so a chain emit can put decls in layer 0 and stream entries into chunks
 /// without any cross-chunk dependency (entries depend only on the base).
-pub fn render_sections(synsets: &[Synset], ranks: &SenseRanks) -> (String, Vec<String>, Report) {
-    let (decls, entries, rep) = render_core(synsets, ranks);
+pub fn render_sections(
+    synsets: &[Synset],
+    ranks: &SenseRanks,
+    mass: &MassNouns,
+) -> (String, Vec<String>, Report) {
+    let (decls, entries, rep) = render_core(synsets, ranks, mass);
     let base = format!("{ESL_HEADER}\n{WORDNET_LEXICON}\n{decls}");
     (base, entries, rep)
 }
@@ -630,7 +899,11 @@ pub fn render_sections(synsets: &[Synset], ranks: &SenseRanks) -> (String, Vec<S
 /// Shared core: render every synset to a declaration section (`decls`) and a vector of
 /// `LexicalEntry` blocks (`entries`), keeping the two separable so both the
 /// single-document and partitioned emits can assemble them.
-fn render_core(synsets: &[Synset], ranks: &SenseRanks) -> (String, Vec<String>, Report) {
+fn render_core(
+    synsets: &[Synset],
+    ranks: &SenseRanks,
+    mass: &MassNouns,
+) -> (String, Vec<String>, Report) {
     let mut sorted: Vec<&Synset> = synsets.iter().collect();
     sorted.sort_by(|a, b| (a.pos, &a.offset).cmp(&(b.pos, &b.offset)));
 
@@ -652,7 +925,7 @@ fn render_core(synsets: &[Synset], ranks: &SenseRanks) -> (String, Vec<String>, 
             Pos::Noun => {
                 let mut block = String::new();
                 if syn.instance_of.is_empty() {
-                    push_noun(&mut block, syn, &mut rep, &noun_index, ranks);
+                    push_noun(&mut block, syn, &mut rep, &noun_index, ranks, mass);
                 } else {
                     push_instance(&mut block, syn, &mut rep, &noun_index, ranks);
                 }
@@ -666,7 +939,7 @@ fn render_core(synsets: &[Synset], ranks: &SenseRanks) -> (String, Vec<String>, 
             }
             Pos::Adj => {
                 let mut block = String::new();
-                push_adj(&mut block, syn, &mut rep, ranks);
+                push_adj(&mut block, syn, &mut rep, &noun_index, ranks);
                 route(&block, &mut decls, &mut entries);
             }
             Pos::Adv => {} // deferred (§8.7.5)
@@ -707,7 +980,12 @@ mod tests {
         assert_eq!(classify(13), Some(FrameKind::Transitive)); // "----s on something"
         assert_eq!(classify(14), Some(FrameKind::Ditransitive));
         assert_eq!(classify(31), Some(FrameKind::Ditransitive));
-        // frame 26 "that CLAUSE" → clause-taking (D63 §8.11 6-cl).
+        // single-PP-complement frames → argument-PP verb `(S\NP)/cat_pp_arg` (D63 verb+PP).
+        assert_eq!(classify(12), Some(FrameKind::PpOblique)); // "----s to somebody"
+        assert_eq!(classify(27), Some(FrameKind::PpOblique)); // "----s to somebody"
+        assert_eq!(classify(4), Some(FrameKind::PpOblique)); //  "is ----ing PP"
+        assert_eq!(classify(23), Some(FrameKind::PpOblique)); // "----s PP"
+                                                              // frame 26 "that CLAUSE" → clause-taking (D63 §8.11 6-cl).
         assert_eq!(classify(26), Some(FrameKind::Clausal));
         // still-deferred higher-order frames → None (never guessed).
         assert_eq!(classify(5), None); // predicative complement
@@ -730,6 +1008,7 @@ mod tests {
             &mut rep,
             &BTreeMap::new(),
             &SenseRanks::new(),
+            &MassNouns::new(),
         );
         assert!(buf.contains("class wn:n05444328 : wn:n08476263 {"));
         assert!(buf.contains("description = \"a segment of DNA\";"));
@@ -742,6 +1021,38 @@ mod tests {
         assert!(buf.contains("lexicon:sem_type = type_expr( Set );"));
         assert_eq!(rep.noun_classes, 1);
         assert_eq!(rep.entries, 3); // gene, cistron, factor
+    }
+
+    #[test]
+    fn countability_lexicon_adds_an_additive_mass_entry() {
+        // D62 countability: a lemma flagged uncountable gets a SECOND `cat_n(C, mass)` entry
+        // ALONGSIDE the count one (so `a gene`/`genes` still parse while bare `gene` can shift).
+        // A multi-lemma synset only mass-marks the flagged lemma(s).
+        let gene = syn(
+            "05444328 08 n 03 gene 0 cistron 0 factor 0 001 @ 00001740 n 0000 | a segment of DNA",
+        );
+        let mut mass = MassNouns::new();
+        mass.insert("gene".into()); // flag only `gene`, not `cistron`/`factor`
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_noun(
+            &mut buf,
+            &gene,
+            &mut rep,
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+            &mass,
+        );
+        // count entry (unchanged) + an additive mass entry, both for `gene`.
+        assert!(buf.contains("resource wn:e_n05444328_0 : lexicon:LexicalEntry {"));
+        assert!(buf.contains("resource wn:e_n05444328_0_mass : lexicon:LexicalEntry {"));
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:cat_n(wn:n05444328, lexicon:mass) );"
+        ));
+        // unflagged lemmas get NO mass entry.
+        assert!(!buf.contains("wn:e_n05444328_1_mass"));
+        assert_eq!(rep.entries, 4); // gene, cistron, factor + gene-mass
+        assert_eq!(rep.mass_entries, 1);
     }
 
     #[test]
@@ -758,6 +1069,7 @@ mod tests {
             &mut Report::default(),
             &BTreeMap::new(),
             &ranks,
+            &MassNouns::new(),
         );
         // The `gene` entry carries the rank; `cistron` (rank 0) and `factor` (absent) do not.
         assert!(
@@ -784,6 +1096,7 @@ mod tests {
             &mut Report::default(),
             &BTreeMap::new(),
             &SenseRanks::new(),
+            &MassNouns::new(),
         );
         assert!(buf.contains("class wn:n00001740 : lexicon:Entity {"));
     }
@@ -878,7 +1191,7 @@ mod tests {
             syn("10428004 18 n 01 physicist 0 000 | a scientist"),
             syn("10954498 18 n 01 Einstein 0 001 @i 10428004 n 0000 | a physicist"),
         ];
-        let (doc, rep) = render_document(&synsets, &SenseRanks::new());
+        let (doc, rep) = render_document(&synsets, &SenseRanks::new(), &MassNouns::new());
         assert!(doc.contains("class wn:n10428004 : lexicon:Entity {"));
         assert!(doc.contains("resource wn:n10954498 : wn:n10428004 {"));
         assert!(!doc.contains("class wn:n10954498"));
@@ -894,6 +1207,7 @@ mod tests {
         let (doc, _) = render_document(
             &[syn("00001740 03 n 01 entity 0 000 | that which exists")],
             &SenseRanks::new(),
+            &MassNouns::new(),
         );
         assert!(
             doc.starts_with("// "),
@@ -916,6 +1230,7 @@ mod tests {
         let (doc, _) = render_document(
             &[syn("00001740 03 n 01 entity 0 000 | that which exists")],
             &SenseRanks::new(),
+            &MassNouns::new(),
         );
 
         // The descriptor is emitted exactly once, carrying provenance metadata.
@@ -944,8 +1259,11 @@ mod tests {
         let mut rep = Report::default();
         let mut buf = String::new();
         assert!(push_verb(&mut buf, &eat, &mut rep, &SenseRanks::new()));
-        // frame 11 → transitive; the axiom IRI is kind-tagged (`_t`).
-        assert!(buf.contains("axiom wn:v00275082_t : lexicon:Entity -> lexicon:Entity -> Prop"));
+        // frame 11 → transitive; the axiom IRI is kind-tagged (`_t`). The synset gloss rides the
+        // axiom as a `desc:` clause → `core:description` (D63 §6a index c: verb senses searchable).
+        assert!(buf.contains(
+            "axiom wn:v00275082_t : lexicon:Entity -> lexicon:Entity -> Prop desc: \"to deteriorate\""
+        ));
         // Finite 3sg has a SINGULAR subject slot (6-agr); object slot stays num_any.
         assert!(buf.contains(
             "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
@@ -962,10 +1280,16 @@ mod tests {
         assert!(buf.contains(
             "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
+        // Finite SIMPLE PAST — same surface as the participle but a finite (`fin`) clause head with a
+        // `num_any` subject (past tense has no number agreement). The object slot stays num_any.
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+        ));
         assert_eq!(rep.verb_axioms, 1);
-        // Per lemma: base + finite 3sg + finite plural + gerund + past participle →
-        // 3 lemmas × 5 = 15 entries; 6 of them participles (ger + pss).
-        assert_eq!(rep.entries, 15);
+        // Per lemma: base + finite 3sg + finite plural + gerund + past participle + finite simple
+        // past → 3 lemmas × 6 = 18 entries; 6 of them participles (ger + pss; the finite-past is not
+        // counted a participle).
+        assert_eq!(rep.entries, 18);
         assert_eq!(rep.participle_entries, 6);
     }
 
@@ -1025,8 +1349,8 @@ mod tests {
         assert!(buf.contains("axiom wn:v00001740_i : lexicon:Entity -> Prop"));
         assert!(buf.contains("axiom wn:v00001740_t : lexicon:Entity -> lexicon:Entity -> Prop"));
         assert_eq!(rep.verb_axioms, 2);
-        // one lemma × two kinds × (base + 3sg + plural-finite + gerund + 1 pp) = 10.
-        assert_eq!(rep.entries, 10);
+        // one lemma × two kinds × (base + 3sg + plural-finite + gerund + 1 pp + 1 finite-past) = 12.
+        assert_eq!(rep.entries, 12);
     }
 
     #[test]
@@ -1069,7 +1393,13 @@ mod tests {
         let large = syn("00000001 00 a 01 large 0 000 | of great size");
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_adj(&mut buf, &large, &mut rep, &SenseRanks::new());
+        push_adj(
+            &mut buf,
+            &large,
+            &mut rep,
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+        );
         assert!(buf.contains("axiom wn:deg_a00000001 : lexicon:Entity -> core:float"));
         assert!(buf.contains("axiom wn:std_a00000001 : core:float"));
         assert!(buf.contains("resource wn:pos_sem_a00000001 : lexicon:SemTerm {"));
@@ -1082,8 +1412,99 @@ mod tests {
         assert!(buf.contains(
             "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than) );"
         ));
+        // C1 (d63-comparative-phrasal.md §5.3): a bare `cat_measure` reading of `deg_X` — so the
+        // closed-class `more`/`less` operators combine (periphrastic comparative at scale).
+        assert!(buf.contains("lexicon:cat      = type_expr( lexicon:cat_measure );"));
+        assert!(buf.contains("lexicon:sem      = wn:deg_a00000001;"));
         // no Boolean is-axiom for a gradable adjective.
         assert!(!buf.contains("axiom wn:a00000001 : lexicon:Entity -> Prop"));
+    }
+
+    #[test]
+    fn gradable_adjective_projects_deg_onto_its_nominalization() {
+        // C2 (d63-comparative-phrasal.md §5.3): a gradable adjective's `deg` projects onto its
+        // derivationally-related NOUN (`+` link, `dependent` → `dependence`) as a `cat_measure`
+        // reading, so `greater/less <nominalization>` parses. Here `lethal` → `lethality`.
+        let lethal = syn("00000001 00 a 01 lethal 0 001 + 00000002 n 0000 | causing death");
+        let lethality = syn("00000002 00 n 01 lethality 0 000 | the quality of being lethal");
+        assert_eq!(
+            lethal.derivational,
+            vec![("00000002".to_string(), "n".to_string())]
+        );
+        let noun_index: BTreeMap<_, _> = [(lethality.offset.clone(), &lethality)]
+            .into_iter()
+            .collect();
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_adj(&mut buf, &lethal, &mut rep, &noun_index, &SenseRanks::new());
+        // the noun `lethality` gets a `cat_measure` reading whose sem IS the adjective's `deg`.
+        assert!(
+            buf.contains("lexicon:form     = \"lethality\";"),
+            "projected noun entry:\n{buf}"
+        );
+        assert!(
+            buf.contains("lexicon:sem      = wn:deg_a00000001;"),
+            "sem = the adjective's deg:\n{buf}"
+        );
+        assert!(buf.contains("lexicon:cat      = type_expr( lexicon:cat_measure );"));
+    }
+
+    #[test]
+    fn governed_preposition_from_gloss() {
+        // (1) WordNet's explicit `followed by `to'` convention (`proportional`).
+        assert_eq!(
+            governed_preposition(
+                "properly related in size or degree; usually followed by `to'",
+                "proportional"
+            ),
+            Some("to".to_string())
+        );
+        // (2) lemma in the gloss/example → its preposition, PER-LEMMA within one synset.
+        let g = "compulsively or physiologically dependent on something; \"she is addicted to chocolate\"";
+        assert_eq!(governed_preposition(g, "addicted"), Some("to".to_string()));
+        assert_eq!(governed_preposition(g, "dependent"), Some("on".to_string()));
+        // non-relational: no governance signal.
+        assert_eq!(governed_preposition("of great size", "large"), None);
+        // lemma-keyed avoids verb+prep noise (the prep follows a VERB, not the lemma).
+        assert_eq!(
+            governed_preposition("\"she walked with a limp\"", "temperate"),
+            None
+        );
+    }
+
+    #[test]
+    fn relational_gradable_adjective_emits_ground_taking_measure() {
+        // C3: a gradable adjective whose gloss governs a preposition (`dependent on`) also gets a 2-place
+        // measure `deg_rel` + a `cat_measure/cat_pp_arg` reading (the ground `on X` fills the first arg),
+        // so `more dependent on WRN` threads the ground. The bare 1-place measure (C1) stays.
+        let dependent = syn(
+            "00000001 00 a 01 dependent 0 000 | contingent on something; \"dependent on charity\"",
+        );
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_adj(
+            &mut buf,
+            &dependent,
+            &mut rep,
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+        );
+        assert!(
+            buf.contains(
+                "axiom wn:deg_a00000001_rel : lexicon:Entity -> lexicon:Entity -> core:float"
+            ),
+            "2-place relational measure:\n{buf}"
+        );
+        assert!(
+            buf.contains(
+                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );"
+            ),
+            "relational cat_measure/cat_pp_arg(prep_on) reading — the gloss `dependent on` governs `on` \
+             (C3-precision):\n{buf}"
+        );
+        assert!(buf.contains("lexicon:sem      = wn:deg_a00000001_rel;"));
+        // the bare 1-place measure (C1) is STILL present for the ground-less reading.
+        assert!(buf.contains("lexicon:sem      = wn:deg_a00000001;"));
     }
 
     #[test]
@@ -1096,7 +1517,13 @@ mod tests {
         );
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_adj(&mut buf, &atomic, &mut rep, &SenseRanks::new());
+        push_adj(
+            &mut buf,
+            &atomic,
+            &mut rep,
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+        );
         assert!(buf.contains("axiom wn:a00000004 : lexicon:Entity -> Prop"));
         assert!(buf.contains("lexicon:form     = \"atomic\";"));
         // no measure / comparative for a relational adjective.
@@ -1122,7 +1549,7 @@ mod tests {
             syn("00001740 03 n 01 entity 0 000 | the root"),
             syn("05444328 08 n 01 gene 0 001 @ 00001740 n 0000 | a gene"),
         ];
-        let (doc, rep) = render_document(&nouns, &SenseRanks::new());
+        let (doc, rep) = render_document(&nouns, &SenseRanks::new(), &MassNouns::new());
         assert!(doc.contains("namespace wn         = \"urn:eigenius:wn\";"));
         assert!(doc.contains("class wn:n00001740 : lexicon:Entity {"));
         assert!(doc.contains("class wn:n05444328 : wn:n00001740 {"));

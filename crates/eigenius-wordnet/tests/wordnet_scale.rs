@@ -37,7 +37,7 @@ use eigenius_kernel::nbe::eval::eval;
 use eigenius_kernel::nbe::readback::readback_val;
 use eigenius_kernel::nbe::term::Exp;
 use eigenius_kernel::{bootstrap, esl};
-use eigenius_wordnet::convert::render_document;
+use eigenius_wordnet::convert::{render_document, MassNouns};
 use eigenius_wordnet::import::{read_sense_ranks, select_synsets, SeedSpec};
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 
@@ -69,7 +69,7 @@ fn dict_missing() -> bool {
 fn stand_up(spec: &SeedSpec) -> (Arc<Layer>, std::time::Duration) {
     let chosen = select_synsets(std::path::Path::new(DICT), spec).expect("read WordNet dict");
     let ranks = read_sense_ranks(std::path::Path::new(DICT), &spec.pos).expect("read index ranks");
-    let (doc, rep) = render_document(&chosen, &ranks);
+    let (doc, rep) = render_document(&chosen, &ranks, &MassNouns::new());
     eprintln!(
         "stand_up: {} synsets → {} noun classes, {} instances, {} verb + {} adj axioms, {} entries",
         chosen.len(),
@@ -107,7 +107,7 @@ fn gates_to_prop(layer: &Arc<Layer>, sem: &Exp) -> bool {
 fn props(layer: &Arc<Layer>, forest: &[Item]) -> usize {
     forest
         .iter()
-        .filter(|p| gates_to_prop(layer, &p.sem))
+        .filter(|p| gates_to_prop(layer, p.sem()))
         .count()
 }
 
@@ -159,7 +159,7 @@ fn stage_a_battery_parses_to_props_over_real_wordnet() {
         // RANK witness (D63 §8.7 Stage B): the forest is returned lowest-cost
         // (most-frequent-sense) first — non-decreasing in cost.
         assert!(
-            forest.windows(2).all(|w| w[0].cost <= w[1].cost),
+            forest.windows(2).all(|w| w[0].cost() <= w[1].cost()),
             "'{s}': forest must be ranked by ascending sense-frequency cost"
         );
         // CAP witness: never more than the default cap (the 1.8k blow-up is bounded).
@@ -196,7 +196,7 @@ fn no_spurious_duplication_from_feature_vars() {
     let lemma = morphy();
     // Stays under the cap so the WHOLE forest is observable (no truncation hiding dups).
     let forest = index.parse("no cat eats a fish", &lemma);
-    let mut keys: Vec<String> = forest.iter().map(|p| sem_key(&p.sem)).collect();
+    let mut keys: Vec<String> = forest.iter().map(|p| sem_key(p.sem())).collect();
     let total = keys.len();
     keys.sort();
     keys.dedup();

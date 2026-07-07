@@ -62,6 +62,7 @@ mod inspect;
 mod lifecycle;
 mod load;
 mod parse;
+pub use parse::ParseConfig;
 mod programs;
 mod query;
 mod reflect;
@@ -222,9 +223,22 @@ pub struct EigeniusService {
     /// case is handled internally with the `branch_advanced = true`
     /// in-memory shape.
     pub(crate) persister: Arc<crate::commit::BackendPersister>,
+
+    /// `ParseSentence` parse-path configuration (D63/GH#97 Lever 1): the sense cap, cell beam,
+    /// injected lemmatizer, and opt-in LLM reranker the handler builds each request's index with.
+    /// Defaults to [`ParseConfig::default`] (cap+beam on, `Identity` lemmatizer, ranker off); a
+    /// binary swaps in a real lemmatizer (and turns the ranker on) via [`Self::with_parse_config`].
+    pub(crate) parse_config: ParseConfig,
 }
 
 impl EigeniusService {
+    /// Install the `ParseSentence` [`ParseConfig`] (D63/GH#97 Lever 1). Called by the orchestrator/CLI
+    /// startup to inject a real lemmatizer (`MorphyLemmatizer`, which the kernel can't depend on) and
+    /// to enable the contextual reranker. Builder-style; default is [`ParseConfig::default`].
+    pub fn with_parse_config(mut self, config: ParseConfig) -> Self {
+        self.parse_config = config;
+        self
+    }
     /// Create a new service by bootstrapping the kernel.
     pub fn new() -> Result<Self, String> {
         Self::with_components(ComponentRegistry::default())
@@ -258,6 +272,7 @@ impl EigeniusService {
             persister: Arc::new(crate::commit::BackendPersister::new(None)),
             embedders: Arc::new(crate::program::embedder::EmbedderRegistry::new()),
             sweep_coordinator: None,
+            parse_config: ParseConfig::default(),
         })
     }
 
@@ -311,6 +326,7 @@ impl EigeniusService {
             persister: Arc::new(crate::commit::BackendPersister::new(Some(backend))),
             embedders: Arc::new(crate::program::embedder::EmbedderRegistry::new()),
             sweep_coordinator: None,
+            parse_config: ParseConfig::default(),
         })
     }
 
@@ -403,6 +419,7 @@ impl EigeniusService {
             persister: Arc::new(crate::commit::BackendPersister::new(None)),
             embedders: Arc::new(crate::program::embedder::EmbedderRegistry::new()),
             sweep_coordinator: None,
+            parse_config: ParseConfig::default(),
         })
     }
 

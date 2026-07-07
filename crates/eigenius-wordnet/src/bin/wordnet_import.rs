@@ -40,7 +40,7 @@ use eigenius_kernel::ontology::resource::Resource;
 use eigenius_kernel::ontology::Iri;
 use eigenius_kernel::validation::Validator;
 use eigenius_kernel::{bootstrap, esl};
-use eigenius_wordnet::convert::{render_document, render_sections, ESL_HEADER};
+use eigenius_wordnet::convert::{render_document, render_sections, MassNouns, ESL_HEADER};
 use eigenius_wordnet::import::{read_sense_ranks, select_synsets, SeedSpec};
 use eigenius_wordnet::wndb::Pos;
 
@@ -82,6 +82,41 @@ struct Args {
     /// at load time (the chain is the validation context).
     #[arg(long)]
     validate: bool,
+    /// **Countability lexicon** (D62 bare-mass arguments): a newline-delimited list of noun
+    /// lemmas with an uncountable sense (one per line; `#` comments + blank lines ignored).
+    /// Each such lemma gets an additive `cat_n(C, mass)` entry so a bare singular shifts to an
+    /// NP argument. Built by `scripts/provision-countability.sh` (Wiktionary ∩ WordNet). Absent
+    /// ⇒ no mass marking (count-only, the prior behaviour).
+    #[arg(long, default_value = "references/wiktionary/uncountable-nouns.txt")]
+    countability: PathBuf,
+}
+
+/// Load the countability lexicon (one lemma per line; `#`/blank ignored), lowercased. A missing
+/// file is non-fatal — returns an empty set (no mass marking), like an absent sense-rank index.
+fn load_countability(path: &Path) -> MassNouns {
+    match fs::read_to_string(path) {
+        Ok(s) => {
+            let set: MassNouns = s
+                .lines()
+                .map(|l| l.trim())
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(|l| l.to_lowercase())
+                .collect();
+            eprintln!(
+                "countability: {} uncountable lemmas from {}",
+                set.len(),
+                path.display()
+            );
+            set
+        }
+        Err(_) => {
+            eprintln!(
+                "countability: {} not found — no mass marking (count-only nouns)",
+                path.display()
+            );
+            MassNouns::new()
+        }
+    }
 }
 
 fn pos_of(s: &str) -> Option<Pos> {
@@ -125,14 +160,15 @@ fn main() -> ExitCode {
     // Sense-frequency ranks → `lexicon:sense_rank` (D63 §8.7 Stage B); a missing index
     // is non-fatal (ranks default 0).
     let ranks = read_sense_ranks(&args.dict, &spec.pos).unwrap_or_default();
+    let mass = load_countability(&args.countability);
 
     // Partitioned emit: a base layer (descriptor + all synset classes/axioms) + entry
     // batches, each under the size cap. The single-document path stays for small imports.
     if let Some(dir) = &args.out_dir {
-        return emit_partitioned(&chosen, &ranks, dir, args.split_bytes);
+        return emit_partitioned(&chosen, &ranks, &mass, dir, args.split_bytes);
     }
 
-    let (doc, rep) = render_document(&chosen, &ranks);
+    let (doc, rep) = render_document(&chosen, &ranks, &mass);
     eprintln!(
         "wordnet import: {} synsets selected → {} noun classes, {} instances, {} verb axioms, \
          {} adj axioms, {} entries ({} of them ger/pss participle forms) \
@@ -145,6 +181,10 @@ fn main() -> ExitCode {
         rep.entries,
         rep.participle_entries,
         rep.verbs_deferred,
+    );
+    eprintln!(
+        "  ({} additive mass-noun entries from the countability lexicon)",
+        rep.mass_entries
     );
 
     if let Some(path) = &args.out {
@@ -189,6 +229,7 @@ fn main() -> ExitCode {
 fn emit_partitioned(
     synsets: &[eigenius_wordnet::wndb::Synset],
     ranks: &eigenius_wordnet::convert::SenseRanks,
+    mass: &MassNouns,
     dir: &Path,
     split_bytes: usize,
 ) -> ExitCode {
@@ -197,7 +238,7 @@ fn emit_partitioned(
         return ExitCode::from(1);
     }
 
-    let (base, entries, rep) = render_sections(synsets, ranks);
+    let (base, entries, rep) = render_sections(synsets, ranks, mass);
 
     let mut files: Vec<PathBuf> = Vec::new();
     let base_path = dir.join("wordnet-000-base.esl");
@@ -254,6 +295,10 @@ fn emit_partitioned(
         rep.adj_axioms,
         rep.entries,
         rep.participle_entries,
+    );
+    eprintln!(
+        "  ({} additive mass-noun entries from the countability lexicon)",
+        rep.mass_entries
     );
     eprintln!(
         "wrote {} files → {} (base + {} entry chunks; load in filename order as a chain)",

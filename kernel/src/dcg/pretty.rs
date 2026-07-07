@@ -117,6 +117,65 @@ pub fn pretty_term(e: &Exp) -> String {
     }
 }
 
+/// Render a category's **structural shape** — `pretty_term` with every type INDEX
+/// (an `EigonClass` / `EigonResource` / refined `Σ`) erased to `_`, while keeping the
+/// constructor spine (`cat_n`, `cat_np`, `cat_s`, `fwd`, `bwd`, `cat_forall`) and the
+/// FEATURE atoms (`sg`/`pl`/`num_any`/`mass`/`dcl`/`fin`/…). So `cat_n(wn:n123, sg)`
+/// and `cat_n(umlscui:C1, sg)` both render `cat_n(_, sg)`. Used to histogram chart cells:
+/// many items sharing ONE shape ⇒ lexical/sense variation (a type-narrowing candidate);
+/// many distinct shapes ⇒ structural ambiguity (type-narrowing won't help). Diagnostic.
+pub fn cat_shape(e: &Exp) -> String {
+    match e {
+        Exp::App(_, _) => {
+            let (head, args) = unspine(e);
+            if args.is_empty() {
+                cat_shape(head)
+            } else {
+                let inner = args
+                    .iter()
+                    .map(|a| cat_shape(a))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}({inner})", cat_shape(head))
+            }
+        }
+        Exp::Con(name, body) => format!("{name}({})", cat_shape(body)),
+        Exp::InductiveCtor(_, name, args) => {
+            if args.is_empty() {
+                name.clone()
+            } else {
+                let inner = args.iter().map(cat_shape).collect::<Vec<_>>().join(", ");
+                format!("{name}({inner})")
+            }
+        }
+        Exp::InductiveType(decl, args) => {
+            if args.is_empty() {
+                decl.name.clone()
+            } else {
+                let inner = args.iter().map(cat_shape).collect::<Vec<_>>().join(", ");
+                format!("{}({inner})", decl.name)
+            }
+        }
+        // Type indices / sense identities — erased.
+        Exp::EigonClass(_) | Exp::EigonResource(_) | Exp::EigonAxiom(_) => "_".to_string(),
+        // A refined noun's index is a `Σ`; keep the shape marker, erase the components.
+        Exp::Sig(_, _, _) | Exp::Times(_, _) => "Σ_".to_string(),
+        // A determiner category `cat_forall(num, λT. body)` carries its GQ body as a `Lam`. The body
+        // SHAPE (subject GQ `S/(S\NP)` vs object GQ `(S\NP)\((S\NP)/NP)`) decides combinability, so it
+        // MUST be kept (only the bound type-index `T` erases, via the `Var` arm) — else the packing
+        // signature `(cat_shape, prov)` is not a combinability congruence and packs distinct
+        // determiner readings into one node (D63 §11 3d).
+        Exp::Lam(_, body) => format!("λ.{}", cat_shape(body)),
+        Exp::Arrow(a, b) => format!("{} → {}", cat_shape(a), cat_shape(b)),
+        Exp::Pi(_, a, b) => format!("{} → {}", cat_shape(a), cat_shape(b)),
+        Exp::Var(_) => "_".to_string(),
+        Exp::Sort(0) => "Prop".to_string(),
+        Exp::Sort(1) => "Set".to_string(),
+        // Sems (a leaf's `sem`, not a cat) collapse — we only shape categories.
+        _ => "_".to_string(),
+    }
+}
+
 /// A short label for the `Exp` variant — the fallback so output never explodes.
 fn exp_kind(e: &Exp) -> &'static str {
     match e {

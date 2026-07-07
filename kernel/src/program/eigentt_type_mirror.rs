@@ -143,6 +143,16 @@ fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
         // core:Class), so the encoder need not introduce a different
         // ctor name.
         Exp::EigonAxiom(iri) => Ok(ctor("ConstRef", vec![json!(iri.as_str())])),
+        // A term-level resource *individual* (a named instance — an `Entity` value), the third sibling
+        // of `EigonClass`/`EigonAxiom`. Same on-wire shape: a bare `ConstRef(iri)`. Decode discriminates
+        // it from class/axiom by the resolved resource's class (see `resolve_const_ref`'s tail). This is
+        // what lets a proposition reference an individual, e.g. `affects(kind_of(Instability), hela)`.
+        Exp::EigonResource(res) => {
+            let iri = res.id().ok_or_else(|| {
+                EncodeError::NotATypeLevelExp("EigonResource without an IRI".to_string())
+            })?;
+            Ok(ctor("ConstRef", vec![json!(iri.as_str())]))
+        }
         Exp::EigonPrimitive(p) => {
             use crate::nbe::term::PrimitiveType;
             use crate::ontology::well_known as wk;
@@ -716,10 +726,13 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
             found_classes: class_iris,
         })
     } else {
-        Err(DecodeError::ConstRefWrongClass {
-            iri,
-            found_classes: class_iris,
-        })
+        // A resolved resource that is none of axiom/class/inductive/codata/datatype — a plain
+        // term-level *individual* (an `Entity` value). The dual of the encode-side `EigonResource →
+        // ConstRef` arm: a proposition may reference a named individual (`hela`). A misuse in a *type*
+        // position is caught downstream by the type-checker — the same deferral `EigonClass`/
+        // `EigonAxiom` already rely on — so the codec need not gate it here. (`resolve` above already
+        // rejected an unresolved IRI as `UnresolvedConstRef`, so `resource` is a real chain resource.)
+        Ok(Exp::EigonResource(Box::new(resource.as_ref().clone())))
     }
 }
 

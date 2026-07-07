@@ -86,6 +86,9 @@ data lexicon:Num {
     pl,       // plural — "genes", "all genes"
     num_any,  // underspecified ⊤: meets sg AND pl. WordNet imports carry this;
               // the lookup bridge refines it to the surface number.
+    mass,     // mass / uncountable (D62 CNL) — "MSI", "DNA", "apoptosis": used BARE as an argument
+              // (no determiner) and grammatically singular. Does not meet sg/pl (so `*a MSI` /
+              // `*two MSI` fail); the bare-singular-mass shift gives it an argument NP reading.
 }
 
 // Fin — clause/predicate form (finiteness / non-finite shape + the adjectival
@@ -115,8 +118,35 @@ data lexicon:Fin {
 // because distribution is *deferred* to a later combination (the group meets its
 // predicate downstream), so the connective must travel with the phrase.
 data lexicon:Conn {
-    conn_and,  // "X and Y" — conjunctive group (distributive ∧; collective/reciprocal)
-    conn_or,   // "X or Y"  — disjunctive group (distributive ∨)
+    conn_and,     // "X and Y" — conjunctive group (distributive ∧; collective/reciprocal)
+    conn_or,      // "X or Y"  — disjunctive group (distributive ∨)
+    conn_but_not, // "X but not Y" (D62 §2 #8) — contrastive ellipsis: distributes ASYMMETRICALLY,
+                  // the first member positive and the rest negated (`P(m₀) ∧ ¬P(m₁) ∧ …`), so a
+                  // shared predicate applies affirmatively to X and negatively to the elided Y.
+}
+
+// Prep — the governing preposition of an oblique **argument** PP (D63 §5.3
+// C3-precision, d63-comparative-phrasal.md). A *syntactic* feature (erased by ⟦·⟧,
+// exactly like Num/Fin): it routes which preposition an `cat_pp_arg`-seeking functor
+// accepts, via the feature-meet. A gloss-governed adjective selects its specific prep
+// (`dependent` → `prep_on`, so `*dependent to` fails); a preposition-agnostic verb
+// frame (WordNet "----s PP") carries the `prep_any` wildcard (meets any marker). The
+// concrete ctors are the closed English oblique prepositions the importer's
+// `governed_preposition` extracts.
+data lexicon:Prep {
+    prep_to,      // "dependent to"? no — "addicted to", "proportional to"
+    prep_on,      // "dependent on", "based on"
+    prep_in,      // "interested in", "results in"
+    prep_with,    // "consistent with", "associated with"
+    prep_from,    // "results from", "different from"
+    prep_for,     // "responsible for", "essential for"
+    prep_at,      // "good at"
+    prep_upon,    // "dependent upon", "contingent upon"
+    prep_about,   // "concerned about"
+    prep_against, // "protective against"
+    prep_into,    // "differentiate into"
+    prep_any,     // underspecified ⊤: meets any specific prep. Prep-agnostic verb frames
+                  // carry this; a specific marker refines it at composition.
 }
 
 // Cat — the categorial type (a small inductive at Type 1, since cat_n/cat_np
@@ -191,6 +221,19 @@ data lexicon:Cat : Type 1 {
     // `than` — so `*HeLa is larger BRCA1` (no `than`) gets no parse.
     cat_pp_than : lexicon:Cat,
 
+    // PP[arg](prep) — an **argument** (oblique-complement) prepositional phrase: the PP a verb or
+    // relational adjective *subcategorizes* for ("contributes **to** cancers", "dependent **on** WRN").
+    // ⟦cat_pp_arg(_)⟧ = Entity (the Prep feature is erased, like Num/Fin) — the marker is transparent,
+    // exposing the prep's object (sem `λy. y`), so an argument-PP verb `(S\NP) / cat_pp_arg(any)` binds
+    // it as its second entity argument (same Entity→Entity→Prop sem_type as a transitive verb). A
+    // category distinct from a bare NP forces the preposition — so a genuinely transitive verb
+    // `(S\NP)/NP` (e.g. `affect`) cannot absorb a stray `to X`: `*HeLa affects to BRCA1` has no parse.
+    // The **Prep feature** (D63 §5.3 C3-precision) is what rejects the WRONG preposition on a
+    // gloss-governed adjective: `dependent : cat_measure / cat_pp_arg(prep_on)` selects only the `on`
+    // marker (`cat_pp_arg(prep_on)`), so `*dependent to WRN` fails the feature-meet; a prep-agnostic
+    // verb frame carries `cat_pp_arg(prep_any)` and accepts any. (Mirrors `cat_pp_than`; D63 verb+PP.)
+    cat_pp_arg : lexicon:Prep -> lexicon:Cat,
+
     // PP[mod] — a **noun-postmodifying** prepositional phrase ("…of WRN dependency"),
     // supplying a predicate over the head noun's entities (D63 §8.13 Slice 6-mod).
     // ⟦cat_pp⟧ = Entity -> Prop. A noun-modifier preposition is `cat_pp / cat_np(Entity)`
@@ -200,6 +243,17 @@ data lexicon:Cat : Type 1 {
     // ambiguity carried in the forest), and distinct from a bare adjective (`S[adj]\NP`)
     // so a post-nominal *adjective* never spuriously refines.
     cat_pp : lexicon:Cat,
+
+    // Measure — a **1-place measure** ("(greater) dependence on WRN"), the degree/amount dimension a
+    // PHRASAL comparative quantifier ranges over (D63 §8.12 phrasal comparatives,
+    // `docs/notes/d63-comparative-phrasal.md`). ⟦cat_measure⟧ = Entity → core:float — it maps an entity
+    // to its value on that dimension's opaque float scale. A measure noun `dependence` is
+    // `cat_measure / cat_pp_arg` (sem `λg. μ_dep(g)`, μ parameterized on the ground); the comparative
+    // DEGREE operators `greater`/`less` (+ adjectival `more`/`less`) SELECT `cat_measure` (so `*greater
+    // cell line` — a non-measure noun —
+    // has no parse) and builds `λμ.λV.λy.λx. gt(μ(x), μ(y))` over `measurements:gt`. Distinct from
+    // `cat_pp` (⟦·⟧ = Entity → Prop) — a measure is a scalar, not a truth-value.
+    cat_measure : lexicon:Cat,
 }
 
 // ── The lexical-entry record ──────────────────────────────────────────
@@ -226,6 +280,23 @@ resource lexicon:form_index : core:ValueIndex {
     core:target_property = lexicon:form;
     core:value_normalizer = normalizers:lowercase;
 }
+// A declared `core:TextIndex` on `lexicon:form` makes surface-form OOV **grounding** a BM25/token
+// retrieval (D63 lexicon-augmentation §6a): the `LexiconBacked` resolver token-matches an OOV surface
+// (`recq`) to the multiword atoms that CONTAIN it (`recq family of dna helicases` → C0084304) — which the
+// exact `ValueIndex` above misses (`recq` ≠ the full form). Complements, does not replace, form_index
+// (exact lookup vs fuzzy grounding; different index kinds coexist on one property). The `en-stem-v1`
+// analyzer folds plural/singular (`helicases`↔`helicase`); non-words (`recq`) pass through unstemmed.
+resource lexicon:form_text_index : core:TextIndex {
+    core:description     = "BM25 text index on lexicon:form for token/fuzzy surface-form OOV grounding (D63 lexicon-augmentation §6a). Complements the exact form_index ValueIndex; active for every lexicon layer.";
+    core:target_property = lexicon:form;
+    core:text_analyzer   = "en-stem-v1";
+}
+// The SECONDARY OOV grounding signal — a `core:TextIndex` over `core:description` (concept glosses:
+// noun-class/instance definitions and, after the converter fix, verb/adjective `eigentt:Axiom` glosses)
+// — is NOT declared here: `core:description` is a universal core property, so its index lives with the
+// property in the core ontology (`core:description_text_index`), not in this domain layer. Grounding
+// eligibility (a lexicon concept vs an arbitrary description-bearing resource) is a resolver-side `is_a`
+// filter, not the index's concern (D63 lexicon-augmentation §6a index c).
 property lexicon:cat : core:resource {
     description = "The categorial type as a value of the inductive lexicon:Cat (Atom | A/B | A\\B), carried as a type_expr-encoded EigenTT term — NOT a string. Kernel-checked, pattern-matchable, and the source of the ⟦cat⟧ → sem_type homomorphism.";
     class_types eigentt:TypeExpr;
@@ -344,4 +415,71 @@ property lexicon:prop : core:resource {
     description = "The assembled proposition (eigentt:TypeExpr) — verb sem applied to its arguments, kernel-checked to inhabit Prop.";
     class_types eigentt:TypeExpr;
     domain lexicon:Sentence;
+}
+
+// ── Reserved construct tokens (D63 §11 3g.3 / B10) ────────────────────
+// A grammatical function word that is NOT a lexical entry: a category-polymorphic
+// construct token (coordinator, relativizer, contrastive `but`, negator, reciprocal
+// `each`/`other`, list/appositive comma) the CKY keys reserved-word rules on. `⟦·⟧`
+// cannot denote these (they range over `Cat`), so they are not seeded as lexemes —
+// but the *form set* is data (this table), so a new coordinator/relativizer is added
+// without a code change. The construct *semantics* (which rule fires) stays the parser
+// engine; `construct_kind` is the tag it maps to its internal role. Loaded index-driven
+// at `LexicalIndex` build (`typed_resource_iris` over the `is_a` triple index — NOT a
+// full-chain resource scan), so it costs O(#reserved), not O(chain).
+class lexicon:ReservedConstruct {
+    description = "A reserved construct token (coordinator / relativizer / contrastive `but` / negator / reciprocal `each`·`other` / comma) keyed by a reserved-word CKY rule, not a lexical entry. The form set is data; the construct semantics is the parser engine.";
+    requires lexicon:construct_form, lexicon:construct_kind;
+}
+// A dedicated surface-form property (NOT `lexicon:form`, whose hard domain is `LexicalEntry`): a
+// reserved construct is not a lexical entry, and it is looked up by TYPE at build
+// (typed_resource_iris), never through the `lexicon:form` value index — so it neither belongs to that
+// domain nor should pollute that index.
+property lexicon:construct_form : core:string {
+    description = "The reserved construct's surface form (`and`, `,`, `which`, `each`, …).";
+    domain lexicon:ReservedConstruct;
+}
+// ReservedKind — the CLOSED vocabulary of grammatical roles a reserved construct plays, as a
+// resource enum (core's own `then_recommends` for a `resource` property is `class_types` +
+// `allows_only`, the value-level type check; a free `string` would only recommend a `pattern`). The
+// parser maps each individual's IRI to its internal `ReservedKind`; a coordinator's connective IRI
+// (logic:And / logic:Or) is derived from the kind. Narrowing the set is a retroactively-checked
+// change, and a typo'd `construct_kind` is rejected at commit rather than silently dropped at load.
+class lexicon:ReservedKind {
+    description = "The grammatical role a lexicon:ReservedConstruct plays — a resource enum (allows_only-constrained). The parser keys its reserved-word CKY rules on this.";
+}
+resource lexicon:rk_coord_and : lexicon:ReservedKind {
+    core:description = "`and` — conjunction (the list comma reads as this too).";
+}
+resource lexicon:rk_coord_or : lexicon:ReservedKind {
+    core:description = "`or` — disjunction.";
+}
+resource lexicon:rk_comma : lexicon:ReservedKind {
+    core:description = "The list / appositive / fronted-modifier comma `,` (reads as conjunction for lists).";
+}
+resource lexicon:rk_relativizer : lexicon:ReservedKind {
+    core:description = "`that` — restrictive relativizer (its complementizer use is a lexical leaf).";
+}
+resource lexicon:rk_wh_relativizer : lexicon:ReservedKind {
+    core:description = "`which` — wh-relativizer: the which-relative AND the pied-piping / wh marker.";
+}
+resource lexicon:rk_contrastive_but : lexicon:ReservedKind {
+    core:description = "`but` — the contrastive (first token of `but not`); plain `but` is the `but_subord` lexeme.";
+}
+resource lexicon:rk_negator : lexicon:ReservedKind {
+    core:description = "`not` — the second token of `but not`.";
+}
+resource lexicon:rk_reciprocal_each : lexicon:ReservedKind {
+    core:description = "`each` — first token of the reciprocal `each other`.";
+}
+resource lexicon:rk_reciprocal_other : lexicon:ReservedKind {
+    core:description = "`other` — second token of the reciprocal `each other`.";
+}
+property lexicon:construct_kind : core:resource {
+    description = "The reserved construct's grammatical role the CKY keys on — a lexicon:ReservedKind individual. allows_only enforces the closed vocabulary at commit; the parser maps the referenced IRI to its internal ReservedKind.";
+    class_types lexicon:ReservedKind;
+    allows_only lexicon:rk_coord_and, lexicon:rk_coord_or, lexicon:rk_comma,
+        lexicon:rk_relativizer, lexicon:rk_wh_relativizer, lexicon:rk_contrastive_but,
+        lexicon:rk_negator, lexicon:rk_reciprocal_each, lexicon:rk_reciprocal_other;
+    domain lexicon:ReservedConstruct;
 }

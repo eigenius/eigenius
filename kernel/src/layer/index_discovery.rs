@@ -532,6 +532,15 @@ mod tests {
         (head, storage)
     }
 
+    /// Retain only the indexes a test declared (`urn:ex:*`), dropping the
+    /// bootstrap-shipped `core:description_text_index` that every real chain
+    /// now carries — it targets `core:description`, a property distinct from
+    /// any `urn:ex:*` these discovery/multiplicity tests exercise.
+    fn ex_only(mut v: Vec<ActiveTextIndex>) -> Vec<ActiveTextIndex> {
+        v.retain(|a| a.iri.as_str().starts_with("urn:ex:"));
+        v
+    }
+
     /// Two TextIndex Resources targeting different Properties at the
     /// same head — both should surface, neither shadowed.
     #[test]
@@ -570,7 +579,7 @@ mod tests {
         .unwrap();
         let layer = Arc::new(b.build(storage));
 
-        let mut active = resolve_active_text_indexes(&layer);
+        let mut active = ex_only(resolve_active_text_indexes(&layer));
         active.sort_by(|a, b| a.iri.as_str().cmp(b.iri.as_str()));
         assert_eq!(active.len(), 2);
         assert_eq!(active[0].iri.as_str(), "urn:ex:ti_a");
@@ -599,7 +608,7 @@ mod tests {
         ))
         .unwrap();
         let layer = Arc::new(b.build(storage));
-        let active = resolve_active_text_indexes(&layer);
+        let active = ex_only(resolve_active_text_indexes(&layer));
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].analyzer, "en-stem-v1");
     }
@@ -694,7 +703,7 @@ mod tests {
             .unwrap();
         }
         let layer = Arc::new(b.build(storage));
-        let active = resolve_active_text_indexes(&layer);
+        let active = ex_only(resolve_active_text_indexes(&layer));
         assert_eq!(active.len(), 2);
         let err = verify_text_index_multiplicity(&active).unwrap_err();
         assert!(err.contains("urn:ex:shared_prop"), "error: {err}");
@@ -747,7 +756,7 @@ mod tests {
 
         // At the child head, only the redefined ti is active. The root
         // version is shadowed.
-        let active = resolve_active_text_indexes(&child);
+        let active = ex_only(resolve_active_text_indexes(&child));
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].iri.as_str(), "urn:ex:ti");
         // The shadowed version was the v1 definition; the active one

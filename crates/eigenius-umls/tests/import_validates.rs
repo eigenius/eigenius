@@ -72,7 +72,7 @@ fn esl_layer(name: &str, doc: &str, parent: Arc<Layer>) -> Arc<Layer> {
 #[test]
 fn mirror_and_lexicon_validate_and_felicity_gate() {
     let subset = build_subset(MRSAB, MRRANK, MRSTY, MRCONSO, MRDEF, None, "ENG", None);
-    let (doc, rep) = render_document(&subset, "2026AA");
+    let (doc, rep) = render_document(&subset, "2026AA", &Default::default());
     assert_eq!(rep.concepts, 2);
     assert_eq!(rep.semantic_types, 2);
 
@@ -104,7 +104,7 @@ fn scoped_parse_of_every_werner_syndrome_affects_hela() {
     // bootstrap → demo (the `affects` verb + HeLa) → umls (Werner syndrome kind).
     let demo = esl_layer("demo", DEMO, Arc::clone(ctx.head()));
     let subset = build_subset(MRSAB, MRRANK, MRSTY, MRCONSO, MRDEF, None, "ENG", None);
-    let (doc, _) = render_document(&subset, "2026AA");
+    let (doc, _) = render_document(&subset, "2026AA", &Default::default());
     let umls = esl_layer("umls", &doc, demo);
 
     let index = LexicalIndex::build(Arc::clone(&umls));
@@ -124,7 +124,7 @@ fn scoped_parse_of_every_werner_syndrome_affects_hela() {
         "'every Werner syndrome affects HeLa' must parse with the umls lexicon in scope"
     );
     assert!(
-        forest.iter().all(|p| is_ctor(&p.cat, "cat_s").is_some()),
+        forest.iter().all(|p| is_ctor(p.cat(), "cat_s").is_some()),
         "every parse is a sentence (S)"
     );
 }

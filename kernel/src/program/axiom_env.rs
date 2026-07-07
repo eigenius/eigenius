@@ -135,7 +135,19 @@ pub fn build_axiom_env(layer: &Arc<Layer>) -> Result<AxiomEnv, AxiomEnvError> {
 
     let mut env = AxiomEnv::new();
 
-    for (iri, resource) in layer.iter_all_resources() {
+    // INDEX-DRIVEN enumeration of `eigentt:Axiom` instances (was a full-chain
+    // `iter_all_resources()` scan that eagerly materialised the ENTIRE merged chain into a
+    // BTreeMap — O(all resources) — to filter for the handful of axioms; over a 7.6M-resource
+    // lexicon chain that OOMs, and it is triggered lazily by the first `EigonAxiom` type-check in
+    // the DCG felicity gate). `typed_resource_iris` consults each layer's triple index
+    // (`scan_predicate_object(is_a, eigentt:Axiom)`) plus staged/pending entries, so this is
+    // O(#axioms). The post-`resolve` `is_axiom` guard is retained: a higher layer may tombstone or
+    // redefine an indexed subject so its *effective* resource is no longer an axiom.
+    for iri in crate::layer::typed_resource_iris(layer, &[AXIOM_CLASS_IRI]) {
+        let resource = match layer.resolve(&iri) {
+            Some(r) => r,
+            None => continue,
+        };
         if !is_axiom(&resource, &axiom_class) {
             continue;
         }
@@ -237,13 +249,24 @@ mod tests {
         // - the D63 §8.5 3c ontology relations `ontology:is_a` / `ontology:subclass_of`
         //   (predicate-nominal membership / subsumption); and
         // - the D63 §8.9 6-aux modal operators `logic:Possible` / `logic:Necessary`
-        //   (opaque `Prop → Prop`, witnessed downstream — see `ontologies/logic/logic.esl`).
+        //   plus the future/conditional/deontic `logic:Will` / `Would` / `Should`
+        //   (opaque `Prop → Prop`, witnessed downstream — see `ontologies/logic/logic.esl`); and
+        // - the D62 §2e / D64 referent-hole placeholder `lexicon:anaphor : Entity` (a pronoun
+        //   stores it; the parser freshens it into an open-parse hole — `closed-class.esl`).
         // Every bootstrap axiom should be in one of those families.
         let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
         let env = build_axiom_env(&head).unwrap();
         let modal = [
             "urn:eigenius:logic:Possible",
             "urn:eigenius:logic:Necessary",
+            "urn:eigenius:logic:Will",
+            "urn:eigenius:logic:Would",
+            "urn:eigenius:logic:Should",
+            // D64 referent-hole placeholder + the deictic speaker + possession relation
+            // (open-parse carrier / possessive determiners, `closed-class.esl`)
+            "urn:eigenius:lexicon:anaphor",
+            "urn:eigenius:lexicon:speaker",
+            "urn:eigenius:lexicon:poss_of",
         ];
         let unexpected: Vec<&Iri> = env
             .iter()
@@ -252,13 +275,17 @@ mod tests {
                 let s = iri.as_str();
                 !s.starts_with("urn:eigenius:measurements:")
                     && !s.starts_with("urn:eigenius:ontology:")
+                    // `card : Set→Entity→float` — the opaque cardinality functor for the `fewer`/`more`
+                    // count comparatives (d63-comparative-phrasal.md §5.1; closed-class.esl).
+                    && s != "urn:eigenius:lexicon:card"
                     && !modal.contains(&s)
             })
             .collect();
         assert!(
             unexpected.is_empty(),
             "bootstrap axioms should be the D52 measurement set + the D63 ontology \
-             relations + the modal operators; unexpected axioms: {unexpected:?}"
+             relations + the modal operators + the `lexicon:card` cardinality functor; \
+             unexpected axioms: {unexpected:?}"
         );
     }
 

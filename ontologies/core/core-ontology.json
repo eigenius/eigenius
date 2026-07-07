@@ -1153,5 +1153,13 @@
       "urn:eigenius:core:embedding_policies:manual"
     ],
     "urn:eigenius:core:domain": ["urn:eigenius:core:VectorIndex"]
+  },
+  {
+    "@id": "urn:eigenius:core:description_text_index",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:TextIndex"],
+    "urn:eigenius:core:description": "BM25 text index over `core:description` — makes every resource's natural-language description searchable chain-wide (D43 §3.1). Declared here, with the property it targets, because `core:description` is a universal core property (any resource may carry a description); an index is per-property, so its home is the ontology that owns the property, not a domain layer. This is the retrieval accelerator ONLY — which hits are eligible grounding targets (a domain concept vs an arbitrary meta-class or a predicate Axiom) is a resolver-side decision (an `is_a`/lattice filter over the triple index), never encoded in the index. Its primary consumer is D63 lexicon-augmentation §6a index c (concept-gloss OOV grounding: noun-class/instance glosses and verb/adjective Axiom glosses), but every description-bearing resource is indexed. One active TextIndex per target Property per chain head.",
+    "urn:eigenius:core:short_name": "description_text_index",
+    "urn:eigenius:core:target_property": "urn:eigenius:core:description",
+    "urn:eigenius:core:text_analyzer": "en-stem-v1"
   }
 ]

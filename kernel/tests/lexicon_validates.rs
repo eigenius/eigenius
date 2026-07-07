@@ -465,19 +465,19 @@ fn parser_composes_sentence_to_checked_prop() {
     let parses = cky_parse(&tokens, &lexicon);
     let sentences: Vec<&Item> = parses
         .iter()
-        .filter(|it| is_ctor(&it.cat, "cat_s").is_some())
+        .filter(|it| is_ctor(it.cat(), "cat_s").is_some())
         .collect();
     assert_eq!(
         sentences.len(),
         1,
         "expected exactly one S parse; got cats {:?}",
-        parses.iter().map(|i| &i.cat).collect::<Vec<_>>()
+        parses.iter().map(|i| i.cat()).collect::<Vec<_>>()
     );
 
     // The assembled sem must type-check — and to Prop. That is the felicity of
     // the *whole composed sentence*, confirmed by the kernel.
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], lexicon.clone());
-    let ty = check_infer(&mut ctx, &sentences[0].sem)
+    let ty = check_infer(&mut ctx, sentences[0].sem())
         .expect("composed sentence must type-check (felicity of the parse)");
     assert_eq!(
         readback_val(0, &ty),
@@ -496,7 +496,7 @@ fn parser_rejects_type_mismatched_sentence() {
     let parses = cky_parse(&tokens, &lexicon);
     let s = parses
         .iter()
-        .filter(|it| is_ctor(&it.cat, "cat_s").is_some())
+        .filter(|it| is_ctor(it.cat(), "cat_s").is_some())
         .count();
     assert_eq!(
         s, 0,
@@ -646,17 +646,17 @@ fn parser_composes_general_verb_via_subsumption() {
     let parses = cky_parse(&tokens, &lexicon);
     let sentences: Vec<&Item> = parses
         .iter()
-        .filter(|it| is_ctor(&it.cat, "cat_s").is_some())
+        .filter(|it| is_ctor(it.cat(), "cat_s").is_some())
         .collect();
     assert_eq!(
         sentences.len(),
         1,
         "expected exactly one S parse for the general verb; got cats {:?}",
-        parses.iter().map(|i| &i.cat).collect::<Vec<_>>()
+        parses.iter().map(|i| i.cat()).collect::<Vec<_>>()
     );
 
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], lexicon.clone());
-    let ty = check_infer(&mut ctx, &sentences[0].sem)
+    let ty = check_infer(&mut ctx, sentences[0].sem())
         .expect("composed general-verb sentence must type-check via subsumption");
     assert_eq!(
         readback_val(0, &ty),
@@ -829,7 +829,7 @@ const SCOPED_LEXICA: &str = r#"
 fn sem_string(it: &Item) -> String {
     format!(
         "{:?}",
-        readback_val(0, &eval(&it.sem, &Rho::Nil).expect("eval sem"))
+        readback_val(0, &eval(it.sem(), &Rho::Nil).expect("eval sem"))
     )
 }
 
@@ -860,7 +860,7 @@ fn parse_scope_filters_lexica_and_ranks_by_precedence() {
     let ab = index.parse_scoped(sentence, &Identity, Some(&[lex_a.clone(), lex_b.clone()]));
     assert_eq!(ab.len(), 2);
     assert!(
-        ab[0].cost.lexicon_order <= ab[1].cost.lexicon_order,
+        ab[0].cost().lexicon_order <= ab[1].cost().lexicon_order,
         "forest is sorted by lexicon precedence"
     );
     assert_eq!(
@@ -921,7 +921,7 @@ fn bridge_parses_mwe_sentence_to_prop() {
         forest.len()
     );
     assert!(
-        is_ctor(&forest[0].cat, "cat_s").is_some(),
+        is_ctor(forest[0].cat(), "cat_s").is_some(),
         "the parse is an S"
     );
 }
@@ -1309,12 +1309,13 @@ fn determiner_unifies_type_var_and_substitutes_through_result() {
     let noun = Item::new(noun_cat, Exp::EigonClass(gene.clone()));
     let out = apply(&det, &noun, &layer).expect("polymorphic determiner applies to its noun");
     assert_eq!(
-        out.cat, concrete_result,
+        out.cat(),
+        &concrete_result,
         "apply must resolve the category variable to Gene"
     );
     assert_eq!(
-        out.sem,
-        Exp::App(Box::new(det_sem_exp()), Box::new(Exp::EigonClass(gene))),
+        out.sem(),
+        &Exp::App(Box::new(det_sem_exp()), Box::new(Exp::EigonClass(gene))),
         "apply must build det(Gene) in lockstep"
     );
 }
@@ -1492,20 +1493,21 @@ fn cat_forall_dependent_application_instantiates_and_stays_felicitous() {
 
     let out = apply(&det, &noun, &layer).expect("cat_forall determiner applies to its noun");
     assert_eq!(
-        out.cat, expected,
+        out.cat(),
+        &expected,
         "cat_forall ▸ N_Gene must resolve to S/(S\\NP_Gene)"
     );
     assert_eq!(
-        out.sem,
-        Exp::App(Box::new(det_sem_exp()), Box::new(Exp::EigonClass(gene))),
+        out.sem(),
+        &Exp::App(Box::new(det_sem_exp()), Box::new(Exp::EigonClass(gene))),
         "sem must be det(Gene)"
     );
 
     // Felicity preserved across the step: the (NbE-reduced) produced sem inhabits
     // ⟦S/(S\NP_Gene)⟧ = (Gene→Prop)→Prop.
-    let out_ty = eval(&denote_cat(&out.cat).expect("denote result"), &Rho::Nil)
+    let out_ty = eval(&denote_cat(out.cat()).expect("denote result"), &Rho::Nil)
         .expect("eval result denotation");
-    let reduced_sem = readback_val(0, &eval(&out.sem, &Rho::Nil).expect("eval out sem"));
+    let reduced_sem = readback_val(0, &eval(out.sem(), &Rho::Nil).expect("eval out sem"));
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
     check(&mut ctx, &reduced_sem, &out_ty).expect("det(Gene) must inhabit ⟦S/(S\\NP_Gene)⟧");
 }
@@ -1569,11 +1571,11 @@ fn every_gene_q_composes_via_apply_to_a_quantified_prop() {
 
     // The produced category is a declarative S → Prop.
     assert!(
-        type_eq(&denote_cat(&out.cat).expect("denote S"), &Exp::Sort(0)),
+        type_eq(&denote_cat(out.cat()).expect("denote S"), &Exp::Sort(0)),
         "the produced category must denote Prop"
     );
     // The produced sem NbE-reduces to a well-typed proposition (∀x:Gene. q(x)).
-    let reduced = readback_val(0, &eval(&out.sem, &Rho::Nil).expect("eval sentence sem"));
+    let reduced = readback_val(0, &eval(out.sem(), &Rho::Nil).expect("eval sentence sem"));
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
     let ty = check_infer(&mut ctx, &reduced).expect("composed sentence must type-check");
     assert_eq!(
@@ -1618,14 +1620,14 @@ fn every_cell_line_is_primary_parses_from_entries_to_a_checked_prop() {
     let s = parses
         .iter()
         .find(|it| {
-            denote_cat(&it.cat)
+            denote_cat(it.cat())
                 .map(|d| type_eq(&d, &Exp::Sort(0)))
                 .unwrap_or(false)
         })
         .expect("CKY must yield a spanning S that denotes Prop");
 
     // Its sem NbE-reduces to a well-typed proposition: ∀c:CellLine. is_primary(c).
-    let reduced = readback_val(0, &eval(&s.sem, &Rho::Nil).expect("eval parsed sem"));
+    let reduced = readback_val(0, &eval(s.sem(), &Rho::Nil).expect("eval parsed sem"));
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
     let ty = check_infer(&mut ctx, &reduced).expect("parsed sentence must type-check");
     assert_eq!(
@@ -1651,9 +1653,9 @@ fn bridge_parses_every_gene_affects_hela_to_prop() {
         "the determiner sentence must yield at least one felicitous S:Prop parse"
     );
     for p in &forest {
-        assert!(is_ctor(&p.cat, "cat_s").is_some(), "each parse is an S");
+        assert!(is_ctor(p.cat(), "cat_s").is_some(), "each parse is an S");
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
-        let ty = check_infer(&mut ctx, &p.sem).expect("parsed (reduced) sem type-checks");
+        let ty = check_infer(&mut ctx, p.sem()).expect("parsed (reduced) sem type-checks");
         assert_eq!(
             readback_val(0, &ty),
             Exp::Sort(0),
@@ -1679,9 +1681,9 @@ fn bridge_parses_every_gene_affects_a_cell_line_to_prop() {
         "the doubly-quantified sentence must yield at least one felicitous S:Prop parse"
     );
     for p in &forest {
-        assert!(is_ctor(&p.cat, "cat_s").is_some(), "each parse is an S");
+        assert!(is_ctor(p.cat(), "cat_s").is_some(), "each parse is an S");
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
-        let ty = check_infer(&mut ctx, &p.sem).expect("parsed (reduced) sem type-checks");
+        let ty = check_infer(&mut ctx, p.sem()).expect("parsed (reduced) sem type-checks");
         assert_eq!(
             readback_val(0, &ty),
             Exp::Sort(0),
@@ -1741,14 +1743,14 @@ fn kind_subject_predicate_nominal_is_subclass_of() {
     let forest = index.parse("genes are cell lines", &PluralS);
     assert_eq!(forest.len(), 1, "exactly one kind-subject parse");
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
-    let ty = check_infer(&mut ctx, &forest[0].sem).expect("kind nominal type-checks");
+    let ty = check_infer(&mut ctx, forest[0].sem()).expect("kind nominal type-checks");
     assert_eq!(
         readback_val(0, &ty),
         Exp::Sort(0),
         "a kind predicate nominal denotes Prop"
     );
     // Structure: subclass_of(Gene, CellLine) = App(App(ontology:subclass_of, Gene), CellLine).
-    match &forest[0].sem {
+    match forest[0].sem() {
         Exp::App(f, _) => match &**f {
             Exp::App(g, _) => assert!(
                 matches!(&**g, Exp::EigonAxiom(iri) if iri.as_str() == "urn:eigenius:ontology:subclass_of"),
@@ -1777,7 +1779,7 @@ fn first_prop(forest: &[Item], which: &str) -> Exp {
         !forest.is_empty(),
         "{which} must parse to at least one S:Prop"
     );
-    forest[0].sem.clone()
+    forest[0].sem().clone()
 }
 
 /// Returns Ok iff the kernel confirms `witness : ⟦premise⟧ → ⟦hypothesis⟧` —
@@ -2016,11 +2018,11 @@ fn assert_parses_to_prop(layer: &Arc<Layer>, index: &LexicalIndex, sentence: &st
     );
     for p in &forest {
         assert!(
-            is_ctor(&p.cat, "cat_s").is_some(),
+            is_ctor(p.cat(), "cat_s").is_some(),
             "'{sentence}': each parse is an S"
         );
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
-        let ty = check_infer(&mut ctx, &p.sem)
+        let ty = check_infer(&mut ctx, p.sem())
             .unwrap_or_else(|e| panic!("'{sentence}' must type-check: {e}"));
         assert_eq!(
             readback_val(0, &ty),
@@ -2041,4 +2043,27 @@ fn buildout_some_and_no_determiners_parse_to_prop() {
     // no (object negative, via logic:False under ∃-less ∀¬):
     //   every gene affects no cell line  →  ∀g:Gene. ∀c:CellLine. ¬affects(c, g)
     assert_parses_to_prop(&layer, &index, "every gene affects no cell line");
+}
+
+/// P2.2a — `the` and the demonstratives `this`/`that` are determiners (closed-class
+/// function words gating real prose), modeled on `a` as a definite/demonstrative ≈
+/// existential first-cut (proper iota/deixis deferred). They must parse in both
+/// subject and object position, so the WRN-style NPs they head leave the OOV stream.
+#[test]
+fn buildout_definite_and_demonstrative_determiners_parse_to_prop() {
+    let layer = det_poly_layer();
+    let index = LexicalIndex::build(layer.clone());
+    // the (subject + object)
+    assert_parses_to_prop(&layer, &index, "the gene affects HeLa");
+    assert_parses_to_prop(&layer, &index, "every gene affects the cell line");
+    // this (subject + object)
+    assert_parses_to_prop(&layer, &index, "this gene affects HeLa");
+    assert_parses_to_prop(&layer, &index, "every gene affects this cell line");
+    // that (demonstrative — distinct from the relativizer `that`; subject + object)
+    assert_parses_to_prop(&layer, &index, "that gene affects HeLa");
+    assert_parses_to_prop(&layer, &index, "every gene affects that cell line");
+    // an (pre-vocalic spelling of the indefinite article `a`; subject + object —
+    // a/an phonology is orthographic, so the parser treats `an` exactly as `a`)
+    assert_parses_to_prop(&layer, &index, "an gene affects HeLa");
+    assert_parses_to_prop(&layer, &index, "every gene affects an cell line");
 }

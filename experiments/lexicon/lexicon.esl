@@ -36,6 +36,12 @@ class lexicon:Gene : lexicon:Entity {
 class lexicon:CellLine : lexicon:Entity {
     description = "A cell line (demo domain type).";
 }
+// A MASS / uncountable domain type (D62 CNL) — like MSI/DNA/apoptosis: a bare-usable, grammatically
+// singular noun (`instability affects HeLa`, no determiner). The `mass` number on its `cat_n` triggers
+// the bare-singular-mass shift.
+class lexicon:Instability : lexicon:Entity {
+    description = "Microsatellite-instability-like mass type (demo); a mass noun used bare.";
+}
 
 // ── Predicates: verbs and adjectives as typed opaque constants ────────
 // EigonAxiom — a predicate is a typed constant in the chain, NOT an ad-hoc
@@ -91,6 +97,18 @@ resource lexicon:e_cell_line : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:CellLine;
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "wn:cell_line.n.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (1c) a MASS noun — `cat_n(Instability, mass)`. Used BARE as an argument ("instability affects
+// HeLa") via the bare-singular-mass shift (deferred quantifier → open parse); `*a instability` /
+// `*two instability` correctly fail (mass meets neither sg nor pl).
+resource lexicon:e_instability : lexicon:LexicalEntry {
+    lexicon:form     = "instability";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Instability, lexicon:mass) );
+    lexicon:sem      = lexicon:Instability;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "wn:instability.n.01";
     lexicon:grade    = epistemic:declared;
 }
 
@@ -195,6 +213,55 @@ resource lexicon:e_larger : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 
+// ── PHRASAL comparative (D63 §8.12, d63-comparative-phrasal.md) — the comparative QUANTIFIER over a
+// MEASURE noun. "X showed greater dependence on WRN than Y" → gt(μ_dep(WRN)(x), μ_dep(WRN)(y)).
+// (6a) a MEASURE noun — `cat_measure / cat_pp_arg`, ⟦·⟧ = Entity → (Entity → float). The relational
+// measure `μ_dependence : Entity → Entity → float` (ground, subject → float); the arg-PP `on WRN`
+// supplies the ground → `μ_dependence(WRN) : Entity → float` = `cat_measure`. Only measure nouns get a
+// `cat_measure`, so `*greater cell line` has no parse.
+// A4 (d63 §5.2): the noun's measure IS the gradable adjective `dependent`'s scale — ONE shared axiom
+// `deg_dependent : Entity(ground) → Entity(subject) → float`. So `greater dependence on WRN` (noun) and
+// `more dependent on WRN` (adjective) denote identically. The noun declares it (first use); the
+// adjective (6f) references the same axiom.
+axiom lexicon:deg_dependent : lexicon:Entity -> lexicon:Entity -> core:float
+resource lexicon:e_dependence : lexicon:LexicalEntry {
+    lexicon:form     = "dependence";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );
+    lexicon:sem      = lexicon:deg_dependent;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> core:float );
+    lexicon:sense    = "wn:dependence.n.01";
+    lexicon:grade    = epistemic:declared;
+}
+// The comparative OPERATORS (`greater`/`less`/`more`/`fewer` + the `card` functor) are CLOSED-CLASS →
+// they live in the bootstrap (`ontologies/lexicon/closed-class.esl`, moved in B1). This demo lexicon keeps
+// only the SCALE-source content words: the measure noun `dependence` (above) and the gradable adjective
+// `dependent` (below) — importer scaffolding, not bootstrap (d63-comparative-phrasal.md §5.7).
+// (6f) `dependent` — a RELATIONAL gradable ADJECTIVE. Its scale `deg_dependent` (declared at the noun
+// `dependence`, A4) is the SAME measure — one shared axiom. Category `cat_measure/cat_pp_arg` (the
+// `on WRN` fills the ground), so `X is more/less dependent on WRN than Y` compares the degree. NOTE
+// (demo over-generation): a bare `cat_measure` adjective also lets the NOUN operators `greater`/`less`
+// take it (`*greater dependent`); the importer separates adjective-scale from noun-scale (d63 §5.6).
+resource lexicon:e_dependent_adj : lexicon:LexicalEntry {
+    lexicon:form     = "dependent";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );
+    lexicon:sem      = lexicon:deg_dependent;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> core:float );
+    lexicon:sense    = "wn:dependent.a.01";
+    lexicon:grade    = epistemic:declared;
+}
+// A second named gene, so the comparative subject/ground/standard can be three distinct entities.
+resource lexicon:msh2 : lexicon:Gene {
+    core:description = "The MSH2 gene — a second committed demo gene (for phrasal-comparative standards).";
+}
+resource lexicon:e_msh2 : lexicon:LexicalEntry {
+    lexicon:form     = "MSH2";
+    lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:sg) );
+    lexicon:sem      = lexicon:msh2;
+    lexicon:sem_type = type_expr( lexicon:Gene );
+    lexicon:sense    = "urn:eigenius:lexicon:msh2";
+    lexicon:grade    = epistemic:declared;
+}
+
 // (5) a GENERAL transitive verb typed at the supertype. ⟦cat⟧ = Entity → Entity
 //     → Prop = typeof(affects). Composes with Gene/CellLine arguments by
 //     subsumption (parser_composes_general_verb_via_subsumption: "HeLa affects BRCA1").
@@ -294,6 +361,72 @@ resource lexicon:e_affect_pss : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+// (8b) the finite SIMPLE PAST form ("affected") — `Fin = fin` (a finite declarative root) with a
+//      `num_any` subject (English past tense has no number agreement: "HeLa/genes affected …").
+//      Same surface as the `pss` participle but a finite clause head — mirrors the WordNet importer's
+//      `e_v…_fpast` entries. This is what makes simple-past narrative ("WRN was essential",
+//      "we analysed …") parse, vs only present + auxiliary participle.
+resource lexicon:e_affect_fin_past : lexicon:LexicalEntry {
+    lexicon:form     = "affected";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:affects;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:affect.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (8) an INTRANSITIVE verb — category `S\NP` (no object), `Entity → Prop`. Its present
+//     participle ("arising") is a single-token subject-gapped `ger` VP, exercising the
+//     LEAF fronted-participial adjunct shift (D62 §2 #5a) — "arising, HeLa affects BRCA1".
+axiom lexicon:arises : lexicon:Entity -> Prop
+resource lexicon:e_arises : lexicon:LexicalEntry {
+    lexicon:form     = "arises";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
+    lexicon:sem      = lexicon:arises;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:arise.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:e_arising : lexicon:LexicalEntry {
+    lexicon:form     = "arising";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:arises;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:arise.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// (9) a LIGHT-VERB / MULTIWORD verb (D62 §2 #7) — "give rise to" is a 3-token transitive verb
+//     `(S\NP)/NP` over an opaque causation axiom, seeded as a multiword span (the MWE lookup
+//     already supports multi-token forms, like "cell line"/"depends on"). Finite 3sg/pl + past
+//     forms. "HeLa gives rise to BRCA1" ⇒ give_rise_to(brca1, hela) (object-first convention).
+//     For the full lexicon this should be importer-generated (WordNet collocations); here it is
+//     hand-added so the light-verb shape is exercised end to end.
+axiom lexicon:give_rise_to : lexicon:Entity -> lexicon:Entity -> Prop
+resource lexicon:e_gives_rise_to : lexicon:LexicalEntry {
+    lexicon:form     = "gives rise to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:give_rise_to;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:give_rise_to.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:e_give_rise_to : lexicon:LexicalEntry {
+    lexicon:form     = "give rise to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:give_rise_to;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:give_rise_to.v.01";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:e_gave_rise_to : lexicon:LexicalEntry {
+    lexicon:form     = "gave rise to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:give_rise_to;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:give_rise_to.v.01";
     lexicon:grade    = epistemic:declared;
 }
 

@@ -67,3 +67,24 @@ data logic:Or (P : Prop, Q : Prop) : Prop {
 // "may/might" may instead route to the epistemic GRADE (Declared) — a later refinement.
 axiom logic:Possible : Prop -> Prop
 axiom logic:Necessary : Prop -> Prop
+
+// `Will` (future / prediction), `Would` (conditional / hypothetical), `Should` (weak
+// deontic). The modal auxiliaries `will` / `would` / `should` produce these. They are
+// NOT ◇/□: future and conditional are not alethic modality at all, and weak-deontic
+// `should` is distinct from strong `Necessary` (`must`). Each is therefore its OWN
+// opaque `Prop → Prop` axiom — same contract as `Possible`/`Necessary` above: the
+// kernel does not interpret them, no laws are asserted here, and their meaning (and any
+// relation among modals) is supplied on the **reasoning side** by the justification-logic
+// institution, harvested from use. Keeping each modal a distinct primitive (rather than
+// collapsing `will`/`would`/`should` onto ◇/□) is what lets that institution recover the
+// flavor faithfully instead of from a lossy pre-commitment.
+axiom logic:Will : Prop -> Prop
+axiom logic:Would : Prop -> Prop
+axiom logic:Should : Prop -> Prop
+
+// NOTE: contrastive `but` (D62 §2d) maps to `logic:And` — verified adequate against every
+// `but` in the WRN source (all are "X but (not) Y", truth-conditionally plain conjunction;
+// the contrast is rhetorical, carried by explicit negation, and not part of the typed claim).
+// A distinct contrast-preserving operator (`logic:But`) + kernel transparency (GH #95) remain
+// the documented upgrade for if/when discourse/argumentation structure becomes load-bearing
+// (see `docs/notes/d62-subordinator-design-findings.md`).
