@@ -21,8 +21,12 @@ Four-phase spine (user directive `2026-07-06`, worked in order — stop detourin
   ([d63-comparative-phrasal.md](d63-comparative-phrasal.md)); #8 **verified at scale** (C4, diagnostic
   `verify_degree_comparative_at_scale` over the `2026-07-07-c3` snapshot) — `greater/more dependence/dependent
   on` → identical `gt(deg_dep_rel(…))`, `more sensitive than` → 1-place; #9 `card` holds. **C3-precision**
-  (prep feature on `cat_pp_arg`; rejects `*dependent to`) added + unit-verified (`3e6c0d5`); its at-scale
-  check rides the next reseed — **blocked on the reseed OOM** ([reseed-oom-memory-investigation.md](reseed-oom-memory-investigation.md), on deck).
+  (prep feature on `cat_pp_arg`; rejects `*dependent to`) added + unit-verified (`3e6c0d5`) and
+  **at-scale verified (`2026-07-07`, WordNet `--all` native load; `verify_governed_preposition_at_scale`)**:
+  the relational `deg_rel` reading appears with the governed prep (`on`) and is absent with the wrong one
+  (`to`) — precision on the forest, not on full-sentence closure (which `dependent`'s bare-measure/noun
+  readings defeat). Full WordNet+UMLS reseed (domain-entity #8) still blocked on the load OOM
+  ([reseed-oom-memory-investigation.md](reseed-oom-memory-investigation.md), on deck) — decoupled from this witness.
   **Next: the next gap in the ordered 12-gap backlog** — see the note's roadmap table.
 - **Phases 3 (ambiguity) + 4 (performance): on deck** — one root cause, the **mass-shim over-generation**
   (RC-1 head-inheritance is loose); see the on-deck entry below.

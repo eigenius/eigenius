@@ -44,9 +44,18 @@ fn snapshot_memory_footprint_per_cf() {
     // Global (DB-wide) memory properties.
     let g = |p: &str| db.property_int_value(p).ok().flatten().unwrap_or(0);
     eprintln!("\n=== DB-wide ===");
-    eprintln!("  block-cache-usage        {}", mib(g("rocksdb.block-cache-usage")));
-    eprintln!("  cur-size-all-mem-tables  {}", mib(g("rocksdb.cur-size-all-mem-tables")));
-    eprintln!("  estimate-table-readers-mem (DB) {}", mib(g("rocksdb.estimate-table-readers-mem")));
+    eprintln!(
+        "  block-cache-usage        {}",
+        mib(g("rocksdb.block-cache-usage"))
+    );
+    eprintln!(
+        "  cur-size-all-mem-tables  {}",
+        mib(g("rocksdb.cur-size-all-mem-tables"))
+    );
+    eprintln!(
+        "  estimate-table-readers-mem (DB) {}",
+        mib(g("rocksdb.estimate-table-readers-mem"))
+    );
 
     // Per-CF: pinned table-reader mem (index+filter blocks), on-disk size, key count.
     let mut total_readers = 0u64;

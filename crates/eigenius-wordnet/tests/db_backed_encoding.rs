@@ -403,6 +403,60 @@ fn verify_degree_comparative_at_scale() {
     }
 }
 
+/// D63 §5.3 C3-precision — the AT-SCALE witness: on the real WordNet lexicon, `dependent`'s gloss
+/// governs `on`, so the importer emits `cat_measure / cat_pp_arg(prep_on)`; the WRONG preposition is
+/// rejected at the feature-meet. The two sentences differ ONLY in the preposition. Unlike the unit
+/// test (hand-authored demo entry), this proves the govern-prep detection + prep-tagged emission
+/// survive the full-lexicon importer path. ASSERTS (skips cleanly when no snapshot / ManifestDrift).
+///   EIGENIUS_DB_SNAPSHOT=/path cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       verify_governed_preposition_at_scale -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic+witness: C3-precision rejects *dependent to at scale; --ignored --nocapture"]
+fn verify_governed_preposition_at_scale() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    // The witness is on the RELATIONAL reading, not full-sentence closure: at scale `dependent` also
+    // has a bare `cat_measure` (C1) + a count-noun reading, which close the sentence regardless of the
+    // preposition. C3-precision's claim is narrower — the ground-taking `deg_..._rel(ground, subject)`
+    // term (built only through `cat_measure/cat_pp_arg(prep)`) must appear with the GOVERNED prep and
+    // be ABSENT with the wrong one.
+    let rel_terms = |s: &str| -> Vec<String> {
+        let (c, _) = index.parse_open(s, &lem);
+        let mut rels: Vec<String> = c
+            .iter()
+            .map(|it| pretty_term(it.sem()))
+            .filter(|t| t.contains("_rel("))
+            .collect();
+        rels.sort();
+        rels.dedup();
+        eprintln!(
+            "\n=== {s:?} — {} closed, {} relational ===",
+            c.len(),
+            rels.len()
+        );
+        for (i, t) in rels.iter().enumerate() {
+            eprintln!("  rel[{i}] {t}");
+        }
+        rels
+    };
+    let on_rel = rel_terms("cells are more dependent on genes than mutations");
+    let to_rel = rel_terms("cells are more dependent to genes than mutations");
+
+    assert!(
+        !on_rel.is_empty(),
+        "`more dependent ON genes` must yield the relational deg_rel reading (prep_on marker meets the \
+         importer-emitted governed prep_on)"
+    );
+    assert!(
+        to_rel.is_empty(),
+        "C3-precision: `*more dependent TO genes` must yield NO relational deg_rel reading — `dependent` \
+         governs `on`, so cat_pp_arg(prep_to) fails the feature-meet. (Bare-measure / noun readings may \
+         still close the sentence; the gate is on the relational term.) got: {to_rel:?}"
+    );
+}
+
 /// D63 lexicon-augmentation diagnostic: are the UMLS `RecQ` atoms (C0084304 "RecQ Helicases") seeded as
 /// `lexicon:form` entries in the snapshot? If so, a `TextIndex` over `lexicon:form` (BM25/token) would
 /// ground the OOV surface `recq` → those atoms → the concept — without an HGNC import. The exact
