@@ -256,7 +256,7 @@ Lifted directly from nanoda_lib (`inductive.rs:845-903`). An inductive type `D :
 
 **Case B — exactly one constructor, with restrictions.** `D` has exactly one constructor `c : T → D`, and each argument of `c`:
   - is itself in `Prop`, **or**
-  - appears in the *conclusion* (the indices of `D`, after the parameters), so the eliminator can reconstruct it from the type alone.
+  - **is** one of the *conclusion*'s indices (the argument variable itself occurs as an index of `D`, after the parameters), so the eliminator can reconstruct it from the type alone. An index that merely *mentions* the argument (e.g. `f(a)`) does not determine it and does not qualify — admitting it would let large elimination distinguish proofs that proof irrelevance makes definitionally equal.
 
 Examples that pass: `Eq` (one ctor `refl`, the arguments `x` and `y` appear in the indices); `True` (one ctor `intro`, no arguments). Examples that fail: any `∃`-like singleton whose witness is in `Type` and not visible in the result type.
 

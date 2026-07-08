@@ -405,7 +405,7 @@ Estimated effort: **4–6 weeks** for a single experienced kernel engineer. Larg
 
 **Exit criterion:** D46 §7's algorithm matches the doc text without the "EigenTT lacks indices" caveat.
 
-**Status on landing:** complete. `ctor_args_pass_singleton_b` (renamed from `ctor_args_all_propositional`) accepts `num_indices`, extracts conclusion indices, and admits non-Prop args that *appear in the indices*. `exp_mentions_var` + `patt_binds` helpers handle binder shadowing. The canonical `Eq A x y` admits large elim via the proper algorithm; 3 tests verify Eq admitted, BadIxProp (non-Prop arg not in conclusion) rejected, non-indexed backward-compat.
+**Status on landing:** complete. `ctor_args_pass_singleton_b` (renamed from `ctor_args_all_propositional`) accepts `num_indices`, extracts conclusion indices, and admits non-Prop args that *are themselves conclusion indices* (the argument variable occurs as an index — membership, not mere mention; tightened per finding F-4 of the NbE port-fidelity analysis, matching nanoda's `large_elim_test_aux`). Shadowed binders are unrecoverable and don't qualify. The canonical `Eq A x y` admits large elim via the proper algorithm; tests verify Eq admitted, BadIxProp (non-Prop arg not in conclusion) rejected, mentions-only index rejected, shadowed reference rejected, non-indexed backward-compat.
 
 ### 5.9 Phase I — D47 chain mirror update (~3 days)
 
