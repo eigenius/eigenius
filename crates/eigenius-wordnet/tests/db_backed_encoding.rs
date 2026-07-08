@@ -420,57 +420,34 @@ fn probe_s20_isolation_at_scale() {
             "GAP".to_string()
         }
     };
-    // Phase-D (#7 residual): every NP piece closes in isolation (`these four lineages`, the PP-modifier,
-    // `cells from these four lineages affect genes` all CLOSE), yet the corpus sentence gaps. So it's a
-    // COMPOUNDING-COMPLEXITY interaction (PP-modified compound subject × the comparative predicate).
-    // Bridge the two halves + sweep cap/beam on the gapping sentence to tell a cap/beam artifact (like
-    // #7-comparative, which closed at cap 4) from a genuine grammar gap.
-    // Round 2: pin the real blocker for the 4 gaps whose headline construction works (#3/#4/#8/#9) +
-    // the #2 sub-question. Measure config; the two suspected-search fulls also swept at cap8/beam512.
+    // #5 verification (linking-verb copula, FrameKind::LinkingAdj / frames 6/7) after the reseed:
+    // `remained essential` / `remained true` should now CLOSE (was GAP), and the corpus #5 sentence
+    // either closes (7→6) or reveals a residual SEARCH limit on the compound `PCR-based MSI
+    // classifications` (cap8 tells which).
     let idx = build_index(&head);
     for (tag, s) in [
-        // #2: is it `arise from` itself, or the mass-nominalization subject?
-        ("#2 count", "mutations arise from genes"), //             arise-from, count nouns
-        ("#2 mass-subj", "inactivation arises from genes"), //     mass subject, count object
-        // #3: the passive works; suspect the compound object `screening data sets`
+        ("#5 remain-adj", "genes remained essential"), //          was GAP → expect CLOSED
+        ("#5 remain-true", "findings remained true"), //           the corpus verb+adjective
+        ("#5 become", "genes became essential"), //                another linking verb (frame 6/7)
         (
-            "#3 compound-obj",
-            "genes were represented by screening data sets",
-        ),
-        // #4: the `as Y` works; suspect `compared to` and/or complexity
-        ("#4 compared-to", "HeLa affects BRCA1 compared to MSH2"),
-        (
-            "#4 as+compared",
-            "HeLa identified BRCA1 as a gene compared to MSH2",
-        ),
-        // #8: the relative works; suspect the RELATIONAL adjective `predictive of X` in the body
-        ("#8 predictive", "cells are predictive of deficiency"), //           relational adj, predicative
-        (
-            "#8 rel-relational",
-            "cells possess genes that are predictive of deficiency",
-        ), // in the relative
-        // #9: negation works; suspect the clausal-complement + negation interaction
-        (
-            "#9 compl-neg",
-            "observations suggest that dependency is not essential",
-        ),
-        (
-            "#9 compl-nom",
-            "observations suggest that dependency is a phenotype",
-        ), // complement + predicate-nominal
+            "#5 corpus",
+            "These findings remained true with PCR-based MSI classifications",
+        ), // full #5
     ] {
-        eprintln!("  {tag:<16} {:<10} {s:?}", outcome(&idx, s));
+        eprintln!("  {tag:<14} {:<10} {s:?}", outcome(&idx, s));
     }
-    // Search vs grammar for the two suspected noun-pile/complexity gaps: cap8/beam512, static rank.
+    // Grammar vs search for the full #5 corpus sentence: cap8/beam512, static rank.
     let hi = LexicalIndex::build(Arc::clone(&head))
         .with_sense_cap(8)
         .with_cell_beam(512);
-    for (tag, s) in [
-        ("#3 full@cap8", "Some MSI lines and some MSS lines were represented by these screening data sets"),
-        ("#4 full@cap8", "Project Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines"),
-    ] {
-        eprintln!("  {tag:<16} {:<10} {s:?}", outcome(&hi, s));
-    }
+    eprintln!(
+        "  #5 corpus@cap8 {:<10} {:?}",
+        outcome(
+            &hi,
+            "These findings remained true with PCR-based MSI classifications"
+        ),
+        "These findings remained true with PCR-based MSI classifications"
+    );
 }
 
 #[test]
