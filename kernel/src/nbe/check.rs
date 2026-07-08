@@ -1301,7 +1301,9 @@ pub fn large_elim_admitted(decl: &InductiveDecl) -> bool {
 /// each non-parameter argument must be either:
 ///
 /// - syntactically propositional (inhabits Prop), **or**
-/// - appear in one of the conclusion's index expressions (D48 Phase H).
+/// - **be** one of the conclusion's index expressions — the index is
+///   the argument variable itself (D48 Phase H, strict reading; closes
+///   finding F-4 of docs/notes/nbe-reorganization-analysis.md).
 ///
 /// The second clause is what admits e.g. `Eq A x y` whose ctor
 /// `refl(a) : Eq A a a` has `a` appearing in both index positions —
@@ -1355,10 +1357,26 @@ fn ctor_args_pass_singleton_b(ctor_typ: &Exp, num_params: usize, num_indices: us
         }
         _ => Vec::new(),
     };
-    // Each non-param arg must be propositional OR appear in indices.
-    for (name, typ) in &non_param_args {
+    // Each non-param arg must be propositional OR *be* one of the
+    // conclusion's index expressions — syntactically `Var(name)` of an
+    // unshadowed binder. Membership, not mere mention: the eliminator
+    // must recover the arg from the type's indices (D46 §7 Case B;
+    // nanoda_lib `large_elim_test_aux`). An index that only mentions
+    // the arg (e.g. `f(n)`) does not determine it, and admitting it
+    // would let large elimination distinguish proofs that D46 proof
+    // irrelevance makes definitionally equal.
+    for (i, (name, typ)) in non_param_args.iter().enumerate() {
         let propositional = is_syntactically_propositional_type(typ);
-        let in_indices = !name.is_empty() && index_exps.iter().any(|e| exp_mentions_var(e, name));
+        // A later binder with the same name shadows this one —
+        // `Var(name)` in the conclusion then refers to the later arg.
+        let shadowed = non_param_args[i + 1..]
+            .iter()
+            .any(|(later, _)| later == name);
+        let in_indices = !name.is_empty()
+            && !shadowed
+            && index_exps
+                .iter()
+                .any(|e| matches!(e, Exp::Var(n) if n == name));
         if !propositional && !in_indices {
             return false;
         }
@@ -3316,18 +3334,15 @@ mod tests {
         assert!(large_elim_admitted(&decl));
     }
 
-    /// Recorded divergence from nanoda_lib (port-fidelity analysis,
+    /// Closes finding F-4 (port-fidelity analysis,
     /// docs/notes/nbe-reorganization-analysis.md §4): singleton-elim
-    /// Case B. nanoda's `large_elim_test_aux` (inductive.rs:845 @
-    /// f58f2f6) requires each non-Prop ctor arg to literally *be* one
-    /// of the conclusion's applied params/indices (set membership) —
-    /// the eliminator must be able to recover the arg from the type's
-    /// indices. Our `ctor_args_pass_singleton_b` accepts when an index
-    /// expression merely *mentions* the arg (`exp_mentions_var`), which
-    /// does not imply recoverability (an index `f(n)` mentions `n`
-    /// without determining it).
+    /// Case B requires each non-Prop ctor arg to *be* one of the
+    /// conclusion's indices (set membership, matching nanoda's
+    /// `large_elim_test_aux` @ f58f2f6) — an index that merely
+    /// *mentions* the arg does not determine it, so large elim is not
+    /// admitted.
     #[test]
-    fn parity_nanoda_singleton_elim_mentions_only_index_admitted() {
+    fn singleton_elim_rejects_index_that_only_mentions_arg() {
         // P : 1 → Prop with ctor `mk : (n : 1) → P (n, ())` — the index
         // expression `(n, ())` mentions `n` but is not `n` itself.
         let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
@@ -3356,23 +3371,63 @@ mod tests {
                 typ: ctor_typ,
             }],
         };
-        // Current behavior: admitted. nanoda: not large-eliminating.
         assert!(
-            large_elim_admitted(&decl),
-            "current checker admits large elim when an index merely mentions the arg"
+            !large_elim_admitted(&decl),
+            "an index that merely mentions the arg must not admit large elim"
         );
     }
 
-    /// Recorded divergence from nanoda_lib (port-fidelity analysis,
+    /// F-4 companion: an arg whose name is rebound by a later binder is
+    /// not recoverable through `Var(name)` — the conclusion index
+    /// refers to the later binder.
+    #[test]
+    fn singleton_elim_rejects_shadowed_arg_reference() {
+        // P : 1 → Prop with ctor `mk : (n : 1) → (n : Id(1,(),())) → P n`
+        // — the index `n` refers to the SECOND (propositional) binder;
+        // the first, non-Prop `n` is shadowed and unrecoverable.
+        let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:ShadowIx").unwrap(),
+            name: "ShadowIx".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(0),
+            ctors: Vec::new(),
+        });
+        let conclusion = Exp::InductiveType(self_ref, vec![Exp::Var("n".to_string())]);
+        let id_typ = Exp::Id(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
+        let ctor_typ = Exp::Pi(
+            Patt::Var("n".to_string()),
+            Box::new(Exp::One), // non-Prop, shadowed below
+            Box::new(Exp::Pi(
+                Patt::Var("n".to_string()),
+                Box::new(id_typ), // propositional
+                Box::new(conclusion),
+            )),
+        );
+        let decl = crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:ShadowIx").unwrap(),
+            name: "ShadowIx".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(0),
+            ctors: vec![crate::nbe::term::InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: ctor_typ,
+            }],
+        };
+        assert!(
+            !large_elim_admitted(&decl),
+            "a shadowed arg is not recoverable from the indices"
+        );
+    }
+
+    /// Closes finding F-3 (port-fidelity analysis,
     /// docs/notes/nbe-reorganization-analysis.md §4): a constructor
     /// conclusion that instantiates the block parameter to something
-    /// other than the parameter itself. nanoda's `check_ctor` →
-    /// `is_valid_ind_app` requires the conclusion's param args to be
-    /// exactly the block params; our pipeline (`check_positivity` +
-    /// `validate_indexed_ctor_conclusions`) checks only the head IRI
-    /// and the arg *count*.
+    /// other than the parameter itself is rejected at declaration
+    /// checking, matching nanoda's `check_ctor` → `is_valid_ind_app`.
     #[test]
-    fn parity_nanoda_nonuniform_conclusion_params_accepted() {
+    fn rejects_nonuniform_conclusion_params() {
         // Q(A : Set) { mk : Q(1) } — conclusion `Q(1)`, not `Q(A)`.
         let s = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
             iri: crate::ontology::iri::Iri::parse("urn:test:Q").unwrap(),
@@ -3398,10 +3453,9 @@ mod tests {
             }],
         });
         let mut ctx = CheckCtx::new(Rho::Nil, Vec::new());
-        // Current behavior: accepted. nanoda rejects non-uniform
-        // conclusion params.
-        check_type(&mut ctx, &Exp::Inductive(decl))
-            .expect("current checker accepts non-uniform conclusion params");
+        let err =
+            check_type(&mut ctx, &Exp::Inductive(decl)).expect_err("non-uniform conclusion params");
+        assert!(err.contains("parameters through unchanged"), "got: {err}");
     }
 
     #[test]

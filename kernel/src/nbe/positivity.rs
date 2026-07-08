@@ -42,8 +42,12 @@
 //!   inductive appears inside another inductive's parameters.
 //! - **Wrong result type** — constructor whose Π-telescope ends in
 //!   anything other than an application of the parent inductive.
+//! - **Non-uniform parameters** — a recursive occurrence or conclusion
+//!   that instantiates a declaration parameter to anything other than
+//!   the parameter variable itself (`P(A) { mk : P(1) → P(A) }`,
+//!   `Q(A) { mk : Q(1) }`). Port of nanoda_lib's `ctor_app_params_ok`.
 
-use crate::nbe::term::{Decl, Exp, InductiveDecl};
+use crate::nbe::term::{Decl, Exp, InductiveDecl, Patt};
 
 /// Validate every constructor of `decl` for strict positivity.
 ///
@@ -61,19 +65,94 @@ pub fn check_positivity(decl: &InductiveDecl) -> Result<(), String> {
 ///
 /// Walks the Π-telescope, skipping the first `decl.params.len()` binders
 /// (the parameter prefix), and validates each remaining binder type plus
-/// the final result.
+/// the final result. Tracks the prefix binder names so occurrences of
+/// `decl` can be checked for parameter uniformity: a recursive
+/// occurrence (or the conclusion) must pass the parameters through
+/// unchanged, as the parameter variables themselves. A later binder
+/// that rebinds a parameter's name shadows it — `Var(name)` no longer
+/// refers to the parameter, so uniformity becomes unsatisfiable through
+/// that name.
 fn check_constructor(decl: &InductiveDecl, ctor_name: &str, ctor_typ: &Exp) -> Result<(), String> {
     let mut current = ctor_typ;
     let mut params_to_skip = decl.params.len();
-    while let Exp::Pi(_, dom, body) = current {
+    // Ctor-prefix binder names, in parameter order; `None` = anonymous
+    // or shadowed (unreferencable).
+    let mut param_refs: Vec<Option<String>> = Vec::with_capacity(decl.params.len());
+    while let Exp::Pi(patt, dom, body) = current {
         if params_to_skip > 0 {
             params_to_skip -= 1;
+            let name = match patt {
+                Patt::Var(n) => Some(n.clone()),
+                _ => None,
+            };
+            // A duplicate parameter name shadows the earlier one.
+            if let Some(n) = &name {
+                shadow_param_refs(&mut param_refs, n);
+            }
+            param_refs.push(name);
         } else {
-            check_arg_positivity(decl, ctor_name, dom)?;
+            // The binder's own domain is checked before its pattern
+            // enters scope; shadowing applies to later args and the
+            // conclusion only.
+            check_arg_positivity(decl, ctor_name, dom, &param_refs)?;
+            shadow_patt(&mut param_refs, patt);
         }
         current = body;
     }
-    check_result_type(decl, ctor_name, current)
+    check_result_type(decl, ctor_name, current, &param_refs)
+}
+
+/// Clear every `param_refs` entry equal to `name` (it is shadowed).
+fn shadow_param_refs(param_refs: &mut [Option<String>], name: &str) {
+    for entry in param_refs.iter_mut() {
+        if entry.as_deref() == Some(name) {
+            *entry = None;
+        }
+    }
+}
+
+/// Apply the shadowing effect of a binder pattern to `param_refs`.
+fn shadow_patt(param_refs: &mut [Option<String>], patt: &Patt) {
+    match patt {
+        Patt::Var(n) => shadow_param_refs(param_refs, n),
+        Patt::Pair(a, b) => {
+            shadow_patt(param_refs, a);
+            shadow_patt(param_refs, b);
+        }
+        Patt::Unit => {}
+    }
+}
+
+/// Check that the parameter prefix of an application of `decl` passes
+/// the declaration parameters through unchanged: argument #i must be
+/// the (unshadowed) parameter variable itself. Port of nanoda_lib's
+/// `ctor_app_params_ok` (inductive.rs @ f58f2f6) — without this, a
+/// recursive occurrence like `P(1)` inside `P(A)` derives an induction
+/// hypothesis `C(arg)` with `arg : P(1)` against a motive
+/// `C : P(A) → Sort`, and a conclusion like `Q(1)` gives the ctor a
+/// type unrelated to the declared family.
+fn check_params_uniform(
+    decl: &InductiveDecl,
+    ctor_name: &str,
+    param_args: &[Exp],
+    param_refs: &[Option<String>],
+    context: &str,
+) -> Result<(), String> {
+    for (i, arg) in param_args.iter().enumerate() {
+        let ok = matches!(
+            (arg, param_refs.get(i)),
+            (Exp::Var(n), Some(Some(p))) if n == p
+        );
+        if !ok {
+            return Err(format!(
+                "constructor `{}.{ctor_name}`: {context} of `{}` must pass the \
+                 declaration parameters through unchanged — argument #{i} is not \
+                 the parameter variable",
+                decl.name, decl.name
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Validate one constructor argument's type for strict positivity.
@@ -81,25 +160,47 @@ fn check_constructor(decl: &InductiveDecl, ctor_name: &str, ctor_typ: &Exp) -> R
 /// Three cases, in order:
 /// 1. The type does not mention the inductive at all → accept (non-recursive arg).
 /// 2. The type is a direct application `Exp::InductiveType(decl, args)`
-///    and none of `args` mentions the inductive → accept (direct
-///    recursive arg; Phase 11b iota produces one IH per such arg).
+///    with full arity, the parameter prefix passed through unchanged,
+///    and no inductive occurrence in the index arguments → accept
+///    (direct recursive arg; Phase 11b iota produces one IH per such arg).
 /// 3. Otherwise the inductive appears either under a Π or nested inside
 ///    another inductive — reject.
 fn check_arg_positivity(
     decl: &InductiveDecl,
     ctor_name: &str,
     arg_typ: &Exp,
+    param_refs: &[Option<String>],
 ) -> Result<(), String> {
     if !has_ind_occurrence(decl, arg_typ) {
         return Ok(());
     }
     if let Exp::InductiveType(d, args) = arg_typ {
         if d.iri == decl.iri {
-            for arg in args {
+            let n_params = decl.params.len();
+            let n_indices = decl.indices.len();
+            if args.len() != n_params + n_indices {
+                return Err(format!(
+                    "constructor `{}.{ctor_name}`: recursive occurrence of `{}` \
+                     must apply {} parameter(s) + {} index/indices, got {} argument(s)",
+                    decl.name,
+                    decl.name,
+                    n_params,
+                    n_indices,
+                    args.len()
+                ));
+            }
+            check_params_uniform(
+                decl,
+                ctor_name,
+                &args[..n_params],
+                param_refs,
+                "a recursive occurrence",
+            )?;
+            for arg in &args[n_params..] {
                 if has_ind_occurrence(decl, arg) {
                     return Err(format!(
                         "non-positive occurrence: constructor `{}.{ctor_name}` has a \
-                         nested inductive use of `{}` inside its own parameters",
+                         nested inductive use of `{}` inside its own indices",
                         decl.name, decl.name
                     ));
                 }
@@ -115,10 +216,21 @@ fn check_arg_positivity(
 }
 
 /// The constructor's result type must be a direct application of the
-/// parent inductive.
-fn check_result_type(decl: &InductiveDecl, ctor_name: &str, typ: &Exp) -> Result<(), String> {
+/// parent inductive, with the parameter prefix passed through unchanged.
+/// (Conclusion arity — params + indices — is validated with friendlier
+/// diagnostics by `check::validate_indexed_ctor_conclusions`, which
+/// runs alongside this checker in `check_type`.)
+fn check_result_type(
+    decl: &InductiveDecl,
+    ctor_name: &str,
+    typ: &Exp,
+    param_refs: &[Option<String>],
+) -> Result<(), String> {
     match typ {
-        Exp::InductiveType(d, _) if d.iri == decl.iri => Ok(()),
+        Exp::InductiveType(d, args) if d.iri == decl.iri => {
+            let upto = decl.params.len().min(args.len());
+            check_params_uniform(decl, ctor_name, &args[..upto], param_refs, "the conclusion")
+        }
         _ => Err(format!(
             "constructor `{}.{ctor_name}` must end in an application of `{}`",
             decl.name, decl.name
@@ -150,7 +262,17 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
                 || minors.iter().any(|m| has_ind_occurrence(decl, m))
                 || has_ind_occurrence(decl, major)
         }
-        Exp::Inductive(_) => false,
+        // A declaration expression evaluates to the same type former as
+        // `Exp::InductiveType(d, [])` (see `eval`'s `Exp::Inductive`
+        // arm), so a reference to `decl` in this form IS an occurrence.
+        // Also scan the embedded declaration's constructor types: a
+        // different declaration nested in argument position may itself
+        // reference `decl`. (Self-reference stubs carry empty `ctors`,
+        // and the iri short-circuit fires first for the decl itself, so
+        // this cannot recurse unboundedly.)
+        Exp::Inductive(d) => {
+            d.iri == decl.iri || d.ctors.iter().any(|c| has_ind_occurrence(decl, &c.typ))
+        }
 
         Exp::Pi(_, a, b) | Exp::Sig(_, a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) => {
             has_ind_occurrence(decl, a) || has_ind_occurrence(decl, b)
@@ -453,17 +575,15 @@ mod tests {
         assert!(err.contains("must end in"), "unexpected error: {err}");
     }
 
-    /// Recorded divergence from nanoda_lib (port-fidelity analysis,
+    /// Closes finding F-2 (port-fidelity analysis,
     /// docs/notes/nbe-reorganization-analysis.md §4): a recursive
     /// occurrence that instantiates the block parameter to something
-    /// other than the parameter itself. nanoda's `is_valid_ind_app`
-    /// (inductive.rs:691 @ f58f2f6) rejects this via
-    /// `ctor_app_params_ok`; our `check_arg_positivity` only requires
-    /// the occurrence's args to be I-free, so it accepts. The derived
-    /// IH for such an arg is `C(arg)` with `arg : P(1)` against a
-    /// motive `C : P(A) → Sort` — ill-typed at recursor use sites.
+    /// other than the parameter itself is rejected, matching nanoda's
+    /// `is_valid_ind_app`/`ctor_app_params_ok` (inductive.rs:691 @
+    /// f58f2f6). Without the check, the derived IH for such an arg is
+    /// `C(arg)` with `arg : P(1)` against a motive `C : P(A) → Sort`.
     #[test]
-    fn parity_nanoda_param_mismatch_in_recursive_arg_accepted() {
+    fn rejects_param_mismatch_in_recursive_arg() {
         // P(A : Set) { mk : P(1) → P(A) }
         let s = self_ref("P");
         let rec_occ_wrong_param = Exp::InductiveType(s.clone(), vec![Exp::One]);
@@ -487,28 +607,26 @@ mod tests {
                 ),
             }],
         };
-        // Current behavior: accepted. nanoda rejects.
-        check_positivity(&decl).expect("current checker accepts param-mismatched recursive arg");
+        let err = check_positivity(&decl).expect_err("param-mismatched recursive arg");
+        assert!(err.contains("parameters through unchanged"), "got: {err}");
     }
 
-    /// Recorded finding (port-fidelity analysis,
+    /// Closes finding F-1 (port-fidelity analysis,
     /// docs/notes/nbe-reorganization-analysis.md §4): `Exp::Inductive(d)`
     /// evaluates to the same `Val::InductiveType` as
-    /// `Exp::InductiveType(d, [])` (eval.rs `Exp::Inductive` arm), but
-    /// `has_ind_occurrence` returns `false` for `Exp::Inductive(_)` —
-    /// so a negative occurrence written in the `Exp::Inductive` form
-    /// evades the checker. Not a nanoda-parity case (nanoda has a
-    /// single `Const` representation); a robustness gap of our dual
-    /// representation, reachable through the kernel API.
+    /// `Exp::InductiveType(d, [])` (eval.rs `Exp::Inductive` arm), so
+    /// `has_ind_occurrence` treats it as an occurrence — a negative
+    /// occurrence written in the `Exp::Inductive` form no longer evades
+    /// the checker.
     #[test]
-    fn finding_disguised_inductive_exp_evades_occurrence_check() {
+    fn rejects_disguised_inductive_negative_occurrence() {
         // Neg { mk : (Neg → 1) → Neg } with the negative `Neg` written
         // as `Exp::Inductive(stub)` instead of `Exp::InductiveType`.
         let s = self_ref("Neg");
         let neg_ty = Exp::InductiveType(s.clone(), Vec::new());
         let disguised_negative = Exp::Pi(
             Patt::Unit,
-            Box::new(Exp::Inductive(s)), // ← invisible to has_ind_occurrence
+            Box::new(Exp::Inductive(s)), // ← same type former, non-canonical spelling
             Box::new(Exp::One),
         );
         let decl = InductiveDecl {
@@ -522,9 +640,10 @@ mod tests {
                 typ: Exp::Pi(Patt::Unit, Box::new(disguised_negative), Box::new(neg_ty)),
             }],
         };
-        // Current behavior: accepted despite the negative occurrence.
         // The canonical-form spelling of the same declaration is
-        // rejected by `rejects_negative_occurrence` above.
-        check_positivity(&decl).expect("current checker accepts the disguised negative occurrence");
+        // rejected by `rejects_negative_occurrence` above; the
+        // disguised spelling must be too.
+        let err = check_positivity(&decl).expect_err("disguised negative occurrence");
+        assert!(err.contains("non-positive"), "got: {err}");
     }
 }
