@@ -123,6 +123,16 @@
     "urn:eigenius:core:short_name": "EmptyTrace"
   },
   {
+    "@id": "urn:eigenius:reflection:FieldTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "One entry of a ConstructTrace's per-field traces: the constructed property's IRI plus the trace of the field expression's evaluation.",
+    "urn:eigenius:core:short_name": "FieldTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:property",
+      "urn:eigenius:reflection:trace"
+    ]
+  },
+  {
     "@id": "urn:eigenius:reflection:ComponentTrace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
@@ -131,10 +141,10 @@
     "urn:eigenius:core:requires": [
       "urn:eigenius:reflection:component",
       "urn:eigenius:reflection:input_hash",
-      "urn:eigenius:reflection:output",
-      "urn:eigenius:reflection:timestamp"
+      "urn:eigenius:reflection:output"
     ],
     "urn:eigenius:core:recommends": [
+      "urn:eigenius:reflection:timestamp",
       "urn:eigenius:reflection:argument_hash",
       "urn:eigenius:reflection:provider",
       "urn:eigenius:reflection:model",
@@ -177,8 +187,8 @@
     "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:description": "Trace of a Let binding evaluation.",
     "urn:eigenius:core:short_name": "LetTrace",
-    "urn:eigenius:core:requires": [
-      "urn:eigenius:reflection:name",
+    "urn:eigenius:core:requires": ["urn:eigenius:reflection:name"],
+    "urn:eigenius:core:recommends": [
       "urn:eigenius:reflection:value_trace",
       "urn:eigenius:reflection:body_trace"
     ]
@@ -209,12 +219,10 @@
     "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:description": "Trace of a Case expression evaluation.",
     "urn:eigenius:core:short_name": "CaseTrace",
-    "urn:eigenius:core:requires": [
-      "urn:eigenius:reflection:branch_taken",
-      "urn:eigenius:reflection:branch_trace"
-    ],
+    "urn:eigenius:core:requires": ["urn:eigenius:reflection:branch_taken"],
     "urn:eigenius:core:recommends": [
-      "urn:eigenius:reflection:scrutinee_trace"
+      "urn:eigenius:reflection:scrutinee_trace",
+      "urn:eigenius:reflection:branch_trace"
     ]
   },
   {
@@ -233,10 +241,8 @@
     "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:description": "Trace of a property projection.",
     "urn:eigenius:core:short_name": "ProjectTrace",
-    "urn:eigenius:core:requires": [
-      "urn:eigenius:reflection:source_trace",
-      "urn:eigenius:reflection:property"
-    ]
+    "urn:eigenius:core:requires": ["urn:eigenius:reflection:property"],
+    "urn:eigenius:core:recommends": ["urn:eigenius:reflection:source_trace"]
   },
   {
     "@id": "urn:eigenius:reflection:SeqTrace",
@@ -477,6 +483,15 @@
     "urn:eigenius:core:domain": ["urn:eigenius:reflection:SeqTrace"]
   },
   {
+    "@id": "urn:eigenius:reflection:trace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The trace node of a FieldTrace entry (EmptyTrace when the field evaluated purely).",
+    "urn:eigenius:core:short_name": "trace",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:FieldTrace"]
+  },
+  {
     "@id": "urn:eigenius:reflection:body_trace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "Trace of the body expression in a Let binding.",
@@ -532,9 +547,10 @@
   {
     "@id": "urn:eigenius:reflection:field_traces",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Per-field traces in a ConstructTrace.",
+    "urn:eigenius:core:description": "Per-field traces in a ConstructTrace: an array of FieldTrace entries (property IRI + field trace).",
     "urn:eigenius:core:short_name": "field_traces",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:FieldTrace"],
     "urn:eigenius:core:domain": ["urn:eigenius:reflection:ConstructTrace"]
   },
   {
@@ -579,11 +595,11 @@
   {
     "@id": "urn:eigenius:reflection:property",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The property accessed in a ProjectTrace.",
+    "urn:eigenius:core:description": "The property accessed in a ProjectTrace, or constructed in a FieldTrace entry.",
     "urn:eigenius:core:short_name": "property",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProjectTrace"]
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProjectTrace", "urn:eigenius:reflection:FieldTrace"]
   },
   {
     "@id": "urn:eigenius:reflection:program",

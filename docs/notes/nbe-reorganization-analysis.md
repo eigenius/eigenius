@@ -492,10 +492,27 @@ Addendum (2026-07-07, follow-on to item 5): the trace schema is now closed over 
 class — abstract `reflection:Trace`, all node classes `subclass_of` it, every trace-child
 property + `trace_tree` `class_types`-constrained to it (Rule 8 matches transitively), and
 the untyped empty-embedded-resource placeholder replaced by typed `reflection:EmptyTrace`
-(`empty_trace_resource()` in program/trace.rs). Test:
-`validation::tests::program_trace_tree_root_is_class_typed` (typed root passes, untyped
-root rejected). **Open observation for a future backlog item**: `validate_resource` does
-not recurse into embedded resources' properties, so class constraints enforce at each
-validated resource's first level only (the `trace_tree` root, here); making embedded-tree
-validation recursive is a validator-wide semantic change with platform-wide blast radius —
-its own design decision, not slipped into this change.
+(`empty_trace_resource()` in program/trace.rs).
+
+Addendum 2 (2026-07-07): **embedded-resource recursion (validation Rule 23) now landed** —
+`validate_resource` descends into every embedded resource that declares an `is_a`, applying
+the full rule set at every depth; embedded resources without `is_a` (opaque internal
+program-/comorphism-mirror carriers) are skipped. Closing the recursion gap surfaced four
+latent schema/impl bugs the non-recursion had hidden, all fixed here:
+
+- `ConstructTrace.field_traces` was an untyped IRI-keyed embedded map (recursion can't type
+  it) → restructured to a `resource_array` of typed `reflection:FieldTrace` entries
+  (`property` + `trace`), serializer updated.
+- Four trace-node classes listed structurally-optional children in `requires`
+  (`LetTrace.value_trace`/`body_trace`, `ProjectTrace.source_trace`, `CaseTrace.branch_trace`,
+  `ComponentTrace.timestamp` — the last never emitted at all) → moved to `recommends`.
+- `reflection:property` domain didn't include `FieldTrace` → added.
+- The kinase-notebook compile test asserted Part C's comorphism-dispatching `produce_problem`
+  program "validates cleanly"; it never did — the dangling comorphism reference sat in an
+  embedded Apply node the old validator skipped. Its reference closure (comorphism → formats
+  → institution → `symbolics:env:v1`) bottoms at a Julia runtime-env build artifact
+  unresolvable offline, so the test now compile-checks such cells but excludes them from the
+  clean-validation chain (detected structurally, not by cell id).
+Tests: `validation::tests::embedded_typed_instance_is_validated_at_depth` (deep node
+validated), `…program_trace_tree_root_is_class_typed` (root typing), plus the rocksdb
+`run_program_commits_*` integration path. Full workspace green (kernel lib 1624).

@@ -53,18 +53,29 @@ untraced paths cannot drift apart.
 All node classes are `subclass_of` the abstract **`reflection:Trace`** base
 class, and every trace-child property (`value_trace`, `body_trace`,
 `source_trace`, `scrutinee_trace`, `branch_trace`, `element_traces`,
-`step_traces`, `child_traces`, and `ProgramTrace.trace_tree`) is
-`class_types`-constrained to it — Rule 8 matches transitively via
-`subclass_of`. A positional slot whose evaluation was pure (a Map element,
-Reduce step, or Construct field) serializes as **`reflection:EmptyTrace`**,
-a typed placeholder replacing the untyped empty embedded resource used
-before. Exception: `ConstructTrace.field_traces` is an embedded map keyed
-by property IRI (its container is not itself a trace node), so it carries
-no class constraint. Note on enforcement depth: `validate_resource` checks
-class types on a resource's own property values but does not recurse into
-embedded resources' properties, so the constraint is mechanically enforced
-at each validated resource's first level (in particular the `trace_tree`
-root); deeper levels are schema-documented.
+`step_traces`, `child_traces`, `FieldTrace.trace`, and
+`ProgramTrace.trace_tree`) is `class_types`-constrained to it — Rule 8
+matches transitively via `subclass_of`. A positional slot whose evaluation
+was pure (a Map element, Reduce step, or Construct field) serializes as
+**`reflection:EmptyTrace`**, a typed placeholder replacing the untyped
+empty embedded resource used before.
+
+`ConstructTrace.field_traces` is a `resource_array` of
+**`reflection:FieldTrace`** entries, each a typed resource carrying the
+constructed `property` IRI and the field's `trace` node. (It was formerly
+an untyped embedded resource abused as an IRI-keyed map — a shape recursive
+validation rightly rejects, since the keys are other classes' property
+IRIs.)
+
+**Enforcement is recursive** (validation Rule 23): `validate_resource`
+descends into every embedded resource that declares an `is_a`, applying the
+full rule set at every depth — so a malformed node deep inside a
+`trace_tree` is caught, not just the root. Embedded resources *without* an
+`is_a` are skipped: the resource type doubles as a structural carrier for
+opaque internal encodings (program-expression and comorphism-argument
+mirrors hold sub-expressions under raw property IRIs), which are not domain
+data. `is_a` presence is the discriminator; every trace node sets it, so
+the trace tree is fully covered.
 
 ### 2.1 How evaluation produces traces
 

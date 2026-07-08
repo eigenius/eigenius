@@ -436,23 +436,33 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
         Trace::Construct { field_traces } => {
             let mut r = Resource::new_embedded();
             set_is_a(&mut r, "urn:eigenius:reflection:ConstructTrace");
-            let mut fields = Resource::new_embedded();
-            for (iri, t) in field_traces {
-                match t {
-                    Some(t) => {
-                        fields.set(iri.clone(), Value::Embedded(Box::new(trace_to_resource(t))));
-                    }
-                    None => {
-                        fields.set(
-                            iri.clone(),
-                            Value::Embedded(Box::new(empty_trace_resource())),
-                        );
-                    }
-                }
-            }
+            // One typed FieldTrace entry per constructed property. (An
+            // earlier encoding abused an untyped embedded resource as an
+            // IRI-keyed map, which recursive validation rightly rejects:
+            // the keys are other classes' property IRIs.)
+            let entries: Vec<Value> = field_traces
+                .iter()
+                .map(|(iri, t)| {
+                    let mut entry = Resource::new_embedded();
+                    set_is_a(&mut entry, "urn:eigenius:reflection:FieldTrace");
+                    entry.set(
+                        Iri::parse("urn:eigenius:reflection:property").unwrap(),
+                        Value::String(iri.as_str().to_string()),
+                    );
+                    let trace_node = match t {
+                        Some(t) => trace_to_resource(t),
+                        None => empty_trace_resource(),
+                    };
+                    entry.set(
+                        Iri::parse("urn:eigenius:reflection:trace").unwrap(),
+                        Value::Embedded(Box::new(trace_node)),
+                    );
+                    Value::Embedded(Box::new(entry))
+                })
+                .collect();
             r.set(
                 Iri::parse("urn:eigenius:reflection:field_traces").unwrap(),
-                Value::Embedded(Box::new(fields)),
+                Value::Array(entries),
             );
             r
         }
