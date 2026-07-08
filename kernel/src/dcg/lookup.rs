@@ -1299,10 +1299,36 @@ impl LexicalIndex {
     ) -> (Vec<Item>, Vec<OpenParse>) {
         // Contextual sense ranking computed ONCE (as in the unpacked path), threaded into each attempt.
         let ranks = self.contextual_sense_ranks(text, lemmatizer, scope);
+        // Pass 1 — the reranked order (static, if no ranker configured).
+        let (closed, open) = self.widen_packed(text, lemmatizer, scope, ranks.as_ref());
+        if !closed.is_empty() || !open.is_empty() {
+            return (closed, open);
+        }
+        // Pass 2 — STATIC-RANK FALLBACK (GH #97; mirrors [`Self::parse_unpacked`]). The untrusted
+        // reranker can bury a construction-triggered category variant that static rank + widen keeps;
+        // escalating the cap within the reranked order never recovers it. Retry ONCE under static rank
+        // when the reranked order gaps on an all-known-vocabulary sentence.
+        if ranks.is_some() && self.all_prose_tokens_known(text, lemmatizer) {
+            return self.widen_packed(text, lemmatizer, scope, None);
+        }
+        (closed, open)
+    }
+
+    /// One full packed widen-on-failure escalation under a FIXED sense order (`ranks`): parse at the
+    /// base cap, and while an all-known-vocabulary sentence yields nothing, double the sense cap (up to
+    /// [`SENSE_CAP_WIDEN_MAX`]) and retry. No cell-beam escalation — packing bounds the chart by cube
+    /// pruning, not the per-cell beam, so only the cap can drop a needed sense. Called by
+    /// [`Self::parse_packed`] once under the reranked order, once under static rank (the fallback).
+    fn widen_packed(
+        &self,
+        text: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+        ranks: Option<&BTreeMap<String, u32>>,
+    ) -> (Vec<Item>, Vec<OpenParse>) {
         let mut cap = self.sense_cap;
         loop {
-            let (closed, open) =
-                self.parse_packed_at_cap(text, lemmatizer, scope, cap, ranks.as_ref());
+            let (closed, open) = self.parse_packed_at_cap(text, lemmatizer, scope, cap, ranks);
             if !closed.is_empty() || !open.is_empty() {
                 return (closed, open);
             }
@@ -1869,11 +1895,41 @@ impl LexicalIndex {
         // Contextual sense ranking (GH #97): computed ONCE up front (one ranker call per parse,
         // not per widen iteration), then threaded into every capped attempt below.
         let ranks = self.contextual_sense_ranks(text, lemmatizer, scope);
+        // Pass 1 — the reranked order (static, if no ranker configured).
+        let (closed, open) = self.widen_unpacked(text, lemmatizer, scope, ranks.as_ref());
+        if !closed.is_empty() || !open.is_empty() {
+            return (closed, open);
+        }
+        // Pass 2 — STATIC-RANK FALLBACK (GH #97). The reranker is UNTRUSTED: if its ordering yields no
+        // parse even at the max cap/beam, and the failure could be a pruning artifact (every prose token
+        // known — not an OOV miss), retry ONCE under the plain static `sense_rank` order. The reranker
+        // can bury a *construction-triggered category variant* — e.g. the `cat_measure` reading of a
+        // gradable nominalization (`greater dependence on X than Y`) — that static rank + widen would
+        // keep; escalating the cap WITHIN the reranked order never recovers it. This restores the "a bad
+        // rank costs a re-parse, never a missed parse" contract to the whole widen half, not just the cap.
+        if ranks.is_some() && self.all_prose_tokens_known(text, lemmatizer) {
+            return self.widen_unpacked(text, lemmatizer, scope, None);
+        }
+        (closed, open)
+    }
+
+    /// One full unpacked widen-on-failure escalation under a FIXED sense order (`ranks`): parse at the
+    /// base cap/beam, and while an all-known-vocabulary sentence yields nothing, escalate beam-first
+    /// then the sense cap (up to [`CELL_BEAM_WIDEN_MAX`] / [`SENSE_CAP_WIDEN_MAX`]) and retry. Returns
+    /// the first non-empty forest, or the empty pair when the escalation is exhausted / an OOV blocks
+    /// widening. Called by [`Self::parse_unpacked`] — once under the reranked order, once under static
+    /// rank (the untrusted-reranker fallback).
+    fn widen_unpacked(
+        &self,
+        text: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+        ranks: Option<&BTreeMap<String, u32>>,
+    ) -> (Vec<Item>, Vec<OpenParse>) {
         let mut cap = self.sense_cap;
         let mut beam = self.cell_beam;
         loop {
-            let (closed, open) =
-                self.parse_at_cap(text, lemmatizer, scope, cap, ranks.as_ref(), beam);
+            let (closed, open) = self.parse_at_cap(text, lemmatizer, scope, cap, ranks, beam);
             if !closed.is_empty() || !open.is_empty() {
                 return (closed, open);
             }

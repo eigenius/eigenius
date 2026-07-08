@@ -199,6 +199,101 @@ fn widen_on_failure_overrides_a_misranking_reranker() {
     );
 }
 
+/// A deterministic mock [`SenseRanker`] that ranks one target sense **LAST** for every word (others
+/// keep seed order) — the adversarial "the reranker buries the needed sense" case (mirror of
+/// [`PreferSense`]).
+struct BurySense(&'static str);
+impl SenseRanker for BurySense {
+    fn rank(&self, _sentence: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+        words
+            .iter()
+            .map(|w| {
+                let mut idx: Vec<usize> = (0..w.candidates.len()).collect();
+                idx.sort_by_key(|&i| w.candidates[i].sense == self.0); // target (true) sorts LAST
+                idx
+            })
+            .collect()
+    }
+}
+
+/// A layer where the form `zib` has **17 senses**: ONE parsing sense (a singular `CellLine`, the only
+/// one that agrees with the 3sg verb `affects`) at static rank 0, and 16 non-parsing distractors
+/// (plural `Gene`, failing number agreement) at ranks 1–16. A reranker that buries the parsing sense
+/// pushes it to position 16 — **beyond** the sense-cap widen ceiling (`SENSE_CAP_WIDEN_MAX = 16`, whose
+/// top-16 is positions 0–15) — so cap-widening WITHIN the reranked order can never re-admit it.
+fn zib_layer() -> Arc<Layer> {
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
+    for r in demo {
+        b.add_resource(r).expect("add demo");
+    }
+    let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let mut fixture = String::from(
+        "namespace lexicon   = \"urn:eigenius:lexicon\";\n\
+         namespace epistemic = \"urn:eigenius:reflection:epistemic\";\n\
+         resource lexicon:zib_needed : lexicon:LexicalEntry {\n\
+             lexicon:form       = \"zib\";\n\
+             lexicon:cat        = type_expr( lexicon:cat_np(lexicon:CellLine, lexicon:sg) );\n\
+             lexicon:sem        = lexicon:hela;\n\
+             lexicon:sem_type   = type_expr( lexicon:CellLine );\n\
+             lexicon:sense      = \"zib.needed\";\n\
+             lexicon:sense_rank = 0;\n\
+             lexicon:grade      = epistemic:declared;\n\
+         }\n",
+    );
+    for i in 1..=16 {
+        fixture.push_str(&format!(
+            "resource lexicon:zib_d{i} : lexicon:LexicalEntry {{\n\
+                 lexicon:form       = \"zib\";\n\
+                 lexicon:cat        = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:pl) );\n\
+                 lexicon:sem        = lexicon:brca1;\n\
+                 lexicon:sem_type   = type_expr( lexicon:Gene );\n\
+                 lexicon:sense      = \"zib.d{i}\";\n\
+                 lexicon:sense_rank = {i};\n\
+                 lexicon:grade      = epistemic:declared;\n\
+             }}\n"
+        ));
+    }
+    let fix = esl::compile_against_layer(&fixture, &demo_layer).expect("zib fixture compiles");
+    let mut b2 = LayerBuilder::new("zib", Some(Arc::clone(&demo_layer)));
+    for r in fix {
+        b2.add_resource(r).expect("add zib");
+    }
+    Arc::new(b2.build(LayerStorage::in_memory()))
+}
+
+/// GH#97 / this session — the **static-rank widen fallback**.
+/// [`widen_on_failure_overrides_a_misranking_reranker`] covers the case cap-widening CAN recover (few
+/// senses → doubling the cap admits the needed one). This covers the case it CANNOT: a lemma with more
+/// senses than the widen ceiling, where the reranker buries the only parsing sense beyond it. Cap
+/// escalation within the reranked order stays gapped; a second pass under **static** rank recovers the
+/// parse — extending "a bad rank costs a re-parse, never a missed parse" to the whole widen half.
+#[test]
+fn static_rank_fallback_recovers_a_sense_the_reranker_buried_beyond_widen_max() {
+    // Control: static order keeps the parsing (rank-0) sense — parses without any reranker.
+    assert_eq!(
+        LexicalIndex::build(zib_layer())
+            .with_sense_cap(2)
+            .parse("zib affects HeLa", &Identity)
+            .len(),
+        1,
+        "static cap keeps the agreeing sense at rank 0"
+    );
+    // Adversarial reranker buries the ONLY parsing sense at position 16 — beyond the cap-widen ceiling
+    // (top-16 = positions 0–15). Cap escalation in the reranked order can never re-admit it; the
+    // static-rank fallback re-parses under static order and recovers.
+    assert_eq!(
+        LexicalIndex::build(zib_layer())
+            .with_sense_cap(2)
+            .with_sense_ranker(Box::new(BurySense("zib.needed")))
+            .parse("zib affects HeLa", &Identity)
+            .len(),
+        1,
+        "static-rank fallback recovers the parse the reranker buried beyond widen-max"
+    );
+}
+
 /// Two **both-valid** singular senses of a synthetic word `zarg`: rank-0 → the BRCA1 gene, rank-1
 /// → the HeLa cell line. Each makes "zarg affects HeLa" a felicitous `Prop` (both `Entity`-typed
 /// subjects), so — unlike `zob` (where rank-0 fails agreement and widen recovers rank-1) — the
@@ -3146,8 +3241,8 @@ fn probe_rc8_demo() {
     probe("HeLa shows that BRCA1 may affect HeLa"); //          clausal + embedded modal
     probe("HeLa shows that BRCA1 and HeLa affect HeLa"); //     clausal + coordinated subject
     probe("HeLa shows that BRCA1 and HeLa may affect HeLa"); // clausal + coord subject + modal (s1 shape)
-    // RC-8 s2 core: `… is not simply a result of MMR deficiency` — copula + predicate NOMINAL (`a result
-    // of X`), vs the predicate ADJECTIVES the copula is known to take. Isolate in the demo.
+                                                             // RC-8 s2 core: `… is not simply a result of MMR deficiency` — copula + predicate NOMINAL (`a result
+                                                             // of X`), vs the predicate ADJECTIVES the copula is known to take. Isolate in the demo.
     eprintln!("=== RC-8 s2 core: copula + predicate NOMINAL (± neg) — demo ===");
     probe("HeLa is primary"); //         copula + predicate ADJECTIVE (baseline, known-good)
     probe("HeLa is a cell line"); //     copula + predicate NOMINAL
