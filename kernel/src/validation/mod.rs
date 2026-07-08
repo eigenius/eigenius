@@ -1477,6 +1477,85 @@ mod tests {
         );
     }
 
+    /// `trace_tree` is class-typed to the `reflection:Trace` base class:
+    /// a well-typed node (any concrete trace class, via `subclass_of`)
+    /// passes Rule 8; an untyped embedded resource — the shape the old
+    /// placeholder encoding produced — is rejected. (Enforcement is at
+    /// the tree root; validation does not recurse into embedded
+    /// resources' own properties — see the NbE analysis backlog.)
+    #[test]
+    fn program_trace_tree_root_is_class_typed() {
+        let base = build_full_bootstrap_layer();
+
+        let programtrace_fields = |tree: Resource| {
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(
+                        "urn:eigenius:reflection:ProgramTrace".to_string(),
+                    )]),
+                ),
+                (
+                    "urn:eigenius:reflection:resource",
+                    Value::String("urn:eigenius:test:target_resource".to_string()),
+                ),
+                (
+                    "urn:eigenius:reflection:source",
+                    Value::String("test-institution:validate".to_string()),
+                ),
+                (
+                    "urn:eigenius:reflection:timestamp",
+                    Value::String("2026-04-23T12:00:00Z".to_string()),
+                ),
+            ]
+            .into_iter()
+            .chain(std::iter::once((
+                "urn:eigenius:reflection:trace_tree",
+                Value::Embedded(Box::new(tree)),
+            )))
+            .collect::<Vec<_>>()
+        };
+
+        // Well-typed root: a concrete trace node class matches the
+        // `reflection:Trace` constraint via subclass_of.
+        let typed_tree = crate::program::trace::trace_to_resource(
+            &crate::program::trace::Trace::Seq(Vec::new()),
+        );
+        // Untyped root: the pre-fix placeholder shape.
+        let untyped_tree = Resource::new_embedded();
+
+        for (id, tree, expect_mismatch) in [
+            ("urn:eigenius:test:typed_tree_trace", typed_tree, false),
+            ("urn:eigenius:test:untyped_tree_trace", untyped_tree, true),
+        ] {
+            let mut builder = LayerBuilder::new("test", Some(base.clone()));
+            builder
+                .add_resource(make_resource(id, programtrace_fields(tree)))
+                .unwrap();
+            let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+            let validator = Validator::new(Arc::clone(&layer));
+            let mismatches: Vec<_> = validator
+                .validate()
+                .into_iter()
+                .filter(|e| {
+                    e.resource_id.as_ref().map(|i| i.as_str()) == Some(id)
+                        && e.rule == ValidationRule::ClassTypeMismatch
+                })
+                .collect();
+            if expect_mismatch {
+                assert!(
+                    !mismatches.is_empty(),
+                    "untyped trace_tree root must fail the Trace class constraint"
+                );
+            } else {
+                assert!(
+                    mismatches.is_empty(),
+                    "typed trace node must satisfy the Trace base class: {mismatches:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn program_trace_missing_required_fields_fails() {
         let base = build_full_bootstrap_layer();

@@ -263,6 +263,9 @@ Facts (verified by side-by-side reading of eval.rs:196–713 vs 714–1105 and t
   (795–797); `Observe`'s receiver untraced (884); every catch-all arm with effectful children
   (`Pair`, `Con`, `Match`, `InductiveRec`, `NativeDecide`, …) is invisible in the tree.
   Recorded as **Finding F-5** (§4.3-adjacent; trace-completeness, not soundness).
+  **F-5 FIXED 2026-07-07** with the consolidation (§5 item 5): every arm routes children
+  through the tracer; `Trace::Seq` joins multiple effectful siblings; regression tests
+  `f5_*` in eval/mod.rs.
 
 **Design: generic `eval_impl<T: Tracer>`** (recommended over an `Option<&mut TraceSink>`
 parameter). A `Tracer` trait with ~8 node-building methods + associated `type Node`;
@@ -474,7 +477,7 @@ last.
 | 2 | ~~Fix F-4~~ **done 2026-07-07**: membership rule (arg *is* an unshadowed conclusion index), shadow-aware; D46 §7 + D48 §5.8 wording sharpened; `Eq` stays admitted | §4.3, `singleton_elim_rejects_index_that_only_mentions_arg`, `…_rejects_shadowed_arg_reference` | — | — |
 | 3 | ~~Fix F-2 + F-3~~ **done 2026-07-07**: `check_params_uniform` (≈ nanoda `ctor_app_params_ok`) + arity on recursive occurrences and conclusions, shadow-aware prefix tracking in `check_constructor` | §4.3, `rejects_param_mismatch_in_recursive_arg`, `rejects_nonuniform_conclusion_params` | — | — |
 | 4 | ~~Split check.rs and eval.rs~~ **done 2026-07-07** per §3.1. Result: `check/{mod 1228, inductive 883, codata 380, conv 341, witness 105, testutil}.rs` and `eval/{mod 1141, dispatch 906, iota 174, mapreduce 122, marshal 118, testutil}.rs` (production lines; tests moved with subjects, shared helpers in per-directory `testutil`). Public paths preserved via `pub use` re-exports; only-visibility changes (`pub(super)`) at the new internal boundaries. Verified: kernel lib 1618 passed (identical), workspace exit 0, clippy `-D warnings` clean, fmt clean | §3.1 | — | — |
-| 5 | **Consolidate evaluators** via `eval_impl<T: Tracer>` + unify the three val.rs method pairs; fix F-5 trace losses in the same rewrite | §3.2 (no value divergence — verified) | ~1–2 sessions | The one semantic-adjacent change; prerequisite: trace-tree golden tests for eval_io before rewrite |
+| 5 | ~~Consolidate evaluators~~ **done 2026-07-07**: single `eval_impl<T: Tracer>` (`eval/tracer.rs`: `Tracer` trait, ZST `NoTrace`, `TreeTracer`); `eval_ctx`/`eval_traced` are thin wrappers; val.rs pairs unified into `apply_impl`/`app_impl`/`vobserve_impl` (one implementation each; `Trace` gone from val.rs); `eval_map`/`eval_reduce`/`iota_reduce` generic. **F-5 fixed**: all arms route children through `T`; new `Trace::Seq` node (+ `reflection:SeqTrace` class, D6b §2 updated) for multi-child structural joins; `Match` now emits `CaseTrace`; `Reduce` steps keep both application traces; App/Observe children traced. 4 F-5 regression tests; all 5 pre-existing trace-shape tests unchanged. Kernel lib 1622 passed, workspace clean | §3.2 | — | — |
 | 6 | **Extract effect hooks** (Options A + B): D14/IO engine → `institution/eval_hooks.rs`; class-resolution + D49 witness synthesis behind `CheckHooks` | §3.3, hook surface = 3 + 2 fns | ~1–2 sessions | Public ctor signatures preserved; touches 1 `EvalCtx::IO` site + 2 tests |
 | 7 | Hygiene batch: remove `EvalCtx::Read` (or fold per §3.3); dedup `gen_val` (env.rs:169 / readback.rs:359) and `is_recursive_arg_type` (eval.rs:1327 / recursor.rs:245, self-documented); re-anchor nanoda citations to the pin; fix `extend`'s "shares the type_cache" doc-comment (it clones, §4.4-D7) | §2.4, §2.5, §4.1, §4.4 | trivial | none |
 | 8 | Typed `CheckError` replacing `Result<_, String>` in check/ (our own item, not nanoda alignment) | §4.4-D10 | medium | Best done after #4's splits |
@@ -484,3 +487,15 @@ last.
 Verification items closed with the fixes: (a) no production code outside nbe constructs
 `Exp::Inductive` (workspace grep — the F-1 form was kernel-API-only); (b) F-2/F-3-shaped
 declarations are now rejected at declaration time, so no recursor use site can receive them.
+
+Addendum (2026-07-07, follow-on to item 5): the trace schema is now closed over a base
+class — abstract `reflection:Trace`, all node classes `subclass_of` it, every trace-child
+property + `trace_tree` `class_types`-constrained to it (Rule 8 matches transitively), and
+the untyped empty-embedded-resource placeholder replaced by typed `reflection:EmptyTrace`
+(`empty_trace_resource()` in program/trace.rs). Test:
+`validation::tests::program_trace_tree_root_is_class_typed` (typed root passes, untyped
+root rejected). **Open observation for a future backlog item**: `validate_resource` does
+not recurse into embedded resources' properties, so class constraints enforce at each
+validated resource's first level only (the `trace_tree` root, here); making embedded-tree
+validation recursive is a validator-wide semantic change with platform-wide blast radius —
+its own design decision, not slipped into this change.

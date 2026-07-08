@@ -34,9 +34,37 @@ The trace type system mirrors the expression language (D3). Each expression form
 | `Case` | `CaseTrace` | Scrutinee trace, which branch taken, branch body trace |
 | `Construct` | `ConstructTrace` | Per-field traces |
 | `Project` | `ProjectTrace` | Source trace, property accessed |
+| (structural, ≥2 effectful children) | `SeqTrace` | Child traces in evaluation order |
 | `Lambda` | (no trace) | Creates closure, no computation |
 | `Var` | (no trace) | Variable lookup, no computation |
 | `Literal` | (no trace) | Constant, no computation |
+
+`SeqTrace` is the generic structural join: any expression form without a
+dedicated trace type (`Pair`, `Id`, constructor arguments, the two curried
+applications of one `Reduce` step, …) contributes its children's traces
+directly — one child passes through unwrapped, two or more are grouped in a
+`SeqTrace`. Purely structural subtrees still produce no trace. This closes
+the pre-consolidation gap where only 8 expression forms were traced and
+effects nested anywhere else were dropped from the tree (finding F-5,
+`docs/notes/nbe-reorganization-analysis.md` §3.2); the evaluator is now a
+single function generic over the tracing strategy, so the traced and
+untraced paths cannot drift apart.
+
+All node classes are `subclass_of` the abstract **`reflection:Trace`** base
+class, and every trace-child property (`value_trace`, `body_trace`,
+`source_trace`, `scrutinee_trace`, `branch_trace`, `element_traces`,
+`step_traces`, `child_traces`, and `ProgramTrace.trace_tree`) is
+`class_types`-constrained to it — Rule 8 matches transitively via
+`subclass_of`. A positional slot whose evaluation was pure (a Map element,
+Reduce step, or Construct field) serializes as **`reflection:EmptyTrace`**,
+a typed placeholder replacing the untyped empty embedded resource used
+before. Exception: `ConstructTrace.field_traces` is an embedded map keyed
+by property IRI (its container is not itself a trace node), so it carries
+no class constraint. Note on enforcement depth: `validate_resource` checks
+class types on a resource's own property values but does not recurse into
+embedded resources' properties, so the constraint is mechanically enforced
+at each validated resource's first level (in particular the `trace_tree`
+root); deeper levels are schema-documented.
 
 ### 2.1 How evaluation produces traces
 
