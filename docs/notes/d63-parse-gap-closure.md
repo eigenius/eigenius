@@ -34,7 +34,11 @@ corpus's own `…the MMR genes MSH2, MSH6, PMS2 or MLH1 cause Lynch syndrome` no
 | **RC-7** copula-kind on compound subject | 1 | `Nucleotide repeat regions are microsatellites` |
 | **passive + complex agent** | 1 | `were represented by these screening data sets` → [d63-passive-voice-handling.md](d63-passive-voice-handling.md) (general passive infra: object→subject promotion + `by_arg` + `rel(theme, ground)`) |
 
-**Next parsing gap: RC-2 (comparatives) — 3 sentences, the highest-leverage single fix.**
+**Next parsing gap: RC-8 (clausal complement + multiword verb) — 2 sentences.** (RC-2 comparatives and
+the s20 modal+coordinated-object gap are CLOSED, `2026-07-07` — see the rows above.) The `cat_cp`
+`that`-complement machinery exists (§8.11 Slice 6-cl); the residual is likely in the embedded clause
+(`is not simply a result of` — negated copula + predicate-nominal PP; `may create` — modal, already works).
+First step: witness which of the two sentences gaps and where.
 
 What landed since the baseline below (all Derived, `2026-07-05`):
 - **Stage-A augmentation is now injected into the parse.** The `LexiconBacked` transducer

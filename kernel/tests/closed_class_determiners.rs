@@ -3102,6 +3102,63 @@ fn distributive_object_coordination_parses() {
 }
 
 #[test]
+#[ignore = "probe: subject-GQ + coordinated(distributed) object (s20 residual); --ignored --nocapture"]
+fn probe_subject_gq_distributed_object() {
+    let (_layer, index) = index_over_bootstrap();
+    let probe = |s: &str, lem: &dyn eigenius_kernel::dcg::Lemmatizer| {
+        let (c, o) = index.parse_open(s, lem);
+        let tag = if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("open×{}", o.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  {tag:<10} {s:?}");
+    };
+    eprintln!("\n=== subject-GQ + coordinated object: simple vs bare-plural/comparative coordinands (demo) ===");
+    probe("a gene affects a gene or a cell line", &Identity); //      subj-GQ + det⊕det (CLOSES)
+    probe("a gene affects genes or a cell line", &PluralS); //        subj-GQ + BARE-PLURAL ⊕ GQ
+    probe("genes affect genes or a cell line", &PluralS); //          plural subj + same (baseline)
+    probe("a gene affects a gene or a larger cell line", &Identity); // subj-GQ + GQ ⊕ COMPARATIVE
+    probe("a gene affects genes or a larger cell line", &PluralS); // subj-GQ + bare-plural ⊕ comparative (s20 shape)
+}
+
+#[test]
+#[ignore = "probe: RC-8 clausal-complement sentence shapes (demo); --ignored --nocapture"]
+fn probe_rc8_demo() {
+    let (_layer, index) = index_over_bootstrap();
+    let probe = |s: &str| {
+        let (c, o) = index.parse_open(s, &Identity);
+        let tag = if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("open×{}", o.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  {tag:<10} {s:?}");
+    };
+    // RC-8 s1: `We hypothesized that MSI and MMR deficiency may create vulnerabilities` — clausal
+    // complement + coordinated subject + embedded modal. Demo proxy with `shows` (clause verb).
+    eprintln!("\n=== RC-8 s1 shape (clausal + coord subject + modal) — demo ===");
+    probe("HeLa shows that BRCA1 affects HeLa"); //             clausal baseline
+    probe("HeLa shows that BRCA1 may affect HeLa"); //          clausal + embedded modal
+    probe("HeLa shows that BRCA1 and HeLa affect HeLa"); //     clausal + coordinated subject
+    probe("HeLa shows that BRCA1 and HeLa may affect HeLa"); // clausal + coord subject + modal (s1 shape)
+    // RC-8 s2 core: `… is not simply a result of MMR deficiency` — copula + predicate NOMINAL (`a result
+    // of X`), vs the predicate ADJECTIVES the copula is known to take. Isolate in the demo.
+    eprintln!("=== RC-8 s2 core: copula + predicate NOMINAL (± neg) — demo ===");
+    probe("HeLa is primary"); //         copula + predicate ADJECTIVE (baseline, known-good)
+    probe("HeLa is a cell line"); //     copula + predicate NOMINAL
+    probe("HeLa is a gene"); //          copula + predicate NOMINAL (different type)
+    probe("HeLa is not a cell line"); // + negation
+    probe("HeLa is a cell line of BRCA1"); //      predicate nominal + of-PP complement (`a result OF X`)
+    probe("HeLa is not a cell line of BRCA1"); //  + negation
+    probe("HeLa shows that HeLa is a cell line of BRCA1"); // full s2 shape (clausal + copula-nominal-of-PP)
+}
+
+#[test]
 fn s20_shape_parses_open_with_modal_coordination_and_comparative() {
     // The s20 sentence (`WRN dependency may require specific lineages or a stronger mutation phenotype`)
     // composes three fixes: the modal (`may` → Possible), heterogeneous object-GQ coordination over
