@@ -452,4 +452,79 @@ mod tests {
         let err = check_positivity(&decl).expect_err("Bogus should be rejected");
         assert!(err.contains("must end in"), "unexpected error: {err}");
     }
+
+    /// Recorded divergence from nanoda_lib (port-fidelity analysis,
+    /// docs/notes/nbe-reorganization-analysis.md §4): a recursive
+    /// occurrence that instantiates the block parameter to something
+    /// other than the parameter itself. nanoda's `is_valid_ind_app`
+    /// (inductive.rs:691 @ f58f2f6) rejects this via
+    /// `ctor_app_params_ok`; our `check_arg_positivity` only requires
+    /// the occurrence's args to be I-free, so it accepts. The derived
+    /// IH for such an arg is `C(arg)` with `arg : P(1)` against a
+    /// motive `C : P(A) → Sort` — ill-typed at recursor use sites.
+    #[test]
+    fn parity_nanoda_param_mismatch_in_recursive_arg_accepted() {
+        // P(A : Set) { mk : P(1) → P(A) }
+        let s = self_ref("P");
+        let rec_occ_wrong_param = Exp::InductiveType(s.clone(), vec![Exp::One]);
+        let conclusion = Exp::InductiveType(s, vec![Exp::Var("A".to_string())]);
+        let decl = InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:P").unwrap(),
+            name: "P".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: vec![InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: Exp::Pi(
+                    Patt::Var("A".to_string()),
+                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::Pi(
+                        Patt::Unit,
+                        Box::new(rec_occ_wrong_param),
+                        Box::new(conclusion),
+                    )),
+                ),
+            }],
+        };
+        // Current behavior: accepted. nanoda rejects.
+        check_positivity(&decl).expect("current checker accepts param-mismatched recursive arg");
+    }
+
+    /// Recorded finding (port-fidelity analysis,
+    /// docs/notes/nbe-reorganization-analysis.md §4): `Exp::Inductive(d)`
+    /// evaluates to the same `Val::InductiveType` as
+    /// `Exp::InductiveType(d, [])` (eval.rs `Exp::Inductive` arm), but
+    /// `has_ind_occurrence` returns `false` for `Exp::Inductive(_)` —
+    /// so a negative occurrence written in the `Exp::Inductive` form
+    /// evades the checker. Not a nanoda-parity case (nanoda has a
+    /// single `Const` representation); a robustness gap of our dual
+    /// representation, reachable through the kernel API.
+    #[test]
+    fn finding_disguised_inductive_exp_evades_occurrence_check() {
+        // Neg { mk : (Neg → 1) → Neg } with the negative `Neg` written
+        // as `Exp::Inductive(stub)` instead of `Exp::InductiveType`.
+        let s = self_ref("Neg");
+        let neg_ty = Exp::InductiveType(s.clone(), Vec::new());
+        let disguised_negative = Exp::Pi(
+            Patt::Unit,
+            Box::new(Exp::Inductive(s)), // ← invisible to has_ind_occurrence
+            Box::new(Exp::One),
+        );
+        let decl = InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Neg").unwrap(),
+            name: "Neg".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: vec![InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: Exp::Pi(Patt::Unit, Box::new(disguised_negative), Box::new(neg_ty)),
+            }],
+        };
+        // Current behavior: accepted despite the negative occurrence.
+        // The canonical-form spelling of the same declaration is
+        // rejected by `rejects_negative_occurrence` above.
+        check_positivity(&decl).expect("current checker accepts the disguised negative occurrence");
+    }
 }

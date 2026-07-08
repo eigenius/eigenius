@@ -3316,6 +3316,94 @@ mod tests {
         assert!(large_elim_admitted(&decl));
     }
 
+    /// Recorded divergence from nanoda_lib (port-fidelity analysis,
+    /// docs/notes/nbe-reorganization-analysis.md §4): singleton-elim
+    /// Case B. nanoda's `large_elim_test_aux` (inductive.rs:845 @
+    /// f58f2f6) requires each non-Prop ctor arg to literally *be* one
+    /// of the conclusion's applied params/indices (set membership) —
+    /// the eliminator must be able to recover the arg from the type's
+    /// indices. Our `ctor_args_pass_singleton_b` accepts when an index
+    /// expression merely *mentions* the arg (`exp_mentions_var`), which
+    /// does not imply recoverability (an index `f(n)` mentions `n`
+    /// without determining it).
+    #[test]
+    fn parity_nanoda_singleton_elim_mentions_only_index_admitted() {
+        // P : 1 → Prop with ctor `mk : (n : 1) → P (n, ())` — the index
+        // expression `(n, ())` mentions `n` but is not `n` itself.
+        let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:MentionsIx").unwrap(),
+            name: "MentionsIx".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(0),
+            ctors: Vec::new(),
+        });
+        let index_exp = Exp::Pair(Box::new(Exp::Var("n".to_string())), Box::new(Exp::Unit));
+        let conclusion = Exp::InductiveType(self_ref, vec![index_exp]);
+        let ctor_typ = Exp::Pi(
+            Patt::Var("n".to_string()),
+            Box::new(Exp::One), // non-propositional per is_syntactically_propositional_type
+            Box::new(conclusion),
+        );
+        let decl = crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:MentionsIx").unwrap(),
+            name: "MentionsIx".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(0),
+            ctors: vec![crate::nbe::term::InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: ctor_typ,
+            }],
+        };
+        // Current behavior: admitted. nanoda: not large-eliminating.
+        assert!(
+            large_elim_admitted(&decl),
+            "current checker admits large elim when an index merely mentions the arg"
+        );
+    }
+
+    /// Recorded divergence from nanoda_lib (port-fidelity analysis,
+    /// docs/notes/nbe-reorganization-analysis.md §4): a constructor
+    /// conclusion that instantiates the block parameter to something
+    /// other than the parameter itself. nanoda's `check_ctor` →
+    /// `is_valid_ind_app` requires the conclusion's param args to be
+    /// exactly the block params; our pipeline (`check_positivity` +
+    /// `validate_indexed_ctor_conclusions`) checks only the head IRI
+    /// and the arg *count*.
+    #[test]
+    fn parity_nanoda_nonuniform_conclusion_params_accepted() {
+        // Q(A : Set) { mk : Q(1) } — conclusion `Q(1)`, not `Q(A)`.
+        let s = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Q").unwrap(),
+            name: "Q".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        let decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Q").unwrap(),
+            name: "Q".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: vec![crate::nbe::term::InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: Exp::Pi(
+                    Patt::Var("A".to_string()),
+                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::InductiveType(s, vec![Exp::One])),
+                ),
+            }],
+        });
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new());
+        // Current behavior: accepted. nanoda rejects non-uniform
+        // conclusion params.
+        check_type(&mut ctx, &Exp::Inductive(decl))
+            .expect("current checker accepts non-uniform conclusion params");
+    }
+
     #[test]
     fn large_elim_does_not_apply_to_non_prop_inductives() {
         // A Set-sorted inductive isn't subject to the singleton restriction

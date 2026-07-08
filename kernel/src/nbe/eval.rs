@@ -3181,6 +3181,99 @@ mod tests {
         assert_eq!(result_exp, expected_exp);
     }
 
+    /// Port-fidelity witness (docs/notes/nbe-reorganization-analysis.md
+    /// §4), paired with recursor.rs's
+    /// `node_minor_binder_order_is_args_then_ihs_in_arg_order`: iota
+    /// application order is minor → ctor args (original order) → one IH
+    /// per recursive arg (original order). An asymmetric tree makes any
+    /// deviation (reversed or interleaved IHs) produce a different value.
+    #[test]
+    fn iota_two_recursive_args_ih_order_matches_minor_binders() {
+        // Tree { leaf : Tree, node : Tree → Tree → Tree }
+        let s = ind_self_ref("Tree");
+        let tree_ty = Exp::InductiveType(s, Vec::new());
+        let tree = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Tree").unwrap(),
+            name: "Tree".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: vec![
+                InductiveCtorDecl {
+                    name: "leaf".to_string(),
+                    typ: tree_ty.clone(),
+                },
+                InductiveCtorDecl {
+                    name: "node".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Var("l".to_string()),
+                        Box::new(tree_ty.clone()),
+                        Box::new(Exp::Pi(
+                            Patt::Var("r".to_string()),
+                            Box::new(tree_ty.clone()),
+                            Box::new(tree_ty),
+                        )),
+                    ),
+                },
+            ],
+        });
+        let leaf = Val::InductiveVal {
+            decl: tree.clone(),
+            ctor_name: "leaf".to_string(),
+            args: Vec::new(),
+        };
+        let node = |l: Val, r: Val| Val::InductiveVal {
+            decl: tree.clone(),
+            ctor_name: "node".to_string(),
+            args: vec![l, r],
+        };
+        // leaf ↦ 7; node ↦ λl. λr. λihl. λihr. (ihl, ihr).
+        let leaf_minor = Val::LitInt(7);
+        let node_body = Exp::Lam(
+            Patt::Var("r".to_string()),
+            Box::new(Exp::Lam(
+                Patt::Var("ihl".to_string()),
+                Box::new(Exp::Lam(
+                    Patt::Var("ihr".to_string()),
+                    Box::new(Exp::Pair(
+                        Box::new(Exp::Var("ihl".to_string())),
+                        Box::new(Exp::Var("ihr".to_string())),
+                    )),
+                )),
+            )),
+        );
+        let node_minor = Val::Lam(crate::nbe::val::Clos::new(
+            Patt::Var("l".to_string()),
+            node_body,
+            Rho::Nil,
+        ));
+
+        // Scrutinee: node(node(leaf, leaf), leaf) — asymmetric, so the
+        // two IHs are distinguishable. iota takes the outer ctor's args.
+        let result = iota_reduce(
+            &tree,
+            &Val::Sort(1),
+            &[leaf_minor, node_minor],
+            "node",
+            &[node(leaf.clone(), leaf.clone()), leaf],
+            &EvalCtx::Pure,
+        )
+        .expect("iota_reduce");
+        // rec(node(node(leaf,leaf), leaf)) = (rec(node(leaf,leaf)), rec(leaf))
+        //                                  = ((7, 7), 7)
+        // Reversed IH order would yield (7, (7, 7)).
+        let expected = Val::Pair(
+            Box::new(Val::Pair(
+                Box::new(Val::LitInt(7)),
+                Box::new(Val::LitInt(7)),
+            )),
+            Box::new(Val::LitInt(7)),
+        );
+        let result_exp = crate::nbe::readback::readback_val(0, &result);
+        let expected_exp = crate::nbe::readback::readback_val(0, &expected);
+        assert_eq!(result_exp, expected_exp);
+    }
+
     #[test]
     fn iota_list_length() {
         // List.rec zero (λa rest ih. succ ih) [_, _, _] = succ (succ (succ zero))
