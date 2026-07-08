@@ -350,6 +350,89 @@ mod tests {
         );
     }
 
+    /// Port-fidelity witness (docs/notes/nbe-reorganization-analysis.md
+    /// §4): the module doc claims IH binders are appended *after* all
+    /// ctor args, first recursive arg's IH outermost, matching
+    /// `eval::iota_reduce`'s application order. This test pins the
+    /// binder order structurally: with motive `λx. x`, each IH domain
+    /// evaluates to the generic value of the ctor arg it belongs to,
+    /// so the order is directly observable in the Pi chain.
+    #[test]
+    fn node_minor_binder_order_is_args_then_ihs_in_arg_order() {
+        // Tree { leaf : Tree, node : Tree → Tree → Tree }
+        let s = self_ref("Tree");
+        let tree_ty = Exp::InductiveType(s, Vec::new());
+        let tree = Arc::new(InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Tree").unwrap(),
+            name: "Tree".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: vec![
+                InductiveCtorDecl {
+                    name: "leaf".to_string(),
+                    typ: tree_ty.clone(),
+                },
+                InductiveCtorDecl {
+                    name: "node".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Var("l".to_string()),
+                        Box::new(tree_ty.clone()),
+                        Box::new(Exp::Pi(
+                            Patt::Var("r".to_string()),
+                            Box::new(tree_ty.clone()),
+                            Box::new(tree_ty),
+                        )),
+                    ),
+                },
+            ],
+        });
+        // Identity motive: `motive(v)` evaluates to `v` itself, making
+        // each IH domain reveal which ctor arg it quantifies over.
+        let motive = Val::Lam(Clos::new(
+            Patt::Var("x".to_string()),
+            Exp::Var("x".to_string()),
+            Rho::Nil,
+        ));
+        let typ = derive_minor_type(&tree, 1, &[], &motive, &EvalCtx::Pure)
+            .expect("derive_minor_type for node");
+
+        // Walk the Pi chain, applying distinguishable generic values.
+        let mut domains: Vec<Exp> = Vec::new();
+        let mut current = typ;
+        let mut level = 0usize;
+        while let Val::Pi(dom, clos) = current {
+            domains.push(crate::nbe::readback::readback_val(10, &dom));
+            let gen = Val::Nt(crate::nbe::val::Neut::Gen(level, format!("g{level}")));
+            current = clos.apply(gen).expect("apply pi clos");
+            level += 1;
+        }
+        assert_eq!(domains.len(), 4, "node minor: 2 args + 2 IHs");
+        // Binders 1–2: the ctor args (Tree, Tree).
+        assert!(matches!(domains[0], Exp::InductiveType(_, _)));
+        assert!(matches!(domains[1], Exp::InductiveType(_, _)));
+        // Binder 3: IH for the FIRST recursive arg — identity motive
+        // means its domain is the first arg's generic value (level 0).
+        // Binder 4: IH for the second (level 1). Reversed or
+        // interleaved IHs would swap these.
+        assert_eq!(
+            domains[2],
+            crate::nbe::readback::readback_val(
+                10,
+                &Val::Nt(crate::nbe::val::Neut::Gen(0, "g0".to_string()))
+            ),
+            "third binder must be the IH of the first ctor arg"
+        );
+        assert_eq!(
+            domains[3],
+            crate::nbe::readback::readback_val(
+                10,
+                &Val::Nt(crate::nbe::val::Neut::Gen(1, "g1".to_string()))
+            ),
+            "fourth binder must be the IH of the second ctor arg"
+        );
+    }
+
     #[test]
     fn list_cons_minor_type_has_three_pis() {
         // List(A) cons has args [elem:A, rest:List A], one recursive ⇒
