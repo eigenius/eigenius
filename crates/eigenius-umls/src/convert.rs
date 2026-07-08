@@ -148,14 +148,26 @@ fn concept_description(
 /// WordNet importer also consumes. Empty ⇒ no mass shim (count-only, the prior behaviour).
 pub type MassNouns = std::collections::BTreeSet<String>;
 
-/// **RC-1 mass shim (head-inheritance, D63 parse-gap-closure §4 Step 4).** A concept is mass iff its
-/// preferred name's HEAD (last word) is an uncountable noun — "microsatellite instability" is mass because
-/// its head "instability" is, so the abbreviation "MSI" inherits the mass reading. Lets a bare occurrence
-/// (`MSI contributes to cancers`) shift to a mass NP subject/argument, exactly as bare "instability" does;
-/// a bare *singular count* noun has no such reading (`MSI` / `gene` bare → grammar-gap). General — the
-/// head governs compound countability — replacing the removed 5-acronym `MASS_FORMS` hardcode.
-fn concept_is_mass(preferred_name: &str, mass: &MassNouns) -> bool {
-    preferred_name
+/// UMLS semantic types that denote a **process / function / activity** — an uncountable event-noun
+/// concept (`methylation` is T044 Molecular Function; `apoptosis`/`silencing` are cell/genetic
+/// functions). A bare occurrence (`arises from methylation`) shifts to a mass NP, exactly as a bare
+/// English mass noun does. Using the TUI (the source's own "is this a process" signal) is precise —
+/// unlike a surface `-tion`/`-ing` suffix, it never over-masses a count concept that merely shares a
+/// suffix. T038–T046 = the Biologic/Physiologic/Organism/Mental/Organ/Cell/Molecular/Genetic/Pathologic
+/// Function block; T041 Mental Process; T067/T070 Phenomenon or Process.
+const PROCESS_FUNCTION_TUIS: &[&str] = &[
+    "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T067", "T070",
+];
+
+/// **RC-1 mass shim.** A concept is mass iff EITHER (a) **head-inheritance** — its preferred name's
+/// HEAD (last word) is an uncountable noun ("microsatellite instability" is mass because "instability"
+/// is, so "MSI" inherits it) — OR (b) its **semantic type is a process/function** ([`PROCESS_FUNCTION_TUIS`],
+/// e.g. Molecular Function T044 for "methylation"): a process/activity concept is uncountable. Lets a
+/// bare occurrence (`MSI contributes to cancers`, `arises from methylation`) shift to a mass NP;
+/// a bare *singular count* noun has no such reading (`gene` bare → grammar-gap). Both signals are
+/// additive (the count `cat_n(C, num_any)` entry stays).
+fn concept_is_mass(preferred_name: &str, tuis: &[String], mass: &MassNouns) -> bool {
+    let head_mass = preferred_name
         .split_whitespace()
         .last()
         .map(|w| {
@@ -163,7 +175,11 @@ fn concept_is_mass(preferred_name: &str, mass: &MassNouns) -> bool {
                 .to_lowercase()
         })
         .map(|head| mass.contains(&head))
-        .unwrap_or(false)
+        .unwrap_or(false);
+    let process = tuis
+        .iter()
+        .any(|t| PROCESS_FUNCTION_TUIS.contains(&t.as_str()));
+    head_mass || process
 }
 
 /// Emit one `lexicon:LexicalEntry` for `form` under `cat` / `sem_type`, IRI `umlscui:e_{cui}_{i}{suffix}`.
@@ -274,8 +290,9 @@ pub fn render_concept_block(c: &crate::rrf::Concept, mass: &MassNouns) -> (Strin
     // A named individual (a nomenclature symbol, e.g. an HGNC gene) is emitted as an INSTANCE of its
     // primary semantic-type class with `cat_np` entries; otherwise a concept class with `cat_n`.
     let named_tui: Option<&str> = c.symbol.as_ref().and(c.tuis.first()).map(|t| t.as_str());
-    // RC-1 mass shim: a concept whose preferred-name head is uncountable gets an additive `mass` entry.
-    let is_mass = concept_is_mass(&c.preferred_name, mass);
+    // RC-1 mass shim: a concept whose preferred-name head is uncountable, OR whose semantic type is a
+    // process/function (T044 Molecular Function for `methylation`), gets an additive `mass` entry.
+    let is_mass = concept_is_mass(&c.preferred_name, &c.tuis, mass);
     push_concept(&mut buf, &c.cui, &c.tuis, &desc, named_tui.is_some());
     push_entries(&mut buf, &c.cui, &c.forms, named_tui, is_mass, &mut rep);
     (buf, rep)
@@ -456,11 +473,43 @@ mod tests {
 
     #[test]
     fn count_head_concept_gets_no_mass_entry() {
-        // `Werner Syndrome` head `syndrome` is countable ⇒ no mass entry, even with a populated set.
+        // `Werner Syndrome` head `syndrome` is countable AND T047 is not a process/function type ⇒ no
+        // mass entry, even with a populated set.
         let mut mass = MassNouns::new();
         mass.insert("instability".to_string()); // present, but `syndrome` is not
         let (doc, rep) = render_document(&werner_subset(), "2026AA", &mass);
         assert_eq!(rep.mass_entries, 0);
         assert!(!doc.contains("lexicon:mass"));
+    }
+
+    #[test]
+    fn process_function_concept_is_mass_by_semantic_type() {
+        // #2 (gap `arises from methylation`): `methylation` (C0025723, T044 Molecular Function) is an
+        // uncountable process, but its head `methylation` is NOT in the countability list. The semantic
+        // type (T044 ∈ PROCESS_FUNCTION_TUIS) marks it mass anyway → an ADDITIVE `cat_n(C, mass)` entry,
+        // so bare `arises from methylation` shifts to a mass NP. Empty countability set — the TUI alone
+        // drives it.
+        let subset = Subset {
+            semantic_types: vec![SemanticType {
+                tui: "T044".to_string(),
+                name: "Molecular Function".to_string(),
+            }],
+            concepts: vec![Concept {
+                cui: "C0025723".to_string(),
+                tuis: vec!["T044".to_string()],
+                preferred_name: "Methylation".to_string(),
+                forms: vec!["Methylation".to_string()],
+                definition: None,
+                symbol: None,
+            }],
+        };
+        let (doc, rep) = render_document(&subset, "2026AA", &MassNouns::new());
+        assert_eq!(
+            rep.mass_entries, 1,
+            "a T044 process concept is mass by semantic type, with no countability list"
+        );
+        assert!(doc.contains("lexicon:cat_n(umlscui:C0025723, lexicon:mass)"));
+        assert!(doc.contains("lexicon:cat_n(umlscui:C0025723, lexicon:num_any)"));
+        // count stays (additive)
     }
 }

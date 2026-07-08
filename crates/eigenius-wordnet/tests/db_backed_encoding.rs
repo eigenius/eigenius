@@ -420,34 +420,33 @@ fn probe_s20_isolation_at_scale() {
             "GAP".to_string()
         }
     };
-    // #5 verification (linking-verb copula, FrameKind::LinkingAdj / frames 6/7) after the reseed:
-    // `remained essential` / `remained true` should now CLOSE (was GAP), and the corpus #5 sentence
-    // either closes (7→6) or reveals a residual SEARCH limit on the compound `PCR-based MSI
-    // classifications` (cap8 tells which).
+    // #2 verification on the --umls-all reseed (UMLS process/function-TUI mass fix): methylation
+    // (C0025723, T044) / hypermethylation are now in-vocab AND mass, so bare `from methylation` should
+    // CLOSE (was GAP). The full corpus sentence either closes (7→6) or reveals a residual search limit.
     let idx = build_index(&head);
-    for (tag, s) in [
-        ("#5 remain-adj", "genes remained essential"), //          was GAP → expect CLOSED
-        ("#5 remain-true", "findings remained true"), //           the corpus verb+adjective
-        ("#5 become", "genes became essential"), //                another linking verb (frame 6/7)
-        (
-            "#5 corpus",
-            "These findings remained true with PCR-based MSI classifications",
-        ), // full #5
-    ] {
-        eprintln!("  {tag:<14} {:<10} {s:?}", outcome(&idx, s));
+    for w in ["methylation", "hypermethylation", "methylate"] {
+        eprintln!("  has_token({w:?}) = {}", idx.has_token(w, &lem));
     }
-    // Grammar vs search for the full #5 corpus sentence: cap8/beam512, static rank.
+    for (tag, s) in [
+        ("#2 min-methyl", "inactivation arises from methylation"), //     was GAP → expect CLOSED
+        ("#2 min-hyper", "inactivation arises from hypermethylation"), // CLOSED if its TUI is process/function
+        (
+            "#2 corpus-methyl",
+            "Somatic MMR inactivation typically arises from methylation of the MLH1 promoter",
+        ),
+        (
+            "#2 corpus-hyper",
+            "Somatic MMR inactivation typically arises from hypermethylation of the MLH1 promoter",
+        ), // the actual corpus #2
+    ] {
+        eprintln!("  {tag:<16} {:<10} {s:?}", outcome(&idx, s));
+    }
+    // Grammar vs search for the corpus #2 sentence: cap8/beam512, static rank.
     let hi = LexicalIndex::build(Arc::clone(&head))
         .with_sense_cap(8)
         .with_cell_beam(512);
-    eprintln!(
-        "  #5 corpus@cap8 {:<10} {:?}",
-        outcome(
-            &hi,
-            "These findings remained true with PCR-based MSI classifications"
-        ),
-        "These findings remained true with PCR-based MSI classifications"
-    );
+    let c = "Somatic MMR inactivation typically arises from hypermethylation of the MLH1 promoter";
+    eprintln!("  #2 corpus@cap8   {:<10} {c:?}", outcome(&hi, c));
 }
 
 #[test]
