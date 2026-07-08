@@ -1318,6 +1318,561 @@ mod tests {
         check_type(&mut ctx(), &pi).unwrap();
     }
 
+    // ---------- D46 §4 — impredicative Pi formation tests ----------
+
+    #[test]
+    fn impredicative_pi_codomain_in_prop_lives_in_prop() {
+        // ∀ (_ : 1). Prop : Prop
+        // The codomain `Prop` is in `Sort(1)` (the universe-of-types), not
+        // in `Sort(0)` itself, so this Pi lands in `Sort(1)`, not in Prop —
+        // confirming the impredicative rule fires only on Prop-codomain.
+        let pi = Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(Exp::Sort(0)));
+        check(&mut ctx(), &pi, &Val::Sort(1)).unwrap();
+    }
+
+    #[test]
+    fn impredicative_pi_with_prop_codomain_in_prop() {
+        // ∀ (_ : 1). 1 → 1 — not in Prop (codomain is `1 : Set`, not Prop)
+        // ∀ (P : Prop). P → P : Prop — IS in Prop (codomain `P` is Prop)
+        // We model the second: outer Pi binds `P : Prop`, inner Pi `_ : P. P`.
+        // Inner Pi's codomain is `Var("P")` which has inferred type `Sort(0)`.
+        let inner = Exp::Pi(
+            Patt::Unit,
+            Box::new(Exp::Var("P".to_string())),
+            Box::new(Exp::Var("P".to_string())),
+        );
+        let outer = Exp::Pi(
+            Patt::Var("P".to_string()),
+            Box::new(Exp::Sort(0)),
+            Box::new(inner),
+        );
+        // The whole thing lives in Prop — that's the impredicative rule.
+        check(&mut ctx(), &outer, &Val::Sort(0)).unwrap();
+    }
+
+    #[test]
+    fn impredicative_pi_quantifying_over_set_still_in_prop() {
+        // ∀ (X : Set). (Π _ : X. 1 → 1) — outer Pi binds X at Set (Sort(1));
+        // inner Pi's codomain is `1 → 1`, in Set (Sort(1)).
+        // The outer Pi is NOT in Prop (codomain not in Prop).
+        // But if we want `∀ (X : Set). False : Prop` then it IS in Prop.
+        // We model the latter using Prop as the codomain (Sort(0) is a Prop
+        // — every closed inhabitant of Sort(0) is propositional).
+        // For a clean test, use ∀ (X : Set). Prop's-codomain — encoded as a Pi
+        // whose body is a Pi `_ : X. X` (which won't typecheck against Prop —
+        // X is in Set). So instead: ∀ (X : Set). (∀ _ : 1. 1 = 1). The inner
+        // `1 = 1 : Prop` then makes the whole thing impredicative.
+        //
+        // Simpler test: ∀ (X : Set). False, where False = ∀ (P : Prop). P.
+        // `∀ (P : Prop). P` lives in Prop (impredicative). Wrapping it in
+        // ∀ X : Set. … keeps it in Prop (impredicative on the outer too).
+        let false_prop = Exp::Pi(
+            Patt::Var("P".to_string()),
+            Box::new(Exp::Sort(0)),
+            Box::new(Exp::Var("P".to_string())),
+        );
+        // First check inner is itself in Prop.
+        check(&mut ctx(), &false_prop, &Val::Sort(0)).unwrap();
+        // Then wrap with `∀ (X : Set). False` — also in Prop.
+        let outer = Exp::Pi(
+            Patt::Var("X".to_string()),
+            Box::new(Exp::Sort(1)),
+            Box::new(false_prop),
+        );
+        check(&mut ctx(), &outer, &Val::Sort(0)).unwrap();
+    }
+
+    #[test]
+    fn predicative_sigma_in_prop_requires_both_components_in_prop() {
+        // Σ (P : Prop) (Q : Prop). 1  — first component is in Prop, second is `1 : Set`.
+        // Per D46 §3.4, Sigma in Prop requires BOTH components in Prop.
+        // Mixed → should be rejected when checked against Sort(0).
+        let mixed = Exp::Sig(
+            Patt::Var("P".to_string()),
+            Box::new(Exp::Sort(0)),
+            Box::new(Exp::One),
+        );
+        assert!(
+            check(&mut ctx(), &mixed, &Val::Sort(0)).is_err(),
+            "Sigma with a non-Prop component should not check against Prop"
+        );
+    }
+
+    #[test]
+    fn predicative_sigma_both_in_prop_lives_in_prop() {
+        // Σ (_ : ∀ P : Prop. P) (_ : ∀ Q : Prop. Q) — both components are
+        // closed propositions (each is `False`-shaped, in Prop via the
+        // impredicative rule). The Sigma of two Props lives in Prop.
+        // The universe `Prop` itself lives in Sort(1), not in Prop, so we
+        // cannot use it directly as a Sigma component.
+        let false_p = Exp::Pi(
+            Patt::Var("P".to_string()),
+            Box::new(Exp::Sort(0)),
+            Box::new(Exp::Var("P".to_string())),
+        );
+        let false_q = Exp::Pi(
+            Patt::Var("Q".to_string()),
+            Box::new(Exp::Sort(0)),
+            Box::new(Exp::Var("Q".to_string())),
+        );
+        let sig = Exp::Sig(Patt::Unit, Box::new(false_p), Box::new(false_q));
+        check(&mut ctx(), &sig, &Val::Sort(0)).unwrap();
+    }
+
+    #[test]
+    fn sort_cumulativity_prop_subtypes_set() {
+        // Prop : Set — both as a check rule (Sort(0) inhabits Sort(1) by
+        // the Sort(n) : Sort(n+1) rule) and as a subtype rule (Sort(0) <:
+        // Sort(1) by D46 §3.2 cumulativity).
+        check(&mut ctx(), &Exp::Sort(0), &Val::Sort(1)).unwrap();
+        subtype_of(0, &Val::Sort(0), &Val::Sort(1)).unwrap();
+    }
+
+    #[test]
+    fn sort_strict_cumulativity_set_not_subtype_of_prop() {
+        // Sort(1) is NOT a subtype of Sort(0). Catches the wrong direction.
+        assert!(subtype_of(0, &Val::Sort(1), &Val::Sort(0)).is_err());
+    }
+
+    // ---------- D46 §5 — proof irrelevance tests ----------
+
+    #[test]
+    fn proof_irrelevance_fires_for_id_type() {
+        // Two structurally distinct values used as inhabitants of an Id type
+        // should be accepted as equal via proof irrelevance — the structural
+        // fast-path recognises Val::Id as a propositional type.
+        let id_typ = Val::Id(Box::new(Val::One), Box::new(Val::Unit), Box::new(Val::Unit));
+        let v1 = Val::Sort(1);
+        let v2 = Val::Sort(2);
+        def_eq_at_type(&mut ctx(), &v1, &v2, &id_typ).unwrap();
+    }
+
+    #[test]
+    fn proof_irrelevance_does_not_fire_for_non_prop_type() {
+        // Two distinct values at type `1` (Unit type) should NOT be accepted
+        // as equal — `1` is not propositional (inhabits Sort(1)), so neither
+        // the structural fast-path nor the inference path admits irrelevance.
+        let one_typ = Val::One;
+        let v1 = Val::Sort(1);
+        let v2 = Val::Sort(2);
+        assert!(
+            def_eq_at_type(&mut ctx(), &v1, &v2, &one_typ).is_err(),
+            "non-Prop type should fall through to structural equality"
+        );
+    }
+
+    #[test]
+    fn proof_irrelevance_fires_for_prop_typed_inductive() {
+        // An inductive declared with sort = Sort(0) is propositional — caught
+        // by the structural fast-path on Val::InductiveType.
+        let prop_decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:MyProp").unwrap(),
+            name: "MyProp".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(0),
+            ctors: Vec::new(),
+        });
+        let typ = Val::InductiveType {
+            decl: prop_decl,
+            params: Vec::new(),
+            indices: Vec::new(),
+        };
+        def_eq_at_type(&mut ctx(), &Val::Sort(1), &Val::Sort(2), &typ).unwrap();
+    }
+
+    #[test]
+    fn proof_irrelevance_does_not_fire_for_set_typed_inductive() {
+        // An inductive declared with sort = Sort(1) is NOT propositional.
+        let set_decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:MyData").unwrap(),
+            name: "MyData".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        let typ = Val::InductiveType {
+            decl: set_decl,
+            params: Vec::new(),
+            indices: Vec::new(),
+        };
+        assert!(def_eq_at_type(&mut ctx(), &Val::Sort(1), &Val::Sort(2), &typ).is_err());
+    }
+
+    #[test]
+    fn proof_irrelevance_via_inference_for_pi_into_prop() {
+        // Test that the inference path catches a Prop-shaped type that the
+        // structural fast-path misses.
+        // typ = `∀ (P : Prop). P` — a Pi-into-Prop, propositional by the
+        // impredicative rule (D46 §4.1). Structural fast-path doesn't match
+        // Val::Pi, so the inference path must fire: readback to
+        // `Exp::Pi(P, Sort(0), Var(P))`, infer sort, get Sort(0).
+        let false_prop_exp = Exp::Pi(
+            Patt::Var("P".to_string()),
+            Box::new(Exp::Sort(0)),
+            Box::new(Exp::Var("P".to_string())),
+        );
+        let typ = ctx().eval(&false_prop_exp, &Rho::Nil).expect("eval Pi");
+        // Sanity: this is a Val::Pi, not a fast-path shape.
+        assert!(matches!(typ, Val::Pi(_, _)));
+        // Inference path must classify it as propositional.
+        def_eq_at_type(&mut ctx(), &Val::Sort(1), &Val::Sort(2), &typ).unwrap();
+    }
+
+    #[test]
+    fn proof_irrelevance_via_inference_negative_for_pi_into_set() {
+        // Counter-test: `∀ (X : Set). X` lives in Set, not Prop.
+        // The inference path must REJECT proof irrelevance here.
+        let pi_exp = Exp::Pi(
+            Patt::Var("X".to_string()),
+            Box::new(Exp::Sort(1)),
+            Box::new(Exp::Var("X".to_string())),
+        );
+        let typ = ctx().eval(&pi_exp, &Rho::Nil).expect("eval Pi");
+        assert!(matches!(typ, Val::Pi(_, _)));
+        assert!(def_eq_at_type(&mut ctx(), &Val::Sort(1), &Val::Sort(2), &typ).is_err());
+    }
+
+    // ---------- D46 §7 — singleton-elim tests ----------
+
+    fn mk_prop_decl(
+        name: &str,
+        ctors: Vec<crate::nbe::term::InductiveCtorDecl>,
+    ) -> crate::nbe::term::InductiveDecl {
+        crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse(&format!("urn:test:{name}")).expect("test iri"),
+            name: name.to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(0),
+            ctors,
+        }
+    }
+
+    #[test]
+    fn large_elim_zero_ctors_admitted() {
+        // False : Prop with zero ctors — Case A.
+        let decl = mk_prop_decl("False", Vec::new());
+        assert!(large_elim_admitted(&decl));
+    }
+
+    #[test]
+    fn large_elim_multi_ctor_rejected() {
+        // Multi-ctor Prop — Case B requires exactly one ctor; rejected.
+        let decl = mk_prop_decl(
+            "Either2",
+            vec![
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "left".to_string(),
+                    typ: Exp::EigonClass(
+                        crate::ontology::iri::Iri::parse("urn:_:Either2").unwrap(),
+                    ),
+                },
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "right".to_string(),
+                    typ: Exp::EigonClass(
+                        crate::ontology::iri::Iri::parse("urn:_:Either2").unwrap(),
+                    ),
+                },
+            ],
+        );
+        assert!(!large_elim_admitted(&decl));
+    }
+
+    #[test]
+    fn large_elim_single_ctor_all_prop_args_admitted() {
+        // SingleProp { mk : Id(1, (), ()) → SingleProp } — ctor arg is Id (Prop).
+        let id_arg = Exp::Id(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
+        let conclusion =
+            Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:_:SingleProp").unwrap());
+        let ctor_typ = Exp::Pi(Patt::Unit, Box::new(id_arg), Box::new(conclusion));
+        let decl = mk_prop_decl(
+            "SingleProp",
+            vec![crate::nbe::term::InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: ctor_typ,
+            }],
+        );
+        assert!(large_elim_admitted(&decl));
+    }
+
+    #[test]
+    fn large_elim_single_ctor_with_non_prop_arg_rejected() {
+        // BadProp { mk : 1 → BadProp } — ctor arg is `1 : Set`, not in Prop.
+        let conclusion =
+            Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:_:BadProp").unwrap());
+        let ctor_typ = Exp::Pi(Patt::Unit, Box::new(Exp::One), Box::new(conclusion));
+        let decl = mk_prop_decl(
+            "BadProp",
+            vec![crate::nbe::term::InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: ctor_typ,
+            }],
+        );
+        assert!(!large_elim_admitted(&decl));
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // D48 Phase H — singleton-elim Case B "arg appears in conclusion"
+    // ──────────────────────────────────────────────────────────────────
+
+    /// `Eq A x y` (the canonical motivating case for D48 Phase H's
+    /// extension to singleton-elim Case B). Indexed by two values of
+    /// type A; single ctor `refl(a) : Eq A a a` has `a` appearing in
+    /// both index positions.
+    ///
+    /// Built as a Prop-sorted indexed inductive with one param (A : Set)
+    /// and two indices of type A (both unbound type-parameter
+    /// references — but for the singleton-elim test we just need the
+    /// shape, so the index telescope uses `Exp::Var("A")` referring to
+    /// the param).
+    fn eq_decl() -> std::sync::Arc<crate::nbe::term::InductiveDecl> {
+        // Self-ref for the ctor's conclusion.
+        let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Eq").unwrap(),
+            name: "Eq".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![
+                (Patt::Var("x".to_string()), Exp::Var("A".to_string())),
+                (Patt::Var("y".to_string()), Exp::Var("A".to_string())),
+            ],
+            sort: Exp::Sort(0),
+            ctors: Vec::new(),
+        });
+        // refl(a) : Eq A a a — conclusion supplies `a` in both indices.
+        let conclusion = Exp::InductiveType(
+            self_ref.clone(),
+            vec![
+                Exp::Var("A".to_string()),
+                Exp::Var("a".to_string()),
+                Exp::Var("a".to_string()),
+            ],
+        );
+        let ctor_typ = Exp::Pi(
+            Patt::Var("A".to_string()),
+            Box::new(Exp::Sort(1)),
+            Box::new(Exp::Pi(
+                Patt::Var("a".to_string()),
+                Box::new(Exp::Var("A".to_string())),
+                Box::new(conclusion),
+            )),
+        );
+        std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Eq").unwrap(),
+            name: "Eq".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: vec![
+                (Patt::Var("x".to_string()), Exp::Var("A".to_string())),
+                (Patt::Var("y".to_string()), Exp::Var("A".to_string())),
+            ],
+            sort: Exp::Sort(0),
+            ctors: vec![crate::nbe::term::InductiveCtorDecl {
+                name: "refl".to_string(),
+                typ: ctor_typ,
+            }],
+        })
+    }
+
+    #[test]
+    fn d48_singleton_elim_admits_eq_via_indices_in_conclusion() {
+        // `Eq`'s `refl(a)` has a non-Prop arg `a : A` that appears in
+        // both conclusion indices. Pre-D48 this failed singleton-elim
+        // Case B (no indices => "appears in conclusion" was vacuous).
+        // With D48 Phase H, the extended Case B admits it.
+        let decl = eq_decl();
+        assert!(
+            large_elim_admitted(&decl),
+            "Eq must admit large elim under D48 Phase H — refl's `a` arg appears in indices"
+        );
+    }
+
+    #[test]
+    fn d48_singleton_elim_still_rejects_arg_not_in_conclusion() {
+        // A synthetic Prop-sorted indexed inductive whose single ctor
+        // takes a non-Prop arg that does NOT appear in the conclusion's
+        // index expressions. Even with the Phase H extension, this
+        // should still be rejected.
+        let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:BadIxProp").unwrap(),
+            name: "BadIxProp".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(0),
+            ctors: Vec::new(),
+        });
+        // Conclusion: BadIxProp () — the index is the constant `()`,
+        // not mentioning any ctor arg.
+        let conclusion = Exp::InductiveType(self_ref.clone(), vec![Exp::Unit]);
+        // Ctor: takes a non-Prop arg `_:1` (Unit type, in Set) that
+        // doesn't appear in conclusion.
+        let ctor_typ = Exp::Pi(
+            Patt::Var("smuggled".to_string()),
+            Box::new(Exp::One),
+            Box::new(conclusion),
+        );
+        let decl = crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:BadIxProp").unwrap(),
+            name: "BadIxProp".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(0),
+            ctors: vec![crate::nbe::term::InductiveCtorDecl {
+                name: "smuggle".to_string(),
+                typ: ctor_typ,
+            }],
+        };
+        assert!(
+            !large_elim_admitted(&decl),
+            "BadIxProp must NOT admit large elim — the non-Prop arg doesn't appear in indices"
+        );
+    }
+
+    #[test]
+    fn d48_singleton_elim_unchanged_for_non_indexed_props() {
+        // Without indices, the Phase H extension is vacuous — the
+        // pre-D46 behavior holds: every non-param arg must be
+        // syntactically propositional.
+        // (Re-asserts the existing single-ctor-with-Id-arg case
+        // to catch any Phase H regression.)
+        let id_arg = Exp::Id(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
+        let conclusion =
+            Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:_:SingleProp").unwrap());
+        let ctor_typ = Exp::Pi(Patt::Unit, Box::new(id_arg), Box::new(conclusion));
+        let decl = mk_prop_decl(
+            "SingleProp",
+            vec![crate::nbe::term::InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: ctor_typ,
+            }],
+        );
+        assert!(large_elim_admitted(&decl));
+    }
+
+    /// Recorded divergence from nanoda_lib (port-fidelity analysis,
+    /// docs/notes/nbe-reorganization-analysis.md §4): singleton-elim
+    /// Case B. nanoda's `large_elim_test_aux` (inductive.rs:845 @
+    /// f58f2f6) requires each non-Prop ctor arg to literally *be* one
+    /// of the conclusion's applied params/indices (set membership) —
+    /// the eliminator must be able to recover the arg from the type's
+    /// indices. Our `ctor_args_pass_singleton_b` accepts when an index
+    /// expression merely *mentions* the arg (`exp_mentions_var`), which
+    /// does not imply recoverability (an index `f(n)` mentions `n`
+    /// without determining it).
+    #[test]
+    fn parity_nanoda_singleton_elim_mentions_only_index_admitted() {
+        // P : 1 → Prop with ctor `mk : (n : 1) → P (n, ())` — the index
+        // expression `(n, ())` mentions `n` but is not `n` itself.
+        let self_ref = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:MentionsIx").unwrap(),
+            name: "MentionsIx".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(0),
+            ctors: Vec::new(),
+        });
+        let index_exp = Exp::Pair(Box::new(Exp::Var("n".to_string())), Box::new(Exp::Unit));
+        let conclusion = Exp::InductiveType(self_ref, vec![index_exp]);
+        let ctor_typ = Exp::Pi(
+            Patt::Var("n".to_string()),
+            Box::new(Exp::One), // non-propositional per is_syntactically_propositional_type
+            Box::new(conclusion),
+        );
+        let decl = crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:MentionsIx").unwrap(),
+            name: "MentionsIx".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Unit, Exp::One)],
+            sort: Exp::Sort(0),
+            ctors: vec![crate::nbe::term::InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: ctor_typ,
+            }],
+        };
+        // Current behavior: admitted. nanoda: not large-eliminating.
+        assert!(
+            large_elim_admitted(&decl),
+            "current checker admits large elim when an index merely mentions the arg"
+        );
+    }
+
+    /// Recorded divergence from nanoda_lib (port-fidelity analysis,
+    /// docs/notes/nbe-reorganization-analysis.md §4): a constructor
+    /// conclusion that instantiates the block parameter to something
+    /// other than the parameter itself. nanoda's `check_ctor` →
+    /// `is_valid_ind_app` requires the conclusion's param args to be
+    /// exactly the block params; our pipeline (`check_positivity` +
+    /// `validate_indexed_ctor_conclusions`) checks only the head IRI
+    /// and the arg *count*.
+    #[test]
+    fn parity_nanoda_nonuniform_conclusion_params_accepted() {
+        // Q(A : Set) { mk : Q(1) } — conclusion `Q(1)`, not `Q(A)`.
+        let s = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Q").unwrap(),
+            name: "Q".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: Vec::new(),
+        });
+        let decl = std::sync::Arc::new(crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Q").unwrap(),
+            name: "Q".to_string(),
+            params: vec![(Patt::Var("A".to_string()), Exp::Sort(1))],
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: vec![crate::nbe::term::InductiveCtorDecl {
+                name: "mk".to_string(),
+                typ: Exp::Pi(
+                    Patt::Var("A".to_string()),
+                    Box::new(Exp::Sort(1)),
+                    Box::new(Exp::InductiveType(s, vec![Exp::One])),
+                ),
+            }],
+        });
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new());
+        // Current behavior: accepted. nanoda rejects non-uniform
+        // conclusion params.
+        check_type(&mut ctx, &Exp::Inductive(decl))
+            .expect("current checker accepts non-uniform conclusion params");
+    }
+
+    #[test]
+    fn large_elim_does_not_apply_to_non_prop_inductives() {
+        // A Set-sorted inductive isn't subject to the singleton restriction
+        // at all — large_elim_admitted is only consulted for Prop decls.
+        // Smoke-test the function returns sensibly regardless.
+        let set_decl = crate::nbe::term::InductiveDecl {
+            iri: crate::ontology::iri::Iri::parse("urn:test:Nat").unwrap(),
+            name: "Nat".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(1),
+            ctors: vec![
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "zero".to_string(),
+                    typ: Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap()),
+                },
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "succ".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Unit,
+                        Box::new(Exp::EigonClass(
+                            crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
+                        )),
+                        Box::new(Exp::EigonClass(
+                            crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap(),
+                        )),
+                    ),
+                },
+            ],
+        };
+        // For a non-Prop inductive the singleton test is not load-bearing,
+        // but the algorithm still runs correctly: Nat has 2 ctors, so the
+        // test returns false (as it would for any 2-ctor Prop).
+        assert!(!large_elim_admitted(&set_decl));
+    }
+
     #[test]
     fn check_identity_function() {
         // λx.x : Π x : 1. 1
