@@ -6,9 +6,10 @@ and ancestry consolidation. Plan: analysis first, review, then restructure.
 - Branch: `nbe-cleanup`, HEAD `123087d09c6c75d76dd3079bee8f1cac13bceb88`, clean tree at analysis start.
 - Reference pins (vendored clones, git-ignored): `references/nanoda_lib` @ `f58f2f6`,
   `references/miniagda` @ `b838f00` (v0.2025.7.23), `references/Mini-TT` @ `442b08f`.
-- Status: **complete** (§0 baseline, §1 inventory, §2 coupling, §3 reorganization proposal,
-  §4 ancestry alignment + findings F-1–F-5, §5 ranked backlog). Awaiting joint review before
-  any restructuring begins.
+- Status: analysis **complete** (§0 baseline, §1 inventory, §2 coupling, §3 reorganization
+  proposal, §4 ancestry alignment, §5 ranked backlog). Soundness findings **F-1–F-4 fixed**
+  on this branch (2026-07-07, backlog items 1–3); F-5 (trace-tree completeness) rides with
+  the §3.2 evaluator consolidation. Restructuring (§5 items 4+) awaits joint review.
 
 ## 0. Baseline (grade: Derived — commands run 2026-07-07 at HEAD above)
 
@@ -45,7 +46,8 @@ check.rs is 58% tests (lines 2796–6701). eval.rs is 45% tests (2353–4251).
 
 ### 1.2 Cluster map (line anchors verified by `grep -nE '^(pub )?(fn|enum|struct) '`)
 
-**check.rs**
+#### check.rs
+
 | Lines | Cluster |
 | --- | --- |
 | 43–176 | `CheckCtx` (rho, gamma, layer, type_cache, size_tso, institution index/runtime) + constructors, `eval_ctx()`, `extend`, `resolve_class_cached` |
@@ -66,7 +68,8 @@ check.rs is 58% tests (lines 2796–6701). eval.rs is 45% tests (2353–4251).
 | 2770–2795 | `ext_sig`, `extract_list_element_type` |
 | 2796–6701 | tests (159; includes integration-style D14/Eigon tests importing the institution registry/runtime) |
 
-**eval.rs**
+#### eval.rs
+
 | Lines | Cluster |
 | --- | --- |
 | 25–95 | `EvalError` |
@@ -91,6 +94,7 @@ sized.rs constraint graph + `solve`/`size_le*`; sized_rigid.rs `Tso`.
 ### 1.3 Core type theory vs Eigenius extensions
 
 **Core TT** (would exist in any Mini-TT-descended kernel):
+
 - Whole files: env.rs, readback.rs, recursor.rs, positivity.rs.
 - term.rs/val.rs core arms (Lam/Sort/Pi/Sig/One/Unit/Pair/Con/Data/Case/Fst/Snd/App/Ann/Var/Dec; Gen/Meta/App/Fst/Snd/NtFun).
 - eval.rs core arms (≈196–330); check.rs `check`/`check_infer` core arms, `eq_nf`,
@@ -100,6 +104,7 @@ sized.rs constraint graph + `solve`/`size_le*`; sized_rigid.rs `Tso`.
   abstraction is independent of `Val`).
 
 **Eigenius extensions**:
+
 - term.rs "Eigenius extensions" arms (line 70+): `Id`/`Refl`/`IdJ`, `NativeDecide`/`DecEq`,
   `EigonClass`/`EigonAxiom`/`EigonPrimitive`/`EigonResource`, `Lit*`, `PropAccess`,
   `Template`/`Construct`, Codata (D11), `Map`/`Reduce`, `Inductive*` (D19/D48), `Size*`/`SizedPi`,
@@ -120,7 +125,7 @@ platform-specific. The §3 layering question applies to the latter.
 
 Layering (each file's `use crate::nbe::` imports, production code):
 
-```
+```text
 term ──> (leaf)
 env ──> term, val
 val ──> term, env, eval (EvalError/EvalCtx in method sigs)
@@ -377,40 +382,36 @@ drift** (grade: Observed). Backlog: rewrite the URL to a pin-anchored form
 | Higher-order positive | reject | **accept** | `rejects_higher_order_positive` (pre-existing; intentional restriction) |
 | Nested occurrence | reject | reject | `rejects_nested_occurrence` (pre-existing) |
 | Wrong result type | reject | reject | `rejects_wrong_result_type` (pre-existing) |
-| Param-mismatched recursive arg | **accept** | reject | `parity_nanoda_param_mismatch_in_recursive_arg_accepted` (new) |
-| Non-uniform conclusion params | **accept** | reject | `parity_nanoda_nonuniform_conclusion_params_accepted` (new) |
-| Disguised `Exp::Inductive` negative occurrence | **accept** | n/a (single repr) | `finding_disguised_inductive_exp_evades_occurrence_check` (new) |
+| Param-mismatched recursive arg | reject (fixed 2026-07-07) | reject | `rejects_param_mismatch_in_recursive_arg` (new) |
+| Non-uniform conclusion params | reject (fixed 2026-07-07) | reject | `rejects_nonuniform_conclusion_params` (new) |
+| Disguised `Exp::Inductive` negative occurrence | reject (fixed 2026-07-07) | n/a (single repr) | `rejects_disguised_inductive_negative_occurrence` (new) |
 | Large elim: zero/multi ctor, all-Prop args, non-Prop arg, Eq-via-indices, arg-not-in-conclusion | match | match | `large_elim_*`, `d48_singleton_*` (pre-existing) |
-| Large elim: index *mentions* but ≠ arg | **admit** | reject | `parity_nanoda_singleton_elim_mentions_only_index_admitted` (new) |
+| Large elim: index *mentions* but ≠ arg | reject (fixed 2026-07-07) | reject | `singleton_elim_rejects_index_that_only_mentions_arg` (new) |
+| Large elim: index refers to a shadowed binder | reject | n/a (unique locals) | `singleton_elim_rejects_shadowed_arg_reference` (new) |
 | Minor binder order (args → IHs, first-rec outermost) | ✓ | ✓ | `node_minor_binder_order_is_args_then_ihs_in_arg_order` (new) |
 | Iota application order matches minor binders | ✓ | ✓ | `iota_two_recursive_args_ih_order_matches_minor_binders` (new) |
 
-The six new tests assert **current** behavior (they document the divergences; they are not
-endorsements). If review decides to close a finding, the corresponding test flips to `reject`.
+### 4.3 Findings — all four FIXED (2026-07-07, this branch; each parity test asserts rejection)
 
-### 4.3 Findings (open — fail-closed record; fixes are review-gated production changes)
-
-- **F-1 — positivity evasion via `Exp::Inductive` form.** `Exp::Inductive(d)` and
-  `Exp::InductiveType(d, [])` evaluate identically (eval.rs:534) but only the latter is
-  visible to `has_ind_occurrence` (positivity.rs:153). A negative occurrence written in the
-  `Exp::Inductive` form passes `check_positivity` (test above). Reachable via the kernel API;
-  whether ESL/DCG/the D47 mirror can emit the form is **unverified**. Fix direction is
-  structural: one canonical representation for inductive-type references at decl ingestion
-  (or make the occurrence check see through `Exp::Inductive`), not a per-caller guard.
-- **F-2 — recursive-arg params not checked against block params.** `P(A) { mk : P(1) → P(A) }`
-  accepted; the derived IH is `motive(arg)` with `arg : P(1)` against `motive : P(A) → Sort`.
-  nanoda rejects at declaration (`ctor_app_params_ok`). Downstream effect at recursor use
-  sites untraced. Classification: silent drift from the ported algorithm.
-- **F-3 — conclusion params not checked for uniformity.** `Q(A) { mk : Q(1) }` accepted
-  (`check_type` on `Exp::Inductive` passes; only head IRI + arg count are checked). nanoda
-  rejects. Classification: silent drift.
-- **F-4 — singleton-elim Case B admits "mentions" instead of "is one of".** D46 §7 / D48
-  Phase H spec wording ("appears in the conclusion['s indices]") is ambiguous; the
-  implementation (`exp_mentions_var`) took the loose reading; the ported algorithm
-  (`large_elim_test_aux`, set membership) and Lean's rule require the arg to *be* an index so
-  the eliminator can recover it. An index `f(n)` mentions `n` without determining it; with
-  D46 proof irrelevance this is a subject-reduction risk. Classification: spec-ambiguity +
-  drift from the ported algorithm; soundness-relevant.
+- **F-1 (fixed) — positivity evasion via `Exp::Inductive` form.** `Exp::Inductive(d)` and
+  `Exp::InductiveType(d, [])` evaluate identically (eval.rs:534) but the former was invisible
+  to `has_ind_occurrence`. Fix: the predicate now matches evaluation semantics —
+  `Exp::Inductive(d)` is an occurrence on iri match, and embedded declarations' ctor types
+  are scanned (self-reference stubs carry empty ctors, so recursion is bounded). Severity
+  note: no production code outside nbe constructs `Exp::Inductive` (workspace grep) — the
+  form was reachable via the kernel API only.
+- **F-2 (fixed) — recursive-arg params not checked against block params.** `check_arg_positivity`
+  now enforces full arity (params + indices) and parameter pass-through on recursive
+  occurrences (`check_params_uniform`, port of nanoda's `ctor_app_params_ok`), shadow-aware:
+  the ctor-prefix binder names are tracked and cleared when rebound.
+- **F-3 (fixed) — conclusion params not checked for uniformity.** `check_result_type` applies
+  the same `check_params_uniform` to the conclusion's parameter prefix (arity stays with
+  `validate_indexed_ctor_conclusions`, which has the friendlier count diagnostics).
+- **F-4 (fixed) — singleton-elim Case B "mentions" → "is one of".** `ctor_args_pass_singleton_b`
+  now requires a non-Prop arg to *be* a conclusion index (`Exp::Var(name)`, unshadowed) —
+  membership, matching `large_elim_test_aux` and Lean's recoverability rule. `Eq` stays
+  admitted (its args are the indices). D46 §7 Case B and D48 §5.8 wording sharpened to the
+  strict reading.
 
 Upstream delta scan: not run. The vendored pin `f58f2f6` is current with upstream (grade:
 Declared — user statement, 2026-07-07); no upstream fixes to the ported functions to review.
@@ -469,9 +470,9 @@ last.
 
 | # | Action | Evidence | Cost | Risk / prerequisite |
 | --- | --- | --- | --- | --- |
-| 1 | **Fix F-1**: single canonical representation for inductive-type references at decl boundaries (or make `has_ind_occurrence` see through `Exp::Inductive`) — prefer canonicalization (structure) over widening the predicate (guard) | §4.3, test `finding_disguised_…` flips to reject | small | Must first check which producers (ESL compile, DCG, D47 mirror decode) can emit `Exp::Inductive` inside ctor types |
-| 2 | **Fix F-4**: singleton-elim Case B — arg must *be* a conclusion index (α-equal), not be mentioned by one; update D48 Phase H / D46 §7 wording | §4.3, test `parity_…mentions_only…` flips | small | Check nothing in-tree relies on the loose rule (`Eq` uses exact-index form, stays admitted) |
-| 3 | **Fix F-2 + F-3**: declaration-time check that recursive-occurrence and conclusion param args are exactly the block params (one shared helper ≈ nanoda `ctor_app_params_ok`) | §4.3, two parity tests flip | small | none |
+| 1 | ~~Fix F-1~~ **done 2026-07-07**: `has_ind_occurrence` matches evaluation semantics for `Exp::Inductive` (predicate correction, not a guard — the predicate was wrong about what the form means); no producer outside nbe emits the form (verified) | §4.3, `rejects_disguised_inductive_negative_occurrence` | — | — |
+| 2 | ~~Fix F-4~~ **done 2026-07-07**: membership rule (arg *is* an unshadowed conclusion index), shadow-aware; D46 §7 + D48 §5.8 wording sharpened; `Eq` stays admitted | §4.3, `singleton_elim_rejects_index_that_only_mentions_arg`, `…_rejects_shadowed_arg_reference` | — | — |
+| 3 | ~~Fix F-2 + F-3~~ **done 2026-07-07**: `check_params_uniform` (≈ nanoda `ctor_app_params_ok`) + arity on recursive occurrences and conclusions, shadow-aware prefix tracking in `check_constructor` | §4.3, `rejects_param_mismatch_in_recursive_arg`, `rejects_nonuniform_conclusion_params` | — | — |
 | 4 | **Split check.rs and eval.rs** per §3.1 (pure moves, tests move with subjects) | §1.2 cluster map | mechanical, ~1 session | No semantic change; `cargo test` before/after identical |
 | 5 | **Consolidate evaluators** via `eval_impl<T: Tracer>` + unify the three val.rs method pairs; fix F-5 trace losses in the same rewrite | §3.2 (no value divergence — verified) | ~1–2 sessions | The one semantic-adjacent change; prerequisite: trace-tree golden tests for eval_io before rewrite |
 | 6 | **Extract effect hooks** (Options A + B): D14/IO engine → `institution/eval_hooks.rs`; class-resolution + D49 witness synthesis behind `CheckHooks` | §3.3, hook surface = 3 + 2 fns | ~1–2 sessions | Public ctor signatures preserved; touches 1 `EvalCtx::IO` site + 2 tests |
@@ -480,6 +481,6 @@ last.
 | 9 | Profile-gated: `type_cache` sharing instead of clone-per-`extend` (24 sites); syntactic fast path / success cache around `eq_nf` | §4.4-D4/D7 | small each | Requires a profiling harness first — no measured hotspot today |
 | 10 | Idea parking: K-target reduction (nanoda `init_k_target`/`to_ctor_when_k`); per-`Exp` hash-consing | §4.1, §4.4-D9 | large | Only with a concrete need (K: eta for unit-like props; hash-consing: profiling) |
 
-Open verification items carried forward: (a) can surface languages emit `Exp::Inductive`
-inside ctor types (F-1 severity); (b) downstream behavior of F-2/F-3-shaped decls at recursor
-use sites (both currently blocked only by the missing decl-time check).
+Verification items closed with the fixes: (a) no production code outside nbe constructs
+`Exp::Inductive` (workspace grep — the F-1 form was kernel-API-only); (b) F-2/F-3-shaped
+declarations are now rejected at declaration time, so no recursor use site can receive them.
