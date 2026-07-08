@@ -287,6 +287,54 @@ impl Validator {
         // `nbe::check` diagnostic.
         errors.extend(self.check_standalone_lambda_well_typedness(resource, &res_id));
 
+        // Rule 23: Embedded-resource recursion. A `Value::Embedded`
+        // whose resource declares an `is_a` is a nested *typed instance*
+        // — the full rule set applies to it, at every depth. Without
+        // this, class/domain/requires constraints were only enforced at
+        // each top-level resource's first property level; anything
+        // nested deeper (e.g. the inner nodes of a ProgramTrace's
+        // trace_tree) went unvalidated.
+        //
+        // Embedded resources with NO `is_a` are skipped: the resource
+        // type is also used as a structural carrier for opaque internal
+        // encodings (program-expression / comorphism-argument mirrors
+        // hold sub-expressions under raw property IRIs), which are not
+        // domain data and carry no class to validate against. `is_a`
+        // presence is the discriminator between a typed nested value
+        // and such a carrier. (Trace nodes all set `is_a`, so the
+        // trace tree — the motivating case — is fully covered.)
+        //
+        // Errors from anonymous embedded resources are attributed to the
+        // nearest ancestor with an `@id`, and to the containing property
+        // when the inner rule didn't name one.
+        for (prop_iri, value) in resource.properties() {
+            let embedded: Vec<&Resource> = match value {
+                Value::Embedded(r) => vec![r.as_ref()],
+                Value::Array(arr) => arr
+                    .iter()
+                    .filter_map(|v| match v {
+                        Value::Embedded(r) => Some(r.as_ref()),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => continue,
+            };
+            for inner in embedded {
+                if inner.is_a().is_empty() {
+                    continue; // opaque internal carrier — not a typed instance
+                }
+                for mut e in self.validate_resource(inner) {
+                    if e.resource_id.is_none() {
+                        e.resource_id = res_id.clone();
+                    }
+                    if e.property.is_none() {
+                        e.property = Some(prop_iri.clone());
+                    }
+                    errors.push(e);
+                }
+            }
+        }
+
         errors
     }
 
@@ -1474,6 +1522,153 @@ mod tests {
         assert!(
             trace_errors.is_empty(),
             "ProgramTrace with resource/source/timestamp should pass: {trace_errors:?}"
+        );
+    }
+
+    /// `trace_tree` is class-typed to the `reflection:Trace` base class:
+    /// a well-typed node (any concrete trace class, via `subclass_of`)
+    /// passes Rule 8; an untyped embedded resource — the shape the old
+    /// placeholder encoding produced — is rejected at the tree root.
+    #[test]
+    fn program_trace_tree_root_is_class_typed() {
+        let base = build_full_bootstrap_layer();
+
+        let programtrace_fields = |tree: Resource| {
+            vec![
+                (
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(
+                        "urn:eigenius:reflection:ProgramTrace".to_string(),
+                    )]),
+                ),
+                (
+                    "urn:eigenius:reflection:resource",
+                    Value::String("urn:eigenius:test:target_resource".to_string()),
+                ),
+                (
+                    "urn:eigenius:reflection:source",
+                    Value::String("test-institution:validate".to_string()),
+                ),
+                (
+                    "urn:eigenius:reflection:timestamp",
+                    Value::String("2026-04-23T12:00:00Z".to_string()),
+                ),
+            ]
+            .into_iter()
+            .chain(std::iter::once((
+                "urn:eigenius:reflection:trace_tree",
+                Value::Embedded(Box::new(tree)),
+            )))
+            .collect::<Vec<_>>()
+        };
+
+        // Well-typed root: a concrete trace node class matches the
+        // `reflection:Trace` constraint via subclass_of.
+        let typed_tree = crate::program::trace::trace_to_resource(
+            &crate::program::trace::Trace::Seq(Vec::new()),
+        );
+        // Untyped root: the pre-fix placeholder shape.
+        let untyped_tree = Resource::new_embedded();
+
+        for (id, tree, expect_mismatch) in [
+            ("urn:eigenius:test:typed_tree_trace", typed_tree, false),
+            ("urn:eigenius:test:untyped_tree_trace", untyped_tree, true),
+        ] {
+            let mut builder = LayerBuilder::new("test", Some(base.clone()));
+            builder
+                .add_resource(make_resource(id, programtrace_fields(tree)))
+                .unwrap();
+            let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+            let validator = Validator::new(Arc::clone(&layer));
+            let mismatches: Vec<_> = validator
+                .validate()
+                .into_iter()
+                .filter(|e| {
+                    e.resource_id.as_ref().map(|i| i.as_str()) == Some(id)
+                        && e.rule == ValidationRule::ClassTypeMismatch
+                })
+                .collect();
+            if expect_mismatch {
+                assert!(
+                    !mismatches.is_empty(),
+                    "untyped trace_tree root must fail the Trace class constraint"
+                );
+            } else {
+                assert!(
+                    mismatches.is_empty(),
+                    "typed trace node must satisfy the Trace base class: {mismatches:?}"
+                );
+            }
+        }
+    }
+
+    /// Rule 23: a malformed typed instance embedded *two levels deep*
+    /// (ProgramTrace.trace_tree → LetTrace.body_trace → node) is
+    /// validated, not just the first property level. The deep node
+    /// declares an `is_a` class that doesn't resolve, which recursion
+    /// must surface (attributed via bubble-up to the deep_trace root).
+    /// The untyped-carrier skip is exercised by the program-mirror
+    /// integration tests (rocksdb `run_program_commits_*`, kinase
+    /// notebook); here we isolate the depth behaviour.
+    #[test]
+    fn embedded_typed_instance_is_validated_at_depth() {
+        let base = build_full_bootstrap_layer();
+        let set_is_a = |r: &mut Resource, class: &str| {
+            r.set(
+                iri(wk::IS_A),
+                Value::Array(vec![Value::String(class.to_string())]),
+            );
+        };
+        // Deep node: is_a names an undefined class.
+        let mut deep = Resource::new_embedded();
+        set_is_a(&mut deep, "urn:eigenius:reflection:NoSuchTrace");
+        // Wrap it in a valid LetTrace body_trace.
+        let mut let_trace = Resource::new_embedded();
+        set_is_a(&mut let_trace, "urn:eigenius:reflection:LetTrace");
+        let_trace.set(
+            iri("urn:eigenius:reflection:name"),
+            Value::String("x".to_string()),
+        );
+        let_trace.set(
+            iri("urn:eigenius:reflection:body_trace"),
+            Value::Embedded(Box::new(deep)),
+        );
+
+        let mut builder = LayerBuilder::new("test", Some(base));
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:deep_trace",
+                vec![
+                    (
+                        wk::IS_A,
+                        Value::Array(vec![Value::String(
+                            "urn:eigenius:reflection:ProgramTrace".to_string(),
+                        )]),
+                    ),
+                    (
+                        "urn:eigenius:reflection:source",
+                        Value::String("test:src".to_string()),
+                    ),
+                    (
+                        "urn:eigenius:reflection:timestamp",
+                        Value::String("2026-04-23T12:00:00Z".to_string()),
+                    ),
+                    (
+                        "urn:eigenius:reflection:trace_tree",
+                        Value::Embedded(Box::new(let_trace)),
+                    ),
+                ],
+            ))
+            .unwrap();
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+
+        assert!(
+            errors.iter().any(|e| {
+                e.rule == ValidationRule::UnresolvedClassReference
+                    && e.message.contains("NoSuchTrace")
+            }),
+            "an undefined is_a on a node two levels deep must be reported; got {errors:?}"
         );
     }
 

@@ -3635,6 +3635,35 @@ mod tests {
     /// FormulaTerm supplied 3 args — is exactly the class of bug
     /// the parse-only smoke test would have missed; the validator
     /// drive here forces it into compile-time.
+    /// Whether a compiled resource (or any resource embedded within it,
+    /// at any depth) applies a comorphism — i.e. carries a
+    /// `program:function` value in the `urn:eigenius:comorphisms:`
+    /// namespace. Such programs depend on the runtime-env closure that
+    /// an offline compile test does not build (see the call site).
+    fn references_comorphism(r: &crate::ontology::resource::Resource) -> bool {
+        use crate::ontology::resource::Value;
+        const FUNCTION: &str = "urn:eigenius:program:function";
+        // The compiler lowers a bare application head to a component
+        // IRI, so `comorphisms:symbolics_to_jump(input)` becomes
+        // `urn:eigenius:program:components:comorphisms:symbolics_to_jump`
+        // — match the `comorphisms:` segment wherever it lands.
+        const COMORPHISM_SEG: &str = "comorphisms:";
+        fn value_hits(v: &Value) -> bool {
+            match v {
+                Value::Embedded(inner) => references_comorphism(inner),
+                Value::Array(items) => items.iter().any(value_hits),
+                _ => false,
+            }
+        }
+        r.properties().iter().any(|(prop, value)| {
+            (prop.as_str() == FUNCTION
+                && value
+                    .as_iri()
+                    .is_some_and(|i| i.as_str().contains(COMORPHISM_SEG)))
+                || value_hits(value)
+        })
+    }
+
     #[test]
     fn compile_every_esl_cell_in_kinase_institutions_notebook_validates_cleanly() {
         use crate::bootstrap::bootstrap_with_storage;
@@ -3669,7 +3698,6 @@ mod tests {
         const CATALYST_ONTOLOGY: &str = include_str!(
             "../../../julia/institutions/catalyst/declarations/catalyst-ontology.eigon.json"
         );
-
         // Memory-backed persistent backend so layer commits go through
         // `commit_layer_default` — the D41 supported single-layer-commit
         // surface. `ExecutionContext::commit` was retired in D41 Phase G.
@@ -3715,6 +3743,26 @@ mod tests {
                 !resources.is_empty(),
                 "ESL cell {id} compiled to zero resources"
             );
+
+            // Part C's program cells apply a comorphism
+            // (`comorphisms:symbolics_to_jump`) whose reference closure
+            // — comorphism → export/import formats → institution
+            // declaration → `symbolics:env:v1` — bottoms out at a
+            // Julia runtime-env build artifact that only exists after
+            // the setup script's `env build` step. That closure is
+            // unresolvable in an offline compile test, so such cells are
+            // compile-checked (above) but not committed to the
+            // clean-validation chain. Before Rule 23 (embedded-resource
+            // recursion) landed, the dangling comorphism reference sat
+            // inside an embedded Apply node and escaped validation, so
+            // these cells appeared to "validate cleanly" — they never
+            // did. Detected structurally: a compiled resource whose
+            // `program:function` (at any depth) names the comorphisms
+            // namespace.
+            if resources.iter().any(references_comorphism) {
+                continue;
+            }
+
             for r in resources {
                 ctx.add_resource(r)
                     .unwrap_or_else(|e| panic!("ESL cell {id}: add_resource: {e:?}"));

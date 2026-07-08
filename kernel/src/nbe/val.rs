@@ -277,25 +277,22 @@ impl Clos {
 
     /// Instantiate the closure with a value (Pure mode).
     pub fn apply(&self, v: Val) -> Result<Val, EvalError> {
-        crate::nbe::eval::eval(&self.body, &self.env.clone().extend(self.patt.clone(), v))
+        self.apply_ctx(v, &crate::nbe::eval::EvalCtx::Pure)
     }
 
     /// Instantiate the closure with a value and capability context.
     pub fn apply_ctx(&self, v: Val, ctx: &crate::nbe::eval::EvalCtx) -> Result<Val, EvalError> {
-        crate::nbe::eval::eval_ctx(
-            &self.body,
-            &self.env.clone().extend(self.patt.clone(), v),
-            ctx,
-        )
+        self.apply_impl::<crate::nbe::eval::NoTrace>(v, ctx)
+            .map(|(val, ())| val)
     }
 
-    /// Instantiate the closure with tracing.
-    pub fn apply_ctx_traced(
+    /// Instantiate the closure, generic over the tracing strategy.
+    pub(crate) fn apply_impl<T: crate::nbe::eval::Tracer>(
         &self,
         v: Val,
         ctx: &crate::nbe::eval::EvalCtx,
-    ) -> Result<(Val, Option<crate::program::trace::Trace>), EvalError> {
-        crate::nbe::eval::eval_traced(
+    ) -> Result<(Val, T::Node), EvalError> {
+        crate::nbe::eval::eval_impl::<T>(
             &self.body,
             &self.env.clone().extend(self.patt.clone(), v),
             ctx,
@@ -308,46 +305,51 @@ impl Clos {
 impl Val {
     /// Function application: (λ f) v = f * v; (fun ...) ($c v) = ...; neutral app
     pub fn app(self, v: Val) -> Result<Val, EvalError> {
-        match self {
-            Val::Lam(f) => f.apply(v),
-            Val::Fun(cases, rho) => {
-                if let Val::Con(c, cv) = v {
-                    for (name, exp) in &cases {
-                        if *name == c {
-                            return crate::nbe::eval::eval(exp, &rho)?.app(*cv);
-                        }
-                    }
-                    Err(EvalError::ConstructorNotFound(c))
-                } else if let Val::Nt(k) = v {
-                    Ok(Val::Nt(Neut::NtFun(cases, rho, Box::new(k))))
-                } else {
-                    Err(EvalError::InvalidCaseTarget(format!("{v:?}")))
-                }
-            }
-            Val::Nt(k) => Ok(Val::Nt(Neut::App(Box::new(k), Box::new(v)))),
-            other => Err(EvalError::NotAFunction(format!("{other:?}"))),
-        }
+        self.app_ctx(v, &crate::nbe::eval::EvalCtx::Pure)
     }
 
     /// Function application with capability context.
     pub fn app_ctx(self, v: Val, ctx: &crate::nbe::eval::EvalCtx) -> Result<Val, EvalError> {
+        self.app_impl::<crate::nbe::eval::NoTrace>(v, (), ctx)
+            .map(|(val, ())| val)
+    }
+
+    /// Function application, generic over the tracing strategy.
+    ///
+    /// `arg_node` is the trace node of the already-evaluated argument;
+    /// a `Fun` applied to a `Con` records it as the case's scrutinee
+    /// (D6b `CaseTrace`), a `Lam` folds it into the body's node.
+    pub(crate) fn app_impl<T: crate::nbe::eval::Tracer>(
+        self,
+        v: Val,
+        arg_node: T::Node,
+        ctx: &crate::nbe::eval::EvalCtx,
+    ) -> Result<(Val, T::Node), EvalError> {
         match self {
-            Val::Lam(f) => f.apply_ctx(v, ctx),
+            Val::Lam(f) => {
+                let (result, body_node) = f.apply_impl::<T>(v, ctx)?;
+                Ok((result, T::combine(vec![arg_node, body_node])))
+            }
             Val::Fun(cases, rho) => {
                 if let Val::Con(c, cv) = v {
                     for (name, exp) in &cases {
                         if *name == c {
-                            return crate::nbe::eval::eval_ctx(exp, &rho, ctx)?.app_ctx(*cv, ctx);
+                            let (branch_fn, branch_node) =
+                                crate::nbe::eval::eval_impl::<T>(exp, &rho, ctx)?;
+                            let (result, app_node) =
+                                branch_fn.app_impl::<T>(*cv, T::leaf(), ctx)?;
+                            let body_node = T::combine(vec![branch_node, app_node]);
+                            return Ok((result, T::case(arg_node, &c, body_node)));
                         }
                     }
                     Err(EvalError::ConstructorNotFound(c))
                 } else if let Val::Nt(k) = v {
-                    Ok(Val::Nt(Neut::NtFun(cases, rho, Box::new(k))))
+                    Ok((Val::Nt(Neut::NtFun(cases, rho, Box::new(k))), arg_node))
                 } else {
                     Err(EvalError::InvalidCaseTarget(format!("{v:?}")))
                 }
             }
-            Val::Nt(k) => Ok(Val::Nt(Neut::App(Box::new(k), Box::new(v)))),
+            Val::Nt(k) => Ok((Val::Nt(Neut::App(Box::new(k), Box::new(v))), arg_node)),
             other => Err(EvalError::NotAFunction(format!("{other:?}"))),
         }
     }
@@ -374,77 +376,7 @@ impl Val {
     /// a `CoRecord` and evaluates its body in the captured environment.
     /// For a neutral value, produces a blocked `Neut::Observe`. Pure mode.
     pub fn vobserve(self, obs: &str) -> Result<Val, EvalError> {
-        match self {
-            Val::CoRecord(fields, rho) => {
-                for (name, body) in &fields {
-                    if name == obs {
-                        return crate::nbe::eval::eval(body, &rho);
-                    }
-                }
-                Err(EvalError::ObservationNotFound(obs.to_string()))
-            }
-            Val::Nt(k) => Ok(Val::Nt(Neut::Observe(Box::new(k), obs.to_string()))),
-            other => Err(EvalError::NotACorecord(format!("{other:?}"))),
-        }
-    }
-
-    /// Function application with tracing.
-    ///
-    /// For `Fun` applied to `Con`, produces a `Trace::Case`.
-    /// For `Lam`, delegates to `apply_ctx_traced`.
-    pub fn app_ctx_traced(
-        self,
-        v: Val,
-        ctx: &crate::nbe::eval::EvalCtx,
-    ) -> Result<(Val, Option<crate::program::trace::Trace>), EvalError> {
-        use crate::program::trace::Trace;
-        match self {
-            Val::Lam(f) => f.apply_ctx_traced(v, ctx),
-            Val::Fun(cases, rho) => {
-                if let Val::Con(c, cv) = v {
-                    for (name, exp) in &cases {
-                        if *name == c {
-                            let (branch_fn, branch_trace) =
-                                crate::nbe::eval::eval_traced(exp, &rho, ctx)?;
-                            let (result, app_trace) = branch_fn.app_ctx_traced(*cv, ctx)?;
-                            let trace = Some(Trace::Case {
-                                scrutinee_trace: None,
-                                branch_taken: c,
-                                branch_trace: app_trace.or(branch_trace).map(Box::new),
-                            });
-                            return Ok((result, trace));
-                        }
-                    }
-                    Err(EvalError::ConstructorNotFound(c))
-                } else if let Val::Nt(k) = v {
-                    Ok((Val::Nt(Neut::NtFun(cases, rho, Box::new(k))), None))
-                } else {
-                    Err(EvalError::InvalidCaseTarget(format!("{v:?}")))
-                }
-            }
-            Val::Nt(k) => Ok((Val::Nt(Neut::App(Box::new(k), Box::new(v))), None)),
-            other => Err(EvalError::NotAFunction(format!("{other:?}"))),
-        }
-    }
-
-    /// Observation on a codata value with tracing.
-    pub fn vobserve_ctx_traced(
-        self,
-        obs: &str,
-        ctx: &crate::nbe::eval::EvalCtx,
-    ) -> Result<(Val, Option<crate::program::trace::Trace>), EvalError> {
-        match self {
-            Val::CoRecord(fields, rho) => {
-                for (name, body) in &fields {
-                    if name == obs {
-                        return crate::nbe::eval::eval_traced(body, &rho, ctx);
-                    }
-                }
-                Err(EvalError::ObservationNotFound(obs.to_string()))
-            }
-            Val::Nt(k) => Ok((Val::Nt(Neut::Observe(Box::new(k), obs.to_string())), None)),
-            other => Err(EvalError::NotACorecord(format!("{other:?}"))),
-        }
+        self.vobserve_ctx(obs, &crate::nbe::eval::EvalCtx::Pure)
     }
 
     /// Observation on a codata value, with capability context.
@@ -453,16 +385,29 @@ impl Val {
         obs: &str,
         ctx: &crate::nbe::eval::EvalCtx,
     ) -> Result<Val, EvalError> {
+        self.vobserve_impl::<crate::nbe::eval::NoTrace>(obs, ctx)
+            .map(|(val, ())| val)
+    }
+
+    /// Observation on a codata value, generic over the tracing strategy.
+    pub(crate) fn vobserve_impl<T: crate::nbe::eval::Tracer>(
+        self,
+        obs: &str,
+        ctx: &crate::nbe::eval::EvalCtx,
+    ) -> Result<(Val, T::Node), EvalError> {
         match self {
             Val::CoRecord(fields, rho) => {
                 for (name, body) in &fields {
                     if name == obs {
-                        return crate::nbe::eval::eval_ctx(body, &rho, ctx);
+                        return crate::nbe::eval::eval_impl::<T>(body, &rho, ctx);
                     }
                 }
                 Err(EvalError::ObservationNotFound(obs.to_string()))
             }
-            Val::Nt(k) => Ok(Val::Nt(Neut::Observe(Box::new(k), obs.to_string()))),
+            Val::Nt(k) => Ok((
+                Val::Nt(Neut::Observe(Box::new(k), obs.to_string())),
+                T::leaf(),
+            )),
             other => Err(EvalError::NotACorecord(format!("{other:?}"))),
         }
     }
