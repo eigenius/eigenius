@@ -15,7 +15,7 @@
 //! Recursor runtime: iota-reduction for inductive types (Phase 11b,
 //! D19 §6; indexed families per D48). Split from `eval.rs`.
 
-use super::{EvalCtx, EvalError};
+use super::{EvalCtx, EvalError, Tracer};
 use crate::nbe::term::Exp;
 use crate::nbe::val::{Neut, Val};
 use std::sync::Arc;
@@ -35,14 +35,14 @@ use std::sync::Arc;
 /// elsewhere by the positivity checker (Phase 11b step 4) — here they
 /// would simply fail the recursive-arg-type check and produce an
 /// arity-mismatch error.
-pub(super) fn iota_reduce(
+pub(super) fn iota_reduce_impl<T: Tracer>(
     decl: &Arc<crate::nbe::term::InductiveDecl>,
     motive: &Val,
     minors: &[Val],
     ctor_name: &str,
     args: &[Val],
     ctx: &EvalCtx,
-) -> Result<Val, EvalError> {
+) -> Result<(Val, T::Node), EvalError> {
     let ctor_idx = decl
         .ctors
         .iter()
@@ -75,20 +75,40 @@ pub(super) fn iota_reduce(
 
     // Apply minor to each constructor argument (in original order).
     let mut result = minors[ctor_idx].clone();
+    let mut nodes = Vec::new();
     for arg in args {
-        result = result.app_ctx(arg.clone(), ctx)?;
+        let (next, node) = result.app_impl::<T>(arg.clone(), T::leaf(), ctx)?;
+        result = next;
+        nodes.push(node);
     }
 
     // Then apply an induction hypothesis for each recursive argument,
     // in the order the recursive arguments appear.
     for (arg, arg_typ) in args.iter().zip(arg_types.iter()) {
         if is_recursive_arg_type(decl, arg_typ) {
-            let ih = build_recursor_ih(decl, motive, minors, arg, ctx)?;
-            result = result.app_ctx(ih, ctx)?;
+            let (ih, ih_node) = build_recursor_ih::<T>(decl, motive, minors, arg, ctx)?;
+            nodes.push(ih_node);
+            let (next, node) = result.app_impl::<T>(ih, T::leaf(), ctx)?;
+            result = next;
+            nodes.push(node);
         }
     }
 
-    Ok(result)
+    Ok((result, T::combine(nodes)))
+}
+
+/// Untraced iota reduction (test convenience; the evaluator calls the
+/// generic form directly).
+#[cfg(test)]
+pub(super) fn iota_reduce(
+    decl: &Arc<crate::nbe::term::InductiveDecl>,
+    motive: &Val,
+    minors: &[Val],
+    ctor_name: &str,
+    args: &[Val],
+    ctx: &EvalCtx,
+) -> Result<Val, EvalError> {
+    iota_reduce_impl::<super::NoTrace>(decl, motive, minors, ctor_name, args, ctx).map(|(v, ())| v)
 }
 
 /// Walk the constructor's full type expression, skip the parameter
@@ -148,23 +168,26 @@ fn is_recursive_arg_type(decl: &crate::nbe::term::InductiveDecl, typ: &Exp) -> b
 /// Either recurses into `iota_reduce` (if the argument is itself a
 /// constructor) or produces a blocked `Neut::NtRec` (if the argument
 /// is neutral).
-fn build_recursor_ih(
+fn build_recursor_ih<T: Tracer>(
     decl: &Arc<crate::nbe::term::InductiveDecl>,
     motive: &Val,
     minors: &[Val],
     arg: &Val,
     ctx: &EvalCtx,
-) -> Result<Val, EvalError> {
+) -> Result<(Val, T::Node), EvalError> {
     match arg {
         Val::InductiveVal {
             ctor_name, args, ..
-        } => iota_reduce(decl, motive, minors, ctor_name, args, ctx),
-        Val::Nt(n) => Ok(Val::Nt(Neut::NtRec {
-            decl: decl.clone(),
-            motive: Box::new(motive.clone()),
-            minors: minors.to_vec(),
-            major: Box::new(n.clone()),
-        })),
+        } => iota_reduce_impl::<T>(decl, motive, minors, ctor_name, args, ctx),
+        Val::Nt(n) => Ok((
+            Val::Nt(Neut::NtRec {
+                decl: decl.clone(),
+                motive: Box::new(motive.clone()),
+                minors: minors.to_vec(),
+                major: Box::new(n.clone()),
+            }),
+            T::leaf(),
+        )),
         other => Err(EvalError::InvalidCaseTarget(format!(
             "InductiveRec: recursive argument is not an inductive value: {other:?}"
         ))),

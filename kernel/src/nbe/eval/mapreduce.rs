@@ -15,32 +15,35 @@
 //! Map/Reduce evaluation over collections (Phase 11a; inductive
 //! `List` backing per Phase 11b step 7). Split from `eval.rs`.
 
-use super::{EvalCtx, EvalError};
+use super::{EvalCtx, EvalError, Tracer};
 use crate::nbe::val::{Neut, Val};
 
-/// Evaluate Map(f, collection).
+/// Evaluate Map(f, collection), generic over the tracing strategy.
 ///
 /// Applies `f` to each element of a finite list. Accepts both
 /// `Val::List` (primary, from resource arrays) and cons-pair chains
-/// (legacy, from algebraic construction). Returns `Val::List`.
-pub(super) fn eval_map(f: Val, coll: Val, ctx: &EvalCtx) -> Result<Val, EvalError> {
-    match coll {
-        Val::List(items) => {
-            let mapped: Result<Vec<Val>, EvalError> = items
-                .into_iter()
-                .map(|elem| f.clone().app_ctx(elem, ctx))
-                .collect();
-            Ok(Val::List(mapped?))
+/// (legacy, from algebraic construction). Returns `Val::List` plus a
+/// `Map` node carrying one child per element application.
+pub(super) fn eval_map_impl<T: Tracer>(
+    f: Val,
+    coll: Val,
+    ctx: &EvalCtx,
+) -> Result<(Val, T::Node), EvalError> {
+    let map_items = |items: Vec<Val>| -> Result<(Val, T::Node), EvalError> {
+        let mut mapped = Vec::with_capacity(items.len());
+        let mut element_nodes = Vec::with_capacity(items.len());
+        for elem in items {
+            let (val, node) = f.clone().app_impl::<T>(elem, T::leaf(), ctx)?;
+            mapped.push(val);
+            element_nodes.push(node);
         }
+        Ok((Val::List(mapped), T::map(element_nodes)))
+    };
+    match coll {
+        Val::List(items) => map_items(items),
         Val::Con(ref name, _) if name == "nil" || name == "cons" => {
             match crate::nbe::val::cons_to_vec(&coll) {
-                Some(items) => {
-                    let mapped: Result<Vec<Val>, EvalError> = items
-                        .into_iter()
-                        .map(|elem| f.clone().app_ctx(elem, ctx))
-                        .collect();
-                    Ok(Val::List(mapped?))
-                }
+                Some(items) => map_items(items),
                 None => Err(EvalError::InvalidCaseTarget(format!(
                     "Map: malformed cons list: {coll:?}"
                 ))),
@@ -48,47 +51,55 @@ pub(super) fn eval_map(f: Val, coll: Val, ctx: &EvalCtx) -> Result<Val, EvalErro
         }
         Val::InductiveVal { ref decl, .. } if decl.name == "List" => {
             match crate::nbe::val::inductive_list_to_vec(&coll) {
-                Some(items) => {
-                    let mapped: Result<Vec<Val>, EvalError> = items
-                        .into_iter()
-                        .map(|elem| f.clone().app_ctx(elem, ctx))
-                        .collect();
-                    Ok(Val::List(mapped?))
-                }
+                Some(items) => map_items(items),
                 None => Err(EvalError::InvalidCaseTarget(format!(
                     "Map: malformed inductive list: {coll:?}"
                 ))),
             }
         }
-        Val::Nt(n) => Ok(Val::Nt(Neut::NtMap(Box::new(f), Box::new(n)))),
+        Val::Nt(n) => Ok((Val::Nt(Neut::NtMap(Box::new(f), Box::new(n))), T::leaf())),
         other => Err(EvalError::InvalidCaseTarget(format!(
             "Map: expected list, got {other:?}"
         ))),
     }
 }
 
-/// Evaluate Reduce(f, accumulator, collection).
+/// Untraced Map evaluation (test convenience; the evaluator calls the
+/// generic form directly).
+#[cfg(test)]
+pub(super) fn eval_map(f: Val, coll: Val, ctx: &EvalCtx) -> Result<Val, EvalError> {
+    eval_map_impl::<super::NoTrace>(f, coll, ctx).map(|(v, ())| v)
+}
+
+/// Evaluate Reduce(f, accumulator, collection), generic over the
+/// tracing strategy.
 ///
 /// Left-folds `f` over a finite list starting with `acc`. Accepts the
-/// same three list shapes as [`eval_map`].
-pub(super) fn eval_reduce(f: Val, acc: Val, coll: Val, ctx: &EvalCtx) -> Result<Val, EvalError> {
-    match coll {
-        Val::List(items) => {
-            let mut result = acc;
-            for elem in items {
-                result = f.clone().app_ctx(result, ctx)?.app_ctx(elem, ctx)?;
-            }
-            Ok(result)
+/// same three list shapes as [`eval_map_impl`]. Each step's node
+/// combines BOTH curried applications (`f acc` and `(f acc) elem`) —
+/// the pre-consolidation evaluator kept only one (F-5).
+pub(super) fn eval_reduce_impl<T: Tracer>(
+    f: Val,
+    acc: Val,
+    coll: Val,
+    ctx: &EvalCtx,
+) -> Result<(Val, T::Node), EvalError> {
+    let fold_items = |acc: Val, items: Vec<Val>| -> Result<(Val, T::Node), EvalError> {
+        let mut result = acc;
+        let mut step_nodes = Vec::with_capacity(items.len());
+        for elem in items {
+            let (step_fn, n1) = f.clone().app_impl::<T>(result, T::leaf(), ctx)?;
+            let (next, n2) = step_fn.app_impl::<T>(elem, T::leaf(), ctx)?;
+            result = next;
+            step_nodes.push(T::combine(vec![n1, n2]));
         }
+        Ok((result, T::reduce(step_nodes)))
+    };
+    match coll {
+        Val::List(items) => fold_items(acc, items),
         Val::Con(ref name, _) if name == "nil" || name == "cons" => {
             match crate::nbe::val::cons_to_vec(&coll) {
-                Some(items) => {
-                    let mut result = acc;
-                    for elem in items {
-                        result = f.clone().app_ctx(result, ctx)?.app_ctx(elem, ctx)?;
-                    }
-                    Ok(result)
-                }
+                Some(items) => fold_items(acc, items),
                 None => Err(EvalError::InvalidCaseTarget(format!(
                     "Reduce: malformed cons list: {coll:?}"
                 ))),
@@ -96,27 +107,26 @@ pub(super) fn eval_reduce(f: Val, acc: Val, coll: Val, ctx: &EvalCtx) -> Result<
         }
         Val::InductiveVal { ref decl, .. } if decl.name == "List" => {
             match crate::nbe::val::inductive_list_to_vec(&coll) {
-                Some(items) => {
-                    let mut result = acc;
-                    for elem in items {
-                        result = f.clone().app_ctx(result, ctx)?.app_ctx(elem, ctx)?;
-                    }
-                    Ok(result)
-                }
+                Some(items) => fold_items(acc, items),
                 None => Err(EvalError::InvalidCaseTarget(format!(
                     "Reduce: malformed inductive list: {coll:?}"
                 ))),
             }
         }
-        Val::Nt(n) => Ok(Val::Nt(Neut::NtReduce(
-            Box::new(f),
-            Box::new(acc),
-            Box::new(n),
-        ))),
+        Val::Nt(n) => Ok((
+            Val::Nt(Neut::NtReduce(Box::new(f), Box::new(acc), Box::new(n))),
+            T::leaf(),
+        )),
         other => Err(EvalError::InvalidCaseTarget(format!(
             "Reduce: expected list, got {other:?}"
         ))),
     }
+}
+
+/// Untraced Reduce evaluation (test convenience).
+#[cfg(test)]
+pub(super) fn eval_reduce(f: Val, acc: Val, coll: Val, ctx: &EvalCtx) -> Result<Val, EvalError> {
+    eval_reduce_impl::<super::NoTrace>(f, acc, coll, ctx).map(|(v, ())| v)
 }
 
 #[cfg(test)]

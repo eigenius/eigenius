@@ -110,17 +110,41 @@
   },
 
   {
+    "@id": "urn:eigenius:reflection:Trace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "Abstract base class of all evaluation-trace nodes (D6b \u00a72). Carries no properties of its own; class-typed trace-child properties reference it so any concrete node class is admissible.",
+    "urn:eigenius:core:short_name": "Trace"
+  },
+  {
+    "@id": "urn:eigenius:reflection:EmptyTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:description": "Absence of computation in a positional trace slot (a Map element, Reduce step, or Construct field whose evaluation was pure). Replaces the untyped empty embedded resource previously used as the placeholder.",
+    "urn:eigenius:core:short_name": "EmptyTrace"
+  },
+  {
+    "@id": "urn:eigenius:reflection:FieldTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:description": "One entry of a ConstructTrace's per-field traces: the constructed property's IRI plus the trace of the field expression's evaluation.",
+    "urn:eigenius:core:short_name": "FieldTrace",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:reflection:property",
+      "urn:eigenius:reflection:trace"
+    ]
+  },
+  {
     "@id": "urn:eigenius:reflection:ComponentTrace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:description": "Trace of a single IO component invocation. The memoization cache unit.",
     "urn:eigenius:core:short_name": "ComponentTrace",
     "urn:eigenius:core:requires": [
       "urn:eigenius:reflection:component",
       "urn:eigenius:reflection:input_hash",
-      "urn:eigenius:reflection:output",
-      "urn:eigenius:reflection:timestamp"
+      "urn:eigenius:reflection:output"
     ],
     "urn:eigenius:core:recommends": [
+      "urn:eigenius:reflection:timestamp",
       "urn:eigenius:reflection:argument_hash",
       "urn:eigenius:reflection:provider",
       "urn:eigenius:reflection:model",
@@ -134,6 +158,7 @@
   {
     "@id": "urn:eigenius:reflection:PureTrace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:description": "Trace of a pure (non-IO) component invocation.",
     "urn:eigenius:core:short_name": "PureTrace",
     "urn:eigenius:core:requires": [
@@ -144,6 +169,7 @@
   {
     "@id": "urn:eigenius:reflection:ComorphismTrace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:description": "Trace of a comorphism dispatch (D14 §9.3 four-step pipeline). Records which Comorphism the program ran (`comorphism`), the chain IRI of the produced target-class resource (`target_iri`, `target_class` — D14 §9.3 step 4 chain reinsertion), and the trace of the source-expression evaluation (`source_trace`). Substrate-side per-step provenance for extract / reify lives in the chain-resident `RuntimeInvocation` (D31 §6.2), reachable from the produced resource's `derivation` link.",
     "urn:eigenius:core:short_name": "ComorphismTrace",
     "urn:eigenius:core:requires": [
@@ -158,10 +184,11 @@
   {
     "@id": "urn:eigenius:reflection:LetTrace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:description": "Trace of a Let binding evaluation.",
     "urn:eigenius:core:short_name": "LetTrace",
-    "urn:eigenius:core:requires": [
-      "urn:eigenius:reflection:name",
+    "urn:eigenius:core:requires": ["urn:eigenius:reflection:name"],
+    "urn:eigenius:core:recommends": [
       "urn:eigenius:reflection:value_trace",
       "urn:eigenius:reflection:body_trace"
     ]
@@ -169,6 +196,7 @@
   {
     "@id": "urn:eigenius:reflection:MapTrace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:description": "Trace of a Map evaluation over a collection.",
     "urn:eigenius:core:short_name": "MapTrace",
     "urn:eigenius:core:requires": [
@@ -178,6 +206,7 @@
   {
     "@id": "urn:eigenius:reflection:ReduceTrace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:description": "Trace of a Reduce (fold) evaluation.",
     "urn:eigenius:core:short_name": "ReduceTrace",
     "urn:eigenius:core:requires": [
@@ -187,19 +216,19 @@
   {
     "@id": "urn:eigenius:reflection:CaseTrace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:description": "Trace of a Case expression evaluation.",
     "urn:eigenius:core:short_name": "CaseTrace",
-    "urn:eigenius:core:requires": [
-      "urn:eigenius:reflection:branch_taken",
-      "urn:eigenius:reflection:branch_trace"
-    ],
+    "urn:eigenius:core:requires": ["urn:eigenius:reflection:branch_taken"],
     "urn:eigenius:core:recommends": [
-      "urn:eigenius:reflection:scrutinee_trace"
+      "urn:eigenius:reflection:scrutinee_trace",
+      "urn:eigenius:reflection:branch_trace"
     ]
   },
   {
     "@id": "urn:eigenius:reflection:ConstructTrace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:description": "Trace of a Construct expression (building a typed resource).",
     "urn:eigenius:core:short_name": "ConstructTrace",
     "urn:eigenius:core:requires": [
@@ -209,11 +238,20 @@
   {
     "@id": "urn:eigenius:reflection:ProjectTrace",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:description": "Trace of a property projection.",
     "urn:eigenius:core:short_name": "ProjectTrace",
+    "urn:eigenius:core:requires": ["urn:eigenius:reflection:property"],
+    "urn:eigenius:core:recommends": ["urn:eigenius:reflection:source_trace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:SeqTrace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:subclass_of": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:description": "Sequence of sibling traces from one structural expression with multiple effectful children (trace-tree completeness, F-5).",
+    "urn:eigenius:core:short_name": "SeqTrace",
     "urn:eigenius:core:requires": [
-      "urn:eigenius:reflection:source_trace",
-      "urn:eigenius:reflection:property"
+      "urn:eigenius:reflection:child_traces"
     ]
   },
   {
@@ -432,7 +470,26 @@
     "urn:eigenius:core:description": "Trace of the value expression in a Let binding.",
     "urn:eigenius:core:short_name": "value_trace",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:domain": ["urn:eigenius:reflection:LetTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:child_traces",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Child traces of a SeqTrace, in evaluation order.",
+    "urn:eigenius:core:short_name": "child_traces",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:SeqTrace"]
+  },
+  {
+    "@id": "urn:eigenius:reflection:trace",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The trace node of a FieldTrace entry (EmptyTrace when the field evaluated purely).",
+    "urn:eigenius:core:short_name": "trace",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:FieldTrace"]
   },
   {
     "@id": "urn:eigenius:reflection:body_trace",
@@ -440,6 +497,7 @@
     "urn:eigenius:core:description": "Trace of the body expression in a Let binding.",
     "urn:eigenius:core:short_name": "body_trace",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:domain": ["urn:eigenius:reflection:LetTrace"]
   },
   {
@@ -448,6 +506,7 @@
     "urn:eigenius:core:description": "Per-element traces in a MapTrace.",
     "urn:eigenius:core:short_name": "element_traces",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:domain": ["urn:eigenius:reflection:MapTrace"]
   },
   {
@@ -456,6 +515,7 @@
     "urn:eigenius:core:description": "Per-step accumulator traces in a ReduceTrace.",
     "urn:eigenius:core:short_name": "step_traces",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:domain": ["urn:eigenius:reflection:ReduceTrace"]
   },
   {
@@ -472,6 +532,7 @@
     "urn:eigenius:core:description": "Trace of the taken branch body.",
     "urn:eigenius:core:short_name": "branch_trace",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:domain": ["urn:eigenius:reflection:CaseTrace"]
   },
   {
@@ -480,14 +541,16 @@
     "urn:eigenius:core:description": "Trace of the scrutinee expression in a CaseTrace.",
     "urn:eigenius:core:short_name": "scrutinee_trace",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:domain": ["urn:eigenius:reflection:CaseTrace"]
   },
   {
     "@id": "urn:eigenius:reflection:field_traces",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "Per-field traces in a ConstructTrace.",
+    "urn:eigenius:core:description": "Per-field traces in a ConstructTrace: an array of FieldTrace entries (property IRI + field trace).",
     "urn:eigenius:core:short_name": "field_traces",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:FieldTrace"],
     "urn:eigenius:core:domain": ["urn:eigenius:reflection:ConstructTrace"]
   },
   {
@@ -496,6 +559,7 @@
     "urn:eigenius:core:description": "Trace of the source resource in a ProjectTrace, or of the source-expression eval in a ComorphismTrace.",
     "urn:eigenius:core:short_name": "source_trace",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:domain": [
       "urn:eigenius:reflection:ProjectTrace",
       "urn:eigenius:reflection:ComorphismTrace"
@@ -531,11 +595,11 @@
   {
     "@id": "urn:eigenius:reflection:property",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
-    "urn:eigenius:core:description": "The property accessed in a ProjectTrace.",
+    "urn:eigenius:core:description": "The property accessed in a ProjectTrace, or constructed in a FieldTrace entry.",
     "urn:eigenius:core:short_name": "property",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string",
     "urn:eigenius:core:format": "urn:eigenius:core:formats:iri",
-    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProjectTrace"]
+    "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProjectTrace", "urn:eigenius:reflection:FieldTrace"]
   },
   {
     "@id": "urn:eigenius:reflection:program",
@@ -551,6 +615,7 @@
     "urn:eigenius:core:description": "The root of the tree-structured trace, mirroring the program's expression tree.",
     "urn:eigenius:core:short_name": "trace_tree",
     "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:reflection:Trace"],
     "urn:eigenius:core:domain": ["urn:eigenius:reflection:ProgramTrace"]
   },
   {

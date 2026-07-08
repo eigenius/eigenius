@@ -23,12 +23,14 @@ mod mapreduce;
 mod marshal;
 #[cfg(test)]
 mod testutil;
+mod tracer;
 
 pub(crate) use dispatch::deterministic_run_output_iri;
 use dispatch::{decide_constraint, dispatch_component, try_d14_institution_invoke};
-use iota::iota_reduce;
-use mapreduce::{eval_map, eval_reduce};
+use iota::iota_reduce_impl;
+use mapreduce::{eval_map_impl, eval_reduce_impl};
 pub use marshal::{resource_value_to_val, val_to_resource_value};
+pub(crate) use tracer::{NoTrace, Tracer, TreeTracer};
 
 /// Evaluation error — replaces panics in the NbE evaluator (issue #19).
 ///
@@ -207,61 +209,111 @@ pub fn eval(exp: &Exp, rho: &Rho) -> Result<Val, EvalError> {
 
 /// Evaluate an expression with a capability mode.
 pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
-    // Shorthand for recursive calls
-    let ev = |e: &Exp| -> Result<Val, EvalError> { eval_ctx(e, rho, ctx) };
+    eval_impl::<NoTrace>(exp, rho, ctx).map(|(v, ())| v)
+}
+
+/// Evaluate an expression with tracing.
+///
+/// Same evaluator as [`eval_ctx`] (`eval_impl` instantiated with
+/// [`TreeTracer`] instead of [`NoTrace`]); additionally returns the
+/// tree-structured provenance trace used to build ProgramTraces at the
+/// IO run boundary (D6b §2). Pure subtrees carry `None`.
+pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<(Val, Option<Trace>), EvalError> {
+    eval_impl::<TreeTracer>(exp, rho, ctx)
+}
+
+/// The evaluator, generic over the tracing strategy `T`.
+///
+/// Every arm returns the value plus a `T::Node` describing the
+/// provenance of its computation. With `T = NoTrace` the node is `()`
+/// and the whole tracing dimension compiles away — this instantiation
+/// is the type checker's hot path. With `T = TreeTracer` the nodes
+/// form the D6b trace tree; structural arms combine their children's
+/// nodes so nested effects are never dropped (F-5, NbE analysis §3.2).
+pub(crate) fn eval_impl<T: Tracer>(
+    exp: &Exp,
+    rho: &Rho,
+    ctx: &EvalCtx,
+) -> Result<(Val, T::Node), EvalError> {
+    // Shorthand for recursive calls in the same env/ctx.
+    let ev = |e: &Exp| -> Result<(Val, T::Node), EvalError> { eval_impl::<T>(e, rho, ctx) };
 
     match exp {
-        Exp::Sort(n) => Ok(Val::Sort(*n)),
-        Exp::One => Ok(Val::One),
-        Exp::Unit => Ok(Val::Unit),
+        Exp::Sort(n) => Ok((Val::Sort(*n), T::leaf())),
+        Exp::One => Ok((Val::One, T::leaf())),
+        Exp::Unit => Ok((Val::Unit, T::leaf())),
 
         // eigenius#71 / D49 — literals normalise to themselves; no
         // reduction, no neutral substructure.
-        Exp::LitString(s) => Ok(Val::LitString(s.clone())),
-        Exp::LitInt(n) => Ok(Val::LitInt(*n)),
-        Exp::LitFloat(f) => Ok(Val::LitFloat(*f)),
+        Exp::LitString(s) => Ok((Val::LitString(s.clone()), T::leaf())),
+        Exp::LitInt(n) => Ok((Val::LitInt(*n), T::leaf())),
+        Exp::LitFloat(f) => Ok((Val::LitFloat(*f), T::leaf())),
 
         Exp::Dec(d, e) => {
             match ctx {
                 EvalCtx::Pure => {
-                    // Pure mode: lazy evaluation via UpDec (standard EigenTT)
-                    eval_ctx(e, &Rho::UpDec(Box::new(rho.clone()), d.clone()), ctx)
+                    // Pure mode: lazy evaluation via UpDec (standard
+                    // EigenTT). No Let node — the value is not forced here.
+                    eval_impl::<T>(e, &Rho::UpDec(Box::new(rho.clone()), d.clone()), ctx)
                 }
                 _ => {
                     // IO/Read mode: eagerly evaluate the declaration value
-                    // so that IO dispatch happens in the correct context
+                    // so that IO dispatch happens in the correct context.
                     match d {
                         crate::nbe::term::Decl::Def(patt, _typ, body) => {
-                            let val = eval_ctx(body, rho, ctx)?;
+                            let (val, value_node) = eval_impl::<T>(body, rho, ctx)?;
                             let rho2 = rho.clone().extend(patt.clone(), val);
-                            eval_ctx(e, &rho2, ctx)
+                            let (body_val, body_node) = eval_impl::<T>(e, &rho2, ctx)?;
+                            Ok((body_val, T::let_node(patt, value_node, body_node)))
                         }
                         crate::nbe::term::Decl::Drec(patt, _typ, body) => {
                             // Recursive: evaluate in extended env
                             let rho_ext = Rho::UpDec(Box::new(rho.clone()), d.clone());
-                            let val = eval_ctx(body, &rho_ext, ctx)?;
+                            let (val, value_node) = eval_impl::<T>(body, &rho_ext, ctx)?;
                             let rho2 = rho.clone().extend(patt.clone(), val);
-                            eval_ctx(e, &rho2, ctx)
+                            let (body_val, body_node) = eval_impl::<T>(e, &rho2, ctx)?;
+                            Ok((body_val, T::let_node(patt, value_node, body_node)))
                         }
                     }
                 }
             }
         }
 
-        Exp::Lam(p, e) => Ok(Val::Lam(Clos::new(p.clone(), *e.clone(), rho.clone()))),
-
-        Exp::Pi(p, a, b) => Ok(Val::Pi(
-            Box::new(ev(a)?),
-            Clos::new(p.clone(), *b.clone(), rho.clone()),
+        Exp::Lam(p, e) => Ok((
+            Val::Lam(Clos::new(p.clone(), *e.clone(), rho.clone())),
+            T::leaf(),
         )),
 
-        Exp::Sig(p, a, b) => Ok(Val::Sig(
-            Box::new(ev(a)?),
-            Clos::new(p.clone(), *b.clone(), rho.clone()),
-        )),
+        Exp::Pi(p, a, b) => {
+            let (a_val, a_node) = ev(a)?;
+            Ok((
+                Val::Pi(
+                    Box::new(a_val),
+                    Clos::new(p.clone(), *b.clone(), rho.clone()),
+                ),
+                a_node,
+            ))
+        }
 
-        Exp::Fst(e) => ev(e)?.vfst(),
-        Exp::Snd(e) => ev(e)?.vsnd(),
+        Exp::Sig(p, a, b) => {
+            let (a_val, a_node) = ev(a)?;
+            Ok((
+                Val::Sig(
+                    Box::new(a_val),
+                    Clos::new(p.clone(), *b.clone(), rho.clone()),
+                ),
+                a_node,
+            ))
+        }
+
+        Exp::Fst(e) => {
+            let (v, node) = ev(e)?;
+            Ok((v.vfst()?, node))
+        }
+        Exp::Snd(e) => {
+            let (v, node) = ev(e)?;
+            Ok((v.vsnd()?, node))
+        }
 
         Exp::App(e1, e2) => {
             // In IO mode, intercept component-call-shaped applications:
@@ -272,21 +324,32 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
             // and `Exp::NativeDecide(Constraint::Institution{..}, _)`
             // (Decidable QueryClasses). The ESL compiler emits those
             // AST nodes via the InstitutionIndex classifier (D2 v2 §3.8).
-            if let EvalCtx::IO { registry, .. } = ctx {
+            if let EvalCtx::IO {
+                registry,
+                dispatched_traces,
+                ..
+            } = ctx
+            {
                 if let Exp::Var(name) = e1.as_ref() {
                     if registry.get(name).is_some() {
-                        let arg_val = ev(e2)?;
+                        let (arg_val, arg_node) = ev(e2)?;
                         let (input_val, comp_arg) = match &arg_val {
                             Val::Pair(input, comp_arg) => {
                                 (input.as_ref().clone(), Some(comp_arg.as_ref()))
                             }
                             other => (other.clone(), None),
                         };
-                        return dispatch_component(name, &input_val, comp_arg, ctx);
+                        let before = dispatched_traces.lock().unwrap().len();
+                        let val = dispatch_component(name, &input_val, comp_arg, ctx)?;
+                        let node = T::combine(vec![arg_node, T::component(ctx, before)]);
+                        return Ok((val, node));
                     }
                 }
             }
-            ev(e1)?.app_ctx(ev(e2)?, ctx)
+            let (f_val, f_node) = ev(e1)?;
+            let (arg_val, arg_node) = ev(e2)?;
+            let (result, app_node) = f_val.app_impl::<T>(arg_val, arg_node, ctx)?;
+            Ok((result, T::combine(vec![f_node, app_node])))
         }
 
         // Type annotations are runtime-erased: `⟦(e : T)⟧ = ⟦e⟧`. (The
@@ -294,71 +357,110 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
         Exp::Ann(e, _t) => ev(e),
 
         Exp::Var(x) => match rho.get(x) {
-            Ok(val) => Ok(val),
+            Ok(val) => Ok((val, T::leaf())),
             Err(e) => match ctx {
                 EvalCtx::Pure => Err(EvalError::UnboundVariable(e)),
                 _ => {
                     // IO/Read mode: unbound variables may be component IRIs
                     // that will be intercepted at the App level.
-                    Ok(Val::Nt(Neut::Gen(usize::MAX, x.clone())))
+                    Ok((Val::Nt(Neut::Gen(usize::MAX, x.clone())), T::leaf()))
                 }
             },
         },
 
-        Exp::Pair(e1, e2) => Ok(Val::Pair(Box::new(ev(e1)?), Box::new(ev(e2)?))),
+        Exp::Pair(e1, e2) => {
+            let (v1, n1) = ev(e1)?;
+            let (v2, n2) = ev(e2)?;
+            Ok((
+                Val::Pair(Box::new(v1), Box::new(v2)),
+                T::combine(vec![n1, n2]),
+            ))
+        }
 
-        Exp::Con(c, e) => Ok(Val::Con(c.clone(), Box::new(ev(e)?))),
+        Exp::Con(c, e) => {
+            let (v, node) = ev(e)?;
+            Ok((Val::Con(c.clone(), Box::new(v)), node))
+        }
 
-        Exp::Data(summands) => Ok(Val::Data(
-            summands
-                .iter()
-                .map(|s| (s.name.clone(), s.typ.clone()))
-                .collect(),
-            rho.clone(),
+        Exp::Data(summands) => Ok((
+            Val::Data(
+                summands
+                    .iter()
+                    .map(|s| (s.name.clone(), s.typ.clone()))
+                    .collect(),
+                rho.clone(),
+            ),
+            T::leaf(),
         )),
 
-        Exp::Case(branches) => Ok(Val::Fun(
-            branches
-                .iter()
-                .map(|b| (b.name.clone(), b.body.clone()))
-                .collect(),
-            rho.clone(),
+        Exp::Case(branches) => Ok((
+            Val::Fun(
+                branches
+                    .iter()
+                    .map(|b| (b.name.clone(), b.body.clone()))
+                    .collect(),
+                rho.clone(),
+            ),
+            T::leaf(),
         )),
 
         // Sugar: A → B = Π _ : A. B  (direct construction, Phase 10c)
-        Exp::Arrow(a, b) => Ok(Val::Pi(
-            Box::new(ev(a)?),
-            Clos::new(Patt::Unit, *b.clone(), rho.clone()),
-        )),
+        Exp::Arrow(a, b) => {
+            let (a_val, a_node) = ev(a)?;
+            Ok((
+                Val::Pi(
+                    Box::new(a_val),
+                    Clos::new(Patt::Unit, *b.clone(), rho.clone()),
+                ),
+                a_node,
+            ))
+        }
         // Sugar: A × B = Σ _ : A. B  (direct construction, Phase 10c)
-        Exp::Times(a, b) => Ok(Val::Sig(
-            Box::new(ev(a)?),
-            Clos::new(Patt::Unit, *b.clone(), rho.clone()),
-        )),
+        Exp::Times(a, b) => {
+            let (a_val, a_node) = ev(a)?;
+            Ok((
+                Val::Sig(
+                    Box::new(a_val),
+                    Clos::new(Patt::Unit, *b.clone(), rho.clone()),
+                ),
+                a_node,
+            ))
+        }
 
         // Identity type
-        Exp::Id(a, x, y) => Ok(Val::Id(
-            Box::new(ev(a)?),
-            Box::new(ev(x)?),
-            Box::new(ev(y)?),
-        )),
-        Exp::Refl(a) => Ok(Val::Refl(Box::new(ev(a)?))),
+        Exp::Id(a, x, y) => {
+            let (a_val, an) = ev(a)?;
+            let (x_val, xn) = ev(x)?;
+            let (y_val, yn) = ev(y)?;
+            Ok((
+                Val::Id(Box::new(a_val), Box::new(x_val), Box::new(y_val)),
+                T::combine(vec![an, xn, yn]),
+            ))
+        }
+        Exp::Refl(a) => {
+            let (v, node) = ev(a)?;
+            Ok((Val::Refl(Box::new(v)), node))
+        }
         Exp::IdJ(args) => {
             let [_a, _c, d, _x, _y, p] = args.as_ref();
-            let p_val = ev(p)?;
+            let (p_val, p_node) = ev(p)?;
             match p_val {
                 Val::Refl(a_val) => {
-                    let d_val = ev(d)?;
-                    d_val.app_ctx(*a_val, ctx)
+                    let (d_val, d_node) = ev(d)?;
+                    let (result, app_node) = d_val.app_impl::<T>(*a_val, T::leaf(), ctx)?;
+                    Ok((result, T::combine(vec![p_node, d_node, app_node])))
                 }
                 Val::Nt(n) => {
                     // Blocked — all args become neutral
-                    Ok(Val::Nt(Neut::App(Box::new(n), Box::new(Val::Unit))))
+                    Ok((Val::Nt(Neut::App(Box::new(n), Box::new(Val::Unit))), p_node))
                 }
                 _ => {
                     // Stuck — proof argument is neither Refl nor neutral.
                     // Return a stuck neutral rather than panicking (Phase 10c).
-                    Ok(Val::Nt(Neut::Gen(usize::MAX, "__j_stuck".to_string())))
+                    Ok((
+                        Val::Nt(Neut::Gen(usize::MAX, "__j_stuck".to_string())),
+                        p_node,
+                    ))
                 }
             }
         }
@@ -384,16 +486,22 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
             source,
             target_iri,
         } => {
-            let source_val = ev(source)?;
+            let (source_val, source_node) = ev(source)?;
             if ctx.institution_index().is_none() || ctx.institution_runtime().is_none() {
-                return Ok(Val::Nt(Neut::Gen(
-                    usize::MAX,
-                    format!("__institution_invoke_no_registry:{comorphism_iri}"),
-                )));
+                return Ok((
+                    Val::Nt(Neut::Gen(
+                        usize::MAX,
+                        format!("__institution_invoke_no_registry:{comorphism_iri}"),
+                    )),
+                    source_node,
+                ));
             }
             match try_d14_institution_invoke(comorphism_iri, &source_val, target_iri.as_ref(), ctx)?
             {
-                Some(translated) => Ok(translated),
+                Some(translated) => {
+                    let node = T::comorphism(comorphism_iri, source_node, &translated);
+                    Ok((translated, node))
+                }
                 None => Err(EvalError::InvalidCaseTarget(format!(
                     "no Comorphism declaration found in the InstitutionIndex for `{comorphism_iri}`"
                 ))),
@@ -402,56 +510,63 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
 
         // Native constraint checking
         Exp::NativeDecide(constraint, val) => {
-            let v = ev(val)?;
-            match decide_constraint(constraint, &v, rho, ctx)? {
-                crate::institution::DecResult::Holds => Ok(Val::Refl(Box::new(v))),
-                crate::institution::DecResult::Fails => Ok(Val::Nt(Neut::Gen(
-                    usize::MAX,
-                    "__constraint_failed".to_string(),
-                ))),
-                crate::institution::DecResult::Undecidable => Ok(Val::Nt(Neut::Gen(
+            let (v, node) = ev(val)?;
+            let result = match decide_constraint(constraint, &v, rho, ctx)? {
+                crate::institution::DecResult::Holds => Val::Refl(Box::new(v)),
+                crate::institution::DecResult::Fails => {
+                    Val::Nt(Neut::Gen(usize::MAX, "__constraint_failed".to_string()))
+                }
+                crate::institution::DecResult::Undecidable => Val::Nt(Neut::Gen(
                     usize::MAX,
                     "__constraint_undecidable".to_string(),
-                ))),
-            }
+                )),
+            };
+            Ok((result, node))
         }
 
         // Decidable equality on ground types
         Exp::DecEq(_a, x, y) => {
-            let x_val = ev(x)?;
-            let y_val = ev(y)?;
-            if ground_values_equal(&x_val, &y_val) {
-                Ok(Val::Refl(Box::new(x_val)))
+            let (x_val, xn) = ev(x)?;
+            let (y_val, yn) = ev(y)?;
+            let result = if ground_values_equal(&x_val, &y_val) {
+                Val::Refl(Box::new(x_val))
             } else {
-                Ok(Val::Nt(Neut::Gen(usize::MAX, "__deceq_false".to_string())))
-            }
+                Val::Nt(Neut::Gen(usize::MAX, "__deceq_false".to_string()))
+            };
+            Ok((result, T::combine(vec![xn, yn])))
         }
 
         // Template literal — evaluate type expressions for each reference
         Exp::Template(s, refs) => {
             let mut resolved = Vec::new();
+            let mut nodes = Vec::new();
             for (iri, typ) in refs {
-                resolved.push((iri.clone(), ev(typ)?));
+                let (v, node) = ev(typ)?;
+                resolved.push((iri.clone(), v));
+                nodes.push(node);
             }
-            Ok(Val::TemplateVal(s.clone(), resolved))
+            Ok((Val::TemplateVal(s.clone(), resolved), T::combine(nodes)))
         }
 
         // Eigenius extensions
-        Exp::EigonClass(iri) => Ok(Val::EigonClass(iri.clone())),
+        Exp::EigonClass(iri) => Ok((Val::EigonClass(iri.clone()), T::leaf())),
         // Axiom references evaluate to a neutral spine head — the
         // existing `Neut::App` machinery then handles applications
         // (`stats:lt(a, b)` → `Val::Nt(Neut::App(Neut::App(Neut::EigonAxiom(lt), a), b))`).
-        Exp::EigonAxiom(iri) => Ok(Val::Nt(crate::nbe::val::Neut::EigonAxiom(iri.clone()))),
-        Exp::EigonPrimitive(p) => Ok(Val::EigonPrimitive(*p)),
-        Exp::EigonResource(r) => Ok(Val::ResourceVal(r.clone())),
+        Exp::EigonAxiom(iri) => Ok((
+            Val::Nt(crate::nbe::val::Neut::EigonAxiom(iri.clone())),
+            T::leaf(),
+        )),
+        Exp::EigonPrimitive(p) => Ok((Val::EigonPrimitive(*p), T::leaf())),
+        Exp::EigonResource(r) => Ok((Val::ResourceVal(r.clone()), T::leaf())),
 
         Exp::PropAccess(e, prop) => {
-            let v = ev(e)?;
+            let (v, source_node) = ev(e)?;
             match v {
                 Val::ResourceVal(r) => {
                     // Direct property access on a known resource
-                    match r.get(prop) {
-                        Some(val) => Ok(resource_value_to_val(val)),
+                    let result = match r.get(prop) {
+                        Some(val) => resource_value_to_val(val),
                         None => {
                             tracing::warn!(
                                 { field::OPERATION } = operation::NBE_EVAL,
@@ -459,9 +574,10 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
                                 { field::PROPERTY_IRI } = %prop,
                                 "property not found on resource during eval; returning Unit"
                             );
-                            Ok(Val::Unit)
+                            Val::Unit
                         }
-                    }
+                    };
+                    Ok((result, T::project(source_node, prop)))
                 }
                 // Codata observation: the "property" IRI's local name is
                 // treated as the observation name (D11 §8). Evaluate the
@@ -470,7 +586,8 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
                     let obs_name = prop.local_name();
                     for (name, body) in &fields {
                         if name == obs_name {
-                            return eval_ctx(body, &corecord_rho, ctx);
+                            let (v, body_node) = eval_impl::<T>(body, &corecord_rho, ctx)?;
+                            return Ok((v, T::combine(vec![source_node, body_node])));
                         }
                     }
                     tracing::warn!(
@@ -479,16 +596,19 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
                         observation = %obs_name,
                         "observation not found in corecord during eval; returning Unit"
                     );
-                    Ok(Val::Unit)
+                    Ok((Val::Unit, source_node))
                 }
-                Val::Nt(n) => Ok(Val::Nt(Neut::PropAccess(Box::new(n), prop.clone()))),
+                Val::Nt(n) => Ok((
+                    Val::Nt(Neut::PropAccess(Box::new(n), prop.clone())),
+                    T::project(source_node, prop),
+                )),
                 _other => {
                     tracing::warn!(
                         { field::OPERATION } = operation::NBE_EVAL,
                         { field::ERROR_KIND } = "property_access_non_resource",
                         "property access on non-resource value during eval; returning Unit"
                     );
-                    Ok(Val::Unit)
+                    Ok((Val::Unit, source_node))
                 }
             }
         }
@@ -500,55 +620,75 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
                 Iri::parse("urn:eigenius:core:is_a").unwrap(),
                 Value::Array(vec![Value::String(class_iri.as_str().to_string())]),
             );
+            let mut field_nodes = Vec::with_capacity(fields.len());
             for (prop_iri, expr) in fields {
-                let val = ev(expr)?;
+                let (val, node) = ev(expr)?;
                 let rval = val_to_resource_value(&val);
                 r.set(prop_iri.clone(), rval);
+                field_nodes.push((prop_iri.clone(), node));
             }
-            Ok(Val::ResourceVal(Box::new(r)))
+            Ok((Val::ResourceVal(Box::new(r)), T::construct(field_nodes)))
         }
 
         // Codata (D11, Phase 9b-i)
-        Exp::Codata(observations) => Ok(Val::Codata(
-            observations
-                .iter()
-                .map(|o| (o.name.clone(), o.typ.clone()))
-                .collect(),
-            rho.clone(),
+        Exp::Codata(observations) => Ok((
+            Val::Codata(
+                observations
+                    .iter()
+                    .map(|o| (o.name.clone(), o.typ.clone()))
+                    .collect(),
+                rho.clone(),
+            ),
+            T::leaf(),
         )),
 
-        Exp::CoRecord(fields) => Ok(Val::CoRecord(
-            fields
-                .iter()
-                .map(|f| (f.name.clone(), f.body.clone()))
-                .collect(),
-            rho.clone(),
+        Exp::CoRecord(fields) => Ok((
+            Val::CoRecord(
+                fields
+                    .iter()
+                    .map(|f| (f.name.clone(), f.body.clone()))
+                    .collect(),
+                rho.clone(),
+            ),
+            T::leaf(),
         )),
 
-        Exp::Observe(e, name) => ev(e)?.vobserve_ctx(name, ctx),
+        Exp::Observe(e, name) => {
+            let (v, source_node) = ev(e)?;
+            let (result, obs_node) = v.vobserve_impl::<T>(name, ctx)?;
+            Ok((result, T::combine(vec![source_node, obs_node])))
+        }
 
         // Map/Reduce (Phase 11a)
         Exp::Map(f, coll) => {
-            let f_val = ev(f)?;
-            let coll_val = ev(coll)?;
-            eval_map(f_val, coll_val, ctx)
+            let (f_val, f_node) = ev(f)?;
+            let (coll_val, coll_node) = ev(coll)?;
+            let (result, map_node) = eval_map_impl::<T>(f_val, coll_val, ctx)?;
+            Ok((result, T::combine(vec![f_node, coll_node, map_node])))
         }
         Exp::Reduce(f, init, coll) => {
-            let f_val = ev(f)?;
-            let acc = ev(init)?;
-            let coll_val = ev(coll)?;
-            eval_reduce(f_val, acc, coll_val, ctx)
+            let (f_val, f_node) = ev(f)?;
+            let (acc, init_node) = ev(init)?;
+            let (coll_val, coll_node) = ev(coll)?;
+            let (result, reduce_node) = eval_reduce_impl::<T>(f_val, acc, coll_val, ctx)?;
+            Ok((
+                result,
+                T::combine(vec![f_node, init_node, coll_node, reduce_node]),
+            ))
         }
 
         // Inductive types (Phase 11b, D19; D48 adds indices)
         // Step 1 lands the AST and value shells; Step 2 will add iota
         // reduction for the recursor. Pre-D48 callers always have
         // `indices: Vec::new()` (non-indexed default).
-        Exp::Inductive(decl) => Ok(Val::InductiveType {
-            decl: decl.clone(),
-            params: Vec::new(),
-            indices: Vec::new(),
-        }),
+        Exp::Inductive(decl) => Ok((
+            Val::InductiveType {
+                decl: decl.clone(),
+                params: Vec::new(),
+                indices: Vec::new(),
+            },
+            T::leaf(),
+        )),
         Exp::InductiveType(decl, args) => {
             // D48: `Exp::InductiveType(decl, args)` carries `params ++ indices`
             // — `decl.params.len()` parameters followed by `decl.indices.len()`
@@ -563,14 +703,23 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
             // (all args treated as params, no arity check) so the
             // stub-Arc pattern keeps working. Genuine indexed decls
             // (`decl.indices` non-empty) get the strict split.
-            let vals: Result<Vec<_>, _> = args.iter().map(&ev).collect();
-            let mut vals = vals?;
+            let mut vals = Vec::with_capacity(args.len());
+            let mut nodes = Vec::with_capacity(args.len());
+            for a in args {
+                let (v, n) = ev(a)?;
+                vals.push(v);
+                nodes.push(n);
+            }
+            let node = T::combine(nodes);
             if decl.indices.is_empty() {
-                Ok(Val::InductiveType {
-                    decl: decl.clone(),
-                    params: vals,
-                    indices: Vec::new(),
-                })
+                Ok((
+                    Val::InductiveType {
+                        decl: decl.clone(),
+                        params: vals,
+                        indices: Vec::new(),
+                    },
+                    node,
+                ))
             } else {
                 let n_params = decl.params.len();
                 let n_indices = decl.indices.len();
@@ -587,27 +736,48 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
                     )));
                 }
                 let indices = vals.split_off(n_params);
-                Ok(Val::InductiveType {
-                    decl: decl.clone(),
-                    params: vals,
-                    indices,
-                })
+                Ok((
+                    Val::InductiveType {
+                        decl: decl.clone(),
+                        params: vals,
+                        indices,
+                    },
+                    node,
+                ))
             }
         }
         Exp::CodataType(decl, params) => {
-            let params: Result<Vec<_>, _> = params.iter().map(&ev).collect();
-            Ok(Val::CodataType {
-                decl: decl.clone(),
-                params: params?,
-            })
+            let mut vals = Vec::with_capacity(params.len());
+            let mut nodes = Vec::with_capacity(params.len());
+            for p in params {
+                let (v, n) = ev(p)?;
+                vals.push(v);
+                nodes.push(n);
+            }
+            Ok((
+                Val::CodataType {
+                    decl: decl.clone(),
+                    params: vals,
+                },
+                T::combine(nodes),
+            ))
         }
         Exp::InductiveCtor(decl, ctor_name, args) => {
-            let args: Result<Vec<_>, _> = args.iter().map(&ev).collect();
-            Ok(Val::InductiveVal {
-                decl: decl.clone(),
-                ctor_name: ctor_name.clone(),
-                args: args?,
-            })
+            let mut vals = Vec::with_capacity(args.len());
+            let mut nodes = Vec::with_capacity(args.len());
+            for a in args {
+                let (v, n) = ev(a)?;
+                vals.push(v);
+                nodes.push(n);
+            }
+            Ok((
+                Val::InductiveVal {
+                    decl: decl.clone(),
+                    ctor_name: ctor_name.clone(),
+                    args: vals,
+                },
+                T::combine(nodes),
+            ))
         }
         Exp::InductiveRec {
             decl,
@@ -615,20 +785,40 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
             minors,
             major,
         } => {
-            let motive_val = ev(motive)?;
-            let minor_vals: Result<Vec<_>, _> = minors.iter().map(&ev).collect();
-            let minor_vals = minor_vals?;
-            let major_val = ev(major)?;
+            let (motive_val, motive_node) = ev(motive)?;
+            let mut minor_vals = Vec::with_capacity(minors.len());
+            let mut nodes = vec![motive_node];
+            for m in minors {
+                let (v, n) = ev(m)?;
+                minor_vals.push(v);
+                nodes.push(n);
+            }
+            let (major_val, major_node) = ev(major)?;
+            nodes.push(major_node);
             match major_val {
-                Val::Nt(n) => Ok(Val::Nt(Neut::NtRec {
-                    decl: decl.clone(),
-                    motive: Box::new(motive_val),
-                    minors: minor_vals,
-                    major: Box::new(n),
-                })),
+                Val::Nt(n) => Ok((
+                    Val::Nt(Neut::NtRec {
+                        decl: decl.clone(),
+                        motive: Box::new(motive_val),
+                        minors: minor_vals,
+                        major: Box::new(n),
+                    }),
+                    T::combine(nodes),
+                )),
                 Val::InductiveVal {
                     ctor_name, args, ..
-                } => iota_reduce(decl, &motive_val, &minor_vals, &ctor_name, &args, ctx),
+                } => {
+                    let (result, iota_node) = iota_reduce_impl::<T>(
+                        decl,
+                        &motive_val,
+                        &minor_vals,
+                        &ctor_name,
+                        &args,
+                        ctx,
+                    )?;
+                    nodes.push(iota_node);
+                    Ok((result, T::combine(nodes)))
+                }
                 other => Err(EvalError::InvalidCaseTarget(format!(
                     "InductiveRec: expected inductive value, got {other:?}"
                 ))),
@@ -642,16 +832,23 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
         // not exposed to user code (a future "IH-aware match" extension
         // would expose them).
         Exp::Match { scrutinee, arms } => {
-            let scrutinee_val = ev(scrutinee)?;
+            let (scrutinee_val, scrutinee_node) = ev(scrutinee)?;
             match scrutinee_val {
                 Val::InductiveVal {
                     ctor_name, args, ..
-                } => match_dispatch(arms, &ctor_name, &args, rho, ctx),
-                Val::Nt(n) => Ok(Val::Nt(Neut::NtMatch {
-                    scrutinee: Box::new(n),
-                    arms: arms.clone(),
-                    env: rho.clone(),
-                })),
+                } => {
+                    let (result, body_node) =
+                        match_dispatch::<T>(arms, &ctor_name, &args, rho, ctx)?;
+                    Ok((result, T::case(scrutinee_node, &ctor_name, body_node)))
+                }
+                Val::Nt(n) => Ok((
+                    Val::Nt(Neut::NtMatch {
+                        scrutinee: Box::new(n),
+                        arms: arms.clone(),
+                        env: rho.clone(),
+                    }),
+                    scrutinee_node,
+                )),
                 other => Err(EvalError::InvalidCaseTarget(format!(
                     "Match: expected inductive value, got {other:?}"
                 ))),
@@ -659,22 +856,31 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
         }
 
         // Sized types (Phase 11b step 14, D19 §8).
-        Exp::SizeSort => Ok(Val::SizeSort),
+        Exp::SizeSort => Ok((Val::SizeSort, T::leaf())),
         // ∞ is a fixed point of successor: `ŝ(∞) = ∞`. Matches
         // MiniAgda's `sizeSuccE Infty = Infty` (Abstract.hs:300).
         // Without this absorption, `SizeSucc(SizeInf)` and `SizeInf`
         // would compare unequal, creating spurious type mismatches
         // whenever code mixes sized and unsized (`∞`-indexed) uses.
-        Exp::SizeSucc(s) => match ev(s)? {
-            Val::SizeInf => Ok(Val::SizeInf),
-            other => Ok(Val::SizeSucc(Box::new(other))),
-        },
-        Exp::SizeInf => Ok(Val::SizeInf),
+        Exp::SizeSucc(s) => {
+            let (v, node) = ev(s)?;
+            match v {
+                Val::SizeInf => Ok((Val::SizeInf, node)),
+                other => Ok((Val::SizeSucc(Box::new(other)), node)),
+            }
+        }
+        Exp::SizeInf => Ok((Val::SizeInf, T::leaf())),
 
-        Exp::SizedPi { patt, upper, body } => Ok(Val::SizedPi(
-            Box::new(ev(upper)?),
-            Clos::new(patt.clone(), *body.clone(), rho.clone()),
-        )),
+        Exp::SizedPi { patt, upper, body } => {
+            let (upper_val, node) = ev(upper)?;
+            Ok((
+                Val::SizedPi(
+                    Box::new(upper_val),
+                    Clos::new(patt.clone(), *body.clone(), rho.clone()),
+                ),
+                node,
+            ))
+        }
     }
 }
 
@@ -688,13 +894,13 @@ pub fn eval_ctx(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<Val, EvalError> {
 /// count is a build-time invariant violation (the type checker should
 /// have caught it), so we surface a clear runtime error rather than
 /// silently truncate.
-fn match_dispatch(
+fn match_dispatch<T: Tracer>(
     arms: &[crate::nbe::term::MatchArm],
     ctor_name: &str,
     args: &[Val],
     rho: &Rho,
     ctx: &EvalCtx,
-) -> Result<Val, EvalError> {
+) -> Result<(Val, T::Node), EvalError> {
     let arm = arms
         .iter()
         .find(|a| a.ctor_name == ctor_name)
@@ -716,405 +922,7 @@ fn match_dispatch(
     for (patt, val) in arm.bindings.iter().zip(args.iter()) {
         env = env.extend(patt.clone(), val.clone());
     }
-    eval_ctx(&arm.body, &env, ctx)
-}
-
-/// Evaluate an expression with tracing.
-///
-/// Mirrors `eval_ctx` but produces a trace tree alongside the value.
-/// Pure leaf forms (Var, Set, Type, etc.) return `None` trace.
-/// Used by the execution engine to build tree-structured ProgramTraces (D6b §2).
-pub fn eval_traced(exp: &Exp, rho: &Rho, ctx: &EvalCtx) -> Result<(Val, Option<Trace>), EvalError> {
-    match exp {
-        // --- Dec → Trace::Let (IO/Read mode only) ---
-        Exp::Dec(d, e) => {
-            if matches!(ctx, EvalCtx::Pure) {
-                return Ok((eval_ctx(exp, rho, ctx)?, None));
-            }
-            match d {
-                crate::nbe::term::Decl::Def(patt, _typ, body) => {
-                    let (val, val_trace) = eval_traced(body, rho, ctx)?;
-                    let rho2 = rho.clone().extend(patt.clone(), val);
-                    let (body_val, body_trace) = eval_traced(e, &rho2, ctx)?;
-                    let name = match patt {
-                        Patt::Var(n) => n.clone(),
-                        _ => "_".to_string(),
-                    };
-                    let trace = if val_trace.is_some() || body_trace.is_some() {
-                        Some(Trace::Let {
-                            name,
-                            value_trace: val_trace.map(Box::new),
-                            body_trace: body_trace.map(Box::new),
-                        })
-                    } else {
-                        None
-                    };
-                    Ok((body_val, trace))
-                }
-                crate::nbe::term::Decl::Drec(patt, _typ, body) => {
-                    let rho_ext = Rho::UpDec(Box::new(rho.clone()), d.clone());
-                    let (val, val_trace) = eval_traced(body, &rho_ext, ctx)?;
-                    let rho2 = rho.clone().extend(patt.clone(), val);
-                    let (body_val, body_trace) = eval_traced(e, &rho2, ctx)?;
-                    let name = match patt {
-                        Patt::Var(n) => n.clone(),
-                        _ => "_".to_string(),
-                    };
-                    let trace = if val_trace.is_some() || body_trace.is_some() {
-                        Some(Trace::Let {
-                            name,
-                            value_trace: val_trace.map(Box::new),
-                            body_trace: body_trace.map(Box::new),
-                        })
-                    } else {
-                        None
-                    };
-                    Ok((body_val, trace))
-                }
-            }
-        }
-
-        // --- App: component dispatch (with Trace::Component) or delegate ---
-        Exp::App(e1, e2) => {
-            if let EvalCtx::IO {
-                registry,
-                dispatched_traces,
-                ..
-            } = ctx
-            {
-                if let Exp::Var(name) = e1.as_ref() {
-                    if registry.get(name).is_some() {
-                        let arg_val = eval_ctx(e2, rho, ctx)?;
-                        let (input_val, comp_arg) = match &arg_val {
-                            Val::Pair(input, comp_arg) => {
-                                (input.as_ref().clone(), Some(comp_arg.as_ref()))
-                            }
-                            other => (other.clone(), None),
-                        };
-                        let before = dispatched_traces.lock().unwrap().len();
-                        let val = dispatch_component(name, &input_val, comp_arg, ctx)?;
-                        let trace = {
-                            let traces = dispatched_traces.lock().unwrap();
-                            if traces.len() > before {
-                                Some(Trace::Component(traces.last().unwrap().clone()))
-                            } else {
-                                None
-                            }
-                        };
-                        return Ok((val, trace));
-                    }
-                }
-            }
-            let f_val = eval_ctx(e1, rho, ctx)?;
-            let arg_val = eval_ctx(e2, rho, ctx)?;
-            f_val.app_ctx_traced(arg_val, ctx)
-        }
-
-        // --- PropAccess → Trace::Project ---
-        Exp::PropAccess(e, prop) => {
-            let (v, source_trace) = eval_traced(e, rho, ctx)?;
-            match v {
-                Val::ResourceVal(r) => {
-                    let result = match r.get(prop) {
-                        Some(val) => resource_value_to_val(val),
-                        None => {
-                            tracing::warn!(
-                                { field::OPERATION } = operation::NBE_EVAL,
-                                { field::ERROR_KIND } = "property_missing",
-                                { field::PROPERTY_IRI } = %prop,
-                                "property not found on resource during eval; returning Unit"
-                            );
-                            Val::Unit
-                        }
-                    };
-                    Ok((
-                        result,
-                        Some(Trace::Project {
-                            source_trace: source_trace.map(Box::new),
-                            property: prop.clone(),
-                        }),
-                    ))
-                }
-                Val::CoRecord(fields, corecord_rho) => {
-                    let obs_name = prop.local_name();
-                    for (name, body) in &fields {
-                        if name == obs_name {
-                            return eval_traced(body, &corecord_rho, ctx);
-                        }
-                    }
-                    tracing::warn!(
-                        { field::OPERATION } = operation::NBE_EVAL,
-                        { field::ERROR_KIND } = "observation_missing",
-                        observation = %obs_name,
-                        "observation not found in corecord during eval; returning Unit"
-                    );
-                    Ok((Val::Unit, None))
-                }
-                Val::Nt(n) => Ok((
-                    Val::Nt(Neut::PropAccess(Box::new(n), prop.clone())),
-                    Some(Trace::Project {
-                        source_trace: source_trace.map(Box::new),
-                        property: prop.clone(),
-                    }),
-                )),
-                _other => {
-                    tracing::warn!(
-                        { field::OPERATION } = operation::NBE_EVAL,
-                        { field::ERROR_KIND } = "property_access_non_resource",
-                        "property access on non-resource value during eval; returning Unit"
-                    );
-                    Ok((Val::Unit, None))
-                }
-            }
-        }
-
-        // --- Construct → Trace::Construct ---
-        Exp::Construct(class_iri, fields) => {
-            use crate::ontology::resource::{Resource, Value};
-            let mut r = Resource::new_embedded();
-            r.set(
-                Iri::parse("urn:eigenius:core:is_a").unwrap(),
-                Value::Array(vec![Value::String(class_iri.as_str().to_string())]),
-            );
-            let mut field_traces = std::collections::BTreeMap::new();
-            for (prop_iri, expr) in fields {
-                let (val, trace) = eval_traced(expr, rho, ctx)?;
-                let rval = val_to_resource_value(&val);
-                r.set(prop_iri.clone(), rval);
-                field_traces.insert(prop_iri.clone(), trace);
-            }
-            let has_traces = field_traces.values().any(|t| t.is_some());
-            let trace = if has_traces {
-                Some(Trace::Construct { field_traces })
-            } else {
-                None
-            };
-            Ok((Val::ResourceVal(Box::new(r)), trace))
-        }
-
-        // --- Observe: delegate to vobserve_ctx_traced ---
-        Exp::Observe(e, name) => {
-            let v = eval_ctx(e, rho, ctx)?;
-            v.vobserve_ctx_traced(name, ctx)
-        }
-
-        // --- Map: traced evaluation producing Trace::Map ---
-        Exp::Map(f, coll) => {
-            let f_val = eval_ctx(f, rho, ctx)?;
-            let coll_val = eval_ctx(coll, rho, ctx)?;
-            match coll_val {
-                Val::List(items) => {
-                    let mut mapped = Vec::with_capacity(items.len());
-                    let mut element_traces = Vec::with_capacity(items.len());
-                    for elem in items {
-                        let (val, trace) = f_val.clone().app_ctx_traced(elem, ctx)?;
-                        mapped.push(val);
-                        element_traces.push(trace);
-                    }
-                    let has_traces = element_traces.iter().any(|t| t.is_some());
-                    let trace = if has_traces {
-                        Some(Trace::Map { element_traces })
-                    } else {
-                        None
-                    };
-                    Ok((Val::List(mapped), trace))
-                }
-                Val::Con(ref name, _) if name == "nil" || name == "cons" => {
-                    match crate::nbe::val::cons_to_vec(&coll_val) {
-                        Some(items) => {
-                            let mut mapped = Vec::with_capacity(items.len());
-                            let mut element_traces = Vec::with_capacity(items.len());
-                            for elem in items {
-                                let (val, trace) = f_val.clone().app_ctx_traced(elem, ctx)?;
-                                mapped.push(val);
-                                element_traces.push(trace);
-                            }
-                            let has_traces = element_traces.iter().any(|t| t.is_some());
-                            let trace = if has_traces {
-                                Some(Trace::Map { element_traces })
-                            } else {
-                                None
-                            };
-                            Ok((Val::List(mapped), trace))
-                        }
-                        None => Err(EvalError::InvalidCaseTarget(
-                            "Map: malformed cons list".to_string(),
-                        )),
-                    }
-                }
-                Val::InductiveVal { ref decl, .. } if decl.name == "List" => {
-                    match crate::nbe::val::inductive_list_to_vec(&coll_val) {
-                        Some(items) => {
-                            let mut mapped = Vec::with_capacity(items.len());
-                            let mut element_traces = Vec::with_capacity(items.len());
-                            for elem in items {
-                                let (val, trace) = f_val.clone().app_ctx_traced(elem, ctx)?;
-                                mapped.push(val);
-                                element_traces.push(trace);
-                            }
-                            let has_traces = element_traces.iter().any(|t| t.is_some());
-                            let trace = if has_traces {
-                                Some(Trace::Map { element_traces })
-                            } else {
-                                None
-                            };
-                            Ok((Val::List(mapped), trace))
-                        }
-                        None => Err(EvalError::InvalidCaseTarget(
-                            "Map: malformed inductive list".to_string(),
-                        )),
-                    }
-                }
-                Val::Nt(n) => Ok((Val::Nt(Neut::NtMap(Box::new(f_val), Box::new(n))), None)),
-                other => Err(EvalError::InvalidCaseTarget(format!(
-                    "Map: expected list, got {other:?}"
-                ))),
-            }
-        }
-
-        // --- Reduce: traced evaluation producing Trace::Reduce ---
-        Exp::Reduce(f, init, coll) => {
-            let f_val = eval_ctx(f, rho, ctx)?;
-            let acc = eval_ctx(init, rho, ctx)?;
-            let coll_val = eval_ctx(coll, rho, ctx)?;
-            match coll_val {
-                Val::List(items) => {
-                    let mut result = acc;
-                    let mut step_traces = Vec::with_capacity(items.len());
-                    for elem in items {
-                        let (step_fn, t1) = f_val.clone().app_ctx_traced(result, ctx)?;
-                        let (next, t2) = step_fn.app_ctx_traced(elem, ctx)?;
-                        result = next;
-                        step_traces.push(t1.or(t2));
-                    }
-                    let has_traces = step_traces.iter().any(|t| t.is_some());
-                    let trace = if has_traces {
-                        Some(Trace::Reduce { step_traces })
-                    } else {
-                        None
-                    };
-                    Ok((result, trace))
-                }
-                Val::Con(ref name, _) if name == "nil" || name == "cons" => {
-                    match crate::nbe::val::cons_to_vec(&coll_val) {
-                        Some(items) => {
-                            let mut result = acc;
-                            let mut step_traces = Vec::with_capacity(items.len());
-                            for elem in items {
-                                let (step_fn, t1) = f_val.clone().app_ctx_traced(result, ctx)?;
-                                let (next, t2) = step_fn.app_ctx_traced(elem, ctx)?;
-                                result = next;
-                                step_traces.push(t1.or(t2));
-                            }
-                            let has_traces = step_traces.iter().any(|t| t.is_some());
-                            let trace = if has_traces {
-                                Some(Trace::Reduce { step_traces })
-                            } else {
-                                None
-                            };
-                            Ok((result, trace))
-                        }
-                        None => Err(EvalError::InvalidCaseTarget(
-                            "Reduce: malformed cons list".to_string(),
-                        )),
-                    }
-                }
-                Val::InductiveVal { ref decl, .. } if decl.name == "List" => {
-                    match crate::nbe::val::inductive_list_to_vec(&coll_val) {
-                        Some(items) => {
-                            let mut result = acc;
-                            let mut step_traces = Vec::with_capacity(items.len());
-                            for elem in items {
-                                let (step_fn, t1) = f_val.clone().app_ctx_traced(result, ctx)?;
-                                let (next, t2) = step_fn.app_ctx_traced(elem, ctx)?;
-                                result = next;
-                                step_traces.push(t1.or(t2));
-                            }
-                            let has_traces = step_traces.iter().any(|t| t.is_some());
-                            let trace = if has_traces {
-                                Some(Trace::Reduce { step_traces })
-                            } else {
-                                None
-                            };
-                            Ok((result, trace))
-                        }
-                        None => Err(EvalError::InvalidCaseTarget(
-                            "Reduce: malformed inductive list".to_string(),
-                        )),
-                    }
-                }
-                Val::Nt(n) => Ok((
-                    Val::Nt(Neut::NtReduce(Box::new(f_val), Box::new(acc), Box::new(n))),
-                    None,
-                )),
-                other => Err(EvalError::InvalidCaseTarget(format!(
-                    "Reduce: expected list, got {other:?}"
-                ))),
-            }
-        }
-
-        // --- InstitutionInvoke: comorphism dispatch (D14 §9.3) ---
-        //
-        // The four-step pipeline (extract → m → reify) lives in
-        // `try_d14_institution_invoke`; here we wrap the source
-        // expression in `eval_traced` to nest its trace, drive the
-        // pipeline through `eval_ctx`, and synthesise a
-        // `Trace::Comorphism` node from the produced
-        // `Val::ResourceVal`'s `@id` and class. Pure-mode passthrough
-        // (no D14 backing attached) and downstream errors propagate
-        // unchanged.
-        Exp::InstitutionInvoke {
-            comorphism_iri,
-            source,
-            target_iri,
-        } => {
-            let (source_val, source_trace) = eval_traced(source, rho, ctx)?;
-            if ctx.institution_index().is_none() || ctx.institution_runtime().is_none() {
-                return Ok((
-                    Val::Nt(Neut::Gen(
-                        usize::MAX,
-                        format!("__institution_invoke_no_registry:{comorphism_iri}"),
-                    )),
-                    None,
-                ));
-            }
-            let translated = match try_d14_institution_invoke(
-                comorphism_iri,
-                &source_val,
-                target_iri.as_ref(),
-                ctx,
-            )? {
-                Some(v) => v,
-                None => {
-                    return Err(EvalError::InvalidCaseTarget(format!(
-                            "no Comorphism declaration found in the InstitutionIndex for `{comorphism_iri}`"
-                        )));
-                }
-            };
-            let (target_iri_str, target_class_str) = match &translated {
-                Val::ResourceVal(r) => {
-                    let id = r.id().map(|i| i.as_str().to_string()).unwrap_or_default();
-                    let class = r
-                        .is_a()
-                        .first()
-                        .map(|i| i.as_str().to_string())
-                        .unwrap_or_default();
-                    (id, class)
-                }
-                _ => (String::new(), String::new()),
-            };
-            let trace = Trace::Comorphism {
-                comorphism_iri: comorphism_iri.as_str().to_string(),
-                source_trace: source_trace.map(Box::new),
-                target_iri: target_iri_str,
-                target_class: target_class_str,
-            };
-            Ok((translated, Some(trace)))
-        }
-
-        // --- All other forms: structural, no trace ---
-        _ => Ok((eval_ctx(exp, rho, ctx)?, None)),
-    }
+    eval_impl::<T>(&arm.body, &env, ctx)
 }
 
 /// Check equality of ground-type values.
@@ -1427,6 +1235,151 @@ mod tests {
                 assert!(!ct.cached);
             }
             other => panic!("expected Trace::Component, got {:?}", other),
+        }
+        Ok(())
+    }
+
+    /// Shared setup for the F-5 trace-completeness tests: an IO ctx and
+    /// an env binding `inp` to a resource, plus the Identity call exp.
+    fn f5_setup() -> (EvalCtx, Rho, Exp) {
+        let ctx = io_ctx();
+        let mut input = Resource::new_embedded();
+        input.set(
+            Iri::parse("urn:eigenius:test:val").unwrap(),
+            Value::String("hello".into()),
+        );
+        let rho = Rho::Nil.extend(
+            Patt::Var("inp".to_string()),
+            Val::ResourceVal(Box::new(input)),
+        );
+        let identity_call = Exp::App(
+            Box::new(Exp::Var(
+                "urn:eigenius:program:components:Identity".to_string(),
+            )),
+            Box::new(Exp::Var("inp".to_string())),
+        );
+        (ctx, rho, identity_call)
+    }
+
+    /// F-5 regression (NbE analysis §3.2): a component dispatch nested
+    /// inside a structural expression (`Pair`) must appear in the trace
+    /// tree. Pre-consolidation, `Pair` fell through the untraced
+    /// catch-all and the dispatch was invisible in the tree.
+    #[test]
+    fn f5_component_inside_pair_appears_in_trace() -> Result<(), EvalError> {
+        let (ctx, rho, identity_call) = f5_setup();
+        let exp = Exp::Pair(Box::new(identity_call), Box::new(Exp::Unit));
+        let (_, trace) = eval_traced(&exp, &rho, &ctx)?;
+        match trace.expect("nested dispatch must be visible in the tree") {
+            Trace::Component(ct) => {
+                assert_eq!(ct.component, "urn:eigenius:program:components:Identity");
+            }
+            other => panic!("expected Trace::Component, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    /// F-5 regression: two effectful children of one structural node
+    /// combine into a `Trace::Seq` — neither is dropped.
+    #[test]
+    fn f5_components_in_both_pair_legs_produce_seq() -> Result<(), EvalError> {
+        let (ctx, rho, identity_call) = f5_setup();
+        let exp = Exp::Pair(Box::new(identity_call.clone()), Box::new(identity_call));
+        let (_, trace) = eval_traced(&exp, &rho, &ctx)?;
+        match trace.expect("both dispatches must be visible") {
+            Trace::Seq(children) => {
+                assert_eq!(children.len(), 2);
+                assert!(children.iter().all(|c| matches!(c, Trace::Component(_))));
+                // The metrics walker sees both executions.
+                let metrics =
+                    crate::program::trace::ProgramMetrics::from_trace(&Some(Trace::Seq(children)));
+                assert_eq!(metrics.executed_steps, 2);
+            }
+            other => panic!("expected Trace::Seq of two Components, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    /// F-5 regression: a component dispatch inside a `Match` arm shows
+    /// up as a `Trace::Case` with the branch's dispatch nested (Match
+    /// previously fell through the untraced catch-all).
+    #[test]
+    fn f5_component_inside_match_arm_appears_as_case() -> Result<(), EvalError> {
+        use super::testutil::nat_decl;
+        let (ctx, rho, identity_call) = f5_setup();
+        let nat = nat_decl();
+        let exp = Exp::Match {
+            scrutinee: Box::new(Exp::InductiveCtor(nat.clone(), "zero".to_string(), vec![])),
+            arms: vec![
+                crate::nbe::term::MatchArm {
+                    ctor_name: "zero".to_string(),
+                    bindings: vec![],
+                    body: identity_call,
+                },
+                crate::nbe::term::MatchArm {
+                    ctor_name: "succ".to_string(),
+                    bindings: vec![Patt::Var("n".to_string())],
+                    body: Exp::Unit,
+                },
+            ],
+        };
+        let (_, trace) = eval_traced(&exp, &rho, &ctx)?;
+        match trace.expect("dispatch in the taken arm must be visible") {
+            Trace::Case {
+                branch_taken,
+                branch_trace,
+                ..
+            } => {
+                assert_eq!(branch_taken, "zero");
+                assert!(matches!(branch_trace.as_deref(), Some(Trace::Component(_))));
+            }
+            other => panic!("expected Trace::Case, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    /// F-5 regression: a `Reduce` step whose BOTH curried applications
+    /// carry traces keeps both (pre-consolidation: `t1.or(t2)` dropped
+    /// one).
+    #[test]
+    fn f5_reduce_step_keeps_both_application_traces() -> Result<(), EvalError> {
+        let (ctx, rho, identity_call) = f5_setup();
+        // f = λacc. let _ = Identity(inp) in λx. Identity(inp)
+        // First application (f acc) dispatches once; the resulting
+        // lambda's application (· x) dispatches again.
+        let f = Exp::Lam(
+            Patt::Var("acc".to_string()),
+            Box::new(Exp::Dec(
+                crate::nbe::term::Decl::Def(
+                    Patt::Var("_ignored".to_string()),
+                    Box::new(Exp::One),
+                    Box::new(identity_call.clone()),
+                ),
+                Box::new(Exp::Lam(
+                    Patt::Var("x".to_string()),
+                    Box::new(identity_call),
+                )),
+            )),
+        );
+        let rho = rho.extend(Patt::Var("coll".to_string()), Val::List(vec![Val::Unit]));
+        let exp = Exp::Reduce(
+            Box::new(f),
+            Box::new(Exp::Unit),
+            Box::new(Exp::Var("coll".to_string())),
+        );
+        let (_, trace) = eval_traced(&exp, &rho, &ctx)?;
+        match trace.expect("reduce step dispatches must be visible") {
+            Trace::Reduce { step_traces } => {
+                assert_eq!(step_traces.len(), 1);
+                let step = step_traces[0].as_ref().expect("step must carry traces");
+                let metrics =
+                    crate::program::trace::ProgramMetrics::from_trace(&Some(step.clone()));
+                assert_eq!(
+                    metrics.executed_steps, 2,
+                    "both curried applications' dispatches must be kept, got {step:?}"
+                );
+            }
+            other => panic!("expected Trace::Reduce, got {other:?}"),
         }
         Ok(())
     }

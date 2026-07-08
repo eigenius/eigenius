@@ -76,6 +76,14 @@ pub enum Trace {
         source_trace: Option<Box<Trace>>,
         property: Iri,
     },
+    /// Sequence of sibling traces from one structural expression whose
+    /// children carried more than one effectful sub-computation (e.g.
+    /// a `Pair` whose both components dispatched components, or the
+    /// two curried applications of one `Reduce` step). Introduced for
+    /// trace-tree completeness (F-5, NbE analysis §3.2) — before it,
+    /// multi-child structural nodes silently dropped all but one
+    /// child's trace.
+    Seq(Vec<Trace>),
 }
 
 /// Trace of an IO component invocation — the memoization cache unit.
@@ -190,6 +198,11 @@ impl ProgramMetrics {
                     self.accumulate(t);
                 }
             }
+            Trace::Seq(children) => {
+                for t in children {
+                    self.accumulate(t);
+                }
+            }
         }
     }
 }
@@ -232,6 +245,17 @@ impl TraceStore for InMemoryTraceStore {
     fn put_component_trace(&self, key: [u8; 32], trace: ComponentTrace) {
         self.traces.write().unwrap().insert(key, trace);
     }
+}
+
+/// Typed placeholder for a positional trace slot with no computation
+/// (a pure Map element, Reduce step, or Construct field). Class-typed
+/// as `reflection:EmptyTrace` so trace-child properties can be
+/// constrained to `reflection:Trace` without admitting untyped
+/// embedded resources.
+fn empty_trace_resource() -> Resource {
+    let mut r = Resource::new_embedded();
+    set_is_a(&mut r, "urn:eigenius:reflection:EmptyTrace");
+    r
 }
 
 /// Convert a Trace tree into an Eigon Resource (for storage/serialization).
@@ -359,7 +383,7 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
                 .iter()
                 .map(|t| match t {
                     Some(t) => Value::Embedded(Box::new(trace_to_resource(t))),
-                    None => Value::Embedded(Box::new(Resource::new_embedded())),
+                    None => Value::Embedded(Box::new(empty_trace_resource())),
                 })
                 .collect();
             r.set(
@@ -375,7 +399,7 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
                 .iter()
                 .map(|t| match t {
                     Some(t) => Value::Embedded(Box::new(trace_to_resource(t))),
-                    None => Value::Embedded(Box::new(Resource::new_embedded())),
+                    None => Value::Embedded(Box::new(empty_trace_resource())),
                 })
                 .collect();
             r.set(
@@ -412,23 +436,33 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
         Trace::Construct { field_traces } => {
             let mut r = Resource::new_embedded();
             set_is_a(&mut r, "urn:eigenius:reflection:ConstructTrace");
-            let mut fields = Resource::new_embedded();
-            for (iri, t) in field_traces {
-                match t {
-                    Some(t) => {
-                        fields.set(iri.clone(), Value::Embedded(Box::new(trace_to_resource(t))));
-                    }
-                    None => {
-                        fields.set(
-                            iri.clone(),
-                            Value::Embedded(Box::new(Resource::new_embedded())),
-                        );
-                    }
-                }
-            }
+            // One typed FieldTrace entry per constructed property. (An
+            // earlier encoding abused an untyped embedded resource as an
+            // IRI-keyed map, which recursive validation rightly rejects:
+            // the keys are other classes' property IRIs.)
+            let entries: Vec<Value> = field_traces
+                .iter()
+                .map(|(iri, t)| {
+                    let mut entry = Resource::new_embedded();
+                    set_is_a(&mut entry, "urn:eigenius:reflection:FieldTrace");
+                    entry.set(
+                        Iri::parse("urn:eigenius:reflection:property").unwrap(),
+                        Value::String(iri.as_str().to_string()),
+                    );
+                    let trace_node = match t {
+                        Some(t) => trace_to_resource(t),
+                        None => empty_trace_resource(),
+                    };
+                    entry.set(
+                        Iri::parse("urn:eigenius:reflection:trace").unwrap(),
+                        Value::Embedded(Box::new(trace_node)),
+                    );
+                    Value::Embedded(Box::new(entry))
+                })
+                .collect();
             r.set(
                 Iri::parse("urn:eigenius:reflection:field_traces").unwrap(),
-                Value::Embedded(Box::new(fields)),
+                Value::Array(entries),
             );
             r
         }
@@ -447,6 +481,19 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
             r.set(
                 Iri::parse("urn:eigenius:reflection:property").unwrap(),
                 Value::String(property.as_str().to_string()),
+            );
+            r
+        }
+        Trace::Seq(children) => {
+            let mut r = Resource::new_embedded();
+            set_is_a(&mut r, "urn:eigenius:reflection:SeqTrace");
+            let traces: Vec<Value> = children
+                .iter()
+                .map(|t| Value::Embedded(Box::new(trace_to_resource(t))))
+                .collect();
+            r.set(
+                Iri::parse("urn:eigenius:reflection:child_traces").unwrap(),
+                Value::Array(traces),
             );
             r
         }
