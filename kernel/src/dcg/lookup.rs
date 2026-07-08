@@ -800,28 +800,16 @@ impl LexicalIndex {
             let num = if *c == s_lc { "sg" } else { "pl" };
             out.extend(entries.iter().map(|e| with_noun_num(&e.item, num)));
         }
-        // Bare-plural → kind-subject shift (D63 §8.5 Slice 3c): a plural common noun
-        // also seeds a `cat_kind` edge (the kind it denotes), so "genes" can serve as
-        // a kind subject ("Genes are cell lines" → subclass_of(Gene, CellLine))
-        // alongside its ordinary common-noun reading.
-        let kinds: Vec<Item> = out
+        // Bare-nominal shift (core-en `bnp` + the kind-subject reading, D63 §8.5 Slice 3c): a
+        // determiner-less plural/mass common noun ALSO seeds its `cat_kind` copula-subject edge
+        // ("Genes are cell lines" → subclass_of) and its raised bare-argument NPs (`kind_of(t)`, §7.4).
+        // The SAME [`Self::bare_nominal_shifts`] rule runs here at leaf seeding and on composed cells in
+        // the CKY (both chart paths), so a compound noun shifts identically to a leaf noun.
+        let shifts: Vec<Item> = out
             .iter()
-            .filter_map(|it| {
-                crate::dcg::kind_subject(it.cat(), it.sem())
-                    .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
-            })
+            .flat_map(|it| self.bare_nominal_shifts(it))
             .collect();
-        out.extend(kinds);
-        // Bare-plural NP shift (core-en `bnp`, `det=nil`): a plural common noun also serves as an
-        // ARGUMENT NP (subject + object), committing to its KIND — `kind_of(t)`, D63 reshape §7.4. (The
-        // `kind_subject` edge above is only the copula-subclass reading; this is the general
-        // argument-position reading.)
-        let bare: Vec<Item> = out.iter().flat_map(|it| self.bare_plural_nps(it)).collect();
-        out.extend(bare);
-        // Bare-MASS NP shift (D62 CNL): a mass noun `cat_n(C, mass)` ("MSI", "DNA", "apoptosis") is
-        // a bare argument too, grammatically singular, with the same deferred quantifier.
-        let bare_mass: Vec<Item> = out.iter().flat_map(|it| self.bare_mass_nps(it)).collect();
-        out.extend(bare_mass);
+        out.extend(shifts);
         out
     }
 
@@ -909,6 +897,23 @@ impl LexicalIndex {
     /// *singular* count noun (`*gene is a vulnerability`) correctly does not shift.
     fn bare_plural_nps(&self, noun: &Item) -> Vec<Item> {
         self.kind_raised_nps(noun, "these", "pl")
+    }
+
+    /// The full **bare-nominal shift** (core-en's `bnp` unary rule + the copula kind-subject reading,
+    /// D63 §8.5 Slice 3c): given a `cat_n`, produce (i) the `cat_kind` **copula-subject** edge
+    /// ([`crate::dcg::kind_subject`]; a bare-plural kind, so `are_kind` yields `subclass_of`) and (ii)
+    /// the raised **bare-argument NPs** ([`Self::bare_plural_nps`]/[`Self::bare_mass_nps`]). The single
+    /// rule applied at BOTH leaf seeding AND to COMPOSED cells in both chart paths, so a compound
+    /// `cat_n` (`repeat regions`, formed by the `KindCompound` rule) shifts exactly like a leaf noun —
+    /// `bnp` is a rule over any `n`, not a leaf-only shortcut. Non-`cat_n`/non-plural/non-mass → empty.
+    fn bare_nominal_shifts(&self, it: &Item) -> Vec<Item> {
+        let mut v: Vec<Item> = crate::dcg::kind_subject(it.cat(), it.sem())
+            .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
+            .into_iter()
+            .collect();
+        v.extend(self.bare_plural_nps(it));
+        v.extend(self.bare_mass_nps(it));
+        v
     }
 
     /// Object-position non-restrictive (appositive) relative NP (D62 §2 #2A, object slot): the
@@ -1627,11 +1632,7 @@ impl LexicalIndex {
         use super::packed::UnaryKind;
         let (i, j) = span;
         match kind {
-            UnaryKind::BareNp => {
-                let mut v = self.bare_plural_nps(it);
-                v.extend(self.bare_mass_nps(it));
-                out.extend(v);
-            }
+            UnaryKind::BareNp => out.extend(self.bare_nominal_shifts(it)),
             UnaryKind::Raise => out.extend(raise_nps(std::slice::from_ref(it), &self.layer)),
             UnaryKind::FrontParticipial => {
                 if let Some((cat, sem)) = front_participial(it.cat(), it.sem(), &self.layer) {
@@ -1832,9 +1833,7 @@ impl LexicalIndex {
                 }
                 for id in forest.cells[i][j].values().copied().collect::<Vec<_>>() {
                     let rep = forest.nodes[id].rep.clone();
-                    let mut shifted = self.bare_plural_nps(&rep);
-                    shifted.extend(self.bare_mass_nps(&rep));
-                    for np in shifted {
+                    for np in self.bare_nominal_shifts(&rep) {
                         unary.push((node_sig(&np), np, id, UnaryKind::BareNp));
                     }
                 }
@@ -2514,21 +2513,17 @@ impl LexicalIndex {
                     })
                     .collect();
                 chart[i][j].extend(completed);
-                // Bare-NP shift for COMPOSED common nouns (D62 — N-N compounds like "MSI cancer
-                // models", adjective-refined nouns like "novel therapies" / "synthetic lethality"):
-                // the leaf shift in `lookup_span` only covers lexical nouns, so a *composed*
-                // `cat_n(_, pl)` (plural) or `cat_n(_, mass)` (uncountable) cell needs the shift here
-                // too — else such a compound/adjective-modified noun can never be a bare argument NP.
-                // BOTH the plural and mass shifts apply, symmetric with the leaf path (which runs both);
-                // the mass arm was missing here, so `synthetic lethality` / `deficient repair` (adj +
-                // mass/plural head) gapped while the bare leaf `lethality` shifted.
+                // Bare-nominal shift for COMPOSED common nouns (N-N compounds like "repeat regions" /
+                // "MSI cancer models", adjective-refined nouns like "novel therapies" / "synthetic
+                // lethality"): the leaf shift in `lookup_span` only covers lexical nouns, so a *composed*
+                // `cat_n(_, pl/mass)` cell needs the SAME [`Self::bare_nominal_shifts`] here — both the
+                // raised bare-argument NPs AND the `cat_kind` copula-subject edge, so a compound kind can
+                // be an `are_kind` subject ("repeat regions are microsatellites"). The kind-subject arm
+                // was missing here (only the argument NPs ran), so a compound-kind subject gapped.
+                // Symmetric with the leaf path and the packed forest's `UnaryKind::BareNp`.
                 let bare: Vec<Item> = chart[i][j]
                     .iter()
-                    .flat_map(|it| {
-                        let mut v = self.bare_plural_nps(it);
-                        v.extend(self.bare_mass_nps(it));
-                        v
-                    })
+                    .flat_map(|it| self.bare_nominal_shifts(it))
                     .collect();
                 chart[i][j].extend(bare);
                 // Type-raise `T` (D63 §8.9 Slice 6-T) the cell's name NPs (after its

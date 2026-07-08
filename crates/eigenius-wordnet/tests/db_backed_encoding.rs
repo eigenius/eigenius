@@ -379,9 +379,9 @@ fn probe_rc8_at_scale() {
     let index = build_index(&head);
     let lem = morphy();
     for s in [
-        "genes are a result of mutations",                    // predicate nominal + of-PP
-        "genes are not a result of mutations",                // + negation
-        "genes are not simply a result of mutations",         // + adverb `simply` (the s2 embedded clause)
+        "genes are a result of mutations",     // predicate nominal + of-PP
+        "genes are not a result of mutations", // + negation
+        "genes are not simply a result of mutations", // + adverb `simply` (the s2 embedded clause)
         "cells suggest that genes are a result of mutations", // clausal + predicate nominal
         "cells suggest that genes are not simply a result of mutations", // full s2 shape
     ] {
@@ -410,24 +410,6 @@ fn probe_s20_isolation_at_scale() {
     let Some(path) = snapshot_path() else { return };
     let Some(head) = open_head(&path) else { return };
     let lem = morphy();
-    // The isolation pinned the s20 gap to a SUBJECT-GQ (type-raised `a`/bare-singular determiner)
-    // combining with the coordinated object: `a gene require [coord]` GAPs at the page beam (64) even
-    // after widen-on-failure (→512), while the plural `genes require [coord]` CLOSES at beam 64. The
-    // demo shows the SHAPE parses (open), so this is a beam-capacity question, not a grammar gap. Sweep
-    // the base cell beam ABOVE the widen cap (512) to find where — if ever — the subject-GQ derivation
-    // crosses at full WordNet scale. `sense_cap` held at 4 (one doubling above the page cap).
-    // The s20 gap is a spurious-sense-ambiguity + tight-beam problem: under STATIC `sense_rank` the
-    // correct subject-GQ reading needs several non-frequent senses (attributive `stronger`, compound
-    // `mutation phenotype`) that get buried below the page cap/beam. The CONTEXTUAL reranker (D63 §8.7 /
-    // GH#97) is the designed fix — it reorders each word's senses by contextual plausibility so the cap
-    // keeps the right ones. A/B baseline vs +llm at the REAL measure config (sense_cap 2, cell_beam 64).
-    // The +llm arm only exists with `--features use-llm` + ANTHROPIC_API_KEY.
-    let sentences = [
-        // unit 13 of the page measure: the FIRST sentence to trigger the readback `.expect` panic under
-        // the reranker (`readback.rs:38` — apply-failed during Lam readback). A clausal complement.
-        "We found that WRN was selectively essential in MSI models.",
-        "gene dependency may require specific lineages or a stronger mutation phenotype", // FULL s20 shape (CLOSED×144)
-    ];
     let outcome = |idx: &LexicalIndex, s: &str| -> String {
         let (c, o) = idx.parse_open(s, &lem);
         if !c.is_empty() {
@@ -438,31 +420,21 @@ fn probe_s20_isolation_at_scale() {
             "GAP".to_string()
         }
     };
-    let mk = || {
-        LexicalIndex::build(Arc::clone(&head))
-            .with_sense_cap(SENSE_CAP)
-            .with_cell_beam(CELL_BEAM)
-    };
-    #[allow(unused_mut)]
-    let mut variants: Vec<(String, LexicalIndex)> = vec![("baseline".into(), mk())];
-    #[cfg(feature = "use-llm")]
-    {
-        if let Some(r) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
-            variants.push(("+llm".into(), mk().with_sense_ranker(Box::new(r))));
-        } else {
-            eprintln!("  (no ANTHROPIC_API_KEY — +llm arm skipped)");
-        }
-    }
-    eprintln!(
-        "\n=== s20 subject-GQ: baseline vs contextual reranker (sense_cap {SENSE_CAP}, beam {CELL_BEAM}) ===\n  variants: {:?}",
-        variants.iter().map(|(l, _)| l).collect::<Vec<_>>()
-    );
-    for s in sentences {
-        let cells: Vec<String> = variants
-            .iter()
-            .map(|(l, idx)| format!("{l}={}", outcome(idx, s)))
-            .collect();
-        eprintln!("  {}  {s:?}", cells.join("  "));
+    // Phase-D (#7 residual): every NP piece closes in isolation (`these four lineages`, the PP-modifier,
+    // `cells from these four lineages affect genes` all CLOSE), yet the corpus sentence gaps. So it's a
+    // COMPOUNDING-COMPLEXITY interaction (PP-modified compound subject × the comparative predicate).
+    // Bridge the two halves + sweep cap/beam on the gapping sentence to tell a cap/beam artifact (like
+    // #7-comparative, which closed at cap 4) from a genuine grammar gap.
+    // Gap #1 verification of the bnp-unary-rule fix (kind_subject on composed cells): the compound-kind
+    // subjects that gapped should now CLOSE, while the controls stay closed.
+    let idx = build_index(&head);
+    for s in [
+        "regions are microsatellites", //                        1-noun kind (was CLOSED — control)
+        "repeat regions are microsatellites", //                 2-noun compound kind (was GAP)
+        "Nucleotide repeat regions are microsatellites", //      corpus #1 (was GAP)
+        "DNA repair processes are attractive synthetic lethal targets", // already-closing compound (control)
+    ] {
+        eprintln!("  {:<10} {s:?}", outcome(&idx, s));
     }
 }
 

@@ -1453,6 +1453,24 @@ fn compound_stacking_and_bare_plural_compound() {
                 && pretty_term(p.sem()).contains("compound_kind(")),
         "a bare-plural composed compound is a closed kind-predication over the refined type"
     );
+    // Compound bare-plural noun as a KIND SUBJECT of the copula (this session — the `bnp`-unary-rule
+    // re-alignment with core-en): the COMPOSED compound `gene genes` also gets the `cat_kind`
+    // copula-subject edge, so `are_kind` yields `subclass_of` over the COMPOUND kind. The leaf shift in
+    // `lookup_span` never reached a chart-formed compound, so before this the compound-kind subject
+    // GAPed — the corpus `Nucleotide repeat regions are microsatellites` gap.
+    let kind_subj = index.parse("gene genes are cell lines", &PluralS);
+    assert!(
+        kind_subj.iter().any(|p| {
+            sem_mentions_axiom(p.sem(), "urn:eigenius:ontology:subclass_of")
+                && sem_mentions_axiom(p.sem(), "urn:eigenius:ontology:compound_kind")
+        }),
+        "a compound bare-plural noun is a kind subject: `gene genes are cell lines` → subclass_of over \
+         the compound kind; got {:?}",
+        kind_subj
+            .iter()
+            .map(|p| pretty_term(p.sem()))
+            .collect::<Vec<_>>()
+    );
 }
 
 /// D63 Option A (blueprint §11 3b) — the **packing router is a safe no-op stub** so far. With
