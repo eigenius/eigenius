@@ -155,6 +155,16 @@ enum FrameKind {
     /// Clause-taking (report) verb — frame 26, "Somebody ----s that CLAUSE" (D63 §8.11
     /// 6-cl): an opaque `Prop → Entity → Prop` axiom, category `(S\NP)/cat_cp`.
     Clausal,
+    /// Linking (copular) verb — WordNet frames 6/7 ("Something ----s Adjective/Noun", "Somebody
+    /// ----s Adjective"): `remain`/`become`/`seem`/`appear` + a predicative adjective. An opaque
+    /// `(Entity → Prop) → Entity → Prop` axiom (the verb relates the subject to the property),
+    /// category `(S[dcl,fin]\NP)/(S[dcl,adj]\NP)`. Mirrors the copula `be`'s adjective complement but
+    /// keeps the verb's OWN opaque relation — faithful for both veridical (`remain` ⊨ the adjective)
+    /// and evidential (`seem` ⊭ it) senses without a veridicality list, exactly as the Clausal report
+    /// verb keeps `Prop` opaque rather than asserting it (the copula likewise defers tense; D61). Frame
+    /// 5 ("----s something Adjective", object-predicate `consider X important`) is a distinct category,
+    /// still deferred.
+    LinkingAdj,
 }
 
 impl FrameKind {
@@ -165,6 +175,7 @@ impl FrameKind {
             FrameKind::Ditransitive => "d",
             FrameKind::PpOblique => "p",
             FrameKind::Clausal => "c",
+            FrameKind::LinkingAdj => "j",
         }
     }
 
@@ -182,6 +193,9 @@ impl FrameKind {
                 format!("{ENTITY_TOP} -> {ENTITY_TOP} -> {ENTITY_TOP} -> Prop")
             }
             FrameKind::Clausal => format!("Prop -> {ENTITY_TOP} -> Prop"),
+            // Linking verb: takes the predicative-adjective's denotation (`Entity → Prop`) then the
+            // subject — an opaque relation between the subject and the property.
+            FrameKind::LinkingAdj => format!("({ENTITY_TOP} -> Prop) -> {ENTITY_TOP} -> Prop"),
         }
     }
 
@@ -216,14 +230,21 @@ impl FrameKind {
             }
             // Clause-taking: `(S\NP)/cat_cp` — the complement is an embedded clause.
             FrameKind::Clausal => format!("lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_cp)"),
+            // Linking (copular) verb: `(S[dcl,fin]\NP)/(S[dcl,adj]\NP)` — consumes a predicative-
+            // adjective VP and yields a finite VP, like the copula `be`'s `adj` complement.
+            FrameKind::LinkingAdj => format!(
+                "lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), {obj}))"
+            ),
         }
     }
 }
 
 /// Map a WordNet sentence frame (1–35; `wninput(5WN)`) to an emittable kind, or
 /// `None` for the **deferred** higher-order frames:
-///   - 5, 6, 7 — predicative complement (`----s Adjective/Noun`);
-///   - 26, 29, 34 — clausal complement (`that` / `whether CLAUSE`);
+///   - 6, 7 — subject-predicate linking verb (`----s Adjective`) → [`FrameKind::LinkingAdj`];
+///   - 5 — object-predicate small clause (`----s something Adjective`, `consider X important`) — a
+///     distinct `((S\NP)/adj)/NP` category, still deferred;
+///   - 26, 29, 34 — clausal complement (`that` / `whether CLAUSE`, only 26 emitted);
 ///   - 24, 25, 28, 30, 32, 33, 35 — control / raising (INFINITIVE / V-ing).
 ///
 /// **Single-PP-complement frames** — the verb subcategorizes for one PP ("----s to X" 12/27, "is
@@ -237,8 +258,9 @@ fn classify(frame: u8) -> Option<FrameKind> {
         4 | 12 | 23 | 27 => Some(FrameKind::PpOblique),
         8 | 9 | 10 | 11 | 13 | 20 | 21 => Some(FrameKind::Transitive),
         14 | 15 | 16 | 17 | 18 | 19 | 31 => Some(FrameKind::Ditransitive),
-        26 => Some(FrameKind::Clausal), // "Somebody ----s that CLAUSE" (D63 §8.11 6-cl)
-        _ => None, // 5,6,7 predicative; 29,34 whether-clause; 24,25,28,30,32,33,35 control/raising
+        6 | 7 => Some(FrameKind::LinkingAdj), // "----s Adjective" — copular/linking verb (D63 §8.5)
+        26 => Some(FrameKind::Clausal),       // "Somebody ----s that CLAUSE" (D63 §8.11 6-cl)
+        _ => None, // 5 object-predicate (`consider X important`); 29,34 whether; 24,25,28,30,32,33,35 control/raising
     }
 }
 
@@ -1009,8 +1031,11 @@ mod tests {
         assert_eq!(classify(23), Some(FrameKind::PpOblique)); // "----s PP"
                                                               // frame 26 "that CLAUSE" → clause-taking (D63 §8.11 6-cl).
         assert_eq!(classify(26), Some(FrameKind::Clausal));
+        // frames 6/7 "----s Adjective" → linking (copular) verb (D63 §8.5).
+        assert_eq!(classify(6), Some(FrameKind::LinkingAdj));
+        assert_eq!(classify(7), Some(FrameKind::LinkingAdj));
         // still-deferred higher-order frames → None (never guessed).
-        assert_eq!(classify(5), None); // predicative complement
+        assert_eq!(classify(5), None); // object-predicate small clause (`consider X important`)
         assert_eq!(classify(29), None); // whether CLAUSE (interrogative — deferred)
         assert_eq!(classify(32), None); // bare INFINITIVE (control)
                                         // every frame 1..=35 is classified deliberately (no silent gap).
@@ -1406,6 +1431,27 @@ mod tests {
             "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_cp) );"
         ));
         assert!(buf.contains("lexicon:sem      = wn:v00000003_c;"));
+    }
+
+    #[test]
+    fn linking_verb_emits_copula_adjective_category() {
+        // frames 6/7 → linking (copular) verb (D63 §8.5, gap #5 `remained true`): an opaque
+        // `(Entity → Prop) → Entity → Prop` axiom and the category `(S[dcl,fin]\NP)/(S[dcl,adj]\NP)`,
+        // mirroring the copula `be`'s adjective complement while keeping the verb's own relation.
+        let v = syn("00000004 42 v 01 remain 0 000 01 + 06 00 | continue in a state");
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        assert!(push_verb(&mut buf, &v, &mut rep, &SenseRanks::new()));
+        assert!(buf
+            .contains("axiom wn:v00000004_j : (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop"));
+        // 3sg "remains" over an `adj` complement, singular subject.
+        assert!(buf.contains("lexicon:form     = \"remains\";"));
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );"
+        ));
+        // The corpus form: past "remained" (fin, number-agnostic) also emitted.
+        assert!(buf.contains("lexicon:form     = \"remained\";"));
+        assert!(buf.contains("lexicon:sem      = wn:v00000004_j;"));
     }
 
     #[test]

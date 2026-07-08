@@ -54,6 +54,59 @@ fn index_over_bootstrap() -> (Arc<Layer>, LexicalIndex) {
     (layer, index)
 }
 
+/// gap #5 — the LINKING (copular) verb parse mechanism (importer frames 6/7): a `remained` entry with
+/// the EXACT category the importer now emits — `(S[dcl,fin]\NP)/(S[dcl,adj]\NP)`, an opaque
+/// `(Entity→Prop)→Entity→Prop` relation — consumes a predicative adjective (`primary`) and yields a
+/// finite VP, so `HeLa remained primary` parses to `remain_test(λx.primary(x), hela)`. Faithful: the
+/// property is the verb's ARGUMENT (kept opaque for veridical `remain` and evidential `seem` alike),
+/// not asserted as the copula's vacuous `λP.P` would. Validates the emitted shape without a reseed.
+#[test]
+fn linking_verb_takes_a_predicative_adjective() {
+    const LINKING_FIXTURE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+axiom lexicon:remain_test : (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+resource lexicon:remained_e : lexicon:LexicalEntry {
+    lexicon:form     = "remained";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:remain_test;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "remain";
+    lexicon:grade    = epistemic:declared;
+}
+"#;
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
+    for r in demo {
+        b.add_resource(r).expect("add demo");
+    }
+    let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let fix =
+        esl::compile_against_layer(LINKING_FIXTURE, &demo_layer).expect("linking fixture compiles");
+    let mut b2 = LayerBuilder::new("linking", Some(Arc::clone(&demo_layer)));
+    for r in fix {
+        b2.add_resource(r).expect("add linking");
+    }
+    let index = LexicalIndex::build(Arc::new(b2.build(LayerStorage::in_memory())));
+
+    let closed = index.parse("HeLa remained primary", &Identity);
+    assert!(
+        !closed.is_empty(),
+        "a linking verb + predicative adjective must parse"
+    );
+    assert!(
+        closed
+            .iter()
+            .any(|p| sem_mentions_axiom(p.sem(), "urn:eigenius:lexicon:remain_test")),
+        "the sem is the opaque linking relation over the property + subject; got {:?}",
+        closed
+            .iter()
+            .map(|p| pretty_term(p.sem()))
+            .collect::<Vec<_>>()
+    );
+}
+
 /// Two senses of a synthetic word `zob`, ranked: rank-0 is a **plural** NP (disagrees with the
 /// 3sg verb `affects`), rank-1 is a **singular** NP (agrees). With `sense_cap(1)` only rank-0
 /// seeds, so a sentence needs widen-on-failure to reach rank-1. (Both gate like a proper name.)

@@ -425,16 +425,51 @@ fn probe_s20_isolation_at_scale() {
     // COMPOUNDING-COMPLEXITY interaction (PP-modified compound subject × the comparative predicate).
     // Bridge the two halves + sweep cap/beam on the gapping sentence to tell a cap/beam artifact (like
     // #7-comparative, which closed at cap 4) from a genuine grammar gap.
-    // Gap #1 verification of the bnp-unary-rule fix (kind_subject on composed cells): the compound-kind
-    // subjects that gapped should now CLOSE, while the controls stay closed.
+    // Round 2: pin the real blocker for the 4 gaps whose headline construction works (#3/#4/#8/#9) +
+    // the #2 sub-question. Measure config; the two suspected-search fulls also swept at cap8/beam512.
     let idx = build_index(&head);
-    for s in [
-        "regions are microsatellites", //                        1-noun kind (was CLOSED — control)
-        "repeat regions are microsatellites", //                 2-noun compound kind (was GAP)
-        "Nucleotide repeat regions are microsatellites", //      corpus #1 (was GAP)
-        "DNA repair processes are attractive synthetic lethal targets", // already-closing compound (control)
+    for (tag, s) in [
+        // #2: is it `arise from` itself, or the mass-nominalization subject?
+        ("#2 count", "mutations arise from genes"), //             arise-from, count nouns
+        ("#2 mass-subj", "inactivation arises from genes"), //     mass subject, count object
+        // #3: the passive works; suspect the compound object `screening data sets`
+        (
+            "#3 compound-obj",
+            "genes were represented by screening data sets",
+        ),
+        // #4: the `as Y` works; suspect `compared to` and/or complexity
+        ("#4 compared-to", "HeLa affects BRCA1 compared to MSH2"),
+        (
+            "#4 as+compared",
+            "HeLa identified BRCA1 as a gene compared to MSH2",
+        ),
+        // #8: the relative works; suspect the RELATIONAL adjective `predictive of X` in the body
+        ("#8 predictive", "cells are predictive of deficiency"), //           relational adj, predicative
+        (
+            "#8 rel-relational",
+            "cells possess genes that are predictive of deficiency",
+        ), // in the relative
+        // #9: negation works; suspect the clausal-complement + negation interaction
+        (
+            "#9 compl-neg",
+            "observations suggest that dependency is not essential",
+        ),
+        (
+            "#9 compl-nom",
+            "observations suggest that dependency is a phenotype",
+        ), // complement + predicate-nominal
     ] {
-        eprintln!("  {:<10} {s:?}", outcome(&idx, s));
+        eprintln!("  {tag:<16} {:<10} {s:?}", outcome(&idx, s));
+    }
+    // Search vs grammar for the two suspected noun-pile/complexity gaps: cap8/beam512, static rank.
+    let hi = LexicalIndex::build(Arc::clone(&head))
+        .with_sense_cap(8)
+        .with_cell_beam(512);
+    for (tag, s) in [
+        ("#3 full@cap8", "Some MSI lines and some MSS lines were represented by these screening data sets"),
+        ("#4 full@cap8", "Project Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines"),
+    ] {
+        eprintln!("  {tag:<16} {:<10} {s:?}", outcome(&hi, s));
     }
 }
 
