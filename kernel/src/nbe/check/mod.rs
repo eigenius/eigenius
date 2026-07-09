@@ -19,6 +19,7 @@
 
 mod codata;
 mod conv;
+mod error;
 mod hooks;
 mod inductive;
 #[cfg(test)]
@@ -29,6 +30,7 @@ pub use codata::{check_guarded, lookup_codata_observation};
 use codata::{collect_pattern_names, resolve_full_codata_decl};
 use conv::infer_dependent_sort;
 pub use conv::{def_eq_at_type, eq_nf, exp_mentions_var, subtype_of, subtype_of_with_hyps};
+pub use error::CheckError;
 pub use hooks::CheckHooks;
 pub use inductive::large_elim_admitted;
 use inductive::{
@@ -169,7 +171,7 @@ impl CheckCtx {
     /// `type_cache` into the child — class resolutions performed inside
     /// the binder therefore don't propagate back to the parent on exit
     /// (§4.4-D7; sharing the cache instead is the profile-gated item 9).
-    fn extend(&self, patt: &Patt, typ: &Val, val: &Val) -> Result<CheckCtx, String> {
+    fn extend(&self, patt: &Patt, typ: &Val, val: &Val) -> Result<CheckCtx, CheckError> {
         let gamma1 = up_gamma(&self.gamma, patt, typ, val)?;
         let rho1 = self.rho.clone().extend(patt.clone(), val.clone());
         Ok(CheckCtx {
@@ -185,7 +187,7 @@ impl CheckCtx {
     }
 
     /// Resolve an EigonClass IRI to a EigenTT Sigma type, with caching.
-    fn resolve_class_cached(&mut self, iri: &Iri) -> Result<Val, String> {
+    fn resolve_class_cached(&mut self, iri: &Iri) -> Result<Val, CheckError> {
         let layer = self.layer.as_ref().ok_or_else(|| {
             format!(
                 "cannot resolve class '{}' — no layer access in pure check mode",
@@ -205,21 +207,16 @@ impl CheckCtx {
 /// Check that a declaration is well-typed, returning the extended type context.
 ///
 /// Port of `checkD` from the reference.
-pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, String> {
+pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, CheckError> {
     match decl {
         Decl::Def(patt, typ, body) => {
             // Check that the type is well-formed
             check_type(ctx, typ)?;
-            let t = ctx.eval(typ, &ctx.rho).map_err(|e| e.to_string())?;
+            let t = ctx.eval(typ, &ctx.rho)?;
             // Check that the body has the declared type
             check(ctx, body, &t)?;
             // Extend the type context
-            up_gamma(
-                &ctx.gamma,
-                patt,
-                &t,
-                &ctx.eval(body, &ctx.rho).map_err(|e| e.to_string())?,
-            )
+            up_gamma(&ctx.gamma, patt, &t, &ctx.eval(body, &ctx.rho)?).map_err(CheckError::from)
         }
         Decl::Drec(patt, typ, body) => {
             // Known subtlety (issue #13 item 3): The body is type-checked
@@ -236,7 +233,7 @@ pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, String> {
             //
             // Check that the type is well-formed
             check_type(ctx, typ)?;
-            let t = ctx.eval(typ, &ctx.rho).map_err(|e| e.to_string())?;
+            let t = ctx.eval(typ, &ctx.rho)?;
             let gen = gen_val(&ctx.rho);
             // Extend context with the recursive variable and check body
             let mut inner = ctx.extend(patt, &t, &gen)?;
@@ -249,10 +246,8 @@ pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, String> {
             collect_pattern_names(patt, &mut forbidden);
             check_guarded(body, &forbidden)?;
             // Re-evaluate with the recursive binding
-            let v = ctx
-                .eval(body, &Rho::UpDec(Box::new(ctx.rho.clone()), decl.clone()))
-                .map_err(|e| e.to_string())?;
-            up_gamma(&ctx.gamma, patt, &t, &v)
+            let v = ctx.eval(body, &Rho::UpDec(Box::new(ctx.rho.clone()), decl.clone()))?;
+            up_gamma(&ctx.gamma, patt, &t, &v).map_err(CheckError::from)
         }
     }
 }
@@ -260,13 +255,12 @@ pub fn check_decl(ctx: &mut CheckCtx, decl: &Decl) -> Result<Gamma, String> {
 /// Check that an expression is a well-formed type.
 ///
 /// Port of `checkT` from the reference.
-pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
+pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
     match exp {
         Exp::Pi(p, a, b) | Exp::Sig(p, a, b) => {
             check_type(ctx, a)?;
             let gen = gen_val(&ctx.rho);
-            let mut inner =
-                ctx.extend(p, &ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?, &gen)?;
+            let mut inner = ctx.extend(p, &ctx.eval(a, &ctx.rho)?, &gen)?;
             check_type(&mut inner, b)
         }
         // Bounded size Π-type: `{i < upper}. body`. The upper bound
@@ -276,7 +270,7 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
         // the strict-decrease fact.
         Exp::SizedPi { patt, upper, body } => {
             check(ctx, upper, &Val::SizeSort)?;
-            let upper_val = ctx.eval(upper, &ctx.rho).map_err(|e| e.to_string())?;
+            let upper_val = ctx.eval(upper, &ctx.rho)?;
             let new_level = ctx.rho.len();
             let i_val = gen_val(&ctx.rho);
             let mut inner = ctx.extend(patt, &Val::SizeSort, &i_val)?;
@@ -290,11 +284,11 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
                         .insert(new_level as u32, 1, *upper_level as u32);
                 }
                 other => {
-                    return Err(format!(
+                    return Err(CheckError::IllFormed(format!(
                         "SizedPi: upper bound must normalise to a rigid size variable \
                          or ∞ — got {:?}",
                         readback_val(ctx.rho.len(), other)
-                    ));
+                    )));
                 }
             }
             check_type(&mut inner, body)
@@ -308,7 +302,7 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
         // Id(A, x, y) is a type if A is a type and x, y : A
         Exp::Id(a, x, y) => {
             check_type(ctx, a)?;
-            let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+            let a_val = ctx.eval(a, &ctx.rho)?;
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)
         }
@@ -321,10 +315,10 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
             let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
             for obs in observations {
                 if !seen.insert(obs.name.as_str()) {
-                    return Err(format!(
+                    return Err(CheckError::IllFormed(format!(
                         "duplicate observation name in codata type: '{}'",
                         obs.name
-                    ));
+                    )));
                 }
                 check_type(ctx, &obs.typ)?;
             }
@@ -355,13 +349,13 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), String> {
 /// Check that an expression has a given type (checking mode).
 ///
 /// Port of `check` from the reference.
-pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
+pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError> {
     match (exp, typ) {
         // Lambda against Pi type
         (Exp::Lam(p, e), Val::Pi(t, g)) => {
             let gen = gen_val(&ctx.rho);
             let mut inner = ctx.extend(p, t, &gen)?;
-            check(&mut inner, e, &g.apply(gen).map_err(|e| e.to_string())?)
+            check(&mut inner, e, &g.apply(gen)?)
         }
 
         // Lambda against a bounded size Π (Phase 11b step 15f).
@@ -396,24 +390,19 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
                     // Shouldn't arise — a well-formed SizedPi value
                     // always carries a rigid or ∞ upper. Fail loudly
                     // rather than silently accept an unsound hypothesis.
-                    return Err(format!(
+                    return Err(CheckError::IllFormed(format!(
                         "SizedPi: upper bound must be rigid size var or ∞ — got {:?}",
                         readback_val(ctx.rho.len(), other),
-                    ));
+                    )));
                 }
             }
-            check(&mut inner, e, &g.apply(gen).map_err(|e| e.to_string())?)
+            check(&mut inner, e, &g.apply(gen)?)
         }
 
         // Pair against Sigma type
         (Exp::Pair(e1, e2), Val::Sig(t, g)) => {
             check(ctx, e1, t)?;
-            check(
-                ctx,
-                e2,
-                &g.apply(ctx.eval(e1, &ctx.rho).map_err(|e| e.to_string())?)
-                    .map_err(|e| e.to_string())?,
-            )
+            check(ctx, e2, &g.apply(ctx.eval(e1, &ctx.rho)?)?)
         }
 
         // Constructor against Sum type
@@ -423,7 +412,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
                 .find(|(name, _)| name == c)
                 .map(|(_, typ)| typ)
                 .ok_or_else(|| format!("constructor {c} not in sum type"))?;
-            check(ctx, e, &ctx.eval(a, rho1).map_err(|e| e.to_string())?)
+            check(ctx, e, &ctx.eval(a, rho1)?)
         }
 
         // Case function against Pi from Sum to result
@@ -435,13 +424,13 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
             let branch_names: Vec<&str> = branches.iter().map(|b| b.name.as_str()).collect();
             let case_names: Vec<&str> = cases.iter().map(|(n, _)| n.as_str()).collect();
             if branch_names != case_names {
-                return Err(format!(
+                return Err(CheckError::IllFormed(format!(
                     "case branches {:?} do not match sum type {:?}",
                     branch_names, case_names
-                ));
+                )));
             }
             for (branch, (c, a)) in branches.iter().zip(cases.iter()) {
-                let a_val = ctx.eval(a, rho1).map_err(|e| e.to_string())?;
+                let a_val = ctx.eval(a, rho1)?;
                 let g_c = Clos {
                     patt: Patt::Var("__case_arg".to_string()),
                     body: Exp::App(
@@ -479,8 +468,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         (Exp::Pi(p, a, b), Val::Sort(0)) => {
             check_type(ctx, a)?;
             let gen = gen_val(&ctx.rho);
-            let mut inner =
-                ctx.extend(p, &ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?, &gen)?;
+            let mut inner = ctx.extend(p, &ctx.eval(a, &ctx.rho)?, &gen)?;
             check(&mut inner, b, &Val::Sort(0))
         }
 
@@ -489,8 +477,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         (Exp::Sig(p, a, b), Val::Sort(0)) => {
             check(ctx, a, &Val::Sort(0))?;
             let gen = gen_val(&ctx.rho);
-            let mut inner =
-                ctx.extend(p, &ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?, &gen)?;
+            let mut inner = ctx.extend(p, &ctx.eval(a, &ctx.rho)?, &gen)?;
             check(&mut inner, b, &Val::Sort(0))
         }
 
@@ -498,8 +485,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         (Exp::Pi(p, a, b), Val::Sort(1)) | (Exp::Sig(p, a, b), Val::Sort(1)) => {
             check(ctx, a, &Val::Sort(1))?;
             let gen = gen_val(&ctx.rho);
-            let mut inner =
-                ctx.extend(p, &ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?, &gen)?;
+            let mut inner = ctx.extend(p, &ctx.eval(a, &ctx.rho)?, &gen)?;
             check(&mut inner, b, &Val::Sort(1))
         }
 
@@ -538,7 +524,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         // x = a and y = a hold by proof irrelevance regardless of structure.
         (Exp::Refl(a), Val::Id(typ, x, y)) => {
             check(ctx, a, typ)?;
-            let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+            let a_val = ctx.eval(a, &ctx.rho)?;
             def_eq_at_type(ctx, x, &a_val, typ)?;
             def_eq_at_type(ctx, y, &a_val, typ)
         }
@@ -551,7 +537,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
         // expected Id to live in Set are unaffected.
         (Exp::Id(a, x, y), Val::Sort(0)) => {
             check_type(ctx, a)?;
-            let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+            let a_val = ctx.eval(a, &ctx.rho)?;
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)
         }
@@ -616,13 +602,13 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
             let field_names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
             let obs_names: Vec<&str> = observations.iter().map(|(n, _)| n.as_str()).collect();
             if field_names != obs_names {
-                return Err(format!(
+                return Err(CheckError::IllFormed(format!(
                     "corecord fields {:?} do not match codata observations {:?}",
                     field_names, obs_names
-                ));
+                )));
             }
             for (field, (_, obs_typ)) in fields.iter().zip(observations.iter()) {
-                let t = ctx.eval(obs_typ, rho1).map_err(|e| e.to_string())?;
+                let t = ctx.eval(obs_typ, rho1)?;
                 check(ctx, &field.body, &t)?;
             }
             Ok(())
@@ -650,17 +636,17 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
                 .map(|o| o.name.as_str())
                 .collect();
             if field_names != obs_names {
-                return Err(format!(
+                return Err(CheckError::IllFormed(format!(
                     "corecord fields {:?} do not match codata observations {:?}",
                     field_names, obs_names
-                ));
+                )));
             }
             let mut obs_env = Rho::Nil;
             for ((patt, _), val) in full_decl.params.iter().zip(params.iter()) {
                 obs_env = obs_env.extend(patt.clone(), val.clone());
             }
             for (field, obs) in fields.iter().zip(full_decl.observations.iter()) {
-                let t = ctx.eval(&obs.typ, &obs_env).map_err(|e| e.to_string())?;
+                let t = ctx.eval(&obs.typ, &obs_env)?;
                 check(ctx, &field.body, &t)?;
             }
             Ok(())
@@ -683,11 +669,11 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
             if inhabits {
                 Ok(())
             } else {
-                Err(format!(
+                Err(CheckError::TypeMismatch(format!(
                     "resource {:?} (is_a = {:?}) does not inhabit class {sup}",
                     r.id(),
                     r.is_a()
-                ))
+                )))
             }
         }
 
@@ -719,9 +705,9 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
 /// Infer the type of an expression (inference mode).
 ///
 /// Port of `checkI` from the reference.
-pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
+pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
     match exp {
-        Exp::Var(x) => lookup_gamma(&ctx.gamma, x),
+        Exp::Var(x) => lookup_gamma(&ctx.gamma, x).map_err(CheckError::from),
 
         // Type annotation `(e : T)` — the bidirectional mode switch. `T` must be
         // a type (its own type is a `Sort`); then `e` is *checked* against `T`
@@ -730,12 +716,12 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         Exp::Ann(e, t) => {
             let t_ty = check_infer(ctx, t)?;
             if !matches!(t_ty, Val::Sort(_)) {
-                return Err(format!(
+                return Err(CheckError::ExpectedSort(format!(
                     "Ann: annotation must be a type (a Sort), got {:?}",
                     readback_val(ctx.rho.len(), &t_ty)
-                ));
+                )));
             }
-            let t_val = ctx.eval(t, &ctx.rho).map_err(|err| err.to_string())?;
+            let t_val = ctx.eval(t, &ctx.rho)?;
             check(ctx, e, &t_val)?;
             Ok(t_val)
         }
@@ -748,20 +734,19 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             // binders in scope contribute entailment.
             if let Val::SizedPi(upper, g) = &t1 {
                 check(ctx, e2, &Val::SizeSort)?;
-                let arg_val = ctx.eval(e2, &ctx.rho).map_err(|e| e.to_string())?;
+                let arg_val = ctx.eval(e2, &ctx.rho)?;
                 if !crate::nbe::sized::size_lt_with_hyps(&arg_val, upper, &ctx.size_tso) {
-                    return Err(format!(
+                    return Err(CheckError::TypeMismatch(format!(
                         "SizedPi application: argument {:?} is not strictly below upper bound {:?}",
                         readback_val(ctx.rho.len(), &arg_val),
                         readback_val(ctx.rho.len(), upper),
-                    ));
+                    )));
                 }
-                return g.apply(arg_val).map_err(|e| e.to_string());
+                return g.apply(arg_val).map_err(CheckError::from);
             }
             let (t, g) = ext_pi(&t1)?;
             check(ctx, e2, &t)?;
-            Ok(g.apply(ctx.eval(e2, &ctx.rho).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?)
+            Ok(g.apply(ctx.eval(e2, &ctx.rho)?)?)
         }
 
         Exp::Fst(e) => {
@@ -773,13 +758,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         Exp::Snd(e) => {
             let t = check_infer(ctx, e)?;
             let (_, g) = ext_sig(&t)?;
-            Ok(g.apply(
-                ctx.eval(e, &ctx.rho)
-                    .map_err(|e| e.to_string())?
-                    .vfst()
-                    .map_err(|e| e.to_string())?,
-            )
-            .map_err(|e| e.to_string())?)
+            Ok(g.apply(ctx.eval(e, &ctx.rho)?.vfst()?)?)
         }
 
         // Eigenius: property/observation access type inference.
@@ -796,14 +775,14 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             if let Val::Codata(observations, rho1) = &t {
                 for (name, typ) in observations {
                     if name == prop_name {
-                        return ctx.eval(typ, rho1).map_err(|e| e.to_string());
+                        return ctx.eval(typ, rho1).map_err(CheckError::from);
                     }
                 }
-                return Err(format!(
+                return Err(CheckError::IllFormed(format!(
                     "observation '{}' not found in codata type {:?}",
                     prop_name,
                     readback_val(ctx.rho.len(), &t)
-                ));
+                )));
             }
             if let Val::CodataType { decl, params } = &t {
                 let full_decl = resolve_full_codata_decl(ctx, decl)?;
@@ -812,11 +791,11 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
 
             // Fall back to the existing Sigma / resource behaviour.
             find_sigma_field(ctx, &t, prop_name).ok_or_else(|| {
-                format!(
+                CheckError::IllFormed(format!(
                     "property '{}' not found in type {:?}",
                     prop,
                     readback_val(ctx.rho.len(), &t)
-                )
+                ))
             })
         }
 
@@ -828,23 +807,23 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
                 Val::Codata(observations, rho1) => {
                     for (name, typ) in observations {
                         if name == obs {
-                            return ctx.eval(typ, rho1).map_err(|e| e.to_string());
+                            return ctx.eval(typ, rho1).map_err(CheckError::from);
                         }
                     }
-                    Err(format!(
+                    Err(CheckError::IllFormed(format!(
                         "observation '{}' not found in codata type {:?}",
                         obs,
                         readback_val(ctx.rho.len(), &t)
-                    ))
+                    )))
                 }
                 Val::CodataType { decl, params } => {
                     let full_decl = resolve_full_codata_decl(ctx, decl)?;
                     lookup_codata_observation(&full_decl, params, obs, ctx.rho.len())
                 }
-                other => Err(format!(
+                other => Err(CheckError::ExpectedCodata(format!(
                     "observation target is not a codata value: {:?}",
                     readback_val(ctx.rho.len(), other)
-                )),
+                ))),
             }
         }
 
@@ -853,9 +832,11 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // Construct(class_iri, fields): check each field against the class's
         // Sigma chain and return EigonClass(class_iri).
         Exp::Construct(class_iri, fields) => {
-            let class_type = ctx
-                .resolve_class_cached(class_iri)
-                .map_err(|e| format!("cannot infer Construct type for '{}': {}", class_iri, e))?;
+            let class_type = ctx.resolve_class_cached(class_iri).map_err(|e| {
+                CheckError::CannotInfer(format!(
+                    "cannot infer Construct type for '{class_iri}': {e}"
+                ))
+            })?;
             // Check each field against the resolved class type
             let mut remaining = class_type;
             for (prop_iri, field_exp) in fields {
@@ -891,7 +872,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // Refl(a): infer a's type, return Id(a_type, a_val, a_val)
         Exp::Refl(a) => {
             let a_type = check_infer(ctx, a)?;
-            let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+            let a_val = ctx.eval(a, &ctx.rho)?;
             Ok(Val::Id(
                 Box::new(a_type),
                 Box::new(a_val.clone()),
@@ -903,7 +884,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // so its type is Id(v_type, v_val, v_val)
         Exp::NativeDecide(_, v) => {
             let v_type = check_infer(ctx, v)?;
-            let v_val = ctx.eval(v, &ctx.rho).map_err(|e| e.to_string())?;
+            let v_val = ctx.eval(v, &ctx.rho)?;
             Ok(Val::Id(
                 Box::new(v_type),
                 Box::new(v_val.clone()),
@@ -915,11 +896,11 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // return Id(A_val, x_val, y_val)
         Exp::DecEq(a, x, y) => {
             check_type(ctx, a)?;
-            let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+            let a_val = ctx.eval(a, &ctx.rho)?;
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)?;
-            let x_val = ctx.eval(x, &ctx.rho).map_err(|e| e.to_string())?;
-            let y_val = ctx.eval(y, &ctx.rho).map_err(|e| e.to_string())?;
+            let x_val = ctx.eval(x, &ctx.rho)?;
+            let y_val = ctx.eval(y, &ctx.rho)?;
             Ok(Val::Id(Box::new(a_val), Box::new(x_val), Box::new(y_val)))
         }
 
@@ -931,12 +912,12 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             let [ref a, ref _c, ref d, ref x, ref y, ref p] = **args;
             // A must be a type
             check_type(ctx, a)?;
-            let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+            let a_val = ctx.eval(a, &ctx.rho)?;
             // x, y : A
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)?;
-            let x_val = ctx.eval(x, &ctx.rho).map_err(|e| e.to_string())?;
-            let y_val = ctx.eval(y, &ctx.rho).map_err(|e| e.to_string())?;
+            let x_val = ctx.eval(x, &ctx.rho)?;
+            let y_val = ctx.eval(y, &ctx.rho)?;
             // p : Id(A, x, y)
             let id_type = Val::Id(
                 Box::new(a_val.clone()),
@@ -951,7 +932,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             // J reduces to d(x) when p = refl(x), so the result type
             // is the return type of d applied to x.
             match d_type {
-                Val::Pi(_, g) => g.apply(x_val).map_err(|e| e.to_string()),
+                Val::Pi(_, g) => g.apply(x_val).map_err(CheckError::from),
                 _ => Ok(Val::Sort(1)), // conservative fallback
             }
         }
@@ -959,8 +940,9 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // Map(f, coll): infer f : A → B, coll : List A, return List B.
         Exp::Map(f, coll) => {
             let f_type = check_infer(ctx, f)?;
-            let (a, b_clos) = ext_pi(&f_type)
-                .map_err(|_| "Map: first argument must be a function (A → B)".to_string())?;
+            let (a, b_clos) = ext_pi(&f_type).map_err(|_| {
+                CheckError::ExpectedPi("Map: first argument must be a function (A → B)".to_string())
+            })?;
             let coll_type = check_infer(ctx, coll)?;
             let elem_type = extract_list_element_type(&coll_type).ok_or_else(|| {
                 format!(
@@ -976,21 +958,22 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
                 )
             })?;
             // Compute result element type B by applying closure to a dummy
-            let b = b_clos.apply(gen_val(&ctx.rho)).map_err(|e| e.to_string())?;
+            let b = b_clos.apply(gen_val(&ctx.rho))?;
             // Build list type with element type B
             let list_exp = Exp::list(readback_val(ctx.rho.len(), &b));
-            ctx.eval(&list_exp, &ctx.rho).map_err(|e| e.to_string())
+            ctx.eval(&list_exp, &ctx.rho).map_err(CheckError::from)
         }
 
         // Reduce(f, init, coll): infer f : B → A → B, init : B, coll : List A, return B.
         Exp::Reduce(f, init, coll) => {
             let f_type = check_infer(ctx, f)?;
-            let (b, inner_clos) = ext_pi(&f_type)
-                .map_err(|_| "Reduce: first argument must be a function (B → A → B)".to_string())?;
+            let (b, inner_clos) = ext_pi(&f_type).map_err(|_| {
+                CheckError::ExpectedPi(
+                    "Reduce: first argument must be a function (B → A → B)".to_string(),
+                )
+            })?;
             // f's return must be a function A → B
-            let inner_type = inner_clos
-                .apply(gen_val(&ctx.rho))
-                .map_err(|e| e.to_string())?;
+            let inner_type = inner_clos.apply(gen_val(&ctx.rho))?;
             let (_a_inner, _b_ret_clos) = ext_pi(&inner_type).map_err(|_| {
                 "Reduce: first argument must be a curried function (B → A → B)".to_string()
             })?;
@@ -1020,13 +1003,13 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // parameter inference; require checking mode for those.
         Exp::InductiveCtor(decl, ctor_name, args) => {
             if !decl.params.is_empty() {
-                return Err(format!(
+                return Err(CheckError::CannotInfer(format!(
                     "InductiveCtor: cannot infer type of `{}.{ctor_name}` — \
                      `{}` has {} parameter(s), supply an expected type via checking mode",
                     decl.name,
                     decl.name,
                     decl.params.len()
-                ));
+                )));
             }
             check_inductive_ctor_args(ctx, decl, ctor_name, args, decl, &[], &[])?;
             Ok(Val::InductiveType {
@@ -1055,12 +1038,12 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         // inference mode — its result type is determined by checking-
         // mode context. Surface a diagnostic that points users to the
         // two ways out.
-        Exp::Match { .. } => Err(
+        Exp::Match { .. } => Err(CheckError::CannotInfer(
             "match expression has no inferable type — use it in a checking-mode position \
              (e.g. as a program body or a typed `let` value), or annotate the result type \
              with `returning T` so the parser builds an `InductiveRec` instead"
                 .to_string(),
-        ),
+        )),
 
         // Sized types (Phase 11b step 14). `SizeSort` is itself a
         // type at universe 1; `SizeInf` and `SizeSucc(_)` inhabit
@@ -1098,7 +1081,7 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
             // Id lives in Prop (D46 §9). Set / Type(n) callers still work
             // via cumulativity (Prop ⊆ Set ⊆ Type(n)).
             check_type(ctx, a)?;
-            let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+            let a_val = ctx.eval(a, &ctx.rho)?;
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)?;
             Ok(Val::Sort(0))
@@ -1119,9 +1102,11 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
                 format!("Exp::EigonAxiom({iri}): no layer context available for axiom resolution")
             })?;
             let env = layer.axiom_env();
-            env.get(iri)
-                .map(|entry| entry.typ.clone())
-                .ok_or_else(|| format!("axiom `{iri}` not registered in chain axiom environment"))
+            env.get(iri).map(|entry| entry.typ.clone()).ok_or_else(|| {
+                CheckError::IllFormed(format!(
+                    "axiom `{iri}` not registered in chain axiom environment"
+                ))
+            })
         }
         // eigenius#71 / D49 — literal values infer to their primitive
         // type (`Val::EigonPrimitive(PrimitiveType::*)`). Round-trips
@@ -1141,18 +1126,20 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, String> {
         }
         Exp::CodataType(decl, _) => {
             check_type(ctx, exp)?;
-            ctx.eval(&decl.sort, &ctx.rho).map_err(|e| e.to_string())
+            ctx.eval(&decl.sort, &ctx.rho).map_err(CheckError::from)
         }
         Exp::Inductive(decl) => {
             check_type(ctx, exp)?;
-            ctx.eval(&decl.sort, &ctx.rho).map_err(|e| e.to_string())
+            ctx.eval(&decl.sort, &ctx.rho).map_err(CheckError::from)
         }
         Exp::InductiveType(decl, _) => {
             check_type(ctx, exp)?;
-            ctx.eval(&decl.sort, &ctx.rho).map_err(|e| e.to_string())
+            ctx.eval(&decl.sort, &ctx.rho).map_err(CheckError::from)
         }
 
-        e => Err(format!("cannot infer type of: {e:?}")),
+        e => Err(CheckError::CannotInfer(format!(
+            "cannot infer type of: {e:?}"
+        ))),
     }
 }
 
@@ -1209,18 +1196,22 @@ fn advance_sigma(typ: &Val, field_name: &str, field_exp: &Exp, rho: &Rho) -> Val
 }
 
 /// Extract a Pi type: Pi(A, x.B) → (A, x.B)
-fn ext_pi(val: &Val) -> Result<(Val, Clos), String> {
+fn ext_pi(val: &Val) -> Result<(Val, Clos), CheckError> {
     match val {
         Val::Pi(t, g) => Ok((*t.clone(), g.clone())),
-        u => Err(format!("expected Pi type, got: {u:?}")),
+        u => Err(CheckError::ExpectedPi(format!(
+            "expected Pi type, got: {u:?}"
+        ))),
     }
 }
 
 /// Extract a Sigma type: Sig(A, x.B) → (A, x.B)
-fn ext_sig(val: &Val) -> Result<(Val, Clos), String> {
+fn ext_sig(val: &Val) -> Result<(Val, Clos), CheckError> {
     match val {
         Val::Sig(t, g) => Ok((*t.clone(), g.clone())),
-        u => Err(format!("expected Sigma type, got: {u:?}")),
+        u => Err(CheckError::ExpectedSigma(format!(
+            "expected Sigma type, got: {u:?}"
+        ))),
     }
 }
 
@@ -1999,7 +1990,7 @@ mod tests {
             upper: Box::new(Exp::SizeSucc(Box::new(Exp::Var("i".to_string())))),
             body: Box::new(Exp::One),
         };
-        let err = check_type(&mut c, &exp).unwrap_err();
+        let err = check_type(&mut c, &exp).unwrap_err().to_string();
         assert!(
             err.contains("rigid size variable"),
             "unexpected error: {err}"
@@ -2069,7 +2060,7 @@ mod tests {
             Box::new(Exp::Var("f".to_string())),
             Box::new(Exp::Var("i".to_string())),
         );
-        let err = check_infer(&mut c2, &app).unwrap_err();
+        let err = check_infer(&mut c2, &app).unwrap_err().to_string();
         assert!(
             err.contains("not strictly below"),
             "unexpected error: {err}"
@@ -2829,7 +2820,9 @@ mod tests {
             }],
         });
         let mut c = ctx();
-        let err = validate_indexed_ctor_conclusions(&mut c, &decl).unwrap_err();
+        let err = validate_indexed_ctor_conclusions(&mut c, &decl)
+            .unwrap_err()
+            .to_string();
         assert!(
             err.contains("1 arg(s) but `BadVec` declares 1 param(s) + 1 index"),
             "error should describe the arg-count mismatch: {err}"
@@ -2870,7 +2863,9 @@ mod tests {
             }],
         });
         let mut c = ctx();
-        let err = validate_indexed_ctor_conclusions(&mut c, &decl).unwrap_err();
+        let err = validate_indexed_ctor_conclusions(&mut c, &decl)
+            .unwrap_err()
+            .to_string();
         assert!(
             err.contains("doesn't match declared index telescope type"),
             "error should describe the index type mismatch: {err}"
@@ -2996,7 +2991,7 @@ mod tests {
             params: vec![Val::Sort(0)],
             indices: vec![Val::Sort(1)], // wrong index — should be Unit
         };
-        let err = check(&mut c, &nil_app, &expected).unwrap_err();
+        let err = check(&mut c, &nil_app, &expected).unwrap_err().to_string();
         assert!(
             err.contains("index #0 mismatch") || err.contains("result type mismatch"),
             "expected index mismatch error: {err}"
@@ -3119,7 +3114,9 @@ mod tests {
                 },
             ],
         };
-        let err = check(&mut c2, &match_exp, &Val::One).unwrap_err();
+        let err = check(&mut c2, &match_exp, &Val::One)
+            .unwrap_err()
+            .to_string();
         assert!(
             err.contains("unreachable") || err.contains("index #"),
             "expected unreachable-arm diagnostic: {err}"
@@ -3253,7 +3250,9 @@ mod tests {
             Val::LitString("urn:test:axiom".into()),
             Val::Sort(0),
         );
-        let err = try_synthesize_chain_witness(&c, &expected).unwrap_err();
+        let err = try_synthesize_chain_witness(&c, &expected)
+            .unwrap_err()
+            .to_string();
         assert!(
             err.contains("requires a layer-attached CheckCtx"),
             "expected layer-missing diagnostic, got: {err}"
@@ -3272,7 +3271,9 @@ mod tests {
             Val::Sort(0), // not a LitString
             Val::Sort(0),
         );
-        let err = try_synthesize_chain_witness(&c, &expected).unwrap_err();
+        let err = try_synthesize_chain_witness(&c, &expected)
+            .unwrap_err()
+            .to_string();
         assert!(
             err.contains("iri index must be LitString"),
             "expected iri-shape diagnostic, got: {err}"
@@ -3355,7 +3356,9 @@ mod tests {
             Val::LitString("urn:test:phase9:missing".into()),
             Val::Sort(0),
         );
-        let err = try_synthesize_chain_witness(&c, &expected).unwrap_err();
+        let err = try_synthesize_chain_witness(&c, &expected)
+            .unwrap_err()
+            .to_string();
         assert!(
             err.contains("no admitted") || err.contains("witness"),
             "expected missing-witness diagnostic, got: {err}"

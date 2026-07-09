@@ -22,6 +22,7 @@
 //! `layer` / `witness` machinery. §3.3 of
 //! `docs/notes/nbe-reorganization-analysis.md`.
 
+use super::CheckError;
 use crate::layer::Layer;
 use crate::nbe::val::Val;
 use crate::ontology::iri::Iri;
@@ -33,7 +34,7 @@ use std::sync::Arc;
 pub trait CheckHooks: Send + Sync {
     /// Resolve an `EigonClass` IRI to its EigenTT Sigma type against
     /// the layer chain (D18 ontology-as-types).
-    fn resolve_class(&self, iri: &Iri, layer: &Arc<Layer>) -> Result<Val, String>;
+    fn resolve_class(&self, iri: &Iri, layer: &Arc<Layer>) -> Result<Val, CheckError>;
 
     /// Synthesise a D49 `ChainWitness` inhabitant for a
     /// `JustifiedBy.*` predicate whose expected type is `expected_typ`
@@ -48,5 +49,5 @@ pub trait CheckHooks: Send + Sync {
         expected_typ: &Val,
         level: usize,
         layer: Option<&Arc<Layer>>,
-    ) -> Result<Option<Val>, String>;
+    ) -> Result<Option<Val>, CheckError>;
 }

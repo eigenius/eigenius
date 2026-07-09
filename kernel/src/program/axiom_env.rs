@@ -204,7 +204,7 @@ fn type_check_axiom_statement(exp: &Exp, layer: &Arc<Layer>) -> Result<Val, Stri
     use crate::nbe::env::Rho;
     use crate::nbe::eval::eval;
     let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(layer));
-    check_type(&mut ctx, exp)?;
+    check_type(&mut ctx, exp).map_err(|e| e.to_string())?;
     eval(exp, &ctx.rho).map_err(|e| e.to_string())
 }
 

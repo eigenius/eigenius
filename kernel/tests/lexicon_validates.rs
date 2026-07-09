@@ -208,7 +208,7 @@ fn check_composition(src: &str) -> Result<(), String> {
 
     let typ_val = eval(&typ, &Rho::Nil).map_err(|e| format!("eval type: {e:?}"))?;
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
-    check(&mut ctx, &term, &typ_val)
+    check(&mut ctx, &term, &typ_val).map_err(|e| e.to_string())
 }
 
 // Freshly-Constructed typed values (not chain ResourceRefs) so the check
@@ -1796,7 +1796,7 @@ fn treetest_entails(
     let arrow = Exp::Arrow(Box::new(p), Box::new(h));
     let ty = eval(&arrow, &Rho::Nil).map_err(|e| format!("eval entailment type: {e}"))?;
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
-    check(&mut ctx, witness, &ty)
+    check(&mut ctx, witness, &ty).map_err(|e| e.to_string())
 }
 
 /// The monotonicity witness `λp. λx. p(x)` — instantiate a universal at a

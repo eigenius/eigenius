@@ -16,7 +16,7 @@
 //! `JustifiedBy.*` predicate positions from the per-layer witness
 //! index. Split from `check.rs`.
 
-use super::CheckCtx;
+use super::{CheckCtx, CheckError};
 use crate::nbe::val::Val;
 
 /// Check the arguments of an inductive constructor application against
@@ -41,7 +41,7 @@ use crate::nbe::val::Val;
 pub(super) fn try_synthesize_chain_witness(
     ctx: &CheckCtx,
     expected_typ: &Val,
-) -> Result<Option<Val>, String> {
+) -> Result<Option<Val>, CheckError> {
     ctx.hooks
         .synthesize_chain_witness(expected_typ, ctx.rho.len(), ctx.layer.as_ref())
 }
