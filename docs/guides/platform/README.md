@@ -2,7 +2,7 @@
 
 How to install, run, manage, and extend the Eigenius platform. This guide is the practical companion to the surface-language guides — it covers everything *around* writing ESL, EigenQL, or formula values: the CLI, the kernel server, the orchestrator, persistence, WASM and substrate extensions, and deployment.
 
-The guide is grounded in the implementation in [`cli/`](../../../cli/), [`kernel/src/server/`](../../../kernel/src/server/), [`orchestration/`](../../../orchestration/), [`storage/rocksdb/`](../../../storage/rocksdb/), [`crates/runtime-substrate/`](../../../crates/runtime-substrate/), [`examples/wasm-*`](../../../examples/), [`julia/`](../../../julia/), and [`deploy/`](../../../deploy/). Every command shape, env var, and config detail links to the source.
+The guide is grounded in the implementation in [`cli/`](../../../cli/), [`kernel/src/server/`](../../../kernel/src/server/), [`orchestration/`](../../../orchestration/), [`storage/rocksdb/`](../../../storage/rocksdb/), [`crates/runtime-substrate/`](../../../crates/runtime-substrate/), [`julia/`](../../../julia/), and [`deploy/`](../../../deploy/). Every command shape, env var, and config detail links to the source.
 
 ## How to read this guide
 
@@ -16,7 +16,7 @@ The most-used reference chapters are:
 - **[17. TypeScript SDK](17-typescript-sdk.md)** — the `Eigen` class the notebook is built on, also usable from your own browser / Deno / Node code
 - **[4. CLI reference](04-cli-reference.md)** — every `eigenius` subcommand
 - **[6. Database management](06-database-management.md)** — durable mode, exports, backups
-- **[9. Building WASM components](09-wasm-components.md)** and **[10. Building WASM institutions](10-wasm-institutions.md)** — the sandboxed extension surface
+- **[9. Building WASM components](09-wasm-components.md)** and **[10. Building WASM institutions](10-wasm-institutions.md)** — the sandboxed WASM extension surface (**REMOVED 2026-07-08**; chapters retained as historical record)
 - **[11. Runtime substrate](11-runtime-substrate.md)** — the language-runtime extension surface (Julia in v1)
 - **[`julia-institutions/`](julia-institutions/)** — slow-walk tutorials for each of the v1 Julia institutions
 - **[`lean-institution/`](lean-institution/)** — the platform's first verification institution: Lean 4 in-process via `nanoda_lib`
@@ -39,11 +39,11 @@ The most-used reference chapters are:
 
 7. **[The orchestrator](07-orchestrator.md)** — what it does (IO component dispatch + LLM adapter + MCP server + substrate addon), real vs. mock LLM mode, the built-in `CompleteText` and `CompleteJson` components, when you don't need it.
 
-8. **[Worked demos](08-demos.md)** — step-throughs of `demo/run.sh`, `demo/patent/run.sh`, `demo/wasm/run.sh`, and the multi-institution kinase-institutions notebook.
+8. **[Worked demos](08-demos.md)** — step-throughs of `demo/run.sh`, `demo/patent/run.sh`, and the multi-institution kinase-institutions notebook.
 
-9. **[Building WASM components](09-wasm-components.md)** — pure / read-capability / IO components via `wasm-cbor-echo`, `wasm-doc-validator`, `wasm-read-query-probe`, `wasm-http-shout`. Build with `cargo-component`, install with `eigenius capability install`.
+9. **[Building WASM components](09-wasm-components.md)** — **REMOVED (2026-07-08).** Retained as historical record; WASM component hosting and `eigenius capability install` no longer exist.
 
-10. **[Building WASM institutions](10-wasm-institutions.md)** — D14 `Institution` trait implementations against the `eigenius-institution-d14` WIT world (`extract-typed` / `reify` / `query`). Auto-registration from chain scan via `runtime: wasm` + inline `wasm_binary`. Walked through with the M8 dock-assay worked example.
+10. **[Building WASM institutions](10-wasm-institutions.md)** — **REMOVED (2026-07-08).** Retained as historical record; the institution framework (D14) is intact, but the WASM backend is gone (use in-process Rust or external/substrate institutions).
 
 11. **[Runtime substrate](11-runtime-substrate.md)** — the orchestrator-spawned, container-hosted runtime layer for institutions backed by full language ecosystems (Julia in v1, Python and others tracked). The `mirror create → env build → env create → institution install` lifecycle. WASM vs. substrate trade-off table. Cross-links to [`julia-institutions/`](julia-institutions/).
 

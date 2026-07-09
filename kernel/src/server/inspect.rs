@@ -86,7 +86,7 @@ impl EigeniusService {
         if !req.at_layer.is_empty() {
             let _ = self.resolve_read_layer(&req.at_layer, "").await?;
         }
-        // D14 list-from-index, enriched per D34 §G.8 / §9.2 so the
+        // institution list-from-index, enriched per D34 §G.8 / §9.2 so the
         // notebook's Institutions inspector renders the list-view +
         // detail panel from a single call. Each `InstitutionInfo`
         // carries: legacy `query_types` (kept for non-notebook

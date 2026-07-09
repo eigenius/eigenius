@@ -90,7 +90,7 @@ impl EigeniusService {
             //    `take_working` consumes it and installs a fresh
             //    builder parented at `ctx.head` so the orchestrator
             //    can re-use the context for emission-driven layers.
-            // 2. Snapshot the D14 institution index + runtime. Newly
+            // 2. Snapshot the institution index + runtime. Newly
             //    committed resources are gated by AutoOnLoad
             //    QueryClasses *already* declared in the chain;
             //    QueryClasses declared in the same Load batch take
@@ -100,11 +100,10 @@ impl EigeniusService {
             // 3. Construct the root `LayerEmission` from the working
             //    builder.
             // 4. Run the orchestrator. It drains the root through
-            //    `WithInstitutions`, runs the `register_wasm_components`
-            //    `didPersist` hook (which may queue an
-            //    `institution_classes` Child emission), drains that,
-            //    and finally fires the `rebuild_institution_index`
-            //    `didDrain` hook once with the top layer.
+            //    `WithInstitutions`, runs the `trigger_vector_sweep`
+            //    `didPersist` hook, and finally fires the
+            //    `rebuild_institution_index` `didDrain` hook once with
+            //    the top layer.
             // 5. Translate the resulting `MultiLayerOutcome` to
             //    `LoadResponse` fields.
             //

@@ -452,12 +452,6 @@ function RuntimeBadge({ kind }: RuntimeBadgeProps) {
           in-process
         </Badge>
       );
-    case RuntimeKind.WASM:
-      return (
-        <Badge appearance="tint" color="brand" size="small">
-          wasm
-        </Badge>
-      );
     case RuntimeKind.EXTERNAL:
       return (
         <Badge appearance="tint" color="success" size="small">

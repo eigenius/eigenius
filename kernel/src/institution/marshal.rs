@@ -14,7 +14,7 @@
 
 //! Decidable / FIBER input-resource marshaling.
 //!
-//! Both surfaces — `kernel::nbe::eval::try_d14_decide` (kernel-internal
+//! Both surfaces — `kernel::nbe::eval::try_institution_decide` (kernel-internal
 //! NbE Decidable) and `kernel::query::evaluate::try_dispatch_decidable`
 //! (EigenQL Decidable) — synthesise a single typed input resource from
 //! positional args before calling `Institution::query`. The work is

@@ -340,7 +340,7 @@ enum Commands {
         class_iri: String,
     },
 
-    /// Manage WASM capabilities (components and institutions)
+    /// Manage capabilities (components and institutions)
     Capability {
         #[command(subcommand)]
         command: CapabilityCommands,
@@ -467,40 +467,6 @@ enum CapabilityCommands {
         /// IRI of the component or institution
         #[arg(value_name = "IRI")]
         iri: String,
-    },
-
-    /// Install a WASM component or institution
-    Install {
-        /// Path to the WASM binary file (built with cargo-component)
-        #[arg(value_name = "WASM_FILE")]
-        binary: String,
-
-        /// Path to an Eigon-JSON or ESL file declaring the capability.
-        /// The file should contain the component/institution resource
-        /// with its type declarations; the CLI fills in `wasm_binary`
-        /// and `implementation: "wasm"`.
-        #[arg(long, value_name = "FILE")]
-        definition: Option<String>,
-
-        /// Quick mode: IRI for the capability when no definition file is provided
-        #[arg(long, value_name = "IRI", conflicts_with = "definition")]
-        as_iri: Option<String>,
-
-        /// Quick mode: kind of capability (component or institution)
-        #[arg(long, value_name = "KIND", default_value = "component")]
-        kind: String,
-
-        /// Quick mode: capability level (pure, read, or io)
-        #[arg(long, value_name = "LEVEL", default_value = "pure")]
-        capability: String,
-
-        /// Quick mode: input_type IRI (components only)
-        #[arg(long, value_name = "IRI")]
-        input_type: Option<String>,
-
-        /// Quick mode: output_type IRI (components only)
-        #[arg(long, value_name = "IRI")]
-        output_type: Option<String>,
     },
 
     /// Invoke a registered capability with test input
@@ -2381,8 +2347,8 @@ pub(crate) async fn connect_client(
             eprintln!("Failed to connect to {endpoint}: {e}");
             std::process::exit(1);
         });
-    // Raise gRPC message size limits to 128 MB to accommodate WASM component
-    // binaries (which are base64-encoded and can be multiple MB).
+    // Raise gRPC message size limits to 128 MB to accommodate large
+    // layer-load batches and query result sets (which can be multiple MB).
     EigeniusKernelClient::new(channel)
         .max_decoding_message_size(128 * 1024 * 1024)
         .max_encoding_message_size(128 * 1024 * 1024)
@@ -3775,28 +3741,6 @@ async fn remote_capability(endpoint: &str, command: CapabilityCommands, json: bo
         CapabilityCommands::Inspect { iri } => {
             remote_capability_inspect(endpoint, &iri, json).await
         }
-        CapabilityCommands::Install {
-            binary,
-            definition,
-            as_iri,
-            kind,
-            capability,
-            input_type,
-            output_type,
-        } => {
-            remote_capability_install(
-                endpoint,
-                &binary,
-                definition.as_deref(),
-                as_iri.as_deref(),
-                &kind,
-                &capability,
-                input_type.as_deref(),
-                output_type.as_deref(),
-                json,
-            )
-            .await
-        }
         CapabilityCommands::Test { iri, input, mode } => {
             remote_capability_test(endpoint, &iri, &input, &mode, json).await
         }
@@ -4094,259 +4038,6 @@ fn print_capability_human(resource: &eigenius_kernel::ontology::resource::Resour
     if let Some(inst_iri) = get_str("urn:eigenius:institution:institution_iri") {
         println!("Institution IRI: {inst_iri}");
     }
-
-    // WASM metadata (size in bytes for binary)
-    let wasm_bytes = get("urn:eigenius:program:component:wasm_binary")
-        .or_else(|| get("urn:eigenius:institution:wasm_binary"))
-        .and_then(|v| v.as_str());
-    if let Some(b64) = wasm_bytes {
-        // Rough decoded size: base64 is 4/3 of raw bytes
-        let estimated_size = b64.len() * 3 / 4;
-        println!("WASM binary:     ~{estimated_size} bytes (inline base64)");
-    }
-
-    // Fuel/memory config
-    if let Some(Value::Integer(n)) = get("urn:eigenius:program:component:fuel_limit")
-        .or_else(|| get("urn:eigenius:institution:fuel_limit"))
-    {
-        println!("Fuel limit:      {n}");
-    }
-    if let Some(Value::Integer(n)) = get("urn:eigenius:program:component:memory_limit_pages")
-        .or_else(|| get("urn:eigenius:institution:memory_limit_pages"))
-    {
-        println!("Memory limit:    {n} pages ({} MB)", n * 64 / 1024);
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn remote_capability_install(
-    endpoint: &str,
-    binary_file: &str,
-    definition_file: Option<&str>,
-    as_iri: Option<&str>,
-    kind: &str,
-    capability: &str,
-    input_type: Option<&str>,
-    output_type: Option<&str>,
-    json: bool,
-) {
-    let wasm_bytes = std::fs::read(binary_file).unwrap_or_else(|e| {
-        eprintln!("Failed to read WASM file '{binary_file}': {e}");
-        std::process::exit(1);
-    });
-    let base64_binary = encode_base64(&wasm_bytes);
-
-    let resource_json = if let Some(def_file) = definition_file {
-        merge_definition_with_binary(def_file, &base64_binary, kind)
-    } else {
-        let iri = as_iri.unwrap_or_else(|| {
-            eprintln!("'install' requires either --definition or --as (quick mode)");
-            std::process::exit(1);
-        });
-        generate_quick_resource(
-            iri,
-            kind,
-            capability,
-            &base64_binary,
-            input_type,
-            output_type,
-        )
-    };
-
-    // Send via load RPC with auto_commit
-    let mut client = connect_client(endpoint).await;
-    let request = eigenius_kernel::server::proto::LoadRequest {
-        resources: resource_json.into_bytes(),
-        content_type: "application/eigon+json".to_string(),
-        auto_commit: true,
-        branch: String::new(),
-        // Default policy (Reject{100}) and no explicit tombstones —
-        // this CLI surface predates D41's policy wire-through.
-        policy: None,
-        explicit_tombstones: Vec::new(),
-    };
-
-    match client.load(request).await {
-        Ok(response) => {
-            let resp = response.into_inner();
-            if resp.success {
-                if json {
-                    println!(
-                        "{{\"success\":true,\"resource_count\":{},\"layer_id\":\"{}\"}}",
-                        resp.resource_count, resp.layer_id
-                    );
-                } else {
-                    println!(
-                        "Installed {} resource(s). Layer: {}",
-                        resp.resource_count, resp.layer_id
-                    );
-                    println!(
-                        "(WASM binary: {} bytes from {binary_file})",
-                        wasm_bytes.len()
-                    );
-                }
-            } else {
-                eprintln!("Install failed:");
-                for err in &resp.errors {
-                    eprintln!("  {}: {}", err.rule, err.message);
-                }
-                std::process::exit(1);
-            }
-        }
-        Err(e) => {
-            eprintln!("gRPC error: {e}");
-            std::process::exit(1);
-        }
-    }
-}
-
-fn merge_definition_with_binary(def_file: &str, base64_binary: &str, kind: &str) -> String {
-    // Read and compile to JSON if needed
-    let json_bytes = read_as_json(def_file);
-    let json_str = String::from_utf8(json_bytes).unwrap_or_else(|e| {
-        eprintln!("Definition file is not valid UTF-8: {e}");
-        std::process::exit(1);
-    });
-
-    let mut value: serde_json::Value = serde_json::from_str(&json_str).unwrap_or_else(|e| {
-        eprintln!("Failed to parse definition as JSON: {e}");
-        std::process::exit(1);
-    });
-
-    // The definition may be a single object or an array — find the top-level
-    // capability resource and patch in the wasm_binary + implementation.
-    let (binary_prop, impl_prop) = match kind {
-        "component" => (
-            "urn:eigenius:program:component:wasm_binary",
-            "urn:eigenius:program:component:implementation",
-        ),
-        "institution" => (
-            "urn:eigenius:institution:wasm_binary",
-            "urn:eigenius:institution:implementation",
-        ),
-        other => {
-            eprintln!("Unknown --kind: {other} (expected 'component' or 'institution')");
-            std::process::exit(1);
-        }
-    };
-
-    fn patch(
-        obj: &mut serde_json::Map<String, serde_json::Value>,
-        binary_prop: &str,
-        impl_prop: &str,
-        binary: &str,
-    ) {
-        obj.insert(
-            binary_prop.to_string(),
-            serde_json::Value::String(binary.to_string()),
-        );
-        obj.insert(
-            impl_prop.to_string(),
-            serde_json::Value::String("wasm".to_string()),
-        );
-    }
-
-    match &mut value {
-        serde_json::Value::Object(obj) => patch(obj, binary_prop, impl_prop, base64_binary),
-        serde_json::Value::Array(arr) => {
-            // Patch the first top-level object with @id (that's the capability resource)
-            let mut patched = false;
-            for item in arr.iter_mut() {
-                if let serde_json::Value::Object(obj) = item {
-                    if obj.contains_key("@id") {
-                        patch(obj, binary_prop, impl_prop, base64_binary);
-                        patched = true;
-                        break;
-                    }
-                }
-            }
-            if !patched {
-                eprintln!("Definition file contains no top-level resource with @id");
-                std::process::exit(1);
-            }
-        }
-        _ => {
-            eprintln!("Definition file root must be an object or array");
-            std::process::exit(1);
-        }
-    }
-
-    serde_json::to_string(&value).unwrap()
-}
-
-fn generate_quick_resource(
-    iri: &str,
-    kind: &str,
-    capability: &str,
-    base64_binary: &str,
-    input_type: Option<&str>,
-    output_type: Option<&str>,
-) -> String {
-    use serde_json::json;
-
-    match kind {
-        "component" => {
-            let input = input_type.unwrap_or("urn:eigenius:core:Class");
-            let output = output_type.unwrap_or("urn:eigenius:core:Class");
-            let cap_iri = match capability {
-                "pure" => "urn:eigenius:program:capability_levels:pure",
-                "read" => "urn:eigenius:program:capability_levels:read",
-                "io" => "urn:eigenius:program:capability_levels:io",
-                other => {
-                    eprintln!("Unknown --capability: {other} (expected 'pure', 'read', or 'io')");
-                    std::process::exit(1);
-                }
-            };
-            json!({
-                "@id": iri,
-                "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
-                "urn:eigenius:core:short_name": iri.rsplit(':').next().unwrap_or(iri),
-                "urn:eigenius:program:component:input_type": input,
-                "urn:eigenius:program:component:output_type": output,
-                "urn:eigenius:program:component:capability_level": cap_iri,
-                "urn:eigenius:program:component:implementation": "wasm",
-                "urn:eigenius:program:component:wasm_binary": base64_binary,
-            })
-            .to_string()
-        }
-        "institution" => json!({
-            "@id": iri,
-            "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
-            "urn:eigenius:institution:institution_iri": iri,
-            "urn:eigenius:institution:institution_name": iri.rsplit(':').next().unwrap_or(iri),
-            "urn:eigenius:institution:implementation": "wasm",
-            "urn:eigenius:institution:wasm_binary": base64_binary,
-        })
-        .to_string(),
-        other => {
-            eprintln!("Unknown --kind: {other} (expected 'component' or 'institution')");
-            std::process::exit(1);
-        }
-    }
-}
-
-/// Encode bytes as standard base64 (RFC 4648, with padding).
-fn encode_base64(bytes: &[u8]) -> String {
-    const ALPHA: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b0 = chunk[0];
-        let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] } else { 0 };
-        out.push(ALPHA[(b0 >> 2) as usize] as char);
-        out.push(ALPHA[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
-        if chunk.len() > 1 {
-            out.push(ALPHA[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char);
-        } else {
-            out.push('=');
-        }
-        if chunk.len() > 2 {
-            out.push(ALPHA[(b2 & 0x3f) as usize] as char);
-        } else {
-            out.push('=');
-        }
-    }
-    out
 }
 
 async fn remote_capability_test(
@@ -4374,7 +4065,7 @@ async fn remote_capability_test(
     let input_json = read_as_json(input_file);
 
     if is_institution {
-        // Under D14 there is no per-institution dispatch RPC. Per-RPC
+        // There is no per-institution dispatch RPC. Per-RPC
         // FiberQuery / DiscoverMorphisms primitives from the D10 era
         // were retired in Phase 12. To exercise an institution's
         // QueryClasses, write an EigenQL FIBER query and submit it via
@@ -4382,7 +4073,7 @@ async fn remote_capability_test(
         // longer supports direct institution invocation.
         let _ = mode;
         eprintln!(
-            "`capability test` cannot directly invoke an institution under D14.\n\
+            "`capability test` cannot directly invoke an institution.\n\
              Write an EigenQL FIBER query against one of this institution's QueryClasses\n\
              and submit it via `eigenius query` instead — see D2 v2 §3.5.\n\
              Institution: {iri}"

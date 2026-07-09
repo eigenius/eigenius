@@ -113,7 +113,7 @@ async fn without_embedders_hook_is_a_noop() {
     let layer = build_corpus_layer(model);
 
     // Call the hook directly (this is what the `didPersist` slot
-    // calls in production after `register_wasm_components`).
+    // calls in production).
     let result =
         <EigeniusService as CommitHookHost>::trigger_vector_sweep_for_layer(&service, &layer);
     assert!(result.is_ok(), "no-embedders hook must succeed: {result:?}");

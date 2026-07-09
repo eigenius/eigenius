@@ -78,29 +78,14 @@ This demo demonstrates the central ergonomic claim of the platform: domain-model
 
 The expected output shape — a `PatentBrief` resource with a structured `analysis` field and a free-text `summary` field — is in [`demo/patent/example-output.json`](../../../demo/patent/example-output.json).
 
-## 8.3. `demo/wasm/run.sh` — WASM extensibility
+## 8.3. WASM extensibility — REMOVED (2026-07-08)
 
-Source: [`demo/wasm/run.sh`](../../../demo/wasm/run.sh).
-
-Exercises the WASM hosting path end-to-end with two WASM components (one Pure, one IO):
-
-```bash
-./demo/wasm/run.sh
-```
-
-Steps:
-
-| # | Step | What happens |
-|---|------|---|
-| pre | Build any missing WASM binaries | Runs `cargo component build` if the `.wasm` outputs aren't present |
-| 0 | Health-check the orchestrator | Same as the basic demo |
-| 1 | Install [`wasm-doc-validator`](../../../examples/wasm-doc-validator/) into the kernel | Pure component, registered at `urn:example:components:DocValidator` |
-| 2 | Install [`wasm-http-shout`](../../../examples/wasm-http-shout/) into the orchestrator | IO component, dispatches `CompleteText` from inside WASM |
-| 3 | `capability test` each capability with sample input | Verifies typed dispatch end-to-end |
-
-This demo is the smoke test for the WASM extension surface for components. After running it, two new capabilities are registered in the live kernel (and orchestrator) — `capability list` shows both, and you can invoke them from your own programs.
-
-For D14 institutions (the dock-assay worked example): see [`kernel/tests/d14_dock_assay_demo_wasm.rs`](../../../kernel/tests/d14_dock_assay_demo_wasm.rs), which exercises the full WASM-institution surface end-to-end via auto-registration from the layer chain. Both WASM extension paths are walked through in [chapter 9](09-wasm-components.md) (components) and [chapter 10](10-wasm-institutions.md) (institutions).
+The WASM extensibility demo (`demo/wasm/run.sh`), the `examples/wasm-*`
+components, and in-kernel/orchestrator WASM hosting were removed. Chapters
+[9](09-wasm-components.md) and [10](10-wasm-institutions.md) are retained
+only as historical record. For live extension, use in-process Rust
+institutions or external institutions via the runtime substrate
+([chapter 11](11-runtime-substrate.md)).
 
 ## 8.4. `kinase-institutions` — multi-institution Julia stack
 
@@ -173,23 +158,21 @@ Regeneration: when the Lean toolchain or the capstone proof changes, regenerate 
 Each demo exits 0 on success and non-zero on any step failure. They're suitable as part of CI or pre-deployment verification:
 
 ```bash
-# Bring up stack, run all three demos, tear down
+# Bring up stack, run the demos, tear down
 EIGENIUS_MOCK_LLM=true docker compose up --build -d
 ./demo/run.sh
 ./demo/patent/run.sh
-./demo/wasm/run.sh
 docker compose down
 ```
 
-The three demos exercise overlapping but distinct subsystems:
+The demos exercise overlapping but distinct subsystems:
 
 | Demo | Exercises |
 |---|---|
 | `demo/run.sh` | Bootstrap, JSON+ESL load, query, program run with `CompleteText` |
 | `demo/patent/run.sh` | `CompleteJson` structured extraction, two-step LLM pipeline, `Construct` |
-| `demo/wasm/run.sh` | WASM component install (pure + IO), institution install, dispatch |
 
-For coverage, run all three. For speed, `demo/run.sh` alone covers the most common failure modes.
+For coverage, run both. For speed, `demo/run.sh` alone covers the most common failure modes.
 
 ## 8.6. Customising the demos
 
@@ -198,11 +181,10 @@ Each demo script accepts the kernel endpoint as the first positional argument, s
 ```bash
 ./demo/run.sh http://kernel.internal:50051
 ./demo/patent/run.sh http://kernel.internal:50051
-./demo/wasm/run.sh http://kernel.internal:50051 http://orchestrator.internal:8080
 ```
 
 For local development variants — different ontologies, different programs — the simplest pattern is to copy the script and modify the file paths.
 
 ---
 
-Next: **[9. Building WASM components →](09-wasm-components.md)**
+Next: **[9. Building WASM components →](09-wasm-components.md)** (historical — the feature was removed)

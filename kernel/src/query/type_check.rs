@@ -34,7 +34,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     let mut errors = Vec::new();
 
-    // Build the D14 institution index once for the whole pass — every
+    // Build the institution index once for the whole pass — every
     // FIBER / qualified-call check resolves through it. Index-driven
     // (`from_layer_indexed`, not the full-chain `from_layer`): this runs on
     // EVERY query, so on a large knowledge-graph chain the full scan was a
@@ -62,7 +62,7 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     check_fiber_clauses(&program.query.body, layer, &index, &mut errors);
 
     // Qualified-name function calls in expression position must
-    // resolve to a Decidable QueryClass under D14 (D2 v2 §5.9).
+    // resolve to a Decidable QueryClass (D2 v2 §5.9).
     for cond in &program.query.body.conditions {
         check_qualified_calls(cond, &index, &mut errors);
     }
@@ -915,7 +915,7 @@ fn check_qualified_calls(
 // ─── D2 v2 §5.9 — Verdict-typed expression rules ──────────────────────
 
 /// Collect every variable name that's FIBER-bound to a Verdict
-/// resource. Under D14 these are the only Verdict-typed `?var`
+/// resource. These are the only Verdict-typed `?var`
 /// references in EigenQL — Verdicts have no algebra, so a static
 /// "is this a Verdict source?" predicate is sufficient (no general
 /// type inference required).
@@ -1623,14 +1623,13 @@ mod tests {
         assert!(errors.iter().any(|e| e.rule == "not_exists_unbound"));
     }
 
-    // ─── D2 v2 §5.7–5.9 — D14 institution-surface rules ────────────────
+    // ─── D2 v2 §5.7–5.9 — institution-surface rules ────────────────
 
     /// Build a layer with the dock-assay demo ontology stacked on top
     /// of the bootstrap chain. Provides a realistic InstitutionIndex
     /// for the FIBER / qualified-call type-check tests.
     fn build_demo_layer() -> Arc<Layer> {
-        let demo_ontology =
-            include_str!("../../../ontologies/examples/d14-dock-assay/dock-assay.json");
+        let demo_ontology = include_str!("../../../ontologies/examples/dock-assay/dock-assay.json");
         let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
         let parent = Arc::clone(ctx.head());
         let mut builder = LayerBuilder::new("type-check-demo", Some(parent));
@@ -1664,8 +1663,8 @@ mod tests {
         let errors = check(
             &layer,
             r#"
-            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
-            USING NAMESPACE "urn:eigenius:demo:d14:"
+            USING INSTITUTION "urn:eigenius:demo:institutions:assay" AS assay
+            USING NAMESPACE "urn:eigenius:demo:institutions:"
             MATCH ?x {}
             FIBER assay:not_a_real_query_class { } AS ?v
             RETURN [] { x: ?x }
@@ -1686,13 +1685,13 @@ mod tests {
         let errors = check(
             &layer,
             r#"
-            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
-            USING NAMESPACE "urn:eigenius:demo:d14:"
+            USING INSTITUTION "urn:eigenius:demo:institutions:assay" AS assay
+            USING NAMESPACE "urn:eigenius:demo:institutions:"
             MATCH ?x {}
             FIBER assay:within_tolerance {
-                "urn:eigenius:demo:d14:predicted_ic50": 1.0,
-                "urn:eigenius:demo:d14:target_ic50": 1.0,
-                "urn:eigenius:demo:d14:tolerance": 0.5
+                "urn:eigenius:demo:institutions:predicted_ic50": 1.0,
+                "urn:eigenius:demo:institutions:target_ic50": 1.0,
+                "urn:eigenius:demo:institutions:tolerance": 0.5
             } AS ?v
             RETURN [] { x: ?x }
             "#,
@@ -1713,11 +1712,11 @@ mod tests {
         let errors = check(
             &layer,
             r#"
-            USING INSTITUTION "urn:eigenius:demo:d14:dock" AS dock
-            USING NAMESPACE "urn:eigenius:demo:d14:"
+            USING INSTITUTION "urn:eigenius:demo:institutions:dock" AS dock
+            USING NAMESPACE "urn:eigenius:demo:institutions:"
             MATCH ?x {}
             FIBER dock:validate_prediction {
-                candidate: "urn:eigenius:demo:d14:dock_to_assay"(?x)
+                candidate: "urn:eigenius:demo:institutions:dock_to_assay"(?x)
             } AS ?v
             RETURN [] { x: ?x }
             "#,
@@ -1736,11 +1735,11 @@ mod tests {
         let errors = check(
             &layer,
             r#"
-            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
-            USING NAMESPACE "urn:eigenius:demo:d14:"
+            USING INSTITUTION "urn:eigenius:demo:institutions:assay" AS assay
+            USING NAMESPACE "urn:eigenius:demo:institutions:"
             MATCH ?x {}
             FIBER assay:validate_prediction {
-                candidate: "urn:eigenius:demo:d14:nonexistent_comorphism"(?x)
+                candidate: "urn:eigenius:demo:institutions:nonexistent_comorphism"(?x)
             } AS ?v
             RETURN [] { x: ?x }
             "#,
@@ -1760,7 +1759,7 @@ mod tests {
             &layer,
             r#"
             MATCH ?x {}
-            WHERE "urn:eigenius:demo:d14:validate_prediction"(?x)
+            WHERE "urn:eigenius:demo:institutions:validate_prediction"(?x)
             RETURN [] { x: ?x }
             "#,
         );
@@ -1781,7 +1780,7 @@ mod tests {
             &layer,
             r#"
             MATCH ?x {}
-            WHERE "urn:eigenius:demo:d14:within_tolerance"(1.0, 1.0, 0.5) HOLDS
+            WHERE "urn:eigenius:demo:institutions:within_tolerance"(1.0, 1.0, 0.5) HOLDS
             RETURN [] { x: ?x }
             "#,
         );
@@ -1802,7 +1801,7 @@ mod tests {
             &layer,
             r#"
             MATCH ?x {}
-            WHERE "urn:eigenius:demo:d14:within_tolerance"(1.0, 1.0, 0.5)
+            WHERE "urn:eigenius:demo:institutions:within_tolerance"(1.0, 1.0, 0.5)
             RETURN [] { x: ?x }
             "#,
         );
@@ -1823,11 +1822,11 @@ mod tests {
         let errors = check(
             &layer,
             r#"
-            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
-            USING NAMESPACE "urn:eigenius:demo:d14:"
+            USING INSTITUTION "urn:eigenius:demo:institutions:assay" AS assay
+            USING NAMESPACE "urn:eigenius:demo:institutions:"
             MATCH ?x {}
             FIBER assay:validate_prediction {
-                candidate: "urn:eigenius:demo:d14:dock_to_assay"(?x)
+                candidate: "urn:eigenius:demo:institutions:dock_to_assay"(?x)
             } AS ?v
             WHERE ?v
             RETURN [] { x: ?x }
@@ -1849,11 +1848,11 @@ mod tests {
         let errors = check(
             &layer,
             r#"
-            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
-            USING NAMESPACE "urn:eigenius:demo:d14:"
+            USING INSTITUTION "urn:eigenius:demo:institutions:assay" AS assay
+            USING NAMESPACE "urn:eigenius:demo:institutions:"
             MATCH ?x {}
             FIBER assay:validate_prediction {
-                candidate: "urn:eigenius:demo:d14:dock_to_assay"(?x)
+                candidate: "urn:eigenius:demo:institutions:dock_to_assay"(?x)
             } AS ?v
             WHERE ?v HOLDS
             RETURN [] { x: ?x }
@@ -1925,7 +1924,7 @@ mod tests {
             &layer,
             r#"
             MATCH ?x {}
-            WHERE NOT "urn:eigenius:demo:d14:within_tolerance"(1.0, 1.0, 0.5)
+            WHERE NOT "urn:eigenius:demo:institutions:within_tolerance"(1.0, 1.0, 0.5)
             RETURN [] { x: ?x }
             "#,
         );

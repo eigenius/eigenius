@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D14 AutoOnLoad dispatch (D14 §9.1).
+//! AutoOnLoad institution dispatch (D14 §9.1).
 //!
 //! For each newly committed resource whose class has at least one
 //! `QueryClass` with `dispatch_role` including `AutoOnLoad`, run the
@@ -86,7 +86,7 @@ pub struct AutoOnLoadDispatch {
     /// Empty for institutions whose only job is the pass/fail gate.
     pub derivations: Vec<Resource>,
     /// Substrate-captured partial `RuntimeInvocation` (D26 §5.5).
-    /// `None` for in-process / WASM institutions whose dispatch
+    /// `None` for in-process institutions whose dispatch
     /// happens entirely inside the kernel host process — the kernel
     /// records its own program-trace provenance for those.
     pub partial_invocation: Option<Resource>,
@@ -306,7 +306,7 @@ pub fn dispatch_auto_on_load_for_layer(
 ///
 /// `runtime_invocation_iri` is `Some` when the dispatch was external
 /// (a chain-committed RuntimeInvocation accompanies the Verdict);
-/// `None` for in-process / WASM dispatches whose provenance is
+/// `None` for in-process dispatches whose provenance is
 /// program-trace-only. In the `None` case the IRI scheme falls back
 /// to `urn:eigenius:verdict:<query-class-short>:<subject-short>` so
 /// every Verdict still has a stable @id without inventing a fake
@@ -423,7 +423,7 @@ fn protected_verdict_properties() -> std::collections::HashSet<&'static str> {
 ///   substrate-hosted institutions), the Verdict IRI is
 ///   `{invocation_iri}:verdict` — preserves the existing scheme so
 ///   D28 / Julia institutions keep their per-invocation Verdict IRIs.
-/// - Otherwise (in-process / WASM institutions where the verdict is
+/// - Otherwise (in-process institutions where the verdict is
 ///   a deterministic function of the subject), the Verdict IRI is
 ///   `{subject_iri}:verdict` — a deterministic, 1:1 derivation that
 ///   lets downstream `DerivedEvidence` consumers cite the Verdict
@@ -570,7 +570,7 @@ const RUNTIME_INVOCATION_PROP: &str = "urn:eigenius:institution:runtime_invocati
 const VERDICT_DIAGNOSTIC_PROP: &str = "urn:eigenius:institution:diagnostic";
 
 /// Deterministic Verdict IRI when there's no companion RuntimeInvocation
-/// to derive from (in-process / WASM dispatches). Uses the gated
+/// to derive from (in-process dispatches). Uses the gated
 /// subject's IRI plus a `:verdict` suffix — the verdict is a
 /// deterministic function of the subject (no UUID indirection
 /// required for institutions whose verdicts are reproducible from

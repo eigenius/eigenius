@@ -19,12 +19,7 @@
  * to the local ComponentRegistry. This is the reverse direction:
  * kernel → orchestrator.
  *
- * Also handles `RegisterWasmComponent` for IO WASM components: compiles
- * the Component Model binary via the napi-rs addon and plugs the
- * resulting handle into `ComponentRegistry` as a regular handler.
- *
- * Architecture reference: D6 (execution architecture), D12 (WASM ext),
- * D12b (orchestrator-side WASM plan).
+ * Architecture reference: D6 (execution architecture).
  */
 
 import type { ConnectRouter } from "@connectrpc/connect";
@@ -34,23 +29,15 @@ import {
   ComponentMetricsSchema,
   ComponentResponseSchema,
   DispatchExternalResponseSchema,
-  RegisterWasmComponentResponseSchema,
 } from "../gen/eigenius_pb.ts";
 import type {
   ComponentRequest,
   ComponentResponse,
   DispatchExternalRequest,
   DispatchExternalResponse,
-  RegisterWasmComponentRequest,
 } from "../gen/eigenius_pb.ts";
 import type { ComponentRegistry } from "../components/registry.ts";
-import type { WasmComponentRegistry } from "../wasm/registry.ts";
-import {
-  createWasmComponentHandler,
-  type HostBridge,
-} from "../wasm/hostBridge.ts";
-import type { WasmAddon } from "../wasm/loadAddon.ts";
-import { decodeResource, encodeResource } from "../wasm/cbor.ts";
+import { decodeResource, encodeResource } from "../codec/cbor.ts";
 import type { RuntimeSubstrateAddon } from "../runtime/loadAddon.ts";
 import * as log from "../observability/mod.ts";
 import {
@@ -70,12 +57,6 @@ const CONTENT_TYPE_CBOR = "application/eigon+cbor";
 
 export interface ComponentExecutorDeps {
   registry: ComponentRegistry;
-  /** Optional WASM support bundle. Absent when the native addon failed to load. */
-  wasm?: {
-    addon: WasmAddon;
-    wasmRegistry: WasmComponentRegistry;
-    bridge: HostBridge;
-  };
   /** Optional substrate-addon handle for D31 §6.2 `DispatchExternal`
    * routing. Absent when the runtime-substrate native addon failed to
    * load — in that case `DispatchExternal` returns a typed error so
@@ -281,7 +262,7 @@ export function registerComponentExecutor(
   router: ConnectRouter,
   deps: ComponentExecutorDeps,
 ): void {
-  const { registry, wasm, substrate } = deps;
+  const { registry, substrate } = deps;
 
   router.service(ComponentExecutor, {
     execute(req: ComponentRequest) {
@@ -289,72 +270,6 @@ export function registerComponentExecutor(
         operation.COMPONENT_DISPATCH,
         (mark) => executeComponentRequest(req, registry, mark),
       );
-    },
-
-    registerWasmComponent(req: RegisterWasmComponentRequest) {
-      return withRpcGuard(operation.WASM_COMPONENT_REGISTER, async (mark) => {
-        if (!wasm) {
-          mark.fail("wasm_disabled");
-          return create(RegisterWasmComponentResponseSchema, {
-            success: false,
-            error:
-              "orchestrator WASM support is disabled (native addon not loaded — " +
-              "build orchestration/native)",
-          });
-        }
-
-        const { addon, wasmRegistry, bridge } = wasm;
-        const componentIri = req.componentIri;
-
-        if (!componentIri) {
-          mark.fail("missing_component_iri");
-          return create(RegisterWasmComponentResponseSchema, {
-            success: false,
-            error: "component_iri is required",
-          });
-        }
-        if (!req.wasmBinary || req.wasmBinary.length === 0) {
-          mark.fail("missing_wasm_binary");
-          return create(RegisterWasmComponentResponseSchema, {
-            success: false,
-            error: "wasm_binary is required",
-          });
-        }
-
-        try {
-          await wasmRegistry.register(componentIri, req.wasmBinary, {
-            fuelLimit: Number(req.fuelLimit ?? 0n),
-            memoryLimitPages: Number(req.memoryLimitPages ?? 0n),
-          });
-
-          registry.register(
-            componentIri,
-            createWasmComponentHandler(componentIri, {
-              addon,
-              wasmRegistry,
-              bridge,
-            }),
-          );
-
-          log.info(
-            operation.WASM_COMPONENT_REGISTER,
-            "registered WASM IO component",
-            {
-              component_iri: componentIri,
-              size_bytes: req.wasmBinary.length,
-            },
-          );
-          return create(RegisterWasmComponentResponseSchema, {
-            success: true,
-          });
-        } catch (e) {
-          mark.fail("registration_failed");
-          return create(RegisterWasmComponentResponseSchema, {
-            success: false,
-            error: `WASM registration failed: ${(e as Error).message}`,
-          });
-        }
-      });
     },
 
     dispatchExternal(req: DispatchExternalRequest) {

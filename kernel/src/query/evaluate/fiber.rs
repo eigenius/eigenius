@@ -31,7 +31,7 @@ use std::collections::BTreeMap;
 use super::expression::eval_expression;
 use super::pattern::{apply_negated_pattern, apply_pattern, Binding};
 
-/// Runtime resources available to FIBER clause evaluation under D14.
+/// Runtime resources available to FIBER clause evaluation.
 /// Both `index` and `runtime` must be `Some` for FIBER dispatch to
 /// succeed; `None` for either means FIBER clauses error at dispatch
 /// time (typical of CLI local-only queries with no kernel runtime).
@@ -268,7 +268,7 @@ fn apply_fiber_clause(
     into_collector: &mut Vec<Resource>,
     existing: Vec<Binding>,
 ) -> Result<Vec<Binding>, QueryError> {
-    // D14 dispatch (D2 §6.12): FIBER requires both halves of the
+    // institution dispatch (D2 §6.12): FIBER requires both halves of the
     // institution machinery — the InstitutionIndex (resolves the
     // QueryClass) and the InstitutionRuntime (supplies the
     // Institution trait impl).
@@ -387,7 +387,7 @@ fn apply_fiber_clause(
             query_res.set(param_iri, value);
         }
 
-        // Dispatch via D14 Institution::query.
+        // Dispatch via Institution::query.
         let outcome = institution
             .query(&qc_entry.query_handler, &query_res, ctx)
             .map_err(|e| {
@@ -471,7 +471,7 @@ fn resolve_fiber_institution(
 
 /// Run the four-step comorphism pipeline for a FIBER param coercion
 /// (D2 v2 §3.5 / §6.12). Mirrors the kernel-side
-/// [`crate::nbe::eval::try_d14_institution_invoke`] but operates on
+/// [`crate::nbe::eval::try_institution_invoke`] but operates on
 /// EigenQL `Value`s and dispatches the transformation Component
 /// directly via `BuiltinComponent::execute` — v1 restricts coercion
 /// transformations to Pure/Read so we don't need IO mode plumbing.
@@ -795,7 +795,7 @@ mod tests {
         // ParamValue::Expression(FunctionCall).
         use crate::query::ast::{Clause, ParamValue};
         let source = r#"
-            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            USING INSTITUTION "urn:eigenius:demo:institutions:assay" AS assay
             MATCH ?d {}
             FIBER assay:within_tolerance {
                 predicted_ic50: dock:dock_to_assay(?d)
@@ -835,7 +835,7 @@ mod tests {
         // construction).
         use crate::query::ast::{Clause, Expression, ParamValue};
         let source = r#"
-            USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
+            USING INSTITUTION "urn:eigenius:demo:institutions:assay" AS assay
             MATCH ?d {}
             FIBER assay:within_tolerance {
                 predicted_ic50: cap:multi(?d, 1.0)

@@ -12,54 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Scan a Layer for WASM component/institution resources and register them.
-//!
-//! A resource declares WASM backing via:
-//!
-//! ```json
-//! {
-//!   "@id": "urn:example:components:MyComponent",
-//!   "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
-//!   "urn:eigenius:program:component:implementation": "wasm",
-//!   "urn:eigenius:program:component:wasm_binary": "<base64 bytes>",
-//!   "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:pure"
-//! }
-//! ```
-//!
-//! Institutions use the `urn:eigenius:institution:` namespace for the same properties.
-//! `wasm_binary_ref` (blob store IRI) is reserved for future use.
+//! Scan the layer chain for institution declarations and wire their
+//! backends into the runtime: **in-process** Rust institutions (registered
+//! at startup) and **external** institutions (dispatched over gRPC to the
+//! orchestrator substrate). See D14 (institutions).
 
 use super::external_institution::{ExternalInstitution, ExternalQueryHandler};
-use super::wasm_component::{CapabilityLevel, WasmComponent, WasmComponentConfig};
-use super::wasm_institution::WasmInstitution;
 use crate::institution::in_process_registry::InProcessInstitutionRegistry;
 use crate::institution::registry::{InstitutionIndex, RuntimeKind};
-use crate::institution::runtime::{Institution, InstitutionRuntime};
+use crate::institution::runtime::InstitutionRuntime;
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
-use crate::program::component::ComponentRegistry;
 use crate::program::remote::OrchestratorTransport;
 use crate::server::proto::component_executor_client::ComponentExecutorClient;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-/// Protected namespace prefixes. Domain-supplied WASM modules cannot register
-/// IRIs under these (D12 §8.4).
-const PROTECTED_NAMESPACES: &[&str] = &[
-    "urn:eigenius:core:",
-    "urn:eigenius:program:",
-    "urn:eigenius:reflection:",
-    "urn:eigenius:institution:",
-];
-
-/// Exception: built-in components under program:components: can use the
-/// program namespace (they're part of the built-in registry anyway).
-const PROTECTED_NAMESPACE_EXCEPTIONS: &[&str] = &["urn:eigenius:program:components:"];
-
-/// An error encountered while loading WASM extensions from a layer.
+/// An error encountered while loading institution declarations from a layer.
 #[derive(Debug, Clone)]
 pub struct RegistrationError {
     pub resource_iri: String,
@@ -92,196 +64,6 @@ pub struct RegistrationReport {
     pub institutions_registered: Vec<String>,
     pub errors: Vec<RegistrationError>,
     pub warnings: Vec<RegistrationWarning>,
-}
-
-/// An IO-capability WASM component awaiting forwarding to the orchestrator.
-/// The kernel can't host IO components itself (they need network/LLM access);
-/// the caller ships these to the orchestrator via `RegisterWasmComponent`.
-pub struct PendingIoComponent {
-    pub resource_iri: String,
-    pub wasm_binary: Vec<u8>,
-    pub fuel_limit: u64,
-    pub memory_limit_pages: u32,
-}
-
-/// Full scan result, including IO components that need orchestrator registration.
-#[derive(Default)]
-pub struct ScanResult {
-    pub report: RegistrationReport,
-    pub pending_io_components: Vec<PendingIoComponent>,
-}
-
-/// Walk a Layer looking for WASM component resources.
-///
-/// - Pure/read components are loaded and registered in `components` (kernel host).
-/// - IO components are collected as `PendingIoComponent` entries for the caller
-///   to forward to the orchestrator (kernel can't host IO).
-///
-/// Resources without `implementation = "wasm"` are ignored — they are
-/// handled by the regular built-in or remote component path.
-///
-/// Institution declarations under D14 are plain ontology resources scanned
-/// elsewhere (see [`crate::institution::registry::InstitutionIndex`]); this
-/// scanner does not handle them.
-pub fn scan_and_register(layer: &Layer, components: &mut ComponentRegistry) -> ScanResult {
-    let mut result = ScanResult::default();
-
-    let impl_prop = Iri::parse("urn:eigenius:program:component:implementation").unwrap();
-
-    for arc_resource in layer.iter_resources().map(|(_, r)| r) {
-        let resource: &Resource = &arc_resource;
-        let id = match resource.id() {
-            Some(i) => i.as_str().to_string(),
-            None => continue, // Only top-level resources can be registered
-        };
-
-        // Component: has program:component:implementation = "wasm"
-        if let Some(Value::String(s)) = resource.get(&impl_prop) {
-            if s == "wasm" {
-                if let Err(e) = check_namespace(&id) {
-                    result.report.errors.push(RegistrationError {
-                        resource_iri: id,
-                        message: e,
-                    });
-                    continue;
-                }
-
-                // Decide kernel-host (pure/read) vs orchestrator-host (io) by
-                // inspecting the declared capability level on the resource.
-                match classify_component_capability(resource) {
-                    Ok(CapabilityClass::KernelHost) => match load_wasm_component(resource, layer) {
-                        Ok(component) => {
-                            let declared_iri = component.iri().to_string();
-                            if declared_iri != id {
-                                result.report.warnings.push(RegistrationWarning {
-                                        resource_iri: id.clone(),
-                                        message: format!(
-                                            "WASM binary declares IRI '{declared_iri}' which differs from resource @id '{id}' — using binary's IRI",
-                                        ),
-                                    });
-                            }
-                            components.register(declared_iri.clone(), Box::new(component));
-                            result.report.components_registered.push(declared_iri);
-                        }
-                        Err(e) => {
-                            result.report.errors.push(RegistrationError {
-                                resource_iri: id,
-                                message: e,
-                            });
-                        }
-                    },
-                    Ok(CapabilityClass::OrchestratorHost) => {
-                        match extract_pending_io(resource, &id, layer) {
-                            Ok(pending) => {
-                                result.pending_io_components.push(pending);
-                                result.report.components_registered.push(id);
-                            }
-                            Err(e) => {
-                                result.report.errors.push(RegistrationError {
-                                    resource_iri: id,
-                                    message: e,
-                                });
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        result.report.errors.push(RegistrationError {
-                            resource_iri: id,
-                            message: e,
-                        });
-                    }
-                }
-                continue;
-            }
-        }
-    }
-
-    result
-}
-
-/// Walk the layer chain for D14 Institution declarations whose
-/// `runtime` is `urn:eigenius:institution:runtimes:wasm` and build an
-/// [`InstitutionRuntime`] populated with [`WasmInstitution`] instances
-/// for each. In-process / external runtime declarations are skipped —
-/// the caller is responsible for registering those programmatically.
-///
-/// Resources are merged across the chain; the topmost declaration for
-/// each institution IRI wins (so a child layer can override a parent
-/// layer's `runtime: in_process` declaration with `runtime: wasm` +
-/// `wasm_binary`).
-pub fn build_wasm_institution_runtime(layer: &Layer) -> (InstitutionRuntime, RegistrationReport) {
-    build_wasm_runtime_from(layer, layer.iter_all_resources().map(|(_, r)| r))
-}
-
-/// Index-driven variant of [`build_wasm_institution_runtime`]: discovers `Institution`
-/// resources through the triple index instead of materialising the whole chain. This
-/// is the per-commit rebuild path (D23) — O(institution declarations), not O(chain),
-/// so a chain carrying a large domain lexicon doesn't pay a full-chain scan on every
-/// commit. Identical output to the full scan on a core-rooted chain (every committed
-/// chain); see the `wasm_runtime_indexed_matches_full_scan` test.
-pub fn build_wasm_institution_runtime_indexed(
-    layer: &Layer,
-) -> (InstitutionRuntime, RegistrationReport) {
-    let institutions =
-        crate::layer::resolve_typed_resources(layer, &["urn:eigenius:institution:Institution"]);
-    build_wasm_runtime_from(layer, institutions.into_iter())
-}
-
-/// Shared body: build the WASM institution runtime from a stream of candidate
-/// resources (either the full merged chain or the index-discovered subset). Filters
-/// to `Institution` resources declaring `runtime: wasm`, loads each, and registers it.
-fn build_wasm_runtime_from(
-    layer: &Layer,
-    resources: impl Iterator<Item = std::sync::Arc<crate::ontology::resource::Resource>>,
-) -> (InstitutionRuntime, RegistrationReport) {
-    let mut report = RegistrationReport::default();
-    let mut runtime = InstitutionRuntime::new();
-
-    let runtime_prop = Iri::parse(wk::RUNTIME).expect("well-known IRI");
-    let institution_class_iri = Iri::parse("urn:eigenius:institution:Institution").expect("IRI");
-
-    for resource in resources {
-        if !resource.is_instance_of(&institution_class_iri) {
-            continue;
-        }
-        let Some(iri) = resource.id().cloned() else {
-            continue;
-        };
-        // `runtime` is `data_type: resource`; canonicalises to
-        // `ResourceRef`. `as_iri` accepts both that and the
-        // pre-canonical `String` shape.
-        let is_wasm = resource
-            .get(&runtime_prop)
-            .and_then(|v| v.as_iri())
-            .is_some_and(|i| i.as_str() == wk::RUNTIME_WASM);
-        if !is_wasm {
-            continue; // not WASM-runtime — caller's responsibility
-        }
-
-        match load_wasm_institution(&resource, &iri, layer) {
-            Ok(wasm_inst) => {
-                let inst_iri = wasm_inst.institution_iri().clone();
-                if let Err(e) = runtime.register(Box::new(wasm_inst)) {
-                    report.errors.push(RegistrationError {
-                        resource_iri: iri.as_str().to_string(),
-                        message: format!("InstitutionRuntime::register failed: {e}"),
-                    });
-                    continue;
-                }
-                report
-                    .institutions_registered
-                    .push(inst_iri.as_str().to_string());
-            }
-            Err(e) => {
-                report.errors.push(RegistrationError {
-                    resource_iri: iri.as_str().to_string(),
-                    message: e,
-                });
-            }
-        }
-    }
-
-    (runtime, report)
 }
 
 /// One entry per external Institution declaration that resolves
@@ -418,7 +200,7 @@ pub fn validate_external_institution_chain(
         let mut handler_errors: Vec<String> = Vec::new();
 
         // Harvest the procedure → method_name dispatch table from
-        // every D14 declaration that anchors a runtime entry on this
+        // every institution declaration that anchors a runtime entry on this
         // institution: QueryClass.query_handler (FIBER / AutoOnLoad
         // dispatch), ExportFormat.procedure (comorphism source-side
         // extract_typed), ImportFormat.procedure (comorphism
@@ -560,7 +342,7 @@ pub fn validate_external_institution_chain(
     (plans, errors)
 }
 
-/// Walk the chain for D14 Institution declarations whose `runtime` is
+/// Walk the chain for Institution declarations whose `runtime` is
 /// `urn:eigenius:institution:runtimes:external` (D31 §5) and register
 /// an [`ExternalInstitution`] in `runtime` for each. Each registered
 /// institution holds the env IRI + image digest resolved from the
@@ -600,12 +382,12 @@ pub fn register_external_institutions(
     }
 }
 
-/// Walk the chain for D14 Institution declarations whose `runtime` is
+/// Walk the chain for Institution declarations whose `runtime` is
 /// `urn:eigenius:institution:runtimes:in_process` (D28 §2.3) and
 /// register the matching pre-registered impl from
 /// `in_process_registry` into `runtime`. Phase 20a.1.
 ///
-/// Unlike the WASM and External paths, the institution implementation
+/// Unlike the External path, the institution implementation
 /// itself is **not** constructed from chain data — it's Rust code
 /// linked into the orchestrator binary and pre-registered at startup
 /// by each in-process institution crate. The chain-scan pass just
@@ -659,269 +441,9 @@ fn resolve_via_layer(layer: &Layer, iri: &Iri) -> Option<Arc<Resource>> {
     layer.resolve(iri)
 }
 
-/// Load a WASM institution from an Institution resource declaring
-/// `runtime: wasm` + `wasm_binary`.
-fn load_wasm_institution(
-    resource: &Resource,
-    iri: &Iri,
-    layer: &Layer,
-) -> Result<WasmInstitution, String> {
-    let bytes = extract_wasm_bytes(
-        resource,
-        "urn:eigenius:institution:wasm_binary",
-        "urn:eigenius:institution:wasm_binary_ref",
-        layer,
-    )?;
-    let config = extract_config(
-        resource,
-        "urn:eigenius:institution:fuel_limit",
-        "urn:eigenius:institution:memory_limit_pages",
-    );
-    // The institution's IRI is its @id — same as the resource IRI.
-    // The InstitutionRuntime keys by this; D14 dispatch resolves a
-    // QueryClass's `institution_ref` against this key.
-    WasmInstitution::from_bytes(iri.clone(), &bytes, config)
-}
-
-/// Load a WASM component from a resource.
-fn load_wasm_component(resource: &Resource, layer: &Layer) -> Result<WasmComponent, String> {
-    let bytes = extract_wasm_bytes(
-        resource,
-        "urn:eigenius:program:component:wasm_binary",
-        "urn:eigenius:program:component:wasm_binary_ref",
-        layer,
-    )?;
-    let level =
-        extract_capability_level(resource, "urn:eigenius:program:component:capability_level")?;
-    let config = extract_config(
-        resource,
-        "urn:eigenius:program:component:fuel_limit",
-        "urn:eigenius:program:component:memory_limit_pages",
-    );
-    WasmComponent::from_bytes(&bytes, level, config)
-}
-
-/// Extract WASM binary bytes from a resource, trying inline first then blob ref.
-fn extract_wasm_bytes(
-    resource: &Resource,
-    inline_prop: &str,
-    _ref_prop: &str,
-    _layer: &Layer,
-) -> Result<Vec<u8>, String> {
-    let inline_iri = Iri::parse(inline_prop).unwrap();
-
-    // Try inline binary (base64-encoded or hex-encoded raw bytes)
-    if let Some(Value::String(s)) = resource.get(&inline_iri) {
-        return decode_wasm_binary(s);
-    }
-
-    // Blob ref is reserved for future implementation
-    Err(format!(
-        "resource has no '{inline_prop}' (blob ref support is future work)"
-    ))
-}
-
-/// Decode a WASM binary from a string. Supports:
-/// - base64 encoding (standard)
-/// - hex encoding (with "hex:" prefix)
-fn decode_wasm_binary(s: &str) -> Result<Vec<u8>, String> {
-    if let Some(hex_data) = s.strip_prefix("hex:") {
-        hex::decode(hex_data).map_err(|e| format!("hex decode failed: {e}"))
-    } else {
-        base64_decode(s)
-    }
-}
-
-/// Minimal standard base64 decode (RFC 4648, no padding tolerance).
-fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
-    const ALPHA: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut decode = [255u8; 256];
-    for (i, &b) in ALPHA.iter().enumerate() {
-        decode[b as usize] = i as u8;
-    }
-
-    let s = s.trim();
-    let input: Vec<u8> = s
-        .bytes()
-        .filter(|&b| b != b'=' && !b.is_ascii_whitespace())
-        .collect();
-    let mut out = Vec::with_capacity(input.len() * 3 / 4);
-
-    for chunk in input.chunks(4) {
-        if chunk.is_empty() {
-            break;
-        }
-        let mut buf = [0u8; 4];
-        for (i, &b) in chunk.iter().enumerate() {
-            let v = decode[b as usize];
-            if v == 255 {
-                return Err(format!("invalid base64 character: {}", b as char));
-            }
-            buf[i] = v;
-        }
-        if chunk.len() >= 2 {
-            out.push((buf[0] << 2) | (buf[1] >> 4));
-        }
-        if chunk.len() >= 3 {
-            out.push((buf[1] << 4) | (buf[2] >> 2));
-        }
-        if chunk.len() == 4 {
-            out.push((buf[2] << 6) | buf[3]);
-        }
-    }
-    Ok(out)
-}
-
-/// Where a WASM component should be hosted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CapabilityClass {
-    /// Pure or read: hosted in the kernel via Wasmtime.
-    KernelHost,
-    /// IO: hosted in the orchestrator via jco + Deno WebAssembly.
-    OrchestratorHost,
-}
-
-fn classify_component_capability(resource: &Resource) -> Result<CapabilityClass, String> {
-    let iri = Iri::parse("urn:eigenius:program:component:capability_level").unwrap();
-    let level_str = match resource.get(&iri) {
-        Some(Value::String(s)) => s.as_str(),
-        _ => return Ok(CapabilityClass::KernelHost), // Default: most restrictive (pure)
-    };
-    match level_str {
-        "urn:eigenius:program:capability_levels:pure"
-        | "urn:eigenius:program:capability_levels:read" => Ok(CapabilityClass::KernelHost),
-        "urn:eigenius:program:capability_levels:io" => Ok(CapabilityClass::OrchestratorHost),
-        other => Err(format!("unknown capability level: {other}")),
-    }
-}
-
-fn extract_capability_level(resource: &Resource, prop: &str) -> Result<CapabilityLevel, String> {
-    let iri = Iri::parse(prop).unwrap();
-    let level_str = match resource.get(&iri) {
-        Some(Value::String(s)) => s.as_str(),
-        _ => return Ok(CapabilityLevel::Pure), // Default to most restrictive
-    };
-
-    match level_str {
-        "urn:eigenius:program:capability_levels:pure" => Ok(CapabilityLevel::Pure),
-        "urn:eigenius:program:capability_levels:read" => Ok(CapabilityLevel::Read),
-        "urn:eigenius:program:capability_levels:io" => Err(
-            "IO capability-level components must be classified for orchestrator hosting before reaching this function"
-                .to_string(),
-        ),
-        other => Err(format!("unknown capability level: {other}")),
-    }
-}
-
-/// Build a `PendingIoComponent` descriptor from the resource.
-fn extract_pending_io(
-    resource: &Resource,
-    resource_iri: &str,
-    layer: &Layer,
-) -> Result<PendingIoComponent, String> {
-    let bytes = extract_wasm_bytes(
-        resource,
-        "urn:eigenius:program:component:wasm_binary",
-        "urn:eigenius:program:component:wasm_binary_ref",
-        layer,
-    )?;
-    let config = extract_config(
-        resource,
-        "urn:eigenius:program:component:fuel_limit",
-        "urn:eigenius:program:component:memory_limit_pages",
-    );
-    Ok(PendingIoComponent {
-        resource_iri: resource_iri.to_string(),
-        wasm_binary: bytes,
-        fuel_limit: config.fuel_limit,
-        memory_limit_pages: config.memory_limit_pages,
-    })
-}
-
-fn extract_config(resource: &Resource, fuel_prop: &str, mem_prop: &str) -> WasmComponentConfig {
-    let mut config = WasmComponentConfig::default();
-
-    if let Some(Value::Integer(n)) = resource.get(&Iri::parse(fuel_prop).unwrap()) {
-        if *n > 0 {
-            config.fuel_limit = *n as u64;
-        }
-    }
-    if let Some(Value::Integer(n)) = resource.get(&Iri::parse(mem_prop).unwrap()) {
-        if *n > 0 {
-            config.memory_limit_pages = *n as u32;
-        }
-    }
-    config
-}
-
-/// Check that an IRI doesn't violate namespace protection.
-fn check_namespace(iri: &str) -> Result<(), String> {
-    for exception in PROTECTED_NAMESPACE_EXCEPTIONS {
-        if iri.starts_with(exception) {
-            return Ok(());
-        }
-    }
-    for protected in PROTECTED_NAMESPACES {
-        if iri.starts_with(protected) {
-            return Err(format!(
-                "cannot register WASM extension under protected namespace '{protected}'"
-            ));
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn namespace_check_rejects_core() {
-        assert!(check_namespace("urn:eigenius:core:Foo").is_err());
-        assert!(check_namespace("urn:eigenius:reflection:Foo").is_err());
-        assert!(check_namespace("urn:eigenius:institution:Foo").is_err());
-    }
-
-    #[test]
-    fn namespace_check_rejects_program_except_components() {
-        // Plain program namespace: rejected
-        assert!(check_namespace("urn:eigenius:program:Foo").is_err());
-        // But program:components: is an exception (built-ins live there)
-        assert!(check_namespace("urn:eigenius:program:components:Foo").is_ok());
-    }
-
-    #[test]
-    fn namespace_check_accepts_user_namespaces() {
-        assert!(check_namespace("urn:example:components:MyComp").is_ok());
-        assert!(check_namespace("urn:customer:myapp:foo").is_ok());
-    }
-
-    #[test]
-    fn base64_decode_known_vectors() {
-        assert_eq!(base64_decode("").unwrap(), b"");
-        assert_eq!(base64_decode("Zg==").unwrap(), b"f");
-        assert_eq!(base64_decode("Zm8=").unwrap(), b"fo");
-        assert_eq!(base64_decode("Zm9v").unwrap(), b"foo");
-        assert_eq!(base64_decode("Zm9vYg==").unwrap(), b"foob");
-        assert_eq!(base64_decode("Zm9vYmE=").unwrap(), b"fooba");
-        assert_eq!(base64_decode("Zm9vYmFy").unwrap(), b"foobar");
-    }
-
-    #[test]
-    fn base64_decode_tolerates_whitespace() {
-        assert_eq!(base64_decode("Zm9v\nYmFy").unwrap(), b"foobar");
-        assert_eq!(base64_decode("Zm9v YmFy").unwrap(), b"foobar");
-    }
-
-    #[test]
-    fn base64_decode_rejects_invalid() {
-        assert!(base64_decode("!!!!").is_err());
-    }
-
-    #[test]
-    fn hex_prefix_decoding() {
-        assert_eq!(decode_wasm_binary("hex:48656c6c6f").unwrap(), b"Hello");
-    }
 
     // ─── Phase 20a.1 — InProcess runtime kind registration ───────────────
 
@@ -1028,12 +550,12 @@ mod tests {
     }
 
     #[test]
-    fn in_process_registration_ignores_wasm_and_external_institutions() {
-        // Construct a layer with a `runtime: wasm` institution and
-        // verify the in-process pass skips it (Wasm has its own
-        // registration path).
-        let wasm_iri = "urn:eigenius:test:wasm_inst";
-        let mut inst = Resource::new(Iri::parse(wasm_iri).unwrap());
+    fn in_process_registration_ignores_external_institutions() {
+        // Construct a layer with a `runtime: external` institution and
+        // verify the in-process pass skips it (external has its own
+        // gRPC dispatch path).
+        let ext_iri = "urn:eigenius:test:external_inst";
+        let mut inst = Resource::new(Iri::parse(ext_iri).unwrap());
         inst.set(
             Iri::parse(wk::IS_A).expect("IS_A IRI"),
             Value::Array(vec![Value::ResourceRef(
@@ -1042,17 +564,17 @@ mod tests {
         );
         inst.set(
             Iri::parse("urn:eigenius:institution:institution_iri").unwrap(),
-            Value::String(wasm_iri.to_string()),
+            Value::String(ext_iri.to_string()),
         );
         inst.set(
             Iri::parse("urn:eigenius:institution:institution_name").unwrap(),
-            Value::String("Wasm".to_string()),
+            Value::String("External".to_string()),
         );
         inst.set(
             Iri::parse(wk::RUNTIME).unwrap(),
-            Value::ResourceRef(Iri::parse(wk::RUNTIME_WASM).unwrap()),
+            Value::ResourceRef(Iri::parse(wk::RUNTIME_EXTERNAL).unwrap()),
         );
-        let mut b = LayerBuilder::new("wasm_only", None);
+        let mut b = LayerBuilder::new("external_only", None);
         b.add_resource(inst).unwrap();
         let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
 
@@ -1066,9 +588,9 @@ mod tests {
 
         assert!(
             report.errors.is_empty(),
-            "wasm institutions should be skipped silently"
+            "external institutions should be skipped silently"
         );
         assert!(report.institutions_registered.is_empty());
-        assert!(runtime.get(&Iri::parse(wasm_iri).unwrap()).is_none());
+        assert!(runtime.get(&Iri::parse(ext_iri).unwrap()).is_none());
     }
 }

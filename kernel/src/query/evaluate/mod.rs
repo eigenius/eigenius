@@ -28,7 +28,7 @@
 //!
 //! This module exposes only the public surface used by
 //! [`crate::query::execute_with_into`] and external callers
-//! (`server::mod`, the `d14_dock_assay_demo` integration test).
+//! (`server::mod`, the `dock_assay_demo` integration test).
 
 mod expression;
 mod fiber;

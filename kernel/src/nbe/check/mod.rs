@@ -19,6 +19,7 @@
 
 mod codata;
 mod conv;
+mod hooks;
 mod inductive;
 #[cfg(test)]
 mod testutil;
@@ -28,6 +29,7 @@ pub use codata::{check_guarded, lookup_codata_observation};
 use codata::{collect_pattern_names, resolve_full_codata_decl};
 use conv::infer_dependent_sort;
 pub use conv::{def_eq_at_type, eq_nf, exp_mentions_var, subtype_of, subtype_of_with_hyps};
+pub use hooks::CheckHooks;
 pub use inductive::large_elim_admitted;
 use inductive::{
     check_inductive_ctor_args, check_infer_inductive_rec, check_match,
@@ -51,10 +53,11 @@ use std::sync::Arc;
 /// cache for resolved class types.
 ///
 /// Design follows nanoda_lib's `TypeChecker` pattern
-/// ([nanoda_lib `src/tc.rs`](https://github.com/ammkrn/nanoda_lib/blob/main/src/tc.rs)): a single struct carrying
-/// mutable state (cache) plus immutable environment through all checker
-/// calls. The cache is scoped per type-check invocation — fresh per
-/// call, no cross-check invalidation needed.
+/// (`references/nanoda_lib/src/tc.rs` @ pinned commit `f58f2f6`): a
+/// single struct carrying mutable state (cache) plus immutable
+/// environment through all checker calls. The cache is scoped per
+/// type-check invocation — fresh per call, no cross-check invalidation
+/// needed.
 pub struct CheckCtx {
     pub rho: Rho,
     pub gamma: Gamma,
@@ -72,15 +75,20 @@ pub struct CheckCtx {
     /// Consulted by [`subtype_of`] and any direct size-comparison
     /// site via [`crate::nbe::sized::size_le_with_hyps`].
     pub size_tso: crate::nbe::sized_rigid::Tso,
-    /// D14 institution index — derived view of the layer chain. When
+    /// institution index — derived view of the layer chain. When
     /// attached together with `institution_runtime`,
     /// `Constraint::Institution` predicates dispatch through
-    /// `try_d14_decide` (D14 §9.2). Without these, constraints stay
+    /// `try_institution_decide` (D14 §9.2). Without these, constraints stay
     /// as passthrough neutrals — what `EvalCtx::Pure` does anyway.
     pub institution_index: Option<Arc<crate::institution::registry::InstitutionIndex>>,
-    /// D14 institution runtime — registry of `Institution` trait
+    /// institution runtime — registry of `Institution` trait
     /// objects keyed by institution IRI. See `institution_index`.
     pub institution_runtime: Option<Arc<crate::institution::runtime::InstitutionRuntime>>,
+    /// Chain-resident resolution (EigonClass → Sigma type; D49
+    /// ChainWitness synthesis) the checker delegates out of its pure
+    /// core. Wired to the default (`program::check_hooks`) by the
+    /// constructors; the checker body only touches the trait.
+    hooks: Arc<dyn CheckHooks>,
 }
 
 impl CheckCtx {
@@ -94,6 +102,7 @@ impl CheckCtx {
             size_tso: crate::nbe::sized_rigid::Tso::new(),
             institution_index: None,
             institution_runtime: None,
+            hooks: Arc::new(crate::program::check_hooks::DefaultCheckHooks),
         }
     }
 
@@ -107,13 +116,14 @@ impl CheckCtx {
             size_tso: crate::nbe::sized_rigid::Tso::new(),
             institution_index: None,
             institution_runtime: None,
+            hooks: Arc::new(crate::program::check_hooks::DefaultCheckHooks),
         }
     }
 
-    /// Attach a D14 institution index and runtime for check-time
+    /// Attach a institution index and runtime for check-time
     /// dispatch of `Constraint::Institution` predicates through
-    /// `try_d14_decide` (D14 §9.2).
-    pub fn with_institutions_d14(
+    /// `try_institution_decide` (D14 §9.2).
+    pub fn with_institutions(
         mut self,
         index: Arc<crate::institution::registry::InstitutionIndex>,
         runtime: Arc<crate::institution::runtime::InstitutionRuntime>,
@@ -126,18 +136,20 @@ impl CheckCtx {
     /// Produce an [`EvalCtx`] suitable for evaluating expressions
     /// under this check context.
     ///
-    /// Returns `EvalCtx::Check` when a D14 institution index/runtime
-    /// is attached; otherwise `EvalCtx::Pure`. All internal `eval`
-    /// calls in `check.rs` should route through this so institution-
-    /// dispatched constraints fire at check time rather than deferring
-    /// to runtime.
+    /// Returns an effectful context backed by a check-time
+    /// [`InstitutionEngine`](crate::institution::eval_hooks::InstitutionEngine)
+    /// when an institution index/runtime is attached; otherwise
+    /// `EvalCtx::Pure`. All internal `eval` calls in the checker route
+    /// through this so institution-dispatched constraints fire at check
+    /// time rather than deferring to runtime.
     pub fn eval_ctx(&self) -> crate::nbe::eval::EvalCtx {
         if self.institution_index.is_some() && self.institution_runtime.is_some() {
-            crate::nbe::eval::EvalCtx::Check {
-                layer: self.layer.clone(),
-                institution_index: self.institution_index.clone(),
-                institution_runtime: self.institution_runtime.clone(),
-            }
+            let engine = crate::institution::eval_hooks::InstitutionEngine::for_check(
+                self.layer.clone(),
+                self.institution_index.clone(),
+                self.institution_runtime.clone(),
+            );
+            crate::nbe::eval::EvalCtx::effectful(self.layer.clone(), Arc::new(engine))
         } else {
             crate::nbe::eval::EvalCtx::Pure
         }
@@ -152,8 +164,11 @@ impl CheckCtx {
         eval_ctx(exp, rho, &self.eval_ctx())
     }
 
-    /// Extend the context with a new variable binding (for entering binders).
-    /// Shares the layer and type_cache with the parent context.
+    /// Extend the context with a new variable binding (for entering
+    /// binders). Shares the layer (an `Arc`) and clones the
+    /// `type_cache` into the child — class resolutions performed inside
+    /// the binder therefore don't propagate back to the parent on exit
+    /// (§4.4-D7; sharing the cache instead is the profile-gated item 9).
     fn extend(&self, patt: &Patt, typ: &Val, val: &Val) -> Result<CheckCtx, String> {
         let gamma1 = up_gamma(&self.gamma, patt, typ, val)?;
         let rho1 = self.rho.clone().extend(patt.clone(), val.clone());
@@ -165,6 +180,7 @@ impl CheckCtx {
             size_tso: self.size_tso.clone(),
             institution_index: self.institution_index.clone(),
             institution_runtime: self.institution_runtime.clone(),
+            hooks: self.hooks.clone(),
         })
     }
 
@@ -180,7 +196,7 @@ impl CheckCtx {
         if let Some(cached) = self.type_cache.get(&key) {
             return Ok(cached.clone());
         }
-        let v = crate::program::ground::resolve_class_type(iri, layer)?;
+        let v = self.hooks.resolve_class(iri, layer)?;
         self.type_cache.insert(key, v.clone());
         Ok(v)
     }
@@ -512,6 +528,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), String> {
                 size_tso: ctx.size_tso.clone(),
                 institution_index: ctx.institution_index.clone(),
                 institution_runtime: ctx.institution_runtime.clone(),
+                hooks: ctx.hooks.clone(),
             };
             check(&mut inner, e, t)
         }
@@ -2136,7 +2153,7 @@ mod tests {
     // --- D14 §9.2: institution-registered decision procedures ---
     //
     // Verify that `Constraint::Institution { iri, args }` dispatches
-    // through the D14 `try_d14_decide` path: the constraint IRI
+    // through the `try_institution_decide` path: the constraint IRI
     // resolves to a Decidable QueryClass, args land on the input
     // resource as `decide_args`, and the institution's `query` returns
     // a Verdict resource the kernel translates to a `DecResult`.
@@ -2266,7 +2283,7 @@ mod tests {
     /// 19d.7 dropped the legacy `decide_args` array, so the input
     /// class must declare typed slots for the kernel to populate.
     /// Returns the layer along with the index/runtime so callers
-    /// can thread it into `EvalCtx::Check.layer` for typed
+    /// can thread it into an effectful `EvalCtx`'s layer for typed
     /// marshaling.
     fn build_decide_index(
         fake: Arc<FakeInstitution>,
@@ -2339,18 +2356,19 @@ mod tests {
         (layer, Arc::new(idx), Arc::new(rt))
     }
 
-    /// Build an `EvalCtx::Check` populated with the D14 index +
+    /// Build an effectful check-time `EvalCtx` populated with the institution index +
     /// runtime built from `fake`. Threads the synthetic test layer
-    /// so `try_d14_decide` can resolve the input class for typed-
+    /// so `try_institution_decide` can resolve the input class for typed-
     /// property marshaling (Phase 19d.7).
     fn check_ctx_for(fake: Arc<FakeInstitution>, arg_count: usize) -> EvalCtx {
         let (layer, idx, rt) = build_decide_index(fake, arg_count);
         let _ = ExecutionMode::ReadOnly; // silence unused-import warning on small surface
-        EvalCtx::Check {
-            layer: Some(layer),
-            institution_index: Some(idx),
-            institution_runtime: Some(rt),
-        }
+        let engine = crate::institution::eval_hooks::InstitutionEngine::for_check(
+            Some(layer.clone()),
+            Some(idx),
+            Some(rt),
+        );
+        EvalCtx::effectful(Some(layer), Arc::new(engine))
     }
 
     fn wrap_int(n: i64) -> Exp {
@@ -2393,7 +2411,7 @@ mod tests {
         assert!(matches!(v, Val::Refl(_)), "expected Refl, got {v:?}");
 
         // The fake observed the arg on the typed `arg_0` property of
-        // the synthetic input resource that try_d14_decide marshals.
+        // the synthetic input resource that try_institution_decide marshals.
         let observed = fake.last_args().expect("institution was called");
         assert_eq!(observed.len(), 1);
     }
@@ -2437,7 +2455,7 @@ mod tests {
     #[test]
     fn decide_unregistered_iri_is_undecidable() {
         // Index has a Decidable QueryClass for one IRI; the test
-        // invokes a different IRI → no QueryClass match → D14 path
+        // invokes a different IRI → no QueryClass match → institution path
         // returns None → legacy fallback returns Undecidable (empty
         // legacy registry).
         let fake = FakeInstitution::new("urn:eigenius:test:other", DecResult::Holds);
@@ -2626,11 +2644,12 @@ mod tests {
         let mut rt = InstitutionRuntime::new();
         rt.register(Box::new(fake.clone())).unwrap();
 
-        let ctx = EvalCtx::Check {
-            layer: Some(layer),
-            institution_index: Some(Arc::new(idx)),
-            institution_runtime: Some(Arc::new(rt)),
-        };
+        let engine = crate::institution::eval_hooks::InstitutionEngine::for_check(
+            Some(layer.clone()),
+            Some(Arc::new(idx)),
+            Some(Arc::new(rt)),
+        );
+        let ctx = EvalCtx::effectful(Some(layer), Arc::new(engine));
 
         // Two args, two semantically-required properties — succeeds.
         let constraint = Constraint::Institution {
@@ -2678,7 +2697,7 @@ mod tests {
         let fake = FakeInstitution::new("urn:eigenius:test:check_time", DecResult::Holds);
         let (layer, idx, rt) = build_decide_index(fake.clone(), 1);
 
-        let c = CheckCtx::with_layer(Rho::Nil, Vec::new(), layer).with_institutions_d14(idx, rt);
+        let c = CheckCtx::with_layer(Rho::Nil, Vec::new(), layer).with_institutions(idx, rt);
 
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:check_time").unwrap(),

@@ -53,7 +53,7 @@
 //! inductive value) lifted into a kernel `Val` to construct
 //! `JustifiedBy(j, p)` for type-checking. The lift goes through
 //! `extract_typed` rather than a free helper so the abstraction stays
-//! aligned with D14's standard "lift chain resource → typed Val"
+//! aligned with the kernel's standard "lift chain resource → typed Val"
 //! shape — same surface every other institution uses.
 
 pub mod consistency;

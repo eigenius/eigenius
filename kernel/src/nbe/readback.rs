@@ -355,7 +355,11 @@ fn readback_fun(level: usize, cases: &[(Name, Exp)], rho: &Rho) -> Exp {
     )
 }
 
-/// Generate a fresh variable value at a given level.
+/// Generate a fresh variable value at a given level. The `G#` name tag
+/// pairs with [`gen_patt`]'s `G#{level}` and is load-bearing — a
+/// `Neut::Gen(j, name)` reads back as `Exp::Var("{name}{j}")` — so this
+/// is intentionally distinct from `env::gen_val`'s `TC#` convention,
+/// not a duplication to merge.
 fn gen_val(level: usize) -> Val {
     Val::Nt(Neut::Gen(level, "G#".to_string()))
 }

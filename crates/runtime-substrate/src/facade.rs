@@ -20,7 +20,7 @@
 //! orchestrator gRPC path uses post-Phase-18e and the same codec the
 //! worker RPC uses (D26 §8.1). The orchestrator-side TS handler
 //! receives JS objects from `component_executor.ts`, encodes them to
-//! Eigon-CBOR via `wasm/cbor.ts` (the existing cbor-x ↔ ciborium
+//! Eigon-CBOR via `codec/cbor.ts` (the cbor-x ↔ ciborium
 //! bridge), and hands the bytes to the addon. The addon forwards
 //! straight into this facade. No JSON in the substrate's data path.
 //!

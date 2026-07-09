@@ -323,9 +323,9 @@ enum LayerRole {
   // D41 §3.4) whenever any AutoOnLoad verdict (Holds, Undecidable,
   // Fails) was produced.
   LAYER_ROLE_AUDIT_PROVENANCE = 2;
-  // Follow-up Child produced by the `register_wasm_components`
-  // `didPersist` hook (D41 §3.6) when WASM-registration extraction
-  // produced institution-class resources.
+  // Follow-up Child role for institution-class resources contributed by
+  // an institution-registration pass (D41 §3.6). Not emitted by any
+  // current backend; retained in the role taxonomy.
   LAYER_ROLE_INSTITUTION_CLASSES = 3;
 }
 
@@ -617,13 +617,6 @@ service ComponentExecutor {
   // program that references a remote component (e.g. CompleteText).
   rpc Execute(ComponentRequest) returns (ComponentResponse);
 
-  // Register a WASM IO component with the orchestrator. Called by the
-  // kernel when loading a component with capability_level=io and
-  // implementation=wasm. The orchestrator transpiles the Component Model
-  // binary (jco) and instantiates it when Execute is called.
-  rpc RegisterWasmComponent(RegisterWasmComponentRequest)
-      returns (RegisterWasmComponentResponse);
-
   // D31 §6.2 — Phase 19a.5.c. Dispatch an external-runtime institution
   // procedure. Called by the kernel during commit-time AutoOnLoad
   // gating (and during query / Decidable evaluation) when the matched
@@ -633,18 +626,6 @@ service ComponentExecutor {
   // alongside the partial RuntimeInvocation provenance.
   rpc DispatchExternal(DispatchExternalRequest)
       returns (DispatchExternalResponse);
-}
-
-message RegisterWasmComponentRequest {
-  string component_iri = 1;     // IRI the kernel will use to dispatch
-  bytes wasm_binary = 2;        // Raw Component Model binary bytes
-  uint64 fuel_limit = 3;        // Optional fuel budget per invocation (0 = default)
-  uint64 memory_limit_pages = 4; // Optional memory cap in 64KB pages (0 = default)
-}
-
-message RegisterWasmComponentResponse {
-  bool success = 1;
-  string error = 2;
 }
 
 message ComponentRequest {
@@ -770,7 +751,7 @@ message InstitutionInfo {
   // operator wants to see for each institution.
   RuntimeKind runtime_kind = 4;
   // IRI of the `RuntimeEnvironment` for `RUNTIME_KIND_EXTERNAL`
-  // institutions (D31 §5). Empty for WASM and in-process kinds.
+  // institutions (D31 §5). Empty for the in-process kind.
   string requires_environment = 5;
   // Every `QueryClass` resource whose `institution_ref` points at
   // this institution. Sorted by IRI.
@@ -792,8 +773,9 @@ enum RuntimeKind {
   RUNTIME_KIND_UNSPECIFIED = 0;
   // In-process Rust trait object linked into the kernel binary.
   RUNTIME_KIND_IN_PROCESS = 1;
-  // WASM Component Model binary hosted via Wasmtime in the kernel.
-  RUNTIME_KIND_WASM = 2;
+  // 2 reserved: was RUNTIME_KIND_WASM (in-kernel WASM hosting removed).
+  reserved 2;
+  reserved "RUNTIME_KIND_WASM";
   // External service (gRPC, LSP, etc.) routed through D31 lifecycle.
   RUNTIME_KIND_EXTERNAL = 3;
 }

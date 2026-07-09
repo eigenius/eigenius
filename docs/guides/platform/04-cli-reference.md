@@ -180,7 +180,7 @@ Default port: 50051. The orchestrator URL can also come from the `EIGENIUS_ORCHE
 | `--orchestrator` | none | `EIGENIUS_ORCHESTRATOR_ENDPOINT` |
 | `--db` | in-memory | `EIGENIUS_DB` |
 
-When `--db <path>` is provided, the kernel persists layers, traces, and WASM capabilities to RocksDB and survives restart. See [chapter 6](06-database-management.md).
+When `--db <path>` is provided, the kernel persists layers, traces, and institution registrations to RocksDB and survives restart. See [chapter 6](06-database-management.md).
 
 ## 4.5. Database commands
 
@@ -414,7 +414,7 @@ eigenius --endpoint http://localhost:50051 env inspect urn:eigenius:intervals:en
 
 Install and inspect institution declarations. Used as the third step of the substrate-institution install flow.
 
-`eigenius institution install` is the substrate-flow analogue of `eigenius capability install --kind institution` (which targets WASM-hosted institutions). For substrate-hosted institutions whose declaration includes `Institution { runtime: external, requires_environment: ... }`, use `institution install`; for WASM-hosted institutions whose declaration carries `runtime: wasm` + inline `wasm_binary`, use `capability install` (§4.10).
+Use `institution install` for substrate-hosted institutions whose declaration includes `Institution { runtime: external, requires_environment: ... }`. In-process institutions (`runtime: in_process`, e.g. Reasoning / Lean / Statistics) are linked into the kernel binary and register at startup — no install step.
 
 ### `institution install --definition <FILE>`
 
@@ -442,7 +442,13 @@ eigenius --endpoint http://localhost:50051 institution inspect \
 
 ## 4.10. Capability commands
 
-WASM components and institutions are managed through the `capability` subcommand. All require `--endpoint`.
+Registered components and institutions are inspected through the
+`capability` subcommand. All require `--endpoint`.
+
+> **Note (2026-07-08):** `capability install` was removed with WASM
+> extensibility. Components and institutions are now declared as ontology
+> resources loaded via `load` (external / in-process backends), not
+> installed as WASM binaries.
 
 ### `capability list`
 
@@ -456,45 +462,10 @@ List every registered component and institution with kind and capability level.
 
 ```bash
 eigenius --endpoint http://localhost:50051 capability inspect \
-    urn:example:components:DocValidator
+    urn:example:institutions:Reasoning
 ```
 
-Print details for a registered capability: input/output types (components), declared morphism/query/comorphism types (institutions), capability level, fuel limits.
-
-### `capability install <WASM_FILE> [...]`
-
-Install a WASM binary into the running kernel.
-
-**Quick mode** — pass the IRI and metadata as flags:
-
-```bash
-eigenius --endpoint http://localhost:50051 capability install \
-    examples/wasm-doc-validator/target/wasm32-unknown-unknown/debug/eigenius_wasm_doc_validator.wasm \
-    --as-iri urn:example:components:DocValidator \
-    --kind component \
-    --capability pure \
-    --input-type urn:example:doc:Document \
-    --output-type urn:example:doc:ValidationResult
-```
-
-**Full mode** — provide a definition file (Eigon-JSON or ESL) declaring the capability resource; the CLI fills in `wasm_binary` and `implementation: "wasm"`:
-
-```bash
-eigenius --endpoint http://localhost:50051 capability install \
-    my-component.wasm \
-    --definition my-component-definition.esl
-```
-
-Flags:
-
-| Flag | Default | Use |
-|---|---|---|
-| `--definition <FILE>` | — | Full mode — capability resource declaration |
-| `--as-iri <IRI>` | — | Quick mode — capability IRI (mutually exclusive with `--definition`) |
-| `--kind <KIND>` | `component` | Quick mode — `component` or `institution` |
-| `--capability <LEVEL>` | `pure` | Quick mode — `pure`, `read`, or `io` |
-| `--input-type <IRI>` | — | Quick mode — components only |
-| `--output-type <IRI>` | — | Quick mode — components only |
+Print details for a registered capability: input/output types (components), declared morphism/query/comorphism types (institutions), capability level.
 
 ### `capability test <IRI> --input <FILE> [--mode query|discover]`
 

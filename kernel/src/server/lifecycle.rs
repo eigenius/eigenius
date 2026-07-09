@@ -243,7 +243,7 @@ async fn resume_one_task(
         Arc::clone(&task_store),
     ));
 
-    let result = crate::program::eval_io::execute_program_nbe_with_institutions_d14(
+    let result = crate::program::eval_io::execute_program_nbe_with_institutions(
         &program,
         &input,
         layer,
@@ -333,8 +333,8 @@ impl Default for EmbedderStartupConfig {
 /// that dispatch IO calls to the orchestrator via ComponentExecutor gRPC.
 ///
 /// If `backend` is `Some`, the server runs in durable mode: layers, traces
-/// and WASM capabilities survive restart. An empty backend is seeded with
-/// the embedded ontologies; a populated one is rehydrated. See D13.
+/// and institution registrations survive restart. An empty backend is seeded
+/// with the embedded ontologies; a populated one is rehydrated. See D13.
 ///
 /// `embedders` carries the registered Embedder Components (D43 §5.2);
 /// pass [`EmbedderStartupConfig::default`] (empty) when vector
@@ -382,7 +382,7 @@ pub async fn start_server(
         }
     }
 
-    let (mut service, is_persistent) = match backend {
+    let (mut service, _is_persistent) = match backend {
         Some(b) => {
             tracing::info!(
                 { field::OPERATION } = operation::SERVER_START,
@@ -426,22 +426,6 @@ pub async fn start_server(
     // reranker). The binary injects a real lemmatizer here (the kernel can't depend on WordNet).
     service = service.with_parse_config(parse_config);
 
-    // On a persistent backend, walk the rehydrated chain and
-    // re-register every WASM capability it finds. Institutions go
-    // through `register_rehydrated` (doesn't re-publish classes).
-    if is_persistent {
-        let errors = service.rehydrate_wasm_from_chain().await;
-        for e in errors {
-            tracing::warn!(
-                { field::OPERATION } = operation::CAPABILITY_INSTALL,
-                { field::ERROR_KIND } = "rehydrate_failed",
-                { field::RESOURCE_IRI } = %e.resource_iri,
-                { field::ERROR_MESSAGE } = %e.message,
-                "WASM rehydrate produced an error"
-            );
-        }
-    }
-
     // Phase 20a.1+: pre-register every in-process institution the
     // binary links (Lean today, future verification institutions
     // tomorrow). Must happen before the institution-index rebuild so
@@ -457,7 +441,7 @@ pub async fn start_server(
         service.register_in_process_institution(institution);
     }
 
-    // Build the D14 institution index from the bootstrap / rehydrated
+    // Build the institution index from the bootstrap / rehydrated
     // chain so subsequent Loads dispatch AutoOnLoad QueryClasses
     // declared in the persisted chain.
     let ctx_arc = service
@@ -521,8 +505,9 @@ pub async fn start_server(
         "gRPC server listening"
     );
 
-    // Raise gRPC message size limits to 128 MB to accommodate WASM component
-    // binaries (which are base64-encoded and can be multiple MB).
+    // Raise gRPC message size limits to 128 MB to accommodate large
+    // layer-load batches and external-institution dispatch payloads
+    // (which can be multiple MB).
     //
     // `GrpcWebLayer` wraps the server so it accepts the gRPC-Web wire
     // protocol (HTTP/1.1) alongside native gRPC (HTTP/2). The

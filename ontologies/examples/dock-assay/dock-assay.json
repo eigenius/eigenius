@@ -1,0 +1,176 @@
+[
+  {
+    "@id": "urn:eigenius:demo:institutions:DockingResult",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "DockingResult",
+    "urn:eigenius:core:description": "A computed pose + binding-energy estimate from molecular docking.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:demo:institutions:delta_g"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:demo:institutions:delta_g",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "delta_g",
+    "urn:eigenius:core:description": "Predicted binding free energy in kcal/mol.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:institutions:DockingResult"]
+  },
+
+  {
+    "@id": "urn:eigenius:demo:institutions:AssayPrediction",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "AssayPrediction",
+    "urn:eigenius:core:description": "An assay-side prediction in IC50 (nM) units.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:demo:institutions:ic50"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:demo:institutions:ic50",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "ic50",
+    "urn:eigenius:core:description": "Half-maximal inhibitory concentration in nM.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:institutions:AssayPrediction"]
+  },
+
+  {
+    "@id": "urn:eigenius:demo:institutions:WithinToleranceInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "WithinToleranceInput",
+    "urn:eigenius:core:description": "Decidable QueryClass input: predicted IC50, target IC50, tolerance (nM).",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:demo:institutions:predicted_ic50",
+      "urn:eigenius:demo:institutions:target_ic50",
+      "urn:eigenius:demo:institutions:tolerance"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:demo:institutions:predicted_ic50",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "predicted_ic50",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:institutions:WithinToleranceInput"]
+  },
+  {
+    "@id": "urn:eigenius:demo:institutions:target_ic50",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "target_ic50",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:institutions:WithinToleranceInput"]
+  },
+  {
+    "@id": "urn:eigenius:demo:institutions:tolerance",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "tolerance",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:float",
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:institutions:WithinToleranceInput"]
+  },
+
+  {
+    "@id": "urn:eigenius:demo:institutions:dock",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+    "urn:eigenius:institution:institution_iri": "urn:eigenius:demo:institutions:dock",
+    "urn:eigenius:institution:institution_name": "Dock",
+    "urn:eigenius:institution:runtime": "urn:eigenius:institution:runtimes:in_process"
+  },
+  {
+    "@id": "urn:eigenius:demo:institutions:assay",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Institution"],
+    "urn:eigenius:institution:institution_iri": "urn:eigenius:demo:institutions:assay",
+    "urn:eigenius:institution:institution_name": "Assay",
+    "urn:eigenius:institution:runtime": "urn:eigenius:institution:runtimes:in_process"
+  },
+
+  {
+    "@id": "urn:eigenius:demo:institutions:ef_dock_to_dg",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ExportFormat"],
+    "urn:eigenius:institution:from_class": "urn:eigenius:demo:institutions:DockingResult",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:core:float",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:demo:institutions:dock",
+    "urn:eigenius:institution:procedure": "urn:eigenius:demo:institutions:proc:extract_dg"
+  },
+  {
+    "@id": "urn:eigenius:demo:institutions:if_assay_from_ic50",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:ImportFormat"],
+    "urn:eigenius:institution:to_class": "urn:eigenius:demo:institutions:AssayPrediction",
+    "urn:eigenius:institution:payload_type": "urn:eigenius:core:float",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:demo:institutions:assay",
+    "urn:eigenius:institution:procedure": "urn:eigenius:demo:institutions:proc:reify_ic50"
+  },
+
+  {
+    "@id": "urn:eigenius:demo:institutions:cm_arrhenius",
+    "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
+    "urn:eigenius:core:short_name": "cm_arrhenius",
+    "urn:eigenius:core:description": "Approximation: IC50 (nM) = exp(-deltaG / (R*T)) * 1e9. Pure scalar transformation Float -> Float."
+  },
+
+  {
+    "@id": "urn:eigenius:demo:institutions:dock_to_assay",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:Comorphism"],
+    "urn:eigenius:institution:export_format": "urn:eigenius:demo:institutions:ef_dock_to_dg",
+    "urn:eigenius:institution:transformation": "urn:eigenius:demo:institutions:cm_arrhenius",
+    "urn:eigenius:institution:import_format": "urn:eigenius:demo:institutions:if_assay_from_ic50",
+    "urn:eigenius:institution:exact": false,
+    "urn:eigenius:core:description": "ρ_{Dock→Assay}: extracts ΔG from a DockingResult, transforms to IC50 via Arrhenius, reifies as an AssayPrediction."
+  },
+
+  {
+    "@id": "urn:eigenius:demo:institutions:within_tolerance",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "within_tolerance",
+    "urn:eigenius:institution:query_class": "urn:eigenius:demo:institutions:WithinToleranceInput",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:decidable"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:demo:institutions:proc:within_tolerance",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:demo:institutions:assay"
+  },
+
+  {
+    "@id": "urn:eigenius:demo:institutions:assay_prediction_validity",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "assay_prediction_validity",
+    "urn:eigenius:institution:query_class": "urn:eigenius:demo:institutions:AssayPrediction",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:auto_on_load"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:demo:institutions:proc:check_assay_prediction",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:demo:institutions:assay"
+  },
+
+  {
+    "@id": "urn:eigenius:demo:institutions:PredictionValidationInput",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "PredictionValidationInput",
+    "urn:eigenius:core:description": "OnDemand QueryClass input: a candidate AssayPrediction to validate.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:demo:institutions:candidate"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:demo:institutions:candidate",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "candidate",
+    "urn:eigenius:core:description": "An AssayPrediction the QueryClass should evaluate.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource",
+    "urn:eigenius:core:class_types": ["urn:eigenius:demo:institutions:AssayPrediction"],
+    "urn:eigenius:core:domain": ["urn:eigenius:demo:institutions:PredictionValidationInput"]
+  },
+  {
+    "@id": "urn:eigenius:demo:institutions:validate_prediction",
+    "urn:eigenius:core:is_a": ["urn:eigenius:institution:QueryClass"],
+    "urn:eigenius:core:short_name": "validate_prediction",
+    "urn:eigenius:institution:query_class": "urn:eigenius:demo:institutions:PredictionValidationInput",
+    "urn:eigenius:institution:result_class": "urn:eigenius:institution:Verdict",
+    "urn:eigenius:institution:dispatch_role": [
+      "urn:eigenius:institution:dispatch_roles:on_demand"
+    ],
+    "urn:eigenius:institution:query_handler": "urn:eigenius:demo:institutions:proc:validate_prediction",
+    "urn:eigenius:institution:institution_ref": "urn:eigenius:demo:institutions:assay"
+  }
+]

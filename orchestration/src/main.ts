@@ -38,9 +38,6 @@ import * as log from "./observability/mod.ts";
 import { operation } from "./observability/mod.ts";
 import { ProgramExecutor } from "./program/executor.ts";
 import { startServer } from "./server/mod.ts";
-import { tryLoadWasmAddon } from "./wasm/loadAddon.ts";
-import { WasmComponentRegistry } from "./wasm/registry.ts";
-import { createHostBridge } from "./wasm/hostBridge.ts";
 import { tryLoadRuntimeSubstrateAddon } from "./runtime/loadAddon.ts";
 import {
   createRunRuntimeScriptHandler,
@@ -142,33 +139,6 @@ function main() {
   }
 
   const _executor = new ProgramExecutor(client, components);
-
-  // Native addon for IO WASM components (optional — skipped if not built).
-  const addon = tryLoadWasmAddon();
-  const wasm = addon
-    ? (() => {
-      const wasmRegistry = new WasmComponentRegistry(addon);
-      const bridge = createHostBridge({
-        addon,
-        registry: components,
-        wasmRegistry,
-        kernel: client,
-      });
-      log.info(
-        operation.WASM_ADDON_LOAD,
-        "WASM IO components enabled (native addon loaded)",
-        { enabled: true },
-      );
-      return { addon, wasmRegistry, bridge };
-    })()
-    : undefined;
-  if (!wasm) {
-    log.warn(
-      operation.WASM_ADDON_LOAD,
-      "WASM IO components disabled (addon not loaded; RegisterWasmComponent will fail)",
-      { enabled: false },
-    );
-  }
 
   // Native addon for the runtime substrate (RunRuntimeScript /
   // CallRuntimeMethod). Optional — skipped if not built. Phase 18a.
@@ -331,7 +301,7 @@ function main() {
     );
   } else {
     log.warn(
-      operation.WASM_ADDON_LOAD,
+      operation.ADDON_LOAD,
       "runtime substrate disabled (addon not loaded; " +
         "RunRuntimeScript / CallRuntimeMethod will fail)",
       { enabled: false },
@@ -362,7 +332,6 @@ function main() {
     components,
     client,
     ORCHESTRATOR_PORT,
-    wasm,
     substrateAddon ?? undefined,
     mcpHandler,
   );

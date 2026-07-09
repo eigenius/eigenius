@@ -7,7 +7,7 @@ The full recipe list is in [`justfile`](../../../justfile).
 ## 3.1. The four core recipes
 
 ```bash
-just build      # workspace build + WASM examples + test fixture copy
+just build      # workspace build
 just test       # cargo test --workspace + deno test
 just check      # cargo fmt --check + clippy + deno lint + deno fmt --check
 just fmt        # cargo fmt --all + deno fmt
@@ -18,18 +18,11 @@ These four cover everything in the day-to-day cycle.
 ## 3.2. `just build` in detail
 
 ```bash
-just build      # equivalent to: just build-wasm && cargo build --workspace
-                #                                && cargo build --manifest-path orchestration/native/Cargo.toml
+just build      # equivalent to: cargo build --workspace
 ```
 
-The `build-wasm` dependency does two things:
-
-1. **Compile every `examples/wasm-*` crate** with `cargo component build` (one per directory).
-2. **Copy the resulting `.wasm` binaries into [`kernel/tests/fixtures/`](../../../kernel/tests/fixtures/)** — `eigenius_wasm_doc_validator.wasm` plus the four D14 fixtures (`eigenius_wasm_d14_echo.wasm`, `eigenius_wasm_d14_dock.wasm`, `eigenius_wasm_d14_assay.wasm`, `eigenius_wasm_d14_arrhenius.wasm`). The kernel test suite loads these via `include_bytes!` to verify end-to-end WASM dispatch.
-
-If you don't have the WASM toolchain installed, `just build-wasm` fails. You can still run `cargo build --workspace` directly to build the rest of the platform — but the WASM-fixture-dependent kernel tests will fail at compile time.
-
-The orchestration `native/` build is a small Rust adapter linked into the orchestrator's Deno runtime via FFI; it builds quickly and rarely changes.
+This compiles the full Rust workspace (kernel, storage backends, CLI, and
+the institution crates). No extra toolchain is required beyond stable Rust.
 
 ## 3.3. `just test` in detail
 
@@ -40,7 +33,7 @@ just test       # cargo test --workspace
 
 Two test pools:
 
-- **Rust tests** (`cargo test --workspace`) — every crate's unit and integration tests. The kernel tests cover ontology validation, layer chain resolution, EigenQL parsing/evaluation, ESL compilation, NbE type checking, WASM capability hosting, etc. Heavy; the workspace has thousands of tests across roughly 200 modules.
+- **Rust tests** (`cargo test --workspace`) — every crate's unit and integration tests. The kernel tests cover ontology validation, layer chain resolution, EigenQL parsing/evaluation, ESL compilation, NbE type checking, institution dispatch, etc. Heavy; the workspace has thousands of tests across roughly 200 modules.
 - **Deno tests** (`deno test`) — orchestrator-side tests covering the LLM adapter, component dispatch, and MCP server.
 
 Both must pass cleanly before merging.
@@ -69,18 +62,6 @@ just check      # cargo fmt --all -- --check
 CI runs the equivalent of `just check` plus `just test`. A green local `just check && just test` is the baseline before opening a PR.
 
 `RUSTFLAGS="-D warnings"` upgrades clippy warnings to errors — the project enforces a zero-warnings policy in CI.
-
-## 3.5. WASM-only build
-
-If you're iterating on a single WASM example:
-
-```bash
-just build-wasm                      # all examples + test fixture copy
-cd examples/wasm-doc-validator       # specific example
-cargo component build
-```
-
-The output lives at `target/wasm32-unknown-unknown/debug/<crate_name>.wasm`.
 
 ## 3.6. GPU acceleration for vector embeddings (optional)
 
@@ -146,8 +127,6 @@ The single-command recipes (`compile`, `load`, `validate`) are convenience short
 |---|---|
 | Workspace binaries | `target/debug/` (and `target/release/` for `--release`) |
 | `eigenius` CLI binary | `target/debug/eigenius` |
-| WASM example binaries | `examples/wasm-*/target/wasm32-unknown-unknown/debug/*.wasm` |
-| Test fixtures (copied) | `kernel/tests/fixtures/*.wasm` |
 | Deno-cached deps | `~/.cache/deno/` |
 | Docker images | local Docker daemon (`docker images | grep eigenius`) |
 
@@ -159,8 +138,6 @@ The frequent culprits, in rough order of frequency:
 - **`error: linker 'cc' not found`** — `build-essential` missing on Ubuntu/WSL. Install it.
 - **`error[E0658]: ...`** referencing a Rust version — your `rustc` is older than 1.95. Run `rustup update`.
 - **`error: failed to run custom build command for librocksdb-sys`** — `libclang-dev` missing. Install it.
-- **`cargo component: command not found`** — needed for WASM examples. `cargo install cargo-component`.
-- **WASM target not installed** — `rustup target add wasm32-unknown-unknown`.
 - **Deno cache stale** — `deno cache --reload orchestration/src/main.ts`.
 
 For ongoing build issues, [chapter 13](13-troubleshooting.md) collects them by symptom.

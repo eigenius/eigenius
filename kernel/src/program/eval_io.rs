@@ -54,7 +54,7 @@ pub fn execute_program_nbe(
     registry: Arc<ComponentRegistry>,
     trace_store: Option<Arc<dyn TraceStore>>,
 ) -> Result<NbeExecutionResult, ProgramError> {
-    execute_program_nbe_with_institutions_d14(
+    execute_program_nbe_with_institutions(
         program,
         input,
         layer,
@@ -66,8 +66,7 @@ pub fn execute_program_nbe(
     )
 }
 
-/// Execute a program resource via NbE in IO mode with the D14
-/// institution index + runtime attached so `Exp::InstitutionInvoke`
+/// Execute a program resource via NbE in IO mode with the institution index + runtime attached so `Exp::InstitutionInvoke`
 /// and `Exp::NativeDecide` dispatch through the four-step pipeline /
 /// Decidable QueryClass mechanism (D14 §9).
 ///
@@ -76,7 +75,7 @@ pub fn execute_program_nbe(
 /// crash (D21 §3.2). When `None`, the evaluator runs without task
 /// tracking (type-checker, ad-hoc eval, pre-task callers).
 #[allow(clippy::too_many_arguments)]
-pub fn execute_program_nbe_with_institutions_d14(
+pub fn execute_program_nbe_with_institutions(
     program: &Resource,
     input: &Resource,
     layer: Arc<Layer>,
@@ -103,16 +102,17 @@ pub fn execute_program_nbe_with_institutions_d14(
     // commit at the run-boundary).
     let dispatched_traces = Arc::new(Mutex::new(Vec::new()));
     let produced_resources = Arc::new(Mutex::new(Vec::new()));
-    let ctx = EvalCtx::IO {
-        layer,
+    let engine = crate::institution::eval_hooks::InstitutionEngine::for_io(
+        Arc::clone(&layer),
         registry,
         trace_store,
-        dispatched_traces: Arc::clone(&dispatched_traces),
-        produced_resources: Arc::clone(&produced_resources),
+        Arc::clone(&dispatched_traces),
+        Arc::clone(&produced_resources),
         task_context,
         institution_index,
         institution_runtime,
-    };
+    );
+    let ctx = EvalCtx::effectful(Some(layer), Arc::new(engine));
 
     // Bind input as a Val::ResourceVal in the environment
     let rho = Rho::Nil.extend(
@@ -172,8 +172,11 @@ pub fn execute_program_nbe_with_institutions_d14(
     // or re-push it.
     if output.id().is_none() && !output.properties().is_empty() {
         if let Some(prog_iri) = program.id() {
-            let iri =
-                crate::nbe::eval::deterministic_run_output_iri("program-output", prog_iri, &output);
+            let iri = crate::institution::eval_hooks::deterministic_run_output_iri(
+                "program-output",
+                prog_iri,
+                &output,
+            );
             output.set_id(Some(iri));
             produced.push(output.clone());
         }

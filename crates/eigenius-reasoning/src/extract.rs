@@ -14,7 +14,7 @@
 
 //! `extract_typed` machinery for the Reasoning institution.
 //!
-//! D14's `extract_typed` is the kernel's standard "lift a chain
+//! `extract_typed` is the kernel's standard "lift a chain
 //! resource into a typed `Val`" abstraction; every institution that
 //! exposes its data to the kernel's term language goes through it.
 //! The Reasoning institution's job in this file is to translate a

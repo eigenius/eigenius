@@ -76,8 +76,8 @@ pub trait BuiltinComponent: Send + Sync {
 /// Supports an optional parent pointer so that new registrations can stack
 /// on top of an existing (immutable, shared) registry. Lookups walk the
 /// parent chain: local entries shadow parent entries with the same IRI.
-/// This avoids needing `BuiltinComponent: Clone` when swapping registries
-/// at runtime (e.g., when loading WASM components from a new layer).
+/// This avoids needing `BuiltinComponent: Clone` when stacking a new
+/// layer's component registrations on top of a shared base registry.
 pub struct ComponentRegistry {
     components: BTreeMap<String, Box<dyn BuiltinComponent>>,
     parent: Option<Arc<ComponentRegistry>>,

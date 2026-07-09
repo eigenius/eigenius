@@ -1,5 +1,13 @@
 # 9. Building WASM components
 
+> **REMOVED (2026-07-08).** WASM components were removed from the platform.
+> `eigenius capability install`, the `wit/` interfaces, the `examples/wasm-*`
+> crates, and in-kernel WASM hosting no longer exist. This chapter is retained
+> as historical record only. For live extension mechanisms, use in-process Rust
+> institutions or external institutions via the runtime substrate (see
+> [11. Runtime substrate](11-runtime-substrate.md)). Background:
+> [D12](../../design/d12-wasm-extensibility.md).
+
 WASM components extend the platform with custom dispatch logic. Each component is a sandboxed `.wasm` binary that implements the [`eigenius-component`](../../../wit/eigenius-component.wit) WIT interface, built with `cargo-component`, and installed at runtime via `eigenius capability install`.
 
 This chapter walks through the four worked examples in [`examples/wasm-*`](../../../examples/), in order of increasing capability level. Each example is exercised by an integration test in the kernel suite, so the patterns shown work end-to-end.
