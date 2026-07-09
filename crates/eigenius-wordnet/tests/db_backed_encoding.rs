@@ -55,9 +55,14 @@ use eigenius_kernel::storage::PersistentBackend;
 use eigenius_storage_rocksdb::RocksStore;
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 
-/// Default snapshot location (the copy made from the `eigenius_eigenius_db` docker volume);
-/// override with `EIGENIUS_DB_SNAPSHOT`.
-const DEFAULT_SNAPSHOT: &str = "/home/hm/src/eigenius/db-snapshot/wordnet-umls-2026-06-28";
+/// Default snapshot location — the out-of-tree `db-snapshot/` sibling of the repo (where
+/// `scripts/reseed-lexicon-db.sh` / the native reseed write, `SNAPSHOT_ROOT = <repo>/../db-snapshot`),
+/// resolved from `CARGO_MANIFEST_DIR` (portable, CWD-independent) rather than a hardcoded home path —
+/// same convention as `DICT` below. Override with `EIGENIUS_DB_SNAPSHOT`.
+const DEFAULT_SNAPSHOT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../db-snapshot/wordnet-umls-all-2026-07-08"
+);
 
 /// WordNet dict (for the Morphy lemmatizer — surface→lemma at lookup time).
 const DICT: &str = concat!(
