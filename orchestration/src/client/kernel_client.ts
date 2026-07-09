@@ -49,7 +49,7 @@ import {
   type ValidateProgramResponse,
   type ValidationError,
 } from "../gen/eigenius_pb.ts";
-import { encodeResource } from "../wasm/cbor.ts";
+import { encodeResource } from "../codec/cbor.ts";
 
 export type {
   CommitPolicy,
@@ -222,9 +222,8 @@ export class KernelClient {
    * Execute an EigenQL query. The kernel returns an Eigon document
    * (see D2 Appendix A) — we extract the embedded row resources from
    * the ResultSet and return them individually as CBOR byte arrays so
-   * downstream consumers (notably the WASM `query-access.query` host
-   * import, which contracts for `list<list<u8>>`) don't have to walk
-   * the document themselves.
+   * downstream consumers that contract for `list<list<u8>>` don't have
+   * to walk the document themselves.
    *
    * Rows keep their synthesized Property IRI keys; callers that want
    * the short-name view should consult the ResultSet's row class (see

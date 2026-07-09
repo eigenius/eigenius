@@ -2002,7 +2002,7 @@ mod tests {
         );
     }
 
-    // --- D14: ESL surface for institution capabilities ---
+    // --- ESL surface for institution capabilities ---
 
     use crate::institution::registry::InstitutionIndex;
     use crate::ontology::well_known as wk;

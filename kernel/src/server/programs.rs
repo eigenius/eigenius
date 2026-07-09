@@ -95,7 +95,7 @@ impl EigeniusService {
             let components = Arc::clone(&*self.components.read().await);
             let index = Arc::clone(&*self.institution_index.read().await);
             let runtime = Arc::clone(&*self.institution_runtime.read().await);
-            match crate::program::eval_io::execute_program_nbe_with_institutions_d14(
+            match crate::program::eval_io::execute_program_nbe_with_institutions(
                 &program,
                 &input,
                 Arc::clone(ctx.head()),

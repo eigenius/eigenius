@@ -1,12 +1,12 @@
 # 2. Installation and prerequisites
 
-The platform builds and runs on Linux (native or Windows with WSL 2) and macOS. The required toolchain is a Rust kernel, a Deno orchestrator, and a CLI tied together by gRPC. Optional pieces (WASM examples, Docker deployment, GitHub workflow) add their own tools.
+The platform builds and runs on Linux (native or Windows with WSL 2) and macOS. The required toolchain is a Rust kernel, a Deno orchestrator, and a CLI tied together by gRPC. Optional pieces (Docker deployment, GitHub workflow) add their own tools.
 
 ## 2.1. Required toolchain
 
 ### Rust 1.95+
 
-The Rust version pinned by [`deploy/Dockerfile.kernel`](../../../deploy/Dockerfile.kernel) is **1.95**. Earlier versions fail to build `wasmtime 43`, on which the WASM runtime depends.
+The Rust version pinned by [`deploy/Dockerfile.kernel`](../../../deploy/Dockerfile.kernel) is **1.95**. Earlier versions may fail to build some workspace dependencies.
 
 Install via [rustup](https://rustup.rs):
 
@@ -56,18 +56,7 @@ The repository uses [`just`](https://github.com/casey/just) as a task runner. Th
 cargo install just
 ```
 
-Without `just`, every recipe in [`justfile`](../../../justfile) can be run manually as plain shell — `just build` is `cargo build --workspace` plus a WASM step, `just test` is `cargo test --workspace` plus `deno test`, and so on.
-
-## 2.3. Optional: WASM toolchain
-
-Required if you intend to build WASM components or institutions, or to run the full kernel test suite (some kernel tests load WASM fixtures via `include_bytes!`).
-
-```bash
-rustup target add wasm32-unknown-unknown
-cargo install cargo-component
-```
-
-After installation, `just build` (or `just build-wasm`) builds every WASM example under [`examples/wasm-*`](../../../examples/) and copies the binaries into [`kernel/tests/fixtures/`](../../../kernel/tests/fixtures/) so the kernel tests can find them.
+Without `just`, every recipe in [`justfile`](../../../justfile) can be run manually as plain shell — `just build` is `cargo build --workspace`, `just test` is `cargo test --workspace` plus `deno test`, and so on.
 
 ## 2.4. Optional: Docker
 
@@ -166,9 +155,9 @@ After all required tools are installed:
 
 ```bash
 # from the repo root
-just build       # full build + WASM examples (with WASM toolchain)
+just build       # cargo build --workspace
 # or
-cargo build --workspace   # workspace build only (no WASM examples)
+cargo build --workspace
 ```
 
 A successful `cargo build --workspace` exits cleanly with the binaries under `target/debug/`:
@@ -191,8 +180,7 @@ A clean `deno cache` resolves all TypeScript dependencies without errors.
 |---|---|
 | Run CLI commands against in-process file ops | Just the Rust toolchain |
 | Run the demo end-to-end | Add Deno (and optionally Docker) |
-| Run the kernel test suite | Add WASM toolchain (`wasm32-unknown-unknown`, `cargo-component`) |
-| Build your own WASM extensions | WASM toolchain, plus `eigenius-wasm-sdk` Cargo dep in your project |
+| Run the kernel test suite | Just the Rust toolchain |
 | Deploy to Docker Compose or Azure | Add Docker (locally) and `az` CLI (for Azure) |
 
 ---

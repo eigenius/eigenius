@@ -24,7 +24,6 @@
 use super::proto;
 use super::proto::*;
 use crate::commit::persister::PersistedLayerInfo;
-use crate::ontology::Iri;
 use tonic::{Response, Status};
 
 /// Current time in milliseconds since the Unix epoch. Used to stamp
@@ -159,33 +158,9 @@ pub(super) fn merge_info_from_persist_info(info: Option<&PersistedLayerInfo>) ->
     }
 }
 
-/// Convert a proto-side `ValidationError` to the kernel-internal one.
-///
-/// D41 Phase C/D introduced this conversion at the `LayerPersister` /
-/// `CommitHookHost` trait boundaries because the kernel-side commit
-/// module can't depend on proto types. The mapping is lossy on `rule`
-/// (proto carries a string, kernel carries the
-/// [`crate::validation::ValidationRule`] enum); we land on
-/// `InstitutionValidation` as the closest fit and carry the original
-/// proto rule string in the message so call sites can identify the
-/// underlying cause.
-pub(super) fn convert_proto_validation_error(
-    proto_err: &ValidationError,
-) -> crate::validation::ValidationError {
-    crate::validation::ValidationError {
-        resource_id: Iri::parse(&proto_err.resource_iri).ok(),
-        property: Iri::parse(&proto_err.property_iri).ok(),
-        rule: crate::validation::ValidationRule::InstitutionValidation,
-        message: format!(
-            "{} ({}): {}",
-            proto_err.rule, proto_err.severity, proto_err.message
-        ),
-    }
-}
-
 /// Convert a kernel-internal `ValidationError` to the proto-side one.
 ///
-/// Inverse of [`convert_proto_validation_error`]. Used by the Load
+/// Used by the Load
 /// handler (and other commit-shaped RPC handlers) to surface the
 /// [`crate::commit::CommitOrchestrator`]'s per-layer / drain-hook /
 /// pipeline errors back to gRPC clients.
@@ -364,7 +339,6 @@ pub(super) fn runtime_kind_to_proto(
     match kind {
         None => proto::RuntimeKind::Unspecified,
         Some(K::InProcess) => proto::RuntimeKind::InProcess,
-        Some(K::Wasm) => proto::RuntimeKind::Wasm,
         Some(K::External) => proto::RuntimeKind::External,
     }
 }
@@ -1104,10 +1078,6 @@ mod institution_enrichment_tests {
         assert_eq!(
             runtime_kind_to_proto(Some(KernelRuntimeKind::InProcess)),
             proto::RuntimeKind::InProcess
-        );
-        assert_eq!(
-            runtime_kind_to_proto(Some(KernelRuntimeKind::Wasm)),
-            proto::RuntimeKind::Wasm
         );
         assert_eq!(
             runtime_kind_to_proto(Some(KernelRuntimeKind::External)),

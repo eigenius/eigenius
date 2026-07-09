@@ -85,7 +85,7 @@ pub(super) fn iota_reduce_impl<T: Tracer>(
     // Then apply an induction hypothesis for each recursive argument,
     // in the order the recursive arguments appear.
     for (arg, arg_typ) in args.iter().zip(arg_types.iter()) {
-        if is_recursive_arg_type(decl, arg_typ) {
+        if decl.is_direct_recursive_ref(arg_typ) {
             let (ih, ih_node) = build_recursor_ih::<T>(decl, motive, minors, arg, ctx)?;
             nodes.push(ih_node);
             let (next, node) = result.app_impl::<T>(ih, T::leaf(), ctx)?;
@@ -125,9 +125,9 @@ fn extract_ctor_arg_types<'a>(
     // Sentinel for size-binder positions — these carry a size value
     // at runtime but aren't recursive occurrences, so iota-reduction
     // treats them the same as non-inductive value args (skip IH).
-    // Use `SizeSort` itself as the stand-in domain type; only the
-    // `is_recursive_arg_type` predicate inspects these entries and
-    // `SizeSort` is never a recursive reference.
+    // Use `SizeSort` itself as the stand-in domain type; only
+    // `InductiveDecl::is_direct_recursive_ref` inspects these entries
+    // and `SizeSort` is never a recursive reference.
     static SIZE_SORT: Exp = Exp::SizeSort;
     let mut types = Vec::new();
     let mut current = ctor_typ;
@@ -151,16 +151,6 @@ fn extract_ctor_arg_types<'a>(
         }
     }
     types
-}
-
-/// Whether a constructor argument type is a direct self-reference to
-/// the inductive being eliminated.
-///
-/// Phase 11b is non-nested, strictly positive — recursive arguments
-/// have type exactly `Exp::InductiveType(I, _)` for the same inductive.
-/// Higher-order or nested forms are rejected at type-check time.
-fn is_recursive_arg_type(decl: &crate::nbe::term::InductiveDecl, typ: &Exp) -> bool {
-    matches!(typ, Exp::InductiveType(d, _) if d.iri == decl.iri)
 }
 
 /// Build the induction hypothesis for a recursive constructor argument.

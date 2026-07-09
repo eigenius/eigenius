@@ -235,14 +235,13 @@ pub const SIZE_KIND: &str = "urn:eigenius:core:Size";
 
 // --- Institution-realisation vocabulary (D14) ---
 
-/// is_a marker for a cross-institution comorphism resource. Under D14
-/// the Comorphism class is declared in `institution-ontology.json` and
+/// is_a marker for a cross-institution comorphism resource. The Comorphism class is declared in `institution-ontology.json` and
 /// carries `export_format`, `transformation`, `import_format`, and
 /// `exact` properties — see [`EXPORT_FORMAT`], [`TRANSFORMATION`],
 /// [`IMPORT_FORMAT`], [`EXACT`].
 pub const COMORPHISM: &str = "urn:eigenius:institution:Comorphism";
 
-// --- D14 Comorphism triadic shape (s, m, t) ---
+// --- Comorphism triadic shape (s, m, t) ---
 
 /// ExportFormat reference on a Comorphism — the source-side `s`.
 pub const EXPORT_FORMAT: &str = "urn:eigenius:institution:export_format";
@@ -255,7 +254,7 @@ pub const IMPORT_FORMAT: &str = "urn:eigenius:institution:import_format";
 /// claim.
 pub const EXACT: &str = "urn:eigenius:institution:exact";
 
-// --- D14 ExportFormat / ImportFormat ---
+// --- ExportFormat / ImportFormat ---
 
 /// is_a marker for an ExportFormat resource — a typed outbound view of
 /// a source institution's resource class.
@@ -274,7 +273,7 @@ pub const PAYLOAD_TYPE: &str = "urn:eigenius:institution:payload_type";
 /// `reify` handler.
 pub const PROCEDURE: &str = "urn:eigenius:institution:procedure";
 
-// --- D14 QueryClass ---
+// --- QueryClass ---
 
 /// is_a marker for a QueryClass resource — a typed function on resources
 /// in the institution's fibre, with one or more dispatch roles.
@@ -294,14 +293,12 @@ pub const DISPATCH_ROLE: &str = "urn:eigenius:institution:dispatch_role";
 /// `query` handler.
 pub const QUERY_HANDLER: &str = "urn:eigenius:institution:query_handler";
 
-// --- D14 RuntimeKind / DispatchRole / Verdict ---
+// --- RuntimeKind / DispatchRole / Verdict ---
 
 /// is_a marker for a RuntimeKind resource on an Institution.
 pub const RUNTIME_KIND_CLASS: &str = "urn:eigenius:institution:RuntimeKind";
 /// `runtime` property on an Institution — IRI of the runtime kind.
 pub const RUNTIME: &str = "urn:eigenius:institution:runtime";
-/// WASM Component Model runtime.
-pub const RUNTIME_WASM: &str = "urn:eigenius:institution:runtimes:wasm";
 /// External service (gRPC, LSP, etc.) runtime.
 pub const RUNTIME_EXTERNAL: &str = "urn:eigenius:institution:runtimes:external";
 /// In-process Rust runtime (kernel-linked).

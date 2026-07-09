@@ -375,16 +375,12 @@ mod tests {
     /// confirm `didDrain` fires exactly once per orchestrator run.
     struct StubHost {
         rebuild_calls: AtomicUsize,
-        register_calls: AtomicUsize,
-        register_resources: Mutex<Vec<Resource>>,
     }
 
     impl StubHost {
         fn new() -> Self {
             Self {
                 rebuild_calls: AtomicUsize::new(0),
-                register_calls: AtomicUsize::new(0),
-                register_resources: Mutex::new(Vec::new()),
             }
         }
 
@@ -394,14 +390,6 @@ mod tests {
     }
 
     impl CommitHookHost for StubHost {
-        fn register_wasm_for_layer(
-            &self,
-            _layer: &Arc<Layer>,
-        ) -> Result<Vec<Resource>, Vec<ValidationError>> {
-            self.register_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(self.register_resources.lock().unwrap().clone())
-        }
-
         fn rebuild_institution_index(
             &self,
             _top_layer: &Arc<Layer>,

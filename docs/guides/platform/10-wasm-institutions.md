@@ -1,5 +1,14 @@
 # 10. Building WASM institutions
 
+> **REMOVED (2026-07-08).** WASM-backed institutions were removed. The
+> institution *framework* (D14) is intact — institutions are still declared
+> as ontology resources and implemented as runtimes — but the WASM backend
+> is gone. Implement institutions as in-process Rust (`runtime: in_process`,
+> e.g. `eigenius-reasoning`, `eigenius-lean`) or as external institutions via
+> the runtime substrate (`runtime: external`, D31). This chapter is retained
+> as historical record only. Background:
+> [D12](../../design/d12-wasm-extensibility.md).
+
 Institutions are domain-specific reasoning systems — typed reasoners that contribute structured fibres to the knowledge graph. Under D14 ([Institution Realisation](../../design/d14-institution-realisation.md)) they are *declared* as ontology resources committed to the layer chain (`Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`) and *implemented* as a runtime that handles boundary translations and any opaque reasoning. The same WASM hosting machinery that runs components also hosts institutions, but against the dedicated `eigenius-institution-d14` WIT world (D14 §13).
 
 Cross-link: this chapter is the **implementer** view. The **user** view (how programs and queries invoke institutions) is in [ESL §9](../esl/09-institutions.md) and [EigenQL §8](../eigenql/08-institutions.md).

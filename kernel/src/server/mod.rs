@@ -134,17 +134,18 @@ impl BranchContextCache {
 pub struct EigeniusService {
     /// Per-branch ExecutionContext cache. `"main"` is always present.
     pub(crate) branch_contexts: Arc<BranchContextCache>,
-    /// Outer lock allows swapping the registry (for WASM registration on load).
+    /// Outer lock allows swapping the registry on load.
     /// Inner Arc allows cheap cloning for passing to the evaluator.
     pub(crate) components: Arc<RwLock<Arc<ComponentRegistry>>>,
     pub(crate) trace_store: Arc<dyn TraceStore>,
-    /// D14 institution index — derived view of the layer chain rebuilt
+    /// institution index — derived view of the layer chain rebuilt
     /// after every commit. Outer lock allows swapping; inner Arc lets
-    /// the evaluator clone cheaply when constructing `EvalCtx::IO`.
+    /// the evaluator clone cheaply when constructing the IO effect engine.
     pub(crate) institution_index: Arc<RwLock<Arc<crate::institution::registry::InstitutionIndex>>>,
-    /// D14 institution runtime — `Box<dyn Institution>` per
-    /// institution IRI. Populated when D14-shaped WASM institutions
-    /// are installed (B3+ wiring); otherwise empty.
+    /// institution runtime — `Box<dyn Institution>` per
+    /// institution IRI. Populated by `rebuild_institution_index` after
+    /// each commit with the external and in-process institutions
+    /// declared in the layer chain; otherwise empty.
     pub(crate) institution_runtime:
         Arc<RwLock<Arc<crate::institution::runtime::InstitutionRuntime>>>,
     /// Process-global registry of in-process institution
@@ -174,10 +175,12 @@ pub struct EigeniusService {
     /// Live state of the startup resume sweep (D21 §6). Shared with
     /// the background sweep task so `Health` can report progress.
     pub(crate) resume_state: Arc<ResumeState>,
-    /// Optional gRPC client for the orchestrator. Used to forward IO-capability
-    /// WASM components and to dispatch remote IO components during program
-    /// execution. None means no orchestrator is configured — IO WASM installs
-    /// will be rejected with a clear error in that case.
+    /// Optional gRPC client for the orchestrator. Used to dispatch
+    /// external institutions and remote IO components to the
+    /// orchestrator substrate during program execution. None means no
+    /// orchestrator is configured — chains declaring `runtime: external`
+    /// institutions will fail to dispatch (surfaced with a clear warning
+    /// at index-rebuild time).
     pub(crate) orchestrator_client: Option<
         Arc<
             tokio::sync::Mutex<
@@ -330,8 +333,8 @@ impl EigeniusService {
         })
     }
 
-    /// Attach an orchestrator client so IO-capability WASM components can be
-    /// forwarded to the orchestrator and remote components dispatched back.
+    /// Attach an orchestrator client so external institutions and remote
+    /// IO components can be dispatched to the orchestrator substrate.
     pub fn with_orchestrator_client(
         mut self,
         client: Arc<

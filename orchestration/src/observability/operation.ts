@@ -32,7 +32,7 @@ export const SERVER_SHUTDOWN = "orchestrator.server.shutdown";
 
 // --- Component / capability ---
 
-/** A component (built-in, mock, WASM, or remote) was registered. */
+/** A component (built-in, mock, or remote) was registered. */
 export const COMPONENT_REGISTER = "orchestrator.component.register";
 /** A component-dispatch RPC arrived from the kernel. */
 export const COMPONENT_DISPATCH = "orchestrator.component.dispatch";
@@ -44,14 +44,10 @@ export const EXTERNAL_DISPATCH = "orchestrator.component.external_dispatch";
 export const LLM_COMPLETE_TEXT = "orchestrator.llm.complete_text";
 export const LLM_COMPLETE_JSON = "orchestrator.llm.complete_json";
 
-// --- WASM ---
+// --- Native addons ---
 
-/** WASM IO addon load (presence / absence on startup). */
-export const WASM_ADDON_LOAD = "orchestrator.wasm.addon_load";
-/** A WASM IO component was registered with the orchestrator. */
-export const WASM_COMPONENT_REGISTER = "orchestrator.wasm.component_register";
-/** A WASM IO component was invoked. */
-export const WASM_DISPATCH = "orchestrator.wasm.dispatch";
+/** Native addon load (presence / absence on startup) — runtime substrate. */
+export const ADDON_LOAD = "orchestrator.addon_load";
 
 // --- MCP ---
 

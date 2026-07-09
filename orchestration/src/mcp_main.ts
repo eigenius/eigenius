@@ -35,7 +35,7 @@
  *
  * The orchestrator's main HTTP service (`src/main.ts`) is independent —
  * the MCP entry point connects directly to the kernel and does not need
- * the orchestrator's component / WASM / substrate plumbing.
+ * the orchestrator's component / substrate plumbing.
  */
 
 import { KernelClient } from "./client/kernel_client.ts";

@@ -17,7 +17,7 @@
 //! Ported from `Main.hs` lines 198-217 in the EigenTT reference.
 //! Extended with capability modes (Pure/Read/IO) per D9.
 
-mod dispatch;
+mod hooks;
 mod iota;
 mod mapreduce;
 mod marshal;
@@ -25,8 +25,7 @@ mod marshal;
 mod testutil;
 mod tracer;
 
-pub(crate) use dispatch::deterministic_run_output_iri;
-use dispatch::{decide_constraint, dispatch_component, try_d14_institution_invoke};
+pub use hooks::{Decision, EffectHooks};
 use iota::iota_reduce_impl;
 use mapreduce::{eval_map_impl, eval_reduce_impl};
 pub use marshal::{resource_value_to_val, val_to_resource_value};
@@ -93,66 +92,33 @@ impl std::fmt::Display for EvalError {
 
 impl std::error::Error for EvalError {}
 
-use crate::institution::registry::InstitutionIndex;
-use crate::institution::runtime::InstitutionRuntime;
 use crate::layer::Layer;
 use crate::nbe::env::Rho;
-use crate::nbe::term::{Exp, Patt};
+use crate::nbe::term::{Constraint, Exp, Patt};
 use crate::nbe::val::{Clos, Neut, Val};
 use crate::observability::{field, operation};
 use crate::ontology::iri::Iri;
-use crate::program::component::ComponentRegistry;
-use crate::program::trace::{ComponentTrace, Trace, TraceStore};
-use crate::task::TaskContext;
-use std::sync::{Arc, Mutex};
+use crate::program::trace::Trace;
+use std::sync::Arc;
 
 /// Evaluation context controlling what effects are available.
+///
+/// `Pure` is standard NbE — no side effects, no chain access (the type
+/// checker's default). `Effectful` carries an [`EffectHooks`]
+/// implementation ([`crate::institution::eval_hooks::InstitutionEngine`])
+/// that the three effectful expression forms delegate to; the
+/// capability tier (full IO vs. check-time institution deciding) is a
+/// property of the hooks impl, not the enum. Optional `layer` gives the
+/// evaluator read access to the chain for the few places that need it.
 #[derive(Clone)]
 pub enum EvalCtx {
     /// Standard NbE: normalize terms, check types. No side effects.
     Pure,
-    /// Pure + read access to the layer chain.
-    Read { layer: Arc<Layer> },
-    /// Read + IO component dispatch + trace production.
-    IO {
-        layer: Arc<Layer>,
-        registry: Arc<ComponentRegistry>,
-        trace_store: Option<Arc<dyn TraceStore>>,
-        /// ComponentTraces produced during this evaluation (for trace layer commits).
-        dispatched_traces: Arc<Mutex<Vec<ComponentTrace>>>,
-        /// Top-level resources produced during this evaluation that
-        /// must be committed to the chain at the run-boundary
-        /// (D14 §9.3 step 4 — comorphism reify outputs). Each entry
-        /// has a deterministic content-hash IRI assigned at the
-        /// reify boundary; the run-boundary commits them as part of
-        /// the program-run layer.
-        produced_resources: Arc<Mutex<Vec<crate::ontology::resource::Resource>>>,
-        /// Optional task context. When present, IO dispatches route
-        /// through per-task positional trace keys (D21 §3.2) instead
-        /// of the cross-task content-address cache. Synchronous
-        /// `RunProgram` and the type-checker leave this `None`.
-        task_context: Option<Arc<TaskContext>>,
-        /// D14 institution index — derived view of the layer chain
-        /// keyed by institution / format / query / comorphism IRIs.
-        /// When `Some` and a runtime (below) is also `Some`,
-        /// `Exp::InstitutionInvoke` dispatches via the D14 four-step
-        /// pipeline (D14 §9.3).
-        institution_index: Option<Arc<InstitutionIndex>>,
-        /// D14 institution runtime — registry of `Institution` trait
-        /// objects keyed by institution IRI.
-        institution_runtime: Option<Arc<InstitutionRuntime>>,
-    },
-    /// Pure evaluation with access to the D14 institution index +
-    /// runtime for check-time dispatch of `Constraint::Institution`
-    /// predicates. No component registry, no trace store — this is
-    /// what the type-checker uses when it wants institution
-    /// resolution but not full IO. Comorphism dispatch (which applies
-    /// a transformation Component) is unavailable here; only Decidable
-    /// QueryClass dispatch and AutoOnLoad readers are wired.
-    Check {
+    /// Effectful evaluation: institution dispatch / IO component
+    /// invocation delegated to `hooks`.
+    Effectful {
         layer: Option<Arc<Layer>>,
-        institution_index: Option<Arc<InstitutionIndex>>,
-        institution_runtime: Option<Arc<InstitutionRuntime>>,
+        hooks: Arc<dyn EffectHooks>,
     },
 }
 
@@ -162,41 +128,24 @@ impl EvalCtx {
         EvalCtx::Pure
     }
 
+    /// Construct an effectful context from a hooks implementation.
+    pub fn effectful(layer: Option<Arc<Layer>>, hooks: Arc<dyn EffectHooks>) -> Self {
+        EvalCtx::Effectful { layer, hooks }
+    }
+
     /// Layer for this evaluation context, if any.
     pub fn layer(&self) -> Option<&Arc<Layer>> {
         match self {
             EvalCtx::Pure => None,
-            EvalCtx::Read { layer } => Some(layer),
-            EvalCtx::IO { layer, .. } => Some(layer),
-            EvalCtx::Check { layer, .. } => layer.as_ref(),
+            EvalCtx::Effectful { layer, .. } => layer.as_ref(),
         }
     }
 
-    /// D14 institution index for this evaluation context, if any.
-    pub fn institution_index(&self) -> Option<&Arc<InstitutionIndex>> {
+    /// Effect hooks for this context, if effectful.
+    pub fn hooks(&self) -> Option<&Arc<dyn EffectHooks>> {
         match self {
-            EvalCtx::IO {
-                institution_index, ..
-            } => institution_index.as_ref(),
-            EvalCtx::Check {
-                institution_index, ..
-            } => institution_index.as_ref(),
-            EvalCtx::Pure | EvalCtx::Read { .. } => None,
-        }
-    }
-
-    /// D14 institution runtime for this evaluation context, if any.
-    pub fn institution_runtime(&self) -> Option<&Arc<InstitutionRuntime>> {
-        match self {
-            EvalCtx::IO {
-                institution_runtime,
-                ..
-            } => institution_runtime.as_ref(),
-            EvalCtx::Check {
-                institution_runtime,
-                ..
-            } => institution_runtime.as_ref(),
-            EvalCtx::Pure | EvalCtx::Read { .. } => None,
+            EvalCtx::Pure => None,
+            EvalCtx::Effectful { hooks, .. } => Some(hooks),
         }
     }
 }
@@ -316,34 +265,23 @@ pub(crate) fn eval_impl<T: Tracer>(
         }
 
         Exp::App(e1, e2) => {
-            // In IO mode, intercept component-call-shaped applications:
-            // when the LHS is a Var resolving to a registered Component,
-            // dispatch through the component runtime. Institution
-            // capabilities don't appear here under D14 — programs reach
-            // institutions only via `Exp::InstitutionInvoke` (comorphisms)
-            // and `Exp::NativeDecide(Constraint::Institution{..}, _)`
-            // (Decidable QueryClasses). The ESL compiler emits those
-            // AST nodes via the InstitutionIndex classifier (D2 v2 §3.8).
-            if let EvalCtx::IO {
-                registry,
-                dispatched_traces,
-                ..
-            } = ctx
-            {
-                if let Exp::Var(name) = e1.as_ref() {
-                    if registry.get(name).is_some() {
-                        let (arg_val, arg_node) = ev(e2)?;
-                        let (input_val, comp_arg) = match &arg_val {
-                            Val::Pair(input, comp_arg) => {
-                                (input.as_ref().clone(), Some(comp_arg.as_ref()))
-                            }
-                            other => (other.clone(), None),
-                        };
-                        let before = dispatched_traces.lock().unwrap().len();
-                        let val = dispatch_component(name, &input_val, comp_arg, ctx)?;
-                        let node = T::combine(vec![arg_node, T::component(ctx, before)]);
-                        return Ok((val, node));
-                    }
+            // In effectful mode, intercept component-call-shaped
+            // applications: when the LHS is a Var naming a registered
+            // Component, dispatch through the effect hooks. A component
+            // call evaluates its argument first (then dispatches); an
+            // ordinary application evaluates the function first — the
+            // `is_component` predicate lets us pick the branch before
+            // evaluating either side, preserving evaluation order.
+            // Institution capabilities don't appear here — programs
+            // reach institutions only via `Exp::InstitutionInvoke`
+            // (comorphisms) and `Exp::NativeDecide` (Decidable
+            // QueryClasses).
+            if let (EvalCtx::Effectful { hooks, .. }, Exp::Var(name)) = (ctx, e1.as_ref()) {
+                if hooks.is_component(name) {
+                    let (arg_val, arg_node) = ev(e2)?;
+                    let (val, comp_trace) = hooks.dispatch_component(name, &arg_val)?;
+                    let node = T::combine(vec![arg_node, T::component(comp_trace)]);
+                    return Ok((val, node));
                 }
             }
             let (f_val, f_node) = ev(e1)?;
@@ -473,9 +411,9 @@ pub(crate) fn eval_impl<T: Tracer>(
         // transformation Component, reify a target-class resource via
         // the target institution's ImportFormat procedure. The
         // post-translation validation invariant (D14 §9.3 step 5)
-        // runs as part of [`try_d14_institution_invoke`].
+        // runs as part of [`try_institution_invoke`].
         //
-        // When the evaluator has no D14 backing attached (bare Pure
+        // When the evaluator has no institution backing attached (bare Pure
         // mode used during type-check / conversion), the call reduces
         // to a passthrough neutral so the conversion checker can
         // compare two `InstitutionInvoke`s structurally. When the
@@ -487,36 +425,51 @@ pub(crate) fn eval_impl<T: Tracer>(
             target_iri,
         } => {
             let (source_val, source_node) = ev(source)?;
-            if ctx.institution_index().is_none() || ctx.institution_runtime().is_none() {
-                return Ok((
-                    Val::Nt(Neut::Gen(
-                        usize::MAX,
-                        format!("__institution_invoke_no_registry:{comorphism_iri}"),
-                    )),
-                    source_node,
-                ));
-            }
-            match try_d14_institution_invoke(comorphism_iri, &source_val, target_iri.as_ref(), ctx)?
-            {
-                Some(translated) => {
-                    let node = T::comorphism(comorphism_iri, source_node, &translated);
-                    Ok((translated, node))
+            // No effect hooks (Pure), or hooks with no institution
+            // backing → passthrough neutral so the conversion checker
+            // can compare two `InstitutionInvoke`s structurally.
+            let passthrough = || {
+                Val::Nt(Neut::Gen(
+                    usize::MAX,
+                    format!("__institution_invoke_no_registry:{comorphism_iri}"),
+                ))
+            };
+            match ctx.hooks() {
+                None => Ok((passthrough(), source_node)),
+                Some(hooks) => {
+                    match hooks.institution_invoke(
+                        comorphism_iri,
+                        &source_val,
+                        target_iri.as_ref(),
+                    )? {
+                        Some(translated) => {
+                            let node = T::comorphism(comorphism_iri, source_node, &translated);
+                            Ok((translated, node))
+                        }
+                        None => Ok((passthrough(), source_node)),
+                    }
                 }
-                None => Err(EvalError::InvalidCaseTarget(format!(
-                    "no Comorphism declaration found in the InstitutionIndex for `{comorphism_iri}`"
-                ))),
             }
         }
 
-        // Native constraint checking
+        // Native constraint checking. Structural constraints reduce in
+        // the pure core (available in any mode); institution-bound ones
+        // dispatch through the effect hooks (Undecidable without them).
         Exp::NativeDecide(constraint, val) => {
             let (v, node) = ev(val)?;
-            let result = match decide_constraint(constraint, &v, rho, ctx)? {
-                crate::institution::DecResult::Holds => Val::Refl(Box::new(v)),
-                crate::institution::DecResult::Fails => {
+            let decision = match constraint {
+                Constraint::Institution { .. } => match ctx.hooks() {
+                    Some(hooks) => hooks.decide_institution(constraint, &v, rho, ctx)?,
+                    None => Decision::Undecidable,
+                },
+                structural => decide_structural(structural, &v),
+            };
+            let result = match decision {
+                Decision::Holds => Val::Refl(Box::new(v)),
+                Decision::Fails => {
                     Val::Nt(Neut::Gen(usize::MAX, "__constraint_failed".to_string()))
                 }
-                crate::institution::DecResult::Undecidable => Val::Nt(Neut::Gen(
+                Decision::Undecidable => Val::Nt(Neut::Gen(
                     usize::MAX,
                     "__constraint_undecidable".to_string(),
                 )),
@@ -946,6 +899,55 @@ fn ground_values_equal(x: &Val, y: &Val) -> bool {
     }
 }
 
+/// Extract the payload value from a single-property wrapper resource.
+/// `resource_value_to_val` wraps primitives in a one-property Resource
+/// keyed on the type IRI; this reads that value back out. Multi-property
+/// resources fall back to the first value.
+fn resource_payload(
+    r: &crate::ontology::resource::Resource,
+) -> Option<&crate::ontology::resource::Value> {
+    r.properties().values().next()
+}
+
+/// Decide a structural (kernel-hardcoded) constraint against a value,
+/// three-valued. Pure — available in any evaluation mode, so
+/// `NativeDecide` reduces in `Pure` context too. `Constraint::Institution`
+/// is dispatched through the effect hooks instead and never reaches here.
+fn decide_structural(constraint: &Constraint, val: &Val) -> Decision {
+    let dec = |b: bool| {
+        if b {
+            Decision::Holds
+        } else {
+            Decision::Fails
+        }
+    };
+    let as_int = |v: &Val| match v {
+        Val::ResourceVal(r) => resource_payload(r).and_then(|x| x.as_integer()),
+        _ => None,
+    };
+    let as_str = |v: &Val| match v {
+        Val::ResourceVal(r) => resource_payload(r).and_then(|x| x.as_str().map(str::to_owned)),
+        _ => None,
+    };
+    match constraint {
+        Constraint::MinValue(min) => dec(as_int(val).is_some_and(|n| n >= *min)),
+        Constraint::MaxValue(max) => dec(as_int(val).is_some_and(|n| n <= *max)),
+        Constraint::MinLength(min) => dec(as_str(val).is_some_and(|s| s.len() as i64 >= *min)),
+        Constraint::MaxLength(max) => dec(as_str(val).is_some_and(|s| s.len() as i64 <= *max)),
+        Constraint::Pattern(pattern) => dec(as_str(val).is_some_and(|s| {
+            let full = format!("^(?:{pattern})$");
+            regex::Regex::new(&full).is_ok_and(|re| re.is_match(&s))
+        })),
+        Constraint::Format(fmt) => dec(as_str(val).is_some_and(|s| match fmt.as_str() {
+            "date" => s.len() == 10 && s.chars().nth(4) == Some('-'),
+            "uuid" => s.len() == 36 && s.chars().filter(|c| *c == '-').count() == 4,
+            _ => true,
+        })),
+        // Dispatched through the hooks, not here.
+        Constraint::Institution { .. } => Decision::Undecidable,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1096,19 +1098,21 @@ mod tests {
 
     /// Build a minimal IO evaluation context for traced tests.
     fn io_ctx() -> EvalCtx {
-        EvalCtx::IO {
-            layer: std::sync::Arc::new(
-                crate::layer::LayerBuilder::new("empty", None)
-                    .build(crate::layer::LayerStorage::in_memory()),
-            ),
-            registry: std::sync::Arc::new(ComponentRegistry::default()),
-            trace_store: None,
-            dispatched_traces: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            produced_resources: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            task_context: None,
-            institution_index: None,
-            institution_runtime: None,
-        }
+        let layer = std::sync::Arc::new(
+            crate::layer::LayerBuilder::new("empty", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        );
+        let engine = crate::institution::eval_hooks::InstitutionEngine::for_io(
+            std::sync::Arc::clone(&layer),
+            std::sync::Arc::new(ComponentRegistry::default()),
+            None,
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            None,
+            None,
+            None,
+        );
+        EvalCtx::effectful(Some(layer), std::sync::Arc::new(engine))
     }
 
     #[test]

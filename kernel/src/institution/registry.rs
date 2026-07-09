@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D14 derived institution registry.
+//! derived institution registry.
 //!
 //! [`InstitutionIndex`] is built by scanning the layer chain for
-//! resources of the D14 institution-vocabulary classes — `Institution`,
+//! resources of the institution-vocabulary classes — `Institution`,
 //! `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism` — and
 //! collecting them into typed dispatch tables. The registry is a *pure
 //! derived index*: there is no parallel source of truth in code.
 //! Phase 9a rehydration, Load-time commit, and bootstrap all rebuild
 //! the index from whatever the chain currently contains.
 //!
-//! M2 of the D14 implementation plan — pure indexing, no dispatch yet.
+//! M2 of the implementation plan — pure indexing, no dispatch yet.
 //! M3 will plug the index into the kernel's evaluator paths.
 
 use crate::layer::Layer;
@@ -53,8 +53,6 @@ use crate::layer::resolve_typed_resources;
 /// `runtime` is recommended-but-not-required.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeKind {
-    /// WASM Component Model binary hosted via Wasmtime in the kernel.
-    Wasm,
     /// External service (gRPC, LSP, etc.).
     External,
     /// In-process Rust trait object linked into the kernel binary.
@@ -69,7 +67,7 @@ pub struct InstitutionEntry {
     pub runtime: Option<RuntimeKind>,
     /// IRI of the `RuntimeEnvironment` this institution dispatches
     /// into. Carried for `runtime: external` institutions (D31 §5);
-    /// `None` for WASM and in-process kinds. Resolved from the
+    /// `None` for the in-process kind. Resolved from the
     /// `requires_environment` property at index time.
     pub requires_environment: Option<Iri>,
 }
@@ -148,7 +146,7 @@ pub enum ProcedureKind {
 
 // ─── The index ─────────────────────────────────────────────────────────
 
-/// Read-only derived index of D14 institution declarations.
+/// Read-only derived index of institution declarations.
 ///
 /// Rebuilt on bootstrap, on Phase 9a rehydration, and on every Load
 /// commit. The index does not own dispatch — M3 wires it into the
@@ -522,7 +520,6 @@ fn parse_institution(resource: &Resource) -> Result<InstitutionEntry, String> {
 
 fn parse_runtime_kind(s: &str) -> Result<RuntimeKind, String> {
     match s {
-        wk::RUNTIME_WASM => Ok(RuntimeKind::Wasm),
         wk::RUNTIME_EXTERNAL => Ok(RuntimeKind::External),
         wk::RUNTIME_IN_PROCESS => Ok(RuntimeKind::InProcess),
         other => Err(format!("unknown runtime IRI `{other}`")),
@@ -709,7 +706,7 @@ mod tests {
             "urn:eigenius:institution:institution_name",
             "Test Dock",
         );
-        set_str(&mut inst, wk::RUNTIME, wk::RUNTIME_WASM);
+        set_str(&mut inst, wk::RUNTIME, wk::RUNTIME_EXTERNAL);
         b.add_resource(inst).unwrap();
 
         let mut inst2 = Resource::new(iri("urn:eigenius:test:inst:assay"));
@@ -886,7 +883,7 @@ mod tests {
             .institution(&iri("urn:eigenius:test:inst:dock"))
             .unwrap();
         assert_eq!(dock.name, "Test Dock");
-        assert_eq!(dock.runtime, Some(RuntimeKind::Wasm));
+        assert_eq!(dock.runtime, Some(RuntimeKind::External));
         let assay = idx
             .institution(&iri("urn:eigenius:test:inst:assay"))
             .unwrap();

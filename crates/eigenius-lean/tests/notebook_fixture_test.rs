@@ -159,9 +159,8 @@ fn notebook_demo_fixture_lands_holds() {
     // standalone test — no anchored-commit cache, no CAS, but the
     // pipeline's persist phase still gets a real backend to write to.
     // `NoopHost` satisfies `CommitHookHost` without needing the
-    // server's WASM-registration machinery; the test cares about
-    // AutoOnLoad's `verdict_provenance` Sibling, not the `Child`
-    // `institution_classes` follow-up the WASM hook would queue.
+    // server's index-rebuild / vector-sweep machinery; the test cares
+    // about AutoOnLoad's `verdict_provenance` Sibling.
     let working = ctx
         .take_working("notebook_demo_fixture")
         .expect("take_working");

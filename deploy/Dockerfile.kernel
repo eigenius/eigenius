@@ -18,7 +18,6 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY kernel/ kernel/
 COPY crates/ crates/
-COPY sdk/ sdk/
 COPY storage/ storage/
 COPY cli/ cli/
 COPY proto/ proto/

@@ -255,11 +255,11 @@ pub enum Exp {
     /// (set by EigenQL's `INTO` clause) commits the produced resource
     /// at the caller-named IRI.
     ///
-    /// Without a D14 institution index/runtime attached (bare
+    /// Without a institution index/runtime attached (bare
     /// `EvalCtx::Pure` used at type-check time), the expression
     /// reduces to a passthrough neutral so the conversion checker can
     /// compare two `InstitutionInvoke`s structurally. Runtime callers
-    /// attach the index/runtime via `EvalCtx::IO` or `Check`.
+    /// attach the index/runtime via an effectful `EvalCtx` (the IO or check-time institution engine).
     ///
     /// [`InstitutionIndex`]: crate::institution::registry::InstitutionIndex
     InstitutionInvoke {
@@ -442,6 +442,18 @@ pub struct InductiveDecl {
 impl PartialEq for InductiveDecl {
     fn eq(&self, other: &Self) -> bool {
         self.iri == other.iri
+    }
+}
+
+impl InductiveDecl {
+    /// Whether `typ` is a direct application of this inductive
+    /// (`Exp::InductiveType(self, _)`) — the only shape of recursive
+    /// constructor argument the Phase 11b/D19 iota reduction can
+    /// eliminate. Higher-order or nested occurrences are rejected at
+    /// positivity-check time, so this simple head check suffices for
+    /// both recursor-type derivation and iota reduction.
+    pub fn is_direct_recursive_ref(&self, typ: &Exp) -> bool {
+        matches!(typ, Exp::InductiveType(d, _) if d.iri == self.iri)
     }
 }
 

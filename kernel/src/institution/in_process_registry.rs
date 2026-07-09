@@ -16,19 +16,16 @@
 //! (Phase 20a.1).
 //!
 //! The `RuntimeKind::InProcess` variant has been parsed from chain
-//! resources since D14 ([`crate::institution::registry`]) but had no
-//! registration path until Phase 20a — only `Wasm` (via
-//! [`crate::capability::registration::build_wasm_institution_runtime`])
-//! and `External` (via
+//! resources for institutions ([`crate::institution::registry`]) but had no
+//! registration path until Phase 20a — only `External` (via
 //! [`crate::capability::registration::register_external_institutions`])
 //! actually populated [`InstitutionRuntime`]. This module closes that
 //! gap.
 //!
 //! ## Why a separate registry
 //!
-//! Wasm institutions are constructed from chain data: the WASM binary
-//! lives on the resource itself. External institutions are constructed
-//! from chain data plus a gRPC client. **In-process institutions are
+//! External institutions are constructed from chain data plus a gRPC
+//! client. **In-process institutions are
 //! Rust code** linked into the kernel/orchestrator binary — there is
 //! no chain-side data sufficient to construct them. The
 //! `InProcessInstitutionRegistry` is the per-process container that

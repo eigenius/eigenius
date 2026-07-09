@@ -44,7 +44,7 @@ import {
   type ComponentInput,
   ComponentRegistry,
 } from "../src/components/registry.ts";
-import { decodeResource, encodeResource } from "../src/wasm/cbor.ts";
+import { decodeResource, encodeResource } from "../src/codec/cbor.ts";
 
 const ECHO_IRI = "urn:test:components:CodecEcho";
 const TEXT_DECODER = new TextDecoder();

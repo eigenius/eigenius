@@ -54,12 +54,11 @@ export function startServer(
   registry: ComponentRegistry,
   kernel: KernelClient,
   port: number,
-  wasm?: ComponentExecutorDeps["wasm"],
   substrate?: ComponentExecutorDeps["substrate"],
   mcpHandler?: (req: Request) => Promise<Response>,
 ): void {
   const router = createConnectRouter();
-  registerComponentExecutor(router, { registry, wasm, substrate });
+  registerComponentExecutor(router, { registry, substrate });
   registerNotebookService(router, { kernel });
   registerEigeniusKernelPassthrough(router, { kernel });
 

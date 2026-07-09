@@ -30,7 +30,7 @@ pub fn compile_file(file: &ast::File) -> Result<Vec<Resource>, Vec<EslError>> {
     compile_file_with_institutions(file, None)
 }
 
-/// Compile an ESL AST with access to a D14 [`InstitutionIndex`]. When
+/// Compile an ESL AST with access to an [`InstitutionIndex`]. When
 /// provided, function-call-shaped references whose function IRI
 /// classifies as a registered Decidable QueryClass or a declared
 /// Comorphism are emitted as specialized program resources (decoded
@@ -269,7 +269,7 @@ struct Compiler {
     /// disappear at compile time (no resource is emitted); the table
     /// is purely an in-compiler expansion environment.
     macros: BTreeMap<String, ast::MacroDecl>,
-    /// Optional D14 institution index — when present, drives
+    /// Optional institution index — when present, drives
     /// compile-time classification of function-call IRIs as a
     /// Decidable QueryClass call or a Comorphism invocation, emitting
     /// specialized program resources instead of plain `Apply`.
@@ -2531,7 +2531,7 @@ impl Compiler {
                     return Ok(r);
                 }
 
-                // D14 institution capability classification (D14 §6.2,
+                // institution capability classification (D14 §6.2,
                 // §9.2). When the function resolves to a Decidable
                 // QueryClass or a Comorphism declared in the chain,
                 // emit a specialized program resource. Otherwise fall

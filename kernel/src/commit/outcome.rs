@@ -68,9 +68,11 @@ pub enum LayerRole {
     /// AutoOnLoad verdict (Holds, Undecidable, Fails) was produced.
     /// D31 §6.3 / D41 §3.4.
     AuditProvenance,
-    /// Follow-up Child emitted by the `register_wasm_components`
-    /// `didPersist` hook when WASM-registration extraction produced
-    /// institution-class resources. D41 §3.6.
+    /// Follow-up Child role for institution-class resources contributed
+    /// by an institution-registration pass. Not emitted by any current
+    /// backend — external and in-process institutions declare their
+    /// classes statically in ontologies — but retained in the role
+    /// taxonomy and wire protocol. D41 §3.6.
     InstitutionClasses,
 }
 
@@ -196,7 +198,7 @@ pub enum EmissionKind {
 /// The root emission represents the RPC's primary layer; phases /
 /// hooks may push additional emissions onto `state.emissions` for
 /// follow-up layers (verdict provenance after AutoOnLoad dispatch,
-/// institution-classes after WASM-component registration, etc.).
+/// etc.).
 ///
 /// `name` is a stable, static string used both for diagnostics and as
 /// the `LayerBuilder` name when the orchestrator constructs a builder

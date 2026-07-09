@@ -66,7 +66,7 @@ pub(super) fn resolve_full_codata_decl(
         }
         if let Some(crate::ontology::resource::Value::String(sn)) = resource.get(&short_name_iri) {
             if sn == &stub.name {
-                let v = crate::program::ground::resolve_class_type(&iri, layer)?;
+                let v = ctx.hooks.resolve_class(&iri, layer)?;
                 match v {
                     Val::CodataType { decl, .. } => return Ok(decl),
                     Val::Codata(_, _) => {

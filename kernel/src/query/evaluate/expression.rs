@@ -66,7 +66,7 @@ pub(super) fn eval_expression(
             // Decidable QueryClass invocation. The result is a
             // Verdict-typed resource (Value::Embedded). Comorphism
             // dispatch in expression position is not supported under
-            // D14 — comorphisms surface only as FIBER param coercion
+            // comorphisms surface only as FIBER param coercion
             // (D2 §3.5).
             if name.contains(':') {
                 if let Ok(iri_parsed) = Iri::parse(name) {
@@ -457,7 +457,7 @@ fn expr_has_aggregate(expr: &Expression) -> bool {
 ///   structural error, not a reason to silently fall through.
 ///
 /// Comorphism dispatch is not available in expression position under
-/// D14; comorphisms surface only as FIBER param coercion (D2 §3.5).
+/// comorphisms surface only as FIBER param coercion (D2 §3.5).
 fn try_dispatch_decidable(
     iri: &Iri,
     args: &[Value],
@@ -484,7 +484,7 @@ fn try_dispatch_decidable(
     // Marshal positional args onto a synthetic input resource of the
     // QueryClass's input class via the shared
     // `institution::marshal::marshal_decidable_input` helper. Same
-    // logic as the kernel-side `nbe::eval::try_d14_decide` (D14 §9.2)
+    // logic as the kernel-side `nbe::eval::try_institution_decide` (D14 §9.2)
     // — typed required properties populated in `requires` order,
     // IRI-shaped args targeting `core:resource` properties
     // dereferenced to embedded resources.
@@ -801,7 +801,7 @@ mod tests {
 
     #[test]
     fn where_clause_decide_dispatch_returns_verdict() {
-        // Under D14, a Decidable QueryClass call returns a Verdict
+        // a Decidable QueryClass call returns a Verdict
         // resource (not a Boolean). The postfix predicate (D2 §3.8)
         // is what projects to Boolean — a separate parser concern.
         let (layer, storage, index) = q_index();

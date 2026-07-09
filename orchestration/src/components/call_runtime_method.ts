@@ -30,7 +30,7 @@
  * in its message.
  */
 
-import { decodeResource, encodeResource } from "../wasm/cbor.ts";
+import { decodeResource, encodeResource } from "../codec/cbor.ts";
 import type { RuntimeSubstrateAddon } from "../runtime/loadAddon.ts";
 import * as log from "../observability/mod.ts";
 import { operation } from "../observability/mod.ts";

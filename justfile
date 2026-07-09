@@ -1,9 +1,8 @@
 # Eigenius development tasks
 
 # Build everything
-build: build-wasm
+build:
     cargo build --workspace
-    cargo build --manifest-path orchestration/native/Cargo.toml
 
 # Build everything with CUDA support — same as `build` but the
 # `eigenius-cli` binary is compiled with `--features cuda`, which
@@ -11,34 +10,15 @@ build: build-wasm
 # CUDA backend. Requires a CUDA 12.x toolkit on PATH (`nvcc`) and a
 # compatible driver visible to the build. Runtime device choice is
 # still the `[embedder].device` knob in `eigenius.toml`.
-build-gpu: build-wasm
+build-gpu:
     cargo build --workspace
     cargo build -p eigenius-cli --features cuda
-    cargo build --manifest-path orchestration/native/Cargo.toml
 
 # Same shape as `build-gpu`, but uses Candle's Metal backend instead
 # of CUDA. Intended for Apple Silicon hosts.
-build-metal: build-wasm
+build-metal:
     cargo build --workspace
     cargo build -p eigenius-cli --features metal
-    cargo build --manifest-path orchestration/native/Cargo.toml
-
-# Build WASM examples and copy fixtures for tests
-build-wasm:
-    cd examples/wasm-cbor-echo && cargo component build
-    cd examples/wasm-doc-validator && cargo component build
-    cd examples/wasm-http-shout && cargo component build
-    cd examples/wasm-read-query-probe && cargo component build
-    cd examples/wasm-d14-echo && cargo component build
-    cd examples/wasm-d14-dock && cargo component build
-    cd examples/wasm-d14-assay && cargo component build
-    cd examples/wasm-d14-arrhenius && cargo component build
-    mkdir -p kernel/tests/fixtures
-    cp examples/wasm-doc-validator/target/wasm32-unknown-unknown/debug/eigenius_wasm_doc_validator.wasm kernel/tests/fixtures/
-    cp examples/wasm-d14-echo/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_echo.wasm kernel/tests/fixtures/
-    cp examples/wasm-d14-dock/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_dock.wasm kernel/tests/fixtures/
-    cp examples/wasm-d14-assay/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_assay.wasm kernel/tests/fixtures/
-    cp examples/wasm-d14-arrhenius/target/wasm32-unknown-unknown/debug/eigenius_wasm_d14_arrhenius.wasm kernel/tests/fixtures/
 
 # Run all tests (Rust + Deno)
 test:
