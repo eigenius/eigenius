@@ -4,9 +4,9 @@ The platform builds and runs on Linux (native or Windows with WSL 2) and macOS. 
 
 ## 2.1. Required toolchain
 
-### Rust 1.95+
+### Rust 1.97+
 
-The Rust version pinned by [`deploy/Dockerfile.kernel`](../../../deploy/Dockerfile.kernel) is **1.95**. Earlier versions may fail to build some workspace dependencies.
+The Rust version pinned by [`deploy/Dockerfile.kernel`](../../../deploy/Dockerfile.kernel) is **1.97**. Earlier versions may fail to build some workspace dependencies.
 
 Install via [rustup](https://rustup.rs):
 
@@ -19,7 +19,7 @@ rustup default stable
 Verify:
 
 ```bash
-rustc --version  # rustc 1.95.0 or newer
+rustc --version  # rustc 1.97.0 or newer
 ```
 
 ### Deno

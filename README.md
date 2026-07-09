@@ -463,7 +463,7 @@ Docker-based deployment) add their own tools.
 
 **Core toolchain (required)**
 
-- Rust (stable, **1.95+** — matches `deploy/Dockerfile.kernel`; earlier
+- Rust (stable, **1.97+** — matches `deploy/Dockerfile.kernel`; earlier
   versions may fail to build some workspace dependencies). Install via
   [rustup](https://rustup.rs).
 - [Deno](https://deno.land) — orchestration layer (`orchestration/`).

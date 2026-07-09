@@ -136,7 +136,7 @@ The frequent culprits, in rough order of frequency:
 
 - **`error: failed to run custom build command for prost-build`** — `protobuf-compiler` not installed. Install it (chapter 2).
 - **`error: linker 'cc' not found`** — `build-essential` missing on Ubuntu/WSL. Install it.
-- **`error[E0658]: ...`** referencing a Rust version — your `rustc` is older than 1.95. Run `rustup update`.
+- **`error[E0658]: ...`** referencing a Rust version — your `rustc` is older than 1.97. Run `rustup update`.
 - **`error: failed to run custom build command for librocksdb-sys`** — `libclang-dev` missing. Install it.
 - **Deno cache stale** — `deno cache --reload orchestration/src/main.ts`.
 

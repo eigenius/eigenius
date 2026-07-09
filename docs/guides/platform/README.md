@@ -27,7 +27,7 @@ The most-used reference chapters are:
 
 1. **[Introduction](01-introduction.md)** — what this guide is for, system topology at a glance, the seven ways to interact with the platform.
 
-2. **[Installation and prerequisites](02-installation.md)** — Rust 1.95+, Deno, system packages, optional `just` and `cargo-component`. Optional WordNet provisioning for the DCG / lexicon engine. WSL 2 notes for Windows users.
+2. **[Installation and prerequisites](02-installation.md)** — Rust 1.97+, Deno, system packages, optional `just`. Optional WordNet provisioning for the DCG / lexicon engine. WSL 2 notes for Windows users.
 
 3. **[Building and testing](03-building-and-testing.md)** — `just build`, `just test`, `just check`. What `just build` does that plain `cargo build` does not.
 

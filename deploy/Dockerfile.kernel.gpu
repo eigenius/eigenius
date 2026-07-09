@@ -33,13 +33,13 @@ RUN apt-get update && apt-get install -y \
         && rm -rf /var/lib/apt/lists/*
 
 # Install rustup + the pinned toolchain. We match the CPU image's
-# Rust version family (1.95 / Bookworm) explicitly so toolchain
+# Rust version family (1.97 / Bookworm) explicitly so toolchain
 # drift doesn't surprise the GPU build.
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-        | sh -s -- -y --default-toolchain 1.95 --profile minimal --no-modify-path
+        | sh -s -- -y --default-toolchain 1.97 --profile minimal --no-modify-path
 
 # Ensure nvcc / cuda libs are on the build PATH so candle-kernels'
 # build.rs can find them when it compiles the kernels.
