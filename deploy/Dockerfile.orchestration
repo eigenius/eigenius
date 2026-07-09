@@ -35,7 +35,7 @@ RUN npm run build
 # Output: /build/notebooks/dist/
 
 # --- Stage 2: build the runtime substrate napi addon --------------------------
-FROM rust:1.95-bookworm AS substrate-builder
+FROM rust:1.97-bookworm AS substrate-builder
 
 # Node 22 from NodeSource — Debian bookworm ships Node 18 which is too
 # old for napi-rs CLI v3 (uses `node:util.styleText`, added in Node 20).

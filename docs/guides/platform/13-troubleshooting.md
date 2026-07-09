@@ -24,7 +24,7 @@ Common issues organised by symptom. For each, the diagnosis and the fix.
 
 ### `error[E0658]: ...` referencing a Rust feature
 
-**Cause:** `rustc` older than the workspace MSRV (1.95).
+**Cause:** `rustc` older than the workspace MSRV (1.97).
 
 **Fix:** `rustup update` to get the latest stable.
 
