@@ -194,11 +194,9 @@ fn cascade_for_resolution(
             // class by construction; v1 surfaces no cascade items.
             Ok(Vec::new())
         }
-        MergeResolution::Rename {
-            side,
-            old_iri,
-            ..
-        } => cascade_for_rename(span, *side, old_iri, topology, backend),
+        MergeResolution::Rename { side, old_iri, .. } => {
+            cascade_for_rename(span, *side, old_iri, topology, backend)
+        }
         MergeResolution::SchemaQuotient { conflict, quotient } => {
             cascade_for_quotient(span, conflict, *quotient, topology, backend)
         }
