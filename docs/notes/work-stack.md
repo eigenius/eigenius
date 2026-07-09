@@ -21,13 +21,29 @@ Four-phase spine (user directive `2026-07-06`, worked in order — stop detourin
   **The 5 survivors (#3/#4/#7/#8/#9) are search-starvation, not grammar** — every construction parses in
   isolation; the full sentence overruns the beam/cell budget. Grammar is complete for this page (§0 of the
   note). Earlier RC-2 comparatives + s20 modal+coordinated-object CLOSED `2026-07-07`.
-- **Phase 3 (ambiguity) + Phase 4 (performance): ACTIVE — one lever, scale the search.** The 5 residual
-  parse-gaps, every closing unit AMBIG (0 encoded), and the perf outliers all trace to one root cause: the
-  **mass-shim over-generation / beam budget** (RC-1 head-inheritance is loose). The search-scaling lever
-  (§6 / §7 of the note; **D63 §8.7 / GH#97**) is the whole remaining backlog: an intermediate-cell beam +
-  tightening the mass shim should collapse the residual gaps, the ambiguity, and the parse time together.
-**Exit-gate (phase 3):** the 5 residual full sentences close under a scaled search AND closing units drop
-to a single clean reading (encoded > 0). Then phase 4 (perf) — same root cause — is the residual.
+- **Phase 3 (ambiguity) + Phase 4 (performance): ACTIVE — scale the search.** Chart re-measurement
+  (Derived, `2026-07-08`, [d63-parsing-scale-and-pruning.md §4b](d63-parsing-scale-and-pruning.md)): all 5
+  first-CNL sentences now parse CLOSED, so **the residual is ambiguity, not gaps**, and it factors into
+  **`structural × sense`** — orthogonal levers that multiply (S5 v2: 3 structural × 16 sense = 48).
+  **Three composing levers, cheapest first (reframed `2026-07-09`, [scale-pruning §4c](d63-parsing-scale-and-pruning.md)):**
+  - **(1) Lexicalize / hyphenate compound modifiers (CNL/style-guide fix, ZERO code) — done for the corpus.**
+    `synthetic lethal` was a lexicalization confound, not genuine bracketing; hyphenating → `synthetic-lethal`
+    ([d62-controlled-language-style-guide.md](d62-controlled-language-style-guide.md); `first-page-cnl-v3.txt`)
+    collapsed S5 **144→48 candidates / 12→4 skeletons** (merged-kernel-confirmed). **Do this first on any
+    corpus.**
+  - **(2) Sense** (×4–16 per skeleton) — the reranker/cap (built) + the mass-shim precision fixes
+    (RC-1 head-inheritance loose; §6 of the parse-gap note).
+  - **(3) Structural residual → the nominal-modification NF**, design note
+    [d63-nominal-modification-normal-form.md](d63-nominal-modification-normal-form.md). After lever 1 the
+    target is ~3× smaller (S5: the 4 residual skeletons — `[[DNA repair] processes]` bracketing + copula +
+    the gradable pair). Core move: extend the left-branching NF to forbid the adjective↔compound interleaving
+    (`parser.rs:818`); D1 = the C&L restrictor typing test (gradable `std_` screen). **Resolve D1/D3/D4 (§8)
+    before coding.**
+  Page-level (v3 reranked): 62 units → **0 ENCODED / 57 AMBIG / 5 GAP** — same as v2; lever 1 is
+  ambiguity/cost relief, not a gap/encoded change. (§6/§6a/§7 of
+  [d63-parse-gap-closure.md](d63-parse-gap-closure.md); **D63 §8.7 / GH#97**.)
+**Exit-gate (phase 3):** AMBIG → single ENCODED per unit — the NF collapses the structural skeletons AND
+the reranker collapses the sense product. Then phase 4 (perf) — same root cause — is the residual.
 
 ### 2. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
 The overall sequence that (1) is a detour from. Remaining once (1) pops, in order:

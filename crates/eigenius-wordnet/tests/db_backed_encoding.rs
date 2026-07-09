@@ -624,6 +624,58 @@ fn probe_recq_atoms_in_snapshot() {
     }
 }
 
+/// D2 (nominal-modification NF, d63-nominal-modification-normal-form.md §4/§8): does the snapshot carry
+/// the corpus's genuine collocations as LEXICAL UNITS? A form with a `cat_n`/`cat_np` entry + a sense
+/// (a `wn:`/`umlscui:` id) seeds as a multi-token span, so its compound reading is a leaf — not a
+/// bracketing the compound rule reconstructs. Absent = the NF forces the all-adjective tree on it (the
+/// coverage-policy decision D2). Run:
+///   EIGENIUS_DB_SNAPSHOT=/path cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       d2_collocation_coverage -- --ignored --nocapture
+#[test]
+#[ignore = "D2: collocation-as-lexical-unit coverage over the snapshot; --ignored --nocapture"]
+fn d2_collocation_coverage() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    // Corpus collocations (space-joined lowercase, as `by_form` keys). The adjective-position
+    // `synthetic lethal` is THE one the NF's interleaving hinges on; the rest are the first-5 CNL
+    // compounds. `cell`/`lethality` are sanity controls (known heads).
+    for form in [
+        "synthetic lethality",
+        "synthetic lethal",
+        "synthetic lethal target",
+        "synthetic lethal targets",
+        "cell death",
+        "dna repair",
+        "repair process",
+        "repair processes",
+        "dna repair process",
+        "dna repair processes",
+        "cancer therapeutics",
+        "genetic event",
+        "genetic events",
+        "co-occurrence",
+        // controls:
+        "cell",
+        "lethality",
+    ] {
+        let known = index.has_token(form, &lem);
+        let entries = index.debug_form_entries(form, &lem);
+        // A collocation counts as a UNIT iff some entry is a nominal category carrying a sense id.
+        let unit = entries.iter().any(|(_c, cat, sense)| {
+            !sense.is_empty() && (cat.contains("cat_n") || cat.contains("cat_np"))
+        });
+        eprintln!(
+            "\n=== {form:?} — has_token={known}  UNIT={unit}  {} entries ===",
+            entries.len()
+        );
+        for (closed, cat, sense) in entries.iter().take(8) {
+            eprintln!("  closed={closed}  sense={sense}  cat={cat}");
+        }
+    }
+}
+
 /// D63 lexicon-augmentation §6a — VERIFY both grounding indexes over the RESEEDED snapshot:
 /// **(a)** the form `core:TextIndex` grounds the OOV surface `recq` → its UMLS concept C0084304
 /// (`augment_lexicon_backed`, the RecQ finding over the real atoms), and **(c)** the concept
@@ -1467,7 +1519,9 @@ fn analyze_chart_cells_first_five() {
         "The co-occurrence of these two events leads to cell death.",
         "Each event alone does not lead to cell death.",
         "Scientists can exploit synthetic lethality for cancer therapeutics.",
-        "DNA repair processes are attractive synthetic lethal targets.",
+        // v3: `synthetic-lethal` hyphenated (lexicalized compound modifier, style-guide fix) so it is
+        // ONE compound adjective, not a `synthetic` ∧ `lethal` adjective stack (d63-nominal-mod NF §4).
+        "DNA repair processes are attractive synthetic-lethal targets.",
     ];
     for s in sentences {
         eprintln!("\n════════════════════════════════════════════════════════════════");

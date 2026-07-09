@@ -549,6 +549,27 @@ extra reading multiplies through the chart. This is the **binding constraint on 
 3. Re-measure `--no-llm` (does the AMBIG×N median drop?) and with the **reranker** (`--features use-llm`,
    the phase-3 metric proper: AMBIG → single ENCODED per unit).
 
+### 6a. The ambiguity is structural × sense — two distinct levers (Derived, `2026-07-08`)
+
+Re-ran the chart-cell instrumentation over `wordnet-umls-all-2026-07-08` (§4b of
+[d63-parsing-scale-and-pruning.md](d63-parsing-scale-and-pruning.md)). The readings-per-unit factor into a
+**product of two independent sources**, each with its own lever:
+
+- **Sense multiplicity** (×4–16 per skeleton) — each noun slot filled by a WordNet *or* UMLS sense, plus
+  the mass-shim over-generation above. Lever: the **reranker/cap** (already built) + the mass-shim
+  precision fixes (tasks 1–2).
+- **Structural multiplicity** (2–36 bracketing / adjective-vs-compound category-choice skeletons per
+  sentence) — the Catalan blow-up of the prenominal modifier stack (`attractive synthetic lethal targets`).
+  Sense-ranking does **not** reduce it. Lever: a **nominal-modification normal form** — design note
+  [d63-nominal-modification-normal-form.md](d63-nominal-modification-normal-form.md).
+
+The two multiply (S5: 3 structural × 16 sense = 48), so **both levers are load-bearing** and a single clean
+ENCODED reading needs both. The refined-noun `cat_n(Σ_)` shape dominates the saturating mid-chart cells
+(32 of 173 non-leaf cells), so the structural lever is where the mid-chart population concentrates. The
+`2026-07-06` "mass-shim is *the* root cause" framing is refined: the mass-shim is the sense-side
+over-generation; the bracketing multiplicity is a **separate** structural source the mass-shim fixes don't
+touch.
+
 ## 7. Phase 4 — Performance (parse-time under ambiguity)
 
 **Witnessed (`2026-07-06`):** 62 units in **74 min**, with pathological outliers — a 14-token unit took

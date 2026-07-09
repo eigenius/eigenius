@@ -199,14 +199,87 @@ wide beam. Findings (witnessed; `analyze_chart_cells_first_five` / `enumerate_fu
   objects and compound *direct* objects both parse; only the combination fails). S3/S5 are beam-limited
   by **compound bracketing/derivation multiplicity** (the Catalan blowup of a stacked modifier chain —
   `DNA repair processes`, `attractive synthetic lethal targets`), which sense-ranking does not reduce.
+  **SUPERSEDED (§4b, `2026-07-08`): after the grammar fixes all 5 first-CNL sentences parse CLOSED; the
+  S4 compound-as-prep-object gap is CLOSED. The S3/S5 structural-multiplicity diagnosis stands and is now
+  quantified (§4b).**
 
 **Updated lever order for the CNL** (supersedes "B is the ceiling-lifter via #93" for this corpus):
 1. **Contextual LLM sense reranker** (Lever A strong form) — validated, recovers S1; the cheapest win.
 2. **A normal form for nominal modification** (canonical bracketing of the adjective/compound stack,
    the analogue of the existing coordination + Eisner NFs) — the structural lever for S3/S5, which
-   neither sense-ranking nor selectional typing addresses.
-3. The compound-as-prep-object grammar gap (S4) — separate, small.
+   neither sense-ranking nor selectional typing addresses. **Now the primary remaining lever (§4b);
+   design: [d63-nominal-modification-normal-form.md](d63-nominal-modification-normal-form.md).**
+3. The compound-as-prep-object grammar gap (S4) — separate, small. **CLOSED `2026-07-08` (§4b).**
 GH#93/Lever-B selectional pruning is **not** on this corpus's critical path.
+
+## 4b. Re-measurement after the grammar fixes (Derived, `2026-07-08`)
+
+Re-ran `analyze_chart_cells_first_five` over the current snapshot (`wordnet-umls-all-2026-07-08`,
+cap-only static rank, `sense_cap=2`, `cell_beam=1024`; `EIGENIUS_PARSE_DEBUG=1`; 23 s). **All 5 first-CNL
+sentences now parse CLOSED** — S1×240, S2×150, S3×32, S4×8, S5×48 — where the `2026-06-30` run (§4a) had
+S1/S3/S4/S5 all GAP (cap-only). **The residual is ambiguity, not gaps**, and the S4 compound-as-prep-object
+grammar gap is CLOSED.
+
+**The ambiguity decomposes as `structural bracketing/category-choice × sense-product`** (witnessed via the
+classify-candidate sems, sense IRIs erased to count structural skeletons):
+
+| sentence | closed | classify candidates | distinct structural skeletons | sense × |
+|---|---|---|---|---|
+| S1 `Synthetic lethality is an interaction between two genetic events` | 240 | 256 | 22 | ~12× |
+| S2 `The co-occurrence of these two events leads to cell death` | 150 | 186 | 36 | ~5× |
+| S3 `Each event alone does not lead to cell death` | 32 | 32 | 2 | ~16× |
+| S4 `Scientists can exploit synthetic lethality for cancer therapeutics` | 8 | 8 | 2 | ~4× |
+| S5 `DNA repair processes are attractive synthetic lethal targets` | 48 | 144 | 12 (**3 within one subject-frame**) | ~12× |
+
+**Cleanest case — S5, within one subject-sense frame: exactly 3 modifier-stack skeletons** ×16 WordNet-vs-
+UMLS sense variants over the noun slots:
+1. all three modifiers as **adjectives** — `Σ:Σ:N. And(And(gt,gt),gt). compound_kind(K,N)`;
+2. **nested compound** — `Σ:Σ:N. gt(…). compound_kind(K, …compound_kind(K,N))`;
+3. **mixed** — one adjective + one compound + one adjective-on-compound.
+
+**The refined-noun `cat_n(Σ_)` shape is the dominant saturating mid-chart shape** (top shape in 32 of 173
+non-leaf cells; the rest are copula / type-raise artifacts) — §4a's "the explosion is nominal" holds
+post-fix.
+
+**Three consequences for the levers:**
+- **Both are load-bearing and multiply.** The NF collapses the structural skeletons (S5: 3→1); the
+  reranker/cap collapses the ×N sense product. Neither alone reaches a single ENCODED reading — witnessed,
+  not assumed.
+- **The structural count is non-trivial** (2–36 skeletons; S1/S2 the high cases), so the NF is real work,
+  not a constant-factor tidy-up.
+- **Category-choice entangles the two levers.** A word's adjective-sense routes to `Attrib`, its
+  noun-sense to `KindCompound` — so a *structural* skeleton is partly *sense*-chosen. The NF must be
+  defined over the chosen category, and the sense pick feeds it. This is where the spurious-vs-genuine
+  criterion lands: S5's all-adjective skeleton (`attractive ∧ synthetic ∧ lethal`) is *meaning-distinct*
+  from the compound `[synthetic lethal] targets` (the domain collocation) — so the right bracketing needs
+  the lexicon to carry `synthetic lethal` as a multiword entry.
+
+## 4c. S5's blow-up was mostly LEXICALIZATION — the cheapest lever is a CNL fix (Derived, `2026-07-09`)
+
+`synthetic lethal` is not `synthetic` ∧ `lethal`; it is a lexicalized domain term (the attributive form of
+*synthetic lethality*, C4280020). Unhyphenated it masqueraded as a two-adjective stack — `synthetic` and
+`lethal` each seeded with adjective *and* noun senses — which is what drove S5's fork. **Fix: hyphenate it
+in the CNL** (`synthetic-lethal`, a style-guide rule — [d62-controlled-language-style-guide.md](d62-controlled-language-style-guide.md)),
+so the D63 hyphen morphology reads it as one compound adjective. **Zero parser code.** Measured on the v3
+page (`first-page-cnl-v3.txt`; re-confirmed on the merged kernel + Rust 1.97, #101 parse-neutral):
+
+| S5 `… attractive synthetic[- ]lethal targets` | v2 (`synthetic lethal`) | v3 (`synthetic-lethal`) |
+|---|---|---|
+| leaf seeding | `synthetic` (2 shapes) + `lethal` (2 shapes) | **one token, 1 shape** (predicative adjective) |
+| classify candidates | 144 | **48** (÷3) |
+| structural skeletons | 12 | **4** |
+| closed readings (cap-only) | 48 | **24** |
+
+**But at the page level the win is ambiguity/cost, not the tally.** Full-page reranked measure on v3
+(`--features use-llm`, snapshot `wordnet-umls-all-2026-07-08`): **62 units → ENCODED 0, AMBIG 57,
+GRAMMAR-GAP 5, MISSING 0** — *identical* unit classification to v2 (the same 5 gaps #3/#4/#7/#8/#9;
+`microsatellite-stable` parses, no OOV). Reducing S5's readings keeps it AMBIG, so nothing crosses to
+ENCODED. **Even reranked, S5 stays ambiguous — the reranker collapses *sense*, not the residual 4
+*structural* skeletons.** So the three levers are distinct and composing: **(1) lexicalize/hyphenate**
+(cheapest, done for the corpus), **(2) the sense reranker/cap** (built), **(3) the nominal-modification NF**
+for the genuine structural residual. The NF's target is now the 4 residual skeletons (the `[[DNA repair]
+processes]` bracketing + copula predication + the `attractive`/`synthetic-lethal` gradable pair) — **~3×
+smaller than the v2 numbers implied**, and no longer confounded by the un-lexicalized term.
 
 ## 5. Verification plan
 
