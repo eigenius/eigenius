@@ -21,7 +21,7 @@
 use super::conv::{is_propositional_in_ctx, is_syntactically_propositional_type};
 use super::subtype_of_with_hyps;
 use super::witness::try_synthesize_chain_witness;
-use super::{check, check_infer, CheckCtx};
+use super::{check, check_infer, CheckCtx, CheckError};
 use crate::nbe::env::{gen_val, Rho};
 use crate::nbe::eval::EvalCtx;
 use crate::nbe::readback::readback_val;
@@ -190,7 +190,7 @@ enum CtorArg {
 pub(super) fn validate_indexed_ctor_conclusions(
     ctx: &mut CheckCtx,
     decl: &InductiveDecl,
-) -> Result<(), String> {
+) -> Result<(), CheckError> {
     let n_params = decl.params.len();
     let n_indices = decl.indices.len();
     let expected_args = n_params + n_indices;
@@ -205,15 +205,15 @@ pub(super) fn validate_indexed_ctor_conclusions(
         let conclusion_args = match residual {
             Exp::InductiveType(d, args) if d.iri == decl.iri => args,
             _ => {
-                return Err(format!(
+                return Err(CheckError::IllFormed(format!(
                     "constructor `{}.{}`: conclusion must be `{}(...)` — \
                      positivity check should have caught this",
                     decl.name, ctor.name, decl.name
-                ));
+                )));
             }
         };
         if conclusion_args.len() != expected_args {
-            return Err(format!(
+            return Err(CheckError::IllFormed(format!(
                 "constructor `{}.{}`: conclusion `{}(...)` has {} arg(s) \
                  but `{}` declares {} param(s) + {} index/indices = {} total",
                 decl.name,
@@ -224,7 +224,7 @@ pub(super) fn validate_indexed_ctor_conclusions(
                 n_params,
                 n_indices,
                 expected_args
-            ));
+            )));
         }
 
         if n_indices == 0 {
@@ -284,7 +284,7 @@ fn ctx_with_param_and_arg_binders(
     ctx: &CheckCtx,
     decl: &InductiveDecl,
     ctor_args: &[CtorArg],
-) -> Result<CheckCtx, String> {
+) -> Result<CheckCtx, CheckError> {
     // Walk the parameter prefix, then the ctor's value/size args,
     // chaining `extend` to produce successive contexts.
     //
@@ -369,12 +369,12 @@ pub(super) fn check_inductive_ctor_args(
     expected_decl: &Arc<InductiveDecl>,
     params: &[Val],
     expected_indices: &[Val],
-) -> Result<(), String> {
+) -> Result<(), CheckError> {
     if decl.name != expected_decl.name {
-        return Err(format!(
+        return Err(CheckError::TypeMismatch(format!(
             "InductiveCtor: constructor of `{}` does not match expected inductive `{}`",
             decl.name, expected_decl.name
-        ));
+        )));
     }
     let ctor_idx = decl
         .ctors
@@ -409,12 +409,12 @@ pub(super) fn check_inductive_ctor_args(
     // ChainWitness slot, so eliding it is equivalent to providing a
     // sentinel — but with no boilerplate at the call site.
     if args.len() > arg_specs.len() {
-        return Err(format!(
+        return Err(CheckError::IllFormed(format!(
             "InductiveCtor `{}.{ctor_name}` expects {} args, got {}",
             decl.name,
             arg_specs.len(),
             args.len()
-        ));
+        )));
     }
 
     // Internal env for evaluating expected types: starts with params
@@ -427,7 +427,7 @@ pub(super) fn check_inductive_ctor_args(
         let user_arg = args.get(i);
         match spec {
             CtorArg::Value { patt, typ } => {
-                let arg_typ_val = ctx.eval(typ, &arg_env).map_err(|e| e.to_string())?;
+                let arg_typ_val = ctx.eval(typ, &arg_env)?;
 
                 // D49 Phase 6 hook — when the expected arg type is a
                 // ChainWitness predicate (`IsDeclaredAs` / `IsObservedAs`
@@ -451,7 +451,7 @@ pub(super) fn check_inductive_ctor_args(
                             )
                         })?;
                         check(ctx, arg_exp, &arg_typ_val)?;
-                        ctx.eval(arg_exp, &ctx.rho).map_err(|e| e.to_string())?
+                        ctx.eval(arg_exp, &ctx.rho)?
                     }
                 };
                 arg_env = arg_env.extend(patt.clone(), arg_val);
@@ -468,16 +468,16 @@ pub(super) fn check_inductive_ctor_args(
                 // (evaluated in `arg_env` so it can reference the
                 // inductive's size parameter).
                 check(ctx, arg_exp, &Val::SizeSort)?;
-                let upper_val = ctx.eval(upper, &arg_env).map_err(|e| e.to_string())?;
-                let arg_val = ctx.eval(arg_exp, &ctx.rho).map_err(|e| e.to_string())?;
+                let upper_val = ctx.eval(upper, &arg_env)?;
+                let arg_val = ctx.eval(arg_exp, &ctx.rho)?;
                 if !crate::nbe::sized::size_lt_with_hyps(&arg_val, &upper_val, &ctx.size_tso) {
-                    return Err(format!(
+                    return Err(CheckError::IllFormed(format!(
                         "InductiveCtor `{}.{ctor_name}`: size argument {:?} is not \
                          strictly below upper bound {:?}",
                         decl.name,
                         readback_val(ctx.rho.len(), &arg_val),
                         readback_val(ctx.rho.len(), &upper_val),
-                    ));
+                    )));
                 }
                 arg_env = arg_env.extend(patt.clone(), arg_val);
             }
@@ -498,7 +498,7 @@ pub(super) fn check_inductive_ctor_args(
     // Without this check a buggy constructor declaration of the form
     // `foo : Π p:P. OtherInductive` or `foo : ... → SizedNat (↑ i)`
     // used at `SizedNat i` would pass silently.
-    let actual_result = ctx.eval(current, &arg_env).map_err(|e| e.to_string())?;
+    let actual_result = ctx.eval(current, &arg_env)?;
     let expected_result = Val::InductiveType {
         decl: expected_decl.clone(),
         params: params.to_vec(),
@@ -511,10 +511,10 @@ pub(super) fn check_inductive_ctor_args(
         &ctx.size_tso,
     )
     .map_err(|err| {
-        format!(
+        CheckError::TypeMismatch(format!(
             "InductiveCtor `{}.{ctor_name}`: result type mismatch ({err})",
             decl.name
-        )
+        ))
     })?;
 
     // D48 Phase D — index unification. `subtype_of_with_hyps`
@@ -535,13 +535,13 @@ pub(super) fn check_inductive_ctor_args(
                 }
             };
         if actual_indices.len() != expected_indices_for_unify.len() {
-            return Err(format!(
+            return Err(CheckError::IllFormed(format!(
                 "InductiveCtor `{}.{ctor_name}`: index arity mismatch \
                  (actual has {}, expected has {})",
                 decl.name,
                 actual_indices.len(),
                 expected_indices_for_unify.len()
-            ));
+            )));
         }
         // Phase D uses a fresh per-call MetaCtx — EigenTT doesn't yet
         // have implicit-arg syntax that would create metas surviving
@@ -554,10 +554,10 @@ pub(super) fn check_inductive_ctor_args(
             .enumerate()
         {
             crate::nbe::unify::unify(ctx.rho.len(), actual, expected, &mut mctx).map_err(|e| {
-                format!(
+                CheckError::TypeMismatch(format!(
                     "InductiveCtor `{}.{ctor_name}`: index #{i} mismatch: {e}",
                     decl.name
-                )
+                ))
             })?;
         }
     }
@@ -573,7 +573,7 @@ pub(super) fn check_infer_inductive_rec(
     motive: &Exp,
     minors: &[Exp],
     major: &Exp,
-) -> Result<Val, String> {
+) -> Result<Val, CheckError> {
     // 1. Major must inhabit the inductive being eliminated.
     let major_typ = check_infer(ctx, major)?;
     let (major_decl, params) = match &major_typ {
@@ -583,18 +583,18 @@ pub(super) fn check_infer_inductive_rec(
             indices: _,
         } => (d.clone(), p.clone()),
         other => {
-            return Err(format!(
+            return Err(CheckError::ExpectedInductive(format!(
                 "InductiveRec on `{}`: major has type {:?}, expected an inductive type",
                 decl.name,
                 readback_val(ctx.rho.len(), other)
-            ));
+            )));
         }
     };
     if major_decl.name != decl.name {
-        return Err(format!(
+        return Err(CheckError::TypeMismatch(format!(
             "InductiveRec: declaration mismatch — recursor for `{}`, major has type `{}`",
             decl.name, major_decl.name
-        ));
+        )));
     }
 
     // 2. Motive : I(params) → Sort(<codomain>).
@@ -619,14 +619,14 @@ pub(super) fn check_infer_inductive_rec(
     );
     check(ctx, motive, &motive_typ).map_err(|e| {
         if matches!(decl.sort, Exp::Sort(0)) && !large_elim_admitted(decl) {
-            format!(
+            CheckError::IllFormed(format!(
                 "singleton-elim violation: recursor on `{}` (a Prop with {} \
                  ctor{}, failing the singleton test) requires a Prop-valued \
                  motive; got: {e}",
                 decl.name,
                 decl.ctors.len(),
                 if decl.ctors.len() == 1 { "" } else { "s" }
-            )
+            ))
         } else {
             e
         }
@@ -634,23 +634,22 @@ pub(super) fn check_infer_inductive_rec(
 
     // 3. Minors: one per constructor, each against its derived type.
     if minors.len() != decl.ctors.len() {
-        return Err(format!(
+        return Err(CheckError::IllFormed(format!(
             "InductiveRec on `{}`: expected {} minors (one per constructor), got {}",
             decl.name,
             decl.ctors.len(),
             minors.len()
-        ));
+        )));
     }
-    let motive_val = ctx.eval(motive, &ctx.rho).map_err(|e| e.to_string())?;
-    let expected_minor_types = derive_minor_types(decl, &params, &motive_val, &EvalCtx::Pure)
-        .map_err(|e| e.to_string())?;
+    let motive_val = ctx.eval(motive, &ctx.rho)?;
+    let expected_minor_types = derive_minor_types(decl, &params, &motive_val, &EvalCtx::Pure)?;
     for (minor, expected_typ) in minors.iter().zip(expected_minor_types.iter()) {
         check(ctx, minor, expected_typ)?;
     }
 
     // 4. Result: motive(major).
-    let major_val = ctx.eval(major, &ctx.rho).map_err(|e| e.to_string())?;
-    motive_val.app(major_val).map_err(|e| e.to_string())
+    let major_val = ctx.eval(major, &ctx.rho)?;
+    motive_val.app(major_val).map_err(CheckError::from)
 }
 
 /// Type-check `match scrutinee { arm₁; arm₂; … }` against an expected
@@ -674,7 +673,7 @@ pub(super) fn check_match(
     scrutinee: &Exp,
     arms: &[crate::nbe::term::MatchArm],
     expected: &Val,
-) -> Result<(), String> {
+) -> Result<(), CheckError> {
     use std::collections::BTreeMap;
 
     let scrutinee_type = check_infer(ctx, scrutinee)?;
@@ -685,28 +684,28 @@ pub(super) fn check_match(
             indices,
         } => (decl.clone(), params.clone(), indices.clone()),
         other => {
-            return Err(format!(
+            return Err(CheckError::ExpectedInductive(format!(
                 "match scrutinee has type {:?}, expected an inductive type",
                 readback_val(ctx.rho.len(), other)
-            ));
+            )));
         }
     };
 
     let mut arms_by_ctor: BTreeMap<&str, &crate::nbe::term::MatchArm> = BTreeMap::new();
     for arm in arms {
         if arms_by_ctor.insert(arm.ctor_name.as_str(), arm).is_some() {
-            return Err(format!(
+            return Err(CheckError::IllFormed(format!(
                 "duplicate match arm for `{}.{}`",
                 decl.name, arm.ctor_name
-            ));
+            )));
         }
     }
     for ctor_name in arms_by_ctor.keys() {
         if !decl.ctors.iter().any(|c| &c.name == ctor_name) {
-            return Err(format!(
+            return Err(CheckError::IllFormed(format!(
                 "match arm references unknown constructor `{}.{ctor_name}`",
                 decl.name
-            ));
+            )));
         }
     }
 
@@ -716,14 +715,14 @@ pub(super) fn check_match(
         && !large_elim_admitted(&decl)
         && !is_propositional_in_ctx(ctx, expected)?
     {
-        return Err(format!(
+        return Err(CheckError::IllFormed(format!(
             "singleton-elim violation: match on `{}` (a Prop with {} \
              ctor{}, failing the singleton test) requires a Prop-valued \
              result type",
             decl.name,
             decl.ctors.len(),
             if decl.ctors.len() == 1 { "" } else { "s" }
-        ));
+        )));
     }
 
     for ctor in &decl.ctors {
@@ -741,13 +740,13 @@ pub(super) fn check_match(
         let (arg_specs, _ctor_result) = peel_ctor_telescope(&ctor.typ, decl.params.len());
 
         if arm.bindings.len() != arg_specs.len() {
-            return Err(format!(
+            return Err(CheckError::IllFormed(format!(
                 "match arm `{}.{}` expects {} bindings, got {}",
                 decl.name,
                 ctor.name,
                 arg_specs.len(),
                 arm.bindings.len()
-            ));
+            )));
         }
 
         // Build the arm's check context: start from the outer ctx,
@@ -771,7 +770,7 @@ pub(super) fn check_match(
         for (spec, binding) in arg_specs.iter().zip(arm.bindings.iter()) {
             match spec {
                 CtorArg::Value { patt, typ } => {
-                    let arg_typ_val = ctx.eval(typ, &arg_env).map_err(|e| e.to_string())?;
+                    let arg_typ_val = ctx.eval(typ, &arg_env)?;
                     let gen = gen_val(&arm_ctx.rho);
                     arm_ctx = arm_ctx.extend(binding, &arg_typ_val, &gen)?;
                     arg_env = arg_env.extend(patt.clone(), gen);
@@ -784,7 +783,7 @@ pub(super) fn check_match(
                     // on the destructured sub-value type-check at a
                     // strictly-smaller size — i.e. termination via
                     // pattern-match on a sized inductive.
-                    let upper_val = ctx.eval(upper, &arg_env).map_err(|e| e.to_string())?;
+                    let upper_val = ctx.eval(upper, &arg_env)?;
                     let new_level = arm_ctx.rho.len();
                     let gen = gen_val(&arm_ctx.rho);
                     arm_ctx = arm_ctx.extend(binding, &Val::SizeSort, &gen)?;
@@ -799,13 +798,13 @@ pub(super) fn check_match(
                                 .insert(new_level as u32, 1, *upper_level as u32);
                         }
                         _ => {
-                            return Err(format!(
+                            return Err(CheckError::IllFormed(format!(
                                 "match arm `{}.{}`: constructor's bounded size binder upper \
                                  must be rigid or ∞, got {:?}",
                                 decl.name,
                                 ctor.name,
                                 readback_val(ctx.rho.len(), &upper_val),
-                            ));
+                            )));
                         }
                     }
                     arg_env = arg_env.extend(patt.clone(), gen);
@@ -832,28 +831,26 @@ pub(super) fn check_match(
             // above; re-peel to get it.
             let (_arg_specs_recheck, ctor_result) =
                 peel_ctor_telescope(&ctor.typ, decl.params.len());
-            let actual_conclusion = arm_ctx
-                .eval(ctor_result, &arg_env)
-                .map_err(|e| e.to_string())?;
+            let actual_conclusion = arm_ctx.eval(ctor_result, &arg_env)?;
             let actual_indices: &[Val] = match &actual_conclusion {
                 Val::InductiveType { indices, .. } => indices.as_slice(),
                 _ => {
-                    return Err(format!(
+                    return Err(CheckError::IllFormed(format!(
                         "match arm `{}.{}`: ctor conclusion did not evaluate \
                          to an inductive type",
                         decl.name, ctor.name
-                    ));
+                    )));
                 }
             };
             if actual_indices.len() != scrutinee_indices.len() {
-                return Err(format!(
+                return Err(CheckError::IllFormed(format!(
                     "match arm `{}.{}`: index arity mismatch \
                      (ctor produces {}, scrutinee has {})",
                     decl.name,
                     ctor.name,
                     actual_indices.len(),
                     scrutinee_indices.len()
-                ));
+                )));
             }
             let mut mctx = crate::nbe::unify::MetaCtx::new();
             for (i, (actual, expected_idx)) in actual_indices
@@ -1221,8 +1218,9 @@ mod tests {
             }],
         });
         let mut ctx = CheckCtx::new(Rho::Nil, Vec::new());
-        let err =
-            check_type(&mut ctx, &Exp::Inductive(decl)).expect_err("non-uniform conclusion params");
+        let err = check_type(&mut ctx, &Exp::Inductive(decl))
+            .expect_err("non-uniform conclusion params")
+            .to_string();
         assert!(err.contains("parameters through unchanged"), "got: {err}");
     }
 
@@ -1324,7 +1322,7 @@ mod tests {
         };
         let bogus = Exp::InductiveCtor(nat.clone(), "two".to_string(), Vec::new());
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let err = check(&mut c, &bogus, &nat_ty).unwrap_err();
+        let err = check(&mut c, &bogus, &nat_ty).unwrap_err().to_string();
         assert!(err.contains("no constructor"), "unexpected: {err}");
     }
 
@@ -1352,7 +1350,7 @@ mod tests {
             indices: Vec::new(),
         };
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let err = check(&mut c, &true_exp, &nat_ty).unwrap_err();
+        let err = check(&mut c, &true_exp, &nat_ty).unwrap_err().to_string();
         assert!(err.contains("does not match"), "unexpected: {err}");
     }
 
@@ -1396,7 +1394,7 @@ mod tests {
         });
         let nil_exp = Exp::InductiveCtor(list_decl, "nil".to_string(), Vec::new());
         let mut c = CheckCtx::new(Rho::Nil, vec![]);
-        let err = check_infer(&mut c, &nil_exp).unwrap_err();
+        let err = check_infer(&mut c, &nil_exp).unwrap_err().to_string();
         assert!(err.contains("checking mode"), "unexpected: {err}");
     }
 
@@ -1448,7 +1446,7 @@ mod tests {
             minors: vec![Exp::InductiveType(nat_decl(), Vec::new())], // only 1 minor, needs 2
             major: Box::new(Exp::Var("n".to_string())),
         };
-        let err = check_infer(&mut c, &exp).unwrap_err();
+        let err = check_infer(&mut c, &exp).unwrap_err().to_string();
         assert!(err.contains("expected 2 minors"), "unexpected: {err}");
     }
 
@@ -1488,7 +1486,7 @@ mod tests {
         let gamma: Gamma = vec![("u".to_string(), Val::One)];
         let rho = Rho::Nil.extend(Patt::Var("u".to_string()), Val::Unit);
         let mut c = CheckCtx::new(rho, gamma);
-        let err = check_infer(&mut c, &exp).unwrap_err();
+        let err = check_infer(&mut c, &exp).unwrap_err().to_string();
         assert!(
             err.contains("expected an inductive type"),
             "unexpected: {err}"
@@ -1524,7 +1522,7 @@ mod tests {
             minors: vec![bool_ty.clone(), bool_ty],
             major: Box::new(Exp::Var("n".to_string())),
         };
-        let err = check_infer(&mut c, &exp).unwrap_err();
+        let err = check_infer(&mut c, &exp).unwrap_err().to_string();
         assert!(err.contains("declaration mismatch"), "unexpected: {err}");
     }
 
@@ -1618,7 +1616,7 @@ mod tests {
             params: vec![i_val],
             indices: Vec::new(),
         };
-        let err = check(&mut c, &bad, &ty).unwrap_err();
+        let err = check(&mut c, &bad, &ty).unwrap_err().to_string();
         assert!(
             err.contains("not strictly below"),
             "expected size-bound error, got: {err}"

@@ -17,7 +17,7 @@
 //! (`def_eq_at_type`), cumulativity/size-aware subtyping, and
 //! propositionality classification. Split from `check.rs`.
 
-use super::{check_infer, CheckCtx};
+use super::{check_infer, CheckCtx, CheckError};
 use crate::nbe::env::gen_val;
 use crate::nbe::readback::readback_val;
 use crate::nbe::term::{Exp, Patt};
@@ -27,7 +27,7 @@ use crate::nbe::val::Val;
 ///
 /// Port of `eqNf` from the reference: normalize both sides
 /// and compare syntactically.
-pub fn eq_nf(level: usize, v1: &Val, v2: &Val) -> Result<(), String> {
+pub fn eq_nf(level: usize, v1: &Val, v2: &Val) -> Result<(), CheckError> {
     // D49 §8 — ChainWitness values are opaque kernel-internal markers
     // that intentionally do not read back into surface syntax. Equality
     // on them is key-based: two witnesses with the same `WitnessKey`
@@ -42,18 +42,18 @@ pub fn eq_nf(level: usize, v1: &Val, v2: &Val) -> Result<(), String> {
             return if k1 == k2 {
                 Ok(())
             } else {
-                Err(format!(
+                Err(CheckError::TypeMismatch(format!(
                     "ChainWitness keys differ: {} vs {}",
                     k1.category.label(),
                     k2.category.label(),
-                ))
+                )))
             };
         }
         (Val::ChainWitness(k), _) | (_, Val::ChainWitness(k)) => {
-            return Err(format!(
+            return Err(CheckError::TypeMismatch(format!(
                 "ChainWitness vs non-witness value (witness category {})",
                 k.category.label(),
-            ));
+            )));
         }
         _ => {}
     }
@@ -62,7 +62,9 @@ pub fn eq_nf(level: usize, v1: &Val, v2: &Val) -> Result<(), String> {
     if e1 == e2 {
         Ok(())
     } else {
-        Err(format!("type mismatch: {e1:?} ≠ {e2:?}"))
+        Err(CheckError::TypeMismatch(format!(
+            "type mismatch: {e1:?} ≠ {e2:?}"
+        )))
     }
 }
 
@@ -158,7 +160,7 @@ pub(super) fn is_syntactically_propositional_type(typ: &Exp) -> bool {
 /// asks the kernel for its universe. The inference path covers the cases
 /// the fast-path misses (Pi-into-Prop, Sigma-of-Props, neutrals whose
 /// type reduces to Prop, etc.).
-pub fn def_eq_at_type(ctx: &mut CheckCtx, v1: &Val, v2: &Val, typ: &Val) -> Result<(), String> {
+pub fn def_eq_at_type(ctx: &mut CheckCtx, v1: &Val, v2: &Val, typ: &Val) -> Result<(), CheckError> {
     if is_propositional_in_ctx(ctx, typ)? {
         return Ok(());
     }
@@ -179,28 +181,28 @@ pub(super) fn infer_dependent_sort(
     a: &Exp,
     b: &Exp,
     impredicative: bool,
-) -> Result<Val, String> {
+) -> Result<Val, CheckError> {
     let a_sort = check_infer(ctx, a)?;
     let m = match a_sort {
         Val::Sort(m) => m,
         other => {
-            return Err(format!(
+            return Err(CheckError::ExpectedSort(format!(
                 "binder domain is not a sort: {:?}",
                 readback_val(ctx.rho.len(), &other)
-            ));
+            )));
         }
     };
-    let a_val = ctx.eval(a, &ctx.rho).map_err(|e| e.to_string())?;
+    let a_val = ctx.eval(a, &ctx.rho)?;
     let gen = gen_val(&ctx.rho);
     let mut inner = ctx.extend(patt, &a_val, &gen)?;
     let b_sort = check_infer(&mut inner, b)?;
     let n = match b_sort {
         Val::Sort(n) => n,
         other => {
-            return Err(format!(
+            return Err(CheckError::ExpectedSort(format!(
                 "binder codomain is not a sort: {:?}",
                 readback_val(inner.rho.len(), &other)
-            ));
+            )));
         }
     };
     if impredicative && n == 0 {
@@ -218,7 +220,7 @@ pub(super) fn infer_dependent_sort(
 /// its universe; (3) classify `Sort(0)` as propositional, anything else
 /// not. Per D46 §5.3, this is the type-inference path the spec calls
 /// for; cost is one inference per call, memoised by `CheckCtx::type_cache`.
-pub(super) fn is_propositional_in_ctx(ctx: &mut CheckCtx, typ: &Val) -> Result<bool, String> {
+pub(super) fn is_propositional_in_ctx(ctx: &mut CheckCtx, typ: &Val) -> Result<bool, CheckError> {
     if let Some(decided) = is_propositional_type_structural(typ) {
         return Ok(decided);
     }
@@ -256,7 +258,7 @@ fn is_propositional_type_structural(typ: &Val) -> Option<bool> {
 ///
 /// Calls [`subtype_of_with_hyps`] with an empty TSO — use this variant
 /// when you don't have bounded size hypotheses to bring to bear.
-pub fn subtype_of(level: usize, sub: &Val, super_: &Val) -> Result<(), String> {
+pub fn subtype_of(level: usize, sub: &Val, super_: &Val) -> Result<(), CheckError> {
     subtype_of_with_hyps(level, sub, super_, &crate::nbe::sized_rigid::Tso::new())
 }
 
@@ -286,16 +288,16 @@ pub fn subtype_of_with_hyps(
     sub: &Val,
     super_: &Val,
     tso: &crate::nbe::sized_rigid::Tso,
-) -> Result<(), String> {
+) -> Result<(), CheckError> {
     // Universe cumulativity: Sort(m) <: Sort(n) iff m <= n.
     // D46 §3.2 — Prop ⊆ Set ⊆ Type(1) ⊆ Type(2) ⊆ …
     if let (Val::Sort(m), Val::Sort(n)) = (sub, super_) {
         if m <= n {
             return Ok(());
         } else {
-            return Err(format!(
+            return Err(CheckError::TypeMismatch(format!(
                 "universe mismatch: Sort({m}) is not a subtype of Sort({n})"
-            ));
+            )));
         }
     }
     if let (
@@ -316,12 +318,12 @@ pub fn subtype_of_with_hyps(
                 let decl_param_ty = &d1.params[i].1;
                 if matches!(decl_param_ty, Exp::SizeSort) {
                     if !crate::nbe::sized::size_le_with_hyps(sub_p, sup_p, tso) {
-                        return Err(format!(
+                        return Err(CheckError::TypeMismatch(format!(
                             "size subtyping failed at param {i}: \
                              {:?} ≰ {:?}",
                             readback_val(level, sub_p),
                             readback_val(level, sup_p),
-                        ));
+                        )));
                     }
                 } else if matches!(decl_param_ty, Exp::Sort(0)) {
                     // Proof irrelevance (D46 §5): if the parameter's declared

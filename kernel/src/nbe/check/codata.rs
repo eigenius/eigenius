@@ -15,7 +15,7 @@
 //! Codata checking support: observation resolution (D11) and the
 //! guardedness check (D11 §3). Split from `check.rs`.
 
-use super::CheckCtx;
+use super::{CheckCtx, CheckError};
 use crate::nbe::env::Rho;
 use crate::nbe::eval::eval;
 use crate::nbe::term::{Exp, Patt};
@@ -44,7 +44,7 @@ use std::sync::Arc;
 pub(super) fn resolve_full_codata_decl(
     ctx: &CheckCtx,
     stub: &Arc<crate::nbe::term::CodataDecl>,
-) -> Result<Arc<crate::nbe::term::CodataDecl>, String> {
+) -> Result<Arc<crate::nbe::term::CodataDecl>, CheckError> {
     if !stub.observations.is_empty() {
         return Ok(stub.clone());
     }
@@ -70,26 +70,26 @@ pub(super) fn resolve_full_codata_decl(
                 match v {
                     Val::CodataType { decl, .. } => return Ok(decl),
                     Val::Codata(_, _) => {
-                        return Err(format!(
+                        return Err(CheckError::IllFormed(format!(
                             "codata `{}` resolved to the non-parameterised `Val::Codata` \
                              form — cannot be used as a stub target",
                             stub.name
-                        ));
+                        )));
                     }
                     _ => {
-                        return Err(format!(
+                        return Err(CheckError::IllFormed(format!(
                             "codata `{}` resolved to an unexpected Val form",
                             stub.name
-                        ));
+                        )));
                     }
                 }
             }
         }
     }
-    Err(format!(
+    Err(CheckError::IllFormed(format!(
         "cannot find codata decl with short_name `{}` in the layer chain",
         stub.name
-    ))
+    )))
 }
 
 /// Look up an observation by name on an applied codata type, returning
@@ -106,7 +106,7 @@ pub fn lookup_codata_observation(
     params: &[Val],
     obs_name: &str,
     level: usize,
-) -> Result<Val, String> {
+) -> Result<Val, CheckError> {
     let obs = decl
         .observations
         .iter()
@@ -122,7 +122,7 @@ pub fn lookup_codata_observation(
         env = env.extend(patt.clone(), val.clone());
     }
     let _ = level; // reserved for richer diagnostics in future
-    eval(&obs.typ, &env).map_err(|e| e.to_string())
+    eval(&obs.typ, &env).map_err(CheckError::from)
 }
 
 /// Collect the variable names bound by a pattern.
@@ -186,16 +186,19 @@ fn has_forbidden_head<'a>(
 /// for v1. See D11 §3.4 and [eigenius#16][1].
 ///
 /// [1]: https://github.com/eigenius/eigenius/issues/16
-pub fn check_guarded(exp: &Exp, forbidden: &std::collections::HashSet<&str>) -> Result<(), String> {
+pub fn check_guarded(
+    exp: &Exp,
+    forbidden: &std::collections::HashSet<&str>,
+) -> Result<(), CheckError> {
     match exp {
         Exp::Observe(inner, obs) => {
             if let Some(name) = has_forbidden_head(inner, forbidden) {
-                return Err(format!(
+                return Err(CheckError::IllFormed(format!(
                     "unguarded corecursive reference: '{name}' is observed at field '{obs}' \
                      inside its own definition — this would loop at evaluation time. \
                      Put the recursive call under a function application or inside \
                      another constructor so that each observation makes progress."
-                ));
+                )));
             }
             check_guarded(inner, forbidden)
         }
@@ -677,7 +680,9 @@ mod tests {
                 body: Exp::Unit,
             },
         ]);
-        let err = check_guarded(&body, &forbidden(&["bad"])).unwrap_err();
+        let err = check_guarded(&body, &forbidden(&["bad"]))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("unguarded"));
         assert!(err.contains("bad"));
     }
@@ -767,7 +772,7 @@ mod tests {
             Box::new(codata_typ),
             Box::new(body),
         );
-        let err = check_decl(&mut ctx(), &d).unwrap_err();
+        let err = check_decl(&mut ctx(), &d).unwrap_err().to_string();
         assert!(
             err.contains("unguarded"),
             "expected unguarded error, got: {err}"

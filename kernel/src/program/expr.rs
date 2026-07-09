@@ -1995,7 +1995,7 @@ mod tests {
         use crate::nbe::eval::eval;
         let typ_val = eval(&typ, &Rho::Nil).expect("eval type");
         let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], layer.clone());
-        let err = check(&mut ctx, &term, &typ_val).unwrap_err();
+        let err = check(&mut ctx, &term, &typ_val).unwrap_err().to_string();
         assert!(
             err.contains("non-exhaustive"),
             "expected non-exhaustive error, got: {err}"
