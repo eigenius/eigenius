@@ -78,7 +78,8 @@ pub struct Report {
     pub concepts: usize,
     /// `lexicon:LexicalEntry` entries emitted (one per concept surface form).
     pub entries: usize,
-    /// Additive `cat_n(C, mass)` entries emitted for mass concepts (RC-1 head-inheritance mass shim).
+    /// Additive `cat_n(C, mass)` entries emitted for mass concepts (countability by type-mass OR
+    /// count-vetoed head-inheritance; [`concept_is_mass`]).
     pub mass_entries: usize,
 }
 
@@ -148,26 +149,72 @@ fn concept_description(
 /// WordNet importer also consumes. Empty ⇒ no mass shim (count-only, the prior behaviour).
 pub type MassNouns = std::collections::BTreeSet<String>;
 
-/// UMLS semantic types that denote a **process / function / activity** — an uncountable event-noun
-/// concept (`methylation` is T044 Molecular Function; `apoptosis`/`silencing` are cell/genetic
-/// functions). A bare occurrence (`arises from methylation`) shifts to a mass NP, exactly as a bare
-/// English mass noun does. Using the TUI (the source's own "is this a process" signal) is precise —
-/// unlike a surface `-tion`/`-ing` suffix, it never over-masses a count concept that merely shares a
-/// suffix. T038–T046 = the Biologic/Physiologic/Organism/Mental/Organ/Cell/Molecular/Genetic/Pathologic
-/// Function block; T041 Mental Process; T067/T070 Phenomenon or Process.
-const PROCESS_FUNCTION_TUIS: &[&str] = &[
-    "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T067", "T070",
+/// UMLS semantic types that are **inherently mass (uncountable)** — mass *regardless of the
+/// preferred-name head* — by BRANCH of the Semantic Network tree (STN positions in `MRSTY.RRF`;
+/// `docs/notes/d63-countability-from-subsumption.md` §4a): the Substance subtree (A1.4.\*) and the
+/// Phenomenon/Process/Function/Dysfunction subtree (B2.\* core). This fires for concepts whose head is
+/// countable — `methylation` (T044) is mass though "methylation" is not in the uncountable list.
+/// (Diseases/neoplasms are deliberately NOT here — they reach mass via head-inheritance, which the
+/// [`COUNT_VETO_TUIS`] does not veto; see [`concept_is_mass`].)
+const MASS_DENOTING_TUIS: &[&str] = &[
+    // Substance (A1.4.*) — chemicals, nucleic acids, proteins, body substances, food.
+    "T031", "T103", "T104", "T109", "T114", "T116", "T120", "T121", "T122", "T123", "T125", "T126",
+    "T127", "T129", "T130", "T131", "T167", "T168", "T192", "T195", "T196", "T197",
+    // Phenomenon / Process / Function / Dysfunction (B2.* core).
+    "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T049", "T067", "T068",
+    "T069", "T070",
 ];
 
-/// **RC-1 mass shim.** A concept is mass iff EITHER (a) **head-inheritance** — its preferred name's
-/// HEAD (last word) is an uncountable noun ("microsatellite instability" is mass because "instability"
-/// is, so "MSI" inherits it) — OR (b) its **semantic type is a process/function** ([`PROCESS_FUNCTION_TUIS`],
-/// e.g. Molecular Function T044 for "methylation"): a process/activity concept is uncountable. Lets a
-/// bare occurrence (`MSI contributes to cancers`, `arises from methylation`) shift to a mass NP;
-/// a bare *singular count* noun has no such reading (`gene` bare → grammar-gap). Both signals are
-/// additive (the count `cat_n(C, num_any)` entry stays).
+/// UMLS semantic types that denote a **discrete COUNT entity**, for which head-inheritance's
+/// uncountable-head mass is a **false positive** and is VETOED — the Physical-Object non-substance
+/// branches (Organism A1.1.\*, Anatomical Structure A1.2.\* incl. Gene or Genome T028 / Cell T025,
+/// Manufactured Object A1.3.\*) plus Finding / Laboratory Result / Sign or Symptom (A2.2) and
+/// Experimental Model of Disease (T050). This is the subclass-hierarchy **precision veto**
+/// (`d63-countability-from-subsumption.md` §5, count-veto): it removes the head-string false positives
+/// — the `gENE`→"gene" collision (its concept "Gross Extranodal Extension" C5849123 is T033 Finding,
+/// head "extension") — **without** touching head-inheritance's coverage of diseases/neoplasms used as
+/// bare mass in scientific prose (`cause cancer`, `arise from Lynch syndrome`; T191/T047 are absent
+/// here so their head "cancer" still masses).
+const COUNT_VETO_TUIS: &[&str] = &[
+    // Organism (A1.1.*).
+    "T001", "T002", "T004", "T005", "T007", "T008", "T010", "T011", "T012", "T013", "T014", "T015",
+    "T016", "T194", "T204",
+    // Anatomical Structure (A1.2.*) — incl. Gene or Genome T028, Cell T025.
+    "T017", "T018", "T019", "T020", "T021", "T023", "T024", "T025", "T026", "T028", "T190",
+    // Manufactured Object (A1.3.*).
+    "T073", "T074", "T075", "T200", "T203",
+    // Finding / Laboratory Result / Sign or Symptom (A2.2) + Experimental Model of Disease.
+    "T033", "T034", "T184", "T050",
+];
+
+/// **Countability = type-mass OR gated head-inheritance (`docs/notes/d63-countability-from-subsumption.md`
+/// §5, count-veto).** A concept is mass iff EITHER
+/// - **(type-mass)** its semantic type is inherently mass ([`MASS_DENOTING_TUIS`]), which fires even
+///   when the preferred-name head is countable (`methylation` T044); OR
+/// - **(head-inheritance, VETOED)** the last word of its preferred name is uncountable AND its type is
+///   NOT a discrete count entity ([`COUNT_VETO_TUIS`]).
+///
+/// A mass concept gets an ADDITIVE `cat_n(C, mass)` entry (the count `cat_n(C, num_any)` stays). The
+/// subclass-hierarchy veto is what makes head-inheritance precise: it keeps its broad coverage —
+/// diseases/neoplasms are bare-mass in scientific prose (`cause cancer`, `arise from Lynch syndrome`,
+/// head "cancer") and reach mass through it — while removing the false positives on discrete count
+/// entities (`gene` T028; the junk atom `gENE` = "Gross Extranodal Extension", C5849123, T033 Finding →
+/// vetoed → no mass, so the `gENE`→"gene" collision is gone). A prior pure-TUI-subsumption version
+/// (no head-inheritance) regressed: it excluded T191/T047, dropping the mass of `cancer`/`Lynch
+/// syndrome` and gapping `cause Lynch syndrome` — the veto is the fix (§8 of the note).
 fn concept_is_mass(preferred_name: &str, tuis: &[String], mass: &MassNouns) -> bool {
-    let head_mass = preferred_name
+    let type_mass = tuis
+        .iter()
+        .any(|t| MASS_DENOTING_TUIS.contains(&t.as_str()));
+    let head_mass = head_is_uncountable(preferred_name, mass)
+        && !tuis.iter().any(|t| COUNT_VETO_TUIS.contains(&t.as_str()));
+    type_mass || head_mass
+}
+
+/// The head-inheritance signal: the last word of `preferred_name` (stripped of non-alphanumerics,
+/// lowercased) is in the uncountable-noun list. Gated by [`COUNT_VETO_TUIS`] in [`concept_is_mass`].
+fn head_is_uncountable(preferred_name: &str, mass: &MassNouns) -> bool {
+    preferred_name
         .split_whitespace()
         .last()
         .map(|w| {
@@ -175,11 +222,7 @@ fn concept_is_mass(preferred_name: &str, tuis: &[String], mass: &MassNouns) -> b
                 .to_lowercase()
         })
         .map(|head| mass.contains(&head))
-        .unwrap_or(false);
-    let process = tuis
-        .iter()
-        .any(|t| PROCESS_FUNCTION_TUIS.contains(&t.as_str()));
-    head_mass || process
+        .unwrap_or(false)
 }
 
 /// Emit one `lexicon:LexicalEntry` for `form` under `cat` / `sem_type`, IRI `umlscui:e_{cui}_{i}{suffix}`.
@@ -439,14 +482,16 @@ mod tests {
     /// An MSI-like concept: preferred head `instability` is uncountable → the concept + its abbreviation
     /// `MSI` are mass (C0920269, "Microsatellite Instability", a T047 phenomenon, no nomenclature symbol).
     fn msi_subset() -> Subset {
+        // MSI (C0920269) is really T049 Cell or Molecular Dysfunction (per MRSTY), a mass-denoting
+        // Phenomenon/Process branch type — so it is mass by semantic type, no head-inheritance needed.
         Subset {
             semantic_types: vec![SemanticType {
-                tui: "T047".to_string(),
-                name: "Disease or Syndrome".to_string(),
+                tui: "T049".to_string(),
+                name: "Cell or Molecular Dysfunction".to_string(),
             }],
             concepts: vec![Concept {
                 cui: "C0920269".to_string(),
-                tuis: vec!["T047".to_string()],
+                tuis: vec!["T049".to_string()],
                 preferred_name: "Microsatellite Instability".to_string(),
                 forms: vec!["MSI".to_string(), "Microsatellite Instability".to_string()],
                 definition: None,
@@ -456,12 +501,11 @@ mod tests {
     }
 
     #[test]
-    fn mass_concept_gets_additive_mass_entry_by_head_inheritance() {
-        // RC-1 (§4 Step 4): head `instability` ∈ the countability set ⇒ every form gets an ADDITIVE
-        // `cat_n(C, mass)` entry alongside its `num_any` one — so bare `MSI` shifts to a mass subject.
-        let mut mass = MassNouns::new();
-        mass.insert("instability".to_string());
-        let (doc, rep) = render_document(&msi_subset(), "2026AA", &mass);
+    fn mass_concept_is_mass_by_semantic_type_not_head() {
+        // Countability by subsumption: MSI (C0920269, T049 Cell or Molecular Dysfunction ∈
+        // MASS_DENOTING_TUIS) gets an ADDITIVE `cat_n(C, mass)` per form — bare `MSI` shifts to a mass
+        // subject — with an EMPTY countability set, proving the head-string heuristic is retired.
+        let (doc, rep) = render_document(&msi_subset(), "2026AA", &MassNouns::new());
         assert_eq!(rep.entries, 4, "2 forms × (count + mass)");
         assert_eq!(rep.mass_entries, 2);
         assert!(doc.contains("lexicon:cat_n(umlscui:C0920269, lexicon:num_any)"));
@@ -472,21 +516,81 @@ mod tests {
     }
 
     #[test]
-    fn count_head_concept_gets_no_mass_entry() {
-        // `Werner Syndrome` head `syndrome` is countable AND T047 is not a process/function type ⇒ no
-        // mass entry, even with a populated set.
-        let mut mass = MassNouns::new();
-        mass.insert("instability".to_string()); // present, but `syndrome` is not
-        let (doc, rep) = render_document(&werner_subset(), "2026AA", &mass);
+    fn count_entity_concept_gets_no_mass_entry() {
+        // `Werner Syndrome` (T047 Disease) is not inherently mass (not in MASS_DENOTING_TUIS) and its
+        // head `syndrome` is not uncountable → no mass. (T047 is NOT count-vetoed: a disease WITH an
+        // uncountable head — e.g. "…Cancer" — DOES mass via head-inheritance; see the regression guard.)
+        let (doc, rep) = render_document(&werner_subset(), "2026AA", &MassNouns::new());
         assert_eq!(rep.mass_entries, 0);
         assert!(!doc.contains("lexicon:mass"));
+    }
+
+    #[test]
+    fn count_veto_kills_head_inheritance_false_positive() {
+        // The reported failure: "Gross Extranodal Extension" (C5849123, T033 Finding) has the
+        // uncountable head "extension", so head-inheritance masses it and its acronym atom `gENE`
+        // collides with the surface `gene`. T033 Finding ∈ COUNT_VETO_TUIS → head-inheritance is
+        // VETOED → NO mass entry, even with "extension" in the countability set. The precision win.
+        let mut mass = MassNouns::new();
+        mass.insert("extension".to_string()); // head-inheritance WOULD fire — but the veto suppresses it.
+        let subset = Subset {
+            semantic_types: vec![SemanticType {
+                tui: "T033".to_string(),
+                name: "Finding".to_string(),
+            }],
+            concepts: vec![Concept {
+                cui: "C5849123".to_string(),
+                tuis: vec!["T033".to_string()],
+                preferred_name: "Gross Extranodal Extension".to_string(),
+                forms: vec!["gENE".to_string(), "Gross Extranodal Extension".to_string()],
+                definition: None,
+                symbol: None,
+            }],
+        };
+        let (doc, rep) = render_document(&subset, "2026AA", &mass);
+        assert_eq!(
+            rep.mass_entries, 0,
+            "T033 Finding is count-vetoed → no gENE mass form"
+        );
+        assert!(!doc.contains("lexicon:mass"));
+    }
+
+    #[test]
+    fn disease_neoplasm_stays_mass_via_head_inheritance() {
+        // REGRESSION GUARD (the pure-TUI version gapped `cause Lynch syndrome`): Lynch syndrome
+        // (C1333990, T191 Neoplastic Process) has preferred name "Hereditary Nonpolyposis Colorectal
+        // Cancer" — head "cancer" ∈ the uncountable list. T191 is NOT count-vetoed (diseases/neoplasms
+        // ARE bare-mass in scientific prose: `cause cancer`), so head-inheritance masses it → the bare
+        // object `cause Lynch syndrome` parses. This coverage is what the count-veto preserves.
+        let mut mass = MassNouns::new();
+        mass.insert("cancer".to_string());
+        let subset = Subset {
+            semantic_types: vec![SemanticType {
+                tui: "T191".to_string(),
+                name: "Neoplastic Process".to_string(),
+            }],
+            concepts: vec![Concept {
+                cui: "C1333990".to_string(),
+                tuis: vec!["T191".to_string()],
+                preferred_name: "Hereditary Nonpolyposis Colorectal Cancer".to_string(),
+                forms: vec!["Lynch Syndrome".to_string()],
+                definition: None,
+                symbol: None,
+            }],
+        };
+        let (doc, rep) = render_document(&subset, "2026AA", &mass);
+        assert_eq!(
+            rep.mass_entries, 1,
+            "T191 with uncountable head 'cancer' stays mass via head-inheritance"
+        );
+        assert!(doc.contains("lexicon:cat_n(umlscui:C1333990, lexicon:mass)"));
     }
 
     #[test]
     fn process_function_concept_is_mass_by_semantic_type() {
         // #2 (gap `arises from methylation`): `methylation` (C0025723, T044 Molecular Function) is an
         // uncountable process, but its head `methylation` is NOT in the countability list. The semantic
-        // type (T044 ∈ PROCESS_FUNCTION_TUIS) marks it mass anyway → an ADDITIVE `cat_n(C, mass)` entry,
+        // type (T044 ∈ MASS_DENOTING_TUIS) marks it mass anyway → an ADDITIVE `cat_n(C, mass)` entry,
         // so bare `arises from methylation` shifts to a mass NP. Empty countability set — the TUI alone
         // drives it.
         let subset = Subset {

@@ -541,7 +541,13 @@ subjects (`MSI`). The head-inheritance is **loose**: it over-generates `mass` re
 up a bogus `mass` from the junk atom `gENE` on "Gross Extranodal Extension", head "extension"). Every such
 extra reading multiplies through the chart. This is the **binding constraint on phases 3 AND 4** (§7).
 
-**Concrete tasks (the mass-shim precision follow-ups, tracked from Step 4):**
+**Concrete tasks (the mass-shim precision follow-ups, tracked from Step 4).** **SUPERSEDED by the structural
+fix — [d63-countability-from-subsumption.md](d63-countability-from-subsumption.md) (`2026-07-09`):** replace
+the loose lexical head-inheritance with **countability by `is_subclass_of`** over the shared `lexicon:Entity`
+lattice both importers already populate (UMLS mass-denoting TUIs; WN mass-denoting supersenses), with a
+curated per-lemma **override** for grammatical-vs-ontological divergences (`furniture`). This eliminates the
+head-string heuristic — and both patches below — by construction (`gene`'s TUI is a discrete gene type, so
+no `gENE`→"extension" collision). The two patches are kept here only as the *heuristic* alternative:
 1. **Strictly-uncountable-head test** — mark `mass` only when the head noun is uncountable in *all* its
    senses (not "some sense is uncountable"), killing the `extension`/`instability`-adjacent false positives.
 2. **Acronym ↔ domain-word collision filter** (user-endorsed) — drop a `mass` (or any) reading for an
