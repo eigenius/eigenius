@@ -162,7 +162,7 @@ cd "$REPO_ROOT"
 # Directory names pruned anywhere in the tree (name-based, not path-based,
 # so that any `target/` or `node_modules/` is excluded regardless of depth).
 PRUNE_DIR_NAMES=(
-  "target"          # all Cargo build dirs (workspace, orchestration/native, examples/wasm-*, etc.)
+  "target"          # all Cargo build dirs (workspace, orchestration/runtime-substrate-native, etc.)
   "node_modules"    # JS/TS dependencies
   ".git"
   ".claude"         # Claude Code project state
@@ -177,14 +177,13 @@ PRUNE_DIR_NAMES=(
 
 # Files always excluded by name (regardless of directory).
 EXCLUDED_FILES=(
-  "bindings.rs"     # cargo-component generated WIT bindings
 )
 
 is_excluded_file() {
   local name
   name="$(basename "$1")"
-  for x in "${EXCLUDED_FILES[@]}"; do
-    [[ "$name" == "$x" ]] && return 0
+  for x in "${EXCLUDED_FILES[@]:-}"; do
+    [[ -n "$x" && "$name" == "$x" ]] && return 0
   done
   return 1
 }

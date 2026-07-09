@@ -54,7 +54,6 @@ COPY Cargo.toml Cargo.lock ./
 COPY .cargo/ .cargo/
 COPY kernel/ kernel/
 COPY crates/ crates/
-COPY sdk/ sdk/
 COPY storage/ storage/
 COPY cli/ cli/
 COPY proto/ proto/
