@@ -365,14 +365,35 @@ The two levers are orthogonal and multiply (S5: 3 structural × 16 sense = 48):
 
 ## 8. Decision points (to resolve in-session before coding)
 
-- **D1 — the intersectivity criterion, as a typing check on the restrictor.** "Adjectives attach outside
-  the compound core" is meaning-preserving **only for strictly intersective, context-stable modifiers**
-  (§5). Implement the discriminator from Chatzikyriakidis & Luo's in-repo Coq (§5 table): classify the
-  restrictor `R` in `Σx:C. R(x)` — plain `C→Prop` (intersective → collapse) / CN-polymorphic (subsective →
-  no) / contains a `std_`/degree-standard subterm (gradable → screen) / sum-membership (privative → no) —
-  on our own oracle, **not** a hand-maintained adjective list. The gradable screen is the cheap first cut
-  and it already catches the corpus's real hazard (`attractive`). Enumerate the corpus's stacks and confirm
-  the classifier's verdict on each.
+- **D1 — the intersectivity criterion, as a typing check on the restrictor. ✅ IMPLEMENTED
+  (`2026-07-09`).** `ModifierClass` + `modifier_class(adj_sem) -> ModifierClass` in
+  [`kernel/src/dcg/category.rs`](../../kernel/src/dcg/category.rs) — the Chatzikyriakidis & Luo
+  discriminator (§5 table) run on our own terms, **not** a hand-maintained adjective list. It strips the
+  entity binder and classifies the restrictor by shape: **Gradable** if it mentions the degree machinery
+  (`measurements:gt`/`lt`, `deg_*`, `std_*`) — the cheap first cut that screens the corpus hazard
+  `attractive`; **Privative** if it eliminates a disjoint sum (`Case`/`Data`); **Subsective** if the head
+  class appears in it (`EigonClass` — the CN-polymorphic C&L `skilful`); **Intersective** if it is a clean
+  first-order predicate (plain `Entity→Prop`, possibly conjoined); else **Unknown** (fail-safe).
+  `is_collapsible()` = *Intersective only* — the NF (D3) may collapse nothing else. 7 unit tests cover each
+  class incl. the `And(intersective, gradable)` stack (gradable dominates). Pure/structural, no layer
+  lookup, behavior-neutral (not yet wired into the combine path — D3 consumes it).
+
+  **Corpus diagnostic (Derived, `2026-07-09`, `d1_modifier_class_over_corpus` + `LexicalIndex::
+  debug_modifier_classes`, over `wordnet-umls-all-2026-07-08`).** Ran the classifier over the v3 corpus's
+  *real* adjective entries (every WordNet sense). Verdicts correct: `attractive` → all 3 senses **Gradable**
+  (screened ✓); `colorectal`/`endometrial` → **Intersective** (relational, collapse-eligible ✓); `genetic`
+  → 3 Intersective (the "of genetics" pertainym senses) + 1 Gradable; `immune`/`specific` similarly mixed.
+  **Tally: Gradable 65, Intersective 8** — the importer marks ~89% of adjective *senses* gradable. Three
+  consequences: **(i)** D1's intersective-collapse route is **narrow on this corpus** — it fires only where
+  the reranker selects a relational sense (`genetic`→relational, `colorectal`); evaluatives (`attractive`,
+  `strong`, `novel`, `rare`) have no intersective sense and are always screened, so the residual is
+  dominated by (correctly-screened) gradables + compound bracketing, and the sense reranker does more here
+  than the NF. **(ii)** Coverage gap: morphology-derived adjectives (`synthetic-lethal`, `double-stranded`,
+  `microsatellite-stable`, `hypermutable`) aren't committed `LexicalEntry`s, so the diagnostic (committed
+  entries only) doesn't see them — `synthetic-lethal` is Gradable per the v3 parse (`gt(deg,std)` via head
+  `lethal`). **(iii)** Observation, separate from D1: `somatic`/`homologous` marked Gradable looks
+  semantically wrong (they are relational) — the importer's gradability heuristic (`convert.rs` `push_adj`)
+  over-marks; D1 faithfully reports the lexicon, so the fix (if any) is upstream in the importer.
 - **D2 — the collocation criterion is a *coverage policy*, not a lookup. MEASURED (§4), and it forces
   action.** Coverage is partial: `synthetic lethality` / `cell death` / `dna repair` are units, but the
   adjective form **`synthetic lethal` is absent** — so the NF alone gives S5 the wrong (all-adjective)

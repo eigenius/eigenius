@@ -676,6 +676,72 @@ fn d2_collocation_coverage() {
     }
 }
 
+/// D1 diagnostic (nominal-modification NF §8): run the `modifier_class` discriminator over the v3
+/// corpus's REAL adjective lexicon entries (per WordNet sense), confirming its verdict on actual data
+/// — `attractive` must screen as `Gradable`, classificatory adjectives (`genetic`/`somatic`/`immune`)
+/// must be `Intersective` (the only collapse-eligible class). Cap-only (no parsing/rerank needed —
+/// this seeds adjective leaves and classifies their sems). Run:
+///   cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       d1_modifier_class_over_corpus -- --ignored --nocapture
+#[test]
+#[ignore = "D1 diagnostic: modifier_class over the corpus's real adjectives; --ignored --nocapture"]
+fn d1_modifier_class_over_corpus() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    // The v3 corpus's attributive modifiers, grouped by the verdict expected of a correct D1:
+    let modifiers = [
+        // the §5 hazard + the hyphenated domain term (S5):
+        "attractive",
+        "synthetic-lethal",
+        // scalar / evaluative → expect Gradable (screened, not collapsed):
+        "greater",
+        "stronger",
+        "strong",
+        "rare",
+        "frequent",
+        "novel",
+        "promising",
+        "essential",
+        // classificatory → expect Intersective (collapse-eligible):
+        "genetic",
+        "somatic",
+        "germline",
+        "immune",
+        "homologous",
+        "colorectal",
+        "endometrial",
+        // hyphen state-compounds:
+        "double-stranded",
+        "microsatellite-stable",
+        // mixed / to observe:
+        "specific",
+        "deficient",
+        "hypermutable",
+        "independent",
+        "predictive",
+        "preferential",
+    ];
+    let mut tally: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for m in modifiers {
+        let rows = index.debug_modifier_classes(m, &lem);
+        if rows.is_empty() {
+            eprintln!("\n{m:?} — (no adjective entry seeded)");
+            continue;
+        }
+        eprintln!("\n{m:?} — {} adjective entries:", rows.len());
+        for (cat, sense, class) in &rows {
+            eprintln!("   {class:<12} sense={sense:<26} cat={cat}");
+            *tally.entry(class.clone()).or_default() += 1;
+        }
+    }
+    eprintln!("\n=== ModifierClass tally over all adjective entries ===");
+    for (class, n) in &tally {
+        eprintln!("  {class:<12} {n}");
+    }
+}
+
 /// D63 lexicon-augmentation §6a — VERIFY both grounding indexes over the RESEEDED snapshot:
 /// **(a)** the form `core:TextIndex` grounds the OOV surface `recq` → its UMLS concept C0084304
 /// (`augment_lexicon_backed`, the RecQ finding over the real atoms), and **(c)** the concept

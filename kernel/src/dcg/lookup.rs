@@ -690,6 +690,35 @@ impl LexicalIndex {
         out
     }
 
+    /// Diagnostic (D1, `docs/notes/d63-nominal-modification-normal-form.md` §8): for each **adjective**
+    /// entry resolved for `surface`, the [`super::category::ModifierClass`] its restrictor sem falls
+    /// into — so the D1 classifier's verdict can be confirmed against the corpus's *real* lexicon
+    /// (`attractive` → `Gradable`, a Boolean adjective → `Intersective`) rather than constructed sems.
+    /// Returns `(cat, sense, class)` per distinct adjective entry.
+    pub fn debug_modifier_classes(
+        &self,
+        surface: &str,
+        lemmatizer: &dyn Lemmatizer,
+    ) -> Vec<(String, String, String)> {
+        let mut out = Vec::new();
+        let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
+        for cand in self.candidate_lemmas(surface, lemmatizer) {
+            for e in self.scoped(self.entries_for(&cand), None) {
+                if !is_adjective_cat(e.item.cat()) {
+                    continue;
+                }
+                let cat = super::pretty_term(e.item.cat());
+                let sense = e.sense.clone().unwrap_or_default();
+                if !seen.insert((cat.clone(), sense.clone())) {
+                    continue;
+                }
+                let class = super::category::modifier_class(e.item.sem());
+                out.push((cat, sense, format!("{class:?}")));
+            }
+        }
+        out
+    }
+
     /// Apply the per-parse lexicon **scope** (D65 §4) to one form's resolved
     /// `(item, in_lexicon)` pairs, returning the surviving [`Item`]s with their
     /// leaf `cost.lexicon_order` stamped from the scope:
