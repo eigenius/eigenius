@@ -305,7 +305,7 @@ pub fn apply_witness_resolution(
         MergeError::WitnessTypeMismatch {
             transformation: handle.transformation.clone(),
             expected: format!("Π_:{class}. Π_:{class}. Π_:Option({class}). {class}"),
-            reason,
+            reason: reason.to_string(),
         }
     })?;
 

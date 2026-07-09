@@ -1682,7 +1682,7 @@ mod tests {
             "succ".to_string(),
             vec![Exp::Var("i".to_string()), zero],
         );
-        let err = check(&mut c, &bad, &ty).unwrap_err();
+        let err = check(&mut c, &bad, &ty).unwrap_err().to_string();
         assert!(
             err.contains("not strictly below"),
             "expected sized-bound error, got: {err}"

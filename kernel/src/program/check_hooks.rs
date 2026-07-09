@@ -19,7 +19,7 @@
 //! `docs/notes/nbe-reorganization-analysis.md`.
 
 use crate::layer::Layer;
-use crate::nbe::check::CheckHooks;
+use crate::nbe::check::{CheckError, CheckHooks};
 use crate::nbe::readback::readback_val;
 use crate::nbe::val::Val;
 use crate::ontology::iri::Iri;
@@ -31,8 +31,8 @@ use std::sync::Arc;
 pub struct DefaultCheckHooks;
 
 impl CheckHooks for DefaultCheckHooks {
-    fn resolve_class(&self, iri: &Iri, layer: &Arc<Layer>) -> Result<Val, String> {
-        crate::program::ground::resolve_class_type(iri, layer)
+    fn resolve_class(&self, iri: &Iri, layer: &Arc<Layer>) -> Result<Val, CheckError> {
+        crate::program::ground::resolve_class_type(iri, layer).map_err(CheckError::from)
     }
 
     fn synthesize_chain_witness(
@@ -40,7 +40,7 @@ impl CheckHooks for DefaultCheckHooks {
         expected_typ: &Val,
         level: usize,
         layer: Option<&Arc<Layer>>,
-    ) -> Result<Option<Val>, String> {
+    ) -> Result<Option<Val>, CheckError> {
         let (decl, indices) = match expected_typ {
             Val::InductiveType { decl, indices, .. } => (decl, indices),
             _ => return Ok(None),
@@ -54,20 +54,20 @@ impl CheckHooks for DefaultCheckHooks {
         // `core:string -> Prop -> Prop` (2 indices: iri, P). Mismatch
         // means the chain ontology drifted from the kernel's expectation.
         if indices.len() != 2 {
-            return Err(format!(
+            return Err(CheckError::IllFormed(format!(
                 "ChainWitness predicate `{}` expected 2 indices (iri, P), got {}",
                 decl.name,
                 indices.len()
-            ));
+            )));
         }
 
         let iri_str = match &indices[0] {
             Val::LitString(s) => s.clone(),
             other => {
-                return Err(format!(
+                return Err(CheckError::IllFormed(format!(
                     "ChainWitness predicate `{}` iri index must be LitString, got {other:?}",
                     decl.name
-                ));
+                )));
             }
         };
         let iri = Iri::parse(&iri_str)
