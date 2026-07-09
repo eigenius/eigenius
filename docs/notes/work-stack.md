@@ -9,28 +9,25 @@ any detour.
 
 ## Stack (top → bottom)
 
-### 1. ▲ ACTIVE — [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 2 of 4: parsing gaps**
+### 1. ▲ ACTIVE — [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity / search-scaling**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
-**OOV ✓ → parsing gaps (here) → ambiguity → performance.**
+**OOV ✓ → parsing gaps ✓ → ambiguity / search (here) → performance.**
 - **Phase 1 (OOV): CLOSED** — `missing-lexeme 0`, distinct OOV 0 (Stage-A augmentation grounds the page).
-- **Phase 2 (parsing gaps): ACTIVE.** Re-measure (`2026-07-06`, cnl-v2, `--umls-all`, `--no-llm`, 74 min):
-  62 units → **50 AMBIG, 12 grammar-gap, 0 missing, 0 encoded** — **81% close** (from 68% at Step-9).
-  Done: verb+PP frames, RC-1 (bare-UMLS subject), and **Step 5/5b/5c** (apposition + comma-list connective
-  inheritance + the coordination refactor to core-en's list-with-operator shape) — together **−8 gaps**.
-  **RC-2 comparatives — CLOSED (`2026-07-07`).** Degree (#8) + cardinality (#9) phrasal comparatives
-  ([d63-comparative-phrasal.md](d63-comparative-phrasal.md)); #8 **verified at scale** (C4, diagnostic
-  `verify_degree_comparative_at_scale` over the `2026-07-07-c3` snapshot) — `greater/more dependence/dependent
-  on` → identical `gt(deg_dep_rel(…))`, `more sensitive than` → 1-place; #9 `card` holds. **C3-precision**
-  (prep feature on `cat_pp_arg`; rejects `*dependent to`) added + unit-verified (`3e6c0d5`) and
-  **at-scale verified (`2026-07-07`, WordNet `--all` native load; `verify_governed_preposition_at_scale`)**:
-  the relational `deg_rel` reading appears with the governed prep (`on`) and is absent with the wrong one
-  (`to`) — precision on the forest, not on full-sentence closure (which `dependent`'s bare-measure/noun
-  readings defeat). Full WordNet+UMLS reseed (domain-entity #8) still blocked on the load OOM
-  ([reseed-oom-memory-investigation.md](reseed-oom-memory-investigation.md), on deck) — decoupled from this witness.
-  **Next: the next gap in the ordered 12-gap backlog** — see the note's roadmap table.
-- **Phases 3 (ambiguity) + 4 (performance): on deck** — one root cause, the **mass-shim over-generation**
-  (RC-1 head-inheritance is loose); see the on-deck entry below.
-**Exit-gate (phase 2):** re-measure → grammar-gap = 0 (every unit parses). Then phase 3 becomes the top.
+- **Phase 2 (parsing gaps): CLOSED — grammar-complete (`2026-07-08`).** The canonical config is
+  **reranked** (`--features use-llm` + `AnthropicSenseRanker`, snapshot `wordnet-umls-all-2026-07-08`); the
+  earlier `--no-llm` counts were cap-only and inflated. Under the reranker the grammar-gap count fell
+  **12 → 9 → 8 → 7 → 5**: reranker on (−3), static-rank widen fallback `7d9cda4` (−1), gap #1 bnp
+  compound-kind subject `970e9ae` (−1), #5 linking-verb `1cbeeda` + #2 UMLS process-mass `ab6a909` (−2).
+  **The 5 survivors (#3/#4/#7/#8/#9) are search-starvation, not grammar** — every construction parses in
+  isolation; the full sentence overruns the beam/cell budget. Grammar is complete for this page (§0 of the
+  note). Earlier RC-2 comparatives + s20 modal+coordinated-object CLOSED `2026-07-07`.
+- **Phase 3 (ambiguity) + Phase 4 (performance): ACTIVE — one lever, scale the search.** The 5 residual
+  parse-gaps, every closing unit AMBIG (0 encoded), and the perf outliers all trace to one root cause: the
+  **mass-shim over-generation / beam budget** (RC-1 head-inheritance is loose). The search-scaling lever
+  (§6 / §7 of the note; **D63 §8.7 / GH#97**) is the whole remaining backlog: an intermediate-cell beam +
+  tightening the mass shim should collapse the residual gaps, the ambiguity, and the parse time together.
+**Exit-gate (phase 3):** the 5 residual full sentences close under a scaled search AND closing units drop
+to a single clean reading (encoded > 0). Then phase 4 (perf) — same root cause — is the residual.
 
 ### 2. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
 The overall sequence that (1) is a detour from. Remaining once (1) pops, in order:
