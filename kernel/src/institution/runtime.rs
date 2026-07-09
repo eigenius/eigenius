@@ -51,7 +51,7 @@ use std::collections::BTreeMap;
 /// transaction per [D31 §6.3](../../docs/design/d31-external-institution-lifecycle.md#63-verdict-commit-semantics).
 ///
 /// Only external-runtime institutions populate the partial; in-process
-/// and WASM institutions return `partial_invocation: None` because
+/// institutions return `partial_invocation: None` because
 /// their dispatch happens entirely inside the kernel/host process and
 /// the kernel records its own trace via the program-level trace store
 /// rather than as a chain-committed `RuntimeInvocation`.
@@ -158,7 +158,7 @@ pub trait Institution: Send + Sync {
     /// optional substrate-captured `partial_invocation`. External-
     /// runtime institutions populate the partial so the kernel's
     /// commit pipeline can fold it into a full `RuntimeInvocation`
-    /// resource (D31 §6.3); in-process and WASM institutions return
+    /// resource (D31 §6.3); in-process institutions return
     /// `partial_invocation: None`.
     ///
     /// Default impl: return `NotImplemented`. Institutions whose

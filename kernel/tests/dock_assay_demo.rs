@@ -33,9 +33,8 @@
 //! - [`auto_on_load_fires_on_assay_prediction`] — Load-time dispatch
 //!   for an AutoOnLoad QueryClass (D14 §9.1).
 //!
-//! WASM packaging of the institutions and transformation is a follow-on;
-//! this test wires them as in-process Rust impls so the demo is
-//! self-contained and hermetic.
+//! This test wires the institutions and transformation as in-process
+//! Rust impls so the demo is self-contained and hermetic.
 
 use std::sync::Arc;
 use std::sync::Mutex;

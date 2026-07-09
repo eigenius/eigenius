@@ -20,22 +20,11 @@ members = [
     "crates/eigenius-r",
     "crates/eigenius-reasoning",
     "crates/eigenius-statistics",
-    "crates/wasm-runtime",
-    "sdk/wasm-sdk",
     "storage/tikv",
     "storage/rocksdb",
     "cli",
 ]
 exclude = [
-    "examples/wasm-cbor-echo",
-    "examples/wasm-arrhenius",
-    "examples/wasm-assay",
-    "examples/wasm-dock",
-    "examples/wasm-echo",
-    "examples/wasm-doc-validator",
-    "examples/wasm-http-shout",
-    "examples/wasm-read-query-probe",
-    "orchestration/native",
     "spikes/napi-rs-async",
 ]
 # `eigenius-lean-worker`'s build.rs (`crates/eigenius-lean-worker/build.rs`)
@@ -82,10 +71,6 @@ tonic-prost = "0.14"
 tonic-web = "0.14"
 prost = "0.14"
 uuid = { version = "1", features = ["v4", "serde"] }
-
-# WASM runtime
-wasmtime = { version = "45", features = ["component-model"] }
-eigenius-wasm-runtime = { path = "crates/wasm-runtime" }
 
 # Testing
 proptest = "1"

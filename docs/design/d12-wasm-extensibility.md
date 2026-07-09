@@ -2,7 +2,16 @@
 
 *Design document for the Eigenius project — April 2026*
 
-**Status:** Implemented. Kernel hosting of pure/read components landed
+> **Status: REMOVED (2026-07-08).** WASM extensibility was removed from
+> the project. WASM was one of three institution/component backends
+> (`RuntimeKind::Wasm | External | InProcess`) and carried the `wasmtime`
+> dependency, but no production ontology declared `runtime: wasm` — only
+> tests/demos exercised it. The institution framework and its other two
+> backends (external via the D31 runtime substrate; in-process Rust) are
+> unaffected. This document is retained as historical design record. See
+> `docs/notes/wasm-removal-analysis.md` for the teardown scope.
+
+**Status (historical):** Implemented. Kernel hosting of pure/read components landed
 in Phase 8.0; orchestrator hosting of IO components landed via
 [D12b](d12b-orchestrator-wasm-plan.md) (napi-rs + wasmtime). Decision #19
 below is resolved.

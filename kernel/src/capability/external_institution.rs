@@ -218,7 +218,7 @@ impl ExternalInstitution {
         };
 
         // Bridge sync trait method to the async gRPC client. Same
-        // pattern used by `RemoteComponent::execute` for WASM IO
+        // pattern used by `RemoteComponent::execute` for remote IO
         // components — `program::remote::RemoteComponent`.
         let client = self.client.clone();
         let response = tokio::task::block_in_place(|| {

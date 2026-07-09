@@ -15,10 +15,11 @@
 /**
  * CBOR ↔ Eigon-JSON bridge.
  *
- * The WASM side speaks Eigon-CBOR (kernel's `eigon_cbor` module, ciborium
- * under the hood). TS component handlers speak plain JS objects keyed by
- * IRI strings. cbor-x's default encoding round-trips these cleanly: a CBOR
- * map with text keys decodes to `Record<string, any>` and vice versa.
+ * The kernel speaks Eigon-CBOR (kernel's `eigon_cbor` module, ciborium
+ * under the hood) on the component-executor and runtime-substrate wire.
+ * TS component handlers speak plain JS objects keyed by IRI strings.
+ * cbor-x's default encoding round-trips these cleanly: a CBOR map with
+ * text keys decodes to `Record<string, any>` and vice versa.
  *
  * The kernel encoder sorts keys for deterministic encoding; cbor-x preserves
  * insertion order. That's fine — the decoder on both sides is order-agnostic

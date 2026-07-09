@@ -21,14 +21,14 @@
  *
  * Codec: Eigon-CBOR end-to-end. The JS objects this handler receives
  * (already decoded from the kernel's Eigon-CBOR ComponentRequest by
- * component_executor.ts) are re-encoded to CBOR via wasm/cbor.ts and
+ * component_executor.ts) are re-encoded to CBOR via codec/cbor.ts and
  * passed to the addon as Buffers. The addon decodes back to a Resource
  * and dispatches through SubstrateDispatcher → LanguageRuntime →
  * worker. The output is symmetric: addon returns Eigon-CBOR bytes; we
  * decode to a JS object before returning to the orchestrator.
  */
 
-import { decodeResource, encodeResource } from "../wasm/cbor.ts";
+import { decodeResource, encodeResource } from "../codec/cbor.ts";
 import type { RuntimeSubstrateAddon } from "../runtime/loadAddon.ts";
 import * as log from "../observability/mod.ts";
 import { operation } from "../observability/mod.ts";

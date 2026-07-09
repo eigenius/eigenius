@@ -12,17 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! WASM capability hosting via Wasmtime Component Model.
+//! Institution capability registration.
 //!
-//! Hosts pure/read WASM components in the kernel. IO WASM components are
-//! hosted by the orchestrator. Institution implementations follow the triadic-comorphism contract via [`wasm_institution`].
-//!
-//! See design document D12 (capability hosting) and D14 (institutions).
+//! Scans the layer chain for institution declarations and wires their
+//! backends into the runtime: in-process Rust institutions (registered
+//! at startup) and external institutions (dispatched over gRPC to the
+//! orchestrator substrate). See D14 (institutions).
 
 pub mod external_institution;
 pub mod registration;
-pub mod wasm_component;
-pub mod wasm_institution;
-
-#[cfg(test)]
-mod tests;

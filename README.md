@@ -48,7 +48,7 @@ open http://localhost:8080/notebooks/   # macOS; xdg-open on Linux
 claude mcp add --transport http eigenius http://localhost:8080/mcp
 ```
 
-The first build takes a few minutes (Rust + WASM components). Subsequent ups are fast. See [Docker Compose](#docker-compose) below for state inspection, logs, and `ANTHROPIC_API_KEY` setup, [MCP server](#mcp-server-for-llm-agents) for the agent surface, or [Getting Started](#getting-started) for a native-toolchain build.
+The first build takes a few minutes. Subsequent ups are fast. See [Docker Compose](#docker-compose) below for state inspection, logs, and `ANTHROPIC_API_KEY` setup, [MCP server](#mcp-server-for-llm-agents) for the agent surface, or [Getting Started](#getting-started) for a native-toolchain build.
 
 **What Eigenius gives you, today:**
 
@@ -58,7 +58,6 @@ The first build takes a few minutes (Rust + WASM components). Subsequent ups are
 - **Native dependent-type surface** — EigenTT carries an impredicative `Prop` universe with proof irrelevance, indexed inductive families with first-order pattern unification, and a chain-mirrored type fragment that lets axiom statements, propositions, and dependent motives round-trip as content-addressed chain artifacts. Authorable directly in ESL via `axiom`, indexed `data`, and `match … returning fun (i : T) => body`. ([D46](docs/design/d46-prop-universe-and-proof-irrelevance.md), [D47](docs/design/d47-chain-mirrored-eigentt-type-fragment.md), [D48](docs/design/d48-indexed-inductive-families.md))
 - **Typed program execution** with full reasoning traces, memoization, four epistemic categories enforced by the ontology, and an LLM dispatch surface (Anthropic via Vercel AI SDK, structured output via `CompleteJson`).
 - **Notebook, CLI, and TypeScript SDK** — author and run cells (ESL, EigenQL, TypeScript, programs, charts) in the browser; drive the kernel from the shell; embed it from any TS runtime via [`@eigenius/client`](clients/eigenius-ts/). ([D22](docs/design/d22-notebook-and-typescript-sdk.md))
-- **WASM extensibility** — untrusted capabilities and D14 institutions sandboxed via Wasmtime with fuel/memory limits.
 - **Runtime substrate** — heavy native libraries (SAT solvers, ODE integrators, theorem provers) hosted in sibling containers with content-addressed images and pinned environments, plus a generic `oci` tool runtime that runs any pinned containerized tool as an attested, replayable derivation with a kernel-tracked build recipe. ([D26](docs/design/d26-runtime-substrate.md), [D60](docs/design/d60-native-runtime-and-tracked-env-build.md))
 
 ## The notebook — start here
@@ -82,7 +81,7 @@ The same SDK that powers the notebook ([`@eigenius/client`](clients/eigenius-ts/
 
 Four task-first guides plus a consolidated bibliography, all grounded in the implementation:
 
-- **[Platform user guide](docs/guides/platform/README.md)** — eighteen chapters on operating the platform: installation, build, CLI reference, running locally, database management, the orchestrator, end-to-end demos, building WASM components and institutions, the runtime substrate (Julia v1) with per-institution slow-walks, deployment, troubleshooting, **the notebook UX**, **tags / branches / history**, **merge resolution**, **the TypeScript SDK**.
+- **[Platform user guide](docs/guides/platform/README.md)** — chapters on operating the platform: installation, build, CLI reference, running locally, database management, the orchestrator, end-to-end demos, the runtime substrate (Julia v1) with per-institution slow-walks, deployment, troubleshooting, **the notebook UX**, **tags / branches / history**, **merge resolution**, **the TypeScript SDK**.
 - **[ESL — Eigenius Surface Language](docs/guides/esl/README.md)** — eleven chapters on the declarative surface (`namespace`, `class`, `property`, `resource`, `data`, `codata`, `program`) and the ML-style expression sublanguage. Most important chapter: [chapter 6 — Resources, types, and the layer](docs/guides/esl/06-resources-types-and-the-layer.md), the bridge between the resource graph and the kernel's type theory.
 - **[EigenQL — query language](docs/guides/eigenql/README.md)** — twelve chapters on pattern matching, derived relations, expressions, `FIBER` institution dispatch (with `INTO`-pinned chain reinsertion), stratification, and the result-document format.
 - **[Formula language](docs/guides/formula/README.md)** — eight chapters on the chain-mirrored EigenTT fragment (`urn:eigenius:formulas:FormulaTerm`) shared by every numerical institution: Symbolics, IntervalArithmetic, Catalyst, DiffEq, JuMP-HiGHS. Covers the six-constructor inductive, Eigon-JSON encoding, operator catalog, the ESL `formula(...)` Pratt-parsed sublanguage, and identity-comorphism collapse across institutions.
@@ -114,18 +113,17 @@ The system can:
 - Track four epistemic categories: declared, observed, derived, verified
 - Record tree-structured reasoning traces with memoization and incremental execution
 - Validate epistemic base class requirements (DeclaredResource, DerivedResource, etc.)
-- Persist layers, traces, and WASM capabilities in RocksDB — survives kernel restart
+- Persist layers, traces, and institution registrations in RocksDB — survives kernel restart
 - Serve the kernel as a gRPC service (tonic) with streaming query results
 - Compile ESL (Eigenius Surface Language) to Eigon-JSON — all CLI commands accept `.esl` files
 - Register Grothendieck institutions with fiber reasoners and morphism validation
-- Run untrusted WASM capabilities sandboxed via Wasmtime (components and institutions)
 - Model coinductive types (codata/streams) and resumable tasks with checkpointing
 - Resolve ontology classes as kernel types on demand via the layer chain (Phase 10, D18)
 - Type-check inductive types with bounded binders for sized termination, plus self-referential parameterised codata for productivity by typing (Phase 11b, D19)
 - Use `Map` and `Reduce` as type-level primitives with structural-recursion termination (Phase 11a)
 - Declare institutions, export/import boundary formats, query classes, and triadic comorphisms as ontology resources committed to the layer chain (D14 §3–§5)
 - Fire `Decidable` `QueryClass`es at type-check time, returning a `Verdict` projected to the kernel's reduction (`Holds` → `Refl(v)`, `Fails` → failing neutral, `Undecidable` → passthrough) (D14 §9.2)
-- Auto-register WASM institutions from layer scan: any `Institution` resource with `runtime: wasm` + inline `wasm_binary` is hosted by the kernel without an explicit install step (D14 §3, registration code in `kernel/src/capability/registration.rs`)
+- Auto-register institutions from layer scan: any `Institution` resource with `runtime: external` (dispatched to the orchestrator substrate) or `runtime: in_process` (linked into the kernel binary) is wired into the dispatch index without an explicit install step (D14 §3, registration code in `kernel/src/capability/registration.rs`)
 - Dispatch qualified-name function calls through a single `InstitutionIndex` shared by ESL and EigenQL (D14 §9.5); ESL emits `Exp::NativeDecide` returning `Verdict`; EigenQL adds postfix `HOLDS` / `FAILS` / `UNDECIDABLE` to project to Boolean
 - Run cross-institution comorphism coercion inline inside FIBER param values (`param: comorphism_iri(source)`) — a four-step extract → transform → reify pipeline (D14 §9.3)
 - Reinsert comorphism reify outputs into the chain as first-class resources (D14 §9.3): ESL programs invoke comorphisms as qualified-name function calls (`comorphisms:foo(input)` lowers to `Exp::InstitutionInvoke`) with output committed at a deterministic content-hash IRI; EigenQL `FIBER ... AS ?var INTO "<iri>"` commits the response at a caller-named IRI
@@ -157,11 +155,10 @@ Everything in Eigenius is a **Resource** — classes, properties, data types, fo
 - **Program Model** — programs are typed expressions (Let, Apply, Lambda, Case, Map, Reduce, etc.) that map 1:1 to EigenTT terms. Type-checked via NbE (Normalization by Evaluation) with Eigon ontology types as ground types. IO components dispatched to the orchestrator via gRPC with trace recording and memoization.
 - **Epistemic Model** — four categories (declared, observed, derived, verified) enforced via base classes in the reflection ontology. Reasoning traces mirror the expression tree and serve as memoization cache.
 - **Grothendieck Institutions (D14)** — domain-specific reasoning systems contribute structured fibres to the knowledge graph. Each institution is *declared* as ontology resources (`Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`) committed to the layer chain, and *implemented* via the three-method `Institution` trait (`extract_typed` / `reify` / `query`). Comorphisms are triadic — source-side export + cross-institution EigenTT transformation + target-side import — with optional `exact: bool` Satisfaction-Condition annotation. The category-theoretic Grothendieck construction emerges from declared comorphisms; the kernel provides the dispatch and well-typedness machinery.
-- **WASM Extensibility** — untrusted capabilities run sandboxed via Wasmtime. Components and D14 institutions can be delivered as WASM modules with fuel/memory limits. WASM institutions targeting the `eigenius-institution-d14` WIT world auto-register from chain scan when their declaration carries `runtime: wasm` + `wasm_binary`. SDK builders for the five declaration shapes.
-- **Runtime Substrate (D26/D29/D31)** — the second extensibility surface, peer to WASM. Orchestrator-spawned sibling worker containers running full language ecosystems (Julia, R, Lean; Python and others tracked) communicate with the kernel via Eigon-CBOR over UDS. Four chain shapes drive the lifecycle: `RuntimePackageMirror` (auto-generated, content-addressed Julia source mirroring chain classes/inductives), `RuntimeEnvironment` (pinned image digest + runtime version + lockfile), `RuntimeMethodSignature` (typed input/output contracts), `Institution { runtime: external, requires_environment: ... }`. Long-lived per-image worker pools, mirror generator's closure walker discovers cross-institution classes from signature contracts. The right path when an institution wants to use a heavy native library (a SAT solver, an ODE integrator, a quantum-chemistry engine) that doesn't compile to WASM cleanly.
+- **Runtime Substrate (D26/D29/D31)** — the extensibility surface for out-of-process institutions. Orchestrator-spawned sibling worker containers running full language ecosystems (Julia, R, Lean; Python and others tracked) communicate with the kernel via Eigon-CBOR over UDS. Four chain shapes drive the lifecycle: `RuntimePackageMirror` (auto-generated, content-addressed Julia source mirroring chain classes/inductives), `RuntimeEnvironment` (pinned image digest + runtime version + lockfile), `RuntimeMethodSignature` (typed input/output contracts), `Institution { runtime: external, requires_environment: ... }`. Long-lived per-image worker pools, mirror generator's closure walker discovers cross-institution classes from signature contracts. The right path when an institution wants to use a heavy native library (a SAT solver, an ODE integrator, a quantum-chemistry engine).
 - **Generic OCI tool runtime (D60)** — a language-agnostic `oci` runtime that runs *any pinned containerized tool* as a one-shot Job: the substrate provisions inputs by `content_hash`, dispatches `RunRuntimeScript` to the tool in its `image_digest`-pinned image, and the tool returns its result as Eigon-CBOR; the kernel commits it under a `ProgramTrace → IsDerivedAs`, so a downstream reasoning certificate can `derived(result, P)` against it (the WRN wrapped-program pattern, no new institution). The image build goes through `eigenius env build --language oci` and emits a **kernel-tracked `runtime:BuildRecipe`** (base image, baked-artifact hashes, composed Dockerfile, build command, builder version) committed with the `RuntimeEnvironment` — so *how the image was built* is a chain-resident, content-verified fact, not an ad-hoc script. First consumer: the D57 schema.org generator lift — `eigenius run` converts the pinned schema.org vocabulary through the runtime and `concl_generator` discharges its conformance leg as a genuine **Derived** witness.
 - **Formula Language (D32)** — `urn:eigenius:formulas:FormulaTerm`, a chain-mirrored fragment of EigenTT lifted onto the chain as an `InductiveType` with six constructors (`Var`, `LitFloat`, `OpRef`, `App`, `Lam`, `Pi`). Lives in the kernel bootstrap layer alongside `core:`, `program:`, `reflection:`, `institution:`, `notebook:`. Every numerical institution consumes the same shape; comorphisms between FormulaTerm-speaking institutions collapse to identity. Operators carry on-chain `operator_signature` (`Pi`-spine), and the validator rank-checks every `App` spine against the operator's signature at commit. ESL `formula(...)` Pratt-parsed surface for authoring; tagged-dict Eigon-JSON for the wire form.
-- **Durable State** — `eigenius serve --db <path>` persists layers, traces, and WASM capabilities in RocksDB. Restart rebuilds running state; embedded ontologies seeded with SHA-256 manifest and drift-refusal.
+- **Durable State** — `eigenius serve --db <path>` persists layers, traces, and institution registrations in RocksDB. Restart rebuilds running state; embedded ontologies seeded with SHA-256 manifest and drift-refusal.
 - **Codata and Tasks** — coinductive types (codata/corecord/observation) for streams. Programs run as tracked tasks with checkpointing, positional trace keys, and startup resume sweep for crash recovery.
 
 </details>
@@ -385,7 +382,7 @@ kernel/          Rust kernel crate
   src/nbe/         EigenTT type theory: terms, values, eval, readback, type checker
   src/program/     Program model: expression parser, ground type resolution, executor
   src/esl/         ESL compiler: lexer, parser, compiler to Eigon-JSON (incl. `merge_comorphism`, `lambda`, `pi`)
-  src/capability/  WASM capability hosting, ComponentRegistry, WasmInstitution (D14), chain-scan auto-registration
+  src/capability/  Institution capability registration (external + in-process backends), chain-scan auto-registration
   src/institution/ D14 Institution trait, InstitutionIndex (chain-derived), InstitutionRuntime, AutoOnLoad dispatch
   src/runtime/     Runtime-substrate dispatch (D26 worker IPC, mirror-derived call routing)
   src/commit/      D41 commit pipeline: single-layer pipeline + multi-layer orchestrator, persister, hooks
@@ -397,28 +394,15 @@ kernel/          Rust kernel crate
   src/task/        Task model: TaskRecord, Checkpoint, resume sweep
   src/observability/  Tracing spans, RPC guards, operation labels
 storage/         Storage backend implementations
-  rocksdb/         RocksDB backend (durable layers, traces, branch refs, capabilities)
+  rocksdb/         RocksDB backend (durable layers, traces, branch refs, institution registrations)
   tikv/            TiKV backend (placeholder)
 crates/
-  wasm-runtime/            Wasmtime integration for WASM capability sandboxing
   runtime-substrate/       D26 substrate: worker spawning + UDS IPC + mirror generation
   eigenius-julia/          Julia worker host (spawns the Julia process, marshals FormulaTerm)
   eigenius-lean/           Lean 4 institution: orchestrator-facing authoring surface
   eigenius-lean-runtime/   Lean 4 image / Lake-package build driver (substrate side)
   eigenius-lean-worker/    In-process Lean re-checker via `nanoda_lib` (verification side, D28)
   eigenius-config/         Workspace configuration parsing
-sdk/
-  wasm-sdk/        Rust SDK for authoring WASM capabilities
-examples/        WASM capability examples (excluded from workspace, built with cargo-component)
-  wasm-cbor-echo/            CBOR echo component
-  wasm-doc-validator/        Document validation component
-  wasm-http-shout/           IO component with HTTP dispatch
-  wasm-read-query-probe/     Read-capability query probe
-  wasm-ordering-institution/ Ordering institution (D14 totality/finiteness predicates)
-  wasm-d14-echo/             Minimum-viable D14 institution (smoke test of WIT bindings)
-  wasm-d14-dock/             Dock institution for the M8 worked example
-  wasm-d14-assay/            Assay institution for the M8 worked example
-  wasm-d14-arrhenius/        Arrhenius transformation Component (the m of dock_to_assay)
 julia/           Julia v1 institutions + substrate host (D27)
   runtime-worker/    The Julia process the runtime-substrate spawns (FormulaTerm marshalling, RPC dispatch)
   common/            Shared helpers consumed by every Julia institution
@@ -449,14 +433,12 @@ clients/
   eigenius-ts/     `@eigenius/client` — TypeScript SDK that wraps the orchestrator's RPC surface
                    (incl. branch/tag/merge/preview/submit surfaces with witness-search-branches)
 proto/           gRPC protobuf definitions
-wit/             WIT world definitions for D14 WASM institutions + capability components
 orchestration/   Deno/TypeScript orchestration layer (LLM dispatch, MCP server, notebook static-file route)
   src/                       Orchestrator source
   runtime-substrate-native/  napi-rs addon embedding the Rust runtime substrate inside Deno
-  native/                    Native build outputs
   tests/                     Deno integration tests
 deploy/          Dockerfiles (kernel, orchestration) + Azure ContainerApps Bicep IaC
-demo/            End-to-end demo scripts (`run.sh`, `patent/run.sh`, `wasm/run.sh`,
+demo/            End-to-end demo scripts (`run.sh`, `patent/run.sh`,
                   `d41-commit-pipeline/run.sh`, …)
 docs/            Documentation
   design/          Design documents (D1–D41) + architecture-v0.3 + implementation plan
@@ -476,14 +458,14 @@ references/      Reference implementations consulted during development (e.g. `n
 
 The platform builds and runs on Linux (native or Windows with WSL 2)
 and macOS. The demo rig is a Rust kernel, a Deno orchestrator, and a
-CLI, all tied together by gRPC. Optional pieces (WASM examples, GitHub
-issue workflow, Docker-based deployment) add their own tools.
+CLI, all tied together by gRPC. Optional pieces (GitHub issue workflow,
+Docker-based deployment) add their own tools.
 
 **Core toolchain (required)**
 
 - Rust (stable, **1.95+** — matches `deploy/Dockerfile.kernel`; earlier
-  versions fail to build wasmtime 43 which the WASM runtime depends
-  on). Install via [rustup](https://rustup.rs).
+  versions may fail to build some workspace dependencies). Install via
+  [rustup](https://rustup.rs).
 - [Deno](https://deno.land) — orchestration layer (`orchestration/`).
 - System packages (Ubuntu / WSL 2):
   ```bash
@@ -498,17 +480,6 @@ issue workflow, Docker-based deployment) add their own tools.
   ```bash
   cargo install just
   ```
-
-**WASM examples (required for tests)**
-
-Needed to build the WASM fixtures under `examples/wasm-*` that kernel tests depend on via `include_bytes!`:
-
-```bash
-rustup target add wasm32-unknown-unknown
-cargo install cargo-component
-```
-
-Once installed, `just build` (or `just build-wasm`) builds all WASM examples and copies the fixtures into `kernel/tests/fixtures/`.
 
 **GitHub workflow (optional, recommended)**
 
@@ -564,15 +535,9 @@ while compiling inside WSL 2.
 ### Build and Test
 
 ```bash
-just build        # build workspace + WASM examples + copy test fixtures
+just build        # cargo build --workspace
 just test         # cargo test --workspace + deno test
 just check        # fmt + clippy + deno lint
-```
-
-`just build` runs `cargo component build` for each WASM example and copies the resulting `.wasm` files into `kernel/tests/fixtures/` before building the workspace. To rebuild only the WASM fixtures:
-
-```bash
-just build-wasm
 ```
 
 ### GPU acceleration for vector embeddings (optional)
@@ -854,12 +819,12 @@ system spec) and the **[Implementation Plan](docs/design/implementation-plan.md)
 | [D31: External Institution Lifecycle](docs/design/d31-external-institution-lifecycle.md) | `mirror create → env build → env create → institution install` lifecycle |
 | [D40: Chain-Mirrored Lean Expressions](docs/design/d40-chain-mirrored-lean-expressions.md) | `lean:LeanExpr` / `LeanLevel` / `LeanName` inductives for verifiable propositions |
 
-**WASM extensibility**
+**WASM extensibility (removed 2026-07-08)**
 
 | Document | Description |
 |----------|-------------|
-| [D12: WASM Extensibility](docs/design/d12-wasm-extensibility.md) | WASM module lifecycle, host imports, capability levels, fuel/memory limits |
-| [D12b: Orchestrator WASM Plan](docs/design/d12b-orchestrator-wasm-plan.md) | WASM dispatch model on the orchestrator side |
+| [D12: WASM Extensibility](docs/design/d12-wasm-extensibility.md) | Historical — WASM module lifecycle, host imports, capability levels, fuel/memory limits |
+| [D12b: Orchestrator WASM Plan](docs/design/d12b-orchestrator-wasm-plan.md) | Historical — WASM dispatch model on the orchestrator side |
 
 **Notebook, SDK, and workspace**
 

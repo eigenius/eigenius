@@ -299,8 +299,6 @@ pub const QUERY_HANDLER: &str = "urn:eigenius:institution:query_handler";
 pub const RUNTIME_KIND_CLASS: &str = "urn:eigenius:institution:RuntimeKind";
 /// `runtime` property on an Institution — IRI of the runtime kind.
 pub const RUNTIME: &str = "urn:eigenius:institution:runtime";
-/// WASM Component Model runtime.
-pub const RUNTIME_WASM: &str = "urn:eigenius:institution:runtimes:wasm";
 /// External service (gRPC, LSP, etc.) runtime.
 pub const RUNTIME_EXTERNAL: &str = "urn:eigenius:institution:runtimes:external";
 /// In-process Rust runtime (kernel-linked).

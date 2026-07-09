@@ -653,12 +653,6 @@ mod tests {
     /// Host stub — never invoked by `autoonload_dispatch`.
     struct UnusedHost;
     impl CommitHookHost for UnusedHost {
-        fn register_wasm_for_layer(
-            &self,
-            _layer: &Arc<Layer>,
-        ) -> Result<Vec<Resource>, Vec<ValidationError>> {
-            unreachable!()
-        }
         fn rebuild_institution_index(
             &self,
             _top_layer: &Arc<Layer>,

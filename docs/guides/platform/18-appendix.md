@@ -26,8 +26,6 @@ CLI commands also accept `--endpoint <url>` as an alternative to setting an env 
 | `target/debug/` | Workspace build artifacts (debug profile) |
 | `target/debug/eigenius` | The CLI binary |
 | `target/release/` | Workspace build artifacts (release profile) |
-| `examples/wasm-*/target/wasm32-unknown-unknown/debug/*.wasm` | WASM example binaries |
-| `kernel/tests/fixtures/*.wasm` | Test fixtures copied from WASM examples |
 | `~/.cache/deno/` | Deno-cached TypeScript dependencies |
 | `<rocksdb-path>/` (e.g. `/var/lib/eigenius`) | Persisted state when `serve --db` is used |
 | `/var/lib/eigenius/substrate-depot/` | Runtime-substrate depot path (chapter 11). Bind-mounted into the orchestrator at the *same* path so worker UDS sockets are reachable from both host and orchestrator container. |
@@ -67,7 +65,7 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 - [`kernel/src/server/`](../../../kernel/src/server/) — gRPC service definitions
 - [`kernel/src/bootstrap/`](../../../kernel/src/bootstrap/) — embedded ontology loader
 - [`kernel/src/storage/`](../../../kernel/src/storage/) — storage interface traits
-- [`kernel/src/capability/`](../../../kernel/src/capability/) — WASM capability hosting; `wasm_institution_d14.rs` is the host bridge for D14 institutions; `registration.rs` does chain-scan auto-registration
+- [`kernel/src/capability/`](../../../kernel/src/capability/) — institution capability registration; `registration.rs` does chain-scan auto-registration for external + in-process backends
 - [`kernel/src/institution/runtime.rs`](../../../kernel/src/institution/runtime.rs) — D14 `Institution` trait, `InstitutionRuntime`
 - [`kernel/src/institution/registry.rs`](../../../kernel/src/institution/registry.rs) — `InstitutionIndex` (derived from chain scan)
 
@@ -78,12 +76,6 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 - [`storage/tikv/`](../../../storage/tikv/) — TiKV backend (placeholder)
 - [`kernel/src/layer/index.rs`](../../../kernel/src/layer/index.rs) — per-layer triple index trait + in-memory impl (Phase 14h)
 - [`storage/rocksdb/src/triple_index.rs`](../../../storage/rocksdb/src/triple_index.rs) — RocksDB-backed triple index (Phase 14h)
-
-### WASM runtime and SDK
-
-- [`crates/wasm-runtime/`](../../../crates/wasm-runtime/) — Wasmtime integration, fuel/memory limits
-- [`sdk/wasm-sdk/`](../../../sdk/wasm-sdk/) — Rust SDK for authoring components and institutions
-- [`wit/eigenius-component.wit`](../../../wit/eigenius-component.wit) — WIT interface contracts
 
 ### Runtime substrate (chapter 11)
 
@@ -100,12 +92,8 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 
 ### Examples
 
-- [`examples/wasm-cbor-echo/`](../../../examples/wasm-cbor-echo/) — minimum viable component
-- [`examples/wasm-doc-validator/`](../../../examples/wasm-doc-validator/) — pure component with typed I/O
-- [`examples/wasm-read-query-probe/`](../../../examples/wasm-read-query-probe/) — read-capability component
-- [`examples/wasm-http-shout/`](../../../examples/wasm-http-shout/) — IO component dispatching `CompleteText`
-- [`examples/wasm-d14-echo/`](../../../examples/wasm-d14-echo/) — minimum-viable D14 institution (smoke test of the WIT bindings)
-- [`examples/wasm-d14-dock/`](../../../examples/wasm-d14-dock/), [`examples/wasm-d14-assay/`](../../../examples/wasm-d14-assay/), [`examples/wasm-d14-arrhenius/`](../../../examples/wasm-d14-arrhenius/) — the M8 worked example (dock institution + assay institution + Arrhenius transformation Component)
+WASM example components (`examples/wasm-*`) were removed on 2026-07-08 along
+with the rest of WASM extensibility.
 
 ### Orchestrator
 
@@ -113,13 +101,11 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 - [`orchestration/src/components/`](../../../orchestration/src/components/) — `CompleteText`, `CompleteJson`, registry
 - [`orchestration/src/llm/adapter.ts`](../../../orchestration/src/llm/adapter.ts) — Anthropic adapter
 - [`orchestration/src/mcp/server.ts`](../../../orchestration/src/mcp/server.ts) — MCP tool surface
-- [`orchestration/src/wasm/`](../../../orchestration/src/wasm/) — WASM addon hosting (IO components)
 
 ### Demo scripts
 
 - [`demo/run.sh`](../../../demo/run.sh) — basic document demo
 - [`demo/patent/run.sh`](../../../demo/patent/run.sh) — patent analysis pipeline
-- [`demo/wasm/run.sh`](../../../demo/wasm/run.sh) — WASM extensibility demo
 
 ### Deployment
 

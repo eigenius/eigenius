@@ -65,8 +65,7 @@ pub use crate::validation::{CommitWorkingSet, CommitWorkingSetPool};
 
 pub use backend_persister::BackendPersister;
 pub use hooks::{
-    rebuild_institution_index, register_wasm_components, CommitHookHost, DidDrainHook,
-    DidPersistHook, HookOutcome, NoopHost,
+    rebuild_institution_index, CommitHookHost, DidDrainHook, DidPersistHook, HookOutcome, NoopHost,
 };
 pub use orchestrator::{CommitOrchestrator, MAX_EMISSION_DEPTH};
 pub use outcome::{

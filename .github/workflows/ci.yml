@@ -24,9 +24,8 @@ jobs:
       # Reclaim ~30 GB on the GitHub-hosted runner by removing
       # pre-installed tooling the Rust workspace doesn't use (Android
       # SDK, .NET, Haskell, swap). The stacked footprint of the Lean
-      # toolchain + Rust+wasm toolchains + workspace target/ + five
-      # WASM example target/s otherwise overflows the runner's 80 GB
-      # disk. Run before checkout so the cleanup happens with no
+      # toolchain + workspace target/ otherwise overflows the runner's
+      # 80 GB disk. Run before checkout so the cleanup happens with no
       # contention from the workspace.
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
@@ -79,18 +78,12 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-          # cargo-component (installed below) ships its own wasm32-unknown-unknown
-          # / wasm32-wasip1 toolchain components on demand, but doing it here too
-          # lets the rust-cache step capture them.
-          targets: wasm32-unknown-unknown, wasm32-wasip1
 
       # Swatinem/rust-cache is the de-facto standard for Rust on GHA:
       # - splits the cache into deps (keyed on Cargo.lock) and workspace
       #   (keyed on source-only changes), so a Cargo.toml addition still
       #   hits the closest matching cache via restore-keys.
       # - prunes unused targets automatically; cache size stays bounded.
-      # - preserves ~/.cargo/bin so cargo-component (gated below) survives
-      #   across runs without a separate cache.
       # Drop-in replacement for the previous flat actions/cache step that
       # invalidated everything on any Cargo.toml change.
       - name: Cache cargo + target
@@ -98,84 +91,12 @@ jobs:
         with:
           # Bump this when the cache schema changes (rare).
           prefix-key: v1-rust
-          # Cache cargo-component too — it lives in ~/.cargo/bin.
-          cache-bin: true
-          # Cache the WASM example crates' build dirs alongside the main
-          # workspace target; their `cargo component build` outputs are
-          # what feeds the WASM fixtures cache below.
           workspaces: |
             .
-            examples/wasm-cbor-echo
-            examples/wasm-doc-validator
-            examples/wasm-d14-echo
-            examples/wasm-d14-dock
-            examples/wasm-d14-assay
-            examples/wasm-d14-arrhenius
-            examples/wasm-http-shout
-            examples/wasm-read-query-probe
             orchestration/runtime-substrate-native
 
       - name: Check formatting
         run: cargo fmt --all -- --check
-
-      # Build the WASM example components first — `kernel/src/capability/tests.rs`
-      # `include_bytes!`s the resulting `.wasm` files from
-      # `kernel/tests/fixtures/`. Both clippy (which compiles
-      # `--all-targets`, including test binaries) and `cargo test` need
-      # the fixtures present, so this has to come before either.
-      - name: Install cargo-component
-        # `cargo install` was the dominant cost of the pipeline (~12 min
-        # of recompilation on every run). The cargo cache step above
-        # restores `~/.cargo/bin/cargo-component` and the `.crates.toml`
-        # / `.crates2.json` metadata that lets cargo know it owns the
-        # binary; if those are intact AND match the pinned version
-        # range, skip the install entirely. Otherwise rebuild.
-        run: |
-          if command -v cargo-component >/dev/null \
-              && cargo-component --version 2>/dev/null | grep -q "cargo-component 0\.21\."; then
-            echo "cargo-component already installed: $(cargo-component --version)"
-          else
-            cargo install --locked --force cargo-component@^0.21
-          fi
-
-      # The WASM fixtures only change when their source trees change.
-      # Cache the built `.wasm` artifacts under `kernel/tests/fixtures/`
-      # keyed on a hash of every input that can affect the output:
-      # the example crate sources, the shared SDK they link against,
-      # the WIT bindings, and the cargo-component pin. Drops a ~5min
-      # `cargo component build` step on cache-hit runs.
-      - name: Cache WASM fixtures
-        id: wasm-fixtures-cache
-        uses: actions/cache@v4
-        with:
-          path: kernel/tests/fixtures
-          key: ${{ runner.os }}-wasm-fixtures-cc0.21-${{ hashFiles('examples/wasm-doc-validator/**', 'examples/wasm-d14-echo/**', 'examples/wasm-d14-dock/**', 'examples/wasm-d14-assay/**', 'examples/wasm-d14-arrhenius/**', 'sdk/wasm-sdk/**', 'wit/**') }}
-
-      - name: Build WASM fixtures
-        if: steps.wasm-fixtures-cache.outputs.cache-hit != 'true'
-        # Each example is its own workspace; build from inside the
-        # crate dir, then copy the artifact into the kernel's
-        # gitignored fixtures directory. After every copy, drop the
-        # example's `target/` — the WASM fixture cache covers the
-        # `.wasm` artifacts on subsequent runs, and the per-example
-        # build trees (~1 GB each) are not needed for the main
-        # workspace clippy + test runs that follow. Reclaiming ~5 GB
-        # here gives the rest of the job real headroom on the
-        # GitHub-hosted runner's disk.
-        run: |
-          set -euo pipefail
-          mkdir -p kernel/tests/fixtures
-          for ex in \
-              wasm-doc-validator \
-              wasm-d14-echo \
-              wasm-d14-dock \
-              wasm-d14-assay \
-              wasm-d14-arrhenius; do
-            (cd "examples/$ex" && cargo component build)
-            cp "examples/$ex/target/wasm32-unknown-unknown/debug/eigenius_${ex//-/_}.wasm" \
-               kernel/tests/fixtures/
-            rm -rf "examples/$ex/target"
-          done
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets

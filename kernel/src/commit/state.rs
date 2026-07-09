@@ -56,7 +56,7 @@ pub struct InstitutionContext<'a> {
     /// Shared dispatch index snapshot. `Arc` so phase / hook code can
     /// clone cheaply when they need to outlive the borrow.
     pub index: Arc<InstitutionIndex>,
-    /// Shared institution runtime (WASM components, gate registrations).
+    /// Shared institution runtime (backend dispatch, gate registrations).
     pub runtime: Arc<InstitutionRuntime>,
     /// Lifetime parameter pin: ensures the context can't outlive the
     /// orchestrator borrow that produced it.
@@ -85,9 +85,9 @@ pub struct CommitState<'a> {
     pub storage: LayerStorage,
     /// Persist seam. Phase `persist` is its only caller.
     pub persist: &'a dyn LayerPersister,
-    /// Host seam — used by `didPersist` hooks (today
-    /// `register_wasm_components`) to delegate kernel-side
-    /// registrations / index rebuilds back into `EigeniusService`.
+    /// Host seam — used by `didPersist` hooks (today the vector sweep)
+    /// to delegate kernel-side registrations / index rebuilds back into
+    /// `EigeniusService`.
     /// Threaded into the state by `PipelineConfig`; identical for
     /// every pipeline run within one orchestrator invocation. Phase D.
     pub host: &'a dyn CommitHookHost,

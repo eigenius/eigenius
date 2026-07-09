@@ -53,8 +53,6 @@ use crate::layer::resolve_typed_resources;
 /// `runtime` is recommended-but-not-required.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeKind {
-    /// WASM Component Model binary hosted via Wasmtime in the kernel.
-    Wasm,
     /// External service (gRPC, LSP, etc.).
     External,
     /// In-process Rust trait object linked into the kernel binary.
@@ -69,7 +67,7 @@ pub struct InstitutionEntry {
     pub runtime: Option<RuntimeKind>,
     /// IRI of the `RuntimeEnvironment` this institution dispatches
     /// into. Carried for `runtime: external` institutions (D31 §5);
-    /// `None` for WASM and in-process kinds. Resolved from the
+    /// `None` for the in-process kind. Resolved from the
     /// `requires_environment` property at index time.
     pub requires_environment: Option<Iri>,
 }
@@ -522,7 +520,6 @@ fn parse_institution(resource: &Resource) -> Result<InstitutionEntry, String> {
 
 fn parse_runtime_kind(s: &str) -> Result<RuntimeKind, String> {
     match s {
-        wk::RUNTIME_WASM => Ok(RuntimeKind::Wasm),
         wk::RUNTIME_EXTERNAL => Ok(RuntimeKind::External),
         wk::RUNTIME_IN_PROCESS => Ok(RuntimeKind::InProcess),
         other => Err(format!("unknown runtime IRI `{other}`")),
@@ -709,7 +706,7 @@ mod tests {
             "urn:eigenius:institution:institution_name",
             "Test Dock",
         );
-        set_str(&mut inst, wk::RUNTIME, wk::RUNTIME_WASM);
+        set_str(&mut inst, wk::RUNTIME, wk::RUNTIME_EXTERNAL);
         b.add_resource(inst).unwrap();
 
         let mut inst2 = Resource::new(iri("urn:eigenius:test:inst:assay"));
@@ -886,7 +883,7 @@ mod tests {
             .institution(&iri("urn:eigenius:test:inst:dock"))
             .unwrap();
         assert_eq!(dock.name, "Test Dock");
-        assert_eq!(dock.runtime, Some(RuntimeKind::Wasm));
+        assert_eq!(dock.runtime, Some(RuntimeKind::External));
         let assay = idx
             .institution(&iri("urn:eigenius:test:inst:assay"))
             .unwrap();
