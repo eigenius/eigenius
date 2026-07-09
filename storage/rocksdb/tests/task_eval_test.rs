@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! Phase 9b-iii.2 integration test: positional trace lookup with a
-//! TaskContext attached to EvalCtx::IO.
+//! TaskContext attached to the IO effect engine.
 //!
 //! Uses a counter-backed IO component to prove that:
 //! 1. Without a TaskContext, repeated calls with the same input hit
@@ -143,16 +143,17 @@ fn make_io_ctx(
     trace_store: Option<Arc<dyn TraceStore>>,
     task_context: Option<Arc<TaskContext>>,
 ) -> EvalCtx {
-    EvalCtx::IO {
-        layer,
+    let engine = eigenius_kernel::institution::eval_hooks::InstitutionEngine::for_io(
+        Arc::clone(&layer),
         registry,
         trace_store,
-        dispatched_traces: Arc::new(Mutex::new(Vec::new())),
-        produced_resources: Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(Vec::new())),
         task_context,
-        institution_index: None,
-        institution_runtime: None,
-    }
+        None,
+        None,
+    );
+    EvalCtx::effectful(Some(layer), Arc::new(engine))
 }
 
 #[test]

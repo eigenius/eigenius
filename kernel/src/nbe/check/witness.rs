@@ -17,7 +17,6 @@
 //! index. Split from `check.rs`.
 
 use super::CheckCtx;
-use crate::nbe::readback::readback_val;
 use crate::nbe::val::Val;
 
 /// Check the arguments of an inductive constructor application against
@@ -43,64 +42,6 @@ pub(super) fn try_synthesize_chain_witness(
     ctx: &CheckCtx,
     expected_typ: &Val,
 ) -> Result<Option<Val>, String> {
-    let (decl, indices) = match expected_typ {
-        Val::InductiveType { decl, indices, .. } => (decl, indices),
-        _ => return Ok(None),
-    };
-    let category = match chain_witness_category_for_short_name(&decl.name) {
-        Some(c) => c,
-        None => return Ok(None),
-    };
-
-    // The four ChainWitness predicates all have signature
-    // `core:string -> Prop -> Prop` (2 indices: iri, P). Mismatch
-    // means the chain ontology drifted from the kernel's expectation.
-    if indices.len() != 2 {
-        return Err(format!(
-            "ChainWitness predicate `{}` expected 2 indices (iri, P), got {}",
-            decl.name,
-            indices.len()
-        ));
-    }
-
-    let iri_str = match &indices[0] {
-        Val::LitString(s) => s.clone(),
-        other => {
-            return Err(format!(
-                "ChainWitness predicate `{}` iri index must be LitString, got {other:?}",
-                decl.name
-            ));
-        }
-    };
-    let iri = crate::ontology::iri::Iri::parse(&iri_str)
-        .map_err(|e| format!("ChainWitness `{}`: invalid iri `{iri_str}`: {e}", decl.name))?;
-
-    let prop_exp = readback_val(ctx.rho.len(), &indices[1]);
-
-    let layer = ctx.layer.as_ref().ok_or_else(|| {
-        format!(
-            "ChainWitness synthesis for `{}` requires a layer-attached CheckCtx; \
-             pure-mode contexts cannot admit chain witnesses",
-            decl.name
-        )
-    })?;
-
-    let witness_val = crate::layer::synthesize_chain_witness(layer, category, &iri, &prop_exp)?;
-    Ok(Some(witness_val))
-}
-
-/// Map an inductive's short name to its `WitnessCategory` if it is one
-/// of the four ChainWitness predicates. The IRIs themselves live under
-/// `urn:eigenius:reasoning:ChainWitness:Is*As`; the ESL compiler emits
-/// the local-part short name (`IsDeclaredAs`, etc.) onto the
-/// `InductiveDecl.name` slot, so the matching is by short name here.
-fn chain_witness_category_for_short_name(name: &str) -> Option<crate::witness::WitnessCategory> {
-    use crate::witness::WitnessCategory;
-    match name {
-        "IsDeclaredAs" => Some(WitnessCategory::Declared),
-        "IsObservedAs" => Some(WitnessCategory::Observed),
-        "IsDerivedAs" => Some(WitnessCategory::Derived),
-        "IsVerifiedAs" => Some(WitnessCategory::Verified),
-        _ => None,
-    }
+    ctx.hooks
+        .synthesize_chain_witness(expected_typ, ctx.rho.len(), ctx.layer.as_ref())
 }

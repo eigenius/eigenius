@@ -259,7 +259,7 @@ pub enum Exp {
     /// `EvalCtx::Pure` used at type-check time), the expression
     /// reduces to a passthrough neutral so the conversion checker can
     /// compare two `InstitutionInvoke`s structurally. Runtime callers
-    /// attach the index/runtime via `EvalCtx::IO` or `Check`.
+    /// attach the index/runtime via an effectful `EvalCtx` (the IO or check-time institution engine).
     ///
     /// [`InstitutionIndex`]: crate::institution::registry::InstitutionIndex
     InstitutionInvoke {

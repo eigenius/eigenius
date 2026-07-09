@@ -209,7 +209,7 @@ impl Checkpoint {
 
 /// The live evaluation context for an executing task.
 ///
-/// Threaded through `EvalCtx::IO` so the evaluator can route IO
+/// Threaded through the IO effect engine so the evaluator can route IO
 /// dispatches through per-task positional trace keys (D21 §3.2)
 /// instead of the cross-task content-address cache.
 ///

@@ -27,11 +27,10 @@
 //! node only by combining their children's — `Trace::Seq` when more
 //! than one child carries a trace. Pure subtrees collapse to `None`.
 
-use super::EvalCtx;
 use crate::nbe::term::Patt;
 use crate::nbe::val::Val;
 use crate::ontology::iri::Iri;
-use crate::program::trace::Trace;
+use crate::program::trace::{ComponentTrace, Trace};
 
 /// What one evaluation step reports to the trace being built.
 ///
@@ -56,10 +55,9 @@ pub(crate) trait Tracer {
     fn reduce(steps: Vec<Self::Node>) -> Self::Node;
     /// A taken case/match branch: scrutinee child, branch name, body child.
     fn case(scrutinee: Self::Node, branch: &str, body: Self::Node) -> Self::Node;
-    /// A component dispatch. `before_len` is the length of the IO
-    /// context's `dispatched_traces` sampled before the dispatch; the
-    /// node wraps the `ComponentTrace` the dispatch appended, if any.
-    fn component(ctx: &EvalCtx, before_len: usize) -> Self::Node;
+    /// A component dispatch. `trace` is the `ComponentTrace` the hook's
+    /// `dispatch_component` returned (if any) — the node wraps it.
+    fn component(trace: Option<ComponentTrace>) -> Self::Node;
     /// A comorphism dispatch (D14 §9.3): source child plus the
     /// target IRI/class read from the translated resource value.
     fn comorphism(comorphism_iri: &Iri, source: Self::Node, translated: &Val) -> Self::Node;
@@ -88,7 +86,7 @@ impl Tracer for NoTrace {
     #[inline(always)]
     fn case(_: Self::Node, _: &str, _: Self::Node) -> Self::Node {}
     #[inline(always)]
-    fn component(_: &EvalCtx, _: usize) -> Self::Node {}
+    fn component(_: Option<ComponentTrace>) -> Self::Node {}
     #[inline(always)]
     fn comorphism(_: &Iri, _: Self::Node, _: &Val) -> Self::Node {}
 }
@@ -170,17 +168,8 @@ impl Tracer for TreeTracer {
         })
     }
 
-    fn component(ctx: &EvalCtx, before_len: usize) -> Self::Node {
-        if let EvalCtx::IO {
-            dispatched_traces, ..
-        } = ctx
-        {
-            let traces = dispatched_traces.lock().unwrap();
-            if traces.len() > before_len {
-                return Some(Trace::Component(traces.last().unwrap().clone()));
-            }
-        }
-        None
+    fn component(trace: Option<ComponentTrace>) -> Self::Node {
+        trace.map(Trace::Component)
     }
 
     fn comorphism(comorphism_iri: &Iri, source: Self::Node, translated: &Val) -> Self::Node {

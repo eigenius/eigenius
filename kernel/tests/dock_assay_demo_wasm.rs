@@ -321,16 +321,17 @@ fn run_within_tolerance(
     let components = build_demo_components(&layer);
     let dispatched_traces = Arc::new(Mutex::new(Vec::new()));
 
-    let ctx = EvalCtx::IO {
-        layer: Arc::clone(&layer),
-        registry: components,
-        trace_store: None,
+    let engine = eigenius_kernel::institution::eval_hooks::InstitutionEngine::for_io(
+        Arc::clone(&layer),
+        components,
+        None,
         dispatched_traces,
-        produced_resources: Arc::new(Mutex::new(Vec::new())),
-        task_context: None,
-        institution_index: Some(index),
-        institution_runtime: Some(runtime),
-    };
+        Arc::new(Mutex::new(Vec::new())),
+        None,
+        Some(index),
+        Some(runtime),
+    );
+    let ctx = EvalCtx::effectful(Some(Arc::clone(&layer)), Arc::new(engine));
 
     let wrap_float = |f: f64| -> Exp {
         let mut r = Resource::new_embedded();

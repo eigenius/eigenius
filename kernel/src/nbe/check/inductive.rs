@@ -766,6 +766,7 @@ pub(super) fn check_match(
             size_tso: ctx.size_tso.clone(),
             institution_index: ctx.institution_index.clone(),
             institution_runtime: ctx.institution_runtime.clone(),
+            hooks: ctx.hooks.clone(),
         };
         for (spec, binding) in arg_specs.iter().zip(arm.bindings.iter()) {
             match spec {

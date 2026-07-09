@@ -102,16 +102,17 @@ pub fn execute_program_nbe_with_institutions(
     // commit at the run-boundary).
     let dispatched_traces = Arc::new(Mutex::new(Vec::new()));
     let produced_resources = Arc::new(Mutex::new(Vec::new()));
-    let ctx = EvalCtx::IO {
-        layer,
+    let engine = crate::institution::eval_hooks::InstitutionEngine::for_io(
+        Arc::clone(&layer),
         registry,
         trace_store,
-        dispatched_traces: Arc::clone(&dispatched_traces),
-        produced_resources: Arc::clone(&produced_resources),
+        Arc::clone(&dispatched_traces),
+        Arc::clone(&produced_resources),
         task_context,
         institution_index,
         institution_runtime,
-    };
+    );
+    let ctx = EvalCtx::effectful(Some(layer), Arc::new(engine));
 
     // Bind input as a Val::ResourceVal in the environment
     let rho = Rho::Nil.extend(
@@ -171,8 +172,11 @@ pub fn execute_program_nbe_with_institutions(
     // or re-push it.
     if output.id().is_none() && !output.properties().is_empty() {
         if let Some(prog_iri) = program.id() {
-            let iri =
-                crate::nbe::eval::deterministic_run_output_iri("program-output", prog_iri, &output);
+            let iri = crate::institution::eval_hooks::deterministic_run_output_iri(
+                "program-output",
+                prog_iri,
+                &output,
+            );
             output.set_id(Some(iri));
             produced.push(output.clone());
         }

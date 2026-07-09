@@ -29,6 +29,7 @@
 
 pub mod dispatch;
 pub mod error;
+pub mod eval_hooks;
 pub mod in_process_registry;
 pub mod marshal;
 pub mod registry;
