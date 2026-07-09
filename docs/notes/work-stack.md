@@ -31,19 +31,22 @@ Four-phase spine (user directive `2026-07-06`, worked in order — stop detourin
     ([d62-controlled-language-style-guide.md](d62-controlled-language-style-guide.md); `first-page-cnl-v3.txt`)
     collapsed S5 **144→48 candidates / 12→4 skeletons** (merged-kernel-confirmed). **Do this first on any
     corpus.**
-  - **(2) Sense** (×4–16 per skeleton) — the reranker/cap (built) + the mass-shim precision fixes
-    (RC-1 head-inheritance loose; §6 of the parse-gap note).
-  - **(3) Structural residual → the nominal-modification NF**, design note
-    [d63-nominal-modification-normal-form.md](d63-nominal-modification-normal-form.md). After lever 1 the
-    target is ~3× smaller (S5: the 4 residual skeletons — `[[DNA repair] processes]` bracketing + copula +
-    the gradable pair). Core move: extend the left-branching NF to forbid the adjective↔compound interleaving
-    (`parser.rs:818`); D1 = the C&L restrictor typing test (gradable `std_` screen). **Resolve D1/D3/D4 (§8)
-    before coding.**
-  Page-level (v3 reranked): 62 units → **0 ENCODED / 57 AMBIG / 5 GAP** — same as v2; lever 1 is
-  ambiguity/cost relief, not a gap/encoded change. (§6/§6a/§7 of
-  [d63-parse-gap-closure.md](d63-parse-gap-closure.md); **D63 §8.7 / GH#97**.)
-**Exit-gate (phase 3):** AMBIG → single ENCODED per unit — the NF collapses the structural skeletons AND
-the reranker collapses the sense product. Then phase 4 (perf) — same root cause — is the residual.
+  - **(2) Build-then-subsume (D3, `subsume_duplicates`, `lookup.rs`) — IMPLEMENTED `2026-07-09`.** Drops
+    closed readings that are definitionally-equal (NbE-normal `Exp` equality) to one already kept — Eisner
+    spurious ambiguity the forest previously kept as separate readings. Sound (never drops a distinct
+    reading), cheap. Chart: S1 `240→76`, S2 `150→69`, S5 `24→20`; battery green.
+  - **(3) Sense** — the reranker/cap (built) + the mass-shim precision fixes (RC-1 head-inheritance loose;
+    §6 of the parse-gap note).
+  - **(4) The nominal-modification NF §3.3 adjective rule** (D1 implemented as `modifier_class`; the
+    combine-time collapse un-built) — **NOT needed on this corpus**: S5's residual is copula × object-compound
+    (genuine), the adjective stack is identical across readings, so §3.3 would collapse nothing here (§8 D3
+    of the note). Valid for corpora with intersective-adjective-over-compound stacks.
+  **Page-level MILESTONE (v3 + D3, reranked, `2026-07-09`): 62 units → `ENCODED 2 / AMBIG 55 / GAP 5 / MISSING
+  0`** — first ENCODED units ever (`0→2`: the Lynch-syndrome + "MSI…may create vulnerabilities" sentences);
+  S5 `AMBIG×32→×8`, median AMBIG 28. Achieved by the stack (1)+(2)+(3), none alone. Same 5 gaps
+  (#3/#4/#7/#8/#9). (§6/§6a/§7 of [d63-parse-gap-closure.md](d63-parse-gap-closure.md); **D63 §8.7 / GH#97**.)
+**Exit-gate (phase 3):** AMBIG → single ENCODED per unit. **First crossed (2/62 ENCODED).** Remaining
+high-AMBIG units need more sense/structural collapse; the 5 gaps are search-limited (phase-4 search-scaling).
 
 ### 2. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
 The overall sequence that (1) is a detour from. Remaining once (1) pops, in order:

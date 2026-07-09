@@ -1449,6 +1449,7 @@ impl LexicalIndex {
                 forest_out.push(c);
             }
         }
+        Self::subsume_duplicates(&mut forest_out); // D3: collapse definitionally-equal readings
         forest_out.sort_by_key(|it| it.cost());
         forest_out.truncate(DEFAULT_FOREST_CAP);
         (forest_out, open)
@@ -2707,6 +2708,7 @@ impl LexicalIndex {
                 forest.push(c);
             }
         }
+        Self::subsume_duplicates(&mut forest); // D3: collapse definitionally-equal readings
 
         // RANK + CAP (D63 §8.7 Stage B): order each forest by ascending cost — the sum
         // of the parse's leaf `sense_rank`s — so the most-frequent-sense readings come
@@ -2745,6 +2747,28 @@ impl LexicalIndex {
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.layer));
         check(&mut ctx, &nf, &expected_val).ok()?;
         Some(Item::from_parts(it.cat().clone(), nf, it.prov(), it.cost()))
+    }
+
+    /// Build-then-subsume (D3, `docs/notes/d63-nominal-modification-normal-form.md` §8; Eisner 1996's
+    /// exact restricted-grammar fallback): drop a closed reading whose sem is **definitionally equal**
+    /// to one already kept. [`Self::reduced_felicitous`] / [`Self::classify_felicitous`] have already
+    /// normalized every sem to its NbE normal form, so equal *meaning* is now equal *structure* — this
+    /// collapses spurious ambiguity (different derivations, one reading) and, being an equality, **never
+    /// drops a distinct reading** (the rare luxury the typed kernel affords). Uses structural `Exp`
+    /// equality on the FULL IRIs — not the lossy [`super::pretty_term`], which shortens an IRI to its
+    /// local segment and could false-merge two distinct senses. O(n²) over the pre-cap forest, which the
+    /// felicity gate has already bounded to the classify-candidate count.
+    fn subsume_duplicates(forest: &mut Vec<Item>) {
+        let mut out: Vec<Item> = Vec::with_capacity(forest.len());
+        for it in forest.drain(..) {
+            if !out
+                .iter()
+                .any(|k| k.cat() == it.cat() && k.sem() == it.sem())
+            {
+                out.push(it);
+            }
+        }
+        *forest = out;
     }
 
     /// Classify a full-span candidate as a CLOSED felicitous parse or an OPEN one carrying

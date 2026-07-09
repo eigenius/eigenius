@@ -403,16 +403,49 @@ The two levers are orthogonal and multiply (S5: 3 structural × 16 sense = 48):
   for **grounding**, not parsing. Carry the §4 cautions for any collocation that must be *grounded*:
   coverage-bound ("cannot identify what is not in the lexicon"), and flat words-with-spaces listing is safe
   for rigid terms but risky for productive/discontinuous ones (Sag et al. 2002).
-- **D3 — mechanism: prefer Eisner's build-then-subsume (exact) over a blind syntactic block.** A hard
-  combine-time block (like `is_compound_refined`) risks dropping a genuine reading if D1/D2 are incomplete;
-  a `Cost` penalty preserves the reading below the beam (recoverable via widen) but doesn't fully kill the
-  enumeration. **The survey supplies a third, sound option: Eisner's restricted-grammar fallback — refuse to
-  build a constituent semantically equivalent to one already built.** With our *exact* oracle, equivalence
-  is decidable (NbE normal-form comparison), so this **never drops a reading** and still collapses the
-  duplicates. Prefer it; fall back to the hard guard only where the oracle-equivalence check is too costly.
-- **D4 — interaction with `Attrib` flat-Σ / the Eisner NF.** The pure-adjective forward chain is *already*
-  Eisner-normal (§2a); the extension to `is_compound_refined` must not disturb it, nor regress the flat
-  conjunction (`parser.rs:588`) or the pure-compound left-branching NF.
+- **D3 — mechanism: build-then-subsume. ✅ IMPLEMENTED (`2026-07-09`).** Eisner's exact restricted-grammar
+  fallback — refuse to keep a reading semantically equivalent to one already built — chosen over a hard
+  combine-time block (risks dropping a genuine reading) or a `Cost` penalty (doesn't kill the enumeration).
+  `LexicalIndex::subsume_duplicates` in [`kernel/src/dcg/lookup.rs`](../../kernel/src/dcg/lookup.rs) drops a
+  closed reading whose sem **structurally equals** one already kept, wired into both the packed and unpacked
+  forest collection before the sort/cap. `reduced_felicitous`/`classify_felicitous` already normalize every
+  sem to its NbE normal form, so equal *meaning* is equal *structure* — sound (never drops a distinct
+  reading), and cheap (the normal forms are already computed; no fresh NbE pass). Uses full-IRI structural
+  `Exp` equality, **not** the lossy `pretty_term` (which shortens an IRI to its local segment and could
+  false-merge distinct senses).
+
+  **Measured (Derived, `2026-07-09`, `analyze_chart_cells_first_five` over v3, merged kernel):** it collapses
+  large **derivational** duplication on the dense-lexicon units — S1 `closed×240 → ×76` (−68%), S2 `×150 →
+  ×69` (−54%), S4 `×8 → ×4`, S5 `×24 → ×20`; S3 unchanged (already distinct). The kernel battery (1605 lib
+  + closed-class semantic exact-count tests) stays green — no assertion changed, confirming soundness (the
+  removed readings were genuine duplicates). **This is the first structural ambiguity reduction that is not
+  lexicalization** — different derivations of the *same* meaning (Eisner's spurious ambiguity), which the
+  forest previously kept as separate readings (there was no sem dedup).
+
+  **Full-page authoritative measure (Derived, `2026-07-09`, v3 + D3, `--features use-llm`, merged kernel,
+  28.6 min): the first ENCODED units.** 62 units → **ENCODED 2, AMBIG 55, GRAMMAR-GAP 5, MISSING 0** — vs
+  v3-without-D3's `ENCODED 0 / AMBIG 57 / GAP 5`. **Two units reach a single clean reading** for the first
+  time in the whole arc: *"Germline mutations in the MMR genes MSH2, MSH6, PMS2 or MLH1 cause Lynch
+  syndrome."* and *"We hypothesized that MSI and MMR deficiency may create vulnerabilities."* Per-unit AMBIG
+  falls sharply under reranker + subsume: **S5 `AMBIG×32 → ×8`**, distribution now min 2 / median 28 / max
+  156. Same 5 gaps (#3/#4/#7/#8/#9), 0 missing; 169 handled `felicity_readback` panics. **So `ENCODED > 0`
+  (the phase-3 exit-gate) is first achieved by the stack lexicalize (v3) + build-then-subsume (D3) +
+  reranker — none of them alone.**
+
+  **NB — this does NOT implement §3.3's adjective-outside-compound collapse, and that rule is a *no-op* on
+  this corpus's residual.** Witnessed (`2026-07-09`, the 4 distinct v3 S5 sems): the adjective stack
+  `And(gt, gt)` is **identical across all 4** readings; the residual variation is copula predication
+  (`kind_of` vs `subclass_of`) × object-compound bracketing + one VP-shaped artifact — none of it the
+  adjective/compound interleaving §3.3 targets, and the 4 are definitionally *distinct* (so subsume keeps
+  all 4). So S5's residual is **genuine ambiguity** (copula + object-compound), reduced only by the sense
+  reranker + object-compound handling, not by an adjective NF. §3.3 stays valid for a corpus that has
+  intersective-adjective-over-compound stacks; this one does not.
+- **D4 — non-regression. ✅ CONFIRMED for what was built (`2026-07-09`).** The implemented D3
+  (build-then-subsume) operates on the *final normalized readings*, not the combine rules — it does **not**
+  touch `is_compound_refined`, the `Attrib` flat-Σ (`parser.rs:588`), the Eisner-normal pure-adjective
+  chain (§2a), or the pure-compound left-branching NF. The full kernel battery (1605 lib + closed-class
+  semantic + integration) is green, so none regressed. *(If §3.3's `is_compound_refined` extension is ever
+  built — not needed on this corpus, see D3 — this non-regression check applies to it.)*
 
 ## 9. Verification plan
 
