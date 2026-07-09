@@ -197,7 +197,6 @@ fn cascade_for_resolution(
         MergeResolution::Rename {
             side,
             old_iri,
-            new_iri: _,
             ..
         } => cascade_for_rename(span, *side, old_iri, topology, backend),
         MergeResolution::SchemaQuotient { conflict, quotient } => {
