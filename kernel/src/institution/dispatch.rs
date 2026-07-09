@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D14 AutoOnLoad dispatch (D14 §9.1).
+//! AutoOnLoad institution dispatch (D14 §9.1).
 //!
 //! For each newly committed resource whose class has at least one
 //! `QueryClass` with `dispatch_role` including `AutoOnLoad`, run the

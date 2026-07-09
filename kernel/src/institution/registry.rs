@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D14 derived institution registry.
+//! derived institution registry.
 //!
 //! [`InstitutionIndex`] is built by scanning the layer chain for
-//! resources of the D14 institution-vocabulary classes — `Institution`,
+//! resources of the institution-vocabulary classes — `Institution`,
 //! `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism` — and
 //! collecting them into typed dispatch tables. The registry is a *pure
 //! derived index*: there is no parallel source of truth in code.
 //! Phase 9a rehydration, Load-time commit, and bootstrap all rebuild
 //! the index from whatever the chain currently contains.
 //!
-//! M2 of the D14 implementation plan — pure indexing, no dispatch yet.
+//! M2 of the implementation plan — pure indexing, no dispatch yet.
 //! M3 will plug the index into the kernel's evaluator paths.
 
 use crate::layer::Layer;
@@ -148,7 +148,7 @@ pub enum ProcedureKind {
 
 // ─── The index ─────────────────────────────────────────────────────────
 
-/// Read-only derived index of D14 institution declarations.
+/// Read-only derived index of institution declarations.
 ///
 /// Rebuilt on bootstrap, on Phase 9a rehydration, and on every Load
 /// commit. The index does not own dispatch — M3 wires it into the

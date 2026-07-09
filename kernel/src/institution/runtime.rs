@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D14 institution runtime — the trait an institution implements and
+//! institution runtime — the trait an institution implements and
 //! the registry the kernel dispatches through.
 //!
 //! [`Institution`] is the minimal trait surface from D14 §8: two
@@ -26,7 +26,7 @@
 //! institution IRI*, then this runtime to dispatch the call to the
 //! actual implementation.
 //!
-//! M3 of the D14 plan: trait + runtime + tests, no dispatch sites yet.
+//! M3 of the implementation plan: trait + runtime + tests, no dispatch sites yet.
 //! M5–M7 wire `Exp::InstitutionInvoke`, `Exp::NativeDecide`, and
 //! AutoOnLoad Load handling onto this surface.
 

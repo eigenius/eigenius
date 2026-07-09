@@ -54,7 +54,7 @@ pub fn execute_program_nbe(
     registry: Arc<ComponentRegistry>,
     trace_store: Option<Arc<dyn TraceStore>>,
 ) -> Result<NbeExecutionResult, ProgramError> {
-    execute_program_nbe_with_institutions_d14(
+    execute_program_nbe_with_institutions(
         program,
         input,
         layer,
@@ -66,8 +66,7 @@ pub fn execute_program_nbe(
     )
 }
 
-/// Execute a program resource via NbE in IO mode with the D14
-/// institution index + runtime attached so `Exp::InstitutionInvoke`
+/// Execute a program resource via NbE in IO mode with the institution index + runtime attached so `Exp::InstitutionInvoke`
 /// and `Exp::NativeDecide` dispatch through the four-step pipeline /
 /// Decidable QueryClass mechanism (D14 §9).
 ///
@@ -76,7 +75,7 @@ pub fn execute_program_nbe(
 /// crash (D21 §3.2). When `None`, the evaluator runs without task
 /// tracking (type-checker, ad-hoc eval, pre-task callers).
 #[allow(clippy::too_many_arguments)]
-pub fn execute_program_nbe_with_institutions_d14(
+pub fn execute_program_nbe_with_institutions(
     program: &Resource,
     input: &Resource,
     layer: Arc<Layer>,

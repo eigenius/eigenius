@@ -16,7 +16,7 @@
 //! (Phase 20a.1).
 //!
 //! The `RuntimeKind::InProcess` variant has been parsed from chain
-//! resources since D14 ([`crate::institution::registry`]) but had no
+//! resources for institutions ([`crate::institution::registry`]) but had no
 //! registration path until Phase 20a — only `Wasm` (via
 //! [`crate::capability::registration::build_wasm_institution_runtime`])
 //! and `External` (via

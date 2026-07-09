@@ -15,8 +15,7 @@
 //! WASM capability hosting via Wasmtime Component Model.
 //!
 //! Hosts pure/read WASM components in the kernel. IO WASM components are
-//! hosted by the orchestrator. Institution implementations follow the D14
-//! triadic-comorphism contract via [`wasm_institution`].
+//! hosted by the orchestrator. Institution implementations follow the triadic-comorphism contract via [`wasm_institution`].
 //!
 //! See design document D12 (capability hosting) and D14 (institutions).
 

@@ -15,7 +15,7 @@
 //! Dock institution for the D14 worked example (D14 §5.1).
 //!
 //! Source side of the dock→assay comorphism. Targets the
-//! `eigenius-institution-d14` WIT world with one boundary export
+//! `eigenius-institution` WIT world with one boundary export
 //! (`extract_typed`) implementing the `ef_dock_to_dg` ExportFormat
 //! procedure: read a `DockingResult` resource and extract its
 //! `delta_g` (kcal/mol) as a Float-typed payload.
@@ -28,12 +28,12 @@ use eigenius_wasm_sdk::{Resource, Value};
 
 wit_bindgen::generate!({
     path: "../../wit",
-    world: "eigenius-institution-d14",
+    world: "eigenius-institution-realisation",
 });
 
-const DELTA_G_PROP: &str = "urn:eigenius:demo:d14:delta_g";
+const DELTA_G_PROP: &str = "urn:eigenius:demo:institutions:delta_g";
 const VALUE_PROP: &str = "urn:eigenius:core:value";
-const EXTRACT_DG_PROC: &str = "urn:eigenius:demo:d14:proc:extract_dg";
+const EXTRACT_DG_PROC: &str = "urn:eigenius:demo:institutions:proc:extract_dg";
 
 struct DockInstitution;
 

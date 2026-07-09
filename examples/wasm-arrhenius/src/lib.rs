@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Arrhenius transformation Component for the D14 worked example
+//! Arrhenius transformation Component for the institution-realisation worked example
 //! (D14 §5.1).
 //!
 //! Pure scalar transformation Float → Float — the middle of the
@@ -32,7 +32,7 @@ wit_bindgen::generate!({
     world: "eigenius-component",
 });
 
-const COMPONENT_IRI: &str = "urn:eigenius:demo:d14:cm_arrhenius";
+const COMPONENT_IRI: &str = "urn:eigenius:demo:institutions:cm_arrhenius";
 const VALUE_PROP: &str = "urn:eigenius:core:value";
 
 const RT_KCAL_PER_MOL: f64 = 0.616; // R·T at ~310 K, in kcal/mol

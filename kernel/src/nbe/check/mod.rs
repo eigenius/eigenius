@@ -72,13 +72,13 @@ pub struct CheckCtx {
     /// Consulted by [`subtype_of`] and any direct size-comparison
     /// site via [`crate::nbe::sized::size_le_with_hyps`].
     pub size_tso: crate::nbe::sized_rigid::Tso,
-    /// D14 institution index — derived view of the layer chain. When
+    /// institution index — derived view of the layer chain. When
     /// attached together with `institution_runtime`,
     /// `Constraint::Institution` predicates dispatch through
-    /// `try_d14_decide` (D14 §9.2). Without these, constraints stay
+    /// `try_institution_decide` (D14 §9.2). Without these, constraints stay
     /// as passthrough neutrals — what `EvalCtx::Pure` does anyway.
     pub institution_index: Option<Arc<crate::institution::registry::InstitutionIndex>>,
-    /// D14 institution runtime — registry of `Institution` trait
+    /// institution runtime — registry of `Institution` trait
     /// objects keyed by institution IRI. See `institution_index`.
     pub institution_runtime: Option<Arc<crate::institution::runtime::InstitutionRuntime>>,
 }
@@ -110,10 +110,10 @@ impl CheckCtx {
         }
     }
 
-    /// Attach a D14 institution index and runtime for check-time
+    /// Attach a institution index and runtime for check-time
     /// dispatch of `Constraint::Institution` predicates through
-    /// `try_d14_decide` (D14 §9.2).
-    pub fn with_institutions_d14(
+    /// `try_institution_decide` (D14 §9.2).
+    pub fn with_institutions(
         mut self,
         index: Arc<crate::institution::registry::InstitutionIndex>,
         runtime: Arc<crate::institution::runtime::InstitutionRuntime>,
@@ -126,7 +126,7 @@ impl CheckCtx {
     /// Produce an [`EvalCtx`] suitable for evaluating expressions
     /// under this check context.
     ///
-    /// Returns `EvalCtx::Check` when a D14 institution index/runtime
+    /// Returns `EvalCtx::Check` when a institution index/runtime
     /// is attached; otherwise `EvalCtx::Pure`. All internal `eval`
     /// calls in `check.rs` should route through this so institution-
     /// dispatched constraints fire at check time rather than deferring
@@ -2136,7 +2136,7 @@ mod tests {
     // --- D14 §9.2: institution-registered decision procedures ---
     //
     // Verify that `Constraint::Institution { iri, args }` dispatches
-    // through the D14 `try_d14_decide` path: the constraint IRI
+    // through the `try_institution_decide` path: the constraint IRI
     // resolves to a Decidable QueryClass, args land on the input
     // resource as `decide_args`, and the institution's `query` returns
     // a Verdict resource the kernel translates to a `DecResult`.
@@ -2339,9 +2339,9 @@ mod tests {
         (layer, Arc::new(idx), Arc::new(rt))
     }
 
-    /// Build an `EvalCtx::Check` populated with the D14 index +
+    /// Build an `EvalCtx::Check` populated with the institution index +
     /// runtime built from `fake`. Threads the synthetic test layer
-    /// so `try_d14_decide` can resolve the input class for typed-
+    /// so `try_institution_decide` can resolve the input class for typed-
     /// property marshaling (Phase 19d.7).
     fn check_ctx_for(fake: Arc<FakeInstitution>, arg_count: usize) -> EvalCtx {
         let (layer, idx, rt) = build_decide_index(fake, arg_count);
@@ -2393,7 +2393,7 @@ mod tests {
         assert!(matches!(v, Val::Refl(_)), "expected Refl, got {v:?}");
 
         // The fake observed the arg on the typed `arg_0` property of
-        // the synthetic input resource that try_d14_decide marshals.
+        // the synthetic input resource that try_institution_decide marshals.
         let observed = fake.last_args().expect("institution was called");
         assert_eq!(observed.len(), 1);
     }
@@ -2437,7 +2437,7 @@ mod tests {
     #[test]
     fn decide_unregistered_iri_is_undecidable() {
         // Index has a Decidable QueryClass for one IRI; the test
-        // invokes a different IRI → no QueryClass match → D14 path
+        // invokes a different IRI → no QueryClass match → institution path
         // returns None → legacy fallback returns Undecidable (empty
         // legacy registry).
         let fake = FakeInstitution::new("urn:eigenius:test:other", DecResult::Holds);
@@ -2678,7 +2678,7 @@ mod tests {
         let fake = FakeInstitution::new("urn:eigenius:test:check_time", DecResult::Holds);
         let (layer, idx, rt) = build_decide_index(fake.clone(), 1);
 
-        let c = CheckCtx::with_layer(Rho::Nil, Vec::new(), layer).with_institutions_d14(idx, rt);
+        let c = CheckCtx::with_layer(Rho::Nil, Vec::new(), layer).with_institutions(idx, rt);
 
         let constraint = Constraint::Institution {
             iri: Iri::parse("urn:eigenius:test:check_time").unwrap(),

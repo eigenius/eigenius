@@ -19,7 +19,7 @@
 //! 1. Read `proposition` and `certificate` from the ReasoningSentence
 //!    (D47-encoded EigenTT terms) — decoded via the kernel's D47 codec.
 //! 2. Lift the `justification` property into a typed `Val` via
-//!    `extract_typed(ef_justification, sentence, ctx)` — D14's
+//!    `extract_typed(ef_justification, sentence, ctx)` — the kernel's
 //!    standard "chain resource → typed kernel value" surface, with
 //!    the lifting logic in [`crate::extract`].
 //! 3. Resolve the `JustifiedBy` inductive declaration from the layer.
@@ -75,7 +75,7 @@ pub fn do_validate_justification(
     // ── Step 2: lift justification via extract_typed ─────────────────
     //
     // Routes through the institution's own `extract_typed` so the
-    // chain → Val translation rides on D14's standard surface rather
+    // chain → Val translation rides on the kernel's standard surface rather
     // than a free kernel utility. The handler in `crate::extract`
     // returns a `Val::InductiveVal` typed at `JustificationTerm`.
     let ef_proc = Iri::parse(iris::PROC_EXTRACT_JUSTIFICATION).expect("static IRI");

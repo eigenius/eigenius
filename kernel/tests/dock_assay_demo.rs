@@ -14,7 +14,7 @@
 
 //! D14 §13.4 M8 — worked-example demo.
 //!
-//! Plumbing-only end-to-end test of the D14 institution surface, using
+//! Plumbing-only end-to-end test of the institution surface, using
 //! the dock→assay scenario from D14 §5.1. One source institution
 //! (Dock), one target institution (Assay), one comorphism
 //! (`dock_to_assay`) with a real transformation Component middle
@@ -23,7 +23,7 @@
 //! `within_tolerance` predicate and an AutoOnLoad
 //! `assay_prediction_validity` check fired on AssayPrediction Load.
 //!
-//! Each `#[test]` exercises one D14 dispatch path:
+//! Each `#[test]` exercises one institution dispatch path:
 //!
 //! - [`comorphism_translates_dock_to_assay`] — `Exp::InstitutionInvoke`,
 //!   four-step pipeline (D14 §9.3).
@@ -55,27 +55,27 @@ use eigenius_kernel::program::component::{BuiltinComponent, ComponentRegistry, C
 
 // ─── Constants from the demo ontology ──────────────────────────────────
 
-const DEMO_ONTOLOGY: &str =
-    include_str!("../../ontologies/examples/d14-dock-assay/dock-assay.json");
+const DEMO_ONTOLOGY: &str = include_str!("../../ontologies/examples/dock-assay/dock-assay.json");
 
-const DOCK_INST_IRI: &str = "urn:eigenius:demo:d14:dock";
-const ASSAY_INST_IRI: &str = "urn:eigenius:demo:d14:assay";
-const DOCKING_RESULT_CLASS: &str = "urn:eigenius:demo:d14:DockingResult";
-const ASSAY_PREDICTION_CLASS: &str = "urn:eigenius:demo:d14:AssayPrediction";
-const DELTA_G_PROP: &str = "urn:eigenius:demo:d14:delta_g";
-const IC50_PROP: &str = "urn:eigenius:demo:d14:ic50";
-const PREDICTED_IC50_PROP: &str = "urn:eigenius:demo:d14:predicted_ic50";
-const TARGET_IC50_PROP: &str = "urn:eigenius:demo:d14:target_ic50";
-const TOLERANCE_PROP: &str = "urn:eigenius:demo:d14:tolerance";
-const EXTRACT_DG_PROC: &str = "urn:eigenius:demo:d14:proc:extract_dg";
-const REIFY_IC50_PROC: &str = "urn:eigenius:demo:d14:proc:reify_ic50";
-const WITHIN_TOLERANCE_PROC: &str = "urn:eigenius:demo:d14:proc:within_tolerance";
-const CHECK_ASSAY_PREDICTION_PROC: &str = "urn:eigenius:demo:d14:proc:check_assay_prediction";
-const VALIDATE_PREDICTION_PROC: &str = "urn:eigenius:demo:d14:proc:validate_prediction";
-const CANDIDATE_PROP: &str = "urn:eigenius:demo:d14:candidate";
-const ARRHENIUS_COMPONENT_IRI: &str = "urn:eigenius:demo:d14:cm_arrhenius";
+const DOCK_INST_IRI: &str = "urn:eigenius:demo:institutions:dock";
+const ASSAY_INST_IRI: &str = "urn:eigenius:demo:institutions:assay";
+const DOCKING_RESULT_CLASS: &str = "urn:eigenius:demo:institutions:DockingResult";
+const ASSAY_PREDICTION_CLASS: &str = "urn:eigenius:demo:institutions:AssayPrediction";
+const DELTA_G_PROP: &str = "urn:eigenius:demo:institutions:delta_g";
+const IC50_PROP: &str = "urn:eigenius:demo:institutions:ic50";
+const PREDICTED_IC50_PROP: &str = "urn:eigenius:demo:institutions:predicted_ic50";
+const TARGET_IC50_PROP: &str = "urn:eigenius:demo:institutions:target_ic50";
+const TOLERANCE_PROP: &str = "urn:eigenius:demo:institutions:tolerance";
+const EXTRACT_DG_PROC: &str = "urn:eigenius:demo:institutions:proc:extract_dg";
+const REIFY_IC50_PROC: &str = "urn:eigenius:demo:institutions:proc:reify_ic50";
+const WITHIN_TOLERANCE_PROC: &str = "urn:eigenius:demo:institutions:proc:within_tolerance";
+const CHECK_ASSAY_PREDICTION_PROC: &str =
+    "urn:eigenius:demo:institutions:proc:check_assay_prediction";
+const VALIDATE_PREDICTION_PROC: &str = "urn:eigenius:demo:institutions:proc:validate_prediction";
+const CANDIDATE_PROP: &str = "urn:eigenius:demo:institutions:candidate";
+const ARRHENIUS_COMPONENT_IRI: &str = "urn:eigenius:demo:institutions:cm_arrhenius";
 
-const DEMO_LAYER_NAME: &str = "d14-dock-assay-demo";
+const DEMO_LAYER_NAME: &str = "dock-assay-demo";
 
 // Arrhenius constants (matching the lambda in cm_arrhenius).
 // IC₅₀ (nM) ≈ exp(-ΔG / (R·T)) · 1e9, with R·T at 310 K in kcal/mol.
@@ -160,7 +160,7 @@ fn build_demo_components() -> Arc<ComponentRegistry> {
 }
 
 fn build_exec_ctx(layer: Arc<Layer>, storage: LayerStorage) -> ExecutionContext {
-    ExecutionContext::new(layer, "d14-demo", ExecutionMode::ReadOnly, storage)
+    ExecutionContext::new(layer, "dock-assay-demo", ExecutionMode::ReadOnly, storage)
 }
 
 // ─── Dock institution ──────────────────────────────────────────────────
@@ -429,7 +429,7 @@ fn comorphism_translates_dock_to_assay() {
     let components = build_demo_components();
 
     let source = "
-        namespace demo = \"urn:eigenius:demo:d14\";
+        namespace demo = \"urn:eigenius:demo:institutions\";
 
         program demo:translate : demo:DockingResult -> demo:AssayPrediction {
             demo:dock_to_assay(input)
@@ -439,27 +439,27 @@ fn comorphism_translates_dock_to_assay() {
     let user_resources =
         eigenius_kernel::esl::compile_with_institutions(source, Arc::clone(&index))
             .expect("ESL compile");
-    let mut user_builder = LayerBuilder::new("d14-demo-program", Some(Arc::clone(&layer)));
+    let mut user_builder = LayerBuilder::new("dock-assay-demo-program", Some(Arc::clone(&layer)));
     for r in user_resources {
         user_builder.add_resource(r).expect("add user resource");
     }
     let program_layer = Arc::new(user_builder.build(LayerStorage::in_memory()));
 
     // Build a sample DockingResult: ΔG = -8.5 kcal/mol.
-    let mut input = Resource::new(iri("urn:eigenius:demo:d14:input1"));
+    let mut input = Resource::new(iri("urn:eigenius:demo:institutions:input1"));
     input.set(
         iri(wk::IS_A),
         Value::Array(vec![Value::String(DOCKING_RESULT_CLASS.to_string())]),
     );
     input.set(iri(DELTA_G_PROP), Value::Float(-8.5));
 
-    let prog_iri = iri("urn:eigenius:demo:d14:translate");
+    let prog_iri = iri("urn:eigenius:demo:institutions:translate");
     let program = program_layer
         .resolve(&prog_iri)
         .expect("translate program in layer")
         .clone();
 
-    let result = eigenius_kernel::program::eval_io::execute_program_nbe_with_institutions_d14(
+    let result = eigenius_kernel::program::eval_io::execute_program_nbe_with_institutions(
         &program,
         &input,
         Arc::clone(&program_layer),
@@ -518,7 +518,7 @@ fn comorphism_translates_dock_to_assay() {
             ..
         } => {
             assert_eq!(
-                comorphism_iri, "urn:eigenius:demo:d14:dock_to_assay",
+                comorphism_iri, "urn:eigenius:demo:institutions:dock_to_assay",
                 "trace records the dispatched comorphism IRI"
             );
             assert_eq!(
@@ -565,7 +565,7 @@ fn comorphism_translates_dock_to_assay() {
     // identical content-hash IRI. This is the chain-dedup property
     // that makes "two paths arriving at the same sentence" land at
     // the same resource.
-    let result2 = eigenius_kernel::program::eval_io::execute_program_nbe_with_institutions_d14(
+    let result2 = eigenius_kernel::program::eval_io::execute_program_nbe_with_institutions(
         &program,
         &input,
         Arc::clone(&program_layer),
@@ -625,7 +625,7 @@ fn run_within_tolerance(predicted: f64, target: f64, tolerance: f64) -> Val {
 
     // Construct: NativeDecide(Constraint::Institution { iri = within_tolerance, args = [predicted, target, tolerance] }, Unit).
     let constraint = Constraint::Institution {
-        iri: iri("urn:eigenius:demo:d14:within_tolerance"),
+        iri: iri("urn:eigenius:demo:institutions:within_tolerance"),
         args: vec![
             wrap_float(predicted),
             wrap_float(target),
@@ -674,7 +674,7 @@ fn auto_on_load_fires_on_assay_prediction() {
     let exec_ctx = build_exec_ctx(Arc::clone(&layer), storage);
 
     // Healthy AssayPrediction — IC₅₀ = 250 nM.
-    let mut good = Resource::new(iri("urn:eigenius:demo:d14:good_prediction"));
+    let mut good = Resource::new(iri("urn:eigenius:demo:institutions:good_prediction"));
     good.set(
         iri(wk::IS_A),
         Value::Array(vec![Value::String(ASSAY_PREDICTION_CLASS.to_string())]),
@@ -689,7 +689,7 @@ fn auto_on_load_fires_on_assay_prediction() {
 
     // Broken AssayPrediction — non-positive IC₅₀ should Fail the
     // AutoOnLoad check, surfacing as a typed ValidationError.
-    let mut bad = Resource::new(iri("urn:eigenius:demo:d14:bad_prediction"));
+    let mut bad = Resource::new(iri("urn:eigenius:demo:institutions:bad_prediction"));
     bad.set(
         iri(wk::IS_A),
         Value::Array(vec![Value::String(ASSAY_PREDICTION_CLASS.to_string())]),
@@ -727,7 +727,7 @@ fn fiber_param_comorphism_coercion_runs_four_step_pipeline() {
     let exec_ctx = build_exec_ctx(Arc::clone(&layer), storage);
 
     // Build a sample DockingResult and bind it to ?d in the binding.
-    let dock_iri = iri("urn:eigenius:demo:d14:input1");
+    let dock_iri = iri("urn:eigenius:demo:institutions:input1");
     let mut docking = Resource::new(dock_iri.clone());
     docking.set(
         iri(wk::IS_A),
@@ -737,7 +737,7 @@ fn fiber_param_comorphism_coercion_runs_four_step_pipeline() {
     let mut binding: BTreeMap<String, Value> = BTreeMap::new();
     binding.insert("d".into(), Value::Embedded(Box::new(docking)));
 
-    let comorphism_name = Name::FullIri(iri("urn:eigenius:demo:d14:dock_to_assay"));
+    let comorphism_name = Name::FullIri(iri("urn:eigenius:demo:institutions:dock_to_assay"));
     let source_expr =
         Expression::Variable(eigenius_kernel::query::ast::Variable { name: "d".into() });
 
@@ -779,8 +779,8 @@ fn fiber_param_comorphism_coercion_runs_four_step_pipeline() {
 /// EigenQL queries can MATCH against.
 fn build_demo_data_layer() -> (Arc<Layer>, LayerStorage) {
     let (demo, _) = build_demo_layer();
-    let mut builder = LayerBuilder::new("d14-demo-data", Some(demo));
-    let mut docking = Resource::new(iri("urn:eigenius:demo:d14:dock-result-1"));
+    let mut builder = LayerBuilder::new("dock-assay-demo-data", Some(demo));
+    let mut docking = Resource::new(iri("urn:eigenius:demo:institutions:dock-result-1"));
     docking.set(
         iri(wk::IS_A),
         Value::Array(vec![Value::String(DOCKING_RESULT_CLASS.to_string())]),
@@ -800,8 +800,8 @@ fn eigenql_match_finds_demo_docking_result() {
     let (data, _storage) = build_demo_data_layer();
     let runtime = query::evaluate::FiberRuntime::default();
     let source = r#"
-        MATCH "urn:eigenius:demo:d14:DockingResult"(?d) {
-            "urn:eigenius:demo:d14:delta_g": ?dg
+        MATCH "urn:eigenius:demo:institutions:DockingResult"(?d) {
+            "urn:eigenius:demo:institutions:delta_g": ?dg
         }
         RETURN [] { d: ?d }
     "#;
@@ -843,14 +843,14 @@ fn eigenql_fiber_coercion_only_produces_verdict_binding() {
         vector_segment_cache: None,
     };
     let source = r#"
-        USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
-        USING NAMESPACE "urn:eigenius:demo:d14:"
+        USING INSTITUTION "urn:eigenius:demo:institutions:assay" AS assay
+        USING NAMESPACE "urn:eigenius:demo:institutions:"
 
-        MATCH "urn:eigenius:demo:d14:DockingResult"(?d) {
-            "urn:eigenius:demo:d14:delta_g": ?dg
+        MATCH "urn:eigenius:demo:institutions:DockingResult"(?d) {
+            "urn:eigenius:demo:institutions:delta_g": ?dg
         }
         FIBER assay:validate_prediction {
-            candidate: "urn:eigenius:demo:d14:dock_to_assay"(?d)
+            candidate: "urn:eigenius:demo:institutions:dock_to_assay"(?d)
         } AS ?v
         RETURN [] { d: ?d, v: ?v }
     "#;
@@ -903,14 +903,14 @@ fn eigenql_fiber_with_comorphism_coercion_and_postfix_holds() {
     };
 
     let source = r#"
-        USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
-        USING NAMESPACE "urn:eigenius:demo:d14:"
+        USING INSTITUTION "urn:eigenius:demo:institutions:assay" AS assay
+        USING NAMESPACE "urn:eigenius:demo:institutions:"
 
-        MATCH "urn:eigenius:demo:d14:DockingResult"(?d) {
-            "urn:eigenius:demo:d14:delta_g": ?dg
+        MATCH "urn:eigenius:demo:institutions:DockingResult"(?d) {
+            "urn:eigenius:demo:institutions:delta_g": ?dg
         }
         FIBER assay:validate_prediction {
-            candidate: "urn:eigenius:demo:d14:dock_to_assay"(?d)
+            candidate: "urn:eigenius:demo:institutions:dock_to_assay"(?d)
         } AS ?v
         WHERE ?v HOLDS
         RETURN [] {
@@ -967,17 +967,17 @@ fn eigenql_fiber_into_collects_response_for_chain_commit() {
         vector_segment_cache: None,
     };
 
-    let target = "urn:eigenius:demo:d14:my_validation_verdict";
+    let target = "urn:eigenius:demo:institutions:my_validation_verdict";
     let source = format!(
         r#"
-        USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
-        USING NAMESPACE "urn:eigenius:demo:d14:"
+        USING INSTITUTION "urn:eigenius:demo:institutions:assay" AS assay
+        USING NAMESPACE "urn:eigenius:demo:institutions:"
 
-        MATCH "urn:eigenius:demo:d14:DockingResult"(?d) {{
-            "urn:eigenius:demo:d14:delta_g": ?dg
+        MATCH "urn:eigenius:demo:institutions:DockingResult"(?d) {{
+            "urn:eigenius:demo:institutions:delta_g": ?dg
         }}
         FIBER assay:validate_prediction {{
-            candidate: "urn:eigenius:demo:d14:dock_to_assay"(?d)
+            candidate: "urn:eigenius:demo:institutions:dock_to_assay"(?d)
         }} AS ?v INTO "{target}"
         RETURN [] {{ d: ?d, v: ?v }}
         "#
@@ -1036,14 +1036,14 @@ fn eigenql_postfix_fails_drops_holding_row() {
     };
 
     let source = r#"
-        USING INSTITUTION "urn:eigenius:demo:d14:assay" AS assay
-        USING NAMESPACE "urn:eigenius:demo:d14:"
+        USING INSTITUTION "urn:eigenius:demo:institutions:assay" AS assay
+        USING NAMESPACE "urn:eigenius:demo:institutions:"
 
-        MATCH "urn:eigenius:demo:d14:DockingResult"(?d) {
-            "urn:eigenius:demo:d14:delta_g": ?dg
+        MATCH "urn:eigenius:demo:institutions:DockingResult"(?d) {
+            "urn:eigenius:demo:institutions:delta_g": ?dg
         }
         FIBER assay:validate_prediction {
-            candidate: "urn:eigenius:demo:d14:dock_to_assay"(?d)
+            candidate: "urn:eigenius:demo:institutions:dock_to_assay"(?d)
         } AS ?v
         WHERE ?v FAILS
         RETURN [] {
@@ -1080,7 +1080,7 @@ fn fiber_param_comorphism_coercion_unknown_comorphism_errors() {
     let components = build_demo_components();
     let exec_ctx = build_exec_ctx(Arc::clone(&layer), storage);
 
-    let dock_iri = iri("urn:eigenius:demo:d14:input1");
+    let dock_iri = iri("urn:eigenius:demo:institutions:input1");
     let mut docking = Resource::new(dock_iri);
     docking.set(
         iri(wk::IS_A),
@@ -1090,7 +1090,7 @@ fn fiber_param_comorphism_coercion_unknown_comorphism_errors() {
     let mut binding: BTreeMap<String, Value> = BTreeMap::new();
     binding.insert("d".into(), Value::Embedded(Box::new(docking)));
 
-    let bogus_name = Name::FullIri(iri("urn:eigenius:demo:d14:nonexistent_comorphism"));
+    let bogus_name = Name::FullIri(iri("urn:eigenius:demo:institutions:nonexistent_comorphism"));
     let source_expr =
         Expression::Variable(eigenius_kernel::query::ast::Variable { name: "d".into() });
 

@@ -1,5 +1,5 @@
 [package]
-name = "eigenius-wasm-d14-echo"
+name = "eigenius-wasm-dock"
 version = "0.1.0"
 edition = "2021"
 
@@ -14,5 +14,5 @@ crate-type = ["cdylib"]
 package = "eigenius:component"
 
 [package.metadata.component.target]
-world = "eigenius-institution-d14"
+world = "eigenius-institution-realisation"
 path = "../../wit"

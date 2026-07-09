@@ -15,12 +15,12 @@
 //! D14 §13.4 M8 — worked example end-to-end through WASM, auto-
 //! registered from the layer chain.
 //!
-//! Mirror of `d14_dock_assay_demo.rs` but:
+//! Mirror of `dock_assay_demo.rs` but:
 //!
 //! - The Dock / Assay `Institution` impls are loaded as `WasmInstitution`
-//!   instances from the `examples/wasm-d14-{dock,assay}` crates.
+//!   instances from the `examples/wasm-{dock,assay}` crates.
 //! - The Arrhenius transformation is loaded as a `WasmComponent` from
-//!   the `examples/wasm-d14-arrhenius` crate.
+//!   the `examples/wasm-arrhenius` crate.
 //! - All three are auto-registered from the layer chain — the test
 //!   builds a child layer carrying `runtime: wasm` + `wasm_binary`
 //!   declarations and runs the same scan-and-register helpers the
@@ -49,16 +49,15 @@ use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
 use eigenius_kernel::program::component::ComponentRegistry;
 
-const DEMO_ONTOLOGY: &str =
-    include_str!("../../ontologies/examples/d14-dock-assay/dock-assay.json");
+const DEMO_ONTOLOGY: &str = include_str!("../../ontologies/examples/dock-assay/dock-assay.json");
 
-const DOCK_INST_IRI: &str = "urn:eigenius:demo:d14:dock";
-const ASSAY_INST_IRI: &str = "urn:eigenius:demo:d14:assay";
-const DOCKING_RESULT_CLASS: &str = "urn:eigenius:demo:d14:DockingResult";
-const ASSAY_PREDICTION_CLASS: &str = "urn:eigenius:demo:d14:AssayPrediction";
-const DELTA_G_PROP: &str = "urn:eigenius:demo:d14:delta_g";
-const IC50_PROP: &str = "urn:eigenius:demo:d14:ic50";
-const ARRHENIUS_COMPONENT_IRI: &str = "urn:eigenius:demo:d14:cm_arrhenius";
+const DOCK_INST_IRI: &str = "urn:eigenius:demo:institutions:dock";
+const ASSAY_INST_IRI: &str = "urn:eigenius:demo:institutions:assay";
+const DOCKING_RESULT_CLASS: &str = "urn:eigenius:demo:institutions:DockingResult";
+const ASSAY_PREDICTION_CLASS: &str = "urn:eigenius:demo:institutions:AssayPrediction";
+const DELTA_G_PROP: &str = "urn:eigenius:demo:institutions:delta_g";
+const IC50_PROP: &str = "urn:eigenius:demo:institutions:ic50";
+const ARRHENIUS_COMPONENT_IRI: &str = "urn:eigenius:demo:institutions:cm_arrhenius";
 
 const INSTITUTION_CLASS: &str = "urn:eigenius:institution:Institution";
 const COMPONENT_CLASS: &str = "urn:eigenius:program:Component";
@@ -68,9 +67,9 @@ const COMP_WASM_BINARY: &str = "urn:eigenius:program:component:wasm_binary";
 const COMP_CAPABILITY_LEVEL: &str = "urn:eigenius:program:component:capability_level";
 const CAPABILITY_PURE: &str = "urn:eigenius:program:capability_levels:pure";
 
-const DOCK_FIXTURE: &[u8] = include_bytes!("fixtures/eigenius_wasm_d14_dock.wasm");
-const ASSAY_FIXTURE: &[u8] = include_bytes!("fixtures/eigenius_wasm_d14_assay.wasm");
-const ARRHENIUS_FIXTURE: &[u8] = include_bytes!("fixtures/eigenius_wasm_d14_arrhenius.wasm");
+const DOCK_FIXTURE: &[u8] = include_bytes!("fixtures/eigenius_wasm_dock.wasm");
+const ASSAY_FIXTURE: &[u8] = include_bytes!("fixtures/eigenius_wasm_assay.wasm");
+const ARRHENIUS_FIXTURE: &[u8] = include_bytes!("fixtures/eigenius_wasm_arrhenius.wasm");
 
 const RT_KCAL_PER_MOL: f64 = 0.616;
 const IC50_SCALE_NM: f64 = 1.0e9;
@@ -112,13 +111,13 @@ fn build_demo_layer() -> (Arc<Layer>, LayerStorage) {
     let ctx = bootstrap::bootstrap().expect("bootstrap kernel");
     let parent = Arc::clone(ctx.head());
 
-    let mut base_builder = LayerBuilder::new("d14-dock-assay-base", Some(parent));
+    let mut base_builder = LayerBuilder::new("dock-assay-base", Some(parent));
     for r in eigon_json::parse_document(DEMO_ONTOLOGY).expect("parse demo ontology") {
         base_builder.add_resource(r).expect("add demo resource");
     }
     let base_layer = Arc::new(base_builder.build(LayerStorage::in_memory()));
 
-    let mut wasm_builder = LayerBuilder::new("d14-dock-assay-wasm", Some(base_layer));
+    let mut wasm_builder = LayerBuilder::new("dock-assay-wasm", Some(base_layer));
     wasm_builder
         .add_resource(wasm_institution(DOCK_INST_IRI, "Dock", DOCK_FIXTURE))
         .expect("add Dock WASM override");
@@ -227,7 +226,12 @@ fn build_demo_components(layer: &Layer) -> Arc<ComponentRegistry> {
 }
 
 fn build_exec_ctx(layer: Arc<Layer>, storage: LayerStorage) -> ExecutionContext {
-    ExecutionContext::new(layer, "d14-wasm-demo", ExecutionMode::ReadOnly, storage)
+    ExecutionContext::new(
+        layer,
+        "dock-assay-wasm-demo",
+        ExecutionMode::ReadOnly,
+        storage,
+    )
 }
 
 // ─── 1. Comorphism translation through the WASM host bridge ────────────
@@ -240,7 +244,7 @@ fn wasm_comorphism_translates_dock_to_assay() {
     let components = build_demo_components(&layer);
 
     let source = "
-        namespace demo = \"urn:eigenius:demo:d14\";
+        namespace demo = \"urn:eigenius:demo:institutions\";
 
         program demo:translate : demo:DockingResult -> demo:AssayPrediction {
             demo:dock_to_assay(input)
@@ -250,26 +254,27 @@ fn wasm_comorphism_translates_dock_to_assay() {
     let user_resources =
         eigenius_kernel::esl::compile_with_institutions(source, Arc::clone(&index))
             .expect("ESL compile");
-    let mut user_builder = LayerBuilder::new("d14-wasm-demo-program", Some(Arc::clone(&layer)));
+    let mut user_builder =
+        LayerBuilder::new("dock-assay-wasm-demo-program", Some(Arc::clone(&layer)));
     for r in user_resources {
         user_builder.add_resource(r).expect("add user resource");
     }
     let program_layer = Arc::new(user_builder.build(LayerStorage::in_memory()));
 
-    let mut input = Resource::new(iri("urn:eigenius:demo:d14:wasm_input1"));
+    let mut input = Resource::new(iri("urn:eigenius:demo:institutions:wasm_input1"));
     input.set(
         iri(wk::IS_A),
         Value::Array(vec![Value::String(DOCKING_RESULT_CLASS.to_string())]),
     );
     input.set(iri(DELTA_G_PROP), Value::Float(-8.5));
 
-    let prog_iri = iri("urn:eigenius:demo:d14:translate");
+    let prog_iri = iri("urn:eigenius:demo:institutions:translate");
     let program = program_layer
         .resolve(&prog_iri)
         .expect("translate program in layer")
         .clone();
 
-    let result = eigenius_kernel::program::eval_io::execute_program_nbe_with_institutions_d14(
+    let result = eigenius_kernel::program::eval_io::execute_program_nbe_with_institutions(
         &program,
         &input,
         Arc::clone(&program_layer),
@@ -338,7 +343,7 @@ fn run_within_tolerance(
     };
 
     let constraint = Constraint::Institution {
-        iri: iri("urn:eigenius:demo:d14:within_tolerance"),
+        iri: iri("urn:eigenius:demo:institutions:within_tolerance"),
         args: vec![
             wrap_float(predicted),
             wrap_float(target),
@@ -377,7 +382,7 @@ fn wasm_auto_on_load_fires_on_assay_prediction() {
     let runtime = build_demo_runtime(&layer);
     let exec_ctx = build_exec_ctx(Arc::clone(&layer), storage);
 
-    let mut good = Resource::new(iri("urn:eigenius:demo:d14:wasm_good"));
+    let mut good = Resource::new(iri("urn:eigenius:demo:institutions:wasm_good"));
     good.set(
         iri(wk::IS_A),
         Value::Array(vec![Value::String(ASSAY_PREDICTION_CLASS.to_string())]),
@@ -390,7 +395,7 @@ fn wasm_auto_on_load_fires_on_assay_prediction() {
         "Holds should produce no AutoOnLoad errors; got {errs:?}"
     );
 
-    let mut bad = Resource::new(iri("urn:eigenius:demo:d14:wasm_bad"));
+    let mut bad = Resource::new(iri("urn:eigenius:demo:institutions:wasm_bad"));
     bad.set(
         iri(wk::IS_A),
         Value::Array(vec![Value::String(ASSAY_PREDICTION_CLASS.to_string())]),

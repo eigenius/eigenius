@@ -255,7 +255,7 @@ pub enum Exp {
     /// (set by EigenQL's `INTO` clause) commits the produced resource
     /// at the caller-named IRI.
     ///
-    /// Without a D14 institution index/runtime attached (bare
+    /// Without a institution index/runtime attached (bare
     /// `EvalCtx::Pure` used at type-check time), the expression
     /// reduces to a passthrough neutral so the conversion checker can
     /// compare two `InstitutionInvoke`s structurally. Runtime callers

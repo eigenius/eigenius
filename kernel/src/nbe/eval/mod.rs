@@ -26,7 +26,7 @@ mod testutil;
 mod tracer;
 
 pub(crate) use dispatch::deterministic_run_output_iri;
-use dispatch::{decide_constraint, dispatch_component, try_d14_institution_invoke};
+use dispatch::{decide_constraint, dispatch_component, try_institution_invoke};
 use iota::iota_reduce_impl;
 use mapreduce::{eval_map_impl, eval_reduce_impl};
 pub use marshal::{resource_value_to_val, val_to_resource_value};
@@ -132,17 +132,17 @@ pub enum EvalCtx {
         /// of the cross-task content-address cache. Synchronous
         /// `RunProgram` and the type-checker leave this `None`.
         task_context: Option<Arc<TaskContext>>,
-        /// D14 institution index — derived view of the layer chain
+        /// institution index — derived view of the layer chain
         /// keyed by institution / format / query / comorphism IRIs.
         /// When `Some` and a runtime (below) is also `Some`,
-        /// `Exp::InstitutionInvoke` dispatches via the D14 four-step
+        /// `Exp::InstitutionInvoke` dispatches via the four-step
         /// pipeline (D14 §9.3).
         institution_index: Option<Arc<InstitutionIndex>>,
-        /// D14 institution runtime — registry of `Institution` trait
+        /// institution runtime — registry of `Institution` trait
         /// objects keyed by institution IRI.
         institution_runtime: Option<Arc<InstitutionRuntime>>,
     },
-    /// Pure evaluation with access to the D14 institution index +
+    /// Pure evaluation with access to the institution index +
     /// runtime for check-time dispatch of `Constraint::Institution`
     /// predicates. No component registry, no trace store — this is
     /// what the type-checker uses when it wants institution
@@ -172,7 +172,7 @@ impl EvalCtx {
         }
     }
 
-    /// D14 institution index for this evaluation context, if any.
+    /// institution index for this evaluation context, if any.
     pub fn institution_index(&self) -> Option<&Arc<InstitutionIndex>> {
         match self {
             EvalCtx::IO {
@@ -185,7 +185,7 @@ impl EvalCtx {
         }
     }
 
-    /// D14 institution runtime for this evaluation context, if any.
+    /// institution runtime for this evaluation context, if any.
     pub fn institution_runtime(&self) -> Option<&Arc<InstitutionRuntime>> {
         match self {
             EvalCtx::IO {
@@ -319,7 +319,7 @@ pub(crate) fn eval_impl<T: Tracer>(
             // In IO mode, intercept component-call-shaped applications:
             // when the LHS is a Var resolving to a registered Component,
             // dispatch through the component runtime. Institution
-            // capabilities don't appear here under D14 — programs reach
+            // capabilities don't appear here — programs reach
             // institutions only via `Exp::InstitutionInvoke` (comorphisms)
             // and `Exp::NativeDecide(Constraint::Institution{..}, _)`
             // (Decidable QueryClasses). The ESL compiler emits those
@@ -473,9 +473,9 @@ pub(crate) fn eval_impl<T: Tracer>(
         // transformation Component, reify a target-class resource via
         // the target institution's ImportFormat procedure. The
         // post-translation validation invariant (D14 §9.3 step 5)
-        // runs as part of [`try_d14_institution_invoke`].
+        // runs as part of [`try_institution_invoke`].
         //
-        // When the evaluator has no D14 backing attached (bare Pure
+        // When the evaluator has no institution backing attached (bare Pure
         // mode used during type-check / conversion), the call reduces
         // to a passthrough neutral so the conversion checker can
         // compare two `InstitutionInvoke`s structurally. When the
@@ -496,8 +496,7 @@ pub(crate) fn eval_impl<T: Tracer>(
                     source_node,
                 ));
             }
-            match try_d14_institution_invoke(comorphism_iri, &source_val, target_iri.as_ref(), ctx)?
-            {
+            match try_institution_invoke(comorphism_iri, &source_val, target_iri.as_ref(), ctx)? {
                 Some(translated) => {
                     let node = T::comorphism(comorphism_iri, source_node, &translated);
                     Ok((translated, node))

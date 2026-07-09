@@ -15,7 +15,7 @@
 //! Assay institution for the D14 worked example (D14 §5.1).
 //!
 //! Target side of the dock→assay comorphism. Targets the
-//! `eigenius-institution-d14` WIT world and implements:
+//! `eigenius-institution` WIT world and implements:
 //!
 //! - `reify` — `if_assay_from_ic50` ImportFormat procedure: take a
 //!   Float-typed payload and construct an `AssayPrediction` resource
@@ -35,7 +35,7 @@ use eigenius_wasm_sdk::{QueryResponse, Resource, Value};
 
 wit_bindgen::generate!({
     path: "../../wit",
-    world: "eigenius-institution-d14",
+    world: "eigenius-institution-realisation",
 });
 
 const IS_A: &str = "urn:eigenius:core:is_a";
@@ -43,17 +43,17 @@ const VERDICT_CLASS: &str = "urn:eigenius:institution:Verdict";
 const CTOR_NAME: &str = "urn:eigenius:core:ctor_name";
 
 const VALUE_PROP: &str = "urn:eigenius:core:value";
-const ASSAY_PREDICTION_CLASS: &str = "urn:eigenius:demo:d14:AssayPrediction";
-const IC50_PROP: &str = "urn:eigenius:demo:d14:ic50";
-const PREDICTED_IC50_PROP: &str = "urn:eigenius:demo:d14:predicted_ic50";
-const TARGET_IC50_PROP: &str = "urn:eigenius:demo:d14:target_ic50";
-const TOLERANCE_PROP: &str = "urn:eigenius:demo:d14:tolerance";
-const CANDIDATE_PROP: &str = "urn:eigenius:demo:d14:candidate";
+const ASSAY_PREDICTION_CLASS: &str = "urn:eigenius:demo:institutions:AssayPrediction";
+const IC50_PROP: &str = "urn:eigenius:demo:institutions:ic50";
+const PREDICTED_IC50_PROP: &str = "urn:eigenius:demo:institutions:predicted_ic50";
+const TARGET_IC50_PROP: &str = "urn:eigenius:demo:institutions:target_ic50";
+const TOLERANCE_PROP: &str = "urn:eigenius:demo:institutions:tolerance";
+const CANDIDATE_PROP: &str = "urn:eigenius:demo:institutions:candidate";
 
-const REIFY_IC50_PROC: &str = "urn:eigenius:demo:d14:proc:reify_ic50";
-const WITHIN_TOLERANCE_PROC: &str = "urn:eigenius:demo:d14:proc:within_tolerance";
-const CHECK_ASSAY_PREDICTION_PROC: &str = "urn:eigenius:demo:d14:proc:check_assay_prediction";
-const VALIDATE_PREDICTION_PROC: &str = "urn:eigenius:demo:d14:proc:validate_prediction";
+const REIFY_IC50_PROC: &str = "urn:eigenius:demo:institutions:proc:reify_ic50";
+const WITHIN_TOLERANCE_PROC: &str = "urn:eigenius:demo:institutions:proc:within_tolerance";
+const CHECK_ASSAY_PREDICTION_PROC: &str = "urn:eigenius:demo:institutions:proc:check_assay_prediction";
+const VALIDATE_PREDICTION_PROC: &str = "urn:eigenius:demo:institutions:proc:validate_prediction";
 
 struct AssayInstitution;
 

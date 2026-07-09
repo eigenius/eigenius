@@ -4374,7 +4374,7 @@ async fn remote_capability_test(
     let input_json = read_as_json(input_file);
 
     if is_institution {
-        // Under D14 there is no per-institution dispatch RPC. Per-RPC
+        // There is no per-institution dispatch RPC. Per-RPC
         // FiberQuery / DiscoverMorphisms primitives from the D10 era
         // were retired in Phase 12. To exercise an institution's
         // QueryClasses, write an EigenQL FIBER query and submit it via
@@ -4382,7 +4382,7 @@ async fn remote_capability_test(
         // longer supports direct institution invocation.
         let _ = mode;
         eprintln!(
-            "`capability test` cannot directly invoke an institution under D14.\n\
+            "`capability test` cannot directly invoke an institution.\n\
              Write an EigenQL FIBER query against one of this institution's QueryClasses\n\
              and submit it via `eigenius query` instead — see D2 v2 §3.5.\n\
              Institution: {iri}"

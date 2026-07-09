@@ -215,7 +215,7 @@ pub trait Guest {
     ) -> Result<ResourceData, _rt::String>;
 }
 #[doc(hidden)]
-macro_rules! __export_world_eigenius_institution_d14_cabi {
+macro_rules! __export_world_eigenius_institution_realisation_cabi {
     ($ty:ident with_types_in $($path_to_types:tt)*) => {
         const _ : () = { #[unsafe (export_name = "extract-typed")] unsafe extern "C" fn
         export_extract_typed(arg0 : * mut u8, arg1 : usize, arg2 : * mut u8, arg3 :
@@ -238,7 +238,7 @@ macro_rules! __export_world_eigenius_institution_d14_cabi {
     };
 }
 #[doc(hidden)]
-pub(crate) use __export_world_eigenius_institution_d14_cabi;
+pub(crate) use __export_world_eigenius_institution_realisation_cabi;
 #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
 #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
 struct _RetArea([::core::mem::MaybeUninit<u8>; 3 * ::core::mem::size_of::<*const u8>()]);
@@ -494,25 +494,26 @@ mod _rt {
 /// ```
 #[allow(unused_macros)]
 #[doc(hidden)]
-macro_rules! __export_eigenius_institution_d14_impl {
+macro_rules! __export_eigenius_institution_realisation_impl {
     ($ty:ident) => {
         self::export!($ty with_types_in self);
     };
     ($ty:ident with_types_in $($path_to_types_root:tt)*) => {
-        $($path_to_types_root)*:: __export_world_eigenius_institution_d14_cabi!($ty
-        with_types_in $($path_to_types_root)*);
+        $($path_to_types_root)*::
+        __export_world_eigenius_institution_realisation_cabi!($ty with_types_in
+        $($path_to_types_root)*);
     };
 }
 #[doc(inline)]
-pub(crate) use __export_eigenius_institution_d14_impl as export;
+pub(crate) use __export_eigenius_institution_realisation_impl as export;
 #[cfg(target_arch = "wasm32")]
 #[unsafe(
-    link_section = "component-type:wit-bindgen:0.41.0:eigenius:component@0.1.0:eigenius-institution-d14:encoded world"
+    link_section = "component-type:wit-bindgen:0.41.0:eigenius:component@0.1.0:eigenius-institution-realisation:encoded world"
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 754] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xe3\x04\x01A\x02\x01\
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 770] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xeb\x04\x01A\x02\x01\
 A\x14\x01B\x08\x01p}\x04\0\x0dresource-data\x03\0\0\x01p}\x04\0\x0btyped-value\x03\
 \0\x02\x01s\x04\0\x03iri\x03\0\x04\x01r\x01\x06output\x01\x04\0\x10component-res\
 ult\x03\0\x06\x03\0\x1eeigenius:component/types@0.1.0\x05\0\x02\x03\0\0\x0dresou\
@@ -526,9 +527,9 @@ ata\x03\0\0\x01p\x01\x01j\x01\x02\x01s\x01@\x01\x07eigenqls\0\x03\x04\0\x05query
 @\x02\x0dprocedure-iri\x06\x05input\x02\0\x09\x04\0\x0dextract-typed\x01\x0a\x01\
 j\x01\x02\x01s\x01@\x02\x0dprocedure-iri\x06\x05value\x04\0\x0b\x04\0\x05reify\x01\
 \x0c\x01@\x02\x0dprocedure-iri\x06\x05input\x02\0\x0b\x04\0\x05query\x01\x0d\x04\
-\01eigenius:component/eigenius-institution-d14@0.1.0\x04\0\x0b\x1e\x01\0\x18eige\
-nius-institution-d14\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-comp\
-onent\x070.227.1\x10wit-bindgen-rust\x060.41.0";
+\09eigenius:component/eigenius-institution-realisation@0.1.0\x04\0\x0b&\x01\0\x20\
+eigenius-institution-realisation\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\
+\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

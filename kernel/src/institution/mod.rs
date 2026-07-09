@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D14 institution support.
+//! Institution support.
 //!
 //! Institutions are declared in the layer chain as ordinary Eigon
 //! resources (D14 §3, §4). The kernel reads them through:

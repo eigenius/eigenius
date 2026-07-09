@@ -138,12 +138,12 @@ pub struct EigeniusService {
     /// Inner Arc allows cheap cloning for passing to the evaluator.
     pub(crate) components: Arc<RwLock<Arc<ComponentRegistry>>>,
     pub(crate) trace_store: Arc<dyn TraceStore>,
-    /// D14 institution index — derived view of the layer chain rebuilt
+    /// institution index — derived view of the layer chain rebuilt
     /// after every commit. Outer lock allows swapping; inner Arc lets
     /// the evaluator clone cheaply when constructing `EvalCtx::IO`.
     pub(crate) institution_index: Arc<RwLock<Arc<crate::institution::registry::InstitutionIndex>>>,
-    /// D14 institution runtime — `Box<dyn Institution>` per
-    /// institution IRI. Populated when D14-shaped WASM institutions
+    /// institution runtime — `Box<dyn Institution>` per
+    /// institution IRI. Populated when WASM institutions
     /// are installed (B3+ wiring); otherwise empty.
     pub(crate) institution_runtime:
         Arc<RwLock<Arc<crate::institution::runtime::InstitutionRuntime>>>,

@@ -265,7 +265,7 @@ impl Validator {
         // to *some* resource in the chain. The full EigenTT
         // signature-equality check between transformation Component
         // and the export/import payload types is deferred until the
-        // institution dispatch evaluator lands (M5 of the D14 plan).
+        // institution dispatch evaluator lands (M5 of the implementation plan).
         errors.extend(self.check_comorphism_well_formedness(resource, &res_id));
 
         // Rule 18: MergeComorphism shape (D37 §5.2). The witness
@@ -375,7 +375,7 @@ impl Validator {
     ///   (the full EigenTT signature-equality check between the
     ///   referenced Component and the export/import payload types
     ///   lands when the institution dispatch evaluator does — M5 of
-    ///   the D14 plan).
+    ///   the implementation plan).
     ///
     /// Existing rules (`check_class_types`) already flag references
     /// that resolve to *wrong-class* resources, but they deliberately

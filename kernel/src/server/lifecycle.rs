@@ -243,7 +243,7 @@ async fn resume_one_task(
         Arc::clone(&task_store),
     ));
 
-    let result = crate::program::eval_io::execute_program_nbe_with_institutions_d14(
+    let result = crate::program::eval_io::execute_program_nbe_with_institutions(
         &program,
         &input,
         layer,
@@ -457,7 +457,7 @@ pub async fn start_server(
         service.register_in_process_institution(institution);
     }
 
-    // Build the D14 institution index from the bootstrap / rehydrated
+    // Build the institution index from the bootstrap / rehydrated
     // chain so subsequent Loads dispatch AutoOnLoad QueryClasses
     // declared in the persisted chain.
     let ctx_arc = service

@@ -90,7 +90,7 @@ impl EigeniusService {
             //    `take_working` consumes it and installs a fresh
             //    builder parented at `ctx.head` so the orchestrator
             //    can re-use the context for emission-driven layers.
-            // 2. Snapshot the D14 institution index + runtime. Newly
+            // 2. Snapshot the institution index + runtime. Newly
             //    committed resources are gated by AutoOnLoad
             //    QueryClasses *already* declared in the chain;
             //    QueryClasses declared in the same Load batch take

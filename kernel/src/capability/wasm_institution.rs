@@ -14,7 +14,7 @@
 
 //! Host bridge between the kernel's [`Institution`] trait (D14 §8) and
 //! a WASM Component Model binary targeting the
-//! `eigenius-institution-d14` world.
+//! `eigenius-institution-realisation` world.
 //!
 //! [`WasmInstitution`] compiles the component once at construction
 //! time and instantiates a fresh Wasmtime store per dispatch. Each
@@ -53,17 +53,17 @@ use wasmtime::component::types::ComponentFunc;
 use wasmtime::component::{Component, Linker, Val as WasmVal};
 use wasmtime::{Engine, Store};
 
-/// Host state for a WASM institution targeting the D14 world.
+/// Host state for a WASM institution targeting the institution WIT world.
 struct HostState {
     #[allow(dead_code)] // read by the read-access / query-access host funcs
     layer: Arc<Layer>,
 }
 
-/// A D14-shape institution backed by a WASM Component Model binary.
+/// A institution backed by a WASM Component Model binary.
 ///
 /// Constructed with the institution IRI at install time — the binary
 /// itself does *not* declare an institution IRI (declarations are
-/// ontology-first under D14). The kernel finds the binary by IRI in
+/// ontology-first). The kernel finds the binary by IRI in
 /// the runtime registry and dispatches via the trait methods.
 pub struct WasmInstitution {
     institution_iri: Iri,
@@ -73,7 +73,7 @@ pub struct WasmInstitution {
 }
 
 impl WasmInstitution {
-    /// Compile a WASM Component Model binary as a D14 institution
+    /// Compile a WASM Component Model binary as a institution
     /// keyed by `institution_iri`.
     pub fn from_bytes(
         institution_iri: Iri,
@@ -102,7 +102,7 @@ impl WasmInstitution {
     /// Call a guest export of shape
     /// `(iri, list<u8>) -> result<list<u8>, string>`. The two boundary
     /// methods (`extract-typed`, `reify`) and the reasoning method
-    /// (`query`) all match this shape under the D14 WIT world.
+    /// (`query`) all match this shape under the institution WIT world.
     fn call_iri_bytes(
         &self,
         export_name: &str,
@@ -320,7 +320,7 @@ fn link_query_access(linker: &mut Linker<HostState>) -> Result<(), String> {
     instance
         .func_new("query", |_ctx, _f: ComponentFunc, _params, results| {
             // Same M4 stub as the legacy bridge — full EigenQL dispatch
-            // across the WASM boundary is post-D14 work.
+            // across the WASM boundary is future work.
             results[0] = WasmVal::Result(Ok(Some(Box::new(WasmVal::List(Vec::new())))));
             Ok(())
         })
@@ -364,8 +364,7 @@ mod tests {
     use crate::layer::LayerBuilder;
     use crate::ontology::resource::Value;
 
-    const FIXTURE: &[u8] =
-        include_bytes!("../../../kernel/tests/fixtures/eigenius_wasm_d14_echo.wasm");
+    const FIXTURE: &[u8] = include_bytes!("../../../kernel/tests/fixtures/eigenius_wasm_echo.wasm");
 
     fn iri(s: &str) -> Iri {
         Iri::parse(s).unwrap()
@@ -379,20 +378,17 @@ mod tests {
 
     fn load_echo() -> WasmInstitution {
         WasmInstitution::from_bytes(
-            iri("urn:eigenius:test:d14_echo"),
+            iri("urn:eigenius:test:echo"),
             FIXTURE,
             WasmComponentConfig::default(),
         )
-        .expect("load d14 echo fixture")
+        .expect("load echo fixture")
     }
 
     #[test]
     fn institution_iri_round_trips() {
         let inst = load_echo();
-        assert_eq!(
-            inst.institution_iri().as_str(),
-            "urn:eigenius:test:d14_echo"
-        );
+        assert_eq!(inst.institution_iri().as_str(), "urn:eigenius:test:echo");
     }
 
     #[test]
@@ -415,11 +411,11 @@ mod tests {
         // Echo institution stamps `provenance` with the procedure IRI
         // and `stage` with the export it was dispatched on.
         let provenance = resource
-            .get(&iri("urn:eigenius:test:d14_echo:provenance"))
+            .get(&iri("urn:eigenius:test:echo:provenance"))
             .and_then(|v| v.as_str().map(str::to_owned));
         assert_eq!(provenance.as_deref(), Some("urn:eigenius:test:proc:p1"));
         let stage = resource
-            .get(&iri("urn:eigenius:test:d14_echo:stage"))
+            .get(&iri("urn:eigenius:test:echo:stage"))
             .and_then(|v| v.as_str().map(str::to_owned));
         assert_eq!(stage.as_deref(), Some("extract_typed"));
     }
@@ -442,7 +438,7 @@ mod tests {
             )
             .expect("reify");
         let stage = result
-            .get(&iri("urn:eigenius:test:d14_echo:stage"))
+            .get(&iri("urn:eigenius:test:echo:stage"))
             .and_then(|v| v.as_str().map(str::to_owned));
         assert_eq!(stage.as_deref(), Some("reify"));
     }
@@ -479,12 +475,12 @@ mod tests {
         assert!(outcome.partial_invocation.is_none());
         let stage = outcome
             .output
-            .get(&iri("urn:eigenius:test:d14_echo:stage"))
+            .get(&iri("urn:eigenius:test:echo:stage"))
             .and_then(|v| v.as_str().map(str::to_owned));
         assert_eq!(stage.as_deref(), Some("query"));
         let provenance = outcome
             .output
-            .get(&iri("urn:eigenius:test:d14_echo:provenance"))
+            .get(&iri("urn:eigenius:test:echo:provenance"))
             .and_then(|v| v.as_str().map(str::to_owned));
         assert_eq!(
             provenance.as_deref(),

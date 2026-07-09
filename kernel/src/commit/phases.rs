@@ -829,7 +829,7 @@ mod tests {
         assert_eq!(em.kind, EmissionKind::Sibling);
         // Emission carries the same resources as provenance_resources.
         assert_eq!(em.resources.len(), state.provenance_resources.len());
-        // dispatched_verdicts records the Holds reading per D14.
+        // dispatched_verdicts records the Holds reading for institutions.
         assert_eq!(state.dispatched_verdicts.len(), 1);
         assert!(matches!(
             state.dispatched_verdicts[0].verdict,

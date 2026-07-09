@@ -120,7 +120,7 @@ pub struct ScanResult {
 /// Resources without `implementation = "wasm"` are ignored — they are
 /// handled by the regular built-in or remote component path.
 ///
-/// Institution declarations under D14 are plain ontology resources scanned
+/// Institution declarations are plain ontology resources scanned
 /// elsewhere (see [`crate::institution::registry::InstitutionIndex`]); this
 /// scanner does not handle them.
 pub fn scan_and_register(layer: &Layer, components: &mut ComponentRegistry) -> ScanResult {
@@ -199,7 +199,7 @@ pub fn scan_and_register(layer: &Layer, components: &mut ComponentRegistry) -> S
     result
 }
 
-/// Walk the layer chain for D14 Institution declarations whose
+/// Walk the layer chain for Institution declarations whose
 /// `runtime` is `urn:eigenius:institution:runtimes:wasm` and build an
 /// [`InstitutionRuntime`] populated with [`WasmInstitution`] instances
 /// for each. In-process / external runtime declarations are skipped —
@@ -418,7 +418,7 @@ pub fn validate_external_institution_chain(
         let mut handler_errors: Vec<String> = Vec::new();
 
         // Harvest the procedure → method_name dispatch table from
-        // every D14 declaration that anchors a runtime entry on this
+        // every institution declaration that anchors a runtime entry on this
         // institution: QueryClass.query_handler (FIBER / AutoOnLoad
         // dispatch), ExportFormat.procedure (comorphism source-side
         // extract_typed), ImportFormat.procedure (comorphism
@@ -560,7 +560,7 @@ pub fn validate_external_institution_chain(
     (plans, errors)
 }
 
-/// Walk the chain for D14 Institution declarations whose `runtime` is
+/// Walk the chain for Institution declarations whose `runtime` is
 /// `urn:eigenius:institution:runtimes:external` (D31 §5) and register
 /// an [`ExternalInstitution`] in `runtime` for each. Each registered
 /// institution holds the env IRI + image digest resolved from the
@@ -600,7 +600,7 @@ pub fn register_external_institutions(
     }
 }
 
-/// Walk the chain for D14 Institution declarations whose `runtime` is
+/// Walk the chain for Institution declarations whose `runtime` is
 /// `urn:eigenius:institution:runtimes:in_process` (D28 §2.3) and
 /// register the matching pre-registered impl from
 /// `in_process_registry` into `runtime`. Phase 20a.1.
@@ -678,7 +678,7 @@ fn load_wasm_institution(
         "urn:eigenius:institution:memory_limit_pages",
     );
     // The institution's IRI is its @id — same as the resource IRI.
-    // The InstitutionRuntime keys by this; D14 dispatch resolves a
+    // The InstitutionRuntime keys by this; institution dispatch resolves a
     // QueryClass's `institution_ref` against this key.
     WasmInstitution::from_bytes(iri.clone(), &bytes, config)
 }

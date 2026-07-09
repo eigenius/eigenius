@@ -35,7 +35,7 @@ pub fn compile(source: &str) -> Result<Vec<Resource>, Vec<error::EslError>> {
     compile::compile_file(&file)
 }
 
-/// Compile an ESL source string with access to a D14
+/// Compile an ESL source string with access to an
 /// [`InstitutionIndex`]. When provided, function-call IRIs in program
 /// bodies that classify as Decidable QueryClasses or declared
 /// Comorphisms are routed to the corresponding kernel capability via
@@ -69,7 +69,7 @@ pub fn compile_against_layer(
     compile::compile_file_with_context(&file, None, external_ctors, external_macros)
 }
 
-/// Compile an ESL source string with both a D14 [`InstitutionIndex`]
+/// Compile an ESL source string with both an [`InstitutionIndex`]
 /// AND a chain layer's external ctor + macro tables. This is the
 /// shape the running server reaches for when handling `eigenius load`
 /// or notebook-cell ESL — function-call IRIs need to classify against

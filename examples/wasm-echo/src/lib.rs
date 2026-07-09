@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D14 smoke-test institution.
+//! Institution-realisation smoke-test institution.
 //!
-//! Targets the `eigenius-institution-d14` WIT world (D14 §11). The
+//! Targets the `eigenius-institution` WIT world (D14 §11). The
 //! three exports do simple pass-through with provenance markers so
 //! tests on the host side can verify that the wire format and
 //! procedure-IRI dispatch round-trip end-to-end:
@@ -35,11 +35,11 @@ use eigenius_wasm_sdk::{QueryResponse, Resource, Value};
 
 wit_bindgen::generate!({
     path: "../../wit",
-    world: "eigenius-institution-d14",
+    world: "eigenius-institution-realisation",
 });
 
-const PROVENANCE_PROP: &str = "urn:eigenius:test:d14_echo:provenance";
-const STAGE_PROP: &str = "urn:eigenius:test:d14_echo:stage";
+const PROVENANCE_PROP: &str = "urn:eigenius:test:echo:provenance";
+const STAGE_PROP: &str = "urn:eigenius:test:echo:stage";
 
 struct EchoInstitution;
 

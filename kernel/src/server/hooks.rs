@@ -26,7 +26,7 @@ use crate::program::component::ComponentRegistry;
 use std::sync::Arc;
 
 impl EigeniusService {
-    /// Rebuild the D14 [`crate::institution::registry::InstitutionIndex`]
+    /// Rebuild the [`crate::institution::registry::InstitutionIndex`]
     /// from the given layer (which is the new head of the chain). Called
     /// after every successful commit + after Phase 9a rehydration.
     ///
@@ -125,7 +125,7 @@ impl EigeniusService {
 
     /// Walk a newly committed layer and register every WASM component
     /// (kernel-hosted or IO-class) declared therein. WASM-institution
-    /// registration is **no longer** performed here — D14 institutions
+    /// registration is **no longer** performed here — institutions
     /// register through the chain via the
     /// [`crate::institution::registry::InstitutionIndex`] +
     /// [`crate::institution::runtime::InstitutionRuntime`] populated by
@@ -203,7 +203,7 @@ impl EigeniusService {
             *guard = Arc::new(new_registry);
         }
 
-        // No institution-published resources under D14 — declarations
+        // No institution-published resources — declarations
         // ride into the chain as ordinary Eigon resources. Returns an
         // empty Vec for source-compatibility with the Load handler's
         // follow-up-commit logic (which is now a no-op).
@@ -215,7 +215,7 @@ impl EigeniusService {
     /// finds. IO components are forwarded to the orchestrator again
     /// (same semantics as fresh install; the orchestrator may reject
     /// if it already has the component). WASM institutions register
-    /// via D14 (chain scan + InstitutionRuntime) — no per-layer
+    /// via institution dispatch (chain scan + InstitutionRuntime) — no per-layer
     /// rehydration call here.
     async fn rehydrate_wasm_from_layer(
         &self,
@@ -374,7 +374,7 @@ impl EigeniusService {
 // kernel-hosted component registry, and (by historical convention)
 // returns a `Vec<Resource>` that today is always empty (the
 // institution-classes follow-up content used to come from here but
-// no longer does — D14 institutions declare their classes directly
+// no longer does — institutions declare their classes directly
 // in the chain). The hook surface still requires the return because
 // future institution shapes may re-introduce auto-published classes.
 // The returned `Vec` flows into the `institution_classes` Child

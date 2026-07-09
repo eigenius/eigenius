@@ -1,5 +1,5 @@
 [package]
-name = "eigenius-wasm-d14-arrhenius"
+name = "eigenius-wasm-arrhenius"
 version = "0.1.0"
 edition = "2021"
 

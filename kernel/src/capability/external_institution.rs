@@ -20,7 +20,7 @@
 //! digest, plus a per-procedure `(method_name, signature_iri)`
 //! lookup populated from every `QueryClass.query_handler`,
 //! `ExportFormat.procedure`, and `ImportFormat.procedure` anchored on
-//! this institution) and dispatches all three D14 boundary calls —
+//! this institution) and dispatches all three institution boundary calls —
 //! `extract_typed`, `reify`, and `query` — through the orchestrator's
 //! `DispatchExternal` gRPC method. The orchestrator routes the call
 //! into the substrate (Phase 19a's Docker-spawner + Julia worker for
@@ -172,7 +172,7 @@ impl ExternalInstitution {
     /// `reify`. Marshals the input as Eigon-CBOR, routes through
     /// `DispatchExternal`, and decodes the response Resource. The
     /// substrate wire protocol does not distinguish between the three
-    /// D14 boundary kinds — it's the caller's job to wrap the
+    /// institution boundary kinds — it's the caller's job to wrap the
     /// returned Resource in the appropriate kernel-side type.
     fn dispatch_substrate(
         &self,
@@ -197,7 +197,7 @@ impl ExternalInstitution {
         let handler = self.handlers.get(procedure_iri).ok_or_else(|| {
             InstitutionError::UnknownType(format!(
                 "external institution `{}` has no registered handler for procedure \
-                 `{procedure_iri}` — every D14 declaration anchored on this institution \
+                 `{procedure_iri}` — every institution declaration anchored on this institution \
                  (QueryClass.query_handler / ExportFormat.procedure / ImportFormat.procedure) \
                  must reference a chain-resident RuntimeMethodSignature carrying a \
                  `runtime:method_name`",
