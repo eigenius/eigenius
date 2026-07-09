@@ -163,9 +163,13 @@ pub fn up_gamma(gamma: &Gamma, patt: &Patt, typ: &Val, val: &Val) -> Result<Gamm
     }
 }
 
-/// Generate a fresh variable value for type checking.
+/// Generate a fresh variable value for type checking, at the current
+/// environment depth. Port of `genV` from the reference.
 ///
-/// Port of `genV` from the reference.
+/// Not to be conflated with `readback::gen_val`: the name tag is
+/// load-bearing — `Neut::Gen(j, name)` reads back as `Exp::Var("{name}{j}")`
+/// — so the checker's `TC#` convention and readback's `G#` (paired with
+/// `readback::gen_patt`) are deliberately distinct, not a duplication.
 pub fn gen_val(rho: &Rho) -> Val {
     Val::Nt(crate::nbe::val::Neut::Gen(rho.len(), "TC#".to_string()))
 }

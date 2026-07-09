@@ -53,10 +53,11 @@ use std::sync::Arc;
 /// cache for resolved class types.
 ///
 /// Design follows nanoda_lib's `TypeChecker` pattern
-/// ([nanoda_lib `src/tc.rs`](https://github.com/ammkrn/nanoda_lib/blob/main/src/tc.rs)): a single struct carrying
-/// mutable state (cache) plus immutable environment through all checker
-/// calls. The cache is scoped per type-check invocation — fresh per
-/// call, no cross-check invalidation needed.
+/// (`references/nanoda_lib/src/tc.rs` @ pinned commit `f58f2f6`): a
+/// single struct carrying mutable state (cache) plus immutable
+/// environment through all checker calls. The cache is scoped per
+/// type-check invocation — fresh per call, no cross-check invalidation
+/// needed.
 pub struct CheckCtx {
     pub rho: Rho,
     pub gamma: Gamma,
@@ -163,8 +164,11 @@ impl CheckCtx {
         eval_ctx(exp, rho, &self.eval_ctx())
     }
 
-    /// Extend the context with a new variable binding (for entering binders).
-    /// Shares the layer and type_cache with the parent context.
+    /// Extend the context with a new variable binding (for entering
+    /// binders). Shares the layer (an `Arc`) and clones the
+    /// `type_cache` into the child — class resolutions performed inside
+    /// the binder therefore don't propagate back to the parent on exit
+    /// (§4.4-D7; sharing the cache instead is the profile-gated item 9).
     fn extend(&self, patt: &Patt, typ: &Val, val: &Val) -> Result<CheckCtx, String> {
         let gamma1 = up_gamma(&self.gamma, patt, typ, val)?;
         let rho1 = self.rho.clone().extend(patt.clone(), val.clone());

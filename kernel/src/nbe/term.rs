@@ -445,6 +445,18 @@ impl PartialEq for InductiveDecl {
     }
 }
 
+impl InductiveDecl {
+    /// Whether `typ` is a direct application of this inductive
+    /// (`Exp::InductiveType(self, _)`) — the only shape of recursive
+    /// constructor argument the Phase 11b/D19 iota reduction can
+    /// eliminate. Higher-order or nested occurrences are rejected at
+    /// positivity-check time, so this simple head check suffices for
+    /// both recursor-type derivation and iota reduction.
+    pub fn is_direct_recursive_ref(&self, typ: &Exp) -> bool {
+        matches!(typ, Exp::InductiveType(d, _) if d.iri == self.iri)
+    }
+}
+
 /// Coinductive (codata) declaration — the parameterised analogue of
 /// the anonymous [`Exp::Codata`] form. Admits type parameters
 /// (including `Size` parameters for sized codata) and supports

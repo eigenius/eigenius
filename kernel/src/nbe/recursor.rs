@@ -176,7 +176,7 @@ pub fn derive_minor_type(
         .iter()
         .enumerate()
         .filter(
-            |(_, a)| matches!(a, MinorArg::Value { typ, .. } if is_direct_recursive_ref(decl, typ)),
+            |(_, a)| matches!(a, MinorArg::Value { typ, .. } if decl.is_direct_recursive_ref(typ)),
         )
         .map(|(i, _)| i)
         .collect();
@@ -234,16 +234,6 @@ pub fn derive_minor_type(
         env = env.extend(patt.clone(), val.clone());
     }
     eval_ctx(&body_exp, &env, ctx)
-}
-
-/// Whether `typ` is a direct application of `decl` — the only shape
-/// of recursive constructor argument that Phase 11b's iota reduction
-/// can eliminate.
-///
-/// Duplicated from `eval::is_recursive_arg_type` until Phase 11b's
-/// helpers are deduplicated in a follow-up pass.
-fn is_direct_recursive_ref(decl: &InductiveDecl, typ: &Exp) -> bool {
-    matches!(typ, Exp::InductiveType(d, _) if d.iri == decl.iri)
 }
 
 /// One constructor arg in the minor-derivation telescope.
