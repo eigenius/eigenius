@@ -61,7 +61,7 @@ use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 /// same convention as `DICT` below. Override with `EIGENIUS_DB_SNAPSHOT`.
 const DEFAULT_SNAPSHOT: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../db-snapshot/wordnet-umls-all-2026-07-08"
+    "/../../../db-snapshot/wordnet-umls-all-2026-07-10"
 );
 
 /// WordNet dict (for the Morphy lemmatizer — surface→lemma at lookup time).
@@ -857,23 +857,19 @@ fn dump_as_cats() {
     let Some(head) = open_head(&path) else { return };
     let index = build_index(&head);
     let lem = morphy();
-    for w in ["DRIVE", "drive"] {
-        eprintln!("── {w:?} ──");
-        for (inj, cat, sense) in index.debug_form_entries(w, &lem).iter().take(8) {
-            eprintln!("   inj={inj} sense={sense:?}  {cat}");
-        }
-    }
     for s in [
-        "Project Achilles affects cells", // single named individual — WORKS
-        "project DRIVE affects cells",    // does DRIVE name?
-        "HeLa and BRCA1 affect cells",    // coordinate two plain names — control
-        "Project Achilles and BRCA1 affect cells", // named individual + plain name
-        "Project Achilles and project DRIVE affect cells", // two named individuals
+        "Synthetic lethality is an interaction between two genetic events.",
+        "The co-occurrence of these two events leads to cell death.",
+        "Each event alone does not lead to cell death.",
+        "Scientists can exploit synthetic lethality for cancer therapeutics.",
+        "DNA repair processes are attractive synthetic-lethal targets.",
+        "Many cancers exhibit an impairment of a DNA repair pathway.",
+        "This impairment can lead to dependence on specific repair proteins.",
     ] {
         let (c, o) = index.parse_open(s, &lem);
         eprintln!("\n{s:?}: closed={} open={}", c.len(), o.len());
         for it in c.iter().take(1) {
-            eprintln!("   sem = {}", pretty_term(it.sem()));
+            eprintln!("   {}", pretty_term(it.sem()));
         }
     }
 }
