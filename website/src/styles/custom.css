@@ -645,6 +645,83 @@ body::after {
   text-align: left;
 }
 
+/* =====================================================================
+ * Featured writing module on the landing page
+ * ===================================================================== */
+
+.featured-parts {
+  list-style: none;
+  counter-reset: none;
+  margin: 1.6rem 0 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+  max-width: 46rem;
+}
+
+.featured-part-link {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 0.4rem;
+  text-decoration: none;
+  transition:
+    border-color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.featured-part-link:hover {
+  border-color: var(--sl-color-accent);
+  transform: translateY(-1px);
+}
+
+.featured-part-number {
+  flex: none;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sl-color-text-accent);
+  background: var(--eigenius-brand-bg);
+  border-radius: 0.25rem;
+  padding: 0.15rem 0.45rem;
+}
+
+.featured-part-title {
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--sl-color-text);
+  line-height: 1.35;
+}
+
+.featured-post {
+  margin-top: 1.4rem;
+  max-width: 46rem;
+}
+
+.featured-updated {
+  font-size: 0.85rem;
+  color: var(--eigenius-grey-5);
+  margin-top: 1.6rem;
+}
+
+.featured-updated a {
+  color: var(--sl-color-text-accent);
+}
+
+@media (max-width: 40rem) {
+  .featured-part-link {
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .featured-part-number {
+    align-self: flex-start;
+  }
+}
+
 /* ---------- Previous / next within a series ---------- */
 
 .post-series-nav {

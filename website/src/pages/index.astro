@@ -10,6 +10,7 @@
 // want full control over the hero and section structure.
 
 import BaseLayout from "../layouts/BaseLayout.astro";
+import FeaturedWriting from "../components/FeaturedWriting.astro";
 import WarrantMap from "../components/WarrantMap.astro";
 import AudienceCard from "../components/AudienceCard.astro";
 import PaperCard from "../components/PaperCard.astro";
@@ -204,6 +205,9 @@ const PLAYLIST_URL =
         </div>
       </div>
     </section>
+
+    <!-- ───────── Writing (latest series or post) ───────── -->
+    <FeaturedWriting />
 
     <!-- ───────── Research ───────── -->
     <section class="section section-research">

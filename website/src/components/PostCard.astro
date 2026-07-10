@@ -1,7 +1,7 @@
 ---
 // One post as it appears on the blog index. Shared by the series
 // groups and the standalone list so the two can't drift apart.
-import { formatDate, isoDate, type Post } from "../lib/posts";
+import { formatDate, formatPart, isoDate, type Post } from "../lib/posts";
 
 interface Props {
   post: Post;
@@ -17,7 +17,7 @@ const { post } = Astro.props;
     </time>
     {
       post.data.series && (
-        <span class="post-part">Part {post.data.series.part}</span>
+        <span class="post-part">Part {formatPart(post.data.series.part)}</span>
       )
     }
     {post.data.draft && <span class="post-draft-chip">Draft</span>}

@@ -8,6 +8,7 @@ import {
   getPublishedPosts,
   getSeriesContext,
   formatDate,
+  formatPart,
   isoDate,
   type Post,
 } from "../../lib/posts";
@@ -52,7 +53,7 @@ const series = await getSeriesContext(post);
               <>
                 <span class="post-meta-sep">·</span>
                 <span>
-                  Part {series.part} of {series.total} in {series.name}
+                  Part {formatPart(series.part)} of {formatPart(series.total)} in {series.name}
                 </span>
               </>
             )

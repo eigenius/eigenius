@@ -90,6 +90,28 @@ export async function getIndexEntries(): Promise<IndexEntry[]> {
   return entries.sort((a, b) => b.sortDate.valueOf() - a.sortDate.valueOf());
 }
 
+/**
+ * The one entry to feature on the landing page, or null if nothing is
+ * published.
+ *
+ * Deliberately *not* "the newest post". The newest post in a series is
+ * its last part, which assumes the parts before it — featuring Part III
+ * drops a first-time visitor into the conclusion. Featuring the entry
+ * instead means a series is presented as a series, entered at Part I.
+ *
+ * Reads through `getIndexEntries`, so the landing page and the blog
+ * index can never disagree about what is newest.
+ */
+export async function getFeaturedEntry(): Promise<IndexEntry | null> {
+  const entries = await getIndexEntries();
+  return entries[0] ?? null;
+}
+
+/** The post a featured entry should link to first. */
+export function entryEntryPoint(entry: IndexEntry): Post {
+  return entry.kind === "series" ? entry.posts[0] : entry.post;
+}
+
 /** Where a post sits in its series, and its neighbours. */
 export interface SeriesContext {
   name: string;
@@ -135,6 +157,34 @@ function assertDistinctParts(name: string, posts: Post[]): void {
     }
     seen.set(part, post.id);
   }
+}
+
+/**
+ * Part numbers are stored as integers so they sort, but displayed as
+ * Roman numerals to match how the posts title themselves ("Part III —
+ * Making Reasoning Checkable"). A generated chip reading "Part 3" above
+ * a headline reading "Part III" is the kind of mismatch readers notice.
+ *
+ * Numbers above the series lengths we plausibly write fall back to the
+ * integer rather than producing nonsense.
+ */
+const ROMAN = [
+  "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+  "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX",
+];
+
+export function formatPart(part: number): string {
+  return ROMAN[part - 1] ?? String(part);
+}
+
+/** `3` → `three`, for prose like "a three-part introduction". */
+const WORDS = [
+  "zero", "one", "two", "three", "four", "five",
+  "six", "seven", "eight", "nine", "ten",
+];
+
+export function spellCount(n: number): string {
+  return WORDS[n] ?? String(n);
 }
 
 /** `2026-07-09` → `9 July 2026`. */
