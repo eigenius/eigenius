@@ -189,11 +189,37 @@ Finding T033 / Lab-result T034 / Sign T184 / Model T050), both grounded from `MR
   → vetoed, no mass), `mass_concept_is_mass_by_semantic_type_not_head` (MSI T049), `count_entity_…` (Werner),
   `process_function_…` (T044).
 
-**Still to run:** re-reseed with the count-veto + re-run the parse-level measure (deterministic cap-only on
-the regressed sentences must show GAP 0; full-page reranked must not regress `ENCODED`/`GAP` vs the
-head-inheritance baseline). The **WordNet step** (§4b) is deliberately **not** built — analysis showed
-WordNet supersenses don't predict sense-level countability (the `iron`/`furniture` problem), so its
-per-lemma list stays as-is.
+**Parse-level measure — DONE (Derived, `2026-07-09`, deterministic cap-only, full v3 page over BOTH
+snapshots, diffed).** Reseeded the count-veto → `db-snapshot/wordnet-umls-all-2026-07-09` (chain
+diagnostics: `gENE` C5849123 mass **0**, Lynch syndrome C1333990 mass **16**, methylation C0025723 mass
+**2**). Full-page cap-only:
+
+| snapshot | encoded | ambiguous | GAP |
+|---|---|---|---|
+| head-inheritance (`07-08`) | 1 | 53 | **8** |
+| count-veto (`07-09`) | 1 | 54 | **7** |
+
+- **Regressions: NONE** — no unit gaps under count-veto that didn't already gap under head-inheritance
+  (deterministic diff over all 62 units).
+- **Fixed: 1** — *"These lines possess events that are predictive of MMR deficiency."* gaps under
+  head-inheritance, parses under count-veto (removing spurious mass on discrete-count concepts un-crowded
+  the cap-only beam). So the count-veto is a small **net gain** on the corpus (GAP 8→7), not merely neutral,
+  on top of the lexicon-wide precision.
+
+**Reranked (`--features use-llm`) tally — the authoritative config.** head-inheritance: 62 units →
+**ENCODED 2 / AMBIG 55 / GAP 5**; count-veto: **ENCODED 1 / AMBIG 58 / GAP 3**. Gap diff: **zero
+regressions, two fixed** — #8 (*predictive of MMR deficiency*) and #9 (*not simply a result of MMR
+deficiency*) both gap under head-inheritance and parse under count-veto. So under the real config the
+count-veto is **GAP 5 → 3** (the search-limited MMR-deficiency sentences reach their parse once spurious
+discrete-count mass is removed). The ENCODED 2→1 dip is **reranker non-determinism** (cap-only is ENCODED 1
+for *both* snapshots; ENCODED sits on the encoded↔ambiguous line and swings with LLM sampling — not a
+gapped unit). **Net across both sweeps: the count-veto removes 1–2 corpus gaps, regresses none, and adds the
+lexicon-wide precision.**
+
+Verified clean across the `#102` (CheckError) merge: `cargo check --workspace` passes, the snapshot resumes
+(no ManifestDrift), and the deterministic regression-fix holds (GAP 0 on the affected sentences). 14 unit
+tests green. **The WordNet step (§4b) is deliberately NOT built** — analysis showed WordNet supersenses
+don't predict sense-level countability (the `iron`/`furniture` problem), so its per-lemma list stays as-is.
 
 ## 9. Decision points
 

@@ -176,6 +176,67 @@ pub fn cat_shape(e: &Exp) -> String {
     }
 }
 
+/// A packing key that — unlike [`cat_shape`] — **keeps** every type index: the concrete `EigonClass`
+/// IRIs in argument slots, and refined-noun Σ components. Used only for categories whose
+/// combinability is index-DEPENDENT ([`super::category::cat_has_selectional_slot`]), where `cat_shape`
+/// is too coarse: it erases the argument class, so two object type-raised GQs
+/// `(S\NP)\((S\NP)/cat_np(gene))` and `…/cat_np(cell)` would share a node, and the packed forest's
+/// representative-based edge decision would silently drop the non-representative's combinations
+/// (D63 §11 3d — per-cell packing). Keying such items by the full category makes them merge only when
+/// identical, so their (small) residue stays exact while the index-independent majority still packs by
+/// `cat_shape`. Like `cat_shape`, it never inlines an `InductiveType` declaration (bounded output).
+pub fn cat_key(e: &Exp) -> String {
+    match e {
+        Exp::App(_, _) => {
+            let (head, args) = unspine(e);
+            if args.is_empty() {
+                cat_key(head)
+            } else {
+                let inner = args
+                    .iter()
+                    .map(|a| cat_key(a))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}({inner})", cat_key(head))
+            }
+        }
+        Exp::Con(name, body) => format!("{name}({})", cat_key(body)),
+        Exp::InductiveCtor(_, name, args) => {
+            if args.is_empty() {
+                name.clone()
+            } else {
+                let inner = args.iter().map(cat_key).collect::<Vec<_>>().join(", ");
+                format!("{name}({inner})")
+            }
+        }
+        Exp::InductiveType(decl, args) => {
+            if args.is_empty() {
+                decl.name.clone()
+            } else {
+                let inner = args.iter().map(cat_key).collect::<Vec<_>>().join(", ");
+                format!("{}({inner})", decl.name)
+            }
+        }
+        // KEEP the type index — the whole point of this key over `cat_shape`. Full IRI (not `local`),
+        // so two classes that share a local name across namespaces never collide into one node.
+        Exp::EigonClass(iri) | Exp::EigonAxiom(iri) => iri.as_str().to_string(),
+        Exp::EigonResource(r) => r
+            .id()
+            .map(|i| i.as_str().to_string())
+            .unwrap_or_else(|| "<resource>".to_string()),
+        // KEEP the refined-noun Σ components — they determine the result of a combination.
+        Exp::Sig(_, a, b) => format!("Σ({}, {})", cat_key(a), cat_key(b)),
+        Exp::Times(a, b) => format!("×({}, {})", cat_key(a), cat_key(b)),
+        Exp::Lam(_, body) => format!("λ.{}", cat_key(body)),
+        Exp::Arrow(a, b) => format!("{} → {}", cat_key(a), cat_key(b)),
+        Exp::Pi(_, a, b) => format!("{} → {}", cat_key(a), cat_key(b)),
+        Exp::Var(n) => n.clone(),
+        Exp::Sort(0) => "Prop".to_string(),
+        Exp::Sort(1) => "Set".to_string(),
+        _ => "_".to_string(),
+    }
+}
+
 /// A short label for the `Exp` variant — the fallback so output never explodes.
 fn exp_kind(e: &Exp) -> &'static str {
     match e {

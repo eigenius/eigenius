@@ -1,9 +1,31 @@
 # D63 — PP-attachment control (implementation scoping)
 
-**Status:** design / scoping, pre-implementation. This note specifies *exactly what code each of three
-levers would touch* to add PP-attachment control to the DCG parser. It is a scoping/design note, **not**
-an implementation. Every claim is grounded in the current code (file:line); anything not verifiable from
-the code is flagged.
+> ## ⛔ SHELVED — do NOT pursue PP-attachment control for the residual gaps (re-assessed `2026-07-09`)
+>
+> **Empirically refuted as the lever for the corpus's residual gaps.** Diagnosed the 3 residual reranked
+> gaps (#3 passive, #4 V-as-Y+compared-to, #7 comparative+PP) with a fragment ladder + wide beam
+> (`diagnose_residual_gaps`, `db_backed_encoding.rs`). Finding: **PP-attachment is not the driver.**
+> - Every construction fragment PARSES, *including the PPs*: `…as a dependency compared to cells` CLOSED×176,
+>   `…in cells` ×85, `…greater dependence on genes than counterparts` ×162, and the coordinated passive
+>   `some lines and some lines were represented by data sets` ×6. The grammar attaches PPs (and handles the
+>   passive / V-as-Y / comparative) fine — adding a PP raises the reading count but never causes a gap.
+> - The **only** thing that tips each full sentence from CLOSED → GAP is swapping generic fillers for the
+>   **domain terms** (`MSI cell lines`, `MSS counterparts`, `screening data sets`, `WRN`, `these four
+>   lineages`). Those carry big **sense-products** and **multi-noun compound brackets** — that mass blows the
+>   chart past the beam (10.8M items, then OOM at wide beam), not the PP structure.
+>
+> **So the residual is domain-term ambiguity (sense-product × N-N compound bracketing), and the candidate
+> lever is an N-N compound-bracketing collapse + beam headroom — NOT PP-attachment.** Lever A here (typed
+> pruning of PP slots) resolves a slice that already parses, so it would not move these gaps. Do not
+> re-open this note as "the next lever" without new evidence that a PP-attachment *gap* exists.
+>
+> *(The below scoping is preserved for the record — the three levers and their code touchpoints are still
+> accurate as a design, should a genuine PP-attachment problem surface later.)*
+
+**Status:** design / scoping, pre-implementation (⛔ **shelved** — see banner above). This note specifies
+*exactly what code each of three levers would touch* to add PP-attachment control to the DCG parser. It is
+a scoping/design note, **not** an implementation. Every claim is grounded in the current code (file:line);
+anything not verifiable from the code is flagged.
 
 Follow-on to the packed-forest blueprint's deferred item **"PP-attachment control (L, NEW)"**
 ([d63-packed-forest-parsing-blueprint.md §Deferred, lines 353-355](d63-packed-forest-parsing-blueprint.md)).

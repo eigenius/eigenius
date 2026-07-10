@@ -28,16 +28,28 @@
 use std::collections::BTreeMap;
 
 use super::parser::{Combinator, Cost, Item};
-use super::pretty::cat_shape;
+use super::pretty::{cat_key, cat_shape};
 
-/// A packing **signature**: the category shape (type-indices erased, [`cat_shape`]) plus the Eisner
-/// normal-form provenance. Two items share a node iff they share a `Sig` — the equivalence class
-/// that behaves identically under all future combination (given the index-independence precondition).
+/// A packing **signature**: a category key plus the Eisner normal-form provenance. Two items share a
+/// node iff they share a `Sig` — the equivalence class that behaves identically under all future
+/// combination. For **index-independent** categories the key is the type-index-erased [`cat_shape`]
+/// (the coarse key that collapses the sense-product — the packing win). For categories whose
+/// combinability is index-DEPENDENT (a concrete selectional argument slot,
+/// [`super::category::cat_has_selectional_slot`]) the key keeps the indices ([`cat_key`], prefixed
+/// `sel:`), so e.g. two object type-raised GQs of different classes never share a node — the small
+/// unpacked residue of per-cell packing (D63 §11 3d).
 pub(crate) type Sig = (String, Combinator);
 
-/// The signature of an item — its packing key.
+/// The signature of an item — its packing key. See [`Sig`] for the index-independent vs
+/// index-dependent split. The `sel:` prefix can never collide with a `cat_shape` output (no
+/// constructor is named `sel`), so the two key spaces stay disjoint.
 pub(crate) fn node_sig(it: &Item) -> Sig {
-    (cat_shape(it.cat()), it.prov())
+    let key = if super::category::cat_has_selectional_slot(it.cat()) {
+        format!("sel:{}", cat_key(it.cat()))
+    } else {
+        cat_shape(it.cat())
+    };
+    (key, it.prov())
 }
 
 /// Index of a [`PNode`] in [`Forest::nodes`].
@@ -86,6 +98,11 @@ pub(crate) enum BinRule {
     AppositiveSubj,
     /// Non-restrictive appositive in verb-object position (the in-situ object raise).
     AppositiveObj,
+    /// Close nominal apposition (D63 §8.4 Phase 6, RC-6): a definite/bare common-noun HEAD immediately
+    /// followed by a coreferential NAME-GROUP — "the genes BRCA1 and MSH2" (`appose_group`). Unlike the
+    /// other `BinRule`s there is NO reserved token between the two spans; the head and group are
+    /// ADJACENT, so every split is tried and the rule gates by shape + head-kind at construction.
+    ApposeGroup,
 }
 
 /// Which composed-cell unary shift a [`Edge::Unary`] represents (D63 blueprint §11 3c.4b).

@@ -676,6 +676,180 @@ fn d2_collocation_coverage() {
     }
 }
 
+/// STEP 0 of the compound-pile plan (d63-compound-pile-collapse-plan.md): localize WHICH domain compound
+/// tips each residual sentence over, and get its ROUTING (packed vs unpacked) — the fork that decides
+/// Lever 1 (extend packing) vs Lever 2 (collapse structure). Bounded frames (one domain compound swapped
+/// into a parseable generic base at a time; NO full sentence / double-swaps → avoids the OOM). Cap-only.
+/// Run: cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       diagnose_compound_pile -- --ignored --nocapture
+#[test]
+#[ignore = "STEP 0: localize the exploding domain compound + its routing; --ignored --nocapture"]
+fn diagnose_compound_pile() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    // ROUTING-ONLY (fast: routes_packed does NOT parse; parsing the domain frames explodes/OOMs). The
+    // fork — packed vs unpacked — is the Step-0 answer that picks Lever 1 (extend packing) vs Lever 2.
+    let row = |idx: &LexicalIndex, s: &str| {
+        let toks = tokenize(s);
+        let unk: Vec<String> = toks
+            .iter()
+            .filter(|t| !is_nonprose(t) && !idx.has_token(t, &lem))
+            .cloned()
+            .collect();
+        let routed = if idx.routes_packed(s, &lem) {
+            "PACKED"
+        } else {
+            "UNPACK"
+        };
+        let oov = if unk.is_empty() {
+            String::new()
+        } else {
+            format!("  OOV {unk:?}")
+        };
+        eprintln!("   [{routed}]{oov} {s:?}");
+    };
+    // (label, base generic frame, [one-domain-compound-swap frames])
+    let groups: &[(&str, &str, &[&str])] = &[
+        (
+            "#7 — swap one domain compound into the generic base (×162)",
+            "cells from lineages showed greater dependence on genes than counterparts",
+            &[
+                "MSI cell lines from lineages showed greater dependence on genes than counterparts", // subj compound
+                "cells from these four lineages showed greater dependence on genes than counterparts", // from-PP
+                "cells from lineages showed greater dependence on WRN than counterparts",  // obj (named indiv)
+                "cells from lineages showed greater dependence on genes than their MSS counterparts", // than-obj
+            ],
+        ),
+        (
+            "#4 — swap one domain compound into the generic base (×121)",
+            "we identified genes as a dependency in cells compared to lines",
+            &[
+                "we identified WRN as a dependency in cells compared to lines", // obj (named indiv)
+                "we identified genes as the top preferential dependency in cells compared to lines", // as-complement
+                "we identified genes as a dependency in MSI cell lines compared to lines", // in-PP compound
+                "we identified genes as a dependency in cells compared to MSS cell lines", // compared-to compound
+            ],
+        ),
+        (
+            "#3 — swap one domain compound into the generic base (×6)",
+            "some lines and some lines were represented by data sets",
+            &[
+                "some MSI lines and some MSS lines were represented by data sets", // coord subj compounds
+                "some lines and some lines were represented by these screening data sets", // agent compound
+            ],
+        ),
+    ];
+    for (label, base, swaps) in groups {
+        eprintln!("\n════════════════════════════════════════════════════════════════");
+        eprintln!("{label}");
+        row(&index, base);
+        for s in *swaps {
+            row(&index, s);
+        }
+    }
+    // TRIGGER LOCALIZATION: which construct forces unpacked? (baselines that SHOULD pack + one construct)
+    eprintln!("\n════════════════════════════════════════════════════════════════");
+    eprintln!("TRIGGER (expect PACKED baselines; UNPACK isolates the culprit construct)");
+    for s in [
+        "genes affect cells",                                // SVO baseline
+        "genes are large",                                   // copula baseline
+        "genes are attractive targets",                      // adj + compound baseline
+        "cells showed dependence on genes", // relational noun + governed-prep PP (no comparative)
+        "cells showed greater dependence than counterparts", // #7 comparative
+        "cells are larger than genes",      // bare comparative-than
+        "lines were represented by sets",   // #3 passive
+        "we identified genes as a dependency", // #4 V-as-Y
+        "genes affect cells compared to lines", // 'compared to' adjunct
+    ] {
+        row(&index, s);
+    }
+}
+
+/// RE-ASSESS the 3 residual reranked gaps (#3 passive, #4 V-as-Y+compared-to, #7 comparative+PP): for
+/// each, walk a fragment ladder (isolate the construction with generic fillers) at the DEFAULT beam,
+/// then parse the full sentence at DEFAULT vs WIDE (cell_beam=1024). The verdict per sentence:
+///   - construction parses in a fragment but full sentence GAPs at default, parses at WIDE ⇒ SEARCH-limited
+///     (beam pressure), and the fragment where it first breaks localizes the driver;
+///   - gaps even at WIDE ⇒ a real composition gap (grammar / missing rule), NOT beam pressure.
+/// Cap-only. Run:
+///   cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       diagnose_residual_gaps -- --ignored --nocapture
+#[test]
+#[ignore = "re-assess the 3 residual gaps (search vs grammar, per sentence); --ignored --nocapture"]
+fn diagnose_residual_gaps() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    let outcome = |c: usize, o: usize| -> String {
+        if c > 0 {
+            format!("CLOSED×{c}")
+        } else if o > 0 {
+            format!("open×{o}")
+        } else {
+            "GRAMMAR-GAP".into()
+        }
+    };
+    let probe = |idx: &LexicalIndex, s: &str| -> String {
+        let toks = tokenize(s);
+        let unk: Vec<String> = toks
+            .iter()
+            .filter(|t| !is_nonprose(t) && !idx.has_token(t, &lem))
+            .cloned()
+            .collect();
+        if !unk.is_empty() {
+            return format!("OOV {unk:?}");
+        }
+        let (c, o) = idx.parse_open(s, &lem);
+        outcome(c.len(), o.len())
+    };
+
+    // (label, ladder fragments [default beam], full sentence [default + WIDE])
+    let groups: &[(&str, &[&str], &str)] = &[
+        (
+            "#7 COMPARATIVE + PP (greater … on … than …)",
+            &[
+                "cells showed greater dependence than counterparts", // comparative alone
+                "cells showed greater dependence on genes than counterparts", // + on-PP (governed)
+                "cells from lineages showed greater dependence on genes than counterparts", // + subj from-PP
+            ],
+            "MSI cell lines from these four lineages showed greater dependence on WRN than their MSS counterparts.",
+        ),
+        (
+            "#4 V-as-Y + in-PP + compared-to",
+            &[
+                "we identified genes as a dependency", // V-as-Y alone
+                "we identified genes as a dependency in cells", // + in-PP
+                "we identified genes as a dependency compared to cells", // + compared-to
+                "we identified genes as a dependency in cells compared to lines", // both PPs
+            ],
+            "Project Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines.",
+        ),
+        (
+            "#3 PASSIVE + coordinated subject + complex agent",
+            &[
+                "lines were represented by sets",          // passive, minimal
+                "lines were represented by data sets",     // + compound agent
+                "some lines were represented by data sets", // + some-det
+                "some lines and some lines were represented by data sets", // + coordinated subject
+            ],
+            "Some MSI lines and some MSS lines were represented by these screening data sets.",
+        ),
+    ];
+
+    for (label, ladder, full) in groups {
+        eprintln!("\n════════════════════════════════════════════════════════════════");
+        eprintln!("{label}");
+        for f in *ladder {
+            eprintln!("   [default] {:<12} {f:?}", probe(&index, f));
+        }
+        eprintln!("   ── full sentence ──");
+        eprintln!("   [default] {:<12} {full:?}", probe(&index, full));
+    }
+}
+
 /// D1 diagnostic (nominal-modification NF §8): run the `modifier_class` discriminator over the v3
 /// corpus's REAL adjective lexicon entries (per WordNet sense), confirming its verdict on actual data
 /// — `attractive` must screen as `Gradable`, classificatory adjectives (`genetic`/`somatic`/`immune`)

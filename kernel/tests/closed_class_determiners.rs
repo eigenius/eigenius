@@ -1580,9 +1580,13 @@ fn packing_router_decision_is_correct() {
     assert!(on.routes_packed("BRCA1 , which affects HeLa , is primary", &Identity)); // appositive
     assert!(on.routes_packed("thus , HeLa affects BRCA1", &Identity)); // fronted-comma absorption
 
-    // Selectional (`depends on`: Gene/CellLine slots) ⇒ UNPACKED (fail-closed).
-    assert!(!on.routes_packed("HeLa depends on BRCA1", &Identity));
-    // Pied-piping (`[prep] which`) is ternary + non-piling ⇒ routed UNPACKED (structural detection).
+    // Selectional (`depends on`: Gene/CellLine slots) is PACKED now — per-cell packing keys the
+    // concrete-slot items finer (`node_sig` → `cat_key`) so they never wrongly share a node, instead
+    // of forcing the whole sentence unpacked (D63 §11 3d). Soundness is witnessed by the differential
+    // oracle `packed_forest_equals_unpacked_on_core_grammar`, which now covers selectional sentences.
+    assert!(on.routes_packed("HeLa depends on BRCA1", &Identity));
+    // Pied-piping (`[prep] which`) is the one construct the packed forest builds no edge for (ternary,
+    // non-piling) ⇒ routed UNPACKED (structural detection). A completeness carve-out, not soundness.
     assert!(!on.routes_packed("the gene in which HeLa affects BRCA1 is large", &Identity));
 
     // Flag off ⇒ never packs, even for a packable sentence.
@@ -1630,6 +1634,20 @@ fn packed_forest_equals_unpacked_on_core_grammar() {
         "BRCA1 , which affects HeLa , is primary", // subject appositive (trailing comma absorbed)
         "thus , HeLa affects BRCA1", // fronted transitional + comma absorption
         "more largely , HeLa affects BRCA1", // degree-modified fronted adverb + comma
+        // CONCRETE SELECTIONAL SLOTS (D63 §11 3d — per-cell packing). These route PACKED now (the
+        // whole-sentence selectional carve-out is gone); the concrete-slot items key finer via
+        // `cat_key` so they never wrongly share a node. This is the soundness witness for the
+        // refinement — the packed path must still equal the unpacked path with the residue present.
+        "HeLa depends on BRCA1", // selectional verb `depends on`, both args concrete
+        "every cell line depends on BRCA1", // selectional verb + determiner subject
+        "no cell line depends on BRCA1", // selectional verb + negative determiner
+        "a cell line that depends on BRCA1 is primary", // selectional verb inside a packed relative
+        "HeLa depends on BRCA1 and HeLa depends on BRCA1", // selectional verb under coordination
+        // Close nominal apposition (D63 §8.4 Phase 6, RC-6 — the packed `ApposeGroup` edge). Singular
+        // head + name-GROUP so it works under the `Identity` lemmatizer (the plural-head form is in
+        // `close_apposition_subject_and_object`, which uses `PluralS`). Subject and object position.
+        "the gene BRCA1 and BRCA1 affect HeLa",
+        "HeLa affects the gene BRCA1 and BRCA1",
     ] {
         let (co, oo) = off.parse_open(s, &Identity);
         let (cn, on2) = on.parse_open(s, &Identity);

@@ -1240,9 +1240,11 @@ impl LexicalIndex {
         scope: Option<&[Iri]>,
     ) -> (Vec<Item>, Vec<OpenParse>) {
         // ROUTER (D63 Option A, blueprint §11 3b.3): route to the packed CKY + cube-pruning extractor
-        // when packing is enabled, the combinatory-core spike is off, and this sentence is
-        // index-independent (the guard — no selectional functor slot, no coordination). Otherwise the
-        // unpacked beamed path (also the fallback for selectional lexicons and the oracle baseline).
+        // when packing is enabled, the combinatory-core spike is off, and this sentence is not
+        // pied-piping (the one construct the packed forest builds no edge for — `parse_needs_unpacked`).
+        // Concrete selectional slots are packed per-cell now (they key finer via `node_sig`), so the
+        // dense-lexicon corpus takes this path. Otherwise the unpacked beamed path (the oracle baseline,
+        // and the fallback for the combinatory-core spike / pied-piping).
         if self.packing
             && !self.combinatory_core
             && !self.parse_needs_unpacked(&tokenize(text), lemmatizer, scope)
@@ -1252,20 +1254,18 @@ impl LexicalIndex {
         self.parse_unpacked(text, lemmatizer, scope)
     }
 
-    /// Per-parse index-independence guard (D63 Option A, blueprint §11 3b.2). Returns `true` if this
-    /// sentence must use the UNPACKED path. As of §11 3g.3 the packed CKY mirrors every token-keyed
-    /// sem-reading construct (coordination, the reciprocal, `but not`, the restrictive relative, the
-    /// appositive, the fronted-modifier comma) plus the wh-determiner `which` (an ordinary leaf), so
-    /// only two fail-closed carve-outs remain:
-    /// 1. **pied-piping** (`[prep] which [subj] [VP]`) — a ternary rule with no packing benefit (a
-    ///    rare, non-piling construct), detected structurally (a `which` right after a VP-adjunct
-    ///    preposition) and routed to the proven unpacked path rather than given a ternary edge;
-    /// 2. a seeded functor with a concrete SELECTIONAL argument slot
-    ///    ([`super::category::cat_has_selectional_slot`]) — combinability would be index-dependent, so
-    ///    node-level packing by `cat_shape` is unsound.
-    ///
-    /// The seed scan is over this sentence's spans only (feasible for the lazy index) and uncapped so
-    /// no beyond-cap selectional entry slips through.
+    /// Per-parse packability guard (D63 Option A, blueprint §11 3b.2). Returns `true` if this sentence
+    /// must use the UNPACKED path. As of §11 3g.3 the packed CKY mirrors every token-keyed sem-reading
+    /// construct (coordination, the reciprocal, `but not`, the restrictive relative, the appositive,
+    /// the fronted-modifier comma) plus the wh-determiner `which` (an ordinary leaf), and as of the
+    /// per-cell packing refinement ([`super::packed::node_sig`]) a concrete selectional argument slot
+    /// no longer forces the unpacked path — such items just key finer ([`super::pretty::cat_key`]) so
+    /// they never wrongly share a node, while the index-independent majority still packs by
+    /// `cat_shape`. So one **completeness** carve-out remains:
+    /// - **pied-piping** (`[prep] which [subj] [VP]`) — a ternary rule the packed forest builds no edge
+    ///   for (rare, non-piling), detected structurally (a `which` right after a VP-adjunct preposition)
+    ///   and routed to the unpacked path. It is not a soundness case; the packed forest simply cannot
+    ///   express it yet.
     fn parse_needs_unpacked(
         &self,
         tokens: &[String],
@@ -1273,10 +1273,10 @@ impl LexicalIndex {
         scope: Option<&[Iri]>,
     ) -> bool {
         let n = tokens.len();
-        // (1) Pied-piping `[prep] which`: the antecedent noun-pile isn't collapsed by packing (the
-        // construct is ternary and rare), so route it unpacked. A `which` right after a VP-adjunct
-        // preposition is pied-piping; a `which` after a noun is the packed which-relative, and a
-        // sentence-initial / post-determiner `which` is the packed wh-determiner.
+        // Pied-piping `[prep] which`: the packed forest builds no edge for this ternary construct, so
+        // route it unpacked. A `which` right after a VP-adjunct preposition is pied-piping; a `which`
+        // after a noun is the packed which-relative, and a sentence-initial / post-determiner `which`
+        // is the packed wh-determiner.
         for p in 1..n {
             if !self.reserved.is(&tokens[p], ReservedKind::WhRelativizer) {
                 continue;
@@ -1287,20 +1287,6 @@ impl LexicalIndex {
                 .any(|it| is_vp_adjunct_prep(it.cat()))
             {
                 return true;
-            }
-        }
-        // (2) A seeded functor with a concrete SELECTIONAL argument slot — combinability would be
-        // index-dependent, so node-level packing by `cat_shape` is unsound.
-        let span_limit = self.span_limit(n);
-        for i in 0..n {
-            let last = (i + span_limit).min(n);
-            for j in i..last {
-                let surface = tokens[i..=j].join(" ");
-                for it in self.lookup_span(&surface, lemmatizer, scope, None, None) {
-                    if super::category::cat_has_selectional_slot(it.cat()) {
-                        return true;
-                    }
-                }
             }
         }
         false
@@ -1611,6 +1597,8 @@ impl LexicalIndex {
                     .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
             }
             BinRule::AppositiveObj => self.appositive_obj(l, r),
+            BinRule::ApposeGroup => appose_group(l.cat(), r.cat(), r.sem(), &self.layer)
+                .map(|(cat, sem)| Item::with_cost(cat, sem, cost)),
         }
     }
 
@@ -1817,6 +1805,16 @@ impl LexicalIndex {
                             );
                         }
                     }
+                }
+                // Close nominal apposition (D63 §8.4 Phase 6, RC-6): a definite/bare common-noun HEAD
+                // immediately followed by a coreferential NAME-GROUP — "the genes BRCA1 and MSH2". No
+                // reserved token separates head and group, so — like the plain `Combine` loop — every
+                // adjacent split is tried; `appose_group` gates by shape + head kind on the reps (sound
+                // where the head/group cells are single-kind; the corpus sweep is the multi-sense
+                // witness). Mirrors the unpacked CKY (`parse_at_cap`).
+                #[allow(clippy::needless_range_loop)]
+                for m in i..j {
+                    self.binary_edges(&forest, (i, m), (m + 1, j), BinRule::ApposeGroup, &mut bin);
                 }
                 // Reciprocal: [group] <TV> each other → S (the trailing "each other").
                 if j >= 3
