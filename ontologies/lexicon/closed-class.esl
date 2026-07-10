@@ -1322,6 +1322,20 @@ resource lexicon:into_arg : lexicon:LexicalEntry {
     lexicon:sense    = "into";
     lexicon:grade    = epistemic:declared;
 }
+// Essive / object-predicative `as` (D63 §5.3): the marker of the predicative complement in
+// "identify / regard / describe / classify X AS Y". Like the other argmarkers it consumes the
+// complement NP and yields a transparent `cat_pp_arg(prep_as)` (⟦·⟧ = Entity, sem `λy. y`); the
+// essive verb frame `((S\NP)/cat_pp_arg(prep_as))/NP` (crates/eigenius-wordnet/src/convert.rs,
+// `FrameKind::Essive`) binds it as the verb's third argument. Distinct `prep_as` so a plain
+// transitive or single-PP verb does NOT accept a stray `as Y`.
+resource lexicon:as_arg : lexicon:LexicalEntry {
+    lexicon:form     = "as";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_as), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "as";
+    lexicon:grade    = epistemic:declared;
+}
 
 // ── Determiner entries (D63 §8.3 Phase 2) ─────────────────────────────
 // Subject category:  cat_forall(num, λT. S/(S\NP_T))

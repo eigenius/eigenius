@@ -145,6 +145,7 @@ data lexicon:Prep {
     prep_about,   // "concerned about"
     prep_against, // "protective against"
     prep_into,    // "differentiate into"
+    prep_as,      // essive / object-predicative "as": "identify X as Y", "regard X as Y" (D63 §5.3)
     prep_any,     // underspecified ⊤: meets any specific prep. Prep-agnostic verb frames
                   // carry this; a specific marker refines it at composition.
 }

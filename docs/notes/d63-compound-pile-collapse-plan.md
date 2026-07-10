@@ -118,10 +118,117 @@ exactly the spans that explode, on every corpus sentence.
     The `encoded 1 → 0` / `open 0 → 1` shifts are within the reranker's per-unit non-determinism (the
     deterministic cap-only sweep above is the no-regression proof), not lost readings.
   - **Remaining gap (both sweeps agree):** `Project Achilles and project DRIVE identified WRN as the top
-    preferential dependency in MSI cell lines compared to MSS cell lines` — the hardest unit, stacking
-    `MSI cell lines` + `MSS cell lines` + `top preferential dependency` + `compared to` in one 20-token
-    clause. Per §6's realistic fallback, one search-limited gap on a triple-compound clause is a
-    legitimate stopping point; Levers 2/3 (shape collapse / beam headroom) remain if we choose to chase it.
+    preferential dependency in MSI cell lines compared to MSS cell lines`.
+
+## 7. Remaining gap DIAGNOSED — it is a grammar gap in the `as`-predication complement, NOT search (Derived, `2026-07-10`, `diagnose_project_achilles`)
+
+The "search-limited on a triple-compound clause" label above is **refuted**. Isolating the one sentence
+by swapping each feature of the generic base in one at a time (`diagnose_project_achilles`,
+`db_backed_encoding.rs`) shows every domain compound composes cleanly and the whole thing gaps on a
+**single phrase**:
+
+| swap into the generic base | result |
+|---|---|
+| subject → `Project Achilles and project DRIVE` | CLOSED×112 |
+| object → `WRN` | CLOSED×112 |
+| `in cells` → `in MSI cell lines` | CLOSED×96 |
+| `compared to lines` → `compared to MSS cell lines` | CLOSED×216 |
+| `a dependency` → **`the top preferential dependency`** | **GRAMMAR-GAP** |
+
+It gaps **even at `cell_beam=1024`** (WIDE), so it is not beam pressure. Drilling into the phrase as the
+`as`-complement (`identify X as Y`) vs plain object position:
+
+| `identified genes as …` | | `genes affect …` (object) | |
+|---|---|---|---|
+| `a dependency` | CLOSED | `a top preferential dependency` | CLOSED×12 |
+| `a top dependency` | CLOSED | `the top preferential dependency` | CLOSED×9 |
+| `the dependency` | **GAP** | `a preferential dependency` | CLOSED×9 |
+| `a preferential dependency` | **GAP** | `a top dependency` | CLOSED×33 |
+
+The NP parses in every form in **object** position; only the **`as`-complement** rejects it, on two
+independent triggers, both inside `as …`:
+1. the **definite article** — `as a dependency` closes, `as the dependency` gaps;
+2. the **subsective adjective** `preferential` — `as a top dependency` closes, `as a preferential
+   dependency` gaps (`top`, a non-refining modifier, is fine).
+
+**Mechanism (CORRECTED, Derived from `debug_form_entries` + the winning sem — supersedes the
+predicate-nominal reading first drafted here).** There is **no functional `as`** in the grammar at all.
+`as` seeds only as WordNet/UMLS **nouns** — `As` = arsenic (`n14629149`), a place name (`n08552138`), and
+UMLS concepts — no preposition, no predicativizer, no `cat_pp_arg`. The reason `we identified genes as a
+dependency` "closed" is a **spurious noun compound**: its winning sem is
+`v00618878_t(kind_of(ΣG#0:n14001348. compound_kind(G#0, ΣG#1:n05400860. compound_kind(G#1,
+ΣG#2:n14629149. compound_kind(G#2, n05436752)))), speaker)` — i.e. `identify` used **transitively** over the
+compound `[dependency [a(letter) [as(arsenic) [genes]]]]`. So the ladder rungs marked CLOSED were garbage
+noun-compound readings, never an `identify X as Y` predication. The "gaps" are exactly the cases where the
+spurious compound **can't** form: a definite `the` and a subsective adjective `preferential` are not
+noun-compoundable, so no reading survives at all. (This also means the earlier #4 ladder "CLOSED×112" was
+spurious; the construction never parsed.)
+
+**core-en comparison.** OpenCCG's `core-en` (`references/openccg/grammars/core-en`) has a dedicated
+**Predicative** preposition family (`pp.xsl`, `$P.Default.Fig.X.Ground.Y`) — `as`-style predication is a
+first-class preposition taking a predicate ground. So the construction is standard and belongs in the
+grammar; we simply never added a functional `as`.
+
+**Fix scope (a real grammar-construction addition, not the small lexical tweak first scoped; needs a
+reseed).**
+- **(1) Add a functional `as`** — the essive / predicative-complement marker — to
+  `ontologies/lexicon/closed-class.esl`. Following the existing argmarker pattern (to/from/on/… =
+  `cat_pp_arg(prep)/NP`, transparent sem), `as` = `cat_pp_arg(prep_as)/NP` reaches the referential-NP and
+  raised-GQ complement forms uniformly (so it handles `as the …`, `as a preferential …`, `as WRN`).
+- **(2) A verb frame that consumes it** — `((S\NP)/cat_pp_arg(prep_as))/NP` for the `identify / regard /
+  describe / classify / define … X as Y` verbs (the object+PP follow-up already flagged at
+  `crates/eigenius-wordnet/src/convert.rs:254`). Needs the frame → category mapping in `convert.rs` and a
+  reseed for the corpus (closed-class + importer both change).
+- **(3) Suppress the spurious noun-compound** reading that let `as`(arsenic)/`a`(letter) join compounds —
+  an ambiguity/precision follow-up, separate from closing the gap. **TRIED AND REVERTED** (see below).
+- Not search-related; **Levers 2/3 are not the lever for this gap.** The packing win (§3, GAP 7→2 / 3→1)
+  stands independently.
+
+**IMPLEMENTED (Derived, `2026-07-10`; approach = subcategorized + curated verbs, per the design choice).**
+- `prep_as` added to the `Prep` enum (`ontologies/lexicon/lexicon-ontology.esl`).
+- Functional `as` = `fwd(cat_pp_arg(prep_as), cat_np(Entity, num_any))`, transparent `argmarker_sem`
+  (`ontologies/lexicon/closed-class.esl`) — mirrors to/from/on/….
+- `FrameKind::Essive` = `((S\NP)/cat_pp_arg(prep_as))/NP`, an opaque 3-place `Entity→Entity→Entity→Prop`
+  axiom, emitted **additively** for a curated essive-verb set (`ESSIVE_VERBS` / `is_essive_verb`,
+  `crates/eigenius-wordnet/src/convert.rs`) — WordNet's frame inventory has no `as`-complement, so the
+  frame is added per-lemma, not by `classify`. High-frequency-noun verbs (`class`/`see`/`use`/`treat`)
+  are deliberately excluded (over-generation vs a dominant noun sense).
+- Unit tests `essive_verb_emits_object_predicative_as_frame` / `non_essive_verb_gets_no_as_frame`;
+  full wordnet suite green; clippy clean. Reseeded (native jemalloc, 6.27M UMLS entries, count-veto
+  sanity intact).
+
+**Validation (Derived, fresh reseed).** The corpus sentence now parses as a **real essive predication**,
+not a compound: `we identified WRN as the top preferential dependency in MSI cell lines compared to MSS
+cell lines` → `v00618878_as(C1337007 [=WRN], Π…gt(deg_…) [top/preferential], speaker) ∧ prep_in(…MSI cell
+lines…) ∧ prep_to(…MSS cell lines…)`. **Deterministic cap-only sweep: grammar-gap 2 → 1, zero new gaps**
+(the Project-Achilles sentence closed; the one remaining gap — `The MSI relationship compared favourably
+to other strong biomarkers for vulnerabilities` — is a different construction, intransitive
+`compared favourably to`, unrelated to `as`). Full deterministic progression: **7 (pre-packing) → 2
+(packing) → 1 (essive)**.
+
+**Known residue (follow-ups, not the corpus gap).** (a) `we identified genes as the dependency` /
+`… as a preferential dependency` still gap — a narrower bare-plural-**object** interaction (a name object
+`WRN` closes; a bare-plural `genes` object does not yet), separate from the closed corpus sentence.
+(b) The spurious `as`(arsenic)/`a`(letter) noun-compound reading still competes for `as a dependency`
+(fix (3) above).
+
+**Fix (3) — glue-word content suppression: TRIED AND REVERTED (Derived, `2026-07-10`).** Deleting the
+content-noun entries for function-word surfaces (`as`=arsenic, `a`=letter, …; a curated ~50-word list, a
+per-lemma/per-form skip in both importers, 119 entries removed of 6.7M) killed the spurious compound as
+intended — but on a reseed it **regressed the deterministic sweep 1 → 5**. Two mechanisms, both witnessed
+(`diagnose_project_achilles`, `dump_as_cats` on the glue store): the spurious compounds were (i) *masking
+real, pre-existing gaps* — `Project Achilles` is `[cat_n Project][cat_np Achilles]`, a name head that
+doesn't form a constituent (`Project Achilles affects cells` GAPS while `project DRIVE affects cells`
+CLOSES), and `We evaluated MSI as…` uses `evaluate`, not in `ESSIVE_VERBS`; and (ii) *propping up
+cap-fragile generic parses* — `lines were represented by sets` CLOSES but `… by data sets` GAPS after the
+cut, though neither `data` nor `sets` is glue (the changed sense-product pushes the reading past the beam).
+Decisive point: the benefit is ~nil on the real page — the actual corpus sentence closes via the essive
+regardless (arsenic/letter can't compound into the definite, adjectivally-refined `the top preferential
+dependency`), so the compound only ever won on the synthetic `genes as a dependency` fragment.
+**Disposition: reverted; sense selection is the reranker's job. If we ever want the suppression, do it
+coverage-preservingly (worst-rank the glue content sense so the cap deprioritizes it) rather than by
+deletion.** The `Project Achilles`-subject gap (`Project <Name>`) and the bare-plural-essive-object gap
+(a) are the real follow-ups this unmasked.
 
 ### Lever 2 — Collapse the residual structural shapes (if PACKED, or as the second pass)
 The ~6 shapes are the structural variants packing can't merge. Expected sources (confirm in Step 0):

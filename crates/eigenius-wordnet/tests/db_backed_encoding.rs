@@ -850,6 +850,144 @@ fn diagnose_residual_gaps() {
     }
 }
 
+#[test]
+#[ignore = "TEMP dump of as/a/the/identified categories; --ignored --nocapture"]
+fn dump_as_cats() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    for w in [
+        "and", "of", "by", "that", "these", "as", "in", "to", "project", "Achilles", "DRIVE",
+    ] {
+        let known = index.has_token(w, &lem);
+        let n = index.debug_form_entries(w, &lem).len();
+        eprintln!("token {w:?}: has_token={known} entries={n}");
+    }
+    for s in [
+        // #3 passive ladder — pinpoint whether passive/coord broke (REAL) or it's spurious-revealed.
+        "lines were represented by sets",
+        "lines were represented by data sets",
+        "some lines were represented by data sets",
+        "some lines and some lines were represented by data sets",
+        // clean generic controls (no domain/glue-content) — must still parse if glue skip is safe.
+        "cells were represented by sets",
+        "genes and cells affect lines",
+        "cells possess events",
+        "events are predictive of deficiency",
+    ] {
+        let (c, o) = index.parse_open(s, &lem);
+        eprintln!("\n{s:?}: closed={} open={}", c.len(), o.len());
+        for it in c.iter().take(1) {
+            eprintln!("   sem = {}", pretty_term(it.sem()));
+        }
+    }
+}
+
+/// ISOLATE the #4 "Project Achilles …" residual: start from the generic base that closes
+/// (`we identified genes as a dependency in cells compared to lines`, CLOSED×112) and swap ONE domain
+/// feature back in at a time — coordinated named subject, named object, superlative as-complement, and
+/// each domain-compound PP — then a cumulative build-up, to localize what tips it into a GAP. A
+/// WIDE-beam pass on the tipping cases separates SEARCH pressure (closes at WIDE) from a real grammar
+/// gap (gaps even at WIDE). Cap-only. Run:
+///   cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       diagnose_project_achilles -- --ignored --nocapture
+#[test]
+#[ignore = "isolate the #4 Project Achilles gap (which swap tips it); --ignored --nocapture"]
+fn diagnose_project_achilles() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let wide = build_index(&head).with_cell_beam(1024);
+    let lem = morphy();
+    let outcome = |c: usize, o: usize| -> String {
+        if c > 0 {
+            format!("CLOSED×{c}")
+        } else if o > 0 {
+            format!("open×{o}")
+        } else {
+            "GRAMMAR-GAP".into()
+        }
+    };
+    let probe = |idx: &LexicalIndex, s: &str| -> String {
+        let toks = tokenize(s);
+        let unk: Vec<String> = toks
+            .iter()
+            .filter(|t| !is_nonprose(t) && !idx.has_token(t, &lem))
+            .cloned()
+            .collect();
+        if !unk.is_empty() {
+            return format!("OOV {unk:?}");
+        }
+        let (c, o) = idx.parse_open(s, &lem);
+        outcome(c.len(), o.len())
+    };
+
+    // Drill into the tipping phrase "the top preferential dependency" as an as-complement: vary the
+    // determiner, each modifier alone, and the stacking, to localize the composition gap. Also probe
+    // the NP in plain object position to see if the as-complement is implicated or the NP itself.
+    let isolated: &[(&str, &str)] = &[
+        (
+            "BASE: as a dependency",
+            "we identified genes as a dependency",
+        ),
+        ("as the dependency", "we identified genes as the dependency"),
+        (
+            "as a preferential dep.",
+            "we identified genes as a preferential dependency",
+        ),
+        (
+            "as a top dependency",
+            "we identified genes as a top dependency",
+        ),
+        (
+            "as the top dependency",
+            "we identified genes as the top dependency",
+        ),
+        (
+            "as a top pref. dep.",
+            "we identified genes as a top preferential dependency",
+        ),
+        (
+            "as the top pref. dep.",
+            "we identified genes as the top preferential dependency",
+        ),
+        (
+            "OBJ: affect the top pref dep",
+            "genes affect the top preferential dependency",
+        ),
+        (
+            "OBJ: affect a top pref dep",
+            "genes affect a top preferential dependency",
+        ),
+        (
+            "OBJ: affect a preferential dep",
+            "genes affect a preferential dependency",
+        ),
+        ("OBJ: affect a top dep", "genes affect a top dependency"),
+    ];
+    // Cumulative: add the domain features together (generic subject first, then the real subject).
+    let cumulative: &[(&str, &str)] = &[
+        ("+obj+asY", "we identified WRN as the top preferential dependency in cells compared to lines"),
+        ("+obj+asY+inPP", "we identified WRN as the top preferential dependency in MSI cell lines compared to lines"),
+        ("+obj+asY+bothPP (generic subj)", "we identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines"),
+        ("FULL (real subj)", "Project Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines."),
+    ];
+
+    eprintln!("\n═══ ISOLATED single-feature swaps (default beam) ═══");
+    for (label, s) in isolated {
+        eprintln!("   {label:<28} {:<12} {s:?}", probe(&index, s));
+    }
+    eprintln!("\n═══ CUMULATIVE build-up (default | WIDE cell_beam=1024) ═══");
+    for (label, s) in cumulative {
+        eprintln!(
+            "   {label:<32} default={:<12} wide={:<12} {s:?}",
+            probe(&index, s),
+            probe(&wide, s)
+        );
+    }
+}
+
 /// D1 diagnostic (nominal-modification NF §8): run the `modifier_class` discriminator over the v3
 /// corpus's REAL adjective lexicon entries (per WordNet sense), confirming its verdict on actual data
 /// — `attractive` must screen as `Gradable`, classificatory adjectives (`genetic`/`somatic`/`immune`)
