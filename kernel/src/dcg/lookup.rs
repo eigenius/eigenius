@@ -757,6 +757,14 @@ impl LexicalIndex {
                 candidates.insert(lemma.trim().to_lowercase());
             }
         }
+        // Domain-plural fallback (D63 §5.1, [`Lemmatizer::regular_plural_stem`]): a DOMAIN-lexicon plural
+        // the (validated) lemmatizer can't reduce (`biomarkers` — `biomarker` ∉ WordNet) gets its crude
+        // singular stem here, so a real entry for that singular is offered a PLURAL reading (stem ≠
+        // surface ⇒ pl in [`Self::lookup_span`]) and takes the bare-plural kind shift. `None` under a
+        // no-morphology lemmatizer, so `Identity`-based demo parses are unaffected.
+        if let Some(stem) = lemmatizer.regular_plural_stem(surface) {
+            candidates.insert(stem.trim().to_lowercase());
+        }
         candidates
     }
 

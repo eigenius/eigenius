@@ -1660,6 +1660,38 @@ fn packed_forest_equals_unpacked_on_core_grammar() {
     }
 }
 
+/// D63 §5.3 — **close naming apposition**: a SORTAL common noun + a proper NAME (`gene BRCA1`,
+/// `Project Achilles`) → the definite individual of the sortal kind bearing that name,
+/// `kind_of(Σx:Sortal. named(x, name))`, an `Entity`-typed NP usable as a bare subject/object. The
+/// name's own class need NOT be the sortal (coining), so it is distinct from `appose_group`'s
+/// kind-checked group apposition — the singleton, un-type-checked case.
+#[test]
+fn sortal_plus_proper_name_is_a_named_individual() {
+    let (_layer, index) = index_over_bootstrap();
+    // `gene BRCA1` heads a finite clause as a named-individual subject.
+    let closed = index.parse("gene BRCA1 affects HeLa", &Identity);
+    assert!(
+        !closed.is_empty(),
+        "`gene BRCA1 affects HeLa` — a sortal + proper-name subject should parse"
+    );
+    assert!(
+        closed.iter().any(|it| {
+            let s = pretty_term(it.sem());
+            s.contains("named(") && s.contains("kind_of(")
+        }),
+        "expected a `kind_of(Σ… named(…))` named-individual reading, got: {:?}",
+        closed
+            .iter()
+            .map(|it| pretty_term(it.sem()))
+            .collect::<Vec<_>>()
+    );
+    // Also felicitous as an object.
+    assert!(
+        !index.parse("HeLa affects gene BRCA1", &Identity).is_empty(),
+        "`HeLa affects gene BRCA1` — named individual in object position"
+    );
+}
+
 /// D63 §8.5 — **stacked attributive adjectives** (`synthetic lethal vulnerability`). Refining an
 /// already-refined noun conjoins over the **same base** (`Σx:Base. P(x) ∧ adj(x)`) rather than nesting
 /// (`Σy:Σ. adj(y)`, which applied the adjective to the Σ *pair* — ill-typed, so stacked adjectives

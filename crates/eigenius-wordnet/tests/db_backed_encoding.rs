@@ -857,24 +857,18 @@ fn dump_as_cats() {
     let Some(head) = open_head(&path) else { return };
     let index = build_index(&head);
     let lem = morphy();
-    for w in [
-        "and", "of", "by", "that", "these", "as", "in", "to", "project", "Achilles", "DRIVE",
-    ] {
-        let known = index.has_token(w, &lem);
-        let n = index.debug_form_entries(w, &lem).len();
-        eprintln!("token {w:?}: has_token={known} entries={n}");
+    for w in ["DRIVE", "drive"] {
+        eprintln!("── {w:?} ──");
+        for (inj, cat, sense) in index.debug_form_entries(w, &lem).iter().take(8) {
+            eprintln!("   inj={inj} sense={sense:?}  {cat}");
+        }
     }
     for s in [
-        // #3 passive ladder — pinpoint whether passive/coord broke (REAL) or it's spurious-revealed.
-        "lines were represented by sets",
-        "lines were represented by data sets",
-        "some lines were represented by data sets",
-        "some lines and some lines were represented by data sets",
-        // clean generic controls (no domain/glue-content) — must still parse if glue skip is safe.
-        "cells were represented by sets",
-        "genes and cells affect lines",
-        "cells possess events",
-        "events are predictive of deficiency",
+        "Project Achilles affects cells", // single named individual — WORKS
+        "project DRIVE affects cells",    // does DRIVE name?
+        "HeLa and BRCA1 affect cells",    // coordinate two plain names — control
+        "Project Achilles and BRCA1 affect cells", // named individual + plain name
+        "Project Achilles and project DRIVE affect cells", // two named individuals
     ] {
         let (c, o) = index.parse_open(s, &lem);
         eprintln!("\n{s:?}: closed={} open={}", c.len(), o.len());

@@ -35,6 +35,19 @@ pub enum Pos {
 /// morphological ambiguity becomes extra leaf items in the parser's chart.
 pub trait Lemmatizer {
     fn lemmas(&self, surface: &str, pos: Pos) -> Vec<String>;
+
+    /// An **unvalidated** regular-plural singular stem for a surface whose singular is outside the
+    /// lemmatizer's own dictionary, or `None` if it is not a regular plural (D63 §5.1). The validated
+    /// [`Self::lemmas`] reduces only to *known* lemmas, so a DOMAIN-lexicon plural whose singular is not
+    /// in that dictionary (a UMLS `biomarkers` — `biomarker` ∉ WordNet) yields only the exact surface,
+    /// which the seeder then tags SINGULAR and cannot bare-plural-shift. This offers the crude stem so the
+    /// kernel can resolve it against the FULL lexicon index and, if an entry exists, get a PLURAL reading.
+    /// Default `None` — a lemmatizer with no morphology ([`Identity`]) MUST NOT inject stems (else
+    /// `does`→`doe` on every `-s` surface). Morphy overrides it with `morph.c`'s regular detachment
+    /// *without* the `is_defined` gate.
+    fn regular_plural_stem(&self, _surface: &str) -> Option<String> {
+        None
+    }
 }
 
 /// The trivial lemmatizer — every surface form is its own lemma (no morphology).

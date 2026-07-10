@@ -230,6 +230,40 @@ coverage-preservingly (worst-rank the glue content sense so the cap deprioritize
 deletion.** The `Project Achilles`-subject gap (`Project <Name>`) and the bare-plural-essive-object gap
 (a) are the real follow-ups this unmasked.
 
+## 8. Follow-ups CLOSED (Derived, `2026-07-10`)
+
+**#3 — `compared favourably to` (the last page gap) → the whole page now parses (GAP 1 → 0).** The
+diagnosis reframed twice: not the comparative (`cells compared favourably to lines` parses), not the
+definite subject (`the gene compared to cells` parses) — the culprit is **`biomarkers`**, a UMLS-only
+plural whose singular `biomarker` is not a WordNet lemma. Morphy reduces only to WordNet-KNOWN lemmas, so
+`biomarkers` yielded only the exact surface, which the seeder tags SINGULAR (`num == surface ⇒ sg`,
+`lookup_span`) — a bare singular count noun cannot take the bare-plural kind shift, so `genes affect
+biomarkers` gapped while `genes affect markers` (multi-sense, WordNet) parsed. **Fix:
+`Lemmatizer::regular_plural_stem`** — a trait method (default `None`, so the no-morphology `Identity`
+baseline is untouched — `does`↛`doe`) overridden by Morphy with `morph.c`'s `-ies→-y` / `-s` detachment
+*without* the `is_defined` WordNet gate; `candidate_lemmas` offers the stem so a full-lexicon entry for the
+singular gets a PLURAL reading and shifts. Deterministic sweep **GAP 1 → 0**; kernel + lemmatizer unit
+tests green; **no reseed** (the `biomarker` singular entry already exists). Progression: **7 (pre-packing)
+→ 2 (packing) → 1 (essive) → 0 (domain-plural)**.
+
+**#1 — sortal + proper name (close naming apposition) → implemented.** `Project Achilles` =
+`[cat_n Project][cat_np Achilles]` matched no compose rule (NamedCompound is `[cat_np][cat_n]`, the other
+order), so it gapped; the full sentence "parsed" only via a spurious `compound_kind` chain over `project`
++ UMLS senses. **Fix:** a sem-blind `combinable` case `[cat_n Sortal][cat_np Name]` → `SemRecipe::Name`,
+building the coining reading `kind_of(Σx:Sortal. named(x, name))` — a new opaque axiom
+`ontology:named : Entity → Entity → Prop`, the name's referent as the naming TOKEN (so a name whose
+lexical sense is unrelated — `Achilles` the hero — still felicitously names a Project; NOT type-checked,
+unlike `appose_group`). Result `cat_np(Entity, sg)`, a bare proper-name NP. Rides the existing
+`apply`/Combine machinery (both paths) — no packed edge. `Project Achilles affects cells` now parses
+CLEAN (`kind_of(Σx:project. named(x, Achilles))`) and coordinates with plain names (`Project Achilles and
+BRCA1 affect HeLa`). Kernel suite + a demo test green, clippy clean, deterministic sweep still GAP 0.
+- **Residual (not the naming rule): `project DRIVE` is a common noun, not a proper name.** `DRIVE` seeds
+  only as WordNet `drive` (`cat_n`), so `project DRIVE` is a compound, not a named individual, and can't
+  coordinate with `Project Achilles` (`cat_np`) — so the full sentence still wins the spurious compound.
+  `DRIVE` is a coined project acronym; the faithful fix is a **document glossary** entry (`DRIVE` → a
+  named Project, making it `cat_np`), the same licensed path as arsenic — NOT a generic
+  all-caps→proper-name heuristic (which would collide with the already-handled domain acronyms).
+
 ### Lever 2 — Collapse the residual structural shapes (if PACKED, or as the second pass)
 The ~6 shapes are the structural variants packing can't merge. Expected sources (confirm in Step 0):
 - **(a) unit-vs-compositional.** A domain compound that is *also* a lexicon unit (`cell line`, `data set`

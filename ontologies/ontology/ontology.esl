@@ -63,3 +63,13 @@ axiom ontology:prep_from : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_between : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_within  : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_to      : lexicon:Entity -> lexicon:Entity -> Prop
+
+// ── Naming apposition (D63 §5.3, close apposition of a sortal + a proper name) ────────
+// `named(x, n)`: the individual `x` bears the proper name whose token is `n` — the coining
+// reading of "Project Achilles" / "the enzyme WRN" (a SORTAL common noun + a proper name).
+// OPAQUE like `compound`/`is_a`: the name TOKEN `n` (the name's own referent) labels `x`; the
+// construction does NOT claim `n` itself is of the sortal kind (so a name whose lexical sense is
+// unrelated — `Achilles` the hero — still felicitously names a Project). "Project Achilles" →
+// `kind_of(Σx:Project. named(x, achilles))`. The label↔referent identification is
+// grounding-supplied by the encoding institution (D62).
+axiom ontology:named        : lexicon:Entity -> lexicon:Entity -> Prop
