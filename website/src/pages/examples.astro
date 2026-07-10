@@ -3,25 +3,13 @@
 // the worked examples and routes readers into the individual
 // walkthroughs (which still render through Starlight).
 
-import "../styles/custom.css";
-import TopNav from "../components/TopNav.astro";
-import SiteFooter from "../components/SiteFooter.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+const description =
+  "End-to-end walkthroughs of real scientific and engineering scenarios modelled as Eigenius chains. From IC₅₀ readings to a strong-inhibitor designation; from kinetic curves to a five-institution composition with declared comorphisms.";
 ---
 
-<html lang="en" data-theme="dark">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Examples — Eigenius</title>
-    <meta
-      name="description"
-      content="End-to-end walkthroughs of real scientific and engineering scenarios modelled as Eigenius chains. From IC₅₀ readings to a strong-inhibitor designation; from kinetic curves to a five-institution composition with declared comorphisms."
-    />
-    <link rel="icon" type="image/png" href="/favicon.png" />
-  </head>
-  <body>
-    <TopNav current="examples" />
-
+<BaseLayout title="Examples — Eigenius" description={description} current="examples">
     <!-- ───────── Hero ───────── -->
     <section class="examples-hero">
       <div class="examples-hero-inner">
@@ -163,9 +151,7 @@ import SiteFooter from "../components/SiteFooter.astro";
       </div>
     </section>
 
-    <SiteFooter />
-  </body>
-</html>
+</BaseLayout>
 
 <style>
   /* Page-unique styles. Shared chrome lives in custom.css and the

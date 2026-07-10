@@ -1,12 +1,12 @@
 ---
 // Shared top nav for the hand-authored polished pages
-// (/, /start/, /concepts/, /examples/). Pass `current` to
+// (/, /start/, /concepts/, /examples/, /blog/). Pass `current` to
 // highlight the active item via aria-current.
 import { Image } from "astro:assets";
 import logo from "../assets/eigenius_logo_400x400.png";
 
 interface Props {
-  current?: "start" | "concepts" | "examples" | "docs" | "research";
+  current?: "start" | "concepts" | "examples" | "docs" | "research" | "blog";
 }
 
 const { current } = Astro.props;
@@ -17,6 +17,7 @@ const items = [
   { href: "/examples/", label: "Examples", key: "examples" },
   { href: "/docs/", label: "Docs", key: "docs" },
   { href: "/research/", label: "Research", key: "research" },
+  { href: "/blog/", label: "Blog", key: "blog" },
 ];
 ---
 

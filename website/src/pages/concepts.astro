@@ -3,28 +3,16 @@
 // the framework's vocabulary and routes readers into the deeper
 // concept pages (which still render through Starlight).
 
-import "../styles/custom.css";
-import TopNav from "../components/TopNav.astro";
-import SiteFooter from "../components/SiteFooter.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
 import WarrantMap from "../components/WarrantMap.astro";
 import AudienceCard from "../components/AudienceCard.astro";
 import YouTubeEmbed from "../components/YouTubeEmbed.astro";
+
+const description =
+  "The structural ideas behind Eigenius. The four-warrant taxonomy, domain bridges, institutions, and the feedback loop that makes AI reasoning agents auditable — written for readers who want to understand the framework without committing to learning the platform.";
 ---
 
-<html lang="en" data-theme="dark">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Concepts — Eigenius</title>
-    <meta
-      name="description"
-      content="The structural ideas behind Eigenius. The four-warrant taxonomy, domain bridges, institutions, and the feedback loop that makes AI reasoning agents auditable — written for readers who want to understand the framework without committing to learning the platform."
-    />
-    <link rel="icon" type="image/png" href="/favicon.png" />
-  </head>
-  <body>
-    <TopNav current="concepts" />
-
+<BaseLayout title="Concepts — Eigenius" description={description} current="concepts">
     <!-- ───────── Hero ───────── -->
     <section class="concepts-hero">
       <div class="concepts-hero-inner">
@@ -171,10 +159,7 @@ import YouTubeEmbed from "../components/YouTubeEmbed.astro";
         </p>
       </div>
     </section>
-
-    <SiteFooter />
-  </body>
-</html>
+</BaseLayout>
 
 <style>
   /* Page-unique styles. Shared chrome lives in custom.css and the
