@@ -9,9 +9,8 @@
 // Starlight's <Page> wrapper is intentionally NOT used here — we
 // want full control over the hero and section structure.
 
-import "../styles/custom.css";
-import TopNav from "../components/TopNav.astro";
-import SiteFooter from "../components/SiteFooter.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import FeaturedWriting from "../components/FeaturedWriting.astro";
 import WarrantMap from "../components/WarrantMap.astro";
 import AudienceCard from "../components/AudienceCard.astro";
 import PaperCard from "../components/PaperCard.astro";
@@ -40,20 +39,10 @@ const PLAYLIST_URL =
   "https://www.youtube.com/playlist?list=PL-qRvF3MpNEfyYnjtM6bhpcrgF6v27BUA";
 ---
 
-<html lang="en" data-theme="dark">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Eigenius — a compiler for AI thought</title>
-    <meta
-      name="description"
-      content="Open-source platform — a typed knowledge graph for AI-assisted scientific reasoning. Make the AI show its work: every claim records how it was justified, so a brilliant analysis and a confident hallucination can no longer look the same in prose."
-    />
-    <link rel="icon" type="image/png" href="/favicon.png" />
-  </head>
-  <body>
-    <TopNav />
-
+<BaseLayout
+  title="Eigenius — a compiler for AI thought"
+  description="Open-source platform — a typed knowledge graph for AI-assisted scientific reasoning. Make the AI show its work: every claim records how it was justified, so a brilliant analysis and a confident hallucination can no longer look the same in prose."
+>
     <!-- ───────── Hero ───────── -->
     <section
       class="hero"
@@ -217,6 +206,9 @@ const PLAYLIST_URL =
       </div>
     </section>
 
+    <!-- ───────── Writing (latest series or post) ───────── -->
+    <FeaturedWriting />
+
     <!-- ───────── Research ───────── -->
     <section class="section section-research">
       <div class="section-inner">
@@ -241,9 +233,7 @@ const PLAYLIST_URL =
       </div>
     </section>
 
-    <SiteFooter />
-  </body>
-</html>
+</BaseLayout>
 
 <style>
   /* Page-unique styles. The shared chrome (sections, CTAs, audience

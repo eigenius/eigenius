@@ -1,0 +1,108 @@
+---
+// A single blog post. `[...slug]` (rest param) rather than `[slug]`
+// so nested paths work — src/content/blog/2026/foo.md serves at
+// /blog/2026/foo/.
+import { render } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import {
+  getPublishedPosts,
+  getSeriesContext,
+  formatDate,
+  formatPart,
+  isoDate,
+  type Post,
+} from "../../lib/posts";
+
+export async function getStaticPaths() {
+  const posts = await getPublishedPosts();
+  return posts.map((post) => ({
+    params: { slug: post.id },
+    props: { post },
+  }));
+}
+
+interface Props {
+  post: Post;
+}
+
+const { post } = Astro.props;
+const { Content } = await render(post);
+const series = await getSeriesContext(post);
+---
+
+<BaseLayout
+  title={`${post.data.title} — Eigenius`}
+  description={post.data.description}
+  current="blog"
+  ogType="article"
+>
+  <article class="section">
+    <div class="post-body">
+      <header class="post-header">
+        <a class="post-back" href="/blog/">← Blog</a>
+        <h1 class="post-headline">{post.data.title}</h1>
+        {post.data.subtitle && <p class="post-subtitle">{post.data.subtitle}</p>}
+        <p class="post-meta">
+          <time datetime={isoDate(post.data.pubDate)}>
+            {formatDate(post.data.pubDate)}
+          </time>
+          <span class="post-meta-sep">·</span>
+          <span>{post.data.author}</span>
+          {
+            series && (
+              <>
+                <span class="post-meta-sep">·</span>
+                <span>
+                  Part {formatPart(series.part)} of {formatPart(series.total)} in {series.name}
+                </span>
+              </>
+            )
+          }
+          {
+            post.data.updatedDate && (
+              <>
+                <span class="post-meta-sep">·</span>
+                <span>Updated {formatDate(post.data.updatedDate)}</span>
+              </>
+            )
+          }
+        </p>
+        {
+          post.data.draft && (
+            <p class="post-draft-banner">
+              Draft — not included in production builds.
+            </p>
+          )
+        }
+      </header>
+
+      <div class="post-prose">
+        <Content />
+      </div>
+
+      {
+        series && (series.prev || series.next) && (
+          <nav class="post-series-nav" aria-label={`${series.name} series`}>
+            {series.prev ? (
+              <a class="post-series-link" href={`/blog/${series.prev.id}/`}>
+                <span class="post-series-dir">← Previous</span>
+                <span class="post-series-title">{series.prev.data.title}</span>
+              </a>
+            ) : (
+              <span />
+            )}
+            {series.next && (
+              <a
+                class="post-series-link post-series-link-next"
+                href={`/blog/${series.next.id}/`}
+              >
+                <span class="post-series-dir">Next →</span>
+                <span class="post-series-title">{series.next.data.title}</span>
+              </a>
+            )}
+          </nav>
+        )
+      }
+    </div>
+  </article>
+</BaseLayout>

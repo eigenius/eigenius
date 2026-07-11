@@ -37,7 +37,7 @@ jobs:
           large-packages: false
           swap-storage: true
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libclang-dev
@@ -111,7 +111,7 @@ jobs:
       run:
         working-directory: orchestration
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Deno
         uses: denoland/setup-deno@v2
@@ -131,7 +131,7 @@ jobs:
     name: Protobuf lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install buf
         uses: bufbuild/buf-setup-action@v1

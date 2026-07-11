@@ -1,0 +1,41 @@
+---
+// One post as it appears on the blog index. Shared by the series
+// groups and the standalone list so the two can't drift apart.
+import { formatDate, formatPart, isoDate, type Post } from "../lib/posts";
+
+interface Props {
+  post: Post;
+}
+
+const { post } = Astro.props;
+---
+
+<article>
+  <div class="post-item-meta">
+    <time class="post-date" datetime={isoDate(post.data.pubDate)}>
+      {formatDate(post.data.pubDate)}
+    </time>
+    {
+      post.data.series && (
+        <span class="post-part">Part {formatPart(post.data.series.part)}</span>
+      )
+    }
+    {post.data.draft && <span class="post-draft-chip">Draft</span>}
+  </div>
+
+  <h3 class="post-title">
+    <a href={`/blog/${post.id}/`}>{post.data.title}</a>
+  </h3>
+
+  <p class="post-excerpt">{post.data.description}</p>
+
+  {
+    post.data.tags.length > 0 && (
+      <ul class="post-tags">
+        {post.data.tags.map((tag) => (
+          <li class="post-tag">{tag}</li>
+        ))}
+      </ul>
+    )
+  }
+</article>

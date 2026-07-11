@@ -6,28 +6,16 @@
 // a payoff section that ties what just happened to the warrant
 // taxonomy, and routing into the deeper sections.
 
-import "../styles/custom.css";
-import TopNav from "../components/TopNav.astro";
-import SiteFooter from "../components/SiteFooter.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
 import AudienceCard from "../components/AudienceCard.astro";
 import { Image } from "astro:assets";
 import notebookScreenshot from "../assets/eigenius_notebook_ux.png";
+
+const description =
+  "Run the Eigenius notebook on your laptop in about fifteen minutes. Clone the repo, bring up docker compose, open the drug-screening walkthrough, and watch a typed reasoning chain commit cell by cell.";
 ---
 
-<html lang="en" data-theme="dark">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Get started — Eigenius</title>
-    <meta
-      name="description"
-      content="Run the Eigenius notebook on your laptop in about fifteen minutes. Clone the repo, bring up docker compose, open the drug-screening walkthrough, and watch a typed reasoning chain commit cell by cell."
-    />
-    <link rel="icon" type="image/png" href="/favicon.png" />
-  </head>
-  <body>
-    <TopNav current="start" />
-
+<BaseLayout title="Get started — Eigenius" description={description} current="start">
     <!-- ───────── Hero (smaller than the landing hero) ───────── -->
     <section class="start-hero">
       <div class="start-hero-inner">
@@ -293,9 +281,7 @@ docker compose up -d</code></pre>
       </div>
     </section>
 
-    <SiteFooter />
-  </body>
-</html>
+</BaseLayout>
 
 <style>
   /* Page-unique styles. Shared chrome lives in custom.css and in
