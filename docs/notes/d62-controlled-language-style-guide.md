@@ -38,8 +38,14 @@ Two rules sit above everything else:
    deferred quantifier (an *open* parse, which is acceptable).
 4. **Coordination.** `and`/`or`; comma lists `X, Y and Z`; sentence-level `S but S`. Contrastive
    `requires A but not B` **when A and B are the same kind of thing** (e.g. two activities).
-5. **Adjectives & compounds.** Stacked attributive adjectives (`a synthetic lethal vulnerability`);
-   noun–noun compounds (`cancer models`, `cell line`, `MSI cancer models`).
+5. **Adjectives & compounds.**
+   - *Genuine* stacked attributive adjectives — each modifies the head **independently** (`a human
+     colorectal tumour`); and noun–noun compounds (`cancer models`, `cell line`, `MSI cancer models`).
+   - **A lexicalized compound modifier is ONE term, not a stack — HYPHENATE it.** Write
+     **`synthetic-lethal targets`**, **`microsatellite-stable lines`** — *not* `synthetic lethal …`,
+     `microsatellite stable …`. Hyphenation makes the parser read it as a single compound adjective (via
+     the D63 hyphen morphology, like `double-stranded`), instead of a stack of independent adjectives it
+     is not. Rationale: "Hyphenate lexicalized compound modifiers" below.
 6. **Prepositional phrases.** `of`/`in`/`for`/`with`/`on`/`from`/`within`/`between`, as noun
    post-modifiers (`a biomarker of dependency`) and verb adjuncts (`essential in MSI models`). The
    object may be a determined NP (`within a gene`, `for tumours`).
@@ -63,9 +69,30 @@ Two rules sit above everything else:
 | **`because` / `although` subordinate clauses** | Not in the lexicon (OOV); subordinators unbuilt. | Split + use a transitional: `…. Therefore ….` Drop concessive `although` or restate as two facts. |
 | **Cross-type `but not`** (`required the helicase activity … but not its exonuclease activity` — different kinds) | The two objects must be the same category. | Split: `MSI models required the helicase activity of WRN. MSI models did not require the exonuclease activity of WRN.` |
 | **Deeply-embedded / determined-subject pied-piping** (`the way in which the co-occurrence leads…`) | Only simple/name-subject pied-piping is covered. | Rephrase as a separate clause: `The co-occurrence leads to cell death.` |
-| **Hyphenated compound terms** (`CRISPR–Cas9-mediated`, `double-stranded`, `genome-scale`) | Split oddly / OOV. | Use spaced or simpler forms the lexicon knows, or rephrase. |
+| **Novel / OOV or en-dash hyphenations** (`CRISPR–Cas9-mediated`; an en-dash `–`, not a hyphen) | An unknown head/base is OOV; the en-dash isn't the hyphen token. | Rephrase or drop the modifier. **But a hyphenated compound whose head is a known adjective now PARSES** (D63 morphology: `double-stranded`, `pcr-based`, `large-scale`, `synthetic-lethal`) — **prefer** hyphenation for lexicalized compound modifiers (DO §5), don't avoid it. |
 | **Possessive ellipsis / heavy gapping**, fronted reduced clauses with complex complements | Limited; gapping beyond same-type `but not` isn't covered. | Use an explicit subject and a full verb in each clause. |
 | **`and/or`** | Not a token; collapsing it to `and` overstates (requires *both*). | Write **`or`** — `logic:Or` is **inclusive** (true if either or both), which is exactly what `and/or` means. (Faithfulness rule, not just style — `and/or → and` is a meaning change; `and/or → or` is meaning-preserving.) |
+
+## Hyphenate lexicalized compound modifiers (`synthetic-lethal`, not `synthetic lethal`)
+
+A **lexicalized compound modifier** is a domain term of art whose parts do *not* combine compositionally
+in general English — `synthetic lethal` is not "synthetic ∧ lethal" (a target that is artificial and
+deadly); it is the attributive form of *synthetic lethality* (C4280020), the genetic concept where two
+perturbations are each tolerated alone but lethal in combination. Left unhyphenated, such a term
+**masquerades as a stack of independent adjectives**: `synthetic` and `lethal` each carry adjective *and*
+noun senses, so the parser enumerates the Cartesian product of adjective/compound bracketings — a spurious
+structural blow-up (D63 `d63-nominal-modification-normal-form.md` §1: S5 alone gave 12 skeletons), and the
+"all-adjective" reading it settles on is the **wrong claim**.
+
+**Rule.** Hyphenate a compound modifier when its parts would otherwise each be read as a separate
+adjective (`synthetic-lethal`, `microsatellite-stable`). The D63 hyphen morphology reads it as one
+compound adjective (head must be a known adjective — `lethal`, `stable` — exactly as `double-stranded`
+works). This is *more* faithful (R2), not just faster: the claim is about one property, not a conjunction
+of two. **Noun–noun compound modifiers** (`immune checkpoint blockade`, `DNA repair pathway`, `cell cycle
+arrest`) are already handled by the compound rule and need not be hyphenated — the masquerade only arises
+when a part has an adjective reading. A compound that is a lexicon **unit** already (noun `synthetic
+lethality` → C4280020, `cell death`, `dna repair`) is fine as written; hyphenation is for the *modifier*
+surface the lexicon doesn't carry.
 
 ## Vocabulary note (orthogonal to style)
 

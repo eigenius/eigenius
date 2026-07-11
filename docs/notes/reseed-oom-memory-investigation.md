@@ -1,7 +1,32 @@
-# Reseed OOM — memory investigation (open)
+# Reseed OOM — memory investigation (RESOLVED: environmental, not a kernel bug)
 
-**Status:** root cause **not yet identified**; static analysis exhausted; next step is a jemalloc
-heap profile (§7). **Do not re-tread §3** — those candidates are measured-out, not guesses.
+**Status: RESOLVED (`2026-07-07`).** The kernel is **not** the problem. A native `serve` load of the
+identical WordNet(`--all`, C3-precision) + all 27 UMLS chunks — same binary, same chains — **peaks at
+~6 GiB RSS and completes**, producing a full 2.6 GB store at `/tmp/probe-db`. jemalloc heap profile at
+the high-water mark: **live heap 3954 MB**, dominated by BTreeSet/BTreeMap cloning in the load path
+(`::load::{{closure}}` → `clone_subtree` 2719 MB / `from_iter` 1735 MB) — i.e. the `defined_iris` churn
+of §4, ~2.7 GB, **not 15 GB**. So the docker ~20 GiB OOM (exit 137) is **WSL2 VM memory pressure**:
+page cache from the 2.6 GB of RocksDB writes + `docker compose build` residue + docker overhead, all
+counted inside the WSL2 VM's memory cap — which is why it tracked *host* headroom ("21 GiB avail → OOM,
+24–25 → success"), not any per-chunk kernel growth.
+
+**Fixes.** (1) For a full-lexicon store now: **reseed natively** (`eigenius serve --db <path>` + load the
+chains; ~6 GiB, no docker) — done, `/tmp/probe-db`. (2) For reliable *docker* reseeds: raise the WSL2
+memory cap (`~/.wslconfig` `memory=28GB`), or reseed natively and import into the volume. (3) Real but
+secondary optimisation (not the OOM): `Arc` the per-layer `defined_iris` sets instead of cloning them in
+`build_chain`/`load_chain` (§4) — cuts the ~2.7 GB clone churn + the O(chain²) per-commit re-read.
+
+**Method note:** the jemalloc harness is `cli` feature `jemalloc-prof` (feature-gated
+`tikv-jemallocator`, `#[global_allocator]` in `cli/src/main.rs`); run `eigenius serve` under
+`_RJEM_MALLOC_CONF=prof:true,prof_active:true,lg_prof_interval:31,prof_prefix:…`; analyse with
+`perl <tikv-jemalloc-sys OUT_DIR>/bin/jeprof --text <binary> <dump>.heap`. Harness script:
+scratchpad `profiled_load.sh`.
+
+---
+
+_Original investigation below (§3 candidates were all measured-out en route to the resolution above)._
+
+**Do not re-tread §3** — those candidates are measured-out, not guesses.
 
 **Symptom.** `scripts/reseed-lexicon-db.sh` (WordNet `--all` + UMLS `--all` into the dockerised
 `eigenius serve` kernel) OOMs (exit 137, SIGKILL) **deep into the UMLS load** — established this

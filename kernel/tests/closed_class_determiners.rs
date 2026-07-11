@@ -54,6 +54,59 @@ fn index_over_bootstrap() -> (Arc<Layer>, LexicalIndex) {
     (layer, index)
 }
 
+/// gap #5 — the LINKING (copular) verb parse mechanism (importer frames 6/7): a `remained` entry with
+/// the EXACT category the importer now emits — `(S[dcl,fin]\NP)/(S[dcl,adj]\NP)`, an opaque
+/// `(Entity→Prop)→Entity→Prop` relation — consumes a predicative adjective (`primary`) and yields a
+/// finite VP, so `HeLa remained primary` parses to `remain_test(λx.primary(x), hela)`. Faithful: the
+/// property is the verb's ARGUMENT (kept opaque for veridical `remain` and evidential `seem` alike),
+/// not asserted as the copula's vacuous `λP.P` would. Validates the emitted shape without a reseed.
+#[test]
+fn linking_verb_takes_a_predicative_adjective() {
+    const LINKING_FIXTURE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+axiom lexicon:remain_test : (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+resource lexicon:remained_e : lexicon:LexicalEntry {
+    lexicon:form     = "remained";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:remain_test;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "remain";
+    lexicon:grade    = epistemic:declared;
+}
+"#;
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
+    for r in demo {
+        b.add_resource(r).expect("add demo");
+    }
+    let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let fix =
+        esl::compile_against_layer(LINKING_FIXTURE, &demo_layer).expect("linking fixture compiles");
+    let mut b2 = LayerBuilder::new("linking", Some(Arc::clone(&demo_layer)));
+    for r in fix {
+        b2.add_resource(r).expect("add linking");
+    }
+    let index = LexicalIndex::build(Arc::new(b2.build(LayerStorage::in_memory())));
+
+    let closed = index.parse("HeLa remained primary", &Identity);
+    assert!(
+        !closed.is_empty(),
+        "a linking verb + predicative adjective must parse"
+    );
+    assert!(
+        closed
+            .iter()
+            .any(|p| sem_mentions_axiom(p.sem(), "urn:eigenius:lexicon:remain_test")),
+        "the sem is the opaque linking relation over the property + subject; got {:?}",
+        closed
+            .iter()
+            .map(|p| pretty_term(p.sem()))
+            .collect::<Vec<_>>()
+    );
+}
+
 /// Two senses of a synthetic word `zob`, ranked: rank-0 is a **plural** NP (disagrees with the
 /// 3sg verb `affects`), rank-1 is a **singular** NP (agrees). With `sense_cap(1)` only rank-0
 /// seeds, so a sentence needs widen-on-failure to reach rank-1. (Both gate like a proper name.)
@@ -196,6 +249,101 @@ fn widen_on_failure_overrides_a_misranking_reranker() {
             .len(),
         1,
         "widen-on-failure recovers the parse despite the reranker preferring the failing sense"
+    );
+}
+
+/// A deterministic mock [`SenseRanker`] that ranks one target sense **LAST** for every word (others
+/// keep seed order) — the adversarial "the reranker buries the needed sense" case (mirror of
+/// [`PreferSense`]).
+struct BurySense(&'static str);
+impl SenseRanker for BurySense {
+    fn rank(&self, _sentence: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+        words
+            .iter()
+            .map(|w| {
+                let mut idx: Vec<usize> = (0..w.candidates.len()).collect();
+                idx.sort_by_key(|&i| w.candidates[i].sense == self.0); // target (true) sorts LAST
+                idx
+            })
+            .collect()
+    }
+}
+
+/// A layer where the form `zib` has **17 senses**: ONE parsing sense (a singular `CellLine`, the only
+/// one that agrees with the 3sg verb `affects`) at static rank 0, and 16 non-parsing distractors
+/// (plural `Gene`, failing number agreement) at ranks 1–16. A reranker that buries the parsing sense
+/// pushes it to position 16 — **beyond** the sense-cap widen ceiling (`SENSE_CAP_WIDEN_MAX = 16`, whose
+/// top-16 is positions 0–15) — so cap-widening WITHIN the reranked order can never re-admit it.
+fn zib_layer() -> Arc<Layer> {
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
+    for r in demo {
+        b.add_resource(r).expect("add demo");
+    }
+    let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let mut fixture = String::from(
+        "namespace lexicon   = \"urn:eigenius:lexicon\";\n\
+         namespace epistemic = \"urn:eigenius:reflection:epistemic\";\n\
+         resource lexicon:zib_needed : lexicon:LexicalEntry {\n\
+             lexicon:form       = \"zib\";\n\
+             lexicon:cat        = type_expr( lexicon:cat_np(lexicon:CellLine, lexicon:sg) );\n\
+             lexicon:sem        = lexicon:hela;\n\
+             lexicon:sem_type   = type_expr( lexicon:CellLine );\n\
+             lexicon:sense      = \"zib.needed\";\n\
+             lexicon:sense_rank = 0;\n\
+             lexicon:grade      = epistemic:declared;\n\
+         }\n",
+    );
+    for i in 1..=16 {
+        fixture.push_str(&format!(
+            "resource lexicon:zib_d{i} : lexicon:LexicalEntry {{\n\
+                 lexicon:form       = \"zib\";\n\
+                 lexicon:cat        = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:pl) );\n\
+                 lexicon:sem        = lexicon:brca1;\n\
+                 lexicon:sem_type   = type_expr( lexicon:Gene );\n\
+                 lexicon:sense      = \"zib.d{i}\";\n\
+                 lexicon:sense_rank = {i};\n\
+                 lexicon:grade      = epistemic:declared;\n\
+             }}\n"
+        ));
+    }
+    let fix = esl::compile_against_layer(&fixture, &demo_layer).expect("zib fixture compiles");
+    let mut b2 = LayerBuilder::new("zib", Some(Arc::clone(&demo_layer)));
+    for r in fix {
+        b2.add_resource(r).expect("add zib");
+    }
+    Arc::new(b2.build(LayerStorage::in_memory()))
+}
+
+/// GH#97 / this session — the **static-rank widen fallback**.
+/// [`widen_on_failure_overrides_a_misranking_reranker`] covers the case cap-widening CAN recover (few
+/// senses → doubling the cap admits the needed one). This covers the case it CANNOT: a lemma with more
+/// senses than the widen ceiling, where the reranker buries the only parsing sense beyond it. Cap
+/// escalation within the reranked order stays gapped; a second pass under **static** rank recovers the
+/// parse — extending "a bad rank costs a re-parse, never a missed parse" to the whole widen half.
+#[test]
+fn static_rank_fallback_recovers_a_sense_the_reranker_buried_beyond_widen_max() {
+    // Control: static order keeps the parsing (rank-0) sense — parses without any reranker.
+    assert_eq!(
+        LexicalIndex::build(zib_layer())
+            .with_sense_cap(2)
+            .parse("zib affects HeLa", &Identity)
+            .len(),
+        1,
+        "static cap keeps the agreeing sense at rank 0"
+    );
+    // Adversarial reranker buries the ONLY parsing sense at position 16 — beyond the cap-widen ceiling
+    // (top-16 = positions 0–15). Cap escalation in the reranked order can never re-admit it; the
+    // static-rank fallback re-parses under static order and recovers.
+    assert_eq!(
+        LexicalIndex::build(zib_layer())
+            .with_sense_cap(2)
+            .with_sense_ranker(Box::new(BurySense("zib.needed")))
+            .parse("zib affects HeLa", &Identity)
+            .len(),
+        1,
+        "static-rank fallback recovers the parse the reranker buried beyond widen-max"
     );
 }
 
@@ -1251,6 +1399,43 @@ fn light_verb_give_rise_to_is_a_multiword_transitive() {
 }
 
 #[test]
+fn post_nominal_alone_is_an_exclusive_focus_refinement() {
+    // D61: `alone` (bare post-nominal `cat_pp`) refines the head noun via the PpMod rule —
+    // `[cat_n(gene)] [cat_pp]` → `Σx:gene. sole(x)` — under ANY determiner. The exclusive
+    // `ontology:sole` operator is the "= only" reading. Validated on the demo lexicon (no reseed).
+    let (_layer, index) = index_over_bootstrap();
+    let f = index.parse("each gene alone affects HeLa", &Identity);
+    assert!(!f.is_empty(), "`each gene alone affects HeLa` parses");
+    let sem = pretty_term(f[0].sem());
+    assert!(
+        sem.contains("sole"),
+        "the subject carries the exclusive `sole` operator: {sem}"
+    );
+    // Baseline without `alone` still parses (no regression to the plain determiner path).
+    assert!(
+        !index.parse("each gene affects HeLa", &Identity).is_empty(),
+        "`each gene affects HeLa` still parses"
+    );
+
+    // The FULL structure of sentence 3 — `each [N] alone does not [V]` — over the demo lexicon:
+    // `alone` refines the subject noun AND declarative do-support + VP-negation compose, giving
+    // `∀x:(Σy:gene. sole(y)). ¬affect(x, hela)`. This is exactly the shape "each event alone does not
+    // lead to cell death" takes once the full lexicon is reseeded (WordNet event/lead in place of
+    // demo gene/affect). Witnesses the universal quantifier, the `sole` refinement, and the negation
+    // (`→ logic:False`) all in one reading.
+    let neg = index.parse("each gene alone does not affect HeLa", &Identity);
+    assert!(
+        !neg.is_empty(),
+        "`each gene alone does not affect HeLa` parses (alone + do-support + negation)"
+    );
+    let nsem = pretty_term(neg[0].sem());
+    assert!(
+        nsem.contains("sole") && nsem.contains("False"),
+        "faithful reading: universal over the sole-refined noun, negated: {nsem}"
+    );
+}
+
+#[test]
 fn comma_list_coordination_parses() {
     // D62 S0 slice 2: a comma is a conjunctive list separator, so a multi-item subject list builds
     // the (left-branching) member group the distributive subject rule consumes.
@@ -1358,6 +1543,24 @@ fn compound_stacking_and_bare_plural_compound() {
                 && pretty_term(p.sem()).contains("compound_kind(")),
         "a bare-plural composed compound is a closed kind-predication over the refined type"
     );
+    // Compound bare-plural noun as a KIND SUBJECT of the copula (this session — the `bnp`-unary-rule
+    // re-alignment with core-en): the COMPOSED compound `gene genes` also gets the `cat_kind`
+    // copula-subject edge, so `are_kind` yields `subclass_of` over the COMPOUND kind. The leaf shift in
+    // `lookup_span` never reached a chart-formed compound, so before this the compound-kind subject
+    // GAPed — the corpus `Nucleotide repeat regions are microsatellites` gap.
+    let kind_subj = index.parse("gene genes are cell lines", &PluralS);
+    assert!(
+        kind_subj.iter().any(|p| {
+            sem_mentions_axiom(p.sem(), "urn:eigenius:ontology:subclass_of")
+                && sem_mentions_axiom(p.sem(), "urn:eigenius:ontology:compound_kind")
+        }),
+        "a compound bare-plural noun is a kind subject: `gene genes are cell lines` → subclass_of over \
+         the compound kind; got {:?}",
+        kind_subj
+            .iter()
+            .map(|p| pretty_term(p.sem()))
+            .collect::<Vec<_>>()
+    );
 }
 
 /// D63 Option A (blueprint §11 3b) — the **packing router is a safe no-op stub** so far. With
@@ -1414,9 +1617,13 @@ fn packing_router_decision_is_correct() {
     assert!(on.routes_packed("BRCA1 , which affects HeLa , is primary", &Identity)); // appositive
     assert!(on.routes_packed("thus , HeLa affects BRCA1", &Identity)); // fronted-comma absorption
 
-    // Selectional (`depends on`: Gene/CellLine slots) ⇒ UNPACKED (fail-closed).
-    assert!(!on.routes_packed("HeLa depends on BRCA1", &Identity));
-    // Pied-piping (`[prep] which`) is ternary + non-piling ⇒ routed UNPACKED (structural detection).
+    // Selectional (`depends on`: Gene/CellLine slots) is PACKED now — per-cell packing keys the
+    // concrete-slot items finer (`node_sig` → `cat_key`) so they never wrongly share a node, instead
+    // of forcing the whole sentence unpacked (D63 §11 3d). Soundness is witnessed by the differential
+    // oracle `packed_forest_equals_unpacked_on_core_grammar`, which now covers selectional sentences.
+    assert!(on.routes_packed("HeLa depends on BRCA1", &Identity));
+    // Pied-piping (`[prep] which`) is the one construct the packed forest builds no edge for (ternary,
+    // non-piling) ⇒ routed UNPACKED (structural detection). A completeness carve-out, not soundness.
     assert!(!on.routes_packed("the gene in which HeLa affects BRCA1 is large", &Identity));
 
     // Flag off ⇒ never packs, even for a packable sentence.
@@ -1464,6 +1671,20 @@ fn packed_forest_equals_unpacked_on_core_grammar() {
         "BRCA1 , which affects HeLa , is primary", // subject appositive (trailing comma absorbed)
         "thus , HeLa affects BRCA1", // fronted transitional + comma absorption
         "more largely , HeLa affects BRCA1", // degree-modified fronted adverb + comma
+        // CONCRETE SELECTIONAL SLOTS (D63 §11 3d — per-cell packing). These route PACKED now (the
+        // whole-sentence selectional carve-out is gone); the concrete-slot items key finer via
+        // `cat_key` so they never wrongly share a node. This is the soundness witness for the
+        // refinement — the packed path must still equal the unpacked path with the residue present.
+        "HeLa depends on BRCA1", // selectional verb `depends on`, both args concrete
+        "every cell line depends on BRCA1", // selectional verb + determiner subject
+        "no cell line depends on BRCA1", // selectional verb + negative determiner
+        "a cell line that depends on BRCA1 is primary", // selectional verb inside a packed relative
+        "HeLa depends on BRCA1 and HeLa depends on BRCA1", // selectional verb under coordination
+        // Close nominal apposition (D63 §8.4 Phase 6, RC-6 — the packed `ApposeGroup` edge). Singular
+        // head + name-GROUP so it works under the `Identity` lemmatizer (the plural-head form is in
+        // `close_apposition_subject_and_object`, which uses `PluralS`). Subject and object position.
+        "the gene BRCA1 and BRCA1 affect HeLa",
+        "HeLa affects the gene BRCA1 and BRCA1",
     ] {
         let (co, oo) = off.parse_open(s, &Identity);
         let (cn, on2) = on.parse_open(s, &Identity);
@@ -1474,6 +1695,38 @@ fn packed_forest_equals_unpacked_on_core_grammar() {
         assert_eq!(so, sn, "packed≠unpacked CLOSED forest for {s:?}");
         assert_eq!(oo.len(), on2.len(), "packed≠unpacked OPEN count for {s:?}");
     }
+}
+
+/// D63 §5.3 — **close naming apposition**: a SORTAL common noun + a proper NAME (`gene BRCA1`,
+/// `Project Achilles`) → the definite individual of the sortal kind bearing that name,
+/// `kind_of(Σx:Sortal. named(x, name))`, an `Entity`-typed NP usable as a bare subject/object. The
+/// name's own class need NOT be the sortal (coining), so it is distinct from `appose_group`'s
+/// kind-checked group apposition — the singleton, un-type-checked case.
+#[test]
+fn sortal_plus_proper_name_is_a_named_individual() {
+    let (_layer, index) = index_over_bootstrap();
+    // `gene BRCA1` heads a finite clause as a named-individual subject.
+    let closed = index.parse("gene BRCA1 affects HeLa", &Identity);
+    assert!(
+        !closed.is_empty(),
+        "`gene BRCA1 affects HeLa` — a sortal + proper-name subject should parse"
+    );
+    assert!(
+        closed.iter().any(|it| {
+            let s = pretty_term(it.sem());
+            s.contains("named(") && s.contains("kind_of(")
+        }),
+        "expected a `kind_of(Σ… named(…))` named-individual reading, got: {:?}",
+        closed
+            .iter()
+            .map(|it| pretty_term(it.sem()))
+            .collect::<Vec<_>>()
+    );
+    // Also felicitous as an object.
+    assert!(
+        !index.parse("HeLa affects gene BRCA1", &Identity).is_empty(),
+        "`HeLa affects gene BRCA1` — named individual in object position"
+    );
 }
 
 /// D63 §8.5 — **stacked attributive adjectives** (`synthetic lethal vulnerability`). Refining an
@@ -3098,6 +3351,179 @@ fn distributive_object_coordination_parses() {
         and_conjuncts(forest[0].sem()).map(|c| c.len()),
         Some(2),
         "two object members ⇒ two conjuncts"
+    );
+}
+
+#[test]
+#[ignore = "probe: subject-GQ + coordinated(distributed) object (s20 residual); --ignored --nocapture"]
+fn probe_subject_gq_distributed_object() {
+    let (_layer, index) = index_over_bootstrap();
+    let probe = |s: &str, lem: &dyn eigenius_kernel::dcg::Lemmatizer| {
+        let (c, o) = index.parse_open(s, lem);
+        let tag = if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("open×{}", o.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  {tag:<10} {s:?}");
+    };
+    eprintln!("\n=== subject-GQ + coordinated object: simple vs bare-plural/comparative coordinands (demo) ===");
+    probe("a gene affects a gene or a cell line", &Identity); //      subj-GQ + det⊕det (CLOSES)
+    probe("a gene affects genes or a cell line", &PluralS); //        subj-GQ + BARE-PLURAL ⊕ GQ
+    probe("genes affect genes or a cell line", &PluralS); //          plural subj + same (baseline)
+    probe("a gene affects a gene or a larger cell line", &Identity); // subj-GQ + GQ ⊕ COMPARATIVE
+    probe("a gene affects genes or a larger cell line", &PluralS); // subj-GQ + bare-plural ⊕ comparative (s20 shape)
+}
+
+#[test]
+#[ignore = "probe: RC-8 clausal-complement sentence shapes (demo); --ignored --nocapture"]
+fn probe_rc8_demo() {
+    let (_layer, index) = index_over_bootstrap();
+    let probe = |s: &str| {
+        let (c, o) = index.parse_open(s, &Identity);
+        let tag = if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("open×{}", o.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  {tag:<10} {s:?}");
+    };
+    // RC-8 s1: `We hypothesized that MSI and MMR deficiency may create vulnerabilities` — clausal
+    // complement + coordinated subject + embedded modal. Demo proxy with `shows` (clause verb).
+    eprintln!("\n=== RC-8 s1 shape (clausal + coord subject + modal) — demo ===");
+    probe("HeLa shows that BRCA1 affects HeLa"); //             clausal baseline
+    probe("HeLa shows that BRCA1 may affect HeLa"); //          clausal + embedded modal
+    probe("HeLa shows that BRCA1 and HeLa affect HeLa"); //     clausal + coordinated subject
+    probe("HeLa shows that BRCA1 and HeLa may affect HeLa"); // clausal + coord subject + modal (s1 shape)
+                                                             // RC-8 s2 core: `… is not simply a result of MMR deficiency` — copula + predicate NOMINAL (`a result
+                                                             // of X`), vs the predicate ADJECTIVES the copula is known to take. Isolate in the demo.
+    eprintln!("=== RC-8 s2 core: copula + predicate NOMINAL (± neg) — demo ===");
+    probe("HeLa is primary"); //         copula + predicate ADJECTIVE (baseline, known-good)
+    probe("HeLa is a cell line"); //     copula + predicate NOMINAL
+    probe("HeLa is a gene"); //          copula + predicate NOMINAL (different type)
+    probe("HeLa is not a cell line"); // + negation
+    probe("HeLa is a cell line of BRCA1"); //      predicate nominal + of-PP complement (`a result OF X`)
+    probe("HeLa is not a cell line of BRCA1"); //  + negation
+    probe("HeLa shows that HeLa is a cell line of BRCA1"); // full s2 shape (clausal + copula-nominal-of-PP)
+}
+
+#[test]
+fn s20_shape_parses_open_with_modal_coordination_and_comparative() {
+    // The s20 sentence (`WRN dependency may require specific lineages or a stronger mutation phenotype`)
+    // composes three fixes: the modal (`may` → Possible), heterogeneous object-GQ coordination over
+    // DIFFERENT types (type-preserving `Or`), and the attributive comparative (anaphoric standard hole).
+    // Demo proxy `HeLa may affect a gene or a larger cell line` must parse OPEN — not gap, not closed
+    // (the comparative standard is unresolved) — as `Possible(Or(∃:Gene …, ∃:(Σ CellLine. gt(deg,
+    // anaphor)) …))` with exactly one comparison-standard hole the D64 resolver fills.
+    let (_layer, index) = index_over_bootstrap();
+    let (closed, open) =
+        index.parse_open("HeLa may affect a gene or a larger cell line", &Identity);
+    assert!(
+        closed.is_empty(),
+        "the comparative standard is unresolved → the s20 shape must be OPEN, not closed"
+    );
+    let it = open
+        .iter()
+        .find(|o| o.holes.len() == 1)
+        .expect("an open parse with exactly one comparison-standard hole");
+    let sem = pretty_term(it.item.sem());
+    assert!(
+        sem.contains("Possible(")
+            && sem.contains("Or(")
+            && sem.contains(":Gene.")
+            && sem.contains(":CellLine.")
+            && sem.contains("gt(deg_large")
+            && sem.contains("$anaphor$"),
+        "s20 shape = modal + type-preserving disjunction (Gene ∨ CellLine) + comparative-standard hole: {sem}"
+    );
+}
+
+#[test]
+fn heterogeneous_object_gq_coordination_generalizes_type() {
+    // D63 §8.4 — coordinating type-raised OBJECT quantifiers over DIFFERENT noun types (s20's object
+    // `specific lineages or a stronger mutation phenotype` = Lineage ⊕ Phenotype). The object-GQ
+    // categories differ only in the exposed object slot (`cat_np(Gene)` vs `cat_np(CellLine)`); the
+    // coordination widens that slot to their `common_super` (Entity) so a general verb still fills it,
+    // while the per-disjunct SEMANTICS keep the distinct bound types: `∃g:Gene.V(g) ∨ ∃c:CellLine.V(c)`.
+    let (_layer, index) = index_over_bootstrap();
+
+    // det ⊕ det, different types → closes with a TYPE-PRESERVING disjunction (not collapsed to Entity).
+    let forest = index.parse("HeLa affects a gene or a cell line", &Identity);
+    assert!(
+        !forest.is_empty(),
+        "different-type object-GQ coordination must close"
+    );
+    let sem = pretty_term(forest[0].sem());
+    assert!(
+        sem.starts_with("Or(") && sem.contains(":Gene.") && sem.contains(":CellLine."),
+        "the disjunction preserves BOTH bound types (Gene ∨ CellLine, not widened to Entity): {sem}"
+    );
+
+    // plural ⊕ det, different types — the s20 object shape — also closes.
+    assert!(
+        !index
+            .parse("HeLa affects genes or a cell line", &PluralS)
+            .is_empty(),
+        "plural ⊕ determined, different types (the s20 object shape) closes"
+    );
+
+    // Guard: the object-GQ gate must NOT leak into SUBJECT coordination — a coordinated plural subject
+    // still needs the plural-finite verb, so `*HeLa and BRCA1 affects HeLa` (3sg) stays out (agreement
+    // bites; forward-headed subject-GQs are excluded from the generalization).
+    assert!(
+        index
+            .parse("HeLa and BRCA1 affects HeLa", &Identity)
+            .is_empty(),
+        "the object-GQ generalization does not bypass subject-verb agreement"
+    );
+}
+
+#[test]
+fn attributive_comparative_opens_with_a_standard_hole() {
+    // D63 §8.5 / d63-comparative-phrasal §8: an attributive comparative (`a larger cell line`,
+    // `a stronger mutation phenotype` — s20) has NO explicit `than`-standard; the standard is
+    // anaphoric (a discourse comparison class), unlike the positive's absolute norm `std_large`. So
+    // it parses OPEN — a bare `S[adj]\NP` reading `λx. gt(deg(x), deg(anaphor))` (e_larger_attrib) +
+    // the attributive refine rule → `Σx. gt(deg(x), deg($anaphor$))`, one comparison-standard hole the
+    // D64 resolver fills. It must NOT gap, and must NOT spuriously close (a closed parse would mean the
+    // relative standard was silently invented).
+    let (_layer, index) = index_over_bootstrap();
+
+    // Positive attributive stays CLOSED — absolute `std_large`, no hole.
+    assert!(
+        !index
+            .parse("HeLa affects a large cell line", &Identity)
+            .is_empty(),
+        "positive `a large cell line` closes (absolute standard)"
+    );
+
+    // Comparative attributive: OPEN, not gap, not closed; exactly one comparison-standard hole.
+    let (closed, open) = index.parse_open("HeLa affects a larger cell line", &Identity);
+    assert!(
+        closed.is_empty(),
+        "`a larger cell line` must NOT close — the comparative standard is unresolved"
+    );
+    let one_hole = open.iter().find(|o| o.holes.len() == 1);
+    assert!(
+        one_hole.is_some(),
+        "`a larger cell line` must parse OPEN with one comparison-standard hole, got {} open",
+        open.len()
+    );
+    let sem = pretty_term(one_hole.unwrap().item.sem());
+    assert!(
+        sem.contains("gt(") && sem.contains("deg_large"),
+        "the open sem compares the degree against an anaphoric standard: {sem}"
+    );
+
+    // Works in subject position too.
+    let (c2, o2) = index.parse_open("a larger cell line affects HeLa", &Identity);
+    assert!(
+        c2.is_empty() && o2.iter().any(|o| o.holes.len() == 1),
+        "subject-position attributive comparative also opens with one hole"
     );
 }
 

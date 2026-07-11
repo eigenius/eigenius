@@ -6,26 +6,71 @@ sequence (the user's directive, `2026-07-06` — stop detouring):
 | phase | status | measure |
 |---|---|---|
 | **1. OOV / lexical** | ✅ **closed** (`2026-07-05`) | `missing-lexeme 0`, distinct OOV 0 — Stage-A augmentation grounds the whole page |
-| **2. Parsing gaps** | 🔵 **active** | grammar-gap **20 → 12** (Steps 1–2, 4, 5/5b/5c done); the 12 residual gaps below |
-| **3. Ambiguity** | ⏳ next | every closing unit is AMBIG, **0 ENCODED**; median 105 readings/unit, top units at the forest cap 256 |
-| **4. Performance** | ⏳ last | 62 units in 74 min; pathological outliers (up to 930 s) on ambiguity-rich units |
+| **2. Parsing gaps** | ✅ **grammar-complete** (`2026-07-08`) | reranked grammar-gap **12 → 5**; the 5 residual are **search-starvation** (every construction parses in isolation), not missing grammar — **§0** below |
+| **3. Ambiguity / search** | 🔵 **next** | the 5 residual gaps + every closing unit AMBIG (**0 ENCODED**); one root cause — the beam / mass-shim over-generation (§6) |
+| **4. Performance** | 🔵 **next** (folds into 3) | 62 units in 74 min; pathological outliers (up to 930 s) on ambiguity-rich units — same root cause |
 
 Phases **3 and 4 share one root cause — the mass-shim over-generation** (Step 4 RC-1 head-inheritance is
 loose): killing the spurious `mass` readings collapses ambiguity *and* parse time together. A real
 intermediate-cell beam is the backstop. (§6 / §7.)
 
-**Full re-measure (Derived, `2026-07-06`, snapshot `wordnet-umls-all-2026-07-06`, page cnl-v2, `--no-llm`,
-74 min):** 62 units → **ENCODED 0, AMBIG 50, GRAMMAR-GAP 12, MISSING 0, OPEN 0, SCALE-BOUND 0** — **81%
-close**, up from 68% (AMBIG 42 / gap 20) at the Step-9 baseline (§1b). Step 5 (apposition) + 5b (comma
-inheritance) + 5c (coordination refactor to core-en's list-with-operator shape) closed **8 gaps**; the
-corpus's own `…the MMR genes MSH2, MSH6, PMS2 or MLH1 cause Lynch syndrome` now parses (AMBIG×240).
+---
 
-### Phase-2 backlog — the 12 remaining grammar-gaps (leverage order)
+## 0. Grammar gaps CLOSED — reranked config (Derived, `2026-07-08`)
+
+**All `--no-llm` counts in this note are cap-only** (static most-frequent-sense first) — the **wrong
+measurement config**, which inflates the grammar-gap count. The canonical config attaches the contextual
+sense reranker: `cargo test --release -p eigenius-wordnet --features use-llm --test db_backed_encoding
+wrn_first_page_over_full_lexicon -- --ignored --nocapture` with `ANTHROPIC_API_KEY` set, over the snapshot
+`db-snapshot/wordnet-umls-all-2026-07-08` (`--umls-all`, 52 layers, 2.5 G, all parsing-fixes; the
+`DEFAULT_SNAPSHOT`). Under it the grammar-gap count fell **12 → 5**, and **the 5 residual are
+search-starvation, not grammar**:
+
+| step | grammar-gap | what changed | commit |
+|---|---|---|---|
+| cap-only baseline (`--no-llm`) | 12 | the §-below `2026-07-06` measure | — |
+| + reranker (`--features use-llm`) | 9 | contextual sense order surfaces non-frequent senses under the cap (s20 GAP→CLOSED×144) | — |
+| + static-rank widen fallback | 8 | the reranker is **non-monotonic** — it can bury a construction-triggered category variant that is not a distinct content sense; on an all-known-vocab gap, retry once with `ranks=None` (`widen_unpacked` / `widen_packed`) | `7d9cda4` |
+| + gap #1 (bnp compound-kind subject) | 7 | bare compound-kind subjects shift via the `bnp` unary rule (`bare_nominal_shifts` = kind-subject + bare-plural + bare-mass) | `970e9ae` |
+| + #5 linking-verb + #2 UMLS process-mass | 5 | WordNet frames 6/7 → `FrameKind::LinkingAdj` (copula-adjective `(S[dcl]\NP)/(S[adj]\NP)`); UMLS process/function TUIs (T038–T046 / T067 / T070) → mass (`concept_is_mass` semantic-type shim) | `1cbeeda`, `ab6a909` |
+
+**The 5 residual gaps are all search-starvation** — every construction parses in isolation; the full
+sentence exceeds the beam / cell budget under full-sentence sense-crowding:
+
+| # | sentence (head) | construction (parses in isolation) |
+|---|---|---|
+| #3 | `Some MSI lines … were represented by …` | passive + complex agent (RC row below) |
+| #4 | `… identified WRN as … compared to …` | `V X as Y` (RC-3) + nested verb+PP |
+| #7 | `MSI cell lines … showed greater dependence … than …` | phrasal comparative (RC-2, construction CLOSED `2026-07-07`) |
+| #8 | `These lines possess events that are predictive of …` | adjective + PP-complement (RC-4) |
+| #9 | `… suggest that WRN dependency is not simply a result of …` | clausal complement + negated copula (RC-8) |
+
+**Conclusion — grammar-gap work is DONE for this page.** The grammar covers every construction on the
+page; the remaining 5 gaps are the beam not reaching the (existing) parse under full-sentence
+sense-crowding. Phases 2 / 3 / 4 have collapsed into one lever: **scale the search** — the same beam /
+mass-shim over-generation root cause (§6 / §7; D63 §8.7 / GH#97). The reranked run also carries handled
+`felicity_readback` `catch_unwind` panics on ill-typed resource-as-function candidates (documented, not
+contamination).
+
+---
+
+**Full re-measure (Derived, `2026-07-06`, snapshot `wordnet-umls-all-2026-07-06`, page cnl-v2, `--no-llm`,
+74 min — cap-only, superseded as ground truth by §0):** 62 units → **ENCODED 0, AMBIG 50, GRAMMAR-GAP 12,
+MISSING 0, OPEN 0, SCALE-BOUND 0** — **81% close**, up from 68% (AMBIG 42 / gap 20) at the Step-9 baseline
+(§1b). Step 5 (apposition) + 5b (comma inheritance) + 5c (coordination refactor to core-en's
+list-with-operator shape) closed **8 gaps**; the corpus's own `…the MMR genes MSH2, MSH6, PMS2 or MLH1
+cause Lynch syndrome` now parses (AMBIG×240).
+
+### Phase-2 backlog — the (historical) cap-only 12-gap list — SUPERSEDED by §0
+
+*Historical, cap-only ordering. The **construction diagnoses below stand**; the counts do not — §0 is the
+authoritative reranked status (grammar-gap 5, all search-starvation). Rows kept for the per-construction
+fix record.*
 
 | RC | # | construction — sentence(s) |
 |---|---|---|
-| **RC-2** phrasal comparative (`greater/fewer X … than Y`) | 2 | `greater dependence on WRN than …`; `fewer … than typical lineages` → [d63-comparative-phrasal.md](d63-comparative-phrasal.md) (grounded design, expert-consulted: opaque per-dimension μ + direct 3-place `gt`). Attributive comparatives already parse; only the `than`-clause gaps |
-| **modal + compound-subject** | 1 | `WRN dependency **may require** specific lineages or a stronger mutation phenotype` (s20 — refiled from RC-2; its attributive comparative parses) |
+| **RC-2** phrasal comparative (`greater/fewer X … than Y`) | 2 | `greater dependence on WRN than …`; `fewer … than typical lineages` → [d63-comparative-phrasal.md](d63-comparative-phrasal.md). **CLOSED (`2026-07-07`).** **FAIL-CLOSED CORRECTION (witnessed):** ~~Attributive comparatives already parse~~ was FALSE — `a larger cell line` gapped (positive `a large cell line` closed); comparative adjectives had only the predicative `(S[adj]\NP)/cat_pp_than`, no `N/N`. FIXED: a bare `S[adj]\NP` reading `λx. gt(deg(x), deg(anaphor))` — the elided `than`-standard is an **anaphoric hole** (discourse-relative, d63-comparative-phrasal §8) → `a larger/stronger X` parses **OPEN**, one comparison-standard hole the D64 resolver fills. Demo + importer (`cmp_attrib_sem`, ~18.9k emitted); test `attributive_comparative_opens_with_a_standard_hole`. |
+| **modal + coordinated object** | 1 | `WRN dependency **may require** specific lineages or a stronger mutation phenotype` (s20). **CLOSED (`2026-07-07`)** — two grammar blockers, both fixed and composing → s20 parses **OPEN** (D64 fills the standard hole): **(1)** the attributive comparative `a stronger mutation phenotype` (RC-2 row); **(2)** coordinating type-raised **object-GQs over DIFFERENT noun types** (`lineages` ⊕ `phenotype`) — the object-GQ categories differ only in the exposed slot `cat_np(T)`, so coordination widens it to `common_super` (`common_cat` in category.rs, gated to backward-headed object-GQs in `coordinate_prop`) while the **per-disjunct semantics keep the distinct types**: `∃g:Gene.V(g) ∨ ∃c:CellLine.V(c)`. Witnessed (demo proxy `HeLa may affect a gene or a larger cell line`): `Possible(Or(∃:Gene …, ∃:(Σ CellLine. gt(deg, $anaphor$)) …))`, one hole. Tests `heterogeneous_object_gq_coordination_generalizes_type`, `s20_shape_parses_open_with_modal_coordination_and_comparative`. **NB: earlier calls of this residual "heterogeneous NP coordination" / "compound" were wrong** — it's type-raised object-GQ coordination; base-type-mismatch was the tell. **Corner (logged):** widening the exposed slot relaxes a type-restricted verb's selectional check to the supertype — over-generates for restricted verbs (rare); general verbs are exact. Bare-name ⊕ raised-GQ (`BRCA1 or a gene`) still gaps — a separate shape s20 doesn't use. |
 | **RC-8** clausal complement + multiword verb | 2 | `hypothesized that … give rise to`; `suggest that … is not simply a result of` |
 | **deep verb+PP / nested-PP** | 2 | `arises from hypermethylation of the MLH1 promoter`; `compared favourably to … biomarkers for …` |
 | **RC-3** `V X as Y` | 1 | `identified WRN as the top … dependency` |
@@ -34,7 +79,12 @@ corpus's own `…the MMR genes MSH2, MSH6, PMS2 or MLH1 cause Lynch syndrome` no
 | **RC-7** copula-kind on compound subject | 1 | `Nucleotide repeat regions are microsatellites` |
 | **passive + complex agent** | 1 | `were represented by these screening data sets` → [d63-passive-voice-handling.md](d63-passive-voice-handling.md) (general passive infra: object→subject promotion + `by_arg` + `rel(theme, ground)`) |
 
-**Next parsing gap: RC-2 (comparatives) — 3 sentences, the highest-leverage single fix.**
+**No next parsing gap — the grammar is complete for this page (§0).** Every construction above now parses
+in isolation: RC-2 comparatives and the s20 modal+coordinated-object gap CLOSED `2026-07-07`; RC-5
+linking-verb (`1cbeeda`), RC-7 copula-kind on compound subjects (`970e9ae`), and the UMLS process-mass gap
+(`ab6a909`) CLOSED `2026-07-08`. The five gaps that survive in the reranked full-page measure (§0:
+#3/#4/#7/#8/#9) fail because the full sentence overruns the beam / cell budget, not because a rule is
+missing. The whole remaining backlog is the **search-scaling lever** (§6 / §7; D63 §8.7 / GH#97).
 
 What landed since the baseline below (all Derived, `2026-07-05`):
 - **Stage-A augmentation is now injected into the parse.** The `LexiconBacked` transducer
@@ -491,13 +541,40 @@ subjects (`MSI`). The head-inheritance is **loose**: it over-generates `mass` re
 up a bogus `mass` from the junk atom `gENE` on "Gross Extranodal Extension", head "extension"). Every such
 extra reading multiplies through the chart. This is the **binding constraint on phases 3 AND 4** (§7).
 
-**Concrete tasks (the mass-shim precision follow-ups, tracked from Step 4):**
+**Concrete tasks (the mass-shim precision follow-ups, tracked from Step 4).** **SUPERSEDED by the structural
+fix — [d63-countability-from-subsumption.md](d63-countability-from-subsumption.md) (`2026-07-09`):** replace
+the loose lexical head-inheritance with **countability by `is_subclass_of`** over the shared `lexicon:Entity`
+lattice both importers already populate (UMLS mass-denoting TUIs; WN mass-denoting supersenses), with a
+curated per-lemma **override** for grammatical-vs-ontological divergences (`furniture`). This eliminates the
+head-string heuristic — and both patches below — by construction (`gene`'s TUI is a discrete gene type, so
+no `gENE`→"extension" collision). The two patches are kept here only as the *heuristic* alternative:
 1. **Strictly-uncountable-head test** — mark `mass` only when the head noun is uncountable in *all* its
    senses (not "some sense is uncountable"), killing the `extension`/`instability`-adjacent false positives.
 2. **Acronym ↔ domain-word collision filter** (user-endorsed) — drop a `mass` (or any) reading for an
    acronym atom that collides with a primary concept of its own research domain (`gENE` = GENE).
 3. Re-measure `--no-llm` (does the AMBIG×N median drop?) and with the **reranker** (`--features use-llm`,
    the phase-3 metric proper: AMBIG → single ENCODED per unit).
+
+### 6a. The ambiguity is structural × sense — two distinct levers (Derived, `2026-07-08`)
+
+Re-ran the chart-cell instrumentation over `wordnet-umls-all-2026-07-08` (§4b of
+[d63-parsing-scale-and-pruning.md](d63-parsing-scale-and-pruning.md)). The readings-per-unit factor into a
+**product of two independent sources**, each with its own lever:
+
+- **Sense multiplicity** (×4–16 per skeleton) — each noun slot filled by a WordNet *or* UMLS sense, plus
+  the mass-shim over-generation above. Lever: the **reranker/cap** (already built) + the mass-shim
+  precision fixes (tasks 1–2).
+- **Structural multiplicity** (2–36 bracketing / adjective-vs-compound category-choice skeletons per
+  sentence) — the Catalan blow-up of the prenominal modifier stack (`attractive synthetic lethal targets`).
+  Sense-ranking does **not** reduce it. Lever: a **nominal-modification normal form** — design note
+  [d63-nominal-modification-normal-form.md](d63-nominal-modification-normal-form.md).
+
+The two multiply (S5: 3 structural × 16 sense = 48), so **both levers are load-bearing** and a single clean
+ENCODED reading needs both. The refined-noun `cat_n(Σ_)` shape dominates the saturating mid-chart cells
+(32 of 173 non-leaf cells), so the structural lever is where the mid-chart population concentrates. The
+`2026-07-06` "mass-shim is *the* root cause" framing is refined: the mass-shim is the sense-side
+over-generation; the bracketing multiplicity is a **separate** structural source the mass-shim fixes don't
+touch.
 
 ## 7. Phase 4 — Performance (parse-time under ambiguity)
 

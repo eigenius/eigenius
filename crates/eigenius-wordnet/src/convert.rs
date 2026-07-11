@@ -155,6 +155,24 @@ enum FrameKind {
     /// Clause-taking (report) verb — frame 26, "Somebody ----s that CLAUSE" (D63 §8.11
     /// 6-cl): an opaque `Prop → Entity → Prop` axiom, category `(S\NP)/cat_cp`.
     Clausal,
+    /// Linking (copular) verb — WordNet frames 6/7 ("Something ----s Adjective/Noun", "Somebody
+    /// ----s Adjective"): `remain`/`become`/`seem`/`appear` + a predicative adjective. An opaque
+    /// `(Entity → Prop) → Entity → Prop` axiom (the verb relates the subject to the property),
+    /// category `(S[dcl,fin]\NP)/(S[dcl,adj]\NP)`. Mirrors the copula `be`'s adjective complement but
+    /// keeps the verb's OWN opaque relation — faithful for both veridical (`remain` ⊨ the adjective)
+    /// and evidential (`seem` ⊭ it) senses without a veridicality list, exactly as the Clausal report
+    /// verb keeps `Prop` opaque rather than asserting it (the copula likewise defers tense; D61). Frame
+    /// 5 ("----s something Adjective", object-predicate `consider X important`) is a distinct category,
+    /// still deferred.
+    LinkingAdj,
+    /// Essive / object-predicative — the `identify / regard / describe / classify X AS Y` construction
+    /// (D63 §5.3). WordNet's frame inventory does NOT capture the `as`-complement (frame 14 is the
+    /// double-object "give" frame), so this kind is not assigned by [`classify`]; it is added per-lemma
+    /// for a curated essive-verb set ([`is_essive_verb`], in [`push_verb`]). Category
+    /// `((S\NP)/cat_pp_arg(prep_as))/NP` — object first, then the `as`-marked predicative complement
+    /// (⟦cat_pp_arg⟧ = Entity); an opaque 3-place axiom `Entity → Entity → Entity → Prop`
+    /// (`identify(obj, as_obj, subj)`), the essive analogue of the ditransitive shape.
+    Essive,
 }
 
 impl FrameKind {
@@ -165,6 +183,8 @@ impl FrameKind {
             FrameKind::Ditransitive => "d",
             FrameKind::PpOblique => "p",
             FrameKind::Clausal => "c",
+            FrameKind::LinkingAdj => "j",
+            FrameKind::Essive => "as",
         }
     }
 
@@ -178,10 +198,13 @@ impl FrameKind {
             FrameKind::Transitive | FrameKind::PpOblique => {
                 format!("{ENTITY_TOP} -> {ENTITY_TOP} -> Prop")
             }
-            FrameKind::Ditransitive => {
+            FrameKind::Ditransitive | FrameKind::Essive => {
                 format!("{ENTITY_TOP} -> {ENTITY_TOP} -> {ENTITY_TOP} -> Prop")
             }
             FrameKind::Clausal => format!("Prop -> {ENTITY_TOP} -> Prop"),
+            // Linking verb: takes the predicative-adjective's denotation (`Entity → Prop`) then the
+            // subject — an opaque relation between the subject and the property.
+            FrameKind::LinkingAdj => format!("({ENTITY_TOP} -> Prop) -> {ENTITY_TOP} -> Prop"),
         }
     }
 
@@ -203,6 +226,13 @@ impl FrameKind {
             FrameKind::Ditransitive => {
                 format!("lexicon:fwd(lexicon:fwd(lexicon:bwd({s}, {subj}), {obj}), {obj})")
             }
+            // Essive `((S\NP)/cat_pp_arg(prep_as))/NP` — the object NP binds first (adjacent to the
+            // verb), then the `as`-marked predicative complement `cat_pp_arg(prep_as)` (⟦·⟧ = Entity).
+            // Same 3-place `Entity → Entity → Entity → Prop` axiom as the ditransitive; the distinct
+            // `prep_as` marker forces the `as`, so a plain transitive verb still rejects a stray `as Y`.
+            FrameKind::Essive => format!(
+                "lexicon:fwd(lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_pp_arg(lexicon:prep_as)), {obj})"
+            ),
             // Argument-PP verb: `(S\NP)/cat_pp_arg(prep_any)` — the object arrives through a transparent
             // argument-marker preposition (`to`/`on`/…). Distinct from a bare NP so the preposition is
             // forced; `⟦cat_pp_arg⟧ = Entity`, so the sem_type equals the transitive one above. WordNet's
@@ -216,14 +246,21 @@ impl FrameKind {
             }
             // Clause-taking: `(S\NP)/cat_cp` — the complement is an embedded clause.
             FrameKind::Clausal => format!("lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_cp)"),
+            // Linking (copular) verb: `(S[dcl,fin]\NP)/(S[dcl,adj]\NP)` — consumes a predicative-
+            // adjective VP and yields a finite VP, like the copula `be`'s `adj` complement.
+            FrameKind::LinkingAdj => format!(
+                "lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), {obj}))"
+            ),
         }
     }
 }
 
 /// Map a WordNet sentence frame (1–35; `wninput(5WN)`) to an emittable kind, or
 /// `None` for the **deferred** higher-order frames:
-///   - 5, 6, 7 — predicative complement (`----s Adjective/Noun`);
-///   - 26, 29, 34 — clausal complement (`that` / `whether CLAUSE`);
+///   - 6, 7 — subject-predicate linking verb (`----s Adjective`) → [`FrameKind::LinkingAdj`];
+///   - 5 — object-predicate small clause (`----s something Adjective`, `consider X important`) — a
+///     distinct `((S\NP)/adj)/NP` category, still deferred;
+///   - 26, 29, 34 — clausal complement (`that` / `whether CLAUSE`, only 26 emitted);
 ///   - 24, 25, 28, 30, 32, 33, 35 — control / raising (INFINITIVE / V-ing).
 ///
 /// **Single-PP-complement frames** — the verb subcategorizes for one PP ("----s to X" 12/27, "is
@@ -237,8 +274,9 @@ fn classify(frame: u8) -> Option<FrameKind> {
         4 | 12 | 23 | 27 => Some(FrameKind::PpOblique),
         8 | 9 | 10 | 11 | 13 | 20 | 21 => Some(FrameKind::Transitive),
         14 | 15 | 16 | 17 | 18 | 19 | 31 => Some(FrameKind::Ditransitive),
-        26 => Some(FrameKind::Clausal), // "Somebody ----s that CLAUSE" (D63 §8.11 6-cl)
-        _ => None, // 5,6,7 predicative; 29,34 whether-clause; 24,25,28,30,32,33,35 control/raising
+        6 | 7 => Some(FrameKind::LinkingAdj), // "----s Adjective" — copular/linking verb (D63 §8.5)
+        26 => Some(FrameKind::Clausal),       // "Somebody ----s that CLAUSE" (D63 §8.11 6-cl)
+        _ => None, // 5 object-predicate (`consider X important`); 29,34 whether; 24,25,28,30,32,33,35 control/raising
     }
 }
 
@@ -480,9 +518,90 @@ fn head_pps(lemma: &str) -> Vec<String> {
 /// questions, negation, and modals fire on imported verbs (not just the hand demo), and
 /// fixes the former base-as-`fin` mistag (bare "affect" no longer parses as finite).
 /// Returns `false` (deferred) when no frame is emittable.
+/// Verbs that take an object + an `as`-marked predicative complement — the essive construction
+/// (`identify / regard / describe X as Y`), which WordNet's frame inventory does not encode (D63 §5.3).
+/// A curated, high-precision set: each canonically licenses `V NP as NP`. Any synset containing one of
+/// these lemmas gets an ADDITIONAL [`FrameKind::Essive`] category (in [`push_verb`]) on top of its
+/// frame-derived categories. British + American spellings both listed.
+const ESSIVE_VERBS: &[&str] = &[
+    "identify",
+    "regard",
+    "view",
+    "perceive",
+    "reckon",
+    "construe",
+    "misconstrue",
+    "interpret",
+    "misinterpret",
+    "understand",
+    "conceive",
+    "envisage",
+    "envision",
+    "recognize",
+    "recognise",
+    "accept",
+    // --- Group 2: Categorization & Naming ---
+    "classify",
+    "define",
+    "categorize",
+    "categorise",
+    "label",
+    "brand",
+    "designate",
+    "qualify",
+    "disqualify",
+    // --- Group 3: Depiction, Framing & Public Statement ---
+    "describe",
+    "characterize",
+    "characterise",
+    "portray",
+    "depict",
+    "represent",
+    "frame",
+    "cite",
+    "report",
+    "cast",
+    "denounce",
+    "hail",
+    "praise",
+    "condemn",
+    "advertise",
+    "market",
+    // --- Group 4: Role Designation & Appointment ---
+    "appoint",
+    "select",
+    "choose",
+    "elect",
+    "hire",
+    "install",
+    "establish",
+    // --- Group 5: Utilization & Operational Essives ---
+    "utilize",
+    "utilise",
+    "employ",
+    "adopt",
+    // --- Group 6: High-Frequency / High-Risk (Apply low verb-prior weights) ---
+    //   "see",   // Danger: Hyper-frequent. Must not override standard transitive "see [NP]".
+    //   "use",   // Danger: Hyper-frequent noun/verb.
+    //   "class", // Danger: Hyper-frequent noun ("the python class").
+    //   "treat"  // Danger: Common noun/regular transitive ("treat the patient").
+];
+
+/// Whether `lemma` is in the curated essive-verb set ([`ESSIVE_VERBS`]) — case-insensitive.
+fn is_essive_verb(lemma: &str) -> bool {
+    let l = lemma.to_ascii_lowercase();
+    ESSIVE_VERBS.contains(&l.as_str())
+}
+
 fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks) -> bool {
-    let kinds: std::collections::BTreeSet<FrameKind> =
+    let mut kinds: std::collections::BTreeSet<FrameKind> =
         syn.frames.iter().filter_map(|&f| classify(f)).collect();
+    // Essive (`identify / regard / describe X as Y`) is NOT a WordNet frame (its inventory has no
+    // `as`-complement), so add it per-lemma for the curated essive set (D63 §5.3) — additively, on top
+    // of the synset's frame-derived categories.
+    if syn.words.iter().any(|w| is_essive_verb(w)) {
+        kinds.insert(FrameKind::Essive);
+    }
     if kinds.is_empty() {
         rep.verbs_deferred += 1;
         return false;
@@ -741,6 +860,15 @@ fn push_adj(
         &format!("cmp_sem_{loc}"),
         &format!("( fun (y : {ENTITY_TOP}) => fun (x : {ENTITY_TOP}) => measurements:gt(wn:deg_{loc}(x), wn:deg_{loc}(y)) : {ENTITY_TOP} -> {prop_arrow} )"),
     );
+    // Attributive / elided-`than` comparative (d63-comparative-phrasal §8): `a stronger phenotype` /
+    // `X is stronger` — the comparison STANDARD is anaphoric (`lexicon:anaphor`, freshened to a per-span
+    // hole → an OPEN parse the D64 resolver fills), NOT the positive's absolute `std_{loc}`. A bare
+    // `S[adj]\NP`, so the existing attributive refine rule turns `stronger phenotype` into a refined noun.
+    push_sem_term(
+        buf,
+        &format!("cmp_attrib_sem_{loc}"),
+        &format!("( fun (x : {ENTITY_TOP}) => measurements:gt(wn:deg_{loc}(x), wn:deg_{loc}(lexicon:anaphor)) : {prop_arrow} )"),
+    );
     let pos_cat = adj_cat();
     let cmp_cat = format!("lexicon:fwd({}, lexicon:cat_pp_than)", adj_cat());
     let cmp_arrow = format!("{ENTITY_TOP} -> {prop_arrow}");
@@ -804,6 +932,19 @@ fn push_adj(
                     &cmp_cat,
                     &format!("cmp_sem_{loc}"),
                     &cmp_arrow,
+                    &sense,
+                    ranks,
+                );
+                rep.entries += 1;
+                // Attributive / elided-`than` reading of the same synthetic comparative (bare `S[adj]\NP`,
+                // anaphoric standard) → `a stronger phenotype` refines the noun, opens the standard hole.
+                push_entry(
+                    buf,
+                    &format!("e_{loc}_{i}_ca{k}"),
+                    c,
+                    &pos_cat,
+                    &format!("cmp_attrib_sem_{loc}"),
+                    &prop_arrow,
                     &sense,
                     ranks,
                 );
@@ -987,8 +1128,11 @@ mod tests {
         assert_eq!(classify(23), Some(FrameKind::PpOblique)); // "----s PP"
                                                               // frame 26 "that CLAUSE" → clause-taking (D63 §8.11 6-cl).
         assert_eq!(classify(26), Some(FrameKind::Clausal));
+        // frames 6/7 "----s Adjective" → linking (copular) verb (D63 §8.5).
+        assert_eq!(classify(6), Some(FrameKind::LinkingAdj));
+        assert_eq!(classify(7), Some(FrameKind::LinkingAdj));
         // still-deferred higher-order frames → None (never guessed).
-        assert_eq!(classify(5), None); // predicative complement
+        assert_eq!(classify(5), None); // object-predicate small clause (`consider X important`)
         assert_eq!(classify(29), None); // whether CLAUSE (interrogative — deferred)
         assert_eq!(classify(32), None); // bare INFINITIVE (control)
                                         // every frame 1..=35 is classified deliberately (no silent gap).
@@ -1294,6 +1438,50 @@ mod tests {
     }
 
     #[test]
+    fn essive_verb_emits_object_predicative_as_frame() {
+        // `identify` is a curated essive verb (D63 §5.3): on TOP of its frame-derived transitive
+        // category, `push_verb` emits the object-predicative essive `((S\NP)/cat_pp_arg(prep_as))/NP` —
+        // WordNet has no `as`-complement frame, so it is added per-lemma (`is_essive_verb`).
+        let v = syn(
+            "00618451 31 v 01 identify 0 001 @ 00619183 v 0000 01 + 08 00 | consider to be equal",
+        );
+        let mut buf = String::new();
+        assert!(push_verb(
+            &mut buf,
+            &v,
+            &mut Report::default(),
+            &SenseRanks::new()
+        ));
+        // The essive axiom is a 3-place opaque relation (subj, obj, as-complement), tagged `_as`.
+        assert!(buf.contains(
+            "axiom wn:v00618451_as : lexicon:Entity -> lexicon:Entity -> lexicon:Entity -> Prop"
+        ));
+        // Finite 3sg essive category `((S\NP)/cat_pp_arg(prep_as))/NP` for "identifies": object NP binds
+        // first (adjacent), then the `as`-marked predicative complement `cat_pp_arg(prep_as)`.
+        assert!(buf.contains("lexicon:form     = \"identifies\";"));
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_as)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+        ));
+        // Essive is ADDITIVE: the frame-8 transitive category is still emitted.
+        assert!(buf.contains("axiom wn:v00618451_t :"));
+    }
+
+    #[test]
+    fn non_essive_verb_gets_no_as_frame() {
+        // A non-curated verb (`eat`) never gets the essive frame — no `_as` axiom, no `prep_as`.
+        let eat = syn("00275082 30 v 03 corrode 1 eat 0 rust 1 001 @ 00259743 v 0000 01 + 11 00 | to deteriorate");
+        let mut buf = String::new();
+        assert!(push_verb(
+            &mut buf,
+            &eat,
+            &mut Report::default(),
+            &SenseRanks::new()
+        ));
+        assert!(!buf.contains("_as :"));
+        assert!(!buf.contains("prep_as"));
+    }
+
+    #[test]
     fn verb_emits_participle_forms_with_ger_and_pss_categories() {
         // D63 §8.9 6-aux: per verb lemma, the importer also emits the generated present
         // participle (`ger`, progressive) and past participle (`pss`, perfect/passive),
@@ -1384,6 +1572,27 @@ mod tests {
             "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_cp) );"
         ));
         assert!(buf.contains("lexicon:sem      = wn:v00000003_c;"));
+    }
+
+    #[test]
+    fn linking_verb_emits_copula_adjective_category() {
+        // frames 6/7 → linking (copular) verb (D63 §8.5, gap #5 `remained true`): an opaque
+        // `(Entity → Prop) → Entity → Prop` axiom and the category `(S[dcl,fin]\NP)/(S[dcl,adj]\NP)`,
+        // mirroring the copula `be`'s adjective complement while keeping the verb's own relation.
+        let v = syn("00000004 42 v 01 remain 0 000 01 + 06 00 | continue in a state");
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        assert!(push_verb(&mut buf, &v, &mut rep, &SenseRanks::new()));
+        assert!(buf
+            .contains("axiom wn:v00000004_j : (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop"));
+        // 3sg "remains" over an `adj` complement, singular subject.
+        assert!(buf.contains("lexicon:form     = \"remains\";"));
+        assert!(buf.contains(
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );"
+        ));
+        // The corpus form: past "remained" (fin, number-agnostic) also emitted.
+        assert!(buf.contains("lexicon:form     = \"remained\";"));
+        assert!(buf.contains("lexicon:sem      = wn:v00000004_j;"));
     }
 
     #[test]

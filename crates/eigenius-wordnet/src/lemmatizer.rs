@@ -72,6 +72,28 @@ impl Lemmatizer for MorphyLemmatizer {
         }
         out
     }
+
+    /// The regular-plural singular stem — `morph.c`'s `-ies → -y` / trailing `-s` detachment, but
+    /// WITHOUT the `is_defined` WordNet gate (the reason [`Self::lemmas`] drops it): so a DOMAIN plural
+    /// whose singular is not a WordNet lemma (`biomarkers` → `biomarker`, `vulnerabilities` →
+    /// `vulnerability`) is still offered to the kernel's full-lexicon index (D63 §5.1). Conservative:
+    /// skips the common non-plural `-s` endings (`-ss`/`-us`/`-is`) and very short stems; irregular
+    /// plurals (`mice`) are already the exception list's job, not `-s`-shaped, so untouched.
+    fn regular_plural_stem(&self, surface: &str) -> Option<String> {
+        let s = surface.trim().to_lowercase();
+        if let Some(stem) = s.strip_suffix("ies") {
+            if stem.len() >= 2 {
+                return Some(format!("{stem}y"));
+            }
+        }
+        if let Some(stem) = s.strip_suffix('s') {
+            let skip = s.ends_with("ss") || s.ends_with("us") || s.ends_with("is");
+            if stem.len() >= 3 && !skip {
+                return Some(stem.to_string());
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -101,5 +123,38 @@ mod tests {
         // morphstr returns nothing for a base word; the trait contract still
         // requires the form itself.
         assert_eq!(mini().lemmas("dog", Pos::Noun), vec!["dog".to_string()]);
+    }
+
+    #[test]
+    fn regular_plural_stem_offers_the_unvalidated_singular() {
+        // D63 §5.1: a DOMAIN plural whose singular is NOT in the WordNet `LemmaSet` (`biomarker` is
+        // absent here) is dropped by the validated `lemmas`, but `regular_plural_stem` still offers the
+        // crude stem so the kernel can resolve it against the full lexicon.
+        let m = mini();
+        assert!(!m
+            .lemmas("biomarkers", Pos::Noun)
+            .contains(&"biomarker".to_string()));
+        assert_eq!(
+            m.regular_plural_stem("biomarkers"),
+            Some("biomarker".to_string())
+        );
+        assert_eq!(
+            m.regular_plural_stem("vulnerabilities"),
+            Some("vulnerability".to_string())
+        );
+        // Not a regular plural / too short / non-plural `-s` endings ⇒ None.
+        assert_eq!(m.regular_plural_stem("gene"), None); // no trailing -s
+        assert_eq!(m.regular_plural_stem("is"), None); // too short
+        assert_eq!(m.regular_plural_stem("analysis"), None); // -is, not a plural
+        assert_eq!(m.regular_plural_stem("class"), None); // -ss
+    }
+
+    #[test]
+    fn identity_lemmatizer_offers_no_plural_stem() {
+        // The no-morphology baseline MUST NOT inject stems (else `does`→`doe` on every `-s` surface,
+        // breaking `Identity`-based demo parses). It uses the trait default `None`.
+        use eigenius_kernel::dcg::Identity;
+        assert_eq!(Identity.regular_plural_stem("biomarkers"), None);
+        assert_eq!(Identity.regular_plural_stem("does"), None);
     }
 }

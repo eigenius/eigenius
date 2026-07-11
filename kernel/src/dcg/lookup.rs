@@ -690,6 +690,35 @@ impl LexicalIndex {
         out
     }
 
+    /// Diagnostic (D1, `docs/notes/d63-nominal-modification-normal-form.md` §8): for each **adjective**
+    /// entry resolved for `surface`, the [`super::category::ModifierClass`] its restrictor sem falls
+    /// into — so the D1 classifier's verdict can be confirmed against the corpus's *real* lexicon
+    /// (`attractive` → `Gradable`, a Boolean adjective → `Intersective`) rather than constructed sems.
+    /// Returns `(cat, sense, class)` per distinct adjective entry.
+    pub fn debug_modifier_classes(
+        &self,
+        surface: &str,
+        lemmatizer: &dyn Lemmatizer,
+    ) -> Vec<(String, String, String)> {
+        let mut out = Vec::new();
+        let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
+        for cand in self.candidate_lemmas(surface, lemmatizer) {
+            for e in self.scoped(self.entries_for(&cand), None) {
+                if !is_adjective_cat(e.item.cat()) {
+                    continue;
+                }
+                let cat = super::pretty_term(e.item.cat());
+                let sense = e.sense.clone().unwrap_or_default();
+                if !seen.insert((cat.clone(), sense.clone())) {
+                    continue;
+                }
+                let class = super::category::modifier_class(e.item.sem());
+                out.push((cat, sense, format!("{class:?}")));
+            }
+        }
+        out
+    }
+
     /// Apply the per-parse lexicon **scope** (D65 §4) to one form's resolved
     /// `(item, in_lexicon)` pairs, returning the surviving [`Item`]s with their
     /// leaf `cost.lexicon_order` stamped from the scope:
@@ -727,6 +756,14 @@ impl LexicalIndex {
             for lemma in lemmatizer.lemmas(surface, pos) {
                 candidates.insert(lemma.trim().to_lowercase());
             }
+        }
+        // Domain-plural fallback (D63 §5.1, [`Lemmatizer::regular_plural_stem`]): a DOMAIN-lexicon plural
+        // the (validated) lemmatizer can't reduce (`biomarkers` — `biomarker` ∉ WordNet) gets its crude
+        // singular stem here, so a real entry for that singular is offered a PLURAL reading (stem ≠
+        // surface ⇒ pl in [`Self::lookup_span`]) and takes the bare-plural kind shift. `None` under a
+        // no-morphology lemmatizer, so `Identity`-based demo parses are unaffected.
+        if let Some(stem) = lemmatizer.regular_plural_stem(surface) {
+            candidates.insert(stem.trim().to_lowercase());
         }
         candidates
     }
@@ -800,28 +837,16 @@ impl LexicalIndex {
             let num = if *c == s_lc { "sg" } else { "pl" };
             out.extend(entries.iter().map(|e| with_noun_num(&e.item, num)));
         }
-        // Bare-plural → kind-subject shift (D63 §8.5 Slice 3c): a plural common noun
-        // also seeds a `cat_kind` edge (the kind it denotes), so "genes" can serve as
-        // a kind subject ("Genes are cell lines" → subclass_of(Gene, CellLine))
-        // alongside its ordinary common-noun reading.
-        let kinds: Vec<Item> = out
+        // Bare-nominal shift (core-en `bnp` + the kind-subject reading, D63 §8.5 Slice 3c): a
+        // determiner-less plural/mass common noun ALSO seeds its `cat_kind` copula-subject edge
+        // ("Genes are cell lines" → subclass_of) and its raised bare-argument NPs (`kind_of(t)`, §7.4).
+        // The SAME [`Self::bare_nominal_shifts`] rule runs here at leaf seeding and on composed cells in
+        // the CKY (both chart paths), so a compound noun shifts identically to a leaf noun.
+        let shifts: Vec<Item> = out
             .iter()
-            .filter_map(|it| {
-                crate::dcg::kind_subject(it.cat(), it.sem())
-                    .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
-            })
+            .flat_map(|it| self.bare_nominal_shifts(it))
             .collect();
-        out.extend(kinds);
-        // Bare-plural NP shift (core-en `bnp`, `det=nil`): a plural common noun also serves as an
-        // ARGUMENT NP (subject + object), committing to its KIND — `kind_of(t)`, D63 reshape §7.4. (The
-        // `kind_subject` edge above is only the copula-subclass reading; this is the general
-        // argument-position reading.)
-        let bare: Vec<Item> = out.iter().flat_map(|it| self.bare_plural_nps(it)).collect();
-        out.extend(bare);
-        // Bare-MASS NP shift (D62 CNL): a mass noun `cat_n(C, mass)` ("MSI", "DNA", "apoptosis") is
-        // a bare argument too, grammatically singular, with the same deferred quantifier.
-        let bare_mass: Vec<Item> = out.iter().flat_map(|it| self.bare_mass_nps(it)).collect();
-        out.extend(bare_mass);
+        out.extend(shifts);
         out
     }
 
@@ -909,6 +934,23 @@ impl LexicalIndex {
     /// *singular* count noun (`*gene is a vulnerability`) correctly does not shift.
     fn bare_plural_nps(&self, noun: &Item) -> Vec<Item> {
         self.kind_raised_nps(noun, "these", "pl")
+    }
+
+    /// The full **bare-nominal shift** (core-en's `bnp` unary rule + the copula kind-subject reading,
+    /// D63 §8.5 Slice 3c): given a `cat_n`, produce (i) the `cat_kind` **copula-subject** edge
+    /// ([`crate::dcg::kind_subject`]; a bare-plural kind, so `are_kind` yields `subclass_of`) and (ii)
+    /// the raised **bare-argument NPs** ([`Self::bare_plural_nps`]/[`Self::bare_mass_nps`]). The single
+    /// rule applied at BOTH leaf seeding AND to COMPOSED cells in both chart paths, so a compound
+    /// `cat_n` (`repeat regions`, formed by the `KindCompound` rule) shifts exactly like a leaf noun —
+    /// `bnp` is a rule over any `n`, not a leaf-only shortcut. Non-`cat_n`/non-plural/non-mass → empty.
+    fn bare_nominal_shifts(&self, it: &Item) -> Vec<Item> {
+        let mut v: Vec<Item> = crate::dcg::kind_subject(it.cat(), it.sem())
+            .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
+            .into_iter()
+            .collect();
+        v.extend(self.bare_plural_nps(it));
+        v.extend(self.bare_mass_nps(it));
+        v
     }
 
     /// Object-position non-restrictive (appositive) relative NP (D62 §2 #2A, object slot): the
@@ -1206,9 +1248,11 @@ impl LexicalIndex {
         scope: Option<&[Iri]>,
     ) -> (Vec<Item>, Vec<OpenParse>) {
         // ROUTER (D63 Option A, blueprint §11 3b.3): route to the packed CKY + cube-pruning extractor
-        // when packing is enabled, the combinatory-core spike is off, and this sentence is
-        // index-independent (the guard — no selectional functor slot, no coordination). Otherwise the
-        // unpacked beamed path (also the fallback for selectional lexicons and the oracle baseline).
+        // when packing is enabled, the combinatory-core spike is off, and this sentence is not
+        // pied-piping (the one construct the packed forest builds no edge for — `parse_needs_unpacked`).
+        // Concrete selectional slots are packed per-cell now (they key finer via `node_sig`), so the
+        // dense-lexicon corpus takes this path. Otherwise the unpacked beamed path (the oracle baseline,
+        // and the fallback for the combinatory-core spike / pied-piping).
         if self.packing
             && !self.combinatory_core
             && !self.parse_needs_unpacked(&tokenize(text), lemmatizer, scope)
@@ -1218,20 +1262,18 @@ impl LexicalIndex {
         self.parse_unpacked(text, lemmatizer, scope)
     }
 
-    /// Per-parse index-independence guard (D63 Option A, blueprint §11 3b.2). Returns `true` if this
-    /// sentence must use the UNPACKED path. As of §11 3g.3 the packed CKY mirrors every token-keyed
-    /// sem-reading construct (coordination, the reciprocal, `but not`, the restrictive relative, the
-    /// appositive, the fronted-modifier comma) plus the wh-determiner `which` (an ordinary leaf), so
-    /// only two fail-closed carve-outs remain:
-    /// 1. **pied-piping** (`[prep] which [subj] [VP]`) — a ternary rule with no packing benefit (a
-    ///    rare, non-piling construct), detected structurally (a `which` right after a VP-adjunct
-    ///    preposition) and routed to the proven unpacked path rather than given a ternary edge;
-    /// 2. a seeded functor with a concrete SELECTIONAL argument slot
-    ///    ([`super::category::cat_has_selectional_slot`]) — combinability would be index-dependent, so
-    ///    node-level packing by `cat_shape` is unsound.
-    ///
-    /// The seed scan is over this sentence's spans only (feasible for the lazy index) and uncapped so
-    /// no beyond-cap selectional entry slips through.
+    /// Per-parse packability guard (D63 Option A, blueprint §11 3b.2). Returns `true` if this sentence
+    /// must use the UNPACKED path. As of §11 3g.3 the packed CKY mirrors every token-keyed sem-reading
+    /// construct (coordination, the reciprocal, `but not`, the restrictive relative, the appositive,
+    /// the fronted-modifier comma) plus the wh-determiner `which` (an ordinary leaf), and as of the
+    /// per-cell packing refinement ([`super::packed::node_sig`]) a concrete selectional argument slot
+    /// no longer forces the unpacked path — such items just key finer ([`super::pretty::cat_key`]) so
+    /// they never wrongly share a node, while the index-independent majority still packs by
+    /// `cat_shape`. So one **completeness** carve-out remains:
+    /// - **pied-piping** (`[prep] which [subj] [VP]`) — a ternary rule the packed forest builds no edge
+    ///   for (rare, non-piling), detected structurally (a `which` right after a VP-adjunct preposition)
+    ///   and routed to the unpacked path. It is not a soundness case; the packed forest simply cannot
+    ///   express it yet.
     fn parse_needs_unpacked(
         &self,
         tokens: &[String],
@@ -1239,10 +1281,10 @@ impl LexicalIndex {
         scope: Option<&[Iri]>,
     ) -> bool {
         let n = tokens.len();
-        // (1) Pied-piping `[prep] which`: the antecedent noun-pile isn't collapsed by packing (the
-        // construct is ternary and rare), so route it unpacked. A `which` right after a VP-adjunct
-        // preposition is pied-piping; a `which` after a noun is the packed which-relative, and a
-        // sentence-initial / post-determiner `which` is the packed wh-determiner.
+        // Pied-piping `[prep] which`: the packed forest builds no edge for this ternary construct, so
+        // route it unpacked. A `which` right after a VP-adjunct preposition is pied-piping; a `which`
+        // after a noun is the packed which-relative, and a sentence-initial / post-determiner `which`
+        // is the packed wh-determiner.
         for p in 1..n {
             if !self.reserved.is(&tokens[p], ReservedKind::WhRelativizer) {
                 continue;
@@ -1253,20 +1295,6 @@ impl LexicalIndex {
                 .any(|it| is_vp_adjunct_prep(it.cat()))
             {
                 return true;
-            }
-        }
-        // (2) A seeded functor with a concrete SELECTIONAL argument slot — combinability would be
-        // index-dependent, so node-level packing by `cat_shape` is unsound.
-        let span_limit = self.span_limit(n);
-        for i in 0..n {
-            let last = (i + span_limit).min(n);
-            for j in i..last {
-                let surface = tokens[i..=j].join(" ");
-                for it in self.lookup_span(&surface, lemmatizer, scope, None, None) {
-                    if super::category::cat_has_selectional_slot(it.cat()) {
-                        return true;
-                    }
-                }
             }
         }
         false
@@ -1299,10 +1327,36 @@ impl LexicalIndex {
     ) -> (Vec<Item>, Vec<OpenParse>) {
         // Contextual sense ranking computed ONCE (as in the unpacked path), threaded into each attempt.
         let ranks = self.contextual_sense_ranks(text, lemmatizer, scope);
+        // Pass 1 — the reranked order (static, if no ranker configured).
+        let (closed, open) = self.widen_packed(text, lemmatizer, scope, ranks.as_ref());
+        if !closed.is_empty() || !open.is_empty() {
+            return (closed, open);
+        }
+        // Pass 2 — STATIC-RANK FALLBACK (GH #97; mirrors [`Self::parse_unpacked`]). The untrusted
+        // reranker can bury a construction-triggered category variant that static rank + widen keeps;
+        // escalating the cap within the reranked order never recovers it. Retry ONCE under static rank
+        // when the reranked order gaps on an all-known-vocabulary sentence.
+        if ranks.is_some() && self.all_prose_tokens_known(text, lemmatizer) {
+            return self.widen_packed(text, lemmatizer, scope, None);
+        }
+        (closed, open)
+    }
+
+    /// One full packed widen-on-failure escalation under a FIXED sense order (`ranks`): parse at the
+    /// base cap, and while an all-known-vocabulary sentence yields nothing, double the sense cap (up to
+    /// [`SENSE_CAP_WIDEN_MAX`]) and retry. No cell-beam escalation — packing bounds the chart by cube
+    /// pruning, not the per-cell beam, so only the cap can drop a needed sense. Called by
+    /// [`Self::parse_packed`] once under the reranked order, once under static rank (the fallback).
+    fn widen_packed(
+        &self,
+        text: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+        ranks: Option<&BTreeMap<String, u32>>,
+    ) -> (Vec<Item>, Vec<OpenParse>) {
         let mut cap = self.sense_cap;
         loop {
-            let (closed, open) =
-                self.parse_packed_at_cap(text, lemmatizer, scope, cap, ranks.as_ref());
+            let (closed, open) = self.parse_packed_at_cap(text, lemmatizer, scope, cap, ranks);
             if !closed.is_empty() || !open.is_empty() {
                 return (closed, open);
             }
@@ -1389,6 +1443,7 @@ impl LexicalIndex {
                 forest_out.push(c);
             }
         }
+        Self::subsume_duplicates(&mut forest_out); // D3: collapse definitionally-equal readings
         forest_out.sort_by_key(|it| it.cost());
         forest_out.truncate(DEFAULT_FOREST_CAP);
         (forest_out, open)
@@ -1550,6 +1605,8 @@ impl LexicalIndex {
                     .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
             }
             BinRule::AppositiveObj => self.appositive_obj(l, r),
+            BinRule::ApposeGroup => appose_group(l.cat(), r.cat(), r.sem(), &self.layer)
+                .map(|(cat, sem)| Item::with_cost(cat, sem, cost)),
         }
     }
 
@@ -1601,11 +1658,7 @@ impl LexicalIndex {
         use super::packed::UnaryKind;
         let (i, j) = span;
         match kind {
-            UnaryKind::BareNp => {
-                let mut v = self.bare_plural_nps(it);
-                v.extend(self.bare_mass_nps(it));
-                out.extend(v);
-            }
+            UnaryKind::BareNp => out.extend(self.bare_nominal_shifts(it)),
             UnaryKind::Raise => out.extend(raise_nps(std::slice::from_ref(it), &self.layer)),
             UnaryKind::FrontParticipial => {
                 if let Some((cat, sem)) = front_participial(it.cat(), it.sem(), &self.layer) {
@@ -1761,6 +1814,16 @@ impl LexicalIndex {
                         }
                     }
                 }
+                // Close nominal apposition (D63 §8.4 Phase 6, RC-6): a definite/bare common-noun HEAD
+                // immediately followed by a coreferential NAME-GROUP — "the genes BRCA1 and MSH2". No
+                // reserved token separates head and group, so — like the plain `Combine` loop — every
+                // adjacent split is tried; `appose_group` gates by shape + head kind on the reps (sound
+                // where the head/group cells are single-kind; the corpus sweep is the multi-sense
+                // witness). Mirrors the unpacked CKY (`parse_at_cap`).
+                #[allow(clippy::needless_range_loop)]
+                for m in i..j {
+                    self.binary_edges(&forest, (i, m), (m + 1, j), BinRule::ApposeGroup, &mut bin);
+                }
                 // Reciprocal: [group] <TV> each other → S (the trailing "each other").
                 if j >= 3
                     && self
@@ -1806,9 +1869,7 @@ impl LexicalIndex {
                 }
                 for id in forest.cells[i][j].values().copied().collect::<Vec<_>>() {
                     let rep = forest.nodes[id].rep.clone();
-                    let mut shifted = self.bare_plural_nps(&rep);
-                    shifted.extend(self.bare_mass_nps(&rep));
-                    for np in shifted {
+                    for np in self.bare_nominal_shifts(&rep) {
                         unary.push((node_sig(&np), np, id, UnaryKind::BareNp));
                     }
                 }
@@ -1869,11 +1930,41 @@ impl LexicalIndex {
         // Contextual sense ranking (GH #97): computed ONCE up front (one ranker call per parse,
         // not per widen iteration), then threaded into every capped attempt below.
         let ranks = self.contextual_sense_ranks(text, lemmatizer, scope);
+        // Pass 1 — the reranked order (static, if no ranker configured).
+        let (closed, open) = self.widen_unpacked(text, lemmatizer, scope, ranks.as_ref());
+        if !closed.is_empty() || !open.is_empty() {
+            return (closed, open);
+        }
+        // Pass 2 — STATIC-RANK FALLBACK (GH #97). The reranker is UNTRUSTED: if its ordering yields no
+        // parse even at the max cap/beam, and the failure could be a pruning artifact (every prose token
+        // known — not an OOV miss), retry ONCE under the plain static `sense_rank` order. The reranker
+        // can bury a *construction-triggered category variant* — e.g. the `cat_measure` reading of a
+        // gradable nominalization (`greater dependence on X than Y`) — that static rank + widen would
+        // keep; escalating the cap WITHIN the reranked order never recovers it. This restores the "a bad
+        // rank costs a re-parse, never a missed parse" contract to the whole widen half, not just the cap.
+        if ranks.is_some() && self.all_prose_tokens_known(text, lemmatizer) {
+            return self.widen_unpacked(text, lemmatizer, scope, None);
+        }
+        (closed, open)
+    }
+
+    /// One full unpacked widen-on-failure escalation under a FIXED sense order (`ranks`): parse at the
+    /// base cap/beam, and while an all-known-vocabulary sentence yields nothing, escalate beam-first
+    /// then the sense cap (up to [`CELL_BEAM_WIDEN_MAX`] / [`SENSE_CAP_WIDEN_MAX`]) and retry. Returns
+    /// the first non-empty forest, or the empty pair when the escalation is exhausted / an OOV blocks
+    /// widening. Called by [`Self::parse_unpacked`] — once under the reranked order, once under static
+    /// rank (the untrusted-reranker fallback).
+    fn widen_unpacked(
+        &self,
+        text: &str,
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+        ranks: Option<&BTreeMap<String, u32>>,
+    ) -> (Vec<Item>, Vec<OpenParse>) {
         let mut cap = self.sense_cap;
         let mut beam = self.cell_beam;
         loop {
-            let (closed, open) =
-                self.parse_at_cap(text, lemmatizer, scope, cap, ranks.as_ref(), beam);
+            let (closed, open) = self.parse_at_cap(text, lemmatizer, scope, cap, ranks, beam);
             if !closed.is_empty() || !open.is_empty() {
                 return (closed, open);
             }
@@ -2458,21 +2549,17 @@ impl LexicalIndex {
                     })
                     .collect();
                 chart[i][j].extend(completed);
-                // Bare-NP shift for COMPOSED common nouns (D62 — N-N compounds like "MSI cancer
-                // models", adjective-refined nouns like "novel therapies" / "synthetic lethality"):
-                // the leaf shift in `lookup_span` only covers lexical nouns, so a *composed*
-                // `cat_n(_, pl)` (plural) or `cat_n(_, mass)` (uncountable) cell needs the shift here
-                // too — else such a compound/adjective-modified noun can never be a bare argument NP.
-                // BOTH the plural and mass shifts apply, symmetric with the leaf path (which runs both);
-                // the mass arm was missing here, so `synthetic lethality` / `deficient repair` (adj +
-                // mass/plural head) gapped while the bare leaf `lethality` shifted.
+                // Bare-nominal shift for COMPOSED common nouns (N-N compounds like "repeat regions" /
+                // "MSI cancer models", adjective-refined nouns like "novel therapies" / "synthetic
+                // lethality"): the leaf shift in `lookup_span` only covers lexical nouns, so a *composed*
+                // `cat_n(_, pl/mass)` cell needs the SAME [`Self::bare_nominal_shifts`] here — both the
+                // raised bare-argument NPs AND the `cat_kind` copula-subject edge, so a compound kind can
+                // be an `are_kind` subject ("repeat regions are microsatellites"). The kind-subject arm
+                // was missing here (only the argument NPs ran), so a compound-kind subject gapped.
+                // Symmetric with the leaf path and the packed forest's `UnaryKind::BareNp`.
                 let bare: Vec<Item> = chart[i][j]
                     .iter()
-                    .flat_map(|it| {
-                        let mut v = self.bare_plural_nps(it);
-                        v.extend(self.bare_mass_nps(it));
-                        v
-                    })
+                    .flat_map(|it| self.bare_nominal_shifts(it))
                     .collect();
                 chart[i][j].extend(bare);
                 // Type-raise `T` (D63 §8.9 Slice 6-T) the cell's name NPs (after its
@@ -2627,6 +2714,7 @@ impl LexicalIndex {
                 forest.push(c);
             }
         }
+        Self::subsume_duplicates(&mut forest); // D3: collapse definitionally-equal readings
 
         // RANK + CAP (D63 §8.7 Stage B): order each forest by ascending cost — the sum
         // of the parse's leaf `sense_rank`s — so the most-frequent-sense readings come
@@ -2665,6 +2753,28 @@ impl LexicalIndex {
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.layer));
         check(&mut ctx, &nf, &expected_val).ok()?;
         Some(Item::from_parts(it.cat().clone(), nf, it.prov(), it.cost()))
+    }
+
+    /// Build-then-subsume (D3, `docs/notes/d63-nominal-modification-normal-form.md` §8; Eisner 1996's
+    /// exact restricted-grammar fallback): drop a closed reading whose sem is **definitionally equal**
+    /// to one already kept. [`Self::reduced_felicitous`] / [`Self::classify_felicitous`] have already
+    /// normalized every sem to its NbE normal form, so equal *meaning* is now equal *structure* — this
+    /// collapses spurious ambiguity (different derivations, one reading) and, being an equality, **never
+    /// drops a distinct reading** (the rare luxury the typed kernel affords). Uses structural `Exp`
+    /// equality on the FULL IRIs — not the lossy [`super::pretty_term`], which shortens an IRI to its
+    /// local segment and could false-merge two distinct senses. O(n²) over the pre-cap forest, which the
+    /// felicity gate has already bounded to the classify-candidate count.
+    fn subsume_duplicates(forest: &mut Vec<Item>) {
+        let mut out: Vec<Item> = Vec::with_capacity(forest.len());
+        for it in forest.drain(..) {
+            if !out
+                .iter()
+                .any(|k| k.cat() == it.cat() && k.sem() == it.sem())
+            {
+                out.push(it);
+            }
+        }
+        *forest = out;
     }
 
     /// Classify a full-span candidate as a CLOSED felicitous parse or an OPEN one carrying

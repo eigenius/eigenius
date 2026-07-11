@@ -249,6 +249,11 @@ enum SemRecipe {
     },
     /// GQ-as-preposition-object raise: category `cat`; sem built from `L`/`R`.
     GqPrepObj { cat: Exp, kind: PrepObj },
+    /// Close naming apposition (D63 §5.3): a SORTAL common noun + a proper NAME → the definite
+    /// individual of the sortal kind bearing that name, `kind_of(Σx:sortal. named(x, name))`. `sortal`
+    /// is the left `cat_n`'s class; the name is the right item's sem (its referent, used as the name
+    /// token). Result category `cat_np(Entity, sg)` (a bare proper-name NP), built in [`build`].
+    Name { sortal: Exp },
 }
 
 /// Application direction for [`SemRecipe::Apply`] (also fixes the provenance: forward ⇒ `ForwardApp`,
@@ -425,6 +430,22 @@ fn combinable(
             }
         }
     }
+    // Close naming apposition (D63 §5.3): a SORTAL common noun `cat_n(Sortal)` (left) + a proper NAME
+    // `cat_np(NameClass, sg)` (right) → the definite individual of the sortal kind bearing that name
+    // ("Project Achilles", "the enzyme WRN"). The name's own class need NOT be the sortal (coining:
+    // "Achilles" the hero names a Project), so this is distinct from `appose_group`'s KIND-checked
+    // group apposition — it is the SINGLETON, un-type-checked naming case. Gated on a genuine proper
+    // name (`NameClass ≠ Entity`) so it does not fire on a pronoun / bare-kind `cat_np(Entity)` right.
+    if let (Some([sortal, _snum]), Some([name_ty, _nnum])) =
+        (is_ctor(&left.cat, "cat_n"), is_ctor(&right.cat, "cat_np"))
+    {
+        if matches!(name_ty, Exp::EigonClass(iri) if iri.as_str() != "urn:eigenius:lexicon:Entity")
+        {
+            return Some(SemRecipe::Name {
+                sortal: sortal.clone(),
+            });
+        }
+    }
     // GQ-as-preposition-object raise (D62 §2): a `cat_pp/NP` or VP-adjunct `(S\NP)\(S\NP)/NP`
     // preposition (left) consuming a type-raised subject-form GQ `S/(S\NP)` (right) in its object.
     if let (Some([pp_res, pp_obj]), Some([gq_s, gq_vp])) =
@@ -566,6 +587,41 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
                 }
             };
             Item::from_parts(cat, sem, Combinator::Other, Cost::ZERO)
+        }
+        SemRecipe::Name { sortal } => {
+            // `Σx:sortal. named(x, name)` — the coined named individual's kind (the name referent is
+            // the naming token); `kind_of` realizes it as an Entity, so "Project Achilles" is a bare
+            // proper-name NP exactly like an ordinary name.
+            let restr = app2(
+                "urn:eigenius:ontology:named",
+                COMPOUND_X,
+                right.sem().clone(),
+            );
+            let sigma = Exp::Sig(
+                Patt::Var(COMPOUND_X.into()),
+                Box::new(sortal),
+                Box::new(restr),
+            );
+            let kind_of = Exp::EigonAxiom(
+                crate::ontology::iri::Iri::parse("urn:eigenius:ontology:kind_of")
+                    .expect("kind_of iri"),
+            );
+            let sem = Exp::App(Box::new(kind_of), Box::new(sigma));
+            // `cat_np(Entity, num)` — reuse the sortal `cat_n`'s Cat decl + the proper name's number.
+            let (decl, num) = match (left.cat(), right.cat()) {
+                (Exp::InductiveCtor(d, _, _), Exp::InductiveCtor(_, _, rargs))
+                    if rargs.len() == 2 =>
+                {
+                    (d.clone(), rargs[1].clone())
+                }
+                _ => unreachable!("Name recipe requires a cat_n left + cat_np right"),
+            };
+            let entity = Exp::EigonClass(
+                crate::ontology::iri::Iri::parse("urn:eigenius:lexicon:Entity")
+                    .expect("entity iri"),
+            );
+            let cat = Exp::InductiveCtor(decl, "cat_np".into(), vec![entity, num]);
+            Item::from_parts(cat, sem, Combinator::Compound, Cost::ZERO)
         }
     }
 }

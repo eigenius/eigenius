@@ -570,6 +570,48 @@ fn sem_is_coordination(sem: &Exp) -> bool {
         if matches!(d.iri.as_str(), "urn:eigenius:logic:And" | "urn:eigenius:logic:Or"))
 }
 
+/// Least common generalization of two categories that share STRUCTURE, widening each corresponding
+/// `cat_np`/`cat_n` **type index** to its [`common_super`]; every other position (ctor, feature,
+/// nested functor, mood) must match exactly. Used to coordinate **type-raised quantifiers over
+/// different noun types** (D63 §8.4 — `a gene or a cell line`, whose object-GQ categories differ only
+/// in the exposed object slot `cat_np(Gene)` vs `cat_np(CellLine)`): the coordinated category widens
+/// that slot to `cat_np(Entity)` so a general verb still fills it, while the per-member semantics —
+/// each quantifier over its own type — are preserved and folded pointwise ([`complete_coord`]). So
+/// `V [a gene or a cell line]` yields `∃g:Gene.V(g) ∨ ∃c:CellLine.V(c)` (the two bound types stay
+/// distinct; only the categorial selectional slot generalizes — a general verb accepts it, a
+/// type-restricted verb over-generates, the documented corner). `None` if the structures differ or a
+/// type pair has no common supertype.
+fn common_cat(x: &Exp, y: &Exp, layer: &Arc<Layer>) -> Option<Exp> {
+    if x == y {
+        return Some(x.clone());
+    }
+    let (Exp::InductiveCtor(dx, nx, ax), Exp::InductiveCtor(_dy, ny, ay)) = (x, y) else {
+        return None;
+    };
+    if nx != ny || ax.len() != ay.len() {
+        return None;
+    }
+    // `cat_np(T, num)` / `cat_n(T, num)`: widen the type index to the common supertype; the number
+    // feature must match (both raised object slots carry `num_any`, so this holds for the GQ case).
+    if (nx == "cat_np" || nx == "cat_n") && ax.len() == 2 {
+        if ax[1] != ay[1] {
+            return None;
+        }
+        let t = common_super(&ax[0], &ay[0], layer)?;
+        return Some(Exp::InductiveCtor(
+            dx.clone(),
+            nx.clone(),
+            vec![t, ax[1].clone()],
+        ));
+    }
+    // Structural (`fwd`/`bwd`/`cat_s`/…): ctor + arity already match; recurse on corresponding args.
+    let mut args = Vec::with_capacity(ax.len());
+    for (a, b) in ax.iter().zip(ay.iter()) {
+        args.push(common_cat(a, b, layer)?);
+    }
+    Some(Exp::InductiveCtor(dx.clone(), nx.clone(), args))
+}
+
 /// Build or extend a **prop-ending coordination list** `cat_coord(BaseCat, conn)` (D63 §8.4 Phase 3,
 /// the list-with-operator model ported from core-en `conj.xsl`). This is the prop-side analogue of
 /// [`coordinate_np`]: instead of folding `a <op> b` EAGERLY (the retired [`coordinate_sem`]), it
@@ -623,10 +665,29 @@ pub fn coordinate_prop(
             (l_cat.clone(), vec![l_sem.clone()])
         }
     };
-    // The right conjunct must coordinate with the base category (same category, prop-ending).
-    if !cats_coordinate(&base_cat, r_cat, layer) {
-        return None;
-    }
+    // The right conjunct coordinates with the base — EXACT (same category, prop-ending) or, for
+    // type-raised quantifiers over DIFFERENT noun types (D63 §8.4: `a gene or a cell line`), at their
+    // type-generalized common category ([`common_cat`]: exposed `cat_np` indices widened to
+    // `common_super`, per-member sems preserved + folded pointwise). Only a prop-ending functor
+    // generalizes — the pointwise fold needs a shared denotation; atoms stay exact.
+    let base_cat = if cats_coordinate(&base_cat, r_cat, layer) {
+        base_cat
+    } else {
+        match common_cat(&base_cat, r_cat, layer) {
+            // Only OBJECT-GQs (backward-headed `(S\NP)\((S\NP)/NP)`) generalize: object coordination has
+            // no subject–verb number agreement, so the pointwise generalized-conjunction fold is safe.
+            // SUBJECT-GQs (`S/(S\NP)`, forward-headed) must NOT take this path — a coordinated subject
+            // needs the plural-group promotion of the NP-list path (`coordinate_np`) so agreement bites
+            // (`*HeLa and BRCA1 affects HeLa`). Gate on the object-GQ shape (top-level `bwd`).
+            Some(gen)
+                if is_ctor(&gen, "bwd").is_some()
+                    && denote_cat(&gen).map(|d| prop_ending(&d)).unwrap_or(false) =>
+            {
+                gen
+            }
+            _ => return None,
+        }
+    };
     let Exp::InductiveCtor(cat_decl, _, _) = r_cat else {
         return None;
     };
@@ -1355,6 +1416,136 @@ fn is_decl_clause(s: &Exp) -> bool {
         if matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl"))
 }
 
+// ── D1: the modifier-restrictor discriminator (nominal-modification NF) ──────────────────────────
+//
+// The Chatzikyriakidis & Luo intersective / subsective / gradable / privative test
+// (`docs/notes/d63-nominal-modification-normal-form.md` §5, the in-repo Coq App. A7; §8 D1), run on
+// our own EigenTT terms rather than a hand-maintained adjective list. The nominal-modification NF may
+// reorder/collapse a modifier over a compound head ONLY when the modifier is *strictly intersective*
+// (set intersection ⇒ bracketing-invariant, §5). A gradable adjective is covertly subsective (its
+// standard is comparison-class-dependent — Kamp & Partee 1995), so it is screened. Keyed on the axiom
+// vocabulary the importer actually emits (`measurements:gt`/`lt`, `deg_*`, `std_*`; `convert.rs`
+// `push_adj`) and on term shape — pure, no layer lookup.
+
+/// The semantic class of an attributive modifier, deciding NF collapse-eligibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModifierClass {
+    /// Plain, noun-type-independent predicate (`Entity → Prop`; C&L `Irish : Human → Prop`,
+    /// `{h:> Human; I: Irish h}`). Intersective modification is predicate conjunction, so bracketing
+    /// and order are invariant — the ONLY class the NF may collapse.
+    Intersective,
+    /// A degree compared against a standard: the positive `measurements:gt(deg_X(x), std_X)` or the
+    /// comparative `…, deg_X(y))` (C&L `tall h := ge (height h) (STND …)`). Comparison-class-dependent
+    /// ⇒ covertly subsective ⇒ NOT collapsible; the cheap first-cut screen (catches `attractive`).
+    Gradable,
+    /// CN-polymorphic predicate — the restrictor is parameterized by the head class (an `EigonClass`
+    /// appears in it; C&L `skilful : ∀A:CN, A → Prop`, applied `skilful Man m`). Subsective ⇒ not
+    /// collapsible. (The current WordNet/UMLS importer emits none — all adjectives are `Entity → Prop`;
+    /// recognized for faithfulness + future lexica.)
+    Subsective,
+    /// Sum-membership (C&L `fake`, a `match … | inl | inr` over a disjoint sum). Privative ⇒ not
+    /// collapsible.
+    Privative,
+    /// Unrecognized shape — conservatively NOT collapsible (fail-safe: the NF never collapses what it
+    /// cannot prove intersective).
+    Unknown,
+}
+
+impl ModifierClass {
+    /// The NF may reorder/collapse a modifier over a compound head iff it is strictly intersective
+    /// (§5). Every other class — gradable, subsective, privative, unrecognized — is left in place.
+    pub fn is_collapsible(self) -> bool {
+        matches!(self, ModifierClass::Intersective)
+    }
+}
+
+/// Classify an attributive modifier's semantics — the predicate an adjective carries (the `left.sem()`
+/// at the `Attrib` combine, an `Entity → Prop` functor) — by the shape of its restrictor. Priority:
+/// gradable (the sharpest, cheapest marker — the degree machinery) → privative (disjoint-sum
+/// elimination) → subsective (CN-polymorphic, head-class in the restrictor) → intersective (a clean
+/// first-order predicate) → `Unknown` (fail-safe). If a modifier is already a conjunction of stacked
+/// adjectives, any gradable/subsective conjunct dominates (the checks recurse).
+pub fn modifier_class(adj_sem: &Exp) -> ModifierClass {
+    // Strip the entity binder(s) to reach the predicate body (mirrors `sem_is_coordination`).
+    let mut body = adj_sem;
+    while let Exp::Lam(_, inner) = body {
+        body = inner;
+    }
+    if exp_any(body, &is_degree_axiom) {
+        return ModifierClass::Gradable;
+    }
+    if exp_any(body, &|e| matches!(e, Exp::Case(_) | Exp::Data(_))) {
+        return ModifierClass::Privative;
+    }
+    if exp_any(body, &|e| matches!(e, Exp::EigonClass(_))) {
+        return ModifierClass::Subsective;
+    }
+    if is_first_order_predicate(body) {
+        return ModifierClass::Intersective;
+    }
+    ModifierClass::Unknown
+}
+
+/// A gradable adjective is built from the degree machinery: the opaque float ordering
+/// `urn:eigenius:measurements:gt`/`lt`, a measure `…:deg_*`, or a standard `…:std_*`.
+fn is_degree_axiom(e: &Exp) -> bool {
+    matches!(e, Exp::EigonAxiom(iri)
+        if iri.as_str() == "urn:eigenius:measurements:gt"
+            || iri.as_str() == "urn:eigenius:measurements:lt"
+            || iri.as_str().contains(":deg_")
+            || iri.as_str().contains(":std_"))
+}
+
+/// True if `pred` holds at `e` or any of its subterms (the variants an adjective sem can contain).
+fn exp_any(e: &Exp, pred: &dyn Fn(&Exp) -> bool) -> bool {
+    if pred(e) {
+        return true;
+    }
+    match e {
+        Exp::App(a, b)
+        | Exp::Pi(_, a, b)
+        | Exp::Sig(_, a, b)
+        | Exp::Arrow(a, b)
+        | Exp::Times(a, b)
+        | Exp::Pair(a, b)
+        | Exp::Ann(a, b) => exp_any(a, pred) || exp_any(b, pred),
+        Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) | Exp::Con(_, b) | Exp::Refl(b) => {
+            exp_any(b, pred)
+        }
+        Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
+            args.iter().any(|x| exp_any(x, pred))
+        }
+        Exp::Id(a, b, c) | Exp::DecEq(a, b, c) => {
+            exp_any(a, pred) || exp_any(b, pred) || exp_any(c, pred)
+        }
+        _ => false,
+    }
+}
+
+/// True if `e` is a first-order predicate expression — atoms (axioms, variables, resources,
+/// literals) combined by application and the logical connectives — with no binder, type-former,
+/// projection, or sum. This is the intersective shape: a plain `Entity → Prop` restrictor.
+fn is_first_order_predicate(e: &Exp) -> bool {
+    match e {
+        Exp::EigonAxiom(_)
+        | Exp::Var(_)
+        | Exp::EigonResource(_)
+        | Exp::EigonPrimitive(_)
+        | Exp::LitString(_)
+        | Exp::LitInt(_)
+        | Exp::Unit => true,
+        Exp::App(f, a) => is_first_order_predicate(f) && is_first_order_predicate(a),
+        Exp::Con(_, b) => is_first_order_predicate(b),
+        Exp::InductiveType(d, args) => {
+            matches!(
+                d.iri.as_str(),
+                "urn:eigenius:logic:And" | "urn:eigenius:logic:Or" | "urn:eigenius:logic:Not"
+            ) && args.iter().all(is_first_order_predicate)
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1363,6 +1554,144 @@ mod tests {
     // so a directly-built `cat_group` ctor is faithful here.
     fn ctor(name: &str, args: Vec<Exp>) -> Exp {
         Exp::InductiveCtor(list_decl(), name.into(), args)
+    }
+
+    // ── D1 modifier-restrictor discriminator (nominal-modification NF §5/§8 D1) ──
+    fn ax(iri: &str) -> Exp {
+        Exp::EigonAxiom(Iri::parse(iri).expect("iri"))
+    }
+    fn lam(x: &str, body: Exp) -> Exp {
+        Exp::Lam(Patt::Var(x.into()), Box::new(body))
+    }
+    fn app(f: Exp, a: Exp) -> Exp {
+        Exp::App(Box::new(f), Box::new(a))
+    }
+    fn and2(a: Exp, b: Exp) -> Exp {
+        // A minimal `logic:And` inductive — `modifier_class` only reads `decl.iri`.
+        let and = Arc::new(InductiveDecl {
+            iri: Iri::parse("urn:eigenius:logic:And").expect("iri"),
+            name: "And".into(),
+            params: vec![],
+            indices: vec![],
+            sort: Exp::Sort(0),
+            ctors: vec![],
+        });
+        Exp::InductiveType(and, vec![a, b])
+    }
+
+    #[test]
+    fn modifier_class_screens_gradable_positive_adjective() {
+        // `attractive`: λx. measurements:gt(wn:deg_X(x), wn:std_X) — the `convert.rs` positive form.
+        let sem = lam(
+            "x",
+            app(
+                app(
+                    ax("urn:eigenius:measurements:gt"),
+                    app(ax("urn:eigenius:wn:deg_a00166146"), Exp::Var("x".into())),
+                ),
+                ax("urn:eigenius:wn:std_a00166146"),
+            ),
+        );
+        assert_eq!(modifier_class(&sem), ModifierClass::Gradable);
+        assert!(
+            !modifier_class(&sem).is_collapsible(),
+            "relative gradables (attractive) are screened, not collapsed"
+        );
+    }
+
+    #[test]
+    fn modifier_class_screens_gradable_comparative() {
+        // `stronger`: λx. measurements:gt(wn:deg_X(x), wn:deg_X(anaphor)) — degree vs degree.
+        let sem = lam(
+            "x",
+            app(
+                app(
+                    ax("urn:eigenius:measurements:gt"),
+                    app(ax("urn:eigenius:wn:deg_a01"), Exp::Var("x".into())),
+                ),
+                app(
+                    ax("urn:eigenius:wn:deg_a01"),
+                    ax("urn:eigenius:lexicon:anaphor"),
+                ),
+            ),
+        );
+        assert_eq!(modifier_class(&sem), ModifierClass::Gradable);
+    }
+
+    #[test]
+    fn modifier_class_collapses_intersective_boolean_adjective() {
+        // C&L `Irish : Human → Prop`: a plain predicate. Applied and bare-axiom forms both collapse.
+        let applied = lam(
+            "x",
+            app(ax("urn:eigenius:wn:is_irish"), Exp::Var("x".into())),
+        );
+        assert_eq!(modifier_class(&applied), ModifierClass::Intersective);
+        assert!(modifier_class(&applied).is_collapsible());
+        assert_eq!(
+            modifier_class(&ax("urn:eigenius:wn:is_irish")),
+            ModifierClass::Intersective,
+            "a bare Entity→Prop axiom is an intersective predicate constant"
+        );
+    }
+
+    #[test]
+    fn modifier_class_conjunction_gradable_dominates() {
+        let x = || Exp::Var("x".into());
+        let p = app(ax("urn:eigenius:wn:is_human"), x());
+        let q = app(ax("urn:eigenius:wn:is_colorectal"), x());
+        // λx. And(is_human(x), is_colorectal(x)) — a stack of two intersectives stays collapsible.
+        let and_ii = lam("x", and2(p.clone(), q));
+        assert_eq!(modifier_class(&and_ii), ModifierClass::Intersective);
+        // λx. And(is_human(x), gt(deg(x), std)) — one gradable conjunct screens the whole.
+        let grad = app(
+            app(
+                ax("urn:eigenius:measurements:gt"),
+                app(ax("urn:eigenius:wn:deg_a01"), x()),
+            ),
+            ax("urn:eigenius:wn:std_a01"),
+        );
+        assert_eq!(
+            modifier_class(&lam("x", and2(p, grad))),
+            ModifierClass::Gradable
+        );
+    }
+
+    #[test]
+    fn modifier_class_flags_subsective_cn_polymorphic() {
+        // C&L `skilful Man m`: the restrictor carries the head CLASS (an EigonClass) — CN-dependent.
+        let sem = lam(
+            "x",
+            app(
+                app(
+                    ax("urn:eigenius:wn:skilful"),
+                    Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:Man").expect("iri")),
+                ),
+                Exp::Var("x".into()),
+            ),
+        );
+        assert_eq!(modifier_class(&sem), ModifierClass::Subsective);
+        assert!(!modifier_class(&sem).is_collapsible());
+    }
+
+    #[test]
+    fn modifier_class_flags_privative_sum() {
+        // C&L `fake`: a disjoint-sum eliminator (`match … | inl | inr`) — a `Case` node.
+        let sem = lam("x", Exp::Case(vec![]));
+        assert_eq!(modifier_class(&sem), ModifierClass::Privative);
+        assert!(!modifier_class(&sem).is_collapsible());
+    }
+
+    #[test]
+    fn only_intersective_is_collapsible() {
+        assert!(ModifierClass::Intersective.is_collapsible());
+        for c in [
+            ModifierClass::Gradable,
+            ModifierClass::Subsective,
+            ModifierClass::Privative,
+            ModifierClass::Unknown,
+        ] {
+            assert!(!c.is_collapsible(), "{c:?} must not be collapsible");
+        }
     }
 
     #[test]

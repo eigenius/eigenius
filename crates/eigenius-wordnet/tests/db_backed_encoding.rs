@@ -55,9 +55,14 @@ use eigenius_kernel::storage::PersistentBackend;
 use eigenius_storage_rocksdb::RocksStore;
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 
-/// Default snapshot location (the copy made from the `eigenius_eigenius_db` docker volume);
-/// override with `EIGENIUS_DB_SNAPSHOT`.
-const DEFAULT_SNAPSHOT: &str = "/home/hm/src/eigenius/db-snapshot/wordnet-umls-2026-06-28";
+/// Default snapshot location — the out-of-tree `db-snapshot/` sibling of the repo (where
+/// `scripts/reseed-lexicon-db.sh` / the native reseed write, `SNAPSHOT_ROOT = <repo>/../db-snapshot`),
+/// resolved from `CARGO_MANIFEST_DIR` (portable, CWD-independent) rather than a hardcoded home path —
+/// same convention as `DICT` below. Override with `EIGENIUS_DB_SNAPSHOT`.
+const DEFAULT_SNAPSHOT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../db-snapshot/wordnet-umls-all-alone-2026-07-10"
+);
 
 /// WordNet dict (for the Morphy lemmatizer — surface→lemma at lookup time).
 const DICT: &str = concat!(
@@ -365,6 +370,91 @@ fn show_based_on_x_reading() {
 /// `deg_sensitive`. #9 cardinality (`fewer genes`) is re-probed as a regression.
 ///   EIGENIUS_DB_SNAPSHOT=/path cargo test -p eigenius-wordnet --test db_backed_encoding \
 ///       verify_degree_comparative_at_scale -- --ignored --nocapture
+/// RC-8 (d63-parse-gap-closure §Phase-2 backlog) — the sentence-2 shape `… is not simply a result of
+/// …` over the real WordNet lexicon. Every grammar piece closes in the demo (copula + predicate
+/// nominal + of-PP + negation + clausal complement), so isolate whether the residual is the ADVERB
+/// `simply` (modifying a predicate nominal) or lexical/scale, with and without it.
+///   EIGENIUS_DB_SNAPSHOT=/path cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       probe_rc8_at_scale -- --ignored --nocapture
+#[test]
+#[ignore = "probe: RC-8 `is not simply a result of` at scale; --ignored --nocapture"]
+fn probe_rc8_at_scale() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    for s in [
+        "genes are a result of mutations",     // predicate nominal + of-PP
+        "genes are not a result of mutations", // + negation
+        "genes are not simply a result of mutations", // + adverb `simply` (the s2 embedded clause)
+        "cells suggest that genes are a result of mutations", // clausal + predicate nominal
+        "cells suggest that genes are not simply a result of mutations", // full s2 shape
+    ] {
+        let (closed, open) = index.parse_open(s, &lem);
+        let tag = if !closed.is_empty() {
+            format!("CLOSED×{}", closed.len())
+        } else if !open.is_empty() {
+            format!("open×{}", open.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  {tag:<10} {s:?}");
+    }
+}
+
+/// FAITHFUL s20 isolation — the corpus sentence `WRN dependency may require specific lineages or a
+/// stronger mutation phenotype` STILL gaps in the fresh-store measure despite the attributive-comparative
+/// and coordination fixes (verified only on the SIMPLER demo proxy `HeLa may affect a gene or a larger
+/// cell line`). Isolate which of the FULL structure — compound subject / adj+bare-plural coordinand /
+/// compound-noun-in-comparative — actually gaps, over the real lexicon (WordNet words; WRN→gene proxy).
+///
+///   EIGENIUS_DB_SNAPSHOT=/path cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       probe_s20_isolation_at_scale -- --ignored --nocapture
+#[test]
+#[ignore = "probe: faithful s20 full-structure isolation at scale; --ignored --nocapture"]
+fn probe_s20_isolation_at_scale() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let outcome = |idx: &LexicalIndex, s: &str| -> String {
+        let (c, o) = idx.parse_open(s, &lem);
+        if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("open×{}", o.len())
+        } else {
+            "GAP".to_string()
+        }
+    };
+    // #2 verification on the --umls-all reseed (UMLS process/function-TUI mass fix): methylation
+    // (C0025723, T044) / hypermethylation are now in-vocab AND mass, so bare `from methylation` should
+    // CLOSE (was GAP). The full corpus sentence either closes (7→6) or reveals a residual search limit.
+    let idx = build_index(&head);
+    for w in ["methylation", "hypermethylation", "methylate"] {
+        eprintln!("  has_token({w:?}) = {}", idx.has_token(w, &lem));
+    }
+    for (tag, s) in [
+        ("#2 min-methyl", "inactivation arises from methylation"), //     was GAP → expect CLOSED
+        ("#2 min-hyper", "inactivation arises from hypermethylation"), // CLOSED if its TUI is process/function
+        (
+            "#2 corpus-methyl",
+            "Somatic MMR inactivation typically arises from methylation of the MLH1 promoter",
+        ),
+        (
+            "#2 corpus-hyper",
+            "Somatic MMR inactivation typically arises from hypermethylation of the MLH1 promoter",
+        ), // the actual corpus #2
+    ] {
+        eprintln!("  {tag:<16} {:<10} {s:?}", outcome(&idx, s));
+    }
+    // Grammar vs search for the corpus #2 sentence: cap8/beam512, static rank.
+    let hi = LexicalIndex::build(Arc::clone(&head))
+        .with_sense_cap(8)
+        .with_cell_beam(512);
+    let c = "Somatic MMR inactivation typically arises from hypermethylation of the MLH1 promoter";
+    eprintln!("  #2 corpus@cap8   {:<10} {c:?}", outcome(&hi, c));
+}
+
 #[test]
 #[ignore = "diagnostic: #8 degree comparatives against the WordNet lexicon; --ignored --nocapture"]
 fn verify_degree_comparative_at_scale() {
@@ -457,6 +547,50 @@ fn verify_governed_preposition_at_scale() {
     );
 }
 
+/// D63 §8.5 / d63-comparative-phrasal §8 — AT-SCALE witness: an attributive comparative (`a stronger
+/// gene`, s20's `a stronger mutation phenotype`) parses OPEN with a comparison-standard hole on the real
+/// WordNet lexicon (the importer's `cmp_attrib_sem` bare `S[adj]\NP` reading). Was a grammar-GAP before.
+///   EIGENIUS_DB_SNAPSHOT=/path cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       verify_attributive_comparative_at_scale -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic+witness: attributive comparative opens with a standard hole at scale; --ignored --nocapture"]
+fn verify_attributive_comparative_at_scale() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    for s in [
+        "cells affect a stronger gene",
+        "cells require a stronger phenotype",
+    ] {
+        let (closed, open) = index.parse_open(s, &lem);
+        // The attributive-comparative reading is an OPEN parse (a comparison-standard hole) whose sem
+        // compares a degree: `gt(deg_X(x), deg_X($anaphor$))`.
+        let attrib = open.iter().find(|o| {
+            !o.holes.is_empty() && {
+                let t = pretty_term(o.item.sem());
+                t.contains("gt(") && t.contains("deg_")
+            }
+        });
+        eprintln!(
+            "\n=== {s:?} — {} closed, {} open ===",
+            closed.len(),
+            open.len()
+        );
+        if let Some(o) = attrib {
+            eprintln!(
+                "  attributive-comparative OPEN (holes={}): {}",
+                o.holes.len(),
+                pretty_term(o.item.sem())
+            );
+        }
+        assert!(
+            attrib.is_some(),
+            "`{s}` must have an OPEN attributive-comparative reading (gt(deg(x),deg(anaphor)) + hole) at scale"
+        );
+    }
+}
+
 /// D63 lexicon-augmentation diagnostic: are the UMLS `RecQ` atoms (C0084304 "RecQ Helicases") seeded as
 /// `lexicon:form` entries in the snapshot? If so, a `TextIndex` over `lexicon:form` (BM25/token) would
 /// ground the OOV surface `recq` → those atoms → the concept — without an HGNC import. The exact
@@ -488,6 +622,429 @@ fn probe_recq_atoms_in_snapshot() {
         for (closed, cat, sense) in entries.iter().take(10) {
             eprintln!("  closed={closed}  sense={sense}  cat={cat}");
         }
+    }
+}
+
+/// D2 (nominal-modification NF, d63-nominal-modification-normal-form.md §4/§8): does the snapshot carry
+/// the corpus's genuine collocations as LEXICAL UNITS? A form with a `cat_n`/`cat_np` entry + a sense
+/// (a `wn:`/`umlscui:` id) seeds as a multi-token span, so its compound reading is a leaf — not a
+/// bracketing the compound rule reconstructs. Absent = the NF forces the all-adjective tree on it (the
+/// coverage-policy decision D2). Run:
+///   EIGENIUS_DB_SNAPSHOT=/path cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       d2_collocation_coverage -- --ignored --nocapture
+#[test]
+#[ignore = "D2: collocation-as-lexical-unit coverage over the snapshot; --ignored --nocapture"]
+fn d2_collocation_coverage() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    // Corpus collocations (space-joined lowercase, as `by_form` keys). The adjective-position
+    // `synthetic lethal` is THE one the NF's interleaving hinges on; the rest are the first-5 CNL
+    // compounds. `cell`/`lethality` are sanity controls (known heads).
+    for form in [
+        "synthetic lethality",
+        "synthetic lethal",
+        "synthetic lethal target",
+        "synthetic lethal targets",
+        "cell death",
+        "dna repair",
+        "repair process",
+        "repair processes",
+        "dna repair process",
+        "dna repair processes",
+        "cancer therapeutics",
+        "genetic event",
+        "genetic events",
+        "co-occurrence",
+        // controls:
+        "cell",
+        "lethality",
+    ] {
+        let known = index.has_token(form, &lem);
+        let entries = index.debug_form_entries(form, &lem);
+        // A collocation counts as a UNIT iff some entry is a nominal category carrying a sense id.
+        let unit = entries.iter().any(|(_c, cat, sense)| {
+            !sense.is_empty() && (cat.contains("cat_n") || cat.contains("cat_np"))
+        });
+        eprintln!(
+            "\n=== {form:?} — has_token={known}  UNIT={unit}  {} entries ===",
+            entries.len()
+        );
+        for (closed, cat, sense) in entries.iter().take(8) {
+            eprintln!("  closed={closed}  sense={sense}  cat={cat}");
+        }
+    }
+}
+
+/// STEP 0 of the compound-pile plan (d63-compound-pile-collapse-plan.md): localize WHICH domain compound
+/// tips each residual sentence over, and get its ROUTING (packed vs unpacked) — the fork that decides
+/// Lever 1 (extend packing) vs Lever 2 (collapse structure). Bounded frames (one domain compound swapped
+/// into a parseable generic base at a time; NO full sentence / double-swaps → avoids the OOM). Cap-only.
+/// Run: cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       diagnose_compound_pile -- --ignored --nocapture
+#[test]
+#[ignore = "STEP 0: localize the exploding domain compound + its routing; --ignored --nocapture"]
+fn diagnose_compound_pile() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    // ROUTING-ONLY (fast: routes_packed does NOT parse; parsing the domain frames explodes/OOMs). The
+    // fork — packed vs unpacked — is the Step-0 answer that picks Lever 1 (extend packing) vs Lever 2.
+    let row = |idx: &LexicalIndex, s: &str| {
+        let toks = tokenize(s);
+        let unk: Vec<String> = toks
+            .iter()
+            .filter(|t| !is_nonprose(t) && !idx.has_token(t, &lem))
+            .cloned()
+            .collect();
+        let routed = if idx.routes_packed(s, &lem) {
+            "PACKED"
+        } else {
+            "UNPACK"
+        };
+        let oov = if unk.is_empty() {
+            String::new()
+        } else {
+            format!("  OOV {unk:?}")
+        };
+        eprintln!("   [{routed}]{oov} {s:?}");
+    };
+    // (label, base generic frame, [one-domain-compound-swap frames])
+    let groups: &[(&str, &str, &[&str])] = &[
+        (
+            "#7 — swap one domain compound into the generic base (×162)",
+            "cells from lineages showed greater dependence on genes than counterparts",
+            &[
+                "MSI cell lines from lineages showed greater dependence on genes than counterparts", // subj compound
+                "cells from these four lineages showed greater dependence on genes than counterparts", // from-PP
+                "cells from lineages showed greater dependence on WRN than counterparts",  // obj (named indiv)
+                "cells from lineages showed greater dependence on genes than their MSS counterparts", // than-obj
+            ],
+        ),
+        (
+            "#4 — swap one domain compound into the generic base (×121)",
+            "we identified genes as a dependency in cells compared to lines",
+            &[
+                "we identified WRN as a dependency in cells compared to lines", // obj (named indiv)
+                "we identified genes as the top preferential dependency in cells compared to lines", // as-complement
+                "we identified genes as a dependency in MSI cell lines compared to lines", // in-PP compound
+                "we identified genes as a dependency in cells compared to MSS cell lines", // compared-to compound
+            ],
+        ),
+        (
+            "#3 — swap one domain compound into the generic base (×6)",
+            "some lines and some lines were represented by data sets",
+            &[
+                "some MSI lines and some MSS lines were represented by data sets", // coord subj compounds
+                "some lines and some lines were represented by these screening data sets", // agent compound
+            ],
+        ),
+    ];
+    for (label, base, swaps) in groups {
+        eprintln!("\n════════════════════════════════════════════════════════════════");
+        eprintln!("{label}");
+        row(&index, base);
+        for s in *swaps {
+            row(&index, s);
+        }
+    }
+    // TRIGGER LOCALIZATION: which construct forces unpacked? (baselines that SHOULD pack + one construct)
+    eprintln!("\n════════════════════════════════════════════════════════════════");
+    eprintln!("TRIGGER (expect PACKED baselines; UNPACK isolates the culprit construct)");
+    for s in [
+        "genes affect cells",                                // SVO baseline
+        "genes are large",                                   // copula baseline
+        "genes are attractive targets",                      // adj + compound baseline
+        "cells showed dependence on genes", // relational noun + governed-prep PP (no comparative)
+        "cells showed greater dependence than counterparts", // #7 comparative
+        "cells are larger than genes",      // bare comparative-than
+        "lines were represented by sets",   // #3 passive
+        "we identified genes as a dependency", // #4 V-as-Y
+        "genes affect cells compared to lines", // 'compared to' adjunct
+    ] {
+        row(&index, s);
+    }
+}
+
+/// RE-ASSESS the 3 residual reranked gaps (#3 passive, #4 V-as-Y+compared-to, #7 comparative+PP): for
+/// each, walk a fragment ladder (isolate the construction with generic fillers) at the DEFAULT beam,
+/// then parse the full sentence at DEFAULT vs WIDE (cell_beam=1024). The verdict per sentence:
+///
+///   - construction parses in a fragment but full sentence GAPs at default, parses at WIDE ⇒ SEARCH-limited
+///     (beam pressure), and the fragment where it first breaks localizes the driver;
+///   - gaps even at WIDE ⇒ a real composition gap (grammar / missing rule), NOT beam pressure.
+///
+/// Cap-only. Run:
+///
+///   cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       diagnose_residual_gaps -- --ignored --nocapture
+#[test]
+#[ignore = "re-assess the 3 residual gaps (search vs grammar, per sentence); --ignored --nocapture"]
+fn diagnose_residual_gaps() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    let outcome = |c: usize, o: usize| -> String {
+        if c > 0 {
+            format!("CLOSED×{c}")
+        } else if o > 0 {
+            format!("open×{o}")
+        } else {
+            "GRAMMAR-GAP".into()
+        }
+    };
+    let probe = |idx: &LexicalIndex, s: &str| -> String {
+        let toks = tokenize(s);
+        let unk: Vec<String> = toks
+            .iter()
+            .filter(|t| !is_nonprose(t) && !idx.has_token(t, &lem))
+            .cloned()
+            .collect();
+        if !unk.is_empty() {
+            return format!("OOV {unk:?}");
+        }
+        let (c, o) = idx.parse_open(s, &lem);
+        outcome(c.len(), o.len())
+    };
+
+    // (label, ladder fragments [default beam], full sentence [default + WIDE])
+    let groups: &[(&str, &[&str], &str)] = &[
+        (
+            "#7 COMPARATIVE + PP (greater … on … than …)",
+            &[
+                "cells showed greater dependence than counterparts", // comparative alone
+                "cells showed greater dependence on genes than counterparts", // + on-PP (governed)
+                "cells from lineages showed greater dependence on genes than counterparts", // + subj from-PP
+            ],
+            "MSI cell lines from these four lineages showed greater dependence on WRN than their MSS counterparts.",
+        ),
+        (
+            "#4 V-as-Y + in-PP + compared-to",
+            &[
+                "we identified genes as a dependency", // V-as-Y alone
+                "we identified genes as a dependency in cells", // + in-PP
+                "we identified genes as a dependency compared to cells", // + compared-to
+                "we identified genes as a dependency in cells compared to lines", // both PPs
+            ],
+            "Project Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines.",
+        ),
+        (
+            "#3 PASSIVE + coordinated subject + complex agent",
+            &[
+                "lines were represented by sets",          // passive, minimal
+                "lines were represented by data sets",     // + compound agent
+                "some lines were represented by data sets", // + some-det
+                "some lines and some lines were represented by data sets", // + coordinated subject
+            ],
+            "Some MSI lines and some MSS lines were represented by these screening data sets.",
+        ),
+    ];
+
+    for (label, ladder, full) in groups {
+        eprintln!("\n════════════════════════════════════════════════════════════════");
+        eprintln!("{label}");
+        for f in *ladder {
+            eprintln!("   [default] {:<12} {f:?}", probe(&index, f));
+        }
+        eprintln!("   ── full sentence ──");
+        eprintln!("   [default] {:<12} {full:?}", probe(&index, full));
+    }
+}
+
+#[test]
+#[ignore = "TEMP dump of as/a/the/identified categories; --ignored --nocapture"]
+fn dump_as_cats() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    for s in [
+        "Synthetic lethality is an interaction between two genetic events.",
+        "The co-occurrence of these two events leads to cell death.",
+        "Each event alone does not lead to cell death.",
+        "Scientists can exploit synthetic lethality for cancer therapeutics.",
+        "DNA repair processes are attractive synthetic-lethal targets.",
+        "Many cancers exhibit an impairment of a DNA repair pathway.",
+        "This impairment can lead to dependence on specific repair proteins.",
+    ] {
+        let (c, o) = index.parse_open(s, &lem);
+        eprintln!("\n{s:?}: closed={} open={}", c.len(), o.len());
+        for it in c.iter().take(1) {
+            eprintln!("   {}", pretty_term(it.sem()));
+        }
+    }
+}
+
+/// ISOLATE the #4 "Project Achilles …" residual: start from the generic base that closes
+/// (`we identified genes as a dependency in cells compared to lines`, CLOSED×112) and swap ONE domain
+/// feature back in at a time — coordinated named subject, named object, superlative as-complement, and
+/// each domain-compound PP — then a cumulative build-up, to localize what tips it into a GAP. A
+/// WIDE-beam pass on the tipping cases separates SEARCH pressure (closes at WIDE) from a real grammar
+/// gap (gaps even at WIDE). Cap-only. Run:
+///   cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       diagnose_project_achilles -- --ignored --nocapture
+#[test]
+#[ignore = "isolate the #4 Project Achilles gap (which swap tips it); --ignored --nocapture"]
+fn diagnose_project_achilles() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let wide = build_index(&head).with_cell_beam(1024);
+    let lem = morphy();
+    let outcome = |c: usize, o: usize| -> String {
+        if c > 0 {
+            format!("CLOSED×{c}")
+        } else if o > 0 {
+            format!("open×{o}")
+        } else {
+            "GRAMMAR-GAP".into()
+        }
+    };
+    let probe = |idx: &LexicalIndex, s: &str| -> String {
+        let toks = tokenize(s);
+        let unk: Vec<String> = toks
+            .iter()
+            .filter(|t| !is_nonprose(t) && !idx.has_token(t, &lem))
+            .cloned()
+            .collect();
+        if !unk.is_empty() {
+            return format!("OOV {unk:?}");
+        }
+        let (c, o) = idx.parse_open(s, &lem);
+        outcome(c.len(), o.len())
+    };
+
+    // Drill into the tipping phrase "the top preferential dependency" as an as-complement: vary the
+    // determiner, each modifier alone, and the stacking, to localize the composition gap. Also probe
+    // the NP in plain object position to see if the as-complement is implicated or the NP itself.
+    let isolated: &[(&str, &str)] = &[
+        (
+            "BASE: as a dependency",
+            "we identified genes as a dependency",
+        ),
+        ("as the dependency", "we identified genes as the dependency"),
+        (
+            "as a preferential dep.",
+            "we identified genes as a preferential dependency",
+        ),
+        (
+            "as a top dependency",
+            "we identified genes as a top dependency",
+        ),
+        (
+            "as the top dependency",
+            "we identified genes as the top dependency",
+        ),
+        (
+            "as a top pref. dep.",
+            "we identified genes as a top preferential dependency",
+        ),
+        (
+            "as the top pref. dep.",
+            "we identified genes as the top preferential dependency",
+        ),
+        (
+            "OBJ: affect the top pref dep",
+            "genes affect the top preferential dependency",
+        ),
+        (
+            "OBJ: affect a top pref dep",
+            "genes affect a top preferential dependency",
+        ),
+        (
+            "OBJ: affect a preferential dep",
+            "genes affect a preferential dependency",
+        ),
+        ("OBJ: affect a top dep", "genes affect a top dependency"),
+    ];
+    // Cumulative: add the domain features together (generic subject first, then the real subject).
+    let cumulative: &[(&str, &str)] = &[
+        ("+obj+asY", "we identified WRN as the top preferential dependency in cells compared to lines"),
+        ("+obj+asY+inPP", "we identified WRN as the top preferential dependency in MSI cell lines compared to lines"),
+        ("+obj+asY+bothPP (generic subj)", "we identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines"),
+        ("FULL (real subj)", "Project Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines."),
+    ];
+
+    eprintln!("\n═══ ISOLATED single-feature swaps (default beam) ═══");
+    for (label, s) in isolated {
+        eprintln!("   {label:<28} {:<12} {s:?}", probe(&index, s));
+    }
+    eprintln!("\n═══ CUMULATIVE build-up (default | WIDE cell_beam=1024) ═══");
+    for (label, s) in cumulative {
+        eprintln!(
+            "   {label:<32} default={:<12} wide={:<12} {s:?}",
+            probe(&index, s),
+            probe(&wide, s)
+        );
+    }
+}
+
+/// D1 diagnostic (nominal-modification NF §8): run the `modifier_class` discriminator over the v3
+/// corpus's REAL adjective lexicon entries (per WordNet sense), confirming its verdict on actual data
+/// — `attractive` must screen as `Gradable`, classificatory adjectives (`genetic`/`somatic`/`immune`)
+/// must be `Intersective` (the only collapse-eligible class). Cap-only (no parsing/rerank needed —
+/// this seeds adjective leaves and classifies their sems). Run:
+///   cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       d1_modifier_class_over_corpus -- --ignored --nocapture
+#[test]
+#[ignore = "D1 diagnostic: modifier_class over the corpus's real adjectives; --ignored --nocapture"]
+fn d1_modifier_class_over_corpus() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    // The v3 corpus's attributive modifiers, grouped by the verdict expected of a correct D1:
+    let modifiers = [
+        // the §5 hazard + the hyphenated domain term (S5):
+        "attractive",
+        "synthetic-lethal",
+        // scalar / evaluative → expect Gradable (screened, not collapsed):
+        "greater",
+        "stronger",
+        "strong",
+        "rare",
+        "frequent",
+        "novel",
+        "promising",
+        "essential",
+        // classificatory → expect Intersective (collapse-eligible):
+        "genetic",
+        "somatic",
+        "germline",
+        "immune",
+        "homologous",
+        "colorectal",
+        "endometrial",
+        // hyphen state-compounds:
+        "double-stranded",
+        "microsatellite-stable",
+        // mixed / to observe:
+        "specific",
+        "deficient",
+        "hypermutable",
+        "independent",
+        "predictive",
+        "preferential",
+    ];
+    let mut tally: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for m in modifiers {
+        let rows = index.debug_modifier_classes(m, &lem);
+        if rows.is_empty() {
+            eprintln!("\n{m:?} — (no adjective entry seeded)");
+            continue;
+        }
+        eprintln!("\n{m:?} — {} adjective entries:", rows.len());
+        for (cat, sense, class) in &rows {
+            eprintln!("   {class:<12} sense={sense:<26} cat={cat}");
+            *tally.entry(class.clone()).or_default() += 1;
+        }
+    }
+    eprintln!("\n=== ModifierClass tally over all adjective entries ===");
+    for (class, n) in &tally {
+        eprintln!("  {class:<12} {n}");
     }
 }
 
@@ -1334,7 +1891,9 @@ fn analyze_chart_cells_first_five() {
         "The co-occurrence of these two events leads to cell death.",
         "Each event alone does not lead to cell death.",
         "Scientists can exploit synthetic lethality for cancer therapeutics.",
-        "DNA repair processes are attractive synthetic lethal targets.",
+        // v3: `synthetic-lethal` hyphenated (lexicalized compound modifier, style-guide fix) so it is
+        // ONE compound adjective, not a `synthetic` ∧ `lethal` adjective stack (d63-nominal-mod NF §4).
+        "DNA repair processes are attractive synthetic-lethal targets.",
     ];
     for s in sentences {
         eprintln!("\n════════════════════════════════════════════════════════════════");

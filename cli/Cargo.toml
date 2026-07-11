@@ -65,6 +65,11 @@ tokio.workspace = true
 tonic.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+# Heap profiling (opt-in, `--features jemalloc-prof`): swaps in jemalloc as the global allocator with
+# profiling enabled so a `serve` process can dump live-heap profiles (jeprof flame graphs) — used to
+# diagnose the reseed OOM (docs/notes/reseed-oom-memory-investigation.md §6). Off by default: zero
+# impact on normal builds/tests/CI.
+tikv-jemallocator = { version = "0.6", features = ["profiling"], optional = true }
 
 [features]
 # Forwarded to `eigenius-embedder-candle`. Build the CLI with
@@ -72,6 +77,8 @@ tracing-subscriber.workspace = true
 # the binary still runs on CPU when `[embedder].device = "cpu"` or
 # the GPU isn't visible at runtime.
 default = []
+# Heap-profiling allocator (see the dep note above). Diagnostic-only.
+jemalloc-prof = ["dep:tikv-jemallocator"]
 cuda = ["eigenius-embedder-candle/cuda"]
 metal = ["eigenius-embedder-candle/metal"]
 # D63/GH#97 Lever 1: enable the contextual LLM sense reranker in the served/local parse path

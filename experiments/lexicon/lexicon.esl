@@ -212,6 +212,28 @@ resource lexicon:e_larger : lexicon:LexicalEntry {
     lexicon:sense    = "wn:large.a.01";
     lexicon:grade    = epistemic:declared;
 }
+// ATTRIBUTIVE / elided-`than` comparative "larger": a BARE predicative `S[adj]\NP` whose comparison
+// STANDARD is an anaphoric hole (`lexicon:anaphor`), not the positive's absolute `std_large`. This is
+// the reading behind `a larger cell line` (the attributive rule refines the noun → `Σx. gt(deg(x),
+// deg(anaphor))`) and bare-predicative `HeLa is larger` (larger THAN some salient referent). The
+// `lexicon:anaphor` placeholder is freshened to a per-span hole at parse time → an OPEN parse the D64
+// resolver fills with the discourse comparison class (d63-comparative-phrasal §8; the comparative is
+// inherently relative — "larger than WHAT" is a referent, not the category norm the positive uses).
+resource lexicon:larger_attrib_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) =>
+            measurements:gt(lexicon:deg_large(x), lexicon:deg_large(lexicon:anaphor))
+          : lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:e_larger_attrib : lexicon:LexicalEntry {
+    lexicon:form     = "larger";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:larger_attrib_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:large.a.01";
+    lexicon:grade    = epistemic:declared;
+}
 
 // ── PHRASAL comparative (D63 §8.12, d63-comparative-phrasal.md) — the comparative QUANTIFIER over a
 // MEASURE noun. "X showed greater dependence on WRN than Y" → gt(μ_dep(WRN)(x), μ_dep(WRN)(y)).

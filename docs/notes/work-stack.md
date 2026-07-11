@@ -9,28 +9,75 @@ any detour.
 
 ## Stack (top → bottom)
 
-### 1. ▲ ACTIVE — [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 2 of 4: parsing gaps**
+### 1. ▲ ACTIVE — [d63-parse-gap-closure.md](d63-parse-gap-closure.md) — **Phase 3 of 4: ambiguity**
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
-**OOV ✓ → parsing gaps (here) → ambiguity → performance.**
-- **Phase 1 (OOV): CLOSED** — `missing-lexeme 0`, distinct OOV 0 (Stage-A augmentation grounds the page).
-- **Phase 2 (parsing gaps): ACTIVE.** Re-measure (`2026-07-06`, cnl-v2, `--umls-all`, `--no-llm`, 74 min):
-  62 units → **50 AMBIG, 12 grammar-gap, 0 missing, 0 encoded** — **81% close** (from 68% at Step-9).
-  Done: verb+PP frames, RC-1 (bare-UMLS subject), and **Step 5/5b/5c** (apposition + comma-list connective
-  inheritance + the coordination refactor to core-en's list-with-operator shape) — together **−8 gaps**.
-  **RC-2 comparatives — CLOSED (`2026-07-07`).** Degree (#8) + cardinality (#9) phrasal comparatives
-  ([d63-comparative-phrasal.md](d63-comparative-phrasal.md)); #8 **verified at scale** (C4, diagnostic
-  `verify_degree_comparative_at_scale` over the `2026-07-07-c3` snapshot) — `greater/more dependence/dependent
-  on` → identical `gt(deg_dep_rel(…))`, `more sensitive than` → 1-place; #9 `card` holds. **C3-precision**
-  (prep feature on `cat_pp_arg`; rejects `*dependent to`) added + unit-verified (`3e6c0d5`) and
-  **at-scale verified (`2026-07-07`, WordNet `--all` native load; `verify_governed_preposition_at_scale`)**:
-  the relational `deg_rel` reading appears with the governed prep (`on`) and is absent with the wrong one
-  (`to`) — precision on the forest, not on full-sentence closure (which `dependent`'s bare-measure/noun
-  readings defeat). Full WordNet+UMLS reseed (domain-entity #8) still blocked on the load OOM
-  ([reseed-oom-memory-investigation.md](reseed-oom-memory-investigation.md), on deck) — decoupled from this witness.
-  **Next: the next gap in the ordered 12-gap backlog** — see the note's roadmap table.
-- **Phases 3 (ambiguity) + 4 (performance): on deck** — one root cause, the **mass-shim over-generation**
-  (RC-1 head-inheritance is loose); see the on-deck entry below.
-**Exit-gate (phase 2):** re-measure → grammar-gap = 0 (every unit parses). Then phase 3 becomes the top.
+**OOV ✓ → parsing gaps ✓ → ambiguity (HERE) → performance.**
+
+#### STATUS — measured `2026-07-10`, HEAD, snapshot `wordnet-umls-all-alone-2026-07-10`
+| config | units | GAP | MISSING | AMBIG | OPEN | ENCODED |
+|---|---|---|---|---|---|---|
+| **reranked** (`--features use-llm`) — *canonical* | 62 | **0** | **0** | 60 | 1 | **1** |
+| deterministic (cap-only) — *the no-regression gate* | 62 | **0** | **0** | 61 | 1 | 0 |
+
+> **Every sentence PARSES — `grammar-gap 0` and `missing-lexeme 0` in BOTH configs. Only 1 of 62 resolves to a
+> single reading.** That is the whole state in one line: the gap/OOV problem is **solved**; the ambiguity
+> problem is **not**. `ENCODED 1/62` is the open front.
+
+Was `GAP 5` on `2026-07-09` (reranked, old snapshot) — **closed to 0** by `20d608e`. `ENCODED` moved 2 → 1 over
+the same period; the reranker is non-deterministic and both the code and snapshot changed, so treat the
+ENCODED count as noisy at n=1–2, not as a regression signal. The gap/missing columns are the load-bearing ones.
+
+#### DONE
+- **Phase 1 — OOV: CLOSED.** `missing-lexeme 0`, distinct OOV 0 (Stage-A augmentation grounds the page).
+- **Phase 2 — parsing gaps: CLOSED.** `grammar-gap 0` (`20d608e`). History of the 12→…→0 descent and the
+  per-gap root causes: **§0 + §3 of [d63-parse-gap-closure.md](d63-parse-gap-closure.md)** — not repeated here.
+- **Faithfulness — exclusive-focus `alone` (`22e550a`).** Sentence 3 ("Each event alone does not lead to cell
+  death") had **0 universals, a lost negation, and a "Department of Energy" subject**. The reranker was
+  *already right* (it ranked `DOE` #19/drop, causative `lead` #0/#1) — the faithful reading existed at **no**
+  cap, because post-nominal `alone` had no rule, so widen-on-failure kept lowering the cap until the noun-pile
+  was the only complete parse. Fix: `alone` as a bare post-nominal `cat_pp` carrying the opaque
+  exclusive-focus operator `ontology:sole` ("this event alone" ≡ "only this event"); reuses the existing
+  `RefineKind::PpMod` rule with **zero new parser code**, closed-class ⇒ cap-exempt. Now:
+  `∀x:(Σy:event. sole(y)). ¬(x causatively-leads-to cell_death)` — 50/50 readings, **0** noun-pile.
+
+#### NEXT — the exit gate: `AMBIG → ENCODED`
+Two concrete levers, cheapest first:
+1. **Re-test `pos_prune`** (categorical drop of function-word-as-noun readings; `EIGENIUS_POS_PRUNE`, currently
+   default-off). It is *the* lever against the `does→DOE`/`doe`/`DO` noun-pile junk that inflates ambiguity.
+   It previously made sentence 3 **unparseable — but only because post-nominal `alone` had no rule. That
+   blocker is now gone**, so it is newly viable and untested. Gate on the deterministic sweep (`GAP` must stay 0).
+2. **Mass-shim precision fixes** (§6 of the parse-gap note): strictly-uncountable-head test +
+   acronym↔domain-word collision filter — kill the spurious `mass` readings that inflate *both* reading count
+   and parse time.
+
+Levers already applied (hyphenation, build-then-subsume D3, sense cap/reranker) and the ones ruled out for this
+corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note** and
+[d63-parsing-scale-and-pruning.md §4c](d63-parsing-scale-and-pruning.md).
+
+#### DO NOT RE-TRY
+- **Per-span pooled sense cap — tried, measured, REVERTED (`b91e100`).** Pooling the cap across a span's
+  candidate lemmas *does* make the reranker's drop-verdict bite (a rank-dropped sense hiding in a sub-cap lemma
+  bucket — `DOE` in the 2-entry `doe` bucket — otherwise slips the per-lemma cap). But it **regressed
+  `grammar-gap 0 → 1`** (unit 52, *"The MSI relationship compared favourably…"*) by over-pruning a multi-lemma
+  span, and it is **unnecessary now that `alone` exists** (the faithful reading is reachable at the tight cap,
+  so widen-on-failure never fires and the junk is never admitted). Isolated by reverting *only* `lookup.rs`
+  against the same store. Do not re-land without repeating that A/B.
+- Kept from the same session: the **UMLS grammatical-surface filter** (17 surfaces incl. `does not`/`alone`/
+  `lead`) in `crates/eigenius-umls/src/convert.rs` — that one is a keeper.
+
+#### GOTCHAS (both cost real time — read before measuring)
+- **Counting.** `summarize()`'s per-unit listing enumerates **only AMBIG units**; grammar-gaps print in a
+  different format, so grepping `[AMBIG` **silently misses every gap**. Count from the
+  `=== WRN first page over FULL lexicon: … grammar-gap N …===` summary line (or the `[unit N] … TAG` lines).
+- **Snapshot drift.** The bootstrap changed (`ontology` + `closed-class` hashes), so older snapshots
+  **ManifestDrift** — and the harness **SKIPs fail-closed while reporting `ok`**: every `db_backed_encoding`
+  test goes green doing nothing. `DEFAULT_SNAPSHOT` must point at `wordnet-umls-all-alone-2026-07-10` (`7933f05`).
+
+#### Follow-up spun out of the faithfulness work (not started)
+**Pre-nominal `only` / `just`.** Same `ontology:sole` operator (already in the ontology), but they attach
+**outside the determiner** ("only [this event]") — NP-level focus, a different rule from `alone`'s N-level
+refine (an NP-level rule must reach into the generalized quantifier's restrictor). Deliberately deferred rather
+than shipping a mis-shaped N-level `only` that would only cover "the only X". Small, self-contained.
 
 ### 2. [d63-next-steps.md](d63-next-steps.md) — the D63 pipeline spine (the base)
 The overall sequence that (1) is a detour from. Remaining once (1) pops, in order:
@@ -44,12 +91,17 @@ done.
 ## On deck (pushed onto the stack when its step becomes active)
 
 - **Reseed OOM — memory profiling follow-up** ([reseed-oom-memory-investigation.md](reseed-oom-memory-investigation.md)).
-  Full WordNet+UMLS reseed OOMs (~20 GiB) deep into the UMLS load; blocks the at-scale re-verification of
-  C3-precision (and any fresh full reseed). Static analysis is exhausted (named resident terms sum to ~5–7 GiB
-  vs the 20 GiB OOM; the note's §3 lists what is measured-out — text index, RocksDB config, in-memory backend,
-  bounded cache — do not re-tread). **Next action: the jemalloc heap profile in §6** (feature-gated
-  `tikv-jemallocator` on `eigenius-cli`, bounded native `serve` + ~10 UMLS chunks + `jeprof` flame graph) to
-  name the ~15 GiB owner. Diagnostic already in tree: `storage/rocksdb/tests/snapshot_memory_probe.rs`.
+  **⚠ POSSIBLY STALE — verify before picking up.** A full `scripts/reseed-lexicon-db.sh --umls-all` ran to
+  **completion on `2026-07-10`** (exit 0, 2.9 GB snapshot `wordnet-umls-all-alone-2026-07-10`), i.e. the claim
+  below that it "blocks any fresh full reseed" no longer reproduces — likely superseded by the `--out-dir`
+  chained-load path. Re-confirm the OOM still happens before investing in the profile.
+  *Original:* Full WordNet+UMLS reseed OOMs (~20 GiB) deep into the UMLS load; blocks the at-scale
+  re-verification of C3-precision (and any fresh full reseed). Static analysis is exhausted (named resident
+  terms sum to ~5–7 GiB vs the 20 GiB OOM; the note's §3 lists what is measured-out — text index, RocksDB
+  config, in-memory backend, bounded cache — do not re-tread). **Next action: the jemalloc heap profile in §6**
+  (feature-gated `tikv-jemallocator` on `eigenius-cli`, bounded native `serve` + ~10 UMLS chunks + `jeprof`
+  flame graph) to name the ~15 GiB owner. Diagnostic already in tree:
+  `storage/rocksdb/tests/snapshot_memory_probe.rs`.
 
 - **Phases 3 (ambiguity) + 4 (performance)** — one root cause, worked together once phase 2 pops.
   Concrete first lever: the **mass-shim precision fixes** (d63-parse-gap-closure.md §6 — strictly-
@@ -62,6 +114,19 @@ done.
 
 ## Parked tracks (real, but off this stack)
 Separate threads, not blocking the parse→encode pipeline; pull onto the stack only if picked up:
+- **GH#104 — NbE readback panic** (`readback.rs:38`): surface `cell` resolves to UMLS **gene** concepts
+  `C1413336`/`C1413337` (TUI **T028**), which are then **applied as functions** → `NotAFunction(ResourceVal(…))`.
+  **Pre-existing** (48 panics on the pre-`alone` baseline, 32 on current HEAD — recent work reduced, did not
+  cause it) and caught per-candidate, so **no unit is lost** and the sweep still completes. But an ill-formed
+  term is reaching readback, so the defect is at the **construction site**, not readback; the `.expect()` is
+  also the wrong failure mode. Off the critical path.
+- **GH#103 — `CompleteJson` intermittently fails** ("No object generated: could not parse the response",
+  patent-analysis notebook). Ruled out: the `main` merge (website-only), reseed/schema explosion (schema is
+  class-derived, not chain-derived), `max_tokens` truncation (standalone repro used 304 of 2000 tokens).
+  Two real findings: (a) the catch block discards `NoObjectGeneratedError`'s `finishReason`/`usage`/raw `text`,
+  making every recurrence undiagnosable; (b) `orchestration/deno.json` pins `ai`/`@ai-sdk/anthropic` to
+  **`@latest`** and the Dockerfile never copies `deno.lock` — the container has drifted **two majors**
+  (`ai` 6.0.158→7.0.19, `@ai-sdk/anthropic` 3.0.69→4.0.11) and re-resolves on every restart, so local ≠ prod.
 - [d61-llm-based-encoding-methodology.md](d61-llm-based-encoding-methodology.md) — grounding-discovery +
   typed decision-making layer (the D61 plan).
 - Benchmark pilot (D50/D51) — chem+bio; kernel gaps done, infra gaps remain.
