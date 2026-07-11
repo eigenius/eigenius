@@ -404,9 +404,10 @@ fn probe_rc8_at_scale() {
 
 /// FAITHFUL s20 isolation — the corpus sentence `WRN dependency may require specific lineages or a
 /// stronger mutation phenotype` STILL gaps in the fresh-store measure despite the attributive-comparative
-/// + coordination fixes (verified only on the SIMPLER demo proxy `HeLa may affect a gene or a larger cell
-/// line`). Isolate which of the FULL structure — compound subject / adj+bare-plural coordinand /
+/// and coordination fixes (verified only on the SIMPLER demo proxy `HeLa may affect a gene or a larger
+/// cell line`). Isolate which of the FULL structure — compound subject / adj+bare-plural coordinand /
 /// compound-noun-in-comparative — actually gaps, over the real lexicon (WordNet words; WRN→gene proxy).
+///
 ///   EIGENIUS_DB_SNAPSHOT=/path cargo test -p eigenius-wordnet --test db_backed_encoding \
 ///       probe_s20_isolation_at_scale -- --ignored --nocapture
 #[test]
@@ -770,10 +771,13 @@ fn diagnose_compound_pile() {
 /// RE-ASSESS the 3 residual reranked gaps (#3 passive, #4 V-as-Y+compared-to, #7 comparative+PP): for
 /// each, walk a fragment ladder (isolate the construction with generic fillers) at the DEFAULT beam,
 /// then parse the full sentence at DEFAULT vs WIDE (cell_beam=1024). The verdict per sentence:
+///
 ///   - construction parses in a fragment but full sentence GAPs at default, parses at WIDE ⇒ SEARCH-limited
 ///     (beam pressure), and the fragment where it first breaks localizes the driver;
 ///   - gaps even at WIDE ⇒ a real composition gap (grammar / missing rule), NOT beam pressure.
+///
 /// Cap-only. Run:
+///
 ///   cargo test --release -p eigenius-wordnet --test db_backed_encoding \
 ///       diagnose_residual_gaps -- --ignored --nocapture
 #[test]
