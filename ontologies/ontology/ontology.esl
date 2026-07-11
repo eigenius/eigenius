@@ -73,3 +73,11 @@ axiom ontology:prep_to      : lexicon:Entity -> lexicon:Entity -> Prop
 // `kind_of(Σx:Project. named(x, achilles))`. The label↔referent identification is
 // grounding-supplied by the encoding institution (D62).
 axiom ontology:named        : lexicon:Entity -> lexicon:Entity -> Prop
+
+// `sole(x)`: the entity `x` holds TO THE EXCLUSION OF ALTERNATIVES — the exclusive-focus reading
+// of post-nominal "alone" ("this event alone") and pre-nominal "only"/"just" ("only this event"),
+// which are the same operator in mirror positions. OPAQUE like `named`/`compound`: it marks `x` as
+// "by itself, and not in combination with others" without unfolding the alternative set (deferred,
+// as numbers/degrees are kept opaque). "each event alone" → `∀x:(Σy:event. sole(y)). …`, so "each
+// event alone does not lead to cell death" is "no single event, taken by itself, suffices".
+axiom ontology:sole         : lexicon:Entity -> Prop

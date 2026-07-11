@@ -81,6 +81,9 @@ pub struct Report {
     /// Additive `cat_n(C, mass)` entries emitted for mass concepts (countability by type-mass OR
     /// count-vetoed head-inheritance; [`concept_is_mass`]).
     pub mass_entries: usize,
+    /// Content entries skipped because the surface is a grammatical filler UMLS mints as a concept
+    /// ([`is_grammatical_surface`], D63 §5.3) — `does not`, `not`, `to`, `lead`, `alone`.
+    pub grammatical_skipped: usize,
 }
 
 /// Escape a string for an ESL double-quoted literal.
@@ -255,6 +258,25 @@ fn emit_entry(
 // count-only). A named individual (gene symbol) yields proper-noun `cat_np(TUI, sg)` entries and is never
 // mass-shimmed. `DNA`/`RNA` etc. that are English nouns get their mass reading here too (same lexicon the
 // WordNet importer uses), a harmless duplicate of any WordNet mass entry (distinct entry IRIs).
+/// **Grammatical surfaces UMLS mints as concepts** (D63 §5.3) — do-support, negation, and the
+/// qualifier/linkage fillers UMLS encodes as `cat_n` concepts (`does not`=C1299585, `Not`/`Non`=C1518422,
+/// `Lead`/`Leading`=C1522538, `To`=C1883351, `alone`=C0679994). In prose these are function words / verbs
+/// whose real reading is in WordNet or the closed-class bootstrap; the UMLS *noun* concept only feeds the
+/// spurious noun-compound pile (the sentence-3 negation-dropping parse). Their per-form entry is skipped
+/// (the concept class stays); WordNet's `lead` verb and the closed-class `not`/`to`/`does` are untouched.
+/// Case-insensitive, exact surface match. Curated (the SNOMED "Interpretation value" / "Linkage concept"
+/// hierarchy is the principled superset but is not in the SRL-0 subset we import).
+const GRAMMATICAL_SURFACES: &[&str] = &[
+    "do", "does", "did", "doing", "done", "do not", "does not", "did not", "not", "non", "non-",
+    "negation", "negated", "to", "alone", "lead", "leading",
+];
+
+/// Whether `form` is a grammatical surface UMLS should not seed as a content noun ([`GRAMMATICAL_SURFACES`]).
+fn is_grammatical_surface(form: &str) -> bool {
+    let f = form.trim().to_ascii_lowercase();
+    GRAMMATICAL_SURFACES.contains(&f.as_str())
+}
+
 fn push_entries(
     buf: &mut String,
     cui: &str,
@@ -275,6 +297,12 @@ fn push_entries(
     };
     let mass_cat = format!("lexicon:cat_n(umlscui:{cui}, lexicon:mass)");
     for (i, form) in forms.iter().enumerate() {
+        // Grammatical surface (do-support / negation / qualifier filler): skip the content entry — the
+        // real reading is WordNet's or the closed-class bootstrap's (D63 §5.3, `is_grammatical_surface`).
+        if is_grammatical_surface(form) {
+            rep.grammatical_skipped += 1;
+            continue;
+        }
         emit_entry(buf, cui, i, "", form, &cat, &sem_type);
         rep.entries += 1;
         if is_mass && named_tui.is_none() {
@@ -357,6 +385,7 @@ pub fn render_document(subset: &Subset, version: &str, mass: &MassNouns) -> (Str
         body.push_str(&block);
         rep.entries += brep.entries;
         rep.mass_entries += brep.mass_entries;
+        rep.grammatical_skipped += brep.grammatical_skipped;
         rep.concepts += 1;
     }
 
@@ -553,6 +582,33 @@ mod tests {
             "T033 Finding is count-vetoed → no gENE mass form"
         );
         assert!(!doc.contains("lexicon:mass"));
+    }
+
+    #[test]
+    fn grammatical_surface_gets_no_content_entry_but_the_concept_stays() {
+        // D63 §5.3: UMLS mints grammatical fillers as concepts (`does not`=C1299585, T080). The
+        // `does not` FORM must not seed a content noun (it feeds the sentence-3 negation-dropping
+        // compound); its real reading is the closed-class negation. The concept class + any non-filler
+        // form stay; only the grammatical surface is skipped.
+        let subset = Subset {
+            semantic_types: vec![SemanticType {
+                tui: "T080".to_string(),
+                name: "Qualitative Concept".to_string(),
+            }],
+            concepts: vec![Concept {
+                cui: "C1299585".to_string(),
+                tuis: vec!["T080".to_string()],
+                preferred_name: "Does not".to_string(),
+                forms: vec!["does not".to_string(), "absence of action".to_string()],
+                definition: None,
+                symbol: None,
+            }],
+        };
+        let (doc, rep) = render_document(&subset, "2026AA", &MassNouns::new());
+        assert!(doc.contains("class umlscui:C1299585 :")); // the concept class is kept
+        assert!(!doc.contains("lexicon:form       = \"does not\";")); // grammatical surface dropped
+        assert!(doc.contains("lexicon:form       = \"absence of action\";")); // non-filler form kept
+        assert_eq!(rep.grammatical_skipped, 1);
     }
 
     #[test]

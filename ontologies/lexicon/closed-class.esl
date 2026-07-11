@@ -1097,6 +1097,34 @@ resource lexicon:to_nmod : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 
+// ── Exclusive-focus particle: post-nominal `alone` (D61 faithfulness) ──
+// "each event alone" / "this event alone" — `alone` is a BARE post-nominal `cat_pp` (⟦·⟧ = Entity →
+// Prop), unlike the preposition noun-modifiers above which are `cat_pp / NP` (they still need an
+// object). Adjacent to the head noun, it fires the SAME post-nominal refine rule (parser.rs,
+// `RefineKind::PpMod`): `[cat_n(C)] [cat_pp]` → `Σx:C. sole(x)`; the determiner then wraps the
+// refined noun, so `each event alone` → `∀x:(Σy:event. sole(y)). …` under ANY determiner. The
+// exclusive `ontology:sole` operator is the "= only" reading (`this event alone` ≡ `only this
+// event`), kept opaque. Closed-class ⇒ cap-EXEMPT (the pooled-cap split), so the faithful reading is
+// seeded at the tight cap and need not be widened in — where the correct senses rank #0/#1 — instead
+// of losing to a widen-admitted noun pile. The WordNet PREDICATIVE adjective `alone` ("the child is
+// alone") stays a separate open-class entry; this adds only the post-nominal focus reading.
+// NB: pre-nominal `only`/`just` ("only this event") are the same `sole` operator but attach OUTSIDE
+// the determiner (NP-level focus), a distinct rule from this N-level refine — deferred.
+resource lexicon:sole_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) => ontology:sole(x)
+          : lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:alone_focus : lexicon:LexicalEntry {
+    lexicon:form     = "alone";
+    lexicon:cat      = type_expr( lexicon:cat_pp );
+    lexicon:sem      = lexicon:sole_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "alone";
+    lexicon:grade    = epistemic:declared;
+}
+
 // ── Comparative `than` marker (D63 §8.12 Slice 6-cmp) ─────────────────
 // "X is larger than Y": `than` marks the comparison STANDARD `Y`. It consumes the
 // standard NP and yields a `cat_pp_than` (⟦·⟧ = Entity), semantically the identity on the

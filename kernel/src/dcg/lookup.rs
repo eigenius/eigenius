@@ -804,39 +804,59 @@ impl LexicalIndex {
                 let toks: Vec<&str> = s_lc.split_whitespace().collect();
                 toks.len() > 1 && toks.iter().all(|t| has_closed(t))
             });
-        let mut out = Vec::new();
+        // Split each candidate lemma's entries into two pools, tagging each with its morphological
+        // number (D63 §5.1, the Slice-1 deferral): a surface that morphology *reduced* to this lemma was
+        // inflected (plural, for nouns); a surface equal to the lemma is singular. `with_noun_num`
+        // refines the common noun's underspecified `num_any` so determiner/noun agreement (`every gene`
+        // ✓ / `every genes` ✗) bites at composition (a no-op for non-noun items).
+        //
+        // `exempt` — untagged GRAMMAR OPERATORS (`in_lexicon = None` AND a functor category, not a bare
+        // `cat_n`/`cat_np`): determiners, auxiliaries (do-support), the copula, prepositions, negators.
+        // These are the function-word grammar, not the polysemy the cap exists to cut; keeping them
+        // unconditionally is what protects declarative do-support from a mis-ranking reranker under the
+        // pooled cap below.
+        // `capped` — everything nameable: content senses (`in_lexicon = Some`, any POS) AND any bare
+        // NOMINAL (`cat_n`/`cat_np`), tagged or not. The nominal clause is load-bearing: it is the
+        // noun-pile junk the cap targets, and it also caps untagged synthetic/demo names so the cap
+        // still bites on a bare-`NP` word with no lexicon tag.
+        let is_nominal =
+            |cat: &Exp| is_ctor(cat, "cat_n").is_some() || is_ctor(cat, "cat_np").is_some();
+        let mut exempt: Vec<Item> = Vec::new();
+        let mut capped: Vec<(SeedEntry, &'static str)> = Vec::new();
         for c in &candidates {
             let mut entries = self.scoped(self.entries_for(c), scope);
             if surface_is_function {
-                entries.retain(|e| {
-                    e.in_lexicon.is_none()
-                        || !(is_ctor(e.item.cat(), "cat_n").is_some()
-                            || is_ctor(e.item.cat(), "cat_np").is_some())
-                });
+                entries.retain(|e| e.in_lexicon.is_none() || !is_nominal(e.item.cat()));
             }
-            if entries.is_empty() {
-                continue;
-            }
-            // Adaptive-supertagging sense cap (GH #97): keep at most `cap` entries for this lemma —
-            // by contextual plausibility first (the reranker's `ranks`, when present), falling back
-            // to the static `sense_rank` (most-frequent first) — cutting WordNet polysemy at the
-            // seed. The closed class (≤ cap entries) is untouched. A stable sort preserves seed
-            // order within a rank. (`cap` is the per-attempt cap from the widen loop.)
-            if let Some(cap) = cap {
-                if entries.len() > cap {
-                    entries.sort_by_key(|e| sense_cap_key(e, ranks));
-                    entries.truncate(cap);
+            let num = if *c == s_lc { "sg" } else { "pl" };
+            for e in entries {
+                if e.in_lexicon.is_none() && !is_nominal(e.item.cat()) {
+                    exempt.push(with_noun_num(&e.item, num));
+                } else {
+                    capped.push((e, num));
                 }
             }
-            // Morphological number (D63 §5.1, the Slice-1 deferral): a surface
-            // that morphology *reduced* to this lemma was inflected (plural,
-            // for nouns); a surface equal to the lemma is singular. Refine the
-            // common noun's underspecified `num_any` to that number so
-            // determiner/noun agreement (`every gene` ✓ / `every genes` ✗)
-            // bites at composition.
-            let num = if *c == s_lc { "sg" } else { "pl" };
-            out.extend(entries.iter().map(|e| with_noun_num(&e.item, num)));
         }
+        // Adaptive-supertagging sense cap (GH #97), applied over the PER-SPAN pooled `capped` senses —
+        // the SAME granularity the contextual reranker scores at ([`Self::contextual_sense_ranks`]
+        // pools a span's candidate lemmas before ranking). Keep at most `cap` senses — by contextual
+        // plausibility first (the reranker's `ranks`, when present), falling back to the static
+        // `sense_rank` (most-frequent first) — cutting polysemy at the seed. A stable sort preserves
+        // seed order within a rank. (`cap` is the per-attempt cap from the widen loop.)
+        //
+        // Pooling (vs the earlier per-candidate-lemma cap) is load-bearing: a rank-dropped sense hiding
+        // in a sub-cap lemma bucket used to slip the cap. "does" pools 21 senses and the reranker ranks
+        // `DOE` (Department of Energy, reached via the plural stem `doe`) #19/drop, but `doe`'s 2-entry
+        // bucket ({deer, DOE}) is ≤ cap, so the per-lemma truncation never fired and DOE seeded a
+        // spurious noun-compound the reranker had already voted out. Pooling makes that verdict bite.
+        if let Some(cap) = cap {
+            if capped.len() > cap {
+                capped.sort_by_key(|(e, _)| sense_cap_key(e, ranks));
+                capped.truncate(cap);
+            }
+        }
+        let mut out = exempt;
+        out.extend(capped.iter().map(|(e, num)| with_noun_num(&e.item, num)));
         // Bare-nominal shift (core-en `bnp` + the kind-subject reading, D63 §8.5 Slice 3c): a
         // determiner-less plural/mass common noun ALSO seeds its `cat_kind` copula-subject edge
         // ("Genes are cell lines" → subclass_of) and its raised bare-argument NPs (`kind_of(t)`, §7.4).

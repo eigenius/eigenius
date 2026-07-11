@@ -1399,6 +1399,43 @@ fn light_verb_give_rise_to_is_a_multiword_transitive() {
 }
 
 #[test]
+fn post_nominal_alone_is_an_exclusive_focus_refinement() {
+    // D61: `alone` (bare post-nominal `cat_pp`) refines the head noun via the PpMod rule —
+    // `[cat_n(gene)] [cat_pp]` → `Σx:gene. sole(x)` — under ANY determiner. The exclusive
+    // `ontology:sole` operator is the "= only" reading. Validated on the demo lexicon (no reseed).
+    let (_layer, index) = index_over_bootstrap();
+    let f = index.parse("each gene alone affects HeLa", &Identity);
+    assert!(!f.is_empty(), "`each gene alone affects HeLa` parses");
+    let sem = pretty_term(f[0].sem());
+    assert!(
+        sem.contains("sole"),
+        "the subject carries the exclusive `sole` operator: {sem}"
+    );
+    // Baseline without `alone` still parses (no regression to the plain determiner path).
+    assert!(
+        !index.parse("each gene affects HeLa", &Identity).is_empty(),
+        "`each gene affects HeLa` still parses"
+    );
+
+    // The FULL structure of sentence 3 — `each [N] alone does not [V]` — over the demo lexicon:
+    // `alone` refines the subject noun AND declarative do-support + VP-negation compose, giving
+    // `∀x:(Σy:gene. sole(y)). ¬affect(x, hela)`. This is exactly the shape "each event alone does not
+    // lead to cell death" takes once the full lexicon is reseeded (WordNet event/lead in place of
+    // demo gene/affect). Witnesses the universal quantifier, the `sole` refinement, and the negation
+    // (`→ logic:False`) all in one reading.
+    let neg = index.parse("each gene alone does not affect HeLa", &Identity);
+    assert!(
+        !neg.is_empty(),
+        "`each gene alone does not affect HeLa` parses (alone + do-support + negation)"
+    );
+    let nsem = pretty_term(neg[0].sem());
+    assert!(
+        nsem.contains("sole") && nsem.contains("False"),
+        "faithful reading: universal over the sole-refined noun, negated: {nsem}"
+    );
+}
+
+#[test]
 fn comma_list_coordination_parses() {
     // D62 S0 slice 2: a comma is a conjunctive list separator, so a multi-item subject list builds
     // the (left-branching) member group the distributive subject rule consumes.
