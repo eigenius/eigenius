@@ -817,6 +817,26 @@ impl LexicalIndex {
             if entries.is_empty() {
                 continue;
             }
+            // **Collapse entries that denote the SAME concept — BEFORE the cap** (D63 cross-lexicon
+            // unification, `docs/notes/d63-wordnet-umls-concept-unification.md`).
+            //
+            // Same predicate [`Self::subsume_duplicates`] applies to the parsed forest — structural
+            // `Exp` equality on `(cat, sem)`, full IRIs, never `pretty_term` (which shortens an IRI
+            // to its local segment and could false-merge two distinct senses). Being an equality it
+            // **cannot drop a distinct reading**.
+            //
+            // What it earns is the ORDER. `subsume_duplicates` runs *after* parsing: by then the cap
+            // has already spent a slot on the duplicate and the chart has already built it. Run here,
+            // a duplicate never consumes a cap slot at all — which is the point, because with
+            // `SENSE_CAP = 2` a word gets only two. **Measured 2026-07-11 over the WRN page: 47% of
+            // ranked words spent BOTH slots on a UMLS/WordNet pair of the same concept** (`state`'s
+            // two survivors have verbatim-identical glosses).
+            //
+            // INERT until the lexica are unified: two entries from different lexica carry different
+            // class IRIs, so `(cat, sem)` differs and nothing collapses. The mass/count variants of
+            // one concept differ in `cat` (`cat_n(C, mass)` vs `cat_n(C, num_any)`) and are likewise
+            // preserved. O(n²) over one lemma's senses, which is small.
+            dedup_same_concept(&mut entries);
             // Adaptive-supertagging sense cap (GH #97): keep at most `cap` entries for this lemma —
             // by contextual plausibility first (the reranker's `ranks`, when present), falling back
             // to the static `sense_rank` (most-frequent first) — cutting WordNet polysemy at the
@@ -3442,6 +3462,51 @@ fn felicity_readback(val: &Val) -> Option<Exp> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| readback_val(0, val))).ok()
 }
 
+/// **Collapse entries that denote the SAME concept** — structural `Exp` equality on `(cat, sem)`,
+/// full IRIs (never `super::pretty_term`, which shortens an IRI to its local segment and could
+/// false-merge two distinct senses). Being an equality it **cannot drop a distinct reading**: a
+/// different category, or a different denotation, survives.
+///
+/// The same predicate `LexicalIndex::subsume_duplicates` applies to the parsed forest. What this
+/// earns is the **ORDER**: `subsume_duplicates` runs *after* parsing, by which point the sense cap
+/// has already spent a slot on the duplicate and the chart has already built it. Run at seed time —
+/// **before the cap** — a duplicate never consumes a cap slot at all, which is the point, because
+/// with `SENSE_CAP = 2` a word gets only two of them.
+///
+/// **Why it matters** (D63, `docs/notes/d63-wordnet-umls-concept-unification.md`): WordNet and UMLS
+/// each mint their own class for the same concept — `state` is `wn:n00024720` *and*
+/// `umlscui:C1442792`, with verbatim-identical glosses. Measured over the WRN page (2026-07-11),
+/// **47% of ranked words spent BOTH cap slots on such a cross-lexicon pair**, so no genuine
+/// alternative could seed at all.
+///
+/// **INERT until the lexica are unified**: two entries from different lexica carry different class
+/// IRIs, so `(cat, sem)` differs and nothing collapses. It fires only once the alignment layer makes
+/// both entries denote one class. O(n²) over one lemma's senses, which is small.
+fn dedup_same_concept(entries: &mut FormEntries) {
+    if entries.len() < 2 {
+        return;
+    }
+    let mut kept: Vec<usize> = Vec::with_capacity(entries.len());
+    for i in 0..entries.len() {
+        let dup = kept.iter().any(|&j| {
+            entries[j].item.cat() == entries[i].item.cat()
+                && entries[j].item.sem() == entries[i].item.sem()
+        });
+        if !dup {
+            kept.push(i);
+        }
+    }
+    if kept.len() == entries.len() {
+        return;
+    }
+    let mut i = 0usize;
+    entries.retain(|_| {
+        let keep = kept.contains(&i);
+        i += 1;
+        keep
+    });
+}
+
 fn sense_cap_key(e: &SeedEntry, ranks: Option<&BTreeMap<String, u32>>) -> (bool, u32, u32) {
     let ctx = e
         .sense
@@ -3514,7 +3579,87 @@ fn with_noun_num(it: &Item, num_name: &str) -> Item {
 
 #[cfg(test)]
 mod tests {
-    use super::tokenize;
+    use super::{dedup_same_concept, tokenize, FormEntries, SeedEntry};
+    use crate::dcg::parser::{Combinator, Cost, Item};
+    use crate::nbe::term::Exp;
+    use crate::ontology::Iri;
+
+    fn iri(s: &str) -> Exp {
+        Exp::EigonClass(Iri::parse(s).unwrap())
+    }
+
+    /// One entry: its category, its denotation, and the sense label it came in under.
+    fn entry(cat: Exp, sem: Exp, sense: &str) -> SeedEntry {
+        SeedEntry {
+            item: Item::from_parts(cat, sem, Combinator::Other, Cost::default()),
+            in_lexicon: None,
+            sense: Some(sense.to_string()),
+        }
+    }
+
+    #[test]
+    fn dedup_collapses_entries_that_denote_the_same_concept() {
+        // The shape the WordNet/UMLS alignment produces: two entries, one per lexicon, made to
+        // denote ONE class — identical (cat, sem), differing only in the sense label they arrived
+        // with. They must collapse to a single seed, so the pair consumes ONE cap slot, not two.
+        let cat = iri("urn:eigenius:lexicon:cat_np");
+        let concept = iri("urn:eigenius:wn:n00024720"); // `state`, the canonical class
+        let mut e: FormEntries = vec![
+            entry(cat.clone(), concept.clone(), "wn:state.n.00024720"),
+            entry(cat.clone(), concept.clone(), "umls:C1442792"), // redefined to the same class
+        ];
+        dedup_same_concept(&mut e);
+        assert_eq!(e.len(), 1, "one concept ⇒ one seed ⇒ one cap slot");
+        // Seed order is preserved: the FIRST occurrence survives, so the cap's ranking is unaffected.
+        assert_eq!(e[0].sense.as_deref(), Some("wn:state.n.00024720"));
+    }
+
+    #[test]
+    fn dedup_never_drops_a_distinct_reading() {
+        // The half that must not break. Being an EQUALITY on (cat, sem), the dedup can only remove
+        // an exact duplicate — never a real alternative.
+        let np = iri("urn:eigenius:lexicon:cat_np");
+        let n = iri("urn:eigenius:lexicon:cat_n");
+        let a = iri("urn:eigenius:wn:n00024720");
+        let b = iri("urn:eigenius:wn:n05696199");
+        let mut e: FormEntries = vec![
+            entry(np.clone(), a.clone(), "s1"),
+            entry(n.clone(), a.clone(), "s2"), // SAME concept, DIFFERENT category (e.g. mass vs count)
+            entry(np.clone(), b.clone(), "s3"), // SAME category, DIFFERENT concept
+        ];
+        dedup_same_concept(&mut e);
+        assert_eq!(
+            e.len(),
+            3,
+            "different cat, or different sem, is a distinct reading — keep it"
+        );
+    }
+
+    #[test]
+    fn dedup_is_inert_on_todays_lexicon() {
+        // Before alignment, WordNet and UMLS mint DIFFERENT classes for the same meaning — so
+        // (cat, sem) differs and nothing collapses. This is why the dedup can land on its own and be
+        // verified as a no-op against the reference measurement, ahead of the alignment layer.
+        let cat = iri("urn:eigenius:lexicon:cat_np");
+        let mut e: FormEntries = vec![
+            entry(
+                cat.clone(),
+                iri("urn:eigenius:wn:n00024720"),
+                "wn:state.n.00024720",
+            ),
+            entry(
+                cat.clone(),
+                iri("urn:eigenius:umlscui:C1442792"),
+                "umls:C1442792",
+            ),
+        ];
+        dedup_same_concept(&mut e);
+        assert_eq!(
+            e.len(),
+            2,
+            "un-aligned lexica: two classes, two seeds — nothing collapses"
+        );
+    }
 
     #[test]
     fn tokenize_lowercases_and_strips_edge_punctuation() {
