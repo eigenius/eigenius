@@ -96,3 +96,4 @@ ncbi-chain/
 experiments/*/results/
 experiments/lexicon-align/alignment.esl
 experiments/lexicon-align/candidates.jsonl
+notes.md

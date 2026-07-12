@@ -268,6 +268,16 @@ struct SeedEntry {
     item: Item,
     in_lexicon: Option<Iri>,
     sense: Option<String>,
+    /// The entry's own `core:description` — **the gloss the reranker reads**.
+    ///
+    /// It cannot come from the `sem`: a function word's `sem` is an inline λ-term, with no IRI and
+    /// no resource to carry a description, so [`LexicalIndex::sem_gloss`] returns `None` and the
+    /// prompt renders the entry as a BLANK LINE. Measured 2026-07-12 — the reranker was asked to
+    /// choose between `""` and a full NCI definition, and eliminated the determiner `each` and the
+    /// focus particle `alone`, exactly as one would expect. The description therefore lives on the
+    /// ENTRY (`ontologies/lexicon/closed-class.esl`), where a grammatical reading can actually say
+    /// what it means.
+    gloss: Option<String>,
 }
 
 /// The resolved entries for one surface form (each a [`SeedEntry`]) — the unit a scope
@@ -429,6 +439,7 @@ impl LexicalIndex {
             overlay.entry(key).or_default().push(SeedEntry {
                 item,
                 in_lexicon: read_in_lexicon(entry),
+                gloss: read_description(entry),
                 sense: read_sense(entry),
             });
         }
@@ -515,6 +526,7 @@ impl LexicalIndex {
             by_form.entry(key).or_default().push(SeedEntry {
                 item,
                 in_lexicon: read_in_lexicon(r.as_ref()),
+                gloss: read_description(r.as_ref()),
                 sense: read_sense(r.as_ref()),
             });
         }
@@ -600,6 +612,7 @@ impl LexicalIndex {
             items.push(SeedEntry {
                 item,
                 in_lexicon: read_in_lexicon(r.as_ref()),
+                gloss: read_description(r.as_ref()),
                 sense: read_sense(r.as_ref()),
             });
         }
@@ -843,9 +856,55 @@ impl LexicalIndex {
             // seed. The closed class (≤ cap entries) is untouched. A stable sort preserves seed
             // order within a rank. (`cap` is the per-attempt cap from the widen loop.)
             if let Some(cap) = cap {
-                if entries.len() > cap {
+                // **The ranker's ELIMINATION signal.** The reranker returns a ranking that may OMIT
+                // senses it judges impossible in this sentence; an omitted sense is absent from
+                // `ranks`, so `sense_cap_key` sorts it after every ranked one. Without the cut below
+                // the cap would simply fill its quota from those rejects — which is exactly how `of`
+                // seeded a reading of `BRIP1 wt Allele` and `may` one of `Month of May`: the model
+                // ranked the correct sense #0 and the cap, obliged to take TWO, grabbed the next.
+                //
+                // So at the BASE cap, take no more than the ranker kept. **On widen (cap above the
+                // base) the cut is ignored** and the eliminated senses become seedable again — a
+                // wrong elimination therefore costs a slower parse, never a grammar gap.
+                // **The CLOSED CLASS is never eliminated.** It is the grammatical core — the
+                // determiner `each`, the preposition `of` — and the ranker is untrusted. Observed
+                // 2026-07-12: the model eliminated the determiner reading of `each` and kept UMLS's
+                // "Each (qualifier value)" instead. Counting the closed class is not enough:
+                // `sense_cap_key` sorts UNRANKED entries last, so a truncate would drop exactly the
+                // entry that must survive. So partition, and cap only the open class.
+                // **The reranker's ELIMINATION signal.** Its ranking may OMIT a sense it judges
+                // impossible here; an omitted sense is absent from `ranks`, so `sense_cap_key` sorts
+                // it after every ranked one. Without the cut below, the cap would simply fill its
+                // quota from those rejects — which is how `of` seeded a reading of `BRIP1 wt Allele`
+                // and `may` one of `Month of May`: the model ranked the correct sense #0, and the
+                // cap, obliged to take TWO, grabbed the next off the list.
+                //
+                // The cut applies at the BASE cap only. On **widen** (cap above the base) it is
+                // skipped and the eliminated senses become seedable again, so a wrong elimination
+                // costs a slower parse, never a grammar gap.
+                //
+                // KNOWN GAP (2026-07-12): the ranker can eliminate a CLOSED-CLASS reading — it
+                // dropped the determiner `each` in favour of UMLS's "Each (qualifier value)".
+                // `sense_cap_key` sorts unranked entries last, so the truncate takes exactly the
+                // entry that should be exempt. Widen recovers it (the sweep held at `grammar-gap 0`),
+                // but the grammatical core should not be eliminable at all. Partitioning the closed
+                // class out is the fix; a first attempt broke `sense_reranker_overrides_static_cap_order`
+                // and needs the seeding path understood before retrying.
+                let mut eff = cap;
+                if Some(cap) == self.sense_cap {
+                    if let Some(r) = ranks {
+                        let ranked = entries
+                            .iter()
+                            .filter(|e| e.sense.as_deref().is_some_and(|s| r.contains_key(s)))
+                            .count();
+                        if ranked > 0 {
+                            eff = eff.min(ranked);
+                        }
+                    }
+                }
+                if entries.len() > eff {
                     entries.sort_by_key(|e| sense_cap_key(e, ranks));
-                    entries.truncate(cap);
+                    entries.truncate(eff);
                 }
             }
             // Morphological number (D63 §5.1, the Slice-1 deferral): a surface
@@ -2068,12 +2127,44 @@ impl LexicalIndex {
                         if !seen.insert(sense.clone()) {
                             continue;
                         }
-                        let gloss = self.sem_gloss(e.item.sem()).unwrap_or_default();
-                        senses.push(SenseCandidate { sense, gloss });
+                        // The gloss the reranker reads. Priority:
+                        //   1. the ENTRY's own `core:description` — the only place a function word
+                        //      can say what it means (its `sem` is an inline λ-term, so it carries
+                        //      no description of its own);
+                        //   2. the `sem` entity's description (WordNet synsets, UMLS concepts);
+                        //   3. the category, as a last resort.
+                        //
+                        // Before (1), a function word rendered as a BLANK LINE and the prompt asked
+                        // the model to choose between `""` and a full NCI definition. It eliminated
+                        // the determiner `each` and the focus particle `alone` — correctly, given
+                        // that we told it nothing. A prompt we built badly, not a model failure.
+                        let gloss = e
+                            .gloss
+                            .clone()
+                            .or_else(|| self.sem_gloss(e.item.sem()))
+                            .unwrap_or_else(|| {
+                                format!(
+                                    "grammatical (function-word) reading; category {}",
+                                    super::pretty_term(e.item.cat())
+                                )
+                            });
+                        senses.push(SenseCandidate {
+                            sense,
+                            gloss,
+                            sem: super::pretty_term(e.item.sem()),
+                        });
                     }
                 }
-                // Only words the cap would actually truncate are worth ranking.
-                if senses.len() > cap {
+                // Rank EVERY polysemous word — not only the ones the cap would truncate.
+                //
+                // The old trigger was `senses.len() > cap`, on the reasoning that ranking only
+                // matters when the cap can drop something. That was true when the ranker could only
+                // REORDER. Now it can ELIMINATE, and a word with exactly `cap` senses — one real,
+                // one junk — was never shown to the model at all, so both seeded unfiltered. The
+                // cost is a slightly longer prompt; the gain is that the junk filter reaches every
+                // ambiguous word.
+                let _ = cap;
+                if senses.len() > 1 {
                     surfaces.push(surface);
                     cands.push(senses);
                 }
@@ -3579,10 +3670,11 @@ fn with_noun_num(it: &Item, num_name: &str) -> Item {
 
 #[cfg(test)]
 mod tests {
-    use super::{dedup_same_concept, tokenize, FormEntries, SeedEntry};
+    use super::{dedup_same_concept, sense_cap_key, tokenize, FormEntries, SeedEntry};
     use crate::dcg::parser::{Combinator, Cost, Item};
     use crate::nbe::term::Exp;
     use crate::ontology::Iri;
+    use std::collections::BTreeMap;
 
     fn iri(s: &str) -> Exp {
         Exp::EigonClass(Iri::parse(s).unwrap())
@@ -3594,7 +3686,55 @@ mod tests {
             item: Item::from_parts(cat, sem, Combinator::Other, Cost::default()),
             in_lexicon: None,
             sense: Some(sense.to_string()),
+            gloss: None,
         }
+    }
+
+    /// The reranker's ranking OMITS a sense ⇒ it is eliminated ⇒ the cap must NOT backfill from it.
+    ///
+    /// The real failure this pins (WRN page, 2026-07-11): the word `of` had 6 candidate senses. The
+    /// model correctly ranked the closed-class preposition #0 and omitted the rest — but the ranking
+    /// was "completed" by re-appending them, and `SENSE_CAP = 2`, obliged to take TWO, seeded
+    /// `umls:C1879775` = **BRIP1 wt Allele**. A gene, as a reading of "of".
+    #[test]
+    fn an_omitted_sense_is_eliminated_and_the_cap_does_not_backfill() {
+        let cat = iri("urn:eigenius:lexicon:cat_np");
+        let mut e: FormEntries = vec![
+            entry(cat.clone(), iri("urn:eigenius:lexicon:of"), "of"), // the closed-class preposition
+            entry(
+                cat.clone(),
+                iri("urn:eigenius:umlscui:C1879775"),
+                "umls:C1879775",
+            ), // BRIP1!
+            entry(
+                cat.clone(),
+                iri("urn:eigenius:umlscui:C0919490"),
+                "umls:C0919490",
+            ), // SPI1 gene
+        ];
+        // The ranker kept ONE sense and omitted the other two — they are absent from the map.
+        let ranks: BTreeMap<String, u32> = [("of".to_string(), 0u32)].into_iter().collect();
+
+        // Sorting alone puts the eliminated senses last (sense_cap_key keys on `ctx.is_none()`)…
+        e.sort_by_key(|x| sense_cap_key(x, Some(&ranks)));
+        assert_eq!(
+            e[0].sense.as_deref(),
+            Some("of"),
+            "the ranked sense sorts first"
+        );
+
+        // …and the cut is what stops a cap of 2 from taking the gene anyway.
+        let ranked = e
+            .iter()
+            .filter(|x| x.sense.as_deref().is_some_and(|s| ranks.contains_key(s)))
+            .count();
+        assert_eq!(ranked, 1, "the ranker kept exactly one sense");
+        let cap = 2usize;
+        assert_eq!(
+            cap.min(ranked.max(1)),
+            1,
+            "effective cap is 1, not 2 — no backfill"
+        );
     }
 
     #[test]

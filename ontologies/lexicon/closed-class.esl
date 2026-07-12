@@ -99,6 +99,7 @@ resource lexicon:wh_which_sem : lexicon:SemTerm {
 // what — subject wh, unrestricted. `cat_q(Entity)/(S\NP_Entity)`: takes the VP on
 // its right, yields the Entity-ranged answer-property.
 resource lexicon:what_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: interrogative/relative pronoun.";
     lexicon:form     = "what";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_q(lexicon:Entity), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:wh_what_sem;
@@ -111,6 +112,7 @@ resource lexicon:what_subj : lexicon:LexicalEntry {
 // The VP's `S\NP_Entity` fills the `S\NP_T` slot by the contravariant functor
 // subsumption (§8.2 item 4), so `Entity`-typed verbs answer `which gene` queries.
 resource lexicon:which_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: relative pronoun introducing a relative clause ('genes which are essential').";
     lexicon:form     = "which";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:cat_q(T), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(T, lexicon:num_any)))) );
     lexicon:sem      = lexicon:wh_which_sem;
@@ -128,6 +130,7 @@ resource lexicon:which_subj : lexicon:LexicalEntry {
 
 // what — object wh, unrestricted. `cat_q(Entity)/(S[q]/NP_Entity)`.
 resource lexicon:what_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: interrogative/relative pronoun.";
     lexicon:form     = "what";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_q(lexicon:Entity), lexicon:fwd(lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:wh_what_sem;
@@ -140,6 +143,7 @@ resource lexicon:what_obj : lexicon:LexicalEntry {
 // T-ranged answer-property. The composed `S[q]/NP_Entity` fills the `S[q]/NP_T`
 // slot by the contravariant functor subsumption (§8.2 item 4).
 resource lexicon:which_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: relative pronoun introducing a relative clause ('genes which are essential').";
     lexicon:form     = "which";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:cat_q(T), lexicon:fwd(lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))) );
     lexicon:sem      = lexicon:wh_which_sem;
@@ -166,6 +170,7 @@ resource lexicon:do_aux_sem : lexicon:SemTerm {
 
 // does — present, 3sg do-support.
 resource lexicon:does_aux : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular DO-support auxiliary, carrying tense in negation ('does not lead to cell death').";
     lexicon:form     = "does";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
     lexicon:sem      = lexicon:do_aux_sem;
@@ -175,6 +180,7 @@ resource lexicon:does_aux : lexicon:LexicalEntry {
 }
 // do — present, non-3sg do-support.
 resource lexicon:do_aux : lexicon:LexicalEntry {
+    core:description = "grammatical: DO-support auxiliary, carrying tense in negation and questions ('do not lead').";
     lexicon:form     = "do";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:pl)) );
     lexicon:sem      = lexicon:do_aux_sem;
@@ -184,6 +190,7 @@ resource lexicon:do_aux : lexicon:LexicalEntry {
 }
 // did — past do-support (tense erased in v1).
 resource lexicon:did_aux : lexicon:LexicalEntry {
+    core:description = "grammatical: past DO-support auxiliary ('did not respond').";
     lexicon:form     = "did";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:do_aux_sem;
@@ -208,6 +215,7 @@ resource lexicon:copula_sem : lexicon:SemTerm {
 }
 // is — copula, 3sg.
 resource lexicon:is_copula : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular present of BE — copula or auxiliary.";
     lexicon:form     = "is";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -217,6 +225,7 @@ resource lexicon:is_copula : lexicon:LexicalEntry {
 }
 // are — copula, plural / non-3sg.
 resource lexicon:are_copula : lexicon:LexicalEntry {
+    core:description = "grammatical: plural present of BE — copula or auxiliary.";
     lexicon:form     = "are";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -229,6 +238,7 @@ resource lexicon:are_copula : lexicon:LexicalEntry {
 // finiteness. The past copula KEEPS number agreement (was = sg, were = pl) — unlike past lexical
 // verbs, which are number-agnostic. Tense is erased by ⟦·⟧, so the sem is the same vacuous `λP.P`.
 resource lexicon:was_copula : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular past of BE — copula or auxiliary.";
     lexicon:form     = "was";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -237,6 +247,7 @@ resource lexicon:was_copula : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:were_copula : lexicon:LexicalEntry {
+    core:description = "grammatical: plural past of BE — copula or auxiliary.";
     lexicon:form     = "were";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -261,6 +272,7 @@ resource lexicon:pred_nominal_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:a_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite article/determiner introducing a singular noun ('a gene').";
     lexicon:form     = "a";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:pred_nominal_sem;
@@ -282,6 +294,7 @@ resource lexicon:kind_nominal_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:are_kind : lexicon:LexicalEntry {
+    core:description = "grammatical: plural present of BE — copula or auxiliary.";
     lexicon:form     = "are";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_kind)) );
     lexicon:sem      = lexicon:kind_nominal_sem;
@@ -307,6 +320,7 @@ resource lexicon:neg_sem : lexicon:SemTerm {
 }
 // not — over a base verbal VP ("does not affect …").
 resource lexicon:not_vp : lexicon:LexicalEntry {
+    core:description = "grammatical: sentential negation ('does not lead to').";
     lexicon:form     = "not";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:neg_sem;
@@ -316,6 +330,7 @@ resource lexicon:not_vp : lexicon:LexicalEntry {
 }
 // not — over an adjectival predicate ("is not primary").
 resource lexicon:not_adj : lexicon:LexicalEntry {
+    core:description = "grammatical: sentential negation ('does not lead to').";
     lexicon:form     = "not";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:neg_sem;
@@ -325,6 +340,7 @@ resource lexicon:not_adj : lexicon:LexicalEntry {
 }
 // Declarative do-support (verbal negation / emphatic) — finiteness-lifting `λP.P`.
 resource lexicon:does_decl : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular DO-support auxiliary, carrying tense in negation ('does not lead to cell death').";
     lexicon:form     = "does";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -333,6 +349,7 @@ resource lexicon:does_decl : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:do_decl : lexicon:LexicalEntry {
+    core:description = "grammatical: DO-support auxiliary, carrying tense in negation and questions ('do not lead').";
     lexicon:form     = "do";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -341,6 +358,7 @@ resource lexicon:do_decl : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:did_decl : lexicon:LexicalEntry {
+    core:description = "grammatical: past DO-support auxiliary ('did not respond').";
     lexicon:form     = "did";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -363,6 +381,7 @@ resource lexicon:did_decl : lexicon:LexicalEntry {
 
 // Progressive `be` (over `ger`): is/are (present), was/were (past — tense erased).
 resource lexicon:is_prog : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular present of BE — copula or auxiliary.";
     lexicon:form     = "is";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -371,6 +390,7 @@ resource lexicon:is_prog : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:are_prog : lexicon:LexicalEntry {
+    core:description = "grammatical: plural present of BE — copula or auxiliary.";
     lexicon:form     = "are";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -379,6 +399,7 @@ resource lexicon:are_prog : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:was_prog : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular past of BE — copula or auxiliary.";
     lexicon:form     = "was";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -387,6 +408,7 @@ resource lexicon:was_prog : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:were_prog : lexicon:LexicalEntry {
+    core:description = "grammatical: plural past of BE — copula or auxiliary.";
     lexicon:form     = "were";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -397,6 +419,7 @@ resource lexicon:were_prog : lexicon:LexicalEntry {
 
 // Perfect `have` (over `pss`): has/have (present), had (past — tense erased).
 resource lexicon:has_perf : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular present of HAVE — perfect auxiliary.";
     lexicon:form     = "has";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -405,6 +428,7 @@ resource lexicon:has_perf : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:have_perf : lexicon:LexicalEntry {
+    core:description = "grammatical: present of HAVE — perfect auxiliary.";
     lexicon:form     = "have";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -413,6 +437,7 @@ resource lexicon:have_perf : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:had_perf : lexicon:LexicalEntry {
+    core:description = "grammatical: past of HAVE — perfect auxiliary.";
     lexicon:form     = "had";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -443,6 +468,7 @@ resource lexicon:passive_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:is_passive : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular present of BE — copula or auxiliary.";
     lexicon:form     = "is";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:passive_sem;
@@ -451,6 +477,7 @@ resource lexicon:is_passive : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:are_passive : lexicon:LexicalEntry {
+    core:description = "grammatical: plural present of BE — copula or auxiliary.";
     lexicon:form     = "are";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:passive_sem;
@@ -459,6 +486,7 @@ resource lexicon:are_passive : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:was_passive : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular past of BE — copula or auxiliary.";
     lexicon:form     = "was";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:passive_sem;
@@ -467,6 +495,7 @@ resource lexicon:was_passive : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:were_passive : lexicon:LexicalEntry {
+    core:description = "grammatical: plural past of BE — copula or auxiliary.";
     lexicon:form     = "were";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:passive_sem;
@@ -492,6 +521,7 @@ resource lexicon:by_agent_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:by_agent : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking the agent of a passive ('represented by these data').";
     lexicon:form     = "by";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:by_agent_sem;
@@ -505,6 +535,7 @@ resource lexicon:by_agent : lexicon:LexicalEntry {
 // `by`-phrase builds, never the active `pss` form — so it lifts "affected by HeLa" but
 // not "affected BRCA1".
 resource lexicon:is_passive_by : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular present of BE — copula or auxiliary.";
     lexicon:form     = "is";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -513,6 +544,7 @@ resource lexicon:is_passive_by : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:are_passive_by : lexicon:LexicalEntry {
+    core:description = "grammatical: plural present of BE — copula or auxiliary.";
     lexicon:form     = "are";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -521,6 +553,7 @@ resource lexicon:are_passive_by : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:was_passive_by : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular past of BE — copula or auxiliary.";
     lexicon:form     = "was";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -529,6 +562,7 @@ resource lexicon:was_passive_by : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:were_passive_by : lexicon:LexicalEntry {
+    core:description = "grammatical: plural past of BE — copula or auxiliary.";
     lexicon:form     = "were";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -562,6 +596,7 @@ resource lexicon:nec_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:can_modal : lexicon:LexicalEntry {
+    core:description = "grammatical: modal auxiliary of possibility/ability.";
     lexicon:form     = "can";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:poss_sem;
@@ -570,6 +605,7 @@ resource lexicon:can_modal : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:could_modal : lexicon:LexicalEntry {
+    core:description = "grammatical: modal auxiliary of possibility (past/hypothetical).";
     lexicon:form     = "could";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:poss_sem;
@@ -578,6 +614,7 @@ resource lexicon:could_modal : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:may_modal : lexicon:LexicalEntry {
+    core:description = "grammatical: modal auxiliary of possibility ('WRN dependency may require lineages').";
     lexicon:form     = "may";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:poss_sem;
@@ -586,6 +623,7 @@ resource lexicon:may_modal : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:might_modal : lexicon:LexicalEntry {
+    core:description = "grammatical: modal auxiliary of possibility (weaker/hypothetical).";
     lexicon:form     = "might";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:poss_sem;
@@ -594,6 +632,7 @@ resource lexicon:might_modal : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:must_modal : lexicon:LexicalEntry {
+    core:description = "grammatical: modal auxiliary of necessity.";
     lexicon:form     = "must";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:nec_sem;
@@ -621,6 +660,7 @@ resource lexicon:should_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:will_modal : lexicon:LexicalEntry {
+    core:description = "grammatical: modal auxiliary of future tense.";
     lexicon:form     = "will";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:will_sem;
@@ -629,6 +669,7 @@ resource lexicon:will_modal : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:would_modal : lexicon:LexicalEntry {
+    core:description = "grammatical: modal auxiliary of conditional/hypothetical mood.";
     lexicon:form     = "would";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:would_sem;
@@ -637,6 +678,7 @@ resource lexicon:would_modal : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:should_modal : lexicon:LexicalEntry {
+    core:description = "grammatical: modal auxiliary of obligation or expectation.";
     lexicon:form     = "should";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:should_sem;
@@ -658,6 +700,7 @@ resource lexicon:that_comp_sem : lexicon:SemTerm {
     lexicon:term = type_expr( ( fun (p : Prop) => p : Prop -> Prop ) );
 }
 resource lexicon:that_comp : lexicon:LexicalEntry {
+    core:description = "grammatical: singular distal demonstrative determiner, or the complementiser introducing a clause ('showed that WRN is essential').";
     lexicon:form     = "that";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_cp, lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
     lexicon:sem      = lexicon:that_comp_sem;
@@ -686,6 +729,7 @@ resource lexicon:if_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:if_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: conditional subordinator ('if the gene is deleted').";
     lexicon:form     = "if";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
     lexicon:sem      = lexicon:if_sem;
@@ -710,6 +754,7 @@ resource lexicon:but_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:but_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: contrastive coordinating conjunction.";
     lexicon:form     = "but";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
     lexicon:sem      = lexicon:but_sem;
@@ -732,6 +777,7 @@ resource lexicon:anaphor_sem : lexicon:SemTerm {
     lexicon:term = type_expr( lexicon:anaphor );
 }
 resource lexicon:it_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular pronoun.";
     lexicon:form     = "it";
     lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:sg) );
     lexicon:sem      = lexicon:anaphor_sem;
@@ -740,6 +786,7 @@ resource lexicon:it_pron : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:they_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person plural subject pronoun.";
     lexicon:form     = "they";
     lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:pl) );
     lexicon:sem      = lexicon:anaphor_sem;
@@ -758,6 +805,7 @@ resource lexicon:speaker_sem : lexicon:SemTerm {
     lexicon:term = type_expr( lexicon:speaker );
 }
 resource lexicon:we_pron : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person plural subject pronoun.";
     lexicon:form     = "we";
     lexicon:cat      = type_expr( lexicon:cat_np(lexicon:Entity, lexicon:pl) );
     lexicon:sem      = lexicon:speaker_sem;
@@ -796,6 +844,7 @@ resource lexicon:poss_obj_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:its_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular possessive determiner ('its function').";
     lexicon:form     = "its";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:poss_subj_sem;
@@ -804,6 +853,7 @@ resource lexicon:its_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:its_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular possessive determiner ('its function').";
     lexicon:form     = "its";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:poss_obj_sem;
@@ -812,6 +862,7 @@ resource lexicon:its_obj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:their_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person plural possessive determiner ('their survival').";
     lexicon:form     = "their";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
     lexicon:sem      = lexicon:poss_subj_sem;
@@ -820,6 +871,7 @@ resource lexicon:their_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:their_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person plural possessive determiner ('their survival').";
     lexicon:form     = "their";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:poss_obj_sem;
@@ -909,6 +961,7 @@ resource lexicon:nmod_within_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:between_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a relation between two things.";
     lexicon:form     = "between";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:prep_between_sem;
@@ -917,6 +970,7 @@ resource lexicon:between_prep : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:within_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking containment ('within the region').";
     lexicon:form     = "within";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:prep_within_sem;
@@ -925,6 +979,7 @@ resource lexicon:within_prep : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:between_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a relation between two things.";
     lexicon:form     = "between";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:nmod_between_sem;
@@ -933,6 +988,7 @@ resource lexicon:between_nmod : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:within_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking containment ('within the region').";
     lexicon:form     = "within";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:nmod_within_sem;
@@ -941,6 +997,7 @@ resource lexicon:within_nmod : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:in_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking location or containment ('in colon cancers').";
     lexicon:form     = "in";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:prep_in_sem;
@@ -949,6 +1006,7 @@ resource lexicon:in_prep : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:for_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking purpose or beneficiary ('essential for growth').";
     lexicon:form     = "for";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:prep_for_sem;
@@ -957,6 +1015,7 @@ resource lexicon:for_prep : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:to_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a goal or recipient, or the infinitival marker ('lead to death', 'to test').";
     lexicon:form     = "to";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:prep_to_sem;
@@ -965,6 +1024,7 @@ resource lexicon:to_prep : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:with_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking accompaniment or instrument ('cancers with MSI').";
     lexicon:form     = "with";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:prep_with_sem;
@@ -973,6 +1033,7 @@ resource lexicon:with_prep : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:on_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking position or dependence ('depends on').";
     lexicon:form     = "on";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:prep_on_sem;
@@ -981,6 +1042,7 @@ resource lexicon:on_prep : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:from_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking origin or source ('arise from mutations').";
     lexicon:form     = "from";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:prep_from_sem;
@@ -1035,6 +1097,7 @@ resource lexicon:nmod_from_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:of_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a genitive/partitive relation ('depletion of WRN').";
     lexicon:form     = "of";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:nmod_of_sem;
@@ -1043,6 +1106,7 @@ resource lexicon:of_nmod : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:in_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking location or containment ('in colon cancers').";
     lexicon:form     = "in";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:nmod_in_sem;
@@ -1051,6 +1115,7 @@ resource lexicon:in_nmod : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:for_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking purpose or beneficiary ('essential for growth').";
     lexicon:form     = "for";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:nmod_for_sem;
@@ -1059,6 +1124,7 @@ resource lexicon:for_nmod : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:with_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking accompaniment or instrument ('cancers with MSI').";
     lexicon:form     = "with";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:nmod_with_sem;
@@ -1067,6 +1133,7 @@ resource lexicon:with_nmod : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:on_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking position or dependence ('depends on').";
     lexicon:form     = "on";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:nmod_on_sem;
@@ -1075,6 +1142,7 @@ resource lexicon:on_nmod : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:from_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking origin or source ('arise from mutations').";
     lexicon:form     = "from";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:nmod_from_sem;
@@ -1089,6 +1157,7 @@ resource lexicon:nmod_to_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:to_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a goal or recipient, or the infinitival marker ('lead to death', 'to test').";
     lexicon:form     = "to";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:nmod_to_sem;
@@ -1117,6 +1186,7 @@ resource lexicon:sole_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:alone_focus : lexicon:LexicalEntry {
+    core:description = "grammatical: exclusive focus particle — by itself, to the exclusion of others; 'X alone' means 'only X' ('each event alone').";
     lexicon:form     = "alone";
     lexicon:cat      = type_expr( lexicon:cat_pp );
     lexicon:sem      = lexicon:sole_sem;
@@ -1135,6 +1205,7 @@ resource lexicon:than_sem : lexicon:SemTerm {
     lexicon:term = type_expr( ( fun (y : lexicon:Entity) => y : lexicon:Entity -> lexicon:Entity ) );
 }
 resource lexicon:than_marker : lexicon:LexicalEntry {
+    core:description = "grammatical: comparative complementiser ('larger than').";
     lexicon:form     = "than";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_than, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:than_sem;
@@ -1157,6 +1228,7 @@ resource lexicon:greater_cmp_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:greater_cmp : lexicon:LexicalEntry {
+    core:description = "grammatical: comparative degree marker of a larger degree.";
     lexicon:form     = "greater";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:bwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_pp_than), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_measure))) );
     lexicon:sem      = lexicon:greater_cmp_sem;
@@ -1173,6 +1245,7 @@ resource lexicon:less_cmp_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:less_cmp : lexicon:LexicalEntry {
+    core:description = "grammatical: comparative degree marker of a lesser degree.";
     lexicon:form     = "less";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:bwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_pp_than), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_measure))) );
     lexicon:sem      = lexicon:less_cmp_sem;
@@ -1193,6 +1266,7 @@ resource lexicon:fewer_card_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:fewer_card : lexicon:LexicalEntry {
+    core:description = "grammatical: comparative quantifier over count nouns.";
     lexicon:form     = "fewer";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_pp_than), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:fewer_card_sem;
@@ -1208,6 +1282,7 @@ resource lexicon:more_card_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:more_card : lexicon:LexicalEntry {
+    core:description = "grammatical: comparative degree marker or quantifier ('more sensitive', 'more cells').";
     lexicon:form     = "more";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_pp_than), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:more_card_sem;
@@ -1225,6 +1300,7 @@ resource lexicon:more_deg_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:more_deg : lexicon:LexicalEntry {
+    core:description = "grammatical: comparative degree marker or quantifier ('more sensitive', 'more cells').";
     lexicon:form     = "more";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than), lexicon:cat_measure) );
     lexicon:sem      = lexicon:more_deg_sem;
@@ -1240,6 +1316,7 @@ resource lexicon:less_deg_sem : lexicon:SemTerm {
     );
 }
 resource lexicon:less_deg : lexicon:LexicalEntry {
+    core:description = "grammatical: comparative degree marker of a lesser degree.";
     lexicon:form     = "less";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than), lexicon:cat_measure) );
     lexicon:sem      = lexicon:less_deg_sem;
@@ -1263,6 +1340,7 @@ resource lexicon:argmarker_sem : lexicon:SemTerm {
     lexicon:term = type_expr( ( fun (y : lexicon:Entity) => y : lexicon:Entity -> lexicon:Entity ) );
 }
 resource lexicon:to_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a goal or recipient, or the infinitival marker ('lead to death', 'to test').";
     lexicon:form     = "to";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_to), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
@@ -1271,6 +1349,7 @@ resource lexicon:to_arg : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:from_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking origin or source ('arise from mutations').";
     lexicon:form     = "from";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_from), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
@@ -1279,6 +1358,7 @@ resource lexicon:from_arg : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:on_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking position or dependence ('depends on').";
     lexicon:form     = "on";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_on), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
@@ -1287,6 +1367,7 @@ resource lexicon:on_arg : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:with_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking accompaniment or instrument ('cancers with MSI').";
     lexicon:form     = "with";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_with), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
@@ -1295,6 +1376,7 @@ resource lexicon:with_arg : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:in_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking location or containment ('in colon cancers').";
     lexicon:form     = "in";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_in), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
@@ -1303,6 +1385,7 @@ resource lexicon:in_arg : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:for_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking purpose or beneficiary ('essential for growth').";
     lexicon:form     = "for";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_for), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
@@ -1311,6 +1394,7 @@ resource lexicon:for_arg : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:at_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a point in space or time.";
     lexicon:form     = "at";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_at), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
@@ -1319,6 +1403,7 @@ resource lexicon:at_arg : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:upon_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking position or dependence.";
     lexicon:form     = "upon";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_upon), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
@@ -1327,6 +1412,7 @@ resource lexicon:upon_arg : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:about_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a topic.";
     lexicon:form     = "about";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_about), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
@@ -1335,6 +1421,7 @@ resource lexicon:about_arg : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:against_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking opposition.";
     lexicon:form     = "against";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_against), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
@@ -1343,6 +1430,7 @@ resource lexicon:against_arg : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:into_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking motion or transformation.";
     lexicon:form     = "into";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_into), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
@@ -1357,6 +1445,7 @@ resource lexicon:into_arg : lexicon:LexicalEntry {
 // `FrameKind::Essive`) binds it as the verb's third argument. Distinct `prep_as` so a plain
 // transitive or single-PP verb does NOT accept a stray `as Y`.
 resource lexicon:as_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition/complementiser marking a role or comparison ('identified as a target').";
     lexicon:form     = "as";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_as), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:argmarker_sem;
@@ -1373,6 +1462,7 @@ resource lexicon:as_arg : lexicon:LexicalEntry {
 
 // every — universal, singular.
 resource lexicon:every_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: universal determiner — predicates of all members of a group ('every cell').";
     lexicon:form     = "every";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:forall_sem;
@@ -1381,6 +1471,7 @@ resource lexicon:every_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:every_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: universal determiner — predicates of all members of a group ('every cell').";
     lexicon:form     = "every";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_forall_sem;
@@ -1390,6 +1481,7 @@ resource lexicon:every_obj : lexicon:LexicalEntry {
 }
 // each — universal, singular (≈ every truth-conditionally).
 resource lexicon:each_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: distributive universal determiner — predicates of every member of a group, taken one at a time ('each gene was tested').";
     lexicon:form     = "each";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:forall_sem;
@@ -1399,6 +1491,7 @@ resource lexicon:each_subj : lexicon:LexicalEntry {
 }
 // all — universal, plural.
 resource lexicon:all_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: universal determiner/quantifier over a whole group ('all cells').";
     lexicon:form     = "all";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
     lexicon:sem      = lexicon:forall_sem;
@@ -1407,6 +1500,7 @@ resource lexicon:all_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:all_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: universal determiner/quantifier over a whole group ('all cells').";
     lexicon:form     = "all";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_forall_sem;
@@ -1416,6 +1510,7 @@ resource lexicon:all_obj : lexicon:LexicalEntry {
 }
 // a — existential, singular.
 resource lexicon:a_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite article/determiner introducing a singular noun ('a gene').";
     lexicon:form     = "a";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1424,6 +1519,7 @@ resource lexicon:a_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:a_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite article/determiner introducing a singular noun ('a gene').";
     lexicon:form     = "a";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1433,6 +1529,7 @@ resource lexicon:a_obj : lexicon:LexicalEntry {
 }
 // an — the pre-vocalic spelling of the indefinite article `a` (same sense/semantics).
 resource lexicon:an_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite article/determiner before a vowel sound ('an event').";
     lexicon:form     = "an";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1441,6 +1538,7 @@ resource lexicon:an_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:an_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite article/determiner before a vowel sound ('an event').";
     lexicon:form     = "an";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1450,6 +1548,7 @@ resource lexicon:an_obj : lexicon:LexicalEntry {
 }
 // some — existential, singular.
 resource lexicon:some_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: existential determiner — at least one member ('some cells died').";
     lexicon:form     = "some";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1458,6 +1557,7 @@ resource lexicon:some_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:some_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: existential determiner — at least one member ('some cells died').";
     lexicon:form     = "some";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1467,6 +1567,7 @@ resource lexicon:some_obj : lexicon:LexicalEntry {
 }
 // no — negative, singular.
 resource lexicon:no_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: negative determiner — not any ('no cells survived').";
     lexicon:form     = "no";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:no_sem;
@@ -1475,6 +1576,7 @@ resource lexicon:no_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:no_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: negative determiner — not any ('no cells survived').";
     lexicon:form     = "no";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_no_sem;
@@ -1494,6 +1596,7 @@ resource lexicon:no_obj : lexicon:LexicalEntry {
 // like `a`). `that` here is the demonstrative determiner; it coexists with the existing
 // relativizer/complementizer `that` (competing chart edges, resolved downstream).
 resource lexicon:the_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: definite article/determiner ('the gene').";
     lexicon:form     = "the";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1502,6 +1605,7 @@ resource lexicon:the_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:the_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: definite article/determiner ('the gene').";
     lexicon:form     = "the";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1514,6 +1618,7 @@ resource lexicon:the_obj : lexicon:LexicalEntry {
 // agreement (a high-frequency gap in real prose — `the X(plural)` is ubiquitous). Same first-cut
 // existential treatment as the singular `the` and the plural demonstratives `these`/`those`.
 resource lexicon:the_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: definite article/determiner ('the gene').";
     lexicon:form     = "the";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1522,6 +1627,7 @@ resource lexicon:the_subj_pl : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:the_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: definite article/determiner ('the gene').";
     lexicon:form     = "the";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1530,6 +1636,7 @@ resource lexicon:the_obj_pl : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:this_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: singular proximal demonstrative determiner ('this gene').";
     lexicon:form     = "this";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1538,6 +1645,7 @@ resource lexicon:this_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:this_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: singular proximal demonstrative determiner ('this gene').";
     lexicon:form     = "this";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1546,6 +1654,7 @@ resource lexicon:this_obj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:that_dem_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: singular distal demonstrative determiner, or the complementiser introducing a clause ('showed that WRN is essential').";
     lexicon:form     = "that";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1554,6 +1663,7 @@ resource lexicon:that_dem_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:that_dem_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: singular distal demonstrative determiner, or the complementiser introducing a clause ('showed that WRN is essential').";
     lexicon:form     = "that";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1565,6 +1675,7 @@ resource lexicon:that_dem_obj : lexicon:LexicalEntry {
 // Plural demonstratives `these`/`those` (D62 connectives batch): the plural of `this`/`that`
 // — same existential treatment (`exists_sem`), plural number (mirrors `all`'s `pl` cat shape).
 resource lexicon:these_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural proximal demonstrative determiner ('these cells').";
     lexicon:form     = "these";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1573,6 +1684,7 @@ resource lexicon:these_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:these_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural proximal demonstrative determiner ('these cells').";
     lexicon:form     = "these";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1581,6 +1693,7 @@ resource lexicon:these_obj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:those_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural distal demonstrative determiner ('those lines').";
     lexicon:form     = "those";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1589,6 +1702,7 @@ resource lexicon:those_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:those_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural distal demonstrative determiner ('those lines').";
     lexicon:form     = "those";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1606,6 +1720,7 @@ resource lexicon:those_obj : lexicon:LexicalEntry {
 // here; DIGIT numerals (`14`, `37`) need a generative numeral tokenizer hook — a follow-on. Each
 // numeral mirrors the `these` (subject) / `these_obj` (in-situ object) plural-existential shape.
 resource lexicon:two_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (2).";
     lexicon:form     = "two";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1614,6 +1729,7 @@ resource lexicon:two_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:two_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (2).";
     lexicon:form     = "two";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1622,6 +1738,7 @@ resource lexicon:two_obj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:three_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (3).";
     lexicon:form     = "three";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1630,6 +1747,7 @@ resource lexicon:three_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:three_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (3).";
     lexicon:form     = "three";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1638,6 +1756,7 @@ resource lexicon:three_obj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:four_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (4).";
     lexicon:form     = "four";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1646,6 +1765,7 @@ resource lexicon:four_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:four_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (4).";
     lexicon:form     = "four";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1654,6 +1774,7 @@ resource lexicon:four_obj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:five_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (5).";
     lexicon:form     = "five";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1662,6 +1783,7 @@ resource lexicon:five_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:five_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (5).";
     lexicon:form     = "five";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1670,6 +1792,7 @@ resource lexicon:five_obj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:six_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (6).";
     lexicon:form     = "six";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1678,6 +1801,7 @@ resource lexicon:six_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:six_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (6).";
     lexicon:form     = "six";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1686,6 +1810,7 @@ resource lexicon:six_obj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:seven_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (7).";
     lexicon:form     = "seven";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1694,6 +1819,7 @@ resource lexicon:seven_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:seven_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (7).";
     lexicon:form     = "seven";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1702,6 +1828,7 @@ resource lexicon:seven_obj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:eight_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (8).";
     lexicon:form     = "eight";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1710,6 +1837,7 @@ resource lexicon:eight_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:eight_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (8).";
     lexicon:form     = "eight";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1718,6 +1846,7 @@ resource lexicon:eight_obj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:nine_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (9).";
     lexicon:form     = "nine";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1726,6 +1855,7 @@ resource lexicon:nine_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:nine_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (9).";
     lexicon:form     = "nine";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
@@ -1734,6 +1864,7 @@ resource lexicon:nine_obj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:ten_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (10).";
     lexicon:form     = "ten";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
     lexicon:sem      = lexicon:exists_sem;
@@ -1742,6 +1873,7 @@ resource lexicon:ten_subj : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:ten_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: cardinal numeral determiner (10).";
     lexicon:form     = "ten";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
