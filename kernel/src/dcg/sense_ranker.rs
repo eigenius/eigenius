@@ -65,6 +65,166 @@ impl SenseRanker for IdentityRanker {
     }
 }
 
+// ───────────────────────── record / replay (reproducibility) ─────────────────────────
+
+/// A recorded ranking decision: the exact question put to the ranker, and the answer it gave.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct RankRecord {
+    /// The sentence the ranking was conditioned on.
+    pub sentence: String,
+    /// Per word: the surface form, its candidate sense labels **in seed order**, and the
+    /// permutation the ranker returned (indices into `senses`, most-plausible-first).
+    pub words: Vec<RankedWord>,
+}
+
+/// One word's recorded ranking.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct RankedWord {
+    pub surface: String,
+    pub senses: Vec<String>,
+    pub order: Vec<usize>,
+}
+
+/// The lookup key for a ranking: the sentence plus every word's candidate sense-set **in seed
+/// order**. Both matter — the same word ranks differently in a different sentence, and a different
+/// candidate set is a different question. Two runs whose lexicon changed will therefore MISS the
+/// cache rather than silently replay a stale answer.
+fn rank_key(sentence: &str, words: &[WordSenses]) -> String {
+    let mut k = String::from(sentence);
+    for w in words {
+        k.push('\u{1f}');
+        k.push_str(w.surface);
+        for c in w.candidates {
+            k.push('\u{1e}');
+            k.push_str(&c.sense);
+        }
+    }
+    k
+}
+
+/// **Record** every ranking an inner ranker produces, so the run can later be replayed exactly.
+///
+/// The contextual reranker is an LLM: it is the one component that can return a different answer
+/// for the same code and the same store, which makes any measurement that depends on it
+/// irreproducible — and makes it impossible to A/B a parser change, because the LLM moves
+/// underneath you. Recording turns it from an *uncontrolled* input into a *recorded* one:
+/// [`ReplaySenseRanker`] then re-runs the identical decisions with no API calls at all.
+///
+/// Flush with [`Self::write`] (the harness does this at the end of a run).
+pub struct RecordingSenseRanker<R: SenseRanker> {
+    inner: R,
+    log: std::sync::Mutex<std::collections::BTreeMap<String, RankRecord>>,
+}
+
+impl<R: SenseRanker> RecordingSenseRanker<R> {
+    pub fn new(inner: R) -> Self {
+        Self {
+            inner,
+            log: std::sync::Mutex::new(std::collections::BTreeMap::new()),
+        }
+    }
+
+    /// Write the recorded decisions as JSON (sorted by key — deterministic bytes).
+    pub fn write(&self, path: &std::path::Path) -> std::io::Result<usize> {
+        let log = self.log.lock().expect("rank log");
+        let records: Vec<&RankRecord> = log.values().collect();
+        let json = serde_json::to_string_pretty(&records)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(path, json)?;
+        Ok(records.len())
+    }
+}
+
+impl<R: SenseRanker> SenseRanker for RecordingSenseRanker<R> {
+    fn rank(&self, sentence: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+        let order = self.inner.rank(sentence, words);
+        let rec = RankRecord {
+            sentence: sentence.to_string(),
+            words: words
+                .iter()
+                .zip(order.iter())
+                .map(|(w, o)| RankedWord {
+                    surface: w.surface.to_string(),
+                    senses: w.candidates.iter().map(|c| c.sense.clone()).collect(),
+                    order: o.clone(),
+                })
+                .collect(),
+        };
+        self.log
+            .lock()
+            .expect("rank log")
+            .insert(rank_key(sentence, words), rec);
+        order
+    }
+}
+
+/// **Replay** rankings recorded by [`RecordingSenseRanker`] — no LLM, no network, deterministic.
+///
+/// A miss (the sentence or a word's candidate set is not in the recording) falls back to the seed
+/// order and is COUNTED, not hidden: [`Self::misses`] must be 0 for a replay to be a faithful
+/// reproduction. A non-zero count means the lexicon or the page changed under the recording, and
+/// the run is a different experiment.
+pub struct ReplaySenseRanker {
+    by_key: std::collections::BTreeMap<String, Vec<Vec<usize>>>,
+    misses: std::sync::atomic::AtomicUsize,
+    hits: std::sync::atomic::AtomicUsize,
+}
+
+impl ReplaySenseRanker {
+    /// Load a recording written by [`RecordingSenseRanker::write`].
+    pub fn load(path: &std::path::Path) -> std::io::Result<Self> {
+        let text = std::fs::read_to_string(path)?;
+        let records: Vec<RankRecord> = serde_json::from_str(&text)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut by_key = std::collections::BTreeMap::new();
+        for r in records {
+            // Rebuild the key from the recorded question, so it matches what `rank` will compute.
+            let mut k = r.sentence.clone();
+            for w in &r.words {
+                k.push('\u{1f}');
+                k.push_str(&w.surface);
+                for s in &w.senses {
+                    k.push('\u{1e}');
+                    k.push_str(s);
+                }
+            }
+            by_key.insert(k, r.words.iter().map(|w| w.order.clone()).collect());
+        }
+        Ok(Self {
+            by_key,
+            misses: std::sync::atomic::AtomicUsize::new(0),
+            hits: std::sync::atomic::AtomicUsize::new(0),
+        })
+    }
+
+    /// Rankings replayed from the recording.
+    pub fn hits(&self) -> usize {
+        self.hits.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Rankings NOT found in the recording (fell back to seed order). **Must be 0** for the replay
+    /// to reproduce the recorded run.
+    pub fn misses(&self) -> usize {
+        self.misses.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl SenseRanker for ReplaySenseRanker {
+    fn rank(&self, sentence: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+        match self.by_key.get(&rank_key(sentence, words)) {
+            Some(order) => {
+                self.hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                order.clone()
+            }
+            None => {
+                self.misses
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                IdentityRanker.rank(sentence, words)
+            }
+        }
+    }
+}
+
 // ───────────────────────── live Anthropic ranker (use-llm feature) ─────────────────────────
 
 #[cfg(feature = "use-llm")]
@@ -245,6 +405,99 @@ mod tests {
             r[0][0], 0,
             "the financial sense ranks first in a loan context, got {:?}",
             r[0]
+        );
+    }
+
+    // ── record / replay ──────────────────────────────────────────────────────
+
+    /// A ranker that reverses each word's candidates — a stand-in for the LLM: it returns a
+    /// non-identity order, so a replay that silently fell back to the seed order would be caught.
+    struct ReverseRanker;
+    impl SenseRanker for ReverseRanker {
+        fn rank(&self, _s: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+            words
+                .iter()
+                .map(|w| (0..w.candidates.len()).rev().collect())
+                .collect()
+        }
+    }
+
+    fn cands(n: usize) -> Vec<SenseCandidate> {
+        (0..n)
+            .map(|i| SenseCandidate {
+                sense: format!("wn:s{i}"),
+                gloss: format!("gloss {i}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_replay_reproduces_the_recorded_rankings_exactly_and_makes_no_calls() {
+        let c = cands(3);
+        let words = vec![WordSenses {
+            surface: "bank",
+            candidates: &c,
+        }];
+
+        let rec = RecordingSenseRanker::new(ReverseRanker);
+        let live = rec.rank("we sat on the bank", &words);
+        assert_eq!(
+            live,
+            vec![vec![2, 1, 0]],
+            "the inner ranker's answer passes through"
+        );
+
+        let dir = std::env::temp_dir().join("eigenius-rank-replay-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("ranks.json");
+        assert_eq!(rec.write(&path).unwrap(), 1);
+
+        // Replay: same question → the SAME answer, with no ranker behind it at all.
+        let replay = ReplaySenseRanker::load(&path).unwrap();
+        let got = replay.rank("we sat on the bank", &words);
+        assert_eq!(
+            got, live,
+            "replay must reproduce the recorded ranking exactly"
+        );
+        assert_eq!(replay.hits(), 1);
+        assert_eq!(replay.misses(), 0, "a faithful replay misses nothing");
+    }
+
+    #[test]
+    fn a_replay_miss_is_counted_not_hidden() {
+        let c = cands(2);
+        let words = vec![WordSenses {
+            surface: "bank",
+            candidates: &c,
+        }];
+        let rec = RecordingSenseRanker::new(ReverseRanker);
+        rec.rank("sentence A", &words);
+        let dir = std::env::temp_dir().join("eigenius-rank-replay-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("ranks-miss.json");
+        rec.write(&path).unwrap();
+
+        let replay = ReplaySenseRanker::load(&path).unwrap();
+        // A DIFFERENT sentence — the recording cannot answer it.
+        let got = replay.rank("sentence B", &words);
+        assert_eq!(got, vec![vec![0, 1]], "a miss falls back to seed order");
+        assert_eq!(
+            replay.misses(),
+            1,
+            "and the miss is COUNTED — a replay with misses is not a reproduction"
+        );
+
+        // A different CANDIDATE SET is also a different question (the lexicon changed under it).
+        let c2 = cands(3);
+        let words2 = vec![WordSenses {
+            surface: "bank",
+            candidates: &c2,
+        }];
+        replay.rank("sentence A", &words2);
+        assert_eq!(
+            replay.misses(),
+            2,
+            "a changed sense-set must MISS, not replay a stale answer"
         );
     }
 }

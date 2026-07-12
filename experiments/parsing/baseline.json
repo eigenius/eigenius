@@ -1,0 +1,50 @@
+{
+  "_comment": "The reference measurement the parse-rate gate is judged against. The full run log is NOT committed (experiments/*/results/ is gitignored); this is its distilled result + provenance. Regenerate with scripts/measure-parse-rate.sh and update deliberately.",
+  "provenance": {
+    "commit": "7933f05",
+    "commit_note": "squashed into 41af6db (main); kernel/, ontologies/, crates/*/src are byte-identical between them",
+    "date": "2026-07-10",
+    "profile": "release",
+    "features": [
+      "use-llm"
+    ],
+    "reranker": "AnthropicSenseRanker (live), claude-sonnet-4-6",
+    "reranker_note": "this run PREDATES the temperature:0 pin \u2014 it sampled at temperature 1.0",
+    "page": "references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt",
+    "snapshot": "wordnet-umls-all-alone-2026-07-10",
+    "config": "pos_prune=0 combinatory_core=0 SENSE_CAP=2 CELL_BEAM=64",
+    "runtime_s": 393.85
+  },
+  "expected": {
+    "units": 62,
+    "grammar_gap": 0,
+    "missing_lexeme": 0,
+    "ambiguous": 60,
+    "open": 1,
+    "encoded": 1
+  },
+  "gates": {
+    "coverage": "grammar_gap == 0 and missing_lexeme == 0 \u2014 every sentence parses",
+    "faithfulness": "encoded should RISE; it is the open goal (1/62 today)"
+  },
+  "reproduced": [
+    {
+      "date": "2026-07-11",
+      "commit": "41af6db",
+      "note": "temperature:0 pinned. THREE consecutive runs, all grammar-gap 0.",
+      "units": 62,
+      "grammar_gap": 0,
+      "encoded": 1,
+      "runtime_s": [
+        349.79,
+        331.42,
+        334.4
+      ]
+    }
+  ],
+  "reproducibility": {
+    "finding": "temperature:0 is NOT deterministic. Two live runs of identical code against an identical store differed on 21% of full sense orders and 5% of the CAPPED top-2 \u2014 and the capped top-2 is the only part that reaches the parser. The outcome was nonetheless stable (3/3 grammar-gap 0), so the pin shrinks the variance below the threshold that changes the verdict, but it does NOT make a run reproducible.",
+    "the_only_exact_reproduction": "scripts/measure-parse-rate.sh --replay <run>/ranks.json \u2014 replays the recorded rankings with no LLM at all. A replay with misses > 0 is a different experiment, not a reproduction.",
+    "before_the_pin": "at the API default (temperature 1.0) the drift was large enough to drop correct senses before parsing, producing 12 phantom grammar gaps on 2026-07-11."
+  }
+}

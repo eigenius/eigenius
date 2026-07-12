@@ -87,4 +87,7 @@ pub use pretty::{cat_shape, pretty_term};
 pub use segment::{is_nonprose, segment_sentences};
 #[cfg(feature = "use-llm")]
 pub use sense_ranker::AnthropicSenseRanker;
-pub use sense_ranker::{IdentityRanker, SenseCandidate, SenseRanker, WordSenses};
+pub use sense_ranker::{
+    IdentityRanker, RankRecord, RankedWord, RecordingSenseRanker, ReplaySenseRanker,
+    SenseCandidate, SenseRanker, WordSenses,
+};

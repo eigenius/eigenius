@@ -2589,7 +2589,6 @@ fn lexicon_backed_augmentation_grounds_verb_oov_to_axiom_with_verb_cat() {
     );
 }
 
-#[test]
 /// Live-LLM smoke test for the (B) POS source: the `AnthropicCategoryProposer` tags a word by its role
 /// in the sentence — a verb as `Verb`, a noun as `Nominal`. Non-deterministic (a live model), so it is
 /// `#[ignore]`d and asserts only the clear cases. Run:

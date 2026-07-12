@@ -132,6 +132,47 @@ fn open_head(path: &std::path::Path) -> Option<Arc<Layer>> {
     }
 }
 
+/// A `SenseRanker` that shares ownership, so the harness can still flush the recording after the
+/// `LexicalIndex` has taken its `Box<dyn SenseRanker>`. Only the recording path constructs it.
+#[cfg(feature = "use-llm")]
+struct ArcRanker(std::sync::Arc<dyn eigenius_kernel::dcg::SenseRanker + Send + Sync>);
+#[cfg(feature = "use-llm")]
+impl eigenius_kernel::dcg::SenseRanker for ArcRanker {
+    fn rank(&self, sentence: &str, words: &[eigenius_kernel::dcg::WordSenses]) -> Vec<Vec<usize>> {
+        self.0.rank(sentence, words)
+    }
+}
+
+// The recorder wraps the LIVE ranker, which only exists under `use-llm`. Without the feature there
+// is no LLM to record, so recording is a no-op (a replay still works — it needs no ranker at all).
+#[cfg(feature = "use-llm")]
+type Recorder = std::sync::Arc<
+    eigenius_kernel::dcg::RecordingSenseRanker<eigenius_kernel::dcg::AnthropicSenseRanker>,
+>;
+
+#[cfg(feature = "use-llm")]
+thread_local! {
+    /// The live recording (if `EIGENIUS_SENSE_RANKS` named a file that did not yet exist) and where
+    /// to write it. Flushed by [`flush_sense_ranks`] at the end of a measurement.
+    static RANK_RECORDER: std::cell::RefCell<Option<(Recorder, PathBuf)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Write the recorded sense rankings, if this run was recording. Called at the END of a measurement:
+/// the artifact is what makes the run replayable, and what lets a later parser change be A/B'd
+/// against FIXED rankings — isolating the code from the model.
+fn flush_sense_ranks() {
+    #[cfg(feature = "use-llm")]
+    RANK_RECORDER.with(|slot| {
+        if let Some((rec, path)) = slot.borrow().as_ref() {
+            match rec.write(path) {
+                Ok(n) => eprintln!("sense-ranks: recorded {n} rankings → {}", path.display()),
+                Err(e) => eprintln!("sense-ranks: FAILED to write {}: {e}", path.display()),
+            }
+        }
+    });
+}
+
 /// Build the lazy `LexicalIndex` over the head with the sense cap, plus the live contextual
 /// reranker when built with `--features use-llm` and `ANTHROPIC_API_KEY` is set.
 fn build_index(head: &Arc<Layer>) -> LexicalIndex {
@@ -154,9 +195,47 @@ fn build_index(head: &Arc<Layer>) -> LexicalIndex {
         .with_cell_beam(CELL_BEAM)
         .with_combinatory_core(core)
         .with_pos_prune(pos_prune);
+    // ── Reproducibility: RECORD or REPLAY the reranker's decisions ───────────────────────────
+    // The contextual reranker is an LLM — the one component that can answer differently for the
+    // same code against the same store, which makes the measurement irreproducible and makes it
+    // impossible to A/B a parser change (the LLM moves underneath you). `EIGENIUS_SENSE_RANKS`
+    // turns it from an *uncontrolled* input into a *recorded* one:
+    //   file EXISTS  → REPLAY it (deterministic, no network, no API cost)
+    //   file ABSENT  → RECORD the live ranker into it (written at the end of the run)
+    let ranks_path = std::env::var("EIGENIUS_SENSE_RANKS")
+        .ok()
+        .map(PathBuf::from);
+    if let Some(p) = &ranks_path {
+        if p.exists() {
+            match eigenius_kernel::dcg::ReplaySenseRanker::load(p) {
+                Ok(r) => {
+                    eprintln!(
+                        "contextual reranker: REPLAY from {} (deterministic, no LLM)",
+                        p.display()
+                    );
+                    return index.with_sense_ranker(Box::new(r));
+                }
+                Err(e) => panic!(
+                    "EIGENIUS_SENSE_RANKS={} exists but could not be read: {e}",
+                    p.display()
+                ),
+            }
+        }
+    }
     #[cfg(feature = "use-llm")]
     {
         if let Some(ranker) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
+            if let Some(p) = ranks_path {
+                eprintln!(
+                    "contextual reranker: AnthropicSenseRanker (live) — RECORDING to {}",
+                    p.display()
+                );
+                let rec =
+                    std::sync::Arc::new(eigenius_kernel::dcg::RecordingSenseRanker::new(ranker));
+                RANK_RECORDER
+                    .with(|slot| *slot.borrow_mut() = Some((std::sync::Arc::clone(&rec), p)));
+                return index.with_sense_ranker(Box::new(ArcRanker(rec)));
+            }
             eprintln!("contextual reranker: AnthropicSenseRanker (live)");
             return index.with_sense_ranker(Box::new(ranker));
         }
@@ -2400,6 +2479,9 @@ fn summarize(report: &[UnitReport]) {
             }
         }
     }
+    // Persist the reranker's decisions (if recording) BEFORE the summary, so a run that produced a
+    // number always leaves behind the artifact that makes it replayable.
+    flush_sense_ranks();
     eprintln!(
         "\n=== WRN first page over FULL lexicon: {} units → encoded {enc}, ambiguous {amb}, \
          open {open}, missing-lexeme {miss}, grammar-gap {gap}, \

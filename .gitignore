@@ -90,3 +90,7 @@ umls.esl
 umls-chain/
 wordnet-chain/
 ncbi-chain/
+/experiments/parsing/results/**
+# Experiment run artifacts (logs + recorded LLM rankings) — large and regenerable.
+# The committed artifact is the distilled baseline (e.g. experiments/parsing/baseline.json).
+experiments/*/results/
