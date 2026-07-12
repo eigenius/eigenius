@@ -1,31 +1,34 @@
 {
-  "_comment": "The reference measurement the parse-rate gate is judged against. The full run log is NOT committed (experiments/*/results/ is gitignored); this is its distilled result + provenance. Regenerate with scripts/measure-parse-rate.sh and update deliberately.",
+  "_comment": "The reference measurement the parse-rate gate is judged against. Run logs are NOT committed (experiments/*/results/ is gitignored); this is the distilled result + provenance. Update it DELIBERATELY, never to make a red run go green.",
   "provenance": {
-    "commit": "7933f05",
-    "commit_note": "squashed into 41af6db (main); kernel/, ontologies/, crates/*/src are byte-identical between them",
-    "date": "2026-07-10",
+    "commit": "a45c0f2",
+    "date": "2026-07-12",
     "profile": "release",
     "features": [
       "use-llm"
     ],
-    "reranker": "AnthropicSenseRanker (live), claude-sonnet-4-6",
-    "reranker_note": "this run PREDATES the temperature:0 pin \u2014 it sampled at temperature 1.0",
+    "reranker": "AnthropicSenseRanker (live), claude-sonnet-4-6, temperature 0",
     "page": "references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt",
-    "snapshot": "wordnet-umls-all-alone-2026-07-10",
+    "snapshot": "wordnet-umls-aligned-v2-2026-07-12",
+    "snapshot_lineage": [
+      "scripts/reseed-lexicon-db.sh --umls-all            -> wordnet-umls-2026-07-12  (base)",
+      "scripts/add-layer-to-snapshot.sh --base <base> ... -> wordnet-umls-aligned-v2-2026-07-12",
+      "  the layer is experiments/lexicon-align/alignment.esl (26,690 WordNet<->UMLS concept merges)"
+    ],
     "config": "pos_prune=0 combinatory_core=0 SENSE_CAP=2 CELL_BEAM=64",
-    "runtime_s": 393.85
+    "runtime_s": 220
   },
   "expected": {
     "units": 62,
     "grammar_gap": 0,
     "missing_lexeme": 0,
-    "ambiguous": 60,
+    "ambiguous": 58,
     "open": 1,
-    "encoded": 1
+    "encoded": 3
   },
   "gates": {
-    "coverage": "grammar_gap == 0 and missing_lexeme == 0 \u2014 every sentence parses",
-    "faithfulness": "encoded should RISE; it is the open goal (1/62 today)"
+    "coverage": "grammar_gap == 0 and missing_lexeme == 0 \u2014 every sentence parses. NON-NEGOTIABLE.",
+    "faithfulness": "encoded should RISE. Set at the observed FLOOR (3), not the best run (4): the reranker drifts ~1 unit between runs even at temperature 0, and a baseline set at the peak would flag that drift as a regression."
   },
   "reproduced": [
     {
@@ -43,8 +46,34 @@
     }
   ],
   "reproducibility": {
-    "finding": "temperature:0 is NOT deterministic. Two live runs of identical code against an identical store differed on 21% of full sense orders and 5% of the CAPPED top-2 \u2014 and the capped top-2 is the only part that reaches the parser. The outcome was nonetheless stable (3/3 grammar-gap 0), so the pin shrinks the variance below the threshold that changes the verdict, but it does NOT make a run reproducible.",
-    "the_only_exact_reproduction": "scripts/measure-parse-rate.sh --replay <run>/ranks.json \u2014 replays the recorded rankings with no LLM at all. A replay with misses > 0 is a different experiment, not a reproduction.",
-    "before_the_pin": "at the API default (temperature 1.0) the drift was large enough to drop correct senses before parsing, producing 12 phantom grammar gaps on 2026-07-11."
-  }
+    "finding": "temperature:0 is NOT deterministic. Two live runs of identical code against an identical store differ on ~5% of the CAPPED top-2 \u2014 the only part that reaches the parser. encoded moves +/-1 unit between runs. Do not read a one-unit change as signal.",
+    "the_only_exact_reproduction": "scripts/measure-parse-rate.sh --replay <run>/ranks.json \u2014 replays the recorded rankings with no LLM. A replay with misses > 0 is a DIFFERENT experiment.",
+    "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible \u2014 two senses with different labels and the SAME sem are one concept \u2014 but the pre-dedup caveat still stands."
+  },
+  "history": [
+    {
+      "date": "2026-07-10",
+      "commit": "7933f05",
+      "encoded": 1,
+      "note": "first reference. Cross-lexicon duplicates and function-word junk both present."
+    },
+    {
+      "date": "2026-07-11",
+      "commit": "62d31b9",
+      "encoded": 1,
+      "note": "cross-lexicon alignment v1 (12,450 merges). readings -4.3%, encoded UNCHANGED \u2014 collapsing a duplicate freed a cap slot that the parser immediately refilled."
+    },
+    {
+      "date": "2026-07-12",
+      "commit": "a45c0f2",
+      "encoded": "3-4",
+      "note": "SENSE ELIMINATION. The ranker may now OMIT an impossible sense, the cap no longer backfills from the rejects, and 132 closed-class entries carry a real core:description (they used to render as BLANK LINES in the prompt, so the model eliminated the determiner `each` and kept UMLS's 'Each (qualifier value)'). encoded 1 -> 4, runtime 330s -> 220s. THE ONLY CHANGE THAT MOVED encoded ALL SESSION."
+    },
+    {
+      "date": "2026-07-12",
+      "commit": "a45c0f2",
+      "encoded": 3,
+      "note": "alignment v2 (26,690 merges, incl. the un-glossed half). readings -0.3% vs v1 \u2014 FLAT. Cross-lexicon de-duplication is DONE and is not the lever. What remains is STRUCTURAL: the worst unit is 168 readings over 93 skeletons (coordination + PP attachment), sense~1.8."
+    }
+  ]
 }

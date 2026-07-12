@@ -101,12 +101,12 @@ done
 #
 # `EIGENIUS_POS_PRUNE` is read with `.is_ok()`: ANY value, including the empty string, enables it.
 # Setting it to "0" would turn it ON. It must be UNSET to be off — hence `env -u`, not `VAR=0`.
-for v in EIGENIUS_POS_PRUNE EIGENIUS_COMBINATORY_CORE EIGENIUS_PARSE_DEBUG EIGENIUS_DUMP_CELL; do
+for v in EIGENIUS_POS_PRUNE EIGENIUS_COMBINATORY_CORE EIGENIUS_PARSE_DEBUG EIGENIUS_DUMP_CELL EIGENIUS_DUMP_RANK_PROMPT; do
   if [[ -n "${!v:-}" ]]; then
     echo "note: ignoring ambient $v=${!v} — the run declares its own config (use the flags)" >&2
   fi
 done
-ENV_STRIP=(env -u EIGENIUS_POS_PRUNE -u EIGENIUS_COMBINATORY_CORE -u EIGENIUS_PARSE_DEBUG -u EIGENIUS_DUMP_CELL)
+ENV_STRIP=(env -u EIGENIUS_POS_PRUNE -u EIGENIUS_COMBINATORY_CORE -u EIGENIUS_PARSE_DEBUG -u EIGENIUS_DUMP_CELL -u EIGENIUS_DUMP_RANK_PROMPT)
 [[ "$POS_PRUNE" == "1" ]] && ENV_STRIP+=(EIGENIUS_POS_PRUNE=1)
 [[ "$COMB_CORE" == "1" ]] && ENV_STRIP+=(EIGENIUS_COMBINATORY_CORE=1)
 

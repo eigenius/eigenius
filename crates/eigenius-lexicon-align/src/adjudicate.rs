@@ -81,15 +81,41 @@ pub fn prompt(batch: &[&Candidate]) -> String {
            vs a `lead` that is a clue), or one is a specialisation the other is not.\n\
          - When the UMLS sense is a narrow clinical reading of a broad ordinary word, that is \
            DIFFERENT.\n\
+         - Some UMLS concepts have NO definition. Judge them from the name, the semantic type and \
+           the atoms. An atom marked `(attribute)`, `(qualifier value)` or `(finding)` tells you \
+           what KIND of thing the concept is.\n\
+         - REJECT metadata artefacts: a concept that names a DISCIPLINE, a CODE, an ANSWER, a \
+           DOCUMENT SECTION or a data-entry qualifier is not the ordinary word it is spelled like. \
+           `Specialty Type - cancer` is the medical field, not the disease — that is DIFFERENT.\n\
          - If you cannot tell, answer same=false with low confidence. A wrong merge destroys a \
            reading; a missed merge only leaves things as they are. Prefer to miss.\n\n",
     );
     for (i, c) in batch.iter().enumerate() {
+        // **51% of UMLS concepts have no definition** — including ordinary English abstract nouns
+        // like `Deficiency`, whose surface IS a WordNet lemma. Requiring a gloss excluded them all.
+        // For those, describe the concept by what UMLS *does* record: its preferred name, its
+        // semantic type, and its atoms. The fully-specified names are the load-bearing part —
+        // `Deficiency (attribute)`, `Deficient (qualifier value)` say what KIND of thing it is,
+        // which is how a real merge is told apart from a metadata artefact such as
+        // `Specialty Type - cancer` (a *discipline*, not the disease).
+        let umls = if c.umls_gloss.trim().is_empty() {
+            format!(
+                "name \"{}\"; semantic type: {}; atoms: {}   [no definition in UMLS]",
+                c.umls_name,
+                c.tuis.join(", "),
+                c.umls_atoms.join("; ")
+            )
+        } else {
+            format!(
+                "{} (semantic type: {})",
+                c.umls_gloss.trim(),
+                c.tuis.join(", ")
+            )
+        };
         p.push_str(&format!(
-            "[{i}] word: {}\n  UMLS ({}): {}\n  WordNet: {}\n\n",
+            "[{i}] word: {}\n  UMLS: {}\n  WordNet: {}\n\n",
             c.surface,
-            c.tuis.join(","),
-            c.umls_gloss.trim(),
+            umls,
             c.wn_gloss.trim(),
         ));
     }

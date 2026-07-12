@@ -94,6 +94,8 @@ ncbi-chain/
 # Experiment run artifacts (logs + recorded LLM rankings) — large and regenerable.
 # The committed artifact is the distilled baseline (e.g. experiments/parsing/baseline.json).
 experiments/*/results/
-experiments/lexicon-align/alignment.esl
-experiments/lexicon-align/candidates.jsonl
+# Derived from the committed alignment.jsonl + the source corpora — regenerate, don't store.
+# Globbed: a future `candidates-v3.jsonl` must not slip past the pattern (a 37 MB `-v2` file did).
+experiments/lexicon-align/alignment*.esl
+experiments/lexicon-align/candidates*.jsonl
 notes.md

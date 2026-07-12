@@ -43,8 +43,21 @@ pub struct Candidate {
     pub surface: String,
     /// UMLS concept id.
     pub cui: String,
-    /// UMLS definition (`MRDEF`).
+    /// UMLS definition (`MRDEF`) — **empty for 51% of concepts**, which is why the fields below
+    /// exist. UMLS simply never wrote a definition for `Deficiency` (C0011155), whose surface *is* a
+    /// WordNet lemma (`lack / deficiency / want`); requiring a gloss silently excluded it, and with
+    /// it the whole Functional/Qualitative-Concept bucket — precisely the abstract nouns that overlap
+    /// WordNet most.
     pub umls_gloss: String,
+    /// UMLS preferred name (`MTH/PN`, else `*/PT`). Present for every concept.
+    #[serde(default)]
+    pub umls_name: String,
+    /// A few distinctive atoms as `TTY|STR`. The **fully-specified names** carry structure a gloss
+    /// does not: `Deficiency (attribute)`, `Deficient (qualifier value)` say *what kind of thing*
+    /// the concept is — which is how a real merge (`Deficiency`) is told apart from a metadata
+    /// artefact (`Specialty Type - cancer`, a *discipline*, competing with the disease `cancer`).
+    #[serde(default)]
+    pub umls_atoms: Vec<String>,
     /// UMLS semantic type(s) (`MRSTY` TUI).
     pub tuis: Vec<String>,
     /// WordNet synset offset (noun).
@@ -118,7 +131,7 @@ pub fn candidates(meta: &Path, dict: &Path) -> std::io::Result<Vec<Candidate>> {
     use eigenius_umls::rrf::{parse_mrconso_line, parse_mrdef_line, parse_mrsty_line};
     use eigenius_wordnet::wndb::{read_data_file, Pos};
 
-    // UMLS: CUI → definition (first, unsuppressed).
+    // UMLS definitions — present for only ~10.6% of concepts.
     let mut cui_gloss: BTreeMap<String, String> = BTreeMap::new();
     for line in std::fs::read_to_string(meta.join("MRDEF.RRF"))?.lines() {
         if let Some(d) = parse_mrdef_line(line) {
@@ -128,25 +141,18 @@ pub fn candidates(meta: &Path, dict: &Path) -> std::io::Result<Vec<Candidate>> {
         }
     }
 
-    // …their semantic types (a feature, not a filter).
+    // Semantic types, for EVERY concept (not just the glossed ones) — for an un-glossed concept the
+    // type is a large part of what identifies it.
     let mut cui_tuis: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for line in std::fs::read_to_string(meta.join("MRSTY.RRF"))?.lines() {
         if let Some(s) = parse_mrsty_line(line) {
-            if cui_gloss.contains_key(&s.cui) {
-                cui_tuis.entry(s.cui).or_default().push(s.tui);
-            }
+            cui_tuis.entry(s.cui).or_default().push(s.sty);
         }
     }
 
-    // WordNet nouns: lemma → [(offset, gloss)].
-    //
-    // **INSTANCE synsets are excluded.** A synset with an `@i` (instance-hypernym) pointer is a
-    // proper-noun individual — `Africa`, `Alabama` — and the importer emits it as a `resource`, not
-    // a `class`. A lexical entry's category is `cat_n(C, num)` where `C : Set`, so pointing an entry
-    // at an individual is a TYPE ERROR: the individual's type is its class (`EigonClass(…)`), not
-    // `Sort(1)`. The kernel validator rejects it (`TypeExprIllTyped`), which is exactly how this was
-    // caught — 405 such merges produced 721 violations on the first load attempt. The symmetric
-    // exclusion on the UMLS side is the `cat_np` skip in [`crate::emit`].
+    // WordNet nouns: lemma → [(offset, gloss)]. INSTANCE synsets (`@i`) are excluded — the importer
+    // emits them as a `resource`, not a `class`, and an entry's `cat_n(C, num)` requires `C : Set`.
+    // Pointing an entry at an individual is a type error the kernel validator rejects.
     let nouns = read_data_file(&dict.join(Pos::Noun.data_file()))?;
     let mut by_lemma: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     for (off, syn) in &nouns {
@@ -161,9 +167,14 @@ pub fn candidates(meta: &Path, dict: &Path) -> std::io::Result<Vec<Candidate>> {
         }
     }
 
-    // Join on the surface. Stream MRCONSO (2.3 GB) rather than materialize it.
-    let mut out: Vec<Candidate> = Vec::new();
-    let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
+    // One pass over MRCONSO: collect, per concept that shares a surface with a WordNet noun, its
+    // surfaces + its atoms (`TTY|STR`) + its preferred name.
+    struct Acc {
+        name: String,
+        atoms: Vec<String>,
+        surfaces: BTreeSet<String>,
+    }
+    let mut acc: BTreeMap<String, Acc> = BTreeMap::new();
     let conso = std::fs::read_to_string(meta.join("MRCONSO.RRF"))?;
     for line in conso.lines() {
         let Some(a) = parse_mrconso_line(line) else {
@@ -172,27 +183,72 @@ pub fn candidates(meta: &Path, dict: &Path) -> std::io::Result<Vec<Candidate>> {
         if a.lat != "ENG" || a.suppress != "N" {
             continue;
         }
-        let Some(ug) = cui_gloss.get(&a.cui) else {
-            continue;
-        };
         let surface = a.str_.to_lowercase();
-        let Some(syns) = by_lemma.get(&surface) else {
-            continue;
-        };
-        let ut = gloss_tokens(ug);
-        for (off, wg) in syns {
-            if !seen.insert((a.cui.clone(), off.clone())) {
-                continue;
+        let hits_wn = by_lemma.contains_key(&surface);
+        let e = acc.entry(a.cui.clone()).or_insert_with(|| Acc {
+            name: String::new(),
+            atoms: Vec::new(),
+            surfaces: BTreeSet::new(),
+        });
+        // Preferred name: MTH/PN wins, else the first PT.
+        if e.name.is_empty() && (a.tty == "PN" || a.tty == "PT") {
+            e.name = a.str_.clone();
+        }
+        // Keep a handful of atoms, favouring the fully-specified names — they carry the structure.
+        if e.atoms.len() < 8 {
+            let row = format!("{}|{}", a.tty, a.str_);
+            if !e.atoms.contains(&row) {
+                e.atoms.push(row);
             }
-            out.push(Candidate {
-                surface: surface.clone(),
-                cui: a.cui.clone(),
-                umls_gloss: ug.clone(),
-                tuis: cui_tuis.get(&a.cui).cloned().unwrap_or_default(),
-                offset: off.clone(),
-                wn_gloss: wg.clone(),
-                gloss_jaccard: jaccard(&ut, &gloss_tokens(wg)),
-            });
+        }
+        if hits_wn {
+            e.surfaces.insert(surface);
+        }
+    }
+
+    let mut out: Vec<Candidate> = Vec::new();
+    for (cui, e) in &acc {
+        if e.surfaces.is_empty() {
+            continue; // shares no surface with a WordNet noun
+        }
+        // Not every concept carries a `PN`/`PT` atom — fall back to the first atom's string rather
+        // than handing the adjudicator an empty name.
+        // Not every concept carries a `PN`/`PT` atom. Fall back to the first atom's string, and
+        // failing that the surface itself — never hand the adjudicator an empty name.
+        let name = if !e.name.is_empty() {
+            e.name.clone()
+        } else if let Some((_, s)) = e.atoms.first().and_then(|a| a.split_once('|')) {
+            s.to_string()
+        } else {
+            String::new()
+        };
+        let ug = cui_gloss.get(cui).cloned().unwrap_or_default();
+        let ut = gloss_tokens(&ug);
+        for surface in &e.surfaces {
+            let Some(syns) = by_lemma.get(surface) else {
+                continue;
+            };
+            for (off, wg) in syns {
+                out.push(Candidate {
+                    surface: surface.clone(),
+                    cui: cui.clone(),
+                    umls_gloss: ug.clone(),
+                    umls_name: if name.is_empty() {
+                        surface.clone()
+                    } else {
+                        name.clone()
+                    },
+                    umls_atoms: e.atoms.clone(),
+                    tuis: cui_tuis.get(cui).cloned().unwrap_or_default(),
+                    offset: off.clone(),
+                    wn_gloss: wg.clone(),
+                    gloss_jaccard: if ug.is_empty() {
+                        0.0
+                    } else {
+                        jaccard(&ut, &gloss_tokens(wg))
+                    },
+                });
+            }
         }
     }
     out.sort_by(|a, b| (&a.cui, &a.offset).cmp(&(&b.cui, &b.offset)));

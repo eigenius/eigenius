@@ -29,6 +29,26 @@ persisted chain, and copies the volume out to a dated read-only snapshot.
 scripts/reseed-lexicon-db.sh --umls-all      # ~20 min → ../db-snapshot/wordnet-umls-<date>
 ```
 
+### 2a. Layer the WordNet↔UMLS alignment on top
+
+The measured store is the base **plus** the cross-lexicon concept alignment
+([experiments/lexicon-align](../lexicon-align/README.md) — 26 690 merges that make a WordNet synset
+and a UMLS concept denote ONE class):
+
+```bash
+scripts/add-layer-to-snapshot.sh \
+  --base ../db-snapshot/wordnet-umls-<date> \
+  --out  ../db-snapshot/wordnet-umls-aligned-v2-<date> \
+  experiments/lexicon-align/alignment.esl
+```
+
+The base is treated as **immutable**: it is staged into a scratch volume, the layer is loaded
+**through the kernel** (so it goes through the validator — Rule 22, type-checking, the commit gate),
+and the result is written to a NEW snapshot. Loading through the kernel is not a formality: on the
+first attempt the validator rejected the layer with **721 type errors** (WordNet *instance* synsets
+used where a `class` was required), which a hand-rolled loader would have written straight into the
+store as silent lexicon corruption.
+
 **A reseed is required after any edit to a bootstrap ontology** (`ontologies/logic`,
 `ontologies/lexicon/closed-class`, …): the persisted chain is rooted at the bootstrap it was seeded
 with *by content hash*, so an edited bootstrap makes the old store unresumable (`ManifestDrift`,
@@ -102,7 +122,13 @@ The scripts close all three. They are documented because *reading the raw log by
 2. **The reranker must be on.** The canonical measure is `--features use-llm` + `ANTHROPIC_API_KEY`.
    A cap-only run inflates gaps *by construction* and is not comparable to a reranked one. The
    harness prints `contextual reranker: …`; `eval-parse-rate.sh` refuses to compare across kinds.
-3. **`grammar-gap` comes from the summary line, and nowhere else.** The per-unit listing enumerates
+3. **`ranks.json` is a PRE-DEDUP instrument.** It records the reranker's *candidate list*, built
+   before `lookup_span` runs the dedup and the cap — so it shows what the model was **asked**, not
+   what **seeded**. It cannot tell you how many cap slots a merge freed. (I drew a conclusion from it
+   that it structurally cannot support, three times.) Its `sems` field records what each sense
+   *denotes*, so two senses with different labels and the same `sem` are visibly ONE concept — but
+   the pre-dedup caveat still stands.
+4. **`grammar-gap` comes from the summary line, and nowhere else.** The per-unit listing enumerates
    only AMBIG units and **silently omits grammar gaps** — counting from it reports 0 gaps on a run
    that had many. And **a run with no summary line did not complete**; its partial counts are not a
    result.
@@ -188,3 +214,27 @@ The parser builds a reading for each. They are **not `Exp`-equal** (different IR
 is the `sense×` axis (median 5.5/unit), measured rather than inferred, and it is the case for
 [cross-lexicon sense alignment](../../docs/notes/d63-cross-lexicon-sense-alignment.md): make both
 lexica's entries denote **one** concept.
+
+---
+
+## 9. Sense elimination (2026-07-12) — what a run now does
+
+The reranker may **omit** a candidate index, and an omitted sense is **eliminated**: it stays out of
+the `sense → rank` map, and the cap does not backfill its quota from the rejects
+(`eff = cap.min(ranked)`). Before this, a permutation could reorder but never drop, so `SENSE_CAP=2`
+— obliged to take two — seeded `BRIP1 wt Allele` as a reading of **"of"**, `Month of May` for
+**"may"**, and `Department of Energy` for **"does"**.
+
+**The cut applies at the BASE cap only.** On widen-on-failure it is ignored and eliminated senses
+become seedable again, so a wrong elimination costs a **slower parse, never a grammar gap**. That is
+why `grammar-gap 0` holds through it.
+
+**Function words carry a `core:description`** (`ontologies/lexicon/closed-class.esl`, 132 entries).
+They used to render as **blank lines** in the prompt — a function word's `sem` is an inline λ-term,
+so it has no description — and the model was being asked to choose between `""` and a full NCI
+definition. It eliminated the determiner `each` and kept *"Each (qualifier value)"*. Correctly: we
+had told it nothing.
+
+**`--no-llm` is now a genuinely different experiment**, not merely a noisier one: without a ranker
+there is no elimination at all. It is not comparable to a reranked run, and `eval-parse-rate.sh`
+refuses to diff across kinds.
