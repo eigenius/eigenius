@@ -116,8 +116,78 @@ fn snapshot_path() -> Option<PathBuf> {
 /// seeded with, so the code's `logic`/`closed-class` ontologies must match that seeded version
 /// (this session: checked out at `ff7f6cc`) or the resume fails closed. Rather than panic, skip —
 /// so this committed test stays green whatever bootstrap the working tree currently compiles.
+/// A **working copy** of the snapshot, removed when the run ends.
+///
+/// RocksDB has no read-only open in this build: `RocksStore::open` takes the DB read-write and
+/// mutates it on the spot — WAL, `MANIFEST`, `OPTIONS`, `CURRENT`, compaction. So a measurement
+/// pointed at a snapshot **rewrites that snapshot**, and a run that dies mid-way (a stack overflow,
+/// a kill) can leave the baseline it was measured against in an unknown state. On 2026-07-11 the
+/// reference snapshot's `CURRENT`/`OPTIONS`/`.log` all carried the day's mtimes for exactly this
+/// reason, and hours were spent asking whether it had been corrupted.
+///
+/// The measurement must therefore treat its input as **immutable**: copy first, open the copy. The
+/// copy costs ~2 s on a 2.7 GB store (page cache) against a ~6 min run — nothing. It matters more
+/// still once a layer is *added* on top (the WordNet/UMLS alignment), because that genuinely writes.
+struct SnapshotWorkdir(PathBuf);
+
+impl Drop for SnapshotWorkdir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+thread_local! {
+    /// Held for the life of the test so the working copy outlives the store that opens it.
+    static SNAPSHOT_WORK: std::cell::RefCell<Option<SnapshotWorkdir>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Copy `src` to a scratch working directory and return the copy's path.
+///
+/// `EIGENIUS_DB_WORKDIR` places the copy (default: the system temp dir) — point it at a fast disk,
+/// or at one with room for the store. `EIGENIUS_DB_INPLACE=1` opts OUT and opens `src` directly:
+/// faster, and **it will modify the snapshot**. Only for a store you intend to write to.
+fn working_copy(src: &std::path::Path) -> PathBuf {
+    if std::env::var("EIGENIUS_DB_INPLACE").is_ok() {
+        eprintln!(
+            "snapshot: IN-PLACE (EIGENIUS_DB_INPLACE) — this run WILL MODIFY {}",
+            src.display()
+        );
+        return src.to_path_buf();
+    }
+    let root = std::env::var("EIGENIUS_DB_WORKDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let dst = root.join(format!("eigenius-snapshot-work-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dst);
+    let t = std::time::Instant::now();
+    // `--reflink=auto`: instant on a CoW filesystem, a plain copy elsewhere.
+    let ok = std::process::Command::new("cp")
+        .args(["-r", "--reflink=auto"])
+        .arg(src)
+        .arg(&dst)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(
+        ok,
+        "failed to copy snapshot {} → {}",
+        src.display(),
+        dst.display()
+    );
+    eprintln!(
+        "snapshot: working copy → {} ({:.1}s; the source is left untouched)",
+        dst.display(),
+        t.elapsed().as_secs_f32()
+    );
+    SNAPSHOT_WORK.with(|slot| *slot.borrow_mut() = Some(SnapshotWorkdir(dst.clone())));
+    dst
+}
+
 fn open_head(path: &std::path::Path) -> Option<Arc<Layer>> {
-    let store = Arc::new(RocksStore::open(path).expect("open RocksStore snapshot"));
+    // Never open the caller's snapshot directly — see [`working_copy`]. RocksDB would rewrite it.
+    let work = working_copy(path);
+    let store = Arc::new(RocksStore::open(&work).expect("open RocksStore snapshot"));
     let backend: Arc<dyn PersistentBackend> = store;
     match bootstrap_persistent(Arc::clone(&backend)) {
         Ok(ctx) => Some(Arc::clone(ctx.head())),
