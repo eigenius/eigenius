@@ -49,7 +49,11 @@ pub mod sense_ranker;
 /// Direct Anthropic tool-use client for the reasoning-layer LLM calls (sense ranker / proposers) —
 /// structured output via forced `tool_choice`, replacing the `allms` prompt-inject-and-parse path.
 #[cfg(feature = "use-llm")]
-mod anthropic_client;
+/// The Anthropic structured-output client. Public so the offline data pipelines (e.g. the
+/// WordNet↔UMLS concept adjudicator, `crates/eigenius-lexicon-align`) reuse the same transport,
+/// model default, and `temperature: 0` pin as the in-kernel proposers, rather than each rolling
+/// their own.
+pub mod anthropic_client;
 
 /// Live-LLM anaphora proposer (D64 §4) — opt-in via the `use-llm` feature; default builds stay
 /// LLM-free.

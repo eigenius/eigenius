@@ -94,3 +94,5 @@ ncbi-chain/
 # Experiment run artifacts (logs + recorded LLM rankings) — large and regenerable.
 # The committed artifact is the distilled baseline (e.g. experiments/parsing/baseline.json).
 experiments/*/results/
+experiments/lexicon-align/alignment.esl
+experiments/lexicon-align/candidates.jsonl

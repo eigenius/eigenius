@@ -158,6 +158,27 @@ fn working_copy(src: &std::path::Path) -> PathBuf {
     let root = std::env::var("EIGENIUS_DB_WORKDIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| std::env::temp_dir());
+    // Sweep any copy left by a run that was KILLED — `Drop` does not run on SIGKILL, and each copy
+    // is the size of the store (GBs). Only reap a directory whose owning process is gone.
+    if let Ok(rd) = std::fs::read_dir(&root) {
+        for e in rd.flatten() {
+            let name = e.file_name();
+            let Some(pid) = name
+                .to_str()
+                .and_then(|n| n.strip_prefix("eigenius-snapshot-work-"))
+            else {
+                continue;
+            };
+            let alive = std::path::Path::new(&format!("/proc/{pid}")).exists();
+            if !alive {
+                eprintln!(
+                    "snapshot: reaping stale working copy {}",
+                    e.path().display()
+                );
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    }
     let dst = root.join(format!("eigenius-snapshot-work-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dst);
     let t = std::time::Instant::now();
@@ -3136,4 +3157,186 @@ fn measure_abbreviation_glossary() {
          the glossary",
         sentences.len()
     );
+}
+
+/// **What is actually driving the ambiguity?** Factor each unit's readings into
+/// `structural skeletons × sense combinations`, and check whether any residual cross-lexicon
+/// duplication survives (two readings differing ONLY in a `umls:` vs `wn:` sense of one word).
+///
+///   EIGENIUS_DB_SNAPSHOT=<store> cargo test --release -p eigenius-wordnet --features use-llm \
+///     --test db_backed_encoding factor_ambiguity -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed; --ignored --nocapture"]
+fn factor_ambiguity() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let page = std::fs::read_to_string(&page_path).expect("page");
+
+    // Erase every sense IRI's local segment, leaving the STRUCTURE. `wn:n00024720` / `umls:C1442792`
+    // both become `§`, so two readings that differ only in which lexicon's copy of one concept they
+    // chose collapse to the same skeleton.
+    fn erase(s: &str) -> String {
+        let mut out = String::new();
+        let mut it = s.char_indices().peekable();
+        while let Some((i, c)) = it.next() {
+            if c == ':' {
+                // consume an IRI-ish local segment
+                let rest = &s[i + 1..];
+                let n = rest
+                    .find(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '.')
+                    .unwrap_or(rest.len());
+                if n >= 4 {
+                    out.push('§');
+                    for _ in 0..n {
+                        it.next();
+                    }
+                    continue;
+                }
+            }
+            out.push(c);
+        }
+        out
+    }
+
+    println!(
+        "\n{:<52} {:>6} {:>9} {:>7}",
+        "unit", "reads", "skeletons", "sense×"
+    );
+    println!("{}", "-".repeat(78));
+    let (mut tr, mut tk) = (0usize, 0usize);
+    let mut rows: Vec<(usize, usize, String)> = Vec::new();
+    for text in segment_sentences(&page) {
+        let f = index.parse(&text, &lem);
+        if f.len() < 2 {
+            continue;
+        }
+        let sems: Vec<String> = f.iter().map(|it| pretty_term(it.sem())).collect();
+        let skels: std::collections::BTreeSet<String> = sems.iter().map(|s| erase(s)).collect();
+        tr += f.len();
+        tk += skels.len();
+        rows.push((f.len(), skels.len(), text.chars().take(50).collect()));
+    }
+    rows.sort_by_key(|r| std::cmp::Reverse(r.0));
+    for (r, k, t) in rows.iter().take(12) {
+        println!("{:<52} {:>6} {:>9} {:>7.1}", t, r, k, *r as f32 / *k as f32);
+    }
+    println!("{}", "-".repeat(78));
+    println!(
+        "TOTAL readings {tr}   distinct skeletons {tk}   ⇒ sense× = {:.2}",
+        tr as f32 / tk as f32
+    );
+    println!(
+        "\nIf the cross-lexicon duplicates are gone, sense× ≈ 1 and the readings are STRUCTURAL.\n\
+         If sense× is still large, senses are still multiplying."
+    );
+}
+
+/// **Deep dive on the NEAR-ENCODED units** — every unit with ≤ 16 readings. These are the ones
+/// closest to a single reading, so what separates them from ENCODED is the most informative thing
+/// the corpus can tell us.
+///
+/// For each: the readings, the distinct STRUCTURAL skeletons (senses erased), and — when the
+/// skeleton count is 1 — the actual pairwise difference between the readings, which is then a pure
+/// SENSE choice and can be read off directly.
+///
+///   EIGENIUS_DB_SNAPSHOT=<store> EIGENIUS_SENSE_RANKS=<ranks.json> \
+///     cargo test --release -p eigenius-wordnet --features use-llm --test db_backed_encoding \
+///     dive_near_encoded -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed; --ignored --nocapture"]
+fn dive_near_encoded() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let page = std::fs::read_to_string(&page_path).expect("page");
+
+    /// Replace every IRI local segment with `§` — leaves the STRUCTURE only.
+    fn erase(s: &str) -> String {
+        let mut out = String::new();
+        let mut it = s.char_indices().peekable();
+        while let Some((i, c)) = it.next() {
+            if c == ':' {
+                let rest = &s[i + 1..];
+                let n = rest
+                    .find(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '.')
+                    .unwrap_or(rest.len());
+                if n >= 4 {
+                    out.push('§');
+                    for _ in 0..n {
+                        it.next();
+                    }
+                    continue;
+                }
+            }
+            out.push(c);
+        }
+        out
+    }
+
+    /// The tokens that differ between two readings — the actual locus of the ambiguity.
+    fn diff(a: &str, b: &str) -> Vec<(String, String)> {
+        let (ta, tb): (Vec<&str>, Vec<&str>) = (
+            a.split(['(', ')', ' ', ','])
+                .filter(|t| !t.is_empty())
+                .collect(),
+            b.split(['(', ')', ' ', ','])
+                .filter(|t| !t.is_empty())
+                .collect(),
+        );
+        if ta.len() != tb.len() {
+            return vec![("<different shape>".into(), String::new())];
+        }
+        ta.iter()
+            .zip(tb.iter())
+            .filter(|(x, y)| x != y)
+            .map(|(x, y)| ((*x).to_string(), (*y).to_string()))
+            .collect()
+    }
+
+    let mut n_dive = 0;
+    for text in segment_sentences(&page) {
+        let f = index.parse(&text, &lem);
+        if f.len() < 2 || f.len() > 16 {
+            continue;
+        }
+        n_dive += 1;
+        let sems: Vec<String> = f.iter().map(|it| pretty_term(it.sem())).collect();
+        let skels: std::collections::BTreeSet<String> = sems.iter().map(|s| erase(s)).collect();
+        println!("\n════════════════════════════════════════════════════════════════════");
+        println!("{text}");
+        println!(
+            "  {} readings  |  {} structural skeleton(s)  |  sense× = {:.1}",
+            f.len(),
+            skels.len(),
+            f.len() as f32 / skels.len() as f32
+        );
+        // What actually differs between reading 0 and each other reading?
+        for (i, s) in sems.iter().enumerate().skip(1).take(6) {
+            let d = diff(&sems[0], s);
+            let same_shape = erase(&sems[0]) == erase(s);
+            let tag = if same_shape { "SENSE" } else { "STRUCT" };
+            let shown: Vec<String> = d
+                .iter()
+                .take(3)
+                .map(|(x, y)| {
+                    if y.is_empty() {
+                        x.clone()
+                    } else {
+                        format!("{x} ⇄ {y}")
+                    }
+                })
+                .collect();
+            println!("   [{tag}] #{i}: {}", shown.join("   "));
+        }
+        if sems.len() > 7 {
+            println!("   … {} more", sems.len() - 7);
+        }
+    }
+    println!("\n════════════════════════════════════════════════════════════════════");
+    println!("units with 2–16 readings: {n_dive}");
 }
