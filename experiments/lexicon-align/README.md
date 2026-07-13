@@ -12,7 +12,9 @@ Design note: [d63-wordnet-umls-concept-unification.md](../../docs/notes/d63-word
 
 ```bash
 # 1. Candidates — deterministic, no LLM. Every (UMLS concept, WordNet noun synset) pair sharing a
-#    surface. ~79k pairs.
+#    surface. 102 292 pairs. UMLS surfaces are LEMMATISED against WordNet (morphy), so the plural
+#    atom `Genes` is a candidate for the synset its singular matches — it is a separate entry in the
+#    chain (`e_C0017337_0`) and would otherwise never merge.
 cargo run --release --bin lexicon-align -- candidates \
   --out experiments/lexicon-align/candidates.jsonl
 
@@ -29,14 +31,30 @@ cargo run --release --features use-llm --bin lexicon-align -- adjudicate \
   --concurrency 16 --out experiments/lexicon-align/alignment.jsonl
 #    → ~30 min, ~$40. Fails CLOSED: a batch that exhausts its retries records NOTHING.
 
-# 5. Emit the alignment LAYER (reads the committed entries from the chain; see below).
-cargo run --release --features chain --bin lexicon-align-emit \
-  --snapshot <a COPY of the base snapshot>
+# 5. Resolve the verdicts into the merge set. Deterministic — the three rules are in
+#    `crates/eigenius-lexicon-align/src/merge.rs` and are unit-tested there.
+cargo run --release --bin lexicon-align -- merges
+#    → 102 292 candidates, 81 305 verdicts, 27 196 accepted concept pairs, 311 ties dropped,
+#      20 unjudged → 38 389 merges.
 
-# 6. Load it onto a copy of the base, producing a new snapshot.
-scripts/add-layer-to-snapshot.sh --base <base> --out <aligned> \
-  experiments/lexicon-align/alignment.esl
+# 6. Build the aligned snapshot: emit the layer from merges.json (reading the committed entries
+#    out of the base chain) and load it through the kernel. ONE step — the .esl is a build
+#    artefact of this run, never a hand-carried input.
+scripts/build-alignment-snapshot.sh --base <base> --out <aligned>
+#    → 38 389 merges rewrite 51 939 entries (each (cui, surface) can hit both the count entry and
+#      its additive `_mass` variant).
 ```
+
+> **Why 5 exists as a command.** It was a Python one-off, so the load-bearing rule (**a verdict is
+> about `(cui, synset)` — the surface is only how the pair was found, so one verdict licenses every
+> surface of the concept**) lived nowhere in the repo. Re-deriving it by hand resolved 8 confidence
+> ties loosely, and one of them was `cell` — a word on every other line of the WRN page.
+
+> **Why 6 is one step and not two.** It used to be two: emit, then load the emitted `.esl`. On
+> 2026-07-12 `merges.json` was rebuilt and only the *load* was re-run. The **stale `.esl` from the
+> previous emit loaded cleanly**, the snapshot was named `-v3`, and the measurement reported a v2
+> result under a v3 name. Nothing failed — the wrong thing succeeded. The intermediate a human can
+> forget to refresh is now gone.
 
 ---
 
@@ -44,8 +62,8 @@ scripts/add-layer-to-snapshot.sh --base <base> --out <aligned> \
 
 | file | committed | why |
 |---|---|---|
-| **`alignment.jsonl`** | **YES** | 77 167 LLM verdicts, ~$80, **NOT reproducible** (temperature 0 still drifts). Losing it means re-spending the money *and* getting different answers. |
-| `merges.json` | yes | the adjudicated, conflict-resolved merge set (26 690) — the emitter's input |
+| **`alignment.jsonl`** | **YES** | 81 305 LLM verdicts, ~$90, **NOT reproducible** (temperature 0 still drifts). Losing it means re-spending the money *and* getting different answers. |
+| `merges.json` | yes | the resolved merge set (38 389) — the emitter's input. Derived from `alignment.jsonl` + `candidates.jsonl` by step 5, so it is reproducible; committed because the emitter needs it and regenerating means regenerating candidates first. |
 | `gold-/probe-verdicts` | yes | the validation record |
 | `candidates.jsonl` | no (gitignored) | deterministic, ~1 min to regenerate |
 | `alignment.esl` | no (gitignored) | deterministic, 15 s to regenerate |
@@ -60,8 +78,14 @@ accessory"*. Different concepts. The model proposed **nothing** below 0.70, so i
 the usable signal.
 
 **One entry, one class.** An entry `(cui, surface)` proposed for two synsets is resolved by **highest
-confidence; ties DROPPED** (208 of them). With no basis to choose, *prefer to miss*: a missed merge
-changes nothing, a wrong one points a word at the wrong concept.
+confidence; ties DROPPED** (311 of them). With no basis to choose, *prefer to miss*: a missed merge
+changes nothing, a wrong one points a word at the wrong concept. `cell` (C1948049) is one of the 311.
+
+**A verdict is about `(cui, synset)`. The surface is only how the pair was found.** One verdict
+therefore licenses the merge for **every** surface of that concept. The adjudicator judged
+`C0017337` ↔ `n05436752` having been shown `gene`; the chain holds `e_C0017337_0` = **"Genes"** as a
+separate entry, and it merges on the same verdict. Keying merges on the judged surface dropped every
+plural — 11 700 entries, for free, once fixed.
 
 **Exclude WordNet INSTANCE synsets** (`@i` — `Africa`, `Alabama`). The importer emits them as a
 `resource`, not a `class`, and an entry's `cat_n(C, num)` requires `C : Set`. Pointing an entry at an
@@ -107,20 +131,42 @@ dedup (`dedup_same_concept`) keys on `(cat, sem)`, so the label is irrelevant to
 | | merges | effect on the WRN page |
 |---|---|---|
 | v1 (glossed only) | 12 450 | readings **−4.3%**, `encoded` unchanged |
-| **v2 (+ the un-glossed half)** | **26 690** | readings **−0.3%**, `encoded` unchanged |
+| v2 (+ the un-glossed half) | 26 690 | readings **−0.3%**, `encoded` unchanged |
+| **v3 (+ plurals; one-verdict-per-concept)** | **38 389** | readings **−3.6%** (2320→2237), `encoded` unchanged (3) |
 
-**Cross-lexicon de-duplication is done, and it is not the lever.** `grammar-gap 0` held throughout,
-so it is *correct* and worth keeping — the extra merges will matter on other text — but it does not
-reach this corpus.
+**Cross-lexicon de-duplication is done, and it is not the lever.** `grammar-gap 0` held throughout —
+v3 rewrites 51 925 entries, 2.8× v2, and still destroyed no correct reading — so it is *correct* and
+worth keeping (the extra merges will matter on other text), but it does not reach this corpus.
+
+The **−3.6% is soft, not clean signal.** The v2 (2320) and v3 (2237) totals are separate live-reranker
+runs, so the delta conflates the lexicon change with temperature-0 reranker drift; and cap-backfill
+absorbs part of every merge (freeing a cap slot lets the parser admit the next sense), which is why
+the worst unit's max reading count went *up*, 128 → 184. The direction is right — dedup can only
+remove readings — but to isolate the lexicon effect from drift you must replay one `ranks.json`
+across both snapshots. `encoded` is flat at 3 either way.
+
+**v3 falsified a specific prediction.** The two units that were pure sense ambiguity over one
+skeleton and whose competing senses were exactly the unmerged plurals — `Thus, MSI tumours need
+novel therapies` (8 readings) and `Germline mutations in the MMR genes … Lynch syndrome` (3) — were
+predicted to collapse to a single reading once the plurals merged. They **dropped** (8→4, 3→2) but
+did **not** collapse. The plural merge removed one competing sense each; another remained. Same
+lesson a third time: alignment cuts reading *multiplicity*, never down to *one*.
 
 **Why v1 was a wash:** collapsing a duplicate freed a cap slot, and the parser immediately refilled
 it with the next sense — often junk. That changed on 2026-07-12, when the reranker gained the ability
 to **eliminate** senses (see [../parsing/README.md](../parsing/README.md) §9): a freed slot now stays
 free. **Sense elimination, not alignment, is what moved `encoded` (1 → 4).**
 
-**What remains is structural.** The worst unit — `MSI occurs in colon, gastric, endometrial and
-ovarian cancers` — is **168 readings across 93 distinct skeletons**, with `sense× ≈ 1.8`. That is
-coordination and PP attachment. No lexicon work reaches it.
+**What remains is structural, or junk — never an unmerged duplicate.** The worst unit — `MSI occurs
+in colon, gastric, endometrial and ovarian cancers` — is **168 readings across 93 distinct
+skeletons**, `sense× ≈ 1.8`: coordination and PP attachment. And the residual *sense* competition,
+where there is any, is a UMLS **metadata artefact** the adjudicator correctly declined to merge — not
+a duplicate it missed. The v3 dive on `novel therapies are needed for tumours with MSI` (4 readings,
+2 skeletons) shows exactly one sense pair left: `C0686904` **"Patient need for (contextual
+qualifier)"** — a data-entry qualifier seeded as a content noun — against WordNet `n00023773`
+*motivation/need*. Judged `same=false` (0.88), so alignment leaves it; the reranker must kill it in
+context. Alignment removes true duplicates; what it leaves is structure and junk entries, and neither
+is its job.
 
 ---
 
@@ -133,6 +179,10 @@ coordination and PP attachment. No lexicon work reaches it.
   the resume reuses v1's verdicts rather than re-judging them. ~$40 saved against a mild
   inconsistency — the new rules target territory v1 never touched, but it is not free.
 - **Junk senses are filtered at parse time, not in the lexicon.** `Specialty Type - cancer` (a
-  *discipline*, competing with the disease) is still an entry; the reranker now eliminates it in
-  context. That is arguably better than a static filter — it is contextual — but the junk is still
-  there.
+  *discipline*, competing with the disease) and `C0686904` "Patient need for (contextual qualifier)"
+  (a data-entry qualifier competing with the verb *need*) are still entries; the reranker now
+  eliminates them in context. That is arguably better than a static filter — it is contextual — but
+  the junk is still there. **The real fix is upstream:** the UMLS importer should not seed a
+  `(contextual qualifier)` / `(attribute)` / metadata concept as a content-noun `LexicalEntry` at
+  all. That is a separate lever from alignment (which only merges genuine duplicates) and from
+  reranking (which only hides them per-sentence).

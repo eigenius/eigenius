@@ -29,6 +29,7 @@
 
 pub mod adjudicate;
 pub mod emit;
+pub mod merge;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -37,7 +38,7 @@ use serde::{Deserialize, Serialize};
 
 /// One (UMLS concept, WordNet synset) pair sharing a surface form, with everything an adjudicator
 /// needs to decide whether they are the same concept — and the features to score it with.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Candidate {
     /// The surface string both sides spell (lowercased).
     pub surface: String,
@@ -129,6 +130,7 @@ pub fn jaccard(a: &BTreeSet<String>, b: &BTreeSet<String>) -> f32 {
 /// the un-glossed 89% is a long tail of source-specific codes that never surface in text.
 pub fn candidates(meta: &Path, dict: &Path) -> std::io::Result<Vec<Candidate>> {
     use eigenius_umls::rrf::{parse_mrconso_line, parse_mrdef_line, parse_mrsty_line};
+    use eigenius_wordnet::morphy::{morphstr, ExcLists, LemmaSet};
     use eigenius_wordnet::wndb::{read_data_file, Pos};
 
     // UMLS definitions — present for only ~10.6% of concepts.
@@ -153,7 +155,9 @@ pub fn candidates(meta: &Path, dict: &Path) -> std::io::Result<Vec<Candidate>> {
     // WordNet nouns: lemma → [(offset, gloss)]. INSTANCE synsets (`@i`) are excluded — the importer
     // emits them as a `resource`, not a `class`, and an entry's `cat_n(C, num)` requires `C : Set`.
     // Pointing an entry at an individual is a type error the kernel validator rejects.
+    let exc = ExcLists::load(dict)?;
     let nouns = read_data_file(&dict.join(Pos::Noun.data_file()))?;
+    let lemma_set = LemmaSet::from_synsets([&nouns]);
     let mut by_lemma: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     for (off, syn) in &nouns {
         if syn.gloss.is_empty() || !syn.instance_of.is_empty() {
@@ -184,7 +188,20 @@ pub fn candidates(meta: &Path, dict: &Path) -> std::io::Result<Vec<Candidate>> {
             continue;
         }
         let surface = a.str_.to_lowercase();
-        let hits_wn = by_lemma.contains_key(&surface);
+        // **Lemmatize before matching.** WordNet lemmas are SINGULAR; UMLS mints atoms for the
+        // plural too (`Genes`, `Tumours`, `Therapies`). Matching the surface verbatim meant those
+        // atoms never became candidates — so the plural ENTRY was never merged, even though the
+        // singular of the SAME concept was, and it kept denoting `umlscui:…` and generating a
+        // separate reading. Witnessed on the WRN page: `genes` had THREE competing senses
+        // (n05436752 + C0017337 + junk) and `Thus, MSI tumours need novel therapies` had 8 readings
+        // over ONE skeleton — pure sense ambiguity, entirely manufactured by unmerged plurals.
+        //
+        // The candidate keeps the ORIGINAL surface (the emitter finds the entry by `(cui, form)`,
+        // and the entry's form IS the plural); only the WordNet lookup uses the lemma.
+        let hits_wn = by_lemma.contains_key(&surface)
+            || morphstr(&surface, Pos::Noun, &exc, &lemma_set)
+                .iter()
+                .any(|l| by_lemma.contains_key(&l.to_lowercase()));
         let e = acc.entry(a.cui.clone()).or_insert_with(|| Acc {
             name: String::new(),
             atoms: Vec::new(),
@@ -225,8 +242,18 @@ pub fn candidates(meta: &Path, dict: &Path) -> std::io::Result<Vec<Candidate>> {
         let ug = cui_gloss.get(cui).cloned().unwrap_or_default();
         let ut = gloss_tokens(&ug);
         for surface in &e.surfaces {
-            let Some(syns) = by_lemma.get(surface) else {
-                continue;
+            // Resolve the WordNet synsets under the surface OR its lemma (see above).
+            let syns: &Vec<(String, String)> = match by_lemma.get(surface) {
+                Some(v) => v,
+                None => {
+                    let Some(v) = morphstr(surface, Pos::Noun, &exc, &lemma_set)
+                        .iter()
+                        .find_map(|l| by_lemma.get(&l.to_lowercase()))
+                    else {
+                        continue;
+                    };
+                    v
+                }
             };
             for (off, wg) in syns {
                 out.push(Candidate {

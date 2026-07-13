@@ -25,6 +25,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use eigenius_lexicon_align::adjudicate::Verdict;
+use eigenius_lexicon_align::merge::{resolve, MERGE_CONFIDENCE};
 use eigenius_lexicon_align::{candidates, gold, Candidate, GOLD_JACCARD};
 
 #[derive(Parser, Debug)]
@@ -108,17 +110,77 @@ enum Cmd {
         #[arg(long, default_value = "experiments/lexicon-align/candidates.jsonl")]
         out: PathBuf,
     },
+    /// Resolve the adjudicator's verdicts into the merge set the emitter consumes. Deterministic —
+    /// the rules (one verdict per CONCEPT pair licenses every surface; confidence ≥ 0.85; ties
+    /// dropped) are in [`eigenius_lexicon_align::merge`].
+    Merges {
+        #[arg(long, default_value = "experiments/lexicon-align/candidates.jsonl")]
+        candidates: PathBuf,
+        #[arg(long, default_value = "experiments/lexicon-align/alignment.jsonl")]
+        verdicts: PathBuf,
+        #[arg(long, default_value = "experiments/lexicon-align/merges.json")]
+        out: PathBuf,
+    },
 }
 
-/// Only the LLM subcommands read the candidate file back; the deterministic
-/// `candidates` command writes it.
-#[cfg(feature = "use-llm")]
 fn load_candidates(p: &std::path::Path) -> std::io::Result<Vec<Candidate>> {
     let text = std::fs::read_to_string(p)?;
     Ok(text
         .lines()
         .filter_map(|l| serde_json::from_str::<Candidate>(l).ok())
         .collect())
+}
+
+/// Verdicts + candidates → `merges.json`. The rules live in [`eigenius_lexicon_align::merge`]; this
+/// only does the IO and reports what the resolution dropped.
+fn build_merges(
+    cpath: &std::path::Path,
+    vpath: &std::path::Path,
+    out: &std::path::Path,
+) -> ExitCode {
+    let cands = match load_candidates(cpath) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {} — {e}", cpath.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let text = match std::fs::read_to_string(vpath) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("error: {} — {e}", vpath.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let verdicts: Vec<Verdict> = text
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Verdict>(l).ok())
+        .collect();
+
+    let (merges, stats) = resolve(&cands, &verdicts);
+
+    eprintln!("candidates            {}", cands.len());
+    eprintln!("verdicts              {}", verdicts.len());
+    eprintln!(
+        "accepted concept pairs {}   (same=true, confidence ≥ {MERGE_CONFIDENCE})",
+        stats.accepted_concept_pairs
+    );
+    eprintln!("ties dropped          {}", stats.ties_dropped);
+    // Fails CLOSED and stays visible: a candidate the adjudicator never answered for is NOT
+    // silently counted as "different".
+    eprintln!("UNJUDGED (no verdict) {}", stats.unjudged);
+    eprintln!("MERGES                {}", merges.len());
+
+    let json = serde_json::to_string_pretty(&merges).expect("serialize merges");
+    if let Some(p) = out.parent() {
+        let _ = std::fs::create_dir_all(p);
+    }
+    if let Err(e) = std::fs::write(out, json) {
+        eprintln!("error: {} — {e}", out.display());
+        return ExitCode::FAILURE;
+    }
+    eprintln!("wrote {}", out.display());
+    ExitCode::SUCCESS
 }
 
 fn main() -> ExitCode {
@@ -149,6 +211,11 @@ fn main() -> ExitCode {
             limit,
             out,
         } => validate_gold(&cpath, &model, batch, limit, &out),
+        Cmd::Merges {
+            candidates: cpath,
+            verdicts: vpath,
+            out,
+        } => build_merges(&cpath, &vpath, &out),
         Cmd::Candidates {
             meta_dir,
             dict,
