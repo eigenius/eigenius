@@ -3315,6 +3315,13 @@ fn dive_near_encoded() {
             skels.len(),
             f.len() as f32 / skels.len() as f32
         );
+        // EIGENIUS_DIVE_SKELETONS=1 dumps the full distinct skeletons (senses erased to `§`) — the
+        // actual competing bracketings, for when the `<different shape>` diff is uninformative.
+        if std::env::var("EIGENIUS_DIVE_SKELETONS").is_ok() {
+            for (i, sk) in skels.iter().enumerate() {
+                println!("   skel[{i}]: {sk}");
+            }
+        }
         // What actually differs between reading 0 and each other reading?
         for (i, s) in sems.iter().enumerate().skip(1).take(6) {
             let d = diff(&sems[0], s);
