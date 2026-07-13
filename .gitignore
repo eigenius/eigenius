@@ -99,3 +99,7 @@ experiments/*/results/
 experiments/lexicon-align/alignment*.esl
 experiments/lexicon-align/candidates*.jsonl
 notes.md
+experiments.tgz
+references.tgz
+umls-chain.tgz
+wordnet-chain.tgz

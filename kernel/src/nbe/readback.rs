@@ -20,30 +20,61 @@
 //! readbacks at the same level are syntactically equal.
 
 use crate::nbe::env::Rho;
+use crate::nbe::eval::EvalError;
 use crate::nbe::term::{CoField, Exp, Name, Observation, Patt, Summand};
 use crate::nbe::val::{Neut, Val};
 
-/// Readback a value to a normal-form expression.
+/// Readback a value to a normal-form expression — **asserting the value is well-typed**.
 ///
-/// `level` is the current de Bruijn level (number of binders above).
-/// Port of `rbV` from the reference.
+/// `level` is the current de Bruijn level (number of binders above). Port of `rbV` from the
+/// reference.
+///
+/// Readback is *total on well-typed values*: a value in function position under a binder is, by
+/// well-typedness, a function, so `apply` never fails there. In the Haskell reference this was
+/// simply structural — there was no failure case. This entry point preserves that invariant: a
+/// failure means the caller handed readback a value the type checker never sanctioned, so it is a
+/// kernel-invariant violation and panics. It is the right call for the ~all callers that read back
+/// a value the checker already produced.
+///
+/// A caller that hands readback an **un-vetted** term — the felicity gate normalises candidate
+/// parser sems precisely to test whether they are well-typed (GH#104) — must instead use
+/// [`try_readback_val`], which returns the `apply`/`eval` failure as an `Err`. `eval` is already
+/// fallible this way; `try_readback_val` restores the parity the port dropped, and is why the
+/// felicity gate no longer needs a `catch_unwind` around the panic.
 pub fn readback_val(level: usize, val: &Val) -> Exp {
-    match val {
+    try_readback_val(level, val).expect(
+        "readback_val: apply/eval failed on a value assumed well-typed — the caller handed \
+         readback an un-vetted term; use try_readback_val at that boundary",
+    )
+}
+
+/// Readback a neutral term, asserting well-typedness — see [`readback_val`].
+pub fn readback_neut(level: usize, neut: &Neut) -> Exp {
+    try_readback_neut(level, neut).expect(
+        "readback_neut: apply/eval failed on a value assumed well-typed; use try_readback_val at \
+         an un-vetted boundary",
+    )
+}
+
+/// Fallible readback (see [`readback_val`] for the invariant it upholds). Returns `Err` — rather
+/// than panicking — when a value in function position is **not a function**, or an embedded `eval`
+/// fails: the signature of ill-typed input. On well-typed input it is identical to
+/// [`readback_val`]. This is the entry point for the felicity gate, which reads back un-vetted
+/// candidate sems.
+pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
+    Ok(match val {
         Val::Lam(f) => {
             let gen = gen_val(level);
             Exp::Lam(
                 gen_patt(level),
-                Box::new(readback_val(
-                    level + 1,
-                    &f.apply(gen).expect("readback: apply failed"),
-                )),
+                Box::new(try_readback_val(level + 1, &f.apply(gen)?)?),
             )
         }
         Val::Pair(u, v) => Exp::Pair(
-            Box::new(readback_val(level, u)),
-            Box::new(readback_val(level, v)),
+            Box::new(try_readback_val(level, u)?),
+            Box::new(try_readback_val(level, v)?),
         ),
-        Val::Con(c, v) => Exp::Con(c.clone(), Box::new(readback_val(level, v))),
+        Val::Con(c, v) => Exp::Con(c.clone(), Box::new(try_readback_val(level, v)?)),
         Val::Unit => Exp::Unit,
         Val::Sort(n) => Exp::Sort(*n),
         Val::Pi(t, g) => {
@@ -62,11 +93,8 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
             };
             Exp::Pi(
                 patt,
-                Box::new(readback_val(level, t)),
-                Box::new(readback_val(
-                    level + 1,
-                    &g.apply(gen).expect("readback: apply failed"),
-                )),
+                Box::new(try_readback_val(level, t)?),
+                Box::new(try_readback_val(level + 1, &g.apply(gen)?)?),
             )
         }
         Val::Sig(t, g) => {
@@ -78,32 +106,29 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
             };
             Exp::Sig(
                 patt,
-                Box::new(readback_val(level, t)),
-                Box::new(readback_val(
-                    level + 1,
-                    &g.apply(gen).expect("readback: apply failed"),
-                )),
+                Box::new(try_readback_val(level, t)?),
+                Box::new(try_readback_val(level + 1, &g.apply(gen)?)?),
             )
         }
         Val::One => Exp::One,
-        Val::Fun(cases, rho) => readback_fun(level, cases, rho),
-        Val::Data(summands, rho) => readback_data(level, summands, rho),
-        Val::Nt(k) => readback_neut(level, k),
+        Val::Fun(cases, rho) => try_readback_fun(level, cases, rho)?,
+        Val::Data(summands, rho) => try_readback_data(level, summands, rho)?,
+        Val::Nt(k) => try_readback_neut(level, k)?,
 
         // Identity type
         Val::Id(a, x, y) => Exp::Id(
-            Box::new(readback_val(level, a)),
-            Box::new(readback_val(level, x)),
-            Box::new(readback_val(level, y)),
+            Box::new(try_readback_val(level, a)?),
+            Box::new(try_readback_val(level, x)?),
+            Box::new(try_readback_val(level, y)?),
         ),
-        Val::Refl(a) => Exp::Refl(Box::new(readback_val(level, a))),
+        Val::Refl(a) => Exp::Refl(Box::new(try_readback_val(level, a)?)),
 
         // Template
         Val::TemplateVal(s, refs) => Exp::Template(
             s.clone(),
             refs.iter()
-                .map(|(iri, val)| (iri.clone(), Box::new(readback_val(level, val))))
-                .collect(),
+                .map(|(iri, val)| Ok((iri.clone(), Box::new(try_readback_val(level, val)?))))
+                .collect::<Result<Vec<_>, EvalError>>()?,
         ),
 
         // Eigenius extensions
@@ -117,14 +142,14 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
         Val::Codata(observations, rho) => Exp::Codata(
             observations
                 .iter()
-                .map(|(name, typ)| Observation {
-                    name: name.clone(),
-                    typ: readback_val(
-                        level,
-                        &crate::nbe::eval::eval(typ, rho).expect("readback: eval failed"),
-                    ),
+                .map(|(name, typ)| {
+                    let v = crate::nbe::eval::eval(typ, rho)?;
+                    Ok(Observation {
+                        name: name.clone(),
+                        typ: try_readback_val(level, &v)?,
+                    })
                 })
-                .collect(),
+                .collect::<Result<Vec<_>, EvalError>>()?,
         ),
         // Corecord values use a *conservative* readback: emit the
         // original syntactic field bodies without evaluating them.
@@ -150,7 +175,7 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
                 result = Exp::Con(
                     "cons".into(),
                     Box::new(Exp::Pair(
-                        Box::new(readback_val(level, item)),
+                        Box::new(try_readback_val(level, item)?),
                         Box::new(result),
                     )),
                 );
@@ -172,13 +197,16 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
             params
                 .iter()
                 .chain(indices.iter())
-                .map(|p| readback_val(level, p))
-                .collect(),
+                .map(|p| try_readback_val(level, p))
+                .collect::<Result<Vec<_>, EvalError>>()?,
         ),
         // Parameterised codata types (D19 §8, self-referential codata).
         Val::CodataType { decl, params } => Exp::CodataType(
             decl.clone(),
-            params.iter().map(|p| readback_val(level, p)).collect(),
+            params
+                .iter()
+                .map(|p| try_readback_val(level, p))
+                .collect::<Result<Vec<_>, EvalError>>()?,
         ),
         Val::InductiveVal {
             decl,
@@ -187,7 +215,9 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
         } => Exp::InductiveCtor(
             decl.clone(),
             ctor_name.clone(),
-            args.iter().map(|a| readback_val(level, a)).collect(),
+            args.iter()
+                .map(|a| try_readback_val(level, a))
+                .collect::<Result<Vec<_>, EvalError>>()?,
         ),
 
         // eigenius#71 / D49 — literals round-trip as themselves.
@@ -197,17 +227,14 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
 
         // Sized types (Phase 11b step 14, D19 §8).
         Val::SizeSort => Exp::SizeSort,
-        Val::SizeSucc(s) => Exp::SizeSucc(Box::new(readback_val(level, s))),
+        Val::SizeSucc(s) => Exp::SizeSucc(Box::new(try_readback_val(level, s)?)),
         Val::SizeInf => Exp::SizeInf,
         Val::SizedPi(upper, g) => {
             let gen = gen_val(level);
             Exp::SizedPi {
                 patt: gen_patt(level),
-                upper: Box::new(readback_val(level, upper)),
-                body: Box::new(readback_val(
-                    level + 1,
-                    &g.apply(gen).expect("readback: apply failed"),
-                )),
+                upper: Box::new(try_readback_val(level, upper)?),
+                body: Box::new(try_readback_val(level + 1, &g.apply(gen)?)?),
             }
         }
         // D49 §8 — `ChainWitness` values are opaque, kernel-internal
@@ -216,60 +243,63 @@ pub fn readback_val(level: usize, val: &Val) -> Exp {
         // an `Exp` is a programming error: they should only be produced
         // by the type checker's synthesis hook at `JustifiedBy.*`
         // type-check time and consumed within the same type-check; they
-        // do not survive normalisation into a readback-able form.
+        // do not survive normalisation into a readback-able form. This is
+        // a genuine kernel-internal invariant (never input-dependent), so
+        // it stays a hard panic even on the fallible path.
         Val::ChainWitness(key) => panic!(
             "readback_val: ChainWitness {:?} reached readback — witness values are \
              kernel-internal and should be consumed at JustifiedBy.* type-check time, \
              never readback into surface syntax",
             key
         ),
-    }
+    })
 }
 
-/// Readback a neutral term to an expression.
+/// Fallible readback of a neutral term (see [`readback_val`]/[`try_readback_val`]).
 ///
 /// Port of `rbN` from the reference.
-pub fn readback_neut(level: usize, neut: &Neut) -> Exp {
-    match neut {
+pub fn try_readback_neut(level: usize, neut: &Neut) -> Result<Exp, EvalError> {
+    Ok(match neut {
         Neut::Gen(j, name) => Exp::Var(format!("{name}{j}")),
         // D48 Phase C: an unsolved metavariable reads back as a fresh
         // variable name (`?<id>`) plus the spine applied. Solved metas
         // are resolved before readback by the unifier (`zonk` step);
         // a Meta surviving to readback is by definition unsolved.
         Neut::Meta(id, spine) => {
-            let head = Exp::Var(format!("?{}", id.0));
-            spine.iter().fold(head, |acc, v| {
-                Exp::App(Box::new(acc), Box::new(readback_val(level, v)))
-            })
+            let mut acc = Exp::Var(format!("?{}", id.0));
+            for v in spine.iter() {
+                acc = Exp::App(Box::new(acc), Box::new(try_readback_val(level, v)?));
+            }
+            acc
         }
         Neut::App(k, m) => Exp::App(
-            Box::new(readback_neut(level, k)),
-            Box::new(readback_val(level, m)),
+            Box::new(try_readback_neut(level, k)?),
+            Box::new(try_readback_val(level, m)?),
         ),
-        Neut::Fst(k) => Exp::Fst(Box::new(readback_neut(level, k))),
-        Neut::Snd(k) => Exp::Snd(Box::new(readback_neut(level, k))),
+        Neut::Fst(k) => Exp::Fst(Box::new(try_readback_neut(level, k)?)),
+        Neut::Snd(k) => Exp::Snd(Box::new(try_readback_neut(level, k)?)),
         Neut::NtFun(cases, rho, k) => {
-            let fun_exp = readback_fun(level, cases, rho);
-            Exp::App(Box::new(fun_exp), Box::new(readback_neut(level, k)))
+            let fun_exp = try_readback_fun(level, cases, rho)?;
+            Exp::App(Box::new(fun_exp), Box::new(try_readback_neut(level, k)?))
         }
         // Eigenius extension
         Neut::EigonAxiom(iri) => Exp::EigonAxiom(iri.clone()),
         Neut::PropAccess(k, prop) => {
-            Exp::PropAccess(Box::new(readback_neut(level, k)), prop.clone())
+            Exp::PropAccess(Box::new(try_readback_neut(level, k)?), prop.clone())
         }
 
         // Codata (D11, Phase 9b-i)
-        Neut::Observe(k, obs) => Exp::Observe(Box::new(readback_neut(level, k)), obs.clone()),
+        Neut::Observe(k, obs) => Exp::Observe(Box::new(try_readback_neut(level, k)?), obs.clone()),
 
         // Map/Reduce (Phase 11a)
         Neut::NtMap(f, k) => Exp::Map(
-            Box::new(readback_val(level, f)),
-            Box::new(readback_neut(level, k)),
+            Box::new(try_readback_val(level, f)?),
+            Box::new(try_readback_neut(level, k)?),
         ),
         Neut::NtReduce(f, acc, k) => Exp::Reduce(
-            Box::new(readback_val(level, f)),
-            Box::new(readback_val(level, acc)),
-            Box::new(readback_neut(level, k)),
+            Box::new(try_readback_val(level, f)?),
+            Box::new(try_readback_val(level, acc)?),
+            Box::new(try_readback_neut(level, k)?),
         ),
 
         // Inductive types (Phase 11b, D19)
@@ -280,9 +310,12 @@ pub fn readback_neut(level: usize, neut: &Neut) -> Exp {
             major,
         } => Exp::InductiveRec {
             decl: decl.clone(),
-            motive: Box::new(readback_val(level, motive)),
-            minors: minors.iter().map(|m| readback_val(level, m)).collect(),
-            major: Box::new(readback_neut(level, major)),
+            motive: Box::new(try_readback_val(level, motive)?),
+            minors: minors
+                .iter()
+                .map(|m| try_readback_val(level, m))
+                .collect::<Result<Vec<_>, EvalError>>()?,
+            major: Box::new(try_readback_neut(level, major)?),
         },
 
         // Pattern-match blocked on a neutral scrutinee (Phase 11b
@@ -300,10 +333,10 @@ pub fn readback_neut(level: usize, neut: &Neut) -> Exp {
             arms,
             env: _,
         } => Exp::Match {
-            scrutinee: Box::new(readback_neut(level, scrutinee)),
+            scrutinee: Box::new(try_readback_neut(level, scrutinee)?),
             arms: arms.clone(),
         },
-    }
+    })
 }
 
 /// Readback a Data (Sum type) value.
@@ -311,25 +344,25 @@ pub fn readback_neut(level: usize, neut: &Neut) -> Exp {
 /// Evaluates each summand's type expression in the captured environment,
 /// then reads back the resulting value. This avoids the old placeholder
 /// approach that produced `__data_N` variable references.
-fn readback_data(level: usize, summands: &[(Name, Exp)], rho: &Rho) -> Exp {
+fn try_readback_data(level: usize, summands: &[(Name, Exp)], rho: &Rho) -> Result<Exp, EvalError> {
     let read_summands: Vec<Summand> = summands
         .iter()
         .map(|(name, exp)| {
-            let val = crate::nbe::eval::eval(exp, rho).expect("readback: eval failed");
-            Summand {
+            let val = crate::nbe::eval::eval(exp, rho)?;
+            Ok(Summand {
                 name: name.clone(),
-                typ: readback_val(level, &val),
-            }
+                typ: try_readback_val(level, &val)?,
+            })
         })
-        .collect();
-    Exp::Data(read_summands)
+        .collect::<Result<Vec<_>, EvalError>>()?;
+    Ok(Exp::Data(read_summands))
 }
 
 /// Readback a Fun (case function) value.
 ///
 /// Evaluates each branch body in the captured environment to produce
 /// a proper case expression.
-fn readback_fun(level: usize, cases: &[(Name, Exp)], rho: &Rho) -> Exp {
+fn try_readback_fun(level: usize, cases: &[(Name, Exp)], rho: &Rho) -> Result<Exp, EvalError> {
     // A Fun is a case function: fun(c₁ → e₁ | c₂ → e₂ | ...)
     // Each branch is a closure over the constructor's payload.
     // We evaluate each branch with a fresh variable and read back.
@@ -337,14 +370,11 @@ fn readback_fun(level: usize, cases: &[(Name, Exp)], rho: &Rho) -> Exp {
     let branches: Vec<(Name, Exp)> = cases
         .iter()
         .map(|(name, body)| {
-            let branch_val = crate::nbe::eval::eval(body, rho)
-                .expect("readback: eval failed")
-                .app(gen.clone())
-                .expect("readback: app failed");
-            (name.clone(), readback_val(level + 1, &branch_val))
+            let branch_val = crate::nbe::eval::eval(body, rho)?.app(gen.clone())?;
+            Ok((name.clone(), try_readback_val(level + 1, &branch_val)?))
         })
-        .collect();
-    Exp::Case(
+        .collect::<Result<Vec<_>, EvalError>>()?;
+    Ok(Exp::Case(
         branches
             .into_iter()
             .map(|(name, body)| crate::nbe::term::Branch {
@@ -352,7 +382,7 @@ fn readback_fun(level: usize, cases: &[(Name, Exp)], rho: &Rho) -> Exp {
                 body: Exp::Lam(gen_patt(level), Box::new(body)),
             })
             .collect(),
-    )
+    ))
 }
 
 /// Generate a fresh variable value at a given level. The `G#` name tag

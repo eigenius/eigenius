@@ -41,7 +41,7 @@ use crate::layer::{normalize_value, resolve_active_value_indexes, Layer};
 use crate::nbe::check::{check, exp_mentions_var, CheckCtx};
 use crate::nbe::env::{Gamma, Rho};
 use crate::nbe::eval::eval;
-use crate::nbe::readback::readback_val;
+use crate::nbe::readback::{readback_val, try_readback_val};
 use crate::nbe::term::{Exp, Patt};
 use crate::nbe::val::{Neut, Val};
 use crate::ontology::resource::Value;
@@ -3541,16 +3541,15 @@ fn cell_histogram(cell: &[Item]) -> String {
     format!("shapes={distinct} top: {}", top.join(", "))
 }
 
-/// Readback for the **felicity oracle** — total where [`readback_val`] is partial. The gate evaluates
-/// UNTRUSTED candidate sems off the chart, and a spurious derivation can produce a stuck application
-/// (e.g. a resource applied as a function — witnessed for a named-individual subject under
-/// do-support/modal + a PP), on which `readback_val` panics (`apply failed`). Such a candidate is
-/// simply **not felicitous** — reject it (`None`) rather than crash the parser. `catch_unwind`
-/// converts the panic into a rejection; `eval` is already fallible (`.ok()?`), this restores the same
-/// totality to the readback half. (A fully fallible `readback_val` is the cleaner follow-up; until
-/// then the caught panic may still print to stderr.)
+/// Readback for the **felicity oracle**. The gate evaluates UNTRUSTED candidate sems off the chart,
+/// and a spurious derivation can produce a stuck application (e.g. a resource applied as a function —
+/// witnessed for a named-individual subject under do-support/modal + a PP). `try_readback_val`
+/// returns that as `Err` rather than panicking (`readback_val` asserts well-typedness and would
+/// panic), so such a candidate is simply **not felicitous** — reject it (`None`). This is the
+/// readback half of the fallibility `eval` already has; it replaced an earlier `catch_unwind` guard
+/// that turned the panic into a rejection but still printed to stderr.
 fn felicity_readback(val: &Val) -> Option<Exp> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| readback_val(0, val))).ok()
+    try_readback_val(0, val).ok()
 }
 
 /// **Collapse entries that denote the SAME concept** — structural `Exp` equality on `(cat, sem)`,
