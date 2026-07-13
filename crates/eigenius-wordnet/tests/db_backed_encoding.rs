@@ -3255,7 +3255,16 @@ fn dive_near_encoded() {
     let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
     let page = std::fs::read_to_string(&page_path).expect("page");
 
-    /// Replace every IRI local segment with `§` — leaves the STRUCTURE only.
+    /// Erase every SENSE identifier, leaving the combinatory STRUCTURE only, so that two readings
+    /// differing only in *which sense* fills a slot collapse to one skeleton.
+    ///
+    /// Pass 1 handles `X:sense` suffixes (`ΣG#0:n00024720 → ΣG#0§`). Pass 2 handles the ones pass 1
+    /// misses: a sense that appears as a **bare function argument** (`kind_of(C0920269)`) or inside a
+    /// **predicate name** (`v02624263_i`, `deg_a00494409`) — any run of ≥4 digits (CUIs, WordNet
+    /// offsets, synset numbers) → `§`, keeping the categorial part of the name (`v§_i`, `deg_a§`).
+    /// `G#N` structural variables have <4 digits and are untouched. Without pass 2 a bare-argument
+    /// sense pair (a cross-lexicon duplicate as `kind_of(C…)` vs `kind_of(n…)`, or a verb-sense split
+    /// `v00339738_i` vs `v02624263_i`) is miscounted as a distinct *structural* skeleton.
     fn erase(s: &str) -> String {
         let mut out = String::new();
         let mut it = s.char_indices().peekable();
@@ -3275,7 +3284,30 @@ fn dive_near_encoded() {
             }
             out.push(c);
         }
-        out
+        // Pass 2: collapse bare sense-id digit runs of length >= 4.
+        let mut result = String::new();
+        let mut run = String::new();
+        for c in out.chars() {
+            if c.is_ascii_digit() {
+                run.push(c);
+                continue;
+            }
+            if !run.is_empty() {
+                if run.len() >= 4 {
+                    result.push('§');
+                } else {
+                    result.push_str(&run);
+                }
+                run.clear();
+            }
+            result.push(c);
+        }
+        if run.len() >= 4 {
+            result.push('§');
+        } else {
+            result.push_str(&run);
+        }
+        result
     }
 
     /// The tokens that differ between two readings — the actual locus of the ambiguity.
@@ -3317,9 +3349,15 @@ fn dive_near_encoded() {
         );
         // EIGENIUS_DIVE_SKELETONS=1 dumps the full distinct skeletons (senses erased to `§`) — the
         // actual competing bracketings, for when the `<different shape>` diff is uninformative.
+        // EIGENIUS_DIVE_RAW=1 additionally dumps the raw sems (with sense IRIs) for CUI/TUI tracing.
         if std::env::var("EIGENIUS_DIVE_SKELETONS").is_ok() {
             for (i, sk) in skels.iter().enumerate() {
                 println!("   skel[{i}]: {sk}");
+            }
+        }
+        if std::env::var("EIGENIUS_DIVE_RAW").is_ok() {
+            for (i, s) in sems.iter().enumerate() {
+                println!("   raw[{i}]: {s}");
             }
         }
         // What actually differs between reading 0 and each other reading?

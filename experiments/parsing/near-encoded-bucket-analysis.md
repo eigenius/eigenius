@@ -156,3 +156,184 @@ The two grammar choices behind this:
   NP fills only argument positions, not pre-nominal-modifier ones; the genuine `compound_kind`
   survives. Kills axis-2 for MSI and every other mass/plural modifier, and leaves argument-position
   bare NPs ("MSI is a state") untouched — so `grammar-gap` stays 0.
+
+---
+
+## Deep dive — modal scope (`MSI can arise from Lynch syndrome`)
+
+Unit 9 (6 readings / 6 skeletons / `sense× = 1.0`) carries two axes; one is genuine structure, one
+is a verb *sense* split the metric miscounts (see the metric note below).
+
+**Modal scope (structural).** `can` is a VP-to-VP modal, sem `poss_sem` (the `Possible` operator):
+
+```
+can : (S[fin]\NP)/(S[bse]\NP)
+```
+
+The skeletons split on where `Possible` scopes relative to the `from Lynch` adjunct:
+- `Possible(And(arise, prep_from))` — `Possible` **high** (adjunct inside the modal)
+- `And(Possible(arise), prep_from)` — `Possible` **low** (adjunct outside the modal)
+
+**Nailed to the line.** The `from` VP-adjunct category (`ontologies/lexicon/closed-class.esl:966`,
+shared by the whole VP-adjunct preposition family — lines 975/1002/1011/1020/1029) is
+
+```
+((S[fin_any]\NP)\(S[fin_any]\NP))/NP
+```
+
+with **`fin_any`** (polymorphic finiteness) on *both* the argument and result VP. So after taking its
+object, `from Lynch` = `(S[fin_any]\NP)\(S[fin_any]\NP)` and `fin_any` unifies with either the base
+VP `arise` (`S[bse]\NP`, *inside* the modal → `Possible` high) or the finite VP `can arise`
+(`S[fin]\NP`, *outside* → `Possible` low). The `is_vp` combinability check (`parser.rs:455`) ignores
+finiteness too, consistent with the lexical polymorphism. (The other axis — `arise` v00339738 vs
+v02624263 — is a verb *sense* split, reranker territory.)
+
+**Fix.** Not "pin the adjunct to `bse`" — a plain clause with no modal (`MSI arises from Lynch`) has
+only a finite VP, so a `bse`-only adjunct would fail to attach → grammar gap. The ambiguity exists
+*only* when a modal splits the VP into two levels, so the fix is an **Eisner-style normal form scoped
+to modal contexts**: when a modal is present, admit only the adjunct-inside-the-base-VP derivation
+(`Possible` high, the intended reading) and drop the outer one — exactly analogous to
+`is_compound_refined`. The no-modal case is untouched, so `grammar-gap` stays 0.
+
+---
+
+## Metric note — `sense×` under-counts sense/lexical ambiguity
+
+The dive's `sense×` (= readings / distinct skeletons, where a skeleton is the sem with senses erased)
+**mislabels lexical-category ambiguity as structural.** `erase()` only collapses an `X:sense` IRI
+*suffix*; a lexical-category clash produces different *functors and arguments*, which are not `:sense`
+suffixes and so survive erasure as distinct skeletons. Witnessed:
+
+- `several cancers` (unit 8): `compound_kind(…, C0443302)` vs `gt(deg_a00494409, std)` — `several`
+  carries an attributive-adjective entry (`bwd(cat_s(dcl, adj), cat_np(…))` → `gt`) **and** its
+  surface matches the UMLS noun `Several` (`cat_n(C0443302)` → `compound_kind`). A lexical clash,
+  reported `sense× = 1.0`. (Full breakdown in the `gt`-vs-`compound_kind` deep dive below.)
+- `homologous` (unit 3): the same shape — adjective (`gt`) vs a lexicalized concept (`compound_kind`).
+
+**Fixed (2026-07-12).** `erase()` now runs a second pass that collapses any bare ≥4-digit sense id
+(a CUI's `C0920269`, a WordNet offset `n05436752`, a synset number inside a predicate name
+`v02624263_i` → `v§_i`), keeping the categorial part and the `G#N` structural vars. Re-running the
+2–8 bucket:
+
+| | old skeletons | new skeletons |
+|---|---|---|
+| total (14 units) | 44 | **40** |
+| `MSI can arise from Lynch syndrome` | 6 | **3** (the `arise` verb-sense `v00339738`/`v02624263` collapses) |
+| `We found that WRN was selectively essential…` | 5 | **4** |
+
+So **4 of the 44 "structural" skeletons were verb-sense artifacts.** The remaining 40 are genuine.
+
+**Honest limit:** `several`/`homologous` (units 8, 3) **stay** at 2 skeletons — the adjective-vs-noun
+clash produces different sem *shapes* (`gt(deg_a§, std_a§)` vs `compound_kind(…, §)`), which no
+sense-erasure collapses. They are *lexicon/reranker* work, not structural, so the metric cannot
+reclassify them. Read `sense× = 1.0` as "no sense-of-one-word variation," and remember a
+lexical-*category* clash still shows as two skeletons.
+
+---
+
+## Deep dive — `gt` vs `compound_kind` (gradable adjective vs noun compound)
+
+`gt(deg_X(x), std_X)` is the **gradable-adjective positive form** (`kernel/src/dcg/category.rs:1437`
+— degree function `deg_X`, contextual standard `std_X`; Chatzikyriakidis & Luo degree semantics). The
+clash: **one surface matches both an adjective entry (→ `gt` via `Attrib`) and a noun entry (→
+`compound_kind` via `KindCompound`)**, and both fire as pre-nominal modifiers. It is **two classes**
+under one skeleton signature:
+
+| unit | source of `compound_kind` | verdict | fix |
+|---|---|---|---|
+| `several cancers` (8) | `Several` = `cat_n(umlscui:C0443302)`, **TUI T081 Quantitative Concept** — a junk metadata concept seeded as a content noun (case-insensitive lookup lets lowercase `several` match capitalized `Several`) | **spurious** | **upstream**: don't seed T081 / qualifier / attribute TUIs as content nouns (the junk-entry class — same as `C0686904 "Patient need for"`); or the reranker kills it |
+| `homologous recombination` (3) | `C0599773 "homologous recombination"`, **TUI T045 Genetic Function** — a real lexicalized concept | **both valid** (compositional `gt` vs lexicalized `kind_of(C0599773)`) | **multiword preference**: prefer the lexicalized concept when it fully covers the span; or reranker |
+
+So the `gt`-vs-`compound_kind` clash is **lexical over-generation, not grammar structure** — junk
+content entries plus a multiword-granularity choice. Neither is fixed by a normal form; both are
+lexicon/reranker work. This is why the `sense×` metric cannot reclassify it (the sems differ in
+shape) yet it is not "structural" in the actionable sense.
+
+### Sizing the junk-TUI content-entry fix (measured, and modest)
+
+Extracting every UMLS CUI that appears in the 2–8 bucket's readings (`EIGENIUS_DIVE_RAW=1`) and
+looking up its semantic type: **6 of 32 distinct CUIs are junk metadata TUIs seeded as content
+nouns** — `Several` (T081 Quantitative), `New`/`Successful` (T080 Qualitative), `Data Set` (T170
+Intellectual Product), `Deficiency`/`therapeutic aspects` (T169 Functional). But only **2 of the 6
+actually cause count-ambiguity** (they appear in *some* readings, competing with a correct entry):
+
+| junk CUI | unit | appears in | if filtered (keeping the real entry) |
+|---|---|---|---|
+| `C0443302 Several` | 8 `MSI contributes to several cancers` | 1/2 readings | **2 → 1 (ENCODED)** — `several`'s `cat_measure` remains |
+| `C0039798 therapeutic aspects` | 11 `Thus, MSI tumours need novel therapies` | 2/4 readings | **4 → 2** — WordNet `therapy` remains |
+
+The other 4 (`New`, `Successful`, `Data Set`, `Deficiency`) appear in **all** readings of their unit —
+they are a *wrong-denotation* quality problem (`novel` → "New", `successful` → a Qualitative Concept),
+not a count-ambiguity source. **So the junk-TUI filter is not a broad count lever here** — it collapses
+~1 unit to ENCODED and halves one more; its bigger value is correctness (6 words denoting a metadata
+concept instead of their ordinary sense). It must keep a non-junk fallback entry, or filtering a
+word's *only* entry causes OOV → grammar gap. (This downgrades the earlier "single highest-leverage
+lexical fix" framing — measured, it is modest on count, broad on quality.)
+
+**Related lexical junk, different mechanism.** The `genes ↔ C5849123` pair (units 10, 12), earlier
+mislabeled a cross-lexicon *duplicate*, is a **spurious surface collision**: `C5849123` is a T033
+Finding ("Gross Extranodal Extension") carrying a junk synonym atom **`gENE`**. Not a duplicate to
+merge — a bad atom to suppress. A reminder that "cross-lexicon duplicate" and "spurious collision"
+look identical in the skeleton and must be told apart by the concept, not the surface.
+
+### Why the reranker's elimination doesn't stick — widen-on-failure
+
+`C5849123` looks like a reranker miss, but it isn't. In all three `genes` sentences the recorded
+ranking (`<run>/ranks.json`) is `order: [0, 1]` — the reranker **kept** WordNet `gene` and the real
+UMLS `C0017337` and **omitted `C5849123`**. So the LLM eliminated it correctly, and the base-cap cut
+(`lookup.rs`, "take no more than the ranker kept") drops it at the base cap.
+
+It reappears because **the sentence widens.** Widen-on-failure (`lookup.rs:866`) is a *fail-open*
+safety net: when a sentence can't parse at the base sense cap, the parser re-widens every word's
+sense pool and **ignores the reranker's elimination** — "a wrong elimination therefore costs a slower
+parse, never a grammar gap." So on any sentence hard enough to widen — precisely the ambiguity-heavy
+near-encoded ones — *all* eliminated senses come back, `C5849123` included. The `n05436752 ⇄ C5849123`
+axis in the parse is the fingerprint of a widen, not a reranker failure.
+
+**Consequence for the fix — and it is NOT "delete the entry."** A lexical entry cannot be removed
+in general: the concept is usually appropriate in *some* context (`Data Set` is a real noun; `several`
+a real word). The `C5849123` cases split three ways:
+
+1. **Bad atom** (`gENE → C5849123`): a miscased synonym atom wrong in *every* context. Suppress the
+   **surface form**, not the concept — an atom-level data fix, not an entry deletion.
+2. **Wrong category** (`Several` = T081 Quantitative, `Successful` = T080 Qualitative, seeded as
+   `cat_n`): the concept is fine but a quantifier/adjective should not be a content noun. Fix the
+   **import category**, don't delete.
+3. **Genuinely context-dependent** (`Data Set` = T170; gradable adjectives; `C5849123` in a *widening*
+   sentence): the reranker already makes the right contextual call — it *eliminated* `C5849123`. The
+   lexicon is not the lever here. What defeats the reranker is the **widen**, so the fix is to remove
+   whatever *forces* the widen (below), and let the contextual elimination stand.
+
+So a blanket junk-TUI filter is itself too blunt (T170 covers real nouns); only (1) and (2) are
+lexicon work, and both are surgical (atom / category), not deletion.
+
+**Trace of the bypass — nailed: widen-on-failure.** Instrumenting the cap loop
+(`parse_packed_at_cap`, `EIGENIUS_PARSE_DEBUG=1`) on `We analysed these data sets for genes that are
+selectively essential…`:
+
+```
+cap=Some(2)  →  candidates=0     (base cap fails — no finite-clause parse)
+cap=Some(4)  →  candidates=256   (widen fires, succeeds)
+```
+
+Base cap yields **zero** parses; `widen_packed` (`lookup.rs:1436`) escalates 2→4, and the cut only
+applies when `Some(cap) == self.sense_cap` — so at cap 4 it is **skipped**, re-admitting every
+eliminated sense. The whole 8-reading forest is a *cap-4* forest, which is why a reading using only
+base-cap-subset senses coexists with the `C5849123` ones (all 8 are cap-4 readings — base cap never
+succeeded). It is **not** the `if ranked > 0` guard: for `are`, `ranked = 1` (the closed `be` is
+ranked), so `eff = min(2,1) = 1` and `be.v.02604760` **is** eliminated at base cap; same for
+`genes`/`C5849123`. Both are eliminated at cap 2 and only return at cap 4.
+
+The widen **trigger is `are`**: base cap seeds only the closed copula `be`, and `that are selectively
+essential` has no parse on `be` alone at cap 2 (`genes` parses fine on `n05436752`, so it is not the
+blocker — just collateral swept back in when the cap widens).
+
+**So `C5849123` is a *symptom of the widen*, and the widen is a symptom of a base-cap parse gap** —
+apparently the closed copula `be` not composing with a predicative "selectively essential" in a
+relative clause. If that is a grammar gap, fixing it makes base cap parse, the reranker's elimination
+**sticks**, and `C5849123` disappears **with no lexicon change at all**. The elimination *is* the
+right contextual call; the load-bearing fix is to stop forcing the widen — either close the grammar
+gap so the base cap parses, or (for the genuinely bad atom / wrong-category cases above) fix the
+surface form or import category. "Remove the entry" is never the answer, because the entry is
+appropriate in other contexts. **Open:** confirm the base-cap gap is `be` + predicative-adjective
+relative clause (needs a reranked test sentence isolating it).

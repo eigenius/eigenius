@@ -1487,7 +1487,8 @@ impl LexicalIndex {
         candidates.truncate(CLASSIFY_BUDGET);
         if std::env::var("EIGENIUS_PARSE_DEBUG").is_ok() {
             eprintln!(
-                "dcg::parse (packed): {:?} forest nodes={} finite candidates={}",
+                "dcg::parse (packed): cap={:?} {:?} forest nodes={} finite candidates={}",
+                cap,
                 text,
                 forest.nodes.len(),
                 candidates.len()
