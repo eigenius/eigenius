@@ -19,7 +19,7 @@
 //!
 //! It opens a **copy** of the docker-volume store (never the live volume — RocksDB takes an
 //! exclusive lock) via the kernel's persistent backend, resumes the `main` branch head (the loaded
-//! chain), and builds the **lazy** `LexicalIndex` (on-demand `lexicon:form` value-index probes —
+//! chain), and builds the **lazy** `Parser` (on-demand `lexicon:form` value-index probes —
 //! the only tractable path at 7.6M resources; the eager full-chain scan OOMs). The sense cap
 //! (adaptive supertagging) keeps the chart tractable on long sentences; with `--features use-llm`
 //! and `ANTHROPIC_API_KEY`, the contextual reranker reorders which senses the cap keeps.
@@ -43,7 +43,7 @@ use std::sync::Arc;
 use eigenius_kernel::bootstrap::bootstrap_persistent;
 use eigenius_kernel::dcg::{
     extract_abbreviations, glossary_resources, ground_abbreviation, is_nonprose, pretty_term,
-    segment_sentences, tokenize, Identity, Lemmatizer, LexicalIndex,
+    segment_sentences, tokenize, Identity, Lemmatizer, LexicalIndex, LexiconAugmentation, Parser,
 };
 use eigenius_kernel::layer::{resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -224,7 +224,7 @@ fn open_head(path: &std::path::Path) -> Option<Arc<Layer>> {
 }
 
 /// A `SenseRanker` that shares ownership, so the harness can still flush the recording after the
-/// `LexicalIndex` has taken its `Box<dyn SenseRanker>`. Only the recording path constructs it.
+/// `Parser` has taken its `Box<dyn SenseRanker>`. Only the recording path constructs it.
 #[cfg(feature = "use-llm")]
 struct ArcRanker(std::sync::Arc<dyn eigenius_kernel::dcg::SenseRanker + Send + Sync>);
 #[cfg(feature = "use-llm")]
@@ -264,9 +264,17 @@ fn flush_sense_ranks() {
     });
 }
 
-/// Build the lazy `LexicalIndex` over the head with the sense cap, plus the live contextual
+/// Build the lazy `Parser` over the head with the sense cap, plus the live contextual
 /// reranker when built with `--features use-llm` and `ANTHROPIC_API_KEY` is set.
-fn build_index(head: &Arc<Layer>) -> LexicalIndex {
+fn build_index(head: &Arc<Layer>) -> Parser {
+    build_index_over(head, None)
+}
+
+/// Same, but with a document's OOV groundings overlaid on the LEXICON first. The overlay is a fact
+/// about words, so it is applied to the `LexicalIndex`; the `Parser` is then built over that lexicon.
+/// (Before the lexicon/parser split this was `.with_document_augmentation(…)` chained onto the index,
+/// back when the index *was* the parser.)
+fn build_index_over(head: &Arc<Layer>, aug: Option<&LexiconAugmentation>) -> Parser {
     // Combinatory-core spike: `EIGENIUS_COMBINATORY_CORE=1` enables the extra CCG combinators for the
     // A/B port measurement (default off = the established rule-by-rule path).
     let core = std::env::var("EIGENIUS_COMBINATORY_CORE")
@@ -281,7 +289,11 @@ fn build_index(head: &Arc<Layer>) -> LexicalIndex {
     if pos_prune {
         eprintln!("cross-POS prune: ON");
     }
-    let index = LexicalIndex::build(Arc::clone(head))
+    let mut lex = LexicalIndex::build(Arc::clone(head));
+    if let Some(aug) = aug {
+        lex = lex.with_document_augmentation(aug);
+    }
+    let index = Parser::over(Arc::new(lex), Arc::clone(head))
         .with_sense_cap(SENSE_CAP)
         .with_cell_beam(CELL_BEAM)
         .with_combinatory_core(core)
@@ -388,12 +400,7 @@ struct UnitReport {
 /// parse there is guaranteed-empty wasted work. (Edge: a unit whose only unknown single-tokens are
 /// all subsumed by *multiword* entries that do seed, and which fully parses, would be bucketed
 /// MISSING rather than ENCODED — measure-zero for this corpus, and the OOV signal is still right.)
-fn encode_unit(
-    text: &str,
-    index: &LexicalIndex,
-    lem: &dyn Lemmatizer,
-    layer: &Arc<Layer>,
-) -> Outcome {
+fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Layer>) -> Outcome {
     let toks = tokenize(text);
     let unknown: Vec<String> = toks
         .iter()
@@ -459,7 +466,7 @@ fn verify_sense_lever_at_page_beam() {
         "Scientists can exploit synthetic lethality for cancer therapeutics.",
         "DNA repair processes are attractive synthetic lethal targets.",
     ];
-    let outcome = |idx: &LexicalIndex, s: &str| -> String {
+    let outcome = |idx: &Parser, s: &str| -> String {
         let (c, o) = idx.parse_open(s, &lem);
         if !c.is_empty() {
             format!("CLOSED×{}", c.len())
@@ -470,7 +477,7 @@ fn verify_sense_lever_at_page_beam() {
         }
     };
     let mk = || {
-        LexicalIndex::build(Arc::clone(&head))
+        Parser::build(Arc::clone(&head))
             .with_sense_cap(SENSE_CAP)
             .with_cell_beam(CELL_BEAM)
     };
@@ -478,7 +485,7 @@ fn verify_sense_lever_at_page_beam() {
     // The variants to compare. The LLM variant only exists with `--features use-llm` +
     // ANTHROPIC_API_KEY (one reranker call per sentence).
     #[allow(unused_mut)]
-    let mut variants: Vec<(String, LexicalIndex)> = vec![("baseline".into(), mk())];
+    let mut variants: Vec<(String, Parser)> = vec![("baseline".into(), mk())];
     #[cfg(feature = "use-llm")]
     {
         if let Some(r) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
@@ -586,7 +593,7 @@ fn probe_s20_isolation_at_scale() {
     let Some(path) = snapshot_path() else { return };
     let Some(head) = open_head(&path) else { return };
     let lem = morphy();
-    let outcome = |idx: &LexicalIndex, s: &str| -> String {
+    let outcome = |idx: &Parser, s: &str| -> String {
         let (c, o) = idx.parse_open(s, &lem);
         if !c.is_empty() {
             format!("CLOSED×{}", c.len())
@@ -618,7 +625,7 @@ fn probe_s20_isolation_at_scale() {
         eprintln!("  {tag:<16} {:<10} {s:?}", outcome(&idx, s));
     }
     // Grammar vs search for the corpus #2 sentence: cap8/beam512, static rank.
-    let hi = LexicalIndex::build(Arc::clone(&head))
+    let hi = Parser::build(Arc::clone(&head))
         .with_sense_cap(8)
         .with_cell_beam(512);
     let c = "Somatic MMR inactivation typically arises from hypermethylation of the MLH1 promoter";
@@ -862,7 +869,7 @@ fn diagnose_compound_pile() {
     let lem = morphy();
     // ROUTING-ONLY (fast: routes_packed does NOT parse; parsing the domain frames explodes/OOMs). The
     // fork — packed vs unpacked — is the Step-0 answer that picks Lever 1 (extend packing) vs Lever 2.
-    let row = |idx: &LexicalIndex, s: &str| {
+    let row = |idx: &Parser, s: &str| {
         let toks = tokenize(s);
         let unk: Vec<String> = toks
             .iter()
@@ -966,7 +973,7 @@ fn diagnose_residual_gaps() {
             "GRAMMAR-GAP".into()
         }
     };
-    let probe = |idx: &LexicalIndex, s: &str| -> String {
+    let probe = |idx: &Parser, s: &str| -> String {
         let toks = tokenize(s);
         let unk: Vec<String> = toks
             .iter()
@@ -1073,7 +1080,7 @@ fn diagnose_project_achilles() {
             "GRAMMAR-GAP".into()
         }
     };
-    let probe = |idx: &LexicalIndex, s: &str| -> String {
+    let probe = |idx: &Parser, s: &str| -> String {
         let toks = tokenize(s);
         let unk: Vec<String> = toks
             .iter()
@@ -1499,7 +1506,7 @@ fn probe_grammar_gap_root_causes() {
         aug.added.len(),
         aug.missing_oov.len()
     );
-    let index = build_index(&head).with_document_augmentation(&aug);
+    let index = build_index_over(&head, Some(&aug));
     for t in [
         "msi",
         "wrn",
@@ -2011,7 +2018,7 @@ fn packed_win_probe() {
 fn measure_pile_cell_population() {
     let Some(path) = snapshot_path() else { return };
     let Some(head) = open_head(&path) else { return };
-    let index = LexicalIndex::build(Arc::clone(&head))
+    let index = Parser::build(Arc::clone(&head))
         .with_sense_cap(2)
         .with_cell_beam(1024)
         .with_pos_prune(std::env::var("EIGENIUS_POS_PRUNE").is_ok());
@@ -2051,7 +2058,7 @@ fn analyze_chart_cells_first_five() {
     let Some(head) = open_head(&path) else { return };
     // Wide beam so the dumped cells show the true population, not the page-beam-capped view.
     // Honors EIGENIUS_POS_PRUNE so the pile shown is the residual AFTER the cross-POS prune.
-    let index = LexicalIndex::build(Arc::clone(&head))
+    let index = Parser::build(Arc::clone(&head))
         .with_sense_cap(2)
         .with_cell_beam(1024)
         .with_pos_prune(std::env::var("EIGENIUS_POS_PRUNE").is_ok());
@@ -2197,7 +2204,7 @@ fn diagnose_first_five_cnl() {
     }
     // WIDE-BEAM test: does the 3-noun compound subject parse at cell_beam=1024? CLOSED/open ⇒ the
     // page-beam GAP is BEAM PRESSURE (GH #97 Lever B), not a missing compound rule.
-    let wide = LexicalIndex::build(Arc::clone(&head))
+    let wide = Parser::build(Arc::clone(&head))
         .with_sense_cap(SENSE_CAP)
         .with_cell_beam(1024);
     for f in [
@@ -2372,7 +2379,7 @@ fn diagnose_grammar_gap_fragments() {
     // residual is ambiguity explosion (attributive-adj `novel` over a bare-plural subject + a PP),
     // a Lever-B scale issue (GH #97), NOT a missing prep-object rule (the singular/bare-plural prep
     // objects above already parse). Witnessed: at cell_beam=1024 it yields open×216.
-    let wide = LexicalIndex::build(Arc::clone(&head))
+    let wide = Parser::build(Arc::clone(&head))
         .with_sense_cap(SENSE_CAP)
         .with_cell_beam(1024);
     let (wclosed, wopen) = wide.parse_open("novel therapies are needed for a gene", &lem);
@@ -2417,7 +2424,7 @@ fn llm_reranker_on_structural_residual() {
 }
 
 /// De-risk gate: the store opens, the chain resumes, and the `lexicon:form` value-index is ACTIVE
-/// (→ lazy LexicalIndex path; the eager full-chain scan would OOM on 7.6M resources). Cheap — runs
+/// (→ lazy Parser path; the eager full-chain scan would OOM on 7.6M resources). Cheap — runs
 /// by default (not `#[ignore]`d) so the harness wiring stays green even without the heavy run.
 #[test]
 fn snapshot_opens_with_lazy_form_index() {
@@ -2442,7 +2449,7 @@ fn snapshot_opens_with_lazy_form_index() {
         "lexicon:form value-index must be active for the lazy path; active = {active_props:?}"
     );
 
-    let index = LexicalIndex::build(Arc::clone(&head));
+    let index = Parser::build(Arc::clone(&head));
     assert!(
         index.has_token("gene", &Identity),
         "the full WordNet lexicon must know 'gene'"
@@ -2499,7 +2506,7 @@ fn wrn_first_page_over_full_lexicon() {
         aug.added.len(),
         aug.missing_oov.len()
     );
-    let index = build_index(&head).with_document_augmentation(&aug);
+    let index = build_index_over(&head, Some(&aug));
 
     // Characterize a few interesting buckets directly (closed-class vs -ly adverb vs domain).
     for probe in [
@@ -2983,11 +2990,11 @@ fn probe_beam_crowding() {
     let Some(head) = open_head(&path) else { return };
     let lem = morphy();
     let def = build_index(&head); // CELL_BEAM=64, widen→512
-    let wide = LexicalIndex::build(Arc::clone(&head))
+    let wide = Parser::build(Arc::clone(&head))
         .with_sense_cap(SENSE_CAP)
         .with_cell_beam(2048); // above CELL_BEAM_WIDEN_MAX → a fixed wide beam
 
-    let verdict = |idx: &LexicalIndex, s: &str| {
+    let verdict = |idx: &Parser, s: &str| {
         let (c, o) = idx.parse_open(s, &lem);
         if !c.is_empty() {
             format!("CLOSED×{}", c.len())
@@ -3099,7 +3106,7 @@ fn measure_abbreviation_glossary() {
 
     let base = build_index(&head);
     let glossary = build_index(&doc_layer);
-    let verdict = |idx: &LexicalIndex, s: &str| {
+    let verdict = |idx: &Parser, s: &str| {
         let (c, o) = idx.parse_open(s, &lem);
         if !c.is_empty() {
             format!("CLOSED×{}", c.len())

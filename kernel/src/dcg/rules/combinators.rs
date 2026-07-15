@@ -12,195 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The composition parser: parse items, forward/backward application, and a CKY
-//! chart over categorial categories. The categorial type drives composition; the
-//! kernel confirms the assembled term is well-typed (the felicity oracle).
+//! **The categorial combinators** — the sem-blind composition rules: forward/backward application,
+//! composition (harmonic and crossed), the dependent determiner, and the nominal-modification family.
+//!
+//! Combinability is decided by [`combinable`], which receives only a
+//! [`CategoryPayload`](super::super::item::CategoryPayload) and therefore *cannot* read a sem. That is
+//! not a convention — it is the compile-time guarantee that makes the packed forest's
+//! `(cat_shape, provenance)` signature sound, since two items sharing a signature must combine
+//! identically. [`build`] then materialises the result, and is the only place a child sem is read.
+//!
+//! This file was `parser.rs`, and it never contained a parser: the chart drivers live in
+//! `super::super::chart`, and this holds the rules they apply.
 
 use std::sync::Arc;
 
 use crate::layer::Layer;
 use crate::nbe::term::{Exp, Patt};
 
-use super::category::{
-    cat_subsumes, distribute, distribute_object, feat_meets, is_ctor, subst_cat, unify_cat,
-    CatSubst,
-};
-
-/// The combinator that produced a constituent — its **provenance**, tracked so the
-/// **Eisner normal form** (D63 §8.5 Slice 5c, §8.9 Slice 6-T) can constrain a
-/// derivation by how its inputs were built. ENF's forward constraint keys on
-/// `ForwardComp` (a `>B` output may not be the primary functor of a subsequent
-/// `>` / `>B`) and on `TypeRaised` (a raised functor may only *compose*, never
-/// *apply*).
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub enum Combinator {
-    /// Forward application (`>`) or the dependent `cat_forall` application.
-    ForwardApp,
-    /// Backward application (`<`).
-    BackwardApp,
-    /// Forward composition (`>B`) — the one ENF's forward constraint blocks as a functor.
-    ForwardComp,
-    /// Backward harmonic composition (`<B`, combinatory-core spike): `Y\Z · X\Y → X\Z`.
-    BackwardComp,
-    /// Crossed composition (`>Bx` / `<Bx`, combinatory-core spike): `A/B · B\C → A\C` and
-    /// `Y/Z · X\Y → X/Z`. Like `ForwardComp`, an ENF-constrained functor (may not be the primary
-    /// of a subsequent application/composition).
-    CrossedComp,
-    /// Forward bounded **type-raising** (`T`, D63 §8.9 Slice 6-T): an `NP_X` raised to
-    /// `S/(S\NP_X)`. ENF blocks it from forward *application* — a raised functor may
-    /// only *compose* (`>B`), which is what builds the object-extraction `S/NP` body
-    /// of a relative clause. This kills the spurious `T`-application duplicate of plain
-    /// backward application, keeping declaratives single-parse (the regression gate).
-    TypeRaised,
-    /// A **nominal-modification** step (N-N compound / named-entity compound / PP-noun-modifier /
-    /// attributive-adjective refinement) — every one builds a refined noun `cat_n(Σ…)`. Carried so
-    /// [`apply`] can add a per-step **cost penalty** ([`COMPOUND_STEP_PENALTY`]): summed by the
-    /// combinators, a DEEP noun-pile (many modification steps) then costs strictly more than the
-    /// shallow correct parse, so the beam / forest cap keeps the real reading and thins the pile
-    /// (GH#97 — the content-noun-compound explosion the cross-POS prune can't touch). ENF-inert.
-    Compound,
-    /// Any other producer (lexical leaf, coordination, group/distributive rules) —
-    /// not a composition output, so ENF never constrains it.
-    Other,
-}
-
-/// Per-step cost penalty for a nominal-modification ([`Combinator::Compound`]) output (GH#97). Added
-/// to `Cost::sense_rank`, which is summed across a parse's steps — so cost grows with modification
-/// DEPTH, ranking a deep noun-pile below the shallow correct parse. Small enough not to disturb the
-/// lexicon-order primary key; large enough to dominate per-leaf sense-rank noise at a few steps.
-pub const COMPOUND_STEP_PENALTY: u32 = 8;
-
-/// The 2-component additive **rank key** for a parse (D65 §4.2): lexicon
-/// precedence (primary) then sense-frequency (secondary). The combinators **sum**
-/// both components across a parse's leaves; the forest sorts **lexicographically**
-/// by `(lexicon_order, sense_rank)` then caps. Derived `Ord` compares fields in
-/// declaration order, giving exactly that lexicographic order.
-///
-/// The unordered, single-lexicon default leaves `lexicon_order = 0` everywhere —
-/// behaviour-identical to the prior scalar `sense_rank` cost (D63 §8.7 Stage B).
-/// The kernel never learns either component *means* anything — it sums opaque
-/// weights, keeping the engine sense-/lexicon-agnostic (the §6 boundary).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Cost {
-    /// Σ of each leaf's position in the parse scope's ordered lexicon list
-    /// (0 = first / most-preferred; 0 for the unordered default). Primary key.
-    pub lexicon_order: u32,
-    /// Σ of each leaf's `lexicon:sense_rank` (0 = most-frequent sense). Secondary key.
-    pub sense_rank: u32,
-}
-
-impl Cost {
-    /// The zero cost — the default for closed-class / unranked / unscoped leaves.
-    pub const ZERO: Cost = Cost {
-        lexicon_order: 0,
-        sense_rank: 0,
-    };
-
-    /// A leaf cost from just a sense-frequency rank (`lexicon_order = 0`); the
-    /// lexical index stamps this, and the scope (if any) overwrites `lexicon_order`.
-    pub fn from_sense_rank(sense_rank: u32) -> Cost {
-        Cost {
-            lexicon_order: 0,
-            sense_rank,
-        }
-    }
-
-    /// Component-wise saturating sum — how the combinators aggregate child costs.
-    pub fn saturating_add(self, other: Cost) -> Cost {
-        Cost {
-            lexicon_order: self.lexicon_order.saturating_add(other.lexicon_order),
-            sense_rank: self.sense_rank.saturating_add(other.sense_rank),
-        }
-    }
-}
-
-/// The **category payload** of a parse item — everything the combination rules
-/// ([`apply`]/[`apply_combine`]) are allowed to consume: the category (`lexicon:Cat`
-/// term), the producing [`Combinator`] (Eisner normal form), and the additive [`Cost`]
-/// rank key. Deliberately **carries no semantics**: the packed-forest design (D63
-/// blueprint) requires combinability to be a function of `(category, prov)` alone, so
-/// the sem is segregated into [`SemanticPayload`] and never reachable from a rule that
-/// only holds a `CategoryPayload`. This is the compile-time form of the "postcondition
-/// vs. carry" separation (Hopkins & Langmead 2009).
-#[derive(Clone)]
-pub struct CategoryPayload {
-    pub cat: Exp,
-    pub prov: Combinator,
-    pub cost: Cost,
-}
-
-/// The **semantic payload** of a parse item — the assembled EigenTT sem. Segregated
-/// from [`CategoryPayload`] so the combination rules cannot branch on it (the
-/// packed-forest soundness invariant). In the eventual lazy design (Harper 1994
-/// "Method 3") this becomes a deferred procedure call materialised on demand; today it
-/// is the eagerly-built term.
-#[derive(Clone)]
-pub struct SemanticPayload {
-    pub sem: Exp,
-}
-
-/// A parse item: a [`CategoryPayload`] (category + provenance + cost — all combination
-/// consumes) paired with its [`SemanticPayload`] (the sem — never seen by combination).
-/// A leaf's cost is set by whoever builds it (the lexical index from the entry's
-/// `sense_rank`, the parse scope from the entry's lexicon position); the kernel only
-/// sums opaque weights, staying sense-/lexicon-agnostic (the §6 forest-returns boundary).
-#[derive(Clone)]
-pub struct Item {
-    pub category: CategoryPayload,
-    pub semantics: SemanticPayload,
-}
-
-impl Item {
-    /// Assemble an item from its parts — the single constructor the composition rules
-    /// and lexical index build through (replacing the old `Item::from_parts(cat, sem, prov, cost)`
-    /// literal now that the fields live in two payloads).
-    pub fn from_parts(cat: Exp, sem: Exp, prov: Combinator, cost: Cost) -> Self {
-        Item {
-            category: CategoryPayload { cat, prov, cost },
-            semantics: SemanticPayload { sem },
-        }
-    }
-
-    /// A leaf / non-combinatory item (a lexical seed, or any constituent not
-    /// produced by a composition rule) — `prov = Other`, cost zero.
-    pub fn new(cat: Exp, sem: Exp) -> Self {
-        Self::from_parts(cat, sem, Combinator::Other, Cost::ZERO)
-    }
-
-    /// Same as [`Item::new`] but with an explicit [`Cost`] — used by the lexical
-    /// index to stamp an entry's rank, and by the composition rules that sum costs.
-    pub fn with_cost(cat: Exp, sem: Exp, cost: Cost) -> Self {
-        Self::from_parts(cat, sem, Combinator::Other, cost)
-    }
-
-    /// This item with its cost replaced (preserving cat/sem/prov) — for unary
-    /// transforms (type-raise, number refinement) that carry a child's cost through.
-    fn at_cost(mut self, cost: Cost) -> Self {
-        self.category.cost = cost;
-        self
-    }
-
-    /// The category term (`&self.category.cat`).
-    pub fn cat(&self) -> &Exp {
-        &self.category.cat
-    }
-    /// The assembled sem (`&self.semantics.sem`).
-    pub fn sem(&self) -> &Exp {
-        &self.semantics.sem
-    }
-    /// The producing combinator (Eisner normal form provenance).
-    pub fn prov(&self) -> Combinator {
-        self.category.prov
-    }
-    /// The additive rank key.
-    pub fn cost(&self) -> Cost {
-        self.category.cost
-    }
-    /// Replace the sem in place (the per-span hole freshening).
-    pub fn set_sem(&mut self, sem: Exp) {
-        self.semantics.sem = sem;
-    }
-}
+use super::super::category::{cat_subsumes, feat_meets, is_ctor, subst_cat, unify_cat, CatSubst};
+use super::super::item::{CategoryPayload, Combinator, Cost, Item, COMPOUND_STEP_PENALTY};
+use super::super::rules::constructions::{distribute, distribute_object};
 
 /// Combine two adjacent constituents (the CKY step). Combinability is decided **sem-blind** by
 /// [`combinable`] (it receives only [`CategoryPayload`]s — the compile-time form of the packed-forest
@@ -644,11 +475,15 @@ fn build_refine(
             // SAME base: `Σx:Base. P(x) ∧ adj(x)` — a FLAT Σ. Else `Σx:C. adj(x)`.
             let sigma = match &c {
                 Exp::Sig(Patt::Var(bx), base, p_body)
-                    if super::category::resolve_inductive(layer, "urn:eigenius:logic:And")
-                        .is_some() =>
+                    if super::super::category::resolve_inductive(
+                        layer,
+                        "urn:eigenius:logic:And",
+                    )
+                    .is_some() =>
                 {
-                    let and = super::category::resolve_inductive(layer, "urn:eigenius:logic:And")
-                        .unwrap();
+                    let and =
+                        super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And")
+                            .unwrap();
                     let adj_at =
                         Exp::App(Box::new(left.sem().clone()), Box::new(Exp::Var(bx.clone())));
                     Exp::Sig(
@@ -909,102 +744,17 @@ fn group_member_fits(slot: &Exp, c: &Exp, layer: &Arc<Layer>) -> bool {
     false
 }
 
-/// CKY: `chart[i][j]` holds every item spanning tokens `i..=j`; returns the
-/// items spanning the whole input.
-pub fn cky_parse(tokens: &[Item], layer: &Arc<Layer>) -> Vec<Item> {
-    let n = tokens.len();
-    if n == 0 {
-        return Vec::new();
-    }
-    let mut chart: Vec<Vec<Vec<Item>>> = vec![vec![Vec::new(); n]; n];
-    for (i, t) in tokens.iter().enumerate() {
-        chart[i][i].push(t.clone());
-    }
-    for len in 2..=n {
-        for i in 0..=(n - len) {
-            let j = i + len - 1;
-            let mut produced = Vec::new();
-            for k in i..j {
-                let lefts = chart[i][k].clone();
-                let rights = chart[k + 1][j].clone();
-                for l in &lefts {
-                    for r in &rights {
-                        if let Some(item) = apply(l, r, layer) {
-                            produced.push(item);
-                        }
-                    }
-                }
-            }
-            chart[i][j] = produced;
-        }
-    }
-    chart[0][n - 1].clone()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Cost;
-
-    #[test]
-    fn cost_sorts_lexicon_order_before_sense_rank() {
-        // D65 §4.2: the rank key is lexicographic — lexicon precedence dominates,
-        // sense-frequency tie-breaks within a precedence level.
-        let mut v = vec![
-            Cost {
-                lexicon_order: 1,
-                sense_rank: 0,
-            }, // preferred lexicon? no — order 1
-            Cost {
-                lexicon_order: 0,
-                sense_rank: 9,
-            },
-            Cost {
-                lexicon_order: 0,
-                sense_rank: 1,
-            },
-        ];
-        v.sort();
-        assert_eq!(
-            v,
-            vec![
-                Cost {
-                    lexicon_order: 0,
-                    sense_rank: 1
-                }, // order 0 beats order 1 …
-                Cost {
-                    lexicon_order: 0,
-                    sense_rank: 9
-                }, // … even at a much worse sense_rank
-                Cost {
-                    lexicon_order: 1,
-                    sense_rank: 0
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn cost_saturating_add_is_componentwise() {
-        let a = Cost {
-            lexicon_order: 2,
-            sense_rank: 3,
-        };
-        let b = Cost {
-            lexicon_order: 1,
-            sense_rank: 4,
-        };
-        assert_eq!(
-            a.saturating_add(b),
-            Cost {
-                lexicon_order: 3,
-                sense_rank: 7
-            }
-        );
-        // Saturates each component independently, no overflow panic.
-        let big = Cost {
-            lexicon_order: u32::MAX,
-            sense_rank: 0,
-        };
-        assert_eq!(big.saturating_add(a).lexicon_order, u32::MAX);
-    }
-}
+// NOTE — there is deliberately NO chart driver here.
+//
+// `parser.rs` owns the RULES (`apply` / `apply_core` / `apply_group`); the CKY drivers live in
+// `lookup/chart_packed.rs` and `lookup/chart_unpacked.rs`. That split is forced, not stylistic: several
+// rules resolve their CATEGORY out of the lexicon at parse time — the bare-plural/mass kind shift
+// borrows the determiner's raised category (`entries_for("a")` / `("these")`), the object appositive
+// borrows `a_obj`, and pied-piping looks up the fronted preposition. A driver that must consult the
+// lexicon cannot live in a module that has none, so the drivers hang off `Parser`.
+//
+// A bare `cky_parse(tokens, layer)` that only applied `apply` used to live here. It could not parse
+// coordination, relatives, bare plurals, type-raising, or any composed-cell shift, so it was a strict
+// subset of the real driver and no production path used it — a fossil of the grammar from before the
+// lexicon-dependent rules existed. It survived only as a test harness and now lives with the tests
+// that use it (`kernel/tests/lexicon_validates.rs`), so the engine has exactly one driver family.

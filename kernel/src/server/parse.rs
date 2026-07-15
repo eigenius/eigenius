@@ -15,7 +15,7 @@
 //! `ParseSentence` — run the D63/D65 DCG sentence parser over the served chain.
 //!
 //! Builds the (lazy, when a `lexicon:form` `core:ValueIndex` is active over the
-//! committed storage) `LexicalIndex` over the read layer and returns the typed parse
+//! committed storage) `Parser` over the read layer and returns the typed parse
 //! forest. An optional per-parse scope — a set of `lexicon:Lexicon` IRIs, or a named
 //! `lexicon:LexiconProfile` — restricts which lexica are in play (D65 §4); empty scope
 //! parses against the whole chain unscoped.
@@ -23,7 +23,7 @@
 use super::proto::*;
 use super::EigeniusService;
 use crate::dcg::{
-    is_ctor, pretty_term, resolve_lexicon_profile, Identity, Item, Lemmatizer, LexicalIndex,
+    is_ctor, pretty_term, resolve_lexicon_profile, Identity, Item, Lemmatizer, Parser,
 };
 use crate::nbe::env::Rho;
 use crate::nbe::eval::eval;
@@ -34,7 +34,7 @@ use std::sync::Arc;
 use tonic::{Response, Status};
 
 /// Configuration for the `ParseSentence` parse path (D63/GH#97 Lever 1). Held by
-/// [`EigeniusService`]; a fresh `LexicalIndex` is built per request with these settings.
+/// [`EigeniusService`]; a fresh `Parser` is built per request with these settings.
 ///
 /// Defaults are the safe production shape: the **sense cap + cell beam ON** (the only OOM defense
 /// over the full WordNet+UMLS lexicon — without them a nontrivial sentence over the dense lexicon
@@ -109,7 +109,7 @@ impl EigeniusService {
         // reranker is opt-in and `use-llm`-gated; widen-on-failure (in `parse_scoped`) recovers any
         // sense a bad rank or the cap drops, so neither can lose a parse a known sentence would get.
         let cfg = &self.parse_config;
-        let mut index = LexicalIndex::build(Arc::clone(&layer));
+        let mut index = Parser::build(Arc::clone(&layer));
         if let Some(n) = cfg.sense_cap {
             index = index.with_sense_cap(n);
         }

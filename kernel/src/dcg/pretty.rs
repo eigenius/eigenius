@@ -37,7 +37,7 @@ fn patt(p: &Patt) -> String {
 }
 
 /// Flatten an application spine `((f a) b) c` into `(f, [a, b, c])`.
-fn unspine(e: &Exp) -> (&Exp, Vec<&Exp>) {
+pub(super) fn unspine(e: &Exp) -> (&Exp, Vec<&Exp>) {
     let mut args = Vec::new();
     let mut head = e;
     while let Exp::App(f, a) = head {
@@ -114,126 +114,6 @@ pub fn pretty_term(e: &Exp) -> String {
         // Bounded fallback for any variant not special-cased: the variant kind, never
         // the full Debug (which would inline inductive declarations).
         other => exp_kind(other).to_string(),
-    }
-}
-
-/// Render a category's **structural shape** — `pretty_term` with every type INDEX
-/// (an `EigonClass` / `EigonResource` / refined `Σ`) erased to `_`, while keeping the
-/// constructor spine (`cat_n`, `cat_np`, `cat_s`, `fwd`, `bwd`, `cat_forall`) and the
-/// FEATURE atoms (`sg`/`pl`/`num_any`/`mass`/`dcl`/`fin`/…). So `cat_n(wn:n123, sg)`
-/// and `cat_n(umlscui:C1, sg)` both render `cat_n(_, sg)`. Used to histogram chart cells:
-/// many items sharing ONE shape ⇒ lexical/sense variation (a type-narrowing candidate);
-/// many distinct shapes ⇒ structural ambiguity (type-narrowing won't help). Diagnostic.
-pub fn cat_shape(e: &Exp) -> String {
-    match e {
-        Exp::App(_, _) => {
-            let (head, args) = unspine(e);
-            if args.is_empty() {
-                cat_shape(head)
-            } else {
-                let inner = args
-                    .iter()
-                    .map(|a| cat_shape(a))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{}({inner})", cat_shape(head))
-            }
-        }
-        Exp::Con(name, body) => format!("{name}({})", cat_shape(body)),
-        Exp::InductiveCtor(_, name, args) => {
-            if args.is_empty() {
-                name.clone()
-            } else {
-                let inner = args.iter().map(cat_shape).collect::<Vec<_>>().join(", ");
-                format!("{name}({inner})")
-            }
-        }
-        Exp::InductiveType(decl, args) => {
-            if args.is_empty() {
-                decl.name.clone()
-            } else {
-                let inner = args.iter().map(cat_shape).collect::<Vec<_>>().join(", ");
-                format!("{}({inner})", decl.name)
-            }
-        }
-        // Type indices / sense identities — erased.
-        Exp::EigonClass(_) | Exp::EigonResource(_) | Exp::EigonAxiom(_) => "_".to_string(),
-        // A refined noun's index is a `Σ`; keep the shape marker, erase the components.
-        Exp::Sig(_, _, _) | Exp::Times(_, _) => "Σ_".to_string(),
-        // A determiner category `cat_forall(num, λT. body)` carries its GQ body as a `Lam`. The body
-        // SHAPE (subject GQ `S/(S\NP)` vs object GQ `(S\NP)\((S\NP)/NP)`) decides combinability, so it
-        // MUST be kept (only the bound type-index `T` erases, via the `Var` arm) — else the packing
-        // signature `(cat_shape, prov)` is not a combinability congruence and packs distinct
-        // determiner readings into one node (D63 §11 3d).
-        Exp::Lam(_, body) => format!("λ.{}", cat_shape(body)),
-        Exp::Arrow(a, b) => format!("{} → {}", cat_shape(a), cat_shape(b)),
-        Exp::Pi(_, a, b) => format!("{} → {}", cat_shape(a), cat_shape(b)),
-        Exp::Var(_) => "_".to_string(),
-        Exp::Sort(0) => "Prop".to_string(),
-        Exp::Sort(1) => "Set".to_string(),
-        // Sems (a leaf's `sem`, not a cat) collapse — we only shape categories.
-        _ => "_".to_string(),
-    }
-}
-
-/// A packing key that — unlike [`cat_shape`] — **keeps** every type index: the concrete `EigonClass`
-/// IRIs in argument slots, and refined-noun Σ components. Used only for categories whose
-/// combinability is index-DEPENDENT ([`super::category::cat_has_selectional_slot`]), where `cat_shape`
-/// is too coarse: it erases the argument class, so two object type-raised GQs
-/// `(S\NP)\((S\NP)/cat_np(gene))` and `…/cat_np(cell)` would share a node, and the packed forest's
-/// representative-based edge decision would silently drop the non-representative's combinations
-/// (D63 §11 3d — per-cell packing). Keying such items by the full category makes them merge only when
-/// identical, so their (small) residue stays exact while the index-independent majority still packs by
-/// `cat_shape`. Like `cat_shape`, it never inlines an `InductiveType` declaration (bounded output).
-pub fn cat_key(e: &Exp) -> String {
-    match e {
-        Exp::App(_, _) => {
-            let (head, args) = unspine(e);
-            if args.is_empty() {
-                cat_key(head)
-            } else {
-                let inner = args
-                    .iter()
-                    .map(|a| cat_key(a))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{}({inner})", cat_key(head))
-            }
-        }
-        Exp::Con(name, body) => format!("{name}({})", cat_key(body)),
-        Exp::InductiveCtor(_, name, args) => {
-            if args.is_empty() {
-                name.clone()
-            } else {
-                let inner = args.iter().map(cat_key).collect::<Vec<_>>().join(", ");
-                format!("{name}({inner})")
-            }
-        }
-        Exp::InductiveType(decl, args) => {
-            if args.is_empty() {
-                decl.name.clone()
-            } else {
-                let inner = args.iter().map(cat_key).collect::<Vec<_>>().join(", ");
-                format!("{}({inner})", decl.name)
-            }
-        }
-        // KEEP the type index — the whole point of this key over `cat_shape`. Full IRI (not `local`),
-        // so two classes that share a local name across namespaces never collide into one node.
-        Exp::EigonClass(iri) | Exp::EigonAxiom(iri) => iri.as_str().to_string(),
-        Exp::EigonResource(r) => r
-            .id()
-            .map(|i| i.as_str().to_string())
-            .unwrap_or_else(|| "<resource>".to_string()),
-        // KEEP the refined-noun Σ components — they determine the result of a combination.
-        Exp::Sig(_, a, b) => format!("Σ({}, {})", cat_key(a), cat_key(b)),
-        Exp::Times(a, b) => format!("×({}, {})", cat_key(a), cat_key(b)),
-        Exp::Lam(_, body) => format!("λ.{}", cat_key(body)),
-        Exp::Arrow(a, b) => format!("{} → {}", cat_key(a), cat_key(b)),
-        Exp::Pi(_, a, b) => format!("{} → {}", cat_key(a), cat_key(b)),
-        Exp::Var(n) => n.clone(),
-        Exp::Sort(0) => "Prop".to_string(),
-        Exp::Sort(1) => "Set".to_string(),
-        _ => "_".to_string(),
     }
 }
 

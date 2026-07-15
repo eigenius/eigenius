@@ -31,13 +31,13 @@ use std::sync::Arc;
 
 use crate::layer::{Layer, LayerBuilder, LayerStorage};
 
+use super::abbrev::AbbreviationProposer;
 use super::augment::{
     augment_document_only, augment_lexicon_backed, AugmentOptions, CategoryProposer,
     LexiconAugmentation, NominalCategoryProposer,
 };
-use super::glossary::AbbreviationProposer;
 use super::lemmatizer::Lemmatizer;
-use super::lookup::{LexicalIndex, Proposer, SentenceOutcome};
+use super::parse::{Parser, Proposer, SentenceOutcome};
 use super::segment::segment_sentences;
 
 /// The document→encoding pipeline: raw document text → typed propositions, one [`SentenceOutcome`] per
@@ -156,7 +156,7 @@ impl<'a> InProcessPipeline<'a> {
 
         // Stage B + C — parse each body sentence over base + doc-glossary and resolve its referent holes
         // against the threaded discourse (the untrusted proposer suggests, the kernel re-gates).
-        let index = LexicalIndex::build(Arc::clone(&doc_layer));
+        let index = Parser::build(Arc::clone(&doc_layer));
         let bodies: Vec<String> = segment_sentences(document)
             .into_iter()
             .filter(|s| !s.trim().is_empty())

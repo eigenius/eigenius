@@ -15,7 +15,7 @@
 //! Contextual **sense reranking** (D63 parsing-scale plan / GH #97) — the *strong* form of the
 //! adaptive-supertagging lever.
 //!
-//! The deterministic sense cap (`LexicalIndex::with_sense_cap`) keeps the top-`N` senses per lemma
+//! The deterministic sense cap (`Parser::with_sense_cap`) keeps the top-`N` senses per lemma
 //! by static `sense_rank` (global WordNet frequency). A [`SenseRanker`] makes that prior
 //! **contextual**: given a sentence and each content word's candidate senses, it returns a per-word
 //! ranking, so the kept top-`N` are the senses most plausible *in this sentence*. This is zero-shot

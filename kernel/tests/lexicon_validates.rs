@@ -36,9 +36,9 @@
 use std::sync::Arc;
 
 use eigenius_kernel::dcg::{
-    apply, cat_subsumes, cky_parse, denote_cat, entry_to_item, gate_entry, is_ctor, resolve_sem,
+    apply, cat_subsumes, denote_cat, entry_to_item, gate_entry, is_ctor, resolve_sem,
     resolve_sem_value, subst_cat, type_eq, unify_cat, Identity, Item, Lemmatizer, LexicalIndex,
-    Pos,
+    Parser, Pos,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{
@@ -441,9 +441,44 @@ fn denotation_is_order_and_type_sensitive() {
 // is well-typed. The first prose-tokens → EigenTT-term → kernel-check loop.
 // ════════════════════════════════════════════════════════════════════
 
-// `Item`, `is_ctor`, `entry_to_item`, `apply`, `cky_parse` are the kernel's
-// `eigenius_kernel::dcg` engine (imported above). The tests below drive it
-// over the worked lexicon; they witness the engine, they do not redefine it.
+// `Item`, `is_ctor`, `entry_to_item`, `apply` are the kernel's `eigenius_kernel::dcg` engine
+// (imported above). The tests below drive it over the worked lexicon; they witness the engine, they do
+// not redefine it.
+//
+// `cky_parse` is the exception, and it lives HERE rather than in the kernel: it is a bare CKY over
+// `apply` alone, with no seeding, no token-keyed rules (coordination / relatives / appositives), no
+// composed-cell shifts, and no beam — a strict subset of the real drivers
+// (`dcg::lookup::chart_{packed,unpacked}`), which no production path uses. It is exactly the harness
+// these lexicon tests want: it composes HAND-BUILT items so the assertions are about the LEXICON's
+// categories and sems, not about the parse pipeline around them. Keeping it in the kernel would leave a
+// second, production-shaped driver that nothing drives.
+fn cky_parse(tokens: &[Item], layer: &Arc<Layer>) -> Vec<Item> {
+    let n = tokens.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut chart: Vec<Vec<Vec<Item>>> = vec![vec![Vec::new(); n]; n];
+    for (i, t) in tokens.iter().enumerate() {
+        chart[i][i].push(t.clone());
+    }
+    for len in 2..=n {
+        for i in 0..=(n - len) {
+            let j = i + len - 1;
+            let mut produced = Vec::new();
+            for k in i..j {
+                for l in &chart[i][k].clone() {
+                    for r in &chart[k + 1][j].clone() {
+                        if let Some(item) = apply(l, r, layer) {
+                            produced.push(item);
+                        }
+                    }
+                }
+            }
+            chart[i][j] = produced;
+        }
+    }
+    chart[0][n - 1].clone()
+}
 fn tokens_for(layer: &Arc<Layer>, forms: &[&str]) -> Vec<Item> {
     forms
         .iter()
@@ -667,7 +702,7 @@ fn parser_composes_general_verb_via_subsumption() {
 
 // ════════════════════════════════════════════════════════════════════
 // The lookup bridge (D62 §8.8.1): string → the forest of typed parses.
-// `LexicalIndex` builds a `form → entries` index over the committed lexicon;
+// `Parser` builds a `form → entries` index over the committed lexicon;
 // `parse` tokenizes, seeds multi-token spans via the `Lemmatizer` (`Identity`
 // here — WordNet's Morphy is witnessed in the `eigenius-wordnet` crate), runs
 // CKY, and keeps every full-span S whose assembled sem the kernel types to Prop.
@@ -678,6 +713,7 @@ fn parser_composes_general_verb_via_subsumption() {
 
 #[test]
 fn index_covers_the_committed_entries() {
+    // An INDEX test, not a parser test: it asserts on the lexicon's coverage, so it holds the lexicon.
     let index = LexicalIndex::build(build_lexicon());
     assert!(!index.is_empty());
     // the six spike entries (incl. the multiword forms "cell line", "depends on").
@@ -689,7 +725,7 @@ fn index_covers_the_committed_entries() {
 }
 
 // D65 slice 1: the schema declares a `core:ValueIndex` on `lexicon:form` with a
-// `lowercase` normalizer — the runtime substrate the lazy `LexicalIndex`
+// `lowercase` normalizer — the runtime substrate the lazy `Parser`
 // (slice 2) probes (on a shared-storage chain) instead of eagerly scanning, and
 // whose absence-from-the-local-index is the fallback signal in this fresh-
 // storage-per-layer test harness. The generic active-discovery + build-time
@@ -836,7 +872,7 @@ fn sem_string(it: &Item) -> String {
 #[test]
 fn parse_scope_filters_lexica_and_ranks_by_precedence() {
     let layer = esl_layer("scoped-lex", SCOPED_LEXICA, build_lexicon());
-    let index = LexicalIndex::build(Arc::clone(&layer));
+    let index = Parser::build(Arc::clone(&layer));
     let lex_a = Iri::parse("urn:eigenius:lexicon:lex_a").unwrap();
     let lex_b = Iri::parse("urn:eigenius:lexicon:lex_b").unwrap();
     let sentence = "every widget affects HeLa";
@@ -908,7 +944,7 @@ fn lexicon_profile_resolves_to_ordered_scope() {
 
 #[test]
 fn bridge_parses_mwe_sentence_to_prop() {
-    let index = LexicalIndex::build(build_lexicon());
+    let index = Parser::build(build_lexicon());
     // "HeLa depends on BRCA1": the verb is the multiword form "depends on" — one
     // entry seeded across two tokens (the multi-span MWE seed) — and the proper
     // nouns are single-token NP lookups. `parse` only returns S items whose sem
@@ -928,7 +964,7 @@ fn bridge_parses_mwe_sentence_to_prop() {
 
 #[test]
 fn bridge_composes_general_verb_via_subsumption() {
-    let index = LexicalIndex::build(build_lexicon());
+    let index = Parser::build(build_lexicon());
     // "HeLa affects BRCA1" — the general verb's NP[Entity] slots accept the
     // CellLine subject and Gene object by subclass subsumption, through the bridge.
     let forest = index.parse("HeLa affects BRCA1", &Identity);
@@ -942,7 +978,7 @@ fn bridge_composes_general_verb_via_subsumption() {
 
 #[test]
 fn bridge_is_case_insensitive() {
-    let index = LexicalIndex::build(build_lexicon());
+    let index = Parser::build(build_lexicon());
     // Upper-cased input still resolves: the index is keyed by lowercased form and
     // the tokenizer lowercases.
     let forest = index.parse("HELA DEPENDS ON BRCA1", &Identity);
@@ -951,7 +987,7 @@ fn bridge_is_case_insensitive() {
 
 #[test]
 fn bridge_returns_empty_forest_for_unknown_words() {
-    let index = LexicalIndex::build(build_lexicon());
+    let index = Parser::build(build_lexicon());
     assert!(
         index.parse("xyzzy plugh frobnicate", &Identity).is_empty(),
         "no matching entries → no admissible parse (empty forest is a first-class outcome, not an error)"
@@ -960,7 +996,7 @@ fn bridge_returns_empty_forest_for_unknown_words() {
 
 #[test]
 fn bridge_yields_no_parse_for_type_mismatch() {
-    let index = LexicalIndex::build(build_lexicon());
+    let index = Parser::build(build_lexicon());
     // "BRCA1 depends on HeLa" — subject/object types swapped; the categories do
     // not combine, so the forest is empty (the felicity filter at the category level).
     assert!(
@@ -1638,7 +1674,7 @@ fn every_cell_line_is_primary_parses_from_entries_to_a_checked_prop() {
 }
 
 // ── Item 5 — the determiner milestone through the STRING bridge ──────
-/// `parse("every gene affects HeLa")` via `LexicalIndex::parse`: tokenize →
+/// `parse("every gene affects HeLa")` via `Parser::parse`: tokenize →
 /// seed (determiner / common noun / general verb / named entity) → CKY →
 /// felicity filter. Subject quantification + a named object (no copula, no
 /// object quantifier). The forest is the `∀g:Gene. affects(HeLa, g) : Prop`
@@ -1646,7 +1682,7 @@ fn every_cell_line_is_primary_parses_from_entries_to_a_checked_prop() {
 #[test]
 fn bridge_parses_every_gene_affects_hela_to_prop() {
     let layer = det_poly_layer();
-    let index = LexicalIndex::build(layer.clone());
+    let index = Parser::build(layer.clone());
     let forest = index.parse("every gene affects HeLa", &Identity);
     assert!(
         !forest.is_empty(),
@@ -1674,7 +1710,7 @@ fn bridge_parses_every_gene_affects_hela_to_prop() {
 #[test]
 fn bridge_parses_every_gene_affects_a_cell_line_to_prop() {
     let layer = det_poly_layer();
-    let index = LexicalIndex::build(layer.clone());
+    let index = Parser::build(layer.clone());
     let forest = index.parse("every gene affects a cell line", &Identity);
     assert!(
         !forest.is_empty(),
@@ -1710,12 +1746,12 @@ impl Lemmatizer for PluralS {
 #[test]
 fn determiner_noun_number_agreement_bites() {
     // The Num feature, made functional end to end: the lexicon stores nouns as
-    // `num_any`; `LexicalIndex` refines the seed to the SURFACE number (`gene` sg,
+    // `num_any`; `Parser` refines the seed to the SURFACE number (`gene` sg,
     // `genes` pl); the determiner `every` carries `sg` on its `cat_forall`, and
     // `apply` checks agreement. So a singular determiner with a plural noun has
     // NO parse, while the singular agrees.
     let layer = det_poly_layer();
-    let index = LexicalIndex::build(layer.clone());
+    let index = Parser::build(layer.clone());
 
     let ok = index.parse("every gene affects HeLa", &PluralS);
     assert!(
@@ -1737,7 +1773,7 @@ fn determiner_noun_number_agreement_bites() {
 #[test]
 fn kind_subject_predicate_nominal_is_subclass_of() {
     let layer = det_poly_layer();
-    let index = LexicalIndex::build(layer.clone());
+    let index = Parser::build(layer.clone());
     // "genes are cell lines" → subclass_of(Gene, CellLine) : Prop (opaque; truth is a
     // separate grounding judgment — felicity ≠ truth).
     let forest = index.parse("genes are cell lines", &PluralS);
@@ -1786,7 +1822,7 @@ fn first_prop(forest: &[Item], which: &str) -> Exp {
 /// i.e. the entailment holds, witnessed and checked (not proof-searched).
 fn treetest_entails(
     layer: &Arc<Layer>,
-    index: &LexicalIndex,
+    index: &Parser,
     premise: &str,
     hypothesis: &str,
     witness: &Exp,
@@ -1821,7 +1857,7 @@ fn treetest_every_is_downward_monotone_in_its_restrictor() {
     // `Gene ≤ Entity`, so  "every entity affects HeLa"  ⊨  "every gene affects
     // HeLa".  Witness: λp. λg. p(g) — apply the Entity-universal at the coerced g.
     let layer = det_poly_layer();
-    let index = LexicalIndex::build(layer.clone());
+    let index = Parser::build(layer.clone());
     treetest_entails(
         &layer,
         &index,
@@ -1839,7 +1875,7 @@ fn treetest_rejects_the_invalid_upward_restrictor_step() {
     // instantiation witness fails to type-check — `p : ∀g:Gene…` applied to an
     // `Entity` has no coercion (Entity ⊄ Gene). The runner reports no entailment.
     let layer = det_poly_layer();
-    let index = LexicalIndex::build(layer.clone());
+    let index = Parser::build(layer.clone());
     let verdict = treetest_entails(
         &layer,
         &index,
@@ -1882,7 +1918,7 @@ fn treetest_some_is_upward_monotone_in_its_restrictor() {
     // `Gene ≤ Entity`, so  "some gene affects HeLa"  ⊨  "some entity affects
     // HeLa".  Witness: lift the existential witness from Gene to Entity.
     let layer = det_poly_layer();
-    let index = LexicalIndex::build(layer.clone());
+    let index = Parser::build(layer.clone());
     treetest_entails(
         &layer,
         &index,
@@ -1899,7 +1935,7 @@ fn treetest_rejects_the_invalid_downward_existential_step() {
     // gene affects HeLa" (narrowing an existential's restrictor). The lift
     // witness fails — `k : ∀x:Gene…` cannot consume the Entity-witness.
     let layer = det_poly_layer();
-    let index = LexicalIndex::build(layer.clone());
+    let index = Parser::build(layer.clone());
     let verdict = treetest_entails(
         &layer,
         &index,
@@ -1919,7 +1955,7 @@ fn treetest_no_is_downward_monotone_in_its_restrictor() {
     // preserves): "no entity affects HeLa" ⊨ "no gene affects HeLa". Witness:
     // the same instantiation `λp. λg. p(g)` (a universal instantiated at coerced g).
     let layer = det_poly_layer();
-    let index = LexicalIndex::build(layer.clone());
+    let index = Parser::build(layer.clone());
     treetest_entails(
         &layer,
         &index,
@@ -1958,7 +1994,7 @@ fn treetest_conjunction_elimination_holds() {
     // Premise sem is `logic:And(P, Q)`; the witness `λm. match m { conj p q => p }`
     // is the kernel-checked proof of `⟦premise⟧ → ⟦hypothesis⟧` = `And(P,Q) → P`.
     let layer = det_poly_layer();
-    let index = LexicalIndex::build(layer.clone());
+    let index = Parser::build(layer.clone());
     treetest_entails(
         &layer,
         &index,
@@ -1976,7 +2012,7 @@ fn treetest_rejects_a_non_conjunct_as_a_conjunction_consequence() {
     // first projection yields `P` (= affects(BRCA1, HeLa)), which is not the
     // hypothesis prop, so the witness fails to type-check.
     let layer = det_poly_layer();
-    let index = LexicalIndex::build(layer.clone());
+    let index = Parser::build(layer.clone());
     let verdict = treetest_entails(
         &layer,
         &index,
@@ -1995,7 +2031,7 @@ fn treetest_rejects_the_invalid_upward_negative_step() {
     // The converse is invalid: "no gene affects HeLa" does NOT entail "no entity
     // affects HeLa" (widening a negative's restrictor).
     let layer = det_poly_layer();
-    let index = LexicalIndex::build(layer.clone());
+    let index = Parser::build(layer.clone());
     let verdict = treetest_entails(
         &layer,
         &index,
@@ -2010,7 +2046,7 @@ fn treetest_rejects_the_invalid_upward_negative_step() {
 }
 
 // ── Determiner build-out (§8.3 Phase 2) — new quantifiers parse to checked Prop ──
-fn assert_parses_to_prop(layer: &Arc<Layer>, index: &LexicalIndex, sentence: &str) {
+fn assert_parses_to_prop(layer: &Arc<Layer>, index: &Parser, sentence: &str) {
     let forest = index.parse(sentence, &Identity);
     assert!(
         !forest.is_empty(),
@@ -2035,7 +2071,7 @@ fn assert_parses_to_prop(layer: &Arc<Layer>, index: &LexicalIndex, sentence: &st
 #[test]
 fn buildout_some_and_no_determiners_parse_to_prop() {
     let layer = det_poly_layer();
-    let index = LexicalIndex::build(layer.clone());
+    let index = Parser::build(layer.clone());
     // some (subject existential):  ∃g:Gene. affects(HeLa, g)
     assert_parses_to_prop(&layer, &index, "some gene affects HeLa");
     // no (subject negative):       ∀g:Gene. ¬affects(HeLa, g)
@@ -2052,7 +2088,7 @@ fn buildout_some_and_no_determiners_parse_to_prop() {
 #[test]
 fn buildout_definite_and_demonstrative_determiners_parse_to_prop() {
     let layer = det_poly_layer();
-    let index = LexicalIndex::build(layer.clone());
+    let index = Parser::build(layer.clone());
     // the (subject + object)
     assert_parses_to_prop(&layer, &index, "the gene affects HeLa");
     assert_parses_to_prop(&layer, &index, "every gene affects the cell line");

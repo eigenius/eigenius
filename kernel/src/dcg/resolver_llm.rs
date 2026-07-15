@@ -18,7 +18,7 @@
 //! model in-process before the production path (the orchestrator across the process boundary).
 //! Default builds stay LLM-free — the kernel is the trusted oracle; the resolve loop runs
 //! against the abstract [`Proposer`] trait, and the LLM only ever *proposes* (the kernel
-//! re-gates every suggestion via [`super::LexicalIndex::resolve_open`]). The proposer never
+//! re-gates every suggestion via [`super::Parser::resolve_open`]). The proposer never
 //! decides felicity, so a hallucinated or type-wrong antecedent is vetoed downstream.
 
 use schemars::JsonSchema;

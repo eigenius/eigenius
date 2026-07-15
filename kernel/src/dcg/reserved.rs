@@ -23,11 +23,11 @@
 //! (`Relativize`), the appositive (`Appositive*`), and the fronted-modifier comma (`AbsorbComma`) —
 //! plus the wh-determiner `which` as an ordinary leaf. The lone construct still routed to the unpacked
 //! path is **pied-piping** (`[prep] which`), a ternary rule with no packing benefit, detected
-//! structurally by [`super::lookup::LexicalIndex::parse_needs_unpacked`] rather than by a token guard.
+//! structurally by [`super::parse::Parser::parse_needs_unpacked`] rather than by a token guard.
 //!
 //! The reserved-word FORM SET is **data** (§11 3g.3 / B10): `lexicon:ReservedConstruct { form,
 //! construct_kind }` resources in `closed-class.esl`, loaded index-driven into a [`ReservedTable`] at
-//! `LexicalIndex` build ([`crate::layer::typed_resource_iris`] over the `is_a` triple index — NOT a
+//! `Parser` build ([`crate::layer::typed_resource_iris`] over the `is_a` triple index — NOT a
 //! full-chain resource scan, so it costs O(#reserved)). Adding a coordinator / relativizer is an
 //! ontology edit, not a code change. The construct *semantics* (which rule fires) stays the parser
 //! engine; [`ReservedKind`] is the internal role each `lexicon:construct_kind` individual maps to —
@@ -101,7 +101,7 @@ impl ReservedKind {
 }
 
 /// The reserved-construct table: `form → kind`, loaded index-driven from the ontology
-/// (`lexicon:ReservedConstruct` resources) at `LexicalIndex` build. The single source of truth the
+/// (`lexicon:ReservedConstruct` resources) at `Parser` build. The single source of truth the
 /// CKY's reserved-word rules (both paths) classify tokens against, replacing the former hard-coded
 /// string consts.
 #[derive(Clone, Default)]
@@ -164,14 +164,14 @@ impl ReservedTable {
     }
 
     /// The connective a coordinator contributes: `and` → `logic:And`, `or` → `logic:Or`, and the list
-    /// **comma** → the neutral [`LIST_CONN`](super::category::LIST_CONN) that the trailing `and`/`or`
+    /// **comma** → the neutral [`LIST_CONN`](super::rules::constructions::LIST_CONN) that the trailing `and`/`or`
     /// finalizes (D63 §8.4 Phase 6, Step 5b — the comma inherits the list's final connective, so it is
     /// NOT hardcoded to `and`). `None` if `token` is not a coordinator. Derived from the kind.
     pub fn coord_connective(&self, token: &str) -> Option<&'static str> {
         match self.kind(token) {
             Some(ReservedKind::CoordAnd) => Some("urn:eigenius:logic:And"),
             Some(ReservedKind::CoordOr) => Some("urn:eigenius:logic:Or"),
-            Some(ReservedKind::Comma) => Some(super::category::LIST_CONN),
+            Some(ReservedKind::Comma) => Some(super::rules::constructions::LIST_CONN),
             _ => None,
         }
     }

@@ -17,7 +17,7 @@
 //!
 //! The path is the whole point of the slice: `select_synsets` → `render_document`
 //! → compile over the bootstrap head → `LayerBuilder::build` → **hold the
-//! `Arc<Layer>`** → `LexicalIndex::build` → `parse` with WordNet's Morphy →
+//! `Arc<Layer>`** → `Parser::build` → `parse` with WordNet's Morphy →
 //! kernel-gate each parse to a `Prop`. The always-on test runs at **Stage A**
 //! (a seeded, hypernymy-closed slice of real WordNet vocabulary) so it is fast
 //! and exact; the `#[ignore]` test stands up a large `--limit` slice and records
@@ -29,7 +29,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use eigenius_kernel::dcg::{Identity, Item, LexicalIndex};
+use eigenius_kernel::dcg::{Identity, Item, Parser};
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
 use eigenius_kernel::nbe::env::Rho;
@@ -136,7 +136,7 @@ fn stage_a_battery_parses_to_props_over_real_wordnet() {
     }
     let (layer, build) = stand_up(&SeedSpec::seeded(BATTERY_SEEDS.iter().copied()));
     let t0 = Instant::now();
-    let index = LexicalIndex::build(Arc::clone(&layer));
+    let index = Parser::build(Arc::clone(&layer));
     let index_build = t0.elapsed();
     let lemma = morphy();
     eprintln!("  layer build {build:?}, index build {index_build:?}");
@@ -190,7 +190,7 @@ fn no_spurious_duplication_from_feature_vars() {
     }
     let (_layer, index) = {
         let (l, _) = stand_up(&SeedSpec::seeded(BATTERY_SEEDS.iter().copied()));
-        let i = LexicalIndex::build(Arc::clone(&l));
+        let i = Parser::build(Arc::clone(&l));
         (l, i)
     };
     let lemma = morphy();
@@ -220,7 +220,7 @@ fn singular_subject_rejects_bare_and_plural_verb() {
     }
     let (_layer, index) = {
         let (l, _) = stand_up(&SeedSpec::seeded(BATTERY_SEEDS.iter().copied()));
-        let i = LexicalIndex::build(Arc::clone(&l));
+        let i = Parser::build(Arc::clone(&l));
         (l, i)
     };
     let lemma = morphy();
@@ -242,7 +242,7 @@ fn stage_b_baselines_over_a_large_slice() {
     // time + per-sentence parse-time + forest-size distribution over the battery.
     let (layer, build) = stand_up(&SeedSpec::limit(12_000));
     let t0 = Instant::now();
-    let index = LexicalIndex::build(Arc::clone(&layer));
+    let index = Parser::build(Arc::clone(&layer));
     let index_build = t0.elapsed();
     let lemma = morphy();
     eprintln!("BASELINE: layer build {build:?}, index build {index_build:?}");
