@@ -59,6 +59,12 @@ pub enum Combinator {
     /// shallow correct parse, so the beam / forest cap keeps the real reading and thins the pile
     /// (GH#97 — the content-noun-compound explosion the cross-POS prune can't touch). ENF-inert.
     Compound,
+    /// A **bare mass/plural kind-raise** (`kind_raised_nps`): a bare `cat_n` shifted to a
+    /// determiner-form GQ denoting its kind. ENF-inert (may forward-apply, unlike `TypeRaised`).
+    /// Carried so the attributive rule can REFUSE it as a pre-nominal modifier: its predicative
+    /// `S[adj]\NP` form is for argument/predication slots, not to modify a noun — consuming it there
+    /// is the bare-mass `And` over-generation (`experiments/parsing/near-encoded-bucket-analysis.md`).
+    KindRaised,
     /// Any other producer (lexical leaf, coordination, group/distributive rules) —
     /// not a composition output, so ENF never constrains it.
     Other,

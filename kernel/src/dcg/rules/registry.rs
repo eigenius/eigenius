@@ -507,7 +507,15 @@ impl Grammar {
                     }
                     _ => return None,
                 };
-                Some(Item::with_cost(cat, sem, noun.cost()))
+                // Tag `KindRaised` so the attributive rule can refuse the predicative `S[adj]\NP` form
+                // as a pre-nominal modifier (the bare-mass `And` over-generation), while it stays
+                // available for its legit argument/predication uses. ENF-inert.
+                Some(Item::from_parts(
+                    cat,
+                    sem,
+                    Combinator::KindRaised,
+                    noun.cost(),
+                ))
             })
             .collect()
     }

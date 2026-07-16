@@ -314,10 +314,7 @@ fn combine_nominal_mod(left: &CategoryPayload, right: &CategoryPayload) -> Optio
         let mut binds = CatSubst::new();
         if match_cat(&rule.left_pat, &left.cat, &mut binds)
             && match_cat(&rule.right_pat, &right.cat, &mut binds)
-            && rule
-                .guards
-                .iter()
-                .all(|g| g.holds(&binds, &left.cat, &right.cat))
+            && rule.guards.iter().all(|g| g.holds(&binds, left, right))
         {
             return Some(SemRecipe::Rule {
                 builder: rule.build,
@@ -337,10 +334,7 @@ fn combine_other_grammar(left: &CategoryPayload, right: &CategoryPayload) -> Opt
         let mut binds = CatSubst::new();
         if match_cat(&rule.left_pat, &left.cat, &mut binds)
             && match_cat(&rule.right_pat, &right.cat, &mut binds)
-            && rule
-                .guards
-                .iter()
-                .all(|g| g.holds(&binds, &left.cat, &right.cat))
+            && rule.guards.iter().all(|g| g.holds(&binds, left, right))
         {
             return Some(SemRecipe::Rule {
                 builder: rule.build,
@@ -423,9 +417,10 @@ struct CatRule {
     build: SemBuild,
 }
 
-/// A **sem-blind** dispatch guard — a predicate over an operand's CATEGORY (never its sem: the
-/// packed-forest soundness invariant, enforced by the type — [`Guard::holds`] receives only
-/// categories). This is the predicate library the datafied rules draw from.
+/// A **sem-blind** dispatch guard — a predicate over an operand's CATEGORY and/or PROVENANCE (never
+/// its sem: the packed-forest soundness invariant — [`Guard::holds`] receives a [`CategoryPayload`],
+/// which carries only `cat` + `prov`, both part of the packing `Sig`). The predicate library the
+/// datafied rules draw from.
 #[derive(Clone, Copy)]
 enum Guard {
     /// The named operand must NOT be an already-compound-refined noun — the left-branching normal
@@ -436,6 +431,11 @@ enum Guard {
     /// other than the `Entity` top (D63 §5.3). Keeps close-naming apposition off a pronoun /
     /// bare-kind `cat_np(Entity)` right. Reads a category metavar, never a sem.
     ProperName(&'static str),
+    /// The named operand must NOT carry the given provenance. Keeps a `KindRaised` bare NP out of the
+    /// attributive **modifier** slot (its predicative `S[adj]\NP` form is for argument/predication
+    /// positions; consuming it as a pre-nominal modifier is the bare-mass `And` over-generation).
+    /// Provenance is sem-blind (part of the `Sig`), so this stays a packed-rule-safe guard.
+    NotProv(Operand, Combinator),
 }
 
 /// Which operand a rule reads — a [`Guard`]'s target, or the functor side of a [`CombKind::Apply`].
@@ -446,7 +446,11 @@ enum Operand {
 }
 
 impl Operand {
-    fn pick<'a>(&self, left: &'a Exp, right: &'a Exp) -> &'a Exp {
+    fn pick<'a>(
+        &self,
+        left: &'a CategoryPayload,
+        right: &'a CategoryPayload,
+    ) -> &'a CategoryPayload {
         match self {
             Operand::Left => left,
             Operand::Right => right,
@@ -455,13 +459,14 @@ impl Operand {
 }
 
 impl Guard {
-    fn holds(&self, binds: &CatSubst, left: &Exp, right: &Exp) -> bool {
+    fn holds(&self, binds: &CatSubst, left: &CategoryPayload, right: &CategoryPayload) -> bool {
         match self {
-            Guard::NotCompoundRefined(op) => !is_compound_refined(op.pick(left, right)),
+            Guard::NotCompoundRefined(op) => !is_compound_refined(&op.pick(left, right).cat),
             Guard::ProperName(meta) => matches!(
                 binds.get(*meta),
                 Some(Exp::EigonClass(iri)) if iri.as_str() != "urn:eigenius:lexicon:Entity"
             ),
+            Guard::NotProv(op, prov) => op.pick(left, right).prov != *prov,
         }
     }
 }
@@ -476,7 +481,11 @@ fn refine_rules() -> &'static [CatRule] {
         let cat_n = |a, b| Ctor("cat_n", vec![a, b]);
         vec![
             // Attributive adjective (D63 §8.5 Slice 3b): `S[_,adj]\NP` (left) + `cat_n` (right). The
-            // `adj` fin literal in the pattern IS the adj-clause test — no guard needed.
+            // `adj` fin literal in the pattern IS the adj-clause test. The `NotProv` guard refuses a
+            // `KindRaised` left — a bare mass/plural noun's predicative `S[adj]\NP` form is for
+            // argument/predication slots, not to modify a noun; consuming it here is the bare-mass
+            // `And` over-generation. A genuine adjective (any other provenance) is unaffected. Safe
+            // now that `refine_pp_mod` flattens, so the clean compound+PP reading exists without it.
             CatRule {
                 name: "attrib",
                 left_pat: Ctor(
@@ -484,7 +493,7 @@ fn refine_rules() -> &'static [CatRule] {
                     vec![Ctor("cat_s", vec![Var("_"), Ctor("adj", vec![])]), Var("_")],
                 ),
                 right_pat: cat_n(Var("C"), Var("num")),
-                guards: &[],
+                guards: &[Guard::NotProv(Operand::Left, Combinator::KindRaised)],
                 build: refine_attrib,
             },
             // Named-entity compound `[cat_np] [cat_n]` (D63 §8.13). Left-branching NF: the head may
@@ -589,13 +598,43 @@ fn refine_kind_compound(binds: &CatSubst, left: &Item, right: &Item, _layer: &Ar
 }
 
 /// Post-nominal PP modifier `[cat_n(C)] [cat_pp]` → `Σx:C. ⟦right⟧(x)`. Head noun is the LEFT.
-fn refine_pp_mod(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
+/// If `C` is ALREADY a refined noun `Σx:Base. P(x)` (a compound / earlier-modified noun), CONJOIN the
+/// PP predicate over the SAME base → `Σx:Base. P(x) ∧ pp(x)` — a FLAT Σ, mirroring `refine_attrib`
+/// (EXPERIMENT: flatten the modifier side, testing whether a nested Σ is what blocks the clean parse).
+fn refine_pp_mod(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     let (decl, c, noun_num) = noun_parts(left, binds);
-    let restr = Exp::App(
-        Box::new(right.sem().clone()),
-        Box::new(Exp::Var(COMPOUND_X.into())),
-    );
-    refined_noun(&decl, &c, &noun_num, restr)
+    let sigma = match &c {
+        Exp::Sig(Patt::Var(bx), base, p_body)
+            if super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And")
+                .is_some() =>
+        {
+            let and =
+                super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And").unwrap();
+            let pp_at = Exp::App(
+                Box::new(right.sem().clone()),
+                Box::new(Exp::Var(bx.clone())),
+            );
+            Exp::Sig(
+                Patt::Var(bx.clone()),
+                base.clone(),
+                Box::new(Exp::InductiveType(and, vec![(**p_body).clone(), pp_at])),
+            )
+        }
+        _ => Exp::Sig(
+            Patt::Var(COMPOUND_X.into()),
+            Box::new(c.clone()),
+            Box::new(Exp::App(
+                Box::new(right.sem().clone()),
+                Box::new(Exp::Var(COMPOUND_X.into())),
+            )),
+        ),
+    };
+    Item::from_parts(
+        Exp::InductiveCtor(decl, "cat_n".into(), vec![sigma.clone(), noun_num]),
+        sigma,
+        Combinator::Compound,
+        Cost::ZERO,
+    )
 }
 
 // ── The datafied "other grammar" binary rules (Phase 2) ──────────────────────

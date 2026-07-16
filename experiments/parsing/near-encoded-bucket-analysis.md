@@ -157,6 +157,39 @@ The two grammar choices behind this:
   survives. Kills axis-2 for MSI and every other mass/plural modifier, and leaves argument-position
   bare NPs ("MSI is a state") untouched — so `grammar-gap` stays 0.
 
+### Fix — RESOLVED (`2026-07-16`), and it needed BOTH directions, in order
+
+The two directions above are **not alternatives** — direction 2 alone *gaps* grammatical sentences,
+because the over-generation is **load-bearing**. Witnessed (dumped sems on the post-span-integrity
+`v3-2026-07-15` snapshot):
+
+- The spurious `And` is `refine_attrib` consuming a bare mass/plural noun's **predicative `S[adj]\NP`**
+  kind-raise (sem `λTV.λsubj. TV(kind, subj)`, from `kind_raised_nps`'s `bwd` branch — the `a`/`these`
+  determiner set carries the predicative body alongside the object-GQ, both `bwd`-headed) as a
+  pre-nominal modifier.
+- Gating that consumption (or deleting the predicative form) correctly kills the `And` — and **gaps**
+  `MSI cell lines from these four lineages were distinct` and #8 (unit 54): their ONLY parses *were*
+  the over-generation. Cause: **`refine_attrib` is the only modifier rule that FLATTENS** a further
+  modifier onto a compound-refined noun (`Σx:Base. And(P(x), q(x))`); `refine_pp_mod` /
+  `refine_kind_compound` / `refine_named_compound` **nest** (`Σy:(Σx:Base. P(x)). q(y)`, via
+  `refined_noun`). So a compound + PP (`MSI cell lines` + `from …`) had **no** clean flat structure —
+  only the over-generation's `And` supplied one.
+
+**The fix (`kernel/src/dcg/rules/combinators.rs`, `item.rs`, `registry.rs`), two parts:**
+
+1. **`refine_pp_mod` flattens** when its base `C` is already `Σx:Base. P(x)` → `Σx:Base. And(P(x),
+   pp(x))`, mirroring `refine_attrib`. This *creates the clean compound+PP reading*
+   (`kind_of(Σx:cell_lines. And(compound_kind(x, MSI), prep_from(x, lineages)))`).
+2. **`refine_attrib` gated** with a `Guard::NotProv(Left, Combinator::KindRaised)` — `kind_raised_nps`
+   now tags its outputs `KindRaised` (a new ENF-inert provenance), and the attributive rule refuses a
+   `KindRaised` left. Removes the spurious modifier use; safe now that (1) supplies the clean reading.
+
+**Verified:** object-raised `And` occurrences on the 2–8 bucket **16 → 0**; `MSI cancer models …`
+**4 → 2** readings (1 structural skeleton, pure sense); **`grammar-gap` 0** on the full first page
+(every sentence, incl. #8 and the bare-plural predications, parses cleanly); 1630 kernel lib tests
+pass. Direction 1 (extend the NF / flatten the compound builders too) remains a **follow-on** for
+3+-noun compounds not on this page — this fix flattened only `refine_pp_mod`, which the page needed.
+
 ---
 
 ## Deep dive — modal scope (`MSI can arise from Lynch syndrome`)
