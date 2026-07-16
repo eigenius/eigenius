@@ -24,12 +24,14 @@
 //! This file was `parser.rs`, and it never contained a parser: the chart drivers live in
 //! `super::super::chart`, and this holds the rules they apply.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use crate::layer::Layer;
 use crate::nbe::term::{Exp, Patt};
 
-use super::super::category::{cat_subsumes, feat_meets, is_ctor, subst_cat, unify_cat, CatSubst};
+use super::super::category::{
+    cat_subsumes, feat_meets, is_ctor, match_cat, subst_cat, unify_cat, CatPat, CatSubst,
+};
 use super::super::item::{CategoryPayload, Combinator, Cost, Item, COMPOUND_STEP_PENALTY};
 use super::super::rules::constructions::{distribute, distribute_object};
 
@@ -72,11 +74,11 @@ enum SemRecipe {
     FwdComp { cat: Exp },
     /// Nominal modification (attributive-Σ / N-N / named / PP): the result CATEGORY embeds the
     /// modifier's meaning (CN-as-types), so [`build`] constructs both category and sem from the sems.
+    /// Datafied (Phase 1): [`combine_nominal_mod`] matched a [`RefineRule`] and carries its
+    /// sem-`builder` plus the metavariable `binds` the pattern captured.
     Refine {
-        decl: Arc<crate::nbe::term::InductiveDecl>,
-        c: Exp,
-        noun_num: Exp,
-        kind: RefineKind,
+        builder: RefineBuilder,
+        binds: CatSubst,
     },
     /// GQ-as-preposition-object raise: category `cat`; sem built from `L`/`R`.
     GqPrepObj { cat: Exp, kind: PrepObj },
@@ -95,18 +97,11 @@ enum AppOrder {
     Bwd,
 }
 
-/// Which nominal-modification rule a [`SemRecipe::Refine`] represents.
-#[derive(Clone, Copy)]
-enum RefineKind {
-    /// Attributive adjective (D63 §8.5 Slice 3b): flat-Σ conjunction over the base.
-    Attrib,
-    /// Named-entity compound `[cat_np] [cat_n]` → `Σx:C. compound(x, m)`.
-    NamedCompound,
-    /// N-N kind compound `[cat_n] [cat_n]` → `Σx:C. compound_kind(x, M)`.
-    KindCompound,
-    /// PP-as-noun-modifier `[cat_n] [cat_pp]` → `Σx:C. pp(x)`.
-    PpMod,
-}
+/// A nominal-modification **sem-builder**: assembles the refined-noun [`Item`] from the metavariable
+/// `binds` the trigger captured and the two child sems — the sem half of a datafied [`RefineRule`],
+/// and (with [`build`]) the only place a child sem is read. One per rule (`refine_attrib`, …); they
+/// are the extracted arms of the former `build_refine`.
+type RefineBuilder = fn(&CatSubst, &Item, &Item, &Arc<Layer>) -> Item;
 
 /// How a preposition-object combination `[prep] [raised-GQ]` attaches — decided by [`combinable`] from
 /// categories, consumed by [`build`]. `PpMod` → a post-nominal `cat_pp` (noun modifier); `VpAdjunct` →
@@ -129,6 +124,18 @@ fn combinable(
     right: &CategoryPayload,
     layer: &Arc<Layer>,
 ) -> Option<SemRecipe> {
+    combine_determiner(left, right)
+        .or_else(|| combine_universal(left, right, layer))
+        .or_else(|| combine_nominal_mod(left, right))
+        .or_else(|| combine_other_grammar(left, right))
+}
+
+/// **Dependent determiner application** (D63 §8.2 item 3) — a polymorphic `cat_forall(λT. R[T])`
+/// consuming a common noun, binding `T := G`. A grammar-specific specialization of forward
+/// application; tried first, preserving the original arm order (its `cat_forall` trigger is disjoint
+/// from every other group, so the position is not load-bearing — the [`combinable`] split off the old
+/// linear body is order-preserving by construction).
+fn combine_determiner(left: &CategoryPayload, right: &CategoryPayload) -> Option<SemRecipe> {
     // Dependent forward application (the determiner case, D63 §8.2 item 3): a polymorphic
     // `cat_forall(λT:Set. R[T])` consumes a common noun `N_G`, binding `T := G` → `R[G]`.
     if let Some([det_num, Exp::Lam(Patt::Var(tvar), body)]) = is_ctor(&left.cat, "cat_forall") {
@@ -156,6 +163,19 @@ fn combinable(
             }
         }
     }
+    None
+}
+
+/// The **universal CCG combinators** — forward/backward application and forward (harmonic)
+/// composition, plus the Eisner normal-form guards. Category-generic: no ontology axiom, no nominal
+/// knowledge. This is the calculus, not the grammar — the group Phase 1+ leaves hand-written. Its
+/// `fwd`/`bwd`-keyed triggers are disjoint from the grammar-specific groups, so the split is
+/// order-preserving.
+fn combine_universal(
+    left: &CategoryPayload,
+    right: &CategoryPayload,
+    layer: &Arc<Layer>,
+) -> Option<SemRecipe> {
     // Eisner normal form: a composition output may not be the primary functor of `>`/`>B`, and a
     // type-raised functor may only compose (not forward-apply).
     let left_is_fwd_comp = matches!(
@@ -204,63 +224,37 @@ fn combinable(
             }
         }
     }
-    // Attributive adjective (D63 §8.5 Slice 3b): `S[dcl,adj]\NP` (left) + `cat_n` (right). The
-    // refined noun's TYPE embeds the adjective's predicate, so it is assembled in `build`.
-    if let Some([adj_s, _adj_np]) = is_ctor(&left.cat, "bwd") {
-        if is_adj_clause(adj_s) {
-            if let Exp::InductiveCtor(decl, name, args) = &right.cat {
-                if name == "cat_n" {
-                    if let [c, noun_num] = &args[..] {
-                        return Some(SemRecipe::Refine {
-                            decl: decl.clone(),
-                            c: c.clone(),
-                            noun_num: noun_num.clone(),
-                            kind: RefineKind::Attrib,
-                        });
-                    }
-                }
-            }
+    None
+}
+
+/// The **nominal-modification family** (D63 §8.5/§8.13) — attributive adjective, named-entity and
+/// N-N compounds, and post-nominal PP — now **data-driven** (Phase 1,
+/// `docs/notes/grammar-formalization-plan.md`). Each rule is a [`RefineRule`] (structural [`CatPat`]
+/// triggers + sem-blind category guards + a sem-`builder`); this function is the interpreter: try the
+/// rules in priority order, and on the first whose patterns match and guards hold, defer to its
+/// builder. Sem-blind like all of [`combinable`] — a [`Guard`] reads only an operand's category
+/// (its Σ type-index for `NotCompoundRefined`), never a sem.
+fn combine_nominal_mod(left: &CategoryPayload, right: &CategoryPayload) -> Option<SemRecipe> {
+    for rule in refine_rules() {
+        let mut binds = CatSubst::new();
+        if match_cat(&rule.left_pat, &left.cat, &mut binds)
+            && match_cat(&rule.right_pat, &right.cat, &mut binds)
+            && rule.guards.iter().all(|g| g.holds(&left.cat, &right.cat))
+        {
+            return Some(SemRecipe::Refine {
+                builder: rule.build,
+                binds,
+            });
         }
     }
-    // Pre-nominal compound (D63 §8.13): a modifier (left) + head common noun `cat_n(C)` (right) →
-    // refined noun. LEFT-BRANCHING NF: the head may not itself be a compound result.
-    if let Exp::InductiveCtor(decl, name, args) = &right.cat {
-        if name == "cat_n" && !is_compound_refined(&right.cat) {
-            if let [c, noun_num] = &args[..] {
-                // Named-entity compound `[cat_np] [cat_n]`.
-                if is_ctor(&left.cat, "cat_np").is_some() {
-                    return Some(SemRecipe::Refine {
-                        decl: decl.clone(),
-                        c: c.clone(),
-                        noun_num: noun_num.clone(),
-                        kind: RefineKind::NamedCompound,
-                    });
-                }
-                // N-N kind compound `[cat_n] [cat_n]`.
-                if is_ctor(&left.cat, "cat_n").is_some() {
-                    return Some(SemRecipe::Refine {
-                        decl: decl.clone(),
-                        c: c.clone(),
-                        noun_num: noun_num.clone(),
-                        kind: RefineKind::KindCompound,
-                    });
-                }
-            }
-        }
-    }
-    // PP-as-noun-modifier (post-nominal): `[cat_n(C)] [cat_pp]`.
-    if let Exp::InductiveCtor(decl, name, args) = &left.cat {
-        if name == "cat_n" && is_ctor(&right.cat, "cat_pp").is_some() {
-            if let [c, noun_num] = &args[..] {
-                return Some(SemRecipe::Refine {
-                    decl: decl.clone(),
-                    c: c.clone(),
-                    noun_num: noun_num.clone(),
-                    kind: RefineKind::PpMod,
-                });
-            }
-        }
-    }
+    None
+}
+
+/// The remaining grammar-specific binary rules: close-naming apposition and the
+/// GQ-as-preposition-object raise. Tried last; their triggers (`cat_n`+`cat_np`, `fwd`+`fwd`-with-
+/// raised-GQ) are disjoint from the earlier groups, so their demotion below the universal combinators
+/// is order-preserving.
+fn combine_other_grammar(left: &CategoryPayload, right: &CategoryPayload) -> Option<SemRecipe> {
     // Close naming apposition (D63 §5.3): a SORTAL common noun `cat_n(Sortal)` (left) + a proper NAME
     // `cat_np(NameClass, sg)` (right) → the definite individual of the sortal kind bearing that name
     // ("Project Achilles", "the enzyme WRN"). The name's own class need NOT be the sortal (coining:
@@ -362,12 +356,7 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
             );
             Item::from_parts(cat, sem, Combinator::ForwardComp, Cost::ZERO)
         }
-        SemRecipe::Refine {
-            decl,
-            c,
-            noun_num,
-            kind,
-        } => build_refine(decl, c, noun_num, kind, left, right, layer),
+        SemRecipe::Refine { builder, binds } => builder(&binds, left, right, layer),
         SemRecipe::GqPrepObj { cat, kind } => {
             let sem = match kind {
                 PrepObj::PpMod => {
@@ -457,81 +446,192 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
     }
 }
 
-/// Assemble a nominal-modification refined noun ([`SemRecipe::Refine`]). The result category is a
-/// `cat_n(Σ…)` whose Σ body embeds the modifier's semantics (attributive predicate, compound kind,
-/// or PP predicate) — the CN-as-types entanglement of category and sem in the nominal domain.
-fn build_refine(
-    decl: Arc<crate::nbe::term::InductiveDecl>,
-    c: Exp,
-    noun_num: Exp,
-    kind: RefineKind,
-    left: &Item,
-    right: &Item,
-    layer: &Arc<Layer>,
-) -> Item {
-    match kind {
-        RefineKind::Attrib => {
-            // If `C` is ALREADY a refined noun `Σx:Base. P(x)` (a stacked adjective), CONJOIN over the
-            // SAME base: `Σx:Base. P(x) ∧ adj(x)` — a FLAT Σ. Else `Σx:C. adj(x)`.
-            let sigma = match &c {
-                Exp::Sig(Patt::Var(bx), base, p_body)
-                    if super::super::category::resolve_inductive(
-                        layer,
-                        "urn:eigenius:logic:And",
-                    )
-                    .is_some() =>
-                {
-                    let and =
-                        super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And")
-                            .unwrap();
-                    let adj_at =
-                        Exp::App(Box::new(left.sem().clone()), Box::new(Exp::Var(bx.clone())));
-                    Exp::Sig(
-                        Patt::Var(bx.clone()),
-                        base.clone(),
-                        Box::new(Exp::InductiveType(and, vec![(**p_body).clone(), adj_at])),
-                    )
-                }
-                _ => Exp::Sig(
-                    Patt::Var("__refine_x".into()),
-                    Box::new(c.clone()),
-                    Box::new(Exp::App(
-                        Box::new(left.sem().clone()),
-                        Box::new(Exp::Var("__refine_x".into())),
-                    )),
-                ),
-            };
-            Item::from_parts(
-                Exp::InductiveCtor(decl, "cat_n".into(), vec![sigma.clone(), noun_num]),
-                sigma,
-                Combinator::Compound,
-                Cost::ZERO,
-            )
-        }
-        RefineKind::NamedCompound => {
-            let restr = app2(
-                "urn:eigenius:ontology:compound",
-                COMPOUND_X,
-                left.sem().clone(),
-            );
-            refined_noun(&decl, &c, &noun_num, restr)
-        }
-        RefineKind::KindCompound => {
-            let restr = app2(
-                "urn:eigenius:ontology:compound_kind",
-                COMPOUND_X,
-                left.sem().clone(),
-            );
-            refined_noun(&decl, &c, &noun_num, restr)
-        }
-        RefineKind::PpMod => {
-            let restr = Exp::App(
-                Box::new(right.sem().clone()),
-                Box::new(Exp::Var(COMPOUND_X.into())),
-            );
-            refined_noun(&decl, &c, &noun_num, restr)
+// ── The datafied nominal-modification family (Phase 1) ───────────────────────
+//
+// The four rules the imperative `combine_nominal_mod`/`build_refine` used to inline, expressed as
+// data: a structural `CatPat` trigger per operand, sem-blind category guards, and a sem-builder.
+// `combine_nominal_mod` interprets this table; each `build` is one arm of the former `build_refine`,
+// lifted to a named function. See `docs/notes/grammar-formalization-plan.md` (Phase 1 slice).
+
+/// One datafied nominal-modification rule: its structural trigger ([`CatPat`] over each operand),
+/// sem-blind category `guards`, and the sem-`build`er. Priority is table order.
+struct RefineRule {
+    /// Rule identity — for tracing and future on-chain naming; carried, not yet consumed.
+    #[allow(dead_code)]
+    name: &'static str,
+    left_pat: CatPat,
+    right_pat: CatPat,
+    guards: &'static [Guard],
+    build: RefineBuilder,
+}
+
+/// A **sem-blind** dispatch guard — a predicate over an operand's CATEGORY (never its sem: the
+/// packed-forest soundness invariant, enforced by the type — [`Guard::holds`] receives only
+/// categories). This is the predicate library the datafied rules draw from.
+#[derive(Clone, Copy)]
+enum Guard {
+    /// The named operand must NOT be an already-compound-refined noun — the left-branching normal
+    /// form (D63 §8.13): a compound may not be a compound HEAD again. Negation of
+    /// [`is_compound_refined`], which inspects only the category's Σ type-index.
+    NotCompoundRefined(Operand),
+}
+
+/// Which operand a [`Guard`] reads. The complete two-sided vocabulary; the current family's only
+/// guard reads `Right`, but a guard naming the `Left` operand is equally well-formed.
+#[derive(Clone, Copy)]
+enum Operand {
+    #[allow(dead_code)]
+    Left,
+    Right,
+}
+
+impl Operand {
+    fn pick<'a>(&self, left: &'a Exp, right: &'a Exp) -> &'a Exp {
+        match self {
+            Operand::Left => left,
+            Operand::Right => right,
         }
     }
+}
+
+impl Guard {
+    fn holds(&self, left: &Exp, right: &Exp) -> bool {
+        match self {
+            Guard::NotCompoundRefined(op) => !is_compound_refined(op.pick(left, right)),
+        }
+    }
+}
+
+/// The rule table (built once). Priority = order, mirroring the former linear arm order: attributive
+/// adjective, then the pre-nominal compounds (named / N-N), then the post-nominal PP. Triggers are
+/// pairwise disjoint by `(left_ctor, right_ctor)`, so order is not outcome-critical — it is kept for
+/// a faithful differential against the hand-written path.
+fn refine_rules() -> &'static [RefineRule] {
+    static RULES: LazyLock<Vec<RefineRule>> = LazyLock::new(|| {
+        use CatPat::{Ctor, Var};
+        let cat_n = |a, b| Ctor("cat_n", vec![a, b]);
+        vec![
+            // Attributive adjective (D63 §8.5 Slice 3b): `S[_,adj]\NP` (left) + `cat_n` (right). The
+            // `adj` fin literal in the pattern IS the adj-clause test — no guard needed.
+            RefineRule {
+                name: "attrib",
+                left_pat: Ctor(
+                    "bwd",
+                    vec![Ctor("cat_s", vec![Var("_"), Ctor("adj", vec![])]), Var("_")],
+                ),
+                right_pat: cat_n(Var("C"), Var("num")),
+                guards: &[],
+                build: refine_attrib,
+            },
+            // Named-entity compound `[cat_np] [cat_n]` (D63 §8.13). Left-branching NF: the head may
+            // not itself be a compound result.
+            RefineRule {
+                name: "named_compound",
+                left_pat: Ctor("cat_np", vec![Var("_"), Var("_")]),
+                right_pat: cat_n(Var("C"), Var("num")),
+                guards: &[Guard::NotCompoundRefined(Operand::Right)],
+                build: refine_named_compound,
+            },
+            // N-N kind compound `[cat_n] [cat_n]` (D63 §8.13). Same left-branching guard.
+            RefineRule {
+                name: "kind_compound",
+                left_pat: cat_n(Var("_"), Var("_")),
+                right_pat: cat_n(Var("C"), Var("num")),
+                guards: &[Guard::NotCompoundRefined(Operand::Right)],
+                build: refine_kind_compound,
+            },
+            // PP-as-noun-modifier (post-nominal): `[cat_n(C)] [cat_pp]`. Here the head noun is the
+            // LEFT, so `C`/`num` bind from the left pattern.
+            RefineRule {
+                name: "pp_mod",
+                left_pat: cat_n(Var("C"), Var("num")),
+                right_pat: Ctor("cat_pp", vec![]),
+                guards: &[],
+                build: refine_pp_mod,
+            },
+        ]
+    });
+    &RULES
+}
+
+/// Pull the head noun's `decl` (from `noun`'s category ctor) and the `C` / `num` metavariables the
+/// trigger bound — the shared preamble of the refine builders.
+fn noun_parts(noun: &Item, binds: &CatSubst) -> (Arc<crate::nbe::term::InductiveDecl>, Exp, Exp) {
+    let decl = match noun.cat() {
+        Exp::InductiveCtor(d, _, _) => d.clone(),
+        _ => unreachable!("a refine rule matched a non-inductive noun category"),
+    };
+    let c = binds.get("C").expect("refine trigger binds C").clone();
+    let num = binds.get("num").expect("refine trigger binds num").clone();
+    (decl, c, num)
+}
+
+/// Attributive adjective (D63 §8.5 Slice 3b). If `C` is ALREADY a refined noun `Σx:Base. P(x)` (a
+/// stacked adjective), CONJOIN over the SAME base: `Σx:Base. P(x) ∧ adj(x)` — a FLAT Σ. Else
+/// `Σx:C. adj(x)`. The head noun is the right operand.
+fn refine_attrib(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
+    let (decl, c, noun_num) = noun_parts(right, binds);
+    let sigma = match &c {
+        Exp::Sig(Patt::Var(bx), base, p_body)
+            if super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And")
+                .is_some() =>
+        {
+            let and =
+                super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And").unwrap();
+            let adj_at = Exp::App(Box::new(left.sem().clone()), Box::new(Exp::Var(bx.clone())));
+            Exp::Sig(
+                Patt::Var(bx.clone()),
+                base.clone(),
+                Box::new(Exp::InductiveType(and, vec![(**p_body).clone(), adj_at])),
+            )
+        }
+        _ => Exp::Sig(
+            Patt::Var("__refine_x".into()),
+            Box::new(c.clone()),
+            Box::new(Exp::App(
+                Box::new(left.sem().clone()),
+                Box::new(Exp::Var("__refine_x".into())),
+            )),
+        ),
+    };
+    Item::from_parts(
+        Exp::InductiveCtor(decl, "cat_n".into(), vec![sigma.clone(), noun_num]),
+        sigma,
+        Combinator::Compound,
+        Cost::ZERO,
+    )
+}
+
+/// Named-entity compound `[cat_np] [cat_n]` → `Σx:C. compound(x, ⟦left⟧)`. Head noun is the right.
+fn refine_named_compound(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
+    let (decl, c, noun_num) = noun_parts(right, binds);
+    let restr = app2(
+        "urn:eigenius:ontology:compound",
+        COMPOUND_X,
+        left.sem().clone(),
+    );
+    refined_noun(&decl, &c, &noun_num, restr)
+}
+
+/// N-N kind compound `[cat_n] [cat_n]` → `Σx:C. compound_kind(x, ⟦left⟧)`. Head noun is the right.
+fn refine_kind_compound(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
+    let (decl, c, noun_num) = noun_parts(right, binds);
+    let restr = app2(
+        "urn:eigenius:ontology:compound_kind",
+        COMPOUND_X,
+        left.sem().clone(),
+    );
+    refined_noun(&decl, &c, &noun_num, restr)
+}
+
+/// Post-nominal PP modifier `[cat_n(C)] [cat_pp]` → `Σx:C. ⟦right⟧(x)`. Head noun is the LEFT.
+fn refine_pp_mod(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
+    let (decl, c, noun_num) = noun_parts(left, binds);
+    let restr = Exp::App(
+        Box::new(right.sem().clone()),
+        Box::new(Exp::Var(COMPOUND_X.into())),
+    );
+    refined_noun(&decl, &c, &noun_num, restr)
 }
 
 /// Coordination/distributive rules — the packed-forest **carve-out** (Harper 1994 pitfall): these
@@ -732,13 +832,6 @@ pub(crate) fn cat_n_number(cat: &Exp) -> Option<&Exp> {
     }
 }
 
-/// Whether `s` is an **adjectival** clause `cat_s(_, adj)` — the predicative
-/// adjective form (D63 §8.5 Slice 3b), distinct from verbal `fin`/`bse`.
-fn is_adj_clause(s: &Exp) -> bool {
-    matches!(is_ctor(s, "cat_s"), Some([_, fin])
-        if matches!(fin, Exp::InductiveCtor(_, n, _) if n == "adj"))
-}
-
 /// Whether a group's member type `c` fits a predicate's `NP_C'` `slot` — i.e.
 /// `C ≤ C'` via the subclass lattice (checked by building a member NP at `c`,
 /// reusing the slot's number, and running categorial subsumption).
@@ -770,3 +863,176 @@ fn group_member_fits(slot: &Exp, c: &Exp, layer: &Arc<Layer>) -> bool {
 // subset of the real driver and no production path used it — a fossil of the grammar from before the
 // lexicon-dependent rules existed. It survived only as a test harness and now lives with the tests
 // that use it (`kernel/tests/lexicon_validates.rs`), so the engine has exactly one driver family.
+
+#[cfg(test)]
+mod nominal_mod_tests {
+    //! **0b-lite golden characterization of the nominal-modification family** (the differential
+    //! oracle for the Phase 1 datafication, `docs/notes/grammar-formalization-plan.md`). Each test
+    //! constructs the two operand [`Item`]s and drives the real CKY step [`apply`], pinning the exact
+    //! result category, sem, and provenance. When [`combine_nominal_mod`] is replaced by a data-driven
+    //! table, these must still pass byte-identically — that is what makes "formalization changed
+    //! nothing" a checked claim. The stacked-adjective flat-Σ `And` path needs a layer that resolves
+    //! `logic:And`, so it is covered by the full-page `--no-llm` sweep differential, not here.
+    use super::*;
+    use crate::nbe::term::list_decl;
+    use crate::ontology::iri::Iri;
+
+    fn ct(name: &str, args: Vec<Exp>) -> Exp {
+        Exp::InductiveCtor(list_decl(), name.into(), args)
+    }
+    fn cls(s: &str) -> Exp {
+        Exp::EigonClass(Iri::parse(s).unwrap())
+    }
+    fn ax(s: &str) -> Exp {
+        Exp::EigonAxiom(Iri::parse(s).unwrap())
+    }
+    fn mk_item(cat: Exp, sem: Exp) -> Item {
+        Item::from_parts(cat, sem, Combinator::Other, Cost::ZERO)
+    }
+    fn layer() -> Arc<Layer> {
+        Arc::new(
+            crate::layer::LayerBuilder::new("combinators-nominal-mod-test", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        )
+    }
+    fn sg() -> Exp {
+        ct("sg", vec![])
+    }
+    fn n(c: Exp) -> Exp {
+        ct("cat_n", vec![c, sg()])
+    }
+    fn np(c: Exp) -> Exp {
+        ct("cat_np", vec![c, sg()])
+    }
+    /// `Σx:base. restr` over the compound-family bound variable [`COMPOUND_X`].
+    fn sigma_cmp(base: Exp, restr: Exp) -> Exp {
+        Exp::Sig(
+            Patt::Var(COMPOUND_X.into()),
+            Box::new(base),
+            Box::new(restr),
+        )
+    }
+    /// `R(x, m)` — the 6-mod restrictor App-spine (mirrors [`app2`]).
+    fn app2_x(axiom: &str, m: Exp) -> Exp {
+        Exp::App(
+            Box::new(Exp::App(
+                Box::new(ax(axiom)),
+                Box::new(Exp::Var(COMPOUND_X.into())),
+            )),
+            Box::new(m),
+        )
+    }
+
+    #[test]
+    fn kind_compound_is_sigma_over_compound_kind_axiom() {
+        // `[cat_n] [cat_n]` → `Σx:C. compound_kind(x, ⟦left⟧)`.
+        let modifier = ax("urn:eigenius:lexicon:mmr");
+        let head = cls("urn:eigenius:lexicon:Gene");
+        let l = mk_item(n(cls("urn:eigenius:lexicon:Mmr")), modifier.clone());
+        let r = mk_item(n(head.clone()), head.clone());
+        let got = apply(&l, &r, &layer()).expect("[cat_n][cat_n] → kind compound");
+        let expected = sigma_cmp(
+            head,
+            app2_x("urn:eigenius:ontology:compound_kind", modifier),
+        );
+        assert_eq!(got.cat(), &n(expected.clone()), "result is cat_n(Σ, sg)");
+        assert_eq!(got.sem(), &expected, "sem is the Σ (CN-as-types)");
+        assert_eq!(got.prov(), Combinator::Compound);
+        assert_eq!(
+            got.cost().sense_rank,
+            COMPOUND_STEP_PENALTY,
+            "apply adds the compound-step penalty"
+        );
+    }
+
+    #[test]
+    fn named_compound_is_sigma_over_compound_axiom() {
+        // `[cat_np] [cat_n]` → `Σx:C. compound(x, ⟦left⟧)`.
+        let name_ref = ax("urn:eigenius:lexicon:achilles");
+        let head = cls("urn:eigenius:lexicon:Project");
+        let l = mk_item(np(cls("urn:eigenius:lexicon:Achilles")), name_ref.clone());
+        let r = mk_item(n(head.clone()), head.clone());
+        let got = apply(&l, &r, &layer()).expect("[cat_np][cat_n] → named compound");
+        let expected = sigma_cmp(head, app2_x("urn:eigenius:ontology:compound", name_ref));
+        assert_eq!(got.cat(), &n(expected.clone()));
+        assert_eq!(got.sem(), &expected);
+        assert_eq!(got.prov(), Combinator::Compound);
+    }
+
+    #[test]
+    fn pp_mod_applies_the_pp_sem_to_the_bound_witness() {
+        // `[cat_n] [cat_pp]` → `Σx:C. ⟦right⟧(x)` (un-reduced; the felicity gate normalizes later).
+        let head = cls("urn:eigenius:lexicon:Protein");
+        let pp_sem = Exp::Lam(
+            Patt::Var("y".into()),
+            Box::new(Exp::App(
+                Box::new(ax("urn:eigenius:lexicon:in_nucleus")),
+                Box::new(Exp::Var("y".into())),
+            )),
+        );
+        let l = mk_item(n(head.clone()), head.clone());
+        let r = mk_item(ct("cat_pp", vec![]), pp_sem.clone());
+        let got = apply(&l, &r, &layer()).expect("[cat_n][cat_pp] → pp modifier");
+        let expected = sigma_cmp(
+            head,
+            Exp::App(Box::new(pp_sem), Box::new(Exp::Var(COMPOUND_X.into()))),
+        );
+        assert_eq!(got.cat(), &n(expected.clone()));
+        assert_eq!(got.sem(), &expected);
+        assert_eq!(got.prov(), Combinator::Compound);
+    }
+
+    #[test]
+    fn attrib_on_a_plain_noun_is_a_simple_sigma() {
+        // `[S[adj]\NP] [cat_n]` with a NON-refined base → `Σx:C. ⟦adj⟧(x)`, bound var `__refine_x`.
+        let adj_sem = Exp::Lam(
+            Patt::Var("z".into()),
+            Box::new(Exp::App(
+                Box::new(ax("urn:eigenius:lexicon:large")),
+                Box::new(Exp::Var("z".into())),
+            )),
+        );
+        let adj_cat = ct(
+            "bwd",
+            vec![
+                ct("cat_s", vec![ct("dcl", vec![]), ct("adj", vec![])]),
+                np(cls("urn:eigenius:lexicon:Entity")),
+            ],
+        );
+        let head = cls("urn:eigenius:lexicon:Cell");
+        let l = mk_item(adj_cat, adj_sem.clone());
+        let r = mk_item(n(head.clone()), head.clone());
+        let got = apply(&l, &r, &layer()).expect("[S[adj]\\NP][cat_n] → attributive");
+        let x = "__refine_x";
+        let expected = Exp::Sig(
+            Patt::Var(x.into()),
+            Box::new(head),
+            Box::new(Exp::App(Box::new(adj_sem), Box::new(Exp::Var(x.into())))),
+        );
+        assert_eq!(got.cat(), &n(expected.clone()));
+        assert_eq!(got.sem(), &expected);
+        assert_eq!(got.prov(), Combinator::Compound);
+    }
+
+    #[test]
+    fn compound_refined_head_blocks_further_compounding() {
+        // The left-branching NF cut (D63 §8.13): a head that is ALREADY a compound
+        // (`Σx:Gene. compound_kind(x, m)`) may not be a compound HEAD again. No rule fires → `None`.
+        let refined_head = sigma_cmp(
+            cls("urn:eigenius:lexicon:Gene"),
+            app2_x(
+                "urn:eigenius:ontology:compound_kind",
+                ax("urn:eigenius:lexicon:mmr"),
+            ),
+        );
+        let l = mk_item(
+            n(cls("urn:eigenius:lexicon:Repair")),
+            ax("urn:eigenius:lexicon:repair"),
+        );
+        let r = mk_item(n(refined_head), cls("urn:eigenius:lexicon:Gene"));
+        assert!(
+            apply(&l, &r, &layer()).is_none(),
+            "a compound-refined head is not a compound head a second time"
+        );
+    }
+}

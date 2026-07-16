@@ -67,7 +67,9 @@ impl Parser {
         // compositional kind-compound). The packed path only ever widens the sense cap, so the base
         // attempt is exactly `cap == base`; widen-on-failure lifts the cut and re-admits the compound.
         let prefer_multiword = cap == self.config.sense_cap;
-        let forest = self.grammar.build_forest(&leaves, &tokens, prefer_multiword);
+        let forest = self
+            .grammar
+            .build_forest(&leaves, &tokens, prefer_multiword);
         let mut memo: Vec<Option<Vec<Item>>> = vec![None; forest.nodes.len()];
 
         // Top-span candidates: finite-clause / wh-question nodes spanning the whole sentence.

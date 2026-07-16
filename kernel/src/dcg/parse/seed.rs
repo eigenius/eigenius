@@ -252,7 +252,8 @@ impl Parser {
 
     /// Derived-adjective items (D63 compound morphology §3). If `surface` is a recognized derived
     /// adjective ([`Self::is_derived_adjective`]), seed its `ADJ` `Item`(s) on the whole-token span,
-    /// modifying nouns through the existing attributive-adjective refine rule (`RefineKind::Attrib`):
+    /// modifying nouns through the existing attributive-adjective refine rule (the `attrib` rule in
+    /// `combine_nominal_mod`'s table):
     ///   * **Slice 1** (`hypermutable`, `double-stranded`) — the base adjective's own items, the
     ///     prefix / hyphen modifier transparent (identity sem, like the `-ly` adverbs), so
     ///     `hypermutable ≡ mutable`;

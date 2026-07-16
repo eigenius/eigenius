@@ -290,6 +290,49 @@ pub fn subst_cat(cat: &Exp, subst: &CatSubst) -> Exp {
     }
 }
 
+/// A **rule-dispatch pattern** — the structural matcher deciding WHICH grammar rule fires. It is a
+/// third, distinct category operation, not [`unify_cat`] and not [`common_cat`]: those are the
+/// grammar's subtype ALGEBRA (combination = subsumption + feature-meet; coordination = lattice join),
+/// whereas dispatch is *exact structural matching* of a trigger. Crucially it binds metavariables in
+/// ANY position — including whole subcategories, which [`unify_cat`] cannot (it binds only type-index
+/// / feature slots, and *meets* features rather than matching them). See
+/// `docs/notes/grammar-formalization-plan.md`.
+#[derive(Debug, Clone)]
+pub enum CatPat {
+    /// Match an [`Exp::InductiveCtor`] by NAME + arity — the `decl` is ignored, exactly as
+    /// [`is_ctor`] does — then match each argument against the corresponding sub-pattern.
+    Ctor(&'static str, Vec<CatPat>),
+    /// Bind the matched subterm to `name` (non-linear: a repeated name must bind an equal term). The
+    /// reserved name `"_"` is an anonymous wildcard — matches anything, binds nothing, never checked.
+    Var(&'static str),
+}
+
+/// Match `pat` against category `cat`, threading bindings into `binds` (so a rule matches its left
+/// pattern then its right pattern into the SAME map — a metavariable shared across operands must bind
+/// equal terms). Returns whether the whole pattern matched. Exact: no subsumption, no feature-meet.
+/// See [`CatPat`].
+pub fn match_cat(pat: &CatPat, cat: &Exp, binds: &mut CatSubst) -> bool {
+    match pat {
+        CatPat::Var(name) if *name == "_" => true,
+        CatPat::Var(name) => match binds.get(*name) {
+            Some(bound) => bound == cat,
+            None => {
+                binds.insert((*name).to_string(), cat.clone());
+                true
+            }
+        },
+        CatPat::Ctor(name, args) => {
+            if let Exp::InductiveCtor(_, cname, cargs) = cat {
+                cname == name
+                    && cargs.len() == args.len()
+                    && args.iter().zip(cargs).all(|(p, c)| match_cat(p, c, binds))
+            } else {
+                false
+            }
+        }
+    }
+}
+
 /// An argument of type `sub` fills a slot of type `sup` iff `sub` is `sup` or a
 /// reflexive-transitive subclass of it (the foundation authority
 /// [`Layer::is_subclass_of`]); non-class atoms must match exactly.
