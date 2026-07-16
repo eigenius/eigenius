@@ -297,6 +297,7 @@ itself, the tool for the combinators.
 ## Phases (each independently valuable, each gated)
 
 ### Phase 0 — Legibility groundwork (precondition; days)
+
 - **0a. Derivation tracer** (`EIGENIUS_DERIVATION=1`): per reading, print the rule tree
   (combinator + operand categories + result), reusing the chart's `Combinator` provenance +
   forest edges. Replaces the ad-hoc debug probes with a standing tool.
@@ -309,6 +310,7 @@ itself, the tool for the combinators.
   unchanged.
 
 ### Phase 1 — Vertical slice: prove the compile loop on ONE family (the key validation; ~1 week)
+
 - Target the **nominal-modification family** (`KindCompound` / `Attrib` / `NamedCompound` /
   `PpMod`) — the rules tangled in the bare-mass bug.
 - Define the rule-descriptor schema (Rust data first). Express these four as data (trigger +
@@ -320,6 +322,7 @@ itself, the tool for the combinators.
   data-only diff. Benchmark: no perf regression (decide interpret vs codegen here).
 
 ### Phase 2 — Roll out family-by-family (the velocity payoff; the bulk)
+
 - Convert the remaining grammar-specific rules: the rest of the binary category rules; the
   token-keyed binary rules (coordination, relatives, apposition — `BinRule`); the unary shifts
   (`bare_nominal_shifts`, `raise_nps`, kind-raise, `complete_coord`, `front_participial`).
@@ -329,7 +332,32 @@ itself, the tool for the combinators.
   not hand-written; full-page sweeps (deterministic + reranked) unchanged; perf within budget.
   **This is where "a fix is a data edit" is realized.**
 
+**Progress.**
+
+- **2a — "other grammar" binary rules — DONE** (byte-identical sweep). Close-naming apposition and
+  the GQ-as-preposition-object raise (3 kinds) are now table rows in `other_grammar_rules`; the
+  descriptor generalized (`RefineRule`→`CatRule`, `RefineBuilder`→`SemBuild`, `SemRecipe::Refine`→
+  `SemRecipe::Rule`); the guard library grew one entry (`ProperName`); the `SemRecipe::Name` /
+  `GqPrepObj` variants and `PrepObj` enum are gone (subsumed by the generic builder path). 10 golden
+  tests (both families) + 1618 lib tests + `grammar-gap 0` byte-identical.
+- **2b — universal combinators + dependent determiner — DONE** (byte-identical sweep). These are the
+  *combination-constraint* rule kind: after destructuring a functor they `unify_cat` an argument slot
+  against the other operand (subsumption + feature-meet), which can FAIL — so the combination is part
+  of the dispatch, not just the build. Represented as a `CombRule` table (`comb_rules`) with
+  `CombKind::{Apply{functor,slash}, Compose{slash}, DepApply}` and per-rule Eisner `ProvGuard`s; the
+  interpreter (`CombKind::combine`) does the destructure + `unify_cat` + `subst_cat` + `feat_meets`.
+  The determiner folded in as `DepApply` (polymorphic instantiation, a bespoke interpreter arm). The
+  separate `combine_determiner` is gone; **`combinable` is now fully table-driven** (`combine_universal`
+  → `combine_nominal_mod` → `combine_other_grammar`, all interpreters). 5 combinator golden tests
+  (incl. the DetRefine Fst-projection) + 1623 lib tests + `grammar-gap 0` byte-identical.
+- **2c — token-keyed binary rules (`BinRule`: coordination, relatives, apposition) — TODO.**
+  Sem-reading, off the packed path — needs the `sem_predicate` escape hatch. **The bare-mass `And`
+  partly lives here** (coordination).
+- **2d — unary shifts — TODO.** Different mechanism (`materialize_unary`, per-cell). **Kind-raise is
+  here — the other half of bare-mass.**
+
 ### Phase 3 — ESL authoring + on-chain (platform-native)
+
 - Move the rule data from Rust structures to **ESL resources** (authored like `lexicon:Cat`),
   compiled to Eigon-JSON, committed to a layer; the generator reads the on-chain rule set.
 - **Exit gate:** the grammar rule-set is on-chain ESL, validated by the commit gate; "which rule
@@ -337,6 +365,7 @@ itself, the tool for the combinators.
   behavior + perf unchanged.
 
 ### Phase 4 — Sem reflection (the hard core; deferred / optional)
+
 - Formalize the sem *transformations* as typed EigenTT programs over reflected terms (D47
   `eigentt:TypeExpr` `Exp↔Json` codec), eliminating the last code hooks — the full grammar
   (syntax + semantics) becomes typed data.
