@@ -13,19 +13,25 @@ any detour.
 Four-phase spine (user directive `2026-07-06`, worked in order — stop detouring):
 **OOV ✓ → parsing gaps ✓ → ambiguity (HERE) → performance.**
 
-#### STATUS — measured `2026-07-10`, HEAD, snapshot `wordnet-umls-all-alone-2026-07-10`
+#### STATUS — measured `2026-07-15`, `main`@`29930e4` (post `dcg-cleanup` merge), snapshot `wordnet-umls-aligned-v3-2026-07-15`
 | config | units | GAP | MISSING | AMBIG | OPEN | ENCODED |
 |---|---|---|---|---|---|---|
-| **reranked** (`--features use-llm`) — *canonical* | 62 | **0** | **0** | 60 | 1 | **1** |
-| deterministic (cap-only) — *the no-regression gate* | 62 | **0** | **0** | 61 | 1 | 0 |
+| **reranked** (`--features use-llm`) — *canonical* | 62 | **0** | **0** | 58 | 1 | **3** |
+| deterministic (cap-only) — *the no-regression gate* | 62 | — | — | — | — | — |
 
-> **Every sentence PARSES — `grammar-gap 0` and `missing-lexeme 0` in BOTH configs. Only 1 of 62 resolves to a
-> single reading.** That is the whole state in one line: the gap/OOV problem is **solved**; the ambiguity
-> problem is **not**. `ENCODED 1/62` is the open front.
+> **Every sentence PARSES — `grammar-gap 0` and `missing-lexeme 0` (reranked). 3 of 62 resolve to a single
+> reading.** The gap/OOV problem is **solved**; the ambiguity problem is **not**. `ENCODED 3/62` is the open front.
+> *Deterministic (cap-only) row not re-measured since the alignment-v3 + sense-elimination work — re-run
+> `scripts/measure-parse-rate.sh --no-llm` to refresh (last cap-only figure, `07-10` pre-alignment, was ENCODED 0).*
 
-Was `GAP 5` on `2026-07-09` (reranked, old snapshot) — **closed to 0** by `20d608e`. `ENCODED` moved 2 → 1 over
-the same period; the reranker is non-deterministic and both the code and snapshot changed, so treat the
-ENCODED count as noisy at n=1–2, not as a regression signal. The gap/missing columns are the load-bearing ones.
+`ENCODED` climbed 1 → 3 (`2026-07-10` → `07-12`, now on `main`). The mover was **sense elimination** — the reranker
+may now OMIT an impossible sense (the cap no longer backfills from rejects) and 132 closed-class entries carry a real
+`core:description` instead of blank prompt lines; that alone took ENCODED 1 → 3–4 (baseline floor set at 3).
+Cross-lexicon alignment (12,450 → 38,389 WordNet↔UMLS merges, v1→v3) cut reading *multiplicity* a few % but did
+**not** by itself raise ENCODED — standing verdict, confirmed three times: alignment never reaches a single reading,
+**the residual is structural** (readings ≈ skeletons × senses; both axes live, skeletons median 6). Treat ±1 ENCODED
+as temp-0 reranker drift, not signal; gap/missing are the load-bearing columns. Full record:
+`experiments/parsing/baseline.json`.
 
 #### DONE
 - **Phase 1 — OOV: CLOSED.** `missing-lexeme 0`, distinct OOV 0 (Stage-A augmentation grounds the page).
@@ -60,8 +66,9 @@ corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note** and
   bucket — `DOE` in the 2-entry `doe` bucket — otherwise slips the per-lemma cap). But it **regressed
   `grammar-gap 0 → 1`** (unit 52, *"The MSI relationship compared favourably…"*) by over-pruning a multi-lemma
   span, and it is **unnecessary now that `alone` exists** (the faithful reading is reachable at the tight cap,
-  so widen-on-failure never fires and the junk is never admitted). Isolated by reverting *only* `lookup.rs`
-  against the same store. Do not re-land without repeating that A/B.
+  so widen-on-failure never fires and the junk is never admitted). Isolated by reverting *only* the seeding
+  code — now the `dcg/parse/` module (the `dcg-cleanup` refactor split the old `lookup.rs`; the pooled
+  sense-cap logic is in `parse/seed.rs`) — against the same store. Do not re-land without repeating that A/B.
 - Kept from the same session: the **UMLS grammatical-surface filter** (17 surfaces incl. `does not`/`alone`/
   `lead`) in `crates/eigenius-umls/src/convert.rs` — that one is a keeper.
 
@@ -69,9 +76,13 @@ corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note** and
 - **Counting.** `summarize()`'s per-unit listing enumerates **only AMBIG units**; grammar-gaps print in a
   different format, so grepping `[AMBIG` **silently misses every gap**. Count from the
   `=== WRN first page over FULL lexicon: … grammar-gap N …===` summary line (or the `[unit N] … TAG` lines).
-- **Snapshot drift.** The bootstrap changed (`ontology` + `closed-class` hashes), so older snapshots
-  **ManifestDrift** — and the harness **SKIPs fail-closed while reporting `ok`**: every `db_backed_encoding`
-  test goes green doing nothing. `DEFAULT_SNAPSHOT` must point at `wordnet-umls-all-alone-2026-07-10` (`7933f05`).
+- **Snapshot drift.** A bootstrap-ontology edit changes its content hash, so older snapshots **ManifestDrift** —
+  and the harness **SKIPs fail-closed while reporting `ok`**: every `db_backed_encoding` test goes green doing
+  nothing. Latest drift: the `dcg-cleanup` merge declared `conn_list` on `lexicon:Conn` (`2026-07-15`), retiring
+  the 07-12 snapshots. **Current resumable snapshot: `wordnet-umls-aligned-v3-2026-07-15`.** Always drive the
+  measurement through `scripts/measure-parse-rate.sh` (it sets `EIGENIUS_DB_SNAPSHOT` to the newest snapshot); the
+  harness fallback `DEFAULT_SNAPSHOT` still hard-codes the drifted `wordnet-umls-all-alone-2026-07-10`
+  (`crates/eigenius-wordnet/tests/db_backed_encoding.rs:64`) and needs updating.
 
 #### Follow-up spun out of the faithfulness work (not started)
 **Pre-nominal `only` / `just`.** Same `ontology:sole` operator (already in the ontology), but they attach

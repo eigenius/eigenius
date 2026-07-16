@@ -61,7 +61,7 @@ use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 /// same convention as `DICT` below. Override with `EIGENIUS_DB_SNAPSHOT`.
 const DEFAULT_SNAPSHOT: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../db-snapshot/wordnet-umls-all-alone-2026-07-10"
+    "/../../../db-snapshot/wordnet-umls-aligned-v3-2026-07-15"
 );
 
 /// WordNet dict (for the Morphy lemmatizer — surface→lemma at lookup time).

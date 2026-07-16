@@ -63,7 +63,11 @@ impl Parser {
         // does not). Hoisting the seed out of `build_forest` is what makes the packed driver
         // lexicon-free — it is handed the leaf cells and never asks where they came from.
         let (leaves, _drops) = self.seed_leaves(&tokens, lemmatizer, scope, cap, ranks, None);
-        let forest = self.grammar.build_forest(&leaves, &tokens);
+        // Multiword preference is a BASE-CAP cut (prefer a span-covering lexicalized multiword over its
+        // compositional kind-compound). The packed path only ever widens the sense cap, so the base
+        // attempt is exactly `cap == base`; widen-on-failure lifts the cut and re-admits the compound.
+        let prefer_multiword = cap == self.config.sense_cap;
+        let forest = self.grammar.build_forest(&leaves, &tokens, prefer_multiword);
         let mut memo: Vec<Option<Vec<Item>>> = vec![None; forest.nodes.len()];
 
         // Top-span candidates: finite-clause / wh-question nodes spanning the whole sentence.
@@ -173,11 +177,16 @@ impl Parser {
 
         // 2. Drive the chart. Seeding needed the lexicon; DRIVING does not — the grammar is handed the
         //    seeded cells and composes them, so the two CKY drivers are pure grammar operations.
+        // Base-cap gate for the multiword-preference cut. The unpacked path widens the beam BEFORE the
+        // sense cap, so the base attempt requires BOTH at their configured base; widen-on-failure then
+        // re-admits the compositional kind-compound, keeping `grammar-gap 0`.
+        let prefer_multiword = cap == self.config.sense_cap && beam == self.config.cell_beam;
         beam_drops += self.grammar.drive_unpacked(
             &mut chart,
             &tokens,
             beam,
             self.config.combinatory_core,
+            prefer_multiword,
             debug,
         );
         if beam_drops > 0 {

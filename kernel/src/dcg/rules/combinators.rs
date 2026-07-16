@@ -720,6 +720,35 @@ fn is_compound_refined(cat: &Exp) -> bool {
     false
 }
 
+/// The **number** argument of a `cat_n(_, num)` category (`sg` / `pl` / `mass` / `num_any`), or
+/// `None` if `cat` is not a common noun. The multiword-preference cut compares only this — a bare-class
+/// leaf and a `Σ`-refined compound noun of the SAME number fill the identical combinatorial slot and
+/// differ only in denotation, so the compound is the one to drop.
+pub(crate) fn cat_n_number(cat: &Exp) -> Option<&Exp> {
+    if let Some([_, num]) = is_ctor(cat, "cat_n") {
+        Some(num)
+    } else {
+        None
+    }
+}
+
+/// Whether `cat` is a KIND-compound-refined common noun — narrower than [`is_compound_refined`]:
+/// its restrictor's App-spine head is specifically `ontology:compound_kind` (the `[cat_n][cat_n]`
+/// `KindCompound` rule), NOT the named-entity `ontology:compound`. Used by the chart drivers'
+/// multiword-preference cut: drop a compositional kind-compound over a span that a lexicalized
+/// multiword `cat_n` already covers (base-cap gated; widen-on-failure recovers).
+pub(crate) fn is_kind_compound(cat: &Exp) -> bool {
+    if let Some([Exp::Sig(_, _, body), _]) = is_ctor(cat, "cat_n") {
+        let mut head = &**body;
+        while let Exp::App(f, _) = head {
+            head = f;
+        }
+        return matches!(head, Exp::EigonAxiom(iri)
+            if iri.as_str() == "urn:eigenius:ontology:compound_kind");
+    }
+    false
+}
+
 /// Whether `s` is an **adjectival** clause `cat_s(_, adj)` — the predicative
 /// adjective form (D63 §8.5 Slice 3b), distinct from verbal `fin`/`bse`.
 fn is_adj_clause(s: &Exp) -> bool {

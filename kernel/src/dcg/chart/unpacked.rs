@@ -32,8 +32,9 @@ use super::super::holes::{freshen_anaphor, hole_base};
 use super::super::item::Item;
 use super::super::pretty::pretty_term;
 use super::super::reserved::ReservedKind;
-use super::super::rules::combinators::{apply, apply_core};
+use super::super::rules::combinators::{apply, apply_core, cat_n_number, is_kind_compound};
 use super::super::rules::constructions::{complete_coord, front_participial, pied_pipe};
+use super::forest::cat_shape;
 use super::{beam_cell, cell_histogram};
 
 impl Grammar {
@@ -45,6 +46,7 @@ impl Grammar {
         tokens: &[String],
         beam: Option<usize>,
         combinatory_core: bool,
+        prefer_multiword: bool,
         debug: bool,
     ) -> usize {
         let n = tokens.len();
@@ -62,7 +64,21 @@ impl Grammar {
                     for l in lefts {
                         for r in rights {
                             if let Some(item) = apply(l, r, &self.layer) {
-                                produced.push(item);
+                                // Multiword-preference cut (mirrors the packed driver): drop a
+                                // compositional kind-compound over [i,j] when a lexicalized multiword
+                                // `cat_n` seed already covers the span with the same category shape.
+                                // Base cap only (widen-on-failure re-admits), so `grammar-gap 0` holds.
+                                let covered = prefer_multiword
+                                    && is_kind_compound(item.cat())
+                                    && cat_n_number(item.cat()).is_some_and(|n| {
+                                        let want = cat_shape(n);
+                                        chart[i][j].iter().any(|it| {
+                                            cat_n_number(it.cat()).map(cat_shape) == Some(want.clone())
+                                        })
+                                    });
+                                if !covered {
+                                    produced.push(item);
+                                }
                             }
                             // Combinatory-core spike: the extra CCG combinators (crossed + backward
                             // composition), applied alongside the hand-built rules when enabled.
