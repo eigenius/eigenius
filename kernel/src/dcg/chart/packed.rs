@@ -31,7 +31,7 @@ use super::super::category::is_sentence_premod;
 use super::super::grammar::Grammar;
 use super::super::holes::{freshen_anaphor, hole_base};
 use super::super::item::Item;
-use super::super::rules::combinators::{apply, cat_n_number, is_kind_compound};
+use super::super::rules::combinators::{apply, cat_n_number};
 use super::super::rules::constructions::{complete_coord, front_participial};
 use super::super::rules::registry::{BinRule, UnaryKind};
 use super::forest::{self as packed, CubeCandidate, Edge, Forest, NodeId, Sig};
@@ -239,6 +239,24 @@ impl Grammar {
     ) -> packed::Forest {
         use packed::node_sig;
         let n = tokens.len();
+        // Multiword span integrity (base cap only): a lexicalized multiword `cat_n` leaf at [a,b]
+        // (b>a) is atomic — protect its interior split points {a..b-1} so no compositional constituent
+        // ever crosses it. This subsumes the redundant-compound case (a compositional compound over
+        // [a,b] requires an interior split) AND blocks the left-branching split ("[MSI cell] lines"
+        // over the lexicalized "cell lines"). Widen-on-failure clears `prefer_multiword`, re-admitting
+        // the splits if the multiword won't compose in context, so `grammar-gap 0` is preserved.
+        let mut protected_split = vec![false; n];
+        if prefer_multiword {
+            for (a, row) in leaves.iter().enumerate() {
+                for (b, cell) in row.iter().enumerate().skip(a + 1) {
+                    if cell.iter().any(|it| cat_n_number(it.cat()).is_some()) {
+                        for pk in protected_split.iter_mut().take(b).skip(a) {
+                            *pk = true;
+                        }
+                    }
+                }
+            }
+        }
         let mut forest = Forest::new(n);
         // Group leaf items into nodes (one `Leaf` edge each; same-`Sig` items share a node).
         for (i, row) in leaves.iter().enumerate() {
@@ -256,6 +274,10 @@ impl Grammar {
                 // Collect combinations first (immutable borrow of `forest`), then insert.
                 let mut edges: Vec<(Sig, Item, NodeId, NodeId)> = Vec::new();
                 for k in i..j {
+                    // Span integrity: never combine across the interior of a multiword span.
+                    if protected_split.get(k).copied().unwrap_or(false) {
+                        continue;
+                    }
                     let lefts: Vec<NodeId> = forest.cells[i][k].values().copied().collect();
                     let rights: Vec<NodeId> = forest.cells[k + 1][j].values().copied().collect();
                     for &l in &lefts {
@@ -263,26 +285,6 @@ impl Grammar {
                             let lrep = forest.nodes[l].rep.clone();
                             let rrep = forest.nodes[r].rep.clone();
                             if let Some(result) = apply(&lrep, &rrep, &self.layer) {
-                                // Multiword-preference cut (base cap only; widen-on-failure re-admits):
-                                // when a lexicalized multiword `cat_n` leaf already spans [i,j] with the
-                                // same category shape, the compositional kind-compound over [i,j] is a
-                                // redundant bracketing (e.g. "MSI cell lines": UMLS C0007600 vs the
-                                // WordNet cell+line build-up). A leaf at a multi-token span can only be a
-                                // genuine MWE (single tokens span [i,i]), and same shape ⇒ it fills the
-                                // identical slot; its felicity may differ, so the cut is gated to the base
-                                // cap and widen recovers the compositional reading if the MWE won't compose.
-                                if prefer_multiword && is_kind_compound(result.cat()) {
-                                    if let Some(want) = cat_n_number(result.cat()).map(packed::cat_shape)
-                                    {
-                                        if forest.cells[i][j].values().any(|&id| {
-                                            cat_n_number(forest.nodes[id].rep.cat())
-                                                .map(packed::cat_shape)
-                                                == Some(want.clone())
-                                        }) {
-                                            continue;
-                                        }
-                                    }
-                                }
                                 edges.push((node_sig(&result), result, l, r));
                             }
                         }

@@ -32,9 +32,8 @@ use super::super::holes::{freshen_anaphor, hole_base};
 use super::super::item::Item;
 use super::super::pretty::pretty_term;
 use super::super::reserved::ReservedKind;
-use super::super::rules::combinators::{apply, apply_core, cat_n_number, is_kind_compound};
+use super::super::rules::combinators::{apply, apply_core, cat_n_number};
 use super::super::rules::constructions::{complete_coord, front_participial, pied_pipe};
-use super::forest::cat_shape;
 use super::{beam_cell, cell_histogram};
 
 impl Grammar {
@@ -51,34 +50,38 @@ impl Grammar {
     ) -> usize {
         let n = tokens.len();
         let mut beam_drops = 0usize;
-        // 2. CKY composition, appending combined items to each cell's seeds (so a
-        //    multiword leaf and a compositional derivation of the same span both
-        //    remain available).
+        // Multiword span integrity (base cap only; mirrors the packed driver): protect the interior
+        // split points of every multiword `cat_n` leaf so no compositional constituent splits it.
+        // Widen-on-failure clears `prefer_multiword`, re-admitting the splits, so `grammar-gap 0` holds.
+        let mut protected_split = vec![false; n];
+        if prefer_multiword {
+            for (a, row) in chart.iter().enumerate() {
+                for (b, cell) in row.iter().enumerate().skip(a + 1) {
+                    if cell.iter().any(|it| cat_n_number(it.cat()).is_some()) {
+                        for pk in protected_split.iter_mut().take(b).skip(a) {
+                            *pk = true;
+                        }
+                    }
+                }
+            }
+        }
+        // 2. CKY composition, appending combined items to each cell's seeds (so a multiword leaf and a
+        //    compositional derivation of the same span both remain available, EXCEPT where span
+        //    integrity forbids splitting a multiword).
         for len in 2..=n {
             for i in 0..=(n - len) {
                 let j = i + len - 1;
                 let mut produced = Vec::new();
                 for k in i..j {
+                    if protected_split.get(k).copied().unwrap_or(false) {
+                        continue;
+                    }
                     let lefts = &chart[i][k];
                     let rights = &chart[k + 1][j];
                     for l in lefts {
                         for r in rights {
                             if let Some(item) = apply(l, r, &self.layer) {
-                                // Multiword-preference cut (mirrors the packed driver): drop a
-                                // compositional kind-compound over [i,j] when a lexicalized multiword
-                                // `cat_n` seed already covers the span with the same category shape.
-                                // Base cap only (widen-on-failure re-admits), so `grammar-gap 0` holds.
-                                let covered = prefer_multiword
-                                    && is_kind_compound(item.cat())
-                                    && cat_n_number(item.cat()).is_some_and(|n| {
-                                        let want = cat_shape(n);
-                                        chart[i][j].iter().any(|it| {
-                                            cat_n_number(it.cat()).map(cat_shape) == Some(want.clone())
-                                        })
-                                    });
-                                if !covered {
-                                    produced.push(item);
-                                }
+                                produced.push(item);
                             }
                             // Combinatory-core spike: the extra CCG combinators (crossed + backward
                             // composition), applied alongside the hand-built rules when enabled.
