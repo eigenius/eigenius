@@ -350,11 +350,32 @@ itself, the tool for the combinators.
   separate `combine_determiner` is gone; **`combinable` is now fully table-driven** (`combine_universal`
   → `combine_nominal_mod` → `combine_other_grammar`, all interpreters). 5 combinator golden tests
   (incl. the DetRefine Fst-projection) + 1623 lib tests + `grammar-gap 0` byte-identical.
-- **2c — token-keyed binary rules (`BinRule`: coordination, relatives, apposition) — TODO.**
-  Sem-reading, off the packed path — needs the `sem_predicate` escape hatch. **The bare-mass `And`
-  partly lives here** (coordination).
-- **2d — unary shifts — TODO.** Different mechanism (`materialize_unary`, per-cell). **Kind-raise is
-  here — the other half of bare-mass.**
+- **2c — token-keyed binary rules (`BinRule`: coordination, relatives, apposition) — DONE**
+  (byte-identical sweep). This family was already a well-factored registry (enumerated `BinRule`,
+  centralized `binary_sites` geometry, named-fn builders); 2c unified each rule into ONE `TokBinRule`
+  descriptor (`trigger` geometry fn + `build` fn + `reads_sem`), and made `binary_sites` /
+  `apply_bin_rule` interpreters over the `bin_rules()` table (the `BinRule` tag carries the
+  coordination connective, so builder dispatch is keyed by a `BinKind` discriminant). The
+  **`sem_predicate` escape hatch is now an explicit `reads_sem` declaration** — pinned by the
+  `escape_hatch_matches_sig` test to exactly {Coordinate, ButNot}, the rules `Sig` carries the
+  coordination bit for. 2 escape-hatch invariant tests + 1628 lib tests + `grammar-gap 0`
+  byte-identical.
+- **2d — unary shifts — DONE** (byte-identical sweep). The composed-cell shifts (coordination
+  completion, bare-nominal, **type-raise/kind-raise**, fronted participial) are now one ordered
+  `unary_shifts()` table (`kind` + per-item `apply` fn), consumed by all THREE former shift sites —
+  the unpacked CKY (extends the cell), the packed forest builder (adds `Edge::Unary`), and
+  `materialize_unary` (re-applies at extraction) — eliminating the triplicated orchestration. The
+  load-bearing order (bare-nominal before type-raise) is table order; `AbsorbComma` stays inline (a
+  sentence-initial cross-cell special case). Verified per-item-independent (so the packed per-item and
+  unpacked whole-cell applications are equal). 1630 lib tests + `grammar-gap 0` byte-identical.
+
+**Phase 2 is complete.** Every grammar-specific rule is now data: `combinable` (universal combinators,
+nominal-modification, other-grammar), the token-keyed `BinRule` family, and the unary shifts are all
+table-driven interpreters. The sem/trigger *logic* stays as named per-rule functions (principle 2);
+the *rule set* — which rules exist, their triggers, guards, order, escape-hatch declarations — is
+data. Per the replicate-then-fix plan, the bare-mass `And` fix is now the next step: an isolated edit
+to the kind-raise rule (or a guard), verified by the ambiguity delta + targeted look-alike golden
+tests, not the byte-identical gate.
 
 ### Phase 3 — ESL authoring + on-chain (platform-native)
 

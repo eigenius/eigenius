@@ -28,12 +28,12 @@
 
 use super::super::category::{is_ctor, is_sentence_premod, is_vp_adjunct_prep};
 use super::super::grammar::Grammar;
-use super::super::holes::{freshen_anaphor, hole_base};
 use super::super::item::Item;
 use super::super::pretty::pretty_term;
 use super::super::reserved::ReservedKind;
 use super::super::rules::combinators::{apply, apply_core, cat_n_number};
-use super::super::rules::constructions::{complete_coord, front_participial, pied_pipe};
+use super::super::rules::constructions::pied_pipe;
+use super::super::rules::registry::unary_shifts;
 use super::{beam_cell, cell_histogram};
 
 impl Grammar {
@@ -178,52 +178,19 @@ impl Grammar {
                 }
                 let produced_n = produced.len();
                 chart[i][j].extend(produced);
-                // Coordination list-completion (D63 §8.4 Phase 3, core-en's `s-list`/`pred-adj-list`):
-                // fold a prop-ending `cat_coord` list in this cell into its base category (`op(op(m₀,
-                // m₁),…)`). Added ALONGSIDE the `cat_coord` (which stays, so a longer list can still
-                // extend it); the completed base-category item is what a copula / matrix consumes. A
-                // completed coordination can't re-enter `coordinate_prop` (its NF blocks an `And`/`Or`
-                // sem), so this stays single-valued.
-                let completed: Vec<Item> = chart[i][j]
-                    .iter()
-                    .filter_map(|it| {
-                        complete_coord(it.cat(), it.sem(), &self.layer)
-                            .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
-                    })
-                    .collect();
-                chart[i][j].extend(completed);
-                // Bare-nominal shift for COMPOSED common nouns (N-N compounds like "repeat regions" /
-                // "MSI cancer models", adjective-refined nouns like "novel therapies" / "synthetic
-                // lethality"): the leaf shift in `lookup_span` only covers lexical nouns, so a *composed*
-                // `cat_n(_, pl/mass)` cell needs the SAME [`Self::bare_nominal_shifts`] here — both the
-                // raised bare-argument NPs AND the `cat_kind` copula-subject edge, so a compound kind can
-                // be an `are_kind` subject ("repeat regions are microsatellites"). The kind-subject arm
-                // was missing here (only the argument NPs ran), so a compound-kind subject gapped.
-                // Symmetric with the leaf path and the packed forest's `UnaryKind::BareNp`.
-                let bare: Vec<Item> = chart[i][j]
-                    .iter()
-                    .flat_map(|it| self.bare_nominal_shifts(it))
-                    .collect();
-                chart[i][j].extend(bare);
-                // Type-raise `T` (D63 §8.9 Slice 6-T) the cell's name NPs (after its
-                // composition + relativizer items are in place), so a non-leaf / composed
-                // NP can also seed an extraction body. Raised once per cell.
-                let raised = self.raise_nps(&chart[i][j]);
-                chart[i][j].extend(raised);
-                // Fronted participial adjunct (D62 §2 #5a): a subject-gapped `ger` VP in this cell
-                // ("affecting BRCA1", "hypothesizing that P") also serves as a sentence pre-modifier
-                // `S/S` asserting the participial proposition with a CONTROLLED-subject referent hole
-                // (freshened with this span's `hole_base`, so it is the open-parse controller). The
-                // comma absorption below then carries it over a trailing comma to front the matrix.
-                let fronted: Vec<Item> = chart[i][j]
-                    .iter()
-                    .filter_map(|it| {
-                        front_participial(it.cat(), it.sem(), &self.layer).map(|(cat, sem)| {
-                            Item::with_cost(cat, freshen_anaphor(&sem, &hole_base(i, j)), it.cost())
-                        })
-                    })
-                    .collect();
-                chart[i][j].extend(fronted);
+                // Composed-cell UNARY shifts (Phase 2d): the shared `unary_shifts()` table, iterated IN
+                // ORDER — coordination list-completion, bare-nominal shift, type-raise (over the updated
+                // cell, so it sees the shifted NPs), fronted participial. Each shift extends the cell
+                // before the next reads it, so the ordering is load-bearing exactly as in the packed
+                // forest's edge-creation loop (single source of truth: `registry::unary_shifts`). Every
+                // shift is per-item-independent, so the flat-map equals the former whole-cell calls.
+                for shift in unary_shifts() {
+                    let produced: Vec<Item> = chart[i][j]
+                        .iter()
+                        .flat_map(|it| shift.run(self, it, (i, j)))
+                        .collect();
+                    chart[i][j].extend(produced);
+                }
                 // Fronted-modifier comma absorption (D62 §2 #5): a SENTENCE-INITIAL `S/S` modifier
                 // (`Thus,` / `More commonly,` / later a fronted participial) absorbs a trailing comma
                 // so it can then forward-apply to the matrix clause. The comma is otherwise a reserved
