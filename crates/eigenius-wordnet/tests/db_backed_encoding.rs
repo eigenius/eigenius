@@ -19,7 +19,7 @@
 //!
 //! It opens a **copy** of the docker-volume store (never the live volume — RocksDB takes an
 //! exclusive lock) via the kernel's persistent backend, resumes the `main` branch head (the loaded
-//! chain), and builds the **lazy** `LexicalIndex` (on-demand `lexicon:form` value-index probes —
+//! chain), and builds the **lazy** `Parser` (on-demand `lexicon:form` value-index probes —
 //! the only tractable path at 7.6M resources; the eager full-chain scan OOMs). The sense cap
 //! (adaptive supertagging) keeps the chart tractable on long sentences; with `--features use-llm`
 //! and `ANTHROPIC_API_KEY`, the contextual reranker reorders which senses the cap keeps.
@@ -43,7 +43,7 @@ use std::sync::Arc;
 use eigenius_kernel::bootstrap::bootstrap_persistent;
 use eigenius_kernel::dcg::{
     extract_abbreviations, glossary_resources, ground_abbreviation, is_nonprose, pretty_term,
-    segment_sentences, tokenize, Identity, Lemmatizer, LexicalIndex,
+    segment_sentences, tokenize, Identity, Lemmatizer, LexicalIndex, LexiconAugmentation, Parser,
 };
 use eigenius_kernel::layer::{resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -116,8 +116,99 @@ fn snapshot_path() -> Option<PathBuf> {
 /// seeded with, so the code's `logic`/`closed-class` ontologies must match that seeded version
 /// (this session: checked out at `ff7f6cc`) or the resume fails closed. Rather than panic, skip —
 /// so this committed test stays green whatever bootstrap the working tree currently compiles.
+/// A **working copy** of the snapshot, removed when the run ends.
+///
+/// RocksDB has no read-only open in this build: `RocksStore::open` takes the DB read-write and
+/// mutates it on the spot — WAL, `MANIFEST`, `OPTIONS`, `CURRENT`, compaction. So a measurement
+/// pointed at a snapshot **rewrites that snapshot**, and a run that dies mid-way (a stack overflow,
+/// a kill) can leave the baseline it was measured against in an unknown state. On 2026-07-11 the
+/// reference snapshot's `CURRENT`/`OPTIONS`/`.log` all carried the day's mtimes for exactly this
+/// reason, and hours were spent asking whether it had been corrupted.
+///
+/// The measurement must therefore treat its input as **immutable**: copy first, open the copy. The
+/// copy costs ~2 s on a 2.7 GB store (page cache) against a ~6 min run — nothing. It matters more
+/// still once a layer is *added* on top (the WordNet/UMLS alignment), because that genuinely writes.
+struct SnapshotWorkdir(PathBuf);
+
+impl Drop for SnapshotWorkdir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+thread_local! {
+    /// Held for the life of the test so the working copy outlives the store that opens it.
+    static SNAPSHOT_WORK: std::cell::RefCell<Option<SnapshotWorkdir>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Copy `src` to a scratch working directory and return the copy's path.
+///
+/// `EIGENIUS_DB_WORKDIR` places the copy (default: the system temp dir) — point it at a fast disk,
+/// or at one with room for the store. `EIGENIUS_DB_INPLACE=1` opts OUT and opens `src` directly:
+/// faster, and **it will modify the snapshot**. Only for a store you intend to write to.
+fn working_copy(src: &std::path::Path) -> PathBuf {
+    if std::env::var("EIGENIUS_DB_INPLACE").is_ok() {
+        eprintln!(
+            "snapshot: IN-PLACE (EIGENIUS_DB_INPLACE) — this run WILL MODIFY {}",
+            src.display()
+        );
+        return src.to_path_buf();
+    }
+    let root = std::env::var("EIGENIUS_DB_WORKDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
+    // Sweep any copy left by a run that was KILLED — `Drop` does not run on SIGKILL, and each copy
+    // is the size of the store (GBs). Only reap a directory whose owning process is gone.
+    if let Ok(rd) = std::fs::read_dir(&root) {
+        for e in rd.flatten() {
+            let name = e.file_name();
+            let Some(pid) = name
+                .to_str()
+                .and_then(|n| n.strip_prefix("eigenius-snapshot-work-"))
+            else {
+                continue;
+            };
+            let alive = std::path::Path::new(&format!("/proc/{pid}")).exists();
+            if !alive {
+                eprintln!(
+                    "snapshot: reaping stale working copy {}",
+                    e.path().display()
+                );
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    }
+    let dst = root.join(format!("eigenius-snapshot-work-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dst);
+    let t = std::time::Instant::now();
+    // `--reflink=auto`: instant on a CoW filesystem, a plain copy elsewhere.
+    let ok = std::process::Command::new("cp")
+        .args(["-r", "--reflink=auto"])
+        .arg(src)
+        .arg(&dst)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    assert!(
+        ok,
+        "failed to copy snapshot {} → {}",
+        src.display(),
+        dst.display()
+    );
+    eprintln!(
+        "snapshot: working copy → {} ({:.1}s; the source is left untouched)",
+        dst.display(),
+        t.elapsed().as_secs_f32()
+    );
+    SNAPSHOT_WORK.with(|slot| *slot.borrow_mut() = Some(SnapshotWorkdir(dst.clone())));
+    dst
+}
+
 fn open_head(path: &std::path::Path) -> Option<Arc<Layer>> {
-    let store = Arc::new(RocksStore::open(path).expect("open RocksStore snapshot"));
+    // Never open the caller's snapshot directly — see [`working_copy`]. RocksDB would rewrite it.
+    let work = working_copy(path);
+    let store = Arc::new(RocksStore::open(&work).expect("open RocksStore snapshot"));
     let backend: Arc<dyn PersistentBackend> = store;
     match bootstrap_persistent(Arc::clone(&backend)) {
         Ok(ctx) => Some(Arc::clone(ctx.head())),
@@ -132,9 +223,58 @@ fn open_head(path: &std::path::Path) -> Option<Arc<Layer>> {
     }
 }
 
-/// Build the lazy `LexicalIndex` over the head with the sense cap, plus the live contextual
+/// A `SenseRanker` that shares ownership, so the harness can still flush the recording after the
+/// `Parser` has taken its `Box<dyn SenseRanker>`. Only the recording path constructs it.
+#[cfg(feature = "use-llm")]
+struct ArcRanker(std::sync::Arc<dyn eigenius_kernel::dcg::SenseRanker + Send + Sync>);
+#[cfg(feature = "use-llm")]
+impl eigenius_kernel::dcg::SenseRanker for ArcRanker {
+    fn rank(&self, sentence: &str, words: &[eigenius_kernel::dcg::WordSenses]) -> Vec<Vec<usize>> {
+        self.0.rank(sentence, words)
+    }
+}
+
+// The recorder wraps the LIVE ranker, which only exists under `use-llm`. Without the feature there
+// is no LLM to record, so recording is a no-op (a replay still works — it needs no ranker at all).
+#[cfg(feature = "use-llm")]
+type Recorder = std::sync::Arc<
+    eigenius_kernel::dcg::RecordingSenseRanker<eigenius_kernel::dcg::AnthropicSenseRanker>,
+>;
+
+#[cfg(feature = "use-llm")]
+thread_local! {
+    /// The live recording (if `EIGENIUS_SENSE_RANKS` named a file that did not yet exist) and where
+    /// to write it. Flushed by [`flush_sense_ranks`] at the end of a measurement.
+    static RANK_RECORDER: std::cell::RefCell<Option<(Recorder, PathBuf)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Write the recorded sense rankings, if this run was recording. Called at the END of a measurement:
+/// the artifact is what makes the run replayable, and what lets a later parser change be A/B'd
+/// against FIXED rankings — isolating the code from the model.
+fn flush_sense_ranks() {
+    #[cfg(feature = "use-llm")]
+    RANK_RECORDER.with(|slot| {
+        if let Some((rec, path)) = slot.borrow().as_ref() {
+            match rec.write(path) {
+                Ok(n) => eprintln!("sense-ranks: recorded {n} rankings → {}", path.display()),
+                Err(e) => eprintln!("sense-ranks: FAILED to write {}: {e}", path.display()),
+            }
+        }
+    });
+}
+
+/// Build the lazy `Parser` over the head with the sense cap, plus the live contextual
 /// reranker when built with `--features use-llm` and `ANTHROPIC_API_KEY` is set.
-fn build_index(head: &Arc<Layer>) -> LexicalIndex {
+fn build_index(head: &Arc<Layer>) -> Parser {
+    build_index_over(head, None)
+}
+
+/// Same, but with a document's OOV groundings overlaid on the LEXICON first. The overlay is a fact
+/// about words, so it is applied to the `LexicalIndex`; the `Parser` is then built over that lexicon.
+/// (Before the lexicon/parser split this was `.with_document_augmentation(…)` chained onto the index,
+/// back when the index *was* the parser.)
+fn build_index_over(head: &Arc<Layer>, aug: Option<&LexiconAugmentation>) -> Parser {
     // Combinatory-core spike: `EIGENIUS_COMBINATORY_CORE=1` enables the extra CCG combinators for the
     // A/B port measurement (default off = the established rule-by-rule path).
     let core = std::env::var("EIGENIUS_COMBINATORY_CORE")
@@ -149,14 +289,56 @@ fn build_index(head: &Arc<Layer>) -> LexicalIndex {
     if pos_prune {
         eprintln!("cross-POS prune: ON");
     }
-    let index = LexicalIndex::build(Arc::clone(head))
+    let mut lex = LexicalIndex::build(Arc::clone(head));
+    if let Some(aug) = aug {
+        lex = lex.with_document_augmentation(aug);
+    }
+    let index = Parser::over(Arc::new(lex), Arc::clone(head))
         .with_sense_cap(SENSE_CAP)
         .with_cell_beam(CELL_BEAM)
         .with_combinatory_core(core)
         .with_pos_prune(pos_prune);
+    // ── Reproducibility: RECORD or REPLAY the reranker's decisions ───────────────────────────
+    // The contextual reranker is an LLM — the one component that can answer differently for the
+    // same code against the same store, which makes the measurement irreproducible and makes it
+    // impossible to A/B a parser change (the LLM moves underneath you). `EIGENIUS_SENSE_RANKS`
+    // turns it from an *uncontrolled* input into a *recorded* one:
+    //   file EXISTS  → REPLAY it (deterministic, no network, no API cost)
+    //   file ABSENT  → RECORD the live ranker into it (written at the end of the run)
+    let ranks_path = std::env::var("EIGENIUS_SENSE_RANKS")
+        .ok()
+        .map(PathBuf::from);
+    if let Some(p) = &ranks_path {
+        if p.exists() {
+            match eigenius_kernel::dcg::ReplaySenseRanker::load(p) {
+                Ok(r) => {
+                    eprintln!(
+                        "contextual reranker: REPLAY from {} (deterministic, no LLM)",
+                        p.display()
+                    );
+                    return index.with_sense_ranker(Box::new(r));
+                }
+                Err(e) => panic!(
+                    "EIGENIUS_SENSE_RANKS={} exists but could not be read: {e}",
+                    p.display()
+                ),
+            }
+        }
+    }
     #[cfg(feature = "use-llm")]
     {
         if let Some(ranker) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
+            if let Some(p) = ranks_path {
+                eprintln!(
+                    "contextual reranker: AnthropicSenseRanker (live) — RECORDING to {}",
+                    p.display()
+                );
+                let rec =
+                    std::sync::Arc::new(eigenius_kernel::dcg::RecordingSenseRanker::new(ranker));
+                RANK_RECORDER
+                    .with(|slot| *slot.borrow_mut() = Some((std::sync::Arc::clone(&rec), p)));
+                return index.with_sense_ranker(Box::new(ArcRanker(rec)));
+            }
             eprintln!("contextual reranker: AnthropicSenseRanker (live)");
             return index.with_sense_ranker(Box::new(ranker));
         }
@@ -218,12 +400,7 @@ struct UnitReport {
 /// parse there is guaranteed-empty wasted work. (Edge: a unit whose only unknown single-tokens are
 /// all subsumed by *multiword* entries that do seed, and which fully parses, would be bucketed
 /// MISSING rather than ENCODED — measure-zero for this corpus, and the OOV signal is still right.)
-fn encode_unit(
-    text: &str,
-    index: &LexicalIndex,
-    lem: &dyn Lemmatizer,
-    layer: &Arc<Layer>,
-) -> Outcome {
+fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Layer>) -> Outcome {
     let toks = tokenize(text);
     let unknown: Vec<String> = toks
         .iter()
@@ -289,7 +466,7 @@ fn verify_sense_lever_at_page_beam() {
         "Scientists can exploit synthetic lethality for cancer therapeutics.",
         "DNA repair processes are attractive synthetic lethal targets.",
     ];
-    let outcome = |idx: &LexicalIndex, s: &str| -> String {
+    let outcome = |idx: &Parser, s: &str| -> String {
         let (c, o) = idx.parse_open(s, &lem);
         if !c.is_empty() {
             format!("CLOSED×{}", c.len())
@@ -300,7 +477,7 @@ fn verify_sense_lever_at_page_beam() {
         }
     };
     let mk = || {
-        LexicalIndex::build(Arc::clone(&head))
+        Parser::build(Arc::clone(&head))
             .with_sense_cap(SENSE_CAP)
             .with_cell_beam(CELL_BEAM)
     };
@@ -308,7 +485,7 @@ fn verify_sense_lever_at_page_beam() {
     // The variants to compare. The LLM variant only exists with `--features use-llm` +
     // ANTHROPIC_API_KEY (one reranker call per sentence).
     #[allow(unused_mut)]
-    let mut variants: Vec<(String, LexicalIndex)> = vec![("baseline".into(), mk())];
+    let mut variants: Vec<(String, Parser)> = vec![("baseline".into(), mk())];
     #[cfg(feature = "use-llm")]
     {
         if let Some(r) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
@@ -416,7 +593,7 @@ fn probe_s20_isolation_at_scale() {
     let Some(path) = snapshot_path() else { return };
     let Some(head) = open_head(&path) else { return };
     let lem = morphy();
-    let outcome = |idx: &LexicalIndex, s: &str| -> String {
+    let outcome = |idx: &Parser, s: &str| -> String {
         let (c, o) = idx.parse_open(s, &lem);
         if !c.is_empty() {
             format!("CLOSED×{}", c.len())
@@ -448,7 +625,7 @@ fn probe_s20_isolation_at_scale() {
         eprintln!("  {tag:<16} {:<10} {s:?}", outcome(&idx, s));
     }
     // Grammar vs search for the corpus #2 sentence: cap8/beam512, static rank.
-    let hi = LexicalIndex::build(Arc::clone(&head))
+    let hi = Parser::build(Arc::clone(&head))
         .with_sense_cap(8)
         .with_cell_beam(512);
     let c = "Somatic MMR inactivation typically arises from hypermethylation of the MLH1 promoter";
@@ -692,7 +869,7 @@ fn diagnose_compound_pile() {
     let lem = morphy();
     // ROUTING-ONLY (fast: routes_packed does NOT parse; parsing the domain frames explodes/OOMs). The
     // fork — packed vs unpacked — is the Step-0 answer that picks Lever 1 (extend packing) vs Lever 2.
-    let row = |idx: &LexicalIndex, s: &str| {
+    let row = |idx: &Parser, s: &str| {
         let toks = tokenize(s);
         let unk: Vec<String> = toks
             .iter()
@@ -796,7 +973,7 @@ fn diagnose_residual_gaps() {
             "GRAMMAR-GAP".into()
         }
     };
-    let probe = |idx: &LexicalIndex, s: &str| -> String {
+    let probe = |idx: &Parser, s: &str| -> String {
         let toks = tokenize(s);
         let unk: Vec<String> = toks
             .iter()
@@ -903,7 +1080,7 @@ fn diagnose_project_achilles() {
             "GRAMMAR-GAP".into()
         }
     };
-    let probe = |idx: &LexicalIndex, s: &str| -> String {
+    let probe = |idx: &Parser, s: &str| -> String {
         let toks = tokenize(s);
         let unk: Vec<String> = toks
             .iter()
@@ -1329,7 +1506,7 @@ fn probe_grammar_gap_root_causes() {
         aug.added.len(),
         aug.missing_oov.len()
     );
-    let index = build_index(&head).with_document_augmentation(&aug);
+    let index = build_index_over(&head, Some(&aug));
     for t in [
         "msi",
         "wrn",
@@ -1841,7 +2018,7 @@ fn packed_win_probe() {
 fn measure_pile_cell_population() {
     let Some(path) = snapshot_path() else { return };
     let Some(head) = open_head(&path) else { return };
-    let index = LexicalIndex::build(Arc::clone(&head))
+    let index = Parser::build(Arc::clone(&head))
         .with_sense_cap(2)
         .with_cell_beam(1024)
         .with_pos_prune(std::env::var("EIGENIUS_POS_PRUNE").is_ok());
@@ -1881,7 +2058,7 @@ fn analyze_chart_cells_first_five() {
     let Some(head) = open_head(&path) else { return };
     // Wide beam so the dumped cells show the true population, not the page-beam-capped view.
     // Honors EIGENIUS_POS_PRUNE so the pile shown is the residual AFTER the cross-POS prune.
-    let index = LexicalIndex::build(Arc::clone(&head))
+    let index = Parser::build(Arc::clone(&head))
         .with_sense_cap(2)
         .with_cell_beam(1024)
         .with_pos_prune(std::env::var("EIGENIUS_POS_PRUNE").is_ok());
@@ -2027,7 +2204,7 @@ fn diagnose_first_five_cnl() {
     }
     // WIDE-BEAM test: does the 3-noun compound subject parse at cell_beam=1024? CLOSED/open ⇒ the
     // page-beam GAP is BEAM PRESSURE (GH #97 Lever B), not a missing compound rule.
-    let wide = LexicalIndex::build(Arc::clone(&head))
+    let wide = Parser::build(Arc::clone(&head))
         .with_sense_cap(SENSE_CAP)
         .with_cell_beam(1024);
     for f in [
@@ -2202,7 +2379,7 @@ fn diagnose_grammar_gap_fragments() {
     // residual is ambiguity explosion (attributive-adj `novel` over a bare-plural subject + a PP),
     // a Lever-B scale issue (GH #97), NOT a missing prep-object rule (the singular/bare-plural prep
     // objects above already parse). Witnessed: at cell_beam=1024 it yields open×216.
-    let wide = LexicalIndex::build(Arc::clone(&head))
+    let wide = Parser::build(Arc::clone(&head))
         .with_sense_cap(SENSE_CAP)
         .with_cell_beam(1024);
     let (wclosed, wopen) = wide.parse_open("novel therapies are needed for a gene", &lem);
@@ -2247,7 +2424,7 @@ fn llm_reranker_on_structural_residual() {
 }
 
 /// De-risk gate: the store opens, the chain resumes, and the `lexicon:form` value-index is ACTIVE
-/// (→ lazy LexicalIndex path; the eager full-chain scan would OOM on 7.6M resources). Cheap — runs
+/// (→ lazy Parser path; the eager full-chain scan would OOM on 7.6M resources). Cheap — runs
 /// by default (not `#[ignore]`d) so the harness wiring stays green even without the heavy run.
 #[test]
 fn snapshot_opens_with_lazy_form_index() {
@@ -2272,7 +2449,7 @@ fn snapshot_opens_with_lazy_form_index() {
         "lexicon:form value-index must be active for the lazy path; active = {active_props:?}"
     );
 
-    let index = LexicalIndex::build(Arc::clone(&head));
+    let index = Parser::build(Arc::clone(&head));
     assert!(
         index.has_token("gene", &Identity),
         "the full WordNet lexicon must know 'gene'"
@@ -2329,7 +2506,7 @@ fn wrn_first_page_over_full_lexicon() {
         aug.added.len(),
         aug.missing_oov.len()
     );
-    let index = build_index(&head).with_document_augmentation(&aug);
+    let index = build_index_over(&head, Some(&aug));
 
     // Characterize a few interesting buckets directly (closed-class vs -ly adverb vs domain).
     for probe in [
@@ -2400,6 +2577,9 @@ fn summarize(report: &[UnitReport]) {
             }
         }
     }
+    // Persist the reranker's decisions (if recording) BEFORE the summary, so a run that produced a
+    // number always leaves behind the artifact that makes it replayable.
+    flush_sense_ranks();
     eprintln!(
         "\n=== WRN first page over FULL lexicon: {} units → encoded {enc}, ambiguous {amb}, \
          open {open}, missing-lexeme {miss}, grammar-gap {gap}, \
@@ -2810,11 +2990,11 @@ fn probe_beam_crowding() {
     let Some(head) = open_head(&path) else { return };
     let lem = morphy();
     let def = build_index(&head); // CELL_BEAM=64, widen→512
-    let wide = LexicalIndex::build(Arc::clone(&head))
+    let wide = Parser::build(Arc::clone(&head))
         .with_sense_cap(SENSE_CAP)
         .with_cell_beam(2048); // above CELL_BEAM_WIDEN_MAX → a fixed wide beam
 
-    let verdict = |idx: &LexicalIndex, s: &str| {
+    let verdict = |idx: &Parser, s: &str| {
         let (c, o) = idx.parse_open(s, &lem);
         if !c.is_empty() {
             format!("CLOSED×{}", c.len())
@@ -2926,7 +3106,7 @@ fn measure_abbreviation_glossary() {
 
     let base = build_index(&head);
     let glossary = build_index(&doc_layer);
-    let verdict = |idx: &LexicalIndex, s: &str| {
+    let verdict = |idx: &Parser, s: &str| {
         let (c, o) = idx.parse_open(s, &lem);
         if !c.is_empty() {
             format!("CLOSED×{}", c.len())
@@ -2984,4 +3164,231 @@ fn measure_abbreviation_glossary() {
          the glossary",
         sentences.len()
     );
+}
+
+/// **What is actually driving the ambiguity?** Factor each unit's readings into
+/// `structural skeletons × sense combinations`, and check whether any residual cross-lexicon
+/// duplication survives (two readings differing ONLY in a `umls:` vs `wn:` sense of one word).
+///
+///   EIGENIUS_DB_SNAPSHOT=<store> cargo test --release -p eigenius-wordnet --features use-llm \
+///     --test db_backed_encoding factor_ambiguity -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed; --ignored --nocapture"]
+fn factor_ambiguity() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let page = std::fs::read_to_string(&page_path).expect("page");
+
+    // Erase every sense IRI's local segment, leaving the STRUCTURE. `wn:n00024720` / `umls:C1442792`
+    // both become `§`, so two readings that differ only in which lexicon's copy of one concept they
+    // chose collapse to the same skeleton.
+    fn erase(s: &str) -> String {
+        let mut out = String::new();
+        let mut it = s.char_indices().peekable();
+        while let Some((i, c)) = it.next() {
+            if c == ':' {
+                // consume an IRI-ish local segment
+                let rest = &s[i + 1..];
+                let n = rest
+                    .find(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '.')
+                    .unwrap_or(rest.len());
+                if n >= 4 {
+                    out.push('§');
+                    for _ in 0..n {
+                        it.next();
+                    }
+                    continue;
+                }
+            }
+            out.push(c);
+        }
+        out
+    }
+
+    println!(
+        "\n{:<52} {:>6} {:>9} {:>7}",
+        "unit", "reads", "skeletons", "sense×"
+    );
+    println!("{}", "-".repeat(78));
+    let (mut tr, mut tk) = (0usize, 0usize);
+    let mut rows: Vec<(usize, usize, String)> = Vec::new();
+    for text in segment_sentences(&page) {
+        let f = index.parse(&text, &lem);
+        if f.len() < 2 {
+            continue;
+        }
+        let sems: Vec<String> = f.iter().map(|it| pretty_term(it.sem())).collect();
+        let skels: std::collections::BTreeSet<String> = sems.iter().map(|s| erase(s)).collect();
+        tr += f.len();
+        tk += skels.len();
+        rows.push((f.len(), skels.len(), text.chars().take(50).collect()));
+    }
+    rows.sort_by_key(|r| std::cmp::Reverse(r.0));
+    for (r, k, t) in rows.iter().take(12) {
+        println!("{:<52} {:>6} {:>9} {:>7.1}", t, r, k, *r as f32 / *k as f32);
+    }
+    println!("{}", "-".repeat(78));
+    println!(
+        "TOTAL readings {tr}   distinct skeletons {tk}   ⇒ sense× = {:.2}",
+        tr as f32 / tk as f32
+    );
+    println!(
+        "\nIf the cross-lexicon duplicates are gone, sense× ≈ 1 and the readings are STRUCTURAL.\n\
+         If sense× is still large, senses are still multiplying."
+    );
+}
+
+/// **Deep dive on the NEAR-ENCODED units** — every unit with ≤ 16 readings. These are the ones
+/// closest to a single reading, so what separates them from ENCODED is the most informative thing
+/// the corpus can tell us.
+///
+/// For each: the readings, the distinct STRUCTURAL skeletons (senses erased), and — when the
+/// skeleton count is 1 — the actual pairwise difference between the readings, which is then a pure
+/// SENSE choice and can be read off directly.
+///
+///   EIGENIUS_DB_SNAPSHOT=<store> EIGENIUS_SENSE_RANKS=<ranks.json> \
+///     cargo test --release -p eigenius-wordnet --features use-llm --test db_backed_encoding \
+///     dive_near_encoded -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed; --ignored --nocapture"]
+fn dive_near_encoded() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let page = std::fs::read_to_string(&page_path).expect("page");
+
+    /// Erase every SENSE identifier, leaving the combinatory STRUCTURE only, so that two readings
+    /// differing only in *which sense* fills a slot collapse to one skeleton.
+    ///
+    /// Pass 1 handles `X:sense` suffixes (`ΣG#0:n00024720 → ΣG#0§`). Pass 2 handles the ones pass 1
+    /// misses: a sense that appears as a **bare function argument** (`kind_of(C0920269)`) or inside a
+    /// **predicate name** (`v02624263_i`, `deg_a00494409`) — any run of ≥4 digits (CUIs, WordNet
+    /// offsets, synset numbers) → `§`, keeping the categorial part of the name (`v§_i`, `deg_a§`).
+    /// `G#N` structural variables have <4 digits and are untouched. Without pass 2 a bare-argument
+    /// sense pair (a cross-lexicon duplicate as `kind_of(C…)` vs `kind_of(n…)`, or a verb-sense split
+    /// `v00339738_i` vs `v02624263_i`) is miscounted as a distinct *structural* skeleton.
+    fn erase(s: &str) -> String {
+        let mut out = String::new();
+        let mut it = s.char_indices().peekable();
+        while let Some((i, c)) = it.next() {
+            if c == ':' {
+                let rest = &s[i + 1..];
+                let n = rest
+                    .find(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '.')
+                    .unwrap_or(rest.len());
+                if n >= 4 {
+                    out.push('§');
+                    for _ in 0..n {
+                        it.next();
+                    }
+                    continue;
+                }
+            }
+            out.push(c);
+        }
+        // Pass 2: collapse bare sense-id digit runs of length >= 4.
+        let mut result = String::new();
+        let mut run = String::new();
+        for c in out.chars() {
+            if c.is_ascii_digit() {
+                run.push(c);
+                continue;
+            }
+            if !run.is_empty() {
+                if run.len() >= 4 {
+                    result.push('§');
+                } else {
+                    result.push_str(&run);
+                }
+                run.clear();
+            }
+            result.push(c);
+        }
+        if run.len() >= 4 {
+            result.push('§');
+        } else {
+            result.push_str(&run);
+        }
+        result
+    }
+
+    /// The tokens that differ between two readings — the actual locus of the ambiguity.
+    fn diff(a: &str, b: &str) -> Vec<(String, String)> {
+        let (ta, tb): (Vec<&str>, Vec<&str>) = (
+            a.split(['(', ')', ' ', ','])
+                .filter(|t| !t.is_empty())
+                .collect(),
+            b.split(['(', ')', ' ', ','])
+                .filter(|t| !t.is_empty())
+                .collect(),
+        );
+        if ta.len() != tb.len() {
+            return vec![("<different shape>".into(), String::new())];
+        }
+        ta.iter()
+            .zip(tb.iter())
+            .filter(|(x, y)| x != y)
+            .map(|(x, y)| ((*x).to_string(), (*y).to_string()))
+            .collect()
+    }
+
+    let mut n_dive = 0;
+    for text in segment_sentences(&page) {
+        let f = index.parse(&text, &lem);
+        if f.len() < 2 || f.len() > 16 {
+            continue;
+        }
+        n_dive += 1;
+        let sems: Vec<String> = f.iter().map(|it| pretty_term(it.sem())).collect();
+        let skels: std::collections::BTreeSet<String> = sems.iter().map(|s| erase(s)).collect();
+        println!("\n════════════════════════════════════════════════════════════════════");
+        println!("{text}");
+        println!(
+            "  {} readings  |  {} structural skeleton(s)  |  sense× = {:.1}",
+            f.len(),
+            skels.len(),
+            f.len() as f32 / skels.len() as f32
+        );
+        // EIGENIUS_DIVE_SKELETONS=1 dumps the full distinct skeletons (senses erased to `§`) — the
+        // actual competing bracketings, for when the `<different shape>` diff is uninformative.
+        // EIGENIUS_DIVE_RAW=1 additionally dumps the raw sems (with sense IRIs) for CUI/TUI tracing.
+        if std::env::var("EIGENIUS_DIVE_SKELETONS").is_ok() {
+            for (i, sk) in skels.iter().enumerate() {
+                println!("   skel[{i}]: {sk}");
+            }
+        }
+        if std::env::var("EIGENIUS_DIVE_RAW").is_ok() {
+            for (i, s) in sems.iter().enumerate() {
+                println!("   raw[{i}]: {s}");
+            }
+        }
+        // What actually differs between reading 0 and each other reading?
+        for (i, s) in sems.iter().enumerate().skip(1).take(6) {
+            let d = diff(&sems[0], s);
+            let same_shape = erase(&sems[0]) == erase(s);
+            let tag = if same_shape { "SENSE" } else { "STRUCT" };
+            let shown: Vec<String> = d
+                .iter()
+                .take(3)
+                .map(|(x, y)| {
+                    if y.is_empty() {
+                        x.clone()
+                    } else {
+                        format!("{x} ⇄ {y}")
+                    }
+                })
+                .collect();
+            println!("   [{tag}] #{i}: {}", shown.join("   "));
+        }
+        if sems.len() > 7 {
+            println!("   … {} more", sems.len() - 7);
+        }
+    }
+    println!("\n════════════════════════════════════════════════════════════════════");
+    println!("units with 2–16 readings: {n_dive}");
 }

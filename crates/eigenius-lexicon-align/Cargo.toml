@@ -1,0 +1,28 @@
+[package]
+name = "eigenius-lexicon-align"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+eigenius-wordnet = { path = "../eigenius-wordnet" }
+eigenius-umls = { path = "../eigenius-umls" }
+eigenius-kernel = { path = "../../kernel", optional = true }
+tokio = { workspace = true, optional = true }
+schemars = { version = "0.8.12", optional = true }
+serde.workspace = true
+serde_json.workspace = true
+clap = { version = "4", features = ["derive"] }
+
+eigenius-storage-rocksdb = { path = "../../storage/rocksdb", optional = true }
+
+[features]
+# The LLM adjudicator. Candidate generation + the gold set are deterministic and always available.
+use-llm = ["dep:eigenius-kernel", "eigenius-kernel/use-llm", "dep:tokio", "dep:schemars"]
+# Reading the committed lexicon out of a snapshot (the emitter passes properties through unchanged).
+chain = ["dep:eigenius-kernel", "dep:eigenius-storage-rocksdb"]
+
+[[bin]]
+name = "lexicon-align-emit"
+path = "src/bin/lexicon-align-emit.rs"
+required-features = ["chain"]

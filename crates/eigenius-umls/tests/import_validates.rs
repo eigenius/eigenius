@@ -25,7 +25,7 @@
 use std::sync::Arc;
 
 use eigenius_kernel::bootstrap;
-use eigenius_kernel::dcg::{gate_entry, is_ctor, Identity, LexicalIndex};
+use eigenius_kernel::dcg::{gate_entry, is_ctor, Identity, Parser};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::Iri;
@@ -107,7 +107,7 @@ fn scoped_parse_of_every_werner_syndrome_affects_hela() {
     let (doc, _) = render_document(&subset, "2026AA", &Default::default());
     let umls = esl_layer("umls", &doc, demo);
 
-    let index = LexicalIndex::build(Arc::clone(&umls));
+    let index = Parser::build(Arc::clone(&umls));
     let umls_lex = Iri::parse("urn:eigenius:lexicon:umls").unwrap();
 
     // Scoped to the UMLS lexicon: the disease KIND "Werner syndrome" is in scope; the

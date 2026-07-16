@@ -36,13 +36,14 @@ use crate::ontology::Iri;
 use crate::query::text::analyzer::registry::analyzer_for;
 use crate::query::text::search::run_text_search;
 
+use super::abbrev::{extract_abbreviations_with, AbbreviationProposer};
 use super::glossary::{
-    abbreviation_resources, extract_abbreviations_with, glossary_resources, ground_abbreviation,
-    AbbreviationBinding, AbbreviationProposer,
+    abbreviation_resources, glossary_resources, ground_abbreviation, AbbreviationBinding,
 };
 use super::lemmatizer::Lemmatizer;
-use super::lookup::{tokenize, LexicalIndex};
+use super::parse::Parser;
 use super::segment::segment_sentences;
+use super::segment::tokenize;
 
 const LEXICAL_ENTRY: &str = "urn:eigenius:lexicon:LexicalEntry";
 
@@ -67,7 +68,7 @@ pub enum ExpectedCat {
 /// and its document context, propose the [`ExpectedCat`] the grammar expects there — the query-side
 /// category the resolver matches concept hits against. Same "propose, kernel gates" contract as
 /// [`AbbreviationProposer`](super::glossary::AbbreviationProposer) / the anaphora
-/// [`Proposer`](super::lookup::Proposer): a wrong proposal only mis-selects a candidate, which the
+/// [`Proposer`](super::parse::Proposer): a wrong proposal only mis-selects a candidate, which the
 /// felicity gate then rejects — it never commits an ill-typed alias. [`NominalCategoryProposer`] is the
 /// deterministic default; the live `AnthropicCategoryProposer` (`use-llm`) reads the sentence.
 pub trait CategoryProposer {
@@ -216,7 +217,7 @@ pub fn augment_document_only(
     // just add as an abbreviation — is a `Gap`. `LexiconBacked`/`LlmBacked` (Phase 2/3) would try to ground
     // these; `DocumentOnly` reports them as-is. Each gap carries the sentence it occurs in as `context` —
     // the window a `CategoryProposer` reads to infer the OOV's expected category (§6a, the (B) step).
-    let index = LexicalIndex::build(Arc::clone(base));
+    let index = Parser::build(Arc::clone(base));
     let sentences = segment_sentences(document);
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut missing_oov = Vec::new();

@@ -1,0 +1,294 @@
+{"cui":"C0000723","offset":"07091587","surface":"abbreviation","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0002211","offset":"14731964","surface":"alpha globulin","same":true,"confidence":0.97,"reason":"Both describe the same protein in blood plasma/serum with alkaline properties and high electrophoretic mobility; minor wording difference only."}
+{"cui":"C0003060","offset":"01335659","surface":"animal virus","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0003126","offset":"14552477","surface":"anosmia","same":true,"confidence":0.95,"reason":"Both define absence of the sense of smell; WordNet adds elaborating detail but the core concept is identical."}
+{"cui":"C0003611","offset":"00666232","surface":"appendectomy","same":true,"confidence":0.98,"reason":"Both define surgical removal of the vermiform appendix; UMLS adds a citation but the meaning is the same."}
+{"cui":"C0004690","offset":"14260898","surface":"balanitis","same":true,"confidence":0.97,"reason":"Both define inflammation of the glans penis; wording is nearly identical."}
+{"cui":"C0005678","offset":"01774384","surface":"latrodectus mactans","same":true,"confidence":0.95,"reason":"Both describe the same venomous New World spider with a red hourglass mark; minor descriptive differences do not change the concept."}
+{"cui":"C0006386","offset":"14316352","surface":"bunion","same":true,"confidence":0.93,"reason":"Both describe a painful swelling of the bursa at the first big-toe joint; UMLS adds 'inflamed' but the concept is the same."}
+{"cui":"C0011485","offset":"15073147","surface":"deoxycytidine","same":true,"confidence":0.99,"reason":"Both define deoxycytidine as a DNA nucleoside composed of cytosine and deoxyribose; essentially identical."}
+{"cui":"C0013295","offset":"14212579","surface":"duodenal ulcer","same":true,"confidence":0.98,"reason":"Both define a peptic ulcer located in the duodenum; wording differs trivially."}
+{"cui":"C0014100","offset":"14342638","surface":"endarteritis","same":true,"confidence":0.95,"reason":"Both describe inflammation of the inner lining of an artery; UMLS specifies 'tunica intima/endothelial' but the concept is the same."}
+{"cui":"C0014591","offset":"14370992","surface":"epistaxis","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0015801","offset":"05345247","surface":"femoral artery","same":true,"confidence":0.98,"reason":"Both describe the main/chief artery of the thigh as a continuation of the external iliac artery."}
+{"cui":"C0016094","offset":"06508816","surface":"file","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0016540","offset":"05602548","surface":"forehead","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0017765","offset":"14887801","surface":"glucoside","same":true,"confidence":0.98,"reason":"Both define glucoside as a glycoside derived from glucose; essentially identical."}
+{"cui":"C0020473","offset":"14193925","surface":"hyperlipidemia","same":true,"confidence":0.97,"reason":"Both describe excess lipids in the blood; 'presence of excess' vs 'excess of' is a trivial phrasing difference."}
+{"cui":"C0021102","offset":"03563710","surface":"implant","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0022573","offset":"14348429","surface":"keratoconjunctivitis","same":true,"confidence":0.97,"reason":"Both describe simultaneous/combined inflammation of the cornea and conjunctiva; minor wording difference only."}
+{"cui":"C0023380","offset":"05042138","surface":"lethargy","same":true,"confidence":0.88,"reason":"Both refer to a lack of vitality or energy; WordNet frames it as a 'weakness' while UMLS frames it as a characteristic, but the core concept is the same."}
+{"cui":"C0023630","offset":"06170892","surface":"library science","same":true,"confidence":0.97,"reason":"Both define library science as the study of principles and practices of library administration and services — essentially identical."}
+{"cui":"C0023864","offset":"05638486","surface":"literacy","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical: the ability to read and write."}
+{"cui":"C0029053","offset":"04703424","surface":"opacity","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical regarding the quality of being opaque and reducing light passage."}
+{"cui":"C0029189","offset":"00686913","surface":"orchiectomy","same":true,"confidence":0.99,"reason":"Both define orchiectomy as surgical removal of one or both testicles, differing only in the presence of 'the'."}
+{"cui":"C0029936","offset":"00686570","surface":"ovariectomy","same":true,"confidence":0.99,"reason":"Both define ovariectomy as surgical removal of one or both ovaries; the WordNet 'of both' vs 'or both' is a minor typo, not a semantic difference."}
+{"cui":"C0031752","offset":"01003272","surface":"photometry","same":true,"confidence":0.93,"reason":"Both define photometry as measurement of properties of light; WordNet adds a parenthetical emphasis on luminous intensity but the core concept is the same."}
+{"cui":"C0033269","offset":"13824500","surface":"productivity","same":true,"confidence":0.99,"reason":"Both definitions are identical; WordNet merely adds the domain label '(economics)'."}
+{"cui":"C0033414","offset":"07251984","surface":"promotion","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical: encouragement of the progress or growth or acceptance of something."}
+{"cui":"C0034641","offset":"01501450","surface":"raja","same":true,"confidence":0.9,"reason":"Both refer to the genus Raja in family Rajidae; 'type genus' vs 'genus' is a minor distinction but the referent is the same taxon."}
+{"cui":"C0035345","offset":"13954118","surface":"retirement","same":true,"confidence":0.97,"reason":"Both define retirement as the state of being retired from one's position/occupation — 'position or occupation' vs 'business or occupation' is a negligible wording difference."}
+{"cui":"C0038128","offset":"15052970","surface":"stain","same":true,"confidence":0.99,"reason":"Both definitions are identical; WordNet merely adds the domain label '(microscopy)'."}
+{"cui":"C0038215","offset":"06018465","surface":"statistics","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0040145","offset":"00688220","surface":"thyroidectomy","same":true,"confidence":0.99,"reason":"Both define thyroidectomy as surgical removal of the thyroid gland; UMLS adds a source citation which does not change the meaning."}
+{"cui":"C0043100","offset":"05026843","surface":"weight","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0085732","offset":"05200169","surface":"ability","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0085862","offset":"13994148","surface":"independence","same":true,"confidence":0.97,"reason":"Both define independence as freedom from control or influence of another or others; UMLS adds 'factors' but the core meaning is the same."}
+{"cui":"C0086960","offset":"06495328","surface":"schedule","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0087123","offset":"00688766","surface":"myringotomy","same":true,"confidence":0.99,"reason":"Both define myringotomy as surgical incision into the eardrum; WordNet adds a parenthetical purpose clause that does not change the core concept."}
+{"cui":"C0150041","offset":"07542249","surface":"hopelessness","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0150646","offset":"10212501","surface":"interpreter","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0178448","offset":"02480346","surface":"pongo","same":true,"confidence":0.99,"reason":"Both define pongo as the type genus of family Pongidae comprising orangutans, with virtually identical wording."}
+{"cui":"C0180098","offset":"03094503","surface":"container","same":true,"confidence":0.9,"reason":"Both define container as an object that holds things; the WordNet parenthetical is just an example, not a different concept."}
+{"cui":"C0181856","offset":"03760944","surface":"microtome","same":true,"confidence":0.99,"reason":"Both define microtome as an instrument that cuts thin slices for microscopic examination, differing only in minor wording."}
+{"cui":"C0182576","offset":"04038727","surface":"rack","same":true,"confidence":0.95,"reason":"Both define rack as a framework for holding objects with identical wording."}
+{"cui":"C0184486","offset":"04609811","surface":"x-ray tube","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical describing an X-ray tube as a vacuum tube with a metal target for generating X rays."}
+{"cui":"C0205208","offset":"14480772","surface":"solid","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical describing the solid state of matter."}
+{"cui":"C0205284","offset":"13903387","surface":"margin","same":true,"confidence":0.98,"reason":"Both define margin as a boundary line or the area immediately inside it, with only a minor article difference."}
+{"cui":"C0205547","offset":"01026482","surface":"routine","same":true,"confidence":0.99,"reason":"Both define routine as an unvarying or habitual method or procedure with identical wording."}
+{"cui":"C0221165","offset":"14087208","surface":"diplegia","same":true,"confidence":0.98,"reason":"Both define diplegia as paralysis of corresponding parts on both sides of the body, differing only trivially in phrasing."}
+{"cui":"C0222001","offset":"05584265","surface":"fingernail","same":true,"confidence":0.99,"reason":"Both define fingernail as the nail at the end of a finger with identical wording."}
+{"cui":"C0222645","offset":"05587288","surface":"axial skeleton","same":true,"confidence":0.99,"reason":"Both define axial skeleton as the part of the skeleton including skull, spinal column, sternum, and ribs with identical wording."}
+{"cui":"C0223736","offset":"05272891","surface":"trapezium","same":true,"confidence":0.98,"reason":"Both define trapezium as the carpal/wrist bone on the thumb side articulating with the 1st and 2nd metacarpals; minor wording difference only."}
+{"cui":"C0226550","offset":"05371482","surface":"internal jugular vein","same":true,"confidence":0.99,"reason":"Both define internal jugular vein identically as a continuation of the sigmoid sinus joining the subclavian vein."}
+{"cui":"C0231472","offset":"00349080","surface":"standing","same":true,"confidence":0.99,"reason":"Both define standing as the act of assuming or maintaining an erect upright position with identical wording."}
+{"cui":"C0232726","offset":"14571714","surface":"tenesmus","same":true,"confidence":0.99,"reason":"Both define tenesmus with word-for-word identical descriptions of the painful anal sphincter spasm."}
+{"cui":"C0240146","offset":"10241300","surface":"laborer","same":true,"confidence":0.99,"reason":"Both define laborer as someone who works with their hands engaged in manual labor with identical wording."}
+{"cui":"C0242209","offset":"07859284","surface":"sugar","same":true,"confidence":0.97,"reason":"Both define sugar as a white crystalline carbohydrate used as a sweetener and preservative; UMLS specifies sucrose but this is the same core concept."}
+{"cui":"C0242477","offset":"02945813","surface":"refugee camp","same":true,"confidence":0.97,"reason":"Both define refugee camp as shelter for persons displaced by war, political oppression, or religious beliefs; UMLS adds 'temporary/makeshift' but the concept is the same."}
+{"cui":"C0271298","offset":"14316048","surface":"chemosis","same":true,"confidence":0.99,"reason":"Both define chemosis as edema of the mucous membrane of the eyeball and eyelid lining with identical wording."}
+{"cui":"C0278598","offset":"10170681","surface":"hematologist","same":true,"confidence":0.97,"reason":"Both define hematologist as a doctor specializing in blood diseases and blood-forming organs; minor wording difference only."}
+{"cui":"C0282126","offset":"14390967","surface":"neurotic depression","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical in meaning."}
+{"cui":"C0302600","offset":"13431992","surface":"angiogenesis","same":true,"confidence":0.99,"reason":"Both definitions describe the formation of new blood vessels with identical meaning."}
+{"cui":"C0332189","offset":"07289956","surface":"episode","same":true,"confidence":0.97,"reason":"Both describe a distinctive happening in a series of related events; 'noteworthy' is a minor elaboration, not a different concept."}
+{"cui":"C0332261","offset":"00367976","surface":"spread","same":true,"confidence":0.99,"reason":"Both definitions are essentially identical in meaning."}
+{"cui":"C0332469","offset":"05223370","surface":"fissure","same":true,"confidence":0.99,"reason":"Both describe the same anatomical concept; WordNet simply adds the label '(anatomy)'."}
+{"cui":"C0332501","offset":"13898899","surface":"sphere","same":true,"confidence":0.95,"reason":"Both describe a 3D shape equidistant from center; UMLS adds 'solid or hollow' but the core concept is the same."}
+{"cui":"C0334914","offset":"10305523","surface":"medical assistant","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0337474","offset":"10142747","surface":"grandmother","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0337475","offset":"10142391","surface":"grandfather","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0337576","offset":"09823502","surface":"aunt","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0337577","offset":"10736091","surface":"uncle","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0337578","offset":"10357613","surface":"niece","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0337579","offset":"10353355","surface":"nephew","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0337583","offset":"09972010","surface":"first cousin","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0337600","offset":"09829923","surface":"bachelor","same":true,"confidence":0.97,"reason":"Both refer to an unmarried man; UMLS adds 'has never been' but the core concept is the same."}
+{"cui":"C0376245","offset":"06947032","surface":"english language","same":true,"confidence":0.99,"reason":"Definitions are essentially identical, differing only in trivial capitalization."}
+{"cui":"C0439080","offset":"13597280","surface":"ordinal number","same":true,"confidence":0.99,"reason":"Both describe a number designating place in an ordered sequence."}
+{"cui":"C0439095","offset":"06834138","surface":"alpha","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0439199","offset":"13658998","surface":"decimeter","same":true,"confidence":0.99,"reason":"Definitions are essentially identical."}
+{"cui":"C0439639","offset":"13919547","surface":"wedge","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0439793","offset":"05036715","surface":"severity","same":false,"confidence":0.65,"reason":"The UMLS definition adds 'also, strictness' as a second sense, making it slightly broader than the WordNet definition which covers only degree of something undesirable."}
+{"cui":"C0439962","offset":"14586258","surface":"mixture","same":true,"confidence":0.99,"reason":"Both definitions are virtually identical, differing only in that WordNet adds the domain label '(chemistry)'."}
+{"cui":"C0441471","offset":"00029378","surface":"event","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0441635","offset":"09429387","surface":"segment","same":true,"confidence":0.99,"reason":"Both definitions are identical; WordNet merely adds an illustrative example."}
+{"cui":"C0441792","offset":"06590446","surface":"edition","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0441833","offset":"00031264","surface":"group","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0442516","offset":"03776460","surface":"mobile home","same":true,"confidence":0.97,"reason":"Both describe the same concept of a large trailer used as permanent housing; minor wording differences do not change the meaning."}
+{"cui":"C0443348","offset":"05056234","surface":"viability","same":true,"confidence":0.95,"reason":"Both convey capability of normal growth and development in living things; UMLS phrasing is slightly broader but refers to the same concept."}
+{"cui":"C0444626","offset":"14883206","surface":"crystal","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0449238","offset":"15133621","surface":"duration","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0449255","offset":"06284898","surface":"context","same":true,"confidence":0.95,"reason":"Both describe discourse surrounding a language unit that aids interpretation; 'universe of discourse' vs 'discourse' is a negligible difference in meaning."}
+{"cui":"C0449819","offset":"05086269","surface":"wavelength","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0452703","offset":"07622708","surface":"pastry","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0470689","offset":"10677271","surface":"supplier","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0487742","offset":"05136150","surface":"width","same":true,"confidence":0.97,"reason":"Both describe the lateral extent/measurement of something; minor phrasing difference does not change the concept."}
+{"cui":"C0520997","offset":"13567515","surface":"thrombolysis","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0521102","offset":"01073995","surface":"interference","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0549193","offset":"07328305","surface":"parameter","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0552389","offset":"08548065","surface":"cross section","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0556030","offset":"01052739","surface":"repositioning","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C0557702","offset":"04588739","surface":"window","same":true,"confidence":0.98,"reason":"Both define a rectangular portion of a computer screen with a distinct display; wording is nearly identical."}
+{"cui":"C0557806","offset":"08278324","surface":"college","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical in meaning."}
+{"cui":"C0557849","offset":"08543625","surface":"inner city","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical in meaning."}
+{"cui":"C0562518","offset":"08226699","surface":"village","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical in meaning."}
+{"cui":"C0574551","offset":"06916117","surface":"cherokee","same":true,"confidence":0.98,"reason":"Both describe the Iroquoian language of the Cherokee people; trivial wording difference."}
+{"cui":"C0574895","offset":"05081660","surface":"ectopia","same":true,"confidence":0.85,"reason":"Both describe abnormal position of a part or organ; WordNet adds a parenthetical about birth timing but the core concept is the same."}
+{"cui":"C0582802","offset":"05566097","surface":"digit","same":true,"confidence":0.99,"reason":"Definitions are essentially identical, describing a finger or toe in humans or equivalent in other vertebrates."}
+{"cui":"C0585024","offset":"15163979","surface":"monday","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0585026","offset":"15164105","surface":"tuesday","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0585027","offset":"15164233","surface":"wednesday","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0585028","offset":"15164354","surface":"thursday","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0585029","offset":"15164463","surface":"friday","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0596038","offset":"14594708","surface":"acyl group","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical, including the example."}
+{"cui":"C0596066","offset":"14617189","surface":"alkyl","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0598352","offset":"11523538","surface":"voltage","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0678393","offset":"07891433","surface":"sake","same":true,"confidence":0.99,"reason":"Definitions are essentially identical, describing Japanese rice wine served hot."}
+{"cui":"C0679214","offset":"06806469","surface":"symbol","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0679646","offset":"10401829","surface":"participant","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0680647","offset":"08590369","surface":"jurisdiction","same":true,"confidence":0.95,"reason":"Both define jurisdiction as the territory within which power can be exercised; WordNet adds 'in law' as a domain qualifier but the concept is the same."}
+{"cui":"C0681211","offset":"07452074","surface":"wedding","same":true,"confidence":0.99,"reason":"Definitions are word-for-word identical."}
+{"cui":"C0681470","offset":"06420781","surface":"glossary","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C0681494","offset":"03186399","surface":"diagram","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C0682209","offset":"10605985","surface":"skilled worker","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C0683859","offset":"08412749","surface":"elementary school","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C0684328","offset":"05772356","surface":"reasoning","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C0696628","offset":"09607280","surface":"applicant","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C0700364","offset":"04673965","surface":"appearance","same":true,"confidence":0.99,"reason":"The definitions convey the same meaning with only trivial article differences."}
+{"cui":"C0724557","offset":"03040587","surface":"cleanser","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C0746922","offset":"05264913","surface":"node","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C0812225","offset":"03619396","surface":"kit","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C0812409","offset":"13859512","surface":"gradient","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C0868941","offset":"13455487","surface":"data processing","same":true,"confidence":0.98,"reason":"The definitions are identical except WordNet adds a domain label '(computer science)', which does not change the concept."}
+{"cui":"C0868945","offset":"14561618","surface":"deterioration","same":true,"confidence":0.9,"reason":"Both describe reduced quality or strength; UMLS adds 'or state' but the core concept is the same."}
+{"cui":"C0870077","offset":"06652242","surface":"rule","same":true,"confidence":0.99,"reason":"The definitions are effectively identical with only a trivial article difference."}
+{"cui":"C0870134","offset":"09792555","surface":"ancestor","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C0871208","offset":"00874806","surface":"rating","same":true,"confidence":0.99,"reason":"The definitions convey the same meaning with only trivial wording differences."}
+{"cui":"C0871309","offset":"05660631","surface":"scientific method","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C0871643","offset":"06497459","surface":"alphabet","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C0871738","offset":"05660801","surface":"experimental method","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C0929176","offset":"05224755","surface":"hilum","same":true,"confidence":0.99,"reason":"The definitions describe the same anatomical concept; WordNet merely adds a domain label and an example."}
+{"cui":"C0934502","offset":"08591680","surface":"layer","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1136359","offset":"02992529","surface":"cellular phone","same":true,"confidence":0.99,"reason":"The two definitions are essentially identical, differing only by a comma."}
+{"cui":"C1185742","offset":"05476094","surface":"commissure","same":true,"confidence":0.97,"reason":"Both describe a bundle of nerve fibers crossing between sides of the brain or spinal cord; 'crossing' vs 'passing' is a negligible wording difference."}
+{"cui":"C1257882","offset":"08836165","surface":"australasia","same":true,"confidence":0.98,"reason":"Both define Australasia as Australia, New Zealand, and neighboring South Pacific islands; the UMLS adds a citation but the meaning is identical."}
+{"cui":"C1264641","offset":"05737752","surface":"percentile","same":true,"confidence":0.99,"reason":"The definitions are identical; WordNet merely adds a parenthetical domain label '(statistics)'."}
+{"cui":"C1293134","offset":"00365709","surface":"enlargement","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1295726","offset":"05101261","surface":"perimeter","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1301627","offset":"06636806","surface":"format","same":true,"confidence":0.95,"reason":"Both define format as organization of information according to preset specifications; WordNet adds a parenthetical about computer processing but the core concept is the same."}
+{"cui":"C1301886","offset":"05101815","surface":"diameter","same":true,"confidence":0.95,"reason":"Both define diameter as a straight line through the center connecting two circumference points; UMLS adds 'or sphere' but this is an extension of the same concept, not a different sense."}
+{"cui":"C1305636","offset":"05263587","surface":"pubic hair","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1306504","offset":"13871538","surface":"radius","same":true,"confidence":0.99,"reason":"The two definitions are essentially identical; WordNet merely uses parentheses for the sphere extension."}
+{"cui":"C1382107","offset":"14591091","surface":"suspension","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1382110","offset":"14997012","surface":"powder","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1441506","offset":"00868910","surface":"calculation","same":true,"confidence":0.98,"reason":"Both describe the procedure of determining something by mathematical or logical methods; minor rephrasing only."}
+{"cui":"C1442160","offset":"13759014","surface":"cutoff","same":true,"confidence":0.95,"reason":"Both define cutoff as a designated limit beyond which something cannot function or must be terminated; UMLS adds 'or no longer applies' but the core concept is the same."}
+{"cui":"C1512900","offset":"15271008","surface":"interruption","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1519193","offset":"05905348","surface":"scheme","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1519941","offset":"00153961","surface":"validation","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1521797","offset":"00121366","surface":"transmission","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1521819","offset":"06080192","surface":"enzymology","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1522496","offset":"06008609","surface":"axis","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C1549943","offset":"06697703","surface":"associate degree","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C1549966","offset":"06478582","surface":"diploma","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C1551090","offset":"13642000","surface":"gilbert","same":true,"confidence":0.97,"reason":"Both describe the same CGS unit of magnetomotive force equal to 0.7958 ampere-turns; minor wording difference only."}
+{"cui":"C1552859","offset":"04348548","surface":"subsection","same":true,"confidence":0.97,"reason":"Both convey the same meaning of a subdivision of an already-divided section; WordNet just elaborates slightly."}
+{"cui":"C1552926","offset":"13655089","surface":"mil","same":true,"confidence":0.95,"reason":"Both define mil as one-thousandth of an inch used to specify thickness; UMLS adds 'international' and the metric equivalent but the core concept is identical."}
+{"cui":"C1552934","offset":"13619592","surface":"quart","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C1553020","offset":"13626013","surface":"byte","same":true,"confidence":0.98,"reason":"Both define a byte as a sequence of 8 bits processed as a single unit; WordNet adds a parenthetical clarification but the concept is the same."}
+{"cui":"C1553705","offset":"09993040","surface":"daughter-in-law","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C1571705","offset":"05518094","surface":"follicle","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C1627936","offset":"08595531","surface":"latitude","same":true,"confidence":0.97,"reason":"Both define latitude as the angular distance between a parallel line and the equator; minor wording difference ('north or south between') does not change the concept."}
+{"cui":"C1704449","offset":"03339643","surface":"filter","same":true,"confidence":0.99,"reason":"Both definitions are functionally identical, describing a device that removes something from whatever passes through it."}
+{"cui":"C1704709","offset":"06566077","surface":"package","same":true,"confidence":0.95,"reason":"Both describe software (written programs, procedures, rules, and documentation stored in read/write memory); the word 'package' is used in the software sense in both."}
+{"cui":"C1704711","offset":"01083077","surface":"distribution","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C1704728","offset":"09784707","surface":"distributor","same":true,"confidence":0.97,"reason":"Both describe a person (or group) with authority to allot or apportion; UMLS adds 'or group' but the core concept is the same."}
+{"cui":"C1704732","offset":"06256697","surface":"page","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C1704788","offset":"06744396","surface":"definition","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C1705162","offset":"04470953","surface":"transducer","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C1705253","offset":"06755568","surface":"condition","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C1705422","offset":"00871418","surface":"integration","same":true,"confidence":0.99,"reason":"Both definitions are functionally identical, describing the calculus operation of integration; minor article difference ('the calculus' vs 'calculus') is trivial."}
+{"cui":"C1705501","offset":"06816935","surface":"chemical formula","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1705502","offset":"13821570","surface":"frequency","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1705654","offset":"06503724","surface":"entry","same":true,"confidence":0.92,"reason":"The UMLS definition adds 'or electronic' but both describe the same concept of a record entry."}
+{"cui":"C1705682","offset":"03065424","surface":"helix","same":true,"confidence":0.97,"reason":"The definitions are identical in meaning; the WordNet example does not change the concept."}
+{"cui":"C1705946","offset":"03065424","surface":"coil","same":true,"confidence":0.97,"reason":"The definitions are identical in meaning; the WordNet example does not change the concept."}
+{"cui":"C1706074","offset":"08266235","surface":"table","same":true,"confidence":0.99,"reason":"The definitions are essentially identical; the WordNet example does not change the concept."}
+{"cui":"C1706082","offset":"14818238","surface":"compound","same":true,"confidence":0.99,"reason":"Both define a chemical compound in the same way; the WordNet domain label '(chemistry)' matches the UMLS context."}
+{"cui":"C1706423","offset":"11504313","surface":"reactance","same":true,"confidence":0.99,"reason":"The definitions are essentially identical, describing the same electrical concept."}
+{"cui":"C1706462","offset":"06603494","surface":"referent","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1706502","offset":"05791864","surface":"default","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1706852","offset":"06268096","surface":"article","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1706853","offset":"00912001","surface":"assembly","same":true,"confidence":0.95,"reason":"Both describe the act of constructing something; the WordNet parenthetical example does not change the core meaning."}
+{"cui":"C1706858","offset":"05338025","surface":"auricular artery","same":true,"confidence":0.93,"reason":"Both describe an artery supplying blood to the ear; 'oxygenated' is a minor elaboration, not a different concept."}
+{"cui":"C1706912","offset":"02796623","surface":"barrier","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1707260","offset":"08540770","surface":"canton","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1707429","offset":"13586122","surface":"coefficient","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1707456","offset":"06573600","surface":"compiler","same":true,"confidence":0.99,"reason":"The definitions are essentially identical; the WordNet domain label '(computer science)' matches the UMLS context."}
+{"cui":"C1707496","offset":"09612848","surface":"consumer","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1707797","offset":"00043609","surface":"disposal","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1708476","offset":"00044150","surface":"implementation","same":true,"confidence":0.97,"reason":"Both describe the act of carrying something into effect; the WordNet parenthetical elaboration does not change the core meaning."}
+{"cui":"C1708660","offset":"05837271","surface":"layout","same":true,"confidence":0.99,"reason":"The two definitions are essentially identical in wording and meaning."}
+{"cui":"C1709061","offset":"03778600","surface":"module","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical in meaning."}
+{"cui":"C1709450","offset":"07985223","surface":"pair","same":true,"confidence":0.99,"reason":"Both definitions describe the same concept of a set of two similar things as a unit."}
+{"cui":"C1709634","offset":"14583066","surface":"precursor","same":true,"confidence":0.95,"reason":"WordNet's parenthetical 'especially by a metabolic reaction' is a minor elaboration; both define the same core concept of a precursor substance."}
+{"cui":"C1709767","offset":"10491309","surface":"publisher","same":true,"confidence":0.92,"reason":"UMLS adds 'or firm' but both definitions describe the same concept of a publisher; the difference is trivially minor."}
+{"cui":"C1710048","offset":"13874251","surface":"semicircle","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical in meaning."}
+{"cui":"C1710131","offset":"06358513","surface":"source code","same":true,"confidence":0.99,"reason":"The two definitions are essentially identical in wording and meaning."}
+{"cui":"C1710191","offset":"06020737","surface":"statistical method","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical in meaning."}
+{"cui":"C1710232","offset":"08107191","surface":"suborder","same":true,"confidence":0.98,"reason":"Both define suborder as a taxonomic subdivision of an order; WordNet's '(biology)' tag is just a domain label."}
+{"cui":"C1710233","offset":"08103299","surface":"subphylum","same":true,"confidence":0.99,"reason":"Both define subphylum as a taxonomic group between phylum and class; WordNet's '(biology)' is just a domain label."}
+{"cui":"C1710237","offset":"08435937","surface":"subsystem","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical in meaning."}
+{"cui":"C1710443","offset":"04460130","surface":"tower","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical in meaning."}
+{"cui":"C1710706","offset":"08509442","surface":"zone","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical in meaning."}
+{"cui":"C1711161","offset":"13591586","surface":"cardinality","same":true,"confidence":0.97,"reason":"Both define cardinality as the number of elements in a set; WordNet's extra phrasing is just elaboration of the same concept."}
+{"cui":"C1711207","offset":"08108627","surface":"subfamily","same":true,"confidence":0.98,"reason":"Both define subfamily as a taxonomic category below a family; WordNet's '(biology)' is just a domain label."}
+{"cui":"C1711343","offset":"06744154","surface":"deriving","same":true,"confidence":0.95,"reason":"Both define 'deriving' as an explanation of historical origins of a word/phrase; UMLS adds 'or object' but the core meaning is the same."}
+{"cui":"C1854293","offset":"01019129","surface":"iteration","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical in meaning."}
+{"cui":"C1879748","offset":"02749790","surface":"assembly","same":true,"confidence":0.96,"reason":"WordNet specifies 'machine parts' while UMLS says 'parts'; both describe the same concept of an assembly of parts forming a self-contained unit."}
+{"cui":"C1879848","offset":"06047096","surface":"biomedicine","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical in meaning."}
+{"cui":"C1879980","offset":"02935017","surface":"memory cache","same":true,"confidence":0.99,"reason":"The two definitions are essentially identical; WordNet's '(computer science)' is just a domain label."}
+{"cui":"C1880155","offset":"13729428","surface":"complex number","same":true,"confidence":0.99,"reason":"Both define a complex number as x+iy (or a+bi) where x/a and y/b are real numbers and i is the square root of -1; identical concept, trivially different variable names."}
+{"cui":"C1880157","offset":"00868910","surface":"computing","same":true,"confidence":0.98,"reason":"Both define computing as the act/procedure of calculating or determining something by mathematical or logical methods."}
+{"cui":"C1880269","offset":"13460299","surface":"degeneration","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C1880273","offset":"10000787","surface":"delegate","same":true,"confidence":0.99,"reason":"Both define a delegate as a person appointed or elected to represent others — identical wording and concept."}
+{"cui":"C1881209","offset":"05229990","surface":"infundibulum","same":true,"confidence":0.92,"reason":"Both describe any funnel-shaped body part; WordNet adds a parenthetical example (hypophyseal stalk) but the core definition is the same."}
+{"cui":"C1882376","offset":"13635854","surface":"picofarad","same":true,"confidence":0.99,"reason":"Both define a picofarad as a unit of capacitance equal to one trillionth of a farad."}
+{"cui":"C1882405","offset":"03577312","surface":"planimeter","same":true,"confidence":0.99,"reason":"Both define a planimeter as an instrument for measuring the area of an irregular plane figure."}
+{"cui":"C1947915","offset":"05603342","surface":"ridge","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C1947939","offset":"00611143","surface":"law","same":true,"confidence":0.99,"reason":"Both define law as the learned profession mastered by graduate study in a law school responsible for the judicial system; WordNet adds only an illustrative quote."}
+{"cui":"C1947951","offset":"05218899","surface":"apparatus","same":true,"confidence":0.99,"reason":"Both define apparatus (anatomical) as a group of body parts working together to perform a given function."}
+{"cui":"C1947952","offset":"05227079","surface":"bulb","same":true,"confidence":0.99,"reason":"Both define bulb as a rounded dilation or expansion in a canal, vessel, or organ — essentially identical."}
+{"cui":"C1998602","offset":"15245990","surface":"meal","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C1998793","offset":"13548105","surface":"purification","same":true,"confidence":0.98,"reason":"Both define purification as the process of removing impurities; WordNet adds examples but the core meaning is the same."}
+{"cui":"C2336985","offset":"13883885","surface":"polyhedron","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C2347445","offset":"13881175","surface":"parallelogram","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C2347516","offset":"13657849","surface":"picometer","same":true,"confidence":0.99,"reason":"Both define a picometer as a metric unit of length equal to one trillionth of a meter."}
+{"cui":"C2347622","offset":"13866144","surface":"polygon","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C2347849","offset":"03492542","surface":"hard disc","same":true,"confidence":0.99,"reason":"Both define a hard disc as a rigid magnetic disk mounted permanently in a drive unit — identical."}
+{"cui":"C2347883","offset":"05056490","surface":"radio frequency","same":true,"confidence":0.99,"reason":"Both define radio frequency as an electromagnetic wave frequency between audio and infrared."}
+{"cui":"C2347946","offset":"13794417","surface":"relevance","same":true,"confidence":0.99,"reason":"Both definitions are word-for-word identical."}
+{"cui":"C2347957","offset":"00820091","surface":"reservation","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2347958","offset":"10523519","surface":"resident","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2348077","offset":"07765073","surface":"date","same":true,"confidence":0.99,"reason":"Both describe the sweet edible fruit of the date palm; wording is essentially identical."}
+{"cui":"C2348167","offset":"06578654","surface":"search engine","same":true,"confidence":0.97,"reason":"Both describe the same concept; WordNet only adds a parenthetical example (the internet) which does not change the core meaning."}
+{"cui":"C2348178","offset":"15204485","surface":"semester","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2348235","offset":"06725067","surface":"specification","same":true,"confidence":0.95,"reason":"Both describe a detailed description of criteria for a piece of work; the only difference is WordNet adds 'design', which does not create a distinct concept."}
+{"cui":"C2348395","offset":"03458552","surface":"grid","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2348482","offset":"14528873","surface":"exemption","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2348629","offset":"06468951","surface":"synopsis","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2348667","offset":"13657691","surface":"femtometer","same":true,"confidence":0.98,"reason":"Both define a femtometer as one quadrillionth of a meter; UMLS adds the scientific notation which does not change the concept."}
+{"cui":"C2348699","offset":"06825399","surface":"font","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2348964","offset":"13915305","surface":"hexahedron","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2348974","offset":"07001865","surface":"histogram","same":true,"confidence":0.99,"reason":"Both describe a histogram as a bar chart for frequency distributions with bar heights representing frequencies; wording is essentially identical."}
+{"cui":"C2349183","offset":"14590795","surface":"sol","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2349972","offset":"10333317","surface":"mother-in-law","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2349973","offset":"10082043","surface":"father-in-law","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2349995","offset":"14852450","surface":"emission","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2350007","offset":"10624915","surface":"son-in-law","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2350017","offset":"13872592","surface":"cone shape","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2355574","offset":"10767020","surface":"ward","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2697616","offset":"04744319","surface":"homology","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2697794","offset":"03581125","surface":"intersection","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2698122","offset":"02714751","surface":"answering machine","same":true,"confidence":0.99,"reason":"Both describe the same electronic device for answering and recording telephone messages; wording is virtually identical."}
+{"cui":"C2698559","offset":"07574602","surface":"breakfast","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2700061","offset":"07358576","surface":"transition","same":true,"confidence":0.92,"reason":"Both describe a change from one state or stage to another; WordNet adds 'place' and 'subject' but the core concept is the same."}
+{"cui":"C2700177","offset":"05932891","surface":"field of view","same":true,"confidence":0.9,"reason":"Both refer to the extent/area that is visible; WordNet specifies an optical instrument context but the core concept is the same."}
+{"cui":"C2700485","offset":"13901211","surface":"barrel","same":true,"confidence":0.97,"reason":"Both describe a bulging cylindrical shape with flat ends; minor wording difference ('hollow') does not change the concept."}
+{"cui":"C2700613","offset":"05087061","surface":"span","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2825217","offset":"07998712","surface":"union","same":true,"confidence":0.99,"reason":"Both define the mathematical set-union concept in identical terms."}
+{"cui":"C2825228","offset":"06820023","surface":"superscript","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2825231","offset":"06346891","surface":"caption","same":true,"confidence":0.99,"reason":"Both describe a brief description accompanying an illustration; wording is essentially identical."}
+{"cui":"C2825232","offset":"06764244","surface":"footnote","same":true,"confidence":0.97,"reason":"Both describe an explanatory/printed note placed below the text on a page; minor wording difference does not change the concept."}
+{"cui":"C2825408","offset":"04314914","surface":"step","same":true,"confidence":0.99,"reason":"Both describe a support/place to rest the foot on a stairway; wording is essentially identical."}
+{"cui":"C2825490","offset":"11435871","surface":"positive charge","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2825491","offset":"11436019","surface":"negative charge","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2827364","offset":"01233397","surface":"attendance","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2827421","offset":"05835747","surface":"construct","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2827422","offset":"13593219","surface":"factor","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2828033","offset":"03945167","surface":"pipe","same":true,"confidence":0.99,"reason":"Both describe a tube with a small bowl at one end used for smoking tobacco; wording is essentially identical."}
+{"cui":"C2828371","offset":"13903387","surface":"border","same":true,"confidence":0.99,"reason":"Both describe a boundary line or the area immediately inside it; wording is essentially identical."}
+{"cui":"C2828391","offset":"06021499","surface":"statistic","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C2987482","offset":"01898731","surface":"coat","same":true,"confidence":0.97,"reason":"Both describe the covering of hair/wool/fur on an animal's body; only minor phrasing differs."}
+{"cui":"C3146287","offset":"04572935","surface":"well","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C3266812","offset":"05661400","surface":"methodology","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C3537155","offset":"03959936","surface":"plate","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C3669135","offset":"14970920","surface":"oxalate","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C3714614","offset":"14063633","surface":"distention","same":true,"confidence":0.97,"reason":"Both describe being stretched beyond normal dimensions; 'condition' vs 'state' is a trivial difference."}
+{"cui":"C3847505","offset":"03177349","surface":"repository","same":true,"confidence":0.98,"reason":"Both describe a storage/safekeeping facility; 'items' vs 'things' is a trivial difference."}
+{"cui":"C3872494","offset":"08663156","surface":"tip","same":true,"confidence":0.99,"reason":"The two definitions are effectively identical, differing only in punctuation."}
+{"cui":"C3887611","offset":"04625284","surface":"restlessness","same":true,"confidence":0.98,"reason":"Both describe inability to rest, relax, or be still; phrasing is nearly identical."}
+{"cui":"C5420326","offset":"08638442","surface":"point of entry","same":false,"confidence":0.85,"reason":"The WordNet definition restricts the concept to United States ports, while the UMLS definition is broader (any port), making them distinct in scope."}
+{"cui":"C5551387","offset":"13619307","surface":"pint","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C5554868","offset":"00246341","surface":"baking","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}
+{"cui":"C5700162","offset":"06159777","surface":"bioethics","same":true,"confidence":0.99,"reason":"The two definitions are word-for-word identical."}

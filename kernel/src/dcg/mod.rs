@@ -29,33 +29,45 @@
 //! - [`lexicon`] — lexical-entry handling + the felicity [`gate_entry`].
 //! - [`lemmatizer`] — the surface→lemma seam for the lookup stage (Morphy in
 //!   `eigenius-wordnet` is the reference impl).
-//! - [`lookup`] — the bridge (§8.8.1): `string → tree(s)` via a [`LexicalIndex`]
+//! - [`lookup`] — the bridge (§8.8.1): `string → tree(s)` via a [`Parser`]
 //!   + multi-span lemmatized seeding + CKY + the kernel felicity filter.
 
+pub mod abbrev;
 pub mod augment;
 pub mod category;
+pub(crate) mod chart;
 pub mod glossary;
+mod grammar;
+mod holes;
+pub mod item;
 pub mod lemmatizer;
 pub mod lexicon;
-pub mod lookup;
-mod packed;
-pub mod parser;
+pub mod parse;
 pub mod pipeline;
 pub mod pretty;
 mod reserved;
+mod rules;
 pub mod segment;
 pub mod sense_ranker;
 
 /// Direct Anthropic tool-use client for the reasoning-layer LLM calls (sense ranker / proposers) —
 /// structured output via forced `tool_choice`, replacing the `allms` prompt-inject-and-parse path.
 #[cfg(feature = "use-llm")]
-mod anthropic_client;
+/// The Anthropic structured-output client. Public so the offline data pipelines (e.g. the
+/// WordNet↔UMLS concept adjudicator, `crates/eigenius-lexicon-align`) reuse the same transport,
+/// model default, and `temperature: 0` pin as the in-kernel proposers, rather than each rolling
+/// their own.
+pub mod anthropic_client;
 
 /// Live-LLM anaphora proposer (D64 §4) — opt-in via the `use-llm` feature; default builds stay
 /// LLM-free.
 #[cfg(feature = "use-llm")]
 pub mod resolver_llm;
 
+pub use abbrev::{
+    extract_abbreviations, extract_abbreviations_with, AbbrDef, AbbreviationProposer,
+    NoAbbreviationProposer,
+};
 #[cfg(feature = "use-llm")]
 pub use augment::AnthropicCategoryProposer;
 pub use augment::{
@@ -64,27 +76,36 @@ pub use augment::{
     ResolutionMethod,
 };
 pub use category::{
-    appose_group, cat_subsumes, cats_coordinate, common_super, complete_coord, coordinate_np,
-    coordinate_prop, denote_cat, distribute, distribute_object, feat_meets, is_ctor, kind_subject,
-    reciprocate, relativize, subst_cat, type_eq, type_raise, unify_cat, CatSubst,
+    cat_subsumes, common_super, denote_cat, feat_meets, is_ctor, subst_cat, type_eq, unify_cat,
+    CatSubst,
 };
 #[cfg(feature = "use-llm")]
 pub use glossary::AnthropicAbbreviationProposer;
 pub use glossary::{
     abbreviation_resources, document_glossary_resources, document_glossary_resources_with,
-    extract_abbreviations, extract_abbreviations_with, glossary_resources, ground_abbreviation,
-    ground_long_form, AbbrDef, AbbreviationBinding, AbbreviationProposer, NoAbbreviationProposer,
+    glossary_resources, ground_abbreviation, ground_long_form, AbbreviationBinding,
 };
+pub use item::{Combinator, Cost, Item};
 pub use lemmatizer::{Identity, Lemmatizer, Pos};
-pub use lexicon::{entry_to_item, gate_entry, resolve_sem, resolve_sem_value};
-pub use lookup::{
-    resolve_lexicon_profile, tokenize, Candidate, HoleInfo, HoleKind, LexicalIndex, OpenParse,
-    ProposeCtx, Proposer, SentenceOutcome, DEFAULT_FOREST_CAP,
+pub use lexicon::{
+    entry_to_item, gate_entry, resolve_lexicon_profile, resolve_sem, resolve_sem_value, LexEntry,
+    LexicalIndex, LexicalLookup,
 };
-pub use parser::{apply, cky_parse, Combinator, Cost, Item};
+pub use parse::{
+    Candidate, HoleInfo, HoleKind, OpenParse, ParseConfig, Parser, ProposeCtx, Proposer,
+    SentenceOutcome, DEFAULT_FOREST_CAP,
+};
 pub use pipeline::{DocumentEncoding, DocumentPipeline, InProcessPipeline, SentenceEncoding};
-pub use pretty::{cat_shape, pretty_term};
-pub use segment::{is_nonprose, segment_sentences};
+pub use pretty::pretty_term;
+pub use rules::combinators::apply;
+pub use rules::constructions::{
+    appose_group, cats_coordinate, complete_coord, coordinate_np, coordinate_prop, distribute,
+    distribute_object, kind_subject, reciprocate, relativize, type_raise,
+};
+pub use segment::{is_nonprose, segment_sentences, tokenize};
 #[cfg(feature = "use-llm")]
 pub use sense_ranker::AnthropicSenseRanker;
-pub use sense_ranker::{IdentityRanker, SenseCandidate, SenseRanker, WordSenses};
+pub use sense_ranker::{
+    IdentityRanker, RankRecord, RankedWord, RecordingSenseRanker, ReplaySenseRanker,
+    SenseCandidate, SenseRanker, WordSenses,
+};

@@ -14,10 +14,13 @@
 
 //! D62 S0 — document segmentation + non-prose classification (text-only).
 //!
-//! The front of the encoding pipeline: a document is split into sentence units the parser
-//! can attempt, and tokens that are not prose (statistics, figure references) are flagged so
-//! the parser/encoder skips them. Tokenization itself (em-dash/slash/bracket splitting) lives
-//! in [`super::tokenize`]; this module owns the *sentence-boundary* and *non-prose* decisions.
+//! The front of the encoding pipeline: **splitting text into the units the parser can attempt**, at
+//! both granularities. A document is split into sentence units ([`segment_sentences`]); a sentence is
+//! split into word tokens ([`tokenize`]). Tokens that are not prose (statistics, figure references) are
+//! flagged so the parser skips them ([`is_nonprose`]).
+//!
+//! Both are segmentation, and they were in different modules — `tokenize` sat inside the parser, which
+//! meant the parser owned a decision about *text* rather than about *grammar*.
 //!
 //! Deterministic, no LLM. Verified on real paper prose in
 //! `crates/eigenius-wordnet/tests/encoding_prototype.rs` (the cleaned WRN first page: a naive
@@ -124,8 +127,139 @@ pub fn is_nonprose(token: &str) -> bool {
     first.is_ascii_digit() || !token.chars().any(|c| c.is_ascii_alphabetic())
 }
 
+/// Split prose into lowercased word tokens. Token-internal **separators** — em/en-dashes
+/// (`—`/`–`), slashes, and brackets — are normalised to spaces first, so `"not—can"` →
+/// `["not", "can"]` and `"and/or"` → `["and", "or"]` (D62 S0). Hyphens (`-`) are kept, so
+/// hyphenated compounds (`"double-stranded"`) stay intact. Each token is then trimmed of
+/// leading/trailing non-alphanumerics (so `"BRCA1,"` → `"brca1"`); empties are dropped.
+/// Multiword forms are recovered by re-joining spans at lookup time, not here.
+pub fn tokenize(text: &str) -> Vec<String> {
+    // Bracket/dash/slash separators → spaces; the **comma** is preserved as a standalone `,` token
+    // (D62 S0) so the parser can key multi-item list coordination on it. Other punctuation is still
+    // trimmed off token edges.
+    let mut spaced = String::with_capacity(text.len());
+    for c in strip_bracketed_asides(text).chars() {
+        match c {
+            '—' | '–' | '‒' | '―' | '/' | '(' | ')' | '[' | ']' | '{' | '}' => {
+                spaced.push(' ')
+            }
+            ',' => spaced.push_str(" , "),
+            other => spaced.push(other),
+        }
+    }
+    let mut toks: Vec<String> = spaced
+        .split_whitespace()
+        .filter_map(|t| {
+            if t == "," {
+                Some(",".to_string())
+            } else {
+                let s = t
+                    .trim_matches(|c: char| !c.is_alphanumeric())
+                    .to_lowercase();
+                (!s.is_empty()).then_some(s)
+            }
+        })
+        .collect();
+    // A comma is only a separator BETWEEN content tokens: drop dangling (leading/trailing) commas
+    // and collapse runs, so a stray `,` never blocks a full-span parse.
+    while toks.first().is_some_and(|t| t == ",") {
+        toks.remove(0);
+    }
+    while toks.last().is_some_and(|t| t == ",") {
+        toks.pop();
+    }
+    toks.dedup_by(|a, b| a == "," && b == ",");
+    toks
+}
+
+/// Drop **bracketed asides** before tokenizing (D62 S0): parenthetical `(…)`/`[…]`/`{…}` glosses
+/// (depth-aware) and **em-dash-bracketed appositives** `—…—` (paired U+2014). These are droppable
+/// for a *scientific claim* — an abbreviation gloss (`microsatellite instability (MSI)`), a figure
+/// ref (`(Fig. 1a)`), or a defining appositive (`lethality—an interaction…—can be exploited`) leaves
+/// the head + matrix asserting the same fact. A deliberate, recorded cut (apposition-as-renaming is
+/// discourse-level, out of scope for the claim — `docs/notes/d62-grammar-gap-analysis.md`). Content
+/// punctuation (commas/lists) is NOT dropped here — that is the marker-keyed list slice.
+/// A single (unpaired) em-dash is left for the tokenizer to split (it isn't a bracketing pair).
+fn strip_bracketed_asides(text: &str) -> String {
+    // 1. Parentheticals/brackets, depth-aware (handles nesting like `poly(ADP(x))`).
+    let mut no_parens = String::with_capacity(text.len());
+    let mut depth = 0u32;
+    for c in text.chars() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => no_parens.push(c),
+            _ => {}
+        }
+    }
+    // 2. Paired em-dash appositives: with an even number of `—`, the bracketed asides are the
+    // odd-indexed segments; keep the even-indexed matrix. An odd count (a lone `—`) is left as-is.
+    let parts: Vec<&str> = no_parens.split('\u{2014}').collect();
+    if parts.len() >= 3 && parts.len() % 2 == 1 {
+        parts
+            .iter()
+            .step_by(2) // 0, 2, 4, … = the matrix segments
+            .copied()
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else {
+        no_parens
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tokenize_lowercases_and_strips_edge_punctuation() {
+        assert_eq!(
+            tokenize("HeLa depends on BRCA1."),
+            ["hela", "depends", "on", "brca1"]
+        );
+        // The comma between content tokens is preserved as a `,` token (D62 S0 list coordination).
+        assert_eq!(tokenize("  A,  b!  "), ["a", ",", "b"]);
+        assert!(tokenize("   ").is_empty());
+        assert!(tokenize("").is_empty());
+    }
+
+    #[test]
+    fn tokenize_preserves_list_commas_and_drops_dangling() {
+        // Internal commas survive as separators; leading/trailing/duplicate commas are dropped.
+        assert_eq!(
+            tokenize("a, b, c and d"),
+            ["a", ",", "b", ",", "c", "and", "d"]
+        );
+        assert_eq!(tokenize("a,, b,"), ["a", ",", "b"]); // collapsed run + trailing dropped
+        assert_eq!(tokenize(", a"), ["a"]); // leading dropped
+    }
+
+    #[test]
+    fn tokenize_keeps_internal_alphanumerics() {
+        // intra-token digits/letters survive; only the edges are trimmed. The `(BRCA1)` is now a
+        // dropped parenthetical aside (D62 S0), so only `p53` survives.
+        assert_eq!(tokenize("p53, (BRCA1)"), ["p53"]);
+    }
+
+    #[test]
+    fn tokenize_drops_bracketed_asides() {
+        // Parenthetical gloss dropped, head + matrix kept.
+        assert_eq!(
+            tokenize("microsatellite instability (MSI) results"),
+            ["microsatellite", "instability", "results"]
+        );
+        // Nested parens dropped wholesale.
+        assert_eq!(
+            tokenize("poly(ADP(x)-ribose) polymerase"),
+            ["poly", "polymerase"]
+        );
+        // Paired em-dash appositive dropped; head + matrix kept.
+        assert_eq!(
+            tokenize("lethality\u{2014}an interaction here\u{2014}can be exploited"),
+            ["lethality", "can", "be", "exploited"]
+        );
+        // A single (unpaired) em-dash is NOT a bracket pair → split, both sides kept.
+        assert_eq!(tokenize("not\u{2014}can"), ["not", "can"]);
+    }
+
     use super::*;
 
     #[test]

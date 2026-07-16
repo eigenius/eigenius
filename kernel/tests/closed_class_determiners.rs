@@ -22,9 +22,10 @@ use std::sync::Arc;
 
 use eigenius_kernel::bootstrap;
 use eigenius_kernel::dcg::{
-    abbreviation_resources, extract_abbreviations, glossary_resources, ground_long_form, is_ctor,
-    pretty_term, AbbrDef, AbbreviationBinding, Candidate, DocumentPipeline, Identity,
-    InProcessPipeline, LexicalIndex, NoAbbreviationProposer, ProposeCtx, Proposer, SenseRanker,
+    abbreviation_resources, apply, coordinate_np, coordinate_prop, entry_to_item,
+    extract_abbreviations, glossary_resources, ground_long_form, is_ctor, pretty_term, type_raise,
+    AbbrDef, AbbreviationBinding, Candidate, DocumentPipeline, Identity, InProcessPipeline, Item,
+    LexicalIndex, LexicalLookup, NoAbbreviationProposer, Parser, ProposeCtx, Proposer, SenseRanker,
     SentenceEncoding, SentenceOutcome, WordSenses,
 };
 use eigenius_kernel::esl;
@@ -41,7 +42,7 @@ const DEMO: &str = include_str!("../../experiments/lexicon/lexicon.esl");
 /// Bootstrap (which includes the lexicon schema + `closed-class` determiners),
 /// then layer the demo domain (Gene/CellLine, `affects`, `primary`, HeLa, …) on
 /// top — so the index sees the committed determiners *and* the demo content.
-fn index_over_bootstrap() -> (Arc<Layer>, LexicalIndex) {
+fn index_over_bootstrap() -> (Arc<Layer>, Parser) {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
     let resources =
         esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles on bootstrap");
@@ -50,7 +51,7 @@ fn index_over_bootstrap() -> (Arc<Layer>, LexicalIndex) {
         b.add_resource(r).expect("add demo resource");
     }
     let layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let index = LexicalIndex::build(Arc::clone(&layer));
+    let index = Parser::build(Arc::clone(&layer));
     (layer, index)
 }
 
@@ -88,7 +89,7 @@ resource lexicon:remained_e : lexicon:LexicalEntry {
     for r in fix {
         b2.add_resource(r).expect("add linking");
     }
-    let index = LexicalIndex::build(Arc::new(b2.build(LayerStorage::in_memory())));
+    let index = Parser::build(Arc::new(b2.build(LayerStorage::in_memory())));
 
     let closed = index.parse("HeLa remained primary", &Identity);
     assert!(
@@ -150,8 +151,8 @@ fn zob_layer() -> Arc<Layer> {
     Arc::new(b2.build(LayerStorage::in_memory()))
 }
 
-fn index_with_zob(cap: usize) -> LexicalIndex {
-    LexicalIndex::build(zob_layer()).with_sense_cap(cap)
+fn index_with_zob(cap: usize) -> Parser {
+    Parser::build(zob_layer()).with_sense_cap(cap)
 }
 
 /// Like `zob` but with the polarities flipped: rank-0 is the **singular** (agreeing, parsing) sense,
@@ -232,7 +233,7 @@ fn sense_cap_widens_on_failure_for_known_vocabulary() {
 fn widen_on_failure_overrides_a_misranking_reranker() {
     // Control: static cap(1) keeps the agreeing singular (rank-0) sense — parses without widening.
     assert_eq!(
-        LexicalIndex::build(zworp_layer())
+        Parser::build(zworp_layer())
             .with_sense_cap(1)
             .parse("zworp affects HeLa", &Identity)
             .len(),
@@ -242,7 +243,7 @@ fn widen_on_failure_overrides_a_misranking_reranker() {
     // Mis-ranking reranker prefers the FAILING plural sense → the cap seeds only it → the parse can
     // only succeed via widen-on-failure admitting the singular sense.
     assert_eq!(
-        LexicalIndex::build(zworp_layer())
+        Parser::build(zworp_layer())
             .with_sense_cap(1)
             .with_sense_ranker(Box::new(PreferSense("zworp.1")))
             .parse("zworp affects HeLa", &Identity)
@@ -326,7 +327,7 @@ fn zib_layer() -> Arc<Layer> {
 fn static_rank_fallback_recovers_a_sense_the_reranker_buried_beyond_widen_max() {
     // Control: static order keeps the parsing (rank-0) sense — parses without any reranker.
     assert_eq!(
-        LexicalIndex::build(zib_layer())
+        Parser::build(zib_layer())
             .with_sense_cap(2)
             .parse("zib affects HeLa", &Identity)
             .len(),
@@ -337,7 +338,7 @@ fn static_rank_fallback_recovers_a_sense_the_reranker_buried_beyond_widen_max() 
     // (top-16 = positions 0–15). Cap escalation in the reranked order can never re-admit it; the
     // static-rank fallback re-parses under static order and recovers.
     assert_eq!(
-        LexicalIndex::build(zib_layer())
+        Parser::build(zib_layer())
             .with_sense_cap(2)
             .with_sense_ranker(Box::new(BurySense("zib.needed")))
             .parse("zib affects HeLa", &Identity)
@@ -393,8 +394,8 @@ fn zarg_layer() -> Arc<Layer> {
 }
 
 /// The `zarg` index with `sense_cap` and an optional reranker.
-fn index_with_zarg(cap: usize, ranker: Option<Box<dyn SenseRanker + Send + Sync>>) -> LexicalIndex {
-    let mut index = LexicalIndex::build(zarg_layer()).with_sense_cap(cap);
+fn index_with_zarg(cap: usize, ranker: Option<Box<dyn SenseRanker + Send + Sync>>) -> Parser {
+    let mut index = Parser::build(zarg_layer()).with_sense_cap(cap);
     if let Some(r) = ranker {
         index = index.with_sense_ranker(r);
     }
@@ -425,7 +426,7 @@ fn cell_beam_bounds_a_cell_and_is_a_noop_when_generous() {
     // The cell beam is an UNPACKED-path tuning knob (the packed path bounds by cube pruning instead,
     // not the per-cell beam — see `parse_packed`), so pin the unpacked path to exercise it (B9 made
     // packing the default). This is path-specific tuning, not a correctness contract like widen.
-    let unbeamed = LexicalIndex::build(zarg_layer()).with_packing(false);
+    let unbeamed = Parser::build(zarg_layer()).with_packing(false);
     assert_eq!(
         unbeamed.parse("zarg affects HeLa", &Identity).len(),
         2,
@@ -433,7 +434,7 @@ fn cell_beam_bounds_a_cell_and_is_a_noop_when_generous() {
     );
 
     // A generous beam is a no-op — both readings survive.
-    let generous = LexicalIndex::build(zarg_layer())
+    let generous = Parser::build(zarg_layer())
         .with_packing(false)
         .with_cell_beam(16);
     assert_eq!(
@@ -444,7 +445,7 @@ fn cell_beam_bounds_a_cell_and_is_a_noop_when_generous() {
 
     // A tight beam (2) drops the higher-`Cost` (sr1 → HeLa) sense at the leaf, keeping only the
     // cheaper (sr0 → BRCA1) reading: the beam prunes by Cost and bounds the cell.
-    let tight = LexicalIndex::build(zarg_layer())
+    let tight = Parser::build(zarg_layer())
         .with_packing(false)
         .with_cell_beam(2);
     let forest = tight.parse("zarg affects HeLa", &Identity);
@@ -592,7 +593,7 @@ resource lexicon:e_like : lexicon:LexicalEntry {
 }
 "#;
 
-fn denominal_index() -> LexicalIndex {
+fn denominal_index() -> Parser {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
     let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
@@ -606,7 +607,7 @@ fn denominal_index() -> LexicalIndex {
     for r in fix {
         b2.add_resource(r).expect("add denominal relation");
     }
-    LexicalIndex::build(Arc::new(b2.build(LayerStorage::in_memory())))
+    Parser::build(Arc::new(b2.build(LayerStorage::in_memory())))
 }
 
 #[test]
@@ -791,7 +792,7 @@ fn coordination_unpacked_via_list_completion() {
     // plain `and`/`or` binary + n-ary coordination is validated through `coordinate_prop` +
     // `complete_coord` (not just the comma finalizer). D63 §8.4 Phase 3 refactor.
     let (layer, _) = index_over_bootstrap();
-    let index = LexicalIndex::build(Arc::clone(&layer)).with_packing(false);
+    let index = Parser::build(Arc::clone(&layer)).with_packing(false);
     let sem = |s: &str| {
         let ps = index.parse(s, &Identity);
         assert!(!ps.is_empty(), "expected an unpacked parse: {s:?}");
@@ -942,7 +943,7 @@ resource lexicon:e_bit : lexicon:LexicalEntry {
 }
 "#;
 
-fn widget_index() -> LexicalIndex {
+fn widget_index() -> Parser {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
     let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
@@ -956,7 +957,7 @@ fn widget_index() -> LexicalIndex {
     for r in fix {
         b2.add_resource(r).expect("add widget");
     }
-    LexicalIndex::build(Arc::new(b2.build(LayerStorage::in_memory())))
+    Parser::build(Arc::new(b2.build(LayerStorage::in_memory())))
 }
 
 #[test]
@@ -979,6 +980,107 @@ fn close_apposition_bridges_concept_and_semantic_type_granularity() {
             .parse("the genes Wob and Bit affect HeLa", &PluralS)
             .is_empty(),
         "a widget-kind group must not appose a gene-typed head"
+    );
+}
+
+/// A VP-adjunct preposition `beside` that is **lexicon-tagged** (`in_lexicon = lexicon:extra_lex`) and
+/// **sense-ranked** (`sense_rank = 5`) — the two properties the pied-piping rule was throwing away.
+/// Layered on the demo so the rest of the sentence (`the gene … HeLa affects BRCA1 … is large`) parses
+/// exactly as in `pied_piping_relative_threads_the_antecedent_into_the_fronted_preposition`.
+const PIED_PREP_FIXTURE: &str = r#"
+namespace core       = "urn:eigenius:core";
+namespace lexicon    = "urn:eigenius:lexicon";
+namespace logic      = "urn:eigenius:logic";
+namespace ontology   = "urn:eigenius:ontology";
+namespace epistemic  = "urn:eigenius:reflection:epistemic";
+axiom ontology:prep_beside : lexicon:Entity -> lexicon:Entity -> Prop
+resource lexicon:extra_lex : lexicon:Lexicon {
+    core:description = "a lexicon the parse scope can exclude — the scope-filter probe.";
+}
+resource lexicon:prep_beside_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            logic:And(V(s), ontology:prep_beside(s, x))
+          : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:beside_prep : lexicon:LexicalEntry {
+    core:description = "preposition 'beside' — TAGGED to lexicon:extra_lex and ranked, to probe the pied-piping rule.";
+    lexicon:form        = "beside";
+    lexicon:cat         = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem         = lexicon:prep_beside_sem;
+    lexicon:sem_type    = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense       = "beside";
+    lexicon:sense_rank  = 5;
+    lexicon:in_lexicon  = lexicon:extra_lex;
+    lexicon:grade       = epistemic:declared;
+}
+"#;
+
+fn parser_with_pied_prep() -> Parser {
+    let (demo, _) = index_over_bootstrap();
+    let res = esl::compile_against_layer(PIED_PREP_FIXTURE, &demo).expect("fixture compiles");
+    let mut b = LayerBuilder::new("pied-prep", Some(Arc::clone(&demo)));
+    for r in res {
+        b.add_resource(r).expect("add fixture resource");
+    }
+    Parser::build(Arc::new(b.build(LayerStorage::in_memory())))
+}
+
+const PIED_BESIDE: &str = "the gene beside which HeLa affects BRCA1 is large";
+
+/// **The pied-piping rule bypasses the lexicon SCOPE filter** (`chart_unpacked.rs`, the `entries_for`
+/// smuggle). Every seeded entry passes through `scoped(entries, scope)` — D65 §4: *a tagged entry whose
+/// lexicon is outside the scope is dropped*. Pied-piping instead calls `entries_for` RAW, straight out
+/// of the lexicon, so its preposition is admitted no matter what the caller scoped the parse to.
+///
+/// Witness: `beside` is tagged `in_lexicon = extra_lex`. Parsed under an EMPTY scope, every tagged entry
+/// must be dropped (untagged closed-class / demo entries stay — they are always-available). So the
+/// sentence must NOT parse.
+///
+/// **Pinned to the UNPACKED path**, because on the default path the bug is MASKED by a coincidence: the
+/// router's pied-piping detector (`parse_needs_unpacked`) finds the fronted preposition via
+/// `lookup_span`, which *is* scope-aware — so an out-of-scope preposition makes the router miss the
+/// construct entirely and divert the sentence to the packed path, which has no pied-piping rule. The
+/// scope survives by accident, not because the rule respects it. `with_packing(false)` is a supported
+/// configuration (it is the differential oracle's baseline), and there the rule runs and the smuggle is
+/// directly observable.
+#[test]
+fn pied_piping_respects_the_lexicon_scope() {
+    let index = parser_with_pied_prep().with_packing(false);
+    // Unscoped: parses (the preposition is available) — the control.
+    assert!(
+        !index.parse(PIED_BESIDE, &Identity).is_empty(),
+        "control: `beside` pied-piping parses when its lexicon is in scope"
+    );
+    // Scoped to NOTHING: the tagged `beside` is out of scope, so there is no preposition to pied-pipe.
+    let scoped = index.parse_scoped(PIED_BESIDE, &Identity, Some(&[]));
+    assert!(
+        scoped.is_empty(),
+        "pied-piping admitted an OUT-OF-SCOPE preposition — the rule reads the lexicon directly and \
+         never applies the scope filter (D65 §4). Got: {:?}",
+        scoped.iter().map(|it| pretty_term(it.sem())).collect::<Vec<_>>()
+    );
+}
+
+/// **The pied-piping rule drops the preposition's `Cost`.** Every other rule sums the costs of all its
+/// operands; pied-piping builds its result from `noun.cost() + subj.cost() + vp.cost()` and silently
+/// omits the preposition — so its `sense_rank` (and its `lexicon_order`, the PRIMARY rank key) never
+/// reach the parse. A pied-piping reading therefore looks cheaper than it is, and ranks above readings
+/// it should lose to.
+///
+/// Witness: `beside` carries `sense_rank = 5`. Every other leaf in the sentence is rank 0, so the parse's
+/// cost must be ≥ 5. Today it is 0.
+#[test]
+fn pied_piping_counts_the_prepositions_cost() {
+    let index = parser_with_pied_prep();
+    let forest = index.parse(PIED_BESIDE, &Identity);
+    assert!(!forest.is_empty(), "control: `beside` pied-piping parses");
+    let best = forest.iter().map(|it| it.cost().sense_rank).min().unwrap();
+    assert!(
+        best >= 5,
+        "pied-piping dropped the preposition's cost: `beside` has sense_rank=5 and every other leaf is \
+         0, so the parse must cost >= 5, got {best}. The rule sums noun+subj+vp and forgets the prep."
     );
 }
 
@@ -1571,7 +1673,7 @@ fn compound_stacking_and_bare_plural_compound() {
 #[test]
 fn packing_flag_router_is_a_safe_noop() {
     let (layer, _) = index_over_bootstrap();
-    let index = LexicalIndex::build(Arc::clone(&layer)).with_packing(true);
+    let index = Parser::build(Arc::clone(&layer)).with_packing(true);
     // Selectional (`depends on` wants a CellLine subject + Gene object; HeLa:CellLine, BRCA1:Gene —
     // the demo's own worked sentence; routes unpacked via the guard):
     assert!(
@@ -1592,8 +1694,8 @@ fn packing_flag_router_is_a_safe_noop() {
 #[test]
 fn packing_router_decision_is_correct() {
     let (layer, _) = index_over_bootstrap();
-    let on = LexicalIndex::build(Arc::clone(&layer)).with_packing(true);
-    let off = LexicalIndex::build(Arc::clone(&layer)).with_packing(false);
+    let on = Parser::build(Arc::clone(&layer)).with_packing(true);
+    let off = Parser::build(Arc::clone(&layer)).with_packing(false);
 
     // Index-independent, construct-free ⇒ PACKED.
     assert!(on.routes_packed("HeLa affects BRCA1", &Identity));
@@ -1630,62 +1732,16 @@ fn packing_router_decision_is_correct() {
     assert!(!off.routes_packed("HeLa affects BRCA1", &Identity));
 }
 
-/// D63 Option A (blueprint §11 3f.1) — the **differential oracle**: on index-independent,
-/// construct-free sentences (where the router actually engages packing), the packed path must produce
-/// the SAME felicitous forests as the unpacked path. Proves the packed forest + cube extractor are
-/// equivalent to the flat CKY (and that deferring selectional pruning to felicity is sound: felicity
-/// ⊇ unify). Compares the closed forest as a sorted multiset of normalized sems, plus the open count.
-#[test]
-fn packed_forest_equals_unpacked_on_core_grammar() {
-    let (layer, _) = index_over_bootstrap();
-    let off = LexicalIndex::build(Arc::clone(&layer)).with_packing(false);
-    let on = LexicalIndex::build(Arc::clone(&layer)).with_packing(true);
-    for s in [
-        "HeLa affects BRCA1",
-        "every cell line affects HeLa",
-        "no gene affects HeLa",
-        "HeLa is a gene",
-        "HeLa is large",
-        "HeLa is a large gene",
-        "a large primary gene affects HeLa",
-        "HeLa affects a gene",
-        // Restrictive `that`-relative (§11 3g.3 — packed via the Relativize edge):
-        "a gene that affects HeLa is large",
-        "every gene that affects HeLa is large",
-        // Coordination (§11 3g.3 — the Coordinate edge + group distribution):
-        "HeLa affects BRCA1 and HeLa affects BRCA1", // same-category Prop conjunction
-        "HeLa and BRCA1 affect HeLa",                // NP-group subject, distributed over the verb
-        "HeLa affects BRCA1 or HeLa affects BRCA1",  // disjunction
-        // Reciprocal (§11 3g.3 — the Reciprocal edge over a coordinated group):
-        "HeLa and BRCA1 affect each other", // every ordered distinct pair related by the verb
-        "HeLa or BRCA1 affect each other", // or-group gets NO reciprocal reading (both paths agree)
-        // Contrastive `but not` (§11 3g.3 — the ButNot edge) + plain `but` (the subordinator leaf):
-        "HeLa affects BRCA1 but not HeLa", // bare-name contrastive object ellipsis
-        "HeLa affects BRCA1 but HeLa affects BRCA1", // plain `but` subordinator (ordinary leaf)
-        // Restrictive which-relative + wh-determiner `which` (§11 3g.3 — Relativize edge / leaves):
-        "every cell line which affects HeLa is primary", // which-relative (Relativize)
-        "which cell line affects HeLa", // subject wh-determiner (cat_q, lexical leaf)
-        // Comma constructs (§11 3g.3 — Coordinate / Appositive* / AbsorbComma edges):
-        "HeLa, BRCA1 affect HeLa", // comma list coordination (2-member group)
-        "HeLa affects BRCA1 , which affects HeLa", // verb-object appositive
-        "BRCA1 , which affects HeLa , is primary", // subject appositive (trailing comma absorbed)
-        "thus , HeLa affects BRCA1", // fronted transitional + comma absorption
-        "more largely , HeLa affects BRCA1", // degree-modified fronted adverb + comma
-        // CONCRETE SELECTIONAL SLOTS (D63 §11 3d — per-cell packing). These route PACKED now (the
-        // whole-sentence selectional carve-out is gone); the concrete-slot items key finer via
-        // `cat_key` so they never wrongly share a node. This is the soundness witness for the
-        // refinement — the packed path must still equal the unpacked path with the residue present.
-        "HeLa depends on BRCA1", // selectional verb `depends on`, both args concrete
-        "every cell line depends on BRCA1", // selectional verb + determiner subject
-        "no cell line depends on BRCA1", // selectional verb + negative determiner
-        "a cell line that depends on BRCA1 is primary", // selectional verb inside a packed relative
-        "HeLa depends on BRCA1 and HeLa depends on BRCA1", // selectional verb under coordination
-        // Close nominal apposition (D63 §8.4 Phase 6, RC-6 — the packed `ApposeGroup` edge). Singular
-        // head + name-GROUP so it works under the `Identity` lemmatizer (the plural-head form is in
-        // `close_apposition_subject_and_object`, which uses `PluralS`). Subject and object position.
-        "the gene BRCA1 and BRCA1 affect HeLa",
-        "HeLa affects the gene BRCA1 and BRCA1",
-    ] {
+/// The shared **driver-parity** assertion behind the differential oracle (reorganization plan
+/// Phase 0, `docs/notes/dcg-module-reorganization-plan.md`). For each case, parses on BOTH chart
+/// paths and compares the CLOSED forest as a sorted multiset of sems plus the OPEN count.
+///
+/// `exercises_rule` marks a case added to WITNESS a specific rule. Such a case is **fail-closed**:
+/// if it parses to nothing on either path it "agrees" trivially, so it no longer witnesses anything
+/// — and a corpus quietly degrading to vacuous agreement is the failure mode this oracle exists to
+/// prevent. A case that legitimately has no parse (a negative case) is marked `false`.
+fn assert_paths_agree(off: &Parser, on: &Parser, cases: &[(&str, bool)]) {
+    for &(s, exercises_rule) in cases {
         let (co, oo) = off.parse_open(s, &Identity);
         let (cn, on2) = on.parse_open(s, &Identity);
         let mut so: Vec<String> = co.iter().map(|it| pretty_term(it.sem())).collect();
@@ -1694,7 +1750,302 @@ fn packed_forest_equals_unpacked_on_core_grammar() {
         sn.sort();
         assert_eq!(so, sn, "packed≠unpacked CLOSED forest for {s:?}");
         assert_eq!(oo.len(), on2.len(), "packed≠unpacked OPEN count for {s:?}");
+        if exercises_rule {
+            assert!(
+                !co.is_empty() || !oo.is_empty(),
+                "{s:?} is a rule-exercising oracle case but parses to NOTHING on either path — \
+                 it agrees vacuously and no longer witnesses the rule it was added for"
+            );
+        }
     }
+}
+
+/// D63 Option A (blueprint §11 3f.1) — the **differential oracle**: on index-independent,
+/// construct-free sentences (where the router actually engages packing), the packed path must produce
+/// the SAME felicitous forests as the unpacked path. Proves the packed forest + cube extractor are
+/// equivalent to the flat CKY (and that deferring selectional pruning to felicity is sound: felicity
+/// ⊇ unify). Compares the closed forest as a sorted multiset of normalized sems, plus the open count.
+#[test]
+fn packed_forest_equals_unpacked_on_core_grammar() {
+    let (layer, _) = index_over_bootstrap();
+    let off = Parser::build(Arc::clone(&layer)).with_packing(false);
+    let on = Parser::build(Arc::clone(&layer)).with_packing(true);
+    assert_paths_agree(
+        &off,
+        &on,
+        &[
+            ("HeLa affects BRCA1", true),
+            ("every cell line affects HeLa", true),
+            ("no gene affects HeLa", true),
+            ("HeLa is a gene", true),
+            ("HeLa is large", true),
+            ("HeLa is a large gene", true),
+            ("a large primary gene affects HeLa", true),
+            ("HeLa affects a gene", true),
+            // Restrictive `that`-relative (§11 3g.3 — packed via the Relativize edge):
+            ("a gene that affects HeLa is large", true),
+            ("every gene that affects HeLa is large", true),
+            // Coordination (§11 3g.3 — the Coordinate edge + group distribution):
+            ("HeLa affects BRCA1 and HeLa affects BRCA1", true), // same-category Prop conjunction
+            ("HeLa and BRCA1 affect HeLa", true), // NP-group subject, distributed over the verb
+            ("HeLa affects BRCA1 or HeLa affects BRCA1", true), // disjunction
+            // Reciprocal (§11 3g.3 — the Reciprocal edge over a coordinated group):
+            ("HeLa and BRCA1 affect each other", true), // ordered distinct pairs related by the verb
+            // An or-group gets NO reciprocal reading — a NEGATIVE case (both paths agree on nothing).
+            ("HeLa or BRCA1 affect each other", false),
+            // Contrastive `but not` (§11 3g.3 — the ButNot edge) + plain `but` (the subordinator leaf):
+            ("HeLa affects BRCA1 but not HeLa", true), // bare-name contrastive object ellipsis
+            ("HeLa affects BRCA1 but HeLa affects BRCA1", true), // plain `but` subordinator (leaf)
+            // Restrictive which-relative + wh-determiner `which` (§11 3g.3 — Relativize edge / leaves):
+            ("every cell line which affects HeLa is primary", true), // which-relative (Relativize)
+            ("which cell line affects HeLa", true), // subject wh-determiner (cat_q, lexical leaf)
+            // Comma constructs (§11 3g.3 — Coordinate / Appositive* / AbsorbComma edges):
+            ("HeLa, BRCA1 affect HeLa", true), // comma list coordination (2-member group)
+            ("HeLa affects BRCA1 , which affects HeLa", true), // verb-object appositive
+            ("BRCA1 , which affects HeLa , is primary", true), // subject appositive (comma absorbed)
+            ("thus , HeLa affects BRCA1", true), // fronted transitional + comma absorption
+            ("more largely , HeLa affects BRCA1", true), // degree-modified fronted adverb + comma
+            // CONCRETE SELECTIONAL SLOTS (D63 §11 3d — per-cell packing). These route PACKED now (the
+            // whole-sentence selectional carve-out is gone); the concrete-slot items key finer via
+            // `cat_key` so they never wrongly share a node. This is the soundness witness for the
+            // refinement — the packed path must still equal the unpacked path with the residue present.
+            ("HeLa depends on BRCA1", true), // selectional verb `depends on`, both args concrete
+            ("every cell line depends on BRCA1", true), // selectional verb + determiner subject
+            ("no cell line depends on BRCA1", true), // selectional verb + negative determiner
+            ("a cell line that depends on BRCA1 is primary", true), // selectional verb in a relative
+            ("HeLa depends on BRCA1 and HeLa depends on BRCA1", true), // selectional + coordination
+            // Close nominal apposition (D63 §8.4 Phase 6, RC-6 — the packed `ApposeGroup` edge).
+            // Singular head + name-GROUP so it works under the `Identity` lemmatizer (the plural-head
+            // form is in `close_apposition_subject_and_object`, which uses `PluralS`).
+            ("the gene BRCA1 and BRCA1 affect HeLa", true),
+            ("HeLa affects the gene BRCA1 and BRCA1", true),
+        ],
+    );
+}
+
+/// Driver parity over a corpus built to STRESS the two rule-wiring sites where the packed and
+/// unpacked paths are written separately (reorganization plan Phase 0): the coordination rule (which
+/// the unpacked path fires as two independent `if let`s — `coordinate_prop` AND `coordinate_np` — but
+/// the packed path fires as `coordinate_prop().or_else(coordinate_np)`, taking only the first) and the
+/// `but not` rule (whose packed DECISION reads a sem, `is_coordination(r.sem())`, on a node
+/// REPRESENTATIVE). n-ary lists, comma lists, mixed connectives, group-vs-GQ coordination, object-GQ
+/// generalization, and coordination inside a relative are all exercised.
+///
+/// Sentences that do NOT parse are excluded rather than carried as `false` flags: a non-parsing case
+/// agrees vacuously and would be fake coverage. The ones that were tried and dropped are recorded in
+/// `coordination_gaps_are_not_driver_divergences` below, because "it doesn't parse" is a finding about
+/// the GRAMMAR, not licence to widen the oracle with cases that assert nothing.
+#[test]
+fn packed_forest_equals_unpacked_on_coordination_and_butnot_stress() {
+    let (layer, _) = index_over_bootstrap();
+    let off = Parser::build(Arc::clone(&layer)).with_packing(false);
+    let on = Parser::build(Arc::clone(&layer)).with_packing(true);
+    assert_paths_agree(
+        &off,
+        &on,
+        &[
+            // --- coordination: the prop-list vs NP-group split (the `.or_else` divergence site) ---
+            ("HeLa affects BRCA1 and MSH2", true), // object NP-group (coordinate_np)
+            ("HeLa and BRCA1 affect BRCA1 and MSH2", true), // NP-group subject AND object
+            ("HeLa and BRCA1 and MSH2 affect HeLa", true), // n-ary left-branching group
+            ("HeLa , BRCA1 and MSH2 affect HeLa", true), // comma list finalized by `and`
+            ("HeLa affects a gene or a cell line", true), // object-GQ generalization (common_cat)
+            ("HeLa is large and primary", true),   // predicative-adjective coordination
+            (
+                "HeLa affects BRCA1 and HeLa affects BRCA1 and HeLa affects BRCA1",
+                true,
+            ), // 3 props
+            (
+                "HeLa affects BRCA1 , HeLa affects BRCA1 and HeLa affects BRCA1",
+                true,
+            ), // comma props
+            ("a gene that affects BRCA1 and MSH2 is large", true), // coordination inside a relative
+            // --- `but not`: the sem-reading decision (`is_coordination`) on a representative ---
+            ("HeLa affects BRCA1 but not MSH2", true), // bare-name contrastive object
+            ("HeLa is large but not primary", true),   // predicative-adjective contrastive
+            ("HeLa affects BRCA1 but not HeLa affects BRCA1", true), // clausal contrastive
+        ],
+    );
+}
+
+/// Phase 0 finding (reorganization plan): sentences tried as `but not` / coordination stress cases
+/// that parse to NOTHING on **both** paths. They are recorded here rather than silently dropped —
+/// each is a GRAMMAR gap, not a driver divergence, and two of them matter to the refactor:
+///
+/// - `but not` over a COORDINATED operand does not parse. Those were the only sentences that would
+///   have put a coordination sem and a non-coordination sem in one packed node — i.e. the only ones
+///   that could witness whether `apply_bin_rule`'s `ButNot` sem-read on a REPRESENTATIVE
+///   (`lookup.rs`, `is_coordination(r.sem())`) can diverge from the per-pair decision. **The hazard
+///   is therefore latent and unwitnessable at the sentence level in this fixture** — Phase 2 must fix
+///   it structurally (an explicit `sem_blind: false` rule), not wait for a failing parse to prove it.
+/// - A coordinated QUANTIFIED subject (`a gene and a cell line affect HeLa`) does not parse: a raised
+///   GQ is `S/(S\NP)`, not a `cat_np`, so `coordinate_np` cannot fire, and `coordinate_prop` refuses
+///   to generalize subject-GQs (agreement would stop biting). Out of scope for the reorganization;
+///   filed here as an observed gap.
+///
+/// This test asserts they still fail on BOTH paths — so if a future change makes one parse, it must
+/// be re-examined and promoted into the stress corpus above rather than silently changing behaviour.
+#[test]
+fn coordination_gaps_are_not_driver_divergences() {
+    let (layer, _) = index_over_bootstrap();
+    let off = Parser::build(Arc::clone(&layer)).with_packing(false);
+    let on = Parser::build(Arc::clone(&layer)).with_packing(true);
+    for s in [
+        "a gene and a cell line affect HeLa", // coordinated GQ subject
+        "every gene and every cell line affect HeLa", // coordinated universal subject
+        "HeLa affects BRCA1 and MSH2 but not HeLa", // `but not` after a coordinated object
+        "HeLa affects BRCA1 but not BRCA1 and MSH2", // `but not` OVER a coordination
+        "a gene that affects HeLa and a cell line that affects HeLa are large", // coordinated relatives
+    ] {
+        let (co, oo) = off.parse_open(s, &Identity);
+        let (cn, on2) = on.parse_open(s, &Identity);
+        assert!(
+            co.is_empty() && oo.is_empty() && cn.is_empty() && on2.is_empty(),
+            "{s:?} now PARSES (unpacked {}/{}, packed {}/{}) — a recorded grammar gap has closed. \
+             Re-examine it and move it into the stress corpus; do not just delete this line.",
+            co.len(),
+            oo.len(),
+            cn.len(),
+            on2.len(),
+        );
+    }
+}
+
+/// Reorganization plan, **open decision #1** (`docs/notes/dcg-module-reorganization-plan.md`): are
+/// [`coordinate_prop`] and [`coordinate_np`] DISJOINT — i.e. can one `(left, right, op)` triple ever
+/// make both return `Some`?
+///
+/// It matters because the two chart paths wire coordination differently. The unpacked CKY fires them
+/// as two independent `if let`s and pushes BOTH results; the packed path's `apply_bin_rule` uses
+/// `coordinate_prop(…).or_else(|| coordinate_np(…))` and keeps only the FIRST. If a triple can fire
+/// both, the packed path silently drops a reading and the paths are not equivalent — a bug, not a
+/// refactoring detail. If they are disjoint, `.or_else` is safe and Phase 2 may unify them freely.
+///
+/// The structural argument is that they are disjoint on the LEFT category: `coordinate_np` requires a
+/// `cat_np`/`cat_group` left, while `coordinate_prop` requires a `cat_coord` left or a **prop-ending**
+/// one — and `⟦cat_np(T)⟧ = T` (a class) and `⟦cat_group(C)⟧ = List C` are never prop-ending. That is
+/// an argument, not a witness, so this test EXERCISES it: build a category pool from the real
+/// bootstrap + demo lexicon, close it under composition (application, type-raising, and both
+/// coordination builders — so raised GQs, `cat_group`s and `cat_coord`s are all in the pool), and
+/// assert no ordered pair under any connective fires both.
+#[test]
+fn coordinate_prop_and_coordinate_np_are_disjoint() {
+    let (layer, _) = index_over_bootstrap();
+    let entry_class = Iri::parse("urn:eigenius:lexicon:LexicalEntry").expect("iri");
+    // Connectives a coordination rule accepts: `and`, `or`, and the neutral comma list.
+    const OPS: [&str; 3] = [
+        "urn:eigenius:logic:And",
+        "urn:eigenius:logic:Or",
+        "urn:eigenius:lexicon:conn_list",
+    ];
+
+    // Seed: every lexical entry's item (determiners, nouns, names, verbs, adjectives, prepositions).
+    let mut pool: Vec<Item> = Vec::new();
+    for (_iri, r) in layer.iter_all_resources() {
+        if !r.is_instance_of(&entry_class) {
+            continue;
+        }
+        if let Ok(it) = entry_to_item(&layer, r.as_ref()) {
+            pool.push(it);
+        }
+    }
+    assert!(
+        pool.len() > 20,
+        "expected the bootstrap + demo lexicon to seed a real pool, got {}",
+        pool.len()
+    );
+
+    // Dedupe by CATEGORY (one representative item per distinct category — the builders decide on
+    // categories, and the pool would otherwise be dominated by same-category senses).
+    let dedup_by_cat = |items: Vec<Item>| -> Vec<Item> {
+        let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut out = Vec::new();
+        for it in items {
+            if seen.insert(pretty_term(it.cat())) {
+                out.push(it);
+            }
+        }
+        out
+    };
+    pool = dedup_by_cat(pool);
+
+    // Close under composition so the pool contains the categories coordination actually sees at
+    // runtime: applications (det+noun → GQ, verb+NP → VP/S), type-raised NPs, and — crucially — the
+    // OUTPUTS of both coordination builders (`cat_group` / `cat_coord`), which are the left operands
+    // of the n-ary (extend) cases.
+    for _round in 0..2 {
+        let mut grown = pool.clone();
+        for l in &pool {
+            if let Some((cat, sem)) = type_raise(l.cat(), l.sem(), &layer) {
+                grown.push(Item::new(cat, sem));
+            }
+            for r in &pool {
+                if let Some(it) = apply(l, r, &layer) {
+                    grown.push(it);
+                }
+                for op in OPS {
+                    if let Some((cat, sem)) =
+                        coordinate_np(op, l.cat(), l.sem(), r.cat(), r.sem(), &layer)
+                    {
+                        grown.push(Item::new(cat, sem));
+                    }
+                    if let Some((cat, sem)) =
+                        coordinate_prop(op, l.cat(), l.sem(), r.cat(), r.sem(), &layer)
+                    {
+                        grown.push(Item::new(cat, sem));
+                    }
+                }
+            }
+        }
+        pool = dedup_by_cat(grown);
+    }
+
+    // The pool must actually contain the categories this test exists to discriminate, or it proves
+    // nothing (fail-closed: a pool that never built a group/coord/raised-GQ would "pass" vacuously).
+    let has = |ctor: &str| pool.iter().any(|it| is_ctor(it.cat(), ctor).is_some());
+    assert!(has("cat_np"), "pool has no cat_np");
+    assert!(
+        has("cat_group"),
+        "pool has no cat_group (coordinate_np output)"
+    );
+    assert!(
+        has("cat_coord"),
+        "pool has no cat_coord (coordinate_prop output)"
+    );
+    assert!(has("cat_s"), "pool has no cat_s (a prop-ending category)");
+
+    // The witness: no (left, right, op) triple fires BOTH builders.
+    let mut both = Vec::new();
+    for l in &pool {
+        for r in &pool {
+            for op in OPS {
+                let p = coordinate_prop(op, l.cat(), l.sem(), r.cat(), r.sem(), &layer);
+                let n = coordinate_np(op, l.cat(), l.sem(), r.cat(), r.sem(), &layer);
+                if p.is_some() && n.is_some() {
+                    both.push(format!(
+                        "op={op} left={} right={}",
+                        pretty_term(l.cat()),
+                        pretty_term(r.cat())
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        both.is_empty(),
+        "coordinate_prop and coordinate_np BOTH fire on {} triple(s) over a {}-category pool — the \
+         packed path's `.or_else` therefore DROPS a reading the unpacked path keeps (a real \
+         divergence, not a refactoring detail):\n  {}",
+        both.len(),
+        pool.len(),
+        both.join("\n  ")
+    );
+    eprintln!(
+        "disjointness witnessed over {} distinct categories ({} ordered pairs × {} connectives)",
+        pool.len(),
+        pool.len() * pool.len(),
+        OPS.len()
+    );
 }
 
 /// D63 §5.3 — **close naming apposition**: a SORTAL common noun + a proper NAME (`gene BRCA1`,
@@ -2369,7 +2720,7 @@ fn lexicon_backed_augmentation_grounds_oov_via_the_form_text_index() {
     let base = Arc::new(b2.build(storage));
 
     // Sanity: bare `recq` is OOV under the exact index (has_token=false), exactly as on the snapshot.
-    let index = LexicalIndex::build(Arc::clone(&base));
+    let index = Parser::build(Arc::clone(&base));
     assert!(
         !index.has_token("recq", &Identity),
         "bare `recq` is OOV under the exact form index"
@@ -2509,7 +2860,7 @@ fn lexicon_backed_augmentation_grounds_nominal_oov_to_class_not_axiom() {
     let base = description_grounding_base();
 
     // `supercoils` is OOV under the exact index (Identity; the form is `supercoil`).
-    let index = LexicalIndex::build(Arc::clone(&base));
+    let index = Parser::build(Arc::clone(&base));
     assert!(
         !index.has_token("supercoils", &Identity),
         "supercoils is OOV under the exact form index"
@@ -2589,7 +2940,6 @@ fn lexicon_backed_augmentation_grounds_verb_oov_to_axiom_with_verb_cat() {
     );
 }
 
-#[test]
 /// Live-LLM smoke test for the (B) POS source: the `AnthropicCategoryProposer` tags a word by its role
 /// in the sentence — a verb as `Verb`, a noun as `Nominal`. Non-deterministic (a live model), so it is
 /// `#[ignore]`d and asserts only the clear cases. Run:
@@ -2728,7 +3078,7 @@ fn argument_pp_verb_parses_verb_prep_object() {
     // The Step-2 fix in miniature (docs/notes/d63-parse-gap-closure.md): a verb subcategorizing for a PP
     // (`contributes : (S\NP)/cat_pp_arg`) composes with "to <object>" (the argument-marker
     // `to : cat_pp_arg/NP`), while a plain transitive verb still rejects a stray "to X".
-    let index = LexicalIndex::build(contrib_layer());
+    let index = Parser::build(contrib_layer());
 
     // Argument-PP verb + "to <individual>" → parses; sem reuses the `affects` axiom.
     let closed = index.parse("HeLa contributes to BRCA1", &Identity);
@@ -4307,17 +4657,19 @@ fn nary_coordination_has_a_single_left_branching_parse() {
     );
 }
 
-// ── D65 §2.2 / slice 2 — the lazy `LexicalIndex` over the form `ValueIndex` ──
+// ── D65 §2.2 / slice 2 — the lazy `Parser` over the form `ValueIndex` ──
 //
 // On a SHARED-storage chain (bootstrap + a child layer on the same storage), the
-// `lexicon:form_index` `core:ValueIndex` is active, so `LexicalIndex::build` takes
+// `lexicon:form_index` `core:ValueIndex` is active, so `Parser::build` takes
 // the lazy path: O(1) build, forms resolved on demand and memoised. This proves
 // (a) the lazy path activates, (b) it is behaviourally lazy (no forms cached until
 // a parse touches them), and (c) it yields the SAME parse forest as the eager scan.
 
 /// Bootstrap + the demo domain on the SAME storage as the bootstrap chain, so the
-/// declared `lexicon:form` `ValueIndex` is discoverable/active ⇒ lazy `LexicalIndex`.
-fn index_over_bootstrap_shared() -> (Arc<Layer>, LexicalIndex) {
+/// declared `lexicon:form` `ValueIndex` is discoverable/active ⇒ lazy `Parser`.
+/// The bootstrap+demo chain on SHARED storage, and the lexicon over it — for tests that assert on the
+/// index itself (its laziness / coverage) rather than on a parse.
+fn shared_lexicon() -> (Arc<Layer>, Arc<LexicalIndex>) {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
     let resources =
         esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles on bootstrap");
@@ -4325,10 +4677,23 @@ fn index_over_bootstrap_shared() -> (Arc<Layer>, LexicalIndex) {
     for r in resources {
         b.add_resource(r).expect("add demo resource");
     }
-    // Build on the bootstrap chain's OWN storage (shared) — not a fresh in_memory().
     let layer = Arc::new(b.build(ctx.head().storage().clone()));
-    let index = LexicalIndex::build(Arc::clone(&layer));
-    (layer, index)
+    let ix = Arc::new(LexicalIndex::build(Arc::clone(&layer)));
+    (layer, ix)
+}
+
+/// Same, on ISOLATED storage (so no `ValueIndex` is active and the index takes the eager path).
+fn eager_lexicon() -> (Arc<Layer>, Arc<LexicalIndex>) {
+    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let resources =
+        esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles on bootstrap");
+    let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
+    for r in resources {
+        b.add_resource(r).expect("add demo resource");
+    }
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let ix = Arc::new(LexicalIndex::build(Arc::clone(&layer)));
+    (layer, ix)
 }
 
 /// Multiset of reduced-sem keys for a forest — order-independent equivalence.
@@ -4351,16 +4716,19 @@ fn sem_keys(forest: &[eigenius_kernel::dcg::Item]) -> Vec<String> {
 fn lazy_index_is_lazy_and_matches_eager() {
     let sentence = "every cell line affects HeLa";
 
-    // Lazy (shared storage): nothing is cached until a parse touches a form.
-    let (_shared_layer, lazy) = index_over_bootstrap_shared();
+    // Lazy (shared storage): nothing is cached until a parse touches a form. The INDEX is the thing
+    // under test here, so we hold it directly and put a `Parser` over it (`Parser::over`) to drive the
+    // parse — the lexicon and the parser are separate objects now, and this test is the one that cares.
+    let (shared_layer, lazy_ix) = shared_lexicon();
     assert_eq!(
-        lazy.len(),
+        lazy_ix.len(),
         0,
         "the lazy index caches no forms before any parse (it probes the ValueIndex on demand)"
     );
+    let lazy = Parser::over(Arc::clone(&lazy_ix) as Arc<dyn LexicalLookup>, shared_layer);
     let lazy_forest = lazy.parse(sentence, &Identity);
     assert!(
-        !lazy.is_empty(),
+        !lazy_ix.is_empty(),
         "after a parse the lazy index has memoised the forms its sentence touched"
     );
     assert!(
@@ -4369,11 +4737,12 @@ fn lazy_index_is_lazy_and_matches_eager() {
     );
 
     // Eager (isolated storage): the same content scanned up front.
-    let (_eager_layer, eager) = index_over_bootstrap();
+    let (eager_layer, eager_ix) = eager_lexicon();
     assert!(
-        eager.len() >= 6,
+        eager_ix.len() >= 6,
         "the eager index materialises every committed form up front"
     );
+    let eager = Parser::over(eager_ix as Arc<dyn LexicalLookup>, eager_layer);
     let eager_forest = eager.parse(sentence, &Identity);
 
     // Behaviour-equivalence: identical parse forests (as reduced-sem multisets).
@@ -4397,7 +4766,7 @@ fn layer_on(parent: &Arc<Layer>, name: &str, src: &str) -> Arc<Layer> {
 /// Inject one abbreviation binding onto the demo via the programmatic alias emitter
 /// (`dcg::glossary::abbreviation_resources`, the actual Stage-2 code path — resources built directly,
 /// no ESL round-trip) and return an index over the resulting chained doc layer.
-fn demo_with_alias(demo: &Arc<Layer>, long: &str, concept: &str) -> LexicalIndex {
+fn demo_with_alias(demo: &Arc<Layer>, long: &str, concept: &str) -> Parser {
     let binding = AbbreviationBinding {
         abbr: "wsi",
         long_form: long,
@@ -4409,7 +4778,7 @@ fn demo_with_alias(demo: &Arc<Layer>, long: &str, concept: &str) -> LexicalIndex
     for r in res {
         b.add_resource(r).expect("add alias resource");
     }
-    LexicalIndex::build(Arc::new(b.build(LayerStorage::in_memory())))
+    Parser::build(Arc::new(b.build(LayerStorage::in_memory())))
 }
 
 /// D63 Phase 1 (the #1 CNL-v2 lever) × the kind-predication reshape (Phase A): an abbreviation grounded
@@ -4423,7 +4792,7 @@ fn demo_with_alias(demo: &Arc<Layer>, long: &str, concept: &str) -> LexicalIndex
 fn abbreviation_injection_recovers_bare_argument() {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
     let demo = layer_on(ctx.head(), "demo", DEMO);
-    let base = LexicalIndex::build(Arc::clone(&demo));
+    let base = Parser::build(Arc::clone(&demo));
     let injected = demo_with_alias(&demo, "instability", "urn:eigenius:lexicon:Instability");
 
     // Base: `wsi` is OOV — no parse, closed or open.
@@ -4556,8 +4925,8 @@ fn abbreviation_pipeline_end_to_end() {
 
     // Stage B · parse: bare `INS` was OOV before; now the alias recovers it as a CLOSED kind-predication
     // (the bare-mass shift nominalizes the kind — reshape Phase A).
-    let base = LexicalIndex::build(Arc::clone(&demo_layer));
-    let injected = LexicalIndex::build(doc_layer);
+    let base = Parser::build(Arc::clone(&demo_layer));
+    let injected = Parser::build(doc_layer);
     assert!(
         base.parse("INS affects HeLa", &Identity).is_empty()
             && base.parse_open("INS affects HeLa", &Identity).1.is_empty(),

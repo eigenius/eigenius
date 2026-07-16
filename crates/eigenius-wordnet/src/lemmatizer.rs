@@ -15,7 +15,7 @@
 //! `MorphyLemmatizer` — WordNet's Morphy as the kernel's [`Lemmatizer`]: the
 //! reference implementation of the lookup bridge's surface→lemma seam
 //! (D62 §8.8.1). It wraps the exception lists + the lemma-membership oracle and
-//! drives [`morphstr`](crate::morphy::morphstr); the kernel's `dcg::LexicalIndex`
+//! drives [`morphstr`](crate::morphy::morphstr); the kernel's `dcg::Parser`
 //! calls it to reduce inflected surface forms to the base lemmas its entries are
 //! keyed by.
 

@@ -22,7 +22,7 @@
 
 use std::sync::Arc;
 
-use eigenius_kernel::dcg::{Identity, LexicalIndex};
+use eigenius_kernel::dcg::{Identity, Parser};
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::{bootstrap, esl};
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
@@ -98,7 +98,7 @@ fn morphy_bridge_parses_inflected_sentence() {
     // The lexicon schema is part of the bootstrap chain now (D62/D63); build the
     // demo domain directly over the bootstrapped head.
     let domain = layer_over("lexicon-domain", Arc::clone(ctx.head()), DOMAIN);
-    let index = LexicalIndex::build(domain);
+    let index = Parser::build(domain);
 
     // The verb is INFLECTED in the input ("affects"); the entry's form is the base
     // "affect". Morphy reduces affects→affect, the bridge looks the entry up, and
@@ -122,7 +122,7 @@ fn identity_lemmatizer_cannot_reach_the_base_entry() {
     // The lexicon schema is part of the bootstrap chain now (D62/D63); build the
     // demo domain directly over the bootstrapped head.
     let domain = layer_over("lexicon-domain", Arc::clone(ctx.head()), DOMAIN);
-    let index = LexicalIndex::build(domain);
+    let index = Parser::build(domain);
 
     assert!(
         index.parse("HeLa affects BRCA1", &Identity).is_empty(),

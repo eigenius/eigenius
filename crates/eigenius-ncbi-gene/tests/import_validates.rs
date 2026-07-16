@@ -21,7 +21,7 @@
 use std::sync::Arc;
 
 use eigenius_kernel::bootstrap;
-use eigenius_kernel::dcg::{gate_entry, is_ctor, Identity, LexicalIndex};
+use eigenius_kernel::dcg::{gate_entry, is_ctor, Identity, Parser};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::Iri;
@@ -85,7 +85,7 @@ fn scoped_parse_of_wrn_affects_tp53() {
     let (doc, _) = render_document(&genes, "9606", false);
     let ncbi = esl_layer("ncbi-gene", &doc, demo);
 
-    let index = LexicalIndex::build(Arc::clone(&ncbi));
+    let index = Parser::build(Arc::clone(&ncbi));
     let ncbi_gene = Iri::parse("urn:eigenius:lexicon:ncbi_gene").unwrap();
 
     // Scoped to the gene lexicon: WRN / TP53 are in scope; `affects` and any

@@ -1782,7 +1782,7 @@ fn print_parse_forest(sentence: &str, parses: &[ParseRow], json_output: bool) {
     }
 }
 
-/// Local `lexicon parse`: build the `LexicalIndex` over the bootstrap chain plus any
+/// Local `lexicon parse`: build the `Parser` over the bootstrap chain plus any
 /// `--file` domain layers (loaded as a chain), then parse `sentence` (optionally
 /// scoped). The kernel is the parse oracle; this is the offline sibling of the
 /// `ParseSentence` RPC.
@@ -1793,7 +1793,7 @@ fn cmd_lexicon_parse(
     files: &[String],
     json_output: bool,
 ) {
-    use eigenius_kernel::dcg::{is_ctor, pretty_term, resolve_lexicon_profile, LexicalIndex};
+    use eigenius_kernel::dcg::{is_ctor, pretty_term, resolve_lexicon_profile, Parser};
     use eigenius_kernel::nbe::{env::Rho, eval::eval, readback::readback_val};
 
     let ctx = match bootstrap::bootstrap() {
@@ -1852,7 +1852,7 @@ fn cmd_lexicon_parse(
     // (default in-repo dict), so local `lexicon parse` matches the server. The contextual reranker
     // is wired here too under `--features use-llm` (+ ANTHROPIC_API_KEY), for parity.
     let pc = build_parse_config("references/WordNet-3.0/dict");
-    let mut index = LexicalIndex::build(Arc::clone(&layer));
+    let mut index = Parser::build(Arc::clone(&layer));
     if let Some(n) = pc.sense_cap {
         index = index.with_sense_cap(n);
     }
@@ -1886,7 +1886,7 @@ fn cmd_lexicon_parse(
 }
 
 /// Remote `lexicon parse`: call the kernel's `ParseSentence` RPC over the committed
-/// chain. The kernel builds the (lazy) `LexicalIndex` server-side and returns the forest.
+/// chain. The kernel builds the (lazy) `Parser` server-side and returns the forest.
 async fn remote_parse(
     endpoint: &str,
     sentence: &str,

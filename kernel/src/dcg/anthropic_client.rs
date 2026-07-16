@@ -37,6 +37,21 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 const TOOL_NAME: &str = "emit";
 const MAX_TOKENS: u32 = 4096;
 
+/// **Temperature 0 — pinned, and load-bearing for reproducibility.**
+///
+/// Every caller here asks the model to *rank* or *classify* (which senses survive the cap, which
+/// anaphor binds where), not to write prose. We want the model's best ordering, not a sample from
+/// its distribution. The Messages API defaults to `temperature: 1.0`, so omitting this field made
+/// the sense reranker — and therefore the canonical parse-rate measurement it feeds — **randomized
+/// between runs of identical code against an identical store**: different senses survive the cap →
+/// a different chart → a different parse. A measurement that cannot be reproduced is not a
+/// measurement.
+///
+/// (0 buys stability, not a guarantee: the API does not promise bitwise determinism. The
+/// reproducible *gate* is the cap-only arm, `measure-parse-rate.sh --no-llm`, which uses no LLM at
+/// all; the reranked run is the headline number.)
+const TEMPERATURE: f32 = 0.0;
+
 /// Call Anthropic with a forced single-tool `emit` whose `input_schema` is the JSON Schema derived
 /// from `T`, and deserialize the returned `tool_use.input` into `T`. Async — callers run it on their
 /// own tokio runtime (as the proposers already do). `Err(String)` on any transport / API / decode
@@ -55,6 +70,7 @@ pub async fn anthropic_structured<T: JsonSchema + DeserializeOwned>(
     let body = json!({
         "model": model,
         "max_tokens": MAX_TOKENS,
+        "temperature": TEMPERATURE,
         "tools": [{
             "name": TOOL_NAME,
             "description": "Emit the structured result.",

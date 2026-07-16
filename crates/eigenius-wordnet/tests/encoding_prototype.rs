@@ -35,7 +35,7 @@
 use std::sync::Arc;
 
 use eigenius_kernel::dcg::{
-    is_nonprose, pretty_term, segment_sentences, tokenize, Item, Lemmatizer, LexicalIndex, Pos,
+    is_nonprose, pretty_term, segment_sentences, tokenize, Item, Lemmatizer, Parser, Pos,
 };
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -114,12 +114,7 @@ struct UnitReport {
 }
 
 /// The core control flow for one unit: parse → classify.
-fn encode_unit(
-    text: &str,
-    index: &LexicalIndex,
-    lem: &dyn Lemmatizer,
-    layer: &Arc<Layer>,
-) -> Outcome {
+fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Layer>) -> Outcome {
     let forest: Vec<Item> = index.parse_scoped(text, lem, None);
     match forest.len() {
         0 => {
@@ -155,7 +150,7 @@ fn encode_unit(
 
 fn encode_doc(
     doc: &str,
-    index: &LexicalIndex,
+    index: &Parser,
     lem: &dyn Lemmatizer,
     layer: &Arc<Layer>,
 ) -> Vec<UnitReport> {
@@ -259,7 +254,7 @@ fn prototype_over_wrn_first_page() {
     // polysemy doesn't blow up the chart on long sentences — the scaling-plan unblock that lets
     // us measure over the *whole* page instead of only short units.
     const SENSE_CAP: usize = 2;
-    let index = LexicalIndex::build(Arc::clone(&layer)).with_sense_cap(SENSE_CAP);
+    let index = Parser::build(Arc::clone(&layer)).with_sense_cap(SENSE_CAP);
     let lem = morphy();
 
     // Length guard remains as a safety backstop, but the sense cap should let much longer units
@@ -360,7 +355,7 @@ fn prototype_classifies_a_text_document_into_the_four_outcomes() {
         return;
     }
     let layer = stand_up(&SeedSpec::seeded(SEEDS.iter().copied()));
-    let index = LexicalIndex::build(Arc::clone(&layer));
+    let index = Parser::build(Arc::clone(&layer));
     let lem = morphy();
 
     // A small "document": one parseable claim, one with an unknown word, one with all

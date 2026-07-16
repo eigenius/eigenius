@@ -123,6 +123,19 @@ data lexicon:Conn {
     conn_but_not, // "X but not Y" (D62 §2 #8) — contrastive ellipsis: distributes ASYMMETRICALLY,
                   // the first member positive and the rest negated (`P(m₀) ∧ ¬P(m₁) ∧ …`), so a
                   // shared predicate applies affirmatively to X and negatively to the elided Y.
+    conn_list,    // "X, Y, … and Z" — the NEUTRAL list connective a bare COMMA contributes (D63 §8.4
+                  // Phase 3, the list-with-operator model). A comma does not yet say which operator the
+                  // list takes, so it builds the group/`cat_coord` under `conn_list` and the TRAILING
+                  // `and`/`or` rebinds the whole list to `conn_and`/`conn_or` (which is why `A, B, C or
+                  // D` is all-∨, not `(A ∧ B ∧ C) ∨ D`). A list never finalized by an explicit
+                  // connective defaults to conjunction (`complete_coord` / `group_conn_op`).
+                  //
+                  // The parser has always CONSTRUCTED this constructor (`category.rs`, `LIST_CONN`);
+                  // it was simply never declared here. That was live but invisible: `⟦·⟧` erases the
+                  // connective, so a `Cat` carrying it never reaches the type-checker — and `check`
+                  // rejects an undeclared constructor outright ("no constructor `conn_list` in `Conn`",
+                  // nbe/check/inductive.rs). Declaring it makes the term the parser builds a term the
+                  // kernel would actually accept, closing the gap before something type-checks a `Cat`.
 }
 
 // Prep — the governing preposition of an oblique **argument** PP (D63 §5.3
