@@ -102,26 +102,9 @@ impl Parser {
             if entries.is_empty() {
                 continue;
             }
-            // **Collapse entries that denote the SAME concept — BEFORE the cap** (D63 cross-lexicon
-            // unification, `docs/notes/d63-wordnet-umls-concept-unification.md`).
-            //
-            // Same predicate [`Self::subsume_duplicates`] applies to the parsed forest — structural
-            // `Exp` equality on `(cat, sem)`, full IRIs, never `pretty_term` (which shortens an IRI
-            // to its local segment and could false-merge two distinct senses). Being an equality it
-            // **cannot drop a distinct reading**.
-            //
-            // What it earns is the ORDER. `subsume_duplicates` runs *after* parsing: by then the cap
-            // has already spent a slot on the duplicate and the chart has already built it. Run here,
-            // a duplicate never consumes a cap slot at all — which is the point, because with
-            // `SENSE_CAP = 2` a word gets only two. **Measured 2026-07-11 over the WRN page: 47% of
-            // ranked words spent BOTH slots on a UMLS/WordNet pair of the same concept** (`state`'s
-            // two survivors have verbatim-identical glosses).
-            //
-            // INERT until the lexica are unified: two entries from different lexica carry different
-            // class IRIs, so `(cat, sem)` differs and nothing collapses. The mass/count variants of
-            // one concept differ in `cat` (`cat_n(C, mass)` vs `cat_n(C, num_any)`) and are likewise
-            // preserved. O(n²) over one lemma's senses, which is small.
-            dedup_same_concept(&mut entries);
+            // Cross-lexicon concept dedup (D63, `docs/notes/d63-wordnet-umls-concept-unification.md`)
+            // runs AFTER the sense cap — see the `dedup_same_concept` call below the cap block, and the
+            // comment there for why the order (cap-then-dedup) is load-bearing (the `event` case).
             // Adaptive-supertagging sense cap (GH #97): keep at most `cap` entries for this lemma —
             // by contextual plausibility first (the reranker's `ranks`, when present), falling back
             // to the static `sense_rank` (most-frequent first) — cutting WordNet polysemy at the
@@ -179,6 +162,27 @@ impl Parser {
                     entries.truncate(eff);
                 }
             }
+            // **Collapse entries that denote the SAME concept — AFTER the cap** (D63 cross-lexicon
+            // unification, `docs/notes/d63-wordnet-umls-concept-unification.md`). Structural `Exp`
+            // equality on `(cat, sem)` (full IRIs, never `pretty_term` which shortens an IRI to its
+            // local segment and could false-merge two senses); the same predicate as the forest-side
+            // [`Self::subsume_duplicates`]. Being an equality it **cannot drop a distinct reading**.
+            //
+            // The ORDER — cap FIRST, then dedup — is load-bearing. The reranker ranks RAW senses
+            // (pre-merge), so a cross-lexicon pair is TWO votes for ONE concept. When the reranker puts
+            // a concept's WordNet sense AND its UMLS twin in its top-`cap` positions, capping first
+            // keeps both and this dedup collapses them to ONE reading (the word's single best sense).
+            // Dedup-BEFORE-the-cap instead dropped the twin and let the cap BACKFILL the freed slot
+            // with a LOWER-ranked, contextually-wrong sense — the `event` case (2026-07-16): the ranker
+            // ranked event-*happening* #1 and its UMLS twin #2, the wrong event-*circumstance* sense
+            // #3; pre-cap dedup promoted circumstance into the cap, so `Each event alone …` never
+            // encoded. Cap-then-dedup keeps ≤ `cap` DISTINCT concepts and never seeds past the ranker's
+            // top-`cap` raw positions. (The 2026-07-11 measurement that first added the pre-cap dedup
+            // found it left encoded UNCHANGED — the freed slot was "immediately refilled"; that refill
+            // is this bug.) INERT until a pair is actually merged: distinct-lexicon senses carry
+            // different class IRIs, so `(cat, sem)` differs and nothing collapses. O(n²) over one
+            // lemma's (already cap-bounded) senses.
+            dedup_same_concept(&mut entries);
             // Morphological number (D63 §5.1, the Slice-1 deferral): a surface
             // that morphology *reduced* to this lemma was inflected (plural,
             // for nouns); a surface equal to the lemma is singular. Refine the
