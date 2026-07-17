@@ -1,7 +1,7 @@
 {
   "_comment": "The reference measurement the parse-rate gate is judged against. Run logs are NOT committed (experiments/*/results/ is gitignored); this is the distilled result + provenance. Update it DELIBERATELY, never to make a red run go green.",
   "provenance": {
-    "commit": "4c613e2-dirty (definite-referential fix, uncommitted at re-baseline: axiom ontology:the + referential the_ref_subj_sem/the_ref_obj_sem; 12 definite + demonstrative determiner entries repointed off obj_exists_sem/exists_sem)",
+    "commit": "72fc760 (quantifier-determiner fix, on top of 925faa2 definite-referential): added several/many/few/most/both as plural existential determiners + an always-on cross-POS prune that drops the gradable-ADJECTIVE reading of any surface carrying a closed-class determiner reading)",
     "date": "2026-07-16",
     "profile": "release",
     "features": [
@@ -9,28 +9,28 @@
     ],
     "reranker": "AnthropicSenseRanker (live), claude-sonnet-4-6, temperature 0",
     "page": "references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt",
-    "snapshot": "wordnet-umls-aligned-v3-2026-07-16",
+    "snapshot": "wordnet-umls-aligned-v3-2026-07-16-quant",
     "snapshot_lineage": [
-      "scripts/reseed-lexicon-db.sh --umls-all --no-build     -> wordnet-umls-2026-07-16  (base; new bootstrap incl. axiom ontology:the)",
+      "scripts/reseed-lexicon-db.sh --umls-all --snapshot-dir <base>  -> wordnet-umls-2026-07-16-quant  (base; bootstrap incl. axiom ontology:the AND the 5 plural quantifier determiners -- image rebuilt)",
       "experiments/lexicon-align/merges.json (38,389 merges, unchanged from v3)",
-      "scripts/build-alignment-snapshot.sh --base <base> ...  -> wordnet-umls-aligned-v3-2026-07-16 (2.8 GB)",
+      "scripts/build-alignment-snapshot.sh --base <base> ...  -> wordnet-umls-aligned-v3-2026-07-16-quant (2.7 GB)",
       "  the layer rewrites 51,925 UMLS entries",
       "NOTE: the default WRN-TUI subset reseed (988 MB) is NOT faithful -- it drops ~2/3 of UMLS and yields spurious cap-only grammar-gaps + missing-lexemes. --umls-all is required to reproduce baseline coverage."
     ],
     "config": "pos_prune=0 combinatory_core=0 SENSE_CAP=2 CELL_BEAM=64",
-    "runtime_s": 279
+    "runtime_s": 248
   },
   "expected": {
     "units": 62,
     "grammar_gap": 0,
     "missing_lexeme": 0,
-    "ambiguous": 55,
+    "ambiguous": 54,
     "open": 1,
-    "encoded": 6
+    "encoded": 7
   },
   "gates": {
     "coverage": "grammar_gap == 0 and missing_lexeme == 0 — every sentence parses. NON-NEGOTIABLE.",
-    "faithfulness": "encoded should RISE. Floor set at 6, ONE UNIT BELOW the observed 7 (the reranker drifts ~1 unit between runs even at temperature 0; a baseline set at the peak would flag that drift as a regression). Of the observed 7, the definite-referential fix (2026-07-16) contributes a DETERMINISTIC +1: the WRN negation sentence 'MSI cancer models did not require the exonuclease activity of WRN' had, after reranking, only the not-exists / exists-not negation-scope dup (STRUCTURAL, un-collapsible by the reranker) -- referential definites remove it, so AMBIG x2 -> ENCODED. The other 6 encodings are reranker sense-collapse and drift; the floor absorbs them."
+    "faithfulness": "encoded should RISE. Floor set at 7, ONE UNIT BELOW the observed 8 (the reranker drifts ~1 unit between runs even at temperature 0; a baseline set at the peak would flag that drift as a regression). Two of the observed 8 are DETERMINISTIC, traced fixes (each a named sentence AMBIG -> ENCODED, not reranker drift): (1) the definite-referential fix -- 'MSI cancer models did not require the exonuclease activity of WRN', whose only post-rerank ambiguity was the not-exists/exists-not negation-scope dup; (2) the quantifier-determiner fix -- 'MSI contributes to several cancers', where the new `several` determiner + the adjective prune leave only cancer-sense polysemy (1 structural skeleton), which the reranker collapses. The other 6 encodings are reranker sense-collapse and drift; the floor absorbs them."
   },
   "reproduced": [
     {
@@ -94,6 +94,12 @@
       "commit": "4c613e2-dirty",
       "encoded": 7,
       "note": "RE-BASELINE. Definite-referential fix. Definite + demonstrative determiners denoted the existential CPS (obj_exists_sem / exists_sem) as a documented first-cut; under negation that spuriously bifurcated into wide-scope (not-exists) vs narrow-scope (exists-not) -- a REAL ambiguity for `a`/`an`, vacuous for a definite's unique referent. Fix: new axiom ontology:the (the iota / definite operator) + referential sems (subject V(the(A)); object TV(the(T), subj)); 12 definite/demonstrative entries repointed; `a`/`an`/`some` + cardinals KEEP the quantifier sems (their scope split is real). The category is unchanged (sem-only edit) so grammar-gap is unchanged by construction; both scope derivations now normalise to one term and felicity::subsume_duplicates collapses them. The bootstrap edit changed the lexicon-bootstrap content hash and invalidated the 07-15 chain -> reseed --umls-all + v3-align -> wordnet-umls-aligned-v3-2026-07-16 (2.8 GB). Witnessed: cap-only grammar-gap 0 + missing-lexeme 0, WRN negation sentence 4->2 (1 structural skeleton, residual is a cross-lexicon `activity` sense dup); reranked encoded 7, ambiguous 54, open 1, grammar-gap 0, runtime 279s. The single traced, drift-immune signal is the WRN sentence AMBIG x2 -> ENCODED (cap-only 4->2). CAVEAT: encoded 3 -> 7 is NOT a controlled delta -- it accumulates span-integrity + the bare-mass And fix + this fix ACROSS intervening snapshot reseeds; against the last live-captured reranked run on the OLD snapshot (6914d01, encoded 7) this fix recovers the -1 the bare-mass run showed (6 -> 7). Floor set at 6 (see gates.faithfulness). Regression guards: dcg::lexicon::referential_definite_tests (CI, no snapshot) + definite_negation_collapses_referential (snapshot-gated, crates/eigenius-wordnet/tests/db_backed_encoding.rs)."
+    },
+    {
+      "date": "2026-07-16",
+      "commit": "72fc760",
+      "encoded": 8,
+      "note": "RE-BASELINE. Quantifier-determiner fix. `several`/`many`/`few`/`most`/`both` were MISSING from the determiner lexicon, so `several cancers` had no quantifier reading and fell back to `several`'s WordNet gradable-ADJECTIVE entry used prenominally (`gt(deg_a, std_a)` -- the spurious 'more-several-than-standard' modifier). Two-part fix: (1) added the 5 as plural existential determiners (closed-class.esl, modeled on `some` but pl; cardinality opaque first-cut); (2) an ALWAYS-ON cross-POS prune (parse/seed.rs) that drops the open-class ADJECTIVE reading (`is_adjective_cat`, the S[adj]\\NP seed) of any surface carrying a closed-class DETERMINER reading (`cat_forall`). Part 1 alone would leave determiner AND adjective (still 2); part 2 alone would gap the sentence (no quantifier reading) -- both needed. Bootstrap edit -> reseed --umls-all + v3-align -> wordnet-umls-aligned-v3-2026-07-16-quant (2.7 GB, image rebuilt). Witnessed: cap-only grammar-gap 0 + missing-lexeme 0, total readings 2899 -> 2835 (-64, adjective readings pruned corpus-wide), `several cancers` now 1 structural skeleton (determiner; both the gt-adjective and the noun-compound gone); reranked encoded 8, ambiguous 53, open 1, grammar-gap 0, runtime 248s. Traced drift-immune signal: `MSI contributes to several cancers` AMBIG x2 -> ENCODED (+1 over the definite-fix run's 7). No collateral: `most commonly observed` (most-as-adverb) and `fewer deletion` (fewer-as-determiner) unchanged; predicative adjective uses ('the problems were several') are given up by the prune (accepted -- these are quantifiers, not gradable properties). KNOWN RESIDUAL: `few`/`most`/`both` still carry a noun-compound reading (the prune targets adjectives, not nouns); `several`/`many` are clean (no competing noun sense at the cap). Floor set at 7 (see gates.faithfulness)."
     }
   ]
 }

@@ -79,10 +79,12 @@ corpus (NF §3.3 adjective rule): **§6/§6a of the parse-gap note** and
 - **Snapshot drift.** A bootstrap-ontology edit changes its content hash, so older snapshots **ManifestDrift** —
   and the harness **SKIPs fail-closed while reporting `ok`**: every `db_backed_encoding` test goes green doing
   nothing. Latest drift: the `dcg-cleanup` merge declared `conn_list` on `lexicon:Conn` (`2026-07-15`), retiring
-  the 07-12 snapshots. The definite-referential bootstrap edit (`2026-07-16`, axiom `ontology:the`) then invalidated
-  the 07-15 chain too. **Current resumable snapshot: `wordnet-umls-aligned-v3-2026-07-16`** (reseed `--umls-all` +
-  v3-align, 2.8 GB). Always drive the measurement through `scripts/measure-parse-rate.sh` (it sets
-  `EIGENIUS_DB_SNAPSHOT` to the newest snapshot); the harness fallback `DEFAULT_SNAPSHOT`
+  the 07-12 snapshots. Two `2026-07-16` bootstrap edits invalidated the chain in turn: the
+  definite-referential fix (axiom `ontology:the`) and then the quantifier-determiner fix
+  (`several`/`many`/`few`/`most`/`both`). **Current resumable snapshot:
+  `wordnet-umls-aligned-v3-2026-07-16-quant`** (reseed `--umls-all` + v3-align, 2.7 GB). Always drive the
+  measurement through `scripts/measure-parse-rate.sh` (it sets `EIGENIUS_DB_SNAPSHOT` to the newest
+  snapshot); the harness fallback `DEFAULT_SNAPSHOT`
   (`crates/eigenius-wordnet/tests/db_backed_encoding.rs:64`) now points at it.
 
 #### Follow-up spun out of the faithfulness work (not started)
