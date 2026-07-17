@@ -26,6 +26,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use eigenius_lexicon_align::adjudicate::Verdict;
+use eigenius_lexicon_align::drops::{resolve_drops, DROP_CONFIDENCE};
 use eigenius_lexicon_align::merge::{resolve, MERGE_CONFIDENCE};
 use eigenius_lexicon_align::{candidates, gold, Candidate, GOLD_JACCARD};
 
@@ -121,6 +122,18 @@ enum Cmd {
         #[arg(long, default_value = "experiments/lexicon-align/merges.json")]
         out: PathBuf,
     },
+    /// Resolve the adjudicator's verdicts into the DROP set the importer consumes — junk atoms whose
+    /// only contribution is a case-mangled collision with a common word (`gENE`→`gene`). Deterministic:
+    /// a confident `same=false` verdict on an irregular-cased `SY`/`PEP` atom, never on a merged
+    /// surface. Rules are in [`eigenius_lexicon_align::drops`].
+    Drops {
+        #[arg(long, default_value = "experiments/lexicon-align/candidates.jsonl")]
+        candidates: PathBuf,
+        #[arg(long, default_value = "experiments/lexicon-align/alignment.jsonl")]
+        verdicts: PathBuf,
+        #[arg(long, default_value = "experiments/lexicon-align/drops.json")]
+        out: PathBuf,
+    },
 }
 
 fn load_candidates(p: &std::path::Path) -> std::io::Result<Vec<Candidate>> {
@@ -183,6 +196,66 @@ fn build_merges(
     ExitCode::SUCCESS
 }
 
+/// Verdicts + candidates → `drops.json`. The rules live in [`eigenius_lexicon_align::drops`]; this
+/// only does the IO and reports what qualified.
+fn build_drops(
+    cpath: &std::path::Path,
+    vpath: &std::path::Path,
+    out: &std::path::Path,
+) -> ExitCode {
+    let cands = match load_candidates(cpath) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {} — {e}", cpath.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let text = match std::fs::read_to_string(vpath) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("error: {} — {e}", vpath.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let verdicts: Vec<Verdict> = text
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Verdict>(l).ok())
+        .collect();
+
+    let (drops, stats) = resolve_drops(&cands, &verdicts);
+
+    eprintln!("candidates            {}", cands.len());
+    eprintln!("verdicts              {}", verdicts.len());
+    eprintln!(
+        "merged (not dropped)  {}   (the merge owns the surface)",
+        stats.merged_not_dropped
+    );
+    eprintln!(
+        "DROPS                 {}   (same=false, confidence ≥ {DROP_CONFIDENCE}, irregular-cased SY/PEP atom)",
+        drops.len()
+    );
+    for d in drops.iter().take(40) {
+        eprintln!(
+            "    {:<10} {:<20} (→ {}, conf {:.2})",
+            d.cui, d.form, d.surface, d.confidence
+        );
+    }
+    if drops.len() > 40 {
+        eprintln!("    … and {} more", drops.len() - 40);
+    }
+
+    let json = serde_json::to_string_pretty(&drops).expect("serialize drops");
+    if let Some(p) = out.parent() {
+        let _ = std::fs::create_dir_all(p);
+    }
+    if let Err(e) = std::fs::write(out, json) {
+        eprintln!("error: {} — {e}", out.display());
+        return ExitCode::FAILURE;
+    }
+    eprintln!("wrote {}", out.display());
+    ExitCode::SUCCESS
+}
+
 fn main() -> ExitCode {
     let args = Args::parse();
     match args.cmd {
@@ -216,6 +289,11 @@ fn main() -> ExitCode {
             verdicts: vpath,
             out,
         } => build_merges(&cpath, &vpath, &out),
+        Cmd::Drops {
+            candidates: cpath,
+            verdicts: vpath,
+            out,
+        } => build_drops(&cpath, &vpath, &out),
         Cmd::Candidates {
             meta_dir,
             dict,

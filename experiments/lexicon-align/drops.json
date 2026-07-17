@@ -1,0 +1,104 @@
+[
+  {
+    "cui": "C0050063",
+    "form": "cAMP",
+    "surface": "camp",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1306898",
+    "form": "mU",
+    "surface": "mu",
+    "confidence": 0.97
+  },
+  {
+    "cui": "C1433158",
+    "form": "hICK",
+    "surface": "hick",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1570167",
+    "form": "hAM",
+    "surface": "ham",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1707070",
+    "form": "caM",
+    "surface": "cam",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C1961129",
+    "form": "uV",
+    "surface": "uv",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C3887624",
+    "form": "cALLa",
+    "surface": "calla",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C3889432",
+    "form": "iCE",
+    "surface": "ice",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C4050019",
+    "form": "cPR",
+    "surface": "cpr",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C4285072",
+    "form": "mN",
+    "surface": "mn",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C4321287",
+    "form": "gB",
+    "surface": "gb",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C4552849",
+    "form": "haNK",
+    "surface": "hank",
+    "confidence": 0.98
+  },
+  {
+    "cui": "C4723852",
+    "form": "hICK",
+    "surface": "hick",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C4724445",
+    "form": "sLE",
+    "surface": "sle",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C5445266",
+    "form": "mS",
+    "surface": "ms",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C5555460",
+    "form": "recAP",
+    "surface": "recap",
+    "confidence": 0.99
+  },
+  {
+    "cui": "C5849123",
+    "form": "gENE",
+    "surface": "gene",
+    "confidence": 0.99
+  }
+]

@@ -1,7 +1,7 @@
 {
   "_comment": "The reference measurement the parse-rate gate is judged against. Run logs are NOT committed (experiments/*/results/ is gitignored); this is the distilled result + provenance. Update it DELIBERATELY, never to make a red run go green.",
   "provenance": {
-    "commit": "4400aef (two seeding fixes on top of 72fc760 quantifier: [33ff4a2] event -- cap-then-dedup so a merged reranker top-2 collapses to 1 instead of the pre-cap dedup backfilling a lower-ranked wrong sense; [4400aef] gene -- the reranker's sense ELIMINATION now holds at every cap rung, not just base, so widening for one word no longer re-admits every other word's rejects. PASS 2 (ranks=None widen) remains the wrong-elimination safety net. Both are parse/seed.rs runtime -- NO reseed.)",
+    "commit": "A1+A2 UMLS import-time junk removal on top of 4400aef. A1: 16 case-mangled single-word collision atoms (gENE->gene) via --drop-atoms drops.json. A2: 2,410 REDUNDANT multiword CHV-only aliases (C0610268 'DNA Helicase A' aliasing 'dna helicase', already given by MSH) via --drop-chv-redundant. Both coverage-safe by construction. REQUIRES reseed.",
     "date": "2026-07-17",
     "profile": "release",
     "features": [
@@ -9,29 +9,28 @@
     ],
     "reranker": "AnthropicSenseRanker (live), claude-sonnet-4-6, temperature 0",
     "page": "references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt",
-    "snapshot": "wordnet-umls-aligned-v3-2026-07-16-quant",
+    "snapshot": "wordnet-umls-aligned-2026-07-17-chv",
     "snapshot_lineage": [
-      "UNCHANGED from the quantifier baseline -- both fixes are parse/seed.rs runtime code, not bootstrap, so the snapshot is byte-identical (no reseed, no re-align).",
-      "scripts/reseed-lexicon-db.sh --umls-all --snapshot-dir <base>  -> wordnet-umls-2026-07-16-quant  (base; bootstrap incl. axiom ontology:the AND the 5 plural quantifier determiners -- image rebuilt)",
-      "scripts/build-alignment-snapshot.sh --base <base> --merges experiments/lexicon-align/merges.json (38,389)  -> wordnet-umls-aligned-v3-2026-07-16-quant (2.7 GB)",
-      "NOTE: the default WRN-TUI subset reseed (988 MB) is NOT faithful -- it drops ~2/3 of UMLS. --umls-all is required to reproduce baseline coverage."
+      "scripts/reseed-lexicon-db.sh --umls-all --snapshot-dir wordnet-umls-2026-07-17-chv  (import applies --drop-atoms [16 A1] + --drop-chv-redundant [2410 A2])",
+      "scripts/build-alignment-snapshot.sh --base wordnet-umls-2026-07-17-chv --merges merges.json (38,389)  -> wordnet-umls-aligned-2026-07-17-chv (2.8 GB)"
     ],
     "config": "pos_prune=0 combinatory_core=0 SENSE_CAP=2 CELL_BEAM=64",
-    "runtime_s": 239
+    "runtime_s": 236
   },
   "expected": {
     "units": 62,
     "grammar_gap": 0,
     "missing_lexeme": 0,
-    "ambiguous": 52,
+    "ambiguous": 51,
     "open": 1,
-    "encoded": 9,
-    "total_readings_ceiling": 1500
+    "encoded": 10,
+    "total_readings_ceiling": 1500,
+    "total_readings": 1295
   },
   "gates": {
-    "coverage": "grammar_gap == 0 and missing_lexeme == 0 — every sentence parses. NON-NEGOTIABLE.",
-    "faithfulness": "encoded should RISE. Floor set at 9, ONE UNIT BELOW the observed 10 (the reranker drifts ~1 unit between runs even at temperature 0; a baseline set at the peak flags that drift as a regression). The session's four traced, DETERMINISTIC fixes (each a named sentence AMBIG -> ENCODED, not drift): (1) definite-referential -- 'MSI cancer models did not require the exonuclease activity of WRN'; (2) quantifier-determiner -- 'MSI contributes to several cancers'; (3) event cap-then-dedup -- 'Each event alone does not lead to cell death'; (4) gene elimination-through-widen -- 'Germline mutations in the MMR genes MSH2, MSH6, PMS2 or MLH1 cause Lynch syndrome'. The other ~6 encodings are reranker sense-collapse and drift; the floor absorbs them.",
-    "multiplicity": "total_readings (sum of readings over all units) is the MORE SENSITIVE signal and should FALL / not rise. Observed 1286 (live) / 1282 (replay) at commit 4400aef, DOWN 35% from 1991 at 72fc760 -- the gene elimination-through-widen fix stops widening sentences flooding the reranker's rejects page-wide. Ceiling set at 1500 (well below the 1991 pre-fix level, with headroom for reranker drift): a run above it means a widening sentence is re-flooding. NOT YET WIRED into scripts/eval-parse-rate.sh (informational until then)."
+    "coverage": "grammar_gap == 0 and missing_lexeme == 0 \u2014 every sentence parses. NON-NEGOTIABLE.",
+    "faithfulness": "encoded floor 10 (reranker drifts ~1 unit even at temperature 0; observed 10-11 across draws). A1+A2 did NOT move encoded (both page-marginal). Floor catches a real regression below 10 while absorbing drift.",
+    "multiplicity": "total_readings GATED in eval-parse-rate.sh vs total_readings_ceiling (1500). BOTH A1 and A2 are PAGE-MARGINAL on multiplicity, shown by the drift-free cap-only A/B (--no-llm, deterministic, isolates each lexicon change): pre-A1 2869 -> +A1 2873 (+4) -> +A2 2867 (-6). Net cap-only over both: -2 of 2869 (noise). Reranked observed 1295 (drifts 1271-1295). The junk was genuine and coverage-safe to remove corpus-wide, but the gENE-class collisions were off-page and the CHV compounds were mostly single-CUI (redundant alias, dedup already collapsed). WRN-page multiplicity lives in the 11-100 buckets (~33 units): cross-lexicon sense pairs + structural PP-attachment (the x88 'impairment of a DNA repair pathway', x56 'four other RecQ DNA helicases'). That is the real lever; neither A1 nor A2 touches it."
   },
   "reproduced": [
     {
@@ -49,11 +48,25 @@
     }
   ],
   "reproducibility": {
-    "finding": "temperature:0 is NOT deterministic. Two live runs of identical code against an identical store differ on ~5% of the CAPPED top-2 — the only part that reaches the parser. encoded moves +/-1 unit between runs. Do not read a one-unit change as signal.",
-    "the_only_exact_reproduction": "scripts/measure-parse-rate.sh --replay <run>/ranks.json — replays the recorded rankings with no LLM. A replay with misses > 0 is a DIFFERENT experiment.",
-    "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible — two senses with different labels and the SAME sem are one concept — but the pre-dedup caveat still stands."
+    "finding": "temperature:0 is NOT deterministic. Two live runs of identical code against an identical store differ on ~5% of the CAPPED top-2 \u2014 the only part that reaches the parser. encoded moves +/-1 unit between runs. Do not read a one-unit change as signal.",
+    "the_only_exact_reproduction": "scripts/measure-parse-rate.sh --replay <run>/ranks.json \u2014 replays the recorded rankings with no LLM. A replay with misses > 0 is a DIFFERENT experiment.",
+    "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible \u2014 two senses with different labels and the SAME sem are one concept \u2014 but the pre-dedup caveat still stands."
   },
   "history": [
+    {
+      "date": "2026-07-17",
+      "commit": "A2-chv-redundant",
+      "encoded": 10,
+      "total_readings": 1295,
+      "note": "2,410 redundant multiword CHV-only aliases dropped at import (--drop-chv-redundant). Coverage-safe (grammar-gap 0). PAGE-MARGINAL: cap-only 2873->2867 (-6, deterministic), a couple of 2-CUI compounds (dna helicase, cell death) collapsing. Same profile as A1: corpus-wide junk removal, not a page multiplicity win."
+    },
+    {
+      "date": "2026-07-17",
+      "commit": "A1-junk-atom-drops",
+      "encoded": 11,
+      "total_readings": 1271,
+      "note": "16 gENE-class junk atoms dropped at UMLS import (case-mangled collisions with common words, adjudicator different-concept). Coverage-safe (grammar-gap 0). PAGE-NEUTRAL on multiplicity (cap-only 2869->2873, reranked 1264->1271, both within noise); the value is corpus-wide junk removal + the now-wired total_readings/histogram tooling with pinned buckets. encoded 10->11 (within drift)."
+    },
     {
       "date": "2026-07-10",
       "commit": "7933f05",
@@ -64,7 +77,7 @@
       "date": "2026-07-11",
       "commit": "62d31b9",
       "encoded": 1,
-      "note": "cross-lexicon alignment v1 (12,450 merges). readings -4.3%, encoded UNCHANGED — collapsing a duplicate freed a cap slot that the parser immediately refilled."
+      "note": "cross-lexicon alignment v1 (12,450 merges). readings -4.3%, encoded UNCHANGED \u2014 collapsing a duplicate freed a cap slot that the parser immediately refilled."
     },
     {
       "date": "2026-07-12",
@@ -76,13 +89,13 @@
       "date": "2026-07-12",
       "commit": "a45c0f2",
       "encoded": 3,
-      "note": "alignment v2 (26,690 merges, incl. the un-glossed half). readings -0.3% vs v1 — FLAT. Cross-lexicon de-duplication is DONE and is not the lever. What remains is STRUCTURAL: the worst unit is 168 readings over 93 skeletons (coordination + PP attachment), sense~1.8."
+      "note": "alignment v2 (26,690 merges, incl. the un-glossed half). readings -0.3% vs v1 \u2014 FLAT. Cross-lexicon de-duplication is DONE and is not the lever. What remains is STRUCTURAL: the worst unit is 168 readings over 93 skeletons (coordination + PP attachment), sense~1.8."
     },
     {
       "date": "2026-07-12",
       "commit": "6e36580-dirty",
       "encoded": 3,
-      "note": "alignment v3 (38,389 merges). Two structural fixes: (1) UMLS surfaces LEMMATISED against WordNet, so plural atoms (Genes, Tumours, Therapies) now merge — their entries (e_<CUI>_0) are separate from the singular and were silently unmerged before; (2) one verdict now licenses EVERY surface of a concept, not just the judged one. 26,690 -> 38,389 merges, 51,925 entry rewrites (2.8x v2). readings 2320 -> 2237 (-3.6%), encoded UNCHANGED at 3. grammar-gap 0 held. Predicted the two pure-sense units (MSI tumours: 8->4, Germline: 3->2) would collapse to ENCODED; they dropped but did NOT reach 1. Confirms the standing verdict a THIRD time: alignment reduces reading MULTIPLICITY a few %, never reaches a SINGLE reading. The residual is structural. CAVEAT on the -3.6%: it is NOT drift-controlled — the v2 (2320) and v3 (2237) totals are separate live-reranker runs, so the delta conflates the lexicon change with temp-0 reranker drift, and cap-backfill absorbs part of the dedup (the worst unit's max went UP 128 -> 184). Direction is right, magnitude is soft; to isolate the lexicon effect, replay ONE ranks.json across both snapshots. Also: the prior -v3 measurement (encoded 4) was the STALE v2 .esl loaded under a v3 name (emit was never re-run); the emit+load two-step was fused into scripts/build-alignment-snapshot.sh, and merges.json is now built by a `lexicon-align merges` subcommand instead of an ad-hoc script."
+      "note": "alignment v3 (38,389 merges). Two structural fixes: (1) UMLS surfaces LEMMATISED against WordNet, so plural atoms (Genes, Tumours, Therapies) now merge \u2014 their entries (e_<CUI>_0) are separate from the singular and were silently unmerged before; (2) one verdict now licenses EVERY surface of a concept, not just the judged one. 26,690 -> 38,389 merges, 51,925 entry rewrites (2.8x v2). readings 2320 -> 2237 (-3.6%), encoded UNCHANGED at 3. grammar-gap 0 held. Predicted the two pure-sense units (MSI tumours: 8->4, Germline: 3->2) would collapse to ENCODED; they dropped but did NOT reach 1. Confirms the standing verdict a THIRD time: alignment reduces reading MULTIPLICITY a few %, never reaches a SINGLE reading. The residual is structural. CAVEAT on the -3.6%: it is NOT drift-controlled \u2014 the v2 (2320) and v3 (2237) totals are separate live-reranker runs, so the delta conflates the lexicon change with temp-0 reranker drift, and cap-backfill absorbs part of the dedup (the worst unit's max went UP 128 -> 184). Direction is right, magnitude is soft; to isolate the lexicon effect, replay ONE ranks.json across both snapshots. Also: the prior -v3 measurement (encoded 4) was the STALE v2 .esl loaded under a v3 name (emit was never re-run); the emit+load two-step was fused into scripts/build-alignment-snapshot.sh, and merges.json is now built by a `lexicon-align merges` subcommand instead of an ad-hoc script."
     },
     {
       "date": "2026-07-15",

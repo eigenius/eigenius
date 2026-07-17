@@ -391,6 +391,30 @@ struct UnitReport {
     outcome: Outcome,
 }
 
+/// The reading-count of a classified unit — its number of CLOSED full-span parses (the multiplicity
+/// the `total_readings` metric sums). Encoded = 1, Ambiguous = its count; Open/GrammarGap/
+/// MissingLexeme/ScaleBound produce no closed reading, so 0.
+fn unit_readings(o: &Outcome) -> usize {
+    match o {
+        Outcome::Encoded { .. } => 1,
+        Outcome::Ambiguous { count, .. } => *count,
+        _ => 0,
+    }
+}
+
+/// **PINNED** reading-count histogram buckets `(label, lo, hi)` inclusive — the single source of
+/// truth for the multiplicity distribution, so the buckets do NOT drift between runs. Change here
+/// only, deliberately (a re-baseline event), never per-run.
+const READING_BUCKETS: &[(&str, usize, usize)] = &[
+    ("0 (open/gap)", 0, 0),
+    ("1 (encoded)", 1, 1),
+    ("2-3", 2, 3),
+    ("4-10", 4, 10),
+    ("11-30", 11, 30),
+    ("31-100", 31, 100),
+    (">100", 101, usize::MAX),
+];
+
 /// Classify one unit. **OOV-first ordering** (vs. the slice prototype's parse-first): a closed
 /// full-span parse requires every (prose) token to seed a leaf, so a unit with any unknown token
 /// cannot encode — diagnose it as MissingLexeme from the cheap `has_token` probes *without* running
@@ -2577,15 +2601,30 @@ fn summarize(report: &[UnitReport]) {
             }
         }
     }
+    // Reading-count multiplicity: the total over all units, and the pinned-bucket distribution.
+    let readings: Vec<usize> = report.iter().map(|u| unit_readings(&u.outcome)).collect();
+    let total_readings: usize = readings.iter().sum();
+    let max_readings = readings.iter().copied().max().unwrap_or(0);
+
     // Persist the reranker's decisions (if recording) BEFORE the summary, so a run that produced a
     // number always leaves behind the artifact that makes it replayable.
     flush_sense_ranks();
     eprintln!(
         "\n=== WRN first page over FULL lexicon: {} units → encoded {enc}, ambiguous {amb}, \
          open {open}, missing-lexeme {miss}, grammar-gap {gap}, \
-         scale-bound (known, >{PARSE_BUDGET} tok) {scale} ===",
+         scale-bound (known, >{PARSE_BUDGET} tok) {scale}, total-readings {total_readings} ===",
         report.len()
     );
+    // Reading-count histogram (PINNED buckets, [`READING_BUCKETS`]) — the multiplicity distribution.
+    // `eval-parse-rate.sh` parses these `histogram:` lines; keep the format stable.
+    eprintln!(
+        "reading-count histogram ({} units, max {max_readings}):",
+        report.len()
+    );
+    for &(label, lo, hi) in READING_BUCKETS {
+        let n = readings.iter().filter(|&&c| c >= lo && c <= hi).count();
+        eprintln!("  histogram: {label:<12} {n}");
+    }
     eprintln!("distinct OOV tokens ({}): {oov:?}", oov.len());
 
     let per_unit: Vec<usize> = report

@@ -28,6 +28,7 @@
 //! both glosses?) is judged against that gold set before it is trusted on anything else.
 
 pub mod adjudicate;
+pub mod drops;
 pub mod emit;
 pub mod merge;
 

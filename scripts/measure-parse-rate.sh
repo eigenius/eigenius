@@ -129,6 +129,10 @@ fi
   echo "error: no RocksDB snapshot found (looked under $SNAPSHOT_ROOT for wordnet-umls-*; run scripts/reseed-lexicon-db.sh)" >&2
   exit 1
 }
+# ABSOLUTIZE (gotcha #1, for the snapshot too): the test binary's CWD is the crate dir, not here, so
+# a RELATIVE snapshot path silently "not found" from there → a 0.00s SKIP that reads as a pass. Done
+# while CWD is still the invocation dir (the existence check above resolved SNAP against it).
+SNAP="$(cd "$SNAP" && pwd)"
 
 # ── reranker wiring ──
 FEATURES=()

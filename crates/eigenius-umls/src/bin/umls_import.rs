@@ -47,7 +47,7 @@ use eigenius_kernel::ontology::Iri;
 use eigenius_kernel::validation::Validator;
 use eigenius_kernel::{bootstrap, esl};
 use eigenius_umls::convert::{
-    header, render_base, render_concept_block, render_document, MassNouns,
+    header, render_base, render_concept_block, render_document, DropSet, MassNouns,
 };
 use eigenius_umls::rrf::{
     parse_mrconso_line, parse_mrdef_line, parse_mrrank, parse_mrsab, parse_mrsty_line,
@@ -77,6 +77,19 @@ struct Args {
     /// count-only (the prior behaviour).
     #[arg(long)]
     countability: Option<PathBuf>,
+    /// Junk-atom drop set (`drops.json` from `lexicon-align drops`): `(cui, form)` atoms whose only
+    /// contribution is a case-mangled collision with a common word (`gENE`→`gene`), judged a different
+    /// concept by the D63 adjudicator. Their per-form content entry is skipped (the concept class
+    /// stays; the common word is covered by WordNet). Absent ⇒ no drops.
+    #[arg(long)]
+    drop_atoms: Option<PathBuf>,
+    /// A2 CHV-redundant filter (D63): drop each concept's REDUNDANT multiword CHV-only alias — a
+    /// compound surface it gets ONLY from CHV (Consumer Health Vocabulary) that an authoritative
+    /// source already provides elsewhere (`C0610268` aliasing `dna helicase`). Removes a spurious
+    /// second concept-reading of a compound; coverage-safe (the surface stays seedable). Off ⇒ a
+    /// faithful import.
+    #[arg(long)]
+    drop_chv_redundant: bool,
     /// The Metathesaurus release label, for the license notice + descriptor.
     #[arg(long, default_value = "2026AA")]
     version: String,
@@ -147,10 +160,50 @@ fn load_countability(path: Option<&Path>) -> MassNouns {
     }
 }
 
+/// Load the junk-atom drop set (`drops.json`: an array of `{cui, form, …}` rows) → `cui → {forms}`.
+/// Absent/unreadable ⇒ empty (no drops). Matched by EXACT original casing (D63 alignment).
+fn load_drops(path: Option<&Path>) -> DropSet {
+    #[derive(serde::Deserialize)]
+    struct DropRow {
+        cui: String,
+        form: String,
+    }
+    let Some(path) = path else {
+        return DropSet::new();
+    };
+    match fs::read_to_string(path) {
+        Ok(s) => {
+            let rows: Vec<DropRow> = serde_json::from_str(&s).unwrap_or_else(|e| {
+                eprintln!(
+                    "drop-atoms: {} — malformed JSON: {e}; no drops",
+                    path.display()
+                );
+                Vec::new()
+            });
+            let mut set = DropSet::new();
+            for r in &rows {
+                set.entry(r.cui.clone()).or_default().insert(r.form.clone());
+            }
+            eprintln!(
+                "drop-atoms: {} junk atoms across {} concepts from {}",
+                rows.len(),
+                set.len(),
+                path.display()
+            );
+            set
+        }
+        Err(_) => {
+            eprintln!("drop-atoms: {} not found — no drops", path.display());
+            DropSet::new()
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args = Args::parse();
     let meta = &args.meta_dir;
     let mass = load_countability(args.countability.as_deref());
+    let drops = load_drops(args.drop_atoms.as_deref());
 
     // Small files read whole: SRL-0 allowlist + the name-ranking precedence.
     let mrsab = match fs::read_to_string(meta.join("MRSAB.RRF")) {
@@ -176,7 +229,8 @@ fn main() -> ExitCode {
         Some(args.semantic_type.iter().cloned().collect())
     };
 
-    let mut builder = ConceptBuilder::new(srl0, parse_mrrank(&mrrank), allow_tui, &args.language);
+    let mut builder = ConceptBuilder::new(srl0, parse_mrrank(&mrrank), allow_tui, &args.language)
+        .with_drop_chv_redundant(args.drop_chv_redundant);
 
     // Big files streamed. Order matters: STY first (decides selection + full TUI sets),
     // then atoms and definitions (gated on the selected set).
@@ -220,13 +274,14 @@ fn main() -> ExitCode {
     // Partitioned emit: a base layer (semantic types + descriptor) + concept-batch
     // chunks, each under the size cap. The single-document path stays for small imports.
     if let Some(dir) = &args.out_dir {
-        return emit_partitioned(&subset, &args.version, dir, args.split_bytes, &mass);
+        return emit_partitioned(&subset, &args.version, dir, args.split_bytes, &mass, &drops);
     }
 
-    let (doc, rep) = render_document(&subset, &args.version, &mass);
+    let (doc, rep) = render_document(&subset, &args.version, &mass, &drops);
     eprintln!(
-        "umls import ({}): {} semantic-type classes, {} concept classes → {} lexical entries",
-        args.version, rep.semantic_types, rep.concepts, rep.entries,
+        "umls import ({}): {} semantic-type classes, {} concept classes → {} lexical entries \
+         ({} junk atoms dropped)",
+        args.version, rep.semantic_types, rep.concepts, rep.entries, rep.junk_skipped,
     );
 
     if let Some(path) = &args.out {
@@ -271,6 +326,7 @@ fn emit_partitioned(
     dir: &Path,
     split_bytes: usize,
     mass: &MassNouns,
+    drops: &DropSet,
 ) -> ExitCode {
     if let Err(e) = fs::create_dir_all(dir) {
         eprintln!("error: creating {}: {e}", dir.display());
@@ -292,6 +348,7 @@ fn emit_partitioned(
     let mut cur = hdr.clone();
     let mut total_entries = 0usize;
     let mut total_mass = 0usize;
+    let mut total_junk = 0usize;
     let mut chunk_concepts = 0usize;
 
     let flush = |idx: usize, cur: &str| -> std::io::Result<PathBuf> {
@@ -301,7 +358,7 @@ fn emit_partitioned(
     };
 
     for c in &subset.concepts {
-        let (block, brep) = render_concept_block(c, mass);
+        let (block, brep) = render_concept_block(c, mass, drops);
         // Roll over before exceeding the cap (but never write an empty chunk).
         if chunk_concepts > 0 && cur.len() + block.len() > split_bytes {
             match flush(idx, &cur) {
@@ -318,6 +375,7 @@ fn emit_partitioned(
         cur.push_str(&block);
         total_entries += brep.entries;
         total_mass += brep.mass_entries;
+        total_junk += brep.junk_skipped;
         chunk_concepts += 1;
     }
     if chunk_concepts > 0 {
@@ -331,7 +389,7 @@ fn emit_partitioned(
     }
 
     eprintln!(
-        "umls import ({version}): {sty} semantic-type classes, {} concept classes → {total_entries} lexical entries ({total_mass} additive mass entries, RC-1 head-inheritance)",
+        "umls import ({version}): {sty} semantic-type classes, {} concept classes → {total_entries} lexical entries ({total_mass} additive mass entries, RC-1 head-inheritance; {total_junk} junk atoms dropped)",
         subset.concepts.len(),
     );
     eprintln!(
