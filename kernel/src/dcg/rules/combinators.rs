@@ -144,11 +144,18 @@ enum CombKind {
 }
 
 /// An Eisner normal-form provenance guard on the left operand (D63 §8.2 item 4).
+// The shared `LeftNot` prefix is the point — every guard forbids a provenance on the LEFT operand.
+#[allow(clippy::enum_variant_names)]
 enum ProvGuard {
     /// The left operand is not itself a composition output (may not be a primary `>`/`>B` functor).
     LeftNotComposed,
     /// The left operand is not type-raised (a raised functor may only compose, not forward-apply).
     LeftNotRaised,
+    /// The left operand — the backward-application ARGUMENT — is not a modal / do-support output
+    /// ([`Combinator::Modal`]). On `backward_app` this blocks a VP-adjunct PP from attaching ABOVE a
+    /// modal ("`can arise` `from LS`"), where it would escape the modal's `Possible(…)` scope; subject
+    /// application is untouched (there the argument is the subject NP, not the modal VP).
+    LeftNotModal,
 }
 
 impl ProvGuard {
@@ -159,6 +166,7 @@ impl ProvGuard {
                 Combinator::ForwardComp | Combinator::CrossedComp | Combinator::BackwardComp
             ),
             ProvGuard::LeftNotRaised => left_prov != Combinator::TypeRaised,
+            ProvGuard::LeftNotModal => left_prov != Combinator::Modal,
         }
     }
 }
@@ -270,7 +278,10 @@ fn comb_rules() -> &'static [CombRule] {
                     functor: Operand::Right,
                     slash: "bwd",
                 },
-                prov_guards: &[],
+                // LeftNotModal: the ARGUMENT (left) may not be a modal/aux VP output — a VP-adjunct PP
+                // must attach BELOW the modal, not above it (`Combinator::Modal`). Subject application
+                // is unaffected (there the argument is the subject NP).
+                prov_guards: &[ProvGuard::LeftNotModal],
             },
             CombRule {
                 name: "forward_comp",
@@ -348,6 +359,27 @@ fn combine_other_grammar(left: &CategoryPayload, right: &CategoryPayload) -> Opt
 /// Materialise the [`Item`] for a [`SemRecipe`] from the two children's full items — the ONLY place a
 /// child sem is read. For the dependent nominal rules ([`SemRecipe::Rule`]) the result CATEGORY
 /// also embeds the modifier's meaning (CN-as-types), so it too is built here.
+/// A **modal / do-support auxiliary** functor category `(S[dcl,fin]\NP)/(S[dcl,bse]\NP)` — a forward
+/// functor from a BASE verbal VP to a FINITE one (`can`/`may`/…, and the declarative do-support). Its
+/// forward-application output is tagged [`Combinator::Modal`] so a VP-adjunct cannot attach above it.
+fn is_modal_functor(cat: &Exp) -> bool {
+    let Some([res, arg]) = is_ctor(cat, "fwd") else {
+        return false;
+    };
+    is_vp_with_fin(res, "fin") && is_vp_with_fin(arg, "bse")
+}
+
+/// `S[_,<fin>]\NP` — a verbal VP `bwd(cat_s(_, <fin>), NP)` with the given finiteness feature name.
+fn is_vp_with_fin(cat: &Exp, fin: &str) -> bool {
+    let Some([s, _np]) = is_ctor(cat, "bwd") else {
+        return false;
+    };
+    let Some([_mood, f]) = is_ctor(s, "cat_s") else {
+        return false;
+    };
+    matches!(f, Exp::InductiveCtor(_, n, _) if n == fin)
+}
+
 fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     match recipe {
         SemRecipe::DetRefine { cat, t } => {
@@ -369,10 +401,20 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
         }
         SemRecipe::Apply { cat, order } => {
             let (sem, prov) = match order {
-                AppOrder::Fwd => (
-                    Exp::App(Box::new(left.sem().clone()), Box::new(right.sem().clone())),
-                    Combinator::ForwardApp,
-                ),
+                AppOrder::Fwd => {
+                    // A modal / do-support aux (`(S[dcl,fin]\NP)/(S[dcl,bse]\NP)`, functor = left)
+                    // tags its finite-VP output `Modal`, so a later VP-adjunct PP cannot attach ABOVE
+                    // it (`Combinator::Modal` / `ProvGuard::LeftNotModal`) and escape the modal scope.
+                    let prov = if is_modal_functor(left.cat()) {
+                        Combinator::Modal
+                    } else {
+                        Combinator::ForwardApp
+                    };
+                    (
+                        Exp::App(Box::new(left.sem().clone()), Box::new(right.sem().clone())),
+                        prov,
+                    )
+                }
                 AppOrder::Bwd => (
                     Exp::App(Box::new(right.sem().clone()), Box::new(left.sem().clone())),
                     Combinator::BackwardApp,

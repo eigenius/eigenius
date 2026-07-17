@@ -65,6 +65,17 @@ pub enum Combinator {
     /// `S[adj]\NP` form is for argument/predication slots, not to modify a noun — consuming it there
     /// is the bare-mass `And` over-generation (`experiments/parsing/near-encoded-bucket-analysis.md`).
     KindRaised,
+    /// A **modal / do-support auxiliary output** — a finite VP built by applying a functor of shape
+    /// `(S[dcl,fin]\NP)/(S[dcl,bse]\NP)` (a base VP → finite VP; `can`/`may`/…, and the declarative
+    /// do-support). Carried so a **VP-adjunct PP may not attach ABOVE it**: the modal wraps its VP in
+    /// `Possible(…)`, and an adjunct attaching to `can arise` (rather than the bare `arise`) escapes
+    /// that scope — `And(Possible(arise), prep_from(…))` instead of `Possible(And(arise, prep_from(…)))`,
+    /// which wrongly asserts the PP as fact ("adjuncts attach below auxiliaries",
+    /// `experiments/parsing/near-encoded-bucket-analysis.md`). The `backward_app` guard
+    /// [`ProvGuard::LeftNotModal`] refuses this modal-tagged VP as a backward-application ARGUMENT (the
+    /// VP-adjunct case) while leaving subject application untouched (there the argument is the subject
+    /// NP, not the modal VP). ENF-inert.
+    Modal,
     /// Any other producer (lexical leaf, coordination, group/distributive rules) —
     /// not a composition output, so ENF never constrains it.
     Other,
