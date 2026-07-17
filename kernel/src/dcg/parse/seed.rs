@@ -134,27 +134,36 @@ impl Parser {
                 // and `may` one of `Month of May`: the model ranked the correct sense #0, and the
                 // cap, obliged to take TWO, grabbed the next off the list.
                 //
-                // The cut applies at the BASE cap only. On **widen** (cap above the base) it is
-                // skipped and the eliminated senses become seedable again, so a wrong elimination
-                // costs a slower parse, never a grammar gap.
+                // The cut applies at EVERY cap rung (see below), Pass 2 being the safety net — NOT
+                // base-cap-only as it once was. Base-cap-only let widen un-eliminate, which re-seeded
+                // the reranker's rejects onto every word the moment ONE word forced a wider cap (the
+                // `gene`/`C5849123` bug).
                 //
                 // KNOWN GAP (2026-07-12): the ranker can eliminate a CLOSED-CLASS reading — it
                 // dropped the determiner `each` in favour of UMLS's "Each (qualifier value)".
                 // `sense_cap_key` sorts unranked entries last, so the truncate takes exactly the
-                // entry that should be exempt. Widen recovers it (the sweep held at `grammar-gap 0`),
-                // but the grammatical core should not be eliminable at all. Partitioning the closed
-                // class out is the fix; a first attempt broke `sense_reranker_overrides_static_cap_order`
-                // and needs the seeding path understood before retrying.
+                // entry that should be exempt. Pass 2 (the ranks-`None` widen) recovers it (the sweep
+                // held at `grammar-gap 0`), but the grammatical core should not be eliminable at all.
+                // Partitioning the closed class out is the fix; a first attempt broke
+                // `sense_reranker_overrides_static_cap_order` and needs the seeding path understood.
                 let mut eff = cap;
-                if Some(cap) == self.config.sense_cap {
-                    if let Some(r) = ranks {
-                        let ranked = entries
-                            .iter()
-                            .filter(|e| e.sense.as_deref().is_some_and(|s| r.contains_key(s)))
-                            .count();
-                        if ranked > 0 {
-                            eff = eff.min(ranked);
-                        }
+                // Apply the reranker's ELIMINATION at EVERY cap rung, not just the base — INCLUDING
+                // during widen. An eliminated sense (absent from `ranks`) stays out even when the cap
+                // grows to admit some word's deeper RANKED sense, so a sentence that widens for ONE word
+                // (e.g. `cause`/`mutations` needing its #3–4 sense) does not FLOOD every OTHER word with
+                // its rejects — the `gene` junk (`C5849123` = "Gross Extranodal Extension" re-seeding for
+                // `gene` via a "gENE" synonym) that only ever appeared because widen used to un-eliminate.
+                // The wrong-elimination SAFETY that once justified the base-cap-only cut is provided by
+                // [`Self::parse_widening`]'s PASS 2 — a ranks-`None` widen (pure frequency, no cut),
+                // reached only when Pass 1 yields nothing, i.e. exactly when a NEEDED sense was wrongly
+                // eliminated. So the cut can hold at all caps without ever costing a grammar gap.
+                if let Some(r) = ranks {
+                    let ranked = entries
+                        .iter()
+                        .filter(|e| e.sense.as_deref().is_some_and(|s| r.contains_key(s)))
+                        .count();
+                    if ranked > 0 {
+                        eff = eff.min(ranked);
                     }
                 }
                 if entries.len() > eff {
