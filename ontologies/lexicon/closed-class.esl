@@ -1586,7 +1586,106 @@ resource lexicon:some_obj : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
-    lexicon:sense    = "some"; 
+    lexicon:sense    = "some";
+    lexicon:grade    = epistemic:declared;
+}
+
+// ── Plural quantifier determiners (`several`/`many`/`few`/`most`/`both`) ───────────────
+// These were MISSING from the determiner lexicon, so `several cancers` had no quantifier reading and
+// fell back to `several`'s WordNet gradable-ADJECTIVE entry used prenominally (`gt(deg_a, std)` — the
+// spurious "more-several-than-standard" modifier). Modeled on the plural `the`/`some`: an
+// existential-PLURAL determiner (category `cat_forall(pl, …)`, `exists_sem`/`obj_exists_sem`). The
+// exact cardinality (`several` > 2, `both` = 2, `most` = majority) is a FIRST-CUT existential and left
+// opaque, as with the other determiners; the WordNet adjective reading is dropped at seed time when a
+// determiner reading is present (the cross-POS adjective prune, `parse/seed.rs`).
+resource lexicon:several_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('several cancers'). First-cut existential (>2), cardinality opaque.";
+    lexicon:form     = "several";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "several";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:several_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('several cancers'), object position.";
+    lexicon:form     = "several";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "several";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:many_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('many cancers'). First-cut existential, cardinality opaque.";
+    lexicon:form     = "many";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "many";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:many_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('many cancers'), object position.";
+    lexicon:form     = "many";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "many";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:few_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('few cancers'). First-cut existential, cardinality/polarity opaque.";
+    lexicon:form     = "few";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "few";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:few_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('few cancers'), object position.";
+    lexicon:form     = "few";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "few";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:most_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('most cancers'). First-cut existential (majority), cardinality opaque. (No superlative reading — the grammar has none.)";
+    lexicon:form     = "most";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "most";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:most_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('most cancers'), object position.";
+    lexicon:form     = "most";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "most";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:both_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('both lineages'). First-cut existential (dual, =2), cardinality opaque.";
+    lexicon:form     = "both";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "both";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:both_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('both lineages'), object position.";
+    lexicon:form     = "both";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "both";
     lexicon:grade    = epistemic:declared;
 }
 // no — negative, singular.

@@ -71,6 +71,21 @@ impl Parser {
                 let toks: Vec<&str> = s_lc.split_whitespace().collect();
                 toks.len() > 1 && toks.iter().all(|t| has_closed(t))
             });
+        // Cross-POS ADJECTIVE prune (ALWAYS ON — a correctness fix, not the `pos_prune` experiment):
+        // a surface that carries a closed-class DETERMINER reading (a quantifier — its category is
+        // `cat_forall(num, λT. …)`) must not ALSO be read as an open-class gradable ADJECTIVE. WordNet
+        // ships `several`/`many`/`few`/`most`/`both` as descriptive adjectives; prenominally the
+        // attributive rule (`refine_attrib`) turns that `S[adj]\NP` into a spurious `gt(deg_a, std_a)`
+        // modifier ("more-several-than-standard cancers") that duplicates the determiner reading —
+        // over-generation, `experiments/parsing/near-encoded-bucket-analysis.md`. Keyed on the
+        // DETERMINER category, so a plain adjective (no closed-class determiner reading on the surface)
+        // is untouched. A rare PREDICATIVE use ("the problems were several") is given up with it; these
+        // words are quantifiers, not gradable properties, in this grammar.
+        let surface_is_determiner = self
+            .lex
+            .entries_for(&s_lc)
+            .iter()
+            .any(|e| e.in_lexicon.is_none() && is_ctor(e.item.cat(), "cat_forall").is_some());
         let mut out = Vec::new();
         for c in &candidates {
             let mut entries = self.scoped(self.lex.entries_for(c), scope);
@@ -80,6 +95,9 @@ impl Parser {
                         || !(is_ctor(e.item.cat(), "cat_n").is_some()
                             || is_ctor(e.item.cat(), "cat_np").is_some())
                 });
+            }
+            if surface_is_determiner {
+                entries.retain(|e| e.in_lexicon.is_none() || !is_adjective_cat(e.item.cat()));
             }
             if entries.is_empty() {
                 continue;
