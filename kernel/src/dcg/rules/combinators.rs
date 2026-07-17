@@ -576,65 +576,27 @@ fn refine_attrib(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>
 }
 
 /// Named-entity compound `[cat_np] [cat_n]` → `Σx:C. compound(x, ⟦left⟧)`. Head noun is the right.
-fn refine_named_compound(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
+fn refine_named_compound(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     let (decl, c, noun_num) = noun_parts(right, binds);
-    let restr = app2(
-        "urn:eigenius:ontology:compound",
-        COMPOUND_X,
-        left.sem().clone(),
-    );
-    refined_noun(&decl, &c, &noun_num, restr)
+    refine_conjoin(&decl, &c, &noun_num, layer, |x| {
+        app2("urn:eigenius:ontology:compound", x, left.sem().clone())
+    })
 }
 
 /// N-N kind compound `[cat_n] [cat_n]` → `Σx:C. compound_kind(x, ⟦left⟧)`. Head noun is the right.
-fn refine_kind_compound(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
+fn refine_kind_compound(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     let (decl, c, noun_num) = noun_parts(right, binds);
-    let restr = app2(
-        "urn:eigenius:ontology:compound_kind",
-        COMPOUND_X,
-        left.sem().clone(),
-    );
-    refined_noun(&decl, &c, &noun_num, restr)
+    refine_conjoin(&decl, &c, &noun_num, layer, |x| {
+        app2("urn:eigenius:ontology:compound_kind", x, left.sem().clone())
+    })
 }
 
 /// Post-nominal PP modifier `[cat_n(C)] [cat_pp]` → `Σx:C. ⟦right⟧(x)`. Head noun is the LEFT.
-/// If `C` is ALREADY a refined noun `Σx:Base. P(x)` (a compound / earlier-modified noun), CONJOIN the
-/// PP predicate over the SAME base → `Σx:Base. P(x) ∧ pp(x)` — a FLAT Σ, mirroring `refine_attrib`
-/// (EXPERIMENT: flatten the modifier side, testing whether a nested Σ is what blocks the clean parse).
 fn refine_pp_mod(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     let (decl, c, noun_num) = noun_parts(left, binds);
-    let sigma = match &c {
-        Exp::Sig(Patt::Var(bx), base, p_body)
-            if super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And")
-                .is_some() =>
-        {
-            let and =
-                super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And").unwrap();
-            let pp_at = Exp::App(
-                Box::new(right.sem().clone()),
-                Box::new(Exp::Var(bx.clone())),
-            );
-            Exp::Sig(
-                Patt::Var(bx.clone()),
-                base.clone(),
-                Box::new(Exp::InductiveType(and, vec![(**p_body).clone(), pp_at])),
-            )
-        }
-        _ => Exp::Sig(
-            Patt::Var(COMPOUND_X.into()),
-            Box::new(c.clone()),
-            Box::new(Exp::App(
-                Box::new(right.sem().clone()),
-                Box::new(Exp::Var(COMPOUND_X.into())),
-            )),
-        ),
-    };
-    Item::from_parts(
-        Exp::InductiveCtor(decl, "cat_n".into(), vec![sigma.clone(), noun_num]),
-        sigma,
-        Combinator::Compound,
-        Cost::ZERO,
-    )
+    refine_conjoin(&decl, &c, &noun_num, layer, |x| {
+        Exp::App(Box::new(right.sem().clone()), Box::new(Exp::Var(x.into())))
+    })
 }
 
 // ── The datafied "other grammar" binary rules (Phase 2) ──────────────────────
@@ -951,20 +913,44 @@ fn app2(axiom_iri: &str, arg0: &str, arg1: Exp) -> Exp {
     )
 }
 
-/// Build a refined common noun `cat_n(Σx:C. restr, num)` for a 6-mod rule (D63 §8.13),
-/// reusing the head noun's `decl` and number; `restr` is the restrictor `Prop` over the
-/// bound `COMPOUND_X`. Sem is the Σ itself (CN-as-types); provenance `Other`.
-fn refined_noun(
+/// Build a refined common noun `cat_n(Σx:C. restr(x), num)` for a modifier rule (D63 §8.13),
+/// reusing the head noun's `decl` and number. **FLATTENS** when `C` is already a refined noun
+/// `Σx:Base. P(x)`: conjoin the new restrictor over the SAME base → `Σx:Base. And(P(x), restr(x))`,
+/// else the simple `Σx:C. restr(x)`. `mk_restr` receives the bound variable NAME and returns the
+/// restrictor `Prop`. This mirrors how `refine_attrib` handles a stacked adjective, applied to EVERY
+/// modifier rule so that a chain of modifiers on a compound noun stays a **flat** Σ rather than a
+/// nested Σ-over-Σ — the flat form is what the downstream bare-plural kind-raise / predication
+/// consumes (the bare-mass `And` over-generation used to be the only other flattener; see
+/// `experiments/parsing/near-encoded-bucket-analysis.md`). Sem is the Σ itself; provenance `Compound`.
+fn refine_conjoin(
     decl: &Arc<crate::nbe::term::InductiveDecl>,
     c: &Exp,
     noun_num: &Exp,
-    restr: Exp,
+    layer: &Arc<Layer>,
+    mk_restr: impl Fn(&str) -> Exp,
 ) -> Item {
-    let sigma = Exp::Sig(
-        Patt::Var(COMPOUND_X.into()),
-        Box::new(c.clone()),
-        Box::new(restr),
-    );
+    let sigma = match c {
+        Exp::Sig(Patt::Var(bx), base, p_body)
+            if super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And")
+                .is_some() =>
+        {
+            let and =
+                super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And").unwrap();
+            Exp::Sig(
+                Patt::Var(bx.clone()),
+                base.clone(),
+                Box::new(Exp::InductiveType(
+                    and,
+                    vec![(**p_body).clone(), mk_restr(bx)],
+                )),
+            )
+        }
+        _ => Exp::Sig(
+            Patt::Var(COMPOUND_X.into()),
+            Box::new(c.clone()),
+            Box::new(mk_restr(COMPOUND_X)),
+        ),
+    };
     Item::from_parts(
         Exp::InductiveCtor(
             decl.clone(),
