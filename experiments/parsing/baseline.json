@@ -1,8 +1,8 @@
 {
   "_comment": "The reference measurement the parse-rate gate is judged against. Run logs are NOT committed (experiments/*/results/ is gitignored); this is the distilled result + provenance. Update it DELIBERATELY, never to make a red run go green.",
   "provenance": {
-    "commit": "72fc760 (quantifier-determiner fix, on top of 925faa2 definite-referential): added several/many/few/most/both as plural existential determiners + an always-on cross-POS prune that drops the gradable-ADJECTIVE reading of any surface carrying a closed-class determiner reading)",
-    "date": "2026-07-16",
+    "commit": "4400aef (two seeding fixes on top of 72fc760 quantifier: [33ff4a2] event -- cap-then-dedup so a merged reranker top-2 collapses to 1 instead of the pre-cap dedup backfilling a lower-ranked wrong sense; [4400aef] gene -- the reranker's sense ELIMINATION now holds at every cap rung, not just base, so widening for one word no longer re-admits every other word's rejects. PASS 2 (ranks=None widen) remains the wrong-elimination safety net. Both are parse/seed.rs runtime -- NO reseed.)",
+    "date": "2026-07-17",
     "profile": "release",
     "features": [
       "use-llm"
@@ -11,26 +11,27 @@
     "page": "references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt",
     "snapshot": "wordnet-umls-aligned-v3-2026-07-16-quant",
     "snapshot_lineage": [
+      "UNCHANGED from the quantifier baseline -- both fixes are parse/seed.rs runtime code, not bootstrap, so the snapshot is byte-identical (no reseed, no re-align).",
       "scripts/reseed-lexicon-db.sh --umls-all --snapshot-dir <base>  -> wordnet-umls-2026-07-16-quant  (base; bootstrap incl. axiom ontology:the AND the 5 plural quantifier determiners -- image rebuilt)",
-      "experiments/lexicon-align/merges.json (38,389 merges, unchanged from v3)",
-      "scripts/build-alignment-snapshot.sh --base <base> ...  -> wordnet-umls-aligned-v3-2026-07-16-quant (2.7 GB)",
-      "  the layer rewrites 51,925 UMLS entries",
-      "NOTE: the default WRN-TUI subset reseed (988 MB) is NOT faithful -- it drops ~2/3 of UMLS and yields spurious cap-only grammar-gaps + missing-lexemes. --umls-all is required to reproduce baseline coverage."
+      "scripts/build-alignment-snapshot.sh --base <base> --merges experiments/lexicon-align/merges.json (38,389)  -> wordnet-umls-aligned-v3-2026-07-16-quant (2.7 GB)",
+      "NOTE: the default WRN-TUI subset reseed (988 MB) is NOT faithful -- it drops ~2/3 of UMLS. --umls-all is required to reproduce baseline coverage."
     ],
     "config": "pos_prune=0 combinatory_core=0 SENSE_CAP=2 CELL_BEAM=64",
-    "runtime_s": 248
+    "runtime_s": 239
   },
   "expected": {
     "units": 62,
     "grammar_gap": 0,
     "missing_lexeme": 0,
-    "ambiguous": 54,
+    "ambiguous": 52,
     "open": 1,
-    "encoded": 7
+    "encoded": 9,
+    "total_readings_ceiling": 1500
   },
   "gates": {
     "coverage": "grammar_gap == 0 and missing_lexeme == 0 — every sentence parses. NON-NEGOTIABLE.",
-    "faithfulness": "encoded should RISE. Floor set at 7, ONE UNIT BELOW the observed 8 (the reranker drifts ~1 unit between runs even at temperature 0; a baseline set at the peak would flag that drift as a regression). Two of the observed 8 are DETERMINISTIC, traced fixes (each a named sentence AMBIG -> ENCODED, not reranker drift): (1) the definite-referential fix -- 'MSI cancer models did not require the exonuclease activity of WRN', whose only post-rerank ambiguity was the not-exists/exists-not negation-scope dup; (2) the quantifier-determiner fix -- 'MSI contributes to several cancers', where the new `several` determiner + the adjective prune leave only cancer-sense polysemy (1 structural skeleton), which the reranker collapses. The other 6 encodings are reranker sense-collapse and drift; the floor absorbs them."
+    "faithfulness": "encoded should RISE. Floor set at 9, ONE UNIT BELOW the observed 10 (the reranker drifts ~1 unit between runs even at temperature 0; a baseline set at the peak flags that drift as a regression). The session's four traced, DETERMINISTIC fixes (each a named sentence AMBIG -> ENCODED, not drift): (1) definite-referential -- 'MSI cancer models did not require the exonuclease activity of WRN'; (2) quantifier-determiner -- 'MSI contributes to several cancers'; (3) event cap-then-dedup -- 'Each event alone does not lead to cell death'; (4) gene elimination-through-widen -- 'Germline mutations in the MMR genes MSH2, MSH6, PMS2 or MLH1 cause Lynch syndrome'. The other ~6 encodings are reranker sense-collapse and drift; the floor absorbs them.",
+    "multiplicity": "total_readings (sum of readings over all units) is the MORE SENSITIVE signal and should FALL / not rise. Observed 1286 (live) / 1282 (replay) at commit 4400aef, DOWN 35% from 1991 at 72fc760 -- the gene elimination-through-widen fix stops widening sentences flooding the reranker's rejects page-wide. Ceiling set at 1500 (well below the 1991 pre-fix level, with headroom for reranker drift): a run above it means a widening sentence is re-flooding. NOT YET WIRED into scripts/eval-parse-rate.sh (informational until then)."
   },
   "reproduced": [
     {
@@ -100,6 +101,12 @@
       "commit": "72fc760",
       "encoded": 8,
       "note": "RE-BASELINE. Quantifier-determiner fix. `several`/`many`/`few`/`most`/`both` were MISSING from the determiner lexicon, so `several cancers` had no quantifier reading and fell back to `several`'s WordNet gradable-ADJECTIVE entry used prenominally (`gt(deg_a, std_a)` -- the spurious 'more-several-than-standard' modifier). Two-part fix: (1) added the 5 as plural existential determiners (closed-class.esl, modeled on `some` but pl; cardinality opaque first-cut); (2) an ALWAYS-ON cross-POS prune (parse/seed.rs) that drops the open-class ADJECTIVE reading (`is_adjective_cat`, the S[adj]\\NP seed) of any surface carrying a closed-class DETERMINER reading (`cat_forall`). Part 1 alone would leave determiner AND adjective (still 2); part 2 alone would gap the sentence (no quantifier reading) -- both needed. Bootstrap edit -> reseed --umls-all + v3-align -> wordnet-umls-aligned-v3-2026-07-16-quant (2.7 GB, image rebuilt). Witnessed: cap-only grammar-gap 0 + missing-lexeme 0, total readings 2899 -> 2835 (-64, adjective readings pruned corpus-wide), `several cancers` now 1 structural skeleton (determiner; both the gt-adjective and the noun-compound gone); reranked encoded 8, ambiguous 53, open 1, grammar-gap 0, runtime 248s. Traced drift-immune signal: `MSI contributes to several cancers` AMBIG x2 -> ENCODED (+1 over the definite-fix run's 7). No collateral: `most commonly observed` (most-as-adverb) and `fewer deletion` (fewer-as-determiner) unchanged; predicative adjective uses ('the problems were several') are given up by the prune (accepted -- these are quantifiers, not gradable properties). KNOWN RESIDUAL: `few`/`most`/`both` still carry a noun-compound reading (the prune targets adjectives, not nouns); `several`/`many` are clean (no competing noun sense at the cap). Floor set at 7 (see gates.faithfulness)."
+    },
+    {
+      "date": "2026-07-17",
+      "commit": "4400aef",
+      "encoded": 10,
+      "note": "RE-BASELINE. Two SEEDING fixes (parse/seed.rs, NO reseed -- snapshot unchanged), diagnosed from the reranked 2-3 bucket. (A) EVENT [33ff4a2] cap-then-dedup: the cross-lexicon concept dedup used to run BEFORE the sense cap, so a merged reranker top-2 (event-happening's WordNet sense + its UMLS twin) dropped the twin and let the cap BACKFILL a lower-ranked wrong sense (event-*circumstance*). Moving dedup AFTER the cap keeps the reranker's top-`cap` raw positions, which collapse to 1 -> 'Each event alone does not lead to cell death' encodes. (B) GENE [4400aef] elimination-through-widen: the sense-cap elimination cut applied only at BASE cap, so when a sentence WIDENED (base cap fails -- 'Germline mutations ... cause Lynch syndrome' needs cap 4 for `cause`/`mutations`' deep RANKED sense), the widen un-eliminated ALL of the reranker's rejects, re-seeding junk onto every word (`gene` got C5849123 = 'Gross Extranodal Extension' via a spurious 'gENE' NCI synonym). Making the cut hold at EVERY cap rung keeps eliminations through widen; the wrong-elimination safety is instead provided by parse_widening PASS 2 (a ranks=None widen), reached only when a NEEDED sense was wrongly eliminated -- so grammar-gap stays 0. CORRECTION: `gene` was NOT a merge gap (the real gene C0017337<->n05436752 was already merged); the earlier 'dedup gene' framing was wrong -- the junk is a different concept the reranker already eliminates, and merges.json was not the lever. VALIDATED by a deterministic REPLAY of the 2235 rankings (isolates the code from the reranker): encoded 8->10, total_readings 1991->1282 (-36%), grammar-gap 0; then CONFIRMED live at 4400aef: encoded 10, ambiguous 51, open 1, grammar-gap 0, total_readings 1286 (== replay, so the -35% multiplicity drop is structural, not drift), runtime 239s. The 2 newly-encoded are exactly 'Each event ...' and 'Germline mutations ...'. The bigger result is total_readings: the gene fix is BROAD (every widening sentence stops flooding), 101+ bin 4->1. Floor set at 9; total_readings ceiling 1500 (see gates)."
     }
   ]
 }
