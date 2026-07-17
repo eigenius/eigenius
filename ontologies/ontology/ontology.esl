@@ -40,6 +40,17 @@ axiom ontology:subclass_of : Set -> Set -> Prop
 // is grounding-supplied by the encoding institution (D62).
 axiom ontology:kind_of : Set -> lexicon:Entity
 
+// the(A) — the unique presupposed referent of a DEFINITE noun-type A (the ι /
+// definite-description operator): a class (a `Set` value) mapped to THE individual of that
+// type. REFERENTIAL, not quantificational — a definite ("the exonuclease activity of WRN",
+// "these lines") denotes a fixed referent, so unlike an existential it does NOT scope under
+// negation / modals: `¬require(the(A), s)` is a single reading, where reusing the
+// existential encoding for definites spuriously bifurcated into `¬∃x.P` vs `∃x.¬P` (the two
+// equivalent for a unique referent — the WRN-paper "did not require the … of WRN"
+// over-generation). Opaque like `kind_of`: the grammar guarantees the typed tree; the
+// uniqueness presupposition + referent resolution are grounding-supplied (D62).
+axiom ontology:the : forall (A : Set) => A
+
 // ── Nominal-modification relations (D63 §8.13 Slice 6-mod) ────────────
 // OPAQUE modifier relations the compound-noun and PP-adjunct rules produce. The
 // modifier↔head relation is vague (compound: "WRN depletion" = depletion *of* WRN; PP:

@@ -370,3 +370,53 @@ gap so the base cap parses, or (for the genuinely bad atom / wrong-category case
 surface form or import category. "Remove the entry" is never the answer, because the entry is
 appropriate in other contexts. **Open:** confirm the base-cap gap is `be` + predicative-adjective
 relative clause (needs a reranked test sentence isolating it).
+
+## Definite-as-existential negation-scope over-generation — FIXED (`2026-07-16`)
+
+Analysing the 2–4-reading sentences, the one **grammar** (structural) over-generation among them was
+`MSI cancer models did not require the exonuclease activity of WRN` — 2 readings, `sense× = 1.0`,
+differing only in the position of `False`:
+
+```
+raw[0]: … require(…) → G#0 → G#0 → False      (¬∃ : negation wide)
+raw[1]: … require(…) → False → G#0 → G#0      (∃¬ : negation narrow)
+```
+
+The `ΠG#0:Prop … → G#0 → G#0` chain is the CPS existential `∀C:Prop. (∀x:T. (TV(x,subj)→C)) → C` of
+the **object determiner** `the`. Negation composes at two points in it, giving `¬∃`/`∃¬`.
+
+**Root cause (witnessed).** Definite/demonstrative determiners reused `obj_exists_sem` /`exists_sem`
+(a documented first-cut, closed-class.esl). For a genuine existential the two scopes are truly
+distinct — confirmed: `HeLa did not require an activity` keeps both, correctly. For a **definite**
+(unique reference) they collapse, so the second reading is spurious — confirmed: the split needs a
+definite (`the`) *and* negation; `HeLa required the activity` (no neg) and `HeLa did not require
+activity` (no `the`) are each a single reading.
+
+**Fix — referential definite.** A definite is referential, not quantificational. New opaque axiom
+`ontology:the : forall (A : Set) => A` (the ι operator — the presupposed unique referent of a
+noun-type). Two sems: subject `λA.λV. V(the(A))`, object `λT.λTV.λsubj. TV(the(T), subj)`. The 12
+definite entries (`the`, `the`-pl, `this`, `that`, `these`, `those`; subj+obj) point at them;
+`a`/`an`/`some` and the cardinals keep the quantifier sems (their scope split is real).
+
+**Why it collapses.** The category is unchanged (sem-only edit), so the categorial derivation set —
+and thus **grammar-gap — is unchanged by construction**. Both scope derivations now assemble to the
+identical `TV(the(T),subj) → False`; NbE normalises them equal; `felicity::subsume_duplicates` (the
+definitional-equality dedup) drops the duplicate → 2 → 1.
+
+**Status — DONE (`2026-07-16`).** Bootstrap typechecks (`the(A):A`, `TV(the(T),subj)` well-typed);
+1631 kernel lib tests pass. The bootstrap edit invalidates the persisted chain, so the snapshot was
+reseeded `--umls-all` + v3-aligned (2.8 GB, matching the baseline coverage — a first reseed at the
+default WRN-TUI subset dropped ~2/3 of UMLS and produced spurious cap-only gaps + missing-lexemes;
+not the fix). Witnessed on the faithful snapshot:
+- cap-only: **grammar-gap 0, missing-lexeme 0**; the WRN sentence **4→2** (1 structural skeleton, the
+  residual is a cross-lexicon `activity` sense dup, not scope).
+- reranked (cnl-v3): the WRN sentence **AMBIG×2 → ENCODED**, so **encoded 6→7** — recovering the −1 the
+  bare-mass run showed and matching the `6914d01` baseline (7); grammar-gap 0; the other 6 encodings
+  intact.
+- Existentials (`a`/`an`/`some`) and adjectival negation (`were not essential`) correctly untouched.
+
+**Regression guards:** a CI-runnable lexicon-wiring test (`dcg::lexicon::referential_definite_tests`,
+no snapshot — catches a definite→existential reversion or an existential→referential over-correction)
+plus a snapshot-gated behavioural test (`definite_negation_collapses_referential` in
+`crates/eigenius-wordnet/tests/db_backed_encoding.rs` — the definite is scopeless while the matched
+existential keeps the `¬∃`/`∃¬` split).

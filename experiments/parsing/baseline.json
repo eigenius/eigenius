@@ -1,35 +1,36 @@
 {
   "_comment": "The reference measurement the parse-rate gate is judged against. Run logs are NOT committed (experiments/*/results/ is gitignored); this is the distilled result + provenance. Update it DELIBERATELY, never to make a red run go green.",
   "provenance": {
-    "commit": "29930e4 (dcg-cleanup merged: dcg module reorg + conn_list declared on lexicon:Conn)",
-    "date": "2026-07-15",
+    "commit": "4c613e2-dirty (definite-referential fix, uncommitted at re-baseline: axiom ontology:the + referential the_ref_subj_sem/the_ref_obj_sem; 12 definite + demonstrative determiner entries repointed off obj_exists_sem/exists_sem)",
+    "date": "2026-07-16",
     "profile": "release",
     "features": [
       "use-llm"
     ],
     "reranker": "AnthropicSenseRanker (live), claude-sonnet-4-6, temperature 0",
     "page": "references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt",
-    "snapshot": "wordnet-umls-aligned-v3-2026-07-15",
+    "snapshot": "wordnet-umls-aligned-v3-2026-07-16",
     "snapshot_lineage": [
-      "scripts/reseed-lexicon-db.sh --umls-all               -> wordnet-umls-2026-07-15  (base)",
-      "cargo run --bin lexicon-align -- merges                -> experiments/lexicon-align/merges.json (38,389 merges)",
-      "scripts/build-alignment-snapshot.sh --base <base> ... -> wordnet-umls-aligned-v3-2026-07-15",
-      "  the layer rewrites 51,925 UMLS entries (each merge can hit the count entry AND its _mass variant)"
+      "scripts/reseed-lexicon-db.sh --umls-all --no-build     -> wordnet-umls-2026-07-16  (base; new bootstrap incl. axiom ontology:the)",
+      "experiments/lexicon-align/merges.json (38,389 merges, unchanged from v3)",
+      "scripts/build-alignment-snapshot.sh --base <base> ...  -> wordnet-umls-aligned-v3-2026-07-16 (2.8 GB)",
+      "  the layer rewrites 51,925 UMLS entries",
+      "NOTE: the default WRN-TUI subset reseed (988 MB) is NOT faithful -- it drops ~2/3 of UMLS and yields spurious cap-only grammar-gaps + missing-lexemes. --umls-all is required to reproduce baseline coverage."
     ],
     "config": "pos_prune=0 combinatory_core=0 SENSE_CAP=2 CELL_BEAM=64",
-    "runtime_s": 257
+    "runtime_s": 279
   },
   "expected": {
     "units": 62,
     "grammar_gap": 0,
     "missing_lexeme": 0,
-    "ambiguous": 58,
+    "ambiguous": 55,
     "open": 1,
-    "encoded": 3
+    "encoded": 6
   },
   "gates": {
-    "coverage": "grammar_gap == 0 and missing_lexeme == 0 \u2014 every sentence parses. NON-NEGOTIABLE.",
-    "faithfulness": "encoded should RISE. Set at the observed FLOOR (3), not the best run (4): the reranker drifts ~1 unit between runs even at temperature 0, and a baseline set at the peak would flag that drift as a regression."
+    "coverage": "grammar_gap == 0 and missing_lexeme == 0 — every sentence parses. NON-NEGOTIABLE.",
+    "faithfulness": "encoded should RISE. Floor set at 6, ONE UNIT BELOW the observed 7 (the reranker drifts ~1 unit between runs even at temperature 0; a baseline set at the peak would flag that drift as a regression). Of the observed 7, the definite-referential fix (2026-07-16) contributes a DETERMINISTIC +1: the WRN negation sentence 'MSI cancer models did not require the exonuclease activity of WRN' had, after reranking, only the not-exists / exists-not negation-scope dup (STRUCTURAL, un-collapsible by the reranker) -- referential definites remove it, so AMBIG x2 -> ENCODED. The other 6 encodings are reranker sense-collapse and drift; the floor absorbs them."
   },
   "reproduced": [
     {
@@ -47,9 +48,9 @@
     }
   ],
   "reproducibility": {
-    "finding": "temperature:0 is NOT deterministic. Two live runs of identical code against an identical store differ on ~5% of the CAPPED top-2 \u2014 the only part that reaches the parser. encoded moves +/-1 unit between runs. Do not read a one-unit change as signal.",
-    "the_only_exact_reproduction": "scripts/measure-parse-rate.sh --replay <run>/ranks.json \u2014 replays the recorded rankings with no LLM. A replay with misses > 0 is a DIFFERENT experiment.",
-    "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible \u2014 two senses with different labels and the SAME sem are one concept \u2014 but the pre-dedup caveat still stands."
+    "finding": "temperature:0 is NOT deterministic. Two live runs of identical code against an identical store differ on ~5% of the CAPPED top-2 — the only part that reaches the parser. encoded moves +/-1 unit between runs. Do not read a one-unit change as signal.",
+    "the_only_exact_reproduction": "scripts/measure-parse-rate.sh --replay <run>/ranks.json — replays the recorded rankings with no LLM. A replay with misses > 0 is a DIFFERENT experiment.",
+    "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible — two senses with different labels and the SAME sem are one concept — but the pre-dedup caveat still stands."
   },
   "history": [
     {
@@ -62,7 +63,7 @@
       "date": "2026-07-11",
       "commit": "62d31b9",
       "encoded": 1,
-      "note": "cross-lexicon alignment v1 (12,450 merges). readings -4.3%, encoded UNCHANGED \u2014 collapsing a duplicate freed a cap slot that the parser immediately refilled."
+      "note": "cross-lexicon alignment v1 (12,450 merges). readings -4.3%, encoded UNCHANGED — collapsing a duplicate freed a cap slot that the parser immediately refilled."
     },
     {
       "date": "2026-07-12",
@@ -74,19 +75,25 @@
       "date": "2026-07-12",
       "commit": "a45c0f2",
       "encoded": 3,
-      "note": "alignment v2 (26,690 merges, incl. the un-glossed half). readings -0.3% vs v1 \u2014 FLAT. Cross-lexicon de-duplication is DONE and is not the lever. What remains is STRUCTURAL: the worst unit is 168 readings over 93 skeletons (coordination + PP attachment), sense~1.8."
+      "note": "alignment v2 (26,690 merges, incl. the un-glossed half). readings -0.3% vs v1 — FLAT. Cross-lexicon de-duplication is DONE and is not the lever. What remains is STRUCTURAL: the worst unit is 168 readings over 93 skeletons (coordination + PP attachment), sense~1.8."
     },
     {
       "date": "2026-07-12",
       "commit": "6e36580-dirty",
       "encoded": 3,
-      "note": "alignment v3 (38,389 merges). Two structural fixes: (1) UMLS surfaces LEMMATISED against WordNet, so plural atoms (Genes, Tumours, Therapies) now merge \u2014 their entries (e_<CUI>_0) are separate from the singular and were silently unmerged before; (2) one verdict now licenses EVERY surface of a concept, not just the judged one. 26,690 -> 38,389 merges, 51,925 entry rewrites (2.8x v2). readings 2320 -> 2237 (-3.6%), encoded UNCHANGED at 3. grammar-gap 0 held. Predicted the two pure-sense units (MSI tumours: 8->4, Germline: 3->2) would collapse to ENCODED; they dropped but did NOT reach 1. Confirms the standing verdict a THIRD time: alignment reduces reading MULTIPLICITY a few %, never reaches a SINGLE reading. The residual is structural. CAVEAT on the -3.6%: it is NOT drift-controlled — the v2 (2320) and v3 (2237) totals are separate live-reranker runs, so the delta conflates the lexicon change with temp-0 reranker drift, and cap-backfill absorbs part of the dedup (the worst unit's max went UP 128 -> 184). Direction is right, magnitude is soft; to isolate the lexicon effect, replay ONE ranks.json across both snapshots. Also: the prior -v3 measurement (encoded 4) was the STALE v2 .esl loaded under a v3 name (emit was never re-run); the emit+load two-step was fused into scripts/build-alignment-snapshot.sh, and merges.json is now built by a `lexicon-align merges` subcommand instead of an ad-hoc script."
+      "note": "alignment v3 (38,389 merges). Two structural fixes: (1) UMLS surfaces LEMMATISED against WordNet, so plural atoms (Genes, Tumours, Therapies) now merge — their entries (e_<CUI>_0) are separate from the singular and were silently unmerged before; (2) one verdict now licenses EVERY surface of a concept, not just the judged one. 26,690 -> 38,389 merges, 51,925 entry rewrites (2.8x v2). readings 2320 -> 2237 (-3.6%), encoded UNCHANGED at 3. grammar-gap 0 held. Predicted the two pure-sense units (MSI tumours: 8->4, Germline: 3->2) would collapse to ENCODED; they dropped but did NOT reach 1. Confirms the standing verdict a THIRD time: alignment reduces reading MULTIPLICITY a few %, never reaches a SINGLE reading. The residual is structural. CAVEAT on the -3.6%: it is NOT drift-controlled — the v2 (2320) and v3 (2237) totals are separate live-reranker runs, so the delta conflates the lexicon change with temp-0 reranker drift, and cap-backfill absorbs part of the dedup (the worst unit's max went UP 128 -> 184). Direction is right, magnitude is soft; to isolate the lexicon effect, replay ONE ranks.json across both snapshots. Also: the prior -v3 measurement (encoded 4) was the STALE v2 .esl loaded under a v3 name (emit was never re-run); the emit+load two-step was fused into scripts/build-alignment-snapshot.sh, and merges.json is now built by a `lexicon-align merges` subcommand instead of an ad-hoc script."
     },
     {
       "date": "2026-07-15",
       "commit": "29930e4",
       "encoded": 3,
       "note": "Machine move + dcg-cleanup merge. The merge bundled a dcg module REORGANIZATION (lookup.rs -> parse/, parser.rs -> rules/combinators.rs, packed.rs -> chart/, category.rs split into rules/) with a code/data-consistency fix: conn_list, which the parser (category.rs LIST_CONN) had always CONSTRUCTED, was finally DECLARED on the lexicon:Conn inductive. That declaration changed the compiled lexicon-bootstrap content hash (e11ff807 -> 0298520a), so the 2026-07-12 snapshot no longer resumes (ManifestDrift, fail-closed) and a reseed was required. Full reseed against the post-merge bootstrap -> wordnet-umls-aligned-v3-2026-07-15 (38,389 merges, 51,925 entry rewrites), then measured live: encoded 3, ambiguous 58, open 1, grammar-gap 0, missing-lexeme 0, runtime 257s. REPRODUCES the baseline EXACTLY, on a different machine, confirming (a) the new machine reproduces prior work and (b) the merge is behaviorally neutral on this page (dcg reorg + conn_list together). Provenance repointed from the drifted 2026-07-12 snapshot to this one; the 2026-07-12 snapshots are superseded and safe to prune."
+    },
+    {
+      "date": "2026-07-16",
+      "commit": "4c613e2-dirty",
+      "encoded": 7,
+      "note": "RE-BASELINE. Definite-referential fix. Definite + demonstrative determiners denoted the existential CPS (obj_exists_sem / exists_sem) as a documented first-cut; under negation that spuriously bifurcated into wide-scope (not-exists) vs narrow-scope (exists-not) -- a REAL ambiguity for `a`/`an`, vacuous for a definite's unique referent. Fix: new axiom ontology:the (the iota / definite operator) + referential sems (subject V(the(A)); object TV(the(T), subj)); 12 definite/demonstrative entries repointed; `a`/`an`/`some` + cardinals KEEP the quantifier sems (their scope split is real). The category is unchanged (sem-only edit) so grammar-gap is unchanged by construction; both scope derivations now normalise to one term and felicity::subsume_duplicates collapses them. The bootstrap edit changed the lexicon-bootstrap content hash and invalidated the 07-15 chain -> reseed --umls-all + v3-align -> wordnet-umls-aligned-v3-2026-07-16 (2.8 GB). Witnessed: cap-only grammar-gap 0 + missing-lexeme 0, WRN negation sentence 4->2 (1 structural skeleton, residual is a cross-lexicon `activity` sense dup); reranked encoded 7, ambiguous 54, open 1, grammar-gap 0, runtime 279s. The single traced, drift-immune signal is the WRN sentence AMBIG x2 -> ENCODED (cap-only 4->2). CAVEAT: encoded 3 -> 7 is NOT a controlled delta -- it accumulates span-integrity + the bare-mass And fix + this fix ACROSS intervening snapshot reseeds; against the last live-captured reranked run on the OLD snapshot (6914d01, encoded 7) this fix recovers the -1 the bare-mass run showed (6 -> 7). Floor set at 6 (see gates.faithfulness). Regression guards: dcg::lexicon::referential_definite_tests (CI, no snapshot) + definite_negation_collapses_referential (snapshot-gated, crates/eigenius-wordnet/tests/db_backed_encoding.rs)."
     }
   ]
 }

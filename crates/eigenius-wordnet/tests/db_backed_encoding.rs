@@ -61,7 +61,7 @@ use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 /// same convention as `DICT` below. Override with `EIGENIUS_DB_SNAPSHOT`.
 const DEFAULT_SNAPSHOT: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../db-snapshot/wordnet-umls-aligned-v3-2026-07-15"
+    "/../../../db-snapshot/wordnet-umls-aligned-v3-2026-07-16"
 );
 
 /// WordNet dict (for the Morphy lemmatizer — surface→lemma at lookup time).
@@ -3391,4 +3391,93 @@ fn dive_near_encoded() {
     }
     println!("\n════════════════════════════════════════════════════════════════════");
     println!("units with 2–16 readings: {n_dive}");
+}
+
+/// Snapshot-gated behavioural guard for the definite-referential fix
+/// (`experiments/parsing/near-encoded-bucket-analysis.md`, `2026-07-16`). A DEFINITE object is
+/// referential (`ontology:the`, the ι operator), hence **scopeless** — it does not scope under
+/// negation, so a definite object under `not` has ONE structural reading. A genuine EXISTENTIAL
+/// (`an`) keeps the real `¬∃` / `∃¬` scope split — TWO. Reverting the definite sems to the
+/// existential CPS (`obj_exists_sem`) reintroduces the WRN-paper "did not require the exonuclease
+/// activity of WRN" over-generation; this test fails if that happens. The CI-runnable wiring guard
+/// (no snapshot) is `dcg::lexicon::referential_definite_tests` in the kernel.
+///
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     definite_negation_collapses_referential -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed; --ignored --nocapture"]
+fn definite_negation_collapses_referential() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+
+    // Distinct STRUCTURAL skeletons: erase senses (runs of >= 4 digits — WordNet offsets / CUIs)
+    // so sense multiplicity cannot mask the structural scope difference we are asserting on.
+    fn erase_senses(s: &str) -> String {
+        let mut out = String::new();
+        let mut run = String::new();
+        for c in s.chars() {
+            if c.is_ascii_digit() {
+                run.push(c);
+                continue;
+            }
+            if !run.is_empty() {
+                out.push_str(if run.len() >= 4 { "§" } else { &run });
+                run.clear();
+            }
+            out.push(c);
+        }
+        if !run.is_empty() {
+            out.push_str(if run.len() >= 4 { "§" } else { &run });
+        }
+        out
+    }
+    let skeletons = |text: &str| -> std::collections::BTreeSet<String> {
+        index
+            .parse(text, &lem)
+            .iter()
+            .map(|it| erase_senses(&pretty_term(it.sem())))
+            .collect()
+    };
+    // The `¬∃`/`∃¬` scope split shows up structurally as a reading whose negation `→ logic:False` is
+    // NOT the outermost connective — `False` followed by more continuation (`… → False → G#0 → …`),
+    // as opposed to the single scopeless `… → False` a referential definite produces.
+    let split_readings = |sk: &std::collections::BTreeSet<String>| -> usize {
+        sk.iter().filter(|s| s.contains("False →")).count()
+    };
+
+    // Same noun ("activity"), same negation — only `the` (definite) vs `an` (existential) differ.
+    // Both carry the same lexical multiplicity of "activity" (senses / a cross-lexicon WordNet↔UMLS
+    // dup), so that factor cancels; what remains is the scope split, which the existential keeps and
+    // the referential definite drops.
+    let def = skeletons("HeLa did not require the activity.");
+    let exi = skeletons("HeLa did not require an activity.");
+
+    // The referential definite is SCOPELESS: no reading has negation scoping under the object.
+    assert_eq!(
+        split_readings(&def),
+        0,
+        "definite object under negation must be scopeless (`the(A)` referential) — a reading with \
+         `False` non-outermost means the `¬∃`/`∃¬` over-generation is back; got {:#?}",
+        def
+    );
+    // The genuine existential KEEPS the real scope split.
+    assert!(
+        split_readings(&exi) >= 1,
+        "existential object under negation must KEEP the ¬∃ / ∃¬ scope split — a scopeless result \
+         means the referential fix wrongly leaked onto `a`/`an`; got {:#?}",
+        exi
+    );
+    // And the count signature: strictly fewer structural readings for the definite than its matched
+    // existential (robust to how many senses "activity" carries — they scale both sides equally).
+    assert!(
+        def.len() < exi.len(),
+        "definite ({} skeletons) must have strictly fewer structural readings than the matched \
+         existential ({} skeletons).\n  definite: {:#?}\n  existential: {:#?}",
+        def.len(),
+        exi.len(),
+        def,
+        exi
+    );
 }
