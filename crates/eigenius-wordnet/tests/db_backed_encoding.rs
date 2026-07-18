@@ -3376,10 +3376,23 @@ fn dive_near_encoded() {
             .collect()
     }
 
+    // The reading-count window to dive into: `2..=EIGENIUS_DIVE_MAX` (default 16). Raise it to
+    // inspect the high-multiplicity units (`EIGENIUS_DIVE_MAX=100`). `EIGENIUS_DIVE_ONLY=<substring>`
+    // restricts the dive to units whose text contains the substring (so a single unit can be dumped).
+    let dive_max: usize = std::env::var("EIGENIUS_DIVE_MAX")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(16);
+    let dive_only = std::env::var("EIGENIUS_DIVE_ONLY").ok();
     let mut n_dive = 0;
     for text in segment_sentences(&page) {
+        if let Some(sub) = &dive_only {
+            if !text.contains(sub.as_str()) {
+                continue;
+            }
+        }
         let f = index.parse(&text, &lem);
-        if f.len() < 2 || f.len() > 16 {
+        if f.len() < 2 || f.len() > dive_max {
             continue;
         }
         n_dive += 1;
@@ -3430,6 +3443,33 @@ fn dive_near_encoded() {
     }
     println!("\n════════════════════════════════════════════════════════════════════");
     println!("units with 2–16 readings: {n_dive}");
+}
+
+/// **Single-sentence forest tracer** — parse one arbitrary sentence (`EIGENIUS_TRACE_SENTENCE`,
+/// default the DNA-repair-pathway probe) through the packed path with the DB-backed lexicon, so the
+/// `EIGENIUS_TRACE_FOREST` instrument (`chart::trace`) fires and prints the derivation forest to
+/// stderr. The trace fires once PER CAP ATTEMPT, so a sentence that gaps at base cap (integrity on)
+/// and only parses widened (integrity off) prints TWO blocks — diff them to see which edge multiword
+/// span-integrity removed.
+///
+///     EIGENIUS_TRACE_FOREST=top \
+///     EIGENIUS_TRACE_SENTENCE="A DNA repair pathway is essential." \
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     trace_one_sentence -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed diagnostic; set EIGENIUS_TRACE_FOREST + run --ignored --nocapture"]
+fn trace_one_sentence() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    let text = std::env::var("EIGENIUS_TRACE_SENTENCE")
+        .unwrap_or_else(|_| "A DNA repair pathway is essential.".to_string());
+    let f = index.parse(&text, &lem);
+    println!("\n=== {text} → {} closed reading(s) ===", f.len());
+    for (i, it) in f.iter().enumerate().take(20) {
+        println!("  reading[{i}]: {}", pretty_term(it.sem()));
+    }
 }
 
 /// Snapshot-gated behavioural guard for the definite-referential fix

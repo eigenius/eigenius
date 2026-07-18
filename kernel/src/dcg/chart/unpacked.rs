@@ -31,7 +31,7 @@ use super::super::grammar::Grammar;
 use super::super::item::Item;
 use super::super::pretty::pretty_term;
 use super::super::reserved::ReservedKind;
-use super::super::rules::combinators::{apply, apply_core, cat_n_number};
+use super::super::rules::combinators::{apply, apply_core};
 use super::super::rules::constructions::pied_pipe;
 use super::super::rules::registry::unary_shifts;
 use super::{beam_cell, cell_histogram};
@@ -53,18 +53,8 @@ impl Grammar {
         // Multiword span integrity (base cap only; mirrors the packed driver): protect the interior
         // split points of every multiword `cat_n` leaf so no compositional constituent splits it.
         // Widen-on-failure clears `prefer_multiword`, re-admitting the splits, so `grammar-gap 0` holds.
-        let mut protected_split = vec![false; n];
-        if prefer_multiword {
-            for (a, row) in chart.iter().enumerate() {
-                for (b, cell) in row.iter().enumerate().skip(a + 1) {
-                    if cell.iter().any(|it| cat_n_number(it.cat()).is_some()) {
-                        for pk in protected_split.iter_mut().take(b).skip(a) {
-                            *pk = true;
-                        }
-                    }
-                }
-            }
-        }
+        // Shared marking (single source of truth with the packed driver and the tracer).
+        let protected_split = super::multiword_protected_splits(chart, prefer_multiword);
         // 2. CKY composition, appending combined items to each cell's seeds (so a multiword leaf and a
         //    compositional derivation of the same span both remain available, EXCEPT where span
         //    integrity forbids splitting a multiword).

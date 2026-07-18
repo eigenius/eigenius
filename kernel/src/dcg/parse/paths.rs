@@ -81,6 +81,26 @@ impl Parser {
                 is_finite_clause(c) || is_ctor(c, "cat_q").is_some()
             })
             .collect();
+
+        // Forest derivation trace (set `EIGENIUS_TRACE_FOREST`, see `chart::trace`): print HOW the
+        // forest was built — the hyperedge tree, which cells combine under which rule at which split.
+        // Fires once per cap attempt; the header carries the `protected_split` vector so a base-cap
+        // run (integrity on) and a widened one (integrity off) can be diffed to name the edge
+        // multiword span-integrity removed.
+        if let Ok(spec) = std::env::var("EIGENIUS_TRACE_FOREST") {
+            let protected =
+                super::super::chart::multiword_protected_splits(&leaves, prefer_multiword);
+            let header = format!(
+                "===== FOREST TRACE cap={cap:?} prefer_multiword={prefer_multiword} \
+                 protected_split={protected:?} nodes={} tokens={tokens:?} =====",
+                forest.nodes.len(),
+            );
+            eprint!(
+                "{}",
+                super::super::chart::trace::forest_trace(&forest, &tokens, &top, &spec, &header)
+            );
+        }
+
         let mut candidates: Vec<Item> = Vec::new();
         for id in top {
             candidates.extend(

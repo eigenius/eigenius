@@ -24,11 +24,45 @@
 
 pub(crate) mod forest;
 pub(crate) mod packed;
+pub(crate) mod trace;
 pub(crate) mod unpacked;
 
 use std::collections::BTreeMap;
 
 use super::item::Item;
+use super::rules::combinators::cat_n_number;
+
+/// **Multiword span integrity** (base-cap only) — the interior split points to PROTECT so no
+/// compositional constituent ever crosses a lexicalized multiword `cat_n` leaf. For each multiword
+/// `cat_n` leaf seeded at cell `[a, b]` (`b > a`), marks every interior split `{a..b-1}` as protected;
+/// a driver then skips those splits, so the atomic multiword reading is kept and its compositional
+/// re-bracketings are suppressed. Widen-on-failure passes `prefer_multiword = false`, which returns an
+/// all-`false` vector, re-admitting every split so `grammar-gap 0` is preserved.
+///
+/// **Single source of truth** for both chart drivers ([`packed::Grammar::build_forest`],
+/// [`unpacked`]) and the forest tracer ([`trace`]) — the logic was verbatim-duplicated in the two
+/// drivers, so a change to one silently diverged the paths the differential oracle is meant to keep
+/// identical. `leaves` are the SEEDED leaf cells (before composition), so the only items in a
+/// multi-token cell `[a, b]` are lexicalized multiword leaves — exactly what this marks.
+pub(crate) fn multiword_protected_splits(
+    leaves: &[Vec<Vec<Item>>],
+    prefer_multiword: bool,
+) -> Vec<bool> {
+    let n = leaves.len();
+    let mut protected = vec![false; n];
+    if prefer_multiword {
+        for (a, row) in leaves.iter().enumerate() {
+            for (b, cell) in row.iter().enumerate().skip(a + 1) {
+                if cell.iter().any(|it| cat_n_number(it.cat()).is_some()) {
+                    for pk in protected.iter_mut().take(b).skip(a) {
+                        *pk = true;
+                    }
+                }
+            }
+        }
+    }
+    protected
+}
 
 /// The CKY table: `chart[i][j]` holds every item spanning tokens `i..=j`. Named, because a bare
 /// `Vec<Vec<Vec<Item>>>` in a signature tells the reader nothing.

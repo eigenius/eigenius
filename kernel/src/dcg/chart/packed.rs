@@ -30,7 +30,7 @@
 use super::super::category::is_sentence_premod;
 use super::super::grammar::Grammar;
 use super::super::item::Item;
-use super::super::rules::combinators::{apply, cat_n_number};
+use super::super::rules::combinators::apply;
 use super::super::rules::registry::{unary_shifts, BinRule, UnaryKind};
 use super::forest::{self as packed, CubeCandidate, Edge, Forest, NodeId, Sig};
 
@@ -230,23 +230,13 @@ impl Grammar {
         use packed::node_sig;
         let n = tokens.len();
         // Multiword span integrity (base cap only): a lexicalized multiword `cat_n` leaf at [a,b]
-        // (b>a) is atomic — protect its interior split points {a..b-1} so no compositional constituent
-        // ever crosses it. This subsumes the redundant-compound case (a compositional compound over
-        // [a,b] requires an interior split) AND blocks the left-branching split ("[MSI cell] lines"
-        // over the lexicalized "cell lines"). Widen-on-failure clears `prefer_multiword`, re-admitting
-        // the splits if the multiword won't compose in context, so `grammar-gap 0` is preserved.
-        let mut protected_split = vec![false; n];
-        if prefer_multiword {
-            for (a, row) in leaves.iter().enumerate() {
-                for (b, cell) in row.iter().enumerate().skip(a + 1) {
-                    if cell.iter().any(|it| cat_n_number(it.cat()).is_some()) {
-                        for pk in protected_split.iter_mut().take(b).skip(a) {
-                            *pk = true;
-                        }
-                    }
-                }
-            }
-        }
+        // (b>a) is atomic — its interior split points {a..b-1} are protected so no compositional
+        // constituent ever crosses it. This subsumes the redundant-compound case (a compositional
+        // compound over [a,b] requires an interior split) AND blocks the left-branching split
+        // ("[MSI cell] lines" over the lexicalized "cell lines"). Widen-on-failure clears
+        // `prefer_multiword`, re-admitting the splits if the multiword won't compose in context, so
+        // `grammar-gap 0` is preserved. The marking is shared with the unpacked driver and the tracer.
+        let protected_split = super::multiword_protected_splits(leaves, prefer_multiword);
         let mut forest = Forest::new(n);
         // Group leaf items into nodes (one `Leaf` edge each; same-`Sig` items share a node).
         for (i, row) in leaves.iter().enumerate() {

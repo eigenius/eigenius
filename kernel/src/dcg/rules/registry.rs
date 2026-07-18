@@ -581,7 +581,7 @@ impl Grammar {
 ///
 /// The rules' trigger geometry — which sub-spans each fires over — is defined ONCE, in
 /// `Parser::binary_sites`, and consumed by both chart paths.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum BinRule {
     /// `[noun] that/which [body] → refined noun` (`relativize`).
     Relativize,
@@ -605,7 +605,7 @@ pub(crate) enum BinRule {
 }
 
 /// Which composed-cell unary shift a [`super::super::chart::forest::Edge::Unary`] represents (D63 blueprint §11 3c.4b).
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum UnaryKind {
     /// Forward bounded type-raising `T`: `NP → S/(S\NP)` (`raise_nps`).
     Raise,
