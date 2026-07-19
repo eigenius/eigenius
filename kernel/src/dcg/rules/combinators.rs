@@ -33,6 +33,7 @@ use super::super::category::{
     cat_subsumes, feat_meets, is_ctor, match_cat, subst_cat, unify_cat, CatPat, CatSubst,
 };
 use super::super::item::{CategoryPayload, Combinator, Cost, Item, COMPOUND_STEP_PENALTY};
+use super::super::pretty::pretty_term;
 use super::super::rules::constructions::{distribute, distribute_object};
 
 /// Combine two adjacent constituents (the CKY step). Combinability is decided **sem-blind** by
@@ -597,15 +598,19 @@ fn refine_attrib(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>
             Exp::Sig(
                 Patt::Var(bx.clone()),
                 base.clone(),
-                Box::new(Exp::InductiveType(and, vec![(**p_body).clone(), adj_at])),
+                Box::new(conjoin_canonical(&and, p_body, adj_at)),
             )
         }
+        // Bound var is [`COMPOUND_X`], the SAME name every refinement rule uses, so an
+        // adjective-then-compound noun and a compound-then-adjective noun are alpha-identical once
+        // `conjoin_canonical` sorts their conjuncts (was `__refine_x` — a per-rule name that defeated
+        // the canonicalization across an adjective/compound mix).
         _ => Exp::Sig(
-            Patt::Var("__refine_x".into()),
+            Patt::Var(COMPOUND_X.into()),
             Box::new(c.clone()),
             Box::new(Exp::App(
                 Box::new(left.sem().clone()),
-                Box::new(Exp::Var("__refine_x".into())),
+                Box::new(Exp::Var(COMPOUND_X.into())),
             )),
         ),
     };
@@ -955,6 +960,43 @@ fn app2(axiom_iri: &str, arg0: &str, arg1: Exp) -> Exp {
     )
 }
 
+/// **Canonicalize a conjunction of noun restrictors** (residual structural-multiplicity fix). Flatten
+/// the associative `And`-tree in `p_body`, append `new_restr`, sort the conjuncts into a DETERMINISTIC
+/// order, and rebuild a left-nested `And`. `logic:And` is commutative+associative, so this is
+/// meaning-preserving; making the order CANONICAL rather than CKY-derivation order is the point: the
+/// two attachment orders of one modifier set (`And(compound, prep_of)` vs `And(prep_of, compound)`)
+/// then emit the **byte-identical** Σ, so they pack into one forest node and `subsume_duplicates`
+/// collapses the otherwise-spurious duplicate readings. Sort key is `pretty_term` — a deterministic
+/// total order over the (simple, App-spine) restrictor terms; only its stability matters, not the
+/// order it picks. Depends on the bound variable being the SAME across paths (all refined Σ use
+/// [`COMPOUND_X`]) — else two alpha-variants would sort identically yet stay distinct terms.
+fn conjoin_canonical(
+    and: &Arc<crate::nbe::term::InductiveDecl>,
+    p_body: &Exp,
+    new_restr: Exp,
+) -> Exp {
+    fn flatten(and_iri: &str, e: &Exp, out: &mut Vec<Exp>) {
+        if let Exp::InductiveType(decl, args) = e {
+            if decl.iri.as_str() == and_iri && args.len() == 2 {
+                flatten(and_iri, &args[0], out);
+                flatten(and_iri, &args[1], out);
+                return;
+            }
+        }
+        out.push(e.clone());
+    }
+    let mut conjuncts = Vec::new();
+    flatten(and.iri.as_str(), p_body, &mut conjuncts);
+    conjuncts.push(new_restr);
+    conjuncts.sort_by_cached_key(pretty_term);
+    let mut it = conjuncts.into_iter();
+    let mut acc = it.next().expect("conjoin_canonical: at least one conjunct");
+    for c in it {
+        acc = Exp::InductiveType(and.clone(), vec![acc, c]);
+    }
+    acc
+}
+
 /// Build a refined common noun `cat_n(Σx:C. restr(x), num)` for a modifier rule (D63 §8.13),
 /// reusing the head noun's `decl` and number. **FLATTENS** when `C` is already a refined noun
 /// `Σx:Base. P(x)`: conjoin the new restrictor over the SAME base → `Σx:Base. And(P(x), restr(x))`,
@@ -981,10 +1023,7 @@ fn refine_conjoin(
             Exp::Sig(
                 Patt::Var(bx.clone()),
                 base.clone(),
-                Box::new(Exp::InductiveType(
-                    and,
-                    vec![(**p_body).clone(), mk_restr(bx)],
-                )),
+                Box::new(conjoin_canonical(&and, p_body, mk_restr(bx))),
             )
         }
         _ => Exp::Sig(
@@ -1189,7 +1228,8 @@ mod dispatch_tests {
 
     #[test]
     fn attrib_on_a_plain_noun_is_a_simple_sigma() {
-        // `[S[adj]\NP] [cat_n]` with a NON-refined base → `Σx:C. ⟦adj⟧(x)`, bound var `__refine_x`.
+        // `[S[adj]\NP] [cat_n]` with a NON-refined base → `Σx:C. ⟦adj⟧(x)`, bound var `COMPOUND_X`
+        // (unified across all refinement rules so canonicalization is alpha-stable).
         let adj_sem = Exp::Lam(
             Patt::Var("z".into()),
             Box::new(Exp::App(
@@ -1208,7 +1248,7 @@ mod dispatch_tests {
         let l = mk_item(adj_cat, adj_sem.clone());
         let r = mk_item(n(head.clone()), head.clone());
         let got = apply(&l, &r, &layer()).expect("[S[adj]\\NP][cat_n] → attributive");
-        let x = "__refine_x";
+        let x = COMPOUND_X;
         let expected = Exp::Sig(
             Patt::Var(x.into()),
             Box::new(head),
@@ -1217,6 +1257,68 @@ mod dispatch_tests {
         assert_eq!(got.cat(), &n(expected.clone()));
         assert_eq!(got.sem(), &expected);
         assert_eq!(got.prov(), Combinator::Compound);
+    }
+
+    /// A minimal `logic:And` declaration — the bare test `layer()` does not load `logic`, so build the
+    /// decl directly (as the forest tests do) to exercise `conjoin_canonical`.
+    fn and_decl() -> Arc<crate::nbe::term::InductiveDecl> {
+        Arc::new(crate::nbe::term::InductiveDecl {
+            iri: Iri::parse("urn:eigenius:logic:And").unwrap(),
+            name: "And".to_string(),
+            params: Vec::new(),
+            indices: Vec::new(),
+            sort: Exp::Sort(0),
+            ctors: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn conjoin_canonical_is_order_independent() {
+        // The residual-multiplicity fix: two modifiers attached in EITHER CKY order must yield the
+        // BYTE-IDENTICAL Σ restrictor, so the two derivations pack + subsume instead of surviving as
+        // commutative `And` duplicates (the `And(compound, prep_of)` vs `And(prep_of, compound)` split).
+        let and = and_decl();
+        let a = app2_x(
+            "urn:eigenius:ontology:compound_kind",
+            cls("urn:eigenius:umlscui:C1"),
+        );
+        let b = app2_x(
+            "urn:eigenius:ontology:prep_of",
+            cls("urn:eigenius:umlscui:C2"),
+        );
+        assert_eq!(
+            conjoin_canonical(&and, &a, b.clone()),
+            conjoin_canonical(&and, &b, a.clone()),
+            "two attachment orders of the same two modifiers must canonicalize identically",
+        );
+
+        // Three modifiers via two different derivation orders — flatten+sort collapses the
+        // associativity too: (((a·b)·c)) and (((b·c)·a)) are the same canonical, FLAT, left-nested And.
+        let c = app2_x(
+            "urn:eigenius:ontology:compound",
+            cls("urn:eigenius:umlscui:C3"),
+        );
+        let ab = conjoin_canonical(&and, &a, b.clone());
+        let order1 = conjoin_canonical(&and, &ab, c.clone());
+        let bc = conjoin_canonical(&and, &b, c.clone());
+        let order2 = conjoin_canonical(&and, &bc, a.clone());
+        assert_eq!(
+            order1, order2,
+            "3-modifier associativity must canonicalize identically"
+        );
+
+        // It is a FLAT left-nested And of 3 conjuncts (top And whose left operand is also an And),
+        // not a nested Σ-over-Σ.
+        let is_and = |e: &Exp| {
+            matches!(e,
+            Exp::InductiveType(d, args) if d.iri.as_str() == "urn:eigenius:logic:And" && args.len() == 2)
+        };
+        match &order1 {
+            Exp::InductiveType(_, args) if is_and(&order1) => {
+                assert!(is_and(&args[0]), "left-nested flat And of 3 conjuncts");
+            }
+            _ => panic!("expected a top-level And, got {}", pretty_term(&order1)),
+        }
     }
 
     #[test]

@@ -1,7 +1,7 @@
 {
   "_comment": "The reference measurement the parse-rate gate is judged against. Run logs are NOT committed (experiments/*/results/ is gitignored); this is the distilled result + provenance. Update it DELIBERATELY, never to make a red run go green.",
   "provenance": {
-    "commit": "66d84de: multiword span-integrity STRUCTURAL fix, parser-only (NO reseed, snapshot unchanged). Two commits on A1+A2/4400aef: eb0c5ab (overlap boundary-exception in chart/mod.rs multiword_protected_splits) + 66d84de (widen-ladder: hold multiword-preference through the widen ladder, lift only at the final rung). Found via the new forest-derivation tracer (b578390, EIGENIUS_TRACE_FOREST). See history[0] for the full derivation.",
+    "commit": "(1a) canonical modifier-`And` normal form (`conjoin_canonical` + bound-var unification in dcg/rules/combinators.rs) + the `EIGENIUS_TRACE_SKELETONS` tracer, parser-only (NO reseed, snapshot unchanged), on top of 66d84de (multiword span-integrity: eb0c5ab boundary-exception + 66d84de widen-ladder) on A1+A2/4400aef. The `expected` numbers are the DRIFT-FREE deterministic replay of one recorded ranks.json (2026-07-18-2315), not a single live draw. See history[0].",
     "date": "2026-07-18",
     "profile": "release",
     "features": [
@@ -14,23 +14,23 @@
       "scripts/reseed-lexicon-db.sh --umls-all --snapshot-dir wordnet-umls-2026-07-17-chv  (import applies --drop-atoms [16 A1] + --drop-chv-redundant [2410 A2])",
       "scripts/build-alignment-snapshot.sh --base wordnet-umls-2026-07-17-chv --merges merges.json (38,389)  -> wordnet-umls-aligned-2026-07-17-chv (2.8 GB)"
     ],
-    "config": "pos_prune=0 combinatory_core=0 SENSE_CAP=2 CELL_BEAM=64 (widen-on-failure to SENSE_CAP_WIDEN_MAX=16 / CELL_BEAM_WIDEN_MAX=512; multiword-preference now held through the ladder, lifted only at the final rung)",
-    "runtime_s": 219
+    "config": "pos_prune=0 combinatory_core=0 SENSE_CAP=2 CELL_BEAM=64 (widen-on-failure to SENSE_CAP_WIDEN_MAX=16 / CELL_BEAM_WIDEN_MAX=512; multiword-preference held through the ladder, lifted only at the final rung)",
+    "runtime_s": 272
   },
   "expected": {
     "units": 62,
     "grammar_gap": 0,
     "missing_lexeme": 0,
-    "ambiguous": 50,
+    "ambiguous": 51,
     "open": 1,
-    "encoded": 11,
+    "encoded": 10,
     "total_readings_ceiling": 1500,
-    "total_readings": 1126
+    "total_readings": 1027
   },
   "gates": {
     "coverage": "grammar_gap == 0 and missing_lexeme == 0 \u2014 every sentence parses. NON-NEGOTIABLE.",
-    "faithfulness": "encoded floor 10 (reranker drifts ~1 unit even at temperature 0; observed 10-11 across draws). A1+A2 did NOT move encoded (both page-marginal). Floor catches a real regression below 10 while absorbing drift. UPDATE 2026-07-18 (history[0]): the multiword-integrity + widen-ladder change moved encoded 10->11 (one reranked sample); floor STAYS 10 to absorb the -1 drift.",
-    "multiplicity": "total_readings GATED in eval-parse-rate.sh vs total_readings_ceiling (1500). BOTH A1 and A2 are PAGE-MARGINAL on multiplicity, shown by the drift-free cap-only A/B (--no-llm, deterministic, isolates each lexicon change): pre-A1 2869 -> +A1 2873 (+4) -> +A2 2867 (-6). Net cap-only over both: -2 of 2869 (noise). Reranked observed 1295 (drifts 1271-1295). The junk was genuine and coverage-safe to remove corpus-wide, but the gENE-class collisions were off-page and the CHV compounds were mostly single-CUI (redundant alias, dedup already collapsed). WRN-page multiplicity lives in the 11-100 buckets (~33 units): cross-lexicon sense pairs + structural PP-attachment (the x88 'impairment of a DNA repair pathway', x56 'four other RecQ DNA helicases'). That is the real lever; neither A1 nor A2 touches it. UPDATE 2026-07-18 (history[0]): the multiword-integrity + widen-ladder change PARTIALLY touches it -- deterministic cap-only 2867->2407 (-16%), reranked 1295->1126 (-13%). It collapses the ON-WIDEN compositional explosion (the x88 'a DNA repair pathway' overlap gap that forced widen->integrity-off); the BASE-CAP structural PP/coordination ambiguity still remains."
+    "faithfulness": "encoded floor 10 (reranker drifts ~1 unit even at temperature 0; observed 10-11 across draws). A1+A2 did NOT move encoded (both page-marginal). Floor catches a real regression below 10 while absorbing drift. UPDATE 2026-07-18 (history[0]/[1]): the multiword-fix baseline briefly set expected.encoded=11 from a single HIGH live draw; a deterministic REPLAY of that draw's own ranks.json gives 10 on the SAME code, so the drift-free faithfulness value is 10 (not 11) and expected.encoded is corrected back to 10. eval-parse-rate.sh gates on the exact expected.encoded, so it must be the drift-free floor (10), never a lucky peak draw. (1a) holds encoded 10->10 under replay — structural-duplicate removal cannot reduce encoded.",
+    "multiplicity": "total_readings GATED in eval-parse-rate.sh vs total_readings_ceiling (1500). BOTH A1 and A2 are PAGE-MARGINAL on multiplicity, shown by the drift-free cap-only A/B (--no-llm, deterministic, isolates each lexicon change): pre-A1 2869 -> +A1 2873 (+4) -> +A2 2867 (-6). Net cap-only over both: -2 of 2869 (noise). Reranked observed 1295 (drifts 1271-1295). The junk was genuine and coverage-safe to remove corpus-wide, but the gENE-class collisions were off-page and the CHV compounds were mostly single-CUI (redundant alias, dedup already collapsed). WRN-page multiplicity lives in the 11-100 buckets (~33 units): cross-lexicon sense pairs + structural PP-attachment (the x88 'impairment of a DNA repair pathway', x56 'four other RecQ DNA helicases'). That is the real lever; neither A1 nor A2 touches it. UPDATE 2026-07-18 (history[1]): the multiword-integrity + widen-ladder change PARTIALLY touches it -- deterministic cap-only 2867->2407 (-16%), reranked 1295->1126 (-13%). It collapses the ON-WIDEN compositional explosion (the x88 'a DNA repair pathway' overlap gap that forced widen->integrity-off); the BASE-CAP structural PP/coordination ambiguity still remains. UPDATE 2026-07-18 (history[0]): (1a) canonical modifier-`And` normal form takes a first bite of that base-cap ambiguity -- cap-only 2407->2347 (-60), reranked 1079->1027 (-4.8%, drift-free replay). It kills the modifier-`And` COMMUTATIVITY over-generation (a noun's compound + PP modifier conjoined in either order -> now one canonical term). REMAINING (driver 1b, deferred with scope): coordination-`And` is a DIFFERENT site (fold_conn is already left-canonical); the coord units' residual is genuine distribution-vs-single-NP scope + a coordinated-pre-nominal-modifier attachment defect (duplicated restrictions) + a skeleton-eraser artifact (cross-lexicon n/C sense counted as structure)."
   },
   "reproduced": [
     {
@@ -53,6 +53,13 @@
     "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible \u2014 two senses with different labels and the SAME sem are one concept \u2014 but the pre-dedup caveat still stands."
   },
   "history": [
+    {
+      "date": "2026-07-18",
+      "commit": "(1a) conjoin_canonical",
+      "encoded": 10,
+      "total_readings": 1027,
+      "note": "(1a) CANONICAL MODIFIER-`And` NORMAL FORM + a drift-calibration correction to the multiword-fix baseline. Parser-only, NO reseed. Found via a new skeleton view (EIGENIUS_TRACE_SKELETONS on trace_one_sentence: erase senses -> count distinct STRUCTURAL bracketings). ROOT CAUSE (traced): the noun refine machinery (refine_conjoin / refine_attrib) built the flat-Σ restrictor `And(existing, new)` in CKY DERIVATION ORDER, so the two attachment orders of one modifier set -- `And(compound, prep_of)` vs `And(prep_of, compound)` -- emitted commutatively-distinct terms that subsume_duplicates (β-equal only) never merged. WITNESSED on 'Many cancers exhibit an impairment of a DNA repair pathway': 196 readings / 40 structural skeletons, 6 of which were pure commutative duplicates of another 6 (the PP `of a DNA repair pathway` attaches to `impairment` in ALL of them -- `of` is nominal, so there is NO verb-attachment; this unit is NOT the 'PP-attachment' the older note called it). FIX: `conjoin_canonical` flattens the associative And-tree, SORTS conjuncts by a deterministic key (pretty_term), rebuilds left-nested -> both derivations emit the byte-identical Σ, so they pack + subsume. Also unified the refinement bound var (refine_attrib `__refine_x` -> COMPOUND_X) so the canonicalization is alpha-stable across an adjective/compound mix. WITNESSED collapse: PP unit 196->170 readings / 40->34 skeletons (exactly the 6 dups); the coordination unit was UNCHANGED (its And is fold_conn, already left-canonical -- that is driver 1b, a SEPARATE deferred site). MEASURED: deterministic cap-only 2407->2347 (-60, 5 units down, ZERO per-unit regression); reranked isolated drift-free by REPLAYING one ranks.json across baseline-vs-1a code: total 1079->1027 (-4.8%), encoded 10->10 UNCHANGED (structural-duplicate removal cannot reduce encoded). Guards: dcg::rules::combinators::dispatch_tests::conjoin_canonical_is_order_independent (CI, no snapshot) + the differential oracle. DRIFT-CALIBRATION CORRECTION: history[1] set expected.encoded=11 from one HIGH live draw; the replay shows the SAME code+rankings give 10, so expected.encoded is corrected to the drift-free floor 10 (eval-parse-rate.sh gates on the exact expected.encoded, so it must be the floor, never a peak draw -- that mismatch, not a regression, is what tripped RC=2). REMAINING lever (1b, scoped + deferred, NOT a canonicalization): coordination-`And` -- genuine distribution-vs-single-NP scope + a coordinated-pre-nominal-modifier attachment defect (duplicated restrictions `And(a,a)`) + a skeleton-eraser cross-lexicon-sense artifact (n/C prefix counted as structure)."
+    },
     {
       "date": "2026-07-18",
       "commit": "66d84de",

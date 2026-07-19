@@ -3466,9 +3466,48 @@ fn trace_one_sentence() {
     let text = std::env::var("EIGENIUS_TRACE_SENTENCE")
         .unwrap_or_else(|_| "A DNA repair pathway is essential.".to_string());
     let f = index.parse(&text, &lem);
-    println!("\n=== {text} → {} closed reading(s) ===", f.len());
-    for (i, it) in f.iter().enumerate().take(20) {
-        println!("  reading[{i}]: {}", pretty_term(it.sem()));
+
+    // Erase every SENSE identifier (a run of >= 4 digits — CUIs, WordNet offsets/synsets) to `§`, so
+    // two readings that differ only in WHICH sense fills a slot collapse to ONE structural skeleton.
+    // This separates STRUCTURAL multiplicity (distinct bracketings) from SENSE multiplicity (same
+    // bracketing, different lexical senses) — the question for the residual-ambiguity root cause.
+    fn erase(s: &str) -> String {
+        let mut out = String::new();
+        let mut run = String::new();
+        for c in s.chars() {
+            if c.is_ascii_digit() {
+                run.push(c);
+                continue;
+            }
+            if !run.is_empty() {
+                out.push_str(if run.len() >= 4 { "§" } else { &run });
+                run.clear();
+            }
+            out.push(c);
+        }
+        if !run.is_empty() {
+            out.push_str(if run.len() >= 4 { "§" } else { &run });
+        }
+        out
+    }
+    let sems: Vec<String> = f.iter().map(|it| pretty_term(it.sem())).collect();
+    let skels: std::collections::BTreeSet<String> = sems.iter().map(|s| erase(s)).collect();
+    println!(
+        "\n=== {text} → {} reading(s) | {} structural skeleton(s) | sense× = {:.1} ===",
+        f.len(),
+        skels.len(),
+        f.len() as f32 / skels.len().max(1) as f32,
+    );
+    // EIGENIUS_TRACE_SKELETONS=1 dumps the distinct STRUCTURAL skeletons (the competing bracketings,
+    // senses erased) instead of the raw readings — the direct view of structural over-generation.
+    if std::env::var("EIGENIUS_TRACE_SKELETONS").is_ok() {
+        for (i, sk) in skels.iter().enumerate() {
+            println!("  skel[{i}]: {sk}");
+        }
+    } else {
+        for (i, it) in f.iter().enumerate().take(20) {
+            println!("  reading[{i}]: {}", pretty_term(it.sem()));
+        }
     }
 }
 
