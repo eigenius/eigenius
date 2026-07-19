@@ -475,6 +475,16 @@ impl Parser {
         for (i, row) in chart.iter_mut().enumerate() {
             let raised = self.grammar.raise_nps(&row[i]);
             row[i].extend(raised);
+            // Pre-nominal modifier lift at the LEAF cells (D63 coordinated-modifier category): every
+            // modifier-eligible leaf item (lexical adjective, derived/`-based` adjective) → `cat_mod`,
+            // so it can coordinate before meeting the head noun. This is the universal leaf point —
+            // after ALL seeding paths — mirroring the leaf `raise_nps` above; composed cells lift via
+            // the `ModLift` unary shift.
+            let mods: Vec<Item> = row[i]
+                .iter()
+                .flat_map(super::super::rules::combinators::mod_lifts)
+                .collect();
+            row[i].extend(mods);
             // A leaf cell is non-top iff the sentence has >1 token; the beam caps it across all
             // candidate lemmas/POS of the token (`sense_cap` already bounds it per-lemma).
             if n > 1 {

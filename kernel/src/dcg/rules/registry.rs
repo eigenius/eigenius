@@ -380,6 +380,7 @@ fn build_coordinate(g: &Grammar, rule: BinRule, l: &Item, r: &Item) -> Option<It
     let cost = l.cost().saturating_add(r.cost());
     coordinate_prop(op, l.cat(), l.sem(), r.cat(), r.sem(), &g.layer)
         .or_else(|| coordinate_np(op, l.cat(), l.sem(), r.cat(), r.sem(), &g.layer))
+        .or_else(|| coordinate_mod(l.cat(), l.sem(), r.cat(), r.sem(), &g.layer))
         .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
 }
 
@@ -622,6 +623,10 @@ pub(crate) enum UnaryKind {
     /// base category (`op(op(m₀, m₁),…)`, via `complete_coord`). The `cat_coord` node stays available
     /// (a longer list extends it); this shift adds the folded base-category node a matrix consumes.
     CoordComplete,
+    /// Pre-nominal modifier lift (D63 coordinated-modifier category): a modifier-eligible item →
+    /// `cat_mod` (`mod_lifts`), so modifiers can coordinate before meeting the head noun. Fires on
+    /// composed cells; leaves are lifted at seed time (mirroring `BareNp`).
+    ModLift,
 }
 
 /// A **composed-cell unary shift** (Phase 2c/2d): its [`UnaryKind`] tag and how it applies to one
@@ -653,7 +658,12 @@ impl UnaryShift {
 /// completion, then bare-nominal, then type-raise (so the raise sees the shifted NPs), then fronted
 /// participial — matching the CKY. Both drivers iterate this in order, each shift reading the cell
 /// state left by the previous.
-static UNARY_SHIFTS: [UnaryShift; 4] = [
+static UNARY_SHIFTS: [UnaryShift; 5] = [
+    UnaryShift {
+        kind: UnaryKind::ModLift,
+        name: "mod_lift",
+        apply: apply_mod_lift,
+    },
     UnaryShift {
         kind: UnaryKind::CoordComplete,
         name: "coord_complete",
@@ -691,6 +701,11 @@ fn apply_coord_complete(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<It
 /// Bare-nominal shift: a plural/mass `cat_n` → the copula kind-subject edge + raised bare-argument NPs.
 fn apply_bare_np(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
     g.bare_nominal_shifts(it)
+}
+
+/// Pre-nominal modifier lift: a modifier-eligible item → a standalone `cat_mod` (`combinators::mod_lifts`).
+fn apply_mod_lift(_g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
+    super::combinators::mod_lifts(it)
 }
 
 /// Forward bounded type-raise: a name `NP` → `S/(S\NP)`.

@@ -474,11 +474,6 @@ enum Guard {
     /// other than the `Entity` top (D63 §5.3). Keeps close-naming apposition off a pronoun /
     /// bare-kind `cat_np(Entity)` right. Reads a category metavar, never a sem.
     ProperName(&'static str),
-    /// The named operand must NOT carry the given provenance. Keeps a `KindRaised` bare NP out of the
-    /// attributive **modifier** slot (its predicative `S[adj]\NP` form is for argument/predication
-    /// positions; consuming it as a pre-nominal modifier is the bare-mass `And` over-generation).
-    /// Provenance is sem-blind (part of the `Sig`), so this stays a packed-rule-safe guard.
-    NotProv(Operand, Combinator),
 }
 
 /// Which operand a rule reads — a [`Guard`]'s target, or the functor side of a [`CombKind::Apply`].
@@ -509,7 +504,6 @@ impl Guard {
                 binds.get(*meta),
                 Some(Exp::EigonClass(iri)) if iri.as_str() != "urn:eigenius:lexicon:Entity"
             ),
-            Guard::NotProv(op, prov) => op.pick(left, right).prov != *prov,
         }
     }
 }
@@ -523,21 +517,19 @@ fn refine_rules() -> &'static [CatRule] {
         use CatPat::{Ctor, Var};
         let cat_n = |a, b| Ctor("cat_n", vec![a, b]);
         vec![
-            // Attributive adjective (D63 §8.5 Slice 3b): `S[_,adj]\NP` (left) + `cat_n` (right). The
-            // `adj` fin literal in the pattern IS the adj-clause test. The `NotProv` guard refuses a
-            // `KindRaised` left — a bare mass/plural noun's predicative `S[adj]\NP` form is for
-            // argument/predication slots, not to modify a noun; consuming it here is the bare-mass
-            // `And` over-generation. A genuine adjective (any other provenance) is unaffected. Safe
-            // now that `refine_pp_mod` flattens, so the clean compound+PP reading exists without it.
+            // Pre-nominal modifier application (D63 coordinated-modifier category,
+            // `docs/notes/d63-coordinated-modifier-category.md`): a lifted `cat_mod` restrictor + head
+            // `cat_n` → refined noun. This is the SOLE attributive-modifier path — an adjective reaches
+            // it by lifting to `cat_mod` (`mod_lifts`, which also excludes `KindRaised`); a coordinated
+            // attributive modifier reaches it as the `Or`-folded `cat_mod` that `coordinate_mod` +
+            // `CoordComplete` produce (D63 §6). No `NotCompoundRefined` — an adjective may refine a
+            // compound head ("primary cancer cell").
             CatRule {
-                name: "attrib",
-                left_pat: Ctor(
-                    "bwd",
-                    vec![Ctor("cat_s", vec![Var("_"), Ctor("adj", vec![])]), Var("_")],
-                ),
+                name: "mod_apply",
+                left_pat: Ctor("cat_mod", Vec::new()),
                 right_pat: cat_n(Var("C"), Var("num")),
-                guards: &[Guard::NotProv(Operand::Left, Combinator::KindRaised)],
-                build: refine_attrib,
+                guards: &[],
+                build: refine_mod_apply,
             },
             // Named-entity compound `[cat_np] [cat_n]` (D63 §8.13). Left-branching NF: the head may
             // not itself be a compound result.
@@ -582,44 +574,44 @@ fn noun_parts(noun: &Item, binds: &CatSubst) -> (Arc<crate::nbe::term::Inductive
     (decl, c, num)
 }
 
-/// Attributive adjective (D63 §8.5 Slice 3b). If `C` is ALREADY a refined noun `Σx:Base. P(x)` (a
-/// stacked adjective), CONJOIN over the SAME base: `Σx:Base. P(x) ∧ adj(x)` — a FLAT Σ. Else
-/// `Σx:C. adj(x)`. The head noun is the right operand.
-fn refine_attrib(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
+/// The **pre-nominal modifier** category `cat_mod` — a restrictor awaiting a head noun (D63,
+/// `docs/notes/d63-coordinated-modifier-category.md`). Nullary: it carries **no** head type `C` (that
+/// dependency lives in its SEM, an un-type-checked restrictor `λx. P(x)`), which is what lets modifiers
+/// coordinate without introducing an abstract `C`. Rust-only ctor (categories are name-keyed on the
+/// shared `list_decl`), so no ontology edit / reseed.
+pub(crate) fn cat_mod_cat() -> Exp {
+    Exp::InductiveCtor(crate::nbe::term::list_decl(), "cat_mod".into(), Vec::new())
+}
+
+/// **Modifier lift** (M1: adjectives): re-categorise a modifier-eligible item into a standalone
+/// [`cat_mod_cat`], so a modifier can meet another modifier (coordinate) before it meets the head
+/// noun. A genuine attributive adjective `S[adj]\NP` lifts with its sem UNCHANGED (already `λx. adj(x)`);
+/// a `KindRaised` bare-noun predicative form does **not** lift — it stays out of modifier position,
+/// reproducing the old `refine_attrib` `NotProv(KindRaised)` guard as a lift-time gate rather than an
+/// application-time one. Fires at leaf seeding (`seed.rs`) and on composed cells (the `ModLift` unary
+/// shift), mirroring `bare_nominal_shifts`.
+pub(crate) fn mod_lifts(it: &Item) -> Vec<Item> {
+    if super::super::category::is_adjective_cat(it.cat()) && it.prov() != Combinator::KindRaised {
+        return vec![Item::from_parts(
+            cat_mod_cat(),
+            it.sem().clone(),
+            Combinator::Other,
+            it.cost(),
+        )];
+    }
+    Vec::new()
+}
+
+/// Apply a `cat_mod` modifier to a head noun: `cat_mod(restr) + cat_n(C, num) →
+/// cat_n(Σx:C. And(P, restr(x)), num)`, via `refine_conjoin` over the CONCRETE `C` (so the restrictor
+/// type-checks at `x:C` directly — no abstract `C`). The restrictor is `restr(x)` un-reduced (`App`),
+/// and the stacked-modifier flatten is `refine_conjoin`'s job — so for an adjective this reproduces the
+/// former `refine_attrib` byte-for-byte.
+fn refine_mod_apply(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     let (decl, c, noun_num) = noun_parts(right, binds);
-    let sigma = match &c {
-        Exp::Sig(Patt::Var(bx), base, p_body)
-            if super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And")
-                .is_some() =>
-        {
-            let and =
-                super::super::category::resolve_inductive(layer, "urn:eigenius:logic:And").unwrap();
-            let adj_at = Exp::App(Box::new(left.sem().clone()), Box::new(Exp::Var(bx.clone())));
-            Exp::Sig(
-                Patt::Var(bx.clone()),
-                base.clone(),
-                Box::new(conjoin_canonical(&and, p_body, adj_at)),
-            )
-        }
-        // Bound var is [`COMPOUND_X`], the SAME name every refinement rule uses, so an
-        // adjective-then-compound noun and a compound-then-adjective noun are alpha-identical once
-        // `conjoin_canonical` sorts their conjuncts (was `__refine_x` — a per-rule name that defeated
-        // the canonicalization across an adjective/compound mix).
-        _ => Exp::Sig(
-            Patt::Var(COMPOUND_X.into()),
-            Box::new(c.clone()),
-            Box::new(Exp::App(
-                Box::new(left.sem().clone()),
-                Box::new(Exp::Var(COMPOUND_X.into())),
-            )),
-        ),
-    };
-    Item::from_parts(
-        Exp::InductiveCtor(decl, "cat_n".into(), vec![sigma.clone(), noun_num]),
-        sigma,
-        Combinator::Compound,
-        Cost::ZERO,
-    )
+    refine_conjoin(&decl, &c, &noun_num, layer, |x| {
+        Exp::App(Box::new(left.sem().clone()), Box::new(Exp::Var(x.into())))
+    })
 }
 
 /// Named-entity compound `[cat_np] [cat_n]` → `Σx:C. compound(x, ⟦left⟧)`. Head noun is the right.
@@ -1227,9 +1219,10 @@ mod dispatch_tests {
     }
 
     #[test]
-    fn attrib_on_a_plain_noun_is_a_simple_sigma() {
-        // `[S[adj]\NP] [cat_n]` with a NON-refined base → `Σx:C. ⟦adj⟧(x)`, bound var `COMPOUND_X`
-        // (unified across all refinement rules so canonicalization is alpha-stable).
+    fn attrib_adjective_lifts_to_cat_mod_then_refines_a_plain_noun() {
+        // A predicative `S[adj]\NP` does NOT refine a noun directly — `cat_mod` is the sole attributive
+        // path (D63 §6). The adjective lifts to `cat_mod` (sem unchanged), then `cat_mod + [cat_n]` →
+        // `Σx:C. ⟦adj⟧(x)` (bound var `COMPOUND_X`).
         let adj_sem = Exp::Lam(
             Patt::Var("z".into()),
             Box::new(Exp::App(
@@ -1247,7 +1240,21 @@ mod dispatch_tests {
         let head = cls("urn:eigenius:lexicon:Cell");
         let l = mk_item(adj_cat, adj_sem.clone());
         let r = mk_item(n(head.clone()), head.clone());
-        let got = apply(&l, &r, &layer()).expect("[S[adj]\\NP][cat_n] → attributive");
+        // The direct `S[adj]\NP + cat_n` path is gone — the adjective must lift first.
+        assert!(
+            apply(&l, &r, &layer()).is_none(),
+            "S[adj]\\NP no longer refines a noun directly; it must lift to cat_mod"
+        );
+        // Lift → cat_mod (sem unchanged), then apply → the refined noun.
+        let mods = mod_lifts(&l);
+        assert_eq!(mods.len(), 1, "one cat_mod lift");
+        assert_eq!(mods[0].cat(), &cat_mod_cat());
+        assert_eq!(
+            mods[0].sem(),
+            &adj_sem,
+            "cat_mod carries the adjective sem unchanged"
+        );
+        let got = apply(&mods[0], &r, &layer()).expect("cat_mod + cat_n → refined noun");
         let x = COMPOUND_X;
         let expected = Exp::Sig(
             Patt::Var(x.into()),
