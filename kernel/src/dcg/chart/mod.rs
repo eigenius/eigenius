@@ -27,38 +27,66 @@ pub(crate) mod packed;
 pub(crate) mod trace;
 pub(crate) mod unpacked;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::item::Item;
 use super::rules::combinators::cat_n_number;
 
+/// The multi-token spans `[a, b]` (`b > a`) a seeded multiword `cat_n` leaf covers. `leaves` are the
+/// SEEDED leaf cells (before composition), so a `cat_n` leaf in a multi-token cell is necessarily a
+/// lexicalized multiword. Shared by [`multiword_protected_splits`] and the tracer's context header.
+pub(crate) fn multiword_spans(leaves: &[Vec<Vec<Item>>]) -> BTreeSet<(usize, usize)> {
+    let mut spans = BTreeSet::new();
+    for (a, row) in leaves.iter().enumerate() {
+        for (b, cell) in row.iter().enumerate().skip(a + 1) {
+            if cell.iter().any(|it| cat_n_number(it.cat()).is_some()) {
+                spans.insert((a, b));
+            }
+        }
+    }
+    spans
+}
+
 /// **Multiword span integrity** (base-cap only) — the interior split points to PROTECT so no
-/// compositional constituent ever crosses a lexicalized multiword `cat_n` leaf. For each multiword
-/// `cat_n` leaf seeded at cell `[a, b]` (`b > a`), marks every interior split `{a..b-1}` as protected;
-/// a driver then skips those splits, so the atomic multiword reading is kept and its compositional
-/// re-bracketings are suppressed. Widen-on-failure passes `prefer_multiword = false`, which returns an
-/// all-`false` vector, re-admitting every split so `grammar-gap 0` is preserved.
+/// compositional constituent tears a lexicalized multiword `cat_n` leaf. For each multiword span
+/// `[a, b]` (`b > a`), protects every interior split `{a..b-1}`, so a driver skips those splits: the
+/// atomic multiword is kept and its compositional re-bracketings (and any left/right-branching that
+/// crosses it) are pruned. Widen-on-failure passes `prefer_multiword = false` → all-`false`,
+/// re-admitting every split so `grammar-gap 0` is preserved.
+///
+/// **Boundary-exception (overlapping multiwords).** Two lexicalized multiwords can share a token —
+/// `aDNA`[0,1] ∩ `DNA repair pathway`[1,3], `cancer cell`[0,1] ∩ `cell lines`[1,2] — and are then
+/// mutually exclusive in any one derivation. Protecting each one's interior *globally* would veto the
+/// split the OTHER needs (the determiner boundary / the alternative bracketing), so the sentence gaps
+/// at base cap and explodes on widen. So an interior split `k` is left OPEN where a **different**
+/// multiword abuts it — one starts just after (`k+1 ∈ starts`) or ends just before (`k ∈ ends`). An
+/// ISOLATED multiword (no other multiword touching its interior) is still fully protected, which is
+/// where the pruning does its work; the exception fires only at a genuine multiword-boundary overlap.
 ///
 /// **Single source of truth** for both chart drivers ([`packed::Grammar::build_forest`],
-/// [`unpacked`]) and the forest tracer ([`trace`]) — the logic was verbatim-duplicated in the two
-/// drivers, so a change to one silently diverged the paths the differential oracle is meant to keep
-/// identical. `leaves` are the SEEDED leaf cells (before composition), so the only items in a
-/// multi-token cell `[a, b]` are lexicalized multiword leaves — exactly what this marks.
+/// [`unpacked`]) — the logic was verbatim-duplicated, so a change to one silently diverged the paths
+/// the differential oracle keeps identical.
 pub(crate) fn multiword_protected_splits(
     leaves: &[Vec<Vec<Item>>],
     prefer_multiword: bool,
 ) -> Vec<bool> {
     let n = leaves.len();
     let mut protected = vec![false; n];
-    if prefer_multiword {
-        for (a, row) in leaves.iter().enumerate() {
-            for (b, cell) in row.iter().enumerate().skip(a + 1) {
-                if cell.iter().any(|it| cat_n_number(it.cat()).is_some()) {
-                    for pk in protected.iter_mut().take(b).skip(a) {
-                        *pk = true;
-                    }
-                }
+    if !prefer_multiword {
+        return protected;
+    }
+    let spans = multiword_spans(leaves);
+    // A split `k` is a multiword BOUNDARY iff some multiword starts at `k+1` or ends at `k`. For an
+    // interior split of a span `[a, b]` (`a ≤ k < b`) the span itself never matches (it starts at
+    // `a ≤ k` and ends at `b > k`), so a match means a *different*, overlapping multiword abuts here.
+    let starts: BTreeSet<usize> = spans.iter().map(|&(a, _)| a).collect();
+    let ends: BTreeSet<usize> = spans.iter().map(|&(_, b)| b).collect();
+    for &(a, b) in &spans {
+        for (k, slot) in protected.iter_mut().enumerate().take(b).skip(a) {
+            if starts.contains(&(k + 1)) || ends.contains(&k) {
+                continue; // shared boundary with an overlapping multiword — leave it open
             }
+            *slot = true;
         }
     }
     protected
@@ -107,4 +135,77 @@ pub(super) fn cell_histogram(cell: &[Item]) -> String {
         .map(|(s, c)| format!("{s}×{c}"))
         .collect();
     format!("shapes={distinct} top: {}", top.join(", "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dcg::item::{Combinator, Cost};
+    use crate::nbe::term::{list_decl, Exp};
+    use crate::ontology::iri::Iri;
+
+    /// A seeded multiword `cat_n` leaf (the number/class are irrelevant to span detection).
+    fn cat_n_leaf() -> Item {
+        let cat = Exp::InductiveCtor(
+            list_decl(),
+            "cat_n".into(),
+            vec![
+                Exp::EigonClass(Iri::parse("urn:eigenius:umlscui:C1").unwrap()),
+                Exp::InductiveCtor(list_decl(), "sg".into(), vec![]),
+            ],
+        );
+        Item::from_parts(cat, Exp::Unit, Combinator::Other, Cost::ZERO)
+    }
+
+    /// An `n × n` seeded-leaf grid with a multiword `cat_n` leaf at each given span `[a, b]`.
+    fn leaves_with(n: usize, spans: &[(usize, usize)]) -> Vec<Vec<Vec<Item>>> {
+        let mut leaves = vec![vec![Vec::new(); n]; n];
+        for &(a, b) in spans {
+            leaves[a][b].push(cat_n_leaf());
+        }
+        leaves
+    }
+
+    #[test]
+    fn isolated_multiword_protects_its_interior() {
+        // "deletion mutations" at [6..7] in an 8-token sentence — no overlapping multiword, so its
+        // interior split k=6 stays protected (this is where the compound-pile pruning happens).
+        let p = multiword_protected_splits(&leaves_with(8, &[(6, 7)]), true);
+        assert!(p[6], "k=6 protected");
+        assert_eq!(p.iter().filter(|&&b| b).count(), 1, "only k=6 protected");
+    }
+
+    #[test]
+    fn overlapping_multiwords_open_the_shared_boundary() {
+        // `cancer cell`[0,1] ∩ `cell lines`[1,2]: k=0 opens (cell-lines starts at 1), k=1 opens
+        // (cancer-cell ends at 1). Neither interior is protected → both bracketings build, no gap.
+        let p = multiword_protected_splits(&leaves_with(5, &[(0, 1), (1, 2)]), true);
+        assert!(!p[0], "k=0 open (a different multiword starts at k+1=1)");
+        assert!(!p[1], "k=1 open (a different multiword ends at k=1)");
+        assert_eq!(p.iter().filter(|&&b| b).count(), 0);
+    }
+
+    #[test]
+    fn determiner_boundary_stays_open_under_overlap() {
+        // `aDNA`[0,1] ∩ `dna repair`[1,2] ∩ `dna repair pathway`[1,3]: the determiner boundary k=0
+        // (where "a" must detach from the C1511689 multiword) is left open by the exception.
+        let p = multiword_protected_splits(&leaves_with(6, &[(0, 1), (1, 2), (1, 3)]), true);
+        assert!(!p[0], "determiner boundary k=0 open");
+    }
+
+    #[test]
+    fn isolated_and_overlap_coexist_in_one_sentence() {
+        // An overlap at the front (`cancer cell`∩`cell lines`, [0,1]/[1,2]) and an ISOLATED multiword
+        // at the back ([5,6]): the exception fires only at the overlap; the isolated one keeps k=5.
+        let p = multiword_protected_splits(&leaves_with(8, &[(0, 1), (1, 2), (5, 6)]), true);
+        assert!(!p[0] && !p[1], "overlap boundaries open");
+        assert!(p[5], "isolated multiword still protected");
+    }
+
+    #[test]
+    fn widen_lifts_all_protection() {
+        // `prefer_multiword = false` (a widen rung) re-admits every split — the grammar-gap-0 escape.
+        let p = multiword_protected_splits(&leaves_with(8, &[(6, 7)]), false);
+        assert!(p.iter().all(|&b| !b));
+    }
 }

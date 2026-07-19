@@ -88,11 +88,12 @@ impl Parser {
         // run (integrity on) and a widened one (integrity off) can be diffed to name the edge
         // multiword span-integrity removed.
         if let Ok(spec) = std::env::var("EIGENIUS_TRACE_FOREST") {
+            let mw_spans = super::super::chart::multiword_spans(&leaves);
             let protected =
                 super::super::chart::multiword_protected_splits(&leaves, prefer_multiword);
             let header = format!(
                 "===== FOREST TRACE cap={cap:?} prefer_multiword={prefer_multiword} \
-                 protected_split={protected:?} nodes={} tokens={tokens:?} =====",
+                 multiword_spans={mw_spans:?} protected_split={protected:?} nodes={} tokens={tokens:?} =====",
                 forest.nodes.len(),
             );
             eprint!(
