@@ -1,8 +1,8 @@
 {
   "_comment": "The reference measurement the parse-rate gate is judged against. Run logs are NOT committed (experiments/*/results/ is gitignored); this is the distilled result + provenance. Update it DELIBERATELY, never to make a red run go green.",
   "provenance": {
-    "commit": "A1+A2 UMLS import-time junk removal on top of 4400aef. A1: 16 case-mangled single-word collision atoms (gENE->gene) via --drop-atoms drops.json. A2: 2,410 REDUNDANT multiword CHV-only aliases (C0610268 'DNA Helicase A' aliasing 'dna helicase', already given by MSH) via --drop-chv-redundant. Both coverage-safe by construction. REQUIRES reseed.",
-    "date": "2026-07-17",
+    "commit": "66d84de: multiword span-integrity STRUCTURAL fix, parser-only (NO reseed, snapshot unchanged). Two commits on A1+A2/4400aef: eb0c5ab (overlap boundary-exception in chart/mod.rs multiword_protected_splits) + 66d84de (widen-ladder: hold multiword-preference through the widen ladder, lift only at the final rung). Found via the new forest-derivation tracer (b578390, EIGENIUS_TRACE_FOREST). See history[0] for the full derivation.",
+    "date": "2026-07-18",
     "profile": "release",
     "features": [
       "use-llm"
@@ -14,23 +14,23 @@
       "scripts/reseed-lexicon-db.sh --umls-all --snapshot-dir wordnet-umls-2026-07-17-chv  (import applies --drop-atoms [16 A1] + --drop-chv-redundant [2410 A2])",
       "scripts/build-alignment-snapshot.sh --base wordnet-umls-2026-07-17-chv --merges merges.json (38,389)  -> wordnet-umls-aligned-2026-07-17-chv (2.8 GB)"
     ],
-    "config": "pos_prune=0 combinatory_core=0 SENSE_CAP=2 CELL_BEAM=64",
-    "runtime_s": 236
+    "config": "pos_prune=0 combinatory_core=0 SENSE_CAP=2 CELL_BEAM=64 (widen-on-failure to SENSE_CAP_WIDEN_MAX=16 / CELL_BEAM_WIDEN_MAX=512; multiword-preference now held through the ladder, lifted only at the final rung)",
+    "runtime_s": 219
   },
   "expected": {
     "units": 62,
     "grammar_gap": 0,
     "missing_lexeme": 0,
-    "ambiguous": 51,
+    "ambiguous": 50,
     "open": 1,
-    "encoded": 10,
+    "encoded": 11,
     "total_readings_ceiling": 1500,
-    "total_readings": 1295
+    "total_readings": 1126
   },
   "gates": {
     "coverage": "grammar_gap == 0 and missing_lexeme == 0 \u2014 every sentence parses. NON-NEGOTIABLE.",
-    "faithfulness": "encoded floor 10 (reranker drifts ~1 unit even at temperature 0; observed 10-11 across draws). A1+A2 did NOT move encoded (both page-marginal). Floor catches a real regression below 10 while absorbing drift.",
-    "multiplicity": "total_readings GATED in eval-parse-rate.sh vs total_readings_ceiling (1500). BOTH A1 and A2 are PAGE-MARGINAL on multiplicity, shown by the drift-free cap-only A/B (--no-llm, deterministic, isolates each lexicon change): pre-A1 2869 -> +A1 2873 (+4) -> +A2 2867 (-6). Net cap-only over both: -2 of 2869 (noise). Reranked observed 1295 (drifts 1271-1295). The junk was genuine and coverage-safe to remove corpus-wide, but the gENE-class collisions were off-page and the CHV compounds were mostly single-CUI (redundant alias, dedup already collapsed). WRN-page multiplicity lives in the 11-100 buckets (~33 units): cross-lexicon sense pairs + structural PP-attachment (the x88 'impairment of a DNA repair pathway', x56 'four other RecQ DNA helicases'). That is the real lever; neither A1 nor A2 touches it."
+    "faithfulness": "encoded floor 10 (reranker drifts ~1 unit even at temperature 0; observed 10-11 across draws). A1+A2 did NOT move encoded (both page-marginal). Floor catches a real regression below 10 while absorbing drift. UPDATE 2026-07-18 (history[0]): the multiword-integrity + widen-ladder change moved encoded 10->11 (one reranked sample); floor STAYS 10 to absorb the -1 drift.",
+    "multiplicity": "total_readings GATED in eval-parse-rate.sh vs total_readings_ceiling (1500). BOTH A1 and A2 are PAGE-MARGINAL on multiplicity, shown by the drift-free cap-only A/B (--no-llm, deterministic, isolates each lexicon change): pre-A1 2869 -> +A1 2873 (+4) -> +A2 2867 (-6). Net cap-only over both: -2 of 2869 (noise). Reranked observed 1295 (drifts 1271-1295). The junk was genuine and coverage-safe to remove corpus-wide, but the gENE-class collisions were off-page and the CHV compounds were mostly single-CUI (redundant alias, dedup already collapsed). WRN-page multiplicity lives in the 11-100 buckets (~33 units): cross-lexicon sense pairs + structural PP-attachment (the x88 'impairment of a DNA repair pathway', x56 'four other RecQ DNA helicases'). That is the real lever; neither A1 nor A2 touches it. UPDATE 2026-07-18 (history[0]): the multiword-integrity + widen-ladder change PARTIALLY touches it -- deterministic cap-only 2867->2407 (-16%), reranked 1295->1126 (-13%). It collapses the ON-WIDEN compositional explosion (the x88 'a DNA repair pathway' overlap gap that forced widen->integrity-off); the BASE-CAP structural PP/coordination ambiguity still remains."
   },
   "reproduced": [
     {
@@ -53,6 +53,13 @@
     "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible \u2014 two senses with different labels and the SAME sem are one concept \u2014 but the pre-dedup caveat still stands."
   },
   "history": [
+    {
+      "date": "2026-07-18",
+      "commit": "66d84de",
+      "encoded": 11,
+      "total_readings": 1126,
+      "note": "RE-BASELINE. Multiword span-integrity STRUCTURAL fix, parser-only (NO reseed). Two commits: eb0c5ab (overlap boundary-exception) + 66d84de (widen-ladder), enabled by the forest-derivation tracer b578390 (EIGENIUS_TRACE_FOREST). ROOT CAUSE (traced): the base-cap multiword-preference cut was a per-split-position veto (protected_split) that could not express OVERLAPPING multiwords. Two lexicalized multiwords sharing a token -- 'cancer cell'[0,1] cap 'cell lines'[1,2]; 'aDNA'(C0000702)[0,1] cap 'DNA repair pathway'(C1511689)[1,3] -- are mutually exclusive per derivation, so protecting each one's interior GLOBALLY vetoed the split the OTHER needed (the determiner boundary / the alternative bracketing) -> the sentence GAPPED at base cap and exploded on widen. That is the x88 'a DNA repair pathway' failure the stashed widen-ladder workaround had (88->227): its own stash message said 'the multiword doesn't compose alone' = this overlap gap. FIX (A, eb0c5ab): boundary-exception -- an interior split k is left OPEN where a DIFFERENT multiword abuts (starts at k+1 or ends at k); an ISOLATED multiword stays fully protected (its cross-span compound-pile pruning is where the value is). (A) ALONE is cap-only PAGE-NEUTRAL (2867->2865): on the WRN page almost every overlap sentence ALSO widens for a sense-cap reason (subject determiners a_subj/the_subj/many_subj rank below cap 2 -- witnessed: a_subj seeds only at cap>=4), and at widen integrity was OFF, so the overlap fix was moot there. FIX (widen-ladder, 66d84de): hold multiword-preference ON through the ENTIRE widen ladder, lifting only at the FINAL rung (cap>=SENSE_CAP_WIDEN_MAX=16 / beam>=CELL_BEAM_WIDEN_MAX=512) -- so a sentence that widens for sense-crowding keeps its compounds collapsed instead of re-exploding; coverage still falls back to the compositional splits at the last rung, grammar-gap 0. This is the half that REDUCES multiplicity; (A) is the half that makes it SAFE (without (A) it re-gaps overlaps through every rung -> the 88->227 explosion, which is why the widen-ladder was stashed as a workaround). NEITHER HALF MOVES THE PAGE ALONE. WITNESSED -- deterministic cap-only A/B (--no-llm, drift-free, isolates the code): 2867->2407 (-16%), grammar-gap 0, encoded 2 held, >100 bin 7->3; the isolated multiword 'insertion or deletion mutations' stays 16 (a rejected variant B, same-span-only suppression, blew it to 112). RERANKED (live, ONE sample, drifts ~5%): encoded 10->11, total_readings 1295->1126 (-13%), grammar-gap 0, >100 bin 1, eval-parse-rate.sh PASS. CAVEAT: the reranked delta is one sample and conflates code + temp-0 drift; the drift-free evidence is the -16% cap-only. PARTIALLY addresses the x88/x56 PP-attachment lever the A1/A2 note called untouched -- it collapses the ON-WIDEN explosion, but the BASE-CAP structural PP/coordination ambiguity remains (e.g. 'MSI occurs in colon, gastric, endometrial and ovarian cancers' rose 24->82 cap-only, but the reranker absorbs it -> NOT in the reranked >100 bin). Guards: dcg::chart::tests (5 boundary-exception unit tests, CI no-snapshot) + the differential oracle packed==unpacked (both drivers share multiword_protected_splits). REJECTED ALTERNATIVE (B): abolish the veto entirely, drop only the same-span compound rebuild -- gap-safe but too gentle, cap-only 2867->3002 (+4.7%, lost the isolated-multiword cross-span pruning); reverted."
+    },
     {
       "date": "2026-07-17",
       "commit": "A2-chv-redundant",
