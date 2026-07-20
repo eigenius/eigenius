@@ -31,6 +31,7 @@
 use super::super::category::{is_adjective_cat, is_binary_relation_cat, kind_of};
 use super::super::chart::{beam_cell, cell_histogram, Chart};
 use super::super::lexicon::{FormEntries, LexEntry};
+use super::super::rules::constructions::coordinate_np;
 use super::*;
 
 impl Parser {
@@ -71,6 +72,21 @@ impl Parser {
                 let toks: Vec<&str> = s_lc.split_whitespace().collect();
                 toks.len() > 1 && toks.iter().all(|t| has_closed(t))
             });
+        // Cross-POS ADJECTIVE prune (ALWAYS ON — a correctness fix, not the `pos_prune` experiment):
+        // a surface that carries a closed-class DETERMINER reading (a quantifier — its category is
+        // `cat_forall(num, λT. …)`) must not ALSO be read as an open-class gradable ADJECTIVE. WordNet
+        // ships `several`/`many`/`few`/`most`/`both` as descriptive adjectives; prenominally the
+        // attributive rule (`refine_attrib`) turns that `S[adj]\NP` into a spurious `gt(deg_a, std_a)`
+        // modifier ("more-several-than-standard cancers") that duplicates the determiner reading —
+        // over-generation, `experiments/parsing/near-encoded-bucket-analysis.md`. Keyed on the
+        // DETERMINER category, so a plain adjective (no closed-class determiner reading on the surface)
+        // is untouched. A rare PREDICATIVE use ("the problems were several") is given up with it; these
+        // words are quantifiers, not gradable properties, in this grammar.
+        let surface_is_determiner = self
+            .lex
+            .entries_for(&s_lc)
+            .iter()
+            .any(|e| e.in_lexicon.is_none() && is_ctor(e.item.cat(), "cat_forall").is_some());
         let mut out = Vec::new();
         for c in &candidates {
             let mut entries = self.scoped(self.lex.entries_for(c), scope);
@@ -81,29 +97,15 @@ impl Parser {
                             || is_ctor(e.item.cat(), "cat_np").is_some())
                 });
             }
+            if surface_is_determiner {
+                entries.retain(|e| e.in_lexicon.is_none() || !is_adjective_cat(e.item.cat()));
+            }
             if entries.is_empty() {
                 continue;
             }
-            // **Collapse entries that denote the SAME concept — BEFORE the cap** (D63 cross-lexicon
-            // unification, `docs/notes/d63-wordnet-umls-concept-unification.md`).
-            //
-            // Same predicate [`Self::subsume_duplicates`] applies to the parsed forest — structural
-            // `Exp` equality on `(cat, sem)`, full IRIs, never `pretty_term` (which shortens an IRI
-            // to its local segment and could false-merge two distinct senses). Being an equality it
-            // **cannot drop a distinct reading**.
-            //
-            // What it earns is the ORDER. `subsume_duplicates` runs *after* parsing: by then the cap
-            // has already spent a slot on the duplicate and the chart has already built it. Run here,
-            // a duplicate never consumes a cap slot at all — which is the point, because with
-            // `SENSE_CAP = 2` a word gets only two. **Measured 2026-07-11 over the WRN page: 47% of
-            // ranked words spent BOTH slots on a UMLS/WordNet pair of the same concept** (`state`'s
-            // two survivors have verbatim-identical glosses).
-            //
-            // INERT until the lexica are unified: two entries from different lexica carry different
-            // class IRIs, so `(cat, sem)` differs and nothing collapses. The mass/count variants of
-            // one concept differ in `cat` (`cat_n(C, mass)` vs `cat_n(C, num_any)`) and are likewise
-            // preserved. O(n²) over one lemma's senses, which is small.
-            dedup_same_concept(&mut entries);
+            // Cross-lexicon concept dedup (D63, `docs/notes/d63-wordnet-umls-concept-unification.md`)
+            // runs AFTER the sense cap — see the `dedup_same_concept` call below the cap block, and the
+            // comment there for why the order (cap-then-dedup) is load-bearing (the `event` case).
             // Adaptive-supertagging sense cap (GH #97): keep at most `cap` entries for this lemma —
             // by contextual plausibility first (the reranker's `ranks`, when present), falling back
             // to the static `sense_rank` (most-frequent first) — cutting WordNet polysemy at the
@@ -133,27 +135,36 @@ impl Parser {
                 // and `may` one of `Month of May`: the model ranked the correct sense #0, and the
                 // cap, obliged to take TWO, grabbed the next off the list.
                 //
-                // The cut applies at the BASE cap only. On **widen** (cap above the base) it is
-                // skipped and the eliminated senses become seedable again, so a wrong elimination
-                // costs a slower parse, never a grammar gap.
+                // The cut applies at EVERY cap rung (see below), Pass 2 being the safety net — NOT
+                // base-cap-only as it once was. Base-cap-only let widen un-eliminate, which re-seeded
+                // the reranker's rejects onto every word the moment ONE word forced a wider cap (the
+                // `gene`/`C5849123` bug).
                 //
                 // KNOWN GAP (2026-07-12): the ranker can eliminate a CLOSED-CLASS reading — it
                 // dropped the determiner `each` in favour of UMLS's "Each (qualifier value)".
                 // `sense_cap_key` sorts unranked entries last, so the truncate takes exactly the
-                // entry that should be exempt. Widen recovers it (the sweep held at `grammar-gap 0`),
-                // but the grammatical core should not be eliminable at all. Partitioning the closed
-                // class out is the fix; a first attempt broke `sense_reranker_overrides_static_cap_order`
-                // and needs the seeding path understood before retrying.
+                // entry that should be exempt. Pass 2 (the ranks-`None` widen) recovers it (the sweep
+                // held at `grammar-gap 0`), but the grammatical core should not be eliminable at all.
+                // Partitioning the closed class out is the fix; a first attempt broke
+                // `sense_reranker_overrides_static_cap_order` and needs the seeding path understood.
                 let mut eff = cap;
-                if Some(cap) == self.config.sense_cap {
-                    if let Some(r) = ranks {
-                        let ranked = entries
-                            .iter()
-                            .filter(|e| e.sense.as_deref().is_some_and(|s| r.contains_key(s)))
-                            .count();
-                        if ranked > 0 {
-                            eff = eff.min(ranked);
-                        }
+                // Apply the reranker's ELIMINATION at EVERY cap rung, not just the base — INCLUDING
+                // during widen. An eliminated sense (absent from `ranks`) stays out even when the cap
+                // grows to admit some word's deeper RANKED sense, so a sentence that widens for ONE word
+                // (e.g. `cause`/`mutations` needing its #3–4 sense) does not FLOOD every OTHER word with
+                // its rejects — the `gene` junk (`C5849123` = "Gross Extranodal Extension" re-seeding for
+                // `gene` via a "gENE" synonym) that only ever appeared because widen used to un-eliminate.
+                // The wrong-elimination SAFETY that once justified the base-cap-only cut is provided by
+                // [`Self::parse_widening`]'s PASS 2 — a ranks-`None` widen (pure frequency, no cut),
+                // reached only when Pass 1 yields nothing, i.e. exactly when a NEEDED sense was wrongly
+                // eliminated. So the cut can hold at all caps without ever costing a grammar gap.
+                if let Some(r) = ranks {
+                    let ranked = entries
+                        .iter()
+                        .filter(|e| e.sense.as_deref().is_some_and(|s| r.contains_key(s)))
+                        .count();
+                    if ranked > 0 {
+                        eff = eff.min(ranked);
                     }
                 }
                 if entries.len() > eff {
@@ -161,6 +172,27 @@ impl Parser {
                     entries.truncate(eff);
                 }
             }
+            // **Collapse entries that denote the SAME concept — AFTER the cap** (D63 cross-lexicon
+            // unification, `docs/notes/d63-wordnet-umls-concept-unification.md`). Structural `Exp`
+            // equality on `(cat, sem)` (full IRIs, never `pretty_term` which shortens an IRI to its
+            // local segment and could false-merge two senses); the same predicate as the forest-side
+            // [`Self::subsume_duplicates`]. Being an equality it **cannot drop a distinct reading**.
+            //
+            // The ORDER — cap FIRST, then dedup — is load-bearing. The reranker ranks RAW senses
+            // (pre-merge), so a cross-lexicon pair is TWO votes for ONE concept. When the reranker puts
+            // a concept's WordNet sense AND its UMLS twin in its top-`cap` positions, capping first
+            // keeps both and this dedup collapses them to ONE reading (the word's single best sense).
+            // Dedup-BEFORE-the-cap instead dropped the twin and let the cap BACKFILL the freed slot
+            // with a LOWER-ranked, contextually-wrong sense — the `event` case (2026-07-16): the ranker
+            // ranked event-*happening* #1 and its UMLS twin #2, the wrong event-*circumstance* sense
+            // #3; pre-cap dedup promoted circumstance into the cap, so `Each event alone …` never
+            // encoded. Cap-then-dedup keeps ≤ `cap` DISTINCT concepts and never seeds past the ranker's
+            // top-`cap` raw positions. (The 2026-07-11 measurement that first added the pre-cap dedup
+            // found it left encoded UNCHANGED — the freed slot was "immediately refilled"; that refill
+            // is this bug.) INERT until a pair is actually merged: distinct-lexicon senses carry
+            // different class IRIs, so `(cat, sem)` differs and nothing collapses. O(n²) over one
+            // lemma's (already cap-bounded) senses.
+            dedup_same_concept(&mut entries);
             // Morphological number (D63 §5.1, the Slice-1 deferral): a surface
             // that morphology *reduced* to this lemma was inflected (plural,
             // for nouns); a surface equal to the lemma is singular. Refine the
@@ -252,7 +284,8 @@ impl Parser {
 
     /// Derived-adjective items (D63 compound morphology §3). If `surface` is a recognized derived
     /// adjective ([`Self::is_derived_adjective`]), seed its `ADJ` `Item`(s) on the whole-token span,
-    /// modifying nouns through the existing attributive-adjective refine rule (`RefineKind::Attrib`):
+    /// modifying nouns through the existing attributive-adjective refine rule (the `attrib` rule in
+    /// `combine_nominal_mod`'s table):
     ///   * **Slice 1** (`hypermutable`, `double-stranded`) — the base adjective's own items, the
     ///     prefix / hyphen modifier transparent (identity sem, like the `-ly` adverbs), so
     ///     `hypermutable ≡ mutable`;
@@ -435,6 +468,26 @@ impl Parser {
             }
         }
 
+        // RNR head distribution (D63, `docs/notes/d63-rnr-head-distribution.md`): a coordinated
+        // pre-nominal modifier list sharing a head noun ("colon, gastric and ovarian cancers") seeds the
+        // group-of-lexicalized-kinds reading its shared-head coordination cannot reach (the head sits
+        // once at the end — no adjacency to the multiword). NOT bounded by `span_limit` (a coordination
+        // is longer than any lexeme); `distribute_head` bails cheaply on a non-coordination. The seeded
+        // `cat_group` protects its span (`multiword_spans`), so the composition it supersedes is pruned
+        // with the multiword widen fallback — coverage-safe (grammar-gap 0).
+        let mut dists: Vec<(usize, usize, Vec<Item>)> = Vec::new();
+        for a in 0..n {
+            for b in (a + 1)..n {
+                let d = self.distribute_head(&tokens[a..=b], lemmatizer, scope, cap, ranks);
+                if !d.is_empty() {
+                    dists.push((a, b, d));
+                }
+            }
+        }
+        for (a, b, d) in dists {
+            chart[a][b].extend(d);
+        }
+
         // Forward bounded type-raising `T` (D63 §8.9 Slice 6-T) at the LEAF cells: a name `NP` lifts
         // to `S/(S\NP)` so it can forward-compose into a relative clause's object-extraction body.
         // ENF (`TypeRaised` provenance) keeps these inert outside extraction. Composed cells are
@@ -443,6 +496,16 @@ impl Parser {
         for (i, row) in chart.iter_mut().enumerate() {
             let raised = self.grammar.raise_nps(&row[i]);
             row[i].extend(raised);
+            // Pre-nominal modifier lift at the LEAF cells (D63 coordinated-modifier category): every
+            // modifier-eligible leaf item (lexical adjective, derived/`-based` adjective) → `cat_mod`,
+            // so it can coordinate before meeting the head noun. This is the universal leaf point —
+            // after ALL seeding paths — mirroring the leaf `raise_nps` above; composed cells lift via
+            // the `ModLift` unary shift.
+            let mods: Vec<Item> = row[i]
+                .iter()
+                .flat_map(super::super::rules::combinators::mod_lifts)
+                .collect();
+            row[i].extend(mods);
             // A leaf cell is non-top iff the sentence has >1 token; the beam caps it across all
             // candidate lemmas/POS of the token (`sense_cap` already bounds it per-lemma).
             if n > 1 {
@@ -459,6 +522,126 @@ impl Parser {
             }
         }
         (chart, beam_drops)
+    }
+
+    /// **RNR head distribution** (`docs/notes/d63-rnr-head-distribution.md`) — a SEED-time rule (it
+    /// needs the lexicon, which the grammar and chart deliberately cannot reach). For a span `[i, j]`
+    /// whose prefix `tokens[i..j]` is a pre-nominal modifier COORDINATION and `tokens[j]` is the shared
+    /// head, re-look-up each "conjunct + head" compound IN ISOLATION — the isolated surface resolves the
+    /// lexicalized concept cleanly, where the shared-head coordination cannot (a multiword lexeme needs
+    /// adjacency, and the head sits once at the end) — bare-NP-shift each to its kind, and fold them into
+    /// a `cat_group` the distributive rules predicate over. So "colon, gastric and ovarian cancers"
+    /// reaches `[kind_of(colon-cancer), …]` rather than a generic cancer with a disjunctive modifier.
+    ///
+    /// First cut (D63 §8 M-RNR-2): fires only when EVERY conjunct lexicalizes; a mixed list (a conjunct
+    /// that only composes, e.g. "ovarian cancer") yields nothing here, and the `cat_mod`/`Or` reading
+    /// stands — coverage is never reduced.
+    fn distribute_head(
+        &self,
+        span: &[String],
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+        cap: Option<usize>,
+        ranks: Option<&BTreeMap<String, u32>>,
+    ) -> Vec<Item> {
+        // `span` is `tokens[i..=j]`: the modifier coordination followed by its shared head (last token).
+        let Some((head, mods)) = span.split_last() else {
+            return Vec::new();
+        };
+        let head = head.as_str();
+        let Some(conjuncts) = split_coord_conjuncts(mods, |t| {
+            self.grammar.reserved.coord_connective(t).is_some()
+        }) else {
+            return Vec::new();
+        };
+        // The shared head's class `H` types the group — each distributed compound `Kᵢ ⊆ H`, so
+        // `group_member_fits` sees the type a predicate accepts. NOT `common_super(Kᵢ)`, which for
+        // UMLS-CUI compounds is the `Entity` top and fits no concrete slot (Wall 1a).
+        let Some(h) = self
+            .lookup_span(head, lemmatizer, scope, cap, ranks)
+            .iter()
+            .find_map(|it| match it.cat() {
+                Exp::InductiveCtor(_, name, args) if name == "cat_n" && args.len() == 2 => {
+                    Some(args[0].clone())
+                }
+                _ => None,
+            })
+        else {
+            return Vec::new();
+        };
+        // Per conjunct: the kind NPs of "conjunct + head", looked up IN ISOLATION and bare-NP-shifted.
+        // Bail unless EVERY conjunct yields ≥1 lexicalized concept (first-cut all-lexicalized gate).
+        let mut per_conjunct: Vec<Vec<Item>> = Vec::with_capacity(conjuncts.len());
+        for c in &conjuncts {
+            let surface = format!("{} {head}", c.join(" "));
+            let raw = self.lookup_span(&surface, lemmatizer, scope, cap, ranks);
+            // The bare-kind NP of each looked-up common noun: `cat_np(C, num)` with sem `kind_of(C)`,
+            // built directly — `bare_nominal_shifts` yields the RAISED subject/object forms, not the
+            // plain `cat_np` that `coordinate_np` folds into a group.
+            let kinds: Vec<Item> = raw
+                .iter()
+                .filter_map(|it| match it.cat() {
+                    Exp::InductiveCtor(decl, name, args) if name == "cat_n" && args.len() == 2 => {
+                        Some(Item::with_cost(
+                            // Typed by the head class `H`, sem is the SPECIFIC kind `kind_of(Kᵢ)`.
+                            Exp::InductiveCtor(
+                                decl.clone(),
+                                "cat_np".into(),
+                                vec![h.clone(), args[1].clone()],
+                            ),
+                            kind_of(args[0].clone()),
+                            it.cost(),
+                        ))
+                    }
+                    _ => None,
+                })
+                // Top-ranked sense only (raw is already sense-ranked by cap/reranker): the union is ONE
+                // structural reading, so cross-producing N conjuncts × their senses is an Nᵗʰ-power seed
+                // explosion (4⁴ on the 4-way cancer list → 192 groups → forest blow-up, Wall 2). Sense
+                // choice is the cap/reranker's job downstream, not distribute_head's.
+                .take(1)
+                .collect();
+            if kinds.is_empty() {
+                return Vec::new();
+            }
+            per_conjunct.push(kinds);
+        }
+        // Connective: `or` anywhere → union; else `and` (a comma list finalizes to conjunction).
+        let op = if mods
+            .iter()
+            .any(|t| self.grammar.reserved.coord_connective(t) == Some("urn:eigenius:logic:Or"))
+        {
+            "urn:eigenius:logic:Or"
+        } else {
+            "urn:eigenius:logic:And"
+        };
+        // One representative cost per conjunct, summed — the distributed compound's seed cost.
+        let mut cost = per_conjunct[0][0].cost();
+        for c in &per_conjunct[1..] {
+            cost = cost.saturating_add(c[0].cost());
+        }
+        // Fold `coordinate_np` left over the one kind per conjunct into the `cat_group` union.
+        let mut groups: Vec<(Exp, Exp)> = per_conjunct[0]
+            .iter()
+            .map(|it| (it.cat().clone(), it.sem().clone()))
+            .collect();
+        for conj in &per_conjunct[1..] {
+            let mut next = Vec::new();
+            for (gc, gs) in &groups {
+                for it in conj {
+                    if let Some(pair) =
+                        coordinate_np(op, gc, gs, it.cat(), it.sem(), &self.grammar.layer)
+                    {
+                        next.push(pair);
+                    }
+                }
+            }
+            groups = next;
+        }
+        groups
+            .into_iter()
+            .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
+            .collect()
     }
 }
 
@@ -668,4 +851,80 @@ pub(super) fn with_noun_num(it: &Item, num_name: &str) -> Item {
         }
     }
     it.clone()
+}
+
+/// **RNR head distribution** (`docs/notes/d63-rnr-head-distribution.md` §4) — split a candidate
+/// pre-nominal modifier-coordination slice on its connectives into the conjunct token-runs, so the
+/// caller can re-look-up each "conjunct + head" compound in isolation. `is_conn(t)` holds for a
+/// coordination connective (comma / `and` / `or`). Returns the conjunct surfaces ("colon",
+/// "microsatellite-stable"); `None` unless there are ≥2 non-empty conjuncts separated ONLY by
+/// connectives — a leading / trailing / doubled connective, or a single conjunct, is not a coordination.
+fn split_coord_conjuncts(
+    tokens: &[String],
+    is_conn: impl Fn(&str) -> bool,
+) -> Option<Vec<Vec<String>>> {
+    let mut conjuncts: Vec<Vec<String>> = vec![Vec::new()];
+    for t in tokens {
+        if is_conn(t) {
+            if conjuncts.last().unwrap().is_empty() {
+                return None; // a leading or doubled connective — malformed
+            }
+            conjuncts.push(Vec::new());
+        } else {
+            conjuncts.last_mut().unwrap().push(t.clone());
+        }
+    }
+    if conjuncts.len() < 2 || conjuncts.last().unwrap().is_empty() {
+        return None; // a single conjunct, or a trailing connective
+    }
+    Some(conjuncts)
+}
+
+#[cfg(test)]
+mod rnr_tests {
+    use super::split_coord_conjuncts;
+
+    fn toks(s: &str) -> Vec<String> {
+        s.split_whitespace().map(str::to_string).collect()
+    }
+    // The parser tokenises the comma as its own token; connectives are `,` / `and` / `or`.
+    fn is_conn(t: &str) -> bool {
+        matches!(t, "," | "and" | "or")
+    }
+
+    #[test]
+    fn splits_a_four_way_comma_list() {
+        assert_eq!(
+            split_coord_conjuncts(&toks("colon , gastric , endometrial and ovarian"), is_conn),
+            Some(vec![
+                toks("colon"),
+                toks("gastric"),
+                toks("endometrial"),
+                toks("ovarian")
+            ])
+        );
+    }
+
+    #[test]
+    fn or_list_keeps_multitoken_conjuncts() {
+        assert_eq!(
+            split_coord_conjuncts(&toks("insertion or deletion"), is_conn),
+            Some(vec![toks("insertion"), toks("deletion")])
+        );
+        assert_eq!(
+            split_coord_conjuncts(&toks("double stranded or single stranded"), is_conn),
+            Some(vec![toks("double stranded"), toks("single stranded")])
+        );
+    }
+
+    #[test]
+    fn rejects_non_coordinations() {
+        assert_eq!(split_coord_conjuncts(&toks("colon"), is_conn), None);
+        assert_eq!(split_coord_conjuncts(&toks("colon and"), is_conn), None);
+        assert_eq!(split_coord_conjuncts(&toks("and colon"), is_conn), None);
+        assert_eq!(
+            split_coord_conjuncts(&toks("colon and and gastric"), is_conn),
+            None
+        );
+    }
 }

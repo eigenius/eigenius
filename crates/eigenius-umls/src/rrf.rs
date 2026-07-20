@@ -248,13 +248,25 @@ fn def_priority(sab: &str) -> usize {
         .unwrap_or(DEF_SOURCE_PREFERENCE.len())
 }
 
+/// One distinct surface of a concept, keyed by its lowercase, with source provenance (D63 A2, the
+/// CHV-redundant filter).
+#[derive(Default)]
+struct FormInfo {
+    /// First display casing seen (first-seen wins).
+    display: String,
+    /// Some contributing source was **CHV** (Consumer Health Vocabulary — lay paraphrases).
+    has_chv: bool,
+    /// Some contributing source was **not** CHV (an authoritative vocabulary: MSH/NCI/…).
+    has_nonchv: bool,
+}
+
 /// Per-concept name/form accumulator.
 #[derive(Default)]
 struct Forms {
     /// Best canonical-name candidate: (score, string).
     best: Option<(u32, String)>,
-    /// Distinct surface strings, keyed by lowercase (first display casing wins).
-    by_key: BTreeMap<String, String>,
+    /// Distinct surface strings, keyed by lowercase (first display casing wins), with provenance.
+    by_key: BTreeMap<String, FormInfo>,
 }
 
 /// Accumulates the MRSTY/MRCONSO/MRDEF streams into a [`Subset`].
@@ -275,6 +287,12 @@ pub struct ConceptBuilder {
     cui_forms: BTreeMap<String, Forms>,
     cui_def: BTreeMap<String, (usize, String, String)>, // (priority, sab, def)
     cui_symbol: BTreeMap<String, (u8, String)>, // named-individual symbol: (tty-priority, string)
+    /// Lowercased surfaces that ANY concept carries from a **non-CHV** source — the coverage witness
+    /// the A2 CHV-redundant filter checks before dropping (D63).
+    surf_nonchv: BTreeSet<String>,
+    /// A2: drop a concept's REDUNDANT multiword CHV-only alias (a compound surface it gets only from
+    /// CHV, which an authoritative source already provides elsewhere). Off by default; opt-in.
+    drop_chv_redundant: bool,
 }
 
 impl ConceptBuilder {
@@ -298,7 +316,16 @@ impl ConceptBuilder {
             cui_forms: BTreeMap::new(),
             cui_def: BTreeMap::new(),
             cui_symbol: BTreeMap::new(),
+            surf_nonchv: BTreeSet::new(),
+            drop_chv_redundant: false,
         }
+    }
+
+    /// Enable the A2 CHV-redundant filter (D63): drop each concept's redundant multiword CHV-only
+    /// alias in [`Self::finish`]. Off by default (a faithful import); the parse harness opts in.
+    pub fn with_drop_chv_redundant(mut self, on: bool) -> Self {
+        self.drop_chv_redundant = on;
+        self
     }
 
     /// Whether a TUI passes the semantic-type filter.
@@ -346,15 +373,27 @@ impl ConceptBuilder {
             .unwrap_or(0);
         let score = rank * 4 + u32::from(a.ts == "P") * 2 + u32::from(a.ispref == "Y");
 
+        // Source provenance for the A2 CHV-redundant filter (D63): CHV = Consumer Health Vocabulary.
+        let is_chv = a.sab == "CHV";
+        let lc = str_.to_lowercase();
+        if !is_chv {
+            self.surf_nonchv.insert(lc.clone());
+        }
         let entry = self.cui_forms.entry(a.cui.clone()).or_default();
         match &entry.best {
             Some((s, _)) if *s >= score => {}
             _ => entry.best = Some((score, str_.to_string())),
         }
-        entry
-            .by_key
-            .entry(str_.to_lowercase())
-            .or_insert_with(|| str_.to_string());
+        let info = entry.by_key.entry(lc).or_insert_with(|| FormInfo {
+            display: str_.to_string(),
+            has_chv: false,
+            has_nonchv: false,
+        });
+        if is_chv {
+            info.has_chv = true;
+        } else {
+            info.has_nonchv = true;
+        }
 
         // Named-individual symbol (D62): a nomenclature-authority atom (HGNC) with a symbol
         // term-type (`ACR`/`PT`) marks this concept a NAMED INDIVIDUAL and supplies its proper-noun
@@ -400,6 +439,7 @@ impl ConceptBuilder {
     pub fn finish(self, limit: Option<usize>) -> Subset {
         let mut concepts = Vec::new();
         let mut used_tuis: BTreeSet<String> = BTreeSet::new();
+        let mut chv_dropped = 0usize; // A2: redundant multiword CHV-only aliases skipped
 
         for cui in &self.selected {
             let Some(forms_acc) = self.cui_forms.get(cui) else {
@@ -423,10 +463,27 @@ impl ConceptBuilder {
             // Forms: preferred name first, then the rest sorted (deduped by lowercase).
             let mut forms = vec![preferred.clone()];
             let pref_key = preferred.to_lowercase();
-            for (key, disp) in &forms_acc.by_key {
-                if *key != pref_key {
-                    forms.push(disp.clone());
+            for (key, info) in &forms_acc.by_key {
+                if *key == pref_key {
+                    continue;
                 }
+                // A2 (D63): drop a REDUNDANT multiword CHV-only alias — a compound surface this
+                // concept gets ONLY from CHV, where an authoritative source already provides that
+                // surface for some concept (so it stays seedable — coverage-safe). It removes the
+                // spurious second concept-reading of a compound that is otherwise one concept
+                // (`C0610268` "DNA Helicase A" aliasing `dna helicase`, which MSH gives the enzyme).
+                // The preferred name is never dropped. Multiword only: single-word CHV collisions are
+                // the A1 (LLM-adjudicated) class.
+                if self.drop_chv_redundant
+                    && key.contains(' ')
+                    && info.has_chv
+                    && !info.has_nonchv
+                    && self.surf_nonchv.contains(key)
+                {
+                    chv_dropped += 1;
+                    continue;
+                }
+                forms.push(info.display.clone());
             }
 
             concepts.push(Concept {
@@ -465,6 +522,10 @@ impl ConceptBuilder {
                 tui,
             })
             .collect();
+
+        if self.drop_chv_redundant {
+            eprintln!("A2 CHV-redundant multiword aliases dropped: {chv_dropped}");
+        }
 
         Subset {
             concepts,
@@ -651,5 +712,82 @@ C1337007|ENG|S|L2|VO|S2|N|A2||||HGNC|NA|HGNC:12791|Werner syndrome RecQ like hel
             "HGNC ACR atom marks the gene a named individual with symbol WRN"
         );
         assert_eq!(gene.tuis, vec!["T028"]);
+    }
+
+    /// A2 CHV-redundant filter (D63): a concept's REDUNDANT multiword CHV-only alias is dropped
+    /// (`C0610268` "DNA Helicase A" aliasing `dna helicase`, which MSH gives the real enzyme), while
+    /// a CHV-UNIQUE compound and every single-word CHV alias are KEPT (coverage-safe).
+    #[test]
+    fn a2_drops_redundant_multiword_chv_only_alias_only() {
+        // Two SRL-0 sources: MSH (authoritative) and CHV (consumer paraphrases).
+        const MRSAB: &str = "C1|C1|MSH|MSH|MeSH|MSH|2026|||||||0|1|1|FULL|MH||ENG|UTF-8|Y|Y|MeSH|;|
+C2|C2|CHV|CHV|Consumer Health Vocabulary|CHV|2026|||||||0|1|1|FULL|SY||ENG|UTF-8|Y|Y|CHV|;|";
+        const MRRANK: &str = "0500|MSH|MH|N|
+0490|MSH|SY|N|
+0100|CHV|SY|N|";
+        const MRSTY: &str = "CA|T116|A1.1|Amino Acid, Peptide, or Protein|AT1||
+CB|T116|A1.1|Amino Acid, Peptide, or Protein|AT2||";
+        // CA "DNA Helicase A": 'dna helicase' ONLY from CHV (redundant — CB has it from MSH);
+        //   'sugar diabetes' ONLY from CHV, CHV-UNIQUE; 'helicase' ONLY from CHV, single word.
+        // CB "DNA helicase": the real enzyme, 'dna helicase' + 'helicase' from MSH.
+        const MRCONSO: &str = "CA|ENG|P|L1|PF|S1|Y|A1||||MSH|MH|D1|DNA Helicase A|0|N||
+CA|ENG|S|L2|VO|S2|N|A2||||CHV|SY|D2|dna helicase|0|N||
+CA|ENG|S|L3|VO|S3|N|A3||||CHV|SY|D3|sugar diabetes|0|N||
+CA|ENG|S|L4|VO|S4|N|A4||||CHV|SY|D4|helicase|0|N||
+CB|ENG|P|L5|PF|S5|Y|A5||||MSH|MH|D5|DNA helicase|0|N||
+CB|ENG|S|L6|VO|S6|N|A6||||MSH|SY|D6|helicase|0|N||";
+
+        let build = |flag: bool| -> Subset {
+            let srl0 = srl0_allowlist(&parse_mrsab(MRSAB));
+            let mut b = ConceptBuilder::new(srl0, parse_mrrank(MRRANK), None, "ENG")
+                .with_drop_chv_redundant(flag);
+            for l in MRSTY.lines() {
+                if let Some(s) = parse_mrsty_line(l) {
+                    b.add_sty(&s);
+                }
+            }
+            for l in MRCONSO.lines() {
+                if let Some(a) = parse_mrconso_line(l) {
+                    b.add_atom(&a);
+                }
+            }
+            b.finish(None)
+        };
+
+        let forms_of = |s: &Subset, cui: &str| -> Vec<String> {
+            s.concepts
+                .iter()
+                .find(|c| c.cui == cui)
+                .map(|c| c.forms.iter().map(|f| f.to_lowercase()).collect())
+                .unwrap_or_default()
+        };
+
+        // Flag OFF (faithful import): CA keeps its CHV 'dna helicase' alias.
+        let off = forms_of(&build(false), "CA");
+        assert!(
+            off.contains(&"dna helicase".to_string()),
+            "off: CHV alias kept"
+        );
+
+        // Flag ON: the redundant multiword CHV-only alias is dropped; everything else stays.
+        let on = forms_of(&build(true), "CA");
+        assert!(
+            !on.contains(&"dna helicase".to_string()),
+            "redundant CHV compound DROPPED"
+        );
+        assert!(
+            on.contains(&"dna helicase a".to_string()),
+            "preferred name kept"
+        );
+        assert!(
+            on.contains(&"sugar diabetes".to_string()),
+            "CHV-UNIQUE compound kept (coverage)"
+        );
+        assert!(
+            on.contains(&"helicase".to_string()),
+            "single-word CHV alias kept (multiword only)"
+        );
+        // CB (the authoritative enzyme) is untouched — the surface still seeds.
+        assert!(forms_of(&build(true), "CB").contains(&"dna helicase".to_string()));
     }
 }

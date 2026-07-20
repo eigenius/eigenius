@@ -157,6 +157,39 @@ The two grammar choices behind this:
   survives. Kills axis-2 for MSI and every other mass/plural modifier, and leaves argument-position
   bare NPs ("MSI is a state") untouched — so `grammar-gap` stays 0.
 
+### Fix — RESOLVED (`2026-07-16`), and it needed BOTH directions, in order
+
+The two directions above are **not alternatives** — direction 2 alone *gaps* grammatical sentences,
+because the over-generation is **load-bearing**. Witnessed (dumped sems on the post-span-integrity
+`v3-2026-07-15` snapshot):
+
+- The spurious `And` is `refine_attrib` consuming a bare mass/plural noun's **predicative `S[adj]\NP`**
+  kind-raise (sem `λTV.λsubj. TV(kind, subj)`, from `kind_raised_nps`'s `bwd` branch — the `a`/`these`
+  determiner set carries the predicative body alongside the object-GQ, both `bwd`-headed) as a
+  pre-nominal modifier.
+- Gating that consumption (or deleting the predicative form) correctly kills the `And` — and **gaps**
+  `MSI cell lines from these four lineages were distinct` and #8 (unit 54): their ONLY parses *were*
+  the over-generation. Cause: **`refine_attrib` is the only modifier rule that FLATTENS** a further
+  modifier onto a compound-refined noun (`Σx:Base. And(P(x), q(x))`); `refine_pp_mod` /
+  `refine_kind_compound` / `refine_named_compound` **nest** (`Σy:(Σx:Base. P(x)). q(y)`, via
+  `refined_noun`). So a compound + PP (`MSI cell lines` + `from …`) had **no** clean flat structure —
+  only the over-generation's `And` supplied one.
+
+**The fix (`kernel/src/dcg/rules/combinators.rs`, `item.rs`, `registry.rs`), two parts:**
+
+1. **`refine_pp_mod` flattens** when its base `C` is already `Σx:Base. P(x)` → `Σx:Base. And(P(x),
+   pp(x))`, mirroring `refine_attrib`. This *creates the clean compound+PP reading*
+   (`kind_of(Σx:cell_lines. And(compound_kind(x, MSI), prep_from(x, lineages)))`).
+2. **`refine_attrib` gated** with a `Guard::NotProv(Left, Combinator::KindRaised)` — `kind_raised_nps`
+   now tags its outputs `KindRaised` (a new ENF-inert provenance), and the attributive rule refuses a
+   `KindRaised` left. Removes the spurious modifier use; safe now that (1) supplies the clean reading.
+
+**Verified:** object-raised `And` occurrences on the 2–8 bucket **16 → 0**; `MSI cancer models …`
+**4 → 2** readings (1 structural skeleton, pure sense); **`grammar-gap` 0** on the full first page
+(every sentence, incl. #8 and the bare-plural predications, parses cleanly); 1630 kernel lib tests
+pass. Direction 1 (extend the NF / flatten the compound builders too) remains a **follow-on** for
+3+-noun compounds not on this page — this fix flattened only `refine_pp_mod`, which the page needed.
+
 ---
 
 ## Deep dive — modal scope (`MSI can arise from Lynch syndrome`)
@@ -337,3 +370,53 @@ gap so the base cap parses, or (for the genuinely bad atom / wrong-category case
 surface form or import category. "Remove the entry" is never the answer, because the entry is
 appropriate in other contexts. **Open:** confirm the base-cap gap is `be` + predicative-adjective
 relative clause (needs a reranked test sentence isolating it).
+
+## Definite-as-existential negation-scope over-generation — FIXED (`2026-07-16`)
+
+Analysing the 2–4-reading sentences, the one **grammar** (structural) over-generation among them was
+`MSI cancer models did not require the exonuclease activity of WRN` — 2 readings, `sense× = 1.0`,
+differing only in the position of `False`:
+
+```
+raw[0]: … require(…) → G#0 → G#0 → False      (¬∃ : negation wide)
+raw[1]: … require(…) → False → G#0 → G#0      (∃¬ : negation narrow)
+```
+
+The `ΠG#0:Prop … → G#0 → G#0` chain is the CPS existential `∀C:Prop. (∀x:T. (TV(x,subj)→C)) → C` of
+the **object determiner** `the`. Negation composes at two points in it, giving `¬∃`/`∃¬`.
+
+**Root cause (witnessed).** Definite/demonstrative determiners reused `obj_exists_sem` /`exists_sem`
+(a documented first-cut, closed-class.esl). For a genuine existential the two scopes are truly
+distinct — confirmed: `HeLa did not require an activity` keeps both, correctly. For a **definite**
+(unique reference) they collapse, so the second reading is spurious — confirmed: the split needs a
+definite (`the`) *and* negation; `HeLa required the activity` (no neg) and `HeLa did not require
+activity` (no `the`) are each a single reading.
+
+**Fix — referential definite.** A definite is referential, not quantificational. New opaque axiom
+`ontology:the : forall (A : Set) => A` (the ι operator — the presupposed unique referent of a
+noun-type). Two sems: subject `λA.λV. V(the(A))`, object `λT.λTV.λsubj. TV(the(T), subj)`. The 12
+definite entries (`the`, `the`-pl, `this`, `that`, `these`, `those`; subj+obj) point at them;
+`a`/`an`/`some` and the cardinals keep the quantifier sems (their scope split is real).
+
+**Why it collapses.** The category is unchanged (sem-only edit), so the categorial derivation set —
+and thus **grammar-gap — is unchanged by construction**. Both scope derivations now assemble to the
+identical `TV(the(T),subj) → False`; NbE normalises them equal; `felicity::subsume_duplicates` (the
+definitional-equality dedup) drops the duplicate → 2 → 1.
+
+**Status — DONE (`2026-07-16`).** Bootstrap typechecks (`the(A):A`, `TV(the(T),subj)` well-typed);
+1631 kernel lib tests pass. The bootstrap edit invalidates the persisted chain, so the snapshot was
+reseeded `--umls-all` + v3-aligned (2.8 GB, matching the baseline coverage — a first reseed at the
+default WRN-TUI subset dropped ~2/3 of UMLS and produced spurious cap-only gaps + missing-lexemes;
+not the fix). Witnessed on the faithful snapshot:
+- cap-only: **grammar-gap 0, missing-lexeme 0**; the WRN sentence **4→2** (1 structural skeleton, the
+  residual is a cross-lexicon `activity` sense dup, not scope).
+- reranked (cnl-v3): the WRN sentence **AMBIG×2 → ENCODED**, so **encoded 6→7** — recovering the −1 the
+  bare-mass run showed and matching the `6914d01` baseline (7); grammar-gap 0; the other 6 encodings
+  intact.
+- Existentials (`a`/`an`/`some`) and adjectival negation (`were not essential`) correctly untouched.
+
+**Regression guards:** a CI-runnable lexicon-wiring test (`dcg::lexicon::referential_definite_tests`,
+no snapshot — catches a definite→existential reversion or an existential→referential over-correction)
+plus a snapshot-gated behavioural test (`definite_negation_collapses_referential` in
+`crates/eigenius-wordnet/tests/db_backed_encoding.rs` — the definite is scopeless while the matched
+existential keeps the `¬∃`/`∃¬` split).

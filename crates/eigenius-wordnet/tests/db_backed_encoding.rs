@@ -41,6 +41,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use eigenius_kernel::bootstrap::bootstrap_persistent;
+use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::{
     extract_abbreviations, glossary_resources, ground_abbreviation, is_nonprose, pretty_term,
     segment_sentences, tokenize, Identity, Lemmatizer, LexicalIndex, LexiconAugmentation, Parser,
@@ -61,7 +62,7 @@ use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 /// same convention as `DICT` below. Override with `EIGENIUS_DB_SNAPSHOT`.
 const DEFAULT_SNAPSHOT: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../db-snapshot/wordnet-umls-all-alone-2026-07-10"
+    "/../../../db-snapshot/wordnet-umls-aligned-v3-2026-07-16-quant"
 );
 
 /// WordNet dict (for the Morphy lemmatizer — surface→lemma at lookup time).
@@ -365,10 +366,16 @@ fn gates_to_prop(layer: &Arc<Layer>, sem: &Exp) -> bool {
 enum Outcome {
     Encoded {
         is_prop: bool,
+        /// Distinct STRUCTURAL skeletons among the closed readings (senses erased) — 1 for an encoded
+        /// unit by construction.
+        skeletons: usize,
     },
     Ambiguous {
         count: usize,
         is_prop: bool,
+        /// Distinct STRUCTURAL skeletons among the `count` closed readings — the sense-independent
+        /// (drift-free) bracketing count. `count / skeletons` is the sense× multiplicity.
+        skeletons: usize,
     },
     MissingLexeme {
         unknown: Vec<String>,
@@ -390,6 +397,73 @@ struct UnitReport {
     text: String,
     outcome: Outcome,
 }
+
+/// The reading-count of a classified unit — its number of CLOSED full-span parses (the multiplicity
+/// the `total_readings` metric sums). Encoded = 1, Ambiguous = its count; Open/GrammarGap/
+/// MissingLexeme/ScaleBound produce no closed reading, so 0.
+fn unit_readings(o: &Outcome) -> usize {
+    match o {
+        Outcome::Encoded { .. } => 1,
+        Outcome::Ambiguous { count, .. } => *count,
+        _ => 0,
+    }
+}
+
+/// Erase sense IRIs to `§` — runs of ≥4 digits (WordNet offsets / UMLS CUIs) — leaving the STRUCTURE,
+/// so two readings that differ only in WHICH sense fills a slot collapse to one skeleton. This is the
+/// same erasure `trace_one_sentence` prints per sentence.
+fn erase_senses(s: &str) -> String {
+    let mut out = String::new();
+    let mut run = String::new();
+    for c in s.chars() {
+        if c.is_ascii_digit() {
+            run.push(c);
+            continue;
+        }
+        if !run.is_empty() {
+            out.push_str(if run.len() >= 4 { "§" } else { &run });
+            run.clear();
+        }
+        out.push(c);
+    }
+    if !run.is_empty() {
+        out.push_str(if run.len() >= 4 { "§" } else { &run });
+    }
+    out
+}
+
+/// The distinct STRUCTURAL skeletons among a unit's closed readings — the sense-independent (hence
+/// reranker-drift-free) bracketing count. `total_readings` sense-multiplies these; skeleton-count does
+/// not, so it is the clean multiplicity signal (D63 baseline gates.multiplicity).
+fn distinct_skeletons(closed: &[Item]) -> usize {
+    closed
+        .iter()
+        .map(|it| erase_senses(&pretty_term(it.sem())))
+        .collect::<BTreeSet<String>>()
+        .len()
+}
+
+/// The distinct-skeleton count of a classified unit (0 for Open/GrammarGap/MissingLexeme/ScaleBound —
+/// they produce no closed reading, mirroring [`unit_readings`]).
+fn unit_skeletons(o: &Outcome) -> usize {
+    match o {
+        Outcome::Encoded { skeletons, .. } | Outcome::Ambiguous { skeletons, .. } => *skeletons,
+        _ => 0,
+    }
+}
+
+/// **PINNED** reading-count histogram buckets `(label, lo, hi)` inclusive — the single source of
+/// truth for the multiplicity distribution, so the buckets do NOT drift between runs. Change here
+/// only, deliberately (a re-baseline event), never per-run.
+const READING_BUCKETS: &[(&str, usize, usize)] = &[
+    ("0 (open/gap)", 0, 0),
+    ("1 (encoded)", 1, 1),
+    ("2-3", 2, 3),
+    ("4-10", 4, 10),
+    ("11-30", 11, 30),
+    ("31-100", 31, 100),
+    (">100", 101, usize::MAX),
+];
 
 /// Classify one unit. **OOV-first ordering** (vs. the slice prototype's parse-first): a closed
 /// full-span parse requires every (prose) token to seed a leaf, so a unit with any unknown token
@@ -430,10 +504,12 @@ fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Lay
         }
         1 => Outcome::Encoded {
             is_prop: gates_to_prop(layer, closed[0].sem()),
+            skeletons: 1,
         },
         n => Outcome::Ambiguous {
             count: n,
             is_prop: gates_to_prop(layer, closed[0].sem()),
+            skeletons: distinct_skeletons(&closed),
         },
     }
 }
@@ -2577,15 +2653,36 @@ fn summarize(report: &[UnitReport]) {
             }
         }
     }
+    // Reading-count multiplicity: the total over all units, and the pinned-bucket distribution.
+    let readings: Vec<usize> = report.iter().map(|u| unit_readings(&u.outcome)).collect();
+    let total_readings: usize = readings.iter().sum();
+    // Sense-independent structural multiplicity: distinct bracketings, senses erased. Drift-free (the
+    // reranker's sense choices collapse to `§`), so it isolates STRUCTURE from the sense multiplicity
+    // that `total_readings` conflates (D63 baseline gates.multiplicity — the tracked lever).
+    let total_skeletons: usize = report.iter().map(|u| unit_skeletons(&u.outcome)).sum();
+    let max_readings = readings.iter().copied().max().unwrap_or(0);
+
     // Persist the reranker's decisions (if recording) BEFORE the summary, so a run that produced a
     // number always leaves behind the artifact that makes it replayable.
     flush_sense_ranks();
     eprintln!(
         "\n=== WRN first page over FULL lexicon: {} units → encoded {enc}, ambiguous {amb}, \
          open {open}, missing-lexeme {miss}, grammar-gap {gap}, \
-         scale-bound (known, >{PARSE_BUDGET} tok) {scale} ===",
+         scale-bound (known, >{PARSE_BUDGET} tok) {scale}, total-readings {total_readings}, \
+         total-skeletons {total_skeletons} (sense× {:.2}) ===",
+        report.len(),
+        total_readings as f32 / total_skeletons.max(1) as f32
+    );
+    // Reading-count histogram (PINNED buckets, [`READING_BUCKETS`]) — the multiplicity distribution.
+    // `eval-parse-rate.sh` parses these `histogram:` lines; keep the format stable.
+    eprintln!(
+        "reading-count histogram ({} units, max {max_readings}):",
         report.len()
     );
+    for &(label, lo, hi) in READING_BUCKETS {
+        let n = readings.iter().filter(|&&c| c >= lo && c <= hi).count();
+        eprintln!("  histogram: {label:<12} {n}");
+    }
     eprintln!("distinct OOV tokens ({}): {oov:?}", oov.len());
 
     let per_unit: Vec<usize> = report
@@ -2634,8 +2731,8 @@ fn summarize(report: &[UnitReport]) {
     for u in report {
         let t: String = u.text.chars().take(100).collect();
         match &u.outcome {
-            Outcome::Encoded { is_prop } => eprintln!("  [ENCODED prop={is_prop}] {t}…"),
-            Outcome::Ambiguous { count, is_prop } => {
+            Outcome::Encoded { is_prop, .. } => eprintln!("  [ENCODED prop={is_prop}] {t}…"),
+            Outcome::Ambiguous { count, is_prop, .. } => {
                 eprintln!("  [AMBIG×{count} prop={is_prop}] {t}…")
             }
             _ => {}
@@ -3337,10 +3434,23 @@ fn dive_near_encoded() {
             .collect()
     }
 
+    // The reading-count window to dive into: `2..=EIGENIUS_DIVE_MAX` (default 16). Raise it to
+    // inspect the high-multiplicity units (`EIGENIUS_DIVE_MAX=100`). `EIGENIUS_DIVE_ONLY=<substring>`
+    // restricts the dive to units whose text contains the substring (so a single unit can be dumped).
+    let dive_max: usize = std::env::var("EIGENIUS_DIVE_MAX")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(16);
+    let dive_only = std::env::var("EIGENIUS_DIVE_ONLY").ok();
     let mut n_dive = 0;
     for text in segment_sentences(&page) {
+        if let Some(sub) = &dive_only {
+            if !text.contains(sub.as_str()) {
+                continue;
+            }
+        }
         let f = index.parse(&text, &lem);
-        if f.len() < 2 || f.len() > 16 {
+        if f.len() < 2 || f.len() > dive_max {
             continue;
         }
         n_dive += 1;
@@ -3391,4 +3501,159 @@ fn dive_near_encoded() {
     }
     println!("\n════════════════════════════════════════════════════════════════════");
     println!("units with 2–16 readings: {n_dive}");
+}
+
+/// **Single-sentence forest tracer** — parse one arbitrary sentence (`EIGENIUS_TRACE_SENTENCE`,
+/// default the DNA-repair-pathway probe) through the packed path with the DB-backed lexicon, so the
+/// `EIGENIUS_TRACE_FOREST` instrument (`chart::trace`) fires and prints the derivation forest to
+/// stderr. The trace fires once PER CAP ATTEMPT, so a sentence that gaps at base cap (integrity on)
+/// and only parses widened (integrity off) prints TWO blocks — diff them to see which edge multiword
+/// span-integrity removed.
+///
+///     EIGENIUS_TRACE_FOREST=top \
+///     EIGENIUS_TRACE_SENTENCE="A DNA repair pathway is essential." \
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     trace_one_sentence -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed diagnostic; set EIGENIUS_TRACE_FOREST + run --ignored --nocapture"]
+fn trace_one_sentence() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+    let text = std::env::var("EIGENIUS_TRACE_SENTENCE")
+        .unwrap_or_else(|_| "A DNA repair pathway is essential.".to_string());
+    let f = index.parse(&text, &lem);
+
+    // Erase every SENSE identifier (a run of >= 4 digits — CUIs, WordNet offsets/synsets) to `§`, so
+    // two readings that differ only in WHICH sense fills a slot collapse to ONE structural skeleton.
+    // This separates STRUCTURAL multiplicity (distinct bracketings) from SENSE multiplicity (same
+    // bracketing, different lexical senses) — the question for the residual-ambiguity root cause.
+    fn erase(s: &str) -> String {
+        let mut out = String::new();
+        let mut run = String::new();
+        for c in s.chars() {
+            if c.is_ascii_digit() {
+                run.push(c);
+                continue;
+            }
+            if !run.is_empty() {
+                out.push_str(if run.len() >= 4 { "§" } else { &run });
+                run.clear();
+            }
+            out.push(c);
+        }
+        if !run.is_empty() {
+            out.push_str(if run.len() >= 4 { "§" } else { &run });
+        }
+        out
+    }
+    let sems: Vec<String> = f.iter().map(|it| pretty_term(it.sem())).collect();
+    let skels: std::collections::BTreeSet<String> = sems.iter().map(|s| erase(s)).collect();
+    println!(
+        "\n=== {text} → {} reading(s) | {} structural skeleton(s) | sense× = {:.1} ===",
+        f.len(),
+        skels.len(),
+        f.len() as f32 / skels.len().max(1) as f32,
+    );
+    // EIGENIUS_TRACE_SKELETONS=1 dumps the distinct STRUCTURAL skeletons (the competing bracketings,
+    // senses erased) instead of the raw readings — the direct view of structural over-generation.
+    if std::env::var("EIGENIUS_TRACE_SKELETONS").is_ok() {
+        for (i, sk) in skels.iter().enumerate() {
+            println!("  skel[{i}]: {sk}");
+        }
+    } else {
+        for (i, it) in f.iter().enumerate().take(20) {
+            println!("  reading[{i}]: {}", pretty_term(it.sem()));
+        }
+    }
+}
+
+/// Snapshot-gated behavioural guard for the definite-referential fix
+/// (`experiments/parsing/near-encoded-bucket-analysis.md`, `2026-07-16`). A DEFINITE object is
+/// referential (`ontology:the`, the ι operator), hence **scopeless** — it does not scope under
+/// negation, so a definite object under `not` has ONE structural reading. A genuine EXISTENTIAL
+/// (`an`) keeps the real `¬∃` / `∃¬` scope split — TWO. Reverting the definite sems to the
+/// existential CPS (`obj_exists_sem`) reintroduces the WRN-paper "did not require the exonuclease
+/// activity of WRN" over-generation; this test fails if that happens. The CI-runnable wiring guard
+/// (no snapshot) is `dcg::lexicon::referential_definite_tests` in the kernel.
+///
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     definite_negation_collapses_referential -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed; --ignored --nocapture"]
+fn definite_negation_collapses_referential() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+
+    // Distinct STRUCTURAL skeletons: erase senses (runs of >= 4 digits — WordNet offsets / CUIs)
+    // so sense multiplicity cannot mask the structural scope difference we are asserting on.
+    fn erase_senses(s: &str) -> String {
+        let mut out = String::new();
+        let mut run = String::new();
+        for c in s.chars() {
+            if c.is_ascii_digit() {
+                run.push(c);
+                continue;
+            }
+            if !run.is_empty() {
+                out.push_str(if run.len() >= 4 { "§" } else { &run });
+                run.clear();
+            }
+            out.push(c);
+        }
+        if !run.is_empty() {
+            out.push_str(if run.len() >= 4 { "§" } else { &run });
+        }
+        out
+    }
+    let skeletons = |text: &str| -> std::collections::BTreeSet<String> {
+        index
+            .parse(text, &lem)
+            .iter()
+            .map(|it| erase_senses(&pretty_term(it.sem())))
+            .collect()
+    };
+    // The `¬∃`/`∃¬` scope split shows up structurally as a reading whose negation `→ logic:False` is
+    // NOT the outermost connective — `False` followed by more continuation (`… → False → G#0 → …`),
+    // as opposed to the single scopeless `… → False` a referential definite produces.
+    let split_readings = |sk: &std::collections::BTreeSet<String>| -> usize {
+        sk.iter().filter(|s| s.contains("False →")).count()
+    };
+
+    // Same noun ("activity"), same negation — only `the` (definite) vs `an` (existential) differ.
+    // Both carry the same lexical multiplicity of "activity" (senses / a cross-lexicon WordNet↔UMLS
+    // dup), so that factor cancels; what remains is the scope split, which the existential keeps and
+    // the referential definite drops.
+    let def = skeletons("HeLa did not require the activity.");
+    let exi = skeletons("HeLa did not require an activity.");
+
+    // The referential definite is SCOPELESS: no reading has negation scoping under the object.
+    assert_eq!(
+        split_readings(&def),
+        0,
+        "definite object under negation must be scopeless (`the(A)` referential) — a reading with \
+         `False` non-outermost means the `¬∃`/`∃¬` over-generation is back; got {:#?}",
+        def
+    );
+    // The genuine existential KEEPS the real scope split.
+    assert!(
+        split_readings(&exi) >= 1,
+        "existential object under negation must KEEP the ¬∃ / ∃¬ scope split — a scopeless result \
+         means the referential fix wrongly leaked onto `a`/`an`; got {:#?}",
+        exi
+    );
+    // And the count signature: strictly fewer structural readings for the definite than its matched
+    // existential (robust to how many senses "activity" carries — they scale both sides equally).
+    assert!(
+        def.len() < exi.len(),
+        "definite ({} skeletons) must have strictly fewer structural readings than the matched \
+         existential ({} skeletons).\n  definite: {:#?}\n  existential: {:#?}",
+        def.len(),
+        exi.len(),
+        def,
+        exi
+    );
 }

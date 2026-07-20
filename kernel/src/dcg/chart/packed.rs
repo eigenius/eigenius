@@ -29,11 +29,9 @@
 
 use super::super::category::is_sentence_premod;
 use super::super::grammar::Grammar;
-use super::super::holes::{freshen_anaphor, hole_base};
 use super::super::item::Item;
 use super::super::rules::combinators::apply;
-use super::super::rules::constructions::{complete_coord, front_participial};
-use super::super::rules::registry::{BinRule, UnaryKind};
+use super::super::rules::registry::{unary_shifts, BinRule, UnaryKind};
 use super::forest::{self as packed, CubeCandidate, Edge, Forest, NodeId, Sig};
 
 impl Grammar {
@@ -191,23 +189,15 @@ impl Grammar {
         span: (usize, usize),
         out: &mut Vec<Item>,
     ) {
-        let (i, j) = span;
+        // Comma absorption carries the sentence-premodifier through unchanged (it now spans the
+        // trailing comma). The child is already `is_sentence_premod` (checked at forest build), so no
+        // re-check here; the span widens but cat/sem/cost are identical. Every other shift comes from
+        // the shared `unary_shifts()` table (Phase 2d), so materialisation cannot drift from build.
         match kind {
-            UnaryKind::BareNp => out.extend(self.bare_nominal_shifts(it)),
-            UnaryKind::Raise => out.extend(self.raise_nps(std::slice::from_ref(it))),
-            UnaryKind::FrontParticipial => {
-                if let Some((cat, sem)) = front_participial(it.cat(), it.sem(), &self.layer) {
-                    let sem = freshen_anaphor(&sem, &hole_base(i, j));
-                    out.push(Item::with_cost(cat, sem, it.cost()));
-                }
-            }
-            // Comma absorption carries the sentence-premodifier through unchanged (it now spans the
-            // trailing comma). The child is already `is_sentence_premod` (checked at forest build), so
-            // no re-check is needed here; the span widens but the cat/sem/cost are identical.
             UnaryKind::AbsorbComma => out.push(it.clone()),
-            UnaryKind::CoordComplete => {
-                if let Some((cat, sem)) = complete_coord(it.cat(), it.sem(), &self.layer) {
-                    out.push(Item::with_cost(cat, sem, it.cost()));
+            _ => {
+                if let Some(shift) = unary_shifts().iter().find(|s| s.kind == kind) {
+                    out.extend(shift.run(self, it, span));
                 }
             }
         }
@@ -235,9 +225,18 @@ impl Grammar {
         &self,
         leaves: &[Vec<Vec<Item>>],
         tokens: &[String],
+        prefer_multiword: bool,
     ) -> packed::Forest {
         use packed::node_sig;
         let n = tokens.len();
+        // Multiword span integrity (base cap only): a lexicalized multiword `cat_n` leaf at [a,b]
+        // (b>a) is atomic — its interior split points {a..b-1} are protected so no compositional
+        // constituent ever crosses it. This subsumes the redundant-compound case (a compositional
+        // compound over [a,b] requires an interior split) AND blocks the left-branching split
+        // ("[MSI cell] lines" over the lexicalized "cell lines"). Widen-on-failure clears
+        // `prefer_multiword`, re-admitting the splits if the multiword won't compose in context, so
+        // `grammar-gap 0` is preserved. The marking is shared with the unpacked driver and the tracer.
+        let protected_split = super::multiword_protected_splits(leaves, prefer_multiword);
         let mut forest = Forest::new(n);
         // Group leaf items into nodes (one `Leaf` edge each; same-`Sig` items share a node).
         for (i, row) in leaves.iter().enumerate() {
@@ -255,6 +254,10 @@ impl Grammar {
                 // Collect combinations first (immutable borrow of `forest`), then insert.
                 let mut edges: Vec<(Sig, Item, NodeId, NodeId)> = Vec::new();
                 for k in i..j {
+                    // Span integrity: never combine across the interior of a multiword span.
+                    if protected_split.get(k).copied().unwrap_or(false) {
+                        continue;
+                    }
                     let lefts: Vec<NodeId> = forest.cells[i][k].values().copied().collect();
                     let rights: Vec<NodeId> = forest.cells[k + 1][j].values().copied().collect();
                     for &l in &lefts {
@@ -288,58 +291,24 @@ impl Grammar {
                     forest.push_edge(id, Edge::Binary { left, right, rule });
                 }
 
-                // Composed-cell UNARY shifts (§11 3c.4b), applied per node's representative and
-                // recorded as `Unary` edges (3d re-applies them per item at extraction). Order matches
-                // the unpacked CKY: (1) bare-plural/mass NP shift, (2) type-raise over the updated
-                // cell (so it sees the shifted NPs), (3) fronted participial. Freshening only touches
-                // the sem, never `cat_shape`, so it does not affect the signature — but it is applied
-                // here so the representative sems stay consistent with the unpacked path.
+                // Composed-cell UNARY shifts (§11 3c.4b) — the shared `unary_shifts()` table (Phase 2d),
+                // applied per node's representative and recorded as `Unary` edges (3d re-applies them
+                // per item at extraction). Iterated IN TABLE ORDER, and each shift's edges are added to
+                // the cell BEFORE the next shift reads it — so the type-raise sees the bare-NP shifts,
+                // matching the unpacked CKY. Freshening only touches the sem, never `cat_shape`, so it
+                // does not affect the signature.
                 let mut unary: Vec<(Sig, Item, NodeId, UnaryKind)> = Vec::new();
-                // Coordination list-completion (D63 §8.4 Phase 3): fold each prop-ending `cat_coord`
-                // node in this cell into its base category. The `cat_coord` node stays (a longer list
-                // extends it); the completed base-category node is what a copula / matrix consumes.
-                for id in forest.cells[i][j].values().copied().collect::<Vec<_>>() {
-                    let rep = forest.nodes[id].rep.clone();
-                    if let Some((cat, sem)) = complete_coord(rep.cat(), rep.sem(), &self.layer) {
-                        let item = Item::with_cost(cat, sem, rep.cost());
-                        unary.push((node_sig(&item), item, id, UnaryKind::CoordComplete));
+                for shift in unary_shifts() {
+                    for id in forest.cells[i][j].values().copied().collect::<Vec<_>>() {
+                        let rep = forest.nodes[id].rep.clone();
+                        for item in shift.run(self, &rep, (i, j)) {
+                            unary.push((node_sig(&item), item, id, shift.kind));
+                        }
                     }
-                }
-                for (sig, item, child, kind) in unary.drain(..) {
-                    let nid = forest.get_or_create(i, j, sig, &item);
-                    forest.push_edge(nid, Edge::Unary { child, kind });
-                }
-                for id in forest.cells[i][j].values().copied().collect::<Vec<_>>() {
-                    let rep = forest.nodes[id].rep.clone();
-                    for np in self.bare_nominal_shifts(&rep) {
-                        unary.push((node_sig(&np), np, id, UnaryKind::BareNp));
+                    for (sig, item, child, kind) in unary.drain(..) {
+                        let nid = forest.get_or_create(i, j, sig, &item);
+                        forest.push_edge(nid, Edge::Unary { child, kind });
                     }
-                }
-                for (sig, item, child, kind) in unary.drain(..) {
-                    let nid = forest.get_or_create(i, j, sig, &item);
-                    forest.push_edge(nid, Edge::Unary { child, kind });
-                }
-                for id in forest.cells[i][j].values().copied().collect::<Vec<_>>() {
-                    let rep = forest.nodes[id].rep.clone();
-                    for raised in self.raise_nps(std::slice::from_ref(&rep)) {
-                        unary.push((node_sig(&raised), raised, id, UnaryKind::Raise));
-                    }
-                }
-                for (sig, item, child, kind) in unary.drain(..) {
-                    let nid = forest.get_or_create(i, j, sig, &item);
-                    forest.push_edge(nid, Edge::Unary { child, kind });
-                }
-                for id in forest.cells[i][j].values().copied().collect::<Vec<_>>() {
-                    let rep = forest.nodes[id].rep.clone();
-                    if let Some((cat, sem)) = front_participial(rep.cat(), rep.sem(), &self.layer) {
-                        let sem = freshen_anaphor(&sem, &hole_base(i, j));
-                        let item = Item::with_cost(cat, sem, rep.cost());
-                        unary.push((node_sig(&item), item, id, UnaryKind::FrontParticipial));
-                    }
-                }
-                for (sig, item, child, kind) in unary.drain(..) {
-                    let nid = forest.get_or_create(i, j, sig, &item);
-                    forest.push_edge(nid, Edge::Unary { child, kind });
                 }
                 // Fronted-modifier comma absorption (§11 3g.3): a sentence-initial `S/S` pre-modifier
                 // at `[0, j-1]` carries over a trailing comma at `j` to span `[0, j]`, so it can then

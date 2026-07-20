@@ -85,6 +85,13 @@ AMB=$(field 'ambiguous'      "$SUMMARY")
 OPN=$(field 'open'           "$SUMMARY")
 MIS=$(field 'missing-lexeme' "$SUMMARY")
 GAP=$(field 'grammar-gap'    "$SUMMARY")
+# total-readings (the multiplicity signal). Absent on logs from before it was wired into the harness
+# (2026-07-17); a non-numeric extraction means "not present", handled downstream.
+TR=$(field 'total-readings'  "$SUMMARY"); [[ "$TR" =~ ^[0-9]+$ ]] || TR=""
+# total-skeletons (the DRIFT-FREE structural multiplicity signal — senses erased, so the reranker's
+# sense choices cannot mask a structural change; the tracked lever, less cap/sense-entangled than
+# total-readings). Absent on logs from before it was wired (2026-07-19).
+TS=$(field 'total-skeletons' "$SUMMARY"); [[ "$TS" =~ ^[0-9]+$ ]] || TS=""
 
 # ── Trap 3: which KIND of run was this? ──────────────────────────────────────
 RERANK="$(grep -m1 -E '^contextual reranker:' "$LOG" | sed 's/^contextual reranker: //' || echo 'unknown')"
@@ -108,7 +115,17 @@ printf '  %-16s %s\n' "missing-lexeme" "$MIS"
 printf '  %-16s %s\n' "ambiguous"      "$AMB"
 printf '  %-16s %s\n' "open"           "$OPN"
 printf '  %-16s %s\n' "encoded"        "$ENC"
+[[ -n "$TR" ]] && printf '  %-16s %s\n' "total-readings"  "$TR"
+[[ -n "$TS" ]] && printf '  %-16s %s\n' "total-skeletons" "$TS"
 echo
+
+# Reading-count histogram — emitted by the harness with PINNED buckets (READING_BUCKETS in
+# db_backed_encoding.rs). Surfaced verbatim so the buckets never drift between the run and the score.
+if grep -qE '^  histogram:' "$LOG"; then
+  echo "  reading-count histogram (pinned buckets):"
+  grep -E '^  histogram:' "$LOG" | sed -E 's/^  histogram: */    /'
+  echo
+fi
 
 RC=0
 if [[ "$PROFILE" == "debug" ]]; then
@@ -142,6 +159,39 @@ if [[ "$USE_JSON" == "1" ]]; then
   printf '    %-16s %s → %s %s\n' "encoded" "$BENC" "$ENC" \
     "$([[ "$ENC" -lt "$BENC" ]] && echo '  REGRESSION' || { [[ "$ENC" -gt "$BENC" ]] && echo '  improved' || echo '  (unchanged)'; })"
   [[ "$GAP" -gt "$BGAP" || "$ENC" -lt "$BENC" ]] && RC=2
+
+  # ── Multiplicity gate: total_readings must not exceed the ceiling (over-generation must not grow) ─
+  BCEIL=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('total_readings_ceiling',0))")
+  BTR=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('total_readings',0))")
+  if [[ -n "$TR" ]]; then
+    if [[ "$TR" -gt "$BCEIL" ]]; then
+      printf '    %-16s %s → %s   REGRESSION (> ceiling %s)\n' "total-readings" "$BTR" "$TR" "$BCEIL"
+      RC=2
+    else
+      printf '    %-16s %s → %s%s (ceiling %s)\n' "total-readings" "$BTR" "$TR" \
+        "$([[ "$TR" -lt "$BTR" ]] && echo '   improved' || { [[ "$TR" -gt "$BTR" ]] && echo '   rose (within ceiling)' || echo '   (unchanged)'; })" "$BCEIL"
+    fi
+  else
+    echo "    total-readings   (not in this log — harness predates the metric; re-measure to gate it)"
+  fi
+
+  # ── Structural-multiplicity gate: total-skeletons (drift-free, sense-erased) must not exceed the
+  #    ceiling. THE CLEAN LEVER — total-readings sense-multiplies structure and the reranker masks real
+  #    wins (M3/RNR both fell in structure while reranked total_readings rose), so a skeleton RISE is the
+  #    true over-generation signal. See gates.multiplicity.
+  BSCEIL=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('skeletons_ceiling',0))")
+  BTS=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('skeletons',0))")
+  if [[ -n "$TS" && "$BSCEIL" -gt 0 ]]; then
+    if [[ "$TS" -gt "$BSCEIL" ]]; then
+      printf '    %-16s %s → %s   REGRESSION (> ceiling %s)\n' "total-skeletons" "$BTS" "$TS" "$BSCEIL"
+      RC=2
+    else
+      printf '    %-16s %s → %s%s (ceiling %s)\n' "total-skeletons" "$BTS" "$TS" \
+        "$([[ "$TS" -lt "$BTS" ]] && echo '   improved' || { [[ "$TS" -gt "$BTS" ]] && echo '   rose (within ceiling)' || echo '   (unchanged)'; })" "$BSCEIL"
+    fi
+  elif [[ -z "$TS" ]]; then
+    echo "    total-skeletons  (not in this log — harness predates the metric; re-measure to gate it)"
+  fi
 fi
 
 # ── Or against another RUN's log (like-for-like only) ────────────────────────

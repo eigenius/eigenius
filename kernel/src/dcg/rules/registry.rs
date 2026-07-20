@@ -34,6 +34,7 @@ use crate::nbe::term::{Exp, Patt};
 
 use super::super::category::*;
 use super::super::grammar::Grammar;
+use super::super::holes::{freshen_anaphor, hole_base};
 use super::super::item::{Combinator, Item};
 use super::super::reserved::ReservedKind;
 use super::constructions::*;
@@ -118,72 +119,12 @@ impl Grammar {
     /// registry. Also not here: the categorial rules ([`apply`]), which are sem-blind and need no
     /// token trigger, and the group/distributive rules ([`super::super::item::apply_group`]).
     pub(crate) fn binary_sites(&self, tokens: &[String], i: usize, j: usize) -> Vec<BinSite> {
+        // Interpreter over the rule table (Phase 2c): each [`TokBinRule`] contributes its firing sites
+        // via its own `trigger`. Site order across rules is not load-bearing — both drivers build ALL
+        // sites, and the forest is a set of edges.
         let mut sites: Vec<BinSite> = Vec::new();
-        // --- constructions keyed by a reserved word BETWEEN the two operands ---
-        for c in (i + 1)..j {
-            // Restrictive relative: `[noun] that/which [body]` → a refined noun.
-            if self.reserved.is_relativizer(tokens[c].as_str()) {
-                sites.push(BinSite::new((i, c - 1), (c + 1, j), BinRule::Relativize));
-            }
-            // Coordination: `[X] and/or/`,` [Y]` → a `cat_coord` list or a `cat_group`.
-            if let Some(op) = self.reserved.coord_connective(tokens[c].as_str()) {
-                sites.push(BinSite::new(
-                    (i, c - 1),
-                    (c + 1, j),
-                    BinRule::Coordinate(op),
-                ));
-            }
-            // Contrastive: `[O₁] but not [O₂]` — a TWO-token coordinator (`but` + `not`), so the right
-            // operand starts at `c + 2`. (`but` alone stays the sentential subordinator, an ordinary
-            // lexical leaf, so the two never conflict.)
-            if self.reserved.is(&tokens[c], ReservedKind::ContrastiveBut)
-                && tokens
-                    .get(c + 1)
-                    .is_some_and(|t| self.reserved.is(t, ReservedKind::Negator))
-                && c + 2 <= j
-            {
-                sites.push(BinSite::new((i, c - 1), (c + 2, j), BinRule::ButNot));
-            }
-        }
-        // --- non-restrictive (appositive) relative: `[NP] , that/which [body] [,]` ---
-        // The comma BEFORE the relativizer is what distinguishes it from the restrictive rule (whose
-        // noun must be relativizer-adjacent), and a trailing comma is absorbed into the span so the
-        // appositive NP ends up adjacent to the matrix VP. Both the subject-position (type-raised) and
-        // the verb-object-position (in-situ raise) readings are offered; the builders gate by category.
-        for c in (i + 2)..=j {
-            if !self.reserved.is_relativizer(tokens[c].as_str())
-                || !self.reserved.is_comma(&tokens[c - 1])
-            {
-                continue;
-            }
-            let body_end = if self.reserved.is_comma(&tokens[j]) {
-                j - 1
-            } else {
-                j
-            };
-            if c < body_end {
-                let (ante, body) = ((i, c - 2), (c + 1, body_end));
-                sites.push(BinSite::new(ante, body, BinRule::AppositiveSubj));
-                sites.push(BinSite::new(ante, body, BinRule::AppositiveObj));
-            }
-        }
-        // --- close nominal apposition: `[head] [name-group]` ---
-        // ADJACENT (no reserved token between them), so — like the plain categorial `Combine` loop —
-        // every split is a candidate and `appose_group` gates by shape + head kind.
-        for m in i..j {
-            sites.push(BinSite::new((i, m), (m + 1, j), BinRule::ApposeGroup));
-        }
-        // --- reciprocal: `[group] <TV> each other` --- keyed on the TRAILING reserved pair, so the
-        // verb spans `[s, j-2]` and the subject group `[i, s-1]` at every split `s`.
-        if j >= 3
-            && self
-                .reserved
-                .is(&tokens[j - 1], ReservedKind::ReciprocalEach)
-            && self.reserved.is(&tokens[j], ReservedKind::ReciprocalOther)
-        {
-            for s in (i + 1)..=(j - 2) {
-                sites.push(BinSite::new((i, s - 1), (s, j - 2), BinRule::Reciprocal));
-            }
+        for rule in bin_rules() {
+            (rule.trigger)(self, tokens, i, j, &mut sites);
         }
         sites
     }
@@ -195,42 +136,290 @@ impl Grammar {
     /// [`super::super::chart::forest::Sig`] — categories, ENF provenance, and the coordination-sem bit — so it is
     /// consistent across every item of a packed node; the sem is built here per pair.
     pub(crate) fn apply_bin_rule(&self, rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
-        let cost = l.cost().saturating_add(r.cost());
-        match rule {
-            BinRule::Relativize => relativize(l.cat(), r.cat(), r.sem())
-                .map(|(cat, sem)| Item::with_cost(cat, sem, cost)),
-            BinRule::Coordinate(op) => {
-                // The list-with-operator model (D63 §8.4 Phase 3): a prop-ending conjunct builds/extends
-                // a deferred `cat_coord` (folded later by the `CoordComplete` unary edge); an NP conjunct
-                // builds a `cat_group`. Each enforces its own left-branching NF (right conjunct is a
-                // single non-list constituent), so no `is_coordination` guard here.
-                coordinate_prop(op, l.cat(), l.sem(), r.cat(), r.sem(), &self.layer)
-                    .or_else(|| coordinate_np(op, l.cat(), l.sem(), r.cat(), r.sem(), &self.layer))
-                    .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
-            }
-            BinRule::ButNot => {
-                if cats_coordinate(l.cat(), r.cat(), &self.layer) {
-                    if sem_is_coordination(r.sem()) {
-                        return None;
-                    }
-                    coordinate_but_not_sem(l.cat(), l.sem(), r.sem(), &self.layer)
-                        .map(|sem| Item::with_cost(l.cat().clone(), sem, cost))
-                } else {
-                    coordinate_but_not(l.cat(), l.sem(), r.cat(), r.sem(), &self.layer)
-                        .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
-                }
-            }
-            BinRule::Reciprocal => reciprocate(l.cat(), l.sem(), r.cat(), r.sem(), &self.layer)
-                .map(|(cat, sem)| Item::with_cost(cat, sem, cost)),
-            BinRule::AppositiveSubj => {
-                relativize_appos(l.cat(), l.sem(), r.cat(), r.sem(), &self.layer)
-                    .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
-            }
-            BinRule::AppositiveObj => self.appositive_obj(l, r),
-            BinRule::ApposeGroup => appose_group(l.cat(), r.cat(), r.sem(), &self.layer)
-                .map(|(cat, sem)| Item::with_cost(cat, sem, cost)),
+        // Interpreter over the rule table (Phase 2c): dispatch to the matched rule's `build`. The
+        // `BinRule` tag carries per-firing data (the coordination connective), so it is looked up by
+        // its `BinKind` discriminant.
+        let desc = bin_rules().iter().find(|d| d.kind == rule.kind())?;
+        (desc.build)(self, rule, l, r)
+    }
+}
+
+/// A **token-keyed binary construction**, fully described in one place (Phase 2c,
+/// `docs/notes/grammar-formalization-plan.md`): its `trigger` geometry (where it fires in the token
+/// stream), its sem-`build`er, and whether its DECISION reads the sem. Both [`Grammar::binary_sites`]
+/// and [`Grammar::apply_bin_rule`] are interpreters over the [`bin_rules`] table; the trigger/build
+/// logic stays named functions (as the categorial builders do), the SET of rules is the data.
+struct TokBinRule {
+    /// Rule identity — for tracing / on-chain naming; carried, not consumed at runtime.
+    #[allow(dead_code)]
+    name: &'static str,
+    /// Discriminant linking a firing site's [`BinRule`] tag back to this descriptor.
+    kind: BinKind,
+    /// Emits this rule's firing sites for a cell `[i, j]` into `out` (the token geometry as code —
+    /// span arithmetic over reserved-word predicates).
+    trigger: TriggerFn,
+    /// Materialises the result item for one `(left, right)` pair — the sem-builder half.
+    build: BinBuild,
+    /// **Escape-hatch declaration.** Whether this rule's *decision* (whether it fires) reads the sem —
+    /// which requires the packing [`super::super::chart::forest::Sig`] to carry the coordination bit.
+    /// The categorial rules are sem-blind; these item-level rules need not be. Pinned by
+    /// `escape_hatch_matches_sig` below; a future forest change can consume it to enforce soundness.
+    #[allow(dead_code)]
+    reads_sem: bool,
+}
+
+type TriggerFn = fn(&Grammar, &[String], usize, usize, &mut Vec<BinSite>);
+type BinBuild = fn(&Grammar, BinRule, &Item, &Item) -> Option<Item>;
+
+/// The discriminant of a [`BinRule`] — a [`BinRule`] carries per-firing data (the coordination
+/// connective IRI), so it is not itself an `Eq` table key; this is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum BinKind {
+    Relativize,
+    Coordinate,
+    ButNot,
+    Reciprocal,
+    AppositiveSubj,
+    AppositiveObj,
+    ApposeGroup,
+}
+
+impl BinRule {
+    fn kind(self) -> BinKind {
+        match self {
+            BinRule::Relativize => BinKind::Relativize,
+            BinRule::Coordinate(_) => BinKind::Coordinate,
+            BinRule::ButNot => BinKind::ButNot,
+            BinRule::Reciprocal => BinKind::Reciprocal,
+            BinRule::AppositiveSubj => BinKind::AppositiveSubj,
+            BinRule::AppositiveObj => BinKind::AppositiveObj,
+            BinRule::ApposeGroup => BinKind::ApposeGroup,
         }
     }
+}
+
+/// The token-keyed binary rule table (all `const`, so no `LazyLock`). Priority = order, but site
+/// order is not load-bearing (both drivers build every site).
+static BIN_RULES: [TokBinRule; 7] = [
+    TokBinRule {
+        name: "relativize",
+        kind: BinKind::Relativize,
+        trigger: trig_relativize,
+        build: build_relativize,
+        reads_sem: false,
+    },
+    TokBinRule {
+        name: "coordinate",
+        kind: BinKind::Coordinate,
+        trigger: trig_coordinate,
+        build: build_coordinate,
+        reads_sem: true,
+    },
+    TokBinRule {
+        name: "but_not",
+        kind: BinKind::ButNot,
+        trigger: trig_but_not,
+        build: build_but_not,
+        reads_sem: true,
+    },
+    TokBinRule {
+        name: "appositive_subj",
+        kind: BinKind::AppositiveSubj,
+        trigger: trig_appositive_subj,
+        build: build_appositive_subj,
+        reads_sem: false,
+    },
+    TokBinRule {
+        name: "appositive_obj",
+        kind: BinKind::AppositiveObj,
+        trigger: trig_appositive_obj,
+        build: build_appositive_obj,
+        reads_sem: false,
+    },
+    TokBinRule {
+        name: "appose_group",
+        kind: BinKind::ApposeGroup,
+        trigger: trig_appose_group,
+        build: build_appose_group,
+        reads_sem: false,
+    },
+    TokBinRule {
+        name: "reciprocal",
+        kind: BinKind::Reciprocal,
+        trigger: trig_reciprocal,
+        build: build_reciprocal,
+        reads_sem: false,
+    },
+];
+
+fn bin_rules() -> &'static [TokBinRule] {
+    &BIN_RULES
+}
+
+// ── Trigger geometries (extracted verbatim from the former `binary_sites`) ───────────────────────
+
+/// Restrictive relative `[noun] that/which [body]`: a relativizer BETWEEN the operands.
+// `c` is a split-point index used for both operand spans, not just to index `tokens`.
+#[allow(clippy::needless_range_loop)]
+fn trig_relativize(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
+    for c in (i + 1)..j {
+        if g.reserved.is_relativizer(tokens[c].as_str()) {
+            out.push(BinSite::new((i, c - 1), (c + 1, j), BinRule::Relativize));
+        }
+    }
+}
+
+/// Coordination `[X] and/or/`,` [Y]`: a coordinating connective BETWEEN the operands (the connective
+/// IRI rides in the `BinRule::Coordinate` tag).
+// `c` is a split-point index used for both operand spans, not just to index `tokens`.
+#[allow(clippy::needless_range_loop)]
+fn trig_coordinate(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
+    for c in (i + 1)..j {
+        if let Some(op) = g.reserved.coord_connective(tokens[c].as_str()) {
+            out.push(BinSite::new(
+                (i, c - 1),
+                (c + 1, j),
+                BinRule::Coordinate(op),
+            ));
+        }
+    }
+}
+
+/// Contrastive `[O₁] but not [O₂]`: a TWO-token coordinator (`but` + `not`), so the right operand
+/// starts at `c + 2`.
+fn trig_but_not(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
+    for c in (i + 1)..j {
+        if g.reserved.is(&tokens[c], ReservedKind::ContrastiveBut)
+            && tokens
+                .get(c + 1)
+                .is_some_and(|t| g.reserved.is(t, ReservedKind::Negator))
+            && c + 2 <= j
+        {
+            out.push(BinSite::new((i, c - 1), (c + 2, j), BinRule::ButNot));
+        }
+    }
+}
+
+/// The `(antecedent, body)` spans of a non-restrictive (appositive) relative `[NP] , that/which
+/// [body] [,]` — a relativizer at `c` preceded by a comma, with trailing-comma absorption. Shared by
+/// the subject- and object-position readings (each is its own rule with its own builder).
+fn appositive_spans(
+    g: &Grammar,
+    tokens: &[String],
+    i: usize,
+    j: usize,
+) -> Vec<((usize, usize), (usize, usize))> {
+    let mut spans = Vec::new();
+    for c in (i + 2)..=j {
+        if !g.reserved.is_relativizer(tokens[c].as_str()) || !g.reserved.is_comma(&tokens[c - 1]) {
+            continue;
+        }
+        let body_end = if g.reserved.is_comma(&tokens[j]) {
+            j - 1
+        } else {
+            j
+        };
+        if c < body_end {
+            spans.push(((i, c - 2), (c + 1, body_end)));
+        }
+    }
+    spans
+}
+
+fn trig_appositive_subj(
+    g: &Grammar,
+    tokens: &[String],
+    i: usize,
+    j: usize,
+    out: &mut Vec<BinSite>,
+) {
+    for (ante, body) in appositive_spans(g, tokens, i, j) {
+        out.push(BinSite::new(ante, body, BinRule::AppositiveSubj));
+    }
+}
+
+fn trig_appositive_obj(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
+    for (ante, body) in appositive_spans(g, tokens, i, j) {
+        out.push(BinSite::new(ante, body, BinRule::AppositiveObj));
+    }
+}
+
+/// Close nominal apposition `[head] [name-group]`: ADJACENT operands, every split a candidate.
+fn trig_appose_group(_g: &Grammar, _tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
+    for m in i..j {
+        out.push(BinSite::new((i, m), (m + 1, j), BinRule::ApposeGroup));
+    }
+}
+
+/// Reciprocal `[group] <TV> each other`: keyed on the TRAILING reserved pair, verb `[s, j-2]`.
+fn trig_reciprocal(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
+    if j >= 3
+        && g.reserved.is(&tokens[j - 1], ReservedKind::ReciprocalEach)
+        && g.reserved.is(&tokens[j], ReservedKind::ReciprocalOther)
+    {
+        for s in (i + 1)..=(j - 2) {
+            out.push(BinSite::new((i, s - 1), (s, j - 2), BinRule::Reciprocal));
+        }
+    }
+}
+
+// ── Builders (extracted verbatim from the former `apply_bin_rule`) ───────────────────────────────
+
+fn build_relativize(_g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
+    let cost = l.cost().saturating_add(r.cost());
+    relativize(l.cat(), r.cat(), r.sem()).map(|(cat, sem)| Item::with_cost(cat, sem, cost))
+}
+
+/// The list-with-operator model (D63 §8.4 Phase 3): a prop-ending conjunct builds/extends a deferred
+/// `cat_coord`; an NP conjunct builds a `cat_group`. Each enforces its own left-branching NF, so no
+/// outer `is_coordination` guard here — the sem-reading NF check lives inside `coordinate_prop`.
+fn build_coordinate(g: &Grammar, rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
+    let BinRule::Coordinate(op) = rule else {
+        return None;
+    };
+    let cost = l.cost().saturating_add(r.cost());
+    coordinate_prop(op, l.cat(), l.sem(), r.cat(), r.sem(), &g.layer)
+        .or_else(|| coordinate_np(op, l.cat(), l.sem(), r.cat(), r.sem(), &g.layer))
+        .or_else(|| coordinate_mod(l.cat(), l.sem(), r.cat(), r.sem(), &g.layer))
+        .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
+}
+
+fn build_but_not(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
+    let cost = l.cost().saturating_add(r.cost());
+    if cats_coordinate(l.cat(), r.cat(), &g.layer) {
+        // Escape hatch: the DECISION reads the sem (a completed coordination cannot be a `but not`
+        // right operand) — this is why `ButNot` declares `reads_sem` and `Sig` carries the bit.
+        if sem_is_coordination(r.sem()) {
+            return None;
+        }
+        coordinate_but_not_sem(l.cat(), l.sem(), r.sem(), &g.layer)
+            .map(|sem| Item::with_cost(l.cat().clone(), sem, cost))
+    } else {
+        coordinate_but_not(l.cat(), l.sem(), r.cat(), r.sem(), &g.layer)
+            .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
+    }
+}
+
+fn build_reciprocal(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
+    let cost = l.cost().saturating_add(r.cost());
+    reciprocate(l.cat(), l.sem(), r.cat(), r.sem(), &g.layer)
+        .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
+}
+
+fn build_appositive_subj(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
+    let cost = l.cost().saturating_add(r.cost());
+    relativize_appos(l.cat(), l.sem(), r.cat(), r.sem(), &g.layer)
+        .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
+}
+
+fn build_appositive_obj(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
+    g.appositive_obj(l, r)
+}
+
+fn build_appose_group(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
+    let cost = l.cost().saturating_add(r.cost());
+    appose_group(l.cat(), r.cat(), r.sem(), &g.layer)
+        .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
 }
 
 /// One firing **site** of a token-keyed binary construction inside a chart cell: the two operand
@@ -319,7 +508,15 @@ impl Grammar {
                     }
                     _ => return None,
                 };
-                Some(Item::with_cost(cat, sem, noun.cost()))
+                // Tag `KindRaised` so the attributive rule can refuse the predicative `S[adj]\NP` form
+                // as a pre-nominal modifier (the bare-mass `And` over-generation), while it stays
+                // available for its legit argument/predication uses. ENF-inert.
+                Some(Item::from_parts(
+                    cat,
+                    sem,
+                    Combinator::KindRaised,
+                    noun.cost(),
+                ))
             })
             .collect()
     }
@@ -385,7 +582,7 @@ impl Grammar {
 ///
 /// The rules' trigger geometry — which sub-spans each fires over — is defined ONCE, in
 /// `Parser::binary_sites`, and consumed by both chart paths.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum BinRule {
     /// `[noun] that/which [body] → refined noun` (`relativize`).
     Relativize,
@@ -409,7 +606,7 @@ pub(crate) enum BinRule {
 }
 
 /// Which composed-cell unary shift a [`super::super::chart::forest::Edge::Unary`] represents (D63 blueprint §11 3c.4b).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum UnaryKind {
     /// Forward bounded type-raising `T`: `NP → S/(S\NP)` (`raise_nps`).
     Raise,
@@ -426,4 +623,143 @@ pub(crate) enum UnaryKind {
     /// base category (`op(op(m₀, m₁),…)`, via `complete_coord`). The `cat_coord` node stays available
     /// (a longer list extends it); this shift adds the folded base-category node a matrix consumes.
     CoordComplete,
+    /// Pre-nominal modifier lift (D63 coordinated-modifier category): a modifier-eligible item →
+    /// `cat_mod` (`mod_lifts`), so modifiers can coordinate before meeting the head noun. Fires on
+    /// composed cells; leaves are lifted at seed time (mirroring `BareNp`).
+    ModLift,
+}
+
+/// A **composed-cell unary shift** (Phase 2c/2d): its [`UnaryKind`] tag and how it applies to one
+/// cell item. The ordered table [`unary_shifts`] is the single source of truth all three shift sites
+/// consume — the unpacked CKY (extends the cell), the packed forest builder (adds `Edge::Unary`), and
+/// `materialize_unary` (re-applies per item at extraction) — replacing the former triplicated
+/// orchestration. `AbsorbComma` is NOT here: it is a sentence-initial cross-cell special case both
+/// drivers keep inline.
+pub(crate) struct UnaryShift {
+    pub(crate) kind: UnaryKind,
+    /// Rule identity — tracing / on-chain naming; carried, not consumed at runtime.
+    #[allow(dead_code)]
+    name: &'static str,
+    apply: UnaryApply,
+}
+
+/// Apply a shift to ONE cell item, given the cell span (for hole freshening). Every shift is
+/// **per-item-independent** — `raise_nps`/`bare_nominal_shifts` map each item alone — so applying the
+/// shift item-by-item (packed) equals applying it to the whole cell at once (unpacked).
+type UnaryApply = fn(&Grammar, &Item, (usize, usize)) -> Vec<Item>;
+
+impl UnaryShift {
+    pub(crate) fn run(&self, g: &Grammar, it: &Item, span: (usize, usize)) -> Vec<Item> {
+        (self.apply)(g, it, span)
+    }
+}
+
+/// The ordered composed-cell shift table (all `const`). **ORDER IS LOAD-BEARING**: coordination
+/// completion, then bare-nominal, then type-raise (so the raise sees the shifted NPs), then fronted
+/// participial — matching the CKY. Both drivers iterate this in order, each shift reading the cell
+/// state left by the previous.
+static UNARY_SHIFTS: [UnaryShift; 5] = [
+    UnaryShift {
+        kind: UnaryKind::ModLift,
+        name: "mod_lift",
+        apply: apply_mod_lift,
+    },
+    UnaryShift {
+        kind: UnaryKind::CoordComplete,
+        name: "coord_complete",
+        apply: apply_coord_complete,
+    },
+    UnaryShift {
+        kind: UnaryKind::BareNp,
+        name: "bare_np",
+        apply: apply_bare_np,
+    },
+    UnaryShift {
+        kind: UnaryKind::Raise,
+        name: "raise",
+        apply: apply_raise,
+    },
+    UnaryShift {
+        kind: UnaryKind::FrontParticipial,
+        name: "front_participial",
+        apply: apply_front_participial,
+    },
+];
+
+pub(crate) fn unary_shifts() -> &'static [UnaryShift] {
+    &UNARY_SHIFTS
+}
+
+/// Coordination list-completion: fold a prop-ending `cat_coord` into its base category.
+fn apply_coord_complete(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
+    complete_coord(it.cat(), it.sem(), &g.layer)
+        .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
+        .into_iter()
+        .collect()
+}
+
+/// Bare-nominal shift: a plural/mass `cat_n` → the copula kind-subject edge + raised bare-argument NPs.
+fn apply_bare_np(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
+    g.bare_nominal_shifts(it)
+}
+
+/// Pre-nominal modifier lift: a modifier-eligible item → a standalone `cat_mod` (`combinators::mod_lifts`).
+fn apply_mod_lift(_g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
+    super::combinators::mod_lifts(it)
+}
+
+/// Forward bounded type-raise: a name `NP` → `S/(S\NP)`.
+fn apply_raise(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
+    g.raise_nps(std::slice::from_ref(it))
+}
+
+/// Fronted participial adjunct: a subject-gapped `ger` VP → a sentence pre-modifier `S/S`, its
+/// controlled-subject hole freshened to this span.
+fn apply_front_participial(g: &Grammar, it: &Item, span: (usize, usize)) -> Vec<Item> {
+    let (i, j) = span;
+    front_participial(it.cat(), it.sem(), &g.layer)
+        .map(|(cat, sem)| Item::with_cost(cat, freshen_anaphor(&sem, &hole_base(i, j)), it.cost()))
+        .into_iter()
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **Escape-hatch invariant** (Phase 2c). The rules that declare `reads_sem` must be exactly the
+    /// ones whose DECISION consults the sem — `Coordinate` and `ButNot` — the two the packing
+    /// `super::super::chart::forest::Sig` carries a coordination bit for. Adding a sem-reading rule
+    /// without extending `Sig` (and this declaration) would be unsound; this test catches it.
+    #[test]
+    fn escape_hatch_matches_sig() {
+        let sem_reading: Vec<BinKind> = bin_rules()
+            .iter()
+            .filter(|d| d.reads_sem)
+            .map(|d| d.kind)
+            .collect();
+        assert_eq!(
+            sem_reading,
+            vec![BinKind::Coordinate, BinKind::ButNot],
+            "only Coordinate and ButNot read the sem in their firing decision"
+        );
+    }
+
+    /// Every `BinKind` a trigger can tag a site with has exactly one descriptor, so
+    /// `apply_bin_rule`'s discriminant lookup never misses.
+    #[test]
+    fn every_kind_has_exactly_one_descriptor() {
+        for kind in [
+            BinKind::Relativize,
+            BinKind::Coordinate,
+            BinKind::ButNot,
+            BinKind::Reciprocal,
+            BinKind::AppositiveSubj,
+            BinKind::AppositiveObj,
+            BinKind::ApposeGroup,
+        ] {
+            let n = bin_rules().iter().filter(|d| d.kind == kind).count();
+            assert_eq!(n, 1, "exactly one descriptor per BinKind: {kind:?}");
+        }
+    }
 }

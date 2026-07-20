@@ -115,6 +115,9 @@ echo "kernel healthy @ $ENDPOINT"
 # (scripts/provision-countability.sh); absent ⇒ count-only nouns (non-fatal).
 COUNTABILITY="${COUNTABILITY:-references/wiktionary/uncountable-nouns.txt}"
 [[ -f "$COUNTABILITY" ]] || say "note: $COUNTABILITY absent — WordNet nouns will be count-only (run scripts/provision-countability.sh)"
+# Junk-atom drop set (D63 alignment): committed by `lexicon-align drops`; absent ⇒ no drops (non-fatal).
+DROPS="${DROPS:-experiments/lexicon-align/drops.json}"
+[[ -f "$DROPS" ]] || say "note: $DROPS absent — no junk-atom drops (run: lexicon-align drops)"
 say "converting WordNet (--all) → wordnet-chain/"
 rm -rf wordnet-chain
 cargo run --release -q -p eigenius-wordnet --bin wordnet-import -- --all --dict "$DICT" --countability "$COUNTABILITY" --out-dir wordnet-chain
@@ -127,8 +130,19 @@ UMLS_TUI_ARGS=()
 # d63-parse-gap-closure §4 Step 4) so a bare abbreviation of a mass phenomenon (`MSI`) parses as a subject.
 UMLS_COUNTABILITY_ARGS=()
 [[ -f "$COUNTABILITY" ]] && UMLS_COUNTABILITY_ARGS+=(--countability "$COUNTABILITY")
+# `--drop-atoms`: skip junk atoms whose only contribution is a case-mangled collision with a common
+# word (`gENE`→`gene`), judged a different concept by the D63 adjudicator (`lexicon-align drops`). The
+# common word stays covered by WordNet (every dropped surface is a WordNet lemma); this only removes
+# the spurious biomedical reading of it.
+UMLS_DROP_ARGS=()
+[[ -f "$DROPS" ]] && UMLS_DROP_ARGS+=(--drop-atoms "$DROPS")
+# `--drop-chv-redundant` (A2, D63): drop each concept's redundant multiword CHV-only alias (a compound
+# surface only CHV gives it, already covered by an authoritative source) — removes a spurious second
+# concept-reading of a compound; coverage-safe. Opt-out with DROP_CHV_REDUNDANT=0.
+UMLS_CHV_ARGS=()
+[[ "${DROP_CHV_REDUNDANT:-1}" == "1" ]] && UMLS_CHV_ARGS+=(--drop-chv-redundant)
 "$ROOT/target/release/umls-import" --meta-dir "$UMLS_META" --version "$UMLS_RELEASE" \
-  --out-dir umls-chain "${UMLS_TUI_ARGS[@]}" "${UMLS_COUNTABILITY_ARGS[@]}"
+  --out-dir umls-chain "${UMLS_TUI_ARGS[@]}" "${UMLS_COUNTABILITY_ARGS[@]}" "${UMLS_DROP_ARGS[@]}" "${UMLS_CHV_ARGS[@]}"
 
 # Guard: the base layer must declare EVERY semantic type the concept chunks reference, else the
 # kernel rejects the chunks (UnresolvedClassReference, fail-closed). This catches the dangling-STY

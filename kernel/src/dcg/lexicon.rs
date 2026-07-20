@@ -553,3 +553,52 @@ impl LexicalLookup for LexicalIndex {
         }
     }
 }
+
+#[cfg(test)]
+mod referential_definite_tests {
+    use super::{LexicalIndex, LexicalLookup};
+    use std::sync::Arc;
+
+    /// The definite-referential fix (`experiments/parsing/near-encoded-bucket-analysis.md`,
+    /// `2026-07-16`): the definite / demonstrative determiners denote a REFERENTIAL definite —
+    /// `ontology:the`, the ι operator — NOT the existential CPS (`obj_exists_sem`/`exists_sem`)
+    /// they once reused as a first-cut. A definite is scopeless, so `¬require(the(A), s)` is a
+    /// single reading; the existential encoding spuriously bifurcated it into `¬∃x.P` / `∃x.¬P`
+    /// under negation (the WRN-paper "did not require the exonuclease activity of WRN" dup).
+    ///
+    /// This pins the wiring **in CI, no snapshot** (the behavioural 2→1 collapse is the
+    /// snapshot-gated `definite_negation_collapses_referential` in
+    /// `crates/eigenius-wordnet/tests/db_backed_encoding.rs`). It catches a **reversion**
+    /// (a definite re-pointed at the existential drops `ontology:the`) and an **over-correction**
+    /// (a genuine existential made referential gains it).
+    #[test]
+    fn definites_reference_ontology_the_and_existentials_do_not() {
+        const THE: &str = "Iri(\"urn:eigenius:ontology:the\")";
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let lex = LexicalIndex::build(Arc::clone(ctx.head()));
+        let mentions_the = |form: &str| -> Vec<bool> {
+            let es = lex.entries_for(form);
+            assert!(!es.is_empty(), "no lexical entries for `{form}`");
+            es.iter()
+                .map(|e| format!("{:?}", e.item.sem()).contains(THE))
+                .collect()
+        };
+        // Definites + demonstratives: their determiner reading is referential. `any` (not `all`)
+        // because some forms are polysemous (`that` is also a complementizer, `this`/`these` also
+        // pronouns) — those extra readings are legitimately not `ontology:the`.
+        for d in ["the", "this", "that", "these", "those"] {
+            assert!(
+                mentions_the(d).iter().any(|&b| b),
+                "`{d}` must have a referential-definite reading (references ontology:the)"
+            );
+        }
+        // Genuine existentials + a cardinal: NEVER referential — their negation-scope split is real
+        // and must be preserved.
+        for q in ["a", "an", "some", "two"] {
+            assert!(
+                mentions_the(q).iter().all(|&b| !b),
+                "`{q}` must stay quantificational (no ontology:the)"
+            );
+        }
+    }
+}

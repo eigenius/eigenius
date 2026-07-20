@@ -29,17 +29,25 @@ persisted chain, and copies the volume out to a dated read-only snapshot.
 scripts/reseed-lexicon-db.sh --umls-all      # ~20 min → ../db-snapshot/wordnet-umls-<date>
 ```
 
+The reseed also applies the **junk-atom drop set** (`experiments/lexicon-align/drops.json`, via
+`--drop-atoms`): UMLS atoms whose only contribution is a case-mangled collision with a common word
+(`gENE`→`gene`), which the D63 adjudicator judged a *different* concept. Their per-form entries are
+skipped at import (the concept class stays; the common word is still covered by WordNet — every
+dropped surface is a WordNet lemma). Regenerate the list with `lexicon-align drops` (see
+[experiments/lexicon-align](../lexicon-align/README.md)).
+
 ### 2a. Layer the WordNet↔UMLS alignment on top
 
 The measured store is the base **plus** the cross-lexicon concept alignment
-([experiments/lexicon-align](../lexicon-align/README.md) — 26 690 merges that make a WordNet synset
-and a UMLS concept denote ONE class):
+([experiments/lexicon-align](../lexicon-align/README.md) — merges that make a WordNet synset and a
+UMLS concept denote ONE class). ONE command emits the layer from `merges.json` **and** loads it —
+never hand-carry a pre-emitted `.esl` (a stale one silently measures the wrong store):
 
 ```bash
-scripts/add-layer-to-snapshot.sh \
+scripts/build-alignment-snapshot.sh \
   --base ../db-snapshot/wordnet-umls-<date> \
-  --out  ../db-snapshot/wordnet-umls-aligned-v2-<date> \
-  experiments/lexicon-align/alignment.esl
+  --out  ../db-snapshot/wordnet-umls-aligned-<date> \
+  --merges experiments/lexicon-align/merges.json
 ```
 
 The base is treated as **immutable**: it is staged into a scratch volume, the layer is loaded
@@ -128,10 +136,11 @@ The scripts close all three. They are documented because *reading the raw log by
    that it structurally cannot support, three times.) Its `sems` field records what each sense
    *denotes*, so two senses with different labels and the same `sem` are visibly ONE concept — but
    the pre-dedup caveat still stands.
-4. **`grammar-gap` comes from the summary line, and nowhere else.** The per-unit listing enumerates
-   only AMBIG units and **silently omits grammar gaps** — counting from it reports 0 gaps on a run
-   that had many. And **a run with no summary line did not complete**; its partial counts are not a
-   result.
+4. **`grammar-gap`, `total-readings`, and `total-skeletons` come from the summary line, and nowhere
+   else.** The per-unit listing enumerates only AMBIG units and **silently omits grammar gaps** —
+   counting from it reports 0 gaps on a run that had many. `eval-parse-rate.sh` reads the metrics from
+   the `=== WRN first page over FULL lexicon: … ===` line only. And **a run with no summary line did not complete**; its
+   partial counts are not a result.
 
 ---
 
@@ -148,8 +157,34 @@ Each sentence unit is classified:
 | `MISSING-LEXEME` | no parse: a word is out of vocabulary (**a lexicon failure**) |
 | `SCALE-BOUND` | skipped: beyond the length bound (>60 tok) |
 
-**Coverage gate:** `grammar-gap 0` and `missing-lexeme 0` — every sentence parses.
-**Faithfulness goal:** raise `encoded`.
+**Coverage gate:** `grammar-gap 0` and `missing-lexeme 0` — every sentence parses. NON-NEGOTIABLE.
+**Faithfulness goal:** raise `encoded` (units at exactly one reading).
+**Multiplicity signal:** lower `total-readings` — the sum of closed readings over all units, the
+more sensitive over-generation signal (a single sentence dropping from 40 readings to 20 moves it
+where `encoded` does not). The harness prints it on the summary line and a **reading-count
+histogram** with **pinned buckets** (`READING_BUCKETS` in `crates/eigenius-wordnet/tests/db_backed_encoding.rs`):
+`0 (open/gap) · 1 (encoded) · 2-3 · 4-10 · 11-30 · 31-100 · >100`. The buckets are fixed in that one
+constant so they do NOT drift between runs; `eval-parse-rate.sh` surfaces them verbatim and gates
+`total-readings` against `total_readings_ceiling` in `baseline.json`.
+
+**Structural multiplicity — the clean lever:** `total-skeletons` — distinct bracketings with senses
+erased (runs of ≥4 digits → `§`), summed over units, printed on the summary line as
+`total-skeletons N (sense× = total-readings / total-skeletons)`. Because it is sense-independent it is
+**drift-free** (the reranker's sense choices collapse to `§`), so it isolates STRUCTURE from the sense
+multiplicity `total-readings` conflates — which matters because `total-readings` has repeatedly *risen*
+while structure *fell* (M3, RNR: the reranker sense-collapses the very units a structural fix improves).
+`eval-parse-rate.sh` reports and gates it against `skeletons_ceiling` in `baseline.json`; a skeleton
+RISE is the true over-generation signal. It is computed over the `SENSE_CAP` reading set (not fully
+uncapped — `factor_ambiguity` is the manual uncapped deep-dive), but the erasure is what makes it clean.
+**Prefer `total-skeletons` for a structural claim; `total-readings` is its sense-inflated companion.**
+
+**Isolating a LEXICON change (drops, merges, imports) — use `--no-llm`.** The reranked metric is the
+progress number, but the LLM reranker drifts ~5% between runs even at `temperature 0`, which swamps a
+small lexicon change (16 dropped atoms moved `total-readings` by ±7, inside the ±60 drift band). A
+lexicon change alters the reranker's candidate set, so a recorded `ranks.json` is not transferable
+across it and `--replay` cannot A/B it cleanly either. **Cap-only (`--no-llm`) is deterministic** —
+no LLM — so pre-vs-post cap-only isolates exactly what the lexicon change did, free of reranker noise.
+Report both: cap-only for the deterministic delta, reranked for the tracked metric.
 
 ---
 

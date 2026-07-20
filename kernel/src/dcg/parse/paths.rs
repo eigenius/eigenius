@@ -63,7 +63,18 @@ impl Parser {
         // does not). Hoisting the seed out of `build_forest` is what makes the packed driver
         // lexicon-free — it is handed the leaf cells and never asks where they came from.
         let (leaves, _drops) = self.seed_leaves(&tokens, lemmatizer, scope, cap, ranks, None);
-        let forest = self.grammar.build_forest(&leaves, &tokens);
+        // Multiword preference (prefer a span-covering lexicalized multiword over its compositional
+        // kind-compound). Kept through the ENTIRE cap-widen ladder, lifted only at the FINAL rung
+        // (cap == SENSE_CAP_WIDEN_MAX): a sentence that widens for unrelated (sense-crowding) reasons
+        // keeps its compounds collapsed instead of re-exploding, and coverage still falls back to the
+        // compositional splits at the last rung, so `grammar-gap 0` holds. Safe to keep on through
+        // widen because the overlap boundary-exception (`multiword_protected_splits`) stops an
+        // overlapping multiword from gapping — otherwise it would stay gapping to the max rung and
+        // explode there (the ×88 regression this cut had before the root fix).
+        let prefer_multiword = !matches!(cap, Some(c) if c >= SENSE_CAP_WIDEN_MAX);
+        let forest = self
+            .grammar
+            .build_forest(&leaves, &tokens, prefer_multiword);
         let mut memo: Vec<Option<Vec<Item>>> = vec![None; forest.nodes.len()];
 
         // Top-span candidates: finite-clause / wh-question nodes spanning the whole sentence.
@@ -75,6 +86,27 @@ impl Parser {
                 is_finite_clause(c) || is_ctor(c, "cat_q").is_some()
             })
             .collect();
+
+        // Forest derivation trace (set `EIGENIUS_TRACE_FOREST`, see `chart::trace`): print HOW the
+        // forest was built — the hyperedge tree, which cells combine under which rule at which split.
+        // Fires once per cap attempt; the header carries the `protected_split` vector so a base-cap
+        // run (integrity on) and a widened one (integrity off) can be diffed to name the edge
+        // multiword span-integrity removed.
+        if let Ok(spec) = std::env::var("EIGENIUS_TRACE_FOREST") {
+            let mw_spans = super::super::chart::multiword_spans(&leaves);
+            let protected =
+                super::super::chart::multiword_protected_splits(&leaves, prefer_multiword);
+            let header = format!(
+                "===== FOREST TRACE cap={cap:?} prefer_multiword={prefer_multiword} \
+                 multiword_spans={mw_spans:?} protected_split={protected:?} nodes={} tokens={tokens:?} =====",
+                forest.nodes.len(),
+            );
+            eprint!(
+                "{}",
+                super::super::chart::trace::forest_trace(&forest, &tokens, &top, &spec, &header)
+            );
+        }
+
         let mut candidates: Vec<Item> = Vec::new();
         for id in top {
             candidates.extend(
@@ -173,11 +205,18 @@ impl Parser {
 
         // 2. Drive the chart. Seeding needed the lexicon; DRIVING does not — the grammar is handed the
         //    seeded cells and composes them, so the two CKY drivers are pure grammar operations.
+        // Multiword-preference cut kept through the ENTIRE widen ladder (beam-first, then cap), lifted
+        // only at the FINAL rung (both maxed) so a sentence that widens for unrelated reasons keeps its
+        // compounds collapsed; the last rung re-admits the compositional kind-compound, keeping
+        // `grammar-gap 0`. Mirrors the packed path above so the differential oracle holds.
+        let prefer_multiword = !(matches!(cap, Some(c) if c >= SENSE_CAP_WIDEN_MAX)
+            && matches!(beam, Some(b) if b >= CELL_BEAM_WIDEN_MAX));
         beam_drops += self.grammar.drive_unpacked(
             &mut chart,
             &tokens,
             beam,
             self.config.combinatory_core,
+            prefer_multiword,
             debug,
         );
         if beam_drops > 0 {

@@ -67,6 +67,30 @@ resource lexicon:obj_no_sem : lexicon:SemTerm {
     );
 }
 
+// ── Definite / demonstrative determiners — REFERENTIAL, not existential ───────────────
+// A definite ("the", "this"/"that", "these"/"those") denotes a fixed, presupposed referent
+// `ontology:the(A) : A` (the ι operator), NOT an existential quantifier. Referential ⇒
+// SCOPELESS: `¬require(the(A), subj)` is one reading, whereas reusing the existential
+// (`obj_exists_sem`, a documented first-cut) spuriously split into `¬∃x.P` / `∃x.¬P` under
+// negation — equivalent for a unique referent (the WRN-paper "did not require the exonuclease
+// activity of WRN"). Genuine existentials (`a`/`an`/`some`) and cardinals keep the quantifier
+// sems above, whose negation-scope split is real.
+// Subject definite: λA. λV. V(the(A)).
+resource lexicon:the_ref_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (A : Set) => fun (V : A -> Prop) => V(ontology:the(A))
+          : forall (A : Set) => (A -> Prop) -> Prop )
+    );
+}
+// Object definite: λT. λTV. λsubj. TV(the(T), subj).
+resource lexicon:the_ref_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            TV(ontology:the(T), subj)
+          : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+
 // ── wh-question semantics (D63 §8.5, Slice 5b — subject wh) ───────────
 // A wh-question denotes its **answer-property** ⟦Q(T)⟧ = T → Prop. A SUBJECT wh
 // has its gap adjacent to the VP (`S\NP_T`), so it composes by plain application
@@ -1562,7 +1586,106 @@ resource lexicon:some_obj : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
-    lexicon:sense    = "some"; 
+    lexicon:sense    = "some";
+    lexicon:grade    = epistemic:declared;
+}
+
+// ── Plural quantifier determiners (`several`/`many`/`few`/`most`/`both`) ───────────────
+// These were MISSING from the determiner lexicon, so `several cancers` had no quantifier reading and
+// fell back to `several`'s WordNet gradable-ADJECTIVE entry used prenominally (`gt(deg_a, std)` — the
+// spurious "more-several-than-standard" modifier). Modeled on the plural `the`/`some`: an
+// existential-PLURAL determiner (category `cat_forall(pl, …)`, `exists_sem`/`obj_exists_sem`). The
+// exact cardinality (`several` > 2, `both` = 2, `most` = majority) is a FIRST-CUT existential and left
+// opaque, as with the other determiners; the WordNet adjective reading is dropped at seed time when a
+// determiner reading is present (the cross-POS adjective prune, `parse/seed.rs`).
+resource lexicon:several_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('several cancers'). First-cut existential (>2), cardinality opaque.";
+    lexicon:form     = "several";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "several";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:several_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('several cancers'), object position.";
+    lexicon:form     = "several";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "several";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:many_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('many cancers'). First-cut existential, cardinality opaque.";
+    lexicon:form     = "many";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "many";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:many_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('many cancers'), object position.";
+    lexicon:form     = "many";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "many";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:few_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('few cancers'). First-cut existential, cardinality/polarity opaque.";
+    lexicon:form     = "few";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "few";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:few_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('few cancers'), object position.";
+    lexicon:form     = "few";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "few";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:most_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('most cancers'). First-cut existential (majority), cardinality opaque. (No superlative reading — the grammar has none.)";
+    lexicon:form     = "most";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "most";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:most_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('most cancers'), object position.";
+    lexicon:form     = "most";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "most";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:both_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('both lineages'). First-cut existential (dual, =2), cardinality opaque.";
+    lexicon:form     = "both";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "both";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:both_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential quantifier determiner ('both lineages'), object position.";
+    lexicon:form     = "both";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "both";
     lexicon:grade    = epistemic:declared;
 }
 // no — negative, singular.
@@ -1599,7 +1722,7 @@ resource lexicon:the_subj : lexicon:LexicalEntry {
     core:description = "grammatical: definite article/determiner ('the gene').";
     lexicon:form     = "the";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:the_ref_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "the";
     lexicon:grade    = epistemic:declared;
@@ -1608,7 +1731,7 @@ resource lexicon:the_obj : lexicon:LexicalEntry {
     core:description = "grammatical: definite article/determiner ('the gene').";
     lexicon:form     = "the";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:the_ref_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "the";
     lexicon:grade    = epistemic:declared;
@@ -1621,7 +1744,7 @@ resource lexicon:the_subj_pl : lexicon:LexicalEntry {
     core:description = "grammatical: definite article/determiner ('the gene').";
     lexicon:form     = "the";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:the_ref_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "the";
     lexicon:grade    = epistemic:declared;
@@ -1630,7 +1753,7 @@ resource lexicon:the_obj_pl : lexicon:LexicalEntry {
     core:description = "grammatical: definite article/determiner ('the gene').";
     lexicon:form     = "the";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:the_ref_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "the";
     lexicon:grade    = epistemic:declared;
@@ -1639,7 +1762,7 @@ resource lexicon:this_subj : lexicon:LexicalEntry {
     core:description = "grammatical: singular proximal demonstrative determiner ('this gene').";
     lexicon:form     = "this";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:the_ref_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "this";
     lexicon:grade    = epistemic:declared;
@@ -1648,7 +1771,7 @@ resource lexicon:this_obj : lexicon:LexicalEntry {
     core:description = "grammatical: singular proximal demonstrative determiner ('this gene').";
     lexicon:form     = "this";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:the_ref_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "this";
     lexicon:grade    = epistemic:declared;
@@ -1657,7 +1780,7 @@ resource lexicon:that_dem_subj : lexicon:LexicalEntry {
     core:description = "grammatical: singular distal demonstrative determiner, or the complementiser introducing a clause ('showed that WRN is essential').";
     lexicon:form     = "that";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:the_ref_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "that_dem";
     lexicon:grade    = epistemic:declared;
@@ -1666,7 +1789,7 @@ resource lexicon:that_dem_obj : lexicon:LexicalEntry {
     core:description = "grammatical: singular distal demonstrative determiner, or the complementiser introducing a clause ('showed that WRN is essential').";
     lexicon:form     = "that";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:the_ref_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "that_dem";
     lexicon:grade    = epistemic:declared;
@@ -1678,7 +1801,7 @@ resource lexicon:these_subj : lexicon:LexicalEntry {
     core:description = "grammatical: plural proximal demonstrative determiner ('these cells').";
     lexicon:form     = "these";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:the_ref_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "these";
     lexicon:grade    = epistemic:declared;
@@ -1687,7 +1810,7 @@ resource lexicon:these_obj : lexicon:LexicalEntry {
     core:description = "grammatical: plural proximal demonstrative determiner ('these cells').";
     lexicon:form     = "these";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:the_ref_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "these";
     lexicon:grade    = epistemic:declared;
@@ -1696,7 +1819,7 @@ resource lexicon:those_subj : lexicon:LexicalEntry {
     core:description = "grammatical: plural distal demonstrative determiner ('those lines').";
     lexicon:form     = "those";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:the_ref_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "those";
     lexicon:grade    = epistemic:declared;
@@ -1705,7 +1828,7 @@ resource lexicon:those_obj : lexicon:LexicalEntry {
     core:description = "grammatical: plural distal demonstrative determiner ('those lines').";
     lexicon:form     = "those";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:the_ref_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "those";
     lexicon:grade    = epistemic:declared;

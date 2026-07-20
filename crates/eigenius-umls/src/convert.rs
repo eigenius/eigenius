@@ -34,10 +34,27 @@
 //! (the WordNet common-noun path) — a determiner quantifies it ("every Werner
 //! syndrome …"), and it flows into general predicate slots by subsumption.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use crate::rrf::Subset;
 
 /// The stable lexicon identity for this importer's output (D65 §3).
 pub const UMLS_LEXICON: &str = "lexicon:umls";
+
+/// **Junk-atom drop set** (D63 cross-lexicon alignment): `CUI → { original-case forms to skip }`.
+///
+/// Produced by `lexicon-align drops` — atoms whose only contribution is a case-mangled collision
+/// with a common word (`gENE`→`gene`), which the adjudicator judged a **different concept** at high
+/// confidence. Matched by the **exact original casing**: the importer keeps one form per
+/// `(cui, lowercase)` (first-seen casing wins, [`crate::rrf`]), so an exact match drops the surviving
+/// form only when it IS the irregular one — a clean `GENE` that survived dedup is correctly kept.
+/// Every dropped surface is by construction also a WordNet lemma, so the common word stays covered.
+pub type DropSet = BTreeMap<String, BTreeSet<String>>;
+
+/// Whether `(cui, form)` is a junk atom to skip ([`DropSet`]).
+fn is_dropped(drops: &DropSet, cui: &str, form: &str) -> bool {
+    drops.get(cui).is_some_and(|fs| fs.contains(form))
+}
 
 /// Document header: the **UMLS license notice** (load-bearing — the redistribution
 /// constraint flows to every downstream user) + namespace declarations. `{version}`
@@ -84,6 +101,9 @@ pub struct Report {
     /// Content entries skipped because the surface is a grammatical filler UMLS mints as a concept
     /// ([`is_grammatical_surface`], D63 §5.3) — `does not`, `not`, `to`, `lead`, `alone`.
     pub grammatical_skipped: usize,
+    /// Content entries skipped because the `(cui, form)` atom is a junk case-collision in the
+    /// [`DropSet`] (`gENE`) — a mangled acronym folding onto a common word (D63 alignment).
+    pub junk_skipped: usize,
 }
 
 /// Escape a string for an ESL double-quoted literal.
@@ -283,6 +303,7 @@ fn push_entries(
     forms: &[String],
     named_tui: Option<&str>,
     is_mass: bool,
+    drops: &DropSet,
     rep: &mut Report,
 ) {
     let (cat, sem_type) = match named_tui {
@@ -301,6 +322,13 @@ fn push_entries(
         // real reading is WordNet's or the closed-class bootstrap's (D63 §5.3, `is_grammatical_surface`).
         if is_grammatical_surface(form) {
             rep.grammatical_skipped += 1;
+            continue;
+        }
+        // Junk case-collision (D63 alignment): a mangled acronym (`gENE`) the adjudicator judged a
+        // different concept from the common word it folds onto. Skip the content entry; WordNet still
+        // covers the word (every dropped surface is a WordNet lemma). The concept class stays.
+        if is_dropped(drops, cui, form) {
+            rep.junk_skipped += 1;
             continue;
         }
         emit_entry(buf, cui, i, "", form, &cat, &sem_type);
@@ -354,7 +382,11 @@ pub fn render_base(subset: &Subset, version: &str) -> (String, usize) {
 /// Render one concept's block — its class (the mirror) plus its derived common-noun
 /// entries. No header; callers concatenate blocks into chunk bodies. Returns the
 /// rendered text and the block's [`Report`] (lexical-entry + additive mass-entry counts).
-pub fn render_concept_block(c: &crate::rrf::Concept, mass: &MassNouns) -> (String, Report) {
+pub fn render_concept_block(
+    c: &crate::rrf::Concept,
+    mass: &MassNouns,
+    drops: &DropSet,
+) -> (String, Report) {
     let mut buf = String::new();
     let mut rep = Report::default();
     let desc = concept_description(&c.preferred_name, c.definition.as_ref(), &c.cui);
@@ -365,7 +397,9 @@ pub fn render_concept_block(c: &crate::rrf::Concept, mass: &MassNouns) -> (Strin
     // process/function (T044 Molecular Function for `methylation`), gets an additive `mass` entry.
     let is_mass = concept_is_mass(&c.preferred_name, &c.tuis, mass);
     push_concept(&mut buf, &c.cui, &c.tuis, &desc, named_tui.is_some());
-    push_entries(&mut buf, &c.cui, &c.forms, named_tui, is_mass, &mut rep);
+    push_entries(
+        &mut buf, &c.cui, &c.forms, named_tui, is_mass, drops, &mut rep,
+    );
     (buf, rep)
 }
 
@@ -373,7 +407,12 @@ pub fn render_concept_block(c: &crate::rrf::Concept, mass: &MassNouns) -> (Strin
 /// `version` labels the header notice and the lexicon descriptor (e.g. `"2026AA"`).
 /// For large imports use the partitioned emit (the binary's `--out-dir`) instead, so
 /// each layer stays under the gRPC message-size limit.
-pub fn render_document(subset: &Subset, version: &str, mass: &MassNouns) -> (String, Report) {
+pub fn render_document(
+    subset: &Subset,
+    version: &str,
+    mass: &MassNouns,
+    drops: &DropSet,
+) -> (String, Report) {
     let mut rep = Report::default();
     let (base, sty) = render_base(subset, version);
     rep.semantic_types = sty;
@@ -381,11 +420,12 @@ pub fn render_document(subset: &Subset, version: &str, mass: &MassNouns) -> (Str
     let mut body = base;
     body.push_str("\n// ── Concept classes (the mirror) + derived common-noun entries ──\n");
     for c in &subset.concepts {
-        let (block, brep) = render_concept_block(c, mass);
+        let (block, brep) = render_concept_block(c, mass, drops);
         body.push_str(&block);
         rep.entries += brep.entries;
         rep.mass_entries += brep.mass_entries;
         rep.grammatical_skipped += brep.grammatical_skipped;
+        rep.junk_skipped += brep.junk_skipped;
         rep.concepts += 1;
     }
 
@@ -443,7 +483,12 @@ mod tests {
 
     #[test]
     fn renders_mirror_and_lexicon() {
-        let (doc, rep) = render_document(&werner_subset(), "2026AA", &MassNouns::new());
+        let (doc, rep) = render_document(
+            &werner_subset(),
+            "2026AA",
+            &MassNouns::new(),
+            &DropSet::new(),
+        );
         assert_eq!(rep.semantic_types, 1);
         assert_eq!(rep.concepts, 1);
         assert_eq!(rep.entries, 2);
@@ -478,11 +523,84 @@ mod tests {
         );
     }
 
+    /// A gENE-shaped junk concept: `C5849123` ("Gross Extranodal Extension", a `Finding`) whose only
+    /// atom under the `gene` key is the mangled acronym `gENE`. Its content entry must be dropped when
+    /// the atom is in the [`DropSet`], and kept otherwise — the concept CLASS survives either way.
+    fn gene_junk_subset() -> Subset {
+        Subset {
+            semantic_types: vec![SemanticType {
+                tui: "T033".to_string(),
+                name: "Finding".to_string(),
+            }],
+            concepts: vec![Concept {
+                cui: "C5849123".to_string(),
+                tuis: vec!["T033".to_string()],
+                preferred_name: "Gross Extranodal Extension".to_string(),
+                forms: vec!["gENE".to_string()],
+                definition: None,
+                symbol: None, // a Finding → a concept class (cat_n), the collision path
+            }],
+        }
+    }
+
+    #[test]
+    fn a_dropped_junk_atom_is_skipped_but_the_concept_class_stays() {
+        // Control: with no drops, the mangled `gENE` atom seeds a content entry (the over-generation).
+        let (doc, rep) = render_document(
+            &gene_junk_subset(),
+            "2026AA",
+            &MassNouns::new(),
+            &DropSet::new(),
+        );
+        assert_eq!(rep.entries, 1);
+        assert_eq!(rep.junk_skipped, 0);
+        assert!(doc.contains("lexicon:form       = \"gENE\";"));
+
+        // With the drop set, the content entry is skipped — but the concept class is untouched.
+        let mut drops = DropSet::new();
+        drops
+            .entry("C5849123".to_string())
+            .or_default()
+            .insert("gENE".to_string());
+        let (doc, rep) = render_document(&gene_junk_subset(), "2026AA", &MassNouns::new(), &drops);
+        assert_eq!(rep.entries, 0, "the gENE content entry is not emitted");
+        assert_eq!(rep.junk_skipped, 1);
+        assert!(!doc.contains("lexicon:form       = \"gENE\";"));
+        assert!(
+            !doc.contains(": lexicon:LexicalEntry {"),
+            "no lexical entry survives"
+        );
+        // The concept CLASS (the mirror) is still emitted — only the surface form is dropped.
+        assert!(doc.contains("class umlscui:C5849123 : umlssty:T033 {"));
+    }
+
+    /// The match is EXACT original casing: a drop targeting the mangled `gENE` must NOT remove a clean
+    /// `GENE` that survived the importer's case-insensitive dedup (first-seen casing wins, [`crate::rrf`]).
+    #[test]
+    fn a_clean_cased_form_is_not_dropped_by_a_mangled_atom_drop() {
+        let mut subset = gene_junk_subset();
+        subset.concepts[0].forms = vec!["GENE".to_string()]; // clean all-caps survived dedup
+        let mut drops = DropSet::new();
+        drops
+            .entry("C5849123".to_string())
+            .or_default()
+            .insert("gENE".to_string()); // the drop names the MANGLED casing
+        let (doc, rep) = render_document(&subset, "2026AA", &MassNouns::new(), &drops);
+        assert_eq!(rep.junk_skipped, 0, "the clean GENE form is spared");
+        assert_eq!(rep.entries, 1);
+        assert!(doc.contains("lexicon:form       = \"GENE\";"));
+    }
+
     #[test]
     fn named_individual_gene_renders_as_instance_with_cat_np_entries() {
         // A gene (HGNC symbol → named individual, D62) is an INSTANCE of its semantic-type class
         // with PROPER-NOUN (cat_np) entries — so it works as both a bare NP and a prenominal modifier.
-        let (doc, _) = render_document(&wrn_gene_subset(), "2026AA", &MassNouns::new());
+        let (doc, _) = render_document(
+            &wrn_gene_subset(),
+            "2026AA",
+            &MassNouns::new(),
+            &DropSet::new(),
+        );
         // The CUI is a `resource` (instance), NOT a `class`, typed by its semantic type.
         assert!(doc.contains("resource umlscui:C1337007 : umlssty:T028 {"));
         assert!(!doc.contains("class umlscui:C1337007"));
@@ -501,7 +619,12 @@ mod tests {
 
     #[test]
     fn header_carries_the_umls_license_and_redistribution_constraint() {
-        let (doc, _) = render_document(&werner_subset(), "2026AA", &MassNouns::new());
+        let (doc, _) = render_document(
+            &werner_subset(),
+            "2026AA",
+            &MassNouns::new(),
+            &DropSet::new(),
+        );
         assert!(doc.contains("UMLS Metathesaurus"));
         assert!(doc.contains("MUST obtain their own UMLS license"));
         assert!(doc.contains("SRL-0"));
@@ -534,7 +657,8 @@ mod tests {
         // Countability by subsumption: MSI (C0920269, T049 Cell or Molecular Dysfunction ∈
         // MASS_DENOTING_TUIS) gets an ADDITIVE `cat_n(C, mass)` per form — bare `MSI` shifts to a mass
         // subject — with an EMPTY countability set, proving the head-string heuristic is retired.
-        let (doc, rep) = render_document(&msi_subset(), "2026AA", &MassNouns::new());
+        let (doc, rep) =
+            render_document(&msi_subset(), "2026AA", &MassNouns::new(), &DropSet::new());
         assert_eq!(rep.entries, 4, "2 forms × (count + mass)");
         assert_eq!(rep.mass_entries, 2);
         assert!(doc.contains("lexicon:cat_n(umlscui:C0920269, lexicon:num_any)"));
@@ -549,7 +673,12 @@ mod tests {
         // `Werner Syndrome` (T047 Disease) is not inherently mass (not in MASS_DENOTING_TUIS) and its
         // head `syndrome` is not uncountable → no mass. (T047 is NOT count-vetoed: a disease WITH an
         // uncountable head — e.g. "…Cancer" — DOES mass via head-inheritance; see the regression guard.)
-        let (doc, rep) = render_document(&werner_subset(), "2026AA", &MassNouns::new());
+        let (doc, rep) = render_document(
+            &werner_subset(),
+            "2026AA",
+            &MassNouns::new(),
+            &DropSet::new(),
+        );
         assert_eq!(rep.mass_entries, 0);
         assert!(!doc.contains("lexicon:mass"));
     }
@@ -576,7 +705,7 @@ mod tests {
                 symbol: None,
             }],
         };
-        let (doc, rep) = render_document(&subset, "2026AA", &mass);
+        let (doc, rep) = render_document(&subset, "2026AA", &mass, &DropSet::new());
         assert_eq!(
             rep.mass_entries, 0,
             "T033 Finding is count-vetoed → no gENE mass form"
@@ -604,7 +733,7 @@ mod tests {
                 symbol: None,
             }],
         };
-        let (doc, rep) = render_document(&subset, "2026AA", &MassNouns::new());
+        let (doc, rep) = render_document(&subset, "2026AA", &MassNouns::new(), &DropSet::new());
         assert!(doc.contains("class umlscui:C1299585 :")); // the concept class is kept
         assert!(!doc.contains("lexicon:form       = \"does not\";")); // grammatical surface dropped
         assert!(doc.contains("lexicon:form       = \"absence of action\";")); // non-filler form kept
@@ -634,7 +763,7 @@ mod tests {
                 symbol: None,
             }],
         };
-        let (doc, rep) = render_document(&subset, "2026AA", &mass);
+        let (doc, rep) = render_document(&subset, "2026AA", &mass, &DropSet::new());
         assert_eq!(
             rep.mass_entries, 1,
             "T191 with uncountable head 'cancer' stays mass via head-inheritance"
@@ -663,7 +792,7 @@ mod tests {
                 symbol: None,
             }],
         };
-        let (doc, rep) = render_document(&subset, "2026AA", &MassNouns::new());
+        let (doc, rep) = render_document(&subset, "2026AA", &MassNouns::new(), &DropSet::new());
         assert_eq!(
             rep.mass_entries, 1,
             "a T044 process concept is mass by semantic type, with no countability list"

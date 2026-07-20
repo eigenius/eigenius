@@ -218,6 +218,56 @@ pub fn coordinate_prop(
     Some((coord_cat, list_term(&all)))
 }
 
+/// Coordinate pre-nominal **modifiers** (`cat_mod`) into a deferred `cat_coord(cat_mod, …)` list —
+/// the attributive counterpart of [`coordinate_prop`] (D63 coordinated-modifier category, §6). A
+/// coordinated attributive modifier is UNION over kinds — "gastric, endometrial and ovarian cancers"
+/// is a cancer that is gastric OR endometrial OR ovarian — so the surface connective ("and" / "or" /
+/// comma) is IRRELEVANT and the list always folds `Or` at completion ([`complete_coord`]). This is
+/// what the category split buys: the SAME adjective coordinates predicatively ("X is gastric and
+/// ovarian" — intersective `And`) via [`coordinate_prop`] on its `S[adj]\NP` form, and attributively
+/// (union `Or`) here on its lifted `cat_mod` form. The category (`cat_mod` vs `S[adj]\NP`) is the
+/// grammatical pivot. Left-branching NF: the right conjunct is a single `cat_mod` (never a list, never
+/// an already-completed `Or`); the left is a fresh `cat_mod` (first coordination) or an existing
+/// `cat_coord(cat_mod, …)` (extend). `None` otherwise.
+pub fn coordinate_mod(
+    l_cat: &Exp,
+    l_sem: &Exp,
+    r_cat: &Exp,
+    r_sem: &Exp,
+    layer: &Arc<Layer>,
+) -> Option<(Exp, Exp)> {
+    // Right conjunct: a single modifier — not a list, not an already-completed coordination.
+    if is_ctor(r_cat, "cat_coord").is_some() || sem_is_coordination(r_sem) {
+        return None;
+    }
+    is_ctor(r_cat, "cat_mod")?;
+    let members: Vec<Exp> = match is_ctor(l_cat, "cat_coord") {
+        // Extend a modifier list.
+        Some([base, _conn]) => {
+            is_ctor(base, "cat_mod")?;
+            group_members(l_sem)?
+        }
+        // First coordination: a fresh `cat_mod`, not an already-completed `Or`.
+        _ => {
+            is_ctor(l_cat, "cat_mod")?;
+            if sem_is_coordination(l_sem) {
+                return None;
+            }
+            vec![l_sem.clone()]
+        }
+    };
+    let mut all = members;
+    all.push(r_sem.clone());
+    // Neutral connective marker; `complete_coord` folds `Or` for a `cat_mod` base regardless (D63 §6).
+    let conn = Exp::InductiveCtor(
+        resolve_inductive(layer, "urn:eigenius:lexicon:Conn")?,
+        "conn_list".into(),
+        vec![],
+    );
+    let coord_cat = Exp::InductiveCtor(list_decl(), "cat_coord".into(), vec![r_cat.clone(), conn]);
+    Some((coord_cat, list_term(&all)))
+}
+
 /// **List-completion** (D63 §8.4 Phase 3, core-en's `s-list` / `pred-adj-list` type-changing rules):
 /// fold a prop-ending coordination `cat_coord(BaseCat, conn)` into its base category, applying the
 /// operator pointwise over the accumulated members — `op(op(m₀, m₁), m₂)…` (left-branching normal
@@ -231,6 +281,21 @@ pub fn complete_coord(coord_cat: &Exp, coord_sem: &Exp, layer: &Arc<Layer>) -> O
     let members = group_members(coord_sem)?;
     if members.len() < 2 {
         return None;
+    }
+    // Attributive modifier coordination (D63 §6): fold UNION `Or` over the restrictors, pointwise —
+    // `[λx. P₀ x, …, λx. Pₙ x]` → `λx. Or(…Or(P₀ x, P₁ x)…, Pₙ x)`. The surface connective is
+    // irrelevant (union over kinds), so `conn` is not consulted here.
+    if is_ctor(base_cat, "cat_mod").is_some() {
+        let or = resolve_inductive(layer, "urn:eigenius:logic:Or")?;
+        let var = "conj0";
+        let app = |p: &Exp| Exp::App(Box::new(p.clone()), Box::new(Exp::Var(var.into())));
+        let mut iter = members.into_iter();
+        let mut acc = app(&iter.next()?);
+        for m in iter {
+            acc = Exp::InductiveType(or.clone(), vec![acc, app(&m)]);
+        }
+        let body = Exp::Lam(Patt::Var(var.into()), Box::new(acc));
+        return Some((base_cat.clone(), body));
     }
     let op_iri = match conn_name_of(conn)? {
         "conn_and" | "conn_list" => "urn:eigenius:logic:And",

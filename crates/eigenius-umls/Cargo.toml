@@ -9,6 +9,10 @@ description = "Import the UMLS Metathesaurus (RRF) into Eigenius: a faithful typ
 [dependencies]
 eigenius-kernel = { path = "../../kernel" }
 clap = { version = "4", features = ["derive"] }
+# Loading the junk-atom drop set (`drops.json` from `lexicon-align drops`); the RRF parsers stay
+# hand-rolled (no serde).
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [[bin]]
 name = "umls-import"
