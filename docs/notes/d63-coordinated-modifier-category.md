@@ -200,6 +200,92 @@ Pieces 1–3 and 5 of §4 are mechanical restructurings of existing code (high c
 (coordination semantics) and the replace-not-add refactor carry the risk. The whole design is a
 hypothesis until the four checks pass.
 
+## 9. Update 2026-07-19 — M3 shipped, M2 failed, RNR reframing
+
+### 9a. Status
+
+M1 + M3 built and committed (`e7c1b24`), parser-only, no reseed. §4's `cat_mod` is built and the
+replace-not-add refactor landed (`refine_attrib` + its `S[adj]\NP + cat_n` rule + `Guard::NotProv`
+deleted; `mod_apply` is the sole attributive path; shift order `ModLift`-before-`CoordComplete` blocks
+the coordinate-then-lift `And` leak). §8 checks 1/2/4 pass; check 3's +63 predicate regression was the
+**naive** fix of §7, not `cat_mod` — it does not recur. §6 is **resolved: union only**.
+
+### 9b. §6 resolved — the pivot is grammatical, not semantic (Derived)
+
+The union-vs-intersective choice is not a per-list judgement; the **surface form** fixes it:
+attributive comma-coordination ("X, Y and Z Ns") → union `Or`; predicative ("N is X and Y", "N that
+is X and Y") → intersective `And`; bare stacking ("X Y N") → intersective `And`. Witnessed:
+"Ovarian cancers are common and frequent" → `And(common, frequent)` (predicative, correct);
+"Gastric, endometrial and ovarian cancers" was `And` (wrong), now `Or`. The **category is the pivot** —
+`cat_mod` (attributive, lifted) folds `Or`; `S[adj]\NP` (predicative) keeps `coordinate_prop`'s `And`.
+So union-only is what the attributive category *means*, not a scoped simplification. Measured: cap-only
+2347→2321 (−26); reranked drift-free encoded 10→12, total 1027→1124 (a `SENSE_CAP=2` interaction, not
+over-generation — the sense-independent signals are cap-only −26 and skeleton 19→5 on the object unit).
+See `experiments/parsing/baseline.json` history[0].
+
+### 9c. M2 (noun/NE modifiers join the union) — attempted, EXPLODED, reverted (Derived)
+
+In "colon, gastric, endometrial and ovarian cancers", `colon`/`gastric` resolve to UMLS/WordNet **nouns**,
+not adjectives, so they never lift to `cat_mod` and stay stacked (`And`) outside the `Or`. Attempt (no
+global lift; `coordinate_mod` converts a `cat_n`/`cat_np` conjunct to a restrictor `compound_kind(x, N)` /
+`compound(x, N)` inline, `kind_compound` nesting untouched): `colon` did join the union, but the unit
+**exploded 30→64 readings / 5→32 skeletons**. Root cause: a noun gains a *coordinate* mode **on top of**
+its `kind_compound` (stacking) + `cat_np`-group modes; in a mixed comma-list each noun independently
+coordinates *or* stacks. Same additive-ambiguity trap M3 avoided by *deleting* `refine_attrib` — here
+there is nothing clean to delete (real stacked compounds need `kind_compound`). Reverted; scratch
+`m2-attempt.patch`.
+
+### 9d. The reframing — coordinated modifiers are RIGHT-NODE RAISING over lexicalized compounds (Derived)
+
+Each distributed "X cancer" traced as "X cancer is common":
+
+| compound | own entry? | resolves to |
+|---|---|---|
+| colon cancer | yes | WordNet `n14247239` |
+| gastric cancer | yes | UMLS `C0024623` (+`C0699791`) |
+| endometrial cancer | yes | WordNet `n14247458` |
+| colorectal cancer | yes | UMLS `C0009402` |
+| insertion mutation | yes | UMLS `C1512796` |
+| deletion mutation | yes | UMLS `C1511760` |
+| ovarian cancer | **no** | composes; explodes 140/20 |
+
+So the faithful reading of "colon, gastric, endometrial and ovarian cancers" is **not** a generic cancer
+with a disjunctive modifier — it is a **union of lexicalized kind concepts**
+`Or(n14247239, C0024623, n14247458, ⟦ovarian cancer⟧)`. The current grammar cannot reach it: a multiword
+lexeme needs **adjacency**, and in a shared-head coordination the head appears once at the end, so the
+pre-modifiers are separated from `cancers` — the lexicalized concepts are **unreachable**, and `cat_mod`/`Or`
+(correct as far as it goes) unions the right *modifiers* while throwing away the right *kinds*.
+
+The construction is **right-node raising** (head-sharing coordination): distribute the shared head onto each
+conjunct, re-run multiword lookup on each "X cancer", union the results. This (i) reaches the lexicalized
+concepts; (ii) **dissolves the noun/adjective asymmetry M2 chased** — each modifier compounds with the head
+regardless of POS, so head-distribution, not modifier-lifting, is the real operation; (iii) gives partial
+lexicalization a clean home (the three that lexicalize become atomic, only "ovarian cancer" composes).
+
+**Page prevalence** (Derived — grep + probes): three shared-head coordinations are RNR-defeated —
+"colon, gastric, endometrial and ovarian cancers" (para 2), "colorectal, endometrial, gastric and ovarian
+cancers" (para 4, a live measurement unit), "insertion or deletion mutations" (para 2, both compounds
+lexicalized — the cleanest case). "MSI lines, microsatellite-stable lines and indeterminate lines" (para 3)
+is head-**repeated**, not RNR. Lexicalized compounds are pervasive (7/8 probed → a single CUI: also cell
+cycle arrest `C1155873`, Lynch syndrome `C1333990`, homologous recombination `C0599773`, immune checkpoint
+blockade `C5392067`).
+
+### 9e. Failure mode 2 (composition not suppressed) — investigated, NOT a page lever (Derived, corrected)
+
+An initial claim that standalone compounds explode and inflate the page was **wrong**. The page uses
+**plural, lexicalized** forms: "cell lines" → `C0007600`, one reading; "These MSI cell lines were distinct"
+→ one reading (an encoded unit). Residual multiplicity in the other "cell lines" units ("three groups of
+cell lines" 26, "screened cell lines with a CRISPR library" 32) is PP-attachment / verb-argument, not
+cell-lines. The singular "cell line" (136/24) and the standalone "ovarian cancer" (140/20) are **coverage
+gaps for surfaces the page never uses bare**. The multiword-preference works on the page; log, do not fix.
+
+### 9f. Direction (Declared)
+
+The M2-superseding move is **right-node raising**: head-distribution + per-conjunct multiword re-lookup,
+with `cat_mod`/`Or` as the fallback where the distributed compound does not lexicalize. Coverage gaps to
+log (not fix now): bare singular "cell line"; the "ovarian cancer" surface (concept exists as "ovarian
+carcinoma" `C0919267`). `cancer`/`line` junk senses (zodiac, tropic) are down-rank candidates, not blockers.
+
 ## References
 
 - D63 §3b — the concrete-`Σ`, no-abstract-`C`, no-kernel-coercion rationale:

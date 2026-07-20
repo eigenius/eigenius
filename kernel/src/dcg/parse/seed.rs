@@ -31,6 +31,7 @@
 use super::super::category::{is_adjective_cat, is_binary_relation_cat, kind_of};
 use super::super::chart::{beam_cell, cell_histogram, Chart};
 use super::super::lexicon::{FormEntries, LexEntry};
+use super::super::rules::constructions::coordinate_np;
 use super::*;
 
 impl Parser {
@@ -467,6 +468,31 @@ impl Parser {
             }
         }
 
+        // RNR head distribution (D63, `docs/notes/d63-rnr-head-distribution.md`): a coordinated
+        // pre-nominal modifier list sharing a head noun ("colon, gastric and ovarian cancers") seeds the
+        // group-of-lexicalized-kinds reading its shared-head coordination cannot reach (the head sits
+        // once at the end — no adjacency to the multiword). NOT bounded by `span_limit` (a coordination
+        // is longer than any lexeme); `distribute_head` bails cheaply on a non-coordination.
+        //
+        // EXPERIMENTAL, off by default (`EIGENIUS_RNR`): WIP — the seeded group does not yet COMBINE into
+        // a reading (the distributive-subject rule's `group_member_fits`/num check), and always-on
+        // seeding regresses coverage (grammar-gap 0→1) via the `CLASSIFY_BUDGET` candidate truncation
+        // (extra candidates evict a needed reading, as with M1). Both are open before it goes default-on.
+        if std::env::var("EIGENIUS_RNR").is_ok() {
+            let mut dists: Vec<(usize, usize, Vec<Item>)> = Vec::new();
+            for a in 0..n {
+                for b in (a + 1)..n {
+                    let d = self.distribute_head(&tokens[a..=b], lemmatizer, scope, cap, ranks);
+                    if !d.is_empty() {
+                        dists.push((a, b, d));
+                    }
+                }
+            }
+            for (a, b, d) in dists {
+                chart[a][b].extend(d);
+            }
+        }
+
         // Forward bounded type-raising `T` (D63 §8.9 Slice 6-T) at the LEAF cells: a name `NP` lifts
         // to `S/(S\NP)` so it can forward-compose into a relative clause's object-extraction body.
         // ENF (`TypeRaised` provenance) keeps these inert outside extraction. Composed cells are
@@ -501,6 +527,141 @@ impl Parser {
             }
         }
         (chart, beam_drops)
+    }
+
+    /// **RNR head distribution** (`docs/notes/d63-rnr-head-distribution.md`) — a SEED-time rule (it
+    /// needs the lexicon, which the grammar and chart deliberately cannot reach). For a span `[i, j]`
+    /// whose prefix `tokens[i..j]` is a pre-nominal modifier COORDINATION and `tokens[j]` is the shared
+    /// head, re-look-up each "conjunct + head" compound IN ISOLATION — the isolated surface resolves the
+    /// lexicalized concept cleanly, where the shared-head coordination cannot (a multiword lexeme needs
+    /// adjacency, and the head sits once at the end) — bare-NP-shift each to its kind, and fold them into
+    /// a `cat_group` the distributive rules predicate over. So "colon, gastric and ovarian cancers"
+    /// reaches `[kind_of(colon-cancer), …]` rather than a generic cancer with a disjunctive modifier.
+    ///
+    /// First cut (D63 §8 M-RNR-2): fires only when EVERY conjunct lexicalizes; a mixed list (a conjunct
+    /// that only composes, e.g. "ovarian cancer") yields nothing here, and the `cat_mod`/`Or` reading
+    /// stands — coverage is never reduced.
+    fn distribute_head(
+        &self,
+        span: &[String],
+        lemmatizer: &dyn Lemmatizer,
+        scope: Option<&[Iri]>,
+        cap: Option<usize>,
+        ranks: Option<&BTreeMap<String, u32>>,
+    ) -> Vec<Item> {
+        // `span` is `tokens[i..=j]`: the modifier coordination followed by its shared head (last token).
+        let Some((head, mods)) = span.split_last() else {
+            return Vec::new();
+        };
+        let head = head.as_str();
+        let Some(conjuncts) = split_coord_conjuncts(mods, |t| {
+            self.grammar.reserved.coord_connective(t).is_some()
+        }) else {
+            return Vec::new();
+        };
+        // The shared head's class `H` types the group — each distributed compound `Kᵢ ⊆ H`, so
+        // `group_member_fits` sees the type a predicate accepts. NOT `common_super(Kᵢ)`, which for
+        // UMLS-CUI compounds is the `Entity` top and fits no concrete slot (Wall 1a).
+        let Some(h) = self
+            .lookup_span(head, lemmatizer, scope, cap, ranks)
+            .iter()
+            .find_map(|it| match it.cat() {
+                Exp::InductiveCtor(_, name, args) if name == "cat_n" && args.len() == 2 => {
+                    Some(args[0].clone())
+                }
+                _ => None,
+            })
+        else {
+            return Vec::new();
+        };
+        // Per conjunct: the kind NPs of "conjunct + head", looked up IN ISOLATION and bare-NP-shifted.
+        // Bail unless EVERY conjunct yields ≥1 lexicalized concept (first-cut all-lexicalized gate).
+        let rnr_debug = std::env::var("EIGENIUS_RNR_DEBUG").is_ok();
+        let mut per_conjunct: Vec<Vec<Item>> = Vec::with_capacity(conjuncts.len());
+        for c in &conjuncts {
+            let surface = format!("{} {head}", c.join(" "));
+            let raw = self.lookup_span(&surface, lemmatizer, scope, cap, ranks);
+            let n_cat_n = raw
+                .iter()
+                .filter(|it| is_ctor(it.cat(), "cat_n").is_some())
+                .count();
+            // The bare-kind NP of each looked-up common noun: `cat_np(C, num)` with sem `kind_of(C)`,
+            // built directly — `bare_nominal_shifts` yields the RAISED subject/object forms, not the
+            // plain `cat_np` that `coordinate_np` folds into a group.
+            let kinds: Vec<Item> = raw
+                .iter()
+                .filter_map(|it| match it.cat() {
+                    Exp::InductiveCtor(decl, name, args) if name == "cat_n" && args.len() == 2 => {
+                        Some(Item::with_cost(
+                            // Typed by the head class `H`, sem is the SPECIFIC kind `kind_of(Kᵢ)`.
+                            Exp::InductiveCtor(
+                                decl.clone(),
+                                "cat_np".into(),
+                                vec![h.clone(), args[1].clone()],
+                            ),
+                            kind_of(args[0].clone()),
+                            it.cost(),
+                        ))
+                    }
+                    _ => None,
+                })
+                // Top-ranked sense only (raw is already sense-ranked by cap/reranker): the union is ONE
+                // structural reading, so cross-producing N conjuncts × their senses is an Nᵗʰ-power seed
+                // explosion (4⁴ on the 4-way cancer list → 192 groups → forest blow-up, Wall 2). Sense
+                // choice is the cap/reranker's job downstream, not distribute_head's.
+                .take(1)
+                .collect();
+            if rnr_debug {
+                eprintln!(
+                    "[rnr] surface={surface:?} raw={} cat_n={n_cat_n} kinds={}",
+                    raw.len(),
+                    kinds.len()
+                );
+            }
+            if kinds.is_empty() {
+                return Vec::new();
+            }
+            per_conjunct.push(kinds);
+        }
+        // Connective: `or` anywhere → union; else `and` (a comma list finalizes to conjunction).
+        let op = if mods
+            .iter()
+            .any(|t| self.grammar.reserved.coord_connective(t) == Some("urn:eigenius:logic:Or"))
+        {
+            "urn:eigenius:logic:Or"
+        } else {
+            "urn:eigenius:logic:And"
+        };
+        // One representative cost per conjunct, summed — the distributed compound's seed cost.
+        let mut cost = per_conjunct[0][0].cost();
+        for c in &per_conjunct[1..] {
+            cost = cost.saturating_add(c[0].cost());
+        }
+        // Fold `coordinate_np` left over one kind per conjunct, cross-producing the conjuncts' senses.
+        let mut groups: Vec<(Exp, Exp)> = per_conjunct[0]
+            .iter()
+            .map(|it| (it.cat().clone(), it.sem().clone()))
+            .collect();
+        for conj in &per_conjunct[1..] {
+            let mut next = Vec::new();
+            for (gc, gs) in &groups {
+                for it in conj {
+                    if let Some(pair) =
+                        coordinate_np(op, gc, gs, it.cat(), it.sem(), &self.grammar.layer)
+                    {
+                        next.push(pair);
+                    }
+                }
+            }
+            groups = next;
+        }
+        if rnr_debug {
+            eprintln!("[rnr] span={span:?} op={op} groups={}", groups.len());
+        }
+        groups
+            .into_iter()
+            .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
+            .collect()
     }
 }
 
@@ -710,4 +871,80 @@ pub(super) fn with_noun_num(it: &Item, num_name: &str) -> Item {
         }
     }
     it.clone()
+}
+
+/// **RNR head distribution** (`docs/notes/d63-rnr-head-distribution.md` §4) — split a candidate
+/// pre-nominal modifier-coordination slice on its connectives into the conjunct token-runs, so the
+/// caller can re-look-up each "conjunct + head" compound in isolation. `is_conn(t)` holds for a
+/// coordination connective (comma / `and` / `or`). Returns the conjunct surfaces ("colon",
+/// "microsatellite-stable"); `None` unless there are ≥2 non-empty conjuncts separated ONLY by
+/// connectives — a leading / trailing / doubled connective, or a single conjunct, is not a coordination.
+fn split_coord_conjuncts(
+    tokens: &[String],
+    is_conn: impl Fn(&str) -> bool,
+) -> Option<Vec<Vec<String>>> {
+    let mut conjuncts: Vec<Vec<String>> = vec![Vec::new()];
+    for t in tokens {
+        if is_conn(t) {
+            if conjuncts.last().unwrap().is_empty() {
+                return None; // a leading or doubled connective — malformed
+            }
+            conjuncts.push(Vec::new());
+        } else {
+            conjuncts.last_mut().unwrap().push(t.clone());
+        }
+    }
+    if conjuncts.len() < 2 || conjuncts.last().unwrap().is_empty() {
+        return None; // a single conjunct, or a trailing connective
+    }
+    Some(conjuncts)
+}
+
+#[cfg(test)]
+mod rnr_tests {
+    use super::split_coord_conjuncts;
+
+    fn toks(s: &str) -> Vec<String> {
+        s.split_whitespace().map(str::to_string).collect()
+    }
+    // The parser tokenises the comma as its own token; connectives are `,` / `and` / `or`.
+    fn is_conn(t: &str) -> bool {
+        matches!(t, "," | "and" | "or")
+    }
+
+    #[test]
+    fn splits_a_four_way_comma_list() {
+        assert_eq!(
+            split_coord_conjuncts(&toks("colon , gastric , endometrial and ovarian"), is_conn),
+            Some(vec![
+                toks("colon"),
+                toks("gastric"),
+                toks("endometrial"),
+                toks("ovarian")
+            ])
+        );
+    }
+
+    #[test]
+    fn or_list_keeps_multitoken_conjuncts() {
+        assert_eq!(
+            split_coord_conjuncts(&toks("insertion or deletion"), is_conn),
+            Some(vec![toks("insertion"), toks("deletion")])
+        );
+        assert_eq!(
+            split_coord_conjuncts(&toks("double stranded or single stranded"), is_conn),
+            Some(vec![toks("double stranded"), toks("single stranded")])
+        );
+    }
+
+    #[test]
+    fn rejects_non_coordinations() {
+        assert_eq!(split_coord_conjuncts(&toks("colon"), is_conn), None);
+        assert_eq!(split_coord_conjuncts(&toks("colon and"), is_conn), None);
+        assert_eq!(split_coord_conjuncts(&toks("and colon"), is_conn), None);
+        assert_eq!(
+            split_coord_conjuncts(&toks("colon and and gastric"), is_conn),
+            None
+        );
+    }
 }
