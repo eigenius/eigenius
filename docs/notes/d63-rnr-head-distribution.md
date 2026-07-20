@@ -176,20 +176,21 @@ were resolved in the build.
 **Semantics — (B), and (A)/(B) are not exclusive.** `core:is_a` is a resource-model **Property**, not an
 `Entity→Class→Prop` axiom, so (A)'s `Or(is_a(x,Kᵢ))` has no predicate the felicity gate can check. (B)
 references each whole kind **directly** (`kind_of(Kᵢ)` group members) — no `is_a` — and reuses the
-existing distributive machinery. They are two encodings of one meaning at different levels: (B) is the
-base; (A)'s only edge (uniform `cat_kind` predication) is a future `cat_group→cat_kind` shift **over** (B),
-not a rival needing `is_a`. So §3's kind-membership sub-question is moot for (B).
+existing distributive machinery, which (verified) handles **both** subject and object predication. So
+(A)'s supposed edge (uniform `cat_kind` predication) is not actually needed — (B)'s distribution already
+covers both positions — and (A) still needs `is_a`. (B) is the encoding; §3's kind-membership
+sub-question is moot for it.
 
 **As built:** split the conjuncts; look up each "conjunct + head" **in isolation**; build the bare-kind NP
 `cat_np(H, kind_of(Kᵢ))` — typed by the **head** class `H`, sem the specific kind `Kᵢ`; fold
-`coordinate_np` → `cat_group`; the distributive-**object** rule predicates over it.
+`coordinate_np` → `cat_group`; the distributive rules (subject and object) predicate over it.
 
 **Wall 1 — the group would not combine (two causes).**
 
 | cause | fix |
 | --- | --- |
 | `common_super(Kᵢ) = Entity` — UMLS-CUI compounds lack a loaded ancestor narrower than the top, so `group_member_fits` fails against any concrete slot | type the group by the **head class `H`** (each `Kᵢ ⊆ H`), not `common_super` |
-| subject-position kind-predication ("X are common") wants a `cat_kind`, not a `cat_group` | the page uses **object** position (`cat_np` slot, `distribute_object`) — works once `H`-typed; subject/`cat_kind` is the deferred `group→kind` shift |
+| ("1b", a MISDIAGNOSIS) the pre-`H`-typing debug showed the subject VP slot as `cat_kind` | after `H`-typing the group distributes in **both** object AND subject position (verified — see §11 corrections); no `group→kind` shift needed. The `cat_kind` slot was one of several VP forms; the group matches a `cat_np` one |
 
 **Wall 2 — coverage gap.** The sense **cross-product** blew up: 4 conjuncts × ~4 senses on
 "colorectal, endometrial, gastric and ovarian cancers" → up to `4⁴` = 192 group seeds → a forest blow-up
@@ -207,9 +208,19 @@ fallback**, so coverage is safe by construction (grammar-gap 0). Replace, not ad
 Deterministic cap-only 2321→2304 (−17), **encoded 2→4**; reranked encoded 12→13, total 1124→1141 (the
 +17 is `SENSE_CAP`/single-draw entanglement — cap-only is the clean A/B, the same pattern M3 documents).
 grammar-gap 0; differential oracle holds; §7's all-lexicalized gate keeps RNR off non-compound
-coordinations (verified: "MSI and MMR deficiency" does not fire). §9 open items still open: the "ovarian
-cancer" coverage note was wrong — the plural surface *does* lexicalize (`C1140680`); head morphology and the
-subject-position shift remain future work.
+coordinations (verified: "MSI and MMR deficiency" does not fire).
+
+Two corrections to earlier claims. (i) The "ovarian cancer does not lexicalize" note was wrong — the
+plural surface *does* (`C1140680`). (ii) **Subject position is NOT deferred** — that was a misdiagnosis
+(Wall "1b" above): after the `H`-typing fix the group distributes in subject position too (verified:
+"Insertion or deletion mutations are common" → `Or(common(kind_of C1512796), common(kind_of C1511760))`;
+"Colon, gastric and endometrial cancers are common" → the 3-kind `And` union — each a clean 1-reading).
+The genuine remaining gap is the **head-REPEATED** coordination of lexicalized compounds ("Colon cancer,
+gastric cancer and endometrial cancer are common" — 80 readings of junk), which is NOT the shared-head
+case RNR handles: `distribute_head` does not fire (there is no shared head to distribute — each conjunct
+is already a full "X cancer"), and coordinating the compound NPs directly reopens the head's junk senses
+(the §2 multiword-preference-through-coordination problem). It is not on the WRN page (which uses the
+shared-head form). Also still open: head morphology (sg/pl re-lookup).
 
 ## References
 
