@@ -470,6 +470,11 @@ enum Guard {
     /// form (D63 §8.13): a compound may not be a compound HEAD again. Negation of
     /// [`is_compound_refined`], which inspects only the category's Σ type-index.
     NotCompoundRefined(Operand),
+    /// The named operand must NOT be an **adjective-refined** noun — the adjective-outside-compound
+    /// normal form (D63 nominal-modification §3.3): a compound forms only over pure nouns, so an
+    /// adjective always attaches OUTSIDE the compound core. Negation of [`is_adjective_refined`];
+    /// category-only, like [`Self::NotCompoundRefined`].
+    NotAdjectiveRefined(Operand),
     /// The bound type-index metavar must be a **genuine proper-name class** — a concrete `EigonClass`
     /// other than the `Entity` top (D63 §5.3). Keeps close-naming apposition off a pronoun /
     /// bare-kind `cat_np(Entity)` right. Reads a category metavar, never a sem.
@@ -500,6 +505,7 @@ impl Guard {
     fn holds(&self, binds: &CatSubst, left: &CategoryPayload, right: &CategoryPayload) -> bool {
         match self {
             Guard::NotCompoundRefined(op) => !is_compound_refined(&op.pick(left, right).cat),
+            Guard::NotAdjectiveRefined(op) => !is_adjective_refined(&op.pick(left, right).cat),
             Guard::ProperName(meta) => matches!(
                 binds.get(*meta),
                 Some(Exp::EigonClass(iri)) if iri.as_str() != "urn:eigenius:lexicon:Entity"
@@ -532,20 +538,32 @@ fn refine_rules() -> &'static [CatRule] {
                 build: refine_mod_apply,
             },
             // Named-entity compound `[cat_np] [cat_n]` (D63 §8.13). Left-branching NF: the head may
-            // not itself be a compound result.
+            // not itself be a compound result. Adjective-outside NF (§3.3): nor an adjective-refined
+            // one — an adjective on the head attaches OUTSIDE the compound, not before it.
             CatRule {
                 name: "named_compound",
                 left_pat: Ctor("cat_np", vec![Var("_"), Var("_")]),
                 right_pat: cat_n(Var("C"), Var("num")),
-                guards: &[Guard::NotCompoundRefined(Operand::Right)],
+                guards: &[
+                    Guard::NotCompoundRefined(Operand::Right),
+                    Guard::NotAdjectiveRefined(Operand::Right),
+                ],
                 build: refine_named_compound,
             },
-            // N-N kind compound `[cat_n] [cat_n]` (D63 §8.13). Same left-branching guard.
+            // N-N kind compound `[cat_n] [cat_n]` (D63 §8.13). Left-branching guard on the head; the
+            // adjective-outside NF (§3.3) additionally forbids an adjective-refined operand on EITHER
+            // side, so a gradable adjective cannot float to an inner compound slot (`[specific repair]
+            // proteins`) — it attaches outside the fully-formed compound core (`specific [repair
+            // proteins]`). A genuine adjective-inside compound is a lexical unit (§4), not rebuilt here.
             CatRule {
                 name: "kind_compound",
                 left_pat: cat_n(Var("_"), Var("_")),
                 right_pat: cat_n(Var("C"), Var("num")),
-                guards: &[Guard::NotCompoundRefined(Operand::Right)],
+                guards: &[
+                    Guard::NotCompoundRefined(Operand::Right),
+                    Guard::NotAdjectiveRefined(Operand::Right),
+                    Guard::NotAdjectiveRefined(Operand::Left),
+                ],
                 build: refine_kind_compound,
             },
             // PP-as-noun-modifier (post-nominal): `[cat_n(C)] [cat_pp]`. Here the head noun is the
@@ -1054,6 +1072,66 @@ fn is_compound_refined(cat: &Exp) -> bool {
     false
 }
 
+/// Whether `cat` is a common noun refined by a **gradable adjective** — a restrictor conjunct whose
+/// predicate is the degree comparison `measurements:gt` / `lt` (`gt(deg_X(x), std_X)`, the form the
+/// importer emits for `specific` / `notable` / `independent` / `attractive`; `category.rs`
+/// `ModifierClass::Gradable`). Flattens the restrictor over `logic:And` and inspects each conjunct's
+/// spine head; POSITIVELY matches the degree axioms rather than "anything not a compound", so a
+/// non-modifier restrictor a compound noun legitimately carries — the essive `is_a`, `named`, a `pp`
+/// (`prep_*`) — is never mistaken for an adjective (that mis-classification exploded `MSI as a
+/// biomarker` under widen-on-failure).
+///
+/// The **adjective-outside-compound normal form** (D63 nominal-modification §3.3): a compound rule
+/// refuses a gradable-adjective-refined operand, so the canonical derivation of a modifier stack over
+/// a compound is `adj*(compound-core(N))` — the left-branching compound core forms first (pure nouns),
+/// then adjectives apply as a flat conjunction on the outside. Collapses the spurious brackets where a
+/// gradable adjective floats to an inner compound slot — `[specific repair] proteins`, `[independent
+/// cancer] dependency data sets` — to the single adjective-outside tree.
+///
+/// Scope is gradable adjectives (the corpus's residual adjective form). Soundness for a gradable —
+/// covertly subsective (§5) — rests on the compound's semantic HEAD being fixed regardless of the
+/// adjective's attachment depth, so the inner-scope brackets are meaning-equivalent; a genuine
+/// meaning-distinct adjective-inside compound (`red blood cell`) is licensed by the lexicon as a
+/// multiword unit (§4), never rebuilt here. Intersective adjectives in compounds are not yet in scope
+/// (absent from this corpus's residual). The adequacy battery witnesses no reading lost.
+fn is_adjective_refined(cat: &Exp) -> bool {
+    let Some([Exp::Sig(_, _, body), _]) = is_ctor(cat, "cat_n") else {
+        return false;
+    };
+    fn flatten_and<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
+        if let Exp::InductiveType(decl, args) = e {
+            if decl.iri.as_str() == "urn:eigenius:logic:And" && args.len() == 2 {
+                flatten_and(&args[0], out);
+                flatten_and(&args[1], out);
+                return;
+            }
+        }
+        out.push(e);
+    }
+    // The predicate an App-spine ultimately applies. A compound / PP / naming restrictor is a direct
+    // axiom application `axiom(x, …)` (head = the axiom); a MODIFIER (adjective) restrictor from
+    // `mod_apply` is left UN-REDUCED — `(λx. P(x)) x`, head = the `Lam` — so descend the annotation
+    // and the binder to reach `P`'s head (`measurements:gt` for a gradable; `prep_*` for a PP, which
+    // is thereby excluded).
+    fn spine_head(mut e: &Exp) -> &Exp {
+        loop {
+            match e {
+                Exp::App(f, _) => e = f,
+                Exp::Ann(inner, _) => e = inner, // the mod-sem's `(e : T)`; pretty-print hides it
+                Exp::Lam(_, body) => e = body,   // into the un-reduced `λx. P(x)` body
+                _ => return e,
+            }
+        }
+    }
+    let mut conjuncts = Vec::new();
+    flatten_and(body, &mut conjuncts);
+    conjuncts.iter().any(|c| {
+        matches!(spine_head(c), Exp::EigonAxiom(iri)
+            if iri.as_str() == "urn:eigenius:measurements:gt"
+                || iri.as_str() == "urn:eigenius:measurements:lt")
+    })
+}
+
 /// The **number** argument of a `cat_n(_, num)` category (`sg` / `pl` / `mass` / `num_any`), or
 /// `None` if `cat` is not a common noun. The multiword-preference cut compares only this — a bare-class
 /// leaf and a `Σ`-refined compound noun of the SAME number fill the identical combinatorial slot and
@@ -1178,6 +1256,80 @@ mod dispatch_tests {
             got.cost().sense_rank,
             COMPOUND_STEP_PENALTY,
             "apply adds the compound-step penalty"
+        );
+    }
+
+    #[test]
+    fn adjective_outside_compound_nf() {
+        let protein = cls("urn:eigenius:lexicon:Protein");
+        // A gradable-adjective restrictor `gt(deg_X(x), std_X)` (the `specific` / `notable` form).
+        let grad = |x: &str| {
+            Exp::App(
+                Box::new(Exp::App(
+                    Box::new(ax("urn:eigenius:measurements:gt")),
+                    Box::new(Exp::App(
+                        Box::new(ax("urn:eigenius:wordnet:deg_specific")),
+                        Box::new(Exp::Var(x.into())),
+                    )),
+                )),
+                Box::new(ax("urn:eigenius:wordnet:std_specific")),
+            )
+        };
+        let adj_cat = n(sigma_cmp(protein.clone(), grad(COMPOUND_X)));
+        assert!(
+            is_adjective_refined(&adj_cat),
+            "Σ. gt(deg,std) is (gradable-)adjective-refined"
+        );
+        assert!(!is_compound_refined(&adj_cat), "and NOT compound-refined");
+
+        // Non-adjective refinements a compound noun legitimately carries must NOT be flagged — the
+        // over-broad "anything not a compound" version wrongly matched these and exploded the parse.
+        let comp_cat = n(sigma_cmp(
+            protein.clone(),
+            app2_x(
+                "urn:eigenius:ontology:compound_kind",
+                ax("urn:eigenius:lexicon:repair"),
+            ),
+        ));
+        assert!(
+            !is_adjective_refined(&comp_cat),
+            "a pure compound is not adjective-refined"
+        );
+        let essive_cat = n(sigma_cmp(
+            protein.clone(),
+            app2_x(
+                "urn:eigenius:ontology:is_a",
+                cls("urn:eigenius:lexicon:Biomarker"),
+            ),
+        ));
+        assert!(
+            !is_adjective_refined(&essive_cat),
+            "an essive `is_a` restrictor is not an adjective"
+        );
+
+        // The adjective-outside NF: a compound may not form over a gradable-adjective-refined operand,
+        // on EITHER side — so the adjective attaches outside the compound core.
+        let adj_mod = mk_item(
+            adj_cat.clone(),
+            sigma_cmp(protein.clone(), grad(COMPOUND_X)),
+        );
+        let gene = mk_item(
+            n(cls("urn:eigenius:lexicon:Gene")),
+            cls("urn:eigenius:lexicon:Gene"),
+        );
+        assert!(
+            apply(&adj_mod, &gene, &layer()).is_none(),
+            "adjective-refined LEFT (modifier) blocks kind_compound"
+        );
+        assert!(
+            apply(&gene, &adj_mod, &layer()).is_none(),
+            "adjective-refined RIGHT (head) blocks kind_compound"
+        );
+        // A pure N-N compound still composes.
+        let bare = mk_item(n(protein.clone()), protein.clone());
+        assert!(
+            apply(&bare, &gene, &layer()).is_some(),
+            "pure N-N compound still composes"
         );
     }
 
