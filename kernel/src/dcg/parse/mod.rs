@@ -757,17 +757,57 @@ impl Parser {
         Some(map)
     }
 
-    /// The `core:description` gloss of a leaf item's `sem` entity — the text the reranker reasons
-    /// over for that sense. An `EigonResource` carries its resource inline; a class/axiom is
-    /// resolved by IRI in the chain. `None` for an inline λ-term sem (function words) or a
-    /// description-less entity.
+    /// The `core:description` gloss the reranker reasons over for a leaf item's sense: the description
+    /// of the FIRST chain entity found in a pre-order walk of `sem` that carries one.
+    ///
+    /// A bare noun / UMLS sem is an `EigonClass` at the ROOT — resolved directly, as before. A gradable
+    /// adjective's sem is `λx. gt(deg_X(x), std_X)`, whose sense gloss is carried on the NESTED `deg_X`
+    /// axiom — "the sense's semantic anchor" (`crates/eigenius-wordnet/src/convert.rs`, D63 §6a index
+    /// c), likewise a verb's synset gloss on its verb axiom — so the walk must descend the `Lam`/`App`
+    /// to reach it. Before this, only the root was checked, so every gradable adjective (and any sense
+    /// whose concept is nested) rendered to the reranker as the bare-category fallback
+    /// ("grammatical (function-word) reading; category …"), which read as a function word to omit and
+    /// lost to any described UMLS concept competing for the surface. Grammar operators (`gt`, `And`,
+    /// `kind_of`, the determiner λ-terms) carry no `core:description`, so the first hit is always the
+    /// sense anchor. `None` (→ the category fallback) when nothing in the term is described — a genuine
+    /// closed-class λ-term.
     fn sem_gloss(&self, sem: &Exp) -> Option<String> {
         match sem {
-            Exp::EigonResource(r) => read_description(r),
-            Exp::EigonClass(i) | Exp::EigonAxiom(i) => {
-                read_description(self.grammar.layer.resolve(i)?.as_ref())
+            Exp::EigonResource(r) => {
+                if let Some(d) = read_description(r) {
+                    return Some(d);
+                }
             }
-            _ => None,
+            Exp::EigonClass(i) | Exp::EigonAxiom(i) => {
+                if let Some(r) = self.grammar.layer.resolve(i) {
+                    if let Some(d) = read_description(r.as_ref()) {
+                        return Some(d);
+                    }
+                }
+            }
+            _ => {}
+        }
+        Self::sem_subterms(sem)
+            .into_iter()
+            .find_map(|child| self.sem_gloss(child))
+    }
+
+    /// The immediate sub-expressions a gloss walk ([`Self::sem_gloss`]) descends into — the
+    /// lambda-calculus core plus inductive-ctor args, which is every shape a lexical sem takes
+    /// (`Lam`/`App` for adjectives and verbs, pairs/projections, annotations, `compound_kind`-style
+    /// ctors). Variants that never wrap a described concept in a lexical sem (literals, sorts,
+    /// data/case, codata) yield none; a missed variant only stops the walk there (→ the category
+    /// fallback), never a wrong gloss.
+    fn sem_subterms(e: &Exp) -> Vec<&Exp> {
+        match e {
+            Exp::Lam(_, b) | Exp::Con(_, b) | Exp::Fst(b) | Exp::Snd(b) => vec![b.as_ref()],
+            Exp::App(a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) | Exp::Pair(a, b) => {
+                vec![a.as_ref(), b.as_ref()]
+            }
+            Exp::Pi(_, a, b) | Exp::Sig(_, a, b) => vec![a.as_ref(), b.as_ref()],
+            Exp::Ann(a, b) => vec![a.as_ref(), b.as_ref()],
+            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => args.iter().collect(),
+            _ => Vec::new(),
         }
     }
 }
