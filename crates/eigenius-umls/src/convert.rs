@@ -291,10 +291,26 @@ const GRAMMATICAL_SURFACES: &[&str] = &[
     "negation", "negated", "to", "alone", "lead", "leading",
 ];
 
-/// Whether `form` is a grammatical surface UMLS should not seed as a content noun ([`GRAMMATICAL_SURFACES`]).
+/// Closed-class **function-word surfaces** (prepositions / conjunctions) UMLS must not seed as content
+/// nouns. Each is already handled by the closed-class bootstrap (`ontologies/lexicon/closed-class.esl`),
+/// so dropping the UMLS content entry cannot make the word unknown — it removes the spurious noun sense
+/// that lets a preposition pile into a compound: `For (preposition)` (`C0521125`, a UMLS Qualitative-
+/// Concept reification of the word) seeded `[for] therapeutics`, the same class as `as`=arsenic. The
+/// content senses colliding on these surfaces are function-word reifications (`From` `C1517320`, `Into`
+/// `C0332286`, `At` `C1516077`, `Within` `C0332285`, `As - qualifier` `C1883713`, …) and chemical-symbol
+/// / gene-acronym homonyms (`as`=arsenic, `in`=indium) — all droppable here; a symbol needed by a
+/// specific document is recoverable as a document-glossary entry. The concept CLASS stays (the mirror is
+/// intact); only the per-form common-noun entry is skipped.
+const FUNCTION_WORD_SURFACES: &[&str] = &[
+    "for", "from", "into", "as", "with", "on", "at", "by", "of", "in", "then", "than", "within",
+    "upon", "onto", "unto",
+];
+
+/// Whether `form` is a grammatical or function-word surface UMLS should not seed as a content noun
+/// ([`GRAMMATICAL_SURFACES`] / [`FUNCTION_WORD_SURFACES`]).
 fn is_grammatical_surface(form: &str) -> bool {
     let f = form.trim().to_ascii_lowercase();
-    GRAMMATICAL_SURFACES.contains(&f.as_str())
+    GRAMMATICAL_SURFACES.contains(&f.as_str()) || FUNCTION_WORD_SURFACES.contains(&f.as_str())
 }
 
 fn push_entries(
@@ -738,6 +754,45 @@ mod tests {
         assert!(!doc.contains("lexicon:form       = \"does not\";")); // grammatical surface dropped
         assert!(doc.contains("lexicon:form       = \"absence of action\";")); // non-filler form kept
         assert_eq!(rep.grammatical_skipped, 1);
+    }
+
+    #[test]
+    fn function_word_surface_gets_no_content_entry() {
+        // `For (preposition)` (C0521125, T080) — a UMLS reification of the preposition. Its `for` form
+        // must not seed a content noun (it piles into a compound, `[for] therapeutics`); the preposition
+        // is the closed-class bootstrap's. A chemical-symbol homonym on the same surface is dropped too.
+        let subset = Subset {
+            semantic_types: vec![SemanticType {
+                tui: "T080".to_string(),
+                name: "Qualitative Concept".to_string(),
+            }],
+            concepts: vec![
+                Concept {
+                    cui: "C0521125".to_string(),
+                    tuis: vec!["T080".to_string()],
+                    preferred_name: "For (preposition)".to_string(),
+                    forms: vec!["for".to_string()],
+                    definition: None,
+                    symbol: None,
+                },
+                Concept {
+                    cui: "C0003818".to_string(),
+                    tuis: vec!["T121".to_string()],
+                    preferred_name: "arsenic".to_string(),
+                    // the element symbol `as` collides with the conjunction; the full name does not.
+                    forms: vec!["as".to_string(), "arsenic".to_string()],
+                    definition: None,
+                    symbol: None,
+                },
+            ],
+        };
+        let (doc, rep) = render_document(&subset, "2026AA", &MassNouns::new(), &DropSet::new());
+        assert!(doc.contains("class umlscui:C0521125 :")); // both concept classes kept
+        assert!(doc.contains("class umlscui:C0003818 :"));
+        assert!(!doc.contains("lexicon:form       = \"for\";")); // preposition surface dropped
+        assert!(!doc.contains("lexicon:form       = \"as\";")); // element-symbol homonym dropped too
+        assert!(doc.contains("lexicon:form       = \"arsenic\";")); // the real content surface stays
+        assert_eq!(rep.grammatical_skipped, 2);
     }
 
     #[test]

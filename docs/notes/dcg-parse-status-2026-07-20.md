@@ -129,6 +129,168 @@ is `SENSE_CAP`/backfill, not lexicon drops. The next real lever is either the ca
 (don't refill a freed slot with a lower-ranked sense) or the noun-pile structure (GH#97), not more
 drops.
 
+## Lever 1 (adjective-outside-compound NF) — landed, and the "regressions" diagnosed (2026-07-20)
+
+Committed `a0acb4d`. A `Guard::NotAdjectiveRefined` on both operands of `kind_compound` (and the head
+of `named_compound`) forbids a compound over a **gradable-adjective-refined** operand (`is_adjective_refined`
+positively matches the `measurements:gt`/`lt` degree axiom, walking the restrictor spine through the
+un-reduced `(λx. gt…)(x)` and its hidden `Ann`). Canonical form: `adj*(compound-core(N))`.
+
+**Result (live reranked, on the metadrops snapshot): coverage holds (grammar-gap 0), encoded 8→11,
+total-skeletons 446→336 (−25%), readings 1328→1103.** Deterministic cap-only (drift-free): skeletons
+720→579 (−20%). `#5` and `#11` reach ENCODED. 1648 kernel tests green incl. the differential packing
+oracle.
+
+**The two apparent per-unit regressions are NOT the NF** — proven by a same-`ranks.json` replay A/B
+across the commit boundary (identical sense choices, so any delta is the grammar alone):
+
+| unit | pre-NF | post-NF | verdict |
+| --- | --- | --- | --- |
+| `#9` "We evaluated MSI as a biomarker for WRN dependency" | 31 | 31 | **NF-neutral** — the live 2→31 is pure reranker sense-choice drift between draws, not the NF. |
+| `#7` "…dependence on specific repair proteins" | 2 | 18 | NF collapses the adjective correctly (specific outside, 1 bracket); the increase is **cap-backfill**. |
+
+`#7`'s 12 post-NF skeletons decompose into three PRE-EXISTING axes the freed cap slot re-admitted, none
+new structure: **modal scope** (`can` in/out of the `on`-PP: `And(Possible(v), prep_on)` vs
+`Possible(And(v, prep_on))`), **PP-attachment** (`on … proteins` → dependence vs VP), and the
+**cross-lexicon `C§`/`n§` sense pairs** of `proteins`/`repair` (each a WordNet + UMLS sense, miscounted
+as distinct skeletons — the same cross-dictionary artifact §"Correction to the step-1 diagnosis"). The
+deterministic cap-only per-unit confirms the NF did not inflate `#7` (72→66, slightly down); the reranker
+draw's cap budget is what redistributes.
+
+**So the NF is sound and a net win.** `#7`'s residual is the SENSE_CAP/**cap-backfill** lever (the same
+one the metadata-drops A/B flagged) plus the already-scoped PP-attachment and cross-lexicon levers — not
+an NF defect. `#9` needs nothing. No further NF change indicated.
+
+## N-N modifier NF — grounded, NO target (2026-07-20)
+
+Grounded the proposed "N-N modifier left-branching NF" before building it, and it has **no clean
+target**: pure N-N compound piles ALREADY left-branch. `MSI biomarkers` → 1 reading; `genes affect
+cancer dependency data sets` → 4 skeletons, all nested/left-branching (the existing
+`is_compound_refined` head-guard, D63 §8.13), differing only by `compound`-vs-`compound_kind`
+(named-vs-common) and the C§/n§ sense artifact — no flat-vs-nested compound over-generation.
+
+The flat-co-modifier piles seen in `#9` (`And(compound(G0), compound_kind(G0), compound_kind(G0),
+is_a(G0))`) are NOT general N-N compounding. Two findings:
+
+- `We evaluated MSI as a biomarker` gaps cap-only (0 readings) — `evaluate` is not in `ESSIVE_VERBS`
+  (known residue, compound-pile-collapse §7), so `#9` never parses as a clean essive; its cap-only
+  mess is spurious compounds around the un-handled `as`.
+- The non-essive `A biomarker for WRN dependency is essential` ALSO explodes (31 readings / 21
+  skeletons), so it is not the essive. Its skeletons are a **heterogeneous mix**, no single driver:
+  `compound` vs `compound_kind` (a word — `WRN` — read as a NAME `cat_np` vs a common noun), PP-attachment
+  (`for WRN dependency`), deep compound piles, the C§/n§ cross-lexicon sense pairs (collapsing C/n cuts
+  only 21→18, so NOT the dominant driver), and a **spurious `is_a` predication inside a non-essive NP**
+  (`is_a(G0, …)` with no essive verb present — a possible over-generation bug, a concrete lead).
+
+**Conclusion: the clean rule-change structural levers are exhausted for this residual.** Lever 1
+(adjective-outside NF) was the one with a clean target and it landed. What remains is sense/category
+(named-vs-common — reranker), alignment (cross-lexicon merge — reseed), PP-attachment (selectional
+typing / underspecification), and the spurious-`is_a`-in-NP lead. None is an N-N compound NF.
+
+## PP-attachment — a red herring, confirmed on two counts (2026-07-20, new session)
+
+Analysed PP-attachment on the current snapshot (metadrops + adjective NF). A minimal-pair PP ladder
+(add one PP at a time; count STRUCTURE with senses AND the `C§`/`n§` class-letter fully erased):
+
+| sentence | distinct structures |
+|---|---|
+| `We queried dependencies` | 1 |
+| `… in cancers` | 1 (adds a sense, not a structure) |
+| `… in cancers with MSI` | 2 (+1: `with MSI` → dependencies flat vs cancers nested) |
+| `Scientists exploit lethality` | 1 |
+| `… for therapeutics` | 4 (+3) |
+
+`with MSI` adds exactly **+1 clean structure** — genuine 2-way attachment. But `for therapeutics`
+adds +3, and dumping them shows only 2 are attachment (VP-adjunct vs noun-modifier); the other 2 are
+**spurious compounds where `for` becomes a noun**: `for` seeds UMLS **`C0521125` "For (preposition)"**
+(type T080 Qualitative Concept, NCI) as a content noun, which the compound rule piles into `[For]
+therapeutics` — the same function-word-junk class as `as`=arsenic. Each preposition surface carries a
+handful of such UMLS content-noun senses (for:4, in:9, as:10, …).
+
+**Two independent reasons PP-attachment is not a grammar lever:**
+
+1. The apparent PP "explosions" are **not attachment** — they are function-word metadata noun senses
+   compounding, and they appear only **cap-only**: the RERANKER eliminates them. Replaying `#6`
+   (`…lethality for cancer therapeutics`) and `#10` (`…in cancers with MSI`) with reranker ranks gives
+   **2 clean readings each, every one carrying a real `prep_for`/`prep_with`** — no `C0521125`, no
+   junk compound. (Deleting the glue-word content senses was already TRIED AND REVERTED — regressed
+   coverage 1→5, compound-pile §7 — and the reranker already handles them, so there is nothing to do.)
+2. The genuine PP-attachment that survives reranking is **small and REAL**: `#6`/`#10` are 2 readings
+   each — `cancers with MSI` vs `dependencies with MSI`, both well-formed logical forms. Nothing
+   spurious to collapse with a rule; it is genuine structural ambiguity whose only levers are
+   **selectional typing** (types pick the felicitous attachment) or **underspecification** (represent
+   the choice) — the shelved PP-attachment note's Lever A / Lever C — NOT an NF/rule change.
+
+**Verdict:** red herring, again. The "PP" residual is (a) cap-only function-word junk the reranker
+already removes, and (b) a genuine 2-way ambiguity that is not rule-collapsible. No grammar-rule work
+is warranted; if pursued, it is the selectional-typing/underspecification track (bigger scope), not a
+combinator guard.
+
+## Three bundled importer fixes — big win, but a coverage regression on #46 (2026-07-20, new session)
+
+Reseeded `wordnet-umls-aligned-2026-07-20-fixes` with three importer/lexicon fixes:
+1. **function-word-surface skip** (`eigenius-umls` `is_grammatical_surface` += prepositions/conjunctions)
+   — `For (preposition)` `C0521125` and siblings + chemical-symbol homonyms no longer seed content nouns.
+2. **`evaluate`/`assess`/`deem` → `ESSIVE_VERBS`** (`eigenius-wordnet`).
+3. **informational-metadata drops** (`drops.rs`: INFO-TUI + code/info name, substance-TUI floor) —
+   `Protein Info` `C1521746` etc.; drops.json 275 → 397. (The "cross-lexicon merge gap" was a misnomer:
+   the `same:false` pairs are metadata junk like this, or GENUINE distinct senses — no real merge gap.)
+
+**Verified working:** `For` fully gone (`#6` cap-only 8 → 1 skeleton), essive parses (`#9` 0/gap → 22).
+**Big multiplicity win (reranked):** total-readings **1328 → 967 (−27%)**, total-skeletons **446 → 322
+(−28%)**, encoded **8 → 10**.
+
+**But COVERAGE REGRESSED — grammar-gap 0 → 1** (non-negotiable gate FAILS), on `#46` *"Some MSI lines and
+some MSS lines were represented by these screening data sets."* — the exact cap-fragile sentence the
+compound-pile note reverted a glue-word cut over. Diagnosis:
+
+- Every sub-part and near-variant parses (`…by data sets` 88, generic-`lines …these screening data sets`
+  66); only the full three-domain-compound combination gaps.
+- NOT beam pressure: gaps at `cell_beam` 512/1024/**2048** and `sense_cap` 16. A clean parse path does
+  not exist.
+- The only new changes on its words: dropped `C1546701 "Line"` (a specimen-code) and skipped the `by`
+  content noun (`C4761448 "Buyei Chinese"`). Its previously-working parse was **relying on one of those
+  junk senses** (the compound-pile "propping up cap-fragile parses" mechanism); removing the junk removed
+  the derivation, and no clean one exists.
+
+**Disposition (needs a call):** the fixes are correct (they remove genuine junk) and a large win, but
+`#46` broke the coverage gate. Options:
+
+(a) back off the tipping drop(s) [reseed, re-masks the gap with
+junk]; (b) fix `#46`'s real grammar gap (coordinated-passive × 3 domain compounds — the clean parse
+should exist without junk); (c) accept it (the parse was junk-dependent). Not landing until resolved.
+
+## #46's real gap DIAGNOSED — a broad agentive-passive `by` composition bug (2026-07-20)
+
+The junk drop exposed a **pre-existing** grammar gap, not a new one: on the metadrops (pre-fix)
+snapshot `Cells were represented by screening data sets` "parsed" only via `C4761448 "Buyei Chinese"`
+(the `by`=noun I dropped) forming a spurious transitive compound `represent(cells, [screening data
+sets by-noun])` — never a real passive. The clean agentive passive does not compose.
+
+Isolated with a swap-ladder (fixes snapshot). The agentive-passive `by` (`by_agent`,
+[closed-class.esl §Agentive passive](../../ontologies/lexicon/closed-class.esl), category
+`(S[pass]\NP \ (S[pss]\NP)/NP) / cat_np(Entity, num_any)`) — precise mechanism:
+
+| agent after passive `by` | parses? |
+|---|---|
+| bare-plural KIND — `by cells`, `by data sets`, `by screening sets` | **yes** |
+| determined SIMPLE — `by these sets` | **yes** |
+| **determined COMPOUND — `by these data sets`, `by these screening data sets`** | **NO** |
+| bare/adj COMPLEX — `by large data sets`, `by screening data` | **NO** |
+| pronoun — `by them` | **NO** |
+
+The determined-compound agent is a valid NP everywhere ELSE: it composes as a subject (`These screening
+data sets are essential` 24) and as a plain transitive OBJECT (`Cells affect these screening data sets`
+48). A determiner produces a **type-raised GQ**, consumed as a prep object by the GQ-as-prep-object
+rules (`gq_prep_*`, `combinators.rs`). So the gap is: **`by_agent` + a determined-COMPOUND GQ does not
+compose**, though `by_agent` + a determined-SIMPLE GQ (`these sets`) and + a bare-plural kind
+(`data sets`) both do, and a normal verb-object slot takes the compound GQ fine. The fix is in the
+GQ-as-`by`-agent path — why the compound-refined GQ (`Σ. compound_kind(…)`) fails the `by_agent`
+agent slot when a simple-class GQ and the transitive-object slot accept it. A focused grammar fix
+(combinator/closed-class + reseed to validate), broader than `#46` but specific. The three importer
+fixes are correct and a big win (readings −27%, skeletons −28%, encoded +2) but stay unlanded until
+this passive gap is fixed, so coverage returns to grammar-gap 0 without junk.
+
 ## Process note
 
 These are not just edits — each needs me to run cycles of:

@@ -143,10 +143,66 @@ const CODESYSTEM_PREFIXES: &[&str] = &[
 /// deliberately EXCLUDED: those mark genuine concepts, not scaffolding.
 const METADATA_TAGS: &[&str] = &["qualifier value", "attribute", "qualifier"];
 
-/// Is this concept a metadata artefact — an administrative code-table entry or a SNOMED modifier
-/// value — as read from its UMLS preferred name? The two curated pattern sets above; neither matches
-/// any merged concept in the 2026-07-20 population.
-fn is_metadata_concept(umls_name: &str) -> bool {
+/// Semantic types that mark an **information / idea artefact** — a code, identifier, terminology,
+/// database record, or software system, NOT a content entity. Combined with [`INFO_NAME_TOKENS`] this
+/// catches the informational metadata the code-table PREFIX misses: `Protein Info` (`C1521746`, a
+/// GenBank record), `Accession Number (identifier)`, `Acute - Triage Code`, `ARIA Oncology
+/// Information System`. (The `cross-lexicon merge gap` turned out to be more of THIS, not unmerged
+/// duplicates — the duplicates the adjudicator left are genuine distinct senses.)
+const INFO_TUIS: &[&str] = &[
+    "Intellectual Product",
+    "Conceptual Entity",
+    "Idea or Concept",
+    "Classification",
+];
+
+/// Semantic types that are always a REAL content concept — never dropped even if the name looks
+/// code-ish (`Alanine Transaminase` a.k.a. `ALT`, an Enzyme; a gene; a chemical). The safety floor.
+const SUBSTANCE_TUIS: &[&str] = &[
+    "Enzyme",
+    "Amino Acid, Peptide, or Protein",
+    "Organic Chemical",
+    "Pharmacologic Substance",
+    "Gene or Genome",
+    "Nucleotide Sequence",
+    "Biologically Active Substance",
+    "Nucleic Acid, Nucleoside, or Nucleotide",
+];
+
+/// Name tokens marking an information/code artefact (word-boundary match).
+const INFO_NAME_TOKENS: &[&str] = &[
+    "code",
+    "codes",
+    "identifier",
+    "info",
+    "information",
+    "terminology",
+    "actclass",
+    "nomenclature",
+];
+
+/// Is this concept an **informational metadata artefact** — an `INFO_TUIS` type whose name is a code /
+/// identifier / info-record reification — as opposed to a real substance/gene (`SUBSTANCE_TUIS`, kept)?
+/// Validated over the 2026-07-20 population: 193 concepts, all codes/specimen-codes/info-systems, none
+/// a merged pair, none a genuine content concept (the substance floor excludes `ALT`).
+fn is_informational_metadata(umls_name: &str, tuis: &[String]) -> bool {
+    if tuis.iter().any(|t| SUBSTANCE_TUIS.contains(&t.as_str())) {
+        return false;
+    }
+    if !tuis.iter().any(|t| INFO_TUIS.contains(&t.as_str())) {
+        return false;
+    }
+    let name = umls_name.to_lowercase();
+    name.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|tok| INFO_NAME_TOKENS.contains(&tok))
+        || name.contains("value set")
+        || name.contains("code set")
+}
+
+/// Is this concept a metadata artefact — an administrative code-table entry, a SNOMED modifier value,
+/// or an information/code artefact — as read from its UMLS preferred name (+ semantic type)? Neither
+/// pattern set matches a merged concept in the 2026-07-20 population.
+fn is_metadata_concept(umls_name: &str, tuis: &[String]) -> bool {
     let name = umls_name.to_lowercase();
     if let Some((prefix, _value)) = name.split_once(" - ") {
         if CODESYSTEM_PREFIXES.contains(&prefix.trim()) {
@@ -160,7 +216,7 @@ fn is_metadata_concept(umls_name: &str) -> bool {
             }
         }
     }
-    false
+    is_informational_metadata(umls_name, tuis)
 }
 
 /// The colliding atom form(s) to drop for a metadata concept: every atom whose lowercase IS the
@@ -169,7 +225,7 @@ fn is_metadata_concept(umls_name: &str) -> bool {
 /// dedup is thereby covered). Empty when no atom collides exactly (a lemma-only collision) → no drop,
 /// fail closed.
 fn metadata_atom_forms(c: &Candidate) -> Vec<String> {
-    if !is_metadata_concept(&c.umls_name) {
+    if !is_metadata_concept(&c.umls_name, &c.tuis) {
         return Vec::new();
     }
     let mut forms: Vec<String> = c
@@ -429,23 +485,55 @@ mod tests {
 
     #[test]
     fn metadata_name_patterns_flag_scaffolding_only() {
+        let no_tui: &[String] = &[];
         // Administrative code-table entries.
-        assert!(is_metadata_concept("Specialty Type - cancer"));
-        assert!(is_metadata_concept("Specimen Source Codes - Bone"));
-        assert!(is_metadata_concept("Act Class - act"));
+        assert!(is_metadata_concept("Specialty Type - cancer", no_tui));
+        assert!(is_metadata_concept("Specimen Source Codes - Bone", no_tui));
+        assert!(is_metadata_concept("Act Class - act", no_tui));
         // SNOMED modifier tags.
-        assert!(is_metadata_concept("Specific (qualifier value)"));
-        assert!(is_metadata_concept("Adherence (attribute)"));
+        assert!(is_metadata_concept("Specific (qualifier value)", no_tui));
+        assert!(is_metadata_concept("Adherence (attribute)", no_tui));
         assert!(is_metadata_concept(
-            "Arbitrary (property) (qualifier value)"
+            "Arbitrary (property) (qualifier value)",
+            no_tui
         )); // trailing tag wins
             // NOT scaffolding: a real dashed concept whose prefix is not a code-system, and real SNOMED
             // entity tags a genuine noun carries.
-        assert!(!is_metadata_concept("Blood - brain barrier anatomy"));
-        assert!(!is_metadata_concept("Beans - dietary"));
-        assert!(!is_metadata_concept("Impaired health (finding)"));
-        assert!(!is_metadata_concept("Biopsy (procedure)"));
-        assert!(!is_metadata_concept("4-aminobenzoic acid"));
+        assert!(!is_metadata_concept(
+            "Blood - brain barrier anatomy",
+            no_tui
+        ));
+        assert!(!is_metadata_concept("Beans - dietary", no_tui));
+        assert!(!is_metadata_concept("Impaired health (finding)", no_tui));
+        assert!(!is_metadata_concept("Biopsy (procedure)", no_tui));
+        assert!(!is_metadata_concept("4-aminobenzoic acid", no_tui));
+    }
+
+    #[test]
+    fn informational_metadata_dropped_but_substances_kept() {
+        let ip = &["Intellectual Product".to_string()];
+        let ce = &["Conceptual Entity".to_string()];
+        // Information / code artefacts (an INFO_TUIS type + a code/info/identifier name).
+        assert!(is_informational_metadata("Protein Info", ce)); // C1521746, the GenBank record
+        assert!(is_informational_metadata("Acute - Triage Code", ip));
+        assert!(is_informational_metadata(
+            "Accession Number (identifier)",
+            ip
+        ));
+        assert!(is_informational_metadata(
+            "ARIA Oncology Information System",
+            ip
+        ));
+        assert!(is_informational_metadata("Basophil Specimen Code", ip));
+        // Substance floor: never drop a real enzyme/gene/chemical, even if the name looks code-ish.
+        let enzyme = &["Enzyme".to_string()];
+        assert!(!is_informational_metadata("Alanine Transaminase", enzyme)); // ALT
+                                                                             // Needs BOTH an info TUI and an info name — a plain content concept is not caught.
+        assert!(!is_informational_metadata("Protein", ce)); // no info token
+        assert!(!is_informational_metadata(
+            "Triage Code",
+            &["Finding".to_string()]
+        )); // not an info TUI
     }
 
     /// The WRN-page culprit: `Specialty Type - cancer` (`C1547140`, an HL7 oncology-specialty code)

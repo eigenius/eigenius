@@ -580,7 +580,12 @@ const ESSIVE_VERBS: &[&str] = &[
     "utilise",
     "employ",
     "adopt",
-    // --- Group 6: High-Frequency / High-Risk (Apply low verb-prior weights) ---
+    // --- Group 6: Appraisal & Assessment (verb-dominant; `evaluate X as Y` — the WRN `We evaluated
+    //     MSI as a biomarker for WRN dependency` case, which gapped without this) ---
+    "evaluate",
+    "assess",
+    "deem",
+    // --- Group 7: High-Frequency / High-Risk (Apply low verb-prior weights) ---
     //   "see",   // Danger: Hyper-frequent. Must not override standard transitive "see [NP]".
     //   "use",   // Danger: Hyper-frequent noun/verb.
     //   "class", // Danger: Hyper-frequent noun ("the python class").
@@ -1435,6 +1440,17 @@ mod tests {
         // counted a participle).
         assert_eq!(rep.entries, 18);
         assert_eq!(rep.participle_entries, 6);
+    }
+
+    #[test]
+    fn evaluate_is_a_curated_essive_verb() {
+        // `We evaluated MSI as a biomarker for WRN dependency` gapped because `evaluate` was not in the
+        // essive set; guard the appraisal group. `treat`/`use` stay out (dominant-noun risk).
+        assert!(is_essive_verb("evaluate"));
+        assert!(is_essive_verb("assess"));
+        assert!(is_essive_verb("deem"));
+        assert!(!is_essive_verb("treat"));
+        assert!(!is_essive_verb("use"));
     }
 
     #[test]
