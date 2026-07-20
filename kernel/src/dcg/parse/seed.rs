@@ -472,25 +472,20 @@ impl Parser {
         // pre-nominal modifier list sharing a head noun ("colon, gastric and ovarian cancers") seeds the
         // group-of-lexicalized-kinds reading its shared-head coordination cannot reach (the head sits
         // once at the end — no adjacency to the multiword). NOT bounded by `span_limit` (a coordination
-        // is longer than any lexeme); `distribute_head` bails cheaply on a non-coordination.
-        //
-        // EXPERIMENTAL, off by default (`EIGENIUS_RNR`): WIP — the seeded group does not yet COMBINE into
-        // a reading (the distributive-subject rule's `group_member_fits`/num check), and always-on
-        // seeding regresses coverage (grammar-gap 0→1) via the `CLASSIFY_BUDGET` candidate truncation
-        // (extra candidates evict a needed reading, as with M1). Both are open before it goes default-on.
-        if std::env::var("EIGENIUS_RNR").is_ok() {
-            let mut dists: Vec<(usize, usize, Vec<Item>)> = Vec::new();
-            for a in 0..n {
-                for b in (a + 1)..n {
-                    let d = self.distribute_head(&tokens[a..=b], lemmatizer, scope, cap, ranks);
-                    if !d.is_empty() {
-                        dists.push((a, b, d));
-                    }
+        // is longer than any lexeme); `distribute_head` bails cheaply on a non-coordination. The seeded
+        // `cat_group` protects its span (`multiword_spans`), so the composition it supersedes is pruned
+        // with the multiword widen fallback — coverage-safe (grammar-gap 0).
+        let mut dists: Vec<(usize, usize, Vec<Item>)> = Vec::new();
+        for a in 0..n {
+            for b in (a + 1)..n {
+                let d = self.distribute_head(&tokens[a..=b], lemmatizer, scope, cap, ranks);
+                if !d.is_empty() {
+                    dists.push((a, b, d));
                 }
             }
-            for (a, b, d) in dists {
-                chart[a][b].extend(d);
-            }
+        }
+        for (a, b, d) in dists {
+            chart[a][b].extend(d);
         }
 
         // Forward bounded type-raising `T` (D63 §8.9 Slice 6-T) at the LEAF cells: a name `NP` lifts
@@ -576,15 +571,10 @@ impl Parser {
         };
         // Per conjunct: the kind NPs of "conjunct + head", looked up IN ISOLATION and bare-NP-shifted.
         // Bail unless EVERY conjunct yields ≥1 lexicalized concept (first-cut all-lexicalized gate).
-        let rnr_debug = std::env::var("EIGENIUS_RNR_DEBUG").is_ok();
         let mut per_conjunct: Vec<Vec<Item>> = Vec::with_capacity(conjuncts.len());
         for c in &conjuncts {
             let surface = format!("{} {head}", c.join(" "));
             let raw = self.lookup_span(&surface, lemmatizer, scope, cap, ranks);
-            let n_cat_n = raw
-                .iter()
-                .filter(|it| is_ctor(it.cat(), "cat_n").is_some())
-                .count();
             // The bare-kind NP of each looked-up common noun: `cat_np(C, num)` with sem `kind_of(C)`,
             // built directly — `bare_nominal_shifts` yields the RAISED subject/object forms, not the
             // plain `cat_np` that `coordinate_np` folds into a group.
@@ -611,13 +601,6 @@ impl Parser {
                 // choice is the cap/reranker's job downstream, not distribute_head's.
                 .take(1)
                 .collect();
-            if rnr_debug {
-                eprintln!(
-                    "[rnr] surface={surface:?} raw={} cat_n={n_cat_n} kinds={}",
-                    raw.len(),
-                    kinds.len()
-                );
-            }
             if kinds.is_empty() {
                 return Vec::new();
             }
@@ -637,7 +620,7 @@ impl Parser {
         for c in &per_conjunct[1..] {
             cost = cost.saturating_add(c[0].cost());
         }
-        // Fold `coordinate_np` left over one kind per conjunct, cross-producing the conjuncts' senses.
+        // Fold `coordinate_np` left over the one kind per conjunct into the `cat_group` union.
         let mut groups: Vec<(Exp, Exp)> = per_conjunct[0]
             .iter()
             .map(|it| (it.cat().clone(), it.sem().clone()))
@@ -654,9 +637,6 @@ impl Parser {
                 }
             }
             groups = next;
-        }
-        if rnr_debug {
-            eprintln!("[rnr] span={span:?} op={op} groups={}", groups.len());
         }
         groups
             .into_iter()

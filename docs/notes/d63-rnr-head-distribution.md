@@ -13,11 +13,14 @@ shared-head case; `cat_mod`/`Or` remains the fallback where no distributed compo
 The distributed compounds are lexicalized concepts, but the coordination hides them. Each "X cancer"
 traced as "X cancer is common":
 
-| compound | own entry | | compound | own entry |
-|---|---|---|---|---|
-| colon cancer | WordNet `n14247239` | | colorectal cancer | UMLS `C0009402` |
-| gastric cancer | UMLS `C0024623` | | insertion mutation | UMLS `C1512796` |
-| endometrial cancer | WordNet `n14247458` | | deletion mutation | UMLS `C1511760` |
+| compound | own entry |
+| --- | --- |
+| colon cancer | WordNet `n14247239` |
+| gastric cancer | UMLS `C0024623` |
+| endometrial cancer | WordNet `n14247458` |
+| colorectal cancer | UMLS `C0009402` |
+| insertion mutation | UMLS `C1512796` |
+| deletion mutation | UMLS `C1511760` |
 
 `ovarian cancer` has **no** bigram entry (composes). A multiword lexeme needs **adjacency**; in
 "colon, gastric, endometrial and ovarian cancers" the head is one token at the end, separated from
@@ -52,7 +55,7 @@ build the union **directly** from re-looked-up atomic concepts, sidestepping bot
 
 For "M₁, …, Mₙ Head" over head class `H`:
 
-```
+```text
 Σx:H. Or(δ₁, …, δₙ)
   δᵢ = is_a(x, Kᵢ)                      if "Mᵢ Head" lexicalizes to concept Kᵢ  (Kᵢ ⊆ H)
   δᵢ = compound_kind(x, ⟦Mᵢ⟧)  (noun)   otherwise — the M3 compositional restrictor
@@ -62,6 +65,7 @@ For "M₁, …, Mₙ Head" over head class `H`:
 Example: `Σx:cancer. Or(is_a(x, n14247239), is_a(x, C0024623), is_a(x, n14247458), compound_kind(x, ovarian))`.
 
 Two semantic sub-questions, deferred (they do not change the mechanism):
+
 - **kind-membership predicate.** `is_a(x, Kᵢ)` is a placeholder; the exact form must match how a
   lexicalized compound denotes as a common-noun restrictor over its supertype (Kᵢ ⊆ H is the typing
   constraint). To confirm against the grammar's existing kind representation.
@@ -79,6 +83,7 @@ already lives: a **cell-level, token-and-lexicon-accessing rule**, run by both c
 `multiword_protected_splits` / `lookup_span` are. So:
 
 **A `distribute_head` cell rule** at a span `[i, j]` whose tokens are `[modifier coordination] head`:
+
 1. re-tokenize `tokens[i..j-1]` on the coordination connectives (`,` / `and` / `or`) → modifier
    surfaces `s₁ … sₙ`; the head is `tokens[j]` (with its singular/plural variants);
 2. for each `sᵢ`, look up the multiword `"sᵢ ‹head›"` in the existing **surface** index (no new index) —
@@ -161,6 +166,50 @@ Over-firing is bounded — a mis-fire that finds no lexicalized `Kᵢ` produces 
 3. both cancer units carry the union reading with the three lexicalized `Kᵢ` + the composed `ovarian`;
 4. no doubling — the compositional `cat_mod`/`Or` reading is suppressed where the union fires;
 5. coverage grammar-gap 0; cap-only does not rise; reranked encoded does not fall.
+
+## 11. Update — implemented, default-on (Derived)
+
+Built as `Parser::distribute_head` (seed-time, `parse/seed.rs`) + a two-line extension of
+`multiword_spans` (`chart/mod.rs`); default-on, on top of the M3 baseline. The design held; four things
+were resolved in the build.
+
+**Semantics — (B), and (A)/(B) are not exclusive.** `core:is_a` is a resource-model **Property**, not an
+`Entity→Class→Prop` axiom, so (A)'s `Or(is_a(x,Kᵢ))` has no predicate the felicity gate can check. (B)
+references each whole kind **directly** (`kind_of(Kᵢ)` group members) — no `is_a` — and reuses the
+existing distributive machinery. They are two encodings of one meaning at different levels: (B) is the
+base; (A)'s only edge (uniform `cat_kind` predication) is a future `cat_group→cat_kind` shift **over** (B),
+not a rival needing `is_a`. So §3's kind-membership sub-question is moot for (B).
+
+**As built:** split the conjuncts; look up each "conjunct + head" **in isolation**; build the bare-kind NP
+`cat_np(H, kind_of(Kᵢ))` — typed by the **head** class `H`, sem the specific kind `Kᵢ`; fold
+`coordinate_np` → `cat_group`; the distributive-**object** rule predicates over it.
+
+**Wall 1 — the group would not combine (two causes).**
+
+| cause | fix |
+| --- | --- |
+| `common_super(Kᵢ) = Entity` — UMLS-CUI compounds lack a loaded ancestor narrower than the top, so `group_member_fits` fails against any concrete slot | type the group by the **head class `H`** (each `Kᵢ ⊆ H`), not `common_super` |
+| subject-position kind-predication ("X are common") wants a `cat_kind`, not a `cat_group` | the page uses **object** position (`cat_np` slot, `distribute_object`) — works once `H`-typed; subject/`cat_kind` is the deferred `group→kind` shift |
+
+**Wall 2 — coverage gap.** The sense **cross-product** blew up: 4 conjuncts × ~4 senses on
+"colorectal, endometrial, gastric and ovarian cancers" → up to `4⁴` = 192 group seeds → a forest blow-up
+that parsed unit 53 to 0 readings. Fix: take the **top-ranked sense per conjunct** (`.take(1)`) — the union is one
+structural reading; sense choice is the cap/reranker's job downstream.
+
+**M-RNR-3 suppression (§5).** A seeded `cat_group` in the LEAVES is necessarily an RNR seed (compositional
+groups are built later in the CKY), so `multiword_spans` counts it and its span is protected exactly like a
+lexicalized multiword — the coordination's guessed cat_mod/composition is pruned **with the multiword widen
+fallback**, so coverage is safe by construction (grammar-gap 0). Replace, not add.
+
+**Results.** "MSI occurs in colon, gastric, endometrial and ovarian cancers" → **1 reading**:
+`And(occurs(MSI, K)…)` over `colon n14247239 · gastric C0024623 · endometrial n14247458 · ovarian C1140680`
+(was 30 readings / 5 skeletons — §1). "insertion or deletion mutations" → the `Or` union, 2 sense-variants.
+Deterministic cap-only 2321→2304 (−17), **encoded 2→4**; reranked encoded 12→13, total 1124→1141 (the
++17 is `SENSE_CAP`/single-draw entanglement — cap-only is the clean A/B, the same pattern M3 documents).
+grammar-gap 0; differential oracle holds; §7's all-lexicalized gate keeps RNR off non-compound
+coordinations (verified: "MSI and MMR deficiency" does not fire). §9 open items still open: the "ovarian
+cancer" coverage note was wrong — the plural surface *does* lexicalize (`C1140680`); head morphology and the
+subject-position shift remain future work.
 
 ## References
 

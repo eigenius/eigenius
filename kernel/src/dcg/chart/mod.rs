@@ -32,14 +32,22 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::item::Item;
 use super::rules::combinators::cat_n_number;
 
-/// The multi-token spans `[a, b]` (`b > a`) a seeded multiword `cat_n` leaf covers. `leaves` are the
-/// SEEDED leaf cells (before composition), so a `cat_n` leaf in a multi-token cell is necessarily a
-/// lexicalized multiword. Shared by [`multiword_protected_splits`] and the tracer's context header.
+/// The multi-token spans `[a, b]` (`b > a`) a seeded multiword leaf covers. `leaves` are the SEEDED
+/// leaf cells (before composition), so a `cat_n` leaf in a multi-token cell is necessarily a lexicalized
+/// multiword — and a `cat_group` leaf is necessarily an **RNR head-distribution** seed (D63
+/// `docs/notes/d63-rnr-head-distribution.md`; compositional groups are built later in the CKY, never
+/// seeded), whose span is protected the same way so the guessed cat_mod/composition of the coordination
+/// is pruned in favour of the lexicalized-kind union (M-RNR-3, multiword-preference for the distributed
+/// case — with the same widen fallback preserving `grammar-gap 0`). Shared by
+/// [`multiword_protected_splits`] and the tracer's context header.
 pub(crate) fn multiword_spans(leaves: &[Vec<Vec<Item>>]) -> BTreeSet<(usize, usize)> {
     let mut spans = BTreeSet::new();
     for (a, row) in leaves.iter().enumerate() {
         for (b, cell) in row.iter().enumerate().skip(a + 1) {
-            if cell.iter().any(|it| cat_n_number(it.cat()).is_some()) {
+            if cell.iter().any(|it| {
+                cat_n_number(it.cat()).is_some()
+                    || super::category::is_ctor(it.cat(), "cat_group").is_some()
+            }) {
                 spans.insert((a, b));
             }
         }

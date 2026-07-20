@@ -20,7 +20,7 @@ modifier-`And` fix, `experiments/parsing/baseline.json` history). (1a) killed th
 `trace_one_sentence` with senses erased to structural skeletons. It is **heterogeneity**, not list length:
 
 | probe | modifiers | readings / structural skeletons |
-|---|---|---|
+| --- | --- | --- |
 | "Ovarian cancers are common." | 1 adjective | 1 / 1 (encoded) |
 | "Gastric, endometrial and ovarian cancers are common." | 3 adjectives (homogeneous) | 4 / 2 — clean |
 | "Colon, gastric, endometrial and ovarian cancers are common." | noun + 3 adj | 40 / 12 |
@@ -30,7 +30,7 @@ A homogeneous adjective list folds cleanly (`fold_conn` is already left-canonica
 **noun**-modifier ("colon"/"breast", which has no adjective category) joins the coordination it blows
 up. The malformed restrictor on the head noun embeds an **object-GQ used as a modifier**, e.g.
 
-```
+```text
 Σ__cmp_x:C1140680. And(compound_kind(__cmp_x, C1515981),
                        λconj0. And(λTV. λsubj. TV(kind_of(colon), subj)(conj0), ...)(__cmp_x))
 ```
@@ -60,7 +60,7 @@ Un-laundering the provenance is not enough (§7 proves it over-reaches). The pro
 *matters* because pre-nominal modifiers have **three incompatible categories** and no shared one:
 
 | modifier | category | rule |
-|---|---|---|
+| --- | --- | --- |
 | adjective | `S[adj]\NP` | `refine_attrib` |
 | named entity | `cat_np` | `refine_named_compound` |
 | N-N compound | `cat_n` | `refine_kind_compound` |
@@ -111,7 +111,7 @@ lambda, with the `Σ` still built over the concrete `C` at application.
    pulled out to stand alone:
 
    | lift | from | `cat_mod` sem |
-   |---|---|---|
+   | --- | --- | --- |
    | adjective | `S[adj]\NP` | `λx. adj(x)` (identity on the predicative sem) |
    | attributive noun | `cat_n(M,_)` | `λx. compound_kind(x, M)` |
    | named entity | `cat_np(M,_)` | `λx. compound(x, M)` |
@@ -240,7 +240,7 @@ there is nothing clean to delete (real stacked compounds need `kind_compound`). 
 Each distributed "X cancer" traced as "X cancer is common":
 
 | compound | own entry? | resolves to |
-|---|---|---|
+| --- | --- | --- |
 | colon cancer | yes | WordNet `n14247239` |
 | gastric cancer | yes | UMLS `C0024623` (+`C0699791`) |
 | endometrial cancer | yes | WordNet `n14247458` |

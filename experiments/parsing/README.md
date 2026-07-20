@@ -136,10 +136,10 @@ The scripts close all three. They are documented because *reading the raw log by
    that it structurally cannot support, three times.) Its `sems` field records what each sense
    *denotes*, so two senses with different labels and the same `sem` are visibly ONE concept — but
    the pre-dedup caveat still stands.
-4. **`grammar-gap` and `total-readings` come from the summary line, and nowhere else.** The per-unit
-   listing enumerates only AMBIG units and **silently omits grammar gaps** — counting from it reports
-   0 gaps on a run that had many. `eval-parse-rate.sh` reads both metrics from the `=== WRN first page
-   over FULL lexicon: … ===` line only. And **a run with no summary line did not complete**; its
+4. **`grammar-gap`, `total-readings`, and `total-skeletons` come from the summary line, and nowhere
+   else.** The per-unit listing enumerates only AMBIG units and **silently omits grammar gaps** —
+   counting from it reports 0 gaps on a run that had many. `eval-parse-rate.sh` reads the metrics from
+   the `=== WRN first page over FULL lexicon: … ===` line only. And **a run with no summary line did not complete**; its
    partial counts are not a result.
 
 ---
@@ -166,6 +166,17 @@ histogram** with **pinned buckets** (`READING_BUCKETS` in `crates/eigenius-wordn
 `0 (open/gap) · 1 (encoded) · 2-3 · 4-10 · 11-30 · 31-100 · >100`. The buckets are fixed in that one
 constant so they do NOT drift between runs; `eval-parse-rate.sh` surfaces them verbatim and gates
 `total-readings` against `total_readings_ceiling` in `baseline.json`.
+
+**Structural multiplicity — the clean lever:** `total-skeletons` — distinct bracketings with senses
+erased (runs of ≥4 digits → `§`), summed over units, printed on the summary line as
+`total-skeletons N (sense× = total-readings / total-skeletons)`. Because it is sense-independent it is
+**drift-free** (the reranker's sense choices collapse to `§`), so it isolates STRUCTURE from the sense
+multiplicity `total-readings` conflates — which matters because `total-readings` has repeatedly *risen*
+while structure *fell* (M3, RNR: the reranker sense-collapses the very units a structural fix improves).
+`eval-parse-rate.sh` reports and gates it against `skeletons_ceiling` in `baseline.json`; a skeleton
+RISE is the true over-generation signal. It is computed over the `SENSE_CAP` reading set (not fully
+uncapped — `factor_ambiguity` is the manual uncapped deep-dive), but the erasure is what makes it clean.
+**Prefer `total-skeletons` for a structural claim; `total-readings` is its sense-inflated companion.**
 
 **Isolating a LEXICON change (drops, merges, imports) — use `--no-llm`.** The reranked metric is the
 progress number, but the LLM reranker drifts ~5% between runs even at `temperature 0`, which swamps a

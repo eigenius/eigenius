@@ -41,6 +41,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use eigenius_kernel::bootstrap::bootstrap_persistent;
+use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::{
     extract_abbreviations, glossary_resources, ground_abbreviation, is_nonprose, pretty_term,
     segment_sentences, tokenize, Identity, Lemmatizer, LexicalIndex, LexiconAugmentation, Parser,
@@ -365,10 +366,16 @@ fn gates_to_prop(layer: &Arc<Layer>, sem: &Exp) -> bool {
 enum Outcome {
     Encoded {
         is_prop: bool,
+        /// Distinct STRUCTURAL skeletons among the closed readings (senses erased) — 1 for an encoded
+        /// unit by construction.
+        skeletons: usize,
     },
     Ambiguous {
         count: usize,
         is_prop: bool,
+        /// Distinct STRUCTURAL skeletons among the `count` closed readings — the sense-independent
+        /// (drift-free) bracketing count. `count / skeletons` is the sense× multiplicity.
+        skeletons: usize,
     },
     MissingLexeme {
         unknown: Vec<String>,
@@ -398,6 +405,49 @@ fn unit_readings(o: &Outcome) -> usize {
     match o {
         Outcome::Encoded { .. } => 1,
         Outcome::Ambiguous { count, .. } => *count,
+        _ => 0,
+    }
+}
+
+/// Erase sense IRIs to `§` — runs of ≥4 digits (WordNet offsets / UMLS CUIs) — leaving the STRUCTURE,
+/// so two readings that differ only in WHICH sense fills a slot collapse to one skeleton. This is the
+/// same erasure `trace_one_sentence` prints per sentence.
+fn erase_senses(s: &str) -> String {
+    let mut out = String::new();
+    let mut run = String::new();
+    for c in s.chars() {
+        if c.is_ascii_digit() {
+            run.push(c);
+            continue;
+        }
+        if !run.is_empty() {
+            out.push_str(if run.len() >= 4 { "§" } else { &run });
+            run.clear();
+        }
+        out.push(c);
+    }
+    if !run.is_empty() {
+        out.push_str(if run.len() >= 4 { "§" } else { &run });
+    }
+    out
+}
+
+/// The distinct STRUCTURAL skeletons among a unit's closed readings — the sense-independent (hence
+/// reranker-drift-free) bracketing count. `total_readings` sense-multiplies these; skeleton-count does
+/// not, so it is the clean multiplicity signal (D63 baseline gates.multiplicity).
+fn distinct_skeletons(closed: &[Item]) -> usize {
+    closed
+        .iter()
+        .map(|it| erase_senses(&pretty_term(it.sem())))
+        .collect::<BTreeSet<String>>()
+        .len()
+}
+
+/// The distinct-skeleton count of a classified unit (0 for Open/GrammarGap/MissingLexeme/ScaleBound —
+/// they produce no closed reading, mirroring [`unit_readings`]).
+fn unit_skeletons(o: &Outcome) -> usize {
+    match o {
+        Outcome::Encoded { skeletons, .. } | Outcome::Ambiguous { skeletons, .. } => *skeletons,
         _ => 0,
     }
 }
@@ -454,10 +504,12 @@ fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Lay
         }
         1 => Outcome::Encoded {
             is_prop: gates_to_prop(layer, closed[0].sem()),
+            skeletons: 1,
         },
         n => Outcome::Ambiguous {
             count: n,
             is_prop: gates_to_prop(layer, closed[0].sem()),
+            skeletons: distinct_skeletons(&closed),
         },
     }
 }
@@ -2604,6 +2656,10 @@ fn summarize(report: &[UnitReport]) {
     // Reading-count multiplicity: the total over all units, and the pinned-bucket distribution.
     let readings: Vec<usize> = report.iter().map(|u| unit_readings(&u.outcome)).collect();
     let total_readings: usize = readings.iter().sum();
+    // Sense-independent structural multiplicity: distinct bracketings, senses erased. Drift-free (the
+    // reranker's sense choices collapse to `§`), so it isolates STRUCTURE from the sense multiplicity
+    // that `total_readings` conflates (D63 baseline gates.multiplicity — the tracked lever).
+    let total_skeletons: usize = report.iter().map(|u| unit_skeletons(&u.outcome)).sum();
     let max_readings = readings.iter().copied().max().unwrap_or(0);
 
     // Persist the reranker's decisions (if recording) BEFORE the summary, so a run that produced a
@@ -2612,8 +2668,10 @@ fn summarize(report: &[UnitReport]) {
     eprintln!(
         "\n=== WRN first page over FULL lexicon: {} units → encoded {enc}, ambiguous {amb}, \
          open {open}, missing-lexeme {miss}, grammar-gap {gap}, \
-         scale-bound (known, >{PARSE_BUDGET} tok) {scale}, total-readings {total_readings} ===",
-        report.len()
+         scale-bound (known, >{PARSE_BUDGET} tok) {scale}, total-readings {total_readings}, \
+         total-skeletons {total_skeletons} (sense× {:.2}) ===",
+        report.len(),
+        total_readings as f32 / total_skeletons.max(1) as f32
     );
     // Reading-count histogram (PINNED buckets, [`READING_BUCKETS`]) — the multiplicity distribution.
     // `eval-parse-rate.sh` parses these `histogram:` lines; keep the format stable.
@@ -2673,8 +2731,8 @@ fn summarize(report: &[UnitReport]) {
     for u in report {
         let t: String = u.text.chars().take(100).collect();
         match &u.outcome {
-            Outcome::Encoded { is_prop } => eprintln!("  [ENCODED prop={is_prop}] {t}…"),
-            Outcome::Ambiguous { count, is_prop } => {
+            Outcome::Encoded { is_prop, .. } => eprintln!("  [ENCODED prop={is_prop}] {t}…"),
+            Outcome::Ambiguous { count, is_prop, .. } => {
                 eprintln!("  [AMBIG×{count} prop={is_prop}] {t}…")
             }
             _ => {}
