@@ -22,6 +22,7 @@
 //! (The drivers themselves — `lookup::chart_packed` / `lookup::chart_unpacked` — belong here too; they
 //! are still under `lookup` only because a few helpers have yet to be re-homed.)
 
+pub(crate) mod attribute;
 pub(crate) mod forest;
 pub(crate) mod packed;
 pub(crate) mod trace;

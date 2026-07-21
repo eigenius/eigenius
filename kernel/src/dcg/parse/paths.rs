@@ -107,6 +107,15 @@ impl Parser {
             );
         }
 
+        // Ambiguity attribution (set `EIGENIUS_TRACE_ATTRIBUTION`, see `chart::attribute`): roll the
+        // forest's multiplicity up into ranked, named sense/structure factors — WHICH span, WHICH rule
+        // or senses drives the reading count — instead of hand-reading it off the derivation dump.
+        if std::env::var("EIGENIUS_TRACE_ATTRIBUTION").is_ok() && !top.is_empty() {
+            if let Some(report) = forest.attribute(&tokens, &top).render(&tokens.join(" ")) {
+                eprint!("{report}");
+            }
+        }
+
         let mut candidates: Vec<Item> = Vec::new();
         for id in top {
             candidates.extend(
