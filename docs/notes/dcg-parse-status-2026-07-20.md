@@ -302,6 +302,33 @@ PRONOUN agent (`by them`) still gaps — pronouns are not raised GQs, a small se
 grammar-gap **0**, missing-lexeme 0; encoded **8 → 11 (+3)**; total-readings **1328 → 943 (−29%)**;
 total-skeletons **446 → 354 (−21%)**. The multiplicity win lands with coverage held and no junk crutch.
 
+## Re-baseline + high-reading-bucket patterns (2026-07-20, new session)
+
+**Re-baselined** `baseline.json` against `wordnet-umls-aligned-2026-07-20-fixes` (5-draw variance study;
+grammar-gap 0 in all 5). Expected = drift-free replay of the encoded-floor draw: **encoded 10** (band
+10-11), **total-readings 931** (band 931-986, ceiling 1100), **total-skeletons 326** (band 326-354,
+ceiling 400). `eval-parse-rate.sh` scores the floor draw exactly.
+
+**High-reading buckets are SENSE-dominated, not structural** (`less dependent on WRN` 61 readings / **2
+skeletons**, sense× 30; coordinations ~10 skeletons / sense× ~12). The sense product comes from:
+
+1. **Genuine WordNet polysemy** — `lines` = line/occupation/cell-line; `group` = general/social.
+2. **UMLS qualifier concepts colliding with ADJECTIVES** — `rare` seeds the adjective PLUS `C0522498`
+   "Rare" (Qualitative) + `C0521114` "Infrequent" (Temporal); `indeterminate` → `C0205258`. These are
+   **invisible to the drop/merge pipeline**: a candidate requires a WordNet **noun** collision, and an
+   adjective-colliding qualifier is never a candidate (`C0522498`/`C0521114` = 0 in candidates/drops/
+   merges). The importer still seeds them as content nouns.
+3. **Residual function-word reifications** — `C1550557` "RelationshipConjunction - and" seeds `and`;
+   `and` is not yet in the function-word skip.
+
+**Correction to the earlier claim:** genuine cross-lexicon *twins* are mostly already merged (38k) — the
+residual noun pairs (`group`/`Social group`) are genuine distinct senses the adjudicator kept, NOT missed
+merges. So the next SENSE levers are (a) an importer-side **adjective-competing-qualifier filter** (skip a
+Qualitative/Temporal/Spatial "qualifier"-typed UMLS concept whose surface is a WordNet ADJECTIVE), and (b)
+extend the function-word skip to conjunctions/determiners (`and`, …). The residual STRUCTURAL lever is
+**coordination scope** (distribution-vs-single-NP + the-referential-vs-kind on the 3-4-way `X, Y and Z`
+units). NOT more compound/PP NF work.
+
 ## Process note
 
 These are not just edits — each needs me to run cycles of:
