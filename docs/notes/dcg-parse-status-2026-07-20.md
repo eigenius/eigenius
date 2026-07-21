@@ -287,9 +287,20 @@ compose**, though `by_agent` + a determined-SIMPLE GQ (`these sets`) and + a bar
 (`data sets`) both do, and a normal verb-object slot takes the compound GQ fine. The fix is in the
 GQ-as-`by`-agent path — why the compound-refined GQ (`Σ. compound_kind(…)`) fails the `by_agent`
 agent slot when a simple-class GQ and the transitive-object slot accept it. A focused grammar fix
-(combinator/closed-class + reseed to validate), broader than `#46` but specific. The three importer
-fixes are correct and a big win (readings −27%, skeletons −28%, encoded +2) but stay unlanded until
-this passive gap is fixed, so coverage returns to grammar-gap 0 without junk.
+(combinator/closed-class + reseed to validate), broader than `#46` but specific.
+
+**FIXED (2026-07-20) — `gq_prep_passive_agent`, a KERNEL rule (no reseed).** Added a fourth
+GQ-as-prep-object rule in `kernel/src/dcg/rules/combinators.rs`: the agentive `by`
+(`fwd(passive-VP-result, NP_agent)`) now takes a type-raised GQ agent — `λTV. λp. Q(λagent.
+by(agent)(TV)(p))`, `by`'s own result category — exactly as the other `gq_prep_*` rules quantify a
+preposition's object. `#46` **0 → 120** readings; `by these data sets` 0→6, `by large data sets` 0→9,
+`by these screening data sets` 0→48. Trigger-disjoint from the three existing GQ-prep rules; 1648+142
+kernel tests green (differential packing oracle holds). Residual (separate, pre-existing): a bare
+PRONOUN agent (`by them`) still gaps — pronouns are not raised GQs, a small separate follow-up.
+
+**Full result — all four fixes (3 importer + this grammar rule), reranked, COVERAGE PASS:**
+grammar-gap **0**, missing-lexeme 0; encoded **8 → 11 (+3)**; total-readings **1328 → 943 (−29%)**;
+total-skeletons **446 → 354 (−21%)**. The multiplicity win lands with coverage held and no junk crutch.
 
 ## Process note
 

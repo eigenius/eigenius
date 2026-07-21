@@ -684,6 +684,16 @@ fn raised_gq_pat() -> CatPat {
     CatPat::Ctor("fwd", vec![any_s_pat(), vp_pat()])
 }
 
+/// The agentive-passive `by`'s functor RESULT — `(S[pass]\NP) \ ((S[pss]\NP)/NP)`: a passive patient-VP
+/// awaiting the unsaturated active participle on its left. Distinct from every `pp_res` above (it is a
+/// `bwd` whose left is a VP and right is a `fwd`), so `gq_prep_passive_agent` stays trigger-disjoint.
+fn passive_agent_res_pat() -> CatPat {
+    CatPat::Ctor(
+        "bwd",
+        vec![vp_pat(), CatPat::Ctor("fwd", vec![vp_pat(), any_np_pat()])],
+    )
+}
+
 /// The "other grammar" rule table (built once). Priority = order: close-naming apposition first, then
 /// the three GQ-as-prep-object kinds (distinguished by the preposition functor's result `pp_res`:
 /// `cat_pp` / `cat_pp_arg` / `(S\NP)\(S\NP)` — disjoint ctors). Tried after the nominal-modification
@@ -726,6 +736,18 @@ fn other_grammar_rules() -> &'static [CatRule] {
                 right_pat: raised_gq_pat(),
                 guards: &[],
                 build: gq_prep_vpadjunct,
+            },
+            // GQ-as-passive-agent: the agentive `by` (`fwd(passive-VP-result, NP_agent)`) takes a
+            // type-raised GQ agent — `represented by [these data sets]`. Without it `by`'s forward slot
+            // only takes a PLAIN `cat_np`, so a determined / pronoun / deep-compound agent (a raised GQ,
+            // not a plain NP) has no passive-agent parse (the `#46` gap). Trigger-disjoint from the three
+            // above (its `pp_res` is `bwd(VP, fwd(VP, NP))`, none of `cat_pp`/`cat_pp_arg`/`bwd(VP,VP)`).
+            CatRule {
+                name: "gq_prep_passive_agent",
+                left_pat: Ctor("fwd", vec![passive_agent_res_pat(), any_np_pat()]),
+                right_pat: raised_gq_pat(),
+                guards: &[],
+                build: gq_prep_passive_agent,
             },
         ]
     });
@@ -793,6 +815,42 @@ fn gq_prep_ppmod(_binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Laye
     let sem = Exp::Lam(
         Patt::Var(x.into()),
         Box::new(Exp::App(Box::new(right.sem().clone()), Box::new(inner))),
+    );
+    Item::from_parts(gq_pp_res(left), sem, Combinator::Other, Cost::ZERO)
+}
+
+/// GQ-as-passive-agent: `by`'s sem is `λagent. λTV. λp. TV(p, agent)`; scope the GQ `Q` over the agent
+/// slot — `λTV. λp. Q(λagent. by(agent)(TV)(p))` — and return `by`'s own result category. So
+/// `represented by [these data sets]` closes: the raised-GQ agent is quantified in, exactly as the
+/// other `gq_prep_*` rules quantify a preposition's object. Applies `by`'s sem opaquely (no assumption
+/// about its body), so it stays correct if `by_agent_sem` changes.
+fn gq_prep_passive_agent(
+    _binds: &CatSubst,
+    left: &Item,
+    right: &Item,
+    _layer: &Arc<Layer>,
+) -> Item {
+    let (agent, tv, p) = ("__agt_x", "__agt_TV", "__agt_p");
+    // by(agent)(TV)(p) : Prop
+    let by_applied = Exp::App(
+        Box::new(Exp::App(
+            Box::new(Exp::App(
+                Box::new(left.sem().clone()),
+                Box::new(Exp::Var(agent.into())),
+            )),
+            Box::new(Exp::Var(tv.into())),
+        )),
+        Box::new(Exp::Var(p.into())),
+    );
+    // Q(λagent. by(agent)(TV)(p)) : Prop
+    let scoped = Exp::App(
+        Box::new(right.sem().clone()),
+        Box::new(Exp::Lam(Patt::Var(agent.into()), Box::new(by_applied))),
+    );
+    // λTV. λp. Q(…) — `by`'s passive-VP result sem.
+    let sem = Exp::Lam(
+        Patt::Var(tv.into()),
+        Box::new(Exp::Lam(Patt::Var(p.into()), Box::new(scoped))),
     );
     Item::from_parts(gq_pp_res(left), sem, Combinator::Other, Cost::ZERO)
 }
