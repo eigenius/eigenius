@@ -2598,6 +2598,14 @@ fn wrn_first_page_over_full_lexicon() {
         eprintln!("  has_token({probe:?}) = {}", index.has_token(probe, &lem));
     }
 
+    // Page-level ambiguity roll-up (set `EIGENIUS_ATTRIBUTION_ROLLUP`): aggregate every unit's
+    // per-span sense/structure branch sites into ranked levers — which surface form drives the most
+    // sense multiplicity, which named construction the most structural branching, across the page.
+    let rollup = std::env::var("EIGENIUS_ATTRIBUTION_ROLLUP").is_ok();
+    if rollup {
+        eigenius_kernel::dcg::attribution::begin();
+    }
+
     let mut report: Vec<UnitReport> = Vec::new();
     for (i, text) in segment_sentences(&page).into_iter().enumerate() {
         let ntok = tokenize(&text).len();
@@ -2609,9 +2617,22 @@ fn wrn_first_page_over_full_lexicon() {
             tag(&outcome)
         );
         report.push(UnitReport { text, outcome });
+        // Progress snapshot: the page sweep runs for many minutes, so emit the partial roll-up
+        // periodically — an interrupted run still leaves usable attribution in the log.
+        if rollup && (i + 1) % 10 == 0 {
+            if let Some(s) = eigenius_kernel::dcg::attribution::snapshot() {
+                eprint!("[roll-up after {} units]\n{s}", i + 1);
+            }
+        }
     }
 
     summarize(&report);
+
+    if rollup {
+        if let Some(s) = eigenius_kernel::dcg::attribution::take() {
+            eprint!("{s}");
+        }
+    }
 }
 
 fn tag(o: &Outcome) -> &'static str {

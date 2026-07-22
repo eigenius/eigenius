@@ -159,3 +159,78 @@ exactly:
 
 Both show the pre-felicity over-count (raw 80/4160 vs extracted 28/128) — labelled as an upper bound, per
 limitation (a).
+
+## 8. Page roll-up (§5) — shipped and measured 2026-07-21
+
+`kernel/src/dcg/attribution.rs` (pub `begin`/`snapshot`/`take`; thread-local accumulator keyed by unit
+tokens so the cap-widen ladder's retries OVERWRITE rather than double-count — unit-tested). Recorded
+from the `paths.rs` hook, armed by the sweep. Exposed as `scripts/measure-parse-rate.sh --attribution`
+(also added to the `env -u` strip list, so an ambient value can never enter a run silently) and
+documented in `experiments/parsing/README.md` §7a. A partial roll-up is emitted every 10 units, so an
+interrupted run still leaves data.
+
+**Reference run** (`--attribution --replay 2026-07-20-1751/ranks.json`, CNL-v3, release, 31.8s):
+metrics **identical to baseline — 0 / 10 / 931 / 326** with and without the flag, witnessing that the
+instrument is read-only.
+
+SENSE levers — **RETRACTED, see §9.** The first ranking was computed on the RAW forest and is void:
+`has` ×7 (excess 10) · `project` 9 · `are` ×3 (9) · `classifications` 8 · `lines` 8 ·
+`microsatellite-stable` ×5 (8) · `lineages` 7 · `and` (6) · `were` 5 · `rare` ×3 (4). From it I concluded
+that copula/auxiliary reification (`has`/`are`/`were`) was the deepest sense driver. **That conclusion
+was an artifact of counting a population the parser had already discarded.**
+
+STRUCTURE levers: `compound` **47/62 units**, excess 282, max ×9 · `Relativize` 52 · `ApposeGroup+
+coord(conn_list)` 50 · `BareNp+leaf` 26 · `adjective` 24; generic attachment 465 across 53 units.
+**This table is an upper bound, not a lever ranking** (limitation (a)) — §6 measures the extracted
+readings as sense-dominated, and the two count different populations. The felicity intersection is the
+prerequisite for acting on it.
+
+**Methodology cost, recorded so it is not repeated.** Three runs were wasted (~3h) producing
+wrong-but-plausible numbers because the measurement was hand-rolled as `cargo test` instead of the
+script: that misses `EIGENIUS_WRN_PAGE` (defaults to the ORIGINAL page, not CNL-v3 — 42-token sentences
+instead of 5–11) and misses `--release` (debug ⇒ NbE stack overflow ⇒ **fake grammar gaps**, README §4
+trap 1). The README already forbids hand-rolling and names the tell ("tens of minutes ⇒ debug"); the
+1h20m/27-unit runtime was that tell, misread as pathological widening. Correct invocation, ~30s:
+`scripts/measure-parse-rate.sh --attribution --replay <run>/ranks.json`. Cross-check a run is on the
+expected page/profile via per-unit token counts and timings before reading any number off it.
+
+## 9. Felicity intersection (2026-07-21) — and what it refuted
+
+Attribution now runs **after** the top-span felicity filter and `subsume_duplicates`, in `parse_at_cap`,
+and takes the surviving readings plus the layer:
+`Forest::attribute(tokens, top, readings, layer)`. A sense site reports `surviving/raw`; a sense whose
+identifying atoms (tokens with a ≥4-digit run — the same signal `erase_senses` uses) appear in no
+surviving reading is marked `[pruned]` and excluded. Sense IRIs resolve through the chain to
+`C0018905 "Hemagglutination test" [T059]` (`core:description` + the `core:is_a` → `umlssty:<TUI>`
+parents), so the manual `MRCONSO` loop §4 promised to remove is actually removed.
+
+**Verification of the two blockers I had asserted without checking.** §4's "data-dependent, needs
+MRSTY / crosses a crate boundary" was **false** — the TUI is a parent class in the chain the parser
+already holds. The felicity claim was **half true**: sense sites intersect cheaply (atom containment in
+the surviving readings, no `kbest` change), but structure sites genuinely cannot — `kbest` returns bare
+`Item`s with no derivation record and truncates per node, so bracketing intersection needs derivation
+ids threaded through `kbest`/`cube`/`materialize_unary`. Structure is therefore still RAW and ranks
+nothing; the report says so.
+
+**What the intersection refuted.** On "This state has frequent insertion or deletion mutations", the
+surface `has` seeds 7 noun/concept senses — hour-angle, `Hemagglutination test`, `Han Chinese`,
+`Ha Antibody`, `rich_person`, UMLS `Possess`, UMLS `Have` — and **0 of 7 survive** (the verb site is
+2 of 5). The felicity type-check already rejects every one. So the §8 finding that
+abbreviation-collisions (N1), UMLS verb reifications (N2) and proper-name collisions (N3) were levers —
+and the "noun-only alignment candidate rule is the root cause" conclusion drawn from them — is
+**REFUTED**: those senses contribute zero multiplicity. They are real seeding junk, and irrelevant to
+the tracked metrics.
+
+**Corrected page levers** (`--attribution --replay`, 62 units, 27.5s, metrics unchanged 0/10/931/326):
+`lines` 8 · `project` 7 · `microsatellite-stable` 7 · **`and` 5 units** · `are` 5 · `lineages` 5 ·
+`arise` 4 · `rare` 4 · `regions` 4 · `analysed` 4 · `arises` 4 · `classifications` 4 · `deficiency` 4 ·
+`screened` 4 · `essential` 3. `has`, `were`, `findings`, `observations`, `wrn` all leave the top 15.
+
+This **restores the baseline's original hypotheses** and removes mine: H(a) genuine polysemy dominates
+(`lines`, `project`, `lineages`, `regions`, `classifications`, `deficiency`); H(b) adjective-competing
+qualifiers are real and survive (`rare`, 2 units, max ×3); H(c) function-word reification is real and
+survives (`and`, 5 units — unlike `has`, its C1515981/C1550557 do reach readings). The baseline was
+right; my §8 contribution was measurement error.
+
+**Standing rule:** never rank a lever on raw-forest counts. The raw and intersected rankings disagree at
+the top.

@@ -229,6 +229,48 @@ readings  median 32   ≈   skeletons  median 6   ×   sense×  median 5.5
 Both axes are live and they *multiply*. Collapsing senses perfectly leaves ~18% of readings;
 perfecting the structural normal form leaves ~15%. **Neither alone reaches ENCODED.**
 
+### 7a. Attribution — which span, which rule, which sense
+
+The split above says *structure vs sense*; it does not say **which word or which rule**. That question
+used to be answered by hand (dump readings, erase senses, swap-ladder a trigger, look up each CUI) —
+slow, and it produced several wrong diagnoses. `kernel/src/dcg/chart/attribute.rs` now reads it off the
+packed forest directly: every OR-node that branches becomes a labelled *site* (competing `Leaf` edges ⇒
+**sense**, competing rule/split edges ⇒ **structure**, named from `BinRule` / `UnaryKind`, and for the
+lumped `Combinator::Compound` refined by the restrictor axiom into compound / adjective / pp / essive).
+
+```bash
+scripts/measure-parse-rate.sh --attribution --replay <run>/ranks.json   # page roll-up
+EIGENIUS_TRACE_SENTENCE="…" EIGENIUS_TRACE_ATTRIBUTION=1 \
+  cargo test -p eigenius-wordnet --test db_backed_encoding trace_one_sentence -- --ignored --nocapture
+```
+
+The roll-up ranks levers by `excess = Σ(factor−1)` — sense sites by surface form, structure sites by
+named construction, with generic apply/compose lumped. A partial roll-up is emitted every 10 units, so
+an interrupted run still leaves usable data (but see trap 4: a partial run is not a *result*).
+
+**Read the two halves differently.**
+
+*SENSE sites are felicity-intersected and DO rank.* Attribution runs after the top-span type-check and
+dedup, so each sense is checked against the readings that actually survived (`n/m` = surviving/raw; a
+non-survivor prints `[pruned]`). This matters enormously: on the reference page the surface `has` seeds
+**7** noun/concept senses — `Hemagglutination test`, `Han Chinese`, `Ha Antibody`, hour-angle,
+`rich_person`, plus UMLS `Possess`/`Have` — and **all 7 are pruned**. Ranking the raw forest put `has`
+first; ranking survivors drops it out of the top 15 entirely. **Never size a lever from raw counts** —
+an earlier analysis did exactly that and produced a wholly spurious root cause.
+
+*STRUCTURE sites are RAW and rank NOTHING.* `kbest` records no per-reading derivation (items carry no
+provenance and it truncates per node), so bracketings cannot be intersected. `compound` branching in
+47/62 units is an upper bound, **not** evidence that residual multiplicity is structural — §6 measures
+the extracted readings as sense-dominated, and the two count different populations. Making this half
+rankable requires threading derivation ids through `kbest`/`cube`/`materialize_unary`.
+
+Sense labels resolve through the layer chain — `C0018905 "Hemagglutination test" [T059]` — since the
+importer emits each concept as `class umlscui:<CUI> : umlssty:<TUI>` with a `description`. No
+`MRSTY`/`MRCONSO` side-lookup.
+
+The instrument is **read-only**: on the reference replay, grammar-gap / encoded / total-readings /
+total-skeletons are identical with and without `--attribution` (0 / 10 / 931 / 326).
+
 ---
 
 ## 8. What the recorded rankings already show

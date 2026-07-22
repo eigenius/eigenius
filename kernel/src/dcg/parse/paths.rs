@@ -107,17 +107,8 @@ impl Parser {
             );
         }
 
-        // Ambiguity attribution (set `EIGENIUS_TRACE_ATTRIBUTION`, see `chart::attribute`): roll the
-        // forest's multiplicity up into ranked, named sense/structure factors — WHICH span, WHICH rule
-        // or senses drives the reading count — instead of hand-reading it off the derivation dump.
-        if std::env::var("EIGENIUS_TRACE_ATTRIBUTION").is_ok() && !top.is_empty() {
-            if let Some(report) = forest.attribute(&tokens, &top).render(&tokens.join(" ")) {
-                eprint!("{report}");
-            }
-        }
-
         let mut candidates: Vec<Item> = Vec::new();
-        for id in top {
+        for id in top.iter().copied() {
             candidates.extend(
                 self.grammar
                     .kbest(&forest, id, DEFAULT_FOREST_CAP, &mut memo),
@@ -166,6 +157,27 @@ impl Parser {
         Self::subsume_duplicates(&mut forest_out); // D3: collapse definitionally-equal readings
         forest_out.sort_by_key(|it| it.cost());
         forest_out.truncate(DEFAULT_FOREST_CAP);
+
+        // Ambiguity attribution (`chart::attribute`): which span, which rule, which senses drive this
+        // unit's reading count. Runs HERE — after the felicity filter and dedup — so a sense site can
+        // be intersected against the readings that actually SURVIVED; attributing the raw forest
+        // instead over-counts (~60x) and ranks nothing. `EIGENIUS_TRACE_ATTRIBUTION` prints the
+        // per-unit block; the `dcg::attribution` roll-up (armed by the sweep) records it for the
+        // cross-unit aggregate. Read-only: the parse result is already final above.
+        let want_render = std::env::var("EIGENIUS_TRACE_ATTRIBUTION").is_ok();
+        let want_record = super::super::attribution::is_enabled();
+        if !top.is_empty() && (want_render || want_record) {
+            let attr = forest.attribute(&tokens, &top, &forest_out, &self.grammar.layer);
+            if want_render {
+                if let Some(report) = attr.render(&tokens.join(" ")) {
+                    eprint!("{report}");
+                }
+            }
+            if want_record {
+                super::super::attribution::record(&tokens, &attr);
+            }
+        }
+
         (forest_out, open)
     }
 }

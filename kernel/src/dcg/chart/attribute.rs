@@ -23,9 +23,12 @@
 //! `Combine`/`Binary`/`Unary` edges is a **structure** branch (competing derivations). This walk finds
 //! every branch, labels it, and ranks by branching factor. Design: `docs/notes/dcg-ambiguity-attribution-plan.md`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
+use crate::layer::Layer;
 use crate::nbe::term::Exp;
+use crate::ontology::iri::Iri;
+use crate::ontology::resource::Value;
 
 use super::super::item::{Combinator, Item};
 use super::super::pretty::pretty_term;
@@ -45,11 +48,17 @@ pub(crate) struct Site {
     pub span: (usize, usize),
     pub text: String,
     pub kind: SiteKind,
-    /// Number of local alternatives — the multiplicative branching this node introduces.
+    /// Number of local alternatives in the RAW forest — pre-felicity, so an upper bound.
     pub factor: usize,
+    /// How many of those alternatives actually occur in a SURVIVING reading. For a sense site this is
+    /// the real multiplicity (the felicity intersection); for a structure site it is `factor`, because
+    /// intersecting bracketings needs per-reading derivations that `kbest` does not record — so a
+    /// structure `factor` must NOT be read as an impact ranking.
+    pub felicitous: usize,
     /// Subtree reading count — a coarse impact proxy for ranking (see the note's limitation (a)).
     pub inside: u64,
-    /// The competing senses (IRIs) or constructions (rule names), deduped.
+    /// The competing senses (resolved to name + semantic type where the chain knows them) or the
+    /// competing constructions (rule names), deduped.
     pub labels: Vec<String>,
 }
 
@@ -91,8 +100,23 @@ impl Forest {
         total
     }
 
-    /// Attribute the multiplicity of the readings rooted at `top` to ranked sense/structure sites.
-    pub(crate) fn attribute(&self, tokens: &[String], top: &[NodeId]) -> UnitAttribution {
+    /// Attribute the multiplicity of the readings rooted at `top` to sense/structure sites.
+    ///
+    /// `readings` are the SURVIVING readings (post-felicity, post-dedup) — a sense alternative that
+    /// appears in none of them was pruned and is not real multiplicity, so it is excluded from the
+    /// site's `felicitous` count. `layer` resolves a sense IRI to its name and semantic type, so the
+    /// report reads `C0018905 "Hemagglutination test" [T059]` instead of an opaque CUI.
+    pub(crate) fn attribute(
+        &self,
+        tokens: &[String],
+        top: &[NodeId],
+        readings: &[Item],
+        layer: &Layer,
+    ) -> UnitAttribution {
+        let reading_atoms: Vec<BTreeSet<String>> = readings
+            .iter()
+            .map(|r| sense_atoms(&pretty_term(r.sem())))
+            .collect();
         let mut memo = HashMap::new();
         let mut stack = HashSet::new();
         let readings = top
@@ -129,24 +153,36 @@ impl Forest {
             let text = span_text(tokens, i, j);
             let inside = *memo.get(&id).unwrap_or(&1);
             if node.edges.iter().all(|e| matches!(e, Edge::Leaf(_))) {
-                let mut labels: Vec<String> = node
-                    .edges
-                    .iter()
-                    .filter_map(|e| match e {
-                        Edge::Leaf(it) => Some(sense_label(it.sem())),
-                        _ => None,
-                    })
-                    .collect();
-                labels.sort();
-                labels.dedup();
-                if labels.len() < 2 {
-                    continue; // same sense packed twice — not a real branch
+                // One entry per distinct sense: (label, does it survive into a reading?).
+                let mut seen: BTreeSet<String> = BTreeSet::new();
+                let mut entries: Vec<(String, bool)> = Vec::new();
+                for e in &node.edges {
+                    let Edge::Leaf(it) = e else { continue };
+                    let label = describe_sense(it.sem(), layer);
+                    if !seen.insert(label.clone()) {
+                        continue; // same sense packed twice — not a real branch
+                    }
+                    let atoms = sense_atoms(&pretty_term(it.sem()));
+                    // No sense-identifying atom ⇒ cannot discriminate; count it as surviving rather
+                    // than silently dropping a branch we failed to measure.
+                    let survives =
+                        atoms.is_empty() || reading_atoms.iter().any(|r| atoms.is_subset(r));
+                    entries.push((label, survives));
                 }
+                if entries.len() < 2 {
+                    continue;
+                }
+                let felicitous = entries.iter().filter(|(_, s)| *s).count();
+                let labels = entries
+                    .into_iter()
+                    .map(|(l, s)| if s { l } else { format!("{l} [pruned]") })
+                    .collect();
                 sites.push(Site {
                     span: (i, j),
                     text,
                     kind: SiteKind::Sense,
-                    factor: labels.len(),
+                    factor: seen.len(),
+                    felicitous,
                     inside,
                     labels,
                 });
@@ -163,6 +199,7 @@ impl Forest {
                     text,
                     kind: SiteKind::Structure,
                     factor: node.edges.len(),
+                    felicitous: node.edges.len(), // not intersectable — see `Site::felicitous`
                     inside,
                     labels,
                 });
@@ -188,37 +225,26 @@ impl UnitAttribution {
         if self.sites.is_empty() {
             return None;
         }
-        let struct_prod: u64 = self
-            .sites
-            .iter()
-            .filter(|s| s.kind == SiteKind::Structure)
-            .map(|s| s.factor as u64)
-            .product::<u64>()
-            .max(1);
-        let sense_prod: u64 = self
-            .sites
-            .iter()
-            .filter(|s| s.kind == SiteKind::Sense)
-            .map(|s| s.factor as u64)
-            .product::<u64>()
-            .max(1);
+        // NO structure×/sense× products here. They were inflated ~60x against the extracted counts AND
+        // internally incoherent (their product exceeded the raw path count, because sites are not
+        // independent) — a caveat line did not stop them being misread, so they are not emitted.
         let mut out = format!(
-            "=== ATTRIBUTION (raw forest, pre-felicity) «{sentence}» ===\n  {} raw paths ≈ \
-             structure×{struct_prod} · sense×{sense_prod} (upper bounds; felicity + ranking prune to \
-             the extracted count)\n",
+            "=== ATTRIBUTION «{sentence}» ({} raw forest paths, pre-felicity) ===\n\
+             SENSE sites show surviving/raw senses — surviving is the real multiplicity. STRUCTURE\n\
+             sites are RAW branching only (not intersectable: kbest records no per-reading derivation),\n\
+             so they rank nothing.\n",
             self.readings
         );
         for s in self.sites.iter().take(12) {
-            let kind = match s.kind {
-                SiteKind::Sense => "SENSE ",
-                SiteKind::Structure => "STRUCT",
+            let (kind, count) = match s.kind {
+                SiteKind::Sense => ("SENSE ", format!("{}/{}", s.felicitous, s.factor)),
+                SiteKind::Structure => ("STRUCT", format!("{} raw", s.factor)),
             };
             out.push_str(&format!(
-                "  {kind} [{}..{}] «{}» ×{} : {}\n",
+                "  {kind} [{}..{}] «{}» ×{count} : {}\n",
                 s.span.0,
                 s.span.1,
                 s.text,
-                s.factor,
                 s.labels.join(" | "),
             ));
         }
@@ -338,6 +364,109 @@ fn sense_label(sem: &Exp) -> String {
     }
 }
 
+/// The **sense-identifying** atoms of a pretty-printed term: tokens carrying a run of ≥4 digits —
+/// the same signal `erase_senses` uses to erase a sense. `n08430568`, `C0018905`, `deg_a00740336`
+/// qualify; `compound_kind`, `gt`, `And` do not. A sense occurs in a reading iff all of its atoms do.
+fn sense_atoms(pretty: &str) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for tok in pretty.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+        let mut run = 0usize;
+        let mut max_run = 0usize;
+        for c in tok.chars() {
+            if c.is_ascii_digit() {
+                run += 1;
+                max_run = max_run.max(run);
+            } else {
+                run = 0;
+            }
+        }
+        if max_run >= 4 {
+            out.insert(tok.to_string());
+        }
+    }
+    out
+}
+
+/// The class IRI a leaf sense denotes, if it denotes one directly (`C0018905`, `n10529231`). An
+/// adjective's `λx. gt(deg_a…(x), std_a…)` has no single class and falls back to the pretty form.
+fn class_iri(sem: &Exp) -> Option<&Iri> {
+    match sem {
+        Exp::EigonClass(i) => Some(i),
+        Exp::Ann(inner, _) => class_iri(inner),
+        _ => None,
+    }
+}
+
+/// Resolve a sense to `<id> "<name>" [<semantic types>]` using the chain the parser already holds —
+/// the concept class carries `core:description`, and its `core:is_a` parents ARE its UMLS semantic
+/// types (`umlssty:<TUI>`). This is what turns an opaque `C0018905` into `"Hemagglutination test"`
+/// without a `MRSTY`/`MRCONSO` side-lookup.
+fn describe_sense(sem: &Exp, layer: &Layer) -> String {
+    let Some(iri) = class_iri(sem) else {
+        return sense_label(sem);
+    };
+    let short = iri.as_str().rsplit(':').next().unwrap_or(iri.as_str());
+    let Some(res) = layer.resolve(iri) else {
+        return short.to_string();
+    };
+    let name = res
+        .get(&iri_of("urn:eigenius:core:description"))
+        .and_then(value_text)
+        .map(|d| {
+            let d = d.trim_end_matches('.');
+            let d: String = d.chars().take(48).collect();
+            format!(" \"{d}\"")
+        })
+        .unwrap_or_default();
+    let types = res
+        .get(&iri_of("urn:eigenius:core:is_a"))
+        .map(|v| {
+            let mut t: Vec<String> = value_refs(v)
+                .into_iter()
+                .filter_map(|r| {
+                    let local = r.as_str().rsplit(':').next()?.to_string();
+                    r.as_str().contains(":umlssty:").then_some(local)
+                })
+                .collect();
+            t.sort();
+            t.dedup();
+            t
+        })
+        .unwrap_or_default();
+    let types = if types.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", types.join(","))
+    };
+    format!("{short}{name}{types}")
+}
+
+fn iri_of(s: &str) -> Iri {
+    Iri::parse(s).expect("static IRI")
+}
+
+fn value_text(v: &Value) -> Option<&str> {
+    match v {
+        Value::String(s) => Some(s.as_str()),
+        _ => None,
+    }
+}
+
+/// The `ResourceRef` IRIs a property value holds (a lone ref, or an array of them).
+fn value_refs(v: &Value) -> Vec<&Iri> {
+    match v {
+        Value::ResourceRef(i) => vec![i],
+        Value::Array(xs) => xs
+            .iter()
+            .filter_map(|x| match x {
+                Value::ResourceRef(i) => Some(i),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! The DERIVED labels — the one place a construction name is computed from the sem rather than
@@ -423,6 +552,24 @@ mod tests {
         );
         assert_eq!(axiom_class(&ax("urn:eigenius:ontology:prep_in")), "pp");
         assert_eq!(axiom_class(&var()), "other");
+    }
+
+    #[test]
+    fn sense_atoms_picks_only_sense_identifying_tokens() {
+        // Sense ids (≥4-digit run) are kept; structural vocabulary is not.
+        let a = sense_atoms("subclass_of(ΣG#0:n08430568. compound_kind(G#0, C0205258))");
+        assert!(a.contains("n08430568") && a.contains("C0205258"), "{a:?}");
+        assert!(
+            !a.contains("compound_kind") && !a.contains("subclass_of"),
+            "{a:?}"
+        );
+        // An adjective's degree axioms identify it even with no class IRI.
+        let b = sense_atoms("λx. gt(deg_a00740336(x), std_a00740336)");
+        assert!(b.contains("deg_a00740336"), "{b:?}");
+        assert!(!b.contains("gt"), "{b:?}");
+        // Subset test is what decides survival: a sense occurs in a reading iff all its atoms do.
+        assert!(sense_atoms("C0205258").is_subset(&a));
+        assert!(!sense_atoms("C9999999").is_subset(&a));
     }
 
     #[test]
