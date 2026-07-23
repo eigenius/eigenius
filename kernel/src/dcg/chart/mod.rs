@@ -39,8 +39,14 @@ use super::rules::combinators::cat_n_number;
 /// `docs/notes/d63-rnr-head-distribution.md`; compositional groups are built later in the CKY, never
 /// seeded), whose span is protected the same way so the guessed cat_mod/composition of the coordination
 /// is pruned in favour of the lexicalized-kind union (M-RNR-3, multiword-preference for the distributed
-/// case — with the same widen fallback preserving `grammar-gap 0`). Shared by
-/// [`multiword_protected_splits`] and the tracer's context header.
+/// case — with the same widen fallback preserving `grammar-gap 0`).
+///
+/// A multiword `cat_np` leaf is a lexicalized **named entity** — a document-glossary named individual
+/// ("Project Achilles", "project DRIVE") or a multiword proper name — so its span is protected too: the
+/// atomic named-entity reading SHADOWS the compositional re-bracketing of its component words (the
+/// "project"(N/V) + name split that crowds the coordinated-subject beam, D63
+/// `docs/notes/d63-named-entity-glossary-source.md` §3c). Same widen fallback preserves `grammar-gap 0`.
+/// Shared by [`multiword_protected_splits`] and the tracer's context header.
 pub(crate) fn multiword_spans(leaves: &[Vec<Vec<Item>>]) -> BTreeSet<(usize, usize)> {
     let mut spans = BTreeSet::new();
     for (a, row) in leaves.iter().enumerate() {
@@ -48,6 +54,7 @@ pub(crate) fn multiword_spans(leaves: &[Vec<Vec<Item>>]) -> BTreeSet<(usize, usi
             if cell.iter().any(|it| {
                 cat_n_number(it.cat()).is_some()
                     || super::category::is_ctor(it.cat(), "cat_group").is_some()
+                    || super::category::is_ctor(it.cat(), "cat_np").is_some()
             }) {
                 spans.insert((a, b));
             }

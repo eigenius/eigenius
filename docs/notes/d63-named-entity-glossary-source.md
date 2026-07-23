@@ -81,7 +81,20 @@ component "project"(V)+name compositional parse. Shadowing both closes the gap A
 (fewer readings, less beam pressure — it removes the crowding that caused the gap in the first place),
 and it is the memory-safer form. Adopt shadow for the named-entity span.
 
-**Implementation hook (found).** The span-shadow mechanism already exists:
+**Two shadow forms (do not conflate).**
+
+- **(a) Span-protection shadow** — suppresses the compositional *re-bracketing* over the name's span
+  (the "project"+name compound split). Implemented via `multiword_protected_splits` (below). Verified:
+  P6 5→3, coord+as 15→9 readings; coverage-safe; but it does NOT touch the sentence-initial
+  "project"-as-**verb** parse (which combines rightward, never building a constituent over `[i,j]`), so
+  single-subject "Project Achilles identified WRN…" stayed at 111.
+- **(b) Sense-precedence shadow** (§2a) — the stronger form: the doc-glossary entry ranks first in
+  `scope`, so the component tokens' competing senses (the "project" VERB leaf at that position) are
+  de-prioritized/dropped at SEED. This is what actually kills the verb-crowding. Evaluate at re-baseline
+  (§3d): if (a) + the named individual holds the readings/beam budget on the full page, (b) is optional;
+  if verb-crowding still pressures long coordinations, add (b).
+
+**Span-protection hook (implemented).** The mechanism already exists:
 [`chart::multiword_protected_splits`](../../kernel/src/dcg/chart/mod.rs) protects a multiword lexeme's
 interior split points on the base pass (`prefer_multiword = true`), pruning its compositional
 re-bracketings; widen-on-failure passes `prefer_multiword = false`, re-admitting every split — so it is
