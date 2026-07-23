@@ -250,6 +250,12 @@ fn cat_is_mass(cat: &Exp) -> bool {
 /// The class(es) a resource is a *direct instance of* — its `is_a` targets excluding `core:Class`
 /// itself. For a UMLS named individual (`resource umlscui:C : umlssty:T`) this is its semantic-type
 /// class(es); for a class node (`is_a = [core:Class]`) it is empty.
+///
+/// A reference target may be stored as a `ResourceRef` (bootstrap-loaded resources) OR as a `String`
+/// IRI (a resource minted in-process and round-tripped through the persistent backend, which serialises
+/// the ref as its IRI string) — both denote the same class, so accept either (as [`Resource::is_instance_of`]
+/// does). Only matching `ResourceRef` silently drops a persisted named individual's type, misclassifying
+/// it as a bare class (→ a common-noun alias instead of the proper-noun one).
 fn instance_type_classes(r: &Resource) -> Vec<Iri> {
     let (Ok(is_a), Ok(class)) = (Iri::parse(wk::IS_A), Iri::parse(wk::CLASS)) else {
         return Vec::new();
@@ -258,9 +264,11 @@ fn instance_type_classes(r: &Resource) -> Vec<Iri> {
         Some(Value::Array(vs)) => vs
             .iter()
             .filter_map(|v| match v {
-                Value::ResourceRef(iri) if *iri != class => Some(iri.clone()),
+                Value::ResourceRef(iri) => Some(iri.clone()),
+                Value::String(s) => Iri::parse(s).ok(),
                 _ => None,
             })
+            .filter(|iri| *iri != class)
             .collect(),
         _ => Vec::new(),
     }
