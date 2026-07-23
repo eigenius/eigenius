@@ -229,6 +229,24 @@ readings  median 32   ≈   skeletons  median 6   ×   sense×  median 5.5
 Both axes are live and they *multiply*. Collapsing senses perfectly leaves ~18% of readings;
 perfecting the structural normal form leaves ~15%. **Neither alone reaches ENCODED.**
 
+### 7c. Faithfulness = "the unit contains its expected reading", not encoded-count
+
+Encoded-count is a **weak** faithfulness signal: a unit can be encoded on the WRONG reading. On
+2026-07-20 a gloss bug made "specific repair proteins" close on `compound_kind(x, C0205369 "Specific
+(qualifier)")` — one reading, ENCODED, and wrong. Fixing it restored the adjective reading, so the unit
+became AMBIG ×2 and encoded *fell*. Chasing encoded upward would have rewarded the bug.
+
+So faithfulness is gated on **expected-reading hits** instead. `experiments/parsing/expected-readings.tsv`
+pins, per curated unit, the sense-erased skeleton of the reading a human has verified is correct
+(`sentence <TAB> skeleton <TAB> note`). The gate asserts each unit still **contains** that skeleton among
+its readings — drift-free (senses erased) and robust to added ambiguity: a unit going ENCODED→AMBIG while
+keeping the right reading is **not** a regression. `eval-parse-rate.sh` regresses on a hit drop or a
+curated-set shrink; `encoded` is reported but no longer gated.
+
+Author entries from a run: `EIGENIUS_DUMP_SKELETONS=1 scripts/measure-parse-rate.sh --replay <ranks>`
+prints every unit's skeleton set; pick the correct one and pin it. **`encoded` ≠ `correct`** — verify
+each entry; the 2026-07-21 seed (the 20 single-reading units) is provisional and pending sign-off.
+
 ### 7b. The skeleton eraser must erase the LEXICON PREFIX too
 
 `total-skeletons` is the tracked structural lever, and it is only as good as `erase_senses`. The

@@ -1,0 +1,29 @@
+# Expected-reading corpus — the faithfulness gate (README §7c). TAB-separated:
+#   sentence <TAB> skeleton (sense-erased) <TAB> note
+# The gate asserts each unit still CONTAINS its skeleton among its readings — robust to
+# added ambiguity, unlike encoded-count. A MISS = a fundamentally-correct reading was lost.
+# VERIFIED 2026-07-22: each entry's reading was checked via English gloss or manual
+# λ-term dissection. Two originally-seeded units were ENCODED on a WRONG reading and
+# REMOVED: "MSI is associated with…" ('associated with' reified as UMLS C0332281 into a
+# noun compound, not the verb) and "These data sets are project Achilles and project DRIVE"
+# ('and' reified as UMLS C1515981 into a compound pile, not a coordination). Both are the
+# function-word/qualifier reification defect; re-add once it is fixed and the correct reading pins.
+# baseline replay. "encoded" is NOT proof of "correct" (cf. the 2026-07-20 gloss bug), so
+The co-occurrence of these two events leads to cell death.	§(kind_of(§), the(ΣG#0:§. prep_of(G#0, the(ΣG#1:§. compound_kind(G#1, §)).1)).1)	verified 2026-07-22 (gloss)
+Each event alone does not lead to cell death.	ΠG#0:ΣG#0:§. sole(G#0). §(kind_of(§), G#0.1) → False	verified 2026-07-22 (gloss)
+DNA repair processes are attractive synthetic-lethal targets.	subclass_of(ΣG#0:§. compound_kind(G#0, §), ΣG#0:§. And(gt(§(G#0), §), gt(§(G#0), §)))	verified 2026-07-22 (gloss)
+This success highlights the potential of this approach.	§(the(ΣG#0:§. prep_of(G#0, the(§))).1, the(§))	verified 2026-07-22 (gloss)
+MSI cancer models required the helicase activity of WRN.	§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))	verified 2026-07-22 (gloss)
+MSI cancer models did not require the exonuclease activity of WRN.	§(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False	verified 2026-07-22 (gloss)
+Nucleotide repeat regions are microsatellites.	subclass_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §)), §)	verified 2026-07-22 (gloss)
+MSI contributes to several cancers.	ΠG#0:Prop. ΠG#1:§. §(G#1, kind_of(§)) → G#0 → G#0	verified 2026-07-22 (dissection); structure correct, GQ cardinality 'several' not encoded in this reading
+MSI occurs in colon, gastric, endometrial and ovarian cancers.	And(And(And(§(kind_of(§), kind_of(§)), §(kind_of(§), kind_of(§))), §(kind_of(§), kind_of(§))), §(kind_of(§), kind_of(§)))	verified 2026-07-22 (gloss)
+MSI can arise from Lynch syndrome.	Possible(And(§(kind_of(§)), prep_from(kind_of(§), kind_of(§))))	verified 2026-07-22 (gloss)
+More commonly, MSI cancers arise from somatic MMR inactivation.	And(§(kind_of(ΣG#0:§. compound_kind(G#0, §))), prep_from(kind_of(ΣG#0:§. compound_kind(G#0, §)), kind_of(ΣG#0:§. And(compound_kind(G#0, §), gt(§(G#0), §)))))	verified 2026-07-22 (gloss)
+The use of immune checkpoint blockade can be limited by toxicity.	Possible(§(kind_of(ΣG#0:§. compound_kind(G#0, §)), the(ΣG#0:§. compound_kind(G#0, §)).1))	verified 2026-07-22 (gloss)
+Thus, MSI tumours need novel therapies.	§(kind_of(ΣG#0:§. gt(§(G#0), §)), kind_of(ΣG#0:§. compound_kind(G#0, §)))	verified 2026-07-22 (gloss)
+We hypothesized that MSI and MMR deficiency may create vulnerabilities.	§(Possible(§(kind_of(§), kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, ΣG#2:§. compound_kind(G#2, §)))))), speaker)	verified 2026-07-22 (gloss)
+We analysed two independent cancer dependency data sets.	ΠG#0:Prop. ΠG#1:ΣG#1:§. And(compound_kind(G#1, ΣG#2:§. compound_kind(G#2, §)), gt(§(G#1), §)). §(G#1.1, speaker) → G#0 → G#0	verified 2026-07-22 (dissection); structure correct, GQ cardinality 'two' not encoded in this reading
+Project Achilles screened cell lines with a CRISPR library.	ΠG#0:Prop. ΠG#1:ΣG#1:§. compound_kind(G#1, §). And(§(kind_of(§), kind_of(ΣG#2:§. named(G#2, §))), prep_with(kind_of(ΣG#2:§. named(G#2, §)), G#1.1)) → G#0 → G#0	verified 2026-07-22 (gloss)
+Project DRIVE analysed cell lines with an RNA interference library.	§(kind_of(ΣG#0:§. ΠG#1:Prop. ΠG#2:ΣG#2:§. compound_kind(G#2, §). prep_with(G#0, G#2.1) → G#1 → G#1), kind_of(ΣG#0:§. compound_kind(G#0, §)))	verified 2026-07-22 (gloss)
+These MSI cell lines were distinct.	gt(§(the(ΣG#0:§. compound_kind(G#0, §)).1), §)	verified 2026-07-22 (gloss)

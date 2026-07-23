@@ -401,16 +401,17 @@ fn gates_to_prop(layer: &Arc<Layer>, sem: &Exp) -> bool {
 enum Outcome {
     Encoded {
         is_prop: bool,
-        /// Distinct STRUCTURAL skeletons among the closed readings (senses erased) — 1 for an encoded
-        /// unit by construction.
-        skeletons: usize,
+        /// The distinct STRUCTURAL skeletons among the closed readings (senses erased) — one entry for
+        /// an encoded unit by construction. Held as the SET (not a count) so the faithfulness gate can
+        /// ask "does this unit still CONTAIN its expected reading" (see `expected-readings.jsonl`).
+        skeletons: Vec<String>,
     },
     Ambiguous {
         count: usize,
         is_prop: bool,
-        /// Distinct STRUCTURAL skeletons among the `count` closed readings — the sense-independent
-        /// (drift-free) bracketing count. `count / skeletons` is the sense× multiplicity.
-        skeletons: usize,
+        /// The distinct STRUCTURAL skeletons among the `count` closed readings — the sense-independent
+        /// (drift-free) bracketing set. `count / skeletons.len()` is the sense× multiplicity.
+        skeletons: Vec<String>,
     },
     MissingLexeme {
         unknown: Vec<String>,
@@ -543,21 +544,355 @@ fn assert_replay_faithful() {
 }
 
 /// The distinct STRUCTURAL skeletons among a unit's closed readings — the sense-independent (hence
-/// reranker-drift-free) bracketing count. `total_readings` sense-multiplies these; skeleton-count does
-/// not, so it is the clean multiplicity signal (D63 baseline gates.multiplicity).
-fn distinct_skeletons(closed: &[Item]) -> usize {
+/// reranker-drift-free) bracketings, senses erased. `total_readings` sense-multiplies these; the
+/// skeleton COUNT does not, so it is the clean multiplicity signal (D63 baseline gates.multiplicity).
+/// Returned as the SET (sorted, unique) so the faithfulness gate can test membership of an expected
+/// reading, not just the cardinality.
+fn skeleton_set(closed: &[Item]) -> Vec<String> {
     closed
         .iter()
         .map(|it| erase_senses(&pretty_term(it.sem())))
         .collect::<BTreeSet<String>>()
-        .len()
+        .into_iter()
+        .collect()
 }
 
-/// The distinct-skeleton count of a classified unit (0 for Open/GrammarGap/MissingLexeme/ScaleBound —
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// Verbalizer — render a reading's `sem` back to approximate English, for HUMAN VERIFICATION of the
+// expected-reading corpus (a skeleton is hard to check by eye; "every nucleotide-repeat region is a
+// microsatellite" is easy). FAIL-HONEST: any construct it does not understand is emitted as `⟦raw⟧`,
+// never smoothed into fluent-but-wrong English — a partial gloss must LOOK partial.
+//
+// Sense NAMING uses the LOADED lexicon, not the WordNet data files: each entry's `sense` key is
+// `wn:{lemma}.{tag}.{offset}`, so the unit's own tokens yield `{tag}{offset} → lemma` from the seeded
+// data (and the actual surface lemma, not just a synonym); UMLS names come from the layer description.
+// Two limits remain: a sem atom not contributed by any single token falls back to the layer/local, and
+// generalized-quantifier (Π-CPS) sems are bracketed, not verbalized. Enable `EIGENIUS_GLOSS_READINGS=1`.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+/// `{tag}{offset} → lemma` (WordNet) and `C… → preferred name` (UMLS) for every sense reachable from a
+/// unit's tokens — read off the LOADED lexicon's entry `sense` keys, so it is the seeded data.
+fn unit_sense_names(
+    text: &str,
+    index: &Parser,
+    lem: &dyn Lemmatizer,
+    layer: &Arc<Layer>,
+) -> std::collections::BTreeMap<String, String> {
+    let mut m = std::collections::BTreeMap::new();
+    for tok in tokenize(text) {
+        let tok = tok.trim_matches(|c: char| !c.is_alphanumeric()); // shed attached commas/periods
+        for (_closed, _cat, sense) in index.debug_form_entries(tok, lem) {
+            // `wn:{lemma}.{tag}.{offset}` — split from the RIGHT: offset, tag, then the lemma (which
+            // may itself contain '.').
+            if let Some(rest) = sense.strip_prefix("wn:") {
+                let parts: Vec<&str> = rest.rsplitn(3, '.').collect(); // [offset, tag, lemma]
+                if let [offset, tag, lemma] = parts.as_slice() {
+                    m.entry(format!("{tag}{offset}"))
+                        .or_insert_with(|| lemma.replace('_', " "));
+                }
+            } else if let Some(cui) = sense.strip_prefix("umls:") {
+                if let Some(name) = umls_name(cui, layer) {
+                    m.entry(cui.to_string()).or_insert(name);
+                }
+            }
+        }
+    }
+    m
+}
+
+/// The UMLS preferred name = the concept description up to its first ` - ` / `. ` (the loaded resource).
+fn umls_name(cui: &str, layer: &Arc<Layer>) -> Option<String> {
+    let iri = Iri::parse(&format!("urn:eigenius:umlscui:{cui}")).ok()?;
+    let res = layer.resolve(&iri)?;
+    let d = res.get(&Iri::parse("urn:eigenius:core:description").ok()?)?;
+    let eigenius_kernel::ontology::resource::Value::String(d) = d else {
+        return None;
+    };
+    // Descriptions are "Preferred Name — Definition [SOURCE] UMLS CUI C…". Split at the em-dash to
+    // keep just the name. (The dash renders as the mojibake `â…` — a separate importer encoding bug —
+    // so split on either form.)
+    let name = d.split('—').next().unwrap_or(d);
+    let name = name.split('â').next().unwrap_or(name);
+    let name = name.split(" - ").next().unwrap_or(name);
+    Some(name.trim().to_string())
+}
+
+/// Naming + layer context threaded through the walk.
+struct Vb<'a> {
+    names: &'a std::collections::BTreeMap<String, String>,
+    layer: &'a Arc<Layer>,
+}
+
+fn app_spine(e: &Exp) -> (&Exp, Vec<&Exp>) {
+    let mut args = Vec::new();
+    let mut cur = e;
+    while let Exp::App(f, x) = cur {
+        args.push(x.as_ref());
+        cur = f;
+    }
+    args.reverse();
+    (cur, args)
+}
+
+fn axiom_local(e: &Exp) -> Option<&str> {
+    match e {
+        Exp::EigonAxiom(i) | Exp::EigonClass(i) => {
+            Some(i.as_str().rsplit(':').next().unwrap_or(""))
+        }
+        _ => None,
+    }
+}
+
+/// The word for a sense atom: the unit's own lemma map first, then the UMLS layer name, else the local.
+fn name_atom(local: &str, vb: &Vb) -> String {
+    // Normalise: strip the `deg_`/`std_` adjective wrappers and any verb frame suffix (`_t`/`_i`/…).
+    let core = local
+        .strip_prefix("deg_")
+        .or_else(|| local.strip_prefix("std_"))
+        .unwrap_or(local);
+    let key = core.split('_').next().unwrap_or(core);
+    if let Some(w) = vb.names.get(key) {
+        return w.clone();
+    }
+    if key.starts_with('C') && key[1..].chars().all(|c| c.is_ascii_digit()) {
+        if let Some(w) = umls_name(key, vb.layer) {
+            return w;
+        }
+    }
+    key.to_string()
+}
+
+fn verbalize(sem: &Exp, vb: &Vb) -> String {
+    match sem {
+        Exp::Ann(inner, _) | Exp::Fst(inner) | Exp::Snd(inner) => return verbalize(inner, vb),
+        Exp::Lam(_, body) => return verbalize(body, vb),
+        Exp::Var(_) => return String::new(), // a bound restrictor variable — carries no surface
+        _ => {}
+    }
+    if let Exp::InductiveType(decl, args) = sem {
+        let d = decl.iri.as_str();
+        if args.len() == 2 && (d.ends_with("logic:And") || d.ends_with("logic:Or")) {
+            // Verb + shared-subject PP is ONE clause, not a conjunction: `And(V(subj), prep(subj, o))`
+            // → "subj V prep o" (e.g. "MSI arises from Lynch syndrome"), the dominant sentence shape.
+            if d.ends_with("And") {
+                if let Some(merged) = verb_pp(&args[0], &args[1], vb) {
+                    return merged;
+                }
+            }
+            let op = if d.ends_with("And") { "and" } else { "or" };
+            return format!(
+                "{} {op} {}",
+                verbalize(&args[0], vb),
+                verbalize(&args[1], vb)
+            );
+        }
+    }
+    if let Exp::Pi(_, dom, cod) = sem {
+        if axiom_local(cod) == Some("False") {
+            return format!("not ({})", verbalize(dom, vb));
+        }
+        return format!("⟦{}⟧", pretty_term(sem)); // GQ-CPS / other Π — not verbalizable yet
+    }
+    if let Exp::Sig(_, base, restr) = sem {
+        return format!("a {}", noun_phrase(base, restr, vb));
+    }
+    let (head, args) = app_spine(sem);
+    if let Some(local) = axiom_local(head) {
+        match (local, args.len()) {
+            ("subclass_of", 2) => {
+                return format!(
+                    "every {} is {}",
+                    bare_np(args[0], vb),
+                    indefinite(args[1], vb)
+                );
+            }
+            ("is_a", 2) => {
+                return format!("{} is {}", verbalize(args[0], vb), indefinite(args[1], vb));
+            }
+            // Top-level gradable-adjective predication: `gt(deg_X(subj), std_X)` → "subj is X".
+            ("gt" | "lt", 2) => {
+                let (dh, da) = app_spine(args[0]);
+                if let (Some(dl), Some(subj)) = (axiom_local(dh), da.first()) {
+                    return format!("{} is {}", verbalize(subj, vb), name_atom(dl, vb));
+                }
+            }
+            ("kind_of", 1) => return verbalize(args[0], vb),
+            ("the", 1) => return format!("the {}", bare_np(args[0], vb)),
+            ("Possible" | "modal", 1) => return format!("possibly, {}", verbalize(args[0], vb)),
+            ("speaker", _) => return "we".to_string(),
+            ("anaphor", _) => return "it".to_string(),
+            _ => {}
+        }
+        // Verb: `v{offset}_{frame}(obj, subj)` transitive / `(subj)` intransitive (category
+        // `(S\NP)/NP` — object first; convert.rs:225).
+        if local.starts_with('v') && local.contains('_') {
+            let verb = name_atom(local, vb);
+            return match args.as_slice() {
+                [subj] => format!("{} {verb}", verbalize(subj, vb)),
+                [obj, subj] => format!("{} {verb} {}", verbalize(subj, vb), verbalize(obj, vb)),
+                _ => format!("⟦{}⟧", pretty_term(sem)),
+            };
+        }
+    }
+    if let Some(local) = axiom_local(sem) {
+        return name_atom(local, vb);
+    }
+    format!("⟦{}⟧", pretty_term(sem))
+}
+
+/// `And(V(subj), prep_X(subj, obj))` → "subj V prep obj" when the two share a subject; else `None`.
+fn verb_pp(left: &Exp, right: &Exp, vb: &Vb) -> Option<String> {
+    let (lh, la) = app_spine(left);
+    let (rh, ra) = app_spine(right);
+    let ll = axiom_local(lh)?;
+    let rl = axiom_local(rh)?;
+    if !(ll.starts_with('v') && ll.contains('_') && rl.starts_with("prep_") && ra.len() == 2) {
+        return None;
+    }
+    // Intransitive/PP verb: its sole arg is the subject; it must match the PP's first arg.
+    let subj = match la.as_slice() {
+        [s] => s,
+        _ => return None,
+    };
+    if pretty_term(subj) != pretty_term(ra[0]) {
+        return None;
+    }
+    Some(format!(
+        "{} {} {} {}",
+        verbalize(subj, vb),
+        name_atom(ll, vb),
+        &rl[5..],
+        verbalize(ra[1], vb)
+    ))
+}
+
+/// "a NP" for a bare kind / class argument (a Σ already supplies its own article).
+fn indefinite(e: &Exp, vb: &Vb) -> String {
+    match e {
+        Exp::Sig(..) => verbalize(e, vb),
+        _ => format!("a {}", verbalize(e, vb)),
+    }
+}
+
+/// The NP text without a leading article (for `the …`).
+fn bare_np(e: &Exp, vb: &Vb) -> String {
+    if let Exp::Sig(_, base, restr) = e {
+        return noun_phrase(base, restr, vb);
+    }
+    verbalize(e, vb)
+}
+
+/// "adjs compound-mods HEAD pps" from a Σ's base type and restrictor conjuncts.
+fn noun_phrase(base: &Exp, restr: &Exp, vb: &Vb) -> String {
+    let head = verbalize(base, vb);
+    let (mut pre, mut post): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+    let mut conj = Vec::new();
+    flatten_and_exp(restr, &mut conj);
+    for c in conj {
+        let (h, a) = app_spine(c);
+        match axiom_local(h) {
+            // A compound modifier is a bare noun ("nucleotide-repeat"), not "a nucleotide-repeat".
+            Some("compound_kind" | "compound") if a.len() == 2 => pre.push(bare_np(a[1], vb)),
+            Some("gt" | "lt") => {
+                if let Some(first) = a.first() {
+                    let (dh, _) = app_spine(first);
+                    if let Some(dl) = axiom_local(dh) {
+                        pre.push(name_atom(dl, vb));
+                    }
+                }
+            }
+            Some(p) if p.starts_with("prep_") => {
+                if let Some(x) = a.get(1) {
+                    post.push(format!("{} {}", &p[5..], verbalize(x, vb)));
+                }
+            }
+            Some("is_a") if a.len() == 2 => post.push(format!("that is {}", indefinite(a[1], vb))),
+            Some("named") if a.len() == 2 => post.push(format!("named {}", verbalize(a[1], vb))),
+            // A restrictor conjunct we do not recognise (e.g. an embedded GQ modifier `Π… prep_with …`)
+            // is BRACKETED, never dropped — a silent drop makes a gloss look complete when it is not.
+            _ => post.push(format!("⟦{}⟧", pretty_term(c))),
+        }
+    }
+    let mut s = String::new();
+    for m in pre.iter().filter(|m| !m.is_empty()) {
+        s.push_str(m);
+        s.push(' ');
+    }
+    s.push_str(&head);
+    for m in post.iter().filter(|m| !m.is_empty()) {
+        s.push(' ');
+        s.push_str(m);
+    }
+    s.trim().to_string()
+}
+
+fn flatten_and_exp<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
+    if let Exp::InductiveType(decl, args) = e {
+        if decl.iri.as_str().ends_with("logic:And") && args.len() == 2 {
+            flatten_and_exp(&args[0], out);
+            flatten_and_exp(&args[1], out);
+            return;
+        }
+    }
+    out.push(e);
+}
+
+/// A classified unit's distinct-skeleton set (empty for the no-closed-reading outcomes).
+fn unit_skel_set(o: &Outcome) -> &[String] {
+    match o {
+        Outcome::Encoded { skeletons, .. } | Outcome::Ambiguous { skeletons, .. } => skeletons,
+        _ => &[],
+    }
+}
+
+/// The committed expected-reading corpus: for a curated subset of units, the sense-erased skeleton of
+/// the reading a human has verified is CORRECT. The faithfulness gate asserts each such unit still
+/// CONTAINS that skeleton among its readings — robust to added ambiguity (a unit going ENCODED→AMBIG
+/// while keeping the right reading is NOT a regression), unlike encoded-count. Path is repo-relative;
+/// missing file ⇒ empty (gate inactive). See `experiments/parsing/README.md` §7c.
+/// TAB-separated: `sentence <TAB> skeleton <TAB> note`. TSV (not JSON) to avoid a serde_json dep for
+/// one small file; skeletons and sentences contain no tabs. Blank lines and `#` comments are skipped.
+const EXPECTED_READINGS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../experiments/parsing/expected-readings.tsv"
+);
+
+/// One curated expectation: the sentence, the correct reading's skeleton, and why it is correct.
+struct Expected {
+    sentence: String,
+    skeleton: String,
+    note: String,
+}
+
+fn load_expected_readings() -> Vec<Expected> {
+    let Ok(text) = std::fs::read_to_string(EXPECTED_READINGS) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for line in text.lines() {
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut f = line.split('\t');
+        let (Some(sentence), Some(skeleton)) = (f.next(), f.next()) else {
+            panic!("expected-readings.tsv: line needs sentence<TAB>skeleton: {line:?}");
+        };
+        out.push(Expected {
+            sentence: sentence.trim().to_string(),
+            skeleton: skeleton.trim().to_string(),
+            note: f.next().unwrap_or("").trim().to_string(),
+        });
+    }
+    out
+}
+
+/// The distinct-skeleton COUNT of a classified unit (0 for Open/GrammarGap/MissingLexeme/ScaleBound —
 /// they produce no closed reading, mirroring [`unit_readings`]).
 fn unit_skeletons(o: &Outcome) -> usize {
     match o {
-        Outcome::Encoded { skeletons, .. } | Outcome::Ambiguous { skeletons, .. } => *skeletons,
+        Outcome::Encoded { skeletons, .. } | Outcome::Ambiguous { skeletons, .. } => {
+            skeletons.len()
+        }
         _ => 0,
     }
 }
@@ -614,12 +949,12 @@ fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Lay
         }
         1 => Outcome::Encoded {
             is_prop: gates_to_prop(layer, closed[0].sem()),
-            skeletons: 1,
+            skeletons: skeleton_set(&closed),
         },
         n => Outcome::Ambiguous {
             count: n,
             is_prop: gates_to_prop(layer, closed[0].sem()),
-            skeletons: distinct_skeletons(&closed),
+            skeletons: skeleton_set(&closed),
         },
     }
 }
@@ -2744,6 +3079,19 @@ fn wrn_first_page_over_full_lexicon() {
             t.elapsed().as_secs_f64(),
             tag(&outcome)
         );
+        // Page-wide English gloss (`EIGENIUS_GLOSS_READINGS=1`) — verbalize each reading for authoring
+        // / verifying the expected-reading corpus without reading raw λ-terms.
+        if std::env::var("EIGENIUS_GLOSS_READINGS").is_ok() {
+            let vnames = unit_sense_names(&text, &index, &lem, &head);
+            let vb = Vb {
+                names: &vnames,
+                layer: &head,
+            };
+            eprintln!("  «{}»", text.trim());
+            for it in index.parse(&text, &lem).iter().take(4) {
+                eprintln!("      ≈ \"{}\"", verbalize(it.sem(), &vb));
+            }
+        }
         report.push(UnitReport { text, outcome });
         // Progress snapshot: the page sweep runs for many minutes, so emit the partial roll-up
         // periodically — an interrupted run still leaves usable attribution in the log.
@@ -2812,6 +3160,49 @@ fn summarize(report: &[UnitReport]) {
     let total_skeletons: usize = report.iter().map(|u| unit_skeletons(&u.outcome)).sum();
     let max_readings = readings.iter().copied().max().unwrap_or(0);
 
+    // ── Faithfulness: does each curated unit still CONTAIN its expected (correct) reading? ──────────
+    // Authoring aid: `EIGENIUS_DUMP_SKELETONS=1` prints every unit's skeleton set, so a correct
+    // reading can be picked and pinned into expected-readings.jsonl.
+    if std::env::var("EIGENIUS_DUMP_SKELETONS").is_ok() {
+        eprintln!("\n===== PER-UNIT SKELETONS (author expected-readings.jsonl from these) =====");
+        for u in report {
+            let sk = unit_skel_set(&u.outcome);
+            eprintln!("«{}»  [{} skeleton(s)]", u.text.trim(), sk.len());
+            for s in sk {
+                eprintln!("    {s}");
+            }
+        }
+        eprintln!("===== END SKELETONS =====\n");
+    }
+    let expected = load_expected_readings();
+    let (mut exp_hits, mut exp_miss): (usize, Vec<&Expected>) = (0, Vec::new());
+    let mut exp_stale: Vec<&Expected> = Vec::new();
+    for e in &expected {
+        match report.iter().find(|u| u.text.trim() == e.sentence.trim()) {
+            None => exp_stale.push(e),
+            Some(u) => {
+                if unit_skel_set(&u.outcome).iter().any(|s| s == &e.skeleton) {
+                    exp_hits += 1;
+                } else {
+                    exp_miss.push(e);
+                }
+            }
+        }
+    }
+    let exp_total = expected.len() - exp_stale.len();
+    for e in &exp_miss {
+        eprintln!(
+            "  FAITHFULNESS MISS: «{}» no longer contains its expected reading\n    want: {}\n    ({})",
+            e.sentence, e.skeleton, e.note
+        );
+    }
+    for e in &exp_stale {
+        eprintln!(
+            "  expected-readings: curated sentence not on this page (stale?): «{}»",
+            e.sentence
+        );
+    }
+
     // Persist the reranker's decisions (if recording) BEFORE the summary, so a run that produced a
     // number always leaves behind the artifact that makes it replayable.
     flush_sense_ranks();
@@ -2819,7 +3210,8 @@ fn summarize(report: &[UnitReport]) {
         "\n=== WRN first page over FULL lexicon: {} units → encoded {enc}, ambiguous {amb}, \
          open {open}, missing-lexeme {miss}, grammar-gap {gap}, \
          scale-bound (known, >{PARSE_BUDGET} tok) {scale}, total-readings {total_readings}, \
-         total-skeletons {total_skeletons} (sense× {:.2}) ===",
+         total-skeletons {total_skeletons} (sense× {:.2}), \
+         expected-hits {exp_hits}, expected-curated {exp_total} ===",
         report.len(),
         total_readings as f32 / total_skeletons.max(1) as f32
     );
@@ -3713,8 +4105,14 @@ fn trace_one_sentence() {
             println!("  skel[{i}]: {sk}");
         }
     } else {
+        let vnames = unit_sense_names(&text, &index, &lem, &head);
+        let vb = Vb {
+            names: &vnames,
+            layer: &head,
+        };
         for (i, it) in f.iter().enumerate().take(20) {
             println!("  reading[{i}]: {}", pretty_term(it.sem()));
+            println!("      ≈ \"{}\"", verbalize(it.sem(), &vb));
         }
     }
 }
