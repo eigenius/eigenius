@@ -44,7 +44,7 @@ must accept or it emits a `cat_n` common-noun alias instead of `cat_np`.
 
 ## 3. Design decisions
 
-### 3a. Recognition rule (extraction) — OPEN
+### 3a. Recognition rule (extraction) — CONFIRMED: deterministic apposition + LLM tail
 
 The two names share the shape **`<common-noun> <ProperName>`**: a lowercase-able head noun ("project")
 apposed to a capitalized/all-caps token ("Achilles", "DRIVE"). Candidate rules:
@@ -58,10 +58,10 @@ apposed to a capitalized/all-caps token ("Achilles", "DRIVE"). Candidate rules:
    validated (the name must occur in the text), flows the same ground→emit→gate path. Best recall for
    irregular names; non-deterministic (needs record/replay like the sense ranker).
 
-Recommendation: **(1) deterministic apposition first**, LLM proposer as the tail — mirrors the
-abbreviation source's deterministic-first/LLM-tail split, keeps the measurement reproducible.
-Validation guard: require the name to **recur** in the document OR the head to be a known common noun,
-to reject one-off sentence-initial Title Case.
+**Decision: (1) deterministic apposition first**, LLM proposer as the tail — mirrors the abbreviation
+source's deterministic-first/LLM-tail split, keeps the measurement reproducible. Validation guard:
+require the name to **recur** in the document OR the head to be a known common noun, to reject one-off
+sentence-initial Title Case.
 
 ### 3b. Grounding + typing — retrieve-first, head-typed on miss
 
@@ -72,7 +72,7 @@ project is unlikely to exist). On a miss, mint a fresh doc-local individual — 
 `Entity` (sufficient to close the gap; the transitive-verb subject slot is `Entity`). Head-typing is
 the more faithful denotation and sharpens downstream selectional constraints.
 
-### 3c. Shadow, not add — per §2a
+### 3c. Shadow, not add — CONFIRMED (per §2a)
 
 The spike **adds** (the named-individual and the compositional `project`(V)+name parse coexist; the
 coordinated case parses but the chart still carries the verb ambiguity). §2a's design goal is
@@ -80,6 +80,18 @@ coordinated case parses but the chart still carries the verb ambiguity). §2a's 
 component "project"(V)+name compositional parse. Shadowing both closes the gap AND shrinks the chart
 (fewer readings, less beam pressure — it removes the crowding that caused the gap in the first place),
 and it is the memory-safer form. Adopt shadow for the named-entity span.
+
+**Implementation hook (found).** The span-shadow mechanism already exists:
+[`chart::multiword_protected_splits`](../../kernel/src/dcg/chart/mod.rs) protects a multiword lexeme's
+interior split points on the base pass (`prefer_multiword = true`), pruning its compositional
+re-bracketings; widen-on-failure passes `prefer_multiword = false`, re-admitting every split — so it is
+**coverage-safe** (`grammar-gap 0` preserved). But [`chart::multiword_spans`](../../kernel/src/dcg/chart/mod.rs)
+only marks a span protected when its cell carries a `cat_n` (`cat_n_number`) or `cat_group` item — **not
+a `cat_np`**. A named-entity alias is `cat_np`, so shadowing it is a one-line extension: also protect a
+span whose cell holds a multiword `cat_np`. This shadows every multiword `cat_np` (named individuals),
+which is the intended semantics (a named entity shadows its compositional reading); coverage-safety is
+free via the existing widen fallback. Guard the change with the differential oracle (both chart drivers
+share this single source of truth) and confirm `grammar-gap 0` holds on the full page.
 
 ### 3d. Wiring + re-baseline
 
@@ -94,6 +106,23 @@ and it is the memory-safer form. Adopt shadow for the named-entity span.
 ## 4. Status
 
 - Mechanism: **built + witnessed** (spike passes; unit 4 → 12).
-- Prerequisite kernel fix: **committed**.
-- Recognizer (3a), head-typing (3b), shadow (3c), wiring/re-baseline (3d): **to build** — this note is
-  the design; 3a and 3c carry the open decisions to confirm before implementing.
+- Prerequisite kernel fix: **committed** (`instance_type_classes` String-IRI).
+- Design decisions: **confirmed** — 3a deterministic apposition + LLM tail; 3c shadow.
+- Shadow hook: **located** — extend `multiword_spans` to protect multiword `cat_np` (coverage-safe via
+  the existing widen fallback).
+- Recognizer (3a), head-typing (3b), shadow one-liner (3c), wiring + re-baseline (3d): **to build**.
+
+### Implementation order (next session)
+
+1. **Shadow** — extend `multiword_spans` (`+ cat_np`); run the parse suite + differential oracle;
+   confirm `grammar-gap 0`. Smallest, highest-leverage, independently testable.
+2. **Recognizer** — deterministic apposition extractor (`<known-common-noun-head> <Capitalized|ALLCAPS>`,
+   recurrence/known-head guard) returning name candidates; unit-tested on the first page.
+3. **Emission** — mint head-typed doc-local individual (retrieve-first; head class on miss) → `cat_np`
+   alias via `abbreviation_resources`; commit into the doc glossary.
+4. **Wiring** — call the recognizer in the sweep's Stage A; chain its output alongside the OOV
+   augmentation.
+5. **Re-baseline** — reranked re-record: `grammar-gap 0`; re-pin the other project-name units
+   ("Project Achilles screened…", "Project DRIVE analysed…") to their named-individual readings.
+6. **LLM tail** — `use-llm` proposer for irregular names (record/replay), after the deterministic core
+   is validated.
