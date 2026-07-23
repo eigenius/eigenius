@@ -104,6 +104,10 @@ pub struct Report {
     /// Content entries skipped because the `(cui, form)` atom is a junk case-collision in the
     /// [`DropSet`] (`gENE`) — a mangled acronym folding onto a common word (D63 alignment).
     pub junk_skipped: usize,
+    /// Common-noun entries withheld because the concept's semantic types are entirely NON-CONTENT
+    /// ([`NON_CONTENT_TUIS`]) — a relation/idea/qualifier reification (`And` C1515981, `Associated
+    /// with` C0332281), not a thing. The concept CLASS still ships; only the `cat_n` entry is withheld.
+    pub non_content_skipped: usize,
 }
 
 /// Escape a string for an ESL double-quoted literal.
@@ -303,8 +307,31 @@ const GRAMMATICAL_SURFACES: &[&str] = &[
 /// intact); only the per-form common-noun entry is skipped.
 const FUNCTION_WORD_SURFACES: &[&str] = &[
     "for", "from", "into", "as", "with", "on", "at", "by", "of", "in", "then", "than", "within",
-    "upon", "onto", "unto",
+    "upon", "onto", "unto", // prepositions
+    "and", "or", "but",
+    "nor", // coordinating conjunctions — closed-class, so UMLS's noun senses
+           // (`And` C1515981/C1550557, `Or` C1518602=Operating-Room acronym) are
+           // reifications: they let a conjunction pile into a compound instead of
+           // coordinating. The word stays known via the closed-class bootstrap.
 ];
+
+/// Semantic types that denote a RELATION / IDEA / QUALIFIER, not a THING — UMLS terminology-cruft that
+/// must not seed a common noun. A concept typed ONLY by these reifies a grammatical relation and piles
+/// into compounds (`And` C1515981 = T078; `Associated with` C0332281 = T080 → "MSI is an *associated-
+/// with disease-response*"). These are INVISIBLE to the lexicon-align drops (which require a WordNet-
+/// NOUN collision; a conjunction/qualifier collides with neither), so they must be filtered HERE, by
+/// TYPE. The concept CLASS + any named individual still ship; only the `cat_n` common-noun entry is
+/// withheld, and the surface stays known via WordNet / the closed-class bootstrap.
+const NON_CONTENT_TUIS: &[&str] = &[
+    "T078", // Idea or Concept
+    "T080", // Qualitative Concept
+];
+
+/// A concept whose semantic types are ENTIRELY non-content — so it is not a common noun. A concept that
+/// ALSO carries a content type (a body part, a substance, a disease, …) keeps its noun entry.
+fn is_non_content_concept(tuis: &[String]) -> bool {
+    !tuis.is_empty() && tuis.iter().all(|t| NON_CONTENT_TUIS.contains(&t.as_str()))
+}
 
 /// Whether `form` is a grammatical or function-word surface UMLS should not seed as a content noun
 /// ([`GRAMMATICAL_SURFACES`] / [`FUNCTION_WORD_SURFACES`]).
@@ -413,9 +440,16 @@ pub fn render_concept_block(
     // process/function (T044 Molecular Function for `methylation`), gets an additive `mass` entry.
     let is_mass = concept_is_mass(&c.preferred_name, &c.tuis, mass);
     push_concept(&mut buf, &c.cui, &c.tuis, &desc, named_tui.is_some());
-    push_entries(
-        &mut buf, &c.cui, &c.forms, named_tui, is_mass, drops, &mut rep,
-    );
+    // Withhold the common-noun entries for a purely non-content concept (a relation/idea/qualifier
+    // reification), UNLESS it is a named individual (a symbol → `cat_np`, which does not pile into
+    // compounds). The concept CLASS shipped above regardless, so the mirror stays intact.
+    if named_tui.is_none() && is_non_content_concept(&c.tuis) {
+        rep.non_content_skipped += c.forms.len();
+    } else {
+        push_entries(
+            &mut buf, &c.cui, &c.forms, named_tui, is_mass, drops, &mut rep,
+        );
+    }
     (buf, rep)
 }
 
@@ -442,6 +476,7 @@ pub fn render_document(
         rep.mass_entries += brep.mass_entries;
         rep.grammatical_skipped += brep.grammatical_skipped;
         rep.junk_skipped += brep.junk_skipped;
+        rep.non_content_skipped += brep.non_content_skipped;
         rep.concepts += 1;
     }
 
@@ -730,11 +765,12 @@ mod tests {
     }
 
     #[test]
-    fn grammatical_surface_gets_no_content_entry_but_the_concept_stays() {
-        // D63 §5.3: UMLS mints grammatical fillers as concepts (`does not`=C1299585, T080). The
-        // `does not` FORM must not seed a content noun (it feeds the sentence-3 negation-dropping
-        // compound); its real reading is the closed-class negation. The concept class + any non-filler
-        // form stay; only the grammatical surface is skipped.
+    fn non_content_filler_concept_ships_class_but_no_forms() {
+        // UMLS mints grammatical fillers as concepts (`does not`=C1299585, T080 Qualitative Concept).
+        // As a purely non-content concept it ships its CLASS but NO common-noun entry — not even its
+        // nominalized `absence of action` form, which as a common noun is the same qualifier-reification
+        // junk (and is WordNet-backstopped if genuinely a word). This subsumes the older per-surface
+        // grammatical skip for filler concepts, catching them by TYPE rather than by an enumerated form.
         let subset = Subset {
             semantic_types: vec![SemanticType {
                 tui: "T080".to_string(),
@@ -750,10 +786,11 @@ mod tests {
             }],
         };
         let (doc, rep) = render_document(&subset, "2026AA", &MassNouns::new(), &DropSet::new());
-        assert!(doc.contains("class umlscui:C1299585 :")); // the concept class is kept
-        assert!(!doc.contains("lexicon:form       = \"does not\";")); // grammatical surface dropped
-        assert!(doc.contains("lexicon:form       = \"absence of action\";")); // non-filler form kept
-        assert_eq!(rep.grammatical_skipped, 1);
+        assert!(doc.contains("class umlscui:C1299585 :")); // the concept class is kept (mirror intact)
+        assert!(!doc.contains("lexicon:form       = \"does not\";"));
+        assert!(!doc.contains("lexicon:form       = \"absence of action\";"));
+        assert_eq!(rep.non_content_skipped, 2);
+        assert_eq!(rep.grammatical_skipped, 0);
     }
 
     #[test]
@@ -792,7 +829,11 @@ mod tests {
         assert!(!doc.contains("lexicon:form       = \"for\";")); // preposition surface dropped
         assert!(!doc.contains("lexicon:form       = \"as\";")); // element-symbol homonym dropped too
         assert!(doc.contains("lexicon:form       = \"arsenic\";")); // the real content surface stays
-        assert_eq!(rep.grammatical_skipped, 2);
+                                                                    // `For (preposition)` (C0521125, T080) is now caught STRUCTURALLY by the non-content filter (a
+                                                                    // Qualitative-Concept reification), not by the surface list. `as`=arsenic is a CONTENT concept
+                                                                    // (T121) whose grammatical FORM `as` still goes through the per-form grammatical skip.
+        assert_eq!(rep.non_content_skipped, 1);
+        assert_eq!(rep.grammatical_skipped, 1);
     }
 
     #[test]
@@ -855,5 +896,58 @@ mod tests {
         assert!(doc.contains("lexicon:cat_n(umlscui:C0025723, lexicon:mass)"));
         assert!(doc.contains("lexicon:cat_n(umlscui:C0025723, lexicon:num_any)"));
         // count stays (additive)
+    }
+
+    #[test]
+    fn non_content_concept_ships_class_but_no_common_noun_entry() {
+        // `And` (C1515981, T078 Idea or Concept) reifies a conjunction. Its CLASS ships (mirror intact),
+        // but NO `cat_n` common-noun entry — otherwise "and" piles into a compound instead of coordinating.
+        let subset = Subset {
+            semantic_types: vec![SemanticType {
+                tui: "T078".to_string(),
+                name: "Idea or Concept".to_string(),
+            }],
+            concepts: vec![Concept {
+                cui: "C1515981".to_string(),
+                tuis: vec!["T078".to_string()],
+                preferred_name: "And".to_string(),
+                forms: vec!["And".to_string(), "and".to_string()],
+                definition: None,
+                symbol: None,
+            }],
+        };
+        let (doc, rep) = render_document(&subset, "2026AA", &MassNouns::new(), &DropSet::new());
+        assert_eq!(rep.non_content_skipped, 2, "both forms withheld");
+        assert_eq!(rep.entries, 0, "no common-noun entry");
+        assert!(
+            doc.contains("class umlscui:C1515981"),
+            "the concept CLASS still ships (mirror intact)"
+        );
+        assert!(
+            !doc.contains("lexicon:cat_n(umlscui:C1515981"),
+            "but no cat_n common-noun entry"
+        );
+    }
+
+    #[test]
+    fn mixed_type_concept_keeps_its_noun_entry() {
+        // A concept typed T080 Qualitative Concept AND T023 Body Part is a THING — it keeps its noun.
+        let subset = Subset {
+            semantic_types: vec![SemanticType {
+                tui: "T023".to_string(),
+                name: "Body Part, Organ, or Organ Component".to_string(),
+            }],
+            concepts: vec![Concept {
+                cui: "C0000001".to_string(),
+                tuis: vec!["T080".to_string(), "T023".to_string()],
+                preferred_name: "Some Structure".to_string(),
+                forms: vec!["some structure".to_string()],
+                definition: None,
+                symbol: None,
+            }],
+        };
+        let (doc, rep) = render_document(&subset, "2026AA", &MassNouns::new(), &DropSet::new());
+        assert_eq!(rep.non_content_skipped, 0);
+        assert!(doc.contains("lexicon:cat_n(umlscui:C0000001, lexicon:num_any)"));
     }
 }
