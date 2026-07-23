@@ -106,7 +106,32 @@ which is the intended semantics (a named entity shadows its compositional readin
 free via the existing widen fallback. Guard the change with the differential oracle (both chart drivers
 share this single source of truth) and confirm `grammar-gap 0` holds on the full page.
 
-### 3d. Wiring + re-baseline
+### 3a′. Recognition is lexicon-aware (NOT text-in/text-out) — decided
+
+Abbreviation extraction is purely orthographic, so `abbrev` is text-in/pairs-out and the lexicon enters
+only at grounding. Apposition is **not**: "the head is a common noun" is lexical, and orthography alone
+conflates `project DRIVE` (noun+name), `identified WRN` (verb+object), `in DRIVE` (prep+name). So the
+head common-noun test is part of recognition — taken as an **injected `is_common_noun` predicate**
+(`extract_named_entities_with`, keeping the logic unit-testable with a closure), with the layer-backed
+predicate + emission supplied in `glossary`. One filter stays deferred to grounding: the NAME is not
+itself a common noun (so "DNA polymerase" stays a compound).
+
+### 3d. Emission + wiring — the augment overlay, not a persistent doc layer
+
+Doc-scoped entries reach the parser two ways today: `abbrev`→`glossary` commits `LexicalEntry`
+Resources to a **persistent** doc layer; the OOV `augment` overlays `LexicalBinding`s **in-memory**
+(`with_document_augmentation`, already chained by the sweep as `build_index_over(&head, Some(&aug))`).
+The named-entity source uses the **augment overlay**:
+
+- Emission mints the head-typed individual + the `cat_np` `LexicalEntry` Resource (shared
+  `abbreviation_resources` machinery), packaged as a `LexicalBinding { proposed }` +
+  `supporting: [individual]`, merged into the `LexiconAugmentation` the sweep already applies.
+- Rationale: (1) the OOM the spike hit came from the persistent doc-layer path — the overlay is
+  in-memory, no `store_layer`; (2) it unifies named entities with the OOV augmentation (one overlay);
+  (3) the production `DocumentPipeline` can still commit the SAME Resources to a persistent doc layer
+  (one emission, two commit adapters — do not fork the entry shape).
+
+### 3e. Wiring + re-baseline
 
 - Run the recognizer in Stage A alongside abbreviation extraction; both emit into the one doc-glossary
   layer. The first-page sweep currently applies only OOV grounding (`augment_lexicon_backed`) + no

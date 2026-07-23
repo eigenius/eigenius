@@ -43,6 +43,7 @@ mod holes;
 pub mod item;
 pub mod lemmatizer;
 pub mod lexicon;
+pub mod named_entity;
 pub mod parse;
 pub mod pipeline;
 pub mod pretty;
@@ -92,6 +93,7 @@ pub use lexicon::{
     entry_to_item, gate_entry, resolve_lexicon_profile, resolve_sem, resolve_sem_value, LexEntry,
     LexicalIndex, LexicalLookup,
 };
+pub use named_entity::{extract_named_entities_with, NamedEntity};
 pub use parse::{
     Candidate, HoleInfo, HoleKind, OpenParse, ParseConfig, Parser, ProposeCtx, Proposer,
     SentenceOutcome, DEFAULT_FOREST_CAP,
