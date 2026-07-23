@@ -386,36 +386,20 @@ pub fn coordinate_np(
     r_sem: &Exp,
     layer: &Arc<Layer>,
 ) -> Option<(Exp, Exp)> {
-    // The right conjunct is always a single NP (left-branching: a group never sits
-    // on the right — enforced by the caller, mirroring the `is_coordination` guard).
-    let [rt, _rn] = is_ctor(r_cat, "cat_np")? else {
-        return None;
-    };
     let conn_name = match op_iri {
         "urn:eigenius:logic:And" => "conn_and",
         "urn:eigenius:logic:Or" => "conn_or",
         LIST_CONN => "conn_list",
         _ => return None,
     };
-    let (cat_decl, num_decl) = match l_cat {
-        Exp::InductiveCtor(d, n, args) if n == "cat_np" || n == "cat_group" => {
-            // `cat_np`'s number is arg 1; `cat_group`'s is arg 2 (after Conn).
-            let num = if n == "cat_group" {
-                args.get(2)
-            } else {
-                args.get(1)
-            }?;
-            let Exp::InductiveCtor(nd, _, _) = num else {
-                return None;
-            };
-            (d.clone(), nd.clone())
-        }
-        _ => return None,
-    };
+    // The right conjunct is always a single NP (left-branching: a group never sits on the right —
+    // enforced by the caller). A determined/named `cat_np` OR a bare-kind `cat_n`: coordination
+    // LICENSES a bare kind as an argument even where a lone bare singular could not ("*gene is a
+    // vulnerability" but "MSI and MMR deficiency create vulnerabilities"), so a kind conjunct is
+    // realised as an entity via `kind_of`, matching the bare-nominal shift. Carries the shared
+    // `cat`/`num` decls used to build the group.
+    let (rt, r_member, cat_decl, num_decl) = np_conjunct(r_cat, r_sem)?;
     let (lt, members): (Exp, Vec<Exp>) = match l_cat {
-        c if is_ctor(c, "cat_np").is_some() => {
-            (is_ctor(c, "cat_np")?[0].clone(), vec![l_sem.clone()])
-        }
         // A neutral `conn_list` left group takes ANY op (the trailing `and`/`or` rebinds it); a
         // finalized left group must share the op's connective (no `X and Y or Z` mixing).
         c if is_ctor(c, "cat_group").is_some() => {
@@ -425,11 +409,15 @@ pub fn coordinate_np(
             }
             (is_ctor(c, "cat_group")?[0].clone(), group_members(l_sem)?)
         }
-        _ => return None,
+        // A single NP / bare kind starts a new group.
+        _ => {
+            let (lt, l_member, _, _) = np_conjunct(l_cat, l_sem)?;
+            (lt, vec![l_member])
+        }
     };
-    let c = common_super(&lt, rt, layer)?;
+    let c = common_super(&lt, &rt, layer)?;
     let mut all = members;
-    all.push(r_sem.clone());
+    all.push(r_member);
     let conn = Exp::InductiveCtor(
         resolve_inductive(layer, "urn:eigenius:lexicon:Conn")?,
         conn_name.into(),
@@ -438,6 +426,39 @@ pub fn coordinate_np(
     let pl = Exp::InductiveCtor(num_decl, "pl".into(), vec![]);
     let group_cat = Exp::InductiveCtor(cat_decl, "cat_group".into(), vec![c, conn, pl]);
     Some((group_cat, list_term(&all)))
+}
+
+/// One NP conjunct for [`coordinate_np`]: its **type**, its **entity sem**, and the shared `cat` /
+/// `num` inductive decls. Handles a determined/named `cat_np` (sem is already an entity) and a bare
+/// **kind** `cat_n` (its kind sem is realised as an entity via `kind_of` — the bare-nominal shift's
+/// semantics — so coordinated bare kinds can be an argument). `None` for any other category.
+fn np_conjunct(
+    cat: &Exp,
+    sem: &Exp,
+) -> Option<(
+    Exp,
+    Exp,
+    Arc<crate::nbe::term::InductiveDecl>,
+    Arc<crate::nbe::term::InductiveDecl>,
+)> {
+    let Exp::InductiveCtor(cat_decl, n, args) = cat else {
+        return None;
+    };
+    let ty = args.first()?.clone();
+    let Exp::InductiveCtor(num_decl, _, _) = args.get(1)? else {
+        return None;
+    };
+    match n.as_str() {
+        "cat_np" => Some((ty, sem.clone(), cat_decl.clone(), num_decl.clone())),
+        "cat_n" => {
+            let kind_of = Exp::EigonAxiom(
+                crate::ontology::iri::Iri::parse("urn:eigenius:ontology:kind_of").ok()?,
+            );
+            let entity = Exp::App(Box::new(kind_of), Box::new(sem.clone()));
+            Some((ty, entity, cat_decl.clone(), num_decl.clone()))
+        }
+        _ => None,
+    }
 }
 
 /// The raw `Conn` constructor name on a `cat_group` (`conn_and`/`conn_or`/`conn_but_not`).
@@ -982,6 +1003,32 @@ mod tests {
     }
     fn decl_s() -> Exp {
         ctor("cat_s", vec![ctor("dcl", vec![]), ctor("fin", vec![])])
+    }
+
+    // ── coordinate_np: a bare-KIND conjunct is realised as an entity via `kind_of` ──
+    #[test]
+    fn np_conjunct_realises_a_bare_kind_via_kind_of() {
+        let gene = cls("urn:eigenius:lexicon:Gene");
+        // A determined/named `cat_np`: its sem is already an entity, passed through unchanged.
+        let np_cat = ctor("cat_np", vec![gene.clone(), ctor("num_any", vec![])]);
+        let np_sem = cls("urn:eigenius:lexicon:Achilles");
+        let (t, member, _, _) = np_conjunct(&np_cat, &np_sem).expect("cat_np is an NP conjunct");
+        assert_eq!(t, gene, "type is the NP's type");
+        assert_eq!(member, np_sem, "a determined NP's sem is already an entity");
+
+        // A bare `cat_n` KIND ("WRN"/"MSI"): its kind sem is realised as an entity via `kind_of`, so
+        // coordinated bare kinds can be an argument (a lone bare singular could not).
+        let n_cat = ctor("cat_n", vec![gene.clone(), ctor("num_any", vec![])]);
+        let n_sem = cls("urn:eigenius:lexicon:Wrn");
+        let (t2, member2, _, _) = np_conjunct(&n_cat, &n_sem).expect("cat_n is a kind NP conjunct");
+        assert_eq!(t2, gene);
+        let wrapped = matches!(&member2, Exp::App(f, x)
+            if matches!(f.as_ref(), Exp::EigonAxiom(i) if i.as_str().ends_with(":kind_of"))
+            && x.as_ref() == &n_sem);
+        assert!(wrapped, "a bare kind is wrapped in kind_of: {member2:?}");
+
+        // A non-NP category is not an NP conjunct.
+        assert!(np_conjunct(&decl_s(), &Exp::Unit).is_none());
     }
 
     // ── appose_group (D63 §8.4 Phase 6, RC-6 close nominal apposition) ──
