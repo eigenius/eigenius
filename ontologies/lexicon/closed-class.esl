@@ -594,6 +594,19 @@ resource lexicon:were_passive_by : lexicon:LexicalEntry {
     lexicon:sense    = "be";
     lexicon:grade    = epistemic:declared;
 }
+// BASE form under a modal — "can/may be limited by toxicity". The `is/are/was/were` above lift the
+// agentive `pass` VP to a FINITE clause; a modal ("can") selects a BASE `S[dcl,bse]\NP` complement, so
+// the agentive passive under a modal needs this `be : (S[dcl,bse]\NP)/(S[dcl,pass]\NP)`. Same
+// `copula_sem` (λP.P) and same `pass`-only selection (never the active `pss`).
+resource lexicon:be_passive_by : lexicon:LexicalEntry {
+    core:description = "grammatical: base form of BE — passive auxiliary under a modal.";
+    lexicon:form     = "be";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+    lexicon:grade    = epistemic:declared;
+}
 
 // ── Modal auxiliaries (D63 §8.9 Slice 6-aux) ─────────────────────────
 // "HeLa can affect BRCA1" → Possible(affects(brca1, hela)); "… must …" → Necessary(…).
