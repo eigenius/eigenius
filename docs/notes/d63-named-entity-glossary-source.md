@@ -167,19 +167,30 @@ The named-entity source uses the **augment overlay**:
 - Design decisions: **confirmed** — 3a deterministic apposition + LLM tail; 3c shadow.
 - Shadow hook: **located** — extend `multiword_spans` to protect multiword `cat_np` (coverage-safe via
   the existing widen fallback).
-- Recognizer (3a), head-typing (3b), shadow one-liner (3c), wiring + re-baseline (3d): **to build**.
 
-### Implementation order (next session)
+### Implementation status
 
-1. **Shadow** — extend `multiword_spans` (`+ cat_np`); run the parse suite + differential oracle;
-   confirm `grammar-gap 0`. Smallest, highest-leverage, independently testable.
-2. **Recognizer** — deterministic apposition extractor (`<known-common-noun-head> <Capitalized|ALLCAPS>`,
-   recurrence/known-head guard) returning name candidates; unit-tested on the first page.
-3. **Emission** — mint head-typed doc-local individual (retrieve-first; head class on miss) → `cat_np`
-   alias via `abbreviation_resources`; commit into the doc glossary.
-4. **Wiring** — call the recognizer in the sweep's Stage A; chain its output alongside the OOV
-   augmentation.
-5. **Re-baseline** — reranked re-record: `grammar-gap 0`; re-pin the other project-name units
-   ("Project Achilles screened…", "Project DRIVE analysed…") to their named-individual readings.
-6. **LLM tail** — `use-llm` proposer for irregular names (record/replay), after the deterministic core
-   is validated.
+1. **Shadow** — DONE (`4395409`): `multiword_spans` protects multiword `cat_np`; coverage-safe;
+   grammar-gap 0. Bites in-chart (P6 5→3, coord+as 15→9).
+2. **Recognizer** — DONE (`e3e060b`, redesigned in `d0b65b7`): `extract_named_entities_with`, admitted on
+   recurrence ≥2 + head-not-adjective (see 3a′). 6 unit tests.
+3. **Emission** — DONE (`d0b65b7`): `glossary::named_entity_augmentation` mints a head-typed doc-local
+   individual + `cat_np` alias (`abbreviation_resources`, in-memory resolution) → `LexicalBinding`s.
+   Kernel fix `instance_type_classes` String-IRI (`ee02901`).
+4. **Wiring** — DONE (`d0b65b7`): the sweep merges the named-entity bindings into the `LexiconAugmentation`
+   it already overlays → grammar-gap 0, COVERAGE: PASS. End-to-end witness
+   `named_entity_source_closes_unit4_via_overlay`.
+5. **Re-baseline** — DONE (`4f04763`): reranked draw, replay 62/0; grammar-gap 0, encoded 10, readings
+   931→769 (−17%), skeletons 240→220, expected-hits 18/18→19/19 (unit 4 added, two project-name units
+   re-pinned to named-individual readings).
+6. **LLM tail** — DEFERRED (optional): a `use-llm` proposer for irregular names the deterministic
+   apposition pattern misses (record/replay, like `AnthropicAbbreviationProposer`). The deterministic
+   core is validated; the tail is a recall improvement, not a correctness gap.
+
+### Known limits / follow-ups
+
+- **Recall** — v1 requires recurrence ≥2 and a `<head> <Name>` shape; a name mentioned once, or in the
+  `<Name> <head>` order ("Lynch syndrome"), is missed. The LLM tail (6) is the intended lift.
+- **Head-typing** — the individual is typed at the head noun's `cat_n` concept (`common_noun_concept`),
+  else `lexicon:Entity`. Grounding the NAME itself (retrieve-first against the lexicon) is not attempted;
+  the individual is always doc-local-minted.
