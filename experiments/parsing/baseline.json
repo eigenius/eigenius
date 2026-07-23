@@ -2,22 +2,23 @@
   "_comment": "The reference measurement the parse-rate gate is judged against. Run logs are NOT committed (experiments/*/results/ is gitignored); this is the distilled result + provenance. Update it DELIBERATELY, never to make a red run go green.",
   "provenance": {
     "commit": "Four fixes (2026-07-20, new-session): (1) function-word-surface skip in the UMLS importer (is_grammatical_surface += prepositions/conjunctions) -> 'For (preposition)' C0521125 and siblings no longer seed content nouns that pile into compounds around PPs; (2) evaluate/assess/deem added to ESSIVE_VERBS so 'We evaluated MSI as a biomarker...' parses as an essive; (3) informational-metadata drops in lexicon-align (INFO-TUI + code/info/identifier name; substance-TUI floor) -> 'Protein Info' C1521746 etc., drops.json 275->397; (4) KERNEL gq_prep_passive_agent rule (agentive `by` takes a type-raised GQ agent) closes the passive-agent gap that (1) exposed (#46 'Some MSI lines... were represented by these screening data sets' 0->parses). Coverage held grammar-gap 0 throughout. Expected = drift-free REPLAY of the encoded-band-FLOOR draw (draw 2 of a 5-draw study, results/2026-07-20-1751-696066d-...-reranked; live band encoded 10-11, readings 931-986, skeletons 326-354, grammar-gap 0 in all 5). See history[0].",
-    "date": "2026-07-20",
+    "date": "2026-07-23",
     "profile": "release",
     "features": [
       "use-llm"
     ],
     "reranker": "AnthropicSenseRanker (live), claude-sonnet-4-6, temperature 0",
     "page": "references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt",
-    "snapshot": "wordnet-umls-aligned-2026-07-20-fixes",
+    "snapshot": "wordnet-umls-aligned-2026-07-23",
     "snapshot_lineage": [
       "scripts/reseed-lexicon-db.sh --umls-all --snapshot-dir wordnet-umls-2026-07-20-fixes  (import applies: --drop-atoms drops.json [397 atoms / 354 concepts: case-mangled + metadata-artefact concepts (HL7 code-tables, SNOMED (qualifier value)/(attribute) tags, informational INFO-TUI concepts like 'Protein Info') ] + --drop-chv-redundant; PLUS is_grammatical_surface now skips preposition/conjunction surfaces (for/from/into/as/with/on/at/by/of/in/... -> no 'For (preposition)' content noun) and evaluate/assess/deem added to ESSIVE_VERBS)",
       "scripts/build-alignment-snapshot.sh --base wordnet-umls-2026-07-20-fixes --merges merges.json (38,389)  -> wordnet-umls-aligned-2026-07-20-fixes (2.7 GB)",
       "KERNEL (no reseed): gq_prep_passive_agent rule (agentive `by` takes a type-raised GQ agent) closes the passive-agent gap the function-word drop exposed (#46)"
     ],
     "config": "pos_prune=0 combinatory_core=0 SENSE_CAP=2 CELL_BEAM=64 (widen-on-failure to SENSE_CAP_WIDEN_MAX=16 / CELL_BEAM_WIDEN_MAX=512; multiword-preference held through the ladder, lifted only at the final rung)",
-    "runtime_s": 278
+    "runtime_s": 228
   },
+  "_provenance_note_2026-07-23": "Re-baselined for the D63 named-entity glossary source (docs/notes/d63-named-entity-glossary-source.md). The prior provenance.commit (the 2026-07-20 four-fixes narrative) is retained above as historical context; this draw is results/2026-07-23-1533-d0b65b7-dirty-first-page-cnl-v3-reranked (RECORD), replayed drift-free to the expected block below. Snapshot wordnet-umls-aligned-2026-07-23 (the UMLS-reification-filter + ESL-UTF8 + closed-class passive reseed of this session). See history[0].",
   "expected": {
     "units": 62,
     "grammar_gap": 0,
@@ -26,11 +27,11 @@
     "open": 1,
     "encoded": 10,
     "total_readings_ceiling": 1100,
-    "total_readings": 931,
+    "total_readings": 769,
     "skeletons_ceiling": 300,
-    "skeletons": 240,
-    "expected_reading_hits": 18,
-    "expected_reading_curated": 18
+    "skeletons": 220,
+    "expected_reading_hits": 19,
+    "expected_reading_curated": 19
   },
   "gates": {
     "coverage": "grammar_gap == 0 and missing_lexeme == 0 — every sentence parses. NON-NEGOTIABLE.",
@@ -58,6 +59,16 @@
     "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible — two senses with different labels and the SAME sem are one concept — but the pre-dedup caveat still stands."
   },
   "history": [
+    {
+      "date": "2026-07-23",
+      "commit": "D63 named-entity glossary source (recognizer + emission + wiring) + shadow + reification-filter reseed",
+      "encoded": "10 (held)",
+      "total_readings": "931 -> 769 (-17%)",
+      "total_skeletons": "240 -> 220 (-8%)",
+      "expected_hits": "18/18 -> 19/19 (added unit 4)",
+      "grammar_gap": "0 (held; the LAST first-page gap closed the HONEST way)",
+      "note": "Closes the last WRN-first-page grammar gap -- unit 4 'Project Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines'. It was NOT a grammar-coverage gap: the grammar derives the structure (a non-verb compound head parses, 'Gene Achilles and gene DRIVE ... -> 12 readings'); the gap was 'project' being noun+verb, whose verb entries crowd the coordinated-subject beam and prune the gold nominal reading (predicate-sensitively: gaps under 'are essential', survives under 'are dependencies'). The old baseline's grammar-gap 0 was FALSE COMFORT -- unit 4 was 'parsing' via a junk UMLS reification the T078/T080 filter removed. FIX = the FOURTH document-glossary extraction source (docs/notes/d63-named-entity-glossary-source.md): deterministic apposition NER (`<head> <Name>`, admitted on recurrence >=2 + head-not-adjective -- 'is a common noun' is non-discriminative in a 7.6M-entry lexicon, true for 'identified'/'somatic'/'other') recognizes EXACTLY {project Achilles, project DRIVE}, each minted as a head-typed doc-local NAMED INDIVIDUAL and emitted as a cat_np proper-noun alias via the in-memory augment OVERLAY (not a persistent doc layer -- avoids OOM, unifies with the OOV augmentation the sweep already chains). Span-protection SHADOW (chart::multiword_spans now protects multiword cat_np, coverage-safe via the widen fallback) suppresses the compositional re-bracketing. Kernel fix: glossary::instance_type_classes accepts String-IRI is_a (a persisted individual's ref round-trips to String; matching only ResourceRef misread it as a class -> cat_n not cat_np). WITNESSED (named_entity_source_closes_unit4_via_overlay): unit 4 parses as And(...ni_project_achilles..., ...ni_project_drive...) -- the correct DISTRIBUTED COORDINATION, not a coverage-only artifact. Also re-pinned two now-stale project-name units (compositional -> named-individual readings) and ADDED unit 4 to the corpus (curated 18 -> 19). Commits: shadow 4395409, recognizer e3e060b, end-to-end d0b65b7, instance_type_classes ee02901. Draw results/2026-07-23-1533-...-reranked, replay 62 hits / 0 misses."
+    },
     {
       "date": "2026-07-21",
       "commit": "skeleton eraser token-normalised (measurement correction; re-baseline)",
