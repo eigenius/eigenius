@@ -3011,7 +3011,7 @@ fn wrn_first_page_over_full_lexicon() {
     // SEES them (uncommitted, doc-scoped — the §7-2 in-memory-overlay path) instead of gapping on them.
     // Deterministic proposers here (reproducible A/B); the live LLM abbreviation/POS proposers are
     // drop-in behind the traits (exercised by the `--features use-llm` smoke tests).
-    let aug = {
+    let mut aug = {
         use eigenius_kernel::dcg::{
             augment_lexicon_backed, NoAbbreviationProposer, NominalCategoryProposer,
         };
@@ -3023,9 +3023,25 @@ fn wrn_first_page_over_full_lexicon() {
             &lem,
         )
     };
+    // Named-entity source (D63 `d63-named-entity-glossary-source.md`): recognize `<common-noun-head>
+    // <Name>` appositions ("Project Achilles", "project DRIVE") and OVERLAY them as doc-local named
+    // individuals (`cat_np`) via the SAME in-memory augmentation — closes the "project"(N/V)-crowding
+    // grammar gap without a persistent doc layer.
+    let ne_aug = eigenius_kernel::dcg::named_entity_augmentation(&head, &page);
+    let n_names = ne_aug.added.len();
     eprintln!(
-        "augmentation: {} OOV grounded + injected, {} residual OOV",
-        aug.added.len(),
+        "named entities: {:?}",
+        ne_aug
+            .added
+            .iter()
+            .map(|b| b.provenance.surface.clone())
+            .collect::<Vec<_>>()
+    );
+    aug.added.extend(ne_aug.added);
+    aug.supporting.extend(ne_aug.supporting);
+    eprintln!(
+        "augmentation: {} OOV grounded + injected, {n_names} named-entity individual(s), {} residual OOV",
+        aug.added.len() - n_names,
         aug.missing_oov.len()
     );
     // Reranker CONTEXT WINDOW — OFF by default, opt-in via `EIGENIUS_CONTEXT_SENTENCES` (the
@@ -4046,6 +4062,35 @@ fn dive_near_encoded() {
     println!("units with 2–16 readings: {n_dive}");
 }
 
+/// Diagnostic: `is_common_noun` for candidate apposition heads — to see which verbs/adjectives leak
+/// through the head filter (NER precision).
+#[test]
+#[ignore = "DB-backed diagnostic; run --ignored --nocapture"]
+fn debug_ne_head_precision() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    for w in [
+        "project",
+        "gene",
+        "genes",
+        "identified",
+        "evaluated",
+        "other",
+        "somatic",
+        "deficient",
+        "achilles",
+        "drive",
+        "dna",
+        "wrn",
+        "msi",
+    ] {
+        eprintln!(
+            "is_common_noun({w:?}) = {}",
+            eigenius_kernel::dcg::is_common_noun(&head, w)
+        );
+    }
+}
+
 /// **SPIKE — named-entity glossary (D63 §2a, the third extraction source).** Unit 4 ("Project
 /// Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines
 /// compared to MSS cell lines.") is the last grammar gap, but the grammar DERIVES its structure — with
@@ -4207,6 +4252,65 @@ fn spike_named_entity_closes_unit4() {
         readings["coord subj+as"],
         full.then(|| format!(", unit 4 {}", readings["unit 4 (full)"])).unwrap_or_default(),
     );
+}
+
+/// **End-to-end named-entity source** — the real production path (recognizer → `named_entity_augmentation`
+/// → in-memory augment overlay), NOT the spike's hand-minted persistent layers. A small document mentions
+/// each project name twice (the recognizer requires recurrence ≥2); the augmentation must recognize
+/// EXACTLY the two names, and unit 4 must then parse — its reading a coordination of the two doc-local
+/// named individuals. This is the witness that the closed grammar gap is a CORRECT reading, not a
+/// coverage-only artifact.
+#[test]
+#[ignore = "DB-backed; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn named_entity_source_closes_unit4_via_overlay() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+
+    // Each name occurs twice → satisfies the recurrence requirement; "identified WRN" occurs once (and
+    // has a verb head) so it must NOT be recognized.
+    let doc =
+        "Project Achilles and project DRIVE identified WRN as the top preferential dependency \
+               in MSI cell lines compared to MSS cell lines. Project Achilles screened cell lines. \
+               Project DRIVE analysed cell lines.";
+
+    let aug = eigenius_kernel::dcg::named_entity_augmentation(&head, doc);
+    let mut got: Vec<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.to_lowercase())
+        .collect();
+    got.sort();
+    eprintln!("recognized named entities: {got:?}");
+    assert_eq!(
+        got,
+        vec!["project achilles".to_string(), "project drive".to_string()],
+        "the recognizer must find EXACTLY the two recurring project names (no verb/adjective-head false positives)"
+    );
+
+    let unit4 = "Project Achilles and project DRIVE identified WRN as the top preferential \
+                 dependency in MSI cell lines compared to MSS cell lines.";
+    let index = build_index_over(&head, Some(&aug));
+    let f = index.parse(unit4, &lem);
+    eprintln!("unit 4 → {} reading(s)", f.len());
+    for it in f.iter().take(3) {
+        eprintln!("    {}", pretty_term(it.sem()));
+    }
+    assert!(
+        !f.is_empty(),
+        "unit 4 must parse once the two names are overlaid as named individuals"
+    );
+    // The reading is a COORDINATION referencing BOTH minted individuals — the correct structure, not a
+    // spurious verb-object named entity.
+    let any_correct = f.iter().any(|it| {
+        let s = pretty_term(it.sem());
+        s.contains("ni_project_achilles") && s.contains("ni_project_drive")
+    });
+    assert!(
+        any_correct,
+        "no reading references both doc-local named individuals — unit 4 may be parsing via a wrong reading"
+    );
+    eprintln!("\nPASS: named-entity source closes unit 4 with a coordination of the two named individuals.");
 }
 
 /// **Single-sentence forest tracer** — parse one arbitrary sentence (`EIGENIUS_TRACE_SENTENCE`,

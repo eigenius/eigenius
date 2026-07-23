@@ -106,15 +106,34 @@ which is the intended semantics (a named entity shadows its compositional readin
 free via the existing widen fallback. Guard the change with the differential oracle (both chart drivers
 share this single source of truth) and confirm `grammar-gap 0` holds on the full page.
 
-### 3a′. Recognition is lexicon-aware (NOT text-in/text-out) — decided
+### 3a′. Recognition is lexicon-aware — and "is a common noun" does NOT discriminate
 
 Abbreviation extraction is purely orthographic, so `abbrev` is text-in/pairs-out and the lexicon enters
-only at grounding. Apposition is **not**: "the head is a common noun" is lexical, and orthography alone
-conflates `project DRIVE` (noun+name), `identified WRN` (verb+object), `in DRIVE` (prep+name). So the
-head common-noun test is part of recognition — taken as an **injected `is_common_noun` predicate**
-(`extract_named_entities_with`, keeping the logic unit-testable with a closure), with the layer-backed
-predicate + emission supplied in `glossary`. One filter stays deferred to grounding: the NAME is not
-itself a common noun (so "DNA polymerase" stays a compound).
+only at grounding. Apposition is **not**: the head must be a NOUN, and orthography alone conflates
+`project DRIVE` (noun+name), `identified WRN` (verb+object), `in DRIVE` (prep+name). So the head test is
+part of recognition — an **injected predicate** (`extract_named_entities_with`, unit-testable with a
+closure), with the layer-backed predicate in `glossary`.
+
+**Empirical correction (measured on the CNL-v3 page).** "Is a common noun" (has a `cat_n` entry) was the
+first head test — but in the served 7.6M-entry lexicon it is TRUE for essentially every surface
+("identified", "evaluated", "other", "somatic", "deficient" all return true). Using it, the recognizer
+fired 8 candidates — 6 false positives (verb heads "identified WRN"/"evaluated MSI", adjective heads
+"other DNA"/"somatic MMR") — while the broken symmetric name filter *dropped* "Project Achilles"
+(because "achilles" also has a noun sense). grammar-gap 0 was reached, but partly via WRONG readings
+(the coverage-not-correctness trap). Two signals that DO discriminate, verified to yield EXACTLY the two
+real names:
+
+- **Recurrence ≥2** — a named entity is referred to repeatedly; a one-off verb+object is not. (On the
+  page: "Project Achilles"/"project DRIVE" ×3; "identified WRN" ×1.) This is the primary filter.
+- **Head is not an adjective** (`S[adj]\NP`) — rejects "somatic MMR"/"other DNA" (recurring or not),
+  which recurrence alone lets through ("somatic MMR" ×2). The noun/verb homonym "project" stays
+  admissible (it is not an adjective); verb-head one-offs are killed by recurrence, not this.
+
+So the head predicate is `is_apposition_head = is_common_noun && !is_adjective`, and admission requires
+recurrence. The name-not-a-common-noun filter is **dropped** (unachievable — everything is a noun — and
+it wrongly rejects real Title-case names). End-to-end witness: `named_entity_source_closes_unit4_via_overlay`
+— the augmentation recognizes exactly the two names, and unit 4 parses as
+`And(…ni_project_achilles…, …ni_project_drive…)` (the correct distributed coordination).
 
 ### 3d. Emission + wiring — the augment overlay, not a persistent doc layer
 

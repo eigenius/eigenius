@@ -91,6 +91,9 @@ impl CategoryProposer for NominalCategoryProposer {
 pub enum ResolutionMethod {
     /// The document itself defined it (Schwartz-Hearst / a definitional pattern). Deterministic.
     DefinitionExtracted,
+    /// A deterministic named-entity apposition (`<common-noun-head> <Name>`) recognized it as a doc-local
+    /// named individual (D63 named-entity glossary source). Deterministic, same trust as extraction.
+    NameRecognized,
     /// A retrieval hit against the committed lexicon (the form / description text index) grounded it.
     RetrievalGrounded,
     /// An LLM synthesized a provisional type/grounding from a retrieved definition. Lowest trust.

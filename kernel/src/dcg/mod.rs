@@ -85,7 +85,8 @@ pub use category::{
 pub use glossary::AnthropicAbbreviationProposer;
 pub use glossary::{
     abbreviation_resources, document_glossary_resources, document_glossary_resources_with,
-    glossary_resources, ground_abbreviation, ground_long_form, AbbreviationBinding,
+    glossary_resources, ground_abbreviation, ground_long_form, is_adjective, is_apposition_head,
+    is_common_noun, named_entity_augmentation, AbbreviationBinding,
 };
 pub use item::{Combinator, Cost, Item};
 pub use lemmatizer::{Identity, Lemmatizer, Pos};
