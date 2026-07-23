@@ -229,6 +229,33 @@ readings  median 32   ≈   skeletons  median 6   ×   sense×  median 5.5
 Both axes are live and they *multiply*. Collapsing senses perfectly leaves ~18% of readings;
 perfecting the structural normal form leaves ~15%. **Neither alone reaches ENCODED.**
 
+### 7b. The skeleton eraser must erase the LEXICON PREFIX too
+
+`total-skeletons` is the tracked structural lever, and it is only as good as `erase_senses`. The
+erasure replaces **the whole token** carrying a run of ≥4 digits — not just the digit run.
+
+That distinction is not cosmetic. The original erased only the digits, so the lexicon prefix survived:
+
+```
+n07342049 → n§        (WordNet)
+C0205341  → C§        (UMLS)      ← different strings!
+```
+
+A word with one WordNet sense and one UMLS sense therefore produced **two "skeletons" for one
+bracketing**. Measured on the reference page (2026-07-21): **86 of 326 skeletons — 26% — were this
+artifact.** Corrected, `total-skeletons` is **240** and `sense×` rises 2.86 → 3.88, because those 86
+belong to the sense axis. Nothing else moved (grammar-gap 0, encoded 10, total-readings 931): it is a
+measurement correction, no reading was removed.
+
+**Why it matters:** grammar changes are scored against `total-skeletons`. Under the old eraser a
+quarter of that signal was sense noise, so a lexicon change that added a cross-lexicon sense pair would
+show up as *structural over-generation*, and a genuine grammar fix would be diluted. If you ever see
+skeleton counts move without a grammar change, check the eraser first.
+
+How it surfaced: the attribution instrument reported the unit *"Nucleotide repeat regions are
+microsatellites"* as 4 readings / 4 skeletons / `sense× 1.0` while simultaneously showing **two 2-way
+surviving sense sites** — arithmetic that is only consistent if senses were being counted as structure.
+
 ### 7a. Attribution — which span, which rule, which sense
 
 The split above says *structure vs sense*; it does not say **which word or which rule**. That question

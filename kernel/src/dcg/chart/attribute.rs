@@ -60,6 +60,11 @@ pub(crate) struct Site {
     /// The competing senses (resolved to name + semantic type where the chain knows them) or the
     /// competing constructions (rule names), deduped.
     pub labels: Vec<String>,
+    /// A WordNet sense AND a UMLS sense both SURVIVE at this span. These are the pairs the
+    /// WordNet↔UMLS reconciliation either never considered or adjudicated as distinct — and each one
+    /// costs a real reading. Reported separately so "should alignment have merged this?" is a list,
+    /// not a guess.
+    pub cross_lexicon: bool,
 }
 
 pub(crate) struct UnitAttribution {
@@ -156,9 +161,14 @@ impl Forest {
                 // One entry per distinct sense: (label, does it survive into a reading?).
                 let mut seen: BTreeSet<String> = BTreeSet::new();
                 let mut entries: Vec<(String, bool)> = Vec::new();
+                let (mut saw_wordnet, mut saw_umls) = (false, false);
                 for e in &node.edges {
                     let Edge::Leaf(it) = e else { continue };
-                    let label = describe_sense(it.sem(), layer);
+                    // Category first: a SURVIVING `N`/`NP` on a surface that is syntactically a verb
+                    // (or vice versa) is a mis-categorised lexicon entry that reached a real parse —
+                    // a fundamentally wrong reading, not polysemy. That is the signal to look for.
+                    let label =
+                        format!("{} {}", cat_tag(it.cat()), describe_sense(it.sem(), layer));
                     if !seen.insert(label.clone()) {
                         continue; // same sense packed twice — not a real branch
                     }
@@ -167,6 +177,13 @@ impl Forest {
                     // than silently dropping a branch we failed to measure.
                     let survives =
                         atoms.is_empty() || reading_atoms.iter().any(|r| atoms.is_subset(r));
+                    if survives {
+                        match lexicon_of(&atoms) {
+                            Some(Lexicon::WordNet) => saw_wordnet = true,
+                            Some(Lexicon::Umls) => saw_umls = true,
+                            None => {}
+                        }
+                    }
                     entries.push((label, survives));
                 }
                 if entries.len() < 2 {
@@ -185,6 +202,7 @@ impl Forest {
                     felicitous,
                     inside,
                     labels,
+                    cross_lexicon: saw_wordnet && saw_umls,
                 });
             } else {
                 let mut labels: Vec<String> = node
@@ -202,6 +220,7 @@ impl Forest {
                     felicitous: node.edges.len(), // not intersectable — see `Site::felicitous`
                     inside,
                     labels,
+                    cross_lexicon: false,
                 });
             }
         }
@@ -385,6 +404,62 @@ fn sense_atoms(pretty: &str) -> BTreeSet<String> {
         }
     }
     out
+}
+
+/// Which lexicon a sense id came from: WordNet offsets are `n/v/a/r` + digits (`n07342049`,
+/// `v02203362_t`, `deg_a00740336`), UMLS CUIs are `C` + digits (`C0205341`).
+enum Lexicon {
+    WordNet,
+    Umls,
+}
+
+fn lexicon_of(atoms: &BTreeSet<String>) -> Option<Lexicon> {
+    for a in atoms {
+        let core = a.trim_start_matches("deg_").trim_start_matches("std_");
+        let mut cs = core.chars();
+        match cs.next() {
+            Some('C') if cs.clone().all(|c| c.is_ascii_digit()) => return Some(Lexicon::Umls),
+            Some('n' | 'v' | 'a' | 'r') => return Some(Lexicon::WordNet),
+            _ => continue,
+        }
+    }
+    None
+}
+
+/// A short syntactic tag for a lexical category — enough to spot a mis-POS'd entry at a glance.
+/// `N`/`NP` are nominal; `FN(…)` is a functor (verb, modifier, preposition) shown with its result so
+/// `FN(S)` (a verb) reads differently from `FN(N)` (a nominal modifier).
+fn cat_tag(cat: &Exp) -> String {
+    let p = pretty_term(cat);
+    for (prefix, tag) in [
+        ("cat_n(", "N"),
+        ("cat_np(", "NP"),
+        ("cat_s(", "S"),
+        ("cat_q(", "Q"),
+        ("cat_pp_arg(", "PP"),
+        ("cat_pp(", "PP"),
+    ] {
+        if p.starts_with(prefix) {
+            return tag.to_string();
+        }
+    }
+    if p.starts_with("fwd(") || p.starts_with("bwd(") {
+        // The functor's RESULT is the informative half — strip one layer and tag that.
+        let inner = &p[4..];
+        for (prefix, tag) in [
+            ("cat_s(", "S"),
+            ("cat_n(", "N"),
+            ("cat_np(", "NP"),
+            ("bwd(cat_s(", "S"),
+            ("fwd(cat_s(", "S"),
+        ] {
+            if inner.starts_with(prefix) {
+                return format!("FN({tag})");
+            }
+        }
+        return "FN".to_string();
+    }
+    p.chars().take(6).collect()
 }
 
 /// The class IRI a leaf sense denotes, if it denotes one directly (`C0018905`, `n10529231`). An

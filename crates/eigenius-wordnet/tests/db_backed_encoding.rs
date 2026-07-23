@@ -230,8 +230,13 @@ fn open_head(path: &std::path::Path) -> Option<Arc<Layer>> {
 struct ArcRanker(std::sync::Arc<dyn eigenius_kernel::dcg::SenseRanker + Send + Sync>);
 #[cfg(feature = "use-llm")]
 impl eigenius_kernel::dcg::SenseRanker for ArcRanker {
-    fn rank(&self, sentence: &str, words: &[eigenius_kernel::dcg::WordSenses]) -> Vec<Vec<usize>> {
-        self.0.rank(sentence, words)
+    fn rank(
+        &self,
+        sentence: &str,
+        context: &str,
+        words: &[eigenius_kernel::dcg::WordSenses],
+    ) -> Vec<Vec<usize>> {
+        self.0.rank(sentence, context, words)
     }
 }
 
@@ -241,6 +246,15 @@ impl eigenius_kernel::dcg::SenseRanker for ArcRanker {
 type Recorder = std::sync::Arc<
     eigenius_kernel::dcg::RecordingSenseRanker<eigenius_kernel::dcg::AnthropicSenseRanker>,
 >;
+
+thread_local! {
+    /// The active REPLAY ranker, so a run can assert `misses() == 0` afterwards. A miss falls back to
+    /// seed order, which makes `eff = min(cap, ranked)` a no-op — sense ELIMINATION silently OFF for
+    /// that sentence. `misses()` existed but was never checked; see [`assert_replay_faithful`].
+    static REPLAY_RANKER: std::cell::RefCell<
+        Option<std::sync::Arc<eigenius_kernel::dcg::ReplaySenseRanker>>,
+    > = const { std::cell::RefCell::new(None) };
+}
 
 #[cfg(feature = "use-llm")]
 thread_local! {
@@ -317,7 +331,9 @@ fn build_index_over(head: &Arc<Layer>, aug: Option<&LexiconAugmentation>) -> Par
                         "contextual reranker: REPLAY from {} (deterministic, no LLM)",
                         p.display()
                     );
-                    return index.with_sense_ranker(Box::new(r));
+                    let r = std::sync::Arc::new(r);
+                    REPLAY_RANKER.with(|s| *s.borrow_mut() = Some(std::sync::Arc::clone(&r)));
+                    return index.with_sense_ranker(Box::new(ArcReplay(r)));
                 }
                 Err(e) => panic!(
                     "EIGENIUS_SENSE_RANKS={} exists but could not be read: {e}",
@@ -346,7 +362,26 @@ fn build_index_over(head: &Arc<Layer>, aug: Option<&LexiconAugmentation>) -> Par
         eprintln!("contextual reranker: none (ANTHROPIC_API_KEY unset) — cap-only");
     }
     #[cfg(not(feature = "use-llm"))]
-    eprintln!("contextual reranker: none (built without --features use-llm) — cap-only");
+    {
+        // **Fail loudly, never silently unranked.** `EIGENIUS_SENSE_RANKS` pointing at a file that
+        // does not exist is legitimate ONLY in RECORD mode (a live ranker writes it). Without
+        // `use-llm` there is no live ranker, so the run would degrade to cap-only — where the
+        // reranker's ELIMINATION is disabled by construction, so eliminated senses re-seed and EVERY
+        // per-unit conclusion drawn from the trace is wrong. That happened twice on 2026-07-21, both
+        // times from a RELATIVE path: the test binary's CWD is the crate dir, not the repo root, so
+        // the file silently "did not exist". A one-line log is not enough — this is now fatal.
+        if let Some(p) = &ranks_path {
+            panic!(
+                "EIGENIUS_SENSE_RANKS={} does not exist, and this binary has no live ranker \
+                 (built without --features use-llm) — so the run would silently degrade to CAP-ONLY, \
+                 in which sense ELIMINATION is off and any per-unit conclusion is invalid.\n\
+                 The path must be ABSOLUTE: the test binary's CWD is the crate dir, not the repo root.\n\
+                 To replay: point at an existing ranks.json. To record: rebuild with --features use-llm.",
+                p.display()
+            );
+        }
+        eprintln!("contextual reranker: none (built without --features use-llm) — cap-only");
+    }
     index
 }
 
@@ -409,27 +444,102 @@ fn unit_readings(o: &Outcome) -> usize {
     }
 }
 
-/// Erase sense IRIs to `§` — runs of ≥4 digits (WordNet offsets / UMLS CUIs) — leaving the STRUCTURE,
-/// so two readings that differ only in WHICH sense fills a slot collapse to one skeleton. This is the
-/// same erasure `trace_one_sentence` prints per sentence.
+/// Erase sense identity to `§`, leaving the STRUCTURE, so two readings that differ only in WHICH
+/// sense fills a slot collapse to one skeleton. This is the same erasure `trace_one_sentence` prints.
+///
+/// **Token-normalised (2026-07-21 re-baseline).** The erasure replaces the WHOLE token carrying a
+/// run of ≥4 digits, not just the digits. The earlier version erased only the digit run and kept the
+/// lexicon prefix, so `n07342049` → `n§` and `C0205341` → `C§` stayed DISTINCT — a cross-lexicon
+/// sense pair for ONE word was then counted as two *structural* skeletons though the bracketing is
+/// identical. That artifact was **86 of 326** skeletons on the reference page (26%), i.e. a quarter
+/// of the tracked structural lever was sense noise. Erasing the whole token makes `total-skeletons`
+/// measure bracketing alone, which is what grammar work is scored against.
+/// See `experiments/parsing/README.md` §7b.
 fn erase_senses(s: &str) -> String {
-    let mut out = String::new();
-    let mut run = String::new();
-    for c in s.chars() {
-        if c.is_ascii_digit() {
-            run.push(c);
-            continue;
-        }
-        if !run.is_empty() {
-            out.push_str(if run.len() >= 4 { "§" } else { &run });
-            run.clear();
-        }
-        out.push(c);
+    s.split_inclusive(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .map(|tok| {
+            let (word, tail) = match tok.chars().last() {
+                Some(c) if !(c.is_ascii_alphanumeric() || c == '_') => (
+                    &tok[..tok.len() - c.len_utf8()],
+                    &tok[tok.len() - c.len_utf8()..],
+                ),
+                _ => (tok, ""),
+            };
+            let (mut run, mut max_run) = (0usize, 0usize);
+            for c in word.chars() {
+                if c.is_ascii_digit() {
+                    run += 1;
+                    max_run = max_run.max(run);
+                } else {
+                    run = 0;
+                }
+            }
+            if max_run >= 4 {
+                format!("§{tail}")
+            } else {
+                format!("{word}{tail}")
+            }
+        })
+        .collect()
+}
+
+/// Pins the eraser semantics that `total-skeletons` depends on (README §7b). If this ever fails,
+/// the tracked structural lever has started counting SENSE differences as structure again — which
+/// silently inflated it by 26% before 2026-07-21.
+#[test]
+fn erase_senses_collapses_cross_lexicon_sense_pairs() {
+    // One bracketing, a WordNet sense vs a UMLS sense in the same slot ⇒ ONE skeleton.
+    let wn = erase_senses("compound_kind(G#0, n07342049)");
+    let umls = erase_senses("compound_kind(G#0, C0205341)");
+    assert_eq!(
+        wn, umls,
+        "cross-lexicon sense pair must not read as a structural difference"
+    );
+    // The STRUCTURE around the sense is preserved — this is not blanket erasure.
+    assert_ne!(wn, erase_senses("prep_of(G#0, n07342049)"));
+    // Short numbers are NOT sense ids and must survive (`G#0`, arity markers).
+    assert!(
+        erase_senses("G#0").contains('0'),
+        "short digit runs are not sense ids"
+    );
+    // Verb/adjective sense atoms collapse the same way.
+    assert_eq!(erase_senses("v02203362_t"), erase_senses("v00120796_t"));
+}
+
+/// Share one [`ReplaySenseRanker`] between the parser and the miss-check.
+struct ArcReplay(std::sync::Arc<eigenius_kernel::dcg::ReplaySenseRanker>);
+
+impl eigenius_kernel::dcg::SenseRanker for ArcReplay {
+    fn rank(
+        &self,
+        sentence: &str,
+        context: &str,
+        words: &[eigenius_kernel::dcg::WordSenses],
+    ) -> Vec<Vec<usize>> {
+        self.0.rank(sentence, context, words)
     }
-    if !run.is_empty() {
-        out.push_str(if run.len() >= 4 { "§" } else { &run });
-    }
-    out
+}
+
+/// **A replay with misses is not a replay.** A key miss falls back to seed order, so for that
+/// sentence every sense counts as ranked, `eff = min(cap, ranked)` stops cutting, and the reranker's
+/// ELIMINATION is silently OFF — the run then measures something between reranked and cap-only while
+/// still printing "REPLAY". `misses()` was counted but never asserted; this makes it fatal.
+fn assert_replay_faithful() {
+    REPLAY_RANKER.with(|slot| {
+        if let Some(r) = slot.borrow().as_ref() {
+            let (hits, misses) = (r.hits(), r.misses());
+            eprintln!("  replay: {hits} hits, {misses} misses");
+            assert_eq!(
+                misses,
+                0,
+                "REPLAY had {misses} key MISSES (of {} lookups) — each falls back to seed order, \
+                 disabling sense elimination for that sentence, so this is NOT a faithful replay and \
+                 its per-unit numbers are not comparable. The recorded ranks.json does not answer \
+                 this run's question (lexicon, page, or rank-key/prompt changed).",
+                hits + misses
+            );
+        }
+    });
 }
 
 /// The distinct STRUCTURAL skeletons among a unit's closed readings — the sense-independent (hence
@@ -2582,7 +2692,25 @@ fn wrn_first_page_over_full_lexicon() {
         aug.added.len(),
         aug.missing_oov.len()
     );
-    let index = build_index_over(&head, Some(&aug));
+    // Reranker CONTEXT WINDOW — OFF by default, opt-in via `EIGENIUS_CONTEXT_SENTENCES` (the
+    // `--context-window` arm). When on, the ranker sees `window` sentences on each side, so a sense
+    // plausible in isolation but wrong in context (UMLS "Geographic Locations" for "regions" in a
+    // genomics page) can be eliminated. It CHANGES the ranker's question, so a ranks.json recorded
+    // under a different window MISSES — `assert_replay_faithful` makes that fatal, not silent.
+    let ctx_window: usize = std::env::var("EIGENIUS_CONTEXT_SENTENCES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let index =
+        build_index_over(&head, Some(&aug)).with_document(segment_sentences(&page), ctx_window);
+    eprintln!(
+        "context window: {ctx_window} sentence(s) each side ({})",
+        if ctx_window == 0 {
+            "off — isolated-sentence ranking"
+        } else {
+            "on"
+        }
+    );
 
     // Characterize a few interesting buckets directly (closed-class vs -ly adverb vs domain).
     for probe in [
@@ -2627,6 +2755,7 @@ fn wrn_first_page_over_full_lexicon() {
     }
 
     summarize(&report);
+    assert_replay_faithful();
 
     if rollup {
         if let Some(s) = eigenius_kernel::dcg::attribution::take() {
@@ -3609,27 +3738,8 @@ fn definite_negation_collapses_referential() {
     let index = build_index(&head);
     let lem = morphy();
 
-    // Distinct STRUCTURAL skeletons: erase senses (runs of >= 4 digits — WordNet offsets / CUIs)
-    // so sense multiplicity cannot mask the structural scope difference we are asserting on.
-    fn erase_senses(s: &str) -> String {
-        let mut out = String::new();
-        let mut run = String::new();
-        for c in s.chars() {
-            if c.is_ascii_digit() {
-                run.push(c);
-                continue;
-            }
-            if !run.is_empty() {
-                out.push_str(if run.len() >= 4 { "§" } else { &run });
-                run.clear();
-            }
-            out.push(c);
-        }
-        if !run.is_empty() {
-            out.push_str(if run.len() >= 4 { "§" } else { &run });
-        }
-        out
-    }
+    // Distinct STRUCTURAL skeletons via the single token-normalised `erase_senses` above, so sense
+    // multiplicity cannot mask the structural scope difference we are asserting on.
     let skeletons = |text: &str| -> std::collections::BTreeSet<String> {
         index
             .parse(text, &lem)

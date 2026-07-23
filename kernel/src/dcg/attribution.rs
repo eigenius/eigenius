@@ -33,6 +33,8 @@ struct Row {
     sense: bool,
     key: String,
     factor: usize,
+    /// A WordNet and a UMLS sense both survived here — a reconciliation candidate.
+    cross_lexicon: bool,
 }
 
 thread_local! {
@@ -72,6 +74,7 @@ pub(crate) fn record(tokens: &[String], attr: &UnitAttribution) {
                     } else {
                         s.factor
                     },
+                    cross_lexicon: s.cross_lexicon,
                 })
                 .collect();
             map.insert(tokens.join(" "), rows);
@@ -130,8 +133,19 @@ fn format_rollup(map: &BTreeMap<String, Vec<Row>>) -> String {
             excess: 0,
             max: 0,
         };
+        let mut crossed: BTreeMap<String, Agg> = BTreeMap::new();
         for (unit, rows) in map {
             for row in rows {
+                if row.cross_lexicon {
+                    crossed
+                        .entry(row.key.clone())
+                        .or_insert_with(|| Agg {
+                            units: BTreeSet::new(),
+                            excess: 0,
+                            max: 0,
+                        })
+                        .add(unit, row.factor);
+                }
                 let bucket = if row.sense {
                     &mut sense
                 } else if is_generic(&row.key) {
@@ -167,6 +181,10 @@ fn format_rollup(map: &BTreeMap<String, Vec<Row>>) -> String {
             generic.units.len(),
             generic.excess,
         ));
+        out.push_str(
+            "CROSS-LEXICON co-survival (a WordNet AND a UMLS sense both reach a reading at the same\n             span) — each costs a real reading; either alignment never considered the pair or it\n             adjudicated them distinct. Check before assuming a missed merge:\n",
+        );
+        out.push_str(&render_ranked(&crossed, 20));
         out
     }
 }
@@ -215,6 +233,7 @@ mod tests {
             felicitous,
             inside: 1,
             labels: if sense { vec![] } else { vec![key.to_string()] },
+            cross_lexicon: false,
         }
     }
 

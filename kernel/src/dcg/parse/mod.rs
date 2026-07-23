@@ -176,7 +176,20 @@ pub struct Parser {
     grammar: Grammar,
     /// The processing parameters ([`ParseConfig`]).
     config: ParseConfig,
+    /// The document this parser is reading, as sentences, for the reranker's CONTEXT WINDOW.
+    /// `None` ⇒ rank each sentence in isolation (the prior behaviour). Set with
+    /// [`Parser::with_document`]; the sweep supplies the page.
+    document: Option<Arc<Vec<String>>>,
+    /// Sentences of context on EACH side of the ranked sentence. **Default 0 — off**, so a plain
+    /// parser reproduces the isolated-sentence behaviour the committed baseline was measured under.
+    /// The context window CHANGES the reranker's answer (and is unproven), so it is opt-in: set it
+    /// (with a document) via [`Parser::with_document`], driven by the `--context-window` measurement arm.
+    context_sentences: usize,
 }
+
+/// The default context-window size the `--context-window` arm turns on. A passage, not a corpus:
+/// enough to fix the domain (genomics vs geography) without burying the target sentence.
+pub const CONTEXT_SENTENCES: usize = 2;
 
 impl Parser {
     /// Build a parser over `layer` — the one-call path: constructs the [`LexicalIndex`] and wraps it.
@@ -206,6 +219,8 @@ impl Parser {
                 packing: true, // default ON (§11 3g.2 / B9)
                 ..ParseConfig::default()
             },
+            document: None,
+            context_sentences: 0,
         }
     }
 
@@ -259,6 +274,19 @@ impl Parser {
     /// static `sense_rank` cap.
     pub fn with_sense_ranker(mut self, ranker: Box<dyn SenseRanker + Send + Sync>) -> Self {
         self.config.sense_ranker = Some(ranker);
+        self
+    }
+
+    /// Supply the DOCUMENT (its sentences) and the context-window size for the contextual reranker.
+    /// `window` sentences on EACH side of the ranked sentence enter the prompt; **`window == 0` is
+    /// off** — each sentence is ranked alone, the behaviour the committed baseline was measured under.
+    /// Builder-style; the `--context-window` measurement arm passes [`CONTEXT_SENTENCES`].
+    ///
+    /// A non-zero window CHANGES the ranker's question, hence its cache key: a `ranks.json` recorded
+    /// under a different window MISSES rather than replaying a stale answer.
+    pub fn with_document(mut self, sentences: Vec<String>, window: usize) -> Self {
+        self.document = Some(Arc::new(sentences));
+        self.context_sentences = window;
         self
     }
 
@@ -738,7 +766,7 @@ impl Parser {
                 candidates: c,
             })
             .collect();
-        let rankings = ranker.rank(text, &words);
+        let rankings = ranker.rank(text, &self.document_context(text), &words);
         if rankings.len() != words.len() {
             return None; // malformed reply ⇒ degrade to the static cap
         }
@@ -755,6 +783,28 @@ impl Parser {
             }
         }
         Some(map)
+    }
+
+    /// The surrounding sentences for `text` — `context_sentences` on each side, joined. Empty when the
+    /// window is off (the default), no document was supplied, or `text` is not one of its sentences.
+    fn document_context(&self, text: &str) -> String {
+        if self.context_sentences == 0 {
+            return String::new(); // window off (default) — rank in isolation
+        }
+        let Some(doc) = self.document.as_ref() else {
+            return String::new();
+        };
+        let t = text.trim();
+        let Some(i) = doc.iter().position(|s| s.trim() == t) else {
+            return String::new();
+        };
+        let lo = i.saturating_sub(self.context_sentences);
+        let hi = (i + self.context_sentences + 1).min(doc.len());
+        doc[lo..hi]
+            .iter()
+            .map(|s| s.trim())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     /// The `core:description` gloss the reranker reasons over for a leaf item's sense: the description
