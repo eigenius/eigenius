@@ -43,8 +43,9 @@ use std::sync::Arc;
 use eigenius_kernel::bootstrap::bootstrap_persistent;
 use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::{
-    extract_abbreviations, glossary_resources, ground_abbreviation, is_nonprose, pretty_term,
-    segment_sentences, tokenize, Identity, Lemmatizer, LexicalIndex, LexiconAugmentation, Parser,
+    abbreviation_resources, extract_abbreviations, glossary_resources, ground_abbreviation,
+    is_nonprose, pretty_term, segment_sentences, tokenize, AbbreviationBinding, Identity,
+    Lemmatizer, LexicalIndex, LexiconAugmentation, Parser,
 };
 use eigenius_kernel::layer::{resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -4045,6 +4046,169 @@ fn dive_near_encoded() {
     println!("units with 2–16 readings: {n_dive}");
 }
 
+/// **SPIKE — named-entity glossary (D63 §2a, the third extraction source).** Unit 4 ("Project
+/// Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines
+/// compared to MSS cell lines.") is the last grammar gap, but the grammar DERIVES its structure — with
+/// a non-verb compound head it parses (probe: "Gene Achilles and gene DRIVE identified WRN as … → 12
+/// readings"). The gap is caused solely by "project" being noun+verb: the verb entries crowd the
+/// coordinated-subject beam and the gold nominal reading is pruned. This spike registers the two
+/// research-project NAMES as doc-local **named individuals** (`cat_np(Entity, sg)`), reusing the
+/// abbreviation ALIAS machinery ([`abbreviation_resources`]), so the multiword name SHADOWS the
+/// "project"-as-verb reading at those positions. If unit 4 parses, the named-entity source is the
+/// right structural fix (a targeted extension of the existing glossary, not a new subsystem) — to be
+/// generalized from the two hardcoded names to a capitalized-multiword recognizer.
+///
+///     EIGENIUS_DB_SNAPSHOT=<snap> cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       spike_named_entity_closes_unit4 -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed spike; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn spike_named_entity_closes_unit4() {
+    use eigenius_kernel::ontology::resource::{Resource, Value};
+    use eigenius_kernel::ontology::well_known as wk;
+
+    let Some(path) = snapshot_path() else { return };
+    // Open the backend directly (unlike `open_head`, which drops it): the chained doc layers below are
+    // built `with_persistent(backend)` so their value indexes populate LAZILY. Building a `LexicalIndex`
+    // over an IN-MEMORY layer chained on the 7.6M-resource persistent head materializes the whole parent
+    // (OOM) — the served path resolves lazily, so the doc layers must share the same backend.
+    let work = working_copy(&path);
+    let store = Arc::new(RocksStore::open(&work).expect("open RocksStore snapshot"));
+    let backend: Arc<dyn PersistentBackend> = store;
+    let Ok(ctx) = bootstrap_persistent(Arc::clone(&backend)) else {
+        eprintln!("SKIP: cannot resume the snapshot");
+        return;
+    };
+    let head = Arc::clone(ctx.head());
+    let lem = morphy();
+    let p = |s: &str| Iri::parse(s).expect("valid iri");
+
+    // The two named research projects, as they surface in the paper. A general extractor would
+    // recognize capitalized multiword "Project X" names; the spike hardcodes the two to validate the
+    // mechanism before designing the recognizer.
+    let names = [
+        ("Project Achilles", "project_achilles"),
+        ("project DRIVE", "project_drive"),
+    ];
+
+    // 1. Mint a doc-local NAMED INDIVIDUAL for each (an instance of lexicon:Entity, NOT a class) and
+    //    chain them onto head so `abbreviation_resources` resolves each as an individual (→ cat_np).
+    let mut b0 = LayerBuilder::new("doc-names-ni", Some(Arc::clone(&head)));
+    for (surface, key) in names {
+        let mut ni = Resource::new(p(&format!("urn:eigenius:doc:ni_{key}")));
+        ni.set(
+            p(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(p("urn:eigenius:lexicon:Entity"))]),
+        );
+        ni.set(
+            p(wk::DESCRIPTION),
+            Value::String(format!(
+                "Doc-local named individual: research project {surface:?}"
+            )),
+        );
+        b0.add_resource(ni).expect("add named individual");
+    }
+    let l1 = Arc::new(b0.build(LayerStorage::with_persistent(Arc::clone(&backend))));
+    backend
+        .store_layer(&l1)
+        .expect("persist named-individual layer");
+
+    // 2. Emit the `cat_np(Entity, sg)` proper-noun alias for each name (the individual arm of
+    //    `abbreviation_resources`), then chain entries + individuals into the parse layer.
+    let mut b1 = LayerBuilder::new("doc-names", Some(Arc::clone(&l1)));
+    for (surface, key) in names {
+        let ci = format!("urn:eigenius:doc:ni_{key}");
+        let binding = AbbreviationBinding {
+            abbr: surface,
+            long_form: surface,
+            concept_iri: &ci,
+            doc_ns: "urn:eigenius:doc",
+        };
+        let rs = abbreviation_resources(&l1, &binding)
+            .unwrap_or_else(|| panic!("emit named-entity entry for {surface:?}"));
+        // The emitted alias MUST be the proper-noun (`cat_np`) arm — a `cat_n` here means the minted
+        // individual was misclassified as a class (the `instance_type_classes` ResourceRef/String bug).
+        let is_cat_np = rs.iter().any(|r| {
+            r.get(&p("urn:eigenius:lexicon:cat"))
+                .and_then(|v| {
+                    eigenius_kernel::program::eigentt_type_mirror::decode_type(v, &l1).ok()
+                })
+                .is_some_and(|c| matches!(&c, Exp::InductiveCtor(_, n, _) if n == "cat_np"))
+        });
+        assert!(
+            is_cat_np,
+            "named individual {surface:?} must emit a cat_np proper-noun alias"
+        );
+        for r in rs {
+            b1.add_resource(r).expect("add entry");
+        }
+    }
+    let l2 = Arc::new(b1.build(LayerStorage::with_persistent(Arc::clone(&backend))));
+    backend
+        .store_layer(&l2)
+        .expect("persist named-entity lexical-entry layer");
+
+    // 3. Probes SHORTEST-FIRST (each flushes before the next, so a heavy long parse can't hide the
+    //    cheap results). Each of these GAPPED at 0 before the names were registered — the bare-name and
+    //    non-verb-compound analogues parse ("Achilles and DRIVE are essential" → 4; "Gene Achilles and
+    //    gene DRIVE identified WRN as … compared to …" → 12), proving the grammar derives the structure
+    //    and the only obstacle is "project"'s noun/verb ambiguity crowding the coordinated-subject beam.
+    //    Unit 4 is the full 20-token target; run it only when asked (`EIGENIUS_SPIKE_FULL=1`).
+    let index = build_index(&l2);
+    let full = std::env::var("EIGENIUS_SPIKE_FULL")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    let mut probes: Vec<(&str, &str)> = vec![
+        (
+            "P6 are-essential",
+            "Project Achilles and project DRIVE are essential.",
+        ),
+        (
+            "single subj+as",
+            "Project Achilles identified WRN as the top dependency.",
+        ),
+        (
+            "coord subj+as",
+            "Project Achilles and project DRIVE identified WRN as the top dependency.",
+        ),
+    ];
+    if full {
+        probes.push(("unit 4 (full)", "Project Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines."));
+    }
+    let mut readings = std::collections::BTreeMap::<&str, usize>::new();
+    for (label, s) in probes {
+        let f = index.parse(s, &lem);
+        eprintln!("[{label:16}] → {} reading(s)  «{s}»", f.len());
+        for it in f.iter().take(2) {
+            eprintln!("    reading: {}", pretty_term(it.sem()));
+        }
+        use std::io::Write;
+        let _ = std::io::stderr().flush();
+        readings.insert(label, f.len());
+    }
+    // The minimal coordinated case (6 tokens, no beam pressure) is the load-bearing assertion.
+    assert!(
+        readings["P6 are-essential"] > 0,
+        "SPIKE FAILED: the minimal coordinated case still gaps after registering the project names as named individuals"
+    );
+    assert!(
+        readings["coord subj+as"] > 0,
+        "SPIKE FAILED: coordinated named individuals + `identify … as` still gaps"
+    );
+    if full {
+        assert!(
+            readings["unit 4 (full)"] > 0,
+            "SPIKE FAILED: full unit 4 still gaps with the project names as named individuals"
+        );
+    }
+    eprintln!(
+        "\nSPIKE PASSED: registering the project names as cat_np named individuals closes the coordinated-subject gap \
+         (P6 {}, coord+as {}{}) — the named-entity source is the fix; grammar-gap → 0. Set EIGENIUS_SPIKE_FULL=1 for the full unit 4.",
+        readings["P6 are-essential"],
+        readings["coord subj+as"],
+        full.then(|| format!(", unit 4 {}", readings["unit 4 (full)"])).unwrap_or_default(),
+    );
+}
+
 /// **Single-sentence forest tracer** — parse one arbitrary sentence (`EIGENIUS_TRACE_SENTENCE`,
 /// default the DNA-repair-pathway probe) through the packed path with the DB-backed lexicon, so the
 /// `EIGENIUS_TRACE_FOREST` instrument (`chart::trace`) fires and prints the derivation forest to
@@ -4067,31 +4231,11 @@ fn trace_one_sentence() {
         .unwrap_or_else(|_| "A DNA repair pathway is essential.".to_string());
     let f = index.parse(&text, &lem);
 
-    // Erase every SENSE identifier (a run of >= 4 digits — CUIs, WordNet offsets/synsets) to `§`, so
-    // two readings that differ only in WHICH sense fills a slot collapse to ONE structural skeleton.
-    // This separates STRUCTURAL multiplicity (distinct bracketings) from SENSE multiplicity (same
-    // bracketing, different lexical senses) — the question for the residual-ambiguity root cause.
-    fn erase(s: &str) -> String {
-        let mut out = String::new();
-        let mut run = String::new();
-        for c in s.chars() {
-            if c.is_ascii_digit() {
-                run.push(c);
-                continue;
-            }
-            if !run.is_empty() {
-                out.push_str(if run.len() >= 4 { "§" } else { &run });
-                run.clear();
-            }
-            out.push(c);
-        }
-        if !run.is_empty() {
-            out.push_str(if run.len() >= 4 { "§" } else { &run });
-        }
-        out
-    }
+    // Skeletonise via the SHARED `erase_senses` (whole-token normalisation) so the skeletons printed
+    // here are byte-identical to the ones the faithfulness gate computes — otherwise a pin copied from
+    // this trace would silently fail to match. See `erase_senses` for the normalisation rule.
     let sems: Vec<String> = f.iter().map(|it| pretty_term(it.sem())).collect();
-    let skels: std::collections::BTreeSet<String> = sems.iter().map(|s| erase(s)).collect();
+    let skels: std::collections::BTreeSet<String> = sems.iter().map(|s| erase_senses(s)).collect();
     println!(
         "\n=== {text} → {} reading(s) | {} structural skeleton(s) | sense× = {:.1} ===",
         f.len(),
