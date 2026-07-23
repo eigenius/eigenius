@@ -501,10 +501,21 @@ impl Parser {
             // so it can coordinate before meeting the head noun. This is the universal leaf point —
             // after ALL seeding paths — mirroring the leaf `raise_nps` above; composed cells lift via
             // the `ModLift` unary shift.
-            let mods: Vec<Item> = row[i]
+            let mut mods: Vec<Item> = row[i]
                 .iter()
                 .flat_map(super::super::rules::combinators::mod_lifts)
                 .collect();
+            // Attributive past-participle lift, GATED: only when this surface has NO lexical adjective
+            // (else the WordNet adjective already covers the attributive use, and the rule's
+            // reduced-passive reading would just double-seed — "reduced"/"increased"). Where there is
+            // no adjective ("predicted"), the rule is the only source of the attributive reading.
+            if !row[i].iter().any(|it| is_adjective_cat(it.cat())) {
+                let parts: Vec<Item> = row[i]
+                    .iter()
+                    .flat_map(super::super::rules::combinators::participial_lifts)
+                    .collect();
+                mods.extend(parts);
+            }
             row[i].extend(mods);
             // A leaf cell is non-top iff the sentence has >1 token; the beam caps it across all
             // candidate lemmas/POS of the token (`sense_cap` already bounds it per-lemma).

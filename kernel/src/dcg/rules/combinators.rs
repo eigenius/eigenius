@@ -620,6 +620,78 @@ pub(crate) fn mod_lifts(it: &Item) -> Vec<Item> {
     Vec::new()
 }
 
+/// Pre-nominal attributive PAST PARTICIPLE lift — SEPARATE from [`mod_lifts`] so seeding can GATE it.
+/// A transitive `(S[dcl,pss]\NP)/NP` → a reduced-passive modifier `cat_mod(λx. ∃a. TV(x, a))`
+/// ("predicted deficiency" = a deficiency x that was predicted by some a). English forms this for ANY
+/// transitive participle, but WordNet lists only some as adjectives ("increased"/"reduced" yes,
+/// "predicted" no), so it is a RULE, not lexical coverage.
+///
+/// Two guards against double-seeding, layered: (1) [`super::super::parse::seed`] applies this at LEAVES
+/// only when the surface has NO adjective entry — where WordNet already supplies the adjective the
+/// redundant reading is never generated; (2) the compose-time `ModLift` shift applies it ungated (no
+/// surface to check), where the cost PENALTY ([`PARTICIPIAL_MOD_PENALTY`]) keeps it below a real
+/// adjective. Additive: the participle stays available for its passive-VP uses ("is predicted").
+pub(crate) fn participial_lifts(it: &Item) -> Vec<Item> {
+    match participial_restrictor(it.cat(), it.sem()) {
+        Some(restr) => vec![Item::from_parts(
+            cat_mod_cat(),
+            restr,
+            Combinator::Other,
+            it.cost()
+                .saturating_add(Cost::from_sense_rank(PARTICIPIAL_MOD_PENALTY)),
+        )],
+        None => Vec::new(),
+    }
+}
+
+/// Extra cost on a rule-derived participial modifier, so a real lexical adjective (e.g. WordNet's
+/// `increased`/`reduced`) outranks it and the eventive reduced-passive reading only surfaces where no
+/// adjective exists. > [`COMPOUND_STEP_PENALTY`] (8), a clear deprioritisation.
+const PARTICIPIAL_MOD_PENALTY: u32 = 12;
+
+/// The reduced-passive restrictor `λx. ∃a:Entity. TV(x, a)` of a transitive past participle
+/// `(S[dcl,pss]\NP)/NP` (sem `TV`), or `None` for any other category. The `∃` is the impredicative
+/// encoding used by `closed-class.esl`'s `passive_sem` (`∀C:Prop. (∀a. TV(x,a) → C) → C`), so the
+/// modifier reading and the finite short passive denote identically.
+fn participial_restrictor(cat: &Exp, tv: &Exp) -> Option<Exp> {
+    use super::super::category::is_ctor;
+    let [vp, obj] = is_ctor(cat, "fwd")? else {
+        return None;
+    };
+    is_ctor(obj, "cat_np")?;
+    let [s, subj] = is_ctor(vp, "bwd")? else {
+        return None;
+    };
+    is_ctor(subj, "cat_np")?;
+    let [_typ, voice] = is_ctor(s, "cat_s")? else {
+        return None;
+    };
+    if !matches!(voice, Exp::InductiveCtor(_, n, _) if n == "pss") {
+        return None;
+    }
+    let entity =
+        Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:eigenius:lexicon:Entity").ok()?);
+    let (x, a, c) = ("__part_x", "__part_a", "__part_C");
+    // TV(x, a) — object-first: the patient x (the modified noun) then the agent a.
+    let tv_xa = Exp::App(
+        Box::new(Exp::App(Box::new(tv.clone()), Box::new(Exp::Var(x.into())))),
+        Box::new(Exp::Var(a.into())),
+    );
+    // ∀a:Entity. TV(x,a) → C
+    let inner = Exp::Pi(
+        Patt::Var(a.into()),
+        Box::new(entity),
+        Box::new(Exp::Arrow(Box::new(tv_xa), Box::new(Exp::Var(c.into())))),
+    );
+    // ∀C:Prop. (∀a. …) → C   [= ∃a. TV(x,a)]
+    let exists = Exp::Pi(
+        Patt::Var(c.into()),
+        Box::new(Exp::Sort(0)),
+        Box::new(Exp::Arrow(Box::new(inner), Box::new(Exp::Var(c.into())))),
+    );
+    Some(Exp::Lam(Patt::Var(x.into()), Box::new(exists)))
+}
+
 /// Apply a `cat_mod` modifier to a head noun: `cat_mod(restr) + cat_n(C, num) →
 /// cat_n(Σx:C. And(P, restr(x)), num)`, via `refine_conjoin` over the CONCRETE `C` (so the restrictor
 /// type-checks at `x:C` directly — no abstract `C`). The restrictor is `restr(x)` un-reduced (`App`),
@@ -1403,6 +1475,34 @@ mod dispatch_tests {
         assert_eq!(got.cat(), &n(expected.clone()));
         assert_eq!(got.sem(), &expected);
         assert_eq!(got.prov(), Combinator::Compound);
+    }
+
+    #[test]
+    fn transitive_past_participle_lifts_to_a_penalised_reduced_passive_modifier() {
+        // `(S[dcl,pss]\NP)/NP` "predicted" → cat_mod(λx. ∃a. predict(x, a)), at a cost penalty so a real
+        // lexical adjective outranks it where one exists (bounding the double-seeding ambiguity).
+        let entity_np = np(cls("urn:eigenius:lexicon:Entity"));
+        let s_pss = ct("cat_s", vec![ct("dcl", vec![]), ct("pss", vec![])]);
+        let participle = ct(
+            "fwd",
+            vec![ct("bwd", vec![s_pss, entity_np.clone()]), entity_np],
+        );
+        let lifts = participial_lifts(&mk_item(participle, ax("urn:eigenius:lexicon:predict")));
+        assert_eq!(lifts.len(), 1, "one participial modifier");
+        assert_eq!(lifts[0].cat(), &cat_mod_cat(), "lifts to cat_mod");
+        assert_eq!(
+            lifts[0].cost().sense_rank,
+            PARTICIPIAL_MOD_PENALTY,
+            "carries the deprioritisation penalty"
+        );
+        assert!(
+            matches!(lifts[0].sem(), Exp::Lam(..)),
+            "the restrictor is λx. …"
+        );
+        // A plain NP is not a participle → no participial lift; and `mod_lifts` (adjectives) ignores it.
+        assert!(
+            participial_lifts(&mk_item(np(cls("urn:eigenius:lexicon:Gene")), Exp::Unit)).is_empty()
+        );
     }
 
     #[test]

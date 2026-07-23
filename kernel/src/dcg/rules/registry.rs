@@ -703,9 +703,14 @@ fn apply_bare_np(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
     g.bare_nominal_shifts(it)
 }
 
-/// Pre-nominal modifier lift: a modifier-eligible item → a standalone `cat_mod` (`combinators::mod_lifts`).
+/// Pre-nominal modifier lift on COMPOSED cells: an adjective → `cat_mod` (`mod_lifts`), plus a
+/// transitive past participle → a reduced-passive `cat_mod` (`participial_lifts`). Ungated here — a
+/// composed span has no single surface to check for an adjective sibling — so the participial's cost
+/// penalty is what bounds it; the leaf gate lives in `parse::seed` (adjective-present ⇒ suppressed).
 fn apply_mod_lift(_g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
-    super::combinators::mod_lifts(it)
+    let mut v = super::combinators::mod_lifts(it);
+    v.extend(super::combinators::participial_lifts(it));
+    v
 }
 
 /// Forward bounded type-raise: a name `NP` → `S/(S\NP)`.
