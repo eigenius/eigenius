@@ -594,6 +594,35 @@ fn erase_senses_normalises_hole_binder_names() {
     );
 }
 
+/// D63 Defect 2b — the acronyms MSI/MSS are DEFINED (parenthetically) only on the ORIGINAL page, not
+/// the CNL. Schwartz-Hearst over the source text must bind both, so `MSS` grounds to microsatellite-
+/// stable, not the `C0024814` "Marinesco-Sjogren syndrome" acronym collision the lexicon otherwise
+/// returns. Snapshot-free: deterministic extraction only (the sweep additionally layers the LLM
+/// proposer under `use-llm`).
+#[test]
+fn schwartz_hearst_binds_msi_mss_from_the_original_page() {
+    let source = std::fs::read_to_string(WRN_PAGE).expect("original first-page-cleaned.txt");
+    let defs = extract_abbreviations(&source);
+    let has = |sf: &str, lf: &str| {
+        defs.iter()
+            .any(|d| d.short_form == sf && d.long_form.to_lowercase().contains(lf))
+    };
+    assert!(
+        has("MSS", "microsatellite stable"),
+        "Schwartz-Hearst must bind MSS -> microsatellite stable from the source; got {:?}",
+        defs.iter()
+            .map(|d| (d.short_form.clone(), d.long_form.clone()))
+            .collect::<Vec<_>>(),
+    );
+    assert!(
+        has("MSI", "microsatellite instability"),
+        "and MSI -> microsatellite instability; got {:?}",
+        defs.iter()
+            .map(|d| (d.short_form.clone(), d.long_form.clone()))
+            .collect::<Vec<_>>(),
+    );
+}
+
 /// Share one [`ReplaySenseRanker`] between the parser and the miss-check.
 struct ArcReplay(std::sync::Arc<eigenius_kernel::dcg::ReplaySenseRanker>);
 
@@ -805,6 +834,22 @@ fn verbalize(sem: &Exp, vb: &Vb) -> String {
             }
             ("kind_of", 1) => return verbalize(args[0], vb),
             ("the", 1) => return format!("the {}", bare_np(args[0], vb)),
+            // Referential predication (D63 Defect 3): `the(subject-class, restrictor, x)` = "x is the
+            // {subject-class} that is {restrictor}" — the copula's referential distribution over a
+            // coordinated predicate nominal ("These groups are MSI lines, microsatellite-stable lines
+            // and indeterminate lines"). Each And-conjunct is one of these; without this case the
+            // 3-arg `the` fell through to the ⟦…⟧ bracket. `x` is usually a bound restrictor var (so
+            // `verbalize` returns ""), giving "the {class} that is {restrictor}".
+            ("the", 3) => {
+                let subj = verbalize(args[2], vb);
+                let cls = bare_np(args[0], vb);
+                let restr = verbalize(args[1], vb);
+                return if subj.is_empty() {
+                    format!("the {cls} that is {restr}")
+                } else {
+                    format!("{subj} is the {cls} that is {restr}")
+                };
+            }
             ("Possible" | "modal", 1) => return format!("possibly, {}", verbalize(args[0], vb)),
             ("speaker", _) => return "we".to_string(),
             ("anaphor", _) => return "it".to_string(),
@@ -3131,6 +3176,53 @@ fn wrn_first_page_over_full_lexicon() {
     );
     aug.added.extend(ne_aug.added);
     aug.supporting.extend(ne_aug.supporting);
+    // Abbreviation glossary (D63 Defect 2b): the CNL uses acronyms (MSI/MSS) whose DEFINITIONS live in
+    // the ORIGINAL page ("microsatellite instability (MSI)", "microsatellite stable (MSS)") — not the
+    // parsed CNL. Run the abbreviation extraction on the SOURCE document (Schwartz-Hearst, plus the live
+    // LLM proposer under `use-llm` for non-parenthetical introductions) so `MSS` grounds to
+    // microsatellite-stable rather than the `C0024814` Marinesco-Sjogren acronym collision. Merged into
+    // the same doc-scoped overlay; source = WRN_PAGE (the cleaned original) by default, `page` is the
+    // parsed CNL, so the definitions come from the source and bind the CNL's acronym surfaces.
+    let source_path = std::env::var("EIGENIUS_WRN_SOURCE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let source_text = std::fs::read_to_string(&source_path).unwrap_or_else(|_| page.clone());
+    let abbr_aug = {
+        #[cfg(feature = "use-llm")]
+        {
+            match eigenius_kernel::dcg::AnthropicAbbreviationProposer::from_env() {
+                Some(p) => {
+                    eprintln!(
+                        "abbreviation proposer: AnthropicAbbreviationProposer (live) on source"
+                    );
+                    eigenius_kernel::dcg::augment_document_only(&head, &source_text, &p, &lem)
+                }
+                None => eigenius_kernel::dcg::augment_document_only(
+                    &head,
+                    &source_text,
+                    &eigenius_kernel::dcg::NoAbbreviationProposer,
+                    &lem,
+                ),
+            }
+        }
+        #[cfg(not(feature = "use-llm"))]
+        {
+            eigenius_kernel::dcg::augment_document_only(
+                &head,
+                &source_text,
+                &eigenius_kernel::dcg::NoAbbreviationProposer,
+                &lem,
+            )
+        }
+    };
+    eprintln!(
+        "abbreviations: {:?}",
+        abbr_aug
+            .added
+            .iter()
+            .map(|b| b.provenance.surface.clone())
+            .collect::<Vec<_>>()
+    );
+    aug.added.extend(abbr_aug.added);
+    aug.supporting.extend(abbr_aug.supporting);
     eprintln!(
         "augmentation: {} OOV grounded + injected, {n_names} named-entity individual(s), {} residual OOV",
         aug.added.len() - n_names,
