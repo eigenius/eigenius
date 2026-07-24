@@ -1361,47 +1361,16 @@ resource lexicon:less_deg : lexicon:LexicalEntry {
     lexicon:sense    = "less.deg";
     lexicon:grade    = epistemic:declared;
 }
-// (6e′) ELIDED-`than` analytic degree (D63 §8.12; d63-single-skeleton-defects.md, CCGbank reference).
-// CCGbank categorises `than` as an OPTIONAL post-modifier, so "more/less X" is complete on its own —
-// the `((S[adj]\NP)/cat_pp_than)/cat_measure` above makes `than` OBLIGATORY, which is exactly why
-// "less dependent ON WRN" (no `than`, the corpus's relational-comparative form) gaps. These bare
-// `(S[adj]\NP)/cat_measure` variants supply the comparison STANDARD anaphorically (`lexicon:anaphor` →
-// an OPEN parse the D64 resolver fills — the elided comparison target), mirroring the synthetic
-// comparative's `cmp_attrib_sem`. Additive: the explicit-`than` entries above still fire for "more X
-// than Y". (Follow-on: refactor `than` itself to the CCGbank post-modifier `((S[adj]\NP)\(S[adj]\NP))/
-// {NP,PP}` to also cover "than [PP]".)
-resource lexicon:more_deg_bare_sem : lexicon:SemTerm {
-    lexicon:term = type_expr(
-        ( fun (mu : lexicon:Entity -> core:float) => fun (x : lexicon:Entity) =>
-            measurements:gt(mu(x), mu(lexicon:anaphor))
-          : (lexicon:Entity -> core:float) -> lexicon:Entity -> Prop )
-    );
-}
-resource lexicon:more_deg_bare : lexicon:LexicalEntry {
-    core:description = "grammatical: analytic comparative degree marker, elided-`than` (anaphoric standard).";
-    lexicon:form     = "more";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_measure) );
-    lexicon:sem      = lexicon:more_deg_bare_sem;
-    lexicon:sem_type = type_expr( (lexicon:Entity -> core:float) -> lexicon:Entity -> Prop );
-    lexicon:sense    = "wn:more.a.01";
-    lexicon:grade    = epistemic:declared;
-}
-resource lexicon:less_deg_bare_sem : lexicon:SemTerm {
-    lexicon:term = type_expr(
-        ( fun (mu : lexicon:Entity -> core:float) => fun (x : lexicon:Entity) =>
-            measurements:gt(mu(lexicon:anaphor), mu(x))
-          : (lexicon:Entity -> core:float) -> lexicon:Entity -> Prop )
-    );
-}
-resource lexicon:less_deg_bare : lexicon:LexicalEntry {
-    core:description = "grammatical: analytic lesser-degree marker, elided-`than` (anaphoric standard).";
-    lexicon:form     = "less";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_measure) );
-    lexicon:sem      = lexicon:less_deg_bare_sem;
-    lexicon:sem_type = type_expr( (lexicon:Entity -> core:float) -> lexicon:Entity -> Prop );
-    lexicon:sense    = "less.deg";
-    lexicon:grade    = epistemic:declared;
-}
+// (6e′) ELIDED-`than` is a GRAMMAR SHIFT, not a lexical entry (D63 §8.12;
+// d63-single-skeleton-defects.md). "more/less X" with no `than` is complete on its own: the comparative
+// `((S[adj]\NP)/cat_pp_than)/cat_measure` above takes its measure to `(S[adj]\NP)/cat_pp_than`, and the
+// `elided_than` unary shift (kernel: dcg::rules::constructions + the UnaryKind::ElidedThan table entry)
+// saturates the pending `cat_pp_than` standard with the anaphoric placeholder `lexicon:anaphor` (→ an
+// OPEN parse the D64 resolver fills — the elided comparison target). One general rule over any
+// `X/cat_pp_than` REPLACES the former per-word `more_deg_bare`/`less_deg_bare` entries; the explicit
+// `than_marker` still supplies an overt standard for "more X than Y". (`than [PP]` — the RELATUM
+// standard "more dependent on WRN than on MSI" — is a separate two-measure relational-comparative slice,
+// not a `than` widening; see kernel/tests/comparative_than.rs.)
 
 // ── Argument-PP markers: prepositions as VERB/ADJECTIVE-subcategorized oblique complements ──
 // "contributes TO cancers", "results FROM X", "dependent ON WRN", "associated WITH Z": the head

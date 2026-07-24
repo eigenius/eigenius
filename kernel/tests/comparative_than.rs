@@ -13,9 +13,10 @@
 // limitations under the License.
 
 //! D63 §8.12 — the comparative `than` construction over a RELATIONAL adjective, end to end,
-//! snapshot-free. The comparative machinery (`than`/`cat_pp_than`, `less_deg`/`less_deg_bare`,
-//! the `cat_pp_arg` argument markers, `cat_measure`) is COMMITTED chain data from the
-//! bootstrapped `ontologies/lexicon/closed-class.esl`; the fixture adds only the content word —
+//! snapshot-free. The comparative machinery (`than`/`cat_pp_than`, `less_deg`, the `elided_than`
+//! grammar shift, the `cat_pp_arg` argument markers, `cat_measure`) is COMMITTED chain data from the
+//! bootstrapped `ontologies/lexicon/closed-class.esl` + kernel grammar; the fixture adds only the
+//! content word —
 //! a relational adjective `dependent` shaped EXACTLY as the WordNet importer emits a
 //! gloss-governed adjective (`cat_measure / cat_pp_arg(prep_on)`, a 2-place
 //! `deg_dependent_rel : Entity → Entity → float`) — plus the entities. No DB, no LLM, no reseed.

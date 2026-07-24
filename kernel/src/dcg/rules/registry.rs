@@ -627,6 +627,10 @@ pub(crate) enum UnaryKind {
     /// `cat_mod` (`mod_lifts`), so modifiers can coordinate before meeting the head noun. Fires on
     /// composed cells; leaves are lifted at seed time (mirroring `BareNp`).
     ModLift,
+    /// Elided-`than` standard defaulting (D63 §8.12): a comparative awaiting its `than` complement,
+    /// `X / cat_pp_than` → `X` with the standard bound to the anaphoric placeholder (`elided_than`),
+    /// an OPEN parse. Replaces the `more_deg_bare`/`less_deg_bare` lexical entries.
+    ElidedThan,
 }
 
 /// A **composed-cell unary shift** (Phase 2c/2d): its [`UnaryKind`] tag and how it applies to one
@@ -654,11 +658,13 @@ impl UnaryShift {
     }
 }
 
-/// The ordered composed-cell shift table (all `const`). **ORDER IS LOAD-BEARING**: coordination
-/// completion, then bare-nominal, then type-raise (so the raise sees the shifted NPs), then fronted
-/// participial — matching the CKY. Both drivers iterate this in order, each shift reading the cell
-/// state left by the previous.
-static UNARY_SHIFTS: [UnaryShift; 5] = [
+/// The ordered composed-cell shift table (all `const`). **ORDER IS LOAD-BEARING**: modifier-lift,
+/// coordination completion, elided-`than` completion, bare-nominal, then type-raise (so the raise sees
+/// the shifted NPs), then fronted participial — matching the CKY. Both drivers iterate this in order,
+/// each shift reading the cell state left by the previous. Elided-`than` sits after coordination and
+/// before the NP shifts: its input `X/cat_pp_than` and output `S[adj]\NP` are untouched by the others,
+/// so its position only keeps it out of `ModLift` (no attributive comparative modifier is minted).
+static UNARY_SHIFTS: [UnaryShift; 6] = [
     UnaryShift {
         kind: UnaryKind::ModLift,
         name: "mod_lift",
@@ -668,6 +674,11 @@ static UNARY_SHIFTS: [UnaryShift; 5] = [
         kind: UnaryKind::CoordComplete,
         name: "coord_complete",
         apply: apply_coord_complete,
+    },
+    UnaryShift {
+        kind: UnaryKind::ElidedThan,
+        name: "elided_than",
+        apply: apply_elided_than,
     },
     UnaryShift {
         kind: UnaryKind::BareNp,
@@ -701,6 +712,17 @@ fn apply_coord_complete(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<It
 /// Bare-nominal shift: a plural/mass `cat_n` → the copula kind-subject edge + raised bare-argument NPs.
 fn apply_bare_np(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
     g.bare_nominal_shifts(it)
+}
+
+/// Elided-`than` standard defaulting: a comparative `X / cat_pp_than` → `X` with the standard bound to
+/// the anaphoric placeholder, freshened to this span (`$anaphor$i_j`) exactly as a pronoun's hole — so
+/// the completed clause is an OPEN parse the D64 resolver fills.
+fn apply_elided_than(g: &Grammar, it: &Item, span: (usize, usize)) -> Vec<Item> {
+    let (i, j) = span;
+    elided_than(it.cat(), it.sem(), &g.layer)
+        .map(|(cat, sem)| Item::with_cost(cat, freshen_anaphor(&sem, &hole_base(i, j)), it.cost()))
+        .into_iter()
+        .collect()
 }
 
 /// Pre-nominal modifier lift on COMPOSED cells: an adjective → `cat_mod` (`mod_lifts`), plus a

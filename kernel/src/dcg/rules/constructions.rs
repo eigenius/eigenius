@@ -977,6 +977,27 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
     Some((ss, new_sem))
 }
 
+/// Elided-`than` standard defaulting (D63 §8.12): a comparative that is still awaiting its `than`
+/// complement — category `X / cat_pp_than`, sem `λstd. body(std)` — completes with an ANAPHORIC
+/// standard. It yields `X` with sem `body(anaphor)` (the `lexicon:anaphor` placeholder, freshened by
+/// the caller like any referent hole → an OPEN parse the D64 resolver fills from discourse). This is
+/// the general "`than` is optional" rule: "less dependent on WRN" (no `than`) resolves its comparison
+/// target from context. It REPLACES the per-word bare degree entries (`more_deg_bare`/`less_deg_bare`)
+/// with one shift; because only the analytic adjective comparative yields the outer shape
+/// `(S[adj]\NP) / cat_pp_than` (the measure/cardinality comparatives nest `cat_pp_than` under a `bwd`),
+/// it fires exactly where those entries did — a behaviour-preserving collapse, not a widening.
+pub fn elided_than(cat: &Exp, sem: &Exp, _layer: &Arc<Layer>) -> Option<(Exp, Exp)> {
+    let [result, arg] = is_ctor(cat, "fwd")? else {
+        return None;
+    };
+    let [] = is_ctor(arg, "cat_pp_than")? else {
+        return None;
+    };
+    let anaphor = Exp::EigonAxiom(Iri::parse("urn:eigenius:lexicon:anaphor").ok()?);
+    let body_at_hole = Exp::App(Box::new(sem.clone()), Box::new(anaphor));
+    Some((result.clone(), body_at_hole))
+}
+
 /// Whether `s` is a declarative clause `cat_s(dcl, _)` — the result type a relative
 /// clause body abstracts over (D63 §8.9). The finiteness is irrelevant here (a VP
 /// result is `fin`, an object-extraction `S/NP` result is the `T` target's `fin`);
