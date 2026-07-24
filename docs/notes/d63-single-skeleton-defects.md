@@ -177,6 +177,34 @@ on").
   adds the gated relational reading). A lightweight middle ground: tag `prep_on` as the adjective's
   argument without a full relational sem.
 
+### Reference check — CCGbank on `than` (core-en has nothing)
+
+core-en does NOT cover comparatives/`than` at all (adjectives are `n/n` + predicative + a measure
+`np/np`; no PP complement, no degree machinery) — not a reference here. **CCGbank** (gold-standard CCG
+over real WSJ text, `references/openccg/ccgbank/data/*.auto`) categorizes `than` as an OPTIONAL
+POST-MODIFIER, not a complement of `more`/`less`:
+
+```text
+((S[adj]\NP)\(S[adj]\NP))/NP      than   — post-modifies an adjectival predicate, over an NP
+((S[adj]\NP)\(S[adj]\NP))/S[inv]  than   — … over an inverted clause
+(NP\NP)/NP   (NP\NP)/PP   (NP\NP)/S[pss] than  — nominal comparatives (incl. over a PP)
+((S\NP)\(S\NP))/NP   PP/NP   conj         than  — verbal / other
+```
+
+Implications for Fix A's comparative half:
+
+- `than [Y]` is an `X\X` post-modifier attaching to an ALREADY-COMPLETE `S[adj]\NP`. Our
+  `more`/`less` = `((S[adj]\NP)/cat_pp_than)/cat_measure` makes `than` an OBLIGATORY forward complement —
+  the non-standard choice, and exactly why "less dependent on WRN" (no `than`) gaps (the `/cat_pp_than`
+  slot never fills). Standard CCG makes "more/less X" complete on its own → **elided-than is free** (= my
+  piece (b), now reference-confirmed).
+- CCGbank `than` also takes a **PP** (`(NP\NP)/PP`), so "…than on MSS" is standard — our NP-only `than`
+  is the deviation.
+
+So pieces (b) + the than-PP gap collapse into ONE reference-grounded change: refactor `than` to the
+CCGbank optional post-modifier `((S[adj]\NP)\(S[adj]\NP))/{NP,PP,S}` and drop the `/cat_pp_than`
+obligation from `more`/`less`. Aligns us with the gold standard and is the correct structural shape.
+
 ### Relationship / sequencing
 
 NOT mutually exclusive. Fix B is the productive baseline; Fix A the precise refinement gated on frames,
