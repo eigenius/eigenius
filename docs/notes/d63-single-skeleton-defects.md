@@ -49,9 +49,60 @@ open predicate, not a closed proposition (yet the unit is bucketed parsed, not o
 verification: is this the intended copula-predication of a coordinated NP complement, or is the subject
 dropped? 10 sense-variants, 1 skeleton.
 
+## Systematic analysis (confirmed by frame-probing)
+
+### Defect 1 — root cause + scope (CONFIRMED broad)
+
+Probes (cap-only, all structural readings):
+
+- "WRN was essential." → `gt(essential(WRN), std)` — predicative gradable adjective works ALONE.
+- "The gene was dependent on WRN." → `And(gt(dependent(gene), std), prep_on(gene, WRN))`.
+- "WRN was essential for proliferation." → `And(gt(essential(WRN), std), prep_for(WRN, proliferation))`.
+- "MSI is associated with responses." → `And(gt(assoc(MSI), std), prep_with(MSI, responses))`.
+
+The PP is ALWAYS attached as a SEPARATE `And` conjunct `prep_X(subj, obj)` — "subj is Adj AND subj is
+X-related-to obj" — never as the adjective's complement. **Root cause:** a WordNet adjective's sem is a
+one-place gradable property `gt(deg_a(x), std_a)` with NO relatum slot, so "dependent"/"essential" cannot
+consume "on WRN"/"for proliferation" as an argument; the copula's predicative-complement path conjoins
+the adjective and the PP over the shared subject. The intended relational reading `dependent_on(gene,
+WRN)` does not exist in the parse space. Recurs across: dependent-on / essential-for / associated-with /
+dispensable-in / concordant-with — several of the ambiguity-tail units.
+
+**Fix options:** (a) a rule that reinterprets `predicative-adjective + PP` as a two-place relation —
+requires the adjective to expose a relatum, which the one-place WordNet sem does not, so this needs a
+relational adjective encoding (deep); (b) accept the `And(gt(adj(subj)), prep_X(subj, obj))` conjunction
+as the canonical CNL encoding, SUPPRESS the competing attributive reading (the "dependent WRN protein"
+that beat it in unit 4), and let the And-reading pin. Difficulty: MEDIUM–HARD (a semantic-modeling
+decision, not a local fix).
+
+### Defect 2 — two independent sense/grounding levers (CONFIRMED)
+
+- **2a "some" reification.** "Some cancers are common." → BOTH skeletons carry `compound_kind(cancer, §)`
+  where `§` = `C0205392` "Some (qualifier value)": "some" reifies as a NOUN compounded onto the head, and
+  the existential/determiner reading is ABSENT (no GQ/exists structure in any reading). Same family as the
+  T078/T080 `and`/`For`/`each` reifications, but a qualifier-value colliding with a DETERMINER. **Fix:**
+  importer-side skip of determiner-colliding qualifier concepts (extend the function-word filter) and/or a
+  winning determiner entry for "some" (needs a reseed). Difficulty: MEDIUM.
+- **2b "MSS" mis-grounded.** "MSS lines are common." is structurally fine (`subclass_of(MSS-line,
+  common)`) but "MSS" grounds to `C0024814` "Marinesco-Sjogren syndrome" (an abbreviation collision), not
+  "microsatellite stable" — MSS has no parenthetical definition in the CNL so the Schwartz-Hearst
+  glossary never binds it. **Fix:** a document-glossary entry for MSS (definitions-section / LLM
+  abbreviation source / acronym path). Difficulty: EASY–MEDIUM.
+
+### Defect 3 — coordinated predicative complement (CONFIRMED structural)
+
+"The groups are MSI lines and MSS lines." → `And(λG#0. the(class, MSI-line, G#0), λG#0. the(class,
+MSS-line, G#0))` — the SAME open-λ coordinated predicate as with "These" (so it is NOT the demonstrative
+going anaphoric / D64-open; it is the COORDINATION). Single-predicate copula applies the subject (the
+pinned "These MSI cell lines were distinct" is closed); coordinating the predicative complement ("are A
+and B") instead yields an `And` of open predicates with the subject apparently unapplied. **Needs a
+code-level read** of the copula + predicative-complement coordination to confirm whether the resulting
+sem is a closed `Prop` (subject consumed elsewhere) or a genuinely open predicate (bug). Difficulty:
+MEDIUM (structural; investigate before committing to a fix).
+
 ## Takeaway
 
 Single-skeleton is a WEAK correctness signal — 3 of 4 checked were wrong. The faithfulness corpus grows
-only on VERIFIED readings (now 20/20); these 3 units stay UNPINNED until fixed. Defect 1 (predicative
-adjective + PP) is a clean grammar target; Defect 2 is two sense/glossary levers; Defect 3 needs a
-structural read before it is a target.
+only on VERIFIED readings (now 20/20); these 3 units stay UNPINNED until fixed. Priority read:
+**Defect 1** is the broadest (correctness + a multiplicity lever across the tail) but a semantic-modeling
+decision; **Defect 2** is two clean sense/glossary levers; **Defect 3** needs a code read first.
