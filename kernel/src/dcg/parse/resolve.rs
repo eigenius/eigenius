@@ -33,12 +33,19 @@ impl Parser {
     /// the check fail and yields `None`, exactly the kernel veto that keeps the LLM from having
     /// the last word. A leftover (unbound) hole likewise fails closed.
     pub fn resolve_open(&self, open: &OpenParse, bindings: &[(String, Exp)]) -> Option<Item> {
-        let mut rho = Rho::Nil;
-        for (var, ante) in bindings {
-            let v = eval(ante, &Rho::Nil).ok()?;
-            rho = rho.extend(Patt::Var(var.clone()), v);
+        // The open sem is `λ(h₀:T₀)…(hₙ:Tₙ). body` (D64 — a parametric proposition). Resolution is
+        // APPLICATION: apply each hole's antecedent in binder order (`holes[0]` is the outermost binder),
+        // then β-reduce. A hole with no binding ⇒ `None` (fail closed); the re-gate (empty Γ) rejects an
+        // antecedent that itself still carries a free variable.
+        let mut term = open.item.sem().clone();
+        for hole in &open.holes {
+            let ante = bindings
+                .iter()
+                .find(|(v, _)| *v == hole.var)
+                .map(|(_, a)| a)?;
+            term = Exp::App(Box::new(term), Box::new(ante.clone()));
         }
-        let nf = readback_val(0, &eval(open.item.sem(), &rho).ok()?);
+        let nf = readback_val(0, &eval(&term, &Rho::Nil).ok()?);
         let expected = denote_cat(open.item.cat()).ok()?;
         let expected_val = eval(&expected, &Rho::Nil).ok()?;
         // Closed re-gate: empty Γ, so any leftover hole is an unbound variable ⇒ fail closed.

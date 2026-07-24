@@ -61,15 +61,17 @@ impl Parser {
         *forest = out;
     }
 
-    /// Classify a full-span candidate as a CLOSED felicitous parse or an OPEN one carrying
-    /// unresolved holes (D64), or reject it. Generalizes [`Self::reduced_felicitous`] to
-    /// hole-bearing sems: each hole is a free variable, so it is bound in `rho` to a generic neutral
-    /// (else Pure `eval` errors `UnboundVariable`) and in `gamma` to **its own type** so `check`
-    /// types it. `hole_specs` carries every candidate hole `(base name, type, kind)`; a candidate
-    /// mentions only the subset it actually carries — currently `EntityRef` holes (`Entity`, in
-    /// argument position: a pronoun/possessor referent → D64). `Neut::Gen(0, base)` reads back as
-    /// `Var("{base}0")`, so the gamma key and reported hole name use that readback form. With no holes
-    /// present this is exactly `reduced_felicitous` (empty `rho`/`gamma`) — the closed path is unchanged.
+    /// Classify a full-span candidate as a CLOSED felicitous parse or an OPEN one (D64), or reject it.
+    /// Generalizes [`Self::reduced_felicitous`] to hole-bearing sems: at seed time each hole is a fresh
+    /// free variable, so eval binds it to a generic neutral (else Pure `eval` errors `UnboundVariable`)
+    /// to reach the normal form. For an OPEN parse the normal form's holes are then ABSTRACTED into a
+    /// closed function `λ(hᵢ:Tᵢ). nf`, checked against `Π(hᵢ:Tᵢ). ⟦cat⟧` (see [`OpenParse`]) — the same
+    /// verification as a Γ-bound `nf`, but now the sem is a self-contained term and resolution is
+    /// application. `hole_specs` carries every candidate hole `(base name, type, kind)`; a candidate
+    /// mentions only the subset it actually carries — currently `EntityRef` holes (`Entity`, in argument
+    /// position: a pronoun/possessor referent → D64). `Neut::Gen(0, base)` reads back as `Var("{base}0")`,
+    /// so the binder + reported hole name use that readback form. With no holes present this is exactly
+    /// `reduced_felicitous` — the closed path is unchanged.
     pub(super) fn classify_felicitous(
         &self,
         it: &Item,
@@ -102,34 +104,47 @@ impl Parser {
             eprintln!("    [felicity] readback start");
         }
         let nf = felicity_readback(&evaled)?;
-        // Check the normal form under a context binding each (readback-named) hole in BOTH
-        // `rho` (a neutral value — `check` evaluates subterms, which would otherwise error on the
-        // free var) and `gamma` (its **own** type — `Entity` for a referent, the GQ type for a
-        // quantification hole). The carried `HoleInfo` reports each hole's type + kind.
-        let mut chk_rho = Rho::Nil;
-        let mut gamma: Gamma = Vec::new();
-        let mut infos: Vec<HoleInfo> = Vec::new();
-        for (base, ty_exp, kind) in &present {
-            let name = format!("{base}0");
-            chk_rho = chk_rho.extend(Patt::Var(name.clone()), Val::Nt(Neut::Gen(0, name.clone())));
-            gamma.push((name.clone(), eval(ty_exp, &Rho::Nil).ok()?));
-            infos.push(HoleInfo {
-                var: name,
+        // The holes carried by this parse — each a typed parameter (readback-named `{base}0`).
+        let infos: Vec<HoleInfo> = present
+            .iter()
+            .map(|(base, ty_exp, kind)| HoleInfo {
+                var: format!("{base}0"),
                 ty: (*ty_exp).clone(),
                 kind: (*kind).clone(),
-            });
-        }
-        let mut ctx = CheckCtx::with_layer(chk_rho, gamma, Arc::clone(&self.grammar.layer));
+            })
+            .collect();
         if dbg {
             eprintln!("    [felicity] check start");
         }
-        check(&mut ctx, &nf, &expected_val).ok()?;
-        let item = Item::from_parts(it.cat().clone(), nf, it.prov(), it.cost());
         if infos.is_empty() {
-            Some(FelicitousOutcome::Closed(item))
-        } else {
-            Some(FelicitousOutcome::Open(OpenParse { item, holes: infos }))
+            // CLOSED: `nf` is a hole-free `Prop`; check it directly against ⟦cat⟧.
+            let mut ctx =
+                CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
+            check(&mut ctx, &nf, &expected_val).ok()?;
+            let item = Item::from_parts(it.cat().clone(), nf, it.prov(), it.cost());
+            return Some(FelicitousOutcome::Closed(item));
         }
+        // OPEN (D64): ABSTRACT each hole as a typed parameter, so the sem is a CLOSED function
+        // `λ(h₀:T₀)…(hₙ:Tₙ). nf : Π(h₀:T₀)…(hₙ:Tₙ). ⟦cat⟧` — a *parametric* proposition, not a term
+        // with free variables. Resolution is then plain APPLICATION ([`Parser::resolve_open`]). Fold
+        // innermost-first so `holes[0]` is the OUTERMOST binder (the application order). The gate checks
+        // the abstraction against the Π-type (empty Γ — the binders type the holes), which is the same
+        // verification as the old Γ-bound `nf`, now inside the type theory.
+        let mut abstracted = nf;
+        let mut pi_ty = expected;
+        for info in infos.iter().rev() {
+            abstracted = Exp::Lam(Patt::Var(info.var.clone()), Box::new(abstracted));
+            pi_ty = Exp::Pi(
+                Patt::Var(info.var.clone()),
+                Box::new(info.ty.clone()),
+                Box::new(pi_ty),
+            );
+        }
+        let pi_val = eval(&pi_ty, &Rho::Nil).ok()?;
+        let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
+        check(&mut ctx, &abstracted, &pi_val).ok()?;
+        let item = Item::from_parts(it.cat().clone(), abstracted, it.prov(), it.cost());
+        Some(FelicitousOutcome::Open(OpenParse { item, holes: infos }))
     }
 }
 
@@ -140,15 +155,15 @@ impl Parser {
 /// for factive presuppositions is a planned future arm.) The carrier types each hole per its kind.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HoleKind {
-    /// An unresolved entity referent (a pronoun / possessor), resolved by substituting a chain
-    /// antecedent and re-gating. First-order, `Entity`-typed, in argument position.
+    /// An unresolved entity referent (a pronoun / possessor), resolved by APPLYING a chain antecedent
+    /// to its parameter and re-gating. First-order, `Entity`-typed, in argument position.
     EntityRef,
 }
 
-/// One referent hole in an [`OpenParse`]: the free variable standing in the sem, the EigenTT
-/// type it must inhabit (Slice 1: `Entity`), and its resolver [`HoleKind`]. This is what a
-/// `Proposer` consumes (to filter/rank antecedents) and what [`Parser::resolve_open`]
-/// fills.
+/// One typed parameter of an [`OpenParse`]'s abstraction: the binder name (`var`) standing for an
+/// unresolved referent, the EigenTT type it must inhabit (Slice 1: `Entity`), and its resolver
+/// [`HoleKind`]. A `Proposer` consumes it (to filter/rank antecedents); [`Parser::resolve_open`]
+/// applies the chosen antecedent to it.
 #[derive(Clone, Debug)]
 pub struct HoleInfo {
     pub var: String,
@@ -156,10 +171,12 @@ pub struct HoleInfo {
     pub kind: HoleKind,
 }
 
-/// An **open** parse (D64): a felicitous full-span `S` whose sem still carries unresolved
-/// referent holes (free variables). Each [`HoleInfo`] is a slot the D64 resolver fills (by
-/// substituting a chain antecedent + re-gating — [`Parser::resolve_open`]). The kernel
-/// type-checked `item.sem()` with each hole bound to its type; it is NOT a closed final parse.
+/// An **open** parse (D64): a felicitous full-span `S` whose sem is a PARAMETRIC proposition —
+/// `item.sem()` is the closed function `λ(h₀:T₀)…(hₙ:Tₙ). body : Π(h₀:T₀)…(hₙ:Tₙ). ⟦cat⟧`, abstracting
+/// each unresolved referent as a typed parameter (`holes[0]` = the outermost binder). Each [`HoleInfo`]
+/// names one such parameter (type + resolver [`HoleKind`]); [`Parser::resolve_open`] closes the parse
+/// by APPLYING a chain antecedent to each parameter and re-gating. The sem is a well-typed EigenTT term
+/// — just a function, not yet a `Prop`; it becomes a `Prop` once the parameters are applied.
 #[derive(Clone)]
 pub struct OpenParse {
     pub item: Item,

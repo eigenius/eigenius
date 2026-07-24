@@ -1123,7 +1123,8 @@ fn fronted_participial_adjunct_is_an_open_parse_with_a_controlled_subject() {
     // D62 §2 #5a: a subject-gapped present-participle VP fronted as a sentence adjunct
     // ("affecting BRCA1, HeLa affects BRCA1" — schematically "hypothesizing that P, we Q") asserts
     // the participial proposition alongside the matrix, with the participle's subject CONTROLLED — a
-    // referent hole (D64) ⇒ an OPEN parse. Sem: `And(matrix, participle(hole))`.
+    // referent hole (D64) ⇒ an OPEN parse. The open sem ABSTRACTS the hole (D64 parametric proposition):
+    // `λhole. And(matrix, participle(hole))`.
     let (_layer, index) = index_over_bootstrap();
     let (closed, open) = index.parse_open("affecting BRCA1 , HeLa affects BRCA1", &Identity);
     assert!(
@@ -1133,8 +1134,8 @@ fn fronted_participial_adjunct_is_an_open_parse_with_a_controlled_subject() {
     assert!(!open.is_empty(), "fronted participial yields an open parse");
     let sem = pretty_term(open[0].item.sem());
     assert!(
-        sem.starts_with("And(") && sem.matches("affects").count() == 2,
-        "conjoins the matrix and the participial proposition (controlled subject a hole): {sem}"
+        sem.starts_with('λ') && sem.contains("And(") && sem.matches("affects").count() == 2,
+        "abstracts the controlled subject over a conjunction of matrix + participial proposition: {sem}"
     );
     assert_eq!(
         open[0].holes.len(),
