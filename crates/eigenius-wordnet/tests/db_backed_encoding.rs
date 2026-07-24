@@ -419,9 +419,14 @@ enum Outcome {
     },
     GrammarGap,
     /// All tokens known; no CLOSED parse but a felicitous OPEN parse (referent holes — `we`/`its`/
-    /// pronouns, D64). NOT a grammar gap — it parses, awaiting reference resolution.
+    /// pronouns, D64). NOT a grammar gap — it parses, awaiting reference resolution. Since an open sem
+    /// is now a self-contained `Π`-abstraction (a *parametric* proposition — a well-typed EigenTT term,
+    /// not a free-var fragment), it HAS distinct structural skeletons like a closed reading, so the
+    /// faithfulness gate can certify an open unit's parametric reading (resolution is a separate fact).
     Open {
         holes: usize,
+        /// Distinct STRUCTURAL skeletons among the open (parametric) readings, senses erased.
+        skeletons: Vec<String>,
     },
     /// All tokens known, but the unit exceeds [`PARSE_BUDGET`] — parse skipped (would OOM the
     /// beam-less chart over the full lexicon). A *parsing-scale* gap, distinct from a vocab gap.
@@ -838,10 +843,14 @@ fn flatten_and_exp<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
     out.push(e);
 }
 
-/// A classified unit's distinct-skeleton set (empty for the no-closed-reading outcomes).
+/// A classified unit's distinct-skeleton set — the closed readings for Encoded/Ambiguous, the
+/// parametric (open) readings for Open (each a self-contained `Π`-abstraction, so certifiable), empty
+/// for the truly reading-less outcomes (GrammarGap/MissingLexeme/ScaleBound).
 fn unit_skel_set(o: &Outcome) -> &[String] {
     match o {
-        Outcome::Encoded { skeletons, .. } | Outcome::Ambiguous { skeletons, .. } => skeletons,
+        Outcome::Encoded { skeletons, .. }
+        | Outcome::Ambiguous { skeletons, .. }
+        | Outcome::Open { skeletons, .. } => skeletons,
         _ => &[],
     }
 }
@@ -887,13 +896,13 @@ fn load_expected_readings() -> Vec<Expected> {
     out
 }
 
-/// The distinct-skeleton COUNT of a classified unit (0 for Open/GrammarGap/MissingLexeme/ScaleBound —
-/// they produce no closed reading, mirroring [`unit_readings`]).
+/// The distinct-skeleton COUNT of a classified unit — Encoded/Ambiguous (closed) and Open (parametric)
+/// carry structural skeletons; GrammarGap/MissingLexeme/ScaleBound produce none (0).
 fn unit_skeletons(o: &Outcome) -> usize {
     match o {
-        Outcome::Encoded { skeletons, .. } | Outcome::Ambiguous { skeletons, .. } => {
-            skeletons.len()
-        }
+        Outcome::Encoded { skeletons, .. }
+        | Outcome::Ambiguous { skeletons, .. }
+        | Outcome::Open { skeletons, .. } => skeletons.len(),
         _ => 0,
     }
 }
@@ -943,8 +952,10 @@ fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Lay
             if open.is_empty() {
                 Outcome::GrammarGap
             } else {
+                let open_items: Vec<Item> = open.iter().map(|o| o.item.clone()).collect();
                 Outcome::Open {
                     holes: open.iter().map(|o| o.holes.len()).max().unwrap_or(0),
+                    skeletons: skeleton_set(&open_items),
                 }
             }
         }
@@ -3151,7 +3162,7 @@ fn summarize(report: &[UnitReport]) {
                 miss += 1;
                 oov.extend(unknown.iter().cloned());
             }
-            Outcome::Open { holes } => {
+            Outcome::Open { holes, .. } => {
                 open += 1;
                 eprintln!(
                     "  open (referent holes={holes}, awaiting resolution): {:?}",
