@@ -89,16 +89,36 @@ decision, not a local fix).
   glossary never binds it. **Fix:** a document-glossary entry for MSS (definitions-section / LLM
   abbreviation source / acronym path). Difficulty: EASY–MEDIUM.
 
-### Defect 3 — coordinated predicative complement (CONFIRMED structural)
+### Defect 3 — coordinated predicative complement (code read done: NOT a clear bug)
 
-"The groups are MSI lines and MSS lines." → `And(λG#0. the(class, MSI-line, G#0), λG#0. the(class,
-MSS-line, G#0))` — the SAME open-λ coordinated predicate as with "These" (so it is NOT the demonstrative
-going anaphoric / D64-open; it is the COORDINATION). Single-predicate copula applies the subject (the
-pinned "These MSI cell lines were distinct" is closed); coordinating the predicative complement ("are A
-and B") instead yields an `And` of open predicates with the subject apparently unapplied. **Needs a
-code-level read** of the copula + predicative-complement coordination to confirm whether the resulting
-sem is a closed `Prop` (subject consumed elsewhere) or a genuinely open predicate (bug). Difficulty:
-MEDIUM (structural; investigate before committing to a fix).
+Code read (copula + predicative-nominal path). The copula (`is/are/was/were`) is
+`(S[dcl,fin]\NP) / (S[dcl,adj]\NP)`, sem `λP.P` — it lifts an *adjectival predicate*. Predicate nominals
+become that predicate two ways: `a_pred` → `λs. is_a(s, T)` (instance subject), `kind_nominal` →
+`λK. subclass_of(K, T)` (kind subject). The **single** case uses this cleanly:
+
+- "These groups are MSI lines." → `subclass_of(these-groups-kind, MSI-lines-kind)` — closed, correct.
+
+The **coordinated** case does NOT: "These groups are MSI lines and MSS lines." →
+`And(λG#0. the(group, kind_of(MSI-line), G#0), λG#0. the(group, kind_of(MSS-line), G#0))` — same under
+"The" (so NOT D64 anaphora). Findings:
+
+1. **Closed, not open.** The unit is bucketed *ambiguous* (closed), and the reading passed the felicity
+   gate whose `⟦cat_s⟧ = Prop` type-check holds — so it IS a closed `Prop`, not an open-predicate bug.
+2. **Different path.** The coordinated complement does not reuse `kind_nominal` (`subclass_of`); it routes
+   through a **referential `the`-distribution** — `the(subject-class, restrictor, x)` = "x is the [group]
+   that is an MSI-line", coordinated over the members. Likely the `coordinate_np` bare-kind path building
+   a `cat_group` from "MSI lines and MSS lines", then a distributive predication, rather than coordinating
+   the `subclass_of` predicates.
+3. **Possibly a legitimate reading.** "These groups ARE [the] MSI lines, ms-stable lines and indeterminate
+   lines" is an identity/enumeration; the referential-`the` reading may be *closer* to that than the
+   generic `subclass_of`. The main symptom is that the verbalizer can't render it (each conjunct
+   bracketed) and the `λG#0` form is non-canonical.
+
+**Verdict:** Defect 3 is the LEAST clearly-broken of the three — a closed, plausibly-intended
+referential reading that routes through a different construction and defeats the verbalizer. It is a
+modeling/canonicalization question (should coordinated predicative nominals reuse the `subclass_of`
+path? is the referential reading the intended one?), NOT an obvious crash/gap. Lower priority than
+Defects 1–2. Difficulty: MEDIUM, but unclear payoff.
 
 ## Takeaway
 
