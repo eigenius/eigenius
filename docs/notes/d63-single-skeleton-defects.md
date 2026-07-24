@@ -234,6 +234,30 @@ tested:
 Net: (b′) is the right, reference-grounded fix and it works. Unit 4's on-WRN becomes the relational
 complement only once piece (a) gives "dependent" the "on" frame; the comparative half is done.
 
+### (a) frame acquisition — VALIDATED end-to-end (reseed `…relcmp-a`)
+
+`governed_preposition` (gloss heuristic) is low-recall — "dependent"'s glosses ("addicted to a drug" /
+"contingent on something else") have no "dependent on", so it got no frame. Fix: a committed
+`crates/eigenius-wordnet/adjective-frames.tsv` (the high-confidence LLM-proposer output; four curated
+from the page — dependent/on, essential/for, associated/with, concordant/with), `include_str!`-embedded
+(crate-local so the Docker build context carries it) and consulted as a FALLBACK after the gloss. Adj
+entries 464611→464666 (+55: the frame adjectives now emit their relational `cat_pp_arg` readings).
+
+Witnessed (aligned relcmp-a, grammar-gap 0): unit 4 "The lines from rare lineages were less dependent on
+WRN" is OPEN and its skeleton set now CONTAINS the correct relational reading
+
+```text
+λ$anaphor. gt(§(kind_of(§), $anaphor), §(kind_of(§), the(Σ. prep_from(_, kind_of(Σ. gt(§,§)))).1))
+   ≈ gt(deg_dependent_rel(WRN, anaphor), deg_dependent_rel(WRN, the-lines-from-rare-lineages))
+```
+
+— WRN bound as the RELATUM (2-place `deg_rel`), the comparative complete (b′ elided-than), the standard
+an abstracted parameter (the Π-representation), the whole thing a pinnable open skeleton
+(open-skeletonizable). The full chain works: **(a)** frame → **(b′)** elided-than → **Π-abstraction** →
+**open-skeletonizable**. The adjunct `And` readings still coexist (the frame ADDS the relational reading;
+suppressing the adjunct is the than-post-modifier / Fix-B lever). Pinning unit 4 + re-baselining to
+relcmp-a (a reranked re-record) is the remaining bookkeeping.
+
 ### Relationship / sequencing
 
 NOT mutually exclusive. Fix B is the productive baseline; Fix A the precise refinement gated on frames,
