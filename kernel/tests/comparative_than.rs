@@ -63,6 +63,25 @@ resource lexicon:dependent_rel : lexicon:LexicalEntry {
     lexicon:grade    = epistemic:declared;
 }
 
+// `dependent` — the PLAIN gradable reading the importer also emits (1-place degree, no governed
+// preposition). It feeds the ADJUNCT competitor: "less dependent" [plain] + "on WRN" as a free
+// VP-adjunct, competing with the relational reading above. The argument/adjunct fix targets it.
+axiom lexicon:deg_dependent : lexicon:Entity -> core:float
+resource lexicon:dependent_plain_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) => lexicon:deg_dependent(x) : lexicon:Entity -> core:float )
+    );
+}
+resource lexicon:dependent_plain : lexicon:LexicalEntry {
+    core:description = "plain gradable adjective: dependent (degree, no governed preposition).";
+    lexicon:form     = "dependent";
+    lexicon:cat      = type_expr( lexicon:cat_measure );
+    lexicon:sem      = lexicon:dependent_plain_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> core:float );
+    lexicon:sense    = "wn:dependent.a.02";
+    lexicon:grade    = epistemic:declared;
+}
+
 // Entities + their proper-noun / bare-plural NP entries.
 axiom lexicon:wrn : lexicon:Entity
 resource lexicon:wrn_sem : lexicon:SemTerm { lexicon:term = type_expr( lexicon:wrn ); }
@@ -180,6 +199,40 @@ fn explicit_than_pp_is_a_relatum_standard_comparative() {
         closed
             .iter()
             .map(|p| pretty_term(p.sem()))
+            .collect::<Vec<_>>(),
+    );
+}
+
+/// FIX TARGET — the argument/adjunct distinction. With both `dependent` readings seeded (relational
+/// `dependent on` + plain gradable `dependent`), "lines were less dependent on WRN" has TWO open
+/// readings: the correct relational one (WRN is the argument of `dependent`, 2× `deg_dependent_rel`)
+/// and a degenerate ADJUNCT competitor (plain `deg_dependent` + `on WRN` attached as a free VP-adjunct,
+/// a stray `prep_on`). When a frame-bearing head governs its preposition, that PP is its ARGUMENT and
+/// must NOT also parse as a free adjunct. The parse-time suppression (no reseed) makes the relational
+/// reading the only one; flip this on when it lands. Currently the `prep_on` adjunct reading survives.
+#[test]
+#[ignore = "fix target: suppress the free-adjunct PP when a frame-bearing head governs it (parse-time)"]
+fn governed_pp_is_not_also_a_free_adjunct() {
+    let (_closed, open) = parser().parse_open("lines were less dependent on WRN", &Identity);
+    // The correct relational reading (WRN as argument, two relational degrees) must survive.
+    assert!(
+        open.iter().any(|o| pretty_term(o.item.sem())
+            .matches("deg_dependent_rel")
+            .count()
+            == 2),
+        "the relational reading must survive; got {:?}",
+        open.iter()
+            .map(|o| pretty_term(o.item.sem()))
+            .collect::<Vec<_>>(),
+    );
+    // The degenerate adjunct reading (a free prep_on over the same span) must be GONE.
+    assert!(
+        !open
+            .iter()
+            .any(|o| pretty_term(o.item.sem()).contains("prep_on")),
+        "governed 'on WRN' must be the argument of 'dependent', not a free VP-adjunct; got {:?}",
+        open.iter()
+            .map(|o| pretty_term(o.item.sem()))
             .collect::<Vec<_>>(),
     );
 }
