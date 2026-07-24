@@ -205,6 +205,35 @@ So pieces (b) + the than-PP gap collapse into ONE reference-grounded change: ref
 CCGbank optional post-modifier `((S[adj]\NP)\(S[adj]\NP))/{NP,PP,S}` and drop the `/cat_pp_than`
 obligation from `more`/`less`. Aligns us with the gold standard and is the correct structural shape.
 
+### (b′) prototype — VALIDATED end-to-end (reseed `wordnet-umls-aligned-2026-07-23-relcmp`)
+
+Committed `9d2b4a3` (additive `more_deg_bare`/`less_deg_bare` = `(S[adj]\NP)/cat_measure`, anaphoric
+standard). Reseeded (closed-class is `include_str!`-embedded → full drop-and-reseed + alignment) and
+tested:
+
+- **Mechanism works.** "The cell was less addicted to WRN." (no `than`; "addicted" HAS the gloss frame
+  "to") → the relational reading `gt(deg_addicted_rel(WRN, x), deg_addicted_rel(WRN, anaphor))`. Before
+  (b′) this was a hard GAP.
+- **The reading is OPEN.** The anaphoric standard (`lexicon:anaphor` = the elided comparison target) is a
+  referent hole, so `index.parse` (closed-only) returns 0 while the forest forms a complete
+  `cat_s(dcl,fin)`; the open-aware carrier classifies it OPEN (holes=1). This is the honest analysis
+  ("less … than [contextual standard]") and is CONSISTENT with `cmp_attrib_sem` (synthetic comparatives
+  are open the same way). Decision point: keep OPEN (honest, awaits D64 resolution) vs an absolute closed
+  standard (needs a per-measure `std` the general operator lacks).
+- **Coverage-safe.** grammar-gap 0 on the aligned snapshot. (The base-snapshot gap on "…a stronger
+  mutation phenotype" was an UNALIGNMENT artifact — that sentence has no `more`/`less`, and an ADDITIVE
+  lexical change cannot turn a parse into a gap.)
+- **No faithfulness regression.** The lone cap-only miss ("Each event alone does not lead to cell death")
+  is a pre-existing cap-only artifact (missed in the prior named-entity cap-only run too), not from (b′);
+  it hits under the reranker.
+- **Effect on the page.** "The lines from rare lineages were less dependent on WRN" moved from a
+  wrong CLOSED reading ("a … WRN protein", the Defect-1 gloss) to an OPEN comparative — the comparative
+  structure is now correct; "on WRN" is still an ADJUNCT (relational complement awaits piece (a) frame
+  acquisition, since "dependent"'s gloss yields no governed prep).
+
+Net: (b′) is the right, reference-grounded fix and it works. Unit 4's on-WRN becomes the relational
+complement only once piece (a) gives "dependent" the "on" frame; the comparative half is done.
+
 ### Relationship / sequencing
 
 NOT mutually exclusive. Fix B is the productive baseline; Fix A the precise refinement gated on frames,
