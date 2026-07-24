@@ -725,12 +725,13 @@ fn adj_cat() -> String {
 /// source for [`governed_preposition`] when WordNet's gloss yields none (low-recall: it needs the lemma
 /// followed by its prep in its OWN gloss, missing e.g. "dependent" → "on"). Embedded at compile time
 /// (`include_str!`) and parsed once; the high-confidence output an LLM proposer gives for a gradable
-/// adjective's frame (offline generation is the scale path). See
-/// `experiments/lexicon-align/adjective-frames.tsv`.
+/// adjective's frame (offline generation is the scale path). Crate-local (`crates/eigenius-wordnet/
+/// adjective-frames.tsv`) so it is embeddable inside the Docker build context (a sibling of the
+/// runtime-arg `experiments/lexicon-align/drops.json`/`merges.json`, which are read at import instead).
 fn adjective_frames() -> &'static BTreeMap<String, String> {
     static FRAMES: std::sync::OnceLock<BTreeMap<String, String>> = std::sync::OnceLock::new();
     FRAMES.get_or_init(|| {
-        include_str!("../../../experiments/lexicon-align/adjective-frames.tsv")
+        include_str!("../adjective-frames.tsv")
             .lines()
             .filter_map(|l| {
                 let l = l.trim();
