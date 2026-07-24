@@ -1,0 +1,16 @@
+# Adjective subcategorization frames (governed preposition) — the D63 frame-acquisition source
+# (docs/notes/d63-single-skeleton-defects.md, Defect 1 / Fix A piece a).
+#
+# WordNet has no structured subcat frame, so `convert.rs::governed_preposition` derives the governed
+# preposition from the GLOSS — low-recall: it needs the lemma followed by its preposition IN ITS OWN
+# gloss, which misses e.g. "dependent" (gloss "contingent on something else" — no "dependent on").
+# This committed file supplies the governed preposition for such adjectives: the high-confidence output
+# an LLM proposer gives for a gradable adjective's subcategorization frame. Offline LLM generation over
+# the gradable-adjective inventory is the SCALE path; these are curated from the WRN first page. Read
+# deterministically at import (`include_str!`) and consulted by `governed_preposition` as a FALLBACK
+# after the gloss heuristic. TAB-separated: lemma <TAB> preposition (one of governed_preposition's
+# PREPS). Blank lines and `#` comments are skipped.
+dependent	on
+essential	for
+associated	with
+concordant	with

@@ -721,6 +721,32 @@ fn adj_cat() -> String {
     format!("lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))")
 }
 
+/// Curated adjective **subcategorization frames** (lemma → governed preposition) — the frame-acquisition
+/// source for [`governed_preposition`] when WordNet's gloss yields none (low-recall: it needs the lemma
+/// followed by its prep in its OWN gloss, missing e.g. "dependent" → "on"). Embedded at compile time
+/// (`include_str!`) and parsed once; the high-confidence output an LLM proposer gives for a gradable
+/// adjective's frame (offline generation is the scale path). See
+/// `experiments/lexicon-align/adjective-frames.tsv`.
+fn adjective_frames() -> &'static BTreeMap<String, String> {
+    static FRAMES: std::sync::OnceLock<BTreeMap<String, String>> = std::sync::OnceLock::new();
+    FRAMES.get_or_init(|| {
+        include_str!("../../../experiments/lexicon-align/adjective-frames.tsv")
+            .lines()
+            .filter_map(|l| {
+                let l = l.trim();
+                if l.is_empty() || l.starts_with('#') {
+                    return None;
+                }
+                let mut f = l.split('\t');
+                Some((
+                    f.next()?.trim().to_lowercase(),
+                    f.next()?.trim().to_string(),
+                ))
+            })
+            .collect()
+    })
+}
+
 /// The preposition governed by a relational gradable adjective, derived from its WordNet **gloss**
 /// (C3, d63-comparative-phrasal.md §5.3 — WordNet has no structured subcat frame, so the gloss is the
 /// only WordNet-internal signal). Two patterns, most-confident first:
@@ -761,7 +787,12 @@ fn governed_preposition(gloss: &str, lemma: &str) -> Option<String> {
         }
         from += i + key.len();
     }
-    None
+    // (3) Curated / LLM frame fallback — the gloss heuristic is low-recall (misses "dependent" → "on",
+    // whose gloss says "contingent on"). A frame is admitted only if its preposition is in `PREPS`.
+    adjective_frames()
+        .get(&lemma.to_lowercase())
+        .filter(|p| PREPS.contains(&p.as_str()))
+        .cloned()
 }
 
 /// Map a `governed_preposition` result to its `lexicon:Prep` feature constructor (D63 §5.3
@@ -1695,6 +1726,28 @@ mod tests {
             governed_preposition("\"she walked with a limp\"", "temperate"),
             None
         );
+    }
+
+    #[test]
+    fn governed_preposition_falls_back_to_curated_frames() {
+        // Fix A piece (a): the REAL "dependent" synset glosses are "addicted to a drug" / "contingent on
+        // something else" — no "dependent on", so the gloss heuristic yields NONE. The curated frame file
+        // (adjective-frames.tsv) supplies the governed preposition.
+        assert_eq!(
+            governed_preposition("contingent on something else", "dependent"),
+            Some("on".to_string())
+        );
+        assert_eq!(
+            governed_preposition("absolutely necessary; vitally necessary", "essential"),
+            Some("for".to_string())
+        );
+        // A gloss-derived prep still wins (the fallback only fires when the gloss yields none).
+        assert_eq!(
+            governed_preposition("usually followed by `to'", "proportional"),
+            Some("to".to_string())
+        );
+        // An adjective in neither the gloss nor the frame file stays non-relational.
+        assert_eq!(governed_preposition("of great size", "large"), None);
     }
 
     #[test]
