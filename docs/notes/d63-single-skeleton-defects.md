@@ -120,9 +120,74 @@ modeling/canonicalization question (should coordinated predicative nominals reus
 path? is the referential reading the intended one?), NOT an obvious crash/gap. Lower priority than
 Defects 1–2. Difficulty: MEDIUM, but unclear payoff.
 
+## Defect 1 — deep dive: existing machinery, forest trace, Fix A vs Fix B
+
+### Shared root cause
+
+Every preposition sem is a uniform VP-adjunct `λx. λV. λs. And(V(s), prep_X(s, x))` — the `And` is baked
+into the preposition. The grammar does NOT distinguish a COMPLEMENT PP (subcategorized: "dependent ON")
+from an ADJUNCT PP (circumstantial: "essential IN 2020"), so "dependent on WRN" →
+`And(gt(dependent(gene), std), prep_on(gene, WRN))` — the PP is a separate conjunct, not the adjective's
+relatum.
+
+### The importer already has relational machinery — but it is unreachable for the corpus
+
+`crates/eigenius-wordnet/src/convert.rs` (push_adj): gradable-vs-pertainym (WordNet `\`), a gloss-derived
+`governed_preposition`, a 2-place `deg_{loc}_rel`, and a `cat_measure/cat_pp_arg(prep)` entry. Forest
+trace (`EIGENIUS_TRACE_FOREST=all` on "The cell was more addicted to WRN than to MSI") confirms it
+COMPOSES: `[4..6] addicted to wrn → cat_measure`, `[3..6] more addicted to wrn → (S[adj]\NP)/cat_pp_than`.
+It BREAKS at `[7..9] than to MSI` (empty): `than` seeds `fwd(cat_pp_than, cat_np)` — it takes a bare NP,
+but "to MSI" is a PP. So the relational reading is reachable ONLY for "more/less X **than [NP]**", which
+the corpus never uses (the page has elided-than "less dependent on WRN" and positive "essential for X"),
+and "dependent" has no frame anyway (gloss says "contingent on" / "addicted to a drug", not "dependent
+on").
+
+### Fix A — relational adjective sem (bind the relatum) — three pieces, all trace-confirmed
+
+- (a) **Frame acquisition** — LLM proposer feeding `governed_preposition` (importer, reseed), replacing
+  the low-recall gloss heuristic; the LLM also tags gradable-vs-relational → gradable-with-prep gets
+  `gt(deg_A(subj,obj), std)`, non-gradable-pertainym-with-prep gets a NEW `adj_rel(A, subj, obj)` path
+  (pertainyms get only `is_X` today, no PP argument).
+- (b) **Elided-than** — a `(S[adj]\NP)/cat_measure` reading for `more`/`less` (anaphoric/absolute
+  standard) so "less dependent on WRN" completes WITHOUT an explicit "than NP" (mirrors the synthetic
+  comparative `cmp_attrib_sem`). **Highest-leverage single step** — reaches the actual unit-4 form.
+- (c) **Positive relational** — adjective + PP-ground → `S[adj]\NP` directly, so positive "essential for
+  X" / "associated with X" get a relational reading.
+- Result: "dependent on WRN" → `gt(deg_dependent(gene, WRN), std)`, adjunct `And` gated away — correctness
+  and a multiplicity win.
+- **Risk:** multi-part grammar change (b, c) → regression surface (hold grammar-gap 0 + differential
+  oracle); gating precision (a same-prep adjunct "dependent on Tuesday" could be misread as the ground);
+  untrusted frames (fail-closed validation + record/replay); reseed cost; the pertainym `adj_rel` path is
+  new surface.
+- **Future:** the subcat-frame source GENERALIZES to verbs ("depend on", "represented by") — a reusable
+  lexical-enrichment track alongside glossary/NER; later "than [PP]" for explicit relational comparatives,
+  superlatives ("most dependent on"), adjective→source-verb frame linking.
+
+### Fix B — accept the And-adjunct, suppress the worse competitor
+
+- Keep `And(gt(adj(s), std), prep_X(s, obj))` as the canonical CNL encoding (already produced); suppress
+  the competing wrong reading (the predicate-nominal "is a dependent WRN protein" that beat the `And` in
+  unit 4). No importer change, no reseed, no LLM.
+- Result: `And(dependent(gene), prep_on(gene, WRN))` pins as canonical; ambiguity reduced.
+- **Risk:** semantic imprecision (generic `prep_on`, not tied to the adjective — a permanent
+  approximation that cannot answer "what does the gene depend on?"); over-suppression (the
+  predicate-nominal reading is correct for genuine "X is a Y"); papers over the complement-vs-adjunct
+  distinction (band-aid per CLAUDE.md).
+- **Future:** COMPATIBLE with a later Fix A (the `And` becomes the fallback for frameless adjectives; A
+  adds the gated relational reading). A lightweight middle ground: tag `prep_on` as the adjective's
+  argument without a full relational sem.
+
+### Relationship / sequencing
+
+NOT mutually exclusive. Fix B is the productive baseline; Fix A the precise refinement gated on frames,
+`And` as fallback. Natural sequence **B → A**: B makes the `And` canonical + pinnable cheaply now; A then
+activates the existing relational machinery incrementally, piece (b) first.
+
 ## Takeaway
 
 Single-skeleton is a WEAK correctness signal — 3 of 4 checked were wrong. The faithfulness corpus grows
 only on VERIFIED readings (now 20/20); these 3 units stay UNPINNED until fixed. Priority read:
-**Defect 1** is the broadest (correctness + a multiplicity lever across the tail) but a semantic-modeling
-decision; **Defect 2** is two clean sense/glossary levers; **Defect 3** needs a code read first.
+**Defect 1** is the broadest (correctness + a multiplicity lever across the tail) but — per the forest
+trace — a multi-part grammar+lexicon project (Fix A) or a productive approximation (Fix B), sequence
+B → A; **Defect 2** is two clean sense/glossary levers; **Defect 3** needs a code read first (done: not a
+clear bug).
