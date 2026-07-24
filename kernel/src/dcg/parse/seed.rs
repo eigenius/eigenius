@@ -28,7 +28,9 @@
 //! Shared by BOTH chart paths: [`Parser::seed_leaves`] is the single entry point the packed forest
 //! and the flat beamed chart both build their leaf cells from.
 
-use super::super::category::{is_adjective_cat, is_binary_relation_cat, kind_of};
+use super::super::category::{
+    is_adjective_cat, is_binary_relation_cat, is_ctor, is_vp_adjunct_prep, kind_of,
+};
 use super::super::chart::{beam_cell, cell_histogram, Chart};
 use super::super::lexicon::{FormEntries, LexEntry};
 use super::super::rules::constructions::coordinate_np;
@@ -403,6 +405,42 @@ impl Parser {
     /// `n × n` chart (only leaf spans `[i,j]` populated) and the accumulated beam-drop count.
     /// Behaviour-identical to the inline seeding it replaces — the packed path calls it with
     /// `beam = None` (packing bounds via k-best, not a beam).
+    /// Drop a preposition's VP-adjunct reading at position `p` when the ADJECTIVE head immediately to
+    /// its left (`[p-1]`) subcategorizes for exactly that preposition (`X / cat_pp_arg(prep_P)`, X a
+    /// `cat_measure` or `S[adj]\NP`) and the surface at `p` offers the matching `cat_pp_arg(prep_P)`
+    /// argument marker. The governed PP is then the head's argument, never a free adjunct — so the
+    /// `And`-introducing entry (`is_vp_adjunct_prep`) is removed. Adjective-scoped by design (see the
+    /// call site); verbs are excluded because they can genuinely both govern and adjunct one preposition.
+    /// Single-token head/preposition adjacency (the page's shape); an intervening adverb slips it.
+    fn suppress_governed_adjunct(&self, chart: &mut Chart, n: usize) {
+        for p in 1..n {
+            // The preposition governed by an adjective head immediately to the left.
+            let governed_prep: Option<Exp> = chart[p - 1][p - 1].iter().find_map(|it| {
+                let [res, arg] = is_ctor(it.cat(), "fwd")? else {
+                    return None;
+                };
+                let [prep] = is_ctor(arg, "cat_pp_arg")? else {
+                    return None;
+                };
+                (is_ctor(res, "cat_measure").is_some() || is_adjective_cat(res))
+                    .then(|| prep.clone())
+            });
+            let Some(prep) = governed_prep else {
+                continue;
+            };
+            // Disambiguate only when this surface offers BOTH the matching argument marker and a
+            // competing VP-adjunct reading — otherwise there is nothing spurious to drop.
+            let has_matching_arg = chart[p][p].iter().any(|it| {
+                matches!(is_ctor(it.cat(), "fwd"),
+                    Some([a, _]) if matches!(is_ctor(a, "cat_pp_arg"), Some([pp]) if *pp == prep))
+            });
+            let has_adjunct = chart[p][p].iter().any(|it| is_vp_adjunct_prep(it.cat()));
+            if has_matching_arg && has_adjunct {
+                chart[p][p].retain(|it| !is_vp_adjunct_prep(it.cat()));
+            }
+        }
+    }
+
     pub(super) fn seed_leaves(
         &self,
         tokens: &[String],
@@ -486,6 +524,19 @@ impl Parser {
         }
         for (a, b, d) in dists {
             chart[a][b].extend(d);
+        }
+
+        // Argument/adjunct suppression (D63 §8.13): a governed-ADJECTIVE head immediately followed by
+        // its subcategorized preposition takes that PP as its ARGUMENT, so the preposition's competing
+        // VP-adjunct entry (the `And`-introducing `((S\NP)\(S\NP))/NP`, closed-class.esl `prep_*_sem`)
+        // is spurious there and is dropped, leaving only the transparent `cat_pp_arg` marker. Scoped to
+        // ADJECTIVE heads (`cat_measure` / `S[adj]\NP` over `cat_pp_arg(prep)`): a governed adjective has
+        // no competing adjunct use of its preposition ("dependent on X" is always the complement),
+        // unlike a verb ("operate on Monday" — the temporal adjunct is real). Coverage-safe: lifted at
+        // the FINAL widen rung (mirroring multiword-preference, line below), so the adjunct entry is
+        // re-admitted if suppressing it would gap the sentence — `grammar-gap 0` holds by construction.
+        if !matches!(cap, Some(c) if c >= SENSE_CAP_WIDEN_MAX) {
+            self.suppress_governed_adjunct(&mut chart, n);
         }
 
         // Forward bounded type-raising `T` (D63 §8.9 Slice 6-T) at the LEAF cells: a name `NP` lifts

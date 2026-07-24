@@ -203,15 +203,14 @@ fn explicit_than_pp_is_a_relatum_standard_comparative() {
     );
 }
 
-/// FIX TARGET — the argument/adjunct distinction. With both `dependent` readings seeded (relational
-/// `dependent on` + plain gradable `dependent`), "lines were less dependent on WRN" has TWO open
-/// readings: the correct relational one (WRN is the argument of `dependent`, 2× `deg_dependent_rel`)
-/// and a degenerate ADJUNCT competitor (plain `deg_dependent` + `on WRN` attached as a free VP-adjunct,
-/// a stray `prep_on`). When a frame-bearing head governs its preposition, that PP is its ARGUMENT and
-/// must NOT also parse as a free adjunct. The parse-time suppression (no reseed) makes the relational
-/// reading the only one; flip this on when it lands. Currently the `prep_on` adjunct reading survives.
+/// The argument/adjunct distinction (D63 §8.13, `suppress_governed_adjunct`). With both `dependent`
+/// readings seeded (relational `dependent on` + plain gradable `dependent`), "lines were less dependent
+/// on WRN" could parse two ways: the correct relational one (WRN is the argument of `dependent`, 2×
+/// `deg_dependent_rel`) and a degenerate ADJUNCT competitor (plain `deg_dependent` + `on WRN` as a free
+/// VP-adjunct, a stray `prep_on`). Because the ADJECTIVE head `dependent` governs `prep_on` and it is
+/// immediately followed by `on`, the seed-time gate drops `on`'s VP-adjunct entry — so only the
+/// relational reading survives and the `prep_on` adjunct is gone. Parse-time, no reseed.
 #[test]
-#[ignore = "fix target: suppress the free-adjunct PP when a frame-bearing head governs it (parse-time)"]
 fn governed_pp_is_not_also_a_free_adjunct() {
     let (_closed, open) = parser().parse_open("lines were less dependent on WRN", &Identity);
     // The correct relational reading (WRN as argument, two relational degrees) must survive.
