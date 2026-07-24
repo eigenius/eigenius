@@ -36,7 +36,7 @@
 //!     cargo test -p eigenius-wordnet --test db_backed_encoding -- --ignored --nocapture
 //!     cargo test -p eigenius-wordnet --features use-llm --test db_backed_encoding -- --ignored --nocapture
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -463,7 +463,8 @@ fn unit_readings(o: &Outcome) -> usize {
 /// measure bracketing alone, which is what grammar work is scored against.
 /// See `experiments/parsing/README.md` §7b.
 fn erase_senses(s: &str) -> String {
-    s.split_inclusive(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+    let erased: String = s
+        .split_inclusive(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
         .map(|tok| {
             let (word, tail) = match tok.chars().last() {
                 Some(c) if !(c.is_ascii_alphanumeric() || c == '_') => (
@@ -487,7 +488,63 @@ fn erase_senses(s: &str) -> String {
                 format!("{word}{tail}")
             }
         })
-        .collect()
+        .collect();
+    normalize_holes(&erased)
+}
+
+/// Canonicalise referent/quant HOLE binder names so a skeleton is span-INDEPENDENT. A hole variable
+/// `$name$i_j` is position-keyed by [`hole_base`](../../kernel/src/dcg/holes.rs) (D64), so the SAME
+/// open reading freshened at a different derivation site prints a different name — a derivation
+/// artifact, not structure. Two α-equivalent open readings must collapse to ONE skeleton, else the
+/// structural `total-skeletons` count inflates and a pin breaks the moment a grammar change moves the
+/// freshening site (as the `elided_than` shift did to unit 4 — `$anaphor$6_60` → `$anaphor$0_90`).
+/// Each distinct `$name$i_j` token is renamed to `$name$<ordinal>` by first appearance, per name
+/// prefix — preserving co-reference (same token → same canonical) and distinctness (two holes stay
+/// two). Same spirit as the 2026-07-21 whole-token sense-erasure: strip a derivation-specific detail
+/// that was silently being counted as structure. `$` occurs only in hole tokens in a pretty-printed
+/// sem, so the scan keys on it.
+fn normalize_holes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut counters: BTreeMap<String, usize> = BTreeMap::new();
+    let mut canon: BTreeMap<String, String> = BTreeMap::new();
+    let mut i = 0;
+    while i < s.len() {
+        if s.as_bytes()[i] == b'$' {
+            let rest = &s[i + 1..];
+            if let Some(d2) = rest.find('$') {
+                let name = &rest[..d2];
+                let after = &rest[d2 + 1..];
+                let span_len = after
+                    .bytes()
+                    .take_while(|b| b.is_ascii_digit() || *b == b'_')
+                    .count();
+                let span = &after[..span_len];
+                if !name.is_empty()
+                    && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                    && span.contains('_')
+                    && span.bytes().next().is_some_and(|b| b.is_ascii_digit())
+                {
+                    let token = format!("${name}${span}");
+                    let canonical = canon
+                        .entry(token)
+                        .or_insert_with(|| {
+                            let n = counters.entry(name.to_string()).or_insert(0);
+                            let c = format!("${name}${n}");
+                            *n += 1;
+                            c
+                        })
+                        .clone();
+                    out.push_str(&canonical);
+                    i += 1 + d2 + 1 + span_len; // '$' + name + '$' + span
+                    continue;
+                }
+            }
+        }
+        let ch = s[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
 }
 
 /// Pins the eraser semantics that `total-skeletons` depends on (README §7b). If this ever fails,
@@ -511,6 +568,30 @@ fn erase_senses_collapses_cross_lexicon_sense_pairs() {
     );
     // Verb/adjective sense atoms collapse the same way.
     assert_eq!(erase_senses("v02203362_t"), erase_senses("v00120796_t"));
+}
+
+/// Pins hole-binder α-normalisation (2026-07-24): a D64 open reading's hole `$name$i_j` is
+/// position-keyed, so the SAME reading freshened at a different derivation site must still be ONE
+/// skeleton. Regression guard for the `elided_than`-shift breakage of unit 4 (`$anaphor$6_60` →
+/// `$anaphor$0_90`, structurally identical).
+#[test]
+fn erase_senses_normalises_hole_binder_names() {
+    // Same structure, hole freshened at a different span ⇒ ONE skeleton.
+    assert_eq!(
+        erase_senses("λ$anaphor$6_60. gt(deg(x), $anaphor$6_60)"),
+        erase_senses("λ$anaphor$0_90. gt(deg(x), $anaphor$0_90)"),
+    );
+    // Co-reference is preserved: the binder and its body use survive as the SAME canonical name.
+    assert_eq!(
+        erase_senses("λ$anaphor$2_30. f($anaphor$2_30)"),
+        "λ$anaphor$0. f($anaphor$0)",
+    );
+    // Two DISTINCT holes stay distinct (structure preserved), each with its own canonical ordinal.
+    let two = erase_senses("And(p($anaphor$1_10), q($quant$3_40, $anaphor$5_60))");
+    assert!(
+        two.contains("$anaphor$0") && two.contains("$anaphor$1") && two.contains("$quant$0"),
+        "distinct holes must get distinct canonical names, per name prefix; got {two}"
+    );
 }
 
 /// Share one [`ReplaySenseRanker`] between the parser and the miss-check.
@@ -4261,7 +4342,11 @@ fn spike_named_entity_closes_unit4() {
          (P6 {}, coord+as {}{}) — the named-entity source is the fix; grammar-gap → 0. Set EIGENIUS_SPIKE_FULL=1 for the full unit 4.",
         readings["P6 are-essential"],
         readings["coord subj+as"],
-        full.then(|| format!(", unit 4 {}", readings["unit 4 (full)"])).unwrap_or_default(),
+        if full {
+            format!(", unit 4 {}", readings["unit 4 (full)"])
+        } else {
+            String::new()
+        },
     );
 }
 
