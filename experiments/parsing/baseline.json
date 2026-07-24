@@ -2,24 +2,26 @@
   "_comment": "The reference measurement the parse-rate gate is judged against. Run logs are NOT committed (experiments/*/results/ is gitignored); this is the distilled result + provenance. Update it DELIBERATELY, never to make a red run go green.",
   "provenance": {
     "commit": "Four fixes (2026-07-20, new-session): (1) function-word-surface skip in the UMLS importer (is_grammatical_surface += prepositions/conjunctions) -> 'For (preposition)' C0521125 and siblings no longer seed content nouns that pile into compounds around PPs; (2) evaluate/assess/deem added to ESSIVE_VERBS so 'We evaluated MSI as a biomarker...' parses as an essive; (3) informational-metadata drops in lexicon-align (INFO-TUI + code/info/identifier name; substance-TUI floor) -> 'Protein Info' C1521746 etc., drops.json 275->397; (4) KERNEL gq_prep_passive_agent rule (agentive `by` takes a type-raised GQ agent) closes the passive-agent gap that (1) exposed (#46 'Some MSI lines... were represented by these screening data sets' 0->parses). Coverage held grammar-gap 0 throughout. Expected = drift-free REPLAY of the encoded-band-FLOOR draw (draw 2 of a 5-draw study, results/2026-07-20-1751-696066d-...-reranked; live band encoded 10-11, readings 931-986, skeletons 326-354, grammar-gap 0 in all 5). See history[0].",
-    "date": "2026-07-23",
+    "date": "2026-07-24",
     "profile": "release",
     "features": [
       "use-llm"
     ],
     "reranker": "AnthropicSenseRanker (live), claude-sonnet-4-6, temperature 0",
     "page": "references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt",
-    "snapshot": "wordnet-umls-aligned-2026-07-23-relcmp-a",
+    "snapshot": "wordnet-umls-aligned-2026-07-24-relcmp-b",
     "snapshot_lineage": [
       "scripts/reseed-lexicon-db.sh --umls-all --snapshot-dir wordnet-umls-2026-07-20-fixes  (import applies: --drop-atoms drops.json [397 atoms / 354 concepts: case-mangled + metadata-artefact concepts (HL7 code-tables, SNOMED (qualifier value)/(attribute) tags, informational INFO-TUI concepts like 'Protein Info') ] + --drop-chv-redundant; PLUS is_grammatical_surface now skips preposition/conjunction surfaces (for/from/into/as/with/on/at/by/of/in/... -> no 'For (preposition)' content noun) and evaluate/assess/deem added to ESSIVE_VERBS)",
       "scripts/build-alignment-snapshot.sh --base wordnet-umls-2026-07-20-fixes --merges merges.json (38,389)  -> wordnet-umls-aligned-2026-07-20-fixes (2.7 GB)",
       "KERNEL (no reseed): gq_prep_passive_agent rule (agentive `by` takes a type-raised GQ agent) closes the passive-agent gap the function-word drop exposed (#46)",
       "2026-07-23 (D63 named-entity source): reseed -> wordnet-umls-aligned-2026-07-23 (UMLS T078/T080 reification-filter + ESL-UTF8 literal decode + closed-class base-form passive `be` under a modal); named-entity glossary source is an in-memory augment OVERLAY (no persistent doc layer)",
-      "2026-07-23 (Fix A, relcmp-a): reseed -> wordnet-umls-aligned-2026-07-23-relcmp-a. Base = the named-entity/reification-filter snapshot above, RE-RESEEDED to bake in two lexicon additions include_str!-embedded into the kernel image: (b') closed-class.esl more_deg_bare/less_deg_bare (elided-than comparative -> open) and (a) crates/eigenius-wordnet/adjective-frames.tsv curated governed-preposition fallback (dependent/on, essential/for, associated/with, concordant/with). scripts/build-alignment-snapshot.sh --base ... --merges merges.json -> aligned (2.7 GB)"
+      "2026-07-23 (Fix A, relcmp-a): reseed -> wordnet-umls-aligned-2026-07-23-relcmp-a. Base = the named-entity/reification-filter snapshot above, RE-RESEEDED to bake in two lexicon additions include_str!-embedded into the kernel image: (b') closed-class.esl more_deg_bare/less_deg_bare (elided-than comparative -> open) and (a) crates/eigenius-wordnet/adjective-frames.tsv curated governed-preposition fallback (dependent/on, essential/for, associated/with, concordant/with). scripts/build-alignment-snapshot.sh --base ... --merges merges.json -> aligned (2.7 GB)",
+      "2026-07-24 (elision collapse, relcmp-b): reseed -> wordnet-umls-aligned-2026-07-24-relcmp-b. Base = relcmp-a, RE-RESEEDED after REMOVING more_deg_bare/less_deg_bare from closed-class.esl (the bootstrap-hash change forcing the reseed); the elided-`than` completion is now the `elided_than` grammar shift (kernel, no lexicon entry). scripts/build-alignment-snapshot.sh --base ... --merges merges.json -> aligned (2.7 GB). The α-normalized skeleton eraser (db_backed_encoding.rs normalize_holes) is TEST-side, no reseed."
     ],
     "config": "pos_prune=0 combinatory_core=0 SENSE_CAP=2 CELL_BEAM=64 (widen-on-failure to SENSE_CAP_WIDEN_MAX=16 / CELL_BEAM_WIDEN_MAX=512; multiword-preference held through the ladder, lifted only at the final rung)",
-    "runtime_s": 231
+    "runtime_s": 238
   },
+  "_provenance_note_2026-07-24-relcmp-b": "Re-baselined for the elided-`than` STRUCTURAL collapse: the per-word bare comparative entries (more_deg_bare/less_deg_bare) are replaced by one general `elided_than` grammar shift (dcg::rules::constructions + UnaryKind::ElidedThan), so `than` is optional via the grammar, not duplicated per degree word. This draw is results/2026-07-24-1309-2e3ddae-first-page-cnl-v3-reranked (RECORD, runtime 238s), replayed drift-free to the expected block below (21/21 expected-reading hits, grammar-gap 0). Snapshot wordnet-umls-aligned-2026-07-24-relcmp-b = relcmp-a re-reseeded after removing the bare entries (bootstrap-hash change). Also this cycle (TEST-side, no reseed): the skeleton eraser now α-normalizes D64 hole binders (`$name$i_j` -> `$name$<ordinal>`), so an open reading freshened at a different derivation site is ONE skeleton — this collapsed unit 4's 14 -> 6 skeletons (the elided_than shift had split one structure across freshening sites) and total-skeletons 231 -> 221, and it is what kept unit 4's pin valid after the shift moved its anaphor from a leaf to a composed cell. Numbers are the drift-free REPLAY of the recorded ranks under the α-normalized eraser. See history[0].",
   "_provenance_note_2026-07-23-relcmp-a": "Re-baselined for Fix A (Defect 1, the relational-comparative reading of unit 4 'The lines from rare lineages were less dependent on WRN'). The prior _provenance_note_2026-07-23 (the D63 named-entity glossary re-baseline) and provenance.commit narrative are retained above as historical context. This draw is results/2026-07-23-2214-41208b1-first-page-cnl-v3-reranked (RECORD), replayed drift-free to the expected block below (62 hits / 0 misses, 21/21 expected-reading hits). Snapshot wordnet-umls-aligned-2026-07-23-relcmp-a — the named-entity/reification-filter base of the 2026-07-23 draw, RE-RESEEDED with two lexicon additions: (b') the elided-than comparative variants more_deg_bare/less_deg_bare in closed-class.esl (an anaphoric comparative standard → open parse) and (a) the curated adjective-frame fallback in the WordNet importer (crates/eigenius-wordnet/adjective-frames.tsv, include_str!-embedded; 'dependent<TAB>on' etc. supply the governed preposition the gloss heuristic misses → the importer's relational deg_rel/cat_pp_arg reading fires). Kernel: D64 open parse is now a Π-abstraction (the elided standard is an abstracted parameter, β-reduced on resolution) and open units are skeletonizable/pinnable. See history[0].",
   "_provenance_note_2026-07-23": "Re-baselined for the D63 named-entity glossary source (docs/notes/d63-named-entity-glossary-source.md). The prior provenance.commit (the 2026-07-20 four-fixes narrative) is retained above as historical context; this draw is results/2026-07-23-1533-d0b65b7-dirty-first-page-cnl-v3-reranked (RECORD), replayed drift-free to the expected block below. Snapshot wordnet-umls-aligned-2026-07-23 (the UMLS-reification-filter + ESL-UTF8 + closed-class passive reseed of this session). See history[0].",
   "expected": {
@@ -30,9 +32,9 @@
     "open": 2,
     "encoded": 10,
     "total_readings_ceiling": 1100,
-    "total_readings": 779,
+    "total_readings": 709,
     "skeletons_ceiling": 300,
-    "skeletons": 231,
+    "skeletons": 221,
     "expected_reading_hits": 21,
     "expected_reading_curated": 21
   },
@@ -62,6 +64,16 @@
     "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible — two senses with different labels and the SAME sem are one concept — but the pre-dedup caveat still stands."
   },
   "history": [
+    {
+      "date": "2026-07-24",
+      "commit": "elided-`than` collapse (grammar shift, 19f23bb) + α-normalized skeleton eraser (a1506f6)",
+      "encoded": "10 (held)",
+      "total_readings": "779 -> 709 (-70; partly the collapse, partly a fresh reranker draw)",
+      "total_skeletons": "231 -> 221 (-10; the α-normalization collapses α-equivalent open readings)",
+      "expected_hits": "21/21 (held, after the eraser fix + re-pin)",
+      "grammar_gap": "0 (held; drift-free replay of the relcmp-b ranks)",
+      "note": "STRUCTURAL collapse of the elided-`than` comparative (docs/notes/d63-single-skeleton-defects.md). The per-word bare entries more_deg_bare/less_deg_bare are removed; one general `elided_than` grammar shift (kernel/src/dcg/rules/constructions.rs + UnaryKind::ElidedThan) saturates any `X/cat_pp_than` comparative's pending standard with the anaphoric placeholder -> the OPEN parse. `than` is now optional VIA THE GRAMMAR (present = than_marker complement, absent = the shift), not duplicated per degree word — the CCGbank-consistent shape for an interpreted grammar (a literal post-modifier cannot set the buried standard by β; see kernel/tests/comparative_than.rs). Behaviour-preserving: only the analytic adjective comparative yields the outer `(S[adj]\\NP)/cat_pp_than` shape (measure/cardinality comparatives nest cat_pp_than under a `bwd`), so the shift fires exactly where the bare entries did. REQUIRED a reseed (closed-class.esl edit) -> relcmp-b. SECOND, the collapse EXPOSED a faithfulness-gate brittleness (fail-closed caught it): erase_senses left D64 hole binders `$name$i_j` verbatim, and the shift moved unit 4's anaphor freshening site (leaf -> composed cell), `$anaphor$6_60` -> `$anaphor$0_90` — structurally identical, but the pin broke (21/21 -> 20/21 on a reading never lost). FIX (test-side, no reseed): normalize_holes α-renames each distinct `$name$i_j` to `$name$<ordinal>` by first appearance, so an α-equivalent open reading is ONE skeleton. This collapsed unit 4's 14 -> 6 skeletons (the shift had split one structure across sites) and total-skeletons 229 -> 221 on replay, and restored 21/21; unit 4 re-pinned to the canonical `$anaphor$0`. Commits: 19f23bb (shift), 2e3ddae (arg/adjunct fix-target test), a1506f6 (eraser α-normalization + re-pin). Guards: kernel comparative_than tests + db_backed_encoding erase_senses_normalises_hole_binder_names. Draw results/2026-07-24-1309-...-reranked, replay 21/21 hits."
+    },
     {
       "date": "2026-07-23",
       "commit": "Fix A (Defect 1): relational-comparative reading of 'less dependent on WRN' — (b') elided-than + (a) adjective-frame acquisition + D64 Pi-abstraction + open-skeletonizable",
