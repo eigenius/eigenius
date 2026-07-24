@@ -315,6 +315,19 @@ const FUNCTION_WORD_SURFACES: &[&str] = &[
            // coordinating. The word stays known via the closed-class bootstrap.
 ];
 
+/// Closed-class **determiner surfaces** UMLS must not seed as content nouns — the determiner analog of
+/// [`FUNCTION_WORD_SURFACES`]. Each is a bootstrap determiner (`ontologies/lexicon/closed-class.esl`);
+/// the UMLS content senses colliding on these surfaces are qualifier-value reifications (`Some
+/// (qualifier value)` `C0205392`, `Each (qualifier value)`, …) that let a determiner pile into a
+/// `compound_kind` instead of quantifying (D63 Defect 2a: "some MSI lines" → a *some-MSI-line*
+/// compound). The determiner reading is in the closed-class bootstrap, so dropping the UMLS noun cannot
+/// make the word unknown, and any WordNet adjective sense (`several`/`few`) is separately handled by the
+/// cross-POS adjective prune. Same accepted case-collision tradeoff as `as`=arsenic / `in`=indium above
+/// (`no`=NO nitric oxide, recoverable as a document-glossary entry if a document needs the symbol).
+const DETERMINER_SURFACES: &[&str] = &[
+    "some", "each", "every", "all", "any", "no", "several", "many", "few", "fewer", "most", "both",
+];
+
 /// Semantic types that denote a RELATION / IDEA / QUALIFIER, not a THING — UMLS terminology-cruft that
 /// must not seed a common noun. A concept typed ONLY by these reifies a grammatical relation and piles
 /// into compounds (`And` C1515981 = T078; `Associated with` C0332281 = T080 → "MSI is an *associated-
@@ -337,7 +350,9 @@ fn is_non_content_concept(tuis: &[String]) -> bool {
 /// ([`GRAMMATICAL_SURFACES`] / [`FUNCTION_WORD_SURFACES`]).
 fn is_grammatical_surface(form: &str) -> bool {
     let f = form.trim().to_ascii_lowercase();
-    GRAMMATICAL_SURFACES.contains(&f.as_str()) || FUNCTION_WORD_SURFACES.contains(&f.as_str())
+    GRAMMATICAL_SURFACES.contains(&f.as_str())
+        || FUNCTION_WORD_SURFACES.contains(&f.as_str())
+        || DETERMINER_SURFACES.contains(&f.as_str())
 }
 
 fn push_entries(
