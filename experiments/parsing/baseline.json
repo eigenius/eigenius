@@ -9,29 +9,32 @@
     ],
     "reranker": "AnthropicSenseRanker (live), claude-sonnet-4-6, temperature 0",
     "page": "references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt",
-    "snapshot": "wordnet-umls-aligned-2026-07-23",
+    "snapshot": "wordnet-umls-aligned-2026-07-23-relcmp-a",
     "snapshot_lineage": [
       "scripts/reseed-lexicon-db.sh --umls-all --snapshot-dir wordnet-umls-2026-07-20-fixes  (import applies: --drop-atoms drops.json [397 atoms / 354 concepts: case-mangled + metadata-artefact concepts (HL7 code-tables, SNOMED (qualifier value)/(attribute) tags, informational INFO-TUI concepts like 'Protein Info') ] + --drop-chv-redundant; PLUS is_grammatical_surface now skips preposition/conjunction surfaces (for/from/into/as/with/on/at/by/of/in/... -> no 'For (preposition)' content noun) and evaluate/assess/deem added to ESSIVE_VERBS)",
       "scripts/build-alignment-snapshot.sh --base wordnet-umls-2026-07-20-fixes --merges merges.json (38,389)  -> wordnet-umls-aligned-2026-07-20-fixes (2.7 GB)",
-      "KERNEL (no reseed): gq_prep_passive_agent rule (agentive `by` takes a type-raised GQ agent) closes the passive-agent gap the function-word drop exposed (#46)"
+      "KERNEL (no reseed): gq_prep_passive_agent rule (agentive `by` takes a type-raised GQ agent) closes the passive-agent gap the function-word drop exposed (#46)",
+      "2026-07-23 (D63 named-entity source): reseed -> wordnet-umls-aligned-2026-07-23 (UMLS T078/T080 reification-filter + ESL-UTF8 literal decode + closed-class base-form passive `be` under a modal); named-entity glossary source is an in-memory augment OVERLAY (no persistent doc layer)",
+      "2026-07-23 (Fix A, relcmp-a): reseed -> wordnet-umls-aligned-2026-07-23-relcmp-a. Base = the named-entity/reification-filter snapshot above, RE-RESEEDED to bake in two lexicon additions include_str!-embedded into the kernel image: (b') closed-class.esl more_deg_bare/less_deg_bare (elided-than comparative -> open) and (a) crates/eigenius-wordnet/adjective-frames.tsv curated governed-preposition fallback (dependent/on, essential/for, associated/with, concordant/with). scripts/build-alignment-snapshot.sh --base ... --merges merges.json -> aligned (2.7 GB)"
     ],
     "config": "pos_prune=0 combinatory_core=0 SENSE_CAP=2 CELL_BEAM=64 (widen-on-failure to SENSE_CAP_WIDEN_MAX=16 / CELL_BEAM_WIDEN_MAX=512; multiword-preference held through the ladder, lifted only at the final rung)",
-    "runtime_s": 228
+    "runtime_s": 231
   },
+  "_provenance_note_2026-07-23-relcmp-a": "Re-baselined for Fix A (Defect 1, the relational-comparative reading of unit 4 'The lines from rare lineages were less dependent on WRN'). The prior _provenance_note_2026-07-23 (the D63 named-entity glossary re-baseline) and provenance.commit narrative are retained above as historical context. This draw is results/2026-07-23-2214-41208b1-first-page-cnl-v3-reranked (RECORD), replayed drift-free to the expected block below (62 hits / 0 misses, 21/21 expected-reading hits). Snapshot wordnet-umls-aligned-2026-07-23-relcmp-a — the named-entity/reification-filter base of the 2026-07-23 draw, RE-RESEEDED with two lexicon additions: (b') the elided-than comparative variants more_deg_bare/less_deg_bare in closed-class.esl (an anaphoric comparative standard → open parse) and (a) the curated adjective-frame fallback in the WordNet importer (crates/eigenius-wordnet/adjective-frames.tsv, include_str!-embedded; 'dependent<TAB>on' etc. supply the governed preposition the gloss heuristic misses → the importer's relational deg_rel/cat_pp_arg reading fires). Kernel: D64 open parse is now a Π-abstraction (the elided standard is an abstracted parameter, β-reduced on resolution) and open units are skeletonizable/pinnable. See history[0].",
   "_provenance_note_2026-07-23": "Re-baselined for the D63 named-entity glossary source (docs/notes/d63-named-entity-glossary-source.md). The prior provenance.commit (the 2026-07-20 four-fixes narrative) is retained above as historical context; this draw is results/2026-07-23-1533-d0b65b7-dirty-first-page-cnl-v3-reranked (RECORD), replayed drift-free to the expected block below. Snapshot wordnet-umls-aligned-2026-07-23 (the UMLS-reification-filter + ESL-UTF8 + closed-class passive reseed of this session). See history[0].",
   "expected": {
     "units": 62,
     "grammar_gap": 0,
     "missing_lexeme": 0,
-    "ambiguous": 51,
-    "open": 1,
+    "ambiguous": 50,
+    "open": 2,
     "encoded": 10,
     "total_readings_ceiling": 1100,
-    "total_readings": 769,
+    "total_readings": 779,
     "skeletons_ceiling": 300,
-    "skeletons": 220,
-    "expected_reading_hits": 20,
-    "expected_reading_curated": 20
+    "skeletons": 231,
+    "expected_reading_hits": 21,
+    "expected_reading_curated": 21
   },
   "gates": {
     "coverage": "grammar_gap == 0 and missing_lexeme == 0 — every sentence parses. NON-NEGOTIABLE.",
@@ -59,6 +62,17 @@
     "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible — two senses with different labels and the SAME sem are one concept — but the pre-dedup caveat still stands."
   },
   "history": [
+    {
+      "date": "2026-07-23",
+      "commit": "Fix A (Defect 1): relational-comparative reading of 'less dependent on WRN' — (b') elided-than + (a) adjective-frame acquisition + D64 Pi-abstraction + open-skeletonizable",
+      "encoded": "10 (held)",
+      "total_readings": "769 -> 779 (+10, within ceiling 1100)",
+      "total_skeletons": "220 -> 231 (+11, within ceiling 300; the open units now contribute skeletons)",
+      "expected_hits": "20/20 -> 21/21 (added unit 4, no existing pin went stale)",
+      "open": "1 -> 2 (unit 4 'The lines from rare lineages were less dependent on WRN' is now OPEN)",
+      "grammar_gap": "0 (held; drift-free replay 62 hits / 0 misses)",
+      "note": "Defect 1 (docs/notes/d63-single-skeleton-defects.md): unit 4 was encoded on a WRONG reading (WRN as a noun-compound modifier, '...a WRN protein') because the relational comparative 'the lines depend on WRN LESS THAN [the typical lineages]' was unreachable. Two blockers, both structural. (a) FRAME ACQUISITION: the relational reading needs 'dependent' to carry its governed preposition 'on' so the importer emits the 2-place deg_dependent_rel : Entity->Entity->float + a cat_measure/cat_pp_arg(on) reading; the gloss heuristic (governed_preposition) has low recall and misses 'dependent'. FIX = a curated fallback crates/eigenius-wordnet/adjective-frames.tsv (include_str!-embedded so it bakes into the kernel image — Dockerfile.kernel COPYs crates/ not experiments/), keyed lemma->prep, consulted when the gloss heuristic returns None. (b') ELIDED-THAN: the comparative more_deg/less_deg obligate an explicit 'than' complement (((S[adj]\\NP)/cat_pp_than)/cat_measure), but the page writes 'less dependent on WRN' with NO 'than' — the standard is anaphoric (the typical/MSS lineages, from prior discourse). FIX = elided-than variants more_deg_bare/less_deg_bare : (S[adj]\\NP)/cat_measure, sem gt over mu(x) vs mu(lexicon:anaphor) — the anaphoric standard makes the unit an OPEN parse. REPRESENTATION (D64, 87fa199): an open parse is now the Pi-abstraction lambda(h:T).body : Pi(h:T).[cat] (a closed, well-typed parametric proposition — the hole is an abstracted parameter, not a free var), re-checked against [cat]; resolution is application (beta-reduce the antecedent in). Open units are now skeletonizable/pinnable (ad7f980), so the relational reading surfaces as a pinnable skeleton. WITNESSED (reseed relcmp-a): unit 4 -> OPEN, skeleton set CONTAINS the correct relational reading gt(deg_dependent_rel(WRN, anaphor), deg_dependent_rel(WRN, the-lines)) — WRN bound as the RELATUM, standard resolvable from discourse. Pinned (experiments/parsing/expected-readings.tsv, curated 20->21). The adjunct-'And' readings still COEXIST (the frame ADDS the relational reading; suppressing the adjunct is the separate than->post-modifier / Fix B lever, deferred). Commits: 87fa199 (Pi-abstraction), ad7f980 (open skeletonizable), 9d2b4a3 (b' elided-than), 64037a8 + 9ec7cd3 (a frame acquisition), 41208b1 (validation note). Draw results/2026-07-23-2214-...-reranked (RECORD, runtime 231s), replayed drift-free to this block."
+    },
     {
       "date": "2026-07-23",
       "commit": "D63 named-entity glossary source (recognizer + emission + wiring) + shadow + reification-filter reseed",
