@@ -21,6 +21,7 @@
     "config": "pos_prune=0 combinatory_core=0 SENSE_CAP=2 CELL_BEAM=64 (widen-on-failure to SENSE_CAP_WIDEN_MAX=16 / CELL_BEAM_WIDEN_MAX=512; multiword-preference held through the ladder, lifted only at the final rung)",
     "runtime_s": 238
   },
+  "_provenance_note_2026-07-24-adj-adjunct": "The expected block below now also includes the PARSER-ONLY argument/adjunct suppression (52a3faf, NO reseed — same relcmp-b snapshot): a governed adjective's preposition is dropped as a free VP-adjunct, so unit 4 is 2 skeletons (both relational) not 6. Numbers (readings 699, skeletons 213) are the drift-free REPLAY of the 2026-07-24-1309 relcmp-b ranks under 52a3faf. See history[0]. The relcmp-b note below (readings 709, skeletons 221) is the PRE-suppression replay of the same ranks, retained as the reseed's provenance.",
   "_provenance_note_2026-07-24-relcmp-b": "Re-baselined for the elided-`than` STRUCTURAL collapse: the per-word bare comparative entries (more_deg_bare/less_deg_bare) are replaced by one general `elided_than` grammar shift (dcg::rules::constructions + UnaryKind::ElidedThan), so `than` is optional via the grammar, not duplicated per degree word. This draw is results/2026-07-24-1309-2e3ddae-first-page-cnl-v3-reranked (RECORD, runtime 238s), replayed drift-free to the expected block below (21/21 expected-reading hits, grammar-gap 0). Snapshot wordnet-umls-aligned-2026-07-24-relcmp-b = relcmp-a re-reseeded after removing the bare entries (bootstrap-hash change). Also this cycle (TEST-side, no reseed): the skeleton eraser now α-normalizes D64 hole binders (`$name$i_j` -> `$name$<ordinal>`), so an open reading freshened at a different derivation site is ONE skeleton — this collapsed unit 4's 14 -> 6 skeletons (the elided_than shift had split one structure across freshening sites) and total-skeletons 231 -> 221, and it is what kept unit 4's pin valid after the shift moved its anaphor from a leaf to a composed cell. Numbers are the drift-free REPLAY of the recorded ranks under the α-normalized eraser. See history[0].",
   "_provenance_note_2026-07-23-relcmp-a": "Re-baselined for Fix A (Defect 1, the relational-comparative reading of unit 4 'The lines from rare lineages were less dependent on WRN'). The prior _provenance_note_2026-07-23 (the D63 named-entity glossary re-baseline) and provenance.commit narrative are retained above as historical context. This draw is results/2026-07-23-2214-41208b1-first-page-cnl-v3-reranked (RECORD), replayed drift-free to the expected block below (62 hits / 0 misses, 21/21 expected-reading hits). Snapshot wordnet-umls-aligned-2026-07-23-relcmp-a — the named-entity/reification-filter base of the 2026-07-23 draw, RE-RESEEDED with two lexicon additions: (b') the elided-than comparative variants more_deg_bare/less_deg_bare in closed-class.esl (an anaphoric comparative standard → open parse) and (a) the curated adjective-frame fallback in the WordNet importer (crates/eigenius-wordnet/adjective-frames.tsv, include_str!-embedded; 'dependent<TAB>on' etc. supply the governed preposition the gloss heuristic misses → the importer's relational deg_rel/cat_pp_arg reading fires). Kernel: D64 open parse is now a Π-abstraction (the elided standard is an abstracted parameter, β-reduced on resolution) and open units are skeletonizable/pinnable. See history[0].",
   "_provenance_note_2026-07-23": "Re-baselined for the D63 named-entity glossary source (docs/notes/d63-named-entity-glossary-source.md). The prior provenance.commit (the 2026-07-20 four-fixes narrative) is retained above as historical context; this draw is results/2026-07-23-1533-d0b65b7-dirty-first-page-cnl-v3-reranked (RECORD), replayed drift-free to the expected block below. Snapshot wordnet-umls-aligned-2026-07-23 (the UMLS-reification-filter + ESL-UTF8 + closed-class passive reseed of this session). See history[0].",
@@ -32,9 +33,9 @@
     "open": 2,
     "encoded": 10,
     "total_readings_ceiling": 1100,
-    "total_readings": 709,
+    "total_readings": 699,
     "skeletons_ceiling": 300,
-    "skeletons": 221,
+    "skeletons": 213,
     "expected_reading_hits": 21,
     "expected_reading_curated": 21
   },
@@ -64,6 +65,16 @@
     "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible — two senses with different labels and the SAME sem are one concept — but the pre-dedup caveat still stands."
   },
   "history": [
+    {
+      "date": "2026-07-24",
+      "commit": "argument/adjunct suppression — governed adjective's preposition is not also a free adjunct (52a3faf, parser-only NO reseed)",
+      "encoded": "10 (held)",
+      "total_readings": "709 -> 699 (-10)",
+      "total_skeletons": "221 -> 213 (-8; the degenerate `And(…, prep_on(…))` readings removed)",
+      "expected_hits": "21/21 (held; the relational reading is the one kept)",
+      "grammar_gap": "0 (held; the gate is lifted at the final widen rung, so coverage cannot gap)",
+      "note": "A governed-ADJECTIVE head immediately followed by its subcategorized preposition takes that PP as its ARGUMENT, so the preposition's competing VP-adjunct entry (the `And`-introducer, closed-class.esl prep_*_sem, category ((S\\NP)\\(S\\NP))/NP) is spurious there. `suppress_governed_adjunct` (parse/seed.rs, seed-time) drops it, leaving the transparent cat_pp_arg marker — so \"on WRN\" can only be dependent's argument. SCOPED to adjective heads (cat_measure / S[adj]\\NP over cat_pp_arg(prep)): a governed adjective has no competing adjunct use of its preposition (\"dependent on X\" is always the complement; \"dependent on it\" has no locative reading), unlike a verb (\"operate on Monday\"). GROUNDING: core-en makes the arg/adjunct split lexically (Prep-Nom PP/NP *NoSem* vs Prep-Loc modifier) and lets a supertagger pick; our sense-reranker does not commit a category, so for an OPEN unit nothing else removes the adjunct — hence the hard, adjective-scoped gate (consistent with our existing hard prunes: cross-POS determiner, multiword-preference). WITNESSED (replay of the relcmp-b ranks, deterministic): unit 4 'less dependent on WRN' 6 -> 2 skeletons (the 4 prep_on adjunct readings gone, both relational readings kept), grammar-gap 0, expected-hits 21/21, total-skeletons 221 -> 213, readings 709 -> 699. Parser-only, so it runs on the SAME relcmp-b snapshot (no reseed); numbers are the drift-free replay of the 2026-07-24-1309 ranks under 52a3faf. Guard: comparative_than::governed_pp_is_not_also_a_free_adjunct. KNOWN BOUNDS: single-token head/prep adjacency (an intervening adverb slips it); verbs deferred (they can genuinely both govern and adjunct one preposition)."
+    },
     {
       "date": "2026-07-24",
       "commit": "elided-`than` collapse (grammar shift, 19f23bb) + α-normalized skeleton eraser (a1506f6)",
