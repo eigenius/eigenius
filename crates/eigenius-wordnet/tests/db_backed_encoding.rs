@@ -830,7 +830,8 @@ fn verbalize(sem: &Exp, vb: &Vb) -> String {
         return format!("⟦{}⟧", pretty_term(sem)); // other Π — not verbalizable yet
     }
     if let Exp::Sig(_, base, restr) = sem {
-        return format!("a {}", noun_phrase(base, restr, vb));
+        let np = noun_phrase(base, restr, vb);
+        return format!("{} {np}", article(&np));
     }
     let (head, args) = app_spine(sem);
     if let Some(local) = axiom_local(head) {
@@ -973,17 +974,21 @@ fn subst_var(e: &Exp, name: &str, to: &Exp) -> Exp {
     }
 }
 
+/// "a" / "an" for the following word (vowel-initial → "an").
+fn article(word: &str) -> &'static str {
+    match word.chars().next() {
+        Some(c) if "aeiou".contains(c.to_ascii_lowercase()) => "an",
+        _ => "a",
+    }
+}
+
 /// "a NP" / "an NP" for a bare kind / class argument (a Σ already supplies its own article).
 fn indefinite(e: &Exp, vb: &Vb) -> String {
     match e {
         Exp::Sig(..) => verbalize(e, vb),
         _ => {
             let w = verbalize(e, vb);
-            let art = match w.chars().next() {
-                Some(c) if "aeiou".contains(c.to_ascii_lowercase()) => "an",
-                _ => "a",
-            };
-            format!("{art} {w}")
+            format!("{} {w}", article(&w))
         }
     }
 }
