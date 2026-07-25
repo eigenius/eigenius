@@ -51,7 +51,7 @@ use eigenius_kernel::layer::{resolve_active_value_indexes, Layer, LayerBuilder, 
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
 use eigenius_kernel::nbe::env::Rho;
 use eigenius_kernel::nbe::readback::readback_val;
-use eigenius_kernel::nbe::term::Exp;
+use eigenius_kernel::nbe::term::{Exp, Patt};
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::storage::PersistentBackend;
 use eigenius_storage_rocksdb::RocksStore;
@@ -803,11 +803,31 @@ fn verbalize(sem: &Exp, vb: &Vb) -> String {
             );
         }
     }
-    if let Exp::Pi(_, dom, cod) = sem {
+    if let Exp::Pi(binder, dom, cod) = sem {
         if axiom_local(cod) == Some("False") {
             return format!("not ({})", verbalize(dom, vb));
         }
-        return format!("⟦{}⟧", pretty_term(sem)); // GQ-CPS / other Π — not verbalizable yet
+        // Existential GQ (`exists_sem`/`obj_exists_sem`, closed-class.esl): `∀C:Prop. (∀x:A. body(x) →
+        // C) → C`, readback `Pi(C, Prop, (Pi(x, A=Σ, body → C)) → C)`. Non-dependent `→` reads back as
+        // `Pi(Patt::Unit, …)`, so match via `as_arrow`. → "some {A} {body}".
+        if let Some((Exp::Pi(xb, a, arr), _c)) = as_arrow(cod) {
+            if matches!(a.as_ref(), Exp::Sig(..)) {
+                if let Some((body, _)) = as_arrow(arr) {
+                    return format!("some {}", quant_clause(a, xb, body, vb));
+                }
+            }
+        }
+        // Universal / negative GQ over a Σ noun (`forall_sem`: `∀x:A. body`; `no_sem`: `∀x:A. body →
+        // False`). Object variants (`obj_*`) fill the subject in, so the readback shape matches.
+        if matches!(dom.as_ref(), Exp::Sig(..)) {
+            if let Some((body, f)) = as_arrow(cod) {
+                if axiom_local(f) == Some("False") {
+                    return format!("no {}", quant_clause(dom, binder, body, vb));
+                }
+            }
+            return format!("every {}", quant_clause(dom, binder, cod, vb));
+        }
+        return format!("⟦{}⟧", pretty_term(sem)); // other Π — not verbalizable yet
     }
     if let Exp::Sig(_, base, restr) = sem {
         return format!("a {}", noun_phrase(base, restr, vb));
@@ -898,11 +918,73 @@ fn verb_pp(left: &Exp, right: &Exp, vb: &Vb) -> Option<String> {
     ))
 }
 
-/// "a NP" for a bare kind / class argument (a Σ already supplies its own article).
+/// A quantifier's body over the bound entity: "{NP}, {predicate}" with the bound variable (already
+/// named by the NP) rendered as "it", so the coreference is legible — "some group of cell lines, we
+/// identified it". Fail-honest: an empty predicate degrades to just the NP.
+fn quant_clause(np_sig: &Exp, xbinder: &Patt, body: &Exp, vb: &Vb) -> String {
+    let np = bare_np(np_sig, vb);
+    let body = match xbinder {
+        Patt::Var(x) => subst_var(body, x, &anaphor_atom()),
+        _ => body.clone(),
+    };
+    let pred = verbalize(&body, vb);
+    if pred.trim().is_empty() {
+        np
+    } else {
+        format!("{np}, {pred}")
+    }
+}
+
+/// A function type `A → B`, however it reads back — the explicit `Exp::Arrow` or the non-dependent
+/// `Pi(Patt::Unit, A, B)` (readback uses the latter for `→`).
+fn as_arrow(e: &Exp) -> Option<(&Exp, &Exp)> {
+    match e {
+        Exp::Arrow(a, b) => Some((a.as_ref(), b.as_ref())),
+        Exp::Pi(Patt::Unit, a, b) => Some((a.as_ref(), b.as_ref())),
+        _ => None,
+    }
+}
+
+/// The `lexicon:anaphor` placeholder — verbalizes as "it" (the entity the NP already names).
+fn anaphor_atom() -> Exp {
+    Exp::EigonAxiom(Iri::parse("urn:eigenius:lexicon:anaphor").expect("anaphor iri"))
+}
+
+/// Replace the free variable `name` with `to` throughout `e` (glossing the bound quantifier entity).
+fn subst_var(e: &Exp, name: &str, to: &Exp) -> Exp {
+    let go = |x: &Exp| subst_var(x, name, to);
+    match e {
+        Exp::Var(v) if v == name => to.clone(),
+        Exp::App(f, x) => Exp::App(Box::new(go(f)), Box::new(go(x))),
+        Exp::Lam(p, b) => Exp::Lam(p.clone(), Box::new(go(b))),
+        Exp::Pi(p, a, b) => Exp::Pi(p.clone(), Box::new(go(a)), Box::new(go(b))),
+        Exp::Sig(p, a, b) => Exp::Sig(p.clone(), Box::new(go(a)), Box::new(go(b))),
+        Exp::Arrow(a, b) => Exp::Arrow(Box::new(go(a)), Box::new(go(b))),
+        Exp::Times(a, b) => Exp::Times(Box::new(go(a)), Box::new(go(b))),
+        Exp::Fst(x) => Exp::Fst(Box::new(go(x))),
+        Exp::Snd(x) => Exp::Snd(Box::new(go(x))),
+        Exp::Pair(a, b) => Exp::Pair(Box::new(go(a)), Box::new(go(b))),
+        Exp::Ann(x, t) => Exp::Ann(Box::new(go(x)), Box::new(go(t))),
+        Exp::InductiveType(d, args) => Exp::InductiveType(d.clone(), args.iter().map(go).collect()),
+        Exp::InductiveCtor(d, n, args) => {
+            Exp::InductiveCtor(d.clone(), n.clone(), args.iter().map(go).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+/// "a NP" / "an NP" for a bare kind / class argument (a Σ already supplies its own article).
 fn indefinite(e: &Exp, vb: &Vb) -> String {
     match e {
         Exp::Sig(..) => verbalize(e, vb),
-        _ => format!("a {}", verbalize(e, vb)),
+        _ => {
+            let w = verbalize(e, vb);
+            let art = match w.chars().next() {
+                Some(c) if "aeiou".contains(c.to_ascii_lowercase()) => "an",
+                _ => "a",
+            };
+            format!("{art} {w}")
+        }
     }
 }
 
