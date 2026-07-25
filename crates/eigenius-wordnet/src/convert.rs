@@ -886,6 +886,20 @@ fn push_adj(
         buf.push_str(&format!(
             "axiom wn:deg_{loc}_rel : {ENTITY_TOP} -> {ENTITY_TOP} -> core:float\n\n"
         ));
+        // C3-positive (Fix A piece (c), d63-single-skeleton-defects.md): the POSITIVE relational
+        // predication — "these classifications are concordant WITH X", "WRN is essential FOR
+        // proliferation". Exactly the 1-place positive (`pos_sem`: measure vs the absolute standard)
+        // with the GROUND threaded: `λr. λx. gt(deg_rel(r, x), std)`. Without it a governed adjective
+        // had NO positive relational reading — only the comparative consumed the `cat_measure/cat_pp_arg`
+        // form — so "concordant with X" fell back to a 1-place adjective plus a free `with` VP-adjunct
+        // (`And(gt(concordant(x)), prep_with(x, X))`), which does not bind the relatum into the degree.
+        // Reuses `std_{loc}` deliberately: the positive's standard is ABSOLUTE (unlike the comparative's
+        // anaphoric `cmp_attrib_sem`), and the standard is a per-sense threshold, not per-ground.
+        push_sem_term(
+            buf,
+            &format!("pos_rel_sem_{loc}"),
+            &format!("( fun (r : {ENTITY_TOP}) => fun (x : {ENTITY_TOP}) => measurements:gt(wn:deg_{loc}_rel(r, x), wn:std_{loc}) : {ENTITY_TOP} -> {prop_arrow} )"),
+        );
     }
     push_sem_term(
         buf,
@@ -953,6 +967,27 @@ fn push_adj(
                 ),
                 &format!("deg_{loc}_rel"),
                 &format!("{ENTITY_TOP} -> {ENTITY_TOP} -> core:float"),
+                &sense,
+                ranks,
+            );
+            rep.entries += 1;
+            // C3-positive (Fix A (c)): the POSITIVE relational predication `(S[adj]\NP)/cat_pp_arg(prep)`
+            // — consume the governed PP (the ground), yield a predicative adjective comparing the
+            // 2-place measure to the absolute standard. This is what lets "concordant WITH X" bind X as
+            // the relatum instead of stranding it as a free VP-adjunct; the copula then lifts it as any
+            // other predicative adjective. Additive: the `cat_measure` form above still serves the
+            // comparative (`more concordant with X than …`).
+            push_entry(
+                buf,
+                &format!("e_{loc}_{i}_rp"),
+                lemma,
+                &format!(
+                    "lexicon:fwd({}, lexicon:cat_pp_arg({}))",
+                    adj_cat(),
+                    prep_ctor(&prep)
+                ),
+                &format!("pos_rel_sem_{loc}"),
+                &cmp_arrow,
                 &sense,
                 ranks,
             );
@@ -1784,6 +1819,53 @@ mod tests {
         assert!(buf.contains("lexicon:sem      = wn:deg_a00000001_rel;"));
         // the bare 1-place measure (C1) is STILL present for the ground-less reading.
         assert!(buf.contains("lexicon:sem      = wn:deg_a00000001;"));
+    }
+
+    #[test]
+    fn relational_gradable_adjective_emits_positive_predication() {
+        // C3-positive (Fix A (c)): the relational adjective ALSO gets a POSITIVE predicative reading
+        // `(S[adj]\NP)/cat_pp_arg(prep)` — consume the governed PP (the ground), compare the 2-place
+        // measure to the ABSOLUTE standard: `λr.λx. gt(deg_rel(r, x), std)`. Without it "dependent ON
+        // WRN" / "concordant WITH X" had no reading binding the relatum into the degree — only the
+        // comparative consumed the `cat_measure` form — so the PP stranded as a free VP-adjunct.
+        let dependent = syn(
+            "00000001 00 a 01 dependent 0 000 | contingent on something; \"dependent on charity\"",
+        );
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_adj(
+            &mut buf,
+            &dependent,
+            &mut rep,
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+        );
+        // The positive-relational sem: the 2-place measure vs the absolute standard.
+        assert!(
+            buf.contains("measurements:gt(wn:deg_a00000001_rel(r, x), wn:std_a00000001)"),
+            "positive relational sem `gt(deg_rel(r, x), std)`:\n{buf}"
+        );
+        // The predicative category taking the governed PP as its argument.
+        assert!(
+            buf.contains(
+                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_on)) );"
+            ),
+            "positive relational cat `(S[adj]\\NP)/cat_pp_arg(prep_on)`:\n{buf}"
+        );
+        assert!(buf.contains("lexicon:sem      = wn:pos_rel_sem_a00000001;"));
+        // A NON-relational gradable adjective gets no positive-relational entry (nothing to ground).
+        let mut buf2 = String::new();
+        push_adj(
+            &mut buf2,
+            &syn("00000002 00 a 01 large 0 000 | of great size"),
+            &mut Report::default(),
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+        );
+        assert!(
+            !buf2.contains("pos_rel_sem_"),
+            "a non-governed adjective must not get a positive-relational reading:\n{buf2}"
+        );
     }
 
     #[test]

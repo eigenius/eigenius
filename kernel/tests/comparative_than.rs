@@ -38,9 +38,10 @@ use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 /// counterparts. The importer emits a gloss-governed adjective as `cat_measure / cat_pp_arg(prep_on)`
 /// with a 2-place degree; this fixture mirrors that emission exactly (no importer, no snapshot).
 const FIXTURE: &str = r#"
-namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
-namespace core      = "urn:eigenius:core";
+namespace lexicon      = "urn:eigenius:lexicon";
+namespace epistemic    = "urn:eigenius:reflection:epistemic";
+namespace core         = "urn:eigenius:core";
+namespace measurements = "urn:eigenius:measurements";
 
 // Relational degree: deg_dependent_rel(relatum, subject) : float. "on WRN" fills the relatum.
 axiom lexicon:deg_dependent_rel : lexicon:Entity -> lexicon:Entity -> core:float
@@ -59,6 +60,28 @@ resource lexicon:dependent_rel : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );
     lexicon:sem      = lexicon:dependent_rel_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> core:float );
+    lexicon:sense    = "wn:dependent.a.01";
+    lexicon:grade    = epistemic:declared;
+}
+
+// `dependent` — the POSITIVE relational predication the importer emits for a governed adjective
+// (C3-positive / Fix A (c)): `(S[adj]\NP)/cat_pp_arg(prep_on)`, sem `λr.λx. gt(deg_rel(r,x), std)`.
+// Consumes the governed PP as the ground, then predicates against the ABSOLUTE standard, so the copula
+// lifts it like any predicative adjective — "the lines were dependent ON WRN" binds WRN as the relatum.
+axiom lexicon:std_dependent : core:float
+resource lexicon:dependent_pos_rel_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (r : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            measurements:gt(lexicon:deg_dependent_rel(r, x), lexicon:std_dependent)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:dependent_pos_rel : lexicon:LexicalEntry {
+    core:description = "relational adjective, POSITIVE predication (importer (S[adj]\\NP)/cat_pp_arg(prep_on)).";
+    lexicon:form     = "dependent";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_on)) );
+    lexicon:sem      = lexicon:dependent_pos_rel_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:dependent.a.01";
     lexicon:grade    = epistemic:declared;
 }
@@ -199,6 +222,31 @@ fn explicit_than_pp_is_a_relatum_standard_comparative() {
         closed
             .iter()
             .map(|p| pretty_term(p.sem()))
+            .collect::<Vec<_>>(),
+    );
+}
+
+/// POSITIVE relational predication (Fix A piece (c), D63 §8.12): "lines were dependent on WRN" — no
+/// comparative at all. The governed adjective consumes its `on`-PP as the GROUND and predicates against
+/// the absolute standard, binding WRN as the relatum: `gt(deg_dependent_rel(wrn, lines), std_dependent)`.
+/// CLOSED (the positive needs no comparison target, unlike the elided comparative). Before (c) this
+/// reading did not exist — only the comparative consumed the relational `cat_measure`, so a positive
+/// "dependent on WRN" could only strand the PP as a free VP-adjunct.
+#[test]
+fn positive_relational_predication_binds_the_ground() {
+    let (closed, open) = parser().parse_open("lines were dependent on WRN", &Identity);
+    assert!(
+        closed.iter().any(|p| {
+            let s = pretty_term(p.sem());
+            s.contains("deg_dependent_rel") && s.contains("std_dependent") && s.contains("wrn")
+        }),
+        "the positive must bind WRN as the relatum vs the absolute standard; closed={:?} open={:?}",
+        closed
+            .iter()
+            .map(|p| pretty_term(p.sem()))
+            .collect::<Vec<_>>(),
+        open.iter()
+            .map(|o| pretty_term(o.item.sem()))
             .collect::<Vec<_>>(),
     );
 }
