@@ -1253,12 +1253,50 @@ fn is_adjective_refined(cat: &Exp) -> bool {
             }
         }
     }
+    // Derived VERBAL modifiers (D63 compound morphology §3b): the denominal suffix `PCR-based` →
+    // `base(x, PCR)` and the reduced-passive participial `predicted` → `∃a. predict(x, a)`. These are
+    // prenominal modifiers exactly like a gradable adjective, so the same adjective-outside NF applies —
+    // "PCR-based [MSI phenotyping]" is canonical and "[PCR-based MSI] phenotyping" is the spurious
+    // bracketing (it is the PHENOTYPING that is PCR-based, not the MSI). They were missed because their
+    // restrictor is a VERB relation, not a degree comparison.
+    //
+    // Matched POSITIVELY on the importer's verb-frame naming convention `v{offset}_{tag}`
+    // (`crates/eigenius-wordnet/src/convert.rs`), which by construction excludes every restrictor a
+    // compound noun legitimately carries — `compound_kind`, the essive `is_a`, `named`, a PP `prep_*`,
+    // `gt`/`lt` — so the mis-classification that once exploded `MSI as a biomarker` cannot recur. The
+    // reduced passive wraps its relation in a Π-CPS, so scan the whole conjunct, not just its spine.
+    fn mentions_verb_frame(e: &Exp) -> bool {
+        let is_frame = |iri: &crate::ontology::Iri| {
+            let local = iri.as_str().rsplit(':').next().unwrap_or("");
+            let mut cs = local.chars();
+            cs.next() == Some('v')
+                && local.contains('_')
+                && cs.clone().next().is_some_and(|c| c.is_ascii_digit())
+        };
+        match e {
+            Exp::EigonAxiom(iri) => is_frame(iri),
+            Exp::App(f, x) => mentions_verb_frame(f) || mentions_verb_frame(x),
+            Exp::Ann(a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) | Exp::Pair(a, b) => {
+                mentions_verb_frame(a) || mentions_verb_frame(b)
+            }
+            Exp::Lam(_, b) => mentions_verb_frame(b),
+            Exp::Pi(_, a, b) | Exp::Sig(_, a, b) => {
+                mentions_verb_frame(a) || mentions_verb_frame(b)
+            }
+            Exp::Fst(a) | Exp::Snd(a) => mentions_verb_frame(a),
+            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
+                args.iter().any(mentions_verb_frame)
+            }
+            _ => false,
+        }
+    }
     let mut conjuncts = Vec::new();
     flatten_and(body, &mut conjuncts);
     conjuncts.iter().any(|c| {
         matches!(spine_head(c), Exp::EigonAxiom(iri)
             if iri.as_str() == "urn:eigenius:measurements:gt"
                 || iri.as_str() == "urn:eigenius:measurements:lt")
+            || mentions_verb_frame(c)
     })
 }
 
@@ -1424,6 +1462,52 @@ mod dispatch_tests {
         assert!(
             !is_adjective_refined(&comp_cat),
             "a pure compound is not adjective-refined"
+        );
+
+        // DERIVED VERBAL modifiers are modifiers too (D63 compound morphology §3b): the denominal
+        // suffix `PCR-based` → `base(x, PCR)` and the reduced-passive participial `predicted` →
+        // `∃a. predict(x, a)`. Their restrictor is a VERB relation, not a degree comparison, so the
+        // degree-only guard missed them and BOTH bracketings of "PCR-based MSI phenotyping" survived
+        // ("[PCR-based MSI] phenotyping" is spurious — it is the PHENOTYPING that is PCR-based).
+        // Matched on the importer's verb-frame naming convention `v{offset}_{tag}`.
+        let denominal_cat = n(sigma_cmp(
+            protein.clone(),
+            app2_x(
+                "urn:eigenius:wordnet:v00636888_t",
+                ax("urn:eigenius:wordnet:n_pcr"),
+            ),
+        ));
+        assert!(
+            is_adjective_refined(&denominal_cat),
+            "a denominal `-based` verb-frame restrictor is modifier-refined"
+        );
+        // The reduced passive wraps its relation in a Π-CPS — scanned, not just the spine head.
+        let participial_cat = n(sigma_cmp(
+            protein.clone(),
+            Exp::Pi(
+                crate::nbe::term::Patt::Var("C".into()),
+                Box::new(Exp::Sort(0)),
+                Box::new(app2_x(
+                    "urn:eigenius:wordnet:v00917772_t",
+                    Exp::Var("C".into()),
+                )),
+            ),
+        ));
+        assert!(
+            is_adjective_refined(&participial_cat),
+            "a Π-wrapped reduced-passive participial restrictor is modifier-refined"
+        );
+        // A verb-frame axiom is required — a NON-frame relation on the same shape is not a modifier.
+        let plain_rel = n(sigma_cmp(
+            protein.clone(),
+            app2_x(
+                "urn:eigenius:ontology:prep_of",
+                ax("urn:eigenius:lexicon:repair"),
+            ),
+        ));
+        assert!(
+            !is_adjective_refined(&plain_rel),
+            "a PP restrictor is not modifier-refined (the naming convention excludes it)"
         );
         let essive_cat = n(sigma_cmp(
             protein.clone(),
