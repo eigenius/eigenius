@@ -807,7 +807,15 @@ fn other_grammar_rules() -> &'static [CatRule] {
                 name: "name",
                 left_pat: Ctor("cat_n", vec![Var("sortal"), wild()]),
                 right_pat: Ctor("cat_np", vec![Var("namety"), wild()]),
-                guards: &[Guard::ProperName("namety")],
+                // `ProperName` alone is not enough: it only asks that the name's type index be a
+                // CONCRETE class (≠ `Entity`), and a BARE KIND's plain `cat_np` (core-en `bnp`) is also
+                // concretely typed — so "nucleotide repeat regions" was read as the sortal `nucleotide`
+                // apposed to a *name* "repeat regions", i.e. "a nucleotide **named** a repeat region".
+                // The type cannot tell a kind from a name; the PROVENANCE can.
+                guards: &[
+                    Guard::ProperName("namety"),
+                    Guard::NotKindRaised(Operand::Right),
+                ],
                 build: build_name,
             },
             // GQ-as-prep-object, PpMod: `[cat_pp/NP] [raised-GQ]` → a post-nominal `cat_pp` modifier.
