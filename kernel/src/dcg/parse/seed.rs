@@ -168,6 +168,18 @@ impl Parser {
                 //      33% (1741 -> 1169, the avoided widen-floods) but the tracked STRUCTURAL lever
                 //      rose — extra categories per sense are genuine added ambiguity in the reranked
                 //      regime. Net loss; not shipped.
+                //  (1b) cap by SENSE, RE-TESTED 2026-07-25 on the tree that now carries the Eisner
+                //      guards (`LeftNotRaised` covering `KindRaised`, `RightNotKindRaised`, the
+                //      sortal-name guard), since the first rejection was blamed on duplicate
+                //      derivations those guards remove. It is STILL a loss: same-ranks replay gave
+                //      encoded 11 -> 4 (the guards recovered part of the earlier 10 -> 0, not enough)
+                //      and readings 347 -> 352. Crucially it does NOT fix what motivated the retry:
+                //      "does not lead to cell death" needs `lead`'s frame-04 PP-oblique sense
+                //      (02555908 "be conducive to" / 02635956 "tend to or result in"), and those are
+                //      SEPARATE SENSES among lead's 14 verb senses — not categorial variants of a KEPT
+                //      sense. Capping by sense cannot reach a sense the draw never kept. That unit is a
+                //      SENSE-RANKING problem (the documented ~5% temperature-0 draw variance over a
+                //      2-slot cap), not a cap-mechanics one.
                 //  (2) exempt the closed class (`in_lexicon.is_none()`) from the cap — the shape the
                 //      note above proposes. It FAILS `sense_reranker_overrides_static_cap_order`, which
                 //      is why the earlier attempt failed too: `in_lexicon.is_none()` means UNTAGGED, not
