@@ -37,9 +37,9 @@
     "open": 2,
     "encoded": 10,
     "total_readings_ceiling": 1100,
-    "total_readings": 735,
+    "total_readings": 720,
     "skeletons_ceiling": 250,
-    "skeletons": 178,
+    "skeletons": 169,
     "expected_reading_hits": 23,
     "expected_reading_curated": 23
   },
@@ -69,6 +69,16 @@
     "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible — two senses with different labels and the SAME sem are one concept — but the pre-dedup caveat still stands."
   },
   "history": [
+    {
+      "date": "2026-07-25",
+      "commit": "adjective-outside NF extended to derived verbal modifiers (a8f17a7, parser-only NO reseed)",
+      "encoded": "10 (held)",
+      "total_readings": "735 -> 720",
+      "total_skeletons": "178 -> 169",
+      "expected_hits": "23/23 (held)",
+      "grammar_gap": "0 (held)",
+      "note": "The nominal-modification NF (D63 §3.3) forbids a compound over a MODIFIER-refined noun, giving a modifier stack the single canonical derivation adj*(compound-core(N)). Its predicate `is_adjective_refined` matched only the DEGREE axioms (gt/lt) — deliberately positive, because an over-broad 'anything not a compound' version once exploded `MSI as a biomarker` under widen. That left DERIVED VERBAL modifiers out of scope: the denominal suffix `PCR-based` -> base(x, PCR) and the reduced-passive participial `predicted` -> exists a. predict(x, a), whose restrictor is a VERB relation. So both bracketings survived, including the spurious '[PCR-based MSI] phenotyping' (it is the PHENOTYPING that is PCR-based, not the MSI). FIX: also match, POSITIVELY, the importer's verb-frame naming convention v{offset}_{tag} — which by construction excludes every restrictor a compound noun legitimately carries (compound_kind, essive is_a, named, PP prep_*, gt/lt), so the old mis-classification cannot recur; the reduced passive wraps its relation in a Pi-CPS, so the whole conjunct is scanned, not just its spine head. MEASURED as a true A/B (same ranks, same snapshot, parser-only): FOUR units improved, NONE regressed — 'These classifications were highly concordant with PCR-based MSI phenotyping and with predicted MMR deficiency' 4 -> 1 (and its survivor is the FLAT bracketing, the correct one — that unit was 16 skeletons when the investigation began), 'These findings remained true with PCR-based MSI classifications' 4 -> 2, 'We ascertained MSI status with sequencing' 5 -> 3, 'Depletion of WRN induced double-stranded DNA breaks' 6 -> 4. Guard: dispatch_tests::adjective_outside_compound_nf extended with the denominal, Pi-wrapped participial and negative (PP restrictor) cases."
+    },
     {
       "date": "2026-07-25",
       "commit": "the copula is grammar: withhold content senses of `be` (9f52ba1) + Fix A (c) positive relational predication (6437edc)",
