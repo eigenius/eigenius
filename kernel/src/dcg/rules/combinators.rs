@@ -475,6 +475,14 @@ enum Guard {
     /// adjective always attaches OUTSIDE the compound core. Negation of [`is_adjective_refined`];
     /// category-only, like [`Self::NotCompoundRefined`].
     NotAdjectiveRefined(Operand),
+    /// The named operand must NOT be a **bare-kind** NP (`Combinator::KindRaised`). Following core-en's
+    /// `bnp` rule the bare-kind shift yields a PLAIN `cat_np` rather than the quantifier-style raise,
+    /// so it can fill any argument slot — including a non-final one, which type-raising cannot reach.
+    /// This guard keeps the invariant the raise used to enforce structurally: a bare kind stays
+    /// **argument-only** and must not feed the compound rule, which would build a spurious
+    /// `compound(x, kind_of(C))` duplicating the `compound_kind` classifier (D63 §7.5). Reads
+    /// provenance, not the category — the same distinction `mod_lifts` already makes for `KindRaised`.
+    NotKindRaised(Operand),
     /// The bound type-index metavar must be a **genuine proper-name class** — a concrete `EigonClass`
     /// other than the `Entity` top (D63 §5.3). Keeps close-naming apposition off a pronoun /
     /// bare-kind `cat_np(Entity)` right. Reads a category metavar, never a sem.
@@ -506,6 +514,7 @@ impl Guard {
         match self {
             Guard::NotCompoundRefined(op) => !is_compound_refined(&op.pick(left, right).cat),
             Guard::NotAdjectiveRefined(op) => !is_adjective_refined(&op.pick(left, right).cat),
+            Guard::NotKindRaised(op) => op.pick(left, right).prov != Combinator::KindRaised,
             Guard::ProperName(meta) => matches!(
                 binds.get(*meta),
                 Some(Exp::EigonClass(iri)) if iri.as_str() != "urn:eigenius:lexicon:Entity"
@@ -547,6 +556,7 @@ fn refine_rules() -> &'static [CatRule] {
                 guards: &[
                     Guard::NotCompoundRefined(Operand::Right),
                     Guard::NotAdjectiveRefined(Operand::Right),
+                    Guard::NotKindRaised(Operand::Left),
                 ],
                 build: refine_named_compound,
             },

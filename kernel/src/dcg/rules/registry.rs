@@ -470,55 +470,46 @@ impl Grammar {
         }
         let base = base_class(t); // the raised category's NP index (a class in the subsumption lattice)
         let kind = kind_of(t.clone()); // the nominalized whole type — `kind_of(Σx:C.R)` for a compound
-        det_cats
-            .iter()
-            .filter_map(|det_cat| {
-                let head = cat_forall_body_head(det_cat)?;
-                let Some([_dnum, body_lam]) = is_ctor(det_cat, "cat_forall") else {
-                    return None;
-                };
-                let Exp::Lam(Patt::Var(tvar), body) = body_lam else {
-                    return None;
-                };
-                let mut subst = CatSubst::new();
-                subst.insert(tvar.clone(), base.clone());
-                let cat = subst_cat(body, &subst);
-                let sem = match head {
-                    // subject-raised `S/(S\NP)`: `λV. V(kind)`.
-                    "fwd" => Exp::Lam(
-                        Patt::Var("V".into()),
-                        Box::new(Exp::App(
-                            Box::new(Exp::Var("V".into())),
-                            Box::new(kind.clone()),
-                        )),
+                                       // PLAIN `cat_np`, following core-en's `bnp` type-changing rule (`n $1 → np $1`,
+                                       // `unary-rules.xsl`). A bare kind is NOT a generalized quantifier — core-en type-raises only
+                                       // `QuantNP` — so under Chierchia's `∩` it denotes an INDIVIDUAL (`kind_of(t) : Entity`) and a
+                                       // plain referential NP is its correct category.
+                                       //
+                                       // Needed because type-raising FIXES the result category: the object raise
+                                       // `(S\NP)\((S\NP)/NP)` only satisfies a functor whose innermost argument is its NP with
+                                       // result `S\NP`. A verb with a further argument after its object — the ESSIVE
+                                       // `((S\NP)/cat_pp_arg(prep_as))/NP`, the ditransitive — is unreachable, and no composition
+                                       // degree repairs it (`<Bⁿ` needs `((S\NP)/NP)/Z…`; the essive's argument order is reversed).
+                                       // Witnessed: "We evaluated WRN as a biomarker" parsed (proper noun → plain `cat_np`) while
+                                       // "We evaluated MSI as a biomarker" gapped (bare kind → raised only). A plain `cat_np` fills
+                                       // ANY argument slot, closing the whole class of frame instead of one raise shape per frame.
+                                       //
+                                       // AGREEMENT: take the number the determiner-derived raise supplied — a bare MASS noun agrees
+                                       // SINGULAR ("instability affects HeLa"); a bare plural stays plural. Keeping the noun's own
+                                       // `mass` feature would fail to agree with a 3sg verb.
+        let mut out: Vec<Item> = Vec::new();
+        if let Exp::InductiveCtor(decl, _, _) = noun.cat() {
+            if let Exp::InductiveCtor(num_decl, _, _) = num {
+                out.push(Item::from_parts(
+                    Exp::InductiveCtor(
+                        decl.clone(),
+                        "cat_np".into(),
+                        vec![
+                            base_class(t),
+                            Exp::InductiveCtor(
+                                num_decl.clone(),
+                                if want_num == "mass" { "sg" } else { want_num }.into(),
+                                Vec::new(),
+                            ),
+                        ],
                     ),
-                    // object-raised `(S\NP)\((S\NP)/NP)`: `λTV. λsubj. TV(kind, subj)`.
-                    "bwd" => {
-                        let tv_app = Exp::App(
-                            Box::new(Exp::App(
-                                Box::new(Exp::Var("TV".into())),
-                                Box::new(kind.clone()),
-                            )),
-                            Box::new(Exp::Var("subj".into())),
-                        );
-                        Exp::Lam(
-                            Patt::Var("TV".into()),
-                            Box::new(Exp::Lam(Patt::Var("subj".into()), Box::new(tv_app))),
-                        )
-                    }
-                    _ => return None,
-                };
-                // Tag `KindRaised` so the attributive rule can refuse the predicative `S[adj]\NP` form
-                // as a pre-nominal modifier (the bare-mass `And` over-generation), while it stays
-                // available for its legit argument/predication uses. ENF-inert.
-                Some(Item::from_parts(
-                    cat,
-                    sem,
+                    kind_of(t.clone()),
                     Combinator::KindRaised,
                     noun.cost(),
-                ))
-            })
-            .collect()
+                ));
+            }
+        }
+        out
     }
 
     /// Bare-MASS NP shift — the kind shift over a mass noun, singular agreement (reuse `a`).
