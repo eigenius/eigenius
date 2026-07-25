@@ -328,6 +328,19 @@ const DETERMINER_SURFACES: &[&str] = &[
     "some", "each", "every", "all", "any", "no", "several", "many", "few", "fewer", "most", "both",
 ];
 
+/// Closed-class **copula surfaces** UMLS must not seed as content nouns or verbs. `be` and its
+/// inflections are the grammatical core of predication (`ontologies/lexicon/closed-class.esl` ships the
+/// copula `(S[dcl,fin]\NP)/(S[dcl,adj]\NP)` and the passive auxiliary); UMLS's content senses on these
+/// surfaces are chemical-symbol homonyms (`Be` = beryllium, the same accepted tradeoff as `as`=arsenic /
+/// `in`=indium above) and terminology artefacts. Left seeded they are actively harmful, not merely
+/// redundant: a content VERB sense of `were` supplies a linking-verb frame `be(λx.P(x), subj)` that
+/// re-encodes "X is P" as an opaque 2-place relation — destroying the copula's transparency (`X is P`
+/// **is** `P(X)`) — and a `cat_n` sense makes `were` a plural NOUN. Both were measured on the WRN page's
+/// worst unit ("These classifications were highly concordant with … and with …"): 8 of its 16 structural
+/// readings are that opaque-`be` family and a type-raising artifact riding on it.
+/// `being` is deliberately EXCLUDED — it is a legitimate common noun ("a living being").
+const COPULA_SURFACES: &[&str] = &["be", "is", "are", "was", "were", "am", "been"];
+
 /// Semantic types that denote a RELATION / IDEA / QUALIFIER, not a THING — UMLS terminology-cruft that
 /// must not seed a common noun. A concept typed ONLY by these reifies a grammatical relation and piles
 /// into compounds (`And` C1515981 = T078; `Associated with` C0332281 = T080 → "MSI is an *associated-
@@ -353,6 +366,7 @@ fn is_grammatical_surface(form: &str) -> bool {
     GRAMMATICAL_SURFACES.contains(&f.as_str())
         || FUNCTION_WORD_SURFACES.contains(&f.as_str())
         || DETERMINER_SURFACES.contains(&f.as_str())
+        || COPULA_SURFACES.contains(&f.as_str())
 }
 
 fn push_entries(
@@ -849,6 +863,51 @@ mod tests {
                                                                     // (T121) whose grammatical FORM `as` still goes through the per-form grammatical skip.
         assert_eq!(rep.non_content_skipped, 1);
         assert_eq!(rep.grammatical_skipped, 1);
+    }
+
+    #[test]
+    fn copula_surface_gets_no_content_entry() {
+        // `Be` = beryllium (T121, a CONTENT concept) — its element-symbol form collides with the copula.
+        // The copula is the grammatical core of predication (closed-class bootstrap), and a `cat_n`
+        // sense on `were`/`be` makes the verb a plural NOUN, so the per-form grammatical skip drops it.
+        // Same accepted tradeoff as `as`=arsenic / `in`=indium: the concept CLASS stays and the full
+        // name `beryllium` still seeds, so nothing becomes unreachable.
+        let subset = Subset {
+            semantic_types: vec![SemanticType {
+                tui: "T121".to_string(),
+                name: "Pharmacologic Substance".to_string(),
+            }],
+            concepts: vec![Concept {
+                cui: "C0004667".to_string(),
+                tuis: vec!["T121".to_string()],
+                preferred_name: "beryllium".to_string(),
+                forms: vec![
+                    "be".to_string(),
+                    "were".to_string(),
+                    "beryllium".to_string(),
+                ],
+                definition: None,
+                symbol: None,
+            }],
+        };
+        let (doc, rep) = render_document(&subset, "2026AA", &MassNouns::new(), &DropSet::new());
+        assert!(
+            doc.contains("class umlscui:C0004667 :"),
+            "the class is kept"
+        );
+        assert!(
+            !doc.contains("lexicon:form       = \"be\";")
+                && !doc.contains("lexicon:form       = \"were\";"),
+            "copula surfaces must not seed content entries:\n{doc}"
+        );
+        assert!(
+            doc.contains("lexicon:form       = \"beryllium\";"),
+            "the real content surface stays:\n{doc}"
+        );
+        assert_eq!(rep.grammatical_skipped, 2);
+        // `being` is EXCLUDED from the list — it is a legitimate common noun ("a living being").
+        assert!(!is_grammatical_surface("being"));
+        assert!(is_grammatical_surface("were") && is_grammatical_surface("is"));
     }
 
     #[test]

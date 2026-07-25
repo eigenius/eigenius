@@ -136,6 +136,11 @@ pub struct Report {
     /// `cat_n(C, mass)` entry emitted for a lemma flagged uncountable, enabling the bare-mass
     /// argument shift. Zero when no countability lexicon is supplied.
     pub mass_entries: usize,
+    /// Verb lemmas skipped because they are the COPULA (`be`) — grammar the closed-class bootstrap
+    /// owns. WordNet's content senses of it (including a frame-6 LINKING entry over an opaque 2-place
+    /// axiom) compete with the copula and re-encode `X is P` as `be(λx.P(x), X)`. Counts lemma skips,
+    /// so one per (frame-kind × synset) occurrence of `be`.
+    pub copula_skipped: usize,
 }
 
 /// The emittable categorial shapes a verb frame maps to. Higher-order shapes
@@ -634,6 +639,22 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
         // (3sg/pl) and the participles existed.
         let cat_fin_past = kind.cat("fin", "num_any");
         for (i, lemma) in syn.words.iter().enumerate() {
+            // The COPULA is grammar, not a content verb: skip WordNet's `be` senses (D63, the WRN
+            // page's worst unit). WordNet gives `be` 8 verb synsets, and `02604760` "have the quality
+            // of being" carries frame 6 → `FrameKind::LinkingAdj`, so it emits a linking entry
+            // `(S[dcl,fin]\NP)/(S[dcl,adj]\NP)` over an OPAQUE 2-place axiom. That re-encodes "X is P"
+            // as `be(λx.P(x), X)` — destroying the copula's transparency, since `X is P` **is** `P(X)`
+            // — and competes with the closed-class copula that already covers every inflection
+            // (`ontologies/lexicon/closed-class.esl`). Measured: that opaque-`be` family plus a
+            // type-raising artifact riding on it accounted for 8 of the 16 structural readings of
+            // "These classifications were highly concordant with … and with …". Per-LEMMA, not
+            // per-synset: `be`'s synsets also carry legitimate content lemmas (`follow`, `live`,
+            // `equal`, `cost`), which keep their entries. `have`/`do` are NOT skipped — they are
+            // genuine content verbs on this corpus ("this state has frequent … mutations").
+            if is_copula_lemma(lemma) {
+                rep.copula_skipped += 1;
+                continue;
+            }
             let sense = sense_key(syn, lemma);
             // Base form — the lemma surface (do-support / modal complement; num_any).
             push_entry(
@@ -717,6 +738,14 @@ fn push_sem_term(buf: &mut String, id: &str, term: &str) {
 }
 
 /// The predicative adjective category `S[dcl,adj]\NP` (requires the copula; D63 §8.5 3a).
+/// Whether `lemma` is the COPULA — grammar the closed-class bootstrap owns, so WordNet's content verb
+/// senses of it must not be emitted (see the skip in [`push_verb`]). Only `be` itself: the importer
+/// derives every inflection (`is`/`are`/`was`/`were`) from the lemma, so skipping the lemma removes them
+/// all. `being` is not listed because it is not a verb LEMMA here (and is a legitimate common noun).
+fn is_copula_lemma(lemma: &str) -> bool {
+    lemma.trim().eq_ignore_ascii_case("be")
+}
+
 fn adj_cat() -> String {
     format!("lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))")
 }
@@ -1655,6 +1684,36 @@ mod tests {
             "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_cp) );"
         ));
         assert!(buf.contains("lexicon:sem      = wn:v00000003_c;"));
+    }
+
+    #[test]
+    fn copula_lemma_is_skipped_but_its_synset_siblings_survive() {
+        // The copula is grammar (closed-class bootstrap), so WordNet's `be` verb senses must not be
+        // emitted — its frame-6 LINKING entry re-encodes "X is P" as an opaque `be(λx.P(x), X)` and
+        // competed with the copula (8 of 16 readings on the WRN page's worst unit). The skip is
+        // per-LEMMA: a synset carrying `be` alongside a content lemma keeps the content lemma.
+        let be_and_follow =
+            syn("02445925 41 v 02 be 0 follow 9 000 02 + 22 00 + 08 01 | work in a specific place");
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_verb(&mut buf, &be_and_follow, &mut rep, &SenseRanks::new());
+        assert!(
+            !buf.contains("lexicon:form     = \"be\";"),
+            "the copula lemma must not be emitted:\n{buf}"
+        );
+        assert!(
+            !buf.contains("lexicon:form     = \"were\";")
+                && !buf.contains("lexicon:form     = \"is\";"),
+            "nor any inflection derived from it:\n{buf}"
+        );
+        assert!(
+            buf.contains("lexicon:form     = \"follow\";"),
+            "the synset's content sibling lemma MUST survive:\n{buf}"
+        );
+        assert!(rep.copula_skipped > 0, "the skip is counted");
+        // `have`/`do` are genuine content verbs on this corpus and are NOT skipped.
+        assert!(!is_copula_lemma("have") && !is_copula_lemma("do"));
+        assert!(is_copula_lemma("be") && is_copula_lemma("Be"));
     }
 
     #[test]
