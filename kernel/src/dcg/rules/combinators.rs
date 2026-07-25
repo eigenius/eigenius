@@ -151,23 +151,37 @@ enum ProvGuard {
     /// The left operand is not itself a composition output (may not be a primary `>`/`>B` functor).
     LeftNotComposed,
     /// The left operand is not type-raised (a raised functor may only compose, not forward-apply).
+    /// Covers the bare-kind raise ([`Combinator::KindRaised`]) for the same reason it covers
+    /// [`Combinator::TypeRaised`]: with a plain `cat_np` available, a raised SUBJECT forward-applying to
+    /// the VP would re-derive the reading plain backward application already gives.
     LeftNotRaised,
     /// The left operand — the backward-application ARGUMENT — is not a modal / do-support output
     /// ([`Combinator::Modal`]). On `backward_app` this blocks a VP-adjunct PP from attaching ABOVE a
     /// modal ("`can arise` `from LS`"), where it would escape the modal's `Possible(…)` scope; subject
     /// application is untouched (there the argument is the subject NP, not the modal VP).
     LeftNotModal,
+    /// The right operand — the backward-application FUNCTOR — is not a raised BARE KIND
+    /// ([`Combinator::KindRaised`]). The Eisner mirror of [`Self::LeftNotRaised`]: a raised category may
+    /// only compose / coordinate, never do what plain application already does. A bare kind now has a
+    /// plain `cat_np` (core-en's `bnp`), so the raised copy backward-applying to a transitive verb
+    /// re-derives the identical reading — `HeLa affects genes` would close twice with the same sem. A
+    /// DETERMINER quantifier (`a gene`) is unaffected: it has no plain-NP form, so its raise is the only
+    /// derivation and carries a different provenance.
+    RightNotKindRaised,
 }
 
 impl ProvGuard {
-    fn holds(&self, left_prov: Combinator) -> bool {
+    fn holds(&self, left_prov: Combinator, right_prov: Combinator) -> bool {
         match self {
             ProvGuard::LeftNotComposed => !matches!(
                 left_prov,
                 Combinator::ForwardComp | Combinator::CrossedComp | Combinator::BackwardComp
             ),
-            ProvGuard::LeftNotRaised => left_prov != Combinator::TypeRaised,
+            ProvGuard::LeftNotRaised => {
+                !matches!(left_prov, Combinator::TypeRaised | Combinator::KindRaised)
+            }
             ProvGuard::LeftNotModal => left_prov != Combinator::Modal,
+            ProvGuard::RightNotKindRaised => right_prov != Combinator::KindRaised,
         }
     }
 }
@@ -282,7 +296,7 @@ fn comb_rules() -> &'static [CombRule] {
                 // LeftNotModal: the ARGUMENT (left) may not be a modal/aux VP output — a VP-adjunct PP
                 // must attach BELOW the modal, not above it (`Combinator::Modal`). Subject application
                 // is unaffected (there the argument is the subject NP).
-                prov_guards: &[ProvGuard::LeftNotModal],
+                prov_guards: &[ProvGuard::LeftNotModal, ProvGuard::RightNotKindRaised],
             },
             CombRule {
                 name: "forward_comp",
@@ -305,7 +319,11 @@ fn combine_universal(
     layer: &Arc<Layer>,
 ) -> Option<SemRecipe> {
     for rule in comb_rules() {
-        if rule.prov_guards.iter().all(|g| g.holds(left.prov)) {
+        if rule
+            .prov_guards
+            .iter()
+            .all(|g| g.holds(left.prov, right.prov))
+        {
             if let Some(recipe) = rule.kind.combine(left, right, layer) {
                 return Some(recipe);
             }

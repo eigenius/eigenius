@@ -139,6 +139,57 @@ pub(crate) fn sem_is_coordination(sem: &Exp) -> bool {
 /// `and`/`or` rebinds it); a FINALIZED left must share the op (no `X and Y or Z` mixing). `op_iri` is
 /// `logic:And` / `logic:Or` / [`LIST_CONN`] (a comma). `None` unless `l`/`r` coordinate (same
 /// category, prop-ending) and the connectives are compatible.
+/// Raise a **bare-kind** `cat_np` conjunct to the OBJECT-GQ shape of its partner, so it can coordinate
+/// with a determined quantifier — "HeLa affects **genes or a cell line**" (D63 §8.4).
+///
+/// Type-raising is motivated exactly HERE: coordinating unlike constituents. It is NOT needed for
+/// ordinary argument filling, which is why the bare-kind shift yields a plain `cat_np` (core-en's
+/// `bnp`, `n $1 → np $1`) — core-en likewise raises only `QuantNP`. Raising on demand keeps the plain
+/// NP available for every argument slot (including the non-final ones type-raising cannot reach, the
+/// ESSIVE / ditransitive frames) while restoring the one construction that genuinely needs the GQ.
+///
+/// `gq_cat` is the partner's object-GQ category `(S\NP)\((S\NP)/NP_T')`; the raise reuses its shape
+/// with THIS conjunct's class substituted into the exposed object slot, so `common_cat` can then widen
+/// the two indices to their `common_super` as it does for two determined GQs. Sem is the standard
+/// object raise `λTV. λsubj. TV(kind, subj)` over the bare kind's `kind_of(t)` entity.
+fn raise_kind_to_object_gq(np_cat: &Exp, np_sem: &Exp, gq_cat: &Exp) -> Option<(Exp, Exp)> {
+    let [t, _num] = is_ctor(np_cat, "cat_np")? else {
+        return None;
+    };
+    // The partner must be an object GQ: `(S\NP) \ ((S\NP)/NP)`.
+    let [res, inner] = is_ctor(gq_cat, "bwd")? else {
+        return None;
+    };
+    let [vp, obj] = is_ctor(inner, "fwd")? else {
+        return None;
+    };
+    let [_t_other, obj_num] = is_ctor(obj, "cat_np")? else {
+        return None;
+    };
+    let (Exp::InductiveCtor(cat_decl, _, _), Exp::InductiveCtor(_, _, _)) = (gq_cat, obj) else {
+        return None;
+    };
+    let new_obj = Exp::InductiveCtor(
+        cat_decl.clone(),
+        "cat_np".into(),
+        vec![t.clone(), obj_num.clone()],
+    );
+    let new_inner = Exp::InductiveCtor(cat_decl.clone(), "fwd".into(), vec![vp.clone(), new_obj]);
+    let cat = Exp::InductiveCtor(cat_decl.clone(), "bwd".into(), vec![res.clone(), new_inner]);
+    let tv_app = Exp::App(
+        Box::new(Exp::App(
+            Box::new(Exp::Var("TV".into())),
+            Box::new(np_sem.clone()),
+        )),
+        Box::new(Exp::Var("subj".into())),
+    );
+    let sem = Exp::Lam(
+        Patt::Var("TV".into()),
+        Box::new(Exp::Lam(Patt::Var("subj".into()), Box::new(tv_app))),
+    );
+    Some((cat, sem))
+}
+
 pub fn coordinate_prop(
     op_iri: &str,
     l_cat: &Exp,
@@ -158,6 +209,30 @@ pub fn coordinate_prop(
         "urn:eigenius:logic:Or" => "conn_or",
         LIST_CONN => "conn_list",
         _ => return None,
+    };
+    // BARE KIND ⊕ determined quantifier: raise the bare kind's plain `cat_np` to the partner's
+    // object-GQ shape ([`raise_kind_to_object_gq`]) so the two coordinate. Either side may be the
+    // bare kind ("genes or a cell line" / "a cell line or genes"); the raised copies are local to
+    // this coordination, so ordinary argument positions keep the plain NP and gain no duplicate.
+    let (l_raised, r_raised);
+    let (l_cat, l_sem, r_cat, r_sem) = if is_ctor(l_cat, "cat_np").is_some() {
+        match raise_kind_to_object_gq(l_cat, l_sem, r_cat) {
+            Some((c, m)) => {
+                l_raised = (c, m);
+                (&l_raised.0, &l_raised.1, r_cat, r_sem)
+            }
+            None => (l_cat, l_sem, r_cat, r_sem),
+        }
+    } else if is_ctor(r_cat, "cat_np").is_some() {
+        match raise_kind_to_object_gq(r_cat, r_sem, l_cat) {
+            Some((c, m)) => {
+                r_raised = (c, m);
+                (l_cat, l_sem, &r_raised.0, &r_raised.1)
+            }
+            None => (l_cat, l_sem, r_cat, r_sem),
+        }
+    } else {
+        (l_cat, l_sem, r_cat, r_sem)
     };
     let (base_cat, members): (Exp, Vec<Exp>) = match is_ctor(l_cat, "cat_coord") {
         // Extend an existing list: a neutral `conn_list` accepts any op; a finalized one must match.
