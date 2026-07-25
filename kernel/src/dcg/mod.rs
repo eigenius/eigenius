@@ -37,6 +37,7 @@ pub mod attribution;
 pub mod augment;
 pub mod category;
 pub(crate) mod chart;
+pub mod closed_class;
 pub mod glossary;
 mod grammar;
 mod holes;

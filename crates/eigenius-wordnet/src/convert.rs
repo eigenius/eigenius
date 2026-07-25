@@ -316,6 +316,17 @@ fn push_entry(
     sense: &str,
     ranks: &SenseRanks,
 ) {
+    // CLOSED-CLASS SURFACE: the bootstrap owns this word's grammatical reading, so WordNet must not
+    // seed a content entry on it (`eigenius_kernel::dcg::closed_class`, the list both importers share).
+    // WordNet's collisions here are element-symbol / acronym homonyms — `As` is BOTH arsenic
+    // (14629149) and American Samoa (08991878), `Be` beryllium, `In` indium — which let a function word
+    // pile into a compound noun: "We evaluated MSI **as** a biomarker for WRN dependency" parsed as a
+    // compound "a Microsatellite-Instability *As* dependency" (19 structural readings, the WRN page's
+    // worst unit). The single choke point for all emission sites, so every POS is covered at once; the
+    // synset's axioms still ship (only the ENTRY is withheld, mirroring the UMLS importer).
+    if eigenius_kernel::dcg::closed_class::is_closed_class_surface(form) {
+        return;
+    }
     // Sense-frequency rank (D63 §8.7 Stage B): emit `lexicon:sense_rank` only when it is
     // non-zero (rank 0 = the most-frequent sense, and the parser's default — so the
     // overwhelming majority of entries stay rank-free, keeping the ESL lean).

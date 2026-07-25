@@ -305,15 +305,7 @@ const GRAMMATICAL_SURFACES: &[&str] = &[
 /// / gene-acronym homonyms (`as`=arsenic, `in`=indium) — all droppable here; a symbol needed by a
 /// specific document is recoverable as a document-glossary entry. The concept CLASS stays (the mirror is
 /// intact); only the per-form common-noun entry is skipped.
-const FUNCTION_WORD_SURFACES: &[&str] = &[
-    "for", "from", "into", "as", "with", "on", "at", "by", "of", "in", "then", "than", "within",
-    "upon", "onto", "unto", // prepositions
-    "and", "or", "but",
-    "nor", // coordinating conjunctions — closed-class, so UMLS's noun senses
-           // (`And` C1515981/C1550557, `Or` C1518602=Operating-Room acronym) are
-           // reifications: they let a conjunction pile into a compound instead of
-           // coordinating. The word stays known via the closed-class bootstrap.
-];
+// `FUNCTION_WORD_SURFACES` moved to `eigenius_kernel::dcg::closed_class` (shared with the WordNet importer).
 
 /// Closed-class **determiner surfaces** UMLS must not seed as content nouns — the determiner analog of
 /// [`FUNCTION_WORD_SURFACES`]. Each is a bootstrap determiner (`ontologies/lexicon/closed-class.esl`);
@@ -324,9 +316,7 @@ const FUNCTION_WORD_SURFACES: &[&str] = &[
 /// make the word unknown, and any WordNet adjective sense (`several`/`few`) is separately handled by the
 /// cross-POS adjective prune. Same accepted case-collision tradeoff as `as`=arsenic / `in`=indium above
 /// (`no`=NO nitric oxide, recoverable as a document-glossary entry if a document needs the symbol).
-const DETERMINER_SURFACES: &[&str] = &[
-    "some", "each", "every", "all", "any", "no", "several", "many", "few", "fewer", "most", "both",
-];
+// `DETERMINER_SURFACES` moved to `eigenius_kernel::dcg::closed_class` (shared with the WordNet importer).
 
 /// Closed-class **copula surfaces** UMLS must not seed as content nouns or verbs. `be` and its
 /// inflections are the grammatical core of predication (`ontologies/lexicon/closed-class.esl` ships the
@@ -339,7 +329,7 @@ const DETERMINER_SURFACES: &[&str] = &[
 /// worst unit ("These classifications were highly concordant with … and with …"): 8 of its 16 structural
 /// readings are that opaque-`be` family and a type-raising artifact riding on it.
 /// `being` is deliberately EXCLUDED — it is a legitimate common noun ("a living being").
-const COPULA_SURFACES: &[&str] = &["be", "is", "are", "was", "were", "am", "been"];
+// `COPULA_SURFACES` moved to `eigenius_kernel::dcg::closed_class` (shared with the WordNet importer).
 
 /// Semantic types that denote a RELATION / IDEA / QUALIFIER, not a THING — UMLS terminology-cruft that
 /// must not seed a common noun. A concept typed ONLY by these reifies a grammatical relation and piles
@@ -363,10 +353,13 @@ fn is_non_content_concept(tuis: &[String]) -> bool {
 /// ([`GRAMMATICAL_SURFACES`] / [`FUNCTION_WORD_SURFACES`]).
 fn is_grammatical_surface(form: &str) -> bool {
     let f = form.trim().to_ascii_lowercase();
+    // The prepositions/conjunctions, determiners and copula forms now come from the SHARED list
+    // (`eigenius_kernel::dcg::closed_class`) that the WordNet importer also consults — one definition of
+    // "the closed class owns this surface", so the two importers cannot drift. GRAMMATICAL_SURFACES
+    // stays LOCAL: `lead`/`alone`/`negation`/do-support are UMLS *reification* artefacts, and `lead` is
+    // a legitimate WordNet content noun and verb that must not be dropped corpus-wide.
     GRAMMATICAL_SURFACES.contains(&f.as_str())
-        || FUNCTION_WORD_SURFACES.contains(&f.as_str())
-        || DETERMINER_SURFACES.contains(&f.as_str())
-        || COPULA_SURFACES.contains(&f.as_str())
+        || eigenius_kernel::dcg::closed_class::is_closed_class_surface(&f)
 }
 
 fn push_entries(
