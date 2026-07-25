@@ -43,6 +43,33 @@ Order matters: **evidence before claim**.
   positive-relational gap). Then no amount of ranking or pruning helps — the grammar or
   lexicon must gain the reading first.
 
+### 2a. Match the instrument to the question
+
+Most wasted effort in this loop has been asking a question with the wrong tool, or with no
+tool at all. The mapping:
+
+| question | instrument |
+|---|---|
+| *Is this reading correct?* | **verbalizer** (`EIGENIUS_GLOSS_READINGS=1`) — renders meaning; says nothing about derivation |
+| *Which rule built this constituent, from which operands, with what provenance?* | **forest trace** (`EIGENIUS_TRACE_FOREST=all`) — the ONLY view with `prov=` and `edges=Combine@k #L + #R` |
+| *Where does multiplicity concentrate?* | `--attribution` — but its structural half is raw (README §7a), so not for causation |
+| *Did my guard fire?* | a **unit test on the guard**, or the forest trace's `prov` field |
+| *Did MY change cause this?* | a **worktree A/B** (§5a) |
+
+Two rules that follow from it:
+
+- **Stop after one wrong guess.** On the essive gap three consecutive hypotheses (the
+  article, an un-reduced sem, the determiner) were each plausible, each cost a build-and-
+  measure cycle, and each was wrong; the forest trace then answered it in one run. If the
+  first hypothesis misses, switch from guessing to tracing.
+- **A test that can only confirm is not a test.** "Does pruning MORE readings restore a
+  MISSING one?" cannot discriminate — it reproduces the symptom whatever the cause. Before
+  running an experiment, say what each outcome would rule out.
+
+The verbalizer is unreasonably effective as a *first* filter: the sortal-name defect was
+visible in one line of English — *"the mutation occur in **a nucleotide named a repeat
+region**"* — long before the trace confirmed the rule.
+
 ## 3. Ground it — check the reference grammars BEFORE designing
 
 `references/openccg/grammars/core-en/` (and `references/openccg/ccgbank`) are the
@@ -57,6 +84,14 @@ reference. This step has **reversed a planned fix twice**:
   resolves the choice with a **supertagger**. Our sense-reranker ranks *senses*, not
   categories, so nothing in our pipeline plays that role; that is what justified a hard,
   narrowly-scoped prune instead of a soft cost.
+
+- bare NPs: core-en's `bnp` type-changing rule is `n $1 → np $1` — a bare NP is a **plain
+  np** — and core-en type-raises only `QuantNP`, because raising is for GENERALIZED
+  QUANTIFIERS. Ours reused the existential determiner's raised categories, which fixes the
+  result category and so cannot fill a non-final argument slot. **This step was skipped and
+  the cost was direct**: an entire design (generalized composition) was proposed, argued
+  for, and only abandoned after checking — composition cannot repair a raise whose result
+  category is wrong, and the reference had the answer all along.
 
 Conclusion pattern: *mirror the reference's lexical distinctions; where we lack its
 disambiguation mechanism, say so explicitly and justify the substitute.*
@@ -92,6 +127,47 @@ Per CLAUDE.md: eliminate the bad behaviour, don't guard against it. In practice 
 - `encoded` is informational, not gated — a unit can be encoded on the WRONG reading.
   The gate is **expected-reading hits** + `grammar-gap 0` (non-negotiable).
 
+### 5a. Attribute a regression before explaining it — worktree A/B
+
+When a measurement worsens, the first question is *did my change cause it*, and the answer
+is cheap and non-destructive:
+
+```bash
+git worktree add /tmp/eig-base <pre-change-commit>
+cd /tmp/eig-base && cargo build --release -p eigenius-wordnet --tests
+ln -sfn <repo>/references references          # large data is not in git
+EIGENIUS_DB_SNAPSHOT=<same snapshot> EIGENIUS_SENSE_RANKS=<same ranks.json> \
+EIGENIUS_WRN_PAGE=<same page> cargo test --release … wrn_first_page_over_full_lexicon
+```
+
+**Same ranks, same snapshot, only the code differs.** This settled two faithfulness misses
+that had been attributed to the wrong cause: one reproduced on the pre-change tree (so it
+was reranker draw variance, not the change), the other did not (so it was). Guessing which
+is which from the diff would have been wrong in both directions.
+
+Also: check `git log -L <line>,<line>:experiments/parsing/expected-readings.tsv` for a
+broken pin. The note recorded when it was pinned says what was actually VERIFIED — if the
+verified property survives and only an unadjudicated detail moved, that is a **stale pin**,
+not a lost reading.
+
+### 5b. Removing junk can EXPOSE a gap — that is progress, not regression
+
+`grammar-gap 0` can be **false comfort**: a unit may be "parsing" only through a junk
+reading. Delete the junk and it gaps — which looks like a regression and is actually the
+first honest measurement of that unit. It has happened twice (unit 4 via a UMLS reification,
+the essive unit via WordNet's `as`=arsenic noun). The response is to close the gap properly,
+not to restore the junk; land the junk-removal and the gap-closure **together** so the gate
+is never green on a lie.
+
+### 5c. Draw variance is real — a pin can turn on a coin flip
+
+`temperature:0` is documented as NOT deterministic (~5% of the capped top-2 moves between
+runs). A unit whose correct reading needs one specific sense in a 2-slot cap is therefore
+fragile: `lead` has 14 verb senses, FOUR of which carry the frame-04 PP-oblique reading, and
+whether "does not lead to cell death" keeps its pinned reading depends on the draw. Before
+treating such a miss as a regression, take another draw — the repo's own methodology is
+multi-draw with reported bands. Record the fragility either way.
+
 ## 6. Pin it — and expect the gate itself to be brittle
 
 Pin the verified skeleton in `experiments/parsing/expected-readings.tsv` (sentence TAB
@@ -116,3 +192,30 @@ Every accepted change updates `experiments/parsing/baseline.json`: the `expected
 (drift-free replay numbers), a `_provenance_note_*`, the `snapshot_lineage` entry when a
 reseed was needed, and a `history[0]` entry stating root cause, fix, witness, and the
 **known bounds/residuals**. That file is the durable record — this loop's memory.
+
+## 8. Record what was REJECTED, in the code
+
+A measured negative is a result and belongs where the next person will look — the code that
+would be changed. `kernel/src/dcg/parse/seed.rs` carries the sense-cap characterisation plus
+BOTH rejected fixes with their numbers, which is what stopped a third attempt from being
+mounted blind. Cap-by-sense was in fact retried once (on the theory that new Eisner guards
+had removed the duplication that sank it) and rejected again — the retry was justified, and
+recording it was what made the justification checkable.
+
+Corollary: **do not revert in the middle of an investigation.** A partially-working tree with
+one failing test is an artifact; reverting destroys the state the next step needs and forces
+re-derivation. Revert only when the change is positively established as wrong AND its finding
+is already recorded — findings first, revert second, never the reverse.
+
+## 9. Iterate lexicon changes as a LAYER, not a reseed
+
+A reseed is ~40 minutes. To try a lexicon/ESL change, add it as a layer on an existing
+snapshot — the base is treated as immutable, so a known-good snapshot always survives:
+
+```bash
+scripts/add-layer-to-snapshot.sh --base <clean-snapshot> --out <new-snapshot> fix.esl
+```
+
+Reseed only to BAKE IN what the layer proved, or for an importer-emission change
+(`convert.rs`), where the content hash must match.
+
