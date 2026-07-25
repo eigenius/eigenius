@@ -295,41 +295,18 @@ const GRAMMATICAL_SURFACES: &[&str] = &[
     "negation", "negated", "to", "alone", "lead", "leading",
 ];
 
-/// Closed-class **function-word surfaces** (prepositions / conjunctions) UMLS must not seed as content
-/// nouns. Each is already handled by the closed-class bootstrap (`ontologies/lexicon/closed-class.esl`),
-/// so dropping the UMLS content entry cannot make the word unknown — it removes the spurious noun sense
-/// that lets a preposition pile into a compound: `For (preposition)` (`C0521125`, a UMLS Qualitative-
-/// Concept reification of the word) seeded `[for] therapeutics`, the same class as `as`=arsenic. The
-/// content senses colliding on these surfaces are function-word reifications (`From` `C1517320`, `Into`
-/// `C0332286`, `At` `C1516077`, `Within` `C0332285`, `As - qualifier` `C1883713`, …) and chemical-symbol
-/// / gene-acronym homonyms (`as`=arsenic, `in`=indium) — all droppable here; a symbol needed by a
-/// specific document is recoverable as a document-glossary entry. The concept CLASS stays (the mirror is
-/// intact); only the per-form common-noun entry is skipped.
-// `FUNCTION_WORD_SURFACES` moved to `eigenius_kernel::dcg::closed_class` (shared with the WordNet importer).
-
-/// Closed-class **determiner surfaces** UMLS must not seed as content nouns — the determiner analog of
-/// [`FUNCTION_WORD_SURFACES`]. Each is a bootstrap determiner (`ontologies/lexicon/closed-class.esl`);
-/// the UMLS content senses colliding on these surfaces are qualifier-value reifications (`Some
-/// (qualifier value)` `C0205392`, `Each (qualifier value)`, …) that let a determiner pile into a
-/// `compound_kind` instead of quantifying (D63 Defect 2a: "some MSI lines" → a *some-MSI-line*
-/// compound). The determiner reading is in the closed-class bootstrap, so dropping the UMLS noun cannot
-/// make the word unknown, and any WordNet adjective sense (`several`/`few`) is separately handled by the
-/// cross-POS adjective prune. Same accepted case-collision tradeoff as `as`=arsenic / `in`=indium above
-/// (`no`=NO nitric oxide, recoverable as a document-glossary entry if a document needs the symbol).
-// `DETERMINER_SURFACES` moved to `eigenius_kernel::dcg::closed_class` (shared with the WordNet importer).
-
-/// Closed-class **copula surfaces** UMLS must not seed as content nouns or verbs. `be` and its
-/// inflections are the grammatical core of predication (`ontologies/lexicon/closed-class.esl` ships the
-/// copula `(S[dcl,fin]\NP)/(S[dcl,adj]\NP)` and the passive auxiliary); UMLS's content senses on these
-/// surfaces are chemical-symbol homonyms (`Be` = beryllium, the same accepted tradeoff as `as`=arsenic /
-/// `in`=indium above) and terminology artefacts. Left seeded they are actively harmful, not merely
-/// redundant: a content VERB sense of `were` supplies a linking-verb frame `be(λx.P(x), subj)` that
-/// re-encodes "X is P" as an opaque 2-place relation — destroying the copula's transparency (`X is P`
-/// **is** `P(X)`) — and a `cat_n` sense makes `were` a plural NOUN. Both were measured on the WRN page's
-/// worst unit ("These classifications were highly concordant with … and with …"): 8 of its 16 structural
-/// readings are that opaque-`be` family and a type-raising artifact riding on it.
-/// `being` is deliberately EXCLUDED — it is a legitimate common noun ("a living being").
-// `COPULA_SURFACES` moved to `eigenius_kernel::dcg::closed_class` (shared with the WordNet importer).
+// The closed-class SURFACE lists (prepositions/conjunctions, determiners, copula forms) now live in
+// `eigenius_kernel::dcg::closed_class`, shared with the WordNet importer so the two cannot drift; see
+// that module for the rationale. Retained here is the UMLS-specific EVIDENCE for why each group must be
+// withheld — the content senses colliding on these surfaces are function-word reifications
+// (`For (preposition)` C0521125 seeded `[for] therapeutics`; `From` C1517320, `Into` C0332286,
+// `At` C1516077, `Within` C0332285, `As - qualifier` C1883713), qualifier-value reifications of
+// determiners (`Some (qualifier value)` C0205392 piled into a *some-MSI-line* compound, D63 Defect 2a),
+// and chemical-symbol / gene-acronym homonyms (`as`=arsenic, `in`=indium, `Be`=beryllium, `no`=NO nitric
+// oxide). A content VERB sense of the copula is the worst of them: it supplies a linking frame
+// `be(λx.P(x), subj)` that re-encodes "X is P" as an opaque 2-place relation, destroying the copula's
+// transparency. In every case the concept CLASS stays (the mirror is intact) and only the per-form
+// common-noun entry is skipped, so nothing becomes unreachable.
 
 /// Semantic types that denote a RELATION / IDEA / QUALIFIER, not a THING — UMLS terminology-cruft that
 /// must not seed a common noun. A concept typed ONLY by these reifies a grammatical relation and piles
