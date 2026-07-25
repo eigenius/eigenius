@@ -147,8 +147,34 @@ impl Parser {
                 // `sense_cap_key` sorts unranked entries last, so the truncate takes exactly the
                 // entry that should be exempt. Pass 2 (the ranks-`None` widen) recovers it (the sweep
                 // held at `grammar-gap 0`), but the grammatical core should not be eliminable at all.
-                // Partitioning the closed class out is the fix; a first attempt broke
-                // `sense_reranker_overrides_static_cap_order` and needs the seeding path understood.
+                //
+                // THE UNDERLYING SHAPE (characterised 2026-07-24): the cap is keyed per **SENSE**
+                // (`sense_cap_key` reads only sense fields) but truncates per **ENTRY**. One sense
+                // legitimately has SEVERAL entries — the same meaning in different grammatical
+                // categories: `with` (sense "with") is a noun-modifier `cat_pp/NP`, an argument marker
+                // `cat_pp_arg(prep_with)/NP` AND a VP-adjunct `((S\NP)\(S\NP))/NP`; a governed gradable
+                // adjective (one WordNet sense) is a predicative `S[adj]\NP`, a `cat_measure`, a
+                // `cat_measure/cat_pp_arg(prep)` and a positive-relational `(S[adj]\NP)/cat_pp_arg(prep)`.
+                // Those share one key, so the truncate cuts CATEGORIES of a sense the ranker KEPT,
+                // arbitrarily by emission order (a stable sort preserves it). Measured consequences: the
+                // WRN page's `concordant with …` unit GAPS at base cap and floods on widen (8 of its 16
+                // skeletons), `a_subj` seeds only at cap>=4, and Fix A (c)'s positive-relational entry —
+                // emitted 4th — never seeds at base cap, so it is inert on the page.
+                //
+                // TWO FIXES MEASURED AND REJECTED (2026-07-24), both parser-only:
+                //  (1) cap by SENSE (keep every category of each kept sense). Same-ranks A/B: readings
+                //      724 -> 757, total-skeletons 229 -> 248, **encoded 10 -> 0** (every unit lost
+                //      single-reading status) and the target unit stayed at 16. Cap-only readings fell
+                //      33% (1741 -> 1169, the avoided widen-floods) but the tracked STRUCTURAL lever
+                //      rose — extra categories per sense are genuine added ambiguity in the reranked
+                //      regime. Net loss; not shipped.
+                //  (2) exempt the closed class (`in_lexicon.is_none()`) from the cap — the shape the
+                //      note above proposes. It FAILS `sense_reranker_overrides_static_cap_order`, which
+                //      is why the earlier attempt failed too: `in_lexicon.is_none()` means UNTAGGED, not
+                //      closed-class. Test fixtures and demo entries are untagged as well, and the cap
+                //      tests rely on their being capped, so the predicate exempts far more than the
+                //      grammatical core. A real fix needs a POSITIVE closed-class marker (or a
+                //      category-shape test), not the absence of a lexicon tag.
                 let mut eff = cap;
                 // Apply the reranker's ELIMINATION at EVERY cap rung, not just the base — INCLUDING
                 // during widen. An eliminated sense (absent from `ranks`) stays out even when the cap
