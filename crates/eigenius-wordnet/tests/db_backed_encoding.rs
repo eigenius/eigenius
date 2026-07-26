@@ -3300,7 +3300,13 @@ fn wrn_first_page_over_full_lexicon() {
                     .entry(erase_senses(&pretty_term(it.sem())))
                     .or_insert_with(|| verbalize(it.sem(), &vb));
             }
-            for (i, (skel, gloss)) in by_skel.iter().enumerate().take(8) {
+            // `EIGENIUS_GLOSS_MAX` raises the per-unit cap — 8 is enough to adjudicate a 2-5
+            // skeleton unit but useless on an outlier (the page's worst carries 204).
+            let gmax: usize = std::env::var("EIGENIUS_GLOSS_MAX")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(8);
+            for (i, (skel, gloss)) in by_skel.iter().enumerate().take(gmax) {
                 eprintln!("      [S{i}] {skel}");
                 eprintln!("       ≈ \"{gloss}\"");
             }
@@ -4633,4 +4639,109 @@ fn definite_negation_collapses_referential() {
         def,
         exi
     );
+}
+
+/// PROBE — the named-entity-vs-kind competition on the page's worst unit (204 skeletons, 34% of the
+/// page's total). Its dominant axis is the `kind_of` count (7 distinct values, 2..9): "project
+/// Achilles" resolves EITHER to the glossary's named individual `ni_project_achilles` OR to a bare
+/// common-noun kind `kind_of(…)`, and the subject recurs in ~3 argument positions per conjunct
+/// (subject slot, `prep_in` first arg, `prep_to` first arg) × 2 coordinated projects — each position
+/// choosing independently.
+///
+/// This dumps the competing entries for the span and its parts, to establish WHETHER a common-noun
+/// analysis of the span coexists with the named-individual entry (the inferred cause) before any fix
+/// is designed.
+///
+/// **READ THE RESULT CAREFULLY — it is on the BASE index only.** `build_index(&head)` has no
+/// per-document overlay, and the named-individual alias is minted INTO an overlay
+/// (`dcg::glossary`, the `cat_np` alias whose `lexicon:form` is the NE surface). So an EMPTY
+/// result for "project Achilles" means "overlay-only", NOT "missing" — which is exactly the wrong
+/// conclusion to draw, and was drawn once. What the dump does establish is the COMPOSITIONAL
+/// competitor: `project` carries 3 `cat_n` senses (+ ~20 verb entries) and `Achilles` carries both
+/// `cat_np(n09484664, sg)` (proper name) and `cat_n(C0001074)` (UMLS), so the span is analysable
+/// compositionally from the base lexicon alone, alongside whatever the overlay contributes.
+///
+/// Run:
+///   EIGENIUS_DB_SNAPSHOT=… cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     probe_named_entity_vs_kind -- --ignored --nocapture
+#[test]
+#[ignore = "named-entity vs kind competition: entry dump; --ignored --nocapture"]
+fn probe_named_entity_vs_kind() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index(&head);
+    for form in [
+        "project",
+        "Achilles",
+        "DRIVE",
+        "project Achilles",
+        "project DRIVE",
+        "cell line",
+        "MSH2",
+        "MLH1",
+        "genes",
+        "gene",
+        "compared",
+        "compare",
+        "comparison",
+        "predicted",
+    ] {
+        eprintln!("  ENTRIES {form:?}:");
+        for (aug, cat, sense) in index.debug_form_entries(form, &lem) {
+            let a = if aug { "+" } else { " " };
+            eprintln!("     {a} {cat}   [{sense}]");
+        }
+    }
+}
+
+/// PROBE — is the named-entity alias span REACHABLE for both conjuncts of the page's worst unit?
+///
+/// 172 of that unit's 204 skeletons are internally incoherent: one project resolves to its named
+/// individual while the other decomposes into content senses (notably `Achilles` → UMLS C0001074,
+/// the anatomical structure). The suspicion is CASE: the alias surface is minted from the document's
+/// first occurrence, and the unit's first conjunct is sentence-initial ("Project Achilles") while the
+/// second is lower-case ("project DRIVE"), so a case-sensitive span lookup would let exactly one
+/// conjunct resolve — the asymmetry observed.
+///
+/// Dumps, over the AUGMENTED index (the overlay is where the alias lives — see
+/// `probe_named_entity_vs_kind` for why the base index shows nothing): the minted surfaces, and the
+/// entries reachable for each casing of each span.
+#[test]
+#[ignore = "DB-backed; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn probe_ne_alias_case_reachability() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let page = std::fs::read_to_string(
+        std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| String::new()),
+    )
+    .unwrap_or_else(|_| String::new());
+    let doc = if page.is_empty() {
+        "Project Achilles and project DRIVE identified WRN as the top preferential dependency \
+         in MSI cell lines compared to MSS cell lines. Project Achilles screened cell lines. \
+         Project DRIVE analysed cell lines."
+            .to_string()
+    } else {
+        page
+    };
+    let aug = eigenius_kernel::dcg::named_entity_augmentation(&head, &doc);
+    eprintln!("MINTED SURFACES (exactly as stored):");
+    for b in &aug.added {
+        eprintln!("   {:?}", b.provenance.surface);
+    }
+    let index = build_index_over(&head, Some(&aug));
+    for form in [
+        "Project Achilles",
+        "project Achilles",
+        "project achilles",
+        "Project DRIVE",
+        "project DRIVE",
+    ] {
+        let e = index.debug_form_entries(form, &lem);
+        eprintln!("  {form:?} → {} entry(ies)", e.len());
+        for (_a, cat, sense) in e.iter().take(4) {
+            eprintln!("       {cat}   [{sense}]");
+        }
+    }
 }
