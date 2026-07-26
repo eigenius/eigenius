@@ -1052,6 +1052,44 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
     Some((ss, new_sem))
 }
 
+/// **Reduced relative** (core-en `unary-rules.xsl`, the `rrel` type-changing rule): a subject-gapped
+/// PASSIVE VP becomes a NOUN POST-MODIFIER — "the dependency [compared to MSS cells]", "the deficiency
+/// [predicted by the model]".
+///
+/// `S[dcl,pss]\NP → cat_pp`, **sem unchanged**: both denote `Entity → Prop` (a VP is a predicate over
+/// its subject; a `cat_pp` is a predicate over the noun it modifies), so the existing `pp_mod` rule
+/// then conjoins it into the noun's Σ restrictor exactly as a PP modifier is. Reusing `cat_pp` is why
+/// this needs no new binary rule.
+///
+/// core-en states the rule as `s[dcl]/np → n\n` with a `GenRel` relation. We take the SUBJECT-gap
+/// (backward) form rather than its object-gap (forward) one, because that is the participial case —
+/// the same asymmetry as [`front_participial`], which is this rule's sentence-level counterpart
+/// (`ger` VP → `S/S`). Building one half of the participial story and not the other is why
+/// "The deficiency predicted by the model was clear." parsed to 0 readings.
+pub fn reduced_relative(cat: &Exp, layer: &Arc<Layer>) -> Option<Exp> {
+    let Exp::InductiveCtor(cat_decl, _, _) = cat else {
+        return None;
+    };
+    let [s, _np] = is_ctor(cat, "bwd")? else {
+        return None;
+    };
+    let [mood, fin] = is_ctor(s, "cat_s")? else {
+        return None;
+    };
+    if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
+        return None;
+    }
+    if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "pss") {
+        return None;
+    }
+    let _ = layer;
+    Some(Exp::InductiveCtor(
+        cat_decl.clone(),
+        "cat_pp".into(),
+        Vec::new(),
+    ))
+}
+
 /// Elided-`than` standard defaulting (D63 §8.12): a comparative that is still awaiting its `than`
 /// complement — category `X / cat_pp_than`, sem `λstd. body(std)` — completes with an ANAPHORIC
 /// standard. It yields `X` with sem `body(anaphor)` (the `lexicon:anaphor` placeholder, freshened by

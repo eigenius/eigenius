@@ -41,9 +41,9 @@
     "open": 2,
     "encoded": 9,
     "total_readings_ceiling": 2800,
-    "total_readings": 2473,
+    "total_readings": 2299,
     "skeletons_ceiling": 650,
-    "skeletons": 578,
+    "skeletons": 412,
     "expected_reading_hits": 44,
     "expected_reading_curated": 44
   },

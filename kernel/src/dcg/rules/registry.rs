@@ -653,6 +653,9 @@ pub(crate) enum UnaryKind {
     BareNp,
     /// Fronted participial adjunct: a subject-gapped `ger` VP → a sentence pre-modifier `S/S`.
     FrontParticipial,
+    /// Reduced relative (core-en `rrel`): a subject-gapped `pss` VP → a noun post-modifier `cat_pp`,
+    /// so `pp_mod` attaches it. The post-nominal counterpart of `FrontParticipial`.
+    ReducedRelative,
     /// Fronted-modifier comma absorption (D62 §2 #5): a sentence-initial `S/S` pre-modifier at
     /// `[0, j-1]` absorbs a trailing comma at `j`, yielding the same modifier over `[0, j]` (so it can
     /// forward-apply across the otherwise node-less comma to the matrix clause). The child is the
@@ -703,7 +706,7 @@ impl UnaryShift {
 /// each shift reading the cell state left by the previous. Elided-`than` sits after coordination and
 /// before the NP shifts: its input `X/cat_pp_than` and output `S[adj]\NP` are untouched by the others,
 /// so its position only keeps it out of `ModLift` (no attributive comparative modifier is minted).
-static UNARY_SHIFTS: [UnaryShift; 6] = [
+static UNARY_SHIFTS: [UnaryShift; 7] = [
     UnaryShift {
         kind: UnaryKind::ModLift,
         name: "mod_lift",
@@ -733,6 +736,11 @@ static UNARY_SHIFTS: [UnaryShift; 6] = [
         kind: UnaryKind::FrontParticipial,
         name: "front_participial",
         apply: apply_front_participial,
+    },
+    UnaryShift {
+        kind: UnaryKind::ReducedRelative,
+        name: "reduced_relative",
+        apply: apply_reduced_relative,
     },
 ];
 
@@ -785,6 +793,15 @@ fn apply_front_participial(g: &Grammar, it: &Item, span: (usize, usize)) -> Vec<
     let (i, j) = span;
     front_participial(it.cat(), it.sem(), &g.layer)
         .map(|(cat, sem)| Item::with_cost(cat, freshen_anaphor(&sem, &hole_base(i, j)), it.cost()))
+        .into_iter()
+        .collect()
+}
+
+/// Reduced relative: `S[dcl,pss]\NP` → `cat_pp` with the sem carried through unchanged (both denote
+/// `Entity -> Prop`), so the existing `pp_mod` rule conjoins it into the noun's restrictor.
+fn apply_reduced_relative(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
+    reduced_relative(it.cat(), &g.layer)
+        .map(|cat| Item::with_cost(cat, it.sem().clone(), it.cost()))
         .into_iter()
         .collect()
 }
