@@ -862,9 +862,36 @@ fn other_grammar_rules() -> &'static [CatRule] {
     &RULES
 }
 
-/// Close naming apposition (D63 §5.3). `Σx:sortal. named(x, ⟦right⟧)` realized as an `Entity` by
-/// `kind_of` — "Project Achilles" becomes a bare proper-name `cat_np(Entity, num)`. `sortal` is the
-/// bound left `cat_n` class; the result number is the proper name's.
+/// Close naming apposition (D63 §5.3) — the **classifier + designator** construction: a common-noun
+/// CLASSIFIER followed by a proper NAME or identifier ("project Achilles", "project DRIVE", "gene
+/// MSH2", "chromosome 7"). The classifier supplies the **type**; the designator supplies the
+/// **identity**. The phrase denotes an INDIVIDUAL, and a uniquely-identifying one, so it is a definite
+/// description: `the(Σx:sortal. named(x, ⟦right⟧)).1`, at category `cat_np(sortal, num)`.
+///
+/// **This replaced a kind-coercion (2026-07-25) and the change is the point.** It used to build
+/// `kind_of(Σx:sortal. named(x, …))` at `cat_np(Entity, num)` — a KIND coerced to an entity, with the
+/// classifier's class DISCARDED. Two consequences, both measured on the reference page:
+///
+/// - Every instance injected a `kind_of` wrapper, and wherever the phrase recurred in argument
+///   position each occurrence could independently take this route or the glossary's minted `ni_*`
+///   individual. That was the dominant ambiguity axis of the page's worst unit — "Project Achilles and
+///   project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS
+///   cell lines." carried **204 skeletons (34% of the page)**, whose `kind_of` count ranged 2..9 across
+///   ~3 argument positions × 2 coordinated projects.
+/// - Typing the result `Entity` threw away exactly the information the construction exists to carry.
+///   "project Achilles" is a *project*; the classifier is the type, not decoration.
+///
+/// NEITHER reference grammar covers this construction, which is why it needed designing rather than
+/// mirroring (method note §3): core-en's `Name` family is a bare `np` with default sem and all its
+/// apposition machinery is loose/comma-delimited (`RelPro-Appos`, `prep.appos`, the appositive comma);
+/// CCGbank makes a name sequence an ordinary `N/N … N` modifier chain with NO semantics, resolved by a
+/// supertagger. A straight CCGbank mirror would also put the head on the *name* ("Ms. Waite"), which
+/// is wrong here — the referent of "project Achilles" is the project.
+///
+/// Safe to key on the category alone because the construction is **head-INITIAL** (classifier then
+/// designator) while English premodification is head-final: "MSI cell lines" is modifier+head and can
+/// never match this trigger, so no over-application risk of the kind a blanket "prefer the proper-name
+/// reading" preference would carry.
 fn build_name(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
     let sortal = binds
         .get("sortal")
@@ -877,24 +904,26 @@ fn build_name(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) 
     );
     let sigma = Exp::Sig(
         Patt::Var(COMPOUND_X.into()),
-        Box::new(sortal),
+        Box::new(sortal.clone()),
         Box::new(restr),
     );
-    let kind_of = Exp::EigonAxiom(
-        crate::ontology::iri::Iri::parse("urn:eigenius:ontology:kind_of").expect("kind_of iri"),
+    // `the(Σ…).1` — the ι operator (`ontology:the`, as `the_ref_subj_sem` uses it) picks the unique
+    // inhabitant; `Fst` projects the individual out of the Σ, the same shape the definite-NP pins
+    // carry (`the(ΣG#0:§. …).1`). NOT `kind_of` — that realizes a KIND as an entity, which is the
+    // defect this rule used to have.
+    let the = Exp::EigonAxiom(
+        crate::ontology::iri::Iri::parse("urn:eigenius:ontology:the").expect("the iri"),
     );
-    let sem = Exp::App(Box::new(kind_of), Box::new(sigma));
-    // `cat_np(Entity, num)` — reuse the sortal `cat_n`'s Cat decl + the proper name's number.
+    let sem = Exp::Fst(Box::new(Exp::App(Box::new(the), Box::new(sigma))));
+    // `cat_np(sortal, num)` — the CLASSIFIER's class (coercive subtyping reaches any `Entity` slot),
+    // with the designator's number.
     let (decl, num) = match (left.cat(), right.cat()) {
         (Exp::InductiveCtor(d, _, _), Exp::InductiveCtor(_, _, rargs)) if rargs.len() == 2 => {
             (d.clone(), rargs[1].clone())
         }
         _ => unreachable!("the name rule requires a cat_n left + cat_np right"),
     };
-    let entity = Exp::EigonClass(
-        crate::ontology::iri::Iri::parse("urn:eigenius:lexicon:Entity").expect("entity iri"),
-    );
-    let cat = Exp::InductiveCtor(decl, "cat_np".into(), vec![entity, num]);
+    let cat = Exp::InductiveCtor(decl, "cat_np".into(), vec![sortal, num]);
     Item::from_parts(cat, sem, Combinator::Compound, Cost::ZERO)
 }
 
@@ -1792,9 +1821,14 @@ mod dispatch_tests {
         mk_item(ct("fwd", vec![s, vp]), sem)
     }
 
+    /// The **classifier + designator** construction denotes a definite INDIVIDUAL typed at the
+    /// classifier, not a kind coerced to an entity. Pins both halves of the 2026-07-25 correction:
+    /// the sem is `the(Σ…).1` (NOT `kind_of(Σ…)`), and the category carries the CLASSIFIER's class
+    /// (NOT `Entity`). Regression guard — the old shape made every occurrence inject a `kind_of`
+    /// wrapper that multiplied across argument positions, 204 skeletons on one unit.
     #[test]
-    fn name_apposition_builds_kind_of_named_sigma() {
-        // `[cat_n(Sortal)] [proper cat_np]` → `kind_of(Σx:Sortal. named(x, ⟦name⟧))` : cat_np(Entity).
+    fn name_apposition_builds_definite_individual_at_the_classifier_type() {
+        // `[cat_n(Sortal)] [proper cat_np]` → `the(Σx:Sortal. named(x, ⟦name⟧)).1` : cat_np(Sortal).
         let sortal = cls("urn:eigenius:lexicon:Project");
         let name_ref = ax("urn:eigenius:lexicon:achilles_name");
         let l = mk_item(n(sortal.clone()), sortal.clone());
@@ -1803,17 +1837,24 @@ mod dispatch_tests {
             name_ref.clone(),
         );
         let got = apply(&l, &r, &layer()).expect("[cat_n][proper cat_np] → naming apposition");
-        let sigma = sigma_cmp(sortal, app2_x("urn:eigenius:ontology:named", name_ref));
-        let expected_sem = Exp::App(
-            Box::new(ax("urn:eigenius:ontology:kind_of")),
-            Box::new(sigma),
+        let sigma = sigma_cmp(
+            sortal.clone(),
+            app2_x("urn:eigenius:ontology:named", name_ref),
         );
+        let expected_sem = Exp::Fst(Box::new(Exp::App(
+            Box::new(ax("urn:eigenius:ontology:the")),
+            Box::new(sigma),
+        )));
         assert_eq!(
             got.cat(),
-            &np(cls("urn:eigenius:lexicon:Entity")),
-            "result is cat_np(Entity, sg)"
+            &np(sortal),
+            "the CLASSIFIER supplies the type — not lexicon:Entity, which discards it"
         );
-        assert_eq!(got.sem(), &expected_sem);
+        assert_eq!(
+            got.sem(),
+            &expected_sem,
+            "a definite individual `the(Σ…).1`, not the kind coercion `kind_of(Σ…)`"
+        );
         assert_eq!(got.prov(), Combinator::Compound);
     }
 

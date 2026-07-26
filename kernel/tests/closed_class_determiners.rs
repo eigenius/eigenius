@@ -2049,11 +2049,15 @@ fn coordinate_prop_and_coordinate_np_are_disjoint() {
     );
 }
 
-/// D63 §5.3 — **close naming apposition**: a SORTAL common noun + a proper NAME (`gene BRCA1`,
-/// `Project Achilles`) → the definite individual of the sortal kind bearing that name,
-/// `kind_of(Σx:Sortal. named(x, name))`, an `Entity`-typed NP usable as a bare subject/object. The
-/// name's own class need NOT be the sortal (coining), so it is distinct from `appose_group`'s
-/// kind-checked group apposition — the singleton, un-type-checked case.
+/// D63 §5.3 — **close naming apposition**, i.e. the CLASSIFIER + DESIGNATOR construction: a sortal
+/// common noun + a proper name or identifier (`gene BRCA1`, `project Achilles`, `chromosome 7`) → the
+/// definite INDIVIDUAL of the classifier's type bearing that designator, `the(Σx:Sortal. named(x,
+/// designator)).1`, at `cat_np(Sortal, …)` — the classifier supplies the TYPE, the designator supplies
+/// the IDENTITY. The designator's own class need NOT be the sortal (coining), so this is distinct from
+/// `appose_group`'s kind-checked group apposition — the singleton, un-type-checked case.
+///
+/// Was `kind_of(Σ…)` at `cat_np(Entity, …)` until 2026-07-25 — a kind coerced to an entity, with the
+/// classifier's class discarded. See `build_name` for why that shape cost 204 skeletons on one unit.
 #[test]
 fn sortal_plus_proper_name_is_a_named_individual() {
     let (_layer, index) = index_over_bootstrap();
@@ -2066,9 +2070,9 @@ fn sortal_plus_proper_name_is_a_named_individual() {
     assert!(
         closed.iter().any(|it| {
             let s = pretty_term(it.sem());
-            s.contains("named(") && s.contains("kind_of(")
+            s.contains("named(") && s.contains("the(") && !s.contains("kind_of(")
         }),
-        "expected a `kind_of(Σ… named(…))` named-individual reading, got: {:?}",
+        "expected a definite-individual `the(Σ… named(…)).1` reading (NOT the old kind coercion), got: {:?}",
         closed
             .iter()
             .map(|it| pretty_term(it.sem()))

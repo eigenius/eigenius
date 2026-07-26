@@ -8,6 +8,22 @@
 # noun compound, not the verb) and "These data sets are project Achilles and project DRIVE"
 # ('and' reified as UMLS C1515981 into a compound pile, not a coordination). Both are the
 # function-word/qualifier reification defect; re-add once it is fixed and the correct reading pins.
+# REMOVED 2026-07-25: "Project Achilles and project DRIVE identified WRN as the top preferential
+# dependency in MSI cell lines compared to MSS cell lines." — pinned on a WRONG ATTACHMENT. The pin
+# carried prep_in/prep_to predicated of the PROJECTS ("Project Achilles, in MSI cell lines, identified
+# …"), but the study's own chain encodes the claim as onco:TopDifferentialDependency(gene, context)
+# with context = "Achilles_MSI"/"DRIVE_MSI" (chain/05-phase1-discovery.esl) — the MSI context and the
+# MSS contrast belong to the DEPENDENCY, not to the identifying event. Same arbiter method as D62 §4a.
+# The pin's own note had already conceded the object realisation was "incidental to that verification
+# and never adjudicated"; it is now positively wrong, and a wrong pin is worse than none — it would
+# VETO the correct reading once that becomes derivable.
+# The correct reading is NOT currently in the parse space: of the unit's 204 skeletons, 44 get the
+# essive right (the(Σ dependency. top ∧ preferential ∧ prep_in ∧ prep_to).1) with both projects as
+# named individuals, but ALL of them read "compared" as the NOUN comparison (wn:compare.n.04746842)
+# absorbed into the in-PP object, because `compared` has no (S[pss]\NP)/cat_pp_arg(prep_to) entry —
+# WordNet records no oblique frame for `compare`, and the verb analogue of adjective-frames.tsv does
+# not exist. RE-ADD once `compare` can govern `to` AND a post-nominal reduced-participial attachment
+# is confirmed, with the PPs nested in the dependency NP.
 # baseline replay. "encoded" is NOT proof of "correct" (cf. the 2026-07-20 gloss bug), so
 The co-occurrence of these two events leads to cell death.	§(kind_of(§), the(ΣG#0:§. prep_of(G#0, the(ΣG#1:§. compound_kind(G#1, §)).1)).1)	verified 2026-07-22 (gloss)
 Each event alone does not lead to cell death.	ΠG#0:ΣG#0:§. sole(G#0). §(kind_of(§), G#0.1) → False	verified 2026-07-22 (gloss)
@@ -27,7 +43,6 @@ We analysed two independent cancer dependency data sets.	ΠG#0:Prop. ΠG#1:ΣG#1
 We identified three groups of cell lines.	ΠG#0:Prop. ΠG#1:ΣG#1:§. prep_of(G#1, kind_of(§)). §(G#1.1, speaker) → G#0 → G#0	verified 2026-07-23 (cardinal GQ: identify(we, three groups of cell lines); cardinality 'three' not encoded, same caveat as the two-data-sets sibling)
 Project Achilles screened cell lines with a CRISPR library.	§(kind_of(ΣG#0:§. ΠG#1:Prop. ΠG#2:ΣG#2:§. compound_kind(G#2, §). prep_with(G#0, G#2.1) → G#1 → G#1), ni_project_achilles)	verified 2026-07-23 (named individual: Project Achilles screened cell-lines-with-a-CRISPR-library)
 Project DRIVE analysed cell lines with an RNA interference library.	§(kind_of(ΣG#0:§. ΠG#1:Prop. ΠG#2:ΣG#2:§. compound_kind(G#2, §). prep_with(G#0, G#2.1) → G#1 → G#1), ni_project_drive)	verified 2026-07-23 (named individual: Project DRIVE analysed cell-lines-with-an-RNAi-library)
-Project Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines.	And(And(And(§(kind_of(§), the(ΣG#0:§. And(gt(§(G#0), §), gt(§(G#0), §))).1, ni_project_achilles), prep_in(ni_project_achilles, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §))))), prep_to(ni_project_achilles, kind_of(ΣG#0:§. compound(G#0, §)))), And(And(§(kind_of(§), the(ΣG#0:§. And(gt(§(G#0), §), gt(§(G#0), §))).1, ni_project_drive), prep_in(ni_project_drive, kind_of(ΣG#0:§. compound_kind(G#0, ΣG#1:§. compound_kind(G#1, §))))), prep_to(ni_project_drive, kind_of(ΣG#0:§. compound(G#0, §)))))	verified 2026-07-23 (named-entity source: distributed coordination of the two project named individuals); re-pinned 2026-07-25 after the core-en `bnp` change (d24deba): WRN in the essive OBJECT slot is now realised as kind_of(§) rather than a bare atom, because a bare-kind noun has a plain cat_np. The VERIFIED property — the distributed coordination over ni_project_achilles / ni_project_drive — is unchanged; the object's realisation was incidental to that verification and never adjudicated
 These MSI cell lines were distinct.	gt(§(the(ΣG#0:§. compound_kind(G#0, §)).1), §)	verified 2026-07-22 (gloss)
 The lines from rare lineages were less dependent on WRN.	λ$anaphor$0. gt(§(kind_of(§), $anaphor$0), §(kind_of(§), the(ΣG#0:§. prep_from(G#0, kind_of(ΣG#1:§. gt(§(G#1), §)))).1))	verified 2026-07-23 (Fix A a+b': relational comparative — deg_dependent_rel(WRN, .) with WRN the relatum; open, standard = the typical lineages [discourse]); re-pinned 2026-07-24 with α-normalised hole binder ($anaphor$0) after the elided_than shift moved the freshening site
 These groups are MSI lines, microsatellite-stable lines and indeterminate lines.	And(And(λG#0. the(§, kind_of(ΣG#1:§. compound_kind(G#1, §)), G#0), λG#0. the(§, kind_of(ΣG#1:§. gt(§(G#1), §)), G#0)), λG#0. the(§, kind_of(ΣG#1:§. gt(§(G#1), §)), G#0))	verified 2026-07-24 (Defect 3: referential enumeration — the three groups ARE, respectively, the MSI-line kind (compound_kind), the microsatellite-stable-line kind and the indeterminate-line kind (gradable adj gt). subclass_of canonicalization REJECTED: the And-distribution is the contradictory intersection MSI ∩ microsatellite-stable = ∅. 4 readings collapse to 1 skeleton — sense-only ambiguity: group/Social group × two WordNet 'stable' senses a02290998/a02274089)

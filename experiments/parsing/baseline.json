@@ -41,11 +41,11 @@
     "open": 2,
     "encoded": 9,
     "total_readings_ceiling": 2800,
-    "total_readings": 2505,
+    "total_readings": 2473,
     "skeletons_ceiling": 650,
-    "skeletons": 594,
-    "expected_reading_hits": 45,
-    "expected_reading_curated": 45
+    "skeletons": 578,
+    "expected_reading_hits": 44,
+    "expected_reading_curated": 44
   },
   "gates": {
     "coverage": "grammar_gap == 0 and missing_lexeme == 0 — every sentence parses. NON-NEGOTIABLE.",
