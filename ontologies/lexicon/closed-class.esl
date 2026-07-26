@@ -304,6 +304,25 @@ resource lexicon:a_pred : lexicon:LexicalEntry {
     lexicon:sense    = "a";
     lexicon:grade    = epistemic:declared;
 }
+// `an` — the ORTHOGRAPHIC ALLOMORPH of the predicative `a`, and it must exist wherever `a` does.
+// It did not: `a` carried three entries (a_pred / a_subj / a_obj) and `an` only two, so "X is AN
+// interaction between two genetic events" had NO predicate-nominal route. The NP was forced to be an
+// existential quantifier, and the between-PP — with nowhere to land inside it — attached at the VP
+// level and ended up on the SUBJECT, in every reading. Witnessed 2026-07-25 by a minimal pair that
+// differs only in the article:
+//   "… is A relationship between two genetic events."  → is_a(SL, ΣG#0. … prep_between(G#0, …))  ✓ nests
+//   "… is AN interaction between two genetic events."  → prep_between(SL, …) in ALL readings      ✗
+// Same defect class as the missing plural `some` (2026-07-24): an entry present for one surface form
+// and absent for its variant, which reads as a GRAMMAR gap rather than the lexical hole it is.
+resource lexicon:an_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite article/determiner introducing a singular noun ('an interaction').";
+    lexicon:form     = "an";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:pred_nominal_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => lexicon:Entity -> Prop );
+    lexicon:sense    = "a";
+    lexicon:grade    = epistemic:declared;
+}
 
 // ── Kind-subject predicate nominal: `are` (D63 §8.5, Slice 3c kind subjects) ──
 // "Genes are cell lines" → subclass_of(Gene, CellLine). The KIND copula `are`
@@ -1533,7 +1552,24 @@ resource lexicon:each_subj : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:forall_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
-    lexicon:sense    = "each"; 
+    lexicon:sense    = "each";
+    lexicon:grade    = epistemic:declared;
+}
+// `each` in OBJECT position — the type-raised counterpart of `each_subj`, mirroring `every_obj`
+// (truth-conditionally `each` ≈ `every`, so it takes the same `obj_forall_sem`). Its absence was a
+// COVERAGE gap, not merely a missing reading: every other determiner in this lexicon carries a
+// subj/obj pair, and `each` carried only the subject entry, so a `each`-object sentence had NO parse
+// at all. Witnessed 2026-07-25 — "WRN affects each gene." → 0 readings, while the structurally
+// identical "WRN affects every gene." → 4. Found by sweeping the determiner inventory for
+// subj/obj asymmetries after the `an_pred` hole (same defect class: an entry present for one form
+// and absent for its sibling, which reads as a grammar gap rather than the lexical hole it is).
+resource lexicon:each_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: distributive universal determiner in object position ('WRN affects each gene').";
+    lexicon:form     = "each";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_forall_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "each";
     lexicon:grade    = epistemic:declared;
 }
 // all — universal, plural.

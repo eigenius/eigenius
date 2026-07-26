@@ -49,7 +49,7 @@ Most wasted effort in this loop has been asking a question with the wrong tool, 
 tool at all. The mapping:
 
 | question | instrument |
-|---|---|
+| --- | --- |
 | *Is this reading correct?* | **verbalizer** (`EIGENIUS_GLOSS_READINGS=1`) — renders meaning; says nothing about derivation |
 | *Which rule built this constituent, from which operands, with what provenance?* | **forest trace** (`EIGENIUS_TRACE_FOREST=all`) — the ONLY view with `prov=` and `edges=Combine@k #L + #R` |
 | *Where does multiplicity concentrate?* | `--attribution` — but its structural half is raw (README §7a), so not for causation |
@@ -111,6 +111,38 @@ Per CLAUDE.md: eliminate the bad behaviour, don't guard against it. In practice 
 - Distinguish *importer-side* (by TUI / by surface, corpus-wide, needs a reseed) from
   *parse-time* (contextual, no reseed). A decision that depends on syntactic context must
   be parse-time — hard-coding it at import is the wrong shape.
+
+### 4a. Before designing a rule, check the INVENTORY for a missing sibling
+
+A defect that looks like a grammar gap is often a **lexical hole** — an entry present for one
+surface form and absent for its sibling. Three now, in this order of discovery, all the same
+shape:
+
+| symptom | actual cause |
+| --- | --- |
+| plural "some X" reified as UMLS `C0205392` | `some` was singular-only |
+| "is AN interaction between two events" attaches the PP to the SUBJECT | `a` had three entries (`a_pred`/`a_subj`/`a_obj`), `an` only two — no predicative allomorph |
+| "WRN affects each gene." → **0 readings** | `each` had a subject entry and no object entry |
+
+The `an_pred` case cost three wrong diagnoses before the inventory was checked: "PP cannot
+attach to a non-subject nominal" (wrong — `pp_mod` fires and builds the refined `cat_n`),
+"the copula lacks core-en's `NP` predicate-nominal entry" (wrong — we route predicate
+nominals through the predicative article, deliberately), and "`DepApply` Fst-projects away
+the refinement" (wrong — that branch only fires when `tvar` occurs in the body, which it
+does not for `a_pred`). Each was plausible and each cost a build-and-trace cycle. **A
+two-line inventory sweep found it.**
+
+So, before designing any rule:
+
+- **Group the closed-class entries by surface form and diff the sets.** Every determiner
+  should carry a subj/obj pair; an article that has a predicative entry should have it for
+  every allomorph. An asymmetry is a defect until proven otherwise.
+- **Use a minimal pair that differs ONLY in the suspect word.** "…is *a* relationship
+  between two events" vs "…is *an* interaction between two events" settled in one run what
+  the traces had not. Likewise "each gene" vs "every gene".
+- **A 0-reading probe is stronger evidence than a wrong-reading probe.** `each_obj` was a
+  coverage hole invisible to the reference page — no unit exercises it — and only the sweep
+  could surface it. Sweep the inventory even when the corpus looks clean.
 
 ## 5. Measure honestly — the comparison must be like-for-like
 
