@@ -539,6 +539,29 @@ fn head_pps(lemma: &str) -> Vec<String> {
 /// A curated, high-precision set: each canonically licenses `V NP as NP`. Any synset containing one of
 /// these lemmas gets an ADDITIONAL [`FrameKind::Essive`] category (in [`push_verb`]) on top of its
 /// frame-derived categories. British + American spellings both listed.
+/// Verbs that take an oblique PP complement WordNet's frame inventory does not record — the verb
+/// analogue of `adjective-frames.tsv`. WordNet's PP frames (4/12/23/27) are the only route to
+/// [`FrameKind::PpOblique`], and a verb whose synsets carry only transitive frames therefore cannot
+/// take a marked complement at all.
+///
+/// Witnessed 2026-07-26 on `compare`: its synsets carry frames 8/9/10/11 (transitive) only, so
+/// `compared` had `(S[pss]\NP)/NP` but NO `(S[pss]\NP)/cat_pp_arg(...)`. "compared to MSS cell
+/// lines" therefore had no participial derivation and collapsed into the NOUN reading
+/// (`wn:compare.n.04746842`, *comparison*) — which is why the reference page's worst unit (204
+/// skeletons) heads its essive NP on *comparison* in 84 readings and has NO fully-correct reading.
+///
+/// Additive, like [`ESSIVE_VERBS`]: a synset containing one of these lemmas gets an EXTRA
+/// [`FrameKind::PpOblique`] category on top of its frame-derived ones. The emitted marker is
+/// `prep_any` (the wildcard that meets any specific marker), matching how WordNet's own PP frames are
+/// treated — the governed preposition is not recorded per-verb here, only the fact that an oblique
+/// complement is licensed.
+const PP_OBLIQUE_VERBS: &[&str] = &["compare", "contrast"];
+
+/// Whether `lemma` licenses an oblique PP complement per the curated set ([`PP_OBLIQUE_VERBS`]).
+fn is_pp_oblique_verb(lemma: &str) -> bool {
+    PP_OBLIQUE_VERBS.contains(&lemma.to_ascii_lowercase().as_str())
+}
+
 const ESSIVE_VERBS: &[&str] = &[
     "identify",
     "regard",
@@ -622,6 +645,11 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
     // of the synset's frame-derived categories.
     if syn.words.iter().any(|w| is_essive_verb(w)) {
         kinds.insert(FrameKind::Essive);
+    }
+    // Same shape for the oblique-PP complement WordNet does not record ("compared TO X") — see
+    // `PP_OBLIQUE_VERBS`.
+    if syn.words.iter().any(|w| is_pp_oblique_verb(w)) {
+        kinds.insert(FrameKind::PpOblique);
     }
     if kinds.is_empty() {
         rep.verbs_deferred += 1;

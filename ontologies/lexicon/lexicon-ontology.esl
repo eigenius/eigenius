@@ -158,6 +158,8 @@ data lexicon:Prep {
     prep_about,   // "concerned about"
     prep_against, // "protective against"
     prep_into,    // "differentiate into"
+    prep_of,      // "consists of", "composed of" — added 2026-07-26; `of` had a noun-post-modifier
+                  // entry but no governed-arg one, so "MSI consists of repeats." gave 0 readings
     prep_as,      // essive / object-predicative "as": "identify X as Y", "regard X as Y" (D63 §5.3)
     prep_any,     // underspecified ⊤: meets any specific prep. Prep-agnostic verb frames
                   // carry this; a specific marker refines it at composition.
