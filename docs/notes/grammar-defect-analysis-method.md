@@ -159,6 +159,35 @@ the essive unit via WordNet's `as`=arsenic noun). The response is to close the g
 not to restore the junk; land the junk-removal and the gap-closure **together** so the gate
 is never green on a lie.
 
+### 5b′. A metric can improve because a BUDGET truncated the evidence
+
+Before blaming a rule for a lost reading, check whether the reading was ever *classified*.
+The parse spends two bounded budgets — `kbest`'s per-node `k` (`DEFAULT_FOREST_CAP`, 256) and
+`CLASSIFY_BUDGET` (256 felicity evals) — and both truncate a **cost-sorted** list. A correct
+reading that costs more than the flat alternatives is dropped, the unit still parses, and no
+coverage metric can see it.
+
+Witnessed 2026-07-25. `bnp` gave a bare kind a plain `cat_np`; every kind-argument reading
+then had a second derivation with an identical sem. "We also identified MSI cell lines from
+rare lineages." went to **376 candidates carrying 44 distinct sems** — 88% duplicate mass —
+and the duplicates evicted its nested-PP readings: 4 structural skeletons → 2, silently. Five
+of six units then looked *encoded* (one reading) when they were merely truncated to one. Part
+of the celebrated `total-skeletons 169 → 150` was this, not junk removal.
+
+The instrument is a **candidate census**: `EIGENIUS_PARSE_DEBUG=1` now prints
+`candidates=N (raw=R distinct-sem=D)`. `R == 256` means a budget bound the result; `D ≪ R`
+means the budget was spent on duplicates. The fix was to spend both budgets on *distinct*
+`(cat, sem)` pairs — deduplication is cost-free correctness, since `subsume_duplicates`
+collapses the same readings after the eval anyway.
+
+Two durable lessons:
+
+- **A cap that silently drops output is not a guard, it is a defect.** Both truncations now
+  log what they drop (§8's "no silent caps"). Nine units on the CNL-v3 page still bind
+  `CLASSIFY_BUDGET` — visible now instead of invisible.
+- **Suspect the measurement when a metric improves and the glosses do not.** The skeleton
+  count fell while five units' glosses stayed wrong. That combination is the signature.
+
 ### 5c. Draw variance is real — a pin can turn on a coin flip
 
 `temperature:0` is documented as NOT deterministic (~5% of the capped top-2 moves between

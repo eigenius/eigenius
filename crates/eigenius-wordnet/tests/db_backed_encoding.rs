@@ -3369,6 +3369,13 @@ fn wrn_first_page_over_full_lexicon() {
         );
         // Page-wide English gloss (`EIGENIUS_GLOSS_READINGS=1`) — verbalize each reading for authoring
         // / verifying the expected-reading corpus without reading raw λ-terms.
+        //
+        // Grouped BY SKELETON, one representative gloss each. Adjudicating a pin means choosing
+        // between *bracketings*, and the first-N-readings view could not do that: a unit's leading
+        // readings routinely all sit in ONE skeleton (sense variation moves faster than structure),
+        // so the competing bracketing never appeared. Printing per skeleton makes the choice the
+        // gate actually pins the choice the author sees. `[S0]`/`[S1]` line up with the
+        // `EIGENIUS_DUMP_SKELETONS` block, which prints the same set in the same (sorted) order.
         if std::env::var("EIGENIUS_GLOSS_READINGS").is_ok() {
             let vnames = unit_sense_names(&text, &index, &lem, &head);
             let vb = Vb {
@@ -3376,8 +3383,16 @@ fn wrn_first_page_over_full_lexicon() {
                 layer: &head,
             };
             eprintln!("  «{}»", text.trim());
-            for it in index.parse(&text, &lem).iter().take(4) {
-                eprintln!("      ≈ \"{}\"", verbalize(it.sem(), &vb));
+            let mut by_skel: std::collections::BTreeMap<String, String> =
+                std::collections::BTreeMap::new();
+            for it in index.parse(&text, &lem).iter() {
+                by_skel
+                    .entry(erase_senses(&pretty_term(it.sem())))
+                    .or_insert_with(|| verbalize(it.sem(), &vb));
+            }
+            for (i, (skel, gloss)) in by_skel.iter().enumerate().take(8) {
+                eprintln!("      [S{i}] {skel}");
+                eprintln!("       ≈ \"{gloss}\"");
             }
         }
         report.push(UnitReport { text, outcome });

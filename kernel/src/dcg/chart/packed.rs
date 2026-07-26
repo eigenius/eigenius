@@ -82,6 +82,17 @@ impl Grammar {
             }
         }
         cands.sort_by_key(|it| it.cost());
+        // Spend `k` on DISTINCT (category, sem) pairs. A node's edges routinely materialise the same
+        // item twice — after core-en's `bnp` a bare kind reaches an argument slot both as a plain
+        // `cat_np` and as its raised copy, and the two assemble identical sems — and each duplicate
+        // otherwise consumes a k-best slot, evicting a genuinely different reading at the SAME cost
+        // of a cheaper one. Witnessed: "The MSI relationship compared favourably to other strong
+        // biomarkers for vulnerabilities." saturated k=256 with 52 distinct readings and lost its
+        // nested-PP bracketing. Keyed on the category too, not the sem alone: a refined `cat_n`
+        // carries its restrictor INSIDE the category, so two items sharing a sem can still combine
+        // differently upstream. Cost-sorted first, so the survivor is the cheapest derivation.
+        let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        cands.retain(|it| seen.insert(format!("{:?}|{:?}", it.cat(), it.sem())));
         cands.truncate(k);
         memo[node_id] = Some(cands.clone());
         cands

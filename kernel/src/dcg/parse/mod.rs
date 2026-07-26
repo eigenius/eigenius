@@ -95,9 +95,18 @@ pub const DEFAULT_FOREST_CAP: usize = 256;
 /// candidates; over the full lexicon, widen-on-failure escalation makes that thousands, and each
 /// felicity check is a full eval/readback/check of an **impredicative-∃** GQ sem — evaluating all of
 /// them OOMs (witnessed: ~400 doubly-∃ candidates SIGKILL the process). Cost-sorting first and
-/// classifying only the lowest-cost `CLASSIFY_BUDGET` bounds the work without changing the result
-/// for normal forests (which have far fewer candidates): the kept readings are the most-frequent /
-/// most-preferred, exactly what the forest cap would keep.
+/// classifying only the lowest-cost `CLASSIFY_BUDGET` bounds the work.
+///
+/// The budget is spent on **distinct sems** ([`retain_distinct_sems`]), not on raw candidates. A
+/// duplicate costs a full NbE eval and buys nothing: `subsume_duplicates` collapses it afterwards
+/// anyway. Witnessed 2026-07-25 on "We also identified MSI cell lines from rare lineages." — after
+/// core-en `bnp` gave a bare kind a plain `cat_np`, every kind-argument reading acquired a second
+/// derivation and the unit reached **376 candidates carrying 44 distinct sems** (88% duplicate
+/// mass). The duplicates filled the 256 window, pushing that unit's correct nested-PP readings —
+/// which sit higher in the cost order than the flat VP-adjunct ones — out of it entirely: 4
+/// structural skeletons → 2, with no diagnostic, and `grammar-gap` blind to it because the sentence
+/// still parsed. Pre-`bnp` the same unit fitted (192 candidates) and kept all 4. Deduplicating
+/// first is what makes "bounds the work without changing the result" true rather than aspirational.
 pub const CLASSIFY_BUDGET: usize = DEFAULT_FOREST_CAP;
 
 /// Upper bound for widen-on-failure of the sense cap (GH #97): when a capped parse of an

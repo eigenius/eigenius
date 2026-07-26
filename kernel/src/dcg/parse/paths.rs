@@ -24,6 +24,20 @@
 use super::super::segment::tokenize;
 use super::*;
 
+/// Collapse candidates carrying the **same sem term**, keeping the lowest-cost derivation of each.
+///
+/// Call on a cost-sorted list, immediately before the [`CLASSIFY_BUDGET`] truncation: `retain` keeps
+/// the first occurrence, which after the sort is the cheapest. Syntactic (pre-β) identity only —
+/// derivations that differ merely in reduction order are left for `subsume_duplicates` to collapse
+/// on definitional equality after the felicity gate. That is the point: this pass is cheap (one
+/// `Debug` render per candidate) and runs BEFORE the budget is spent, so a reading that is genuinely
+/// distinct is not evicted by n copies of a reading already in the window. See [`CLASSIFY_BUDGET`]
+/// for the witnessed case (376 candidates → 44 sems, correct readings truncated away).
+fn retain_distinct_sems<T>(candidates: &mut Vec<T>, sem: impl Fn(&T) -> &Exp) {
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    candidates.retain(|c| seen.insert(format!("{:?}", sem(c))));
+}
+
 impl Parser {
     /// Packed-forest parse (D63 Option A, blueprint §11 3d): the shared attempt policy
     /// ([`Self::parse_widening`]) over the packed forest + cube-pruning extractor
@@ -115,10 +129,22 @@ impl Parser {
             );
         }
         candidates.sort_by_key(|it| it.cost());
+        let raw_candidates = candidates.len();
+        retain_distinct_sems(&mut candidates, |it| it.sem());
+        let distinct_sems = candidates.len();
         candidates.truncate(CLASSIFY_BUDGET);
+        if distinct_sems > candidates.len() {
+            // Never silent: a truncation here drops readings the grammar DID derive, and the unit
+            // still parses, so no coverage metric can see it (§5b false-comfort coverage).
+            eprintln!(
+                "dcg::parse (packed): CLASSIFY_BUDGET dropped {} distinct reading(s) of {distinct_sems} for {text:?}",
+                distinct_sems - candidates.len(),
+            );
+        }
         if std::env::var("EIGENIUS_PARSE_DEBUG").is_ok() {
             eprintln!(
-                "dcg::parse (packed): cap={:?} {:?} forest nodes={} finite candidates={}",
+                "dcg::parse (packed): cap={:?} {:?} forest nodes={} finite candidates={} \
+                 (raw={raw_candidates} distinct-sem={distinct_sems})",
                 cap,
                 text,
                 forest.nodes.len(),
@@ -292,11 +318,19 @@ impl Parser {
             .collect();
         let n_candidates = candidates.len();
         candidates.sort_by_key(|it| it.cost());
+        retain_distinct_sems(&mut candidates, |it| it.sem());
+        let distinct_sems = candidates.len();
         candidates.truncate(CLASSIFY_BUDGET);
-        if debug && n_candidates > candidates.len() {
+        if distinct_sems > candidates.len() {
             eprintln!(
-                "  [parse-debug cap={cap:?}] full-span candidates {n_candidates} → felicity-checking \
-                 {} (CLASSIFY_BUDGET)",
+                "dcg::parse: CLASSIFY_BUDGET dropped {} distinct reading(s) of {distinct_sems} for {text:?}",
+                distinct_sems - candidates.len(),
+            );
+        }
+        if debug {
+            eprintln!(
+                "  [parse-debug cap={cap:?}] full-span candidates {n_candidates} → {distinct_sems} \
+                 distinct sem(s) → felicity-checking {} (CLASSIFY_BUDGET)",
                 candidates.len()
             );
         }
