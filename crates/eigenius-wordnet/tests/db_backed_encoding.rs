@@ -4725,7 +4725,26 @@ fn probe_ne_alias_case_reachability() {
     } else {
         page
     };
-    let aug = eigenius_kernel::dcg::named_entity_augmentation(&head, &doc);
+    let mut aug = eigenius_kernel::dcg::named_entity_augmentation(&head, &doc);
+    // Match the SWEEP's augmentation set exactly, or the trace explains a different parse than the one
+    // whose skeletons are being adjudicated. The sweep merges TWO overlays: the named-entity glossary
+    // over the parsed CNL (above) AND the abbreviation glossary over the SOURCE page (MSI/MSS
+    // definitions live in the original, not the CNL). Verified by a one-number oracle: the sweep
+    // reports AMBIG×236 for this unit, so anything else means the configuration does NOT match.
+    {
+        let source_path =
+            std::env::var("EIGENIUS_WRN_SOURCE").unwrap_or_else(|_| WRN_PAGE.to_string());
+        let source_text = std::fs::read_to_string(&source_path).unwrap_or_else(|_| doc.clone());
+        let abbr = eigenius_kernel::dcg::augment_document_only(
+            &head,
+            &source_text,
+            &eigenius_kernel::dcg::NoAbbreviationProposer,
+            &lem,
+        );
+        eprintln!("ABBREVIATIONS merged: {}", abbr.added.len());
+        aug.added.extend(abbr.added);
+        aug.supporting.extend(abbr.supporting);
+    }
     eprintln!("MINTED SURFACES (exactly as stored):");
     for b in &aug.added {
         eprintln!("   {:?}", b.provenance.surface);
@@ -4743,5 +4762,106 @@ fn probe_ne_alias_case_reachability() {
         for (_a, cat, sense) in e.iter().take(4) {
             eprintln!("       {cat}   [{sense}]");
         }
+    }
+    // Parse the worst unit under PAGE glossary conditions (set EIGENIUS_WRN_PAGE), so the cap ladder
+    // and `prefer_multiword` match the sweep rather than a toy document's.
+    let unit = "Project Achilles and project DRIVE identified WRN as the top preferential \
+                dependency in MSI cell lines compared to MSS cell lines.";
+    let f = index.parse(unit, &lem);
+    eprintln!(
+        "PARSED under page conditions: {} closed reading(s)",
+        f.len()
+    );
+    let sems: Vec<String> = f.iter().map(|it| pretty_term(it.sem())).collect();
+    eprintln!(
+        "  readings mentioning C0001074 (Achilles-the-noun) : {}",
+        sems.iter().filter(|s| s.contains("C0001074")).count()
+    );
+    eprintln!(
+        "  readings mentioning ni_project_*                 : {}",
+        sems.iter().filter(|s| s.contains("ni_project")).count()
+    );
+    eprintln!(
+        "  distinct skeletons                               : {}",
+        sems.iter()
+            .map(|s| erase_senses(s))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+    );
+    // The decisive datum the forest trace does NOT print: the SEMS of the two cat_np leaves at the
+    // "Project Achilles" span. If they differ (one the named individual, one a bare kind) that alone
+    // explains an 86-reading family with a bare-kind subject despite the span never being torn.
+    for probe in [
+        "Project Achilles screened cell lines.",
+        "Project DRIVE analysed cell lines.",
+    ] {
+        let r = index.parse(probe, &lem);
+        eprintln!("  {probe:?} -> {} reading(s)", r.len());
+        let mut seen = std::collections::BTreeSet::new();
+        for it in r.iter() {
+            if seen.insert(pretty_term(it.sem())) {
+                eprintln!("       {}", pretty_term(it.sem()));
+            }
+        }
+    }
+}
+
+/// COVERAGE SWEEP — every preposition in each syntactic role, by 0-reading probe.
+///
+/// The gate's `grammar-gap 0` is measured on the reference PAGE, so a construction the page happens
+/// not to contain is invisible to it. That blind spot is why several real holes were found only by
+/// hand and then mis-ranked as "off target": `each` had no object entry ("WRN affects each gene." → 0
+/// readings) and six prepositions could not post-modify a noun. A 0-reading probe cannot be
+/// misclassified the way an inventory scan can, so this sweeps the roles directly.
+///
+/// A row that reads 0 in BOTH roles means the preposition is effectively unusable; 0 in one role is a
+/// missing entry of that shape. Run:
+///   EIGENIUS_DB_SNAPSHOT=… cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     probe_preposition_role_coverage -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed coverage sweep; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn probe_preposition_role_coverage() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index(&head);
+    const PREPS: &[&str] = &[
+        "for", "from", "in", "on", "of", "at", "with", "to", "into", "by", "between", "within",
+        "upon", "against", "about", "through", "during", "after", "before", "under", "over",
+        "across", "among", "beyond", "without",
+    ];
+    eprintln!(
+        "{:<10} {:>8} {:>8}   (0 = no parse)",
+        "prep", "nmod", "adjunct"
+    );
+    let mut holes: Vec<String> = Vec::new();
+    for p in PREPS {
+        // nmod: the PP must post-modify a noun.   adjunct: the PP must modify a VP.
+        let nmod = index
+            .parse(&format!("The change {p} cells was clear."), &lem)
+            .len();
+        let adj = index.parse(&format!("WRN acts {p} cells."), &lem).len();
+        eprintln!("{p:<10} {nmod:>8} {adj:>8}");
+        if nmod == 0 {
+            holes.push(format!("{p} (nmod)"));
+        }
+        if adj == 0 {
+            holes.push(format!("{p} (adjunct)"));
+        }
+    }
+    eprintln!("\nHOLES ({}): {}", holes.len(), holes.join(", "));
+    // Natural-sentence confirmation: the templates above can read 0 for the wrong reason ("WRN acts
+    // OF cells" is not English), so each candidate needs a sentence a scientist would actually write.
+    eprintln!("\n-- natural-sentence confirmation --");
+    for s in [
+        "Cells survive without oxygen.",
+        "MSI is common among cancers.",
+        "The effect extends beyond cells.",
+        "Mutations occur at the locus.",
+        "The mutation at the locus was clear.",
+        "Cells were killed by the inhibitor.",
+        "The paper by the authors was clear.",
+    ] {
+        eprintln!("  {:>3}  {s}", index.parse(s, &lem).len());
     }
 }
