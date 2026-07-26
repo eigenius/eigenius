@@ -270,7 +270,18 @@ fn trig_relativize(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut
 }
 
 /// Coordination `[X] and/or/`,` [Y]`: a coordinating connective BETWEEN the operands (the connective
-/// IRI rides in the `BinRule::Coordinate` tag).
+/// IRI rides in the `BinRule::Coordinate` tag). A comma contributes the neutral
+/// [`LIST_CONN`](super::constructions::LIST_CONN) that a trailing `and`/`or` rebinds.
+///
+/// **Resolving the comma's inherited connective HERE does not work, and the attempt is recorded so it
+/// is not retried** (2026-07-26). The comma's connective is a property of the whole list, and this
+/// trigger sees only one CELL: `MSH2 , MSH6` inside "MSH2, MSH6, PMS2 or MLH1" is built in a cell that
+/// ENDS before the `or`, so a scan bounded by `j` finds nothing to inherit. Measured: adding the scan
+/// left the page byte-identical per unit (507 skeletons before and after). Widening the scan to the
+/// whole sentence mis-inherits instead — the comma in "A, B affect X or Y" would take the `or` — and
+/// bounding it correctly needs to know where the nominal list ends, i.e. POS/lexical information that
+/// [`Grammar`] does not carry (no lexicon: `layer`, `reserved`, `dets`). See
+/// [`super::constructions::complete_coord`] for what the fix requires instead.
 // `c` is a split-point index used for both operand spans, not just to index `tokens`.
 #[allow(clippy::needless_range_loop)]
 fn trig_coordinate(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
@@ -377,6 +388,13 @@ fn build_coordinate(g: &Grammar, rule: BinRule, l: &Item, r: &Item) -> Option<It
     let BinRule::Coordinate(op) = rule else {
         return None;
     };
+    // An apposed group is CLOSED (the apposition normal form, [`Combinator::Apposed`]): appending a
+    // member to "the MMR genes MSH2, MSH6" would leave that member outside the classifier's scope, so
+    // only a prefix of the surface list would be classified. An `Apposed` item is always a
+    // `cat_group`, so this can only ever have reached the `coordinate_np` arm below.
+    if l.prov() == Combinator::Apposed {
+        return None;
+    }
     let cost = l.cost().saturating_add(r.cost());
     coordinate_prop(op, l.cat(), l.sem(), r.cat(), r.sem(), &g.layer)
         .or_else(|| coordinate_np(op, l.cat(), l.sem(), r.cat(), r.sem(), &g.layer))
@@ -416,10 +434,16 @@ fn build_appositive_obj(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Opti
     g.appositive_obj(l, r)
 }
 
+/// Close nominal apposition. The result is tagged [`Combinator::Apposed`] — the apposition normal
+/// form (see that variant): an already-apposed group takes no SECOND classifier, and this rule's
+/// trigger offers every split of the cell, so without the check the classifiers stack.
 fn build_appose_group(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
+    if r.prov() == Combinator::Apposed {
+        return None;
+    }
     let cost = l.cost().saturating_add(r.cost());
     appose_group(l.cat(), r.cat(), r.sem(), &g.layer)
-        .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
+        .map(|(cat, sem)| Item::from_parts(cat, sem, Combinator::Apposed, cost))
 }
 
 /// One firing **site** of a token-keyed binary construction inside a chart cell: the two operand
@@ -580,7 +604,18 @@ impl Grammar {
     /// rule applied at BOTH leaf seeding AND to COMPOSED cells in both chart paths, so a compound
     /// `cat_n` (`repeat regions`, formed by the `KindCompound` rule) shifts exactly like a leaf noun —
     /// `bnp` is a rule over any `n`, not a leaf-only shortcut. Non-`cat_n`/non-plural/non-mass → empty.
+    ///
+    /// **A naming-refined noun is excluded** (2026-07-26): `cat_n(Σx:C. named(x, d), num)` has at most
+    /// ONE inhabitant, so it has no kind to denote — its bare use is [`definite_designation`], which
+    /// gives the individual. Letting `bnp` also fire minted `kind_of(Σx:C. named(x, d))` alongside every
+    /// `the(Σx:C. named(x, d)).1`, a systematic duplicate: `Genes MSH2 affect cells.` returned 8 readings
+    /// of which exactly 4 were that shadow. This is the same kind of normal-form statement as
+    /// [`Guard::NotCompoundRefined`] / [`Guard::NotKindRaised`], not a filter on bad output — a uniquely
+    /// naming restrictor is what makes the kind reading degenerate.
     pub(crate) fn bare_nominal_shifts(&self, it: &Item) -> Vec<Item> {
+        if definite_designation(it.cat()).is_some() {
+            return Vec::new();
+        }
         let mut v: Vec<Item> = crate::dcg::kind_subject(it.cat(), it.sem())
             .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
             .into_iter()
@@ -651,6 +686,11 @@ pub(crate) enum UnaryKind {
     Raise,
     /// Bare-plural / bare-mass argument shift: a plural/mass `cat_n` → a deferred-quantifier NP.
     BareNp,
+    /// Definite designation (D63 §5.3): a naming-refined noun `cat_n(Σx:C. named(x, d), num)` → the
+    /// individual it uniquely picks out, `cat_np(C, num)` with `the(Σ…).1`. The bare half of the
+    /// classifier+designator construction, whose `name` rule now yields the refined noun so a
+    /// determiner can reach it (`definite_designation`).
+    DefiniteDesignation,
     /// Fronted participial adjunct: a subject-gapped `ger` VP → a sentence pre-modifier `S/S`.
     FrontParticipial,
     /// Reduced relative (core-en `rrel`): a subject-gapped `pss` VP → a noun post-modifier `cat_pp`,
@@ -706,7 +746,7 @@ impl UnaryShift {
 /// each shift reading the cell state left by the previous. Elided-`than` sits after coordination and
 /// before the NP shifts: its input `X/cat_pp_than` and output `S[adj]\NP` are untouched by the others,
 /// so its position only keeps it out of `ModLift` (no attributive comparative modifier is minted).
-static UNARY_SHIFTS: [UnaryShift; 7] = [
+static UNARY_SHIFTS: [UnaryShift; 8] = [
     UnaryShift {
         kind: UnaryKind::ModLift,
         name: "mod_lift",
@@ -721,6 +761,14 @@ static UNARY_SHIFTS: [UnaryShift; 7] = [
         kind: UnaryKind::ElidedThan,
         name: "elided_than",
         apply: apply_elided_than,
+    },
+    // Before `BareNp`/`Raise` so the designated individual is available to the raise (a subject GQ /
+    // relative-clause body needs it), and after `ModLift` so it is not also minted as a pre-nominal
+    // modifier — the named-compound rule (`[cat_np] [cat_n]`) already covers that direction.
+    UnaryShift {
+        kind: UnaryKind::DefiniteDesignation,
+        name: "definite_designation",
+        apply: apply_definite_designation,
     },
     UnaryShift {
         kind: UnaryKind::BareNp,
@@ -799,6 +847,14 @@ fn apply_front_participial(g: &Grammar, it: &Item, span: (usize, usize)) -> Vec<
 
 /// Reduced relative: `S[dcl,pss]\NP` → `cat_pp` with the sem carried through unchanged (both denote
 /// `Entity -> Prop`), so the existing `pp_mod` rule conjoins it into the noun's restrictor.
+/// Definite designation: a naming-refined noun → the individual it uniquely picks out.
+fn apply_definite_designation(_g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
+    definite_designation(it.cat())
+        .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
+        .into_iter()
+        .collect()
+}
+
 fn apply_reduced_relative(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
     reduced_relative(it.cat(), &g.layer)
         .map(|cat| Item::with_cost(cat, it.sem().clone(), it.cost()))

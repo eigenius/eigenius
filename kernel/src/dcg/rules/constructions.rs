@@ -346,9 +346,38 @@ pub fn coordinate_mod(
 /// **List-completion** (D63 §8.4 Phase 3, core-en's `s-list` / `pred-adj-list` type-changing rules):
 /// fold a prop-ending coordination `cat_coord(BaseCat, conn)` into its base category, applying the
 /// operator pointwise over the accumulated members — `op(op(m₀, m₁), m₂)…` (left-branching normal
-/// form, via [`generalized_coord`]). A never-finalized `conn_list` (a bare comma list, no `and`/`or`)
-/// defaults to conjunction. Needs ≥2 members. Returns `(BaseCat, folded_sem)`; `None` for an ill-formed
-/// list or an unresolvable operator. Realized as a unary shift in both CKY paths (packable).
+/// form, via [`generalized_coord`]). Needs ≥2 members. Returns `(BaseCat, folded_sem)`; `None` for an
+/// ill-formed list or an unresolvable operator. Realized as a unary shift in both CKY paths (packable).
+///
+/// **KNOWN BUG — the `conn_list` arm below defaults to conjunction, and that default is wrong for a
+/// comma-list PREFIX** (diagnosed 2026-07-26, not yet fixed; the arm is deliberately left in place
+/// because removing it costs coverage — see below). The comma is polarity-NEUTRAL by
+/// [`LIST_CONN`]'s own specification and inherits the list's final explicit connective, so
+/// `A, B, C or D` is a four-way `∨`. The chart offers every split, so this default lets a comma-only
+/// PREFIX fold as `∧` and then coordinate with the trailing `or` — `Or(And(A, B), D)`, a connective the
+/// surface never supplied, in a list that had already stated which one it was. On the reference page's
+/// germline unit that is 52 of 192 skeletons (28 with one `Or` node, 24 with two, where four members
+/// demand three).
+///
+/// Three routes were measured, and only the third can work:
+///
+/// - **Delete the arm** (and `group_conn_op`'s): removes exactly those 52 — page 507 → 454 skeletons,
+///   germline 192 → 140, every survivor a proper four-way `Or`, encoded 9 → 10, grammar-gap 0, 44/44
+///   pins. But it breaks ASYNDETIC coordination, which the suite pins deliberately:
+///   `comma_list_coordination_parses` (`A, B affect X`) and the packed/unpacked oracle's
+///   `HeLa, BRCA1 affect HeLa` both fail. Conjunction is the RIGHT reading for a complete asyndetic
+///   list and the wrong one for a prefix, so the arm cannot simply go.
+/// - **Resolve the comma's connective in [`super::registry`]'s coordination trigger**: inert. The
+///   trigger sees one cell, and `MSH2 , MSH6` is built in a cell that ends before the `or`. Measured
+///   byte-identical per unit. Widening the scan to the sentence mis-inherits ("A, B affect X or Y").
+/// - **Resolve it in a seed-time pass over the token stream**, where the whole sentence AND the lexical
+///   POS candidates are both available, so the scan can stop at the end of the nominal list. Each comma
+///   then carries a resolved connective, `conn_list` means *asyndetic* rather than *undecided*, and
+///   this arm becomes correct instead of a guess. That is the fix; it is a front-end change, not a
+///   local one, which is why it is recorded here rather than half-done.
+///
+/// Attributive MODIFIER coordination is unaffected either way: it folds union-`Or` over the restrictors
+/// without consulting `conn` at all (D63 §6, the `cat_mod` arm below).
 pub fn complete_coord(coord_cat: &Exp, coord_sem: &Exp, layer: &Arc<Layer>) -> Option<(Exp, Exp)> {
     let [base_cat, conn] = is_ctor(coord_cat, "cat_coord")? else {
         return None;
@@ -421,6 +450,10 @@ fn group_members(sem: &Exp) -> Option<Vec<Exp>> {
 /// The `Prop`-connective IRI a group's `Conn` feature distributes with: `conn_and`
 /// → `logic:And`, `conn_or` → `logic:Or`. Reads the `Conn` ctor from a `cat_group`
 /// category's second argument.
+///
+/// A neutral [`LIST_CONN`] group (`conn_list`) has **no operator** — it is an UNFINALIZED list, and
+/// this returns `None` so nothing can consume it. See [`complete_coord`] for why the former
+/// default-to-conjunction was a bug rather than a fallback.
 fn group_conn_op(group_cat: &Exp) -> Option<&'static str> {
     let [_c, conn, _num] = is_ctor(group_cat, "cat_group")? else {
         return None;
@@ -428,8 +461,9 @@ fn group_conn_op(group_cat: &Exp) -> Option<&'static str> {
     match conn {
         Exp::InductiveCtor(_, n, _) if n == "conn_and" => Some("urn:eigenius:logic:And"),
         Exp::InductiveCtor(_, n, _) if n == "conn_or" => Some("urn:eigenius:logic:Or"),
-        // A never-finalized comma list (no trailing `and`/`or`) defaults to conjunction — "A, B, C
-        // affect X" ⟿ `∧`. A finalized list carries `conn_and`/`conn_or` and never reaches here.
+        // An ASYNDETIC list (no coordinator anywhere — "A, B affect X") folds as conjunction. Reached
+        // only when the comma found nothing to inherit; `trig_coordinate` resolves the inheritance
+        // from the token sequence, so a comma in `A, B, C or D` never arrives here as `conn_list`.
         Exp::InductiveCtor(_, n, _) if n == "conn_list" => Some("urn:eigenius:logic:And"),
         _ => None,
     }
@@ -440,8 +474,12 @@ fn group_conn_op(group_cat: &Exp) -> Option<&'static str> {
 /// the comma inherits the list's FINAL explicit connective. So a comma builds a `conn_list` group that
 /// the trailing `and`/`or` REBINDS (below). This is a PARSER-INTERNAL sentinel — never a logic op and
 /// never a committed `lexicon:Conn` ctor (`denote_cat` erases the `Conn` argument, so it never reaches
-/// the kernel), so no ontology change / reseed is needed. A group left `conn_list` at fold time (a bare
-/// comma list, no explicit connective) defaults to conjunction ([`group_conn_op`]).
+/// the kernel), so no ontology change / reseed is needed.
+///
+/// A group still `conn_list` at fold time is UNFINALIZED and has no operator — [`group_conn_op`] and
+/// [`complete_coord`] both return `None`, so it cannot be consumed. Neutrality is the whole point: if
+/// the fold could read a connective off the comma, the comma would not be neutral, and in a list that
+/// ends in `or` the read-off value contradicts the surface (see [`complete_coord`]).
 pub(crate) const LIST_CONN: &str = "urn:eigenius:lexicon:conn_list";
 
 /// Coordinate two NP-side constituents into a **group** (`cat_group(C, conn, pl)`
@@ -593,13 +631,27 @@ pub fn coordinate_but_not(
 /// **Close nominal apposition** (D63 §8.4 Phase 6, RC-6): a definite/bare common-noun HEAD
 /// immediately followed by a coreferential **name-group** — "the genes BRCA1 and MSH2", "the MMR
 /// genes MSH2, MSH6, PMS2 or MLH1". In close apposition the head noun *classifies* the referents and
-/// the named group *specifies* them; the names pick out exactly the members, so the group IS the
-/// referent (the head's determiner quantification is overridden — "the poet Burns" refers to Burns,
-/// not to some poet). We realize this by passing the **group through unchanged**, gated on the
-/// felicity condition that the named members are of the head noun's kind. The result group then rides
-/// the existing distributive-subject / distributive-object machinery unmodified (`distribute` /
-/// `distribute_object`), so "the genes BRCA1 and MSH2 affect cells" ⟿ `affect(cells, brca1) ∧
-/// affect(cells, msh2)` — exactly the bare-group reading, now licensed through the classifying head.
+/// the named group *specifies* them, so the rule **distributes the classifier over the members**: each
+/// designator `dᵢ` becomes the individual the classifier + that name picks out,
+/// `the(Σx:classifier. named(x, dᵢ)).1`, and the result is a group of those at the classifier's base
+/// class. The group then rides the existing distributive-subject / distributive-object machinery
+/// unmodified (`distribute` / `distribute_object`), so "the genes BRCA1 and MSH2 affect cells" ⟿
+/// `affect(cells, the(Σx:gene. named(x, brca1)).1) ∧ affect(cells, the(Σx:gene. named(x, msh2)).1)`.
+///
+/// **It used to pass the group through unchanged (until 2026-07-26), and that dropped the classifier.**
+/// Two defects, both on the reference page's "Germline mutations in the MMR genes MSH2, MSH6, PMS2 or
+/// MLH1 cause Lynch syndrome.":
+///
+/// - The classifier's own refinement went nowhere. The head is `Σg:Gene. compound_kind(g, MMR)`; a
+///   pass-through keeps only the *members'* lexical types, so "MMR" left no trace in any reading and
+///   no reading said the four genes are MMR genes. The maximum `named` count across that unit's 112
+///   skeletons was **2** — the analysis typing all four designators did not exist in the forest.
+/// - It made the DESIGNATOR's denotation the referent, which is exactly what
+///   [`super::combinators`]'s `name` rule does not do for a single designator. `named` takes the
+///   designator as a naming TOKEN ([`NAMED_AXIOM`]) precisely so that a name with an unrelated
+///   lexical sense still names felicitously; a pass-through instead refers to Achilles the hero. The
+///   arity of the designator list is not a reason for a different analysis, so both arities now build
+///   the same [`naming_refinement`].
 ///
 /// `head_cat` is a **subject GQ** `S/(S\NP_C)` (determined: "the genes") or a **bare common noun**
 /// `cat_n(C, _)` (bare: "genes"); `group_cat` a `cat_group(D, conn, num)`. The felicity gate compares
@@ -613,27 +665,52 @@ pub fn coordinate_but_not(
 /// head is a SUBTYPE of the members' type, not a supertype; a one-directional `⌊D⌋ ≤ ⌊C⌋` gate would
 /// reject it. The check still rejects a genuine kind clash: "the cells BRCA1 and MSH2" has `⌊head⌋` a
 /// cell concept and `⌊D⌋ = T028`, neither subsuming the other (UMLS semantic types are siblings under
-/// `Entity`) ⇒ no parse. `None` if the shapes don't match or the gate fails. The determiner's
-/// definiteness and the head's type-assertion (`gene(brca1) ∧ …`, already lexically guaranteed by the
-/// names' types) are dropped — a first-cut approximation, parallel to the existential treatment of
-/// `the` (a faithfulness refinement, D61).
+/// `Entity`) ⇒ no parse. `None` if the shapes don't match or the gate fails.
+///
+/// The **group's type index is the classifier's base class** `⌊C⌋`, not the full refinement, matching
+/// [`definite_designation`]: the index is what downstream selectional checks read
+/// ([`type_subsumes`] compares classes and falls back to equality), while the refinement is semantic
+/// content and travels in the members' sems. The head determiner's definiteness beyond the ι each
+/// member now carries is still dropped — a first-cut approximation, parallel to the existential
+/// treatment of `the` (a faithfulness refinement, D61).
 pub fn appose_group(
     head_cat: &Exp,
     group_cat: &Exp,
     group_sem: &Exp,
     layer: &Arc<Layer>,
 ) -> Option<(Exp, Exp)> {
-    let head_ty = sigma_base(appositive_head_type(head_cat)?);
-    let [group_ty, _conn, _num] = is_ctor(group_cat, "cat_group")? else {
+    let classifier = appositive_head_type(head_cat)?;
+    // A classifier that is ITSELF already designated ("genes MSH2") takes no further designator list:
+    // the second naming would sit inside the first's Σ. Cat-only, so the packed forest's `Sig` (which
+    // already carries the designation bit) separates the two heads.
+    if is_naming_refined(classifier) || is_pp_refined(classifier) {
+        return None;
+    }
+    let head_ty = sigma_base(classifier);
+    let [group_ty, conn, num] = is_ctor(group_cat, "cat_group")? else {
         return None;
     };
-    let group_ty = sigma_base(group_ty);
     // Felicity: the head noun and the named members must name the SAME KIND — one type subsumes the
     // other (either direction, to bridge the concept-vs-semantic-type granularity gap across importers).
+    let group_ty = sigma_base(group_ty);
     if !type_subsumes(head_ty, group_ty, layer) && !type_subsumes(group_ty, head_ty, layer) {
         return None;
     }
-    Some((group_cat.clone(), group_sem.clone()))
+    let Exp::InductiveCtor(decl, _, _) = group_cat else {
+        return None;
+    };
+    // Distribute: every designator is classified, not just the first one a `[classifier designator]`
+    // bracketing would reach.
+    let members: Vec<Exp> = group_members(group_sem)?
+        .iter()
+        .map(|d| definite_individual(&naming_refinement(classifier, d)))
+        .collect::<Option<_>>()?;
+    let cat = Exp::InductiveCtor(
+        decl.clone(),
+        "cat_group".into(),
+        vec![head_ty.clone(), conn.clone(), num.clone()],
+    );
+    Some((cat, list_term(&members)))
 }
 
 /// The classifying **type index** of a close-apposition head: a subject GQ `S/(S\NP_C)` (a determined
@@ -831,6 +908,160 @@ pub fn kind_subject(cat: &Exp, sem: &Exp) -> Option<(Exp, Exp)> {
         Exp::InductiveCtor(decl.clone(), "cat_kind".into(), vec![]),
         sem.clone(),
     ))
+}
+
+/// **Definite designation** (D63 §5.3, the bare half of the classifier+designator construction): a
+/// common noun refined by a NAMING restrictor, `cat_n(Σx:C. named(x, d), num)`, shifts to the
+/// individual that Σ uniquely picks out — `cat_np(C, num)` with sem `the(Σ…).1`, the ι operator
+/// (`ontology:the`) applied and `Fst`-projected, the same shape the definite-NP pins carry.
+///
+/// This is the other half of moving [`super::combinators`]'s `name` rule from `cat_np` to `cat_n`
+/// (2026-07-26), and neither half works alone. The rule used to jump straight to `cat_np`, which put
+/// the whole construction out of a determiner's reach — `the`'s argument is a `cat_n` — so a DETERMINED
+/// classifier + designator had no apposition route at all and fell through to the compound-noun
+/// analysis, which heads the phrase on the NAME: `The gene MSH2 affects cells.` had exactly two
+/// readings and both were `the(Σ G:C1333234. compound_kind(G, n05436752)).1`, "an MSH2 of the gene
+/// kind". Emitting the refined noun instead lets `the` apply through the existing
+/// determiner-over-refined-noun `Fst` machinery; this shift restores the bare use (`project Achilles`),
+/// which no longer gets its `cat_np` from the rule directly.
+///
+/// **The naming restrictor is what licenses the shift.** A definite needs uniqueness, and `named(x, d)`
+/// supplies it; a compound / adjective / PP restrictor does not, so those refined nouns keep needing a
+/// real determiner. Hence the positive test for `ontology:named` rather than "any refined noun".
+///
+/// Fires only on a DIRECTLY-named Σ, so a further-modified appositive ("gene MSH2 in humans", whose
+/// outer restrictor is the `prep_in`) is not covered — reachable now that the construction is a `cat_n`
+/// at all, but a separate step.
+pub fn definite_designation(cat: &Exp) -> Option<(Exp, Exp)> {
+    let [ty, num] = is_ctor(cat, "cat_n")? else {
+        return None;
+    };
+    if !is_naming_refined(ty) {
+        return None;
+    }
+    let (Exp::Sig(_, base, _), Exp::InductiveCtor(decl, _, _)) = (ty, cat) else {
+        return None;
+    };
+    let sem = definite_individual(ty)?;
+    let cat = Exp::InductiveCtor(
+        decl.clone(),
+        "cat_np".into(),
+        vec![(**base).clone(), num.clone()],
+    );
+    Some((cat, sem))
+}
+
+/// The opaque naming relation `ontology:named : Entity → Entity → Prop` — its second argument is the
+/// designator's referent used as a naming TOKEN, not as the phrase's referent, which is why a name
+/// whose lexical sense is unrelated (`Achilles` the hero) still felicitously names a Project.
+const NAMED_AXIOM: &str = "urn:eigenius:ontology:named";
+
+/// The **naming refinement** `Σx:classifier. named(x, designator)` — the one shape the
+/// classifier+designator construction builds, in every arity. [`super::combinators`]'s `name` rule
+/// builds it for a single designator ("gene MSH2"), [`appose_group`] builds one per member for a
+/// designator GROUP ("the MMR genes MSH2, MSH6, PMS2 or MLH1"), and [`definite_designation`] /
+/// [`is_naming_restrictor`] recognize it. Bound variable is the compound family's
+/// [`super::combinators::COMPOUND_X`], so a refinement is a single canonical term rather than one
+/// α-variant per construction site (the reading-dedup key is the term).
+pub(crate) fn naming_refinement(classifier: &Exp, designator: &Exp) -> Exp {
+    let named = Exp::EigonAxiom(Iri::parse(NAMED_AXIOM).expect("valid named axiom iri"));
+    let x = super::combinators::COMPOUND_X;
+    let restr = Exp::App(
+        Box::new(Exp::App(Box::new(named), Box::new(Exp::Var(x.into())))),
+        Box::new(designator.clone()),
+    );
+    Exp::Sig(
+        Patt::Var(x.into()),
+        Box::new(classifier.clone()),
+        Box::new(restr),
+    )
+}
+
+/// The **individual a uniquely-satisfied description picks out**: `the(Σ).1`, the ι operator
+/// (`ontology:the`) applied to the refinement and `Fst`-projected — the shape the definite-NP pins
+/// carry. `None` only if `ontology:the` is unavailable.
+fn definite_individual(sigma: &Exp) -> Option<Exp> {
+    let the = Exp::EigonAxiom(Iri::parse("urn:eigenius:ontology:the").ok()?);
+    Some(Exp::Fst(Box::new(Exp::App(
+        Box::new(the),
+        Box::new(sigma.clone()),
+    ))))
+}
+
+/// Whether a classifier type carries a **postmodifying PP** — a `prep_*` relation in its OWN
+/// restrictor, at any depth short of a nested Σ (which belongs to some other noun).
+///
+/// This DISQUALIFIES a close-apposition classifier, on adjacency: the designator sits immediately
+/// after the nominal head, so a PP postmodifier cannot intervene between them — "the gene MSH2 in
+/// humans", never "*the gene in humans MSH2". Without the check the reference page's germline unit
+/// bracketed "[Germline mutations in the MMR] [genes MSH2, MSH6, PMS2 or MLH1]" and classified four
+/// genes as germline mutations, glossing "the a Germ-Line Mutation in the Mismatch Repair named MSH6
+/// protein cause …". The felicity gate cannot catch it: every pair of UMLS classes in this lexicon
+/// joins at the `lexicon:Entity` top (measured — `probe_cross_kind_np_coordination`), so
+/// `type_subsumes(Entity, mutation)` holds and the gate passes vacuously whatever the classifier.
+///
+/// **A spine walk is not enough, and the difference was measured.** A PP whose object is a raised GQ
+/// arrives un-β-reduced with the *verb* variable at the spine head and the preposition buried in an
+/// argument — traced live, the classifier is
+/// `Σ__cmp_x:C0206530. λ__pobj_x. λA. λV. V(the(A))(C1155661, λ__pobj_y. λy. λx. prep_in(x, y)(…))(__cmp_x)`,
+/// whose spine head is `V`. Walking `App`/`Ann`/`Lam` heads (the [`is_naming_restrictor`] /
+/// `is_adjective_refined` idiom) therefore matched nothing and the check was page-neutral: 522
+/// skeletons before and after, byte-identical per unit. Hence a subterm search — stopped at a nested
+/// `Sig` so a PP inside a compound's MODIFIER ("the MMR-pathway genes MSH2") is not mistaken for a
+/// postmodifier of this classifier.
+fn is_pp_refined(ty: &Exp) -> bool {
+    let Exp::Sig(_, _, restr) = ty else {
+        return false;
+    };
+    fn mentions_prep(e: &Exp) -> bool {
+        match e {
+            Exp::EigonAxiom(iri) => iri.as_str().starts_with("urn:eigenius:ontology:prep_"),
+            // A nested refined noun is a different noun's restrictor — do not descend.
+            Exp::Sig(..) => false,
+            Exp::App(a, b)
+            | Exp::Pi(_, a, b)
+            | Exp::Arrow(a, b)
+            | Exp::Times(a, b)
+            | Exp::Pair(a, b)
+            | Exp::Ann(a, b) => mentions_prep(a) || mentions_prep(b),
+            Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) | Exp::Con(_, b) | Exp::Refl(b) => {
+                mentions_prep(b)
+            }
+            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => {
+                args.iter().any(mentions_prep)
+            }
+            Exp::Id(a, b, c) | Exp::DecEq(a, b, c) => {
+                mentions_prep(a) || mentions_prep(b) || mentions_prep(c)
+            }
+            _ => false,
+        }
+    }
+    mentions_prep(restr)
+}
+
+/// Whether a type is a **naming refinement** — the `Σx:C. named(x, d)` [`naming_refinement`] builds,
+/// i.e. a description already made unique by a designator. It licenses [`definite_designation`], and
+/// it DISQUALIFIES a classifier in [`appose_group`]: what is already designated takes no second
+/// designator.
+fn is_naming_refined(ty: &Exp) -> bool {
+    matches!(ty, Exp::Sig(Patt::Var(x), _, restr) if is_naming_restrictor(restr, x))
+}
+
+/// Whether a refined noun's restrictor is a **naming** of its own bound variable — `named(x, d)`, the
+/// shape [`naming_refinement`] builds. Positive match on `ontology:named` over the Σ's variable, so a
+/// compound / adjective / PP restrictor (which does not make the description unique) never licenses
+/// [`definite_designation`].
+fn is_naming_restrictor(restr: &Exp, x: &str) -> bool {
+    let mut head = restr;
+    let mut args: Vec<&Exp> = Vec::new();
+    while let Exp::App(f, a) = head {
+        args.push(a);
+        head = f;
+    }
+    args.reverse();
+    matches!(head, Exp::EigonAxiom(i) if i.as_str() == NAMED_AXIOM)
+        && args.len() == 2
+        && matches!(args[0], Exp::Var(v) if v == x)
 }
 
 /// Forward **bounded type-raising** `T` (D63 §8.9 Slice 6-T): an `NP_X` (a plain
@@ -1167,18 +1398,22 @@ mod tests {
 
     // ── appose_group (D63 §8.4 Phase 6, RC-6 close nominal apposition) ──
     #[test]
-    fn close_apposition_passes_group_through_gated_on_head_kind() {
+    fn close_apposition_distributes_the_classifier_over_every_group_member() {
         let layer = Arc::new(
             crate::layer::LayerBuilder::new("appos-test", None)
                 .build(crate::layer::LayerStorage::in_memory()),
         );
         let gene = cls("urn:eigenius:lexicon:Gene");
         // The name-group `BRCA1 and MSH2` : cat_group(Gene, conn_and, pl); its sem is a cons-chain.
+        let (brca1, msh2) = (
+            cls("urn:eigenius:lexicon:Brca1"),
+            cls("urn:eigenius:lexicon:Msh2"),
+        );
         let group = ctor(
             "cat_group",
             vec![gene.clone(), ctor("conn_and", vec![]), ctor("pl", vec![])],
         );
-        let group_sem = ctor("cons", vec![Exp::Unit, ctor("nil", vec![])]);
+        let group_sem = list_term(&[brca1.clone(), msh2.clone()]);
         let s_finany = ctor("cat_s", vec![ctor("dcl", vec![]), ctor("fin_any", vec![])]);
         // Head "the genes" — a subject GQ  S/(S\NP_Gene) = fwd(S, bwd(S, cat_np(Gene, _))).
         let the_genes = ctor(
@@ -1190,17 +1425,32 @@ mod tests {
         );
         let (cat, sem) = appose_group(&the_genes, &group, &group_sem, &layer)
             .expect("a gene-typed group apposes a gene-typed head");
-        assert_eq!(cat, group, "the group category passes through unchanged");
-        assert_eq!(sem, group_sem, "the group sem passes through unchanged");
-
-        // Bare common-noun head "genes" : cat_n(Gene, pl) — same pass-through.
-        let bare = ctor("cat_n", vec![gene.clone(), ctor("pl", vec![])]);
-        assert!(
-            appose_group(&bare, &group, &group_sem, &layer).is_some(),
-            "a bare common-noun head also apposes"
+        assert_eq!(
+            cat, group,
+            "a class-typed classifier reproduces the group category"
+        );
+        // EVERY member is classified — not just the first, which is all a `[classifier designator]`
+        // bracketing reaches. A pass-through returned `group_sem` here and left the classifier nowhere.
+        let designate = |d: &Exp| {
+            definite_individual(&naming_refinement(&gene, d)).expect("ontology:the is a valid iri")
+        };
+        assert_eq!(
+            sem,
+            list_term(&[designate(&brca1), designate(&msh2)]),
+            "each designator becomes `the(Σx:classifier. named(x, dᵢ)).1`"
         );
 
-        // Compound-Σ head "the MMR genes" : S/(S\NP_{Σx:Gene. φ}) — the BASE class (Gene) peels out.
+        // Bare common-noun head "genes" : cat_n(Gene, pl) — same distribution.
+        let bare = ctor("cat_n", vec![gene.clone(), ctor("pl", vec![])]);
+        assert_eq!(
+            appose_group(&bare, &group, &group_sem, &layer).map(|(_, s)| s),
+            Some(sem),
+            "a bare common-noun head classifies its members identically"
+        );
+
+        // Compound-Σ head "the MMR genes" : S/(S\NP_{Σx:Gene. φ}). The BASE class (Gene) peels out for
+        // the felicity gate and indexes the group; the FULL refinement reaches every member's sem —
+        // that is the information the pass-through dropped ("MMR" left no trace in any reading).
         let sigma = Exp::Sig(
             Patt::Var("x".into()),
             Box::new(gene.clone()),
@@ -1208,11 +1458,25 @@ mod tests {
         );
         let mmr_genes = ctor(
             "fwd",
-            vec![s_finany.clone(), ctor("bwd", vec![decl_s(), np(sigma)])],
+            vec![
+                s_finany.clone(),
+                ctor("bwd", vec![decl_s(), np(sigma.clone())]),
+            ],
         );
-        assert!(
-            appose_group(&mmr_genes, &group, &group_sem, &layer).is_some(),
-            "the compound-Σ head's base class (Gene) licenses the apposition"
+        let (mmr_cat, mmr_sem) = appose_group(&mmr_genes, &group, &group_sem, &layer)
+            .expect("the compound-Σ head's base class (Gene) licenses the apposition");
+        assert_eq!(
+            mmr_cat, group,
+            "the group is indexed at the classifier's BASE class, so selectional checks still see a \
+             class (`type_subsumes` falls back to equality on a Σ)"
+        );
+        let designate_mmr = |d: &Exp| {
+            definite_individual(&naming_refinement(&sigma, d)).expect("ontology:the is a valid iri")
+        };
+        assert_eq!(
+            mmr_sem,
+            list_term(&[designate_mmr(&brca1), designate_mmr(&msh2)]),
+            "every member is an MMR gene, not merely a gene"
         );
 
         // Felicity reject: "the cells BRCA1 and MSH2" — genes are not cells (no lattice link).
@@ -1239,6 +1503,90 @@ mod tests {
         assert!(
             appose_group(&verb, &group, &group_sem, &layer).is_none(),
             "a verb's fwd-argument is an object NP, not a VP — no apposition head type"
+        );
+    }
+
+    /// A classifier already carrying a **postmodifying PP** or an already-designated one is refused:
+    /// the designator is adjacent to the nominal head, so neither can intervene. Pins both halves of
+    /// the normal form [`is_pp_refined`] / [`is_naming_refined`] enforce.
+    #[test]
+    fn close_apposition_refuses_a_pp_modified_or_already_named_classifier() {
+        let layer = Arc::new(
+            crate::layer::LayerBuilder::new("appos-nf-test", None)
+                .build(crate::layer::LayerStorage::in_memory()),
+        );
+        let gene = cls("urn:eigenius:lexicon:Gene");
+        let group = ctor(
+            "cat_group",
+            vec![gene.clone(), ctor("conn_and", vec![]), ctor("pl", vec![])],
+        );
+        let group_sem = list_term(&[cls("urn:eigenius:lexicon:Brca1")]);
+        let refined = |restr: Exp| {
+            ctor(
+                "cat_n",
+                vec![
+                    Exp::Sig(
+                        Patt::Var(crate::dcg::rules::combinators::COMPOUND_X.into()),
+                        Box::new(gene.clone()),
+                        Box::new(restr),
+                    ),
+                    ctor("pl", vec![]),
+                ],
+            )
+        };
+        let x = || Exp::Var(crate::dcg::rules::combinators::COMPOUND_X.into());
+        let app2 = |iri: &str, a: Exp| {
+            Exp::App(
+                Box::new(Exp::App(
+                    Box::new(Exp::EigonAxiom(Iri::parse(iri).unwrap())),
+                    Box::new(x()),
+                )),
+                Box::new(a),
+            )
+        };
+        // "mutations in the MMR" + "genes BRCA1" — the PP would have to sit between classifier and
+        // designator ("*the gene in humans MSH2"), so the head is not an apposition classifier.
+        let pp_head = refined(app2(
+            "urn:eigenius:ontology:prep_in",
+            cls("urn:eigenius:lexicon:Mmr"),
+        ));
+        assert!(
+            appose_group(&pp_head, &group, &group_sem, &layer).is_none(),
+            "a PP-postmodified classifier is refused"
+        );
+        // The un-REDUCED form the PP-noun-modifier rule actually builds — `(λx. prep_in(x, y)) x`.
+        // Matching only the `App` spine reaches the `Lam` and misses this, which made the check inert.
+        let unreduced = Exp::App(
+            Box::new(Exp::Lam(
+                Patt::Var(crate::dcg::rules::combinators::COMPOUND_X.into()),
+                Box::new(app2(
+                    "urn:eigenius:ontology:prep_in",
+                    cls("urn:eigenius:lexicon:Mmr"),
+                )),
+            )),
+            Box::new(x()),
+        );
+        assert!(
+            appose_group(&refined(unreduced), &group, &group_sem, &layer).is_none(),
+            "the un-reduced PP restrictor is refused too"
+        );
+        // An already-designated classifier ("genes MSH2") takes no second designator list.
+        let named_head = refined(app2(
+            "urn:eigenius:ontology:named",
+            cls("urn:eigenius:lexicon:Msh2"),
+        ));
+        assert!(
+            appose_group(&named_head, &group, &group_sem, &layer).is_none(),
+            "an already-named classifier is refused"
+        );
+        // Control: a COMPOUND-refined classifier ("MMR genes") is the licensed case and must pass.
+        let compound_head = refined(app2(
+            "urn:eigenius:ontology:compound_kind",
+            cls("urn:eigenius:lexicon:Mmr"),
+        ));
+        assert!(
+            appose_group(&compound_head, &group, &group_sem, &layer).is_some(),
+            "a compound-refined classifier still apposes — that is the MMR-genes case"
         );
     }
 

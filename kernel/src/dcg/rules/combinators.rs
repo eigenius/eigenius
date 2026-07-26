@@ -914,34 +914,18 @@ fn build_name(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) 
         .get("sortal")
         .expect("name trigger binds sortal")
         .clone();
-    let restr = app2(
-        "urn:eigenius:ontology:named",
-        COMPOUND_X,
-        right.sem().clone(),
-    );
-    let sigma = Exp::Sig(
-        Patt::Var(COMPOUND_X.into()),
-        Box::new(sortal.clone()),
-        Box::new(restr),
-    );
-    // `the(Σ…).1` — the ι operator (`ontology:the`, as `the_ref_subj_sem` uses it) picks the unique
-    // inhabitant; `Fst` projects the individual out of the Σ, the same shape the definite-NP pins
-    // carry (`the(ΣG#0:§. …).1`). NOT `kind_of` — that realizes a KIND as an entity, which is the
-    // defect this rule used to have.
-    let the = Exp::EigonAxiom(
-        crate::ontology::iri::Iri::parse("urn:eigenius:ontology:the").expect("the iri"),
-    );
-    let sem = Exp::Fst(Box::new(Exp::App(Box::new(the), Box::new(sigma))));
-    // `cat_np(sortal, num)` — the CLASSIFIER's class (coercive subtyping reaches any `Entity` slot)
-    // AND the classifier's number: this construction is head-initial, so the classifier is the head of
-    // both. Taking the number from the designator instead inverts subject–verb agreement (see the
-    // table on this rule's doc comment) — a name carries no number of its own.
+    let sigma = super::constructions::naming_refinement(&sortal, right.sem());
+    // `cat_n(Σx:sortal. named(x, d), num)` — a REFINED COMMON NOUN, carrying the CLASSIFIER's class
+    // and the classifier's number (this construction is head-initial, so the classifier heads both;
+    // taking the number from the designator instead inverts agreement — see the table above). Cat and
+    // sem are the same Σ, exactly as [`super::constructions::relativize`] and the named-compound rule
+    // build theirs, and the `Compound` provenance already means "builds a refined noun `cat_n(Σ…)`".
     let (decl, num) = match left.cat() {
         Exp::InductiveCtor(d, _, largs) if largs.len() == 2 => (d.clone(), largs[1].clone()),
         _ => unreachable!("the name rule requires a cat_n left + cat_np right"),
     };
-    let cat = Exp::InductiveCtor(decl, "cat_np".into(), vec![sortal, num]);
-    Item::from_parts(cat, sem, Combinator::Compound, Cost::ZERO)
+    let cat = Exp::InductiveCtor(decl, "cat_n".into(), vec![sigma.clone(), num]);
+    Item::from_parts(cat, sigma, Combinator::Compound, Cost::ZERO)
 }
 
 /// The result category of a GQ-as-prep-object raise: the preposition functor's own result
@@ -1167,7 +1151,7 @@ pub fn apply_core(left: &Item, right: &Item, layer: &Arc<Layer>) -> Vec<Item> {
 }
 
 /// The bound variable of every 6-mod Σ-refinement (D63 §8.13).
-const COMPOUND_X: &str = "__cmp_x";
+pub(crate) const COMPOUND_X: &str = "__cmp_x";
 
 /// Apply an opaque binary modifier axiom `R` to `(Var(arg0), arg1)` — the restrictor of a
 /// 6-mod Σ. `R(x, m)` where the bound `x` (`arg0`) ranges over the head noun's concrete
@@ -1437,6 +1421,7 @@ mod dispatch_tests {
     //! to pass byte-identically — that is what makes "formalization changed nothing" a checked claim.
     //! The stacked-adjective flat-Σ `And` path needs a layer that resolves `logic:And`, so it is
     //! covered by the full-page `--no-llm` sweep differential, not here.
+    use super::super::constructions::definite_designation;
     use super::*;
     use crate::nbe::term::list_decl;
     use crate::ontology::iri::Iri;
@@ -1838,14 +1823,15 @@ mod dispatch_tests {
         mk_item(ct("fwd", vec![s, vp]), sem)
     }
 
-    /// The **classifier + designator** construction denotes a definite INDIVIDUAL typed at the
-    /// classifier, not a kind coerced to an entity. Pins both halves of the 2026-07-25 correction:
-    /// the sem is `the(Σ…).1` (NOT `kind_of(Σ…)`), and the category carries the CLASSIFIER's class
-    /// (NOT `Entity`). Regression guard — the old shape made every occurrence inject a `kind_of`
-    /// wrapper that multiplied across argument positions, 204 skeletons on one unit.
+    /// The **classifier + designator** construction: the rule builds the REFINED NOUN
+    /// `cat_n(Σx:Sortal. named(x, d), num)`, and [`definite_designation`] shifts that to the definite
+    /// INDIVIDUAL `the(Σ…).1` at `cat_np(Sortal, num)`. Pins the whole chain, so it carries both
+    /// corrections: 2026-07-25 (the sem is `the(Σ…).1`, NOT the kind coercion `kind_of(Σ…)`, and the
+    /// type is the CLASSIFIER's, not `Entity` — the old shape injected a `kind_of` wrapper that
+    /// multiplied across argument positions, 204 skeletons on one unit) and 2026-07-26 (the rule stops
+    /// at `cat_n`, so a determiner can reach the construction at all).
     #[test]
-    fn name_apposition_builds_definite_individual_at_the_classifier_type() {
-        // `[cat_n(Sortal)] [proper cat_np]` → `the(Σx:Sortal. named(x, ⟦name⟧)).1` : cat_np(Sortal).
+    fn name_apposition_builds_a_refined_noun_that_shifts_to_a_definite_individual() {
         let sortal = cls("urn:eigenius:lexicon:Project");
         let name_ref = ax("urn:eigenius:lexicon:achilles_name");
         let l = mk_item(n(sortal.clone()), sortal.clone());
@@ -1858,21 +1844,31 @@ mod dispatch_tests {
             sortal.clone(),
             app2_x("urn:eigenius:ontology:named", name_ref),
         );
-        let expected_sem = Exp::Fst(Box::new(Exp::App(
-            Box::new(ax("urn:eigenius:ontology:the")),
-            Box::new(sigma),
-        )));
+        // Half one: the refined common noun — the shape `the` takes as its argument.
         assert_eq!(
             got.cat(),
-            &np(sortal),
+            &n(sigma.clone()),
+            "a refined COMMON NOUN `cat_n(Σx:Sortal. named(x, d))` — jumping straight to `cat_np` put \
+             the construction out of a determiner's reach"
+        );
+        assert_eq!(got.sem(), &sigma, "cat and sem carry the same Σ");
+        assert_eq!(got.prov(), Combinator::Compound);
+        // Half two: the bare use shifts to the individual that Σ uniquely picks out.
+        let (np_cat, np_sem) =
+            definite_designation(got.cat()).expect("a naming-refined noun designates definitely");
+        assert_eq!(
+            np_cat,
+            np(sortal),
             "the CLASSIFIER supplies the type — not lexicon:Entity, which discards it"
         );
         assert_eq!(
-            got.sem(),
-            &expected_sem,
+            np_sem,
+            Exp::Fst(Box::new(Exp::App(
+                Box::new(ax("urn:eigenius:ontology:the")),
+                Box::new(sigma),
+            ))),
             "a definite individual `the(Σ…).1`, not the kind coercion `kind_of(Σ…)`"
         );
-        assert_eq!(got.prov(), Combinator::Compound);
     }
 
     /// The construction's NUMBER is the classifier's, not the designator's. Every UMLS named
@@ -1880,6 +1876,7 @@ mod dispatch_tests {
     /// "the genes MSH2" singular and inverted subject–verb agreement: `The genes MSH2 affect cells.`
     /// read 0 while the ungrammatical `The genes MSH2 affects cells.` read 2. The two operands here
     /// carry OPPOSITE numbers, which is what the shipped test above (both `sg`) could not detect.
+    /// The number must survive the definite shift too, since that is what an argument slot sees.
     #[test]
     fn name_apposition_takes_the_classifiers_number_not_the_designators() {
         let sortal = cls("urn:eigenius:lexicon:Gene");
@@ -1895,11 +1892,40 @@ mod dispatch_tests {
         );
         let got =
             apply(&l, &r, &layer()).expect("[cat_n(pl)][proper cat_np(sg)] → naming apposition");
+        let Some([_ty, num]) = is_ctor(got.cat(), "cat_n") else {
+            panic!("the rule yields a refined common noun")
+        };
         assert_eq!(
-            got.cat(),
-            &ct("cat_np", vec![sortal, pl]),
+            num,
+            &pl,
             "head-initial: the classifier is the head, so the phrase is PLURAL — a name carries no \
              number of its own to contribute"
+        );
+        let (np_cat, _) = definite_designation(got.cat()).expect("designates definitely");
+        assert_eq!(
+            np_cat,
+            ct("cat_np", vec![sortal, pl]),
+            "the classifier's number survives the definite shift — the shifted NP is what an \
+             argument slot agrees against"
+        );
+    }
+
+    /// [`definite_designation`] fires on a NAMING restrictor only. A definite needs uniqueness, and
+    /// `named(x, d)` supplies it; a compound restrictor does not, so a compound-refined noun keeps
+    /// needing a real determiner rather than silently designating an individual.
+    #[test]
+    fn definite_designation_refuses_a_non_naming_restrictor() {
+        let base = cls("urn:eigenius:lexicon:Project");
+        let compound = sigma_cmp(
+            base,
+            app2_x(
+                "urn:eigenius:ontology:compound",
+                ax("urn:eigenius:lexicon:achilles"),
+            ),
+        );
+        assert!(
+            definite_designation(&n(compound)).is_none(),
+            "a compound-refined noun is not uniquely identifying"
         );
     }
 

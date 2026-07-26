@@ -76,6 +76,17 @@ pub enum Combinator {
     /// VP-adjunct case) while leaving subject application untouched (there the argument is the subject
     /// NP, not the modal VP). ENF-inert.
     Modal,
+    /// A **close-apposition output** (`appose_group`): a designator group whose members the classifier
+    /// has already been distributed over. It is a NORMAL FORM, and the tag is what enforces that —
+    /// carried so `build_appose_group` can refuse it as a further apposition's group (a second
+    /// classifier would nest a definite designation inside `named`, whose second argument is a naming
+    /// TOKEN and never a description) and `build_coordinate` can refuse it as a conjunct (a member
+    /// appended afterwards would escape the classifier's scope, so only a prefix of the list would be
+    /// classified). Both re-applications were INVISIBLE while the rule passed the group through
+    /// unchanged, because re-applying an identity is an identity; distributing made them
+    /// term-distinct and they multiplied — the reference page's germline unit went 112 → 497
+    /// skeletons, with up to 8 `named`s over 4 designators. ENF-inert.
+    Apposed,
     /// Any other producer (lexical leaf, coordination, group/distributive rules) —
     /// not a composition output, so ENF never constrains it.
     Other,

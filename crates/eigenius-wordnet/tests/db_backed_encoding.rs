@@ -5251,6 +5251,20 @@ fn probe_determined_classifier_analysis() {
         "The genes MSH2 affects cells.",
         "The cell line HeLa affects genes.",
         "The MMR genes MSH2, MSH6, PMS2 or MLH1 affect cells.",
+        // The bare SINGULAR classifier lost its apposition reading when the rule moved to `cat_n`
+        // (`Gene MSH2 affects cells.` went from 2, both apposition, to 8, all compound) while the
+        // bare PLURAL kept it. Is the apposition derivable at all for a bare singular classifier, or
+        // was it displaced by the compound readings the same cell now also holds? These vary the
+        // designator and the object to change how much competition sits in the cell.
+        "Project Achilles affects cells.",
+        "Gene MSH2 affects HeLa.",
+        "Chromosome 7 affects cells.",
+        // Object position needs only the definite shift, no type-raise. If these parse while the
+        // subject rows gap, the shift works and the loss is in the raise; if they gap too, the shift
+        // itself never fires.
+        "WRN affects project Achilles.",
+        "WRN affects gene MSH2.",
+        "WRN affects the gene MSH2.",
     ] {
         let r = index.parse(s, &lem);
         eprintln!("\n  {s}  -> {}", r.len());
@@ -5269,5 +5283,342 @@ fn probe_determined_classifier_analysis() {
                 eprintln!("       [{kind:>10}] {t}");
             }
         }
+    }
+}
+
+/// PROBE — is a VACUOUS-COMPOUND normal form even available?
+///
+/// The classifier+designator fix (2026-07-26) gave the determined case its correct apposition
+/// analysis, but the wrong-headed COMPOUND analysis stayed, so the germline unit's readings ROSE
+/// 128 → 192 instead of being replaced: `gene MSH2` is read both as "the gene named MSH2" (right) and
+/// as "the MSH2 that is gene-kind-modified" (wrong).
+///
+/// The structural kill would be a vacuity normal form: a compound whose MODIFIER SUBSUMES its HEAD
+/// adds nothing, because `Σx:C. compound_kind(x, M)` with `C ≤ M` is just `C`. Every MSH2 is a gene,
+/// so `Σx:MSH2gene. compound_kind(x, gene)` is vacuous — while a legitimate compound's modifier is
+/// NOT a superclass of its head (`cell` and `line` are siblings; `MMR` is a process, not a gene
+/// hypernym), so the constraint should leave those untouched.
+///
+/// That entire plan rests on a subsumption fact across two importers: the classifier `genes` carries
+/// the ALIGNED WordNet index `n05436752` while the designator's noun sense is the UMLS CUI
+/// `C1333234`, so the rule can only fire if the layer actually relates them. It is not enough that
+/// the relation is true of the world. This prints the walk both directions for the pairs the rule
+/// would depend on, plus control pairs it must NOT fire on.
+#[test]
+#[ignore = "DB-backed diagnostic; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn probe_compound_modifier_subsumes_head() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    // (label, candidate SUB, candidate SUPER) — the rule needs `sub ≤ super` for the pairs marked
+    // KILL and NOT for the pairs marked KEEP.
+    let pairs: &[(&str, &str, &str)] = &[
+        // KILL: the designator's concept under the classifier's aligned class.
+        ("KILL msh2gene ≤ gene(wn)", "C1333234", "n05436752"),
+        ("KILL brca1gene ≤ gene(wn)", "C1528558", "n05436752"),
+        ("KILL mlh1gene ≤ gene(wn)", "C0252642", "n05436752"),
+        // The same question against the UMLS gene CONCEPT rather than the WordNet synset.
+        ("KILL msh2gene ≤ gene(umls)", "C1333234", "C0017337"),
+        ("KILL msh2gene ≤ T028", "C1333234", "T028"),
+        // KEEP: a legitimate compound's modifier must NOT subsume its head.
+        ("KEEP line ≰ cell", "n08430568", "C0007634"),
+        ("KEEP hela ≰ cell-line", "C0018873", "C0007600"),
+    ];
+    for (label, sub, sup) in pairs {
+        let (Ok(s), Ok(p)) = (
+            eigenius_kernel::ontology::iri::Iri::parse(&format!("urn:eigenius:umlscui:{sub}")),
+            eigenius_kernel::ontology::iri::Iri::parse(&format!("urn:eigenius:umlscui:{sup}")),
+        ) else {
+            continue;
+        };
+        // Try both namespaces for each side — a WordNet synset lives under a different prefix, and
+        // guessing wrong would read as "no relation" and silently kill the plan.
+        let mut found = Vec::new();
+        for sns in ["umlscui", "umlssty", "wn"] {
+            for pns in ["umlscui", "umlssty", "wn"] {
+                let (Ok(a), Ok(b)) = (
+                    eigenius_kernel::ontology::iri::Iri::parse(&format!(
+                        "urn:eigenius:{sns}:{sub}"
+                    )),
+                    eigenius_kernel::ontology::iri::Iri::parse(&format!(
+                        "urn:eigenius:{pns}:{sup}"
+                    )),
+                ) else {
+                    continue;
+                };
+                if head.is_subclass_of(&a, &b) {
+                    found.push(format!("{sns}≤{pns}"));
+                }
+            }
+        }
+        let _ = (s, p);
+        eprintln!(
+            "  {label:<28} {}",
+            if found.is_empty() {
+                "NO relation in any namespace pairing".to_string()
+            } else {
+                format!("YES via {}", found.join(", "))
+            }
+        );
+    }
+    // What IRI scheme do these classes actually use? Print the real ones off the lexical entries, so
+    // the namespace guessing above is checkable rather than assumed.
+    eprintln!("\n=== the real class IRIs on the lexical entries ===");
+    let lem = morphy();
+    let index = build_index(&head);
+    for form in ["genes", "MSH2", "cell", "line", "HeLa"] {
+        eprintln!("  {form}:");
+        for (_, cat, sense) in index.debug_form_entries(form, &lem) {
+            eprintln!("     {cat}   [{sense}]");
+        }
+    }
+}
+
+/// PROBE — are the grammar's TYPE-COMPATIBILITY GATES inert?
+///
+/// `probe_compound_modifier_subsumes_head` found no subclass edge from `C1333234` ("MSH2 gene") to
+/// `n05436752` / `C0017337` ("gene") in any namespace pairing. That killed a planned vacuity normal
+/// form, but it raises a much larger question, because `type_subsumes` (category.rs) is the ONLY
+/// mechanism behind every type gate in the grammar — `appose_group`'s felicity check, `common_super`
+/// in coordination, the selectional slots. If UMLS concept-to-concept and concept-to-semantic-type
+/// edges are largely absent from the aligned lexicon, those gates cannot discriminate and quietly pass
+/// or fail on identity alone.
+///
+/// There is independent reason to suspect exactly that. `appose_group`'s doc comment reasons from
+/// "`C0017337` "gene", emitted `: umlssty:T028`, i.e. `C0017337 ≤ T028`" — and the felicity reject it
+/// was written to enforce (`the cells BRCA1 and MSH2 affect HeLa`) does not reject. This censuses the
+/// edges those claims need. A row reading NO is a missing edge in the KNOWLEDGE, not a parser bug —
+/// and the fix for it is in the importer, not the grammar.
+#[test]
+#[ignore = "DB-backed diagnostic; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn probe_subclass_edge_census() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let rel = |sub: &str, sup: &str| -> bool {
+        let (Ok(a), Ok(b)) = (
+            eigenius_kernel::ontology::iri::Iri::parse(sub),
+            eigenius_kernel::ontology::iri::Iri::parse(sup),
+        ) else {
+            return false;
+        };
+        head.is_subclass_of(&a, &b)
+    };
+    // The edges the grammar's own doc comments assume. `sub` and `sup` are given as FULL IRIs so a
+    // namespace mistake cannot be confused with a missing edge.
+    let cases: &[(&str, &str, &str)] = &[
+        (
+            "gene concept ≤ its semantic type (the claim in appose_group's doc)",
+            "urn:eigenius:umlscui:C0017337",
+            "urn:eigenius:umlssty:T028",
+        ),
+        (
+            "MSH2 gene ≤ gene concept",
+            "urn:eigenius:umlscui:C1333234",
+            "urn:eigenius:umlscui:C0017337",
+        ),
+        (
+            "cell concept ≤ its semantic type",
+            "urn:eigenius:umlscui:C0007634",
+            "urn:eigenius:umlssty:T025",
+        ),
+        (
+            "HeLa ≤ cell line",
+            "urn:eigenius:umlscui:C0018873",
+            "urn:eigenius:umlscui:C0007600",
+        ),
+        (
+            "any class ≤ lexicon:Entity (the top the slots rely on)",
+            "urn:eigenius:umlscui:C0017337",
+            "urn:eigenius:lexicon:Entity",
+        ),
+        (
+            "reflexive control (must be YES)",
+            "urn:eigenius:umlscui:C0017337",
+            "urn:eigenius:umlscui:C0017337",
+        ),
+    ];
+    for (label, sub, sup) in cases {
+        eprintln!(
+            "  {:<58} {}",
+            label,
+            if rel(sub, sup) { "YES" } else { "NO" }
+        );
+    }
+    // How many subclass edges does the layer hold at all? If the answer is ~0 for the UMLS namespace,
+    // every gate above is decided by the identity case in `type_subsumes` and nothing else.
+    eprintln!("\n=== does the layer hold parent_classes at all? ===");
+    for iri in [
+        "urn:eigenius:umlscui:C0017337",
+        "urn:eigenius:umlscui:C1333234",
+        "urn:eigenius:umlscui:C0007634",
+        "urn:eigenius:wn:n05436752",
+    ] {
+        let Ok(i) = eigenius_kernel::ontology::iri::Iri::parse(iri) else {
+            continue;
+        };
+        let has = head.get_resource(&i).is_some();
+        eprintln!("  {iri:<40} resource present: {has}");
+    }
+}
+
+/// PROBE — is the `DefiniteDesignation` shift lost to node PACKING?
+///
+/// The bare half of the classifier+designator fix does not fire: `WRN affects the gene MSH2.` gains
+/// the apposition reading (that route is `the` + the refined noun, no shift involved) while every BARE
+/// row is compound-only and `Project Achilles affects cells.` gaps outright. The shift's unit test
+/// passes on the real rule output, so the function is right and the wiring is wrong.
+///
+/// The suspected cause is the packing soundness condition the code already documents. `node_sig` keys
+/// nodes on `cat_shape`, which ERASES the type index, and the packed builder runs each shift on a
+/// node's REPRESENTATIVE item only. `definite_designation` decides on the Σ's restrictor — an index
+/// property — so `cat_n(Σ…named…, sg)` and `cat_n(Σ…compound_kind…, sg)` land in one node and the
+/// shift fires only when the naming item happens to be the representative. That is the same trap
+/// `sem_is_coordination` had to join `Sig` to escape.
+///
+/// A/B on the same index: `with_packing(false)` decides on every item individually, so if the
+/// apposition readings appear there and not under packing, the diagnosis holds and the fix is to carry
+/// the property in `Sig` (not to reshape the rule).
+#[test]
+#[ignore = "DB-backed diagnostic; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn probe_definite_designation_packing_ab() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let packed = build_index(&head).with_packing(true);
+    let unpacked = build_index(&head).with_packing(false);
+    eprintln!(
+        "{:<38} {:>8} {:>8}   {:>9} {:>9}",
+        "sentence", "packed", "unpackd", "appos-p", "appos-u"
+    );
+    for s in [
+        "Project Achilles affects cells.",
+        "Gene MSH2 affects cells.",
+        "Genes MSH2 affect cells.",
+        "WRN affects gene MSH2.",
+        "WRN affects project Achilles.",
+        "The gene MSH2 affects cells.",
+    ] {
+        let (p, u) = (packed.parse(s, &lem), unpacked.parse(s, &lem));
+        // Count readings carrying the apposition sem shape, the thing the shift is supposed to supply.
+        let appos = |v: &Vec<eigenius_kernel::dcg::Item>| {
+            v.iter()
+                .filter(|it| pretty_term(it.sem()).contains("named("))
+                .count()
+        };
+        eprintln!(
+            "{s:<38} {:>8} {:>8}   {:>9} {:>9}",
+            p.len(),
+            u.len(),
+            appos(&p),
+            appos(&u)
+        );
+    }
+}
+
+/// PROBE — does NP coordination join **unlike kinds** through the `lexicon:Entity` top?
+///
+/// The germline unit's dominant family reads "a Germ-Line Mutation in the Mismatch Repair gene named
+/// MSH2 cause HNPCC **or MSH6 protein cause HNPCC** or PMS2 … or MLH1 …" (glossed 2026-07-26): the
+/// coordination is at CLAUSE-SUBJECT level over a group whose first member is the whole mutation NP
+/// and whose remaining three are bare gene names. Only a group typed at the `Entity` top can hold
+/// both, and `coordinate_np` builds its group at `common_super` of the conjuncts — which returns the
+/// top whenever the conjuncts share nothing else. The same top then satisfies `appose_group`'s
+/// bidirectional felicity gate vacuously (`type_subsumes(Entity, mutation)` holds), which is how a
+/// MUTATION ends up classifying a gene group in the `prep_in`-per-disjunct family.
+///
+/// Two things to establish before touching either rule:
+///   1. does a mutation actually coordinate with a gene name (the frames), and
+///   2. is `Entity` really the join, or do these classes share something narrower (the census) —
+///      because refusing the top would ALSO refuse the four-gene group if that group joins at the top.
+///
+/// **Both CONFIRMED, 2026-07-26 (`wordnet-umls-aligned-2026-07-26-preps-reseed`).**
+///
+/// | frame | readings |
+/// | --- | --- |
+/// | `MSH2 and MSH6 cause Lynch syndrome.` (same-kind control) | 4 |
+/// | `Mutations and MSH2 cause Lynch syndrome.` | 4 |
+/// | `Mutations, MSH6, PMS2 or MLH1 cause Lynch syndrome.` | 24 |
+/// | `Cells and MSH2 affect HeLa.` | 8 |
+/// | `Syndromes and MSH2 affect cells.` | 16 |
+///
+/// Cross-kind NP coordination is fully licensed, and `common_super` returns `lexicon:Entity` for
+/// EVERY pair censused — including `C1333234 ⊔ C0017337` ("MSH2 gene" ⊔ "gene"), which should have a
+/// narrower join. `C1333234 ⊔ C0879290` ("MSH2 gene" ⊔ "MSH6 protein") returns NONE: no join at all.
+///
+/// So the germline unit's dominant family is NOT removable by a grammar rule. Refusing the `Entity`
+/// join in `coordinate_np` would refuse essentially all UMLS coordination on the page (every pair
+/// joins there), and tightening `appose_group`'s felicity gate against the top would refuse the
+/// CORRECT four-gene apposition along with the mutation-classifies-genes one. The discriminator needs
+/// concept-level subclass structure the aligned lexicon does not carry — the same importer-level gap
+/// `probe_subclass_edge_census` recorded for CUI→CUI hypernym edges, and this is a second, independent
+/// witness to it. What IS fixable at the grammar is the classifier's own shape, which is why the fix
+/// landed as `is_pp_refined` (adjacency) rather than as a type gate.
+#[test]
+#[ignore = "DB-backed diagnostic; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn probe_cross_kind_np_coordination() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index(&head);
+    // Does an NP of one kind coordinate with an NP of another? Each row is a minimal pair against a
+    // same-kind control, so a 0 is the gate working and a non-zero is the `Entity` join.
+    eprintln!("=== cross-kind NP coordination (0 = gate rejects) ===");
+    for s in [
+        "MSH2 and MSH6 cause Lynch syndrome.", // control: same kind
+        "Mutations and MSH2 cause Lynch syndrome.", // mutation ⊕ gene
+        "Mutations, MSH6, PMS2 or MLH1 cause Lynch syndrome.", // the shape found in the forest
+        "Germline mutations and MSH2 cause Lynch syndrome.",
+        "Cells and MSH2 affect HeLa.", // cell ⊕ gene — the felicity reject appose_group documents
+        "Syndromes and MSH2 affect cells.",
+        "MSI and MSH2 affect cells.",
+    ] {
+        eprintln!("  {:>6}  {s}", index.parse(s, &lem).len());
+    }
+    // What IS the join? `common_super` over the classes the germline unit's conjuncts carry. Printed as
+    // the resolved IRI so "the top" is visible as such rather than inferred.
+    eprintln!("\n=== common_super of the conjunct classes ===");
+    let cls = |iri: &str| Exp::EigonClass(Iri::parse(iri).expect("probe iri"));
+    let pairs: &[(&str, &str, &str)] = &[
+        (
+            "MSH2 gene ⊔ gene concept",
+            "urn:eigenius:umlscui:C1333234",
+            "urn:eigenius:umlscui:C0017337",
+        ),
+        (
+            "MSH2 gene ⊔ MSH6 protein",
+            "urn:eigenius:umlscui:C1333234",
+            "urn:eigenius:umlscui:C0879290",
+        ),
+        (
+            "gene concept ⊔ mutation",
+            "urn:eigenius:umlscui:C0017337",
+            "urn:eigenius:umlscui:C0026882",
+        ),
+        (
+            "gene sem-type ⊔ mutation",
+            "urn:eigenius:umlssty:T028",
+            "urn:eigenius:umlscui:C0026882",
+        ),
+        (
+            "gene sem-type ⊔ protein sem-type",
+            "urn:eigenius:umlssty:T028",
+            "urn:eigenius:umlssty:T116",
+        ),
+        (
+            "reflexive control",
+            "urn:eigenius:umlscui:C0017337",
+            "urn:eigenius:umlscui:C0017337",
+        ),
+    ];
+    for (label, a, b) in pairs {
+        let got = eigenius_kernel::dcg::common_super(&cls(a), &cls(b), &head);
+        eprintln!(
+            "  {:<34} {}",
+            label,
+            match got {
+                Some(Exp::EigonClass(i)) => i.as_str().to_string(),
+                Some(other) => format!("{other:?}"),
+                None => "NONE (no join)".to_string(),
+            }
+        );
     }
 }
