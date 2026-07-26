@@ -4888,3 +4888,386 @@ fn probe_preposition_role_coverage() {
         eprintln!("  {:>3}  {s}", index.parse(s, &lem).len());
     }
 }
+
+/// PROBE — localize the close-apposition gap: HEAD SHAPE × CONNECTIVE × POSITION.
+///
+/// `probe_step5_apposition` has two rows that disagree with what it was written to assert: the
+/// PLAIN-head witness `the genes BRCA1 and MSH2 affect cells` reads GAP, while the COMPOUND-head
+/// `the MMR genes MSH2, MSH6, PMS2 or MLH1 affect cells` parses ×96 — and the felicity REJECT
+/// `the cells BRCA1 and MSH2 affect HeLa` parses ×4 instead of gapping. Those two rows differ in
+/// three variables at once (head shape, connective, clause position), so neither can be attributed
+/// yet. This crosses all three so the gap lands in one cell.
+///
+/// [`appose_group`] gates on `sigma_base(head) ⊑ member_ty` in EITHER direction, and `sigma_base`
+/// peels the compound's `Σx:Gene. compound_kind(x, MMR)` down to the same `Gene` the plain head
+/// carries — so on the documented behaviour, plain and compound heads must score IDENTICALLY. A
+/// difference falsifies that, and the row that differs says where.
+///
+///   EIGENIUS_DB_SNAPSHOT=… cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     probe_apposition_head_grid -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed diagnostic; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn probe_apposition_head_grid() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index(&head);
+    // HEADS: no classifier at all, a bare plural, a plain definite, a compound definite, a definite
+    // whose kind CLASHES with the members (the intended felicity reject), and a singular.
+    const HEADS: &[(&str, &str)] = &[
+        ("(none)", ""),
+        ("bare-pl", "genes "),
+        ("plain-def", "the genes "),
+        ("compound-def", "the MMR genes "),
+        ("clash-def", "the cells "),
+    ];
+    // CONNECTIVES: all lists are ≥2 members, so subject–verb agreement is constant across the grid
+    // and cannot be confounded with the head shape.
+    const LISTS: &[(&str, &str)] = &[
+        ("and2", "BRCA1 and MSH2"),
+        ("or2", "MSH2 or MLH1"),
+        ("comma-and4", "MSH2, MSH6, PMS2 and MLH1"),
+        ("comma-or4", "MSH2, MSH6, PMS2 or MLH1"),
+    ];
+    // POSITIONS: the appositive as clause subject, as a preposition's object, as a verb's object.
+    // Each frame is `(label, prefix, suffix)` around the appositive NP.
+    const FRAMES: &[(&str, &str, &str)] = &[
+        ("subject", "", " affect cells."),
+        ("prep-obj", "Mutations in ", " cause cancer."),
+        ("verb-obj", "WRN affects ", "."),
+    ];
+    for (fname, pre, post) in FRAMES {
+        let frame = |np: &str| format!("{pre}{np}{post}");
+        eprintln!("\n=== {fname} ===");
+        eprint!("{:<14}", "head");
+        for (ln, _) in LISTS {
+            eprint!("{ln:>12}");
+        }
+        eprintln!();
+        for (hn, h) in HEADS {
+            eprint!("{hn:<14}");
+            for (_, l) in LISTS {
+                let n = index.parse(&frame(&format!("{h}{l}")), &lem).len();
+                eprint!("{n:>12}");
+            }
+            eprintln!();
+        }
+    }
+    // The apposition is a CLASSIFIER + designator construction; a singleton designator is the same
+    // construction with a one-member list, and has no coordination in it at all. If singletons parse
+    // where lists gap, the defect is in the coordination leg, not the apposition leg.
+    eprintln!("\n=== singleton apposition (no coordination) ===");
+    for s in [
+        "The gene MSH2 affects cells.",
+        "The genes MSH2 affect cells.",
+        "The MMR gene MSH2 affects cells.",
+        "The cell MSH2 affects cells.",
+        "Mutations in the gene MSH2 cause cancer.",
+        "WRN affects the gene MSH2.",
+    ] {
+        eprintln!("  {:>5}  {s}", index.parse(s, &lem).len());
+    }
+    // What the leaked felicity reject actually BUILDS. If `the cells BRCA1 and MSH2` parses, the sem
+    // says whether apposition licensed it or some other route spanned the string.
+    eprintln!("\n=== readings of the felicity REJECT ===");
+    for s in [
+        "the cells BRCA1 and MSH2 affect HeLa",
+        "The cells BRCA1 and MSH2 affect HeLa.",
+    ] {
+        let r = index.parse(s, &lem);
+        eprintln!("  {s:?} -> {}", r.len());
+        let mut seen = std::collections::BTreeSet::new();
+        for it in r.iter() {
+            if seen.insert(pretty_term(it.sem())) {
+                eprintln!("       {}", pretty_term(it.sem()));
+            }
+        }
+    }
+    // The appositive NP is `[det] [classifier] [designator-list]`. Strip it back one element at a
+    // time: if the DETERMINED HEAD ALONE already gaps, the apposition rule is innocent and the hole
+    // is in the determiner's noun-number agreement.
+    eprintln!("\n=== strip the appositive NP back to its parts ===");
+    for s in [
+        "The gene affects cells.",      //         sg definite head, no designator
+        "The genes affect cells.",      //         pl definite head, no designator   <-- key row
+        "The MMR genes affect cells.",  //       pl definite COMPOUND head, no designator
+        "The cells affect HeLa.",       //         pl definite head, different noun
+        "Genes affect cells.",          //         bare pl head
+        "The genes MSH2 affect cells.", //      + singleton designator
+        "The genes BRCA1 and MSH2 affect cells.", // + 2-member designator list
+        "These genes affect cells.",    //         a different pl determiner
+        "All genes affect cells.",
+        "Some genes affect cells.",
+        "The two genes affect cells.",
+    ] {
+        eprintln!("  {:>5}  {s}", index.parse(s, &lem).len());
+    }
+    eprintln!("\n=== determiner entries ===");
+    for form in ["the", "these", "some", "all", "genes", "gene"] {
+        eprintln!("  ENTRIES {form:?}:");
+        for (aug, cat, sense) in index.debug_form_entries(form, &lem) {
+            let a = if aug { "+" } else { " " };
+            eprintln!("     {a} {cat}   [{sense}]");
+        }
+    }
+    // THE DISCRIMINATING EXPERIMENT. `appose_group`'s felicity gate is `type_subsumes` in either
+    // direction, and `type_subsumes` (category.rs) compares two `EigonClass` via
+    // `layer.is_subclass_of` — a UMLS-hierarchy walk. `genes` carries the ALIGNED index `n05436752`
+    // (a WordNet synset); `cells` carries a raw CUI. If the gate is really testing KIND
+    // COMPATIBILITY, the head's importer is irrelevant and `the cells …` (a kind clash) must fail
+    // while `the genes …` (a kind match) must pass. If it is accidentally testing IMPORTER
+    // PROVENANCE, the outcome flips: every CUI-indexed head passes and every WN-synset-indexed head
+    // gaps, kind notwithstanding. The two hypotheses predict OPPOSITE columns, so one run decides.
+    eprintln!("\n=== head type index vs. apposition licensing ===");
+    eprintln!("{:<14} {:>7}  lexical type index(es)", "head", "parses");
+    for h in [
+        "genes",
+        "cells",
+        "proteins",
+        "enzymes",
+        "mutations",
+        "tumours",
+        "kinases",
+        "lines",
+        "syndromes",
+        "models",
+    ] {
+        let n = index
+            .parse(&format!("The {h} BRCA1 and MSH2 affect HeLa."), &lem)
+            .len();
+        let tys: std::collections::BTreeSet<String> = index
+            .debug_form_entries(h, &lem)
+            .into_iter()
+            .filter_map(|(_, cat, _)| {
+                let c = cat.strip_prefix("cat_n(")?;
+                Some(c.split(',').next()?.to_string())
+            })
+            .collect();
+        eprintln!(
+            "{h:<14} {n:>7}  {}",
+            tys.into_iter().collect::<Vec<_>>().join(" ")
+        );
+    }
+    eprintln!("\n=== the designators' own types (the gate's other operand) ===");
+    for form in ["BRCA1", "MSH2", "MLH1", "HeLa"] {
+        eprintln!("  ENTRIES {form:?}:");
+        for (aug, cat, sense) in index.debug_form_entries(form, &lem) {
+            let a = if aug { "+" } else { " " };
+            eprintln!("     {a} {cat}   [{sense}]");
+        }
+    }
+}
+
+/// PROBE — forest-trace the apposition gap. `probe_apposition_head_grid` localized it to ONE cell
+/// (determined plain head + designator, e.g. `The genes MSH2 affect cells.` → 0, against `The genes
+/// affect cells.` → 4), and falsified two explanations along the way: the licensing does NOT track
+/// importer provenance (`syndromes`, WordNet-only, parses ×4 while `lines`, CUI-indexed, gaps) and the
+/// rows that DO parse carry a compound-noun sem (`kind_of(Σ…compound_kind(·, cell))`), not an
+/// apposition one. So the question is no longer "why does the felicity gate reject" but "what, if
+/// anything, is built over the appositive span at all".
+///
+/// Dumps every node over the appositive span for a gapping sentence and a parsing one, so the missing
+/// constituent is named rather than inferred. Set `EIGENIUS_TRACE_FOREST` yourself for the full tree:
+///   EIGENIUS_TRACE_FOREST=cell:0..4 EIGENIUS_DB_SNAPSHOT=… cargo test --release \
+///     -p eigenius-wordnet --test db_backed_encoding probe_appos_trace -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed diagnostic; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn probe_appos_trace() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index(&head);
+    // Each row: the sentence, and the sub-strings whose constituency decides the derivation. A
+    // sub-string is probed by putting it in a frame that forces exactly one category, so "is there a
+    // constituent here" is answered by a reading count rather than by reading a chart.
+    for s in [
+        "The genes BRCA1 and MSH2 affect cells.", // 0 — the gap
+        "The cells BRCA1 and MSH2 affect HeLa.",  // 4 — parses (compound route)
+    ] {
+        eprintln!("\n===== {s} -> {} =====", index.parse(s, &lem).len());
+    }
+    // Is the CLASSIFIER+DESIGNATOR constituent (`name` rule, bare `cat_n` left) available for each
+    // head? Frame: bare classifier + designator as a clause subject.
+    eprintln!("\n=== `name` rule: bare classifier + designator (cat_n + cat_np) ===");
+    for s in [
+        "Gene MSH2 affects cells.",
+        "Genes MSH2 affect cells.",
+        "Cell MSH2 affects cells.",
+        "Cells MSH2 affect cells.",
+        "Syndrome MSH2 affects cells.",
+        "Line MSH2 affects cells.",
+    ] {
+        eprintln!("  {:>5}  {s}", index.parse(s, &lem).len());
+    }
+    // Is the COMPOUND-NOUN constituent available (`[head] [designator]` as a `cat_n`, which `the` can
+    // then determine)? Frame: force a determiner onto it, singular, no coordination.
+    eprintln!("\n=== compound route: determiner over [classifier designator] ===");
+    for s in [
+        "The gene MSH2 affects cells.",
+        "The genes MSH2 affect cells.",
+        "The cell MSH2 affects cells.",
+        "The cells MSH2 affect cells.",
+        "The syndrome MSH2 affects cells.",
+        "The syndromes MSH2 affect cells.",
+        "The line MSH2 affects cells.",
+        "The lines MSH2 affect cells.",
+    ] {
+        eprintln!("  {:>5}  {s}", index.parse(s, &lem).len());
+    }
+    // NUMBER is the remaining uncontrolled variable: every gapping row above is PLURAL head + the
+    // designators, every parsing row in the grid's `singleton` block was SINGULAR. Cross head-number
+    // against designator-count directly.
+    eprintln!("\n=== head number × designator count ===");
+    eprintln!(
+        "{:<10} {:>10} {:>10} {:>10}",
+        "head", "1 name", "2 names", "4 names"
+    );
+    for h in ["the gene", "the genes", "the cell", "the cells"] {
+        let one = index
+            .parse(&format!("Mutations in {h} MSH2 cause cancer."), &lem)
+            .len();
+        let two = index
+            .parse(
+                &format!("Mutations in {h} BRCA1 and MSH2 cause cancer."),
+                &lem,
+            )
+            .len();
+        let four = index
+            .parse(
+                &format!("Mutations in {h} MSH2, MSH6, PMS2 or MLH1 cause cancer."),
+                &lem,
+            )
+            .len();
+        eprintln!("{h:<10} {one:>10} {two:>10} {four:>10}");
+    }
+}
+
+/// PROBE — the classifier+designator NP's NUMBER, by agreement.
+///
+/// `probe_appos_trace` established a monotone split: a PLURAL classifier + designator gaps in
+/// subject position (`The genes MSH2 affect cells.` → 0) while the SINGULAR one parses (`The gene
+/// MSH2 affects cells.` → 2), and in prep-object position — where nothing agrees — plural and
+/// singular are identical (6 / 24 / 144 for 1 / 2 / 4 designators). Agreement is therefore the only
+/// live variable.
+///
+/// `build_name` (combinators.rs) builds `cat_np(sortal, num)` taking `num` from `rargs[1]`, the
+/// DESIGNATOR's number; `MSH2` is `cat_np(T028, sg)`. So the construction should be `sg` whatever the
+/// classifier's number is. That predicts the UNGRAMMATICAL singular verb parses and the grammatical
+/// plural one does not — a prediction no other explanation of the gap makes, since every competing
+/// story (felicity gate, importer provenance, compound licensing) is indifferent to the verb's
+/// number. The `*` rows are the ones English rejects.
+#[test]
+#[ignore = "DB-backed diagnostic; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn probe_appositive_number_agreement() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index(&head);
+    for (ok, s) in [
+        (true, "The gene MSH2 affects cells."),
+        (false, "The gene MSH2 affect cells."),
+        (true, "The genes MSH2 and MLH1 affect cells."),
+        (false, "The genes MSH2 affect cells."), //   grammatical-ish; 0 today
+        (false, "The genes MSH2 affects cells."), //  * plural head, singular verb
+        (true, "Genes MSH2 and MLH1 affect cells."),
+        (false, "Genes MSH2 affect cells."),
+        (false, "Genes MSH2 affects cells."), //      * bare plural head, singular verb
+        (true, "The cell line HeLa affects genes."),
+        (false, "The cell lines HeLa affects genes."), // * plural head, singular verb
+        (true, "The cell lines HeLa and MSH2 affect genes."),
+    ] {
+        let n = index.parse(s, &lem).len();
+        let mark = if ok { " " } else { "*" };
+        eprintln!("  {mark} {n:>5}  {s}");
+    }
+    // Same strings with the appositive moved OFF the agreement path (prep-object), as the control:
+    // every row here should parse, plural or singular, because no verb agrees with this NP.
+    eprintln!("\n=== control: appositive as a prep object (nothing agrees) ===");
+    for s in [
+        "Mutations in the gene MSH2 cause cancer.",
+        "Mutations in the genes MSH2 cause cancer.",
+        "Mutations in the cell lines HeLa cause cancer.",
+    ] {
+        eprintln!("  {:>5}  {s}", index.parse(s, &lem).len());
+    }
+}
+
+/// PROBE — WHICH ANALYSIS does a determined classifier + designator get?
+///
+/// Sourcing the number from the classifier (`build_name`, 2026-07-26) turned the BARE classifier row
+/// green (`Genes MSH2 affect cells.` 0 → 4) and left every DETERMINED row unmoved (`The genes MSH2
+/// affect cells.` still 0; the ungrammatical `The genes MSH2 affects cells.` still 2). That is
+/// expected once stated: `build_name`'s left operand must be a bare `cat_n`, and under a determiner
+/// the left is a subject GQ — so the rule cannot fire, and `appose_group`, which DOES take a
+/// determined head, requires a `cat_group` and so has no singleton case.
+///
+/// The suspicion was therefore that a determined classifier + one designator falls through to the
+/// COMPOUND-NOUN analysis, which puts the head on the NAME ("an MSH2 of the gene kind") — exactly the
+/// head placement `build_name`'s doc comment identifies as wrong. A reading count cannot tell the two
+/// analyses apart; only the sem can. `the(Σ…named…).1` at the classifier's class is apposition;
+/// `kind_of(Σ…compound_kind(·, classifier))` is the compound.
+///
+/// **CONFIRMED, 2026-07-26.** What this probe printed:
+///
+/// | string | readings | analysis |
+/// | --- | --- | --- |
+/// | `Gene MSH2 affects cells.` | 2 | `the(Σ G:n05436752. named(G, C0879290)).1` — classifier is head ✓ |
+/// | `The gene MSH2 affects cells.` | 2 | `the(Σ G:C1333234. compound_kind(G, n05436752)).1` — name is head ✗ |
+/// | `The MMR genes MSH2, MSH6, PMS2 or MLH1 …` | 96 | ~half apposition ✓, ~half `compound_kind` ✗ |
+///
+/// Three findings, none yet fixed — recorded here rather than dropped:
+///
+/// 1. **A determined classifier + ONE designator has no correct analysis.** Its only readings are
+///    wrong-headed compounds. The construction's two rules leave that cell empty: `build_name`'s left
+///    operand must be a bare `cat_n` (so it cannot fire under a determiner) and `appose_group` takes a
+///    determined head but requires a `cat_group`, so it has no singleton case.
+/// 2. **Where apposition IS available, the compound analysis competes** and supplies about half the
+///    readings — including on the reference page's worst unit, whose construction is exactly
+///    `the MMR genes MSH2, MSH6, PMS2 or MLH1`. That, not `Or`-distribution scope, is the dominant
+///    ambiguity axis on that unit.
+/// 3. **`build_name` accepts an already-apposed right operand**, so a designator can itself be a
+///    definite description: `The cell line HeLa affects genes.` yields
+///    `the(Σ G:C0007634. named(G, the(Σ G#1:n08430568. named(G#1, n09580829)).1)).1` — "the cell named
+///    (the line named HeLa)". A designator must be a NAME, not a description.
+///
+/// The fix `apply`'s shape forces: it returns a single `Option<Item>` and takes the first matching
+/// rule, so a second rule cannot share the `name` trigger. `build_name` therefore has to return the
+/// REFINED COMMON NOUN `cat_n(Σx:sortal. named(x, d), num)` — the Σ-refinement `relativize` and the
+/// compound rule already build — which lets `the` apply through the existing determiner-over-refined-
+/// noun `Fst` machinery; the bare use then needs a unary definite shift back to `cat_np(sortal, num)`
+/// with `the(Σ…).1`, principled because the naming is what makes the description unique. Two parts,
+/// neither sufficient alone.
+#[test]
+#[ignore = "DB-backed diagnostic; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn probe_determined_classifier_analysis() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index(&head);
+    for s in [
+        "The gene MSH2 affects cells.",
+        "Genes MSH2 affect cells.",
+        "Gene MSH2 affects cells.",
+        "The genes MSH2 affects cells.",
+        "The cell line HeLa affects genes.",
+        "The MMR genes MSH2, MSH6, PMS2 or MLH1 affect cells.",
+    ] {
+        let r = index.parse(s, &lem);
+        eprintln!("\n  {s}  -> {}", r.len());
+        let mut seen = std::collections::BTreeSet::new();
+        for it in r.iter() {
+            let t = pretty_term(it.sem());
+            if seen.insert(t.clone()) {
+                // Label the analysis by the shape that distinguishes them.
+                let kind = if t.contains("compound_kind") {
+                    "COMPOUND"
+                } else if t.contains("named(") {
+                    "apposition"
+                } else {
+                    "?"
+                };
+                eprintln!("       [{kind:>10}] {t}");
+            }
+        }
+    }
+}

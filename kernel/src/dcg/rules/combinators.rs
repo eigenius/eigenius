@@ -892,6 +892,23 @@ fn other_grammar_rules() -> &'static [CatRule] {
 /// designator) while English premodification is head-final: "MSI cell lines" is modifier+head and can
 /// never match this trigger, so no over-application risk of the kind a blanket "prefer the proper-name
 /// reading" preference would carry.
+///
+/// **The number is the CLASSIFIER's** (2026-07-26). It used to be the designator's (`rargs[1]`), and
+/// that inverted agreement exactly: a designator is a NAME, and a name has no grammatical number to
+/// contribute — every UMLS named individual seeds `cat_np(T028, sg)` — so the whole phrase came out
+/// `sg` however plural its classifier was, and the parser then accepted the ungrammatical string and
+/// rejected the grammatical one:
+///
+/// | | before | after |
+/// | --- | --- | --- |
+/// | `The genes MSH2 affect cells.` | 0 | ✓ |
+/// | `The genes MSH2 affects cells.` (*) | 2 | 0 |
+/// | `The cell lines HeLa affects genes.` (*) | 15 | 0 |
+///
+/// Head-initial means the classifier is the head, so it carries both the type and the number; the
+/// designator contributes identity only. The classifier's `num` is concrete by the time this fires —
+/// [`super::super::parse::seed`] refines a common noun's `num_any` to `sg`/`pl` from the surface
+/// morphology at seeding.
 fn build_name(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
     let sortal = binds
         .get("sortal")
@@ -915,12 +932,12 @@ fn build_name(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) 
         crate::ontology::iri::Iri::parse("urn:eigenius:ontology:the").expect("the iri"),
     );
     let sem = Exp::Fst(Box::new(Exp::App(Box::new(the), Box::new(sigma))));
-    // `cat_np(sortal, num)` — the CLASSIFIER's class (coercive subtyping reaches any `Entity` slot),
-    // with the designator's number.
-    let (decl, num) = match (left.cat(), right.cat()) {
-        (Exp::InductiveCtor(d, _, _), Exp::InductiveCtor(_, _, rargs)) if rargs.len() == 2 => {
-            (d.clone(), rargs[1].clone())
-        }
+    // `cat_np(sortal, num)` — the CLASSIFIER's class (coercive subtyping reaches any `Entity` slot)
+    // AND the classifier's number: this construction is head-initial, so the classifier is the head of
+    // both. Taking the number from the designator instead inverts subject–verb agreement (see the
+    // table on this rule's doc comment) — a name carries no number of its own.
+    let (decl, num) = match left.cat() {
+        Exp::InductiveCtor(d, _, largs) if largs.len() == 2 => (d.clone(), largs[1].clone()),
         _ => unreachable!("the name rule requires a cat_n left + cat_np right"),
     };
     let cat = Exp::InductiveCtor(decl, "cat_np".into(), vec![sortal, num]);
@@ -1856,6 +1873,34 @@ mod dispatch_tests {
             "a definite individual `the(Σ…).1`, not the kind coercion `kind_of(Σ…)`"
         );
         assert_eq!(got.prov(), Combinator::Compound);
+    }
+
+    /// The construction's NUMBER is the classifier's, not the designator's. Every UMLS named
+    /// individual seeds `cat_np(…, sg)`, so sourcing the number from the designator made
+    /// "the genes MSH2" singular and inverted subject–verb agreement: `The genes MSH2 affect cells.`
+    /// read 0 while the ungrammatical `The genes MSH2 affects cells.` read 2. The two operands here
+    /// carry OPPOSITE numbers, which is what the shipped test above (both `sg`) could not detect.
+    #[test]
+    fn name_apposition_takes_the_classifiers_number_not_the_designators() {
+        let sortal = cls("urn:eigenius:lexicon:Gene");
+        let pl = ct("pl", vec![]);
+        // A PLURAL classifier ("genes") and a SINGULAR designator ("MSH2").
+        let l = mk_item(
+            ct("cat_n", vec![sortal.clone(), pl.clone()]),
+            sortal.clone(),
+        );
+        let r = mk_item(
+            np(cls("urn:eigenius:lexicon:GeneOrGenome")),
+            ax("urn:eigenius:lexicon:msh2_name"),
+        );
+        let got =
+            apply(&l, &r, &layer()).expect("[cat_n(pl)][proper cat_np(sg)] → naming apposition");
+        assert_eq!(
+            got.cat(),
+            &ct("cat_np", vec![sortal, pl]),
+            "head-initial: the classifier is the head, so the phrase is PLURAL — a name carries no \
+             number of its own to contribute"
+        );
     }
 
     #[test]
