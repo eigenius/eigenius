@@ -3311,6 +3311,29 @@ fn wrn_first_page_over_full_lexicon() {
                 eprintln!("       ≈ \"{gloss}\"");
             }
         }
+        // RAW readings — the sense-visible λ-term, which is NEITHER of the two artifacts above and
+        // the only one that answers a structural question about predicates.
+        //
+        // A skeleton is sense-ERASED (`v00776059_t` -> `§`) and a gloss is verbalized ENGLISH (the
+        // verb renders as the word "cause", a coordination as "or"). So grepping either for a
+        // predicate name silently matches nothing, and reads as "0 occurrences" rather than as the
+        // category error it is. That has produced three wrong analyses in this corpus -- counting
+        // PpOblique relations, counting verb predications, and counting `Or(` nesting -- each time
+        // by searching an artifact from which the thing being counted had already been removed.
+        // `trace_one_sentence` does print raw readings but runs cap-only WITHOUT the document
+        // overlay, so it is not like-for-like with the sweep; this is.
+        //
+        // `EIGENIUS_DUMP_READINGS=1` (cap: `EIGENIUS_READINGS_MAX`, default 40).
+        if std::env::var("EIGENIUS_DUMP_READINGS").is_ok() {
+            let rmax: usize = std::env::var("EIGENIUS_READINGS_MAX")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(40);
+            eprintln!("  RAW «{}»", text.trim());
+            for (i, it) in index.parse(&text, &lem).iter().enumerate().take(rmax) {
+                eprintln!("      [R{i}] {}", pretty_term(it.sem()));
+            }
+        }
         report.push(UnitReport { text, outcome });
         // Progress snapshot: the page sweep runs for many minutes, so emit the partial roll-up
         // periodically — an interrupted run still leaves usable attribution in the log.
