@@ -43,8 +43,8 @@
     "total_readings": 2526,
     "skeletons_ceiling": 650,
     "skeletons": 590,
-    "expected_reading_hits": 42,
-    "expected_reading_curated": 42
+    "expected_reading_hits": 44,
+    "expected_reading_curated": 44
   },
   "gates": {
     "coverage": "grammar_gap == 0 and missing_lexeme == 0 — every sentence parses. NON-NEGOTIABLE.",
