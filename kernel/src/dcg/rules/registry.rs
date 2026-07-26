@@ -396,10 +396,20 @@ fn build_coordinate(g: &Grammar, rule: BinRule, l: &Item, r: &Item) -> Option<It
         return None;
     }
     let cost = l.cost().saturating_add(r.cost());
+    // A group inherits [`Combinator::Designated`] from ANY conjunct, so `appose_group` can refuse a
+    // designator group whose members are already designated by reading provenance alone (which `Sig`
+    // carries) instead of the member sems (which would make its firing decision sem-dependent and
+    // require a new packing bit). Coordinating two designations is still fine — "the gene MSH2 and the
+    // gene MSH6" — it is only classifying one AGAIN that the tag blocks.
+    let prov = if l.prov() == Combinator::Designated || r.prov() == Combinator::Designated {
+        Combinator::Designated
+    } else {
+        Combinator::Other
+    };
     coordinate_prop(op, l.cat(), l.sem(), r.cat(), r.sem(), &g.layer)
         .or_else(|| coordinate_np(op, l.cat(), l.sem(), r.cat(), r.sem(), &g.layer))
         .or_else(|| coordinate_mod(l.cat(), l.sem(), r.cat(), r.sem(), &g.layer))
-        .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
+        .map(|(cat, sem)| Item::from_parts(cat, sem, prov, cost))
 }
 
 fn build_but_not(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
@@ -438,7 +448,11 @@ fn build_appositive_obj(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Opti
 /// form (see that variant): an already-apposed group takes no SECOND classifier, and this rule's
 /// trigger offers every split of the cell, so without the check the classifiers stack.
 fn build_appose_group(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
-    if r.prov() == Combinator::Apposed {
+    // No SECOND classifier over an apposed group, and no classifier over designators that are already
+    // designations ([`Combinator::Designated`], propagated to the group by `build_coordinate`).
+    // No SECOND classifier over an apposed group, and no classifier over designators that are already
+    // designations ([`Combinator::Designated`], propagated to the group by `build_coordinate`).
+    if matches!(r.prov(), Combinator::Apposed | Combinator::Designated) {
         return None;
     }
     let cost = l.cost().saturating_add(r.cost());
@@ -847,10 +861,11 @@ fn apply_front_participial(g: &Grammar, it: &Item, span: (usize, usize)) -> Vec<
 
 /// Reduced relative: `S[dcl,pss]\NP` → `cat_pp` with the sem carried through unchanged (both denote
 /// `Entity -> Prop`), so the existing `pp_mod` rule conjoins it into the noun's restrictor.
-/// Definite designation: a naming-refined noun → the individual it uniquely picks out.
+/// Definite designation: a naming-refined noun → the individual it uniquely picks out. Tagged
+/// [`Combinator::Designated`], the only thing distinguishing it from a proper name downstream.
 fn apply_definite_designation(_g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
     definite_designation(it.cat())
-        .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
+        .map(|(cat, sem)| Item::from_parts(cat, sem, Combinator::Designated, it.cost()))
         .into_iter()
         .collect()
 }

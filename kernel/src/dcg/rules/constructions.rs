@@ -690,10 +690,8 @@ pub fn appose_group(
     let [group_ty, conn, num] = is_ctor(group_cat, "cat_group")? else {
         return None;
     };
-    // Felicity: the head noun and the named members must name the SAME KIND — one type subsumes the
-    // other (either direction, to bridge the concept-vs-semantic-type granularity gap across importers).
     let group_ty = sigma_base(group_ty);
-    if !type_subsumes(head_ty, group_ty, layer) && !type_subsumes(group_ty, head_ty, layer) {
+    if !appositive_kinds_match(head_ty, group_ty, layer) {
         return None;
     }
     let Exp::InductiveCtor(decl, _, _) = group_cat else {
@@ -711,6 +709,67 @@ pub fn appose_group(
         vec![head_ty.clone(), conn.clone(), num.clone()],
     );
     Some((cat, list_term(&members)))
+}
+
+/// Whether a classifier and a designator group name the **same kind**, as far as the lexicon can say.
+///
+/// Subsumption in EITHER direction is felicitous, bridging the concept-vs-semantic-type granularity
+/// gap *within* a vocabulary (`umlscui:C0017337 ≤ umlssty:T028`, so "the genes BRCA1 and MSH2" passes
+/// with the head a SUBtype of the members' type).
+///
+/// A **cross-vocabulary** pair is also felicitous, because the absence of an edge between two
+/// vocabularies is not evidence about kinds — the lattice is *specified* to have none.
+/// `docs/notes/d63-wordnet-umls-concept-unification.md` §2: the WordNet↔UMLS alignment canonicalizes
+/// by redefining which class an *entry* denotes and "adds **zero** new `subclass_of` edges … The
+/// alignment must be inert for the lattice", after a 2026-07-11 branch that did add them (a supersense
+/// parent plus the UMLS TUI ISA tree) broke parses and was reverted. So a common noun with an aligned
+/// counterpart denotes a `wn:` class while a UMLS-only named individual keeps its `umlssty:` type
+/// ("MSH2" has no synset, hence no pair), and [`type_subsumes`] across the two is false whether or not
+/// the kinds match.
+///
+/// That is what left the reference page's germline unit with **no correct reading**: the properly
+/// bracketed analysis — classifier `Σx:wn:n05436752. compound_kind(x, C1155661)` ("MMR genes") over
+/// `cat_group(umlssty:T116)` — was refused 138 times on a single sentence (traced 2026-07-26), while
+/// every apposition that DID fire had a group typed at the `lexicon:Entity` top, where the first branch
+/// passes vacuously whatever the classifier is (that is how a MUTATION classified genes).
+///
+/// The permissiveness is scoped to **exactly the one pair whose absence is guaranteed** — WordNet
+/// against UMLS. Everywhere else an absent edge is still informative and still rejects: two UMLS types
+/// (a cell concept against a protein semantic type), and any hand-authored pair inside one layer chain,
+/// where nothing stops the author from relating the classes and not relating them therefore means
+/// something. A blanket "different namespaces ⇒ pass" is NOT equivalent and is wrong: it admitted the
+/// `demo:WidgetKind`-group-against-gene-head clash that
+/// `close_apposition_bridges_concept_and_semantic_type_granularity` pins as infelicitous.
+fn appositive_kinds_match(head_ty: &Exp, group_ty: &Exp, layer: &Arc<Layer>) -> bool {
+    if type_subsumes(head_ty, group_ty, layer) || type_subsumes(group_ty, head_ty, layer) {
+        return true;
+    }
+    match (head_ty, group_ty) {
+        (Exp::EigonClass(a), Exp::EigonClass(b)) => spans_wordnet_and_umls(a, b),
+        _ => false,
+    }
+}
+
+/// Whether two classes sit on opposite sides of the **WordNet/UMLS divide** — the one vocabulary
+/// boundary the alignment is specified never to cross with a `subclass_of` edge, so an absent edge
+/// across it is not evidence of a kind clash.
+fn spans_wordnet_and_umls(a: &Iri, b: &Iri) -> bool {
+    let (va, vb) = (vocabulary(a), vocabulary(b));
+    matches!(
+        (va, vb),
+        (Some("wn"), Some("umls")) | (Some("umls"), Some("wn"))
+    )
+}
+
+/// The imported **vocabulary** a class belongs to, or `None` for anything else (core, `lexicon:`, a
+/// test/domain namespace). `umlscui:`/`umlssty:` are ONE vocabulary — concepts and their semantic types
+/// are linked (`C0017337 ≤ T028`), so an absent edge between them is informative.
+fn vocabulary(iri: &Iri) -> Option<&'static str> {
+    match iri.namespace() {
+        "urn:eigenius:wn:" => Some("wn"),
+        "urn:eigenius:umlscui:" | "urn:eigenius:umlssty:" => Some("umls"),
+        _ => None,
+    }
 }
 
 /// The classifying **type index** of a close-apposition head: a subject GQ `S/(S\NP_C)` (a determined

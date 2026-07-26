@@ -87,6 +87,20 @@ pub enum Combinator {
     /// term-distinct and they multiplied — the reference page's germline unit went 112 → 497
     /// skeletons, with up to 8 `named`s over 4 designators. ENF-inert.
     Apposed,
+    /// A **definite designation** (`definite_designation`): the individual a naming-refined noun
+    /// uniquely picks out, `the(Σx:C. named(x, d)).1`. Its category is an ordinary `cat_np(C, num)` —
+    /// indistinguishable from a proper name's — so only provenance can tell the two apart, exactly as
+    /// it is only provenance that tells a bare KIND from a name for the `name` rule's `NotKindRaised`.
+    ///
+    /// Carried so a designation cannot itself be a DESIGNATOR. `ontology:named`'s second argument is a
+    /// naming TOKEN, not a description, so `named(x, the(Σy:C. named(y, d)).1)` — "the gene named the
+    /// gene named MSH2" — is not a possible naming. It arises because the same tokens admit two
+    /// bracketings: "[the MMR genes] [MSH2, …]" apposes plain names, while "[the MMR] [genes MSH2, …]"
+    /// designates "genes MSH2" first and then apposes THAT. Refusing the second keeps the first, so no
+    /// span loses its analysis. **Propagated through coordination** (`build_coordinate`): a group
+    /// inherits the tag from any conjunct, which is what lets `appose_group` refuse a designator group
+    /// whose members are already designated without reading the sem. ENF-inert.
+    Designated,
     /// Any other producer (lexical leaf, coordination, group/distributive rules) —
     /// not a composition output, so ENF never constrains it.
     Other,

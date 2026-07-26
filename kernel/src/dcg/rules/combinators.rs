@@ -505,6 +505,12 @@ enum Guard {
     /// other than the `Entity` top (D63 §5.3). Keeps close-naming apposition off a pronoun /
     /// bare-kind `cat_np(Entity)` right. Reads a category metavar, never a sem.
     ProperName(&'static str),
+    /// The named operand must NOT be a **definite designation** (`Combinator::Designated`) — a
+    /// designator is a naming TOKEN, never itself a description, so `named(x, the(Σy. named(y, d)).1)`
+    /// ("the gene named the gene named MSH2") is refused. Like [`Self::NotKindRaised`] this reads
+    /// provenance: a designation's category is a plain concretely-typed `cat_np`, so it satisfies
+    /// [`Self::ProperName`] and the type cannot tell it from a name.
+    NotDesignated(Operand),
 }
 
 /// Which operand a rule reads — a [`Guard`]'s target, or the functor side of a [`CombKind::Apply`].
@@ -533,6 +539,7 @@ impl Guard {
             Guard::NotCompoundRefined(op) => !is_compound_refined(&op.pick(left, right).cat),
             Guard::NotAdjectiveRefined(op) => !is_adjective_refined(&op.pick(left, right).cat),
             Guard::NotKindRaised(op) => op.pick(left, right).prov != Combinator::KindRaised,
+            Guard::NotDesignated(op) => op.pick(left, right).prov != Combinator::Designated,
             Guard::ProperName(meta) => matches!(
                 binds.get(*meta),
                 Some(Exp::EigonClass(iri)) if iri.as_str() != "urn:eigenius:lexicon:Entity"
@@ -815,6 +822,7 @@ fn other_grammar_rules() -> &'static [CatRule] {
                 guards: &[
                     Guard::ProperName("namety"),
                     Guard::NotKindRaised(Operand::Right),
+                    Guard::NotDesignated(Operand::Right),
                 ],
                 build: build_name,
             },
