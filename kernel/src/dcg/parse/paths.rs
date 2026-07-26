@@ -38,6 +38,14 @@ fn retain_distinct_sems<T>(candidates: &mut Vec<T>, sem: impl Fn(&T) -> &Exp) {
     candidates.retain(|c| seen.insert(format!("{:?}", sem(c))));
 }
 
+/// Spread the felicity budget over distinct BRACKETINGS — see [`skeleton::spread_over_keys`] for
+/// why a flat cost prefix is systematically biased against the correct (deeply-nested) readings.
+fn spread_over_skeletons<T>(candidates: Vec<T>, sem: impl Fn(&T) -> &Exp) -> Vec<T> {
+    crate::dcg::skeleton::spread_over_keys(candidates, |c| {
+        crate::dcg::skeleton::skeleton_of(sem(c))
+    })
+}
+
 impl Parser {
     /// Packed-forest parse (D63 Option A, blueprint §11 3d): the shared attempt policy
     /// ([`Self::parse_widening`]) over the packed forest + cube-pruning extractor
@@ -132,10 +140,18 @@ impl Parser {
         let raw_candidates = candidates.len();
         retain_distinct_sems(&mut candidates, |it| it.sem());
         let distinct_sems = candidates.len();
+        let mut candidates = spread_over_skeletons(candidates, |it| it.sem());
+        let skels_available = candidates
+            .iter()
+            .map(|it| crate::dcg::skeleton::skeleton_of(it.sem()))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
         candidates.truncate(CLASSIFY_BUDGET);
         if distinct_sems > candidates.len() {
             // Never silent: a truncation here drops readings the grammar DID derive, and the unit
-            // still parses, so no coverage metric can see it (§5b false-comfort coverage).
+            // still parses, so no coverage metric can see it (§5b false-comfort coverage). After
+            // `spread_over_skeletons` what is dropped is depth WITHIN a bracketing, not a bracketing
+            // — every structure is represented before any structure gets a second reading.
             eprintln!(
                 "dcg::parse (packed): CLASSIFY_BUDGET dropped {} distinct reading(s) of {distinct_sems} for {text:?}",
                 distinct_sems - candidates.len(),
@@ -144,7 +160,7 @@ impl Parser {
         if std::env::var("EIGENIUS_PARSE_DEBUG").is_ok() {
             eprintln!(
                 "dcg::parse (packed): cap={:?} {:?} forest nodes={} finite candidates={} \
-                 (raw={raw_candidates} distinct-sem={distinct_sems})",
+                 (raw={raw_candidates} distinct-sem={distinct_sems} distinct-skel={skels_available})",
                 cap,
                 text,
                 forest.nodes.len(),
@@ -320,6 +336,7 @@ impl Parser {
         candidates.sort_by_key(|it| it.cost());
         retain_distinct_sems(&mut candidates, |it| it.sem());
         let distinct_sems = candidates.len();
+        let mut candidates = spread_over_skeletons(candidates, |it| it.sem());
         candidates.truncate(CLASSIFY_BUDGET);
         if distinct_sems > candidates.len() {
             eprintln!(

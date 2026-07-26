@@ -87,7 +87,15 @@ use super::sense_ranker::{SenseCandidate, SenseRanker, WordSenses};
 /// reach ~2k well-typed parses, so this bounds the forest while keeping every
 /// plausible reading; it sits far above any closed-class / demo forest, so those are
 /// unaffected (no truncation, order preserved by the stable cost-0 sort).
-pub const DEFAULT_FOREST_CAP: usize = 256;
+///
+/// **256 → 2048 (2026-07-25).** At 256 this was not a safety bound, it was deciding the grammar: on
+/// "PARP-1 inhibitors are successful in cancers with deficiencies in homologous recombination." the
+/// reported structure count tracked the constant itself — k=256 → 2 skeletons, 1024 → 6, 2048 → 13,
+/// with the fully-nested (correct) reading last in every prefix. A result that scales smoothly with
+/// an arbitrary constant is a measurement of the constant. Raised with the [`CLASSIFY_BUDGET`] log
+/// as the standing signal for whether it still binds; see that constant for why a fixed number is a
+/// step rather than the design.
+pub const DEFAULT_FOREST_CAP: usize = 2048;
 
 /// **Felicity-eval budget** (fail-closed OOM guard): the number of full-span candidates the
 /// felicity loop will NbE-eval, after cost-sorting. The top chart cell is unbeamed (Lever B beams
@@ -107,6 +115,24 @@ pub const DEFAULT_FOREST_CAP: usize = 256;
 /// structural skeletons → 2, with no diagnostic, and `grammar-gap` blind to it because the sentence
 /// still parsed. Pre-`bnp` the same unit fitted (192 candidates) and kept all 4. Deduplicating
 /// first is what makes "bounds the work without changing the result" true rather than aspirational.
+///
+/// …and it is spent across **distinct bracketings** ([`skeleton::spread_over_keys`]), not down a
+/// cost prefix, because a cost prefix is biased *systematically* against the correct reading: a
+/// deeper derivation costs more, so the first thing a prefix drops is the deeply-nested PP
+/// attachment.
+///
+/// **THE NUMBER IS A STEP, NOT THE DESIGN.** There is no constant at which this stops binding —
+/// candidate count grows with length and coordination density, and at 4096 the page's 24-token unit
+/// ("Project Achilles and project DRIVE identified WRN as…") still offered 5920 distinct candidates.
+/// The OOM justification above is also STALE: the witnessed ~400-candidate SIGKILL predates the
+/// distinct-sem dedup, so those 400 raw candidates would be far fewer evals today, and nobody has
+/// re-measured where the real limit sits. 2048 is adopted because it is strictly better than 256 on
+/// every measurement taken, and because the truncation is no longer silent — it LOGS what it drops,
+/// and once the expected-reading corpus covers all 62 units a truncated-away correct reading trips
+/// the faithfulness gate instead of hiding in an improving metric. That pairing (loud log + full
+/// pin coverage) is the feedback loop this constant never had; an outcome-keyed adaptive rule
+/// ("stop when the last N evals yield no new post-felicity skeleton") is only worth building if
+/// that loop shows the fixed number still costing us readings.
 pub const CLASSIFY_BUDGET: usize = DEFAULT_FOREST_CAP;
 
 /// Upper bound for widen-on-failure of the sense cap (GH #97): when a capped parse of an

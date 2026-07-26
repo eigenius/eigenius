@@ -93,6 +93,22 @@ impl Grammar {
         // differently upstream. Cost-sorted first, so the survivor is the cheapest derivation.
         let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         cands.retain(|it| seen.insert(format!("{:?}|{:?}", it.cat(), it.sem())));
+        // …and spend `k` on distinct STRUCTURES, not on a flat cost prefix. Sense multiplicity
+        // inside a node dwarfs structural multiplicity — "PARP-1 inhibitors are successful in
+        // cancers with deficiencies in homologous recombination." reaches 2048 candidates carrying
+        // 297 structures — so a prefix fills with sense-variants of the cheapest bracketing and the
+        // deeper (correct) nestings never reach the felicity gate at all. Before this, that unit's
+        // skeleton count tracked `k` itself: 256 -> 2, 1024 -> 6, 2048 -> 13. A result that scales
+        // smoothly with an arbitrary constant is the signature of a budget deciding the grammar.
+        // Keyed on the CATEGORY too: a refined `cat_n` carries its restrictor inside the category,
+        // so two items sharing a sem structure can still combine differently upstream.
+        let mut cands = super::super::skeleton::spread_over_keys(cands, |it| {
+            format!(
+                "{}|{}",
+                super::super::skeleton::skeleton_of(it.cat()),
+                super::super::skeleton::skeleton_of(it.sem())
+            )
+        });
         cands.truncate(k);
         memo[node_id] = Some(cands.clone());
         cands

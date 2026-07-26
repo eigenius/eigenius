@@ -36,7 +36,7 @@
 //!     cargo test -p eigenius-wordnet --test db_backed_encoding -- --ignored --nocapture
 //!     cargo test -p eigenius-wordnet --features use-llm --test db_backed_encoding -- --ignored --nocapture
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -451,101 +451,11 @@ fn unit_readings(o: &Outcome) -> usize {
     }
 }
 
-/// Erase sense identity to `§`, leaving the STRUCTURE, so two readings that differ only in WHICH
-/// sense fills a slot collapse to one skeleton. This is the same erasure `trace_one_sentence` prints.
-///
-/// **Token-normalised (2026-07-21 re-baseline).** The erasure replaces the WHOLE token carrying a
-/// run of ≥4 digits, not just the digits. The earlier version erased only the digit run and kept the
-/// lexicon prefix, so `n07342049` → `n§` and `C0205341` → `C§` stayed DISTINCT — a cross-lexicon
-/// sense pair for ONE word was then counted as two *structural* skeletons though the bracketing is
-/// identical. That artifact was **86 of 326** skeletons on the reference page (26%), i.e. a quarter
-/// of the tracked structural lever was sense noise. Erasing the whole token makes `total-skeletons`
-/// measure bracketing alone, which is what grammar work is scored against.
-/// See `experiments/parsing/README.md` §7b.
-fn erase_senses(s: &str) -> String {
-    let erased: String = s
-        .split_inclusive(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .map(|tok| {
-            let (word, tail) = match tok.chars().last() {
-                Some(c) if !(c.is_ascii_alphanumeric() || c == '_') => (
-                    &tok[..tok.len() - c.len_utf8()],
-                    &tok[tok.len() - c.len_utf8()..],
-                ),
-                _ => (tok, ""),
-            };
-            let (mut run, mut max_run) = (0usize, 0usize);
-            for c in word.chars() {
-                if c.is_ascii_digit() {
-                    run += 1;
-                    max_run = max_run.max(run);
-                } else {
-                    run = 0;
-                }
-            }
-            if max_run >= 4 {
-                format!("§{tail}")
-            } else {
-                format!("{word}{tail}")
-            }
-        })
-        .collect();
-    normalize_holes(&erased)
-}
-
-/// Canonicalise referent/quant HOLE binder names so a skeleton is span-INDEPENDENT. A hole variable
-/// `$name$i_j` is position-keyed by [`hole_base`](../../kernel/src/dcg/holes.rs) (D64), so the SAME
-/// open reading freshened at a different derivation site prints a different name — a derivation
-/// artifact, not structure. Two α-equivalent open readings must collapse to ONE skeleton, else the
-/// structural `total-skeletons` count inflates and a pin breaks the moment a grammar change moves the
-/// freshening site (as the `elided_than` shift did to unit 4 — `$anaphor$6_60` → `$anaphor$0_90`).
-/// Each distinct `$name$i_j` token is renamed to `$name$<ordinal>` by first appearance, per name
-/// prefix — preserving co-reference (same token → same canonical) and distinctness (two holes stay
-/// two). Same spirit as the 2026-07-21 whole-token sense-erasure: strip a derivation-specific detail
-/// that was silently being counted as structure. `$` occurs only in hole tokens in a pretty-printed
-/// sem, so the scan keys on it.
-fn normalize_holes(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut counters: BTreeMap<String, usize> = BTreeMap::new();
-    let mut canon: BTreeMap<String, String> = BTreeMap::new();
-    let mut i = 0;
-    while i < s.len() {
-        if s.as_bytes()[i] == b'$' {
-            let rest = &s[i + 1..];
-            if let Some(d2) = rest.find('$') {
-                let name = &rest[..d2];
-                let after = &rest[d2 + 1..];
-                let span_len = after
-                    .bytes()
-                    .take_while(|b| b.is_ascii_digit() || *b == b'_')
-                    .count();
-                let span = &after[..span_len];
-                if !name.is_empty()
-                    && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-                    && span.contains('_')
-                    && span.bytes().next().is_some_and(|b| b.is_ascii_digit())
-                {
-                    let token = format!("${name}${span}");
-                    let canonical = canon
-                        .entry(token)
-                        .or_insert_with(|| {
-                            let n = counters.entry(name.to_string()).or_insert(0);
-                            let c = format!("${name}${n}");
-                            *n += 1;
-                            c
-                        })
-                        .clone();
-                    out.push_str(&canonical);
-                    i += 1 + d2 + 1 + span_len; // '$' + name + '$' + span
-                    continue;
-                }
-            }
-        }
-        let ch = s[i..].chars().next().unwrap();
-        out.push(ch);
-        i += ch.len_utf8();
-    }
-    out
-}
+// `erase_senses` / `normalize_holes` now live in the KERNEL (`dcg::skeleton`) — the parser spends its
+// felicity budget per skeleton, so the gate's notion of "same structure" and the parser's must be the
+// SAME function. If they drifted, the parser could drop a bracketing this gate then reports as a lost
+// reading. See kernel/src/dcg/skeleton.rs.
+use eigenius_kernel::dcg::skeleton::erase_senses;
 
 /// Pins the eraser semantics that `total-skeletons` depends on (README §7b). If this ever fails,
 /// the tracked structural lever has started counting SENSE differences as structure again — which
