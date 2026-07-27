@@ -37,15 +37,15 @@
     "units": 62,
     "grammar_gap": 0,
     "missing_lexeme": 0,
-    "ambiguous": 51,
+    "ambiguous": 50,
     "open": 2,
-    "encoded": 9,
-    "total_readings_ceiling": 2800,
-    "total_readings": 2299,
-    "skeletons_ceiling": 650,
-    "skeletons": 412,
+    "encoded": 10,
+    "total_readings_ceiling": 1900,
+    "total_readings": 1216,
+    "skeletons_ceiling": 400,
+    "skeletons": 281,
     "expected_reading_hits": 44,
-    "expected_reading_curated": 44
+    "expected_reading_curated": 45
   },
   "gates": {
     "coverage": "grammar_gap == 0 and missing_lexeme == 0 — every sentence parses. NON-NEGOTIABLE.",
@@ -73,6 +73,38 @@
     "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible — two senses with different labels and the SAME sem are one concept — but the pre-dedup caveat still stands."
   },
   "history": [
+    {
+      "date": "2026-07-26",
+      "note": "Normal forms + lemma-keyed lexicon; see _provenance_note_2026-07-26-normal-forms.",
+      "was": {
+        "units": 62,
+        "grammar_gap": 0,
+        "missing_lexeme": 0,
+        "ambiguous": 51,
+        "open": 2,
+        "encoded": 9,
+        "total_readings_ceiling": 2800,
+        "total_readings": 2299,
+        "skeletons_ceiling": 650,
+        "skeletons": 412,
+        "expected_reading_hits": 44,
+        "expected_reading_curated": 44
+      },
+      "now": {
+        "units": 62,
+        "grammar_gap": 0,
+        "missing_lexeme": 0,
+        "ambiguous": 50,
+        "open": 2,
+        "encoded": 10,
+        "total_readings_ceiling": 1900,
+        "total_readings": 1216,
+        "skeletons_ceiling": 400,
+        "skeletons": 281,
+        "expected_reading_hits": 44,
+        "expected_reading_curated": 45
+      }
+    },
     {
       "date": "2026-07-25",
       "commit": "closed-class surface list shared with WordNet (9f438cf/183f03e) + a bare kind is a plain NP per core-en `bnp` with Eisner-restricted raises (d24deba) + sortal-name guard (a4749f4)",
@@ -275,5 +307,6 @@
       "encoded": 10,
       "note": "RE-BASELINE. Two SEEDING fixes (parse/seed.rs, NO reseed -- snapshot unchanged), diagnosed from the reranked 2-3 bucket. (A) EVENT [33ff4a2] cap-then-dedup: the cross-lexicon concept dedup used to run BEFORE the sense cap, so a merged reranker top-2 (event-happening's WordNet sense + its UMLS twin) dropped the twin and let the cap BACKFILL a lower-ranked wrong sense (event-*circumstance*). Moving dedup AFTER the cap keeps the reranker's top-`cap` raw positions, which collapse to 1 -> 'Each event alone does not lead to cell death' encodes. (B) GENE [4400aef] elimination-through-widen: the sense-cap elimination cut applied only at BASE cap, so when a sentence WIDENED (base cap fails -- 'Germline mutations ... cause Lynch syndrome' needs cap 4 for `cause`/`mutations`' deep RANKED sense), the widen un-eliminated ALL of the reranker's rejects, re-seeding junk onto every word (`gene` got C5849123 = 'Gross Extranodal Extension' via a spurious 'gENE' NCI synonym). Making the cut hold at EVERY cap rung keeps eliminations through widen; the wrong-elimination safety is instead provided by parse_widening PASS 2 (a ranks=None widen), reached only when a NEEDED sense was wrongly eliminated -- so grammar-gap stays 0. CORRECTION: `gene` was NOT a merge gap (the real gene C0017337<->n05436752 was already merged); the earlier 'dedup gene' framing was wrong -- the junk is a different concept the reranker already eliminates, and merges.json was not the lever. VALIDATED by a deterministic REPLAY of the 2235 rankings (isolates the code from the reranker): encoded 8->10, total_readings 1991->1282 (-36%), grammar-gap 0; then CONFIRMED live at 4400aef: encoded 10, ambiguous 51, open 1, grammar-gap 0, total_readings 1286 (== replay, so the -35% multiplicity drop is structural, not drift), runtime 239s. The 2 newly-encoded are exactly 'Each event ...' and 'Germline mutations ...'. The bigger result is total_readings: the gene fix is BROAD (every widening sentence stops flooding), 101+ bin 4->1. Floor set at 9; total_readings ceiling 1500 (see gates)."
     }
-  ]
+  ],
+  "_provenance_note_2026-07-26-normal-forms": "Re-baselined 2026-07-26 for a session of categorial-syntactic normal forms plus a lemma-keyed lexicon. skeletons 412 -> 281 (-32%), readings 2299 -> 1216 (-47%), encoded 9 -> 10, grammar-gap 0 throughout. Snapshot wordnet-umls-aligned-2026-07-26-lemmakeyed; drift-free REPLAY of experiments/parsing/ranks/2026-07-26-lemmakeyed.json (now TRACKED — see that directory's README for why a recording must not live in gitignored results/). PARSER: close apposition distributes the classifier over every group member and is a normal form (`Combinator::Apposed` — no second classifier, no later extension); a designator may not be a DERIVED individual (`Combinator::DerivedIndividual` — neither a definite designation nor a kind realization), propagated through coordination; classifier/designator CARDINALITY agreement (`Guard::NotPlural` — a plural classifier takes a group, never one name); PP-ADJACENCY, i.e. a PP-postmodified noun is neither an apposition classifier nor a pre-nominal compound modifier (`Guard::NotPpRefined`, the single largest win: the germline unit's 24-skeleton compound pile); a comma list folds only when COMPLETE (`RightContext::list_is_final`, new cell right-context threaded to both chart drivers and packing-safe because it is a property of the SPAN); verb-side number (a `-s` surface cannot take a plural subject); vocabulary-scoped apposition felicity (WordNet<->UMLS has no edges BY DESIGN, so an absent one is not a clash). LEXICON: the UMLS importer prunes inflected duplicate forms (52 505 of 6.17M) so the lexicon is lemma-keyed as `seed`'s number rule assumes, and the alignment consumes merges-lemma-keyed.json (38 389 -> 30 776). EXPECTED HITS ARE 44 OF 45, NOT 45/45 — the faithfulness gate is stochastic: four live draws scored 44, 44, 43, 44 and which pin misses varies; every failing pin's structure stayed reachable in some draw. See expected-readings.tsv's header. Ceilings tightened 2800->1900 and 650->400, sized for the measured draw variance (readings +/-25% across recordings, skeletons +/-2.6%). Germline unit 112 -> 9 with a correct reading that did not exist at session start, now pinned."
 }
