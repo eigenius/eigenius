@@ -5826,3 +5826,52 @@ fn probe_agreement_frames_actually_discriminate_number() {
          ambiguity, not agreement, and its results are void"
     );
 }
+
+/// PROBE — what would relating `MSI` and `MMR deficiency` actually require?
+///
+/// Refusing an `Entity`-top join in `coordinate_np` fixes the germline unit (9 -> 1) at the cost of
+/// exactly one gap: "We hypothesized that MSI and MMR deficiency may create vulnerabilities."
+/// (`constructions::coordinate_np`). This prints what those two conjuncts carry, so "add one edge" can
+/// be checked rather than assumed — in particular whether the missing link is CUI-level or a TUI->TUI
+/// edge, the latter being the UMLS Semantic Network structure whose wholesale import broke parses on
+/// 2026-07-11 and was reverted.
+#[test]
+#[ignore = "DB-backed diagnostic; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn probe_msi_mmr_deficiency_join() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = LexicalIndex::build(Arc::clone(&head));
+    let mut classes: Vec<(String, Exp)> = Vec::new();
+    for surface in [
+        "msi",
+        "mmr deficiency",
+        "deficiency",
+        "microsatellite instability",
+    ] {
+        let entries = index.entries_for(surface);
+        eprintln!("\n=== {surface} — {} entr(ies) ===", entries.len());
+        for e in entries.iter().take(8) {
+            eprintln!("    {}", pretty_term(e.item.cat()));
+            if let Some([ty, _]) = eigenius_kernel::dcg::is_ctor(e.item.cat(), "cat_n") {
+                classes.push((surface.to_string(), ty.clone()));
+            }
+        }
+    }
+    // Every cross pair's join, and each class's own ancestors — the two questions that decide whether
+    // a CUI-level edge suffices.
+    eprintln!("\n=== pairwise common_super ===");
+    for (na, a) in &classes {
+        for (nb, b) in &classes {
+            if na >= nb {
+                continue;
+            }
+            let j = eigenius_kernel::dcg::common_super(a, b, &head);
+            eprintln!(
+                "  {:<24} ⊔ {:<24} = {}",
+                pretty_term(a),
+                pretty_term(b),
+                j.map(|x| pretty_term(&x)).unwrap_or_else(|| "NONE".into())
+            );
+        }
+    }
+}
