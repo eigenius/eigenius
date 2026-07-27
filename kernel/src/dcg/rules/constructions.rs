@@ -1383,6 +1383,33 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
 /// then conjoins it into the noun's Σ restrictor exactly as a PP modifier is. Reusing `cat_pp` is why
 /// this needs no new binary rule.
 ///
+/// **KNOWN OVER-GENERATION — `pss` conflates PERFECT with PASSIVE** (diagnosed 2026-07-27, unfixed).
+/// The WordNet importer emits ONE past-participle category per frame, so a transitive verb's `pss` form
+/// is `(S[pss]\NP)/NP` — right for the perfect ("has induced DNA", which keeps its object) and wrong
+/// for the passive (whose object is promoted to subject). Once that category consumes its object the
+/// result is an ACTIVE VP wearing a `pss` label, and this shift — valid only for the passive — fires on
+/// it. The product is a relativizer-less SUBJECT relative, which English does not allow:
+///
+///     "Depletion of WRN induced double-stranded DNA breaks."
+///       -> cat_n(Σx:WRN. induced(DNA, x))          "WRN [that] induced DNA"      <- built here
+///       -> then `breaks` is read as the finite intransitive main verb
+///
+/// English permits a reduced OBJECT relative ("the food the man ate") and a participial ("the DNA
+/// induced by WRN"), never a reduced subject relative ("*the man ate the food" for "the man that ate").
+/// A/B on that sentence: 8 skeletons with this shift, 2 without — 6 of 8 come through here.
+///
+/// **Do NOT fix it by disabling the shift.** Measured page-wide with the shift off: skeletons 281 -> 367
+/// and readings 1216 -> 1430 (coverage and pins hold). Removing readings frees sense-cap and cell-beam
+/// slots that refill with other senses — the same displacement recorded at the cap in
+/// `super::super::parse::seed`. The shift is also genuinely needed ("The deficiency predicted by the
+/// model was clear." parsed 0 without it, and `compare`'s participial route was fixed for exactly this).
+///
+/// The fix is upstream and is a FEATURE-INVENTORY change, not a guard: split the perfect from the
+/// passive so a true passive category has NO object slot and only that one licenses this shift.
+/// Provenance cannot substitute — a genuine passive with an oblique complement
+/// (`(S[pss]\NP)/cat_pp_arg`, the `compared to …` case) is ALSO an application output, so
+/// "was applied" does not separate the two.
+///
 /// core-en states the rule as `s[dcl]/np → n\n` with a `GenRel` relation. We take the SUBJECT-gap
 /// (backward) form rather than its object-gap (forward) one, because that is the participial case —
 /// the same asymmetry as [`front_participial`], which is this rule's sentence-level counterpart
