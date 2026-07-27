@@ -87,20 +87,32 @@ pub enum Combinator {
     /// term-distinct and they multiplied — the reference page's germline unit went 112 → 497
     /// skeletons, with up to 8 `named`s over 4 designators. ENF-inert.
     Apposed,
-    /// A **definite designation** (`definite_designation`): the individual a naming-refined noun
-    /// uniquely picks out, `the(Σx:C. named(x, d)).1`. Its category is an ordinary `cat_np(C, num)` —
-    /// indistinguishable from a proper name's — so only provenance can tell the two apart, exactly as
-    /// it is only provenance that tells a bare KIND from a name for the `name` rule's `NotKindRaised`.
+    /// A **derived individual** — an entity reached by COERCION rather than denoted by a name. Two
+    /// producers, and they are one notion:
+    /// - a **definite designation** (`definite_designation`), `the(Σx:C. named(x, d)).1`: the
+    ///   individual a naming-refined noun uniquely picks out — description-derived;
+    /// - a **kind realization**, `kind_of(K)`: a bare `cat_n` conjunct made argument-fillable by
+    ///   `coordinate_np`'s `np_conjunct` — kind-derived.
     ///
-    /// Carried so a designation cannot itself be a DESIGNATOR. `ontology:named`'s second argument is a
-    /// naming TOKEN, not a description, so `named(x, the(Σy:C. named(y, d)).1)` — "the gene named the
-    /// gene named MSH2" — is not a possible naming. It arises because the same tokens admit two
-    /// bracketings: "[the MMR genes] [MSH2, …]" apposes plain names, while "[the MMR] [genes MSH2, …]"
-    /// designates "genes MSH2" first and then apposes THAT. Refusing the second keeps the first, so no
-    /// span loses its analysis. **Propagated through coordination** (`build_coordinate`): a group
-    /// inherits the tag from any conjunct, which is what lets `appose_group` refuse a designator group
-    /// whose members are already designated without reading the sem. ENF-inert.
-    Designated,
+    /// Either way the category is an ordinary `cat_np(C, num)`, indistinguishable from a proper name's,
+    /// so only provenance can tell them apart — the same reason the `name` rule needs `NotKindRaised`
+    /// alongside `ProperName`.
+    ///
+    /// Carried so a derived individual cannot be a **DESIGNATOR**. `ontology:named`'s second argument is
+    /// a naming TOKEN: not a description, so `named(x, the(Σy:C. named(y, d)).1)` — "the gene named the
+    /// gene named MSH2" — is not a naming; and not a kind, which is the same thing the singular path
+    /// already refuses ("nucleotide repeat regions" read as a nucleotide *named* a repeat region). The
+    /// designation case arises because one string admits two bracketings: "[the MMR genes] [MSH2, …]"
+    /// apposes plain names, while "[the MMR] [genes MSH2, …]" designates "genes MSH2" and apposes THAT.
+    /// Refusing the second keeps the first, so no span loses its analysis.
+    ///
+    /// **Propagated through coordination** (`build_coordinate`): a group inherits the tag from any
+    /// conjunct that is derived, which is what lets `appose_group` refuse an impure designator group by
+    /// reading provenance — a property `Sig` already carries — instead of the member sems, which would
+    /// make its firing decision sem-dependent and need a new packing bit. Coordinating derived
+    /// individuals is untouched ("the gene MSH2 and the gene MSH6", "MSI and MMR deficiency create
+    /// vulnerabilities"); only classifying them AGAIN is blocked. ENF-inert.
+    DerivedIndividual,
     /// Any other producer (lexical leaf, coordination, group/distributive rules) —
     /// not a composition output, so ENF never constrains it.
     Other,

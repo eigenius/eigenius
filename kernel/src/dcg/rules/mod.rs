@@ -32,3 +32,49 @@
 pub(crate) mod combinators;
 pub(crate) mod constructions;
 pub(crate) mod registry;
+
+/// **What immediately follows a chart cell** — the only right-context any rule needs, and the reason
+/// two separate defects were unfixable without it.
+///
+/// A CCG rule normally sees only its two operands. Two constraints genuinely cannot be stated that way,
+/// because both are about whether a construction is *complete* at the point it is built:
+///
+/// - **Classifier capture.** In "the MMR genes MSH2, MSH6, PMS2 or MLH1" the classifier must appose the
+///   WHOLE designator list; binding it to `MSH2` alone and coordinating that NP with the remaining
+///   names is a different (wrong) bracketing. Whether the list continues is exactly [`Self::Comma`] at
+///   the `[classifier designator]` cell's right edge.
+/// - **List finalization.** A comma list may fold only when no coordinator follows it, which is what
+///   separates the asyndetic `A, B affect X` (folds as `∧`) from the prefix `A, B` of `A, B, C or D`
+///   (must not fold at all). See [`constructions::complete_coord`].
+///
+/// **Packing-safe by construction, and that is the point.** This is a property of the SPAN, so it is
+/// identical for every item in a chart node. A rule decision that consults it is therefore still sound
+/// to take on a node's *representative* — no [`super::chart::forest::Sig`] field is needed, unlike the
+/// per-item `is_designation` bit, which varied within a node and had to be added there.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RightContext {
+    /// A list-continuing comma — the cell is followed by `,`.
+    Comma,
+    /// An explicit coordinator (`and` / `or`) — the cell is a conjunct of a larger coordination.
+    Coordinator,
+    /// Anything else, including the end of the sentence: nothing about this cell's right edge licenses
+    /// or forbids a construction. The value rules must treat as "no constraint", and the value
+    /// standalone rule tests pass.
+    Other,
+}
+
+impl RightContext {
+    /// The context at the right edge of the cell ending at `j`, read from the sentence's tokens. Both
+    /// chart drivers compute this once per cell; a cell at the end of the sentence is [`Self::Other`].
+    pub(crate) fn after(
+        reserved: &super::reserved::ReservedTable,
+        tokens: &[String],
+        j: usize,
+    ) -> Self {
+        match tokens.get(j + 1) {
+            Some(t) if reserved.is_comma(t) => Self::Comma,
+            Some(t) if reserved.coord_connective(t).is_some() => Self::Coordinator,
+            _ => Self::Other,
+        }
+    }
+}

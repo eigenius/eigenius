@@ -108,6 +108,7 @@ pub use rules::constructions::{
     appose_group, cats_coordinate, complete_coord, coordinate_np, coordinate_prop, distribute,
     distribute_object, kind_subject, reciprocate, relativize, type_raise,
 };
+pub use rules::RightContext;
 pub use segment::{is_nonprose, segment_sentences, tokenize};
 #[cfg(feature = "use-llm")]
 pub use sense_ranker::AnthropicSenseRanker;

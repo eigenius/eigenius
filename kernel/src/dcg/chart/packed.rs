@@ -62,7 +62,8 @@ impl Grammar {
                     let lk = self.kbest(forest, l, k, memo);
                     let rk = self.kbest(forest, r, k, memo);
                     let layer = &self.layer;
-                    self.cube(&lk, &rk, k, &mut cands, |l, r| apply(l, r, layer));
+                    let rctx = forest.nodes[node_id].rctx;
+                    self.cube(&lk, &rk, k, &mut cands, |l, r| apply(l, r, layer, rctx));
                 }
                 packed::Edge::Binary { left, right, rule } => {
                     let (l, r, rule) = (*left, *right, *rule);
@@ -76,7 +77,13 @@ impl Grammar {
                     let (child, kind) = (*child, *kind);
                     let ck = self.kbest(forest, child, k, memo);
                     for it in &ck {
-                        self.materialize_unary(it, kind, span, &mut cands);
+                        self.materialize_unary(
+                            it,
+                            kind,
+                            span,
+                            forest.nodes[node_id].rctx,
+                            &mut cands,
+                        );
                     }
                 }
             }
@@ -214,6 +221,7 @@ impl Grammar {
         it: &Item,
         kind: UnaryKind,
         span: (usize, usize),
+        rctx: super::super::rules::RightContext,
         out: &mut Vec<Item>,
     ) {
         // Comma absorption carries the sentence-premodifier through unchanged (it now spans the
@@ -224,7 +232,7 @@ impl Grammar {
             UnaryKind::AbsorbComma => out.push(it.clone()),
             _ => {
                 if let Some(shift) = unary_shifts().iter().find(|s| s.kind == kind) {
-                    out.extend(shift.run(self, it, span));
+                    out.extend(shift.run(self, it, span, rctx));
                 }
             }
         }
@@ -268,8 +276,9 @@ impl Grammar {
         // Group leaf items into nodes (one `Leaf` edge each; same-`Sig` items share a node).
         for (i, row) in leaves.iter().enumerate() {
             for (j, cell) in row.iter().enumerate().skip(i) {
+                let rctx = super::super::rules::RightContext::after(&self.reserved, tokens, j);
                 for it in cell {
-                    let id = forest.get_or_create(i, j, node_sig(it), it);
+                    let id = forest.get_or_create(i, j, node_sig(it), it, rctx);
                     forest.push_edge(id, Edge::Leaf(it.clone()));
                 }
             }
@@ -278,6 +287,10 @@ impl Grammar {
         for len in 2..=n {
             for i in 0..=(n - len) {
                 let j = i + len - 1;
+                // The cell's right context: a function of `j` alone, hence identical for every item in
+                // every node of this cell — which is what keeps a rule that consults it decidable on a
+                // node's representative.
+                let rctx = super::super::rules::RightContext::after(&self.reserved, tokens, j);
                 // Collect combinations first (immutable borrow of `forest`), then insert.
                 let mut edges: Vec<(Sig, Item, NodeId, NodeId)> = Vec::new();
                 for k in i..j {
@@ -291,14 +304,14 @@ impl Grammar {
                         for &r in &rights {
                             let lrep = forest.nodes[l].rep.clone();
                             let rrep = forest.nodes[r].rep.clone();
-                            if let Some(result) = apply(&lrep, &rrep, &self.layer) {
+                            if let Some(result) = apply(&lrep, &rrep, &self.layer, rctx) {
                                 edges.push((node_sig(&result), result, l, r));
                             }
                         }
                     }
                 }
                 for (sig, result, l, r) in edges {
-                    let id = forest.get_or_create(i, j, sig, &result);
+                    let id = forest.get_or_create(i, j, sig, &result, rctx);
                     forest.push_edge(id, Edge::Combine { left: l, right: r });
                 }
 
@@ -314,7 +327,7 @@ impl Grammar {
                     self.binary_edges(&forest, site.left, site.right, site.rule, &mut bin);
                 }
                 for (sig, item, left, right, rule) in bin {
-                    let id = forest.get_or_create(i, j, sig, &item);
+                    let id = forest.get_or_create(i, j, sig, &item, rctx);
                     forest.push_edge(id, Edge::Binary { left, right, rule });
                 }
 
@@ -328,12 +341,12 @@ impl Grammar {
                 for shift in unary_shifts() {
                     for id in forest.cells[i][j].values().copied().collect::<Vec<_>>() {
                         let rep = forest.nodes[id].rep.clone();
-                        for item in shift.run(self, &rep, (i, j)) {
+                        for item in shift.run(self, &rep, (i, j), rctx) {
                             unary.push((node_sig(&item), item, id, shift.kind));
                         }
                     }
                     for (sig, item, child, kind) in unary.drain(..) {
-                        let nid = forest.get_or_create(i, j, sig, &item);
+                        let nid = forest.get_or_create(i, j, sig, &item, rctx);
                         forest.push_edge(nid, Edge::Unary { child, kind });
                     }
                 }
@@ -350,7 +363,7 @@ impl Grammar {
                         }
                     }
                     for (sig, item, child, kind) in unary.drain(..) {
-                        let nid = forest.get_or_create(i, j, sig, &item);
+                        let nid = forest.get_or_create(i, j, sig, &item, rctx);
                         forest.push_edge(nid, Edge::Unary { child, kind });
                     }
                 }

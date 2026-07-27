@@ -1981,7 +1981,7 @@ fn coordinate_prop_and_coordinate_np_are_disjoint() {
                 grown.push(Item::new(cat, sem));
             }
             for r in &pool {
-                if let Some(it) = apply(l, r, &layer) {
+                if let Some(it) = apply(l, r, &layer, eigenius_kernel::dcg::RightContext::Other) {
                     grown.push(it);
                 }
                 for op in OPS {

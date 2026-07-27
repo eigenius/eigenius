@@ -381,6 +381,22 @@ fn build_relativize(_g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<
     relativize(l.cat(), r.cat(), r.sem()).map(|(cat, sem)| Item::with_cost(cat, sem, cost))
 }
 
+/// Whether a coordination conjunct denotes a **derived individual** rather than a name
+/// ([`Combinator::DerivedIndividual`]) — so a group containing it is not a designator group.
+///
+/// Three shapes, all cheap and all category-or-provenance only: an already-tagged item (a definite
+/// designation, or a group that inherited the tag), a `KindRaised` bare-kind NP, and a bare `cat_n`
+/// conjunct — which `coordinate_np`'s `np_conjunct` realises as `kind_of(K)` WITHOUT routing it through
+/// the `KindRaised` shift, and which is therefore the shape the singular `name` rule's
+/// `NotKindRaised` guard never sees. That asymmetry is what left the group path admitting kind
+/// designators after the singular path had stopped.
+fn is_derived_individual(it: &Item) -> bool {
+    matches!(
+        it.prov(),
+        Combinator::DerivedIndividual | Combinator::KindRaised
+    ) || is_ctor(it.cat(), "cat_n").is_some()
+}
+
 /// The list-with-operator model (D63 §8.4 Phase 3): a prop-ending conjunct builds/extends a deferred
 /// `cat_coord`; an NP conjunct builds a `cat_group`. Each enforces its own left-branching NF, so no
 /// outer `is_coordination` guard here — the sem-reading NF check lives inside `coordinate_prop`.
@@ -396,13 +412,11 @@ fn build_coordinate(g: &Grammar, rule: BinRule, l: &Item, r: &Item) -> Option<It
         return None;
     }
     let cost = l.cost().saturating_add(r.cost());
-    // A group inherits [`Combinator::Designated`] from ANY conjunct, so `appose_group` can refuse a
-    // designator group whose members are already designated by reading provenance alone (which `Sig`
-    // carries) instead of the member sems (which would make its firing decision sem-dependent and
-    // require a new packing bit). Coordinating two designations is still fine — "the gene MSH2 and the
-    // gene MSH6" — it is only classifying one AGAIN that the tag blocks.
-    let prov = if l.prov() == Combinator::Designated || r.prov() == Combinator::Designated {
-        Combinator::Designated
+    // A group inherits [`Combinator::DerivedIndividual`] from ANY derived conjunct, so `appose_group`
+    // can refuse an impure designator group by reading provenance (which `Sig` carries) rather than the
+    // member sems (which would make its firing decision sem-dependent and need a new packing bit).
+    let prov = if is_derived_individual(l) || is_derived_individual(r) {
+        Combinator::DerivedIndividual
     } else {
         Combinator::Other
     };
@@ -448,11 +462,13 @@ fn build_appositive_obj(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Opti
 /// form (see that variant): an already-apposed group takes no SECOND classifier, and this rule's
 /// trigger offers every split of the cell, so without the check the classifiers stack.
 fn build_appose_group(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
-    // No SECOND classifier over an apposed group, and no classifier over designators that are already
-    // designations ([`Combinator::Designated`], propagated to the group by `build_coordinate`).
-    // No SECOND classifier over an apposed group, and no classifier over designators that are already
-    // designations ([`Combinator::Designated`], propagated to the group by `build_coordinate`).
-    if matches!(r.prov(), Combinator::Apposed | Combinator::Designated) {
+    // No SECOND classifier over an apposed group, and no classifier over members that are DERIVED
+    // individuals rather than names ([`Combinator::DerivedIndividual`], propagated to the group by
+    // `build_coordinate`).
+    if matches!(
+        r.prov(),
+        Combinator::Apposed | Combinator::DerivedIndividual
+    ) {
         return None;
     }
     let cost = l.cost().saturating_add(r.cost());
@@ -743,14 +759,22 @@ pub(crate) struct UnaryShift {
     apply: UnaryApply,
 }
 
-/// Apply a shift to ONE cell item, given the cell span (for hole freshening). Every shift is
-/// **per-item-independent** — `raise_nps`/`bare_nominal_shifts` map each item alone — so applying the
-/// shift item-by-item (packed) equals applying it to the whole cell at once (unpacked).
-type UnaryApply = fn(&Grammar, &Item, (usize, usize)) -> Vec<Item>;
+/// Apply a shift to ONE cell item, given the cell span (for hole freshening) and the cell's
+/// [`super::RightContext`] (for the constructions whose completeness depends on what follows). Every
+/// shift is **per-item-independent** — `raise_nps`/`bare_nominal_shifts` map each item alone — so
+/// applying the shift item-by-item (packed) equals applying it to the whole cell at once (unpacked);
+/// both the span and the right context are properties of the CELL, so neither breaks that.
+type UnaryApply = fn(&Grammar, &Item, (usize, usize), super::RightContext) -> Vec<Item>;
 
 impl UnaryShift {
-    pub(crate) fn run(&self, g: &Grammar, it: &Item, span: (usize, usize)) -> Vec<Item> {
-        (self.apply)(g, it, span)
+    pub(crate) fn run(
+        &self,
+        g: &Grammar,
+        it: &Item,
+        span: (usize, usize),
+        rctx: super::RightContext,
+    ) -> Vec<Item> {
+        (self.apply)(g, it, span, rctx)
     }
 }
 
@@ -811,7 +835,12 @@ pub(crate) fn unary_shifts() -> &'static [UnaryShift] {
 }
 
 /// Coordination list-completion: fold a prop-ending `cat_coord` into its base category.
-fn apply_coord_complete(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
+fn apply_coord_complete(
+    g: &Grammar,
+    it: &Item,
+    _span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
     complete_coord(it.cat(), it.sem(), &g.layer)
         .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
         .into_iter()
@@ -819,14 +848,24 @@ fn apply_coord_complete(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<It
 }
 
 /// Bare-nominal shift: a plural/mass `cat_n` → the copula kind-subject edge + raised bare-argument NPs.
-fn apply_bare_np(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
+fn apply_bare_np(
+    g: &Grammar,
+    it: &Item,
+    _span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
     g.bare_nominal_shifts(it)
 }
 
 /// Elided-`than` standard defaulting: a comparative `X / cat_pp_than` → `X` with the standard bound to
 /// the anaphoric placeholder, freshened to this span (`$anaphor$i_j`) exactly as a pronoun's hole — so
 /// the completed clause is an OPEN parse the D64 resolver fills.
-fn apply_elided_than(g: &Grammar, it: &Item, span: (usize, usize)) -> Vec<Item> {
+fn apply_elided_than(
+    g: &Grammar,
+    it: &Item,
+    span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
     let (i, j) = span;
     elided_than(it.cat(), it.sem(), &g.layer)
         .map(|(cat, sem)| Item::with_cost(cat, freshen_anaphor(&sem, &hole_base(i, j)), it.cost()))
@@ -838,20 +877,35 @@ fn apply_elided_than(g: &Grammar, it: &Item, span: (usize, usize)) -> Vec<Item> 
 /// transitive past participle → a reduced-passive `cat_mod` (`participial_lifts`). Ungated here — a
 /// composed span has no single surface to check for an adjective sibling — so the participial's cost
 /// penalty is what bounds it; the leaf gate lives in `parse::seed` (adjective-present ⇒ suppressed).
-fn apply_mod_lift(_g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
+fn apply_mod_lift(
+    _g: &Grammar,
+    it: &Item,
+    _span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
     let mut v = super::combinators::mod_lifts(it);
     v.extend(super::combinators::participial_lifts(it));
     v
 }
 
 /// Forward bounded type-raise: a name `NP` → `S/(S\NP)`.
-fn apply_raise(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
+fn apply_raise(
+    g: &Grammar,
+    it: &Item,
+    _span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
     g.raise_nps(std::slice::from_ref(it))
 }
 
 /// Fronted participial adjunct: a subject-gapped `ger` VP → a sentence pre-modifier `S/S`, its
 /// controlled-subject hole freshened to this span.
-fn apply_front_participial(g: &Grammar, it: &Item, span: (usize, usize)) -> Vec<Item> {
+fn apply_front_participial(
+    g: &Grammar,
+    it: &Item,
+    span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
     let (i, j) = span;
     front_participial(it.cat(), it.sem(), &g.layer)
         .map(|(cat, sem)| Item::with_cost(cat, freshen_anaphor(&sem, &hole_base(i, j)), it.cost()))
@@ -862,15 +916,25 @@ fn apply_front_participial(g: &Grammar, it: &Item, span: (usize, usize)) -> Vec<
 /// Reduced relative: `S[dcl,pss]\NP` → `cat_pp` with the sem carried through unchanged (both denote
 /// `Entity -> Prop`), so the existing `pp_mod` rule conjoins it into the noun's restrictor.
 /// Definite designation: a naming-refined noun → the individual it uniquely picks out. Tagged
-/// [`Combinator::Designated`], the only thing distinguishing it from a proper name downstream.
-fn apply_definite_designation(_g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
+/// [`Combinator::DerivedIndividual`], the only thing distinguishing it from a proper name downstream.
+fn apply_definite_designation(
+    _g: &Grammar,
+    it: &Item,
+    _span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
     definite_designation(it.cat())
-        .map(|(cat, sem)| Item::from_parts(cat, sem, Combinator::Designated, it.cost()))
+        .map(|(cat, sem)| Item::from_parts(cat, sem, Combinator::DerivedIndividual, it.cost()))
         .into_iter()
         .collect()
 }
 
-fn apply_reduced_relative(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
+fn apply_reduced_relative(
+    g: &Grammar,
+    it: &Item,
+    _span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
     reduced_relative(it.cat(), &g.layer)
         .map(|cat| Item::with_cost(cat, it.sem().clone(), it.cost()))
         .into_iter()

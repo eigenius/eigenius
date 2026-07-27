@@ -43,7 +43,12 @@ use super::super::rules::constructions::{distribute, distribute_object};
 /// (its sem, and — for the dependent nominal rules whose result TYPE embeds modifier meaning — its
 /// category). The result's [`Item::cost`] is the **sum** of the two inputs' costs plus the
 /// [`COMPOUND_STEP_PENALTY`] for a nominal-modification step (D63 §8.7).
-pub fn apply(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
+pub fn apply(
+    left: &Item,
+    right: &Item,
+    layer: &Arc<Layer>,
+    _rctx: super::RightContext,
+) -> Option<Item> {
     if let Some(recipe) = combinable(&left.category, &right.category, layer) {
         let it = build(recipe, left, right, layer);
         let mut cost = left.cost().saturating_add(right.cost());
@@ -505,12 +510,12 @@ enum Guard {
     /// other than the `Entity` top (D63 §5.3). Keeps close-naming apposition off a pronoun /
     /// bare-kind `cat_np(Entity)` right. Reads a category metavar, never a sem.
     ProperName(&'static str),
-    /// The named operand must NOT be a **definite designation** (`Combinator::Designated`) — a
-    /// designator is a naming TOKEN, never itself a description, so `named(x, the(Σy. named(y, d)).1)`
-    /// ("the gene named the gene named MSH2") is refused. Like [`Self::NotKindRaised`] this reads
-    /// provenance: a designation's category is a plain concretely-typed `cat_np`, so it satisfies
+    /// The named operand must NOT be a **derived individual** (`Combinator::DerivedIndividual`) — a
+    /// designator is a naming TOKEN, never a description, so `named(x, the(Σy. named(y, d)).1)` ("the
+    /// gene named the gene named MSH2") is refused. Like [`Self::NotKindRaised`] this reads provenance:
+    /// a designation's category is a plain concretely-typed `cat_np`, so it satisfies
     /// [`Self::ProperName`] and the type cannot tell it from a name.
-    NotDesignated(Operand),
+    NotDerivedIndividual(Operand),
 }
 
 /// Which operand a rule reads — a [`Guard`]'s target, or the functor side of a [`CombKind::Apply`].
@@ -539,7 +544,9 @@ impl Guard {
             Guard::NotCompoundRefined(op) => !is_compound_refined(&op.pick(left, right).cat),
             Guard::NotAdjectiveRefined(op) => !is_adjective_refined(&op.pick(left, right).cat),
             Guard::NotKindRaised(op) => op.pick(left, right).prov != Combinator::KindRaised,
-            Guard::NotDesignated(op) => op.pick(left, right).prov != Combinator::Designated,
+            Guard::NotDerivedIndividual(op) => {
+                op.pick(left, right).prov != Combinator::DerivedIndividual
+            }
             Guard::ProperName(meta) => matches!(
                 binds.get(*meta),
                 Some(Exp::EigonClass(iri)) if iri.as_str() != "urn:eigenius:lexicon:Entity"
@@ -822,7 +829,7 @@ fn other_grammar_rules() -> &'static [CatRule] {
                 guards: &[
                     Guard::ProperName("namety"),
                     Guard::NotKindRaised(Operand::Right),
-                    Guard::NotDesignated(Operand::Right),
+                    Guard::NotDerivedIndividual(Operand::Right),
                 ],
                 build: build_name,
             },
@@ -1083,7 +1090,12 @@ fn apply_group(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
 /// composition `λz. f(g(z))` with the primary functor outermost. ENF: outputs carry a composition
 /// provenance so they can't be a subsequent primary functor (the guard in `apply_combine`); a
 /// composition output is also barred here from being a primary, mirroring that guard.
-pub fn apply_core(left: &Item, right: &Item, layer: &Arc<Layer>) -> Vec<Item> {
+pub fn apply_core(
+    left: &Item,
+    right: &Item,
+    layer: &Arc<Layer>,
+    _rctx: super::RightContext,
+) -> Vec<Item> {
     let mut out = Vec::new();
     let primary_blocked = |p: Combinator| {
         matches!(
@@ -1487,7 +1499,8 @@ mod dispatch_tests {
         let head = cls("urn:eigenius:lexicon:Gene");
         let l = mk_item(n(cls("urn:eigenius:lexicon:Mmr")), modifier.clone());
         let r = mk_item(n(head.clone()), head.clone());
-        let got = apply(&l, &r, &layer()).expect("[cat_n][cat_n] → kind compound");
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("[cat_n][cat_n] → kind compound");
         let expected = sigma_cmp(
             head,
             app2_x("urn:eigenius:ontology:compound_kind", modifier),
@@ -1607,17 +1620,35 @@ mod dispatch_tests {
             cls("urn:eigenius:lexicon:Gene"),
         );
         assert!(
-            apply(&adj_mod, &gene, &layer()).is_none(),
+            apply(
+                &adj_mod,
+                &gene,
+                &layer(),
+                crate::dcg::rules::RightContext::Other
+            )
+            .is_none(),
             "adjective-refined LEFT (modifier) blocks kind_compound"
         );
         assert!(
-            apply(&gene, &adj_mod, &layer()).is_none(),
+            apply(
+                &gene,
+                &adj_mod,
+                &layer(),
+                crate::dcg::rules::RightContext::Other
+            )
+            .is_none(),
             "adjective-refined RIGHT (head) blocks kind_compound"
         );
         // A pure N-N compound still composes.
         let bare = mk_item(n(protein.clone()), protein.clone());
         assert!(
-            apply(&bare, &gene, &layer()).is_some(),
+            apply(
+                &bare,
+                &gene,
+                &layer(),
+                crate::dcg::rules::RightContext::Other
+            )
+            .is_some(),
             "pure N-N compound still composes"
         );
     }
@@ -1629,7 +1660,8 @@ mod dispatch_tests {
         let head = cls("urn:eigenius:lexicon:Project");
         let l = mk_item(np(cls("urn:eigenius:lexicon:Achilles")), name_ref.clone());
         let r = mk_item(n(head.clone()), head.clone());
-        let got = apply(&l, &r, &layer()).expect("[cat_np][cat_n] → named compound");
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("[cat_np][cat_n] → named compound");
         let expected = sigma_cmp(head, app2_x("urn:eigenius:ontology:compound", name_ref));
         assert_eq!(got.cat(), &n(expected.clone()));
         assert_eq!(got.sem(), &expected);
@@ -1677,7 +1709,8 @@ mod dispatch_tests {
         );
         let l = mk_item(n(head.clone()), head.clone());
         let r = mk_item(ct("cat_pp", vec![]), pp_sem.clone());
-        let got = apply(&l, &r, &layer()).expect("[cat_n][cat_pp] → pp modifier");
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("[cat_n][cat_pp] → pp modifier");
         let expected = sigma_cmp(
             head,
             Exp::App(Box::new(pp_sem), Box::new(Exp::Var(COMPOUND_X.into()))),
@@ -1711,7 +1744,7 @@ mod dispatch_tests {
         let r = mk_item(n(head.clone()), head.clone());
         // The direct `S[adj]\NP + cat_n` path is gone — the adjective must lift first.
         assert!(
-            apply(&l, &r, &layer()).is_none(),
+            apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other).is_none(),
             "S[adj]\\NP no longer refines a noun directly; it must lift to cat_mod"
         );
         // Lift → cat_mod (sem unchanged), then apply → the refined noun.
@@ -1723,7 +1756,13 @@ mod dispatch_tests {
             &adj_sem,
             "cat_mod carries the adjective sem unchanged"
         );
-        let got = apply(&mods[0], &r, &layer()).expect("cat_mod + cat_n → refined noun");
+        let got = apply(
+            &mods[0],
+            &r,
+            &layer(),
+            crate::dcg::rules::RightContext::Other,
+        )
+        .expect("cat_mod + cat_n → refined noun");
         let x = COMPOUND_X;
         let expected = Exp::Sig(
             Patt::Var(x.into()),
@@ -1814,7 +1853,7 @@ mod dispatch_tests {
         );
         let r = mk_item(n(refined_head), cls("urn:eigenius:lexicon:Gene"));
         assert!(
-            apply(&l, &r, &layer()).is_none(),
+            apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other).is_none(),
             "a compound-refined head is not a compound head a second time"
         );
     }
@@ -1847,7 +1886,8 @@ mod dispatch_tests {
             np(cls("urn:eigenius:lexicon:AchillesHero")),
             name_ref.clone(),
         );
-        let got = apply(&l, &r, &layer()).expect("[cat_n][proper cat_np] → naming apposition");
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("[cat_n][proper cat_np] → naming apposition");
         let sigma = sigma_cmp(
             sortal.clone(),
             app2_x("urn:eigenius:ontology:named", name_ref),
@@ -1898,8 +1938,8 @@ mod dispatch_tests {
             np(cls("urn:eigenius:lexicon:GeneOrGenome")),
             ax("urn:eigenius:lexicon:msh2_name"),
         );
-        let got =
-            apply(&l, &r, &layer()).expect("[cat_n(pl)][proper cat_np(sg)] → naming apposition");
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("[cat_n(pl)][proper cat_np(sg)] → naming apposition");
         let Some([_ty, num]) = is_ctor(got.cat(), "cat_n") else {
             panic!("the rule yields a refined common noun")
         };
@@ -1950,7 +1990,7 @@ mod dispatch_tests {
             ax("urn:eigenius:lexicon:it"),
         );
         assert!(
-            apply(&l, &r, &layer()).is_none(),
+            apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other).is_none(),
             "close-naming apposition does not fire on a bare-kind cat_np(Entity)"
         );
     }
@@ -1967,7 +2007,8 @@ mod dispatch_tests {
         );
         let l = mk_item(left_cat, prep.clone());
         let r = raised_gq(q.clone());
-        let got = apply(&l, &r, &layer()).expect("[cat_pp/NP][raised GQ] → GQ-prep PpMod");
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("[cat_pp/NP][raised GQ] → GQ-prep PpMod");
         let (x, y) = ("__pobj_x", "__pobj_y");
         let inner = Exp::Lam(
             Patt::Var(y.into()),
@@ -2001,7 +2042,8 @@ mod dispatch_tests {
         );
         let l = mk_item(left_cat, marker.clone());
         let r = raised_gq(q.clone());
-        let got = apply(&l, &r, &layer()).expect("[cat_pp_arg/NP][raised GQ] → GQ-prep ArgMarker");
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("[cat_pp_arg/NP][raised GQ] → GQ-prep ArgMarker");
         let expected_sem = Exp::App(Box::new(q), Box::new(marker));
         assert_eq!(
             got.cat(),
@@ -2024,7 +2066,8 @@ mod dispatch_tests {
         let left_cat = ct("fwd", vec![vpadj.clone(), ent()]);
         let l = mk_item(left_cat, prep.clone());
         let r = raised_gq(q.clone());
-        let got = apply(&l, &r, &layer()).expect("[VP-adjunct/NP][raised GQ] → GQ-prep VpAdjunct");
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("[VP-adjunct/NP][raised GQ] → GQ-prep VpAdjunct");
         let (x, v, sv) = ("__pobj_x", "__pobj_V", "__pobj_s");
         let applied = Exp::App(
             Box::new(Exp::App(
@@ -2067,7 +2110,8 @@ mod dispatch_tests {
             ax("urn:eigenius:lexicon:verb"),
         );
         let r = mk_item(ent_np(), ax("urn:eigenius:lexicon:subj"));
-        let got = apply(&l, &r, &layer()).expect("A/B · B → A");
+        let got =
+            apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other).expect("A/B · B → A");
         assert_eq!(got.cat(), &s_fin(), "result is the functor's result A");
         assert_eq!(
             got.sem(),
@@ -2087,7 +2131,8 @@ mod dispatch_tests {
             ct("bwd", vec![s_fin(), ent_np()]),
             ax("urn:eigenius:lexicon:vp"),
         );
-        let got = apply(&l, &r, &layer()).expect("B · A\\B → A");
+        let got =
+            apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other).expect("B · A\\B → A");
         assert_eq!(got.cat(), &s_fin());
         assert_eq!(
             got.sem(),
@@ -2111,7 +2156,8 @@ mod dispatch_tests {
             ct("fwd", vec![ent_np(), pp.clone()]),
             ax("urn:eigenius:lexicon:g"),
         );
-        let got = apply(&l, &r, &layer()).expect("A/B ∘ B/C → A/C");
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("A/B ∘ B/C → A/C");
         assert_eq!(
             got.cat(),
             &ct("fwd", vec![s_fin(), pp]),
@@ -2148,7 +2194,8 @@ mod dispatch_tests {
             n(cls("urn:eigenius:lexicon:Gene")),
             ax("urn:eigenius:lexicon:noun"),
         );
-        let got = apply(&l, &r, &layer()).expect("cat_forall · plain cat_n → forward application");
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("cat_forall · plain cat_n → forward application");
         assert_eq!(
             got.cat(),
             &np(cls("urn:eigenius:lexicon:Gene")),
@@ -2183,7 +2230,8 @@ mod dispatch_tests {
         );
         let l = mk_item(forall, ax("urn:eigenius:lexicon:det"));
         let r = mk_item(n(sigma.clone()), ax("urn:eigenius:lexicon:noun"));
-        let got = apply(&l, &r, &layer()).expect("cat_forall · refined cat_n → DetRefine");
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("cat_forall · refined cat_n → DetRefine");
         assert_eq!(
             got.cat(),
             &np(comp),

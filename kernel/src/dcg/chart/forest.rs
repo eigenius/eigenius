@@ -127,6 +127,12 @@ pub(crate) struct PNode {
     /// the result category for signature computation. Sound under index-independence: every item in
     /// the node combines identically, so any representative gives the correct edge + result `Sig`.
     pub rep: Item,
+    /// The cell's [`RightContext`](super::super::rules::RightContext) — what token follows this span.
+    /// Stored on the NODE rather than recomputed at extraction because the extractor has no token
+    /// stream, and because storing it makes it impossible for the build pass and the extraction pass to
+    /// disagree. A property of the span, hence identical for every item in the node — which is why a
+    /// rule may consult it and still be decided on `rep`.
+    pub rctx: super::super::rules::RightContext,
     pub edges: Vec<Edge>,
 }
 
@@ -145,9 +151,18 @@ impl Forest {
         }
     }
 
-    /// The node for `sig` at cell `[i][j]`, created (with representative `rep`) if absent. Returns its
-    /// [`NodeId`]. The `rep` of an existing node is kept (the first-seen representative).
-    pub fn get_or_create(&mut self, i: usize, j: usize, sig: Sig, rep: &Item) -> NodeId {
+    /// The node for `sig` at cell `[i][j]`, created (with representative `rep` and the cell's right
+    /// context) if absent. Returns its [`NodeId`]. The `rep` of an existing node is kept (the
+    /// first-seen representative); `rctx` is a function of `j` alone, so every caller for a given cell
+    /// supplies the same value.
+    pub fn get_or_create(
+        &mut self,
+        i: usize,
+        j: usize,
+        sig: Sig,
+        rep: &Item,
+        rctx: super::super::rules::RightContext,
+    ) -> NodeId {
         if let Some(&id) = self.cells[i][j].get(&sig) {
             return id;
         }
@@ -155,6 +170,7 @@ impl Forest {
         self.nodes.push(PNode {
             span: (i, j),
             rep: rep.clone(),
+            rctx,
             edges: Vec::new(),
         });
         self.cells[i][j].insert(sig, id);
@@ -459,10 +475,28 @@ mod tests {
             vec![cls("urn:eigenius:lexicon:Gene"), ctor("sg", vec![])],
         ));
         let mut f = Forest::new(1);
-        let id_a = f.get_or_create(0, 0, node_sig(&a), &a);
-        let id_b = f.get_or_create(0, 0, node_sig(&b), &b);
+        let id_a = f.get_or_create(
+            0,
+            0,
+            node_sig(&a),
+            &a,
+            crate::dcg::rules::RightContext::Other,
+        );
+        let id_b = f.get_or_create(
+            0,
+            0,
+            node_sig(&b),
+            &b,
+            crate::dcg::rules::RightContext::Other,
+        );
         assert_eq!(id_a, id_b, "same Sig ⇒ same node");
-        let id_n = f.get_or_create(0, 0, node_sig(&noun), &noun);
+        let id_n = f.get_or_create(
+            0,
+            0,
+            node_sig(&noun),
+            &noun,
+            crate::dcg::rules::RightContext::Other,
+        );
         assert_ne!(id_a, id_n, "different cat_shape ⇒ different node");
         f.push_edge(id_a, Edge::Leaf(a));
         f.push_edge(id_a, Edge::Leaf(b));
