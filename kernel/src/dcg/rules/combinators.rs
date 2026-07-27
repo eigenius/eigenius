@@ -637,6 +637,14 @@ fn refine_rules() -> &'static [CatRule] {
                     Guard::NotCompoundRefined(Operand::Right),
                     Guard::NotAdjectiveRefined(Operand::Right),
                     Guard::NotAdjectiveRefined(Operand::Left),
+                    // A PP-postmodified noun is not a PRE-nominal modifier: English puts the PP after
+                    // the head it modifies, so "[mutations in the MMR] genes" would need the PP to sit
+                    // between modifier and head. Same adjacency argument as
+                    // [`super::constructions::appose_group`]'s, which has carried it since 2026-07-26;
+                    // this rule did not, and the pile it built was the reference page's germline unit's
+                    // last invalid family — `[[germline mutations in the MMR] genes] MSH2`, 24 of its
+                    // 25 skeletons.
+                    Guard::NotPpRefined(Operand::Left),
                 ],
                 build: refine_kind_compound,
             },

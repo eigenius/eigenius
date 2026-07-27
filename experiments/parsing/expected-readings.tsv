@@ -2,6 +2,30 @@
 #   sentence <TAB> skeleton (sense-erased) <TAB> note
 # The gate asserts each unit still CONTAINS its skeleton among its readings — robust to
 # added ambiguity, unlike encoded-count. A MISS = a fundamentally-correct reading was lost.
+#
+# EXPECTED HIT RATE IS 44-45 OF 45, NOT 45/45 (measured 2026-07-26; accepted for now, REVISIT once
+# the remaining pins are determined and more invalid skeletons are gone). With a LIVE reranker, ~1
+# pin fails per draw and WHICH ONE VARIES. FOUR live draws on the same lexicon scored 44, 44, 43, 44
+# — 45/45 did not come up once, and one draw lost TWO pins. The misses were «These classifications
+# were highly concordant…» (draws 1 and 4), «Synthetic lethality is an interaction…» (draw 2), and two
+# at once (draw 3). The 45/45 recorded earlier on the OLD lexicon was itself a single sample and
+# should not be read as a stable property. Every failing pin's structure stayed REACHABLE: the
+# concordant one is present in
+# cap-only on both lexicons (12 skeletons), the synthetic-lethality one in the OTHER live draw — so
+# these are sense-ELIMINATION misses, not lost readings. Do NOT repin (that would bake in the wrong
+# analysis: the synthetic-lethality miss differs from its pin only by `§(G#2)` vs `gt(§(G#2), §)`,
+# i.e. `genetic` read as GRADABLE instead of intersective) and do NOT resample to green (cherry-
+# picking). Cause is `SENSE_CAP=2` truncating by emission order over a wide sense space — see the
+# long note in `kernel/src/dcg/parse/seed.rs`, which records two fixes already measured and rejected.
+#
+# METHOD NOTE from the same measurement: across the four draws SKELETONS are stable (307/315/310/309,
+# range 2.6%) but READINGS are not (1149-1435, 25%). Compare readings only within one fixed `--replay`
+# recording; across recordings, compare skeletons.
+#
+# SELECTING a draw that scores 45/45 was considered and is NOT available (none of four did). Note for
+# whoever tries it: picking a recording BY its pin score biases the artifact toward passing, so that
+# recording can no longer detect sense-RANKING regressions — acceptable only if the A/B in question is
+# structural (skeletons), and worth saying out loud in whatever adopts it.
 # VERIFIED 2026-07-22: each entry's reading was checked via English gloss or manual
 # λ-term dissection. Two originally-seeded units were ENCODED on a WRONG reading and
 # REMOVED: "MSI is associated with…" ('associated with' reified as UMLS C0332281 into a
