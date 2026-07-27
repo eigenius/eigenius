@@ -102,6 +102,25 @@ impl Parser {
             if surface_is_determiner {
                 entries.retain(|e| e.in_lexicon.is_none() || !is_adjective_cat(e.item.cat()));
             }
+            // **A `-s` surface cannot take a PLURAL subject** (verb-side number refinement). Morphology
+            // reduces `affects` to `affect`, and the lemma's entry is the BASE form, whose finite
+            // category encodes agreement with a plural/non-3sg subject — so seeding it at a 3sg span
+            // let `The genes affects cells.` parse. Traced 2026-07-26: the noun was correctly `pl`
+            // throughout and the verb supplied
+            // `fwd(bwd(cat_s(dcl, fin), cat_np(Entity, pl)), …)` alongside the correct `sg` one.
+            //
+            // The nominal counterpart of this is [`with_noun_num`], which REWRITES an underspecified
+            // `num_any`; a verb's subject number is already concrete in the lexicon, so the base-form
+            // entry is simply the wrong entry for this surface and is dropped rather than restamped.
+            //
+            // Deliberately keyed on the `-s` detachment alone
+            // ([`crate::dcg::regular_plural_stem`], shared with Morphy and the UMLS importer), NOT on
+            // "the candidate was reduced". The importer emits base + gerund/passive participles only,
+            // so a PAST-tense surface (`affected`, `ran`) is reachable ONLY through its lemma's finite
+            // entry; dropping on any reduction would gap every past-tense verb.
+            if crate::dcg::regular_plural_stem(&s_lc).as_deref() == Some(c.as_str()) {
+                entries.retain(|e| !has_plural_finite_subject(e.item.cat()));
+            }
             if entries.is_empty() {
                 continue;
             }
@@ -232,6 +251,24 @@ impl Parser {
             // is this bug.) INERT until a pair is actually merged: distinct-lexicon senses carry
             // different class IRIs, so `(cat, sem)` differs and nothing collapses. O(n²) over one
             // lemma's (already cap-bounded) senses.
+            // **The cap is a fragile equilibrium, and removing INVALID entries exposes that** (measured
+            // 2026-07-26). The UMLS importer began pruning inflected duplicate forms
+            // (`convert::is_inflection_of_sibling`) — 52 505 entries a lemma-keyed lexicon should never
+            // have held. Cap-only, that moved exactly three units on the reference page: the germline
+            // unit 73 -> 41 (the intended effect — a plural surface stopped carrying a singular
+            // reading), and TWO units UP, 18 -> 52 and 40 -> 60, for a net +22.
+            //
+            // The rise is displacement, not new grammar. `entries_for("models")` and
+            // `entries_for("model")` draw on different concepts, and items compete for this cap per
+            // candidate and for `CELL_BEAM` per cell; removing entries frees room that refills with a
+            // different category — the added skeletons pair a 2-place predicate with a ONE-place one,
+            // i.e. the singular's VERB reading (`model`, `arrest`) surfacing where the plural form's
+            // noun-only entries used to sit. Those two units were encoding correctly only because the
+            // invalid entries happened to occupy the slots.
+            //
+            // So it is not an argument against pruning invalid forms — it is a second witness that the
+            // cap truncates by a criterion (emission order) that carries no linguistic content. See the
+            // long note above for two fixes already measured and rejected; this is the same shape.
             dedup_same_concept(&mut entries);
             // Morphological number (D63 §5.1, the Slice-1 deferral): a surface
             // that morphology *reduced* to this lemma was inflected (plural,
@@ -933,6 +970,27 @@ pub(super) fn sense_cap_key(
 /// Only a `cat_n(T, num_any)` item is refined (to `cat_n(T, <num>)`); verbs,
 /// names, and multiword leaves pass through unchanged. The `lexicon:Num` decl is
 /// reused from the existing `num_any` ctor, so no decl lookup is needed.
+/// Whether a category takes a **plural subject on a FINITE clause** — it contains the subject slot
+/// `bwd(cat_s(_, fin), cat_np(_, pl))` at any depth, so it matches an intransitive VP as well as a
+/// transitive verb's `fwd(VP, obj)` and any further-curried frame. A BASE-form VP is
+/// `bwd(cat_s(_, bse), cat_np(_, num_any))` and never matches, which is what keeps the check off
+/// infinitives and participles.
+fn has_plural_finite_subject(cat: &Exp) -> bool {
+    if let Some([res, arg]) = is_ctor(cat, "bwd") {
+        let finite = matches!(is_ctor(res, "cat_s"),
+            Some([_, Exp::InductiveCtor(_, f, _)]) if f == "fin");
+        let plural_subj = matches!(is_ctor(arg, "cat_np"),
+            Some([_, Exp::InductiveCtor(_, n, _)]) if n == "pl");
+        if finite && plural_subj {
+            return true;
+        }
+    }
+    match cat {
+        Exp::InductiveCtor(_, _, args) => args.iter().any(has_plural_finite_subject),
+        _ => false,
+    }
+}
+
 pub(super) fn with_noun_num(it: &Item, num_name: &str) -> Item {
     if let Exp::InductiveCtor(decl, name, args) = it.cat() {
         if name == "cat_n" && args.len() == 2 {

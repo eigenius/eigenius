@@ -91,7 +91,7 @@ pub use glossary::{
     is_common_noun, named_entity_augmentation, AbbreviationBinding,
 };
 pub use item::{Combinator, Cost, Item};
-pub use lemmatizer::{Identity, Lemmatizer, Pos};
+pub use lemmatizer::{regular_plural_stem, Identity, Lemmatizer, Pos};
 pub use lexicon::{
     entry_to_item, gate_entry, resolve_lexicon_profile, resolve_sem, resolve_sem_value, LexEntry,
     LexicalIndex, LexicalLookup,

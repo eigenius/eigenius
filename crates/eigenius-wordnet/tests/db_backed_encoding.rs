@@ -45,7 +45,7 @@ use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::{
     abbreviation_resources, extract_abbreviations, glossary_resources, ground_abbreviation,
     is_nonprose, pretty_term, segment_sentences, tokenize, AbbreviationBinding, Identity,
-    Lemmatizer, LexicalIndex, LexiconAugmentation, Parser,
+    Lemmatizer, LexicalIndex, LexicalLookup, LexiconAugmentation, Parser, Pos,
 };
 use eigenius_kernel::layer::{resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -5621,4 +5621,208 @@ fn probe_cross_kind_np_coordination() {
             }
         );
     }
+}
+
+/// PROBE — does a PLURAL surface carry a spurious SINGULAR reading?
+///
+/// `dcg::parse::seed` refines a common noun's number per candidate lemma: `num = if *c == s_lc {sg}
+/// else {pl}` — "a surface equal to the lemma is singular". Sound for a lemma-keyed lexicon; UMLS
+/// `MRCONSO.STR` holds SURFACE strings, so a concept ships the inflected "genes" as a form and the
+/// identity lemma then yields `sg` for a plural surface. Traced 2026-07-26: `cat_n(n05436752, sg)`
+/// reaching the `name` rule for "genes", which is what let a plural classifier take a single designator
+/// (classifier capture) after `Guard::NotPlural` was supposed to have stopped it.
+///
+/// Measured by AGREEMENT, which needs no lexicon introspection: `The X affect cells.` must parse for a
+/// plural surface and `The X affects cells.` must NOT. A nonzero singular column is the spurious
+/// reading; `sibling?` says whether the singular form is also a surface of the same concept, i.e.
+/// whether `convert::is_inflection_of_sibling` will drop the plural entry at import.
+///
+/// **BASELINE, snapshot `wordnet-umls-aligned-2026-07-26-preps-reseed`: 19 of 19 surfaces carry a
+/// spurious singular reading.** Not a "genes" quirk — universal on the page's vocabulary. Seven rows
+/// have EQUAL `pl`/`sg` counts (cells 4/4, regions 16/16, lineages 8/8, vulnerabilities 8/8, projects
+/// 8/8, counterparts 8/8, syndromes 4/4), the signature of one entry set duplicated under both numbers,
+/// which is the identity-lemma route. `genes` 4/2 and `mutations` 8/2 have extra plural-only routes on
+/// top. The alignment compounds it: `merges.json` was rebuilt to 38 397 merges specifically to add "the
+/// plural surfaces", so those entries are aligned and live.
+///
+/// **The mass confound, resolved against the list the importer itself uses**
+/// (`references/wiktionary/uncountable-nouns.txt`, 32 123 entries). A `mass` reading also takes singular
+/// agreement (`feat_meets(mass, sg)`), so a nonzero `sg` column could in principle be legitimate. It is
+/// not, in either group:
+///
+/// - **11 of 19 heads are NOT uncountable** — gene, cell, syndrome, region, microsatellite, biomarker,
+///   response, tumour, defect, project, counterpart. No mass reading exists, so the singular is purely
+///   the inflected duplicate.
+/// - **8 are** (mutation, line, cancer, therapy, set, lineage, protein, vulnerability), and that does not
+///   excuse them either: [`convert::push_entries`] emits the additive `cat_n(C, mass)` PER FORM, so the
+///   *plural* form carries a mass entry as well — and a plural surface is not mass. Same root cause;
+///   [`convert::is_inflection_of_sibling`] takes both, because the skip precedes `emit_entry`.
+///
+/// So after the reseed every `sg` column should go to 0. A row that does NOT is a plural-only concept
+/// with no singular sibling to fall back on — the residual the importer gate cannot reach by
+/// construction, and what decides whether anything further is needed.
+#[test]
+#[ignore = "DB-backed diagnostic; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn probe_plural_surface_singular_reading() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index(&head);
+    // The page's plural nouns, plus the two that drove the germline defect.
+    const PLURALS: &[&str] = &[
+        "genes",
+        "mutations",
+        "cells",
+        "cell lines",
+        "cancers",
+        "syndromes",
+        "regions",
+        "microsatellites",
+        "biomarkers",
+        "therapies",
+        "responses",
+        "data sets",
+        "lineages",
+        "proteins",
+        "tumours",
+        "defects",
+        "vulnerabilities",
+        "projects",
+        "counterparts",
+    ];
+    // Both columns are READING COUNTS for the two frames, which differ only in verb inflection, so the
+    // verb forces subject-number agreement. Only zero-vs-nonzero is meaningful: the magnitudes are
+    // inflated by unrelated ambiguity in the frame (senses of `cells`, the determiner, the verb), so a
+    // count moving between snapshots says nothing on its own.
+    eprintln!("{:<18} {:>8} {:>8}   verdict", "surface", "pl", "sg");
+    let (mut spurious, mut gapped, mut clean) = (0usize, 0usize, 0usize);
+    for p in PLURALS {
+        let pl = index.parse(&format!("The {p} affect cells."), &lem).len();
+        let sg = index.parse(&format!("The {p} affects cells."), &lem).len();
+        // `pl == 0` is a COVERAGE FAILURE, not a pass: the plural frame must parse. Reporting 0/0 as
+        // "ok" is how a regression gets read as a fix — it labelled `microsatellites`/`biomarkers`
+        // clean on 2026-07-26 when in fact they had stopped parsing entirely.
+        let verdict = match (pl, sg) {
+            (0, _) => {
+                gapped += 1;
+                "GAP — the plural frame does not parse at all"
+            }
+            (_, 0) => {
+                clean += 1;
+                "ok — plural only, as it should be"
+            }
+            _ => {
+                spurious += 1;
+                "SPURIOUS singular reading"
+            }
+        };
+        eprintln!("{p:<18} {pl:>8} {sg:>8}   {verdict}");
+    }
+    eprintln!("\n{spurious} spurious singular, {gapped} GAPPED (coverage loss), {clean} correct");
+    assert_eq!(
+        gapped, 0,
+        "a plural surface that no longer parses is a coverage regression, not a result"
+    );
+}
+
+/// PROBE — WHERE does a plural surface's singular reading come from?
+///
+/// [`probe_plural_surface_singular_reading`] establishes the symptom: 19 of 19 plural surfaces admit a
+/// singular subject. The obvious mechanism — a UMLS entry keyed at the inflected form, which
+/// `lookup_span` then stamps `sg` because the candidate lemma equals the surface — was TESTED AND
+/// FALSIFIED on 2026-07-26: pruning exactly those entries in the importer left 17 of 19 spurious (and
+/// gapped two surfaces). So the model was wrong and this replaces it with the entry set itself.
+///
+/// For each surface it prints, per candidate lemma, every entry [`LexicalIndex::entries_for`] returns
+/// with its category (the `num` is the second argument of `cat_n`/`cat_np`) and its owning lexicon.
+/// `entries_for` keys on LOWERCASED forms, so a case mismatch cannot explain a miss.
+///
+/// Read it as: an entry listed under a candidate EQUAL to the surface is stamped `sg`; one under a
+/// shorter candidate is stamped `pl`. A surface with entries under the plural candidate is the symptom's
+/// source; one with none, yet still admitting `sg`, means the singular arrives some other way entirely.
+#[test]
+#[ignore = "DB-backed diagnostic; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn probe_where_the_singular_reading_comes_from() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = LexicalIndex::build(Arc::clone(&head));
+    for surface in ["cancers", "biomarkers", "genes", "cells", "microsatellites"] {
+        eprintln!("\n===== {surface} =====");
+        // The candidate set `lookup_span` builds: the raw surface, every validated lemma, and the
+        // crude plural stem. Reproduced here because the seeder's own helper is private.
+        let mut cands: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::from([surface.to_string()]);
+        for pos in [Pos::Noun, Pos::Verb, Pos::Adj, Pos::Adv] {
+            for l in lem.lemmas(surface, pos) {
+                cands.insert(l);
+            }
+        }
+        if let Some(stem) = lem.regular_plural_stem(surface) {
+            cands.insert(stem);
+        }
+        for c in &cands {
+            let entries = index.entries_for(c);
+            let stamped = if c == surface { "sg" } else { "pl" };
+            eprintln!(
+                "  candidate {c:<20} stamped {stamped}   {} entr(ies)",
+                entries.len()
+            );
+            for e in entries.iter().take(6) {
+                eprintln!(
+                    "      {:<52} {}",
+                    pretty_term(e.item.cat()),
+                    e.in_lexicon
+                        .as_ref()
+                        .map(|i| i.as_str().to_string())
+                        .unwrap_or_else(|| "<untagged>".into())
+                );
+            }
+            if entries.len() > 6 {
+                eprintln!("      … {} more", entries.len() - 6);
+            }
+        }
+    }
+}
+
+/// CONTROL — is subject–verb NUMBER agreement enforced at all in these frames?
+///
+/// [`probe_plural_surface_singular_reading`] assumes `The X affects …` vs `The X affect …` discriminates
+/// a singular from a plural subject. That assumption was never tested, and the entry-set introspection
+/// contradicts the readings it produced (a surface with ZERO entries at the plural candidate still
+/// admitted the singular frame). If a SINGULAR subject also parses with the PLURAL verb, the frames are
+/// not measuring agreement, and every number conclusion drawn from them is void.
+#[test]
+#[ignore = "DB-backed diagnostic; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn probe_agreement_frames_actually_discriminate_number() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index(&head);
+    eprintln!(
+        "{:<12} {:>10} {:>10}   (want: sg-subj parses only `affects`)",
+        "subject", "affect", "affects"
+    );
+    for (label, subj) in [
+        ("singular", "gene"),
+        ("singular", "cell"),
+        ("plural", "genes"),
+        ("plural", "cells"),
+    ] {
+        let pl_v = index
+            .parse(&format!("The {subj} affect cells."), &lem)
+            .len();
+        let sg_v = index
+            .parse(&format!("The {subj} affects cells."), &lem)
+            .len();
+        eprintln!("{subj:<12} {pl_v:>10} {sg_v:>10}   {label}");
+    }
+    // The decisive cell: a singular subject with a PLURAL verb must not parse.
+    let bad = index.parse("The gene affect cells.", &lem).len();
+    eprintln!("\n`The gene affect cells.` (sg subject, pl verb) → {bad} reading(s)");
+    assert_eq!(
+        bad, 0,
+        "the frames do not discriminate number — `probe_plural_surface_singular_reading` measures verb \
+         ambiguity, not agreement, and its results are void"
+    );
 }

@@ -194,3 +194,25 @@ is its job.
     not carry SAB; adding it would let the importer refuse an administrative-source atom on a
     common-word surface without curating prefixes. Entity-tagged SNOMED concepts a real noun carries
     (`(finding)`, `(procedure)`, `(substance)`) are deliberately left in — they are genuine senses.
+
+## `merges-lemma-keyed.json` — a DERIVED artifact (2026-07-26)
+
+`merges.json` stays the recorded adjudication: 38 389 LLM verdicts, never hand-edited. This file is
+mechanically derived from it and regenerable; it is **not** a second source of truth.
+
+**Filter:** drop a merge whose `surface` is a regular English plural (`-ies→-y`, `-s` excluding
+`-ss`/`-us`/`-is`) of ANOTHER surface merged for the SAME `cui`. 38 389 → **30 776** (7 613 dropped).
+
+**Why.** The lexicon is lemma-keyed and WordNet honours that by construction, but UMLS `MRCONSO.STR`
+holds surface strings, so plurals ship as forms. On 2026-07-12 `merges.json` was deliberately grown
+26 690 → 38 389 *to add those plural surfaces*, and 24% of the merges are now inflected forms. Once the
+importer prunes inflected duplicates (`convert::is_inflection_of_sibling`) those merges match no entry
+in the base chain and become no-ops — silent dead weight that also makes the run's "entries redefined"
+count stop meaning what it used to.
+
+**Scoped WITHIN one cui, deliberately.** The sibling is the evidence that the surface really is an
+inflection. Without it the crude rule is unreliable: the no-sibling group is dominated by non-plurals
+(`aids`→`aid`, `acoustics`→`acoustic`, `nervus abducens`, `acanthosis nigricans`), so those merges are
+left ALONE rather than corrected. Correcting them would rewrite `aids` to `aid`.
+
+**Regenerate** with the filter above over `merges.json`; do not edit either file by hand.

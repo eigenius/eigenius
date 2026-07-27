@@ -104,6 +104,12 @@ pub struct Report {
     /// Content entries skipped because the `(cui, form)` atom is a junk case-collision in the
     /// [`DropSet`] (`gENE`) — a mangled acronym folding onto a common word (D63 alignment).
     pub junk_skipped: usize,
+    /// Content entries skipped because the surface is a regular INFLECTION of another form of the same
+    /// concept ("genes" beside "gene") — [`is_inflection_of_sibling`]. The lexicon is lemma-keyed and the
+    /// lemmatizer reaches the concept from the plural via the singular entry, so the inflected entry is
+    /// redundant; keeping it made the parser read a plural surface as SINGULAR (`seed`'s
+    /// surface-equals-lemma rule) and licensed a singular classifier for "genes".
+    pub inflected_skipped: usize,
     /// Common-noun entries withheld because the concept's semantic types are entirely NON-CONTENT
     /// ([`NON_CONTENT_TUIS`]) — a relation/idea/qualifier reification (`And` C1515981, `Associated
     /// with` C0332281), not a thing. The concept CLASS still ships; only the `cat_n` entry is withheld.
@@ -339,6 +345,30 @@ fn is_grammatical_surface(form: &str) -> bool {
         || eigenius_kernel::dcg::closed_class::is_closed_class_surface(&f)
 }
 
+/// Whether `form` is a **regular inflection of another form of the same concept** — "genes" beside
+/// "gene". Uses the shared detachment rule ([`eigenius_kernel::dcg::regular_plural_stem`]) so the gate
+/// removes exactly the surfaces the lemmatizer can already reach from the sibling, case-insensitively.
+///
+/// UMLS `MRCONSO.STR` holds SURFACE strings, plurals included, while the lexicon is lemma-keyed and
+/// WordNet honours that by construction. Emitting an inflected form as a lemma-equivalent entry with
+/// `num_any` made the parser's number heuristic ("a surface equal to the lemma is singular",
+/// `dcg::parse::seed`) infer SINGULAR for "genes" — which is sound for a lemma-keyed lexicon and wrong
+/// only because this importer broke that assumption. Dropping the entry restores the assumption instead
+/// of making the parser compensate.
+///
+/// **Scoped WITHIN one concept, which is what makes it safe.** The sibling must be present, so a concept
+/// whose only form is plural ("Vital Signs") keeps it and is never lost. It also sidesteps the exception
+/// class a parser-side rule would have to adjudicate: `species` is untouched because no concept of it
+/// carries a sibling `specie`.
+fn is_inflection_of_sibling(form: &str, forms: &[String]) -> bool {
+    let Some(stem) = eigenius_kernel::dcg::regular_plural_stem(form) else {
+        return false;
+    };
+    forms
+        .iter()
+        .any(|other| other.trim().to_lowercase() == stem)
+}
+
 fn push_entries(
     buf: &mut String,
     cui: &str,
@@ -371,6 +401,13 @@ fn push_entries(
         // covers the word (every dropped surface is a WordNet lemma). The concept class stays.
         if is_dropped(drops, cui, form) {
             rep.junk_skipped += 1;
+            continue;
+        }
+        // Inflected duplicate ("genes" beside "gene"): the lexicon is lemma-keyed, and the lemmatizer
+        // reaches this concept from the plural through the singular sibling's entry
+        // ([`is_inflection_of_sibling`]).
+        if is_inflection_of_sibling(form, forms) {
+            rep.inflected_skipped += 1;
             continue;
         }
         emit_entry(buf, cui, i, "", form, &cat, &sem_type);
@@ -486,6 +523,54 @@ pub fn render_document(
 mod tests {
     use super::*;
     use crate::rrf::{Concept, SemanticType};
+
+    /// The inflected-form QC gate ([`is_inflection_of_sibling`]). UMLS ships surface strings, the
+    /// lexicon is lemma-keyed, and an inflected entry made the parser read a plural surface as singular.
+    #[test]
+    fn inflected_forms_are_dropped_only_when_a_singular_sibling_exists() {
+        let gene = vec!["gene".to_string(), "genes".to_string(), "Genes".to_string()];
+        assert!(
+            is_inflection_of_sibling("genes", &gene),
+            "the plural is redundant beside its singular sibling"
+        );
+        assert!(
+            is_inflection_of_sibling("Genes", &gene),
+            "case-insensitive — UMLS varies capitalisation across atoms"
+        );
+        assert!(
+            !is_inflection_of_sibling("gene", &gene),
+            "the singular is the form the lexicon must keep"
+        );
+        // -ies → -y detachment.
+        let vuln = vec!["vulnerability".to_string(), "vulnerabilities".to_string()];
+        assert!(is_inflection_of_sibling("vulnerabilities", &vuln));
+
+        // SAFETY 1 — a concept whose ONLY form is plural keeps it, so no concept is lost.
+        let signs = vec!["Vital Signs".to_string()];
+        assert!(
+            !is_inflection_of_sibling("Vital Signs", &signs),
+            "no singular sibling ⇒ the plural is this concept's only surface and must survive"
+        );
+        // SAFETY 2 — the exception class a parser-side rule would have had to adjudicate never arises,
+        // because the sibling is not there.
+        for solo in [
+            vec!["species".to_string()],
+            vec!["series".to_string()],
+            vec!["analysis".to_string()],
+            vec!["virus".to_string()],
+            vec!["process".to_string()],
+        ] {
+            assert!(
+                !is_inflection_of_sibling(&solo[0], &solo),
+                "{} must not be treated as an inflection",
+                solo[0]
+            );
+        }
+        // A plural whose sibling belongs to a DIFFERENT concept is not visible here — the gate only
+        // ever sees one concept's forms, which is what bounds it.
+        let other = vec!["genes".to_string()];
+        assert!(!is_inflection_of_sibling("genes", &other));
+    }
 
     fn werner_subset() -> Subset {
         Subset {
