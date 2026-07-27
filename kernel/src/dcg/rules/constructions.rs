@@ -535,6 +535,29 @@ pub fn coordinate_np(
             (lt, vec![l_member])
         }
     };
+    // **A join at the `lexicon:Entity` TOP is not evidence of comparability, and refusing it is ONE
+    // SENTENCE away from being correct** (measured 2026-07-26, reverted for coverage).
+    //
+    // Conjuncts sharing a semantic type join at THAT type — `CUI -> TUI` edges exist — so a ⊤ join
+    // means the two share nothing narrower. That is how "Germline mutations in the MMR genes MSH2,
+    // MSH6, PMS2 or MLH1 cause Lynch syndrome." coordinated a Germ-Line Mutation with three PROTEINS
+    // at clause level, the last invalid family on that unit.
+    //
+    // Refusing a ⊤ join here scored, against the adopted recording:
+    //   germline unit   9 -> 1   — ONLY the correct reading survives
+    //   total-skeletons 281 -> 272,  encoded 10 -> 11
+    //   grammar-gap     0 -> 1   ← the blocker, and it is exactly ONE unit
+    //
+    // The single casualty is the case [`np_conjunct`] already documents: "We hypothesized that MSI and
+    // MMR deficiency may create vulnerabilities." — a phenomenon coordinated with a finding, which is
+    // legitimate English and genuinely shares nothing narrower than `Entity` in this lexicon.
+    //
+    // So this is NOT "blocked on importing the UMLS semantic network". It is one named, tractable
+    // knowledge gap: give `MSI` and `MMR deficiency` (or their semantic types) a common ancestor below
+    // the top, and the refusal becomes shippable — worth ~9 skeletons and one `encoded` on this page,
+    // and it removes a whole class of cross-kind coordination noise. Mind the 2026-07-11 lesson
+    // (`d63-wordnet-umls-concept-unification.md` §2): lattice edges added wholesale broke parses and
+    // were reverted, so the edge wanted here is a targeted one, not the ISA tree.
     let c = common_super(&lt, &rt, layer)?;
     let mut all = members;
     all.push(r_member);
