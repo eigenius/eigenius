@@ -349,36 +349,38 @@ pub fn coordinate_mod(
 /// form, via [`generalized_coord`]). Needs ≥2 members. Returns `(BaseCat, folded_sem)`; `None` for an
 /// ill-formed list or an unresolvable operator. Realized as a unary shift in both CKY paths (packable).
 ///
-/// **KNOWN BUG — the `conn_list` arm below defaults to conjunction, and that default is wrong for a
-/// comma-list PREFIX** (diagnosed 2026-07-26, not yet fixed; the arm is deliberately left in place
-/// because removing it costs coverage — see below). The comma is polarity-NEUTRAL by
-/// [`LIST_CONN`]'s own specification and inherits the list's final explicit connective, so
-/// `A, B, C or D` is a four-way `∨`. The chart offers every split, so this default lets a comma-only
-/// PREFIX fold as `∧` and then coordinate with the trailing `or` — `Or(And(A, B), D)`, a connective the
-/// surface never supplied, in a list that had already stated which one it was. On the reference page's
-/// germline unit that is 52 of 192 skeletons (28 with one `Or` node, 24 with two, where four members
-/// demand three).
+/// **A comma list folds only when it is COMPLETE** (2026-07-26), which is what `rctx` decides.
 ///
-/// Three routes were measured, and only the third can work:
+/// The comma is polarity-NEUTRAL by [`LIST_CONN`]'s specification and inherits the list's final
+/// explicit connective, so `A, B, C or D` is a four-way `∨`. This arm used to default an unfinalized
+/// `conn_list` to conjunction unconditionally, and since the chart offers every split, a comma-only
+/// PREFIX could fold as `∧` and then coordinate with the trailing `or` — `Or(And(A, B), D)`, a
+/// connective the surface never supplied, in a list that had already said which one it was. That was 52
+/// of the germline unit's skeletons when first measured.
 ///
-/// - **Delete the arm** (and `group_conn_op`'s): removes exactly those 52 — page 507 → 454 skeletons,
-///   germline 192 → 140, every survivor a proper four-way `Or`, encoded 9 → 10, grammar-gap 0, 44/44
-///   pins. But it breaks ASYNDETIC coordination, which the suite pins deliberately:
-///   `comma_list_coordination_parses` (`A, B affect X`) and the packed/unpacked oracle's
-///   `HeLa, BRCA1 affect HeLa` both fail. Conjunction is the RIGHT reading for a complete asyndetic
-///   list and the wrong one for a prefix, so the arm cannot simply go.
-/// - **Resolve the comma's connective in [`super::registry`]'s coordination trigger**: inert. The
-///   trigger sees one cell, and `MSH2 , MSH6` is built in a cell that ends before the `or`. Measured
-///   byte-identical per unit. Widening the scan to the sentence mis-inherits ("A, B affect X or Y").
-/// - **Resolve it in a seed-time pass over the token stream**, where the whole sentence AND the lexical
-///   POS candidates are both available, so the scan can stop at the end of the nominal list. Each comma
-///   then carries a resolved connective, `conn_list` means *asyndetic* rather than *undecided*, and
-///   this arm becomes correct instead of a guess. That is the fix; it is a front-end change, not a
-///   local one, which is why it is recorded here rather than half-done.
+/// Neither obvious repair works, and both were tried:
+///
+/// - **Deleting the arm** removes those readings but breaks ASYNDETIC coordination, which the suite
+///   pins deliberately: `comma_list_coordination_parses` (`A, B affect X`) and the packed/unpacked
+///   oracle's `HeLa, BRCA1 affect HeLa`. Conjunction is the RIGHT reading for a complete asyndetic list.
+/// - **Resolving the comma's inherited connective in the coordination trigger** is inert: the trigger
+///   sees one CELL, and `MSH2 , MSH6` is built in a cell that ends before the `or`. Measured
+///   byte-identical; widening the scan to the sentence mis-inherits ("A, B affect X or Y").
+///
+/// The distinction the two cases actually turn on is COMPLETENESS, not inheritance, and that is
+/// span-local: a list is final iff no comma or coordinator follows its cell
+/// ([`super::RightContext::list_is_final`]). `A, B` of `A, B, C or D` is followed by `,` and does not
+/// fold; `A, B` of `A, B affect X` is followed by `affect` and folds as `∧`. Both pinned asyndetic
+/// tests keep passing, which is the check that killed the earlier attempts.
 ///
 /// Attributive MODIFIER coordination is unaffected either way: it folds union-`Or` over the restrictors
 /// without consulting `conn` at all (D63 §6, the `cat_mod` arm below).
-pub fn complete_coord(coord_cat: &Exp, coord_sem: &Exp, layer: &Arc<Layer>) -> Option<(Exp, Exp)> {
+pub fn complete_coord(
+    coord_cat: &Exp,
+    coord_sem: &Exp,
+    layer: &Arc<Layer>,
+    rctx: super::RightContext,
+) -> Option<(Exp, Exp)> {
     let [base_cat, conn] = is_ctor(coord_cat, "cat_coord")? else {
         return None;
     };
@@ -402,8 +404,11 @@ pub fn complete_coord(coord_cat: &Exp, coord_sem: &Exp, layer: &Arc<Layer>) -> O
         return Some((base_cat.clone(), body));
     }
     let op_iri = match conn_name_of(conn)? {
-        "conn_and" | "conn_list" => "urn:eigenius:logic:And",
+        "conn_and" => "urn:eigenius:logic:And",
         "conn_or" => "urn:eigenius:logic:Or",
+        // A comma list folds as conjunction only when it is COMPLETE. A prefix of a list that
+        // continues has no connective at all — see the `rctx` discussion above.
+        "conn_list" if rctx.list_is_final() => "urn:eigenius:logic:And",
         _ => return None,
     };
     let denote = denote_cat(base_cat).ok()?;
@@ -454,17 +459,19 @@ fn group_members(sem: &Exp) -> Option<Vec<Exp>> {
 /// A neutral [`LIST_CONN`] group (`conn_list`) has **no operator** — it is an UNFINALIZED list, and
 /// this returns `None` so nothing can consume it. See [`complete_coord`] for why the former
 /// default-to-conjunction was a bug rather than a fallback.
-fn group_conn_op(group_cat: &Exp) -> Option<&'static str> {
+fn group_conn_op(group_cat: &Exp, rctx: super::RightContext) -> Option<&'static str> {
     let [_c, conn, _num] = is_ctor(group_cat, "cat_group")? else {
         return None;
     };
     match conn {
         Exp::InductiveCtor(_, n, _) if n == "conn_and" => Some("urn:eigenius:logic:And"),
         Exp::InductiveCtor(_, n, _) if n == "conn_or" => Some("urn:eigenius:logic:Or"),
-        // An ASYNDETIC list (no coordinator anywhere — "A, B affect X") folds as conjunction. Reached
-        // only when the comma found nothing to inherit; `trig_coordinate` resolves the inheritance
-        // from the token sequence, so a comma in `A, B, C or D` never arrives here as `conn_list`.
-        Exp::InductiveCtor(_, n, _) if n == "conn_list" => Some("urn:eigenius:logic:And"),
+        // An ASYNDETIC list folds as conjunction — but only if it is COMPLETE ("A, B affect X"). A
+        // `conn_list` prefix of a list that continues ("A, B" of "A, B, C or D") has no connective at
+        // all; see [`complete_coord`].
+        Exp::InductiveCtor(_, n, _) if n == "conn_list" && rctx.list_is_final() => {
+            Some("urn:eigenius:logic:And")
+        }
         _ => None,
     }
 }
@@ -825,6 +832,7 @@ pub fn distribute(
     group_sem: &Exp,
     pred_sem: &Exp,
     layer: &Arc<Layer>,
+    rctx: super::RightContext,
 ) -> Option<Exp> {
     let members = group_members(group_sem)?;
     // Contrastive `but not` (D62 §2 #8): `P(m₀) ∧ ¬P(m₁) ∧ …` — first positive, rest negated,
@@ -838,7 +846,7 @@ pub fn distribute(
         )?;
         return fold_conn(&and, preds);
     }
-    let op = resolve_inductive(layer, group_conn_op(group_cat)?)?;
+    let op = resolve_inductive(layer, group_conn_op(group_cat, rctx)?)?;
     let preds = members
         .into_iter()
         .map(|m| Exp::App(Box::new(pred_sem.clone()), Box::new(m)))
@@ -877,6 +885,7 @@ pub fn distribute_object(
     group_sem: &Exp,
     tv_sem: &Exp,
     layer: &Arc<Layer>,
+    rctx: super::RightContext,
 ) -> Option<Exp> {
     let members = group_members(group_sem)?;
     let s = Exp::Var("__dist_subj".into());
@@ -891,7 +900,7 @@ pub fn distribute_object(
         let and = resolve_inductive(layer, "urn:eigenius:logic:And")?;
         fold_conn(&and, but_not_preds(members, mk, layer)?)?
     } else {
-        let op = resolve_inductive(layer, group_conn_op(group_cat)?)?;
+        let op = resolve_inductive(layer, group_conn_op(group_cat, rctx)?)?;
         fold_conn(&op, members.into_iter().map(mk).collect())?
     };
     Some(Exp::Lam(Patt::Var("__dist_subj".into()), Box::new(body)))
@@ -912,7 +921,7 @@ pub fn reciprocate(
     layer: &Arc<Layer>,
 ) -> Option<(Exp, Exp)> {
     // Reciprocity is inherently conjunctive — `and`-groups only.
-    if group_conn_op(group_cat)? != "urn:eigenius:logic:And" {
+    if group_conn_op(group_cat, super::RightContext::Other)? != "urn:eigenius:logic:And" {
         return None;
     }
     let members = group_members(group_sem)?;
@@ -1068,7 +1077,7 @@ fn definite_individual(sigma: &Exp) -> Option<Exp> {
 /// skeletons before and after, byte-identical per unit. Hence a subterm search — stopped at a nested
 /// `Sig` so a PP inside a compound's MODIFIER ("the MMR-pathway genes MSH2") is not mistaken for a
 /// postmodifier of this classifier.
-fn is_pp_refined(ty: &Exp) -> bool {
+pub(crate) fn is_pp_refined(ty: &Exp) -> bool {
     let Exp::Sig(_, _, restr) = ty else {
         return false;
     };
@@ -1681,7 +1690,9 @@ mod tests {
             "the trailing `or` rebinds the neutral list to conn_or"
         );
         // Completion folds left-branching: Or(Or(A, B), C).
-        let (base, folded) = complete_coord(&c2_cat, &c2_sem, &layer).expect("completes");
+        let (base, folded) =
+            complete_coord(&c2_cat, &c2_sem, &layer, crate::dcg::RightContext::Other)
+                .expect("completes");
         assert_eq!(base, s, "completion returns the base clause category");
         let expect = |op: &Exp, args: &[Exp]| {
             matches!(op, Exp::InductiveType(d, a)

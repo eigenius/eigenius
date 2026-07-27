@@ -839,9 +839,9 @@ fn apply_coord_complete(
     g: &Grammar,
     it: &Item,
     _span: (usize, usize),
-    _rctx: super::RightContext,
+    rctx: super::RightContext,
 ) -> Vec<Item> {
-    complete_coord(it.cat(), it.sem(), &g.layer)
+    complete_coord(it.cat(), it.sem(), &g.layer, rctx)
         .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
         .into_iter()
         .collect()

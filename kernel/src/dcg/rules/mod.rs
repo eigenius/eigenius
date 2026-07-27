@@ -77,4 +77,13 @@ impl RightContext {
             _ => Self::Other,
         }
     }
+
+    /// Whether a coordination ending at this cell is **final** — nothing follows that could extend it.
+    /// A comma or an explicit coordinator means the list continues, so a neutral
+    /// [`LIST_CONN`](constructions::LIST_CONN) group is a PREFIX and carries no connective to fold
+    /// with; anything else (including end-of-sentence) makes it complete, and an asyndetic list then
+    /// takes its documented conjunctive reading. See [`constructions::complete_coord`].
+    pub(crate) fn list_is_final(self) -> bool {
+        matches!(self, Self::Other)
+    }
 }

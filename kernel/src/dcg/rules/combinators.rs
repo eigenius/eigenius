@@ -47,7 +47,7 @@ pub fn apply(
     left: &Item,
     right: &Item,
     layer: &Arc<Layer>,
-    _rctx: super::RightContext,
+    rctx: super::RightContext,
 ) -> Option<Item> {
     if let Some(recipe) = combinable(&left.category, &right.category, layer) {
         let it = build(recipe, left, right, layer);
@@ -62,7 +62,7 @@ pub fn apply(
     // Carve-out (Harper 1994 pitfall): the coordination/distributive rules DECIDE on the sem
     // (`group_members` reads the group's `cons/nil` list), so they are NOT sem-blind and are never
     // packed by (cat_shape, ENF-prov). They stay item-level, off the packed path.
-    apply_group(left, right, layer).map(|it| {
+    apply_group(left, right, layer, rctx).map(|it| {
         let cost = left.cost().saturating_add(right.cost());
         it.at_cost(cost)
     })
@@ -516,6 +516,30 @@ enum Guard {
     /// a designation's category is a plain concretely-typed `cat_np`, so it satisfies
     /// [`Self::ProperName`] and the type cannot tell it from a name.
     NotDerivedIndividual(Operand),
+    /// The bound NUMBER metavar must not be plural — **classifier/designator cardinality agreement**
+    /// (D63 §5.3). A close-apposition classifier takes as many designators as its number says: a
+    /// SINGULAR classifier takes exactly one, which is what this binary rule supplies, while a PLURAL
+    /// one needs a designator LIST and must therefore go through
+    /// [`super::constructions::appose_group`] over a `cat_group`. "the gene MSH2" ✓, "the genes BRCA1
+    /// and MSH2" ✓ (the group route), "*the genes MSH2" ✗.
+    ///
+    /// This is the constraint that kills **classifier capture**: in "the MMR genes MSH2, MSH6, PMS2 or
+    /// MLH1" the string also admits `[[the MMR genes MSH2], MSH6, PMS2, MLH1]` — the classifier bound
+    /// to the FIRST designator and that NP coordinated with the remaining three, so only one of four
+    /// genes is classified. It was 24 of the reference page's germline-unit skeletons. The capture needs
+    /// a plural classifier to take a single designator, so refusing that refuses the bracketing, and the
+    /// group route (which classifies all four) is what remains. Purely morphosyntactic — no right
+    /// context, no type lattice. `num_any` is underspecified and passes.
+    NotPlural(&'static str),
+    /// The named operand must NOT be a **PP-postmodified** noun
+    /// ([`super::constructions::is_pp_refined`]) — the adjacency argument that already governs the
+    /// group path: a designator sits immediately after the nominal head, so a PP postmodifier cannot
+    /// intervene ("the gene MSH2 in humans", never "*the gene in humans MSH2"). Category-only.
+    ///
+    /// [`super::constructions::appose_group`] has enforced this since 2026-07-26; the singular rule did
+    /// not, so "[Germline mutations in the MMR gene] [MSH2]" still captured the designator — traced live
+    /// as `cat_n(Σ__cmp_x:n07425011. … prep_in …, sg)` reaching this rule.
+    NotPpRefined(Operand),
 }
 
 /// Which operand a rule reads — a [`Guard`]'s target, or the functor side of a [`CombKind::Apply`].
@@ -551,6 +575,14 @@ impl Guard {
                 binds.get(*meta),
                 Some(Exp::EigonClass(iri)) if iri.as_str() != "urn:eigenius:lexicon:Entity"
             ),
+            Guard::NotPlural(meta) => !matches!(
+                binds.get(*meta),
+                Some(Exp::InductiveCtor(_, n, _)) if n == "pl"
+            ),
+            Guard::NotPpRefined(op) => match is_ctor(&op.pick(left, right).cat, "cat_n") {
+                Some([ty, _num]) => !super::constructions::is_pp_refined(ty),
+                _ => true,
+            },
         }
     }
 }
@@ -819,7 +851,7 @@ fn other_grammar_rules() -> &'static [CatRule] {
             // Close naming apposition (D63 §5.3): `cat_n(Sortal)` + a proper NAME `cat_np(≠Entity)`.
             CatRule {
                 name: "name",
-                left_pat: Ctor("cat_n", vec![Var("sortal"), wild()]),
+                left_pat: Ctor("cat_n", vec![Var("sortal"), Var("sortalnum")]),
                 right_pat: Ctor("cat_np", vec![Var("namety"), wild()]),
                 // `ProperName` alone is not enough: it only asks that the name's type index be a
                 // CONCRETE class (≠ `Entity`), and a BARE KIND's plain `cat_np` (core-en `bnp`) is also
@@ -830,6 +862,8 @@ fn other_grammar_rules() -> &'static [CatRule] {
                     Guard::ProperName("namety"),
                     Guard::NotKindRaised(Operand::Right),
                     Guard::NotDerivedIndividual(Operand::Right),
+                    Guard::NotPlural("sortalnum"),
+                    Guard::NotPpRefined(Operand::Left),
                 ],
                 build: build_name,
             },
@@ -924,6 +958,14 @@ fn other_grammar_rules() -> &'static [CatRule] {
 /// designator contributes identity only. The classifier's `num` is concrete by the time this fires —
 /// [`super::super::parse::seed`] refines a common noun's `num_any` to `sg`/`pl` from the surface
 /// morphology at seeding.
+///
+/// **The plural rows of that table no longer apply, and `The genes MSH2 affect cells.` is back to 0**
+/// (2026-07-26) — by [`Guard::NotPlural`], not by the number bug. Cardinality agreement: a singular
+/// classifier takes exactly one designator (this rule), a plural one takes a designator LIST and must
+/// go through [`super::constructions::appose_group`] over a `cat_group`. `*The genes MSH2` is
+/// ungrammatical either way, so the row was witnessing agreement with a string that should not parse;
+/// what it actually established — that the number comes from the classifier — is unaffected and is now
+/// pinned on a `num_any` classifier instead.
 fn build_name(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) -> Item {
     let sortal = binds
         .get("sortal")
@@ -1044,7 +1086,12 @@ fn gq_prep_argmarker(_binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<
 /// `group_members`), so unlike [`combinable`] they are not sem-blind and are never packed by
 /// `(cat_shape, ENF-prov)`. Tried only after [`combinable`] returns `None` (the group categories
 /// never match a sem-blind rule, so ordering is preserved).
-fn apply_group(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
+fn apply_group(
+    left: &Item,
+    right: &Item,
+    layer: &Arc<Layer>,
+    rctx: super::RightContext,
+) -> Option<Item> {
     // Distributive SUBJECT (D63 §8.4 Phase 6): a `cat_group` subject meeting a VP `S\NP` distributes.
     if let (Some([c, _conn, gnum]), Some([result, slot])) = (
         is_ctor(left.cat(), "cat_group"),
@@ -1053,7 +1100,7 @@ fn apply_group(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
         let num_agrees =
             matches!(is_ctor(slot, "cat_np"), Some([_, snum]) if feat_meets(gnum, snum));
         if num_agrees && group_member_fits(slot, c, layer) {
-            if let Some(sem) = distribute(left.cat(), left.sem(), right.sem(), layer) {
+            if let Some(sem) = distribute(left.cat(), left.sem(), right.sem(), layer, rctx) {
                 return Some(Item::from_parts(
                     result.clone(),
                     sem,
@@ -1069,7 +1116,8 @@ fn apply_group(left: &Item, right: &Item, layer: &Arc<Layer>) -> Option<Item> {
         is_ctor(right.cat(), "cat_group"),
     ) {
         if group_member_fits(slot, c, layer) {
-            if let Some(sem) = distribute_object(right.cat(), right.sem(), left.sem(), layer) {
+            if let Some(sem) = distribute_object(right.cat(), right.sem(), left.sem(), layer, rctx)
+            {
                 return Some(Item::from_parts(
                     result.clone(),
                     sem,
@@ -1919,19 +1967,25 @@ mod dispatch_tests {
         );
     }
 
-    /// The construction's NUMBER is the classifier's, not the designator's. Every UMLS named
-    /// individual seeds `cat_np(…, sg)`, so sourcing the number from the designator made
-    /// "the genes MSH2" singular and inverted subject–verb agreement: `The genes MSH2 affect cells.`
-    /// read 0 while the ungrammatical `The genes MSH2 affects cells.` read 2. The two operands here
-    /// carry OPPOSITE numbers, which is what the shipped test above (both `sg`) could not detect.
-    /// The number must survive the definite shift too, since that is what an argument slot sees.
+    /// The construction's NUMBER is the classifier's, not the designator's. Every UMLS named individual
+    /// seeds `cat_np(…, sg)`, so sourcing the number from the designator made "the gene MSH2" agree as
+    /// though the NAME set the number, and it must survive the definite shift too, since the shifted NP
+    /// is what an argument slot agrees against.
+    ///
+    /// The operands carry DIFFERENT numbers — an underspecified `num_any` classifier against a `sg`
+    /// designator — which is what makes the number's source observable. It used to be witnessed with a
+    /// PLURAL classifier (`The genes MSH2 affect cells.`), and that witness is no longer available:
+    /// [`Guard::NotPlural`] now refuses a plural classifier with a single designator, because a plural
+    /// classifier's designators must arrive as a `cat_group` (cardinality agreement, 2026-07-26). The
+    /// property under test is unchanged — only the pair that exhibits it.
     #[test]
     fn name_apposition_takes_the_classifiers_number_not_the_designators() {
         let sortal = cls("urn:eigenius:lexicon:Gene");
-        let pl = ct("pl", vec![]);
-        // A PLURAL classifier ("genes") and a SINGULAR designator ("MSH2").
+        let any = ct("num_any", vec![]);
+        // An UNDERSPECIFIED classifier and a SINGULAR designator: if the number came from the name, the
+        // phrase would be `sg`.
         let l = mk_item(
-            ct("cat_n", vec![sortal.clone(), pl.clone()]),
+            ct("cat_n", vec![sortal.clone(), any.clone()]),
             sortal.clone(),
         );
         let r = mk_item(
@@ -1939,22 +1993,29 @@ mod dispatch_tests {
             ax("urn:eigenius:lexicon:msh2_name"),
         );
         let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
-            .expect("[cat_n(pl)][proper cat_np(sg)] → naming apposition");
+            .expect("[cat_n(num_any)][proper cat_np(sg)] → naming apposition");
         let Some([_ty, num]) = is_ctor(got.cat(), "cat_n") else {
             panic!("the rule yields a refined common noun")
         };
         assert_eq!(
-            num,
-            &pl,
-            "head-initial: the classifier is the head, so the phrase is PLURAL — a name carries no \
-             number of its own to contribute"
+            num, &any,
+            "head-initial: the classifier is the head, so the phrase keeps the classifier's number — a \
+             name carries no number of its own to contribute"
         );
         let (np_cat, _) = definite_designation(got.cat()).expect("designates definitely");
         assert_eq!(
             np_cat,
-            ct("cat_np", vec![sortal, pl]),
+            ct("cat_np", vec![sortal.clone(), any]),
             "the classifier's number survives the definite shift — the shifted NP is what an \
              argument slot agrees against"
+        );
+
+        // Cardinality agreement: the SAME pair with a plural classifier is refused outright, because a
+        // plural classifier needs a designator LIST and this rule can only supply one.
+        let pl_l = mk_item(ct("cat_n", vec![sortal.clone(), ct("pl", vec![])]), sortal);
+        assert!(
+            apply(&pl_l, &r, &layer(), crate::dcg::rules::RightContext::Other).is_none(),
+            "a plural classifier takes a designator GROUP (`appose_group`), never a single name"
         );
     }
 
