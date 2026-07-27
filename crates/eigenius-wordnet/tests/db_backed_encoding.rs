@@ -5875,3 +5875,62 @@ fn probe_msi_mmr_deficiency_join() {
         }
     }
 }
+
+/// PROBE — which modifier surfaces carry BOTH an entity and a kind reading?
+///
+/// The two compound axioms are typed apart on purpose: `compound(x, m)` takes an ENTITY modifier
+/// (`refine_named_compound`, `[cat_np][cat_n]`) and `compound_kind(x, K)` a KIND
+/// (`refine_kind_compound`, `[cat_n][cat_n]`). So a surface holding both a `cat_np` and a `cat_n`
+/// entry fires BOTH rules and yields two readings of one N-N pair.
+///
+/// Measured on "MSI cell lines from these four lineages showed greater dependence on WRN than their
+/// MSS counterparts." (2026-07-27), the page's worst unit at 48 skeletons: unifying the two axioms
+/// collapses it to 20 distinct shapes, so 28 of the 48 differ ONLY in which axiom each site chose.
+/// This prints, per content word, whether the lexicon actually licenses both — i.e. whether that
+/// choice is a real lexical ambiguity or duplicated encodings of one concept.
+#[test]
+#[ignore = "DB-backed diagnostic; set EIGENIUS_DB_SNAPSHOT + run --ignored --nocapture"]
+fn probe_compound_modifier_categories() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = LexicalIndex::build(Arc::clone(&head));
+    eprintln!("{:<16} {:>7} {:>7}   classes", "surface", "cat_np", "cat_n");
+    for s in [
+        "msi",
+        "mss",
+        "cell",
+        "line",
+        "cell line",
+        "lineage",
+        "wrn",
+        "counterpart",
+        "dependence",
+    ] {
+        let entries = index.entries_for(s);
+        let mut np: Vec<String> = Vec::new();
+        let mut n: Vec<String> = Vec::new();
+        for e in &entries {
+            if let Some([ty, _]) = eigenius_kernel::dcg::is_ctor(e.item.cat(), "cat_np") {
+                np.push(pretty_term(ty));
+            } else if let Some([ty, _]) = eigenius_kernel::dcg::is_ctor(e.item.cat(), "cat_n") {
+                n.push(pretty_term(ty));
+            }
+        }
+        np.sort();
+        np.dedup();
+        n.sort();
+        n.dedup();
+        let both: Vec<&String> = np.iter().filter(|c| n.contains(c)).collect();
+        eprintln!(
+            "{:<16} {:>7} {:>7}   {}",
+            s,
+            np.len(),
+            n.len(),
+            if both.is_empty() {
+                "—".to_string()
+            } else {
+                format!("SAME CLASS both ways: {both:?}")
+            }
+        );
+    }
+}
