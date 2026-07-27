@@ -1398,17 +1398,32 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
 /// induced by WRN"), never a reduced subject relative ("*the man ate the food" for "the man that ate").
 /// A/B on that sentence: 8 skeletons with this shift, 2 without — 6 of 8 come through here.
 ///
-/// **Do NOT fix it by disabling the shift.** Measured page-wide with the shift off: skeletons 281 -> 367
-/// and readings 1216 -> 1430 (coverage and pins hold). Removing readings frees sense-cap and cell-beam
-/// slots that refill with other senses — the same displacement recorded at the cap in
-/// `super::super::parse::seed`. The shift is also genuinely needed ("The deficiency predicted by the
-/// model was clear." parsed 0 without it, and `compare`'s participial route was fixed for exactly this).
+/// **Do NOT fix it by disabling the shift.** Measured page-wide with the shift off: skeletons 281 -> 367,
+/// and the entire +86 was ONE unit — the `compared to MSS cell lines` sentence, 20 -> 112, its average
+/// compounds per skeleton going 4.0 -> 6.0 as the participial collapsed back into the `comparison` NOUN
+/// pile. Removing 6 bad readings bought 92 worse ones.
 ///
-/// The fix is upstream and is a FEATURE-INVENTORY change, not a guard: split the perfect from the
-/// passive so a true passive category has NO object slot and only that one licenses this shift.
-/// Provenance cannot substitute — a genuine passive with an oblique complement
-/// (`(S[pss]\NP)/cat_pp_arg`, the `compared to …` case) is ALSO an application output, so
-/// "was applied" does not separate the two.
+/// **THE FEATURE TO KEY ON IS `pass`, AND PART 1 ALONE IS INERT — measured, reverted.** `lexicon:Fin`
+/// already draws the distinction: `pss` is the "past participle (active/perfect transitive)" of
+/// `has affected …`; `pass` is the "PASSIVE participle VP (patient-subject)". A reduced relative
+/// predicates over the PATIENT, so only `pass` can license one, and keying on `pss` is wrong on the
+/// ontology's own terms. But swapping the test to `pass` measured 367 skeletons / 1430 readings —
+/// BYTE-IDENTICAL to disabling the shift — because on this page NOTHING reaches `pass` where this rule
+/// can see it. The only producer is `gq_prep_passive_agent`, and the page has no `by`-agent participial
+/// ("predicted by the model" is a test sentence, not a page one).
+///
+/// So the oblique participial's missing `pass` route is not a follow-up, it is the whole fix. The model
+/// to copy already exists and is tested: `participial_lifts` takes the UNSATURATED
+/// `(S[pss]\NP)/NP` and promotes it to `λx. ∃a. v(x, a)` at a cost penalty — the correct patient
+/// promotion, for the PRE-nominal participial ("the predicted deficiency"). This rule is its
+/// POST-nominal counterpart and needs the same promotion, plus the `cat_pp_arg` shape for
+/// `compared to …`. Doing it must also move `compared to MSS cell lines` OFF `pss`: that phrase IS
+/// passive voice ("lines that WERE compared to …") and only works today by riding the same `pss` route
+/// that lets the active/perfect form through here.
+///
+/// A provenance guard cannot substitute for the feature: after `to` composes in, the oblique participle's
+/// category is `(S[pss]\NP)/NP` by `ForwardComp` and then `ForwardApp` — the same category and the same
+/// combinator as a transitive participle consuming its object (chart dump, 2026-07-27).
 ///
 /// core-en states the rule as `s[dcl]/np → n\n` with a `GenRel` relation. We take the SUBJECT-gap
 /// (backward) form rather than its object-gap (forward) one, because that is the participial case —
