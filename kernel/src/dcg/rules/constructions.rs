@@ -1390,9 +1390,11 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
 /// result is an ACTIVE VP wearing a `pss` label, and this shift — valid only for the passive — fires on
 /// it. The product is a relativizer-less SUBJECT relative, which English does not allow:
 ///
-///     "Depletion of WRN induced double-stranded DNA breaks."
-///       -> cat_n(Σx:WRN. induced(DNA, x))          "WRN [that] induced DNA"      <- built here
-///       -> then `breaks` is read as the finite intransitive main verb
+/// ```text
+/// "Depletion of WRN induced double-stranded DNA breaks."
+///   -> cat_n(Σx:WRN. induced(DNA, x))      "WRN [that] induced DNA"   <- built here
+///   -> then `breaks` is read as the finite intransitive main verb
+/// ```
 ///
 /// English permits a reduced OBJECT relative ("the food the man ate") and a participial ("the DNA
 /// induced by WRN"), never a reduced subject relative ("*the man ate the food" for "the man that ate").
@@ -1420,6 +1422,37 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
 /// `compared to …`. Doing it must also move `compared to MSS cell lines` OFF `pss`: that phrase IS
 /// passive voice ("lines that WERE compared to …") and only works today by riding the same `pss` route
 /// that lets the active/perfect form through here.
+///
+/// **PART 2 ATTEMPTED, MEASURED, REVERTED (2026-07-27) — right shape, unexplained side effect.**
+/// Reading the frames settles why the rule must fire on the FUNCTOR: both share the arrow
+/// `Entity -> Entity -> Prop` OBJECT-FIRST, so after saturation `Transitive` leaves the AGENT in the
+/// subject slot (`induced DNA` -> `λsubj. induce(DNA, subj)`, the bad reading) while `PpOblique` is
+/// 2-place with no distinct agent and leaves exactly the slot the modified noun should fill
+/// (`compared to X` -> `λsubj. compare(X, subj)`, already correct — no promotion needed). They differ
+/// BEFORE composition and are identical after, which is the whole difficulty.
+///
+/// The rule was rewritten to accept only (a) `S[pass]\NP` -> `cat_pp` (the agentive long passive) and
+/// (b) `(S[pss]\NP)/cat_pp_arg(P)` -> `cat_pp/cat_pp_arg(P)` (the oblique participial, taking its own
+/// marker), dropping the saturated `S[pss]\NP` case. Measured:
+///
+/// ```text
+/// "Depletion of WRN induced ..."      14 -> 8   the target defect, fixed
+/// "... compared to MSS cell lines"    20 -> 48
+/// page                                303 skeletons (baseline 281): net +22, NOT shipped
+/// ```
+///
+/// **The +28 on the oblique unit is NOT a noun-pile fallback**, which is what an average first
+/// suggested (compounds per skeleton 4.0 -> 5.0, vs 6.0 with the shift off). Diffing the skeleton SETS
+/// shows ZERO overlap: all 20 baseline readings gone, 48 different ones in, at the SAME compound count.
+/// What was lost is the correctly-DISTRIBUTED coordination — baseline reads
+/// `And(identified(…, achilles) ∧ prep_in(achilles, …), identified(…, drive) ∧ prep_in(drive, …))`,
+/// whereas under the change the second conjunct is no longer *project DRIVE* but a nominal blob
+/// (`the(` 2->1, `gt(` 4->2, `prep_in(` 2->1).
+///
+/// So changing this rule's RESULT CATEGORY altered which spans could combine and knocked out a subject
+/// coordination three constituents away. That cascade is unexplained and is the thing to understand
+/// before a third attempt — it may matter more than the participial. (Method note: an average over a
+/// set that has been wholly replaced says nothing; diff the sets.)
 ///
 /// A provenance guard cannot substitute for the feature: after `to` composes in, the oblique participle's
 /// category is `(S[pss]\NP)/NP` by `ForwardComp` and then `ForwardApp` — the same category and the same

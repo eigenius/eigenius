@@ -562,6 +562,42 @@ impl Operand {
     }
 }
 
+/// Audit-only projections of a [`Guard`], used by `grammar_rule_guard_matrix`.
+#[cfg(test)]
+impl Guard {
+    /// A short label for the rule/guard AUDIT ([`grammar_rule_guard_matrix`]) — the audit exists
+    /// because the recurring defect shape in this grammar is a constraint applied in ONE rule and not
+    /// its sibling (PP-adjacency was in `appose_group` but not `kind_compound`; `NotKindRaised` on the
+    /// `name` rule but not the group path; number refinement on nouns but not verbs). A matrix makes
+    /// that visible instead of waiting for a sentence to expose it.
+    fn label(&self) -> &'static str {
+        match self {
+            Guard::NotCompoundRefined(_) => "NotCompoundRefined",
+            Guard::NotAdjectiveRefined(_) => "NotAdjectiveRefined",
+            Guard::NotKindRaised(_) => "NotKindRaised",
+            Guard::ProperName(_) => "ProperName",
+            Guard::NotDerivedIndividual(_) => "NotDerivedIndividual",
+            Guard::NotPlural(_) => "NotPlural",
+            Guard::NotPpRefined(_) => "NotPpRefined",
+        }
+    }
+
+    /// Which operand the guard constrains, for the audit ("L", "R", or "-" for a metavar guard).
+    fn side(&self) -> &'static str {
+        match self {
+            Guard::NotCompoundRefined(o)
+            | Guard::NotAdjectiveRefined(o)
+            | Guard::NotKindRaised(o)
+            | Guard::NotDerivedIndividual(o)
+            | Guard::NotPpRefined(o) => match o {
+                Operand::Left => "L",
+                Operand::Right => "R",
+            },
+            Guard::ProperName(_) | Guard::NotPlural(_) => "-",
+        }
+    }
+}
+
 impl Guard {
     fn holds(&self, binds: &CatSubst, left: &CategoryPayload, right: &CategoryPayload) -> bool {
         match self {
@@ -1488,6 +1524,7 @@ fn group_member_fits(slot: &Exp, c: &Exp, layer: &Arc<Layer>) -> bool {
 
 #[cfg(test)]
 mod dispatch_tests {
+
     //! **Golden characterization of the datafied dispatch families** (the differential oracle for the
     //! Phase 1–2 datafication, `docs/notes/grammar-formalization-plan.md`): the nominal-modification
     //! family (`combine_nominal_mod`) and the "other grammar" binary rules — close-naming apposition
@@ -1498,6 +1535,98 @@ mod dispatch_tests {
     //! The stacked-adjective flat-Σ `And` path needs a layer that resolves `logic:And`, so it is
     //! covered by the full-page `--no-llm` sweep differential, not here.
     use super::super::constructions::definite_designation;
+    /// AUDIT — the rule x guard matrix, and which `Fin` features each rule mentions.
+    ///
+    /// Not an assertion: a REPORT, printed with `--nocapture`. It exists because the recurring defect
+    /// shape in this grammar is *a constraint applied in one rule and not its sibling*, and that is
+    /// invisible while the rules are read one at a time. Every fix on 2026-07-26/27 had this shape:
+    /// PP-adjacency lived in `appose_group` but not `kind_compound` (24 skeletons); `NotKindRaised`
+    /// guarded the singular `name` rule but not the group path; number refinement covered nouns but not
+    /// verbs; `reduced_relative` consumed `pss` while the only producer of the patient-subject voice was
+    /// `pass`.
+    ///
+    /// Read the matrix by COLUMN: a guard held by most rules of a family and missing from one is the
+    /// thing to justify or fix. Read the feature census for producer/consumer mismatches.
+    #[test]
+    fn grammar_rule_guard_matrix() {
+        fn feats(p: &CatPat, out: &mut Vec<String>) {
+            match p {
+                CatPat::Ctor(n, args) => {
+                    if matches!(
+                        *n,
+                        "fin"
+                            | "bse"
+                            | "inf"
+                            | "ger"
+                            | "pss"
+                            | "pass"
+                            | "adj"
+                            | "fin_any"
+                            | "sg"
+                            | "pl"
+                            | "mass"
+                            | "num_any"
+                    ) {
+                        out.push((*n).to_string());
+                    }
+                    for a in args {
+                        feats(a, out);
+                    }
+                }
+                CatPat::Var(_) => {}
+            }
+        }
+        let families: [(&str, &[CatRule]); 2] =
+            [("refine", refine_rules()), ("other", other_grammar_rules())];
+        let mut cols: Vec<&'static str> = Vec::new();
+        for (_, rs) in &families {
+            for r in rs.iter() {
+                for g in r.guards {
+                    if !cols.contains(&g.label()) {
+                        cols.push(g.label());
+                    }
+                }
+            }
+        }
+        cols.sort_unstable();
+        eprintln!("\n=== rule x guard ===");
+        eprint!("{:<26}", "rule");
+        for c in &cols {
+            eprint!(" {:>21}", c);
+        }
+        eprintln!();
+        for (fam, rs) in &families {
+            for r in rs.iter() {
+                eprint!("{:<26}", format!("{fam}/{}", r.name));
+                for c in &cols {
+                    let cell = r
+                        .guards
+                        .iter()
+                        .find(|g| g.label() == *c)
+                        .map(|g| g.side())
+                        .unwrap_or("");
+                    eprint!(" {cell:>21}");
+                }
+                eprintln!();
+            }
+        }
+        eprintln!("\n=== Fin/Num features mentioned in each rule's operand patterns ===");
+        for (fam, rs) in &families {
+            for r in rs.iter() {
+                let (mut l, mut rr) = (Vec::new(), Vec::new());
+                feats(&r.left_pat, &mut l);
+                feats(&r.right_pat, &mut rr);
+                if !l.is_empty() || !rr.is_empty() {
+                    eprintln!(
+                        "{:<26} L={:<22} R={:?}",
+                        format!("{fam}/{}", r.name),
+                        format!("{l:?}"),
+                        rr
+                    );
+                }
+            }
+        }
+    }
     use super::*;
     use crate::nbe::term::list_decl;
     use crate::ontology::iri::Iri;
