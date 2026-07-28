@@ -1383,82 +1383,52 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
 /// then conjoins it into the noun's Σ restrictor exactly as a PP modifier is. Reusing `cat_pp` is why
 /// this needs no new binary rule.
 ///
-/// **KNOWN OVER-GENERATION — `pss` conflates PERFECT with PASSIVE** (diagnosed 2026-07-27, unfixed).
-/// The WordNet importer emits ONE past-participle category per frame, so a transitive verb's `pss` form
-/// is `(S[pss]\NP)/NP` — right for the perfect ("has induced DNA", which keeps its object) and wrong
-/// for the passive (whose object is promoted to subject). Once that category consumes its object the
-/// result is an ACTIVE VP wearing a `pss` label, and this shift — valid only for the passive — fires on
-/// it. The product is a relativizer-less SUBJECT relative, which English does not allow:
+/// **The trigger is `pass`, not `pss`** (fixed 2026-07-27). The WordNet importer emits ONE
+/// past-participle category per frame, so a transitive verb's `pss` form is `(S[pss]\NP)/NP` — right
+/// for the perfect ("has induced DNA", which keeps its object) and wrong for the passive (whose object
+/// is promoted to subject). Once that category consumes its object the result is an ACTIVE VP wearing
+/// a `pss` label, and firing this shift on it built a relativizer-less SUBJECT relative, which English
+/// does not allow (it permits a reduced OBJECT relative, "the food the man ate", and a participial,
+/// "the DNA induced by WRN", but never "*the man ate the food" for "the man that ate"):
 ///
 /// ```text
 /// "Depletion of WRN induced double-stranded DNA breaks."
-///   -> cat_n(Σx:WRN. induced(DNA, x))      "WRN [that] induced DNA"   <- built here
+///   -> cat_n(Σx:WRN. induced(DNA, x))      "WRN [that] induced DNA"   <- was built here
 ///   -> then `breaks` is read as the finite intransitive main verb
 /// ```
 ///
-/// English permits a reduced OBJECT relative ("the food the man ate") and a participial ("the DNA
-/// induced by WRN"), never a reduced subject relative ("*the man ate the food" for "the man that ate").
-/// A/B on that sentence: 8 skeletons with this shift, 2 without — 6 of 8 come through here.
+/// `lexicon:Fin` already draws the distinction — `pss` is the past participle (active/perfect
+/// transitive), `pass` the PASSIVE participle VP (patient-subject) — and a reduced relative predicates
+/// over the PATIENT, so only `pass` can license one. Keying on `pass` is what this now does; the
+/// producer that reaches it is `gq_prep_passive_agent` ("the deficiency predicted by the model").
 ///
-/// **Do NOT fix it by disabling the shift.** Measured page-wide with the shift off: skeletons 281 -> 367,
-/// and the entire +86 was ONE unit — the `compared to MSS cell lines` sentence, 20 -> 112, its average
-/// compounds per skeleton going 4.0 -> 6.0 as the participial collapsed back into the `comparison` NOUN
-/// pile. Removing 6 bad readings bought 92 worse ones.
+/// **Narrowing the trigger alone was measured INERT, and the other half is the fix.** The oblique
+/// participial ("compared to MSS cell lines") IS passive voice, but it only ever reached this rule by
+/// riding the same `pss` route the active/perfect form came through — so refusing `pss` here without
+/// giving it a route of its own removed a working analysis and measured 367 skeletons, byte-identical
+/// to disabling the shift outright. Its route is [`super::combinators::oblique_participial_lifts`],
+/// which lifts the still-UNSATURATED `(S[dcl,pss]\NP)/cat_pp_arg(P)` to `cat_pp/cat_pp_arg(P)`.
 ///
-/// **THE FEATURE TO KEY ON IS `pass`, AND PART 1 ALONE IS INERT — measured, reverted.** `lexicon:Fin`
-/// already draws the distinction: `pss` is the "past participle (active/perfect transitive)" of
-/// `has affected …`; `pass` is the "PASSIVE participle VP (patient-subject)". A reduced relative
-/// predicates over the PATIENT, so only `pass` can license one, and keying on `pss` is wrong on the
-/// ontology's own terms. But swapping the test to `pass` measured 367 skeletons / 1430 readings —
-/// BYTE-IDENTICAL to disabling the shift — because on this page NOTHING reaches `pass` where this rule
-/// can see it. The only producer is `gq_prep_passive_agent`, and the page has no `by`-agent participial
-/// ("predicted by the model" is a test sentence, not a page one).
+/// The two halves are one change because the discriminator only exists BEFORE saturation. After it,
+/// oblique and transitive are the same category (`S[dcl,pss]\NP`) over the same object-first
+/// `Entity → Entity → Prop` arrow, reached by the same `ForwardApp` — a provenance guard cannot
+/// separate them (chart dump, 2026-07-27). Before it, the oblique's remaining argument is
+/// `cat_pp_arg` and the transitive's is `cat_np`, and THAT is the agent test: `PpOblique` is 2-place
+/// with no distinct agent, so its subject slot is the one the modified noun should fill
+/// (`compared to X` → `λsubj. compare(X, subj)`), while `Transitive` puts the agent there
+/// (`induced DNA` → `λsubj. induce(DNA, subj)`).
 ///
-/// So the oblique participial's missing `pass` route is not a follow-up, it is the whole fix. The model
-/// to copy already exists and is tested: `participial_lifts` takes the UNSATURATED
-/// `(S[pss]\NP)/NP` and promotes it to `λx. ∃a. v(x, a)` at a cost penalty — the correct patient
-/// promotion, for the PRE-nominal participial ("the predicted deficiency"). This rule is its
-/// POST-nominal counterpart and needs the same promotion, plus the `cat_pp_arg` shape for
-/// `compared to …`. Doing it must also move `compared to MSS cell lines` OFF `pss`: that phrase IS
-/// passive voice ("lines that WERE compared to …") and only works today by riding the same `pss` route
-/// that lets the active/perfect form through here.
+/// The lift must run at SEED time: both chart drivers run the shift table inside `for len in 2..=n`,
+/// so a `UnaryShift` never sees a single-token cell, and `compared` is one.
 ///
-/// **PART 2 ATTEMPTED TWICE, AND THE BLOCKER IS PLUMBING, NOT LINGUISTICS (2026-07-27).** Reading the
-/// frames settles the shape: both share the arrow `Entity -> Entity -> Prop` OBJECT-FIRST, so after
-/// saturation `Transitive` leaves the AGENT in the subject slot (`induced DNA` -> `λsubj.
-/// induce(DNA, subj)`, the bad reading) while `PpOblique` is 2-place with no distinct agent and leaves
-/// exactly the slot the modified noun should fill (`compared to X` -> `λsubj. compare(X, subj)`, already
-/// correct). They differ BEFORE composition and are identical after, so the rule must fire on the
-/// FUNCTOR: accept `S[pass]\NP` -> `cat_pp` and `(S[pss]\NP)/cat_pp_arg(P)` ->
-/// `cat_pp/cat_pp_arg(P)`, dropping the saturated `S[pss]\NP` case.
-///
-/// That is unreachable as written. **`reduced_relative` is a UNARY SHIFT, and both chart drivers run
-/// the shift table inside `for len in 2..=n` — shifts never fire on single-token LEAF cells.** The
-/// functor lift has to happen on `compared` at `[16..16]`, a leaf, so it never happens:
+/// Measured, replayed against the same snapshot and recording (grammar-gap 0, pins 44/45 throughout):
 ///
 /// ```text
-/// baseline   shift sees "compared to MSS cell lines" [16..20], a COMPOSED cell -> fires
-/// part 2     shift needs "compared"                  [16..16], a LEAF          -> never fires
+///                                          skeletons   readings
+///   page                                    269 -> 263  1190 -> 1178
+///   "Depletion of WRN induced …" (isolated)   8 ->   2    18 ->    6
+///   "… compared to MSS cell lines"           64 ->  64   set-identical, 0 lost / 0 added
 /// ```
-///
-/// Measured on top of the `pp_mod` normal form (711b753): the target unit "Depletion of WRN induced …"
-/// 14 -> 8 (the fix works), but "… compared to MSS cell lines" 8 -> 112 — EXACTLY the shift-disabled
-/// number, i.e. the participial route is gone entirely, not degraded. Page 269 -> 367. Reverted.
-///
-/// So part 2 removes a working route and adds an unreachable one; an earlier run measured 303 and I
-/// read the residue as a mysterious "distribution cascade three constituents away". It was not — it was
-/// whatever else could form once the route vanished.
-///
-/// **The fix belongs at SEED time, not in the shift table.** `participial_lifts` is the working model
-/// and is already tested: it takes the UNSATURATED `(S[pss]\NP)/NP` and promotes it to
-/// `λx. ∃a. v(x, a)` at a cost penalty for the PRE-nominal participial ("the predicted deficiency"),
-/// and it runs where leaves are seeded. The post-nominal counterpart wants the same treatment plus the
-/// `cat_pp_arg` shape. The alternative — running the shift table over leaf cells — is a driver change
-/// affecting every shift, and would need its own measurement.
-///
-/// A provenance guard cannot substitute for the feature: after `to` composes in, the oblique participle's
-/// category is `(S[pss]\NP)/NP` by `ForwardComp` and then `ForwardApp` — the same category and the same
-/// combinator as a transitive participle consuming its object (chart dump, 2026-07-27).
 ///
 /// core-en states the rule as `s[dcl]/np → n\n` with a `GenRel` relation. We take the SUBJECT-gap
 /// (backward) form rather than its object-gap (forward) one, because that is the participial case —
@@ -1478,7 +1448,7 @@ pub fn reduced_relative(cat: &Exp, layer: &Arc<Layer>) -> Option<Exp> {
     if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
         return None;
     }
-    if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "pss") {
+    if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "pass") {
         return None;
     }
     let _ = layer;

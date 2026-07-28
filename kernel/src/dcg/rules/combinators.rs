@@ -173,6 +173,12 @@ enum ProvGuard {
     /// DETERMINER quantifier (`a gene`) is unaffected: it has no plain-NP form, so its raise is the only
     /// derivation and carries a different provenance.
     RightNotKindRaised,
+    /// The left operand — the primary COMPOSITION functor — is not a seed-time oblique participial
+    /// lift ([`Combinator::ObliqueParticipial`]). The Eisner mirror of [`Self::LeftNotRaised`]: that
+    /// guard bars a raised category from *applying* because composition is its only non-redundant use;
+    /// this one bars a lifted post-nominal modifier from *composing* because application is. Both
+    /// routes reach the same `cat_pp` over the same span with the same sem.
+    LeftNotObliqueParticipial,
 }
 
 impl ProvGuard {
@@ -187,6 +193,7 @@ impl ProvGuard {
             }
             ProvGuard::LeftNotModal => left_prov != Combinator::Modal,
             ProvGuard::RightNotKindRaised => right_prov != Combinator::KindRaised,
+            ProvGuard::LeftNotObliqueParticipial => left_prov != Combinator::ObliqueParticipial,
         }
     }
 }
@@ -306,7 +313,10 @@ fn comb_rules() -> &'static [CombRule] {
             CombRule {
                 name: "forward_comp",
                 kind: CombKind::Compose { slash: "fwd" },
-                prov_guards: &[ProvGuard::LeftNotComposed],
+                prov_guards: &[
+                    ProvGuard::LeftNotComposed,
+                    ProvGuard::LeftNotObliqueParticipial,
+                ],
             },
         ]
     });
@@ -781,6 +791,79 @@ pub(crate) fn participial_lifts(it: &Item) -> Vec<Item> {
     }
 }
 
+/// POST-nominal OBLIQUE participial lift — the counterpart of [`participial_lifts`], and the seed-time
+/// half of the reduced-relative story (see [`super::constructions::reduced_relative`] for the full
+/// diagnosis). An oblique participle STILL AWAITING its PP argument,
+/// `(S[dcl,pss]\NP)/cat_pp_arg(P)`, lifts to a post-nominal modifier still awaiting the same argument,
+/// `cat_pp/cat_pp_arg(P)` — so once the PP arrives ("compared **to MSS cell lines**") forward
+/// application lands on `cat_pp`, which `pp_mod` attaches to the noun.
+///
+/// **The lift is on the FUNCTOR, and that is the whole point.** After saturation the oblique and the
+/// transitive participle are indistinguishable — both are `S[dcl,pss]\NP` over an object-first
+/// `Entity → Entity → Prop`, same category and same `ForwardApp` provenance (chart dump, 2026-07-27).
+/// Before saturation they are not: the oblique's remaining argument is `cat_pp_arg`, the transitive's
+/// is `cat_np`. That argument shape IS the agent test. `PpOblique` is 2-place with no distinct agent,
+/// so its subject slot is exactly the one the modified noun should fill (`compared to X` →
+/// `λsubj. compare(X, subj)`); `Transitive` puts the AGENT there (`induced DNA` →
+/// `λsubj. induce(DNA, subj)`), which would be a reduced SUBJECT relative — ungrammatical in English
+/// ("*the man ate the food" for "the man that ate"). Discriminating here is what lets
+/// `reduced_relative` refuse the saturated `pss` case outright.
+///
+/// Witnessed at the leaf before it was written — `EIGENIUS_DUMP_CELL=16..16` on the `compared to MSS
+/// cell lines` unit shows BOTH `fwd(bwd(cat_s(dcl,pss), NP), cat_pp_arg(prep_any))` and
+/// `fwd(bwd(cat_s(dcl,pss), NP), cat_np(Entity, num_any))`, so the discriminator is available exactly
+/// where this fires.
+///
+/// Seed-time, not a `UnaryShift`: both chart drivers run the shift table inside `for len in 2..=n`, so
+/// a shift can never see a single-token cell — and `compared` is one. Category-only, cost unchanged,
+/// matching the `reduced_relative` shift this route replaces.
+pub(crate) fn oblique_participial_lifts(it: &Item) -> Vec<Item> {
+    match oblique_participial_cat(it.cat()) {
+        Some(cat) => vec![Item::from_parts(
+            cat,
+            it.sem().clone(),
+            Combinator::ObliqueParticipial,
+            it.cost(),
+        )],
+        None => Vec::new(),
+    }
+}
+
+/// `(S[dcl,pss]\NP)/cat_pp_arg(P)` → `cat_pp/cat_pp_arg(P)`, or `None` for any other category.
+/// The argument is carried through UNCHANGED, so the governed preposition (`prep_any` for WordNet's
+/// preposition-agnostic PP frames) still has to be matched by whatever fills it.
+fn oblique_participial_cat(cat: &Exp) -> Option<Exp> {
+    use super::super::category::is_ctor;
+    let [vp, arg] = is_ctor(cat, "fwd")? else {
+        return None;
+    };
+    is_ctor(arg, "cat_pp_arg")?;
+    let [s, subj] = is_ctor(vp, "bwd")? else {
+        return None;
+    };
+    is_ctor(subj, "cat_np")?;
+    let [mood, voice] = is_ctor(s, "cat_s")? else {
+        return None;
+    };
+    if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
+        return None;
+    }
+    if !matches!(voice, Exp::InductiveCtor(_, n, _) if n == "pss") {
+        return None;
+    }
+    let Exp::InductiveCtor(decl, _, _) = cat else {
+        return None;
+    };
+    Some(Exp::InductiveCtor(
+        decl.clone(),
+        "fwd".into(),
+        vec![
+            Exp::InductiveCtor(decl.clone(), "cat_pp".into(), Vec::new()),
+            arg.clone(),
+        ],
+    ))
+}
+
 /// Extra cost on a rule-derived participial modifier, so a real lexical adjective (e.g. WordNet's
 /// `increased`/`reduced`) outranks it and the eventive reduced-passive reading only surfaces where no
 /// adjective exists. > [`COMPOUND_STEP_PENALTY`] (8), a clear deprioritisation.
@@ -1208,10 +1291,15 @@ pub fn apply_core(
     _rctx: super::RightContext,
 ) -> Vec<Item> {
     let mut out = Vec::new();
+    // `ObliqueParticipial` joins the composition outputs here for the reason it is barred from
+    // `forward_comp` in `comb_rules`: composing it re-derives what applying it already gives.
     let primary_blocked = |p: Combinator| {
         matches!(
             p,
-            Combinator::ForwardComp | Combinator::CrossedComp | Combinator::BackwardComp
+            Combinator::ForwardComp
+                | Combinator::CrossedComp
+                | Combinator::BackwardComp
+                | Combinator::ObliqueParticipial
         )
     };
     let z = "__core_z";

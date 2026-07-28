@@ -642,6 +642,18 @@ impl Parser {
                     .collect();
                 mods.extend(parts);
             }
+            // POST-nominal oblique participial lift — UNGATED, unlike the pre-nominal one above. Its
+            // gate exists because a lexical adjective already covers the ATTRIBUTIVE use; there is no
+            // adjective entry that covers "compared to MSS cell lines", so there is nothing to
+            // double-seed against. Must run at the LEAF: the lift is on the still-unsaturated functor
+            // (that is where oblique and transitive are still distinguishable), and `compared` is one
+            // token — the `UnaryShift` table only runs over spans of length >= 2.
+            mods.extend(
+                row[i]
+                    .iter()
+                    .flat_map(super::super::rules::combinators::oblique_participial_lifts)
+                    .collect::<Vec<_>>(),
+            );
             row[i].extend(mods);
             // A leaf cell is non-top iff the sentence has >1 token; the beam caps it across all
             // candidate lemmas/POS of the token (`sense_cap` already bounds it per-lemma).
@@ -656,6 +668,27 @@ impl Parser {
                     tokens[i],
                     cell_histogram(&row[i])
                 );
+            }
+            // Targeted LEAF dump — the twin of the composed-cell dump in `chart::unpacked`, which
+            // only fires inside `for len in 2..=n` and so can never show a single-token cell. Leaf
+            // categories are what decide whether a seed-time lift has anything to fire on, so they
+            // need their own view. Set `EIGENIUS_DUMP_CELL=i..i`.
+            if let Ok(want) = std::env::var("EIGENIUS_DUMP_CELL") {
+                if want == format!("{i}..{i}") {
+                    eprintln!(
+                        "  ===== DUMP leaf[{i}..{i}] tok={:?} ({} items, sample 20) =====",
+                        tokens[i],
+                        row[i].len()
+                    );
+                    for it in row[i].iter().take(20) {
+                        eprintln!(
+                            "    [{:?} cost={:?}] {}",
+                            it.prov(),
+                            it.cost(),
+                            crate::dcg::pretty::pretty_term(it.cat())
+                        );
+                    }
+                }
             }
         }
         (chart, beam_drops)

@@ -113,6 +113,25 @@ pub enum Combinator {
     /// individuals is untouched ("the gene MSH2 and the gene MSH6", "MSI and MMR deficiency create
     /// vulnerabilities"); only classifying them AGAIN is blocked. ENF-inert.
     DerivedIndividual,
+    /// A **seed-time oblique participial lift** (`oblique_participial_lifts`): a post-nominal modifier
+    /// still awaiting its PP argument, `cat_pp/cat_pp_arg(P)`.
+    ///
+    /// **ENF-constrained, and the exact mirror of [`Self::TypeRaised`]** — that one may only *compose*,
+    /// never forward-apply; this one may only *forward-apply*, never be the primary of a composition
+    /// ([`ProvGuard::LeftNotObliqueParticipial`] on `forward_comp`). The reason is the same: the other
+    /// route re-derives a reading plain application already gives. Composing the lift with the
+    /// preposition and then applying to the object,
+    ///
+    /// ```text
+    /// [cat_pp/cat_pp_arg] · [cat_pp_arg/NP] -> [cat_pp/NP],  then · [NP] -> cat_pp
+    /// ```
+    ///
+    /// yields the same `cat_pp` over the same span with the same sem as applying the lift directly to
+    /// the assembled `cat_pp_arg`. Measured on "… the top preferential dependency in MSI cell lines
+    /// compared to MSS cell lines" (2026-07-27): the span `[16..20]` carried FOUR derivations of
+    /// `cat_pp` across two nodes (the routes split by provenance, so `Sig` keeps them apart) where the
+    /// shift route it replaced carried one.
+    ObliqueParticipial,
     /// Any other producer (lexical leaf, coordination, group/distributive rules) —
     /// not a composition output, so ENF never constrains it.
     Other,

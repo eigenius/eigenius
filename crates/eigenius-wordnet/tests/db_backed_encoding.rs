@@ -5934,3 +5934,76 @@ fn probe_compound_modifier_categories() {
         );
     }
 }
+
+/// **Reduced-relative trigger guard** — `dcg::rules::constructions::reduced_relative` must fire on the
+/// PASSIVE participle (`pass`) and NOT on the active/perfect one (`pss`), with the oblique participial
+/// reaching `cat_pp` through `combinators::oblique_participial_lifts` instead.
+///
+/// Nothing held this before 2026-07-27: "The deficiency predicted by the model was clear." appeared
+/// only in a doc comment recording that it had once parsed to 0 readings, and the whole three-way
+/// distinction was invisible to the lib suite — the page measurement was the only thing that could see
+/// it. Each arm below is a route that a plausible narrowing of the trigger silently removes:
+///
+///   - `pass` too narrow  -> the by-agent participial gaps (this was the historical 0-reading bug);
+///   - `pss`  too wide    -> the ungrammatical reduced SUBJECT relative comes back;
+///   - lift missing       -> the oblique participial loses its only route (measured: page 269 -> 367,
+///     byte-identical to disabling the shift outright).
+///
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     reduced_relative_fires_on_passive_not_perfect -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed; --ignored --nocapture"]
+fn reduced_relative_fires_on_passive_not_perfect() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+
+    let skeletons = |text: &str| -> std::collections::BTreeSet<String> {
+        index
+            .parse(text, &lem)
+            .iter()
+            .map(|it| erase_senses(&pretty_term(it.sem())))
+            .collect()
+    };
+
+    // (1) BY-AGENT PASSIVE participial — the `pass` route. Must parse; a gap here is the historical
+    // "parsed to 0 readings" regression.
+    let by_agent = skeletons("The deficiency predicted by the model was clear.");
+    assert!(
+        !by_agent.is_empty(),
+        "by-agent passive participial must parse (the `pass` reduced-relative route) — 0 readings \
+         means the trigger was narrowed past `gq_prep_passive_agent`"
+    );
+
+    // (2) OBLIQUE participial — the seed-time lift route. Must parse. This one does NOT go through
+    // `reduced_relative` at all any more; it reaches `cat_pp` as `cat_pp/cat_pp_arg` applied to its PP.
+    let oblique = skeletons("The cell lines compared to MSS lines were resistant.");
+    assert!(
+        !oblique.is_empty(),
+        "oblique participial must parse via `oblique_participial_lifts` — 0 readings means the \
+         seed-time lift stopped firing and only the (now-refused) `pss` shift route remained"
+    );
+
+    // (3) The ACTIVE/PERFECT participle must NOT become a noun post-modifier. The signature of the bad
+    // reading is structural, not a count: "WRN [that] induced DNA" makes `WRN` a refined noun and
+    // leaves `breaks` as the finite main verb — so `induced` ends up INSIDE a Σ restrictor. The correct
+    // readings all have `induced` as the matrix verb, with `DNA breaks` its object.
+    let perfect = skeletons("Depletion of WRN induced double-stranded DNA breaks.");
+    assert!(
+        !perfect.is_empty(),
+        "the sentence must still parse — this guard is about WHICH readings exist, not coverage"
+    );
+    // `breaks` as a finite intransitive verb is only reachable once the participial has been consumed
+    // as a post-modifier, so the count is the signature: A/B-measured 2 skeletons with the trigger on
+    // `pass`, 8 with it on `pss`. The bound sits between them rather than at 2, so a later unrelated
+    // gain in ambiguity here does not read as this defect returning.
+    assert!(
+        perfect.len() <= 4,
+        "active/perfect participle must not license a reduced SUBJECT relative (English has no \
+         \"*the man ate the food\" for \"the man that ate\"). Measured 2 skeletons with the trigger \
+         on `pass`, 8 with it on `pss`; got {} — {:#?}",
+        perfect.len(),
+        perfect
+    );
+}

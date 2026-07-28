@@ -367,6 +367,47 @@ impl Grammar {
                         forest.push_edge(nid, Edge::Unary { child, kind });
                     }
                 }
+                // Targeted cell dump (`EIGENIUS_DUMP_CELL=i..j`) — the PACKED path's twin of the ones
+                // in `chart::unpacked` and `parse::seed`. This is the PRODUCTION path, so a difference
+                // that only shows here (packing collapses distinct derivations onto one representative)
+                // is invisible in the other two. Prints each node's representative category.
+                if let Ok(want) = std::env::var("EIGENIUS_DUMP_CELL") {
+                    if want == format!("{i}..{j}") {
+                        eprintln!(
+                            "  ===== DUMP packed[{i}..{j}] ({} nodes) =====",
+                            forest.cells[i][j].len()
+                        );
+                        for nid in forest.cells[i][j].values() {
+                            let n = &forest.nodes[*nid];
+                            let edges: Vec<String> = n
+                                .edges
+                                .iter()
+                                .map(|e| match e {
+                                    Edge::Leaf(_) => "Leaf".to_string(),
+                                    Edge::Combine { left, right } => {
+                                        format!(
+                                            "Combine({}+{})",
+                                            super::super::pretty::pretty_term(
+                                                forest.nodes[*left].rep.cat()
+                                            ),
+                                            super::super::pretty::pretty_term(
+                                                forest.nodes[*right].rep.cat()
+                                            )
+                                        )
+                                    }
+                                    Edge::Unary { kind, .. } => format!("Unary({kind:?})"),
+                                    Edge::Binary { .. } => "Binary".to_string(),
+                                })
+                                .collect();
+                            eprintln!(
+                                "    [{:?}] {}\n        <- {}",
+                                n.rep.prov(),
+                                super::super::pretty::pretty_term(n.rep.cat()),
+                                edges.join("\n        <- ")
+                            );
+                        }
+                    }
+                }
             }
         }
         forest
