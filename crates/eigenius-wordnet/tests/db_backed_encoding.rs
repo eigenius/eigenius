@@ -660,11 +660,25 @@ fn app_spine(e: &Exp) -> (&Exp, Vec<&Exp>) {
     (cur, args)
 }
 
+/// The local name of a sense ATOM — an axiom, a class, or a named INDIVIDUAL.
+///
+/// The individual arm was missing until 2026-07-27, and it mattered: the UMLS importer declares a
+/// concept as a `resource` (not a `class`) when it is an individual — `C0879389` "MLH1 gene",
+/// `C1337007` "WRN gene" — and those reach the sem as [`Exp::EigonResource`]. Without this arm
+/// `axiom_local` returned `None`, so [`name_atom`] was never consulted and every
+/// `compound(x, <individual>)` reading verbalised as the raw `⟦C0879389⟧` bracket.
+///
+/// That blinded the verbaliser on exactly the readings under review when adjudicating the
+/// `compound` / `compound_kind` split, since `compound` (`Entity -> Entity`) is the INDIVIDUAL
+/// relation and `compound_kind` (`Entity -> Set`) the kind one — so the individual side of every
+/// such pair was unreadable. `umls_name` resolves these fine (the resource carries a
+/// `core:description`); only the extractor was refusing to hand it the key.
 fn axiom_local(e: &Exp) -> Option<&str> {
     match e {
         Exp::EigonAxiom(i) | Exp::EigonClass(i) => {
             Some(i.as_str().rsplit(':').next().unwrap_or(""))
         }
+        Exp::EigonResource(r) => r.id().map(|i| i.as_str().rsplit(':').next().unwrap_or("")),
         _ => None,
     }
 }
