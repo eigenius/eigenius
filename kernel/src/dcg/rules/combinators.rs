@@ -700,7 +700,16 @@ fn refine_rules() -> &'static [CatRule] {
                 name: "pp_mod",
                 left_pat: cat_n(Var("C"), Var("num")),
                 right_pat: Ctor("cat_pp", vec![]),
-                guards: &[],
+                guards: &[
+                    // Left-branching NF for POSTnominal modification, the mirror of the guard
+                    // `named_compound`/`kind_compound` carry on their head: a PP attaches to the bare
+                    // nominal, and a pre-nominal compound modifier goes outside it. Both bracketings of
+                    // "the MMR genes in humans" feed `refine_conjoin`, which flattens restrictors onto
+                    // ONE Σ, so they are the same claim reached two ways — collapsing to one derivation
+                    // removes spurious ambiguity, it does not choose a meaning. Found by
+                    // `grammar_rule_guard_matrix` (this rule had no guards at all).
+                    Guard::NotCompoundRefined(Operand::Left),
+                ],
                 build: refine_pp_mod,
             },
         ]
