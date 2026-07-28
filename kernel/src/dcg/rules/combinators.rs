@@ -1391,10 +1391,183 @@ fn app2(axiom_iri: &str, arg0: &str, arg1: Exp) -> Exp {
 /// meaning-preserving; making the order CANONICAL rather than CKY-derivation order is the point: the
 /// two attachment orders of one modifier set (`And(compound, prep_of)` vs `And(prep_of, compound)`)
 /// then emit the **byte-identical** Σ, so they pack into one forest node and `subsume_duplicates`
-/// collapses the otherwise-spurious duplicate readings. Sort key is `pretty_term` — a deterministic
-/// total order over the (simple, App-spine) restrictor terms; only its stability matters, not the
-/// order it picks. Depends on the bound variable being the SAME across paths (all refined Σ use
-/// [`COMPOUND_X`]) — else two alpha-variants would sort identically yet stay distinct terms.
+/// collapses the otherwise-spurious duplicate readings. Sort key is [`restrictor_key`]: `pretty_term`
+/// of the conjunct's β-NORMAL form. Stability alone is not sufficient and keying on the raw term was
+/// measured wrong — one restrictor has several un-reduced forms, which sort to different places and
+/// then reduce to the same thing at readback; see [`restrictor_key`]. Depends on the bound variable
+/// being the SAME across paths (all refined Σ use [`COMPOUND_X`]) — else two alpha-variants would
+/// sort identically yet stay distinct terms.
+/// The sort key [`conjoin_canonical`] orders restrictors by: `pretty_term` of the conjunct's
+/// **β-normal form**.
+///
+/// Keying on the raw term is not enough, and the reason is measured. A restrictor is stored
+/// UN-REDUCED (`refine_mod_apply` / `refine_pp_mod` build `App(sem, x)`, and
+/// [`is_adjective_refined`] depends on that shape), and ONE restrictor has more than one un-reduced
+/// form — the PP object arrives either directly or through a type-raised GQ:
+///
+/// ```text
+/// λ__pobj_x. λV. V(kind_of(C))(λ__pobj_y. λy. λx. prep_to(x, y)(__pobj_y, __pobj_x))(__cmp_x)
+/// λy. λx. prep_to(x, y)(kind_of(C), __cmp_x)
+/// ```
+///
+/// Both β-reduce to `prep_to(__cmp_x, kind_of(C))` — the same claim — but as strings the first sorts
+/// BEFORE `λx. gt(…)(__cmp_x)` and the second AFTER it, so an adjective and a PP on one noun came out
+/// in either order. Readback then reduces both, leaving two Σ that differ ONLY in conjunct order.
+/// Determinism was never the problem; the key has to be invariant under β, because β-equivalent
+/// conjuncts are the same restrictor and must sort to the same place.
+///
+/// Sorting can only REORDER conjuncts, never drop one, so a key that under-normalizes costs a missed
+/// collapse and nothing else — which is why [`beta_normalize`] is allowed to give up (below) rather
+/// than risk an unsound reduction.
+fn restrictor_key(e: &Exp) -> String {
+    pretty_term(&beta_normalize(e))
+}
+
+/// β-normalize for [`restrictor_key`]. Reduces `(λx. b) a` and drops `Ann`, recursing through the
+/// term formers a restrictor is built from; any other variant is returned as-is.
+///
+/// **Deliberately partial.** A redex whose argument shares a variable name with a binder inside the
+/// body is left UNREDUCED instead of being renamed — capture-avoiding freshening is not worth writing
+/// for a sort key, and the fallback is free: an unreduced conjunct just keys by its raw form, exactly
+/// the old behaviour. The shadow test over-approximates (every `Var` in the argument against every
+/// binder in the body), so it errs toward not reducing.
+fn beta_normalize(e: &Exp) -> Exp {
+    fn vars(e: &Exp, out: &mut std::collections::BTreeSet<String>) {
+        if let Exp::Var(n) = e {
+            out.insert(n.to_string());
+        }
+        for c in subterms(e) {
+            vars(c, out);
+        }
+    }
+    fn binders(e: &Exp, out: &mut std::collections::BTreeSet<String>) {
+        match e {
+            Exp::Lam(Patt::Var(n), _)
+            | Exp::Pi(Patt::Var(n), _, _)
+            | Exp::Sig(Patt::Var(n), _, _) => {
+                out.insert(n.to_string());
+            }
+            _ => {}
+        }
+        for c in subterms(e) {
+            binders(c, out);
+        }
+    }
+    fn subterms(e: &Exp) -> Vec<&Exp> {
+        match e {
+            Exp::App(f, a) => vec![f, a],
+            Exp::Lam(_, b) | Exp::Con(_, b) => vec![b],
+            Exp::Pi(_, a, b) | Exp::Sig(_, a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) => {
+                vec![a, b]
+            }
+            Exp::Pair(a, b) => vec![a, b],
+            Exp::Fst(a) | Exp::Snd(a) | Exp::Ann(a, _) => vec![a],
+            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => args.iter().collect(),
+            _ => Vec::new(),
+        }
+    }
+    /// Replace free `name` by `arg`; stops at a binder that re-binds `name` (shadowing).
+    fn subst(body: &Exp, name: &str, arg: &Exp) -> Exp {
+        let rebinds = |p: &Patt| matches!(p, Patt::Var(n) if n.as_str() == name);
+        match body {
+            Exp::Var(n) if n.as_str() == name => arg.clone(),
+            Exp::Lam(p, b) => Exp::Lam(
+                p.clone(),
+                Box::new(if rebinds(p) {
+                    (**b).clone()
+                } else {
+                    subst(b, name, arg)
+                }),
+            ),
+            Exp::Pi(p, a, b) => Exp::Pi(
+                p.clone(),
+                Box::new(subst(a, name, arg)),
+                Box::new(if rebinds(p) {
+                    (**b).clone()
+                } else {
+                    subst(b, name, arg)
+                }),
+            ),
+            Exp::Sig(p, a, b) => Exp::Sig(
+                p.clone(),
+                Box::new(subst(a, name, arg)),
+                Box::new(if rebinds(p) {
+                    (**b).clone()
+                } else {
+                    subst(b, name, arg)
+                }),
+            ),
+            Exp::App(f, a) => {
+                Exp::App(Box::new(subst(f, name, arg)), Box::new(subst(a, name, arg)))
+            }
+            Exp::Con(n, b) => Exp::Con(n.clone(), Box::new(subst(b, name, arg))),
+            Exp::Arrow(a, b) => {
+                Exp::Arrow(Box::new(subst(a, name, arg)), Box::new(subst(b, name, arg)))
+            }
+            Exp::Times(a, b) => {
+                Exp::Times(Box::new(subst(a, name, arg)), Box::new(subst(b, name, arg)))
+            }
+            Exp::Pair(a, b) => {
+                Exp::Pair(Box::new(subst(a, name, arg)), Box::new(subst(b, name, arg)))
+            }
+            Exp::Fst(a) => Exp::Fst(Box::new(subst(a, name, arg))),
+            Exp::Snd(a) => Exp::Snd(Box::new(subst(a, name, arg))),
+            Exp::Ann(a, t) => Exp::Ann(Box::new(subst(a, name, arg)), t.clone()),
+            Exp::InductiveType(d, args) => Exp::InductiveType(
+                d.clone(),
+                args.iter().map(|x| subst(x, name, arg)).collect(),
+            ),
+            Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
+                d.clone(),
+                n.clone(),
+                args.iter().map(|x| subst(x, name, arg)).collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+    match e {
+        Exp::Ann(inner, _) => beta_normalize(inner),
+        Exp::App(f, a) => {
+            let (f, a) = (beta_normalize(f), beta_normalize(a));
+            if let Exp::Lam(Patt::Var(n), body) = &f {
+                let (mut av, mut bb) = (Default::default(), Default::default());
+                vars(&a, &mut av);
+                binders(body, &mut bb);
+                if av.is_disjoint(&bb) {
+                    return beta_normalize(&subst(body, n.as_str(), &a));
+                }
+            }
+            Exp::App(Box::new(f), Box::new(a))
+        }
+        Exp::Lam(p, b) => Exp::Lam(p.clone(), Box::new(beta_normalize(b))),
+        Exp::Con(n, b) => Exp::Con(n.clone(), Box::new(beta_normalize(b))),
+        Exp::Pi(p, a, b) => Exp::Pi(
+            p.clone(),
+            Box::new(beta_normalize(a)),
+            Box::new(beta_normalize(b)),
+        ),
+        Exp::Sig(p, a, b) => Exp::Sig(
+            p.clone(),
+            Box::new(beta_normalize(a)),
+            Box::new(beta_normalize(b)),
+        ),
+        Exp::Arrow(a, b) => Exp::Arrow(Box::new(beta_normalize(a)), Box::new(beta_normalize(b))),
+        Exp::Times(a, b) => Exp::Times(Box::new(beta_normalize(a)), Box::new(beta_normalize(b))),
+        Exp::Pair(a, b) => Exp::Pair(Box::new(beta_normalize(a)), Box::new(beta_normalize(b))),
+        Exp::Fst(a) => Exp::Fst(Box::new(beta_normalize(a))),
+        Exp::Snd(a) => Exp::Snd(Box::new(beta_normalize(a))),
+        Exp::InductiveType(d, args) => {
+            Exp::InductiveType(d.clone(), args.iter().map(beta_normalize).collect())
+        }
+        Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
+            d.clone(),
+            n.clone(),
+            args.iter().map(beta_normalize).collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 fn conjoin_canonical(
     and: &Arc<crate::nbe::term::InductiveDecl>,
     p_body: &Exp,
@@ -1413,7 +1586,7 @@ fn conjoin_canonical(
     let mut conjuncts = Vec::new();
     flatten(and.iri.as_str(), p_body, &mut conjuncts);
     conjuncts.push(new_restr);
-    conjuncts.sort_by_cached_key(pretty_term);
+    conjuncts.sort_by_cached_key(restrictor_key);
     let mut it = conjuncts.into_iter();
     let mut acc = it.next().expect("conjoin_canonical: at least one conjunct");
     for c in it {
@@ -1749,6 +1922,118 @@ mod dispatch_tests {
     }
     fn mk_item(cat: Exp, sem: Exp) -> Item {
         Item::from_parts(cat, sem, Combinator::Other, Cost::ZERO)
+    }
+
+    /// **`restrictor_key` must be invariant under β.** This is the property `conjoin_canonical`'s
+    /// canonical order actually depends on, and keying on the raw term did not have it: a restrictor
+    /// is stored UN-REDUCED, and one restrictor has several un-reduced forms (a PP object arriving
+    /// directly vs through a type-raised GQ). Those sorted to different places and then reduced to
+    /// the same term at readback, so one modifier set emitted two Σ differing only in conjunct order
+    /// — 26 skeletons of the reference page, measured 2026-07-27.
+    ///
+    /// The three forms below are the shapes that actually occur: fully reduced, the direct
+    /// application, and the raised-GQ detour `λV. V(obj)` applied to a continuation.
+    #[test]
+    fn restrictor_key_is_beta_invariant() {
+        let (x, obj) = ("__cmp_x", cls("urn:eigenius:lexicon:Obj"));
+        let prep = ax("urn:eigenius:ontology:prep_to");
+        // prep_to(x, obj)
+        let reduced = Exp::App(
+            Box::new(Exp::App(
+                Box::new(prep.clone()),
+                Box::new(Exp::Var(x.into())),
+            )),
+            Box::new(obj.clone()),
+        );
+        // (λy. λz. prep_to(z, y)) obj x   — the direct route, un-reduced
+        let direct = Exp::App(
+            Box::new(Exp::App(
+                Box::new(Exp::Lam(
+                    Patt::Var("y".into()),
+                    Box::new(Exp::Lam(
+                        Patt::Var("z".into()),
+                        Box::new(Exp::App(
+                            Box::new(Exp::App(
+                                Box::new(prep.clone()),
+                                Box::new(Exp::Var("z".into())),
+                            )),
+                            Box::new(Exp::Var("y".into())),
+                        )),
+                    )),
+                )),
+                Box::new(obj.clone()),
+            )),
+            Box::new(Exp::Var(x.into())),
+        );
+        // (λV. V(obj)) (λw. λz. prep_to(z, w)) x   — the type-raised-object route
+        let raised = Exp::App(
+            Box::new(Exp::App(
+                Box::new(Exp::Lam(
+                    Patt::Var("V".into()),
+                    Box::new(Exp::App(
+                        Box::new(Exp::Var("V".into())),
+                        Box::new(obj.clone()),
+                    )),
+                )),
+                Box::new(Exp::Lam(
+                    Patt::Var("w".into()),
+                    Box::new(Exp::Lam(
+                        Patt::Var("z".into()),
+                        Box::new(Exp::App(
+                            Box::new(Exp::App(Box::new(prep), Box::new(Exp::Var("z".into())))),
+                            Box::new(Exp::Var("w".into())),
+                        )),
+                    )),
+                )),
+            )),
+            Box::new(Exp::Var(x.into())),
+        );
+
+        let k = restrictor_key(&reduced);
+        assert_eq!(
+            k, "prep_to(__cmp_x, Obj)",
+            "the reduced form keys by its normal form"
+        );
+        assert_eq!(
+            restrictor_key(&direct),
+            k,
+            "direct application must key like its normal form"
+        );
+        assert_eq!(
+            restrictor_key(&raised),
+            k,
+            "the raised-GQ detour must key like its normal form"
+        );
+        // The raw forms genuinely differ — otherwise this test would pass vacuously and the defect
+        // it guards could not have happened.
+        assert_ne!(pretty_term(&direct), pretty_term(&raised));
+        assert_ne!(pretty_term(&direct), pretty_term(&reduced));
+    }
+
+    /// The β-normalizer GIVES UP rather than capture: reducing `(λf. λa. f(a)) a` would capture the
+    /// argument `a` under the inner binder, so the redex is left alone. The key is then the raw form
+    /// — a missed collapse, never a wrong one. Sorting only reorders conjuncts, so this costs
+    /// nothing but a duplicate that survives.
+    #[test]
+    fn beta_normalize_refuses_to_capture() {
+        let risky = Exp::App(
+            Box::new(Exp::Lam(
+                Patt::Var("f".into()),
+                Box::new(Exp::Lam(
+                    Patt::Var("a".into()),
+                    Box::new(Exp::App(
+                        Box::new(Exp::Var("f".into())),
+                        Box::new(Exp::Var("a".into())),
+                    )),
+                )),
+            )),
+            Box::new(Exp::Var("a".into())),
+        );
+        assert_eq!(
+            pretty_term(&beta_normalize(&risky)),
+            pretty_term(&risky),
+            "a capturing redex must be left unreduced, not renamed"
+        );
     }
     fn layer() -> Arc<Layer> {
         Arc::new(
