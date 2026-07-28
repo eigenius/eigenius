@@ -153,9 +153,28 @@ pub fn entry_to_item(layer: &Arc<Layer>, entry: &Resource) -> Result<Item, Strin
         .and_then(Value::as_integer)
         .unwrap_or(0)
         .max(0) as u32;
-    Ok(Item::with_cost(
+    // `lexicon:scope_bearing` — the entry is a scope-bearing operator (sentential negation, a modal,
+    // do-support), so its leaf carries [`Combinator::ScopeOperator`] and the combinator can tag the
+    // operator's OUTPUT `Modal` without sniffing the category. Read HERE, exactly once, next to
+    // `sense_rank`: the parse then never re-derives the property, and the firing decision downstream
+    // reads only provenance. Absent ⇒ an ordinary leaf. See [`Combinator::ScopeOperator`] for why the
+    // property is declared rather than inferred.
+    let prov = if entry
+        .get(&iri("urn:eigenius:lexicon:scope_bearing"))
+        .and_then(|v| match v {
+            Value::Boolean(b) => Some(*b),
+            _ => None,
+        })
+        .unwrap_or(false)
+    {
+        super::item::Combinator::ScopeOperator
+    } else {
+        super::item::Combinator::Other
+    };
+    Ok(Item::from_parts(
         cat,
         resolve_sem_value(layer, sem_v)?,
+        prov,
         super::item::Cost::from_sense_rank(sense_rank),
     ))
 }
@@ -599,6 +618,85 @@ mod referential_definite_tests {
                 mentions_the(q).iter().all(|&b| !b),
                 "`{q}` must stay quantificational (no ontology:the)"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod scope_bearing_tests {
+    use super::{LexicalIndex, LexicalLookup};
+    use crate::dcg::item::Combinator;
+    use crate::dcg::rules::combinators::is_modal_functor;
+    use std::sync::Arc;
+
+    /// **`lexicon:scope_bearing` must cover everything the category sniff catches.**
+    ///
+    /// `combinators::build` tags a scope-bearing operator's OUTPUT `Combinator::Modal` two ways: the
+    /// DECLARED property (this flag → `Combinator::ScopeOperator` on the leaf) and the INFERRED
+    /// `is_modal_functor` category test. They are additive so a missing declaration degrades to the
+    /// old behaviour rather than silently dropping an auxiliary's `Modal` tag — and this test is what
+    /// makes retiring the sniff safe, by pinning that the declaration is a SUPERSET of it.
+    ///
+    /// Negation is the part the sniff cannot reach: `not` is `fwd(VP[bse], VP[bse])` /
+    /// `fwd(VP[adj], VP[adj])`, and the latter is byte-identical to the adverb adjective-modifier
+    /// category, so no category test can single it out. Declaring it is the point.
+    ///
+    /// CI-runnable, no snapshot (the behavioural check is `negation_scope_blocks_adjunct_escape` in
+    /// `crates/eigenius-wordnet/tests/db_backed_encoding.rs`).
+    #[test]
+    fn scope_bearing_covers_the_modal_category_sniff() {
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let lex = LexicalIndex::build(Arc::clone(ctx.head()));
+
+        // (1) SUPERSET: every entry the sniff would catch is also declared. If this fails, retiring
+        // `is_modal_functor` would lose that entry's `Modal` tag — the silent failure mode.
+        for form in [
+            "does", "do", "did", "can", "could", "may", "might", "must", "will", "would", "should",
+            "not", "is", "are", "was", "were", "affects", "the", "in",
+        ] {
+            for e in lex.entries_for(form) {
+                if is_modal_functor(e.item.cat()) {
+                    assert_eq!(
+                        e.item.prov(),
+                        Combinator::ScopeOperator,
+                        "`{form}` has an entry the category sniff catches but which does NOT \
+                         declare lexicon:scope_bearing — retiring the sniff would drop its Modal tag"
+                    );
+                }
+            }
+        }
+
+        // (2) NEGATION is declared, and is exactly what the sniff MISSES — both of its entries.
+        let nots = lex.entries_for("not");
+        assert_eq!(
+            nots.len(),
+            2,
+            "expected the two `not` entries (verbal + adjectival)"
+        );
+        for e in &nots {
+            assert_eq!(
+                e.item.prov(),
+                Combinator::ScopeOperator,
+                "sentential negation must declare lexicon:scope_bearing — without it a VP-adjunct \
+                 attaches ABOVE the negation and escapes its scope"
+            );
+            assert!(
+                !is_modal_functor(e.item.cat()),
+                "if the sniff started catching `not`, this test's premise is stale — the flag was \
+                 introduced precisely because no category test can single negation out"
+            );
+        }
+
+        // (3) NOT over-applied: an ordinary content word and a determiner stay untagged, so the
+        // flag cannot silently spread to categories that legitimately host an adjunct above them.
+        for form in ["affects", "the", "in"] {
+            for e in lex.entries_for(form) {
+                assert_ne!(
+                    e.item.prov(),
+                    Combinator::ScopeOperator,
+                    "`{form}` must not be scope-bearing"
+                );
+            }
         }
     }
 }

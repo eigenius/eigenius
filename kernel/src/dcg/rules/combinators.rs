@@ -396,7 +396,7 @@ fn combine_other_grammar(left: &CategoryPayload, right: &CategoryPayload) -> Opt
 /// A **modal / do-support auxiliary** functor category `(S[dcl,fin]\NP)/(S[dcl,bse]\NP)` — a forward
 /// functor from a BASE verbal VP to a FINITE one (`can`/`may`/…, and the declarative do-support). Its
 /// forward-application output is tagged [`Combinator::Modal`] so a VP-adjunct cannot attach above it.
-fn is_modal_functor(cat: &Exp) -> bool {
+pub(crate) fn is_modal_functor(cat: &Exp) -> bool {
     let Some([res, arg]) = is_ctor(cat, "fwd") else {
         return false;
     };
@@ -439,7 +439,18 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
                     // A modal / do-support aux (`(S[dcl,fin]\NP)/(S[dcl,bse]\NP)`, functor = left)
                     // tags its finite-VP output `Modal`, so a later VP-adjunct PP cannot attach ABOVE
                     // it (`Combinator::Modal` / `ProvGuard::LeftNotModal`) and escape the modal scope.
-                    let prov = if is_modal_functor(left.cat()) {
+                    // Two ways to be a scope-bearing operator, and they are ADDITIVE on purpose.
+                    // `is_modal_functor` INFERS it from the category (`VP[fin]/VP[bse]` — the
+                    // auxiliaries); `Combinator::ScopeOperator` is DECLARED on the entry
+                    // (`lexicon:scope_bearing`) and reaches here as the functor's leaf provenance.
+                    // The declared form is what covers sentential negation, whose category a test
+                    // cannot separate from an adverb's. Keeping the inference alongside it means a
+                    // missing declaration degrades to today's behaviour rather than silently
+                    // dropping an auxiliary's `Modal` tag — the failure mode the whole lib suite
+                    // missed once already.
+                    let prov = if left.prov() == Combinator::ScopeOperator
+                        || is_modal_functor(left.cat())
+                    {
                         Combinator::Modal
                     } else {
                         Combinator::ForwardApp

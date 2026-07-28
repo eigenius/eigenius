@@ -370,6 +370,7 @@ resource lexicon:not_vp : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "not";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 // not — over an adjectival predicate ("is not primary").
 resource lexicon:not_adj : lexicon:LexicalEntry {
@@ -380,6 +381,7 @@ resource lexicon:not_adj : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "not";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 // Declarative do-support (verbal negation / emphatic) — finiteness-lifting `λP.P`.
 resource lexicon:does_decl : lexicon:LexicalEntry {
@@ -390,6 +392,7 @@ resource lexicon:does_decl : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "do";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:do_decl : lexicon:LexicalEntry {
     core:description = "grammatical: DO-support auxiliary, carrying tense in negation and questions ('do not lead').";
@@ -399,6 +402,7 @@ resource lexicon:do_decl : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "do";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:did_decl : lexicon:LexicalEntry {
     core:description = "grammatical: past DO-support auxiliary ('did not respond').";
@@ -408,6 +412,7 @@ resource lexicon:did_decl : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "do";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 
 // ── Progressive + perfect auxiliaries (D63 §8.9 Slice 6-aux) ──────────
@@ -659,6 +664,7 @@ resource lexicon:can_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "can";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:could_modal : lexicon:LexicalEntry {
     core:description = "grammatical: modal auxiliary of possibility (past/hypothetical).";
@@ -668,6 +674,7 @@ resource lexicon:could_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "can";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:may_modal : lexicon:LexicalEntry {
     core:description = "grammatical: modal auxiliary of possibility ('WRN dependency may require lineages').";
@@ -677,6 +684,7 @@ resource lexicon:may_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "may";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:might_modal : lexicon:LexicalEntry {
     core:description = "grammatical: modal auxiliary of possibility (weaker/hypothetical).";
@@ -686,6 +694,7 @@ resource lexicon:might_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "may";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:must_modal : lexicon:LexicalEntry {
     core:description = "grammatical: modal auxiliary of necessity.";
@@ -695,6 +704,7 @@ resource lexicon:must_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "must";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 // will / would / should — each its OWN opaque operator (not ◇/□); see logic.esl.
 resource lexicon:will_sem : lexicon:SemTerm {
@@ -723,6 +733,7 @@ resource lexicon:will_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "will";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:would_modal : lexicon:LexicalEntry {
     core:description = "grammatical: modal auxiliary of conditional/hypothetical mood.";
@@ -732,6 +743,7 @@ resource lexicon:would_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "would";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:should_modal : lexicon:LexicalEntry {
     core:description = "grammatical: modal auxiliary of obligation or expectation.";
@@ -741,6 +753,7 @@ resource lexicon:should_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "should";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 
 // ── Clausal complements: complementizer `that` (D63 §8.11 Slice 6-cl) ──

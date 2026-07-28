@@ -132,6 +132,27 @@ pub enum Combinator {
     /// `cat_pp` across two nodes (the routes split by provenance, so `Sig` keeps them apart) where the
     /// shift route it replaced carried one.
     ObliqueParticipial,
+    /// A **scope-bearing operator's lexical leaf** — an entry declaring `lexicon:scope_bearing`
+    /// (sentential negation `not`, the modals, do-support). Set once at seeding by
+    /// [`crate::dcg::lexicon::entry_to_item`]; the tag exists so [`Self::Modal`] can be put on the
+    /// operator's OUTPUT without the combinator having to sniff the category or read a sem.
+    ///
+    /// The distinction it encodes is core-en's. There, negation is an auxiliary-verb family
+    /// (`auxv.xsl`, `family name="Negation" pos="V" closed="true"`) whose category
+    /// `(s.1.from-6.E\np)/(s.6.E2\np)` derives a NEW situation index from its argument's, while an
+    /// adverb (`adv.xsl`, `pos="Adv"`) is `s.1.E\s.1.E` with LF `HasProp(E, P)` — the SAME index,
+    /// decorated. A VP-adjunct attaching above an index-preserving modifier lands on the same event
+    /// and is the same claim; above an index-SHIFTING operator it lands on the outer index and
+    /// escapes the embedded one. Only the latter must be refused.
+    ///
+    /// A category test cannot draw that line here: `not_adj` is `fwd(VP[adj], VP[adj])`, which is
+    /// byte-identical to the adverb adjective-modifier category ([`crate::dcg::category`]'s
+    /// `adverb_modifier_cats`). Hence the property is DECLARED on the entry rather than inferred,
+    /// and read once — a combine-time decision then reads only provenance, which `Sig` already
+    /// carries, so no packing bit is added (the constraint [`Self::DerivedIndividual`] documents).
+    ///
+    /// ENF-inert: it must still forward-apply to its VP, so no `ProvGuard` refuses it.
+    ScopeOperator,
     /// Any other producer (lexical leaf, coordination, group/distributive rules) —
     /// not a composition output, so ENF never constrains it.
     Other,

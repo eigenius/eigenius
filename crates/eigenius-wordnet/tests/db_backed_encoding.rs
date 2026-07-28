@@ -6007,3 +6007,70 @@ fn reduced_relative_fires_on_passive_not_perfect() {
         perfect
     );
 }
+
+/// **A VP-adjunct must not attach ABOVE sentential negation** — `lexicon:scope_bearing` (2026-07-27).
+///
+/// `not` is a VP→VP functor with its own lexical entry, so `not respond` forms as an ordinary
+/// `ForwardApp` and the VP-adjunct preposition family — `((S[fin_any]\NP)\(S[fin_any]\NP))/NP`, whose
+/// `fin_any` unifies with the VP either inside or outside the operator — could attach above it:
+///
+/// ```text
+///   And(respond(s) → False, prep_to(s, X))     "they don't respond, AND they are to X"   WRONG
+///   And(respond(s), prep_to(s, X)) → False     "not (they respond and are to X)"         ok
+///   respond_p(X, s) → False                    `respond to` as a 2-place verb            ok
+/// ```
+///
+/// The do-support route was already protected (`do not respond` is tagged `Combinator::Modal`, and
+/// `ProvGuard::LeftNotModal` refuses it as a VP-adjunct's argument); the standalone `not` route was
+/// not. Declaring `lexicon:scope_bearing` tags its leaf `Combinator::ScopeOperator`, the combinator
+/// tags the output `Modal`, and the existing guard covers both.
+///
+/// The criterion is core-en's, and it is semantic rather than categorial: its Negation family
+/// (`auxv.xsl`, `pos="V" closed="true"`) is `(s.1.from-6.E\np)/(s.6.E2\np)` — a NEW situation index
+/// derived from the argument's — while its Adverb family (`adv.xsl`, `pos="Adv"`) is `s.1.E\s.1.E`
+/// with LF `HasProp(E, P)`, the SAME index decorated. An adjunct above an index-preserving modifier
+/// lands on the same event and is the same claim; above an index-SHIFTING operator it escapes.
+///
+/// Measured: this unit 9 → 6 skeletons on the page (24 → 12 in isolation), page 237 → 234, with a
+/// set diff of 3 lost / 0 added — the three lost being exactly the escaped family.
+///
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     negation_scope_blocks_adjunct_escape -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed; --ignored --nocapture"]
+fn negation_scope_blocks_adjunct_escape() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+
+    let skeletons: std::collections::BTreeSet<String> = index
+        .parse(
+            "Some cancers do not respond to immune checkpoint blockade.",
+            &lem,
+        )
+        .iter()
+        .map(|it| erase_senses(&pretty_term(it.sem())))
+        .collect();
+    assert!(!skeletons.is_empty(), "the sentence must still parse");
+
+    // The escaped reading: the negation sits INSIDE an `And` whose sibling is the PP adjunct, so
+    // only the verb is negated and the adjunct is asserted outright.
+    let escaped: Vec<&String> = skeletons
+        .iter()
+        .filter(|s| s.contains("→ False, prep_"))
+        .collect();
+    assert!(
+        escaped.is_empty(),
+        "a VP-adjunct attached ABOVE the negation and escaped its scope — `not` lost its \
+         lexicon:scope_bearing declaration, or ProvGuard::LeftNotModal stopped covering it. \
+         Offending skeleton(s): {escaped:#?}"
+    );
+
+    // And the correct wide-scope reading is still there — this must be a REFUSAL, not a coverage
+    // loss. `And(…, prep_to(…)) → False` is the negation taking the whole conjunction.
+    assert!(
+        skeletons.iter().any(|s| s.contains(") → False")),
+        "the wide-scope negation reading must survive; got {skeletons:#?}"
+    );
+}
