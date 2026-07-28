@@ -47,7 +47,7 @@
     "expected_reading_hits": 44,
     "expected_reading_curated": 45,
     "skeleton_histogram": {
-      "_comment": "units bucketed by their SKELETON count, from the same replay as `skeletons` above. The total is concentrated, not spread: the tail carries most of it, so a page total moves when one unit moves. Read it before choosing a target — and note skeleton count alone is the WRONG criterion (see history: the 48-unit was picked on size and turned out to be lexical sense multiplicity, not structure).",
+      "_comment": "units bucketed by their SKELETON count, from the same replay as `skeletons` above (237, 2026-07-27, post restrictor-order canonicalisation). The total is CONCENTRATED, not spread: one unit carries 20% and the 7+ tail carries 60%, so the page total moves when a single unit moves. Read it before choosing a target -- and note skeleton count alone is the WRONG criterion. The 48-unit is the largest and the LEAST tractable: it is lexical sense multiplicity (`line` alone has 34 noun classes), which no grammar rule can reach. Rank by STRUCTURAL ambiguity instead. The measured decomposition of the 263-skeleton page was: conjunct ORDER 26 (spurious, now fixed); name-vs-kind (`compound`/`compound_kind`, `kind_of(X)`/`X`) 84 -- a LEXICAL distinction with different types (Entity vs Set), so glossary/NER territory, not rules; the rest structural.",
       "buckets": {
         "1": {
           "units": 23,
@@ -55,32 +55,34 @@
         },
         "2-3": {
           "units": 22,
-          "skeletons": 47
+          "skeletons": 45
         },
         "4-6": {
-          "units": 4,
-          "skeletons": 17
+          "units": 6,
+          "skeletons": 27
         },
         "7-10": {
           "units": 8,
           "skeletons": 68
         },
         "11-20": {
-          "units": 3,
-          "skeletons": 40
+          "units": 2,
+          "skeletons": 26
         },
         "21-50": {
-          "units": 2,
-          "skeletons": 74
+          "units": 1,
+          "skeletons": 48
         }
       },
       "top_units": {
         "MSI cell lines from these four lineages showed greater dependence on WRN than their MSS counterparts.": 48,
-        "We analysed these data sets for genes that are selectively essential in cancer cells with MSI.": 26,
-        "These findings show that WRN is a promising drug target for MSI cancers.": 14,
-        "Depletion of WRN induced double-stranded DNA breaks.": 14,
-        "PARP-1 inhibitors are successful in cancers with deficiencies in homologous recombination.": 12,
-        "MSI is associated with notable responses to immune checkpoint blockade.": 10
+        "We analysed these data sets for genes that are selectively essential in cancer cells with MSI.": 14,
+        "These findings show that WRN is a promising drug target for MSI cancers.": 12,
+        "PARP-1 inhibitors are successful in cancers with deficiencies in homologous recombination.": 10,
+        "Many cancers exhibit an impairment of a DNA repair pathway.": 9,
+        "Germline mutations in the MMR genes MSH2, MSH6, PMS2 or MLH1 cause Lynch syndrome.": 9,
+        "Some cancers do not respond to immune checkpoint blockade.": 9,
+        "Depletion of WRN induced double-stranded DNA breaks.": 8
       }
     }
   },
