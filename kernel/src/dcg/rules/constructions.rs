@@ -1423,36 +1423,38 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
 /// passive voice ("lines that WERE compared to …") and only works today by riding the same `pss` route
 /// that lets the active/perfect form through here.
 ///
-/// **PART 2 ATTEMPTED, MEASURED, REVERTED (2026-07-27) — right shape, unexplained side effect.**
-/// Reading the frames settles why the rule must fire on the FUNCTOR: both share the arrow
-/// `Entity -> Entity -> Prop` OBJECT-FIRST, so after saturation `Transitive` leaves the AGENT in the
-/// subject slot (`induced DNA` -> `λsubj. induce(DNA, subj)`, the bad reading) while `PpOblique` is
-/// 2-place with no distinct agent and leaves exactly the slot the modified noun should fill
-/// (`compared to X` -> `λsubj. compare(X, subj)`, already correct — no promotion needed). They differ
-/// BEFORE composition and are identical after, which is the whole difficulty.
+/// **PART 2 ATTEMPTED TWICE, AND THE BLOCKER IS PLUMBING, NOT LINGUISTICS (2026-07-27).** Reading the
+/// frames settles the shape: both share the arrow `Entity -> Entity -> Prop` OBJECT-FIRST, so after
+/// saturation `Transitive` leaves the AGENT in the subject slot (`induced DNA` -> `λsubj.
+/// induce(DNA, subj)`, the bad reading) while `PpOblique` is 2-place with no distinct agent and leaves
+/// exactly the slot the modified noun should fill (`compared to X` -> `λsubj. compare(X, subj)`, already
+/// correct). They differ BEFORE composition and are identical after, so the rule must fire on the
+/// FUNCTOR: accept `S[pass]\NP` -> `cat_pp` and `(S[pss]\NP)/cat_pp_arg(P)` ->
+/// `cat_pp/cat_pp_arg(P)`, dropping the saturated `S[pss]\NP` case.
 ///
-/// The rule was rewritten to accept only (a) `S[pass]\NP` -> `cat_pp` (the agentive long passive) and
-/// (b) `(S[pss]\NP)/cat_pp_arg(P)` -> `cat_pp/cat_pp_arg(P)` (the oblique participial, taking its own
-/// marker), dropping the saturated `S[pss]\NP` case. Measured:
+/// That is unreachable as written. **`reduced_relative` is a UNARY SHIFT, and both chart drivers run
+/// the shift table inside `for len in 2..=n` — shifts never fire on single-token LEAF cells.** The
+/// functor lift has to happen on `compared` at `[16..16]`, a leaf, so it never happens:
 ///
 /// ```text
-/// "Depletion of WRN induced ..."      14 -> 8   the target defect, fixed
-/// "... compared to MSS cell lines"    20 -> 48
-/// page                                303 skeletons (baseline 281): net +22, NOT shipped
+/// baseline   shift sees "compared to MSS cell lines" [16..20], a COMPOSED cell -> fires
+/// part 2     shift needs "compared"                  [16..16], a LEAF          -> never fires
 /// ```
 ///
-/// **The +28 on the oblique unit is NOT a noun-pile fallback**, which is what an average first
-/// suggested (compounds per skeleton 4.0 -> 5.0, vs 6.0 with the shift off). Diffing the skeleton SETS
-/// shows ZERO overlap: all 20 baseline readings gone, 48 different ones in, at the SAME compound count.
-/// What was lost is the correctly-DISTRIBUTED coordination — baseline reads
-/// `And(identified(…, achilles) ∧ prep_in(achilles, …), identified(…, drive) ∧ prep_in(drive, …))`,
-/// whereas under the change the second conjunct is no longer *project DRIVE* but a nominal blob
-/// (`the(` 2->1, `gt(` 4->2, `prep_in(` 2->1).
+/// Measured on top of the `pp_mod` normal form (711b753): the target unit "Depletion of WRN induced …"
+/// 14 -> 8 (the fix works), but "… compared to MSS cell lines" 8 -> 112 — EXACTLY the shift-disabled
+/// number, i.e. the participial route is gone entirely, not degraded. Page 269 -> 367. Reverted.
 ///
-/// So changing this rule's RESULT CATEGORY altered which spans could combine and knocked out a subject
-/// coordination three constituents away. That cascade is unexplained and is the thing to understand
-/// before a third attempt — it may matter more than the participial. (Method note: an average over a
-/// set that has been wholly replaced says nothing; diff the sets.)
+/// So part 2 removes a working route and adds an unreachable one; an earlier run measured 303 and I
+/// read the residue as a mysterious "distribution cascade three constituents away". It was not — it was
+/// whatever else could form once the route vanished.
+///
+/// **The fix belongs at SEED time, not in the shift table.** `participial_lifts` is the working model
+/// and is already tested: it takes the UNSATURATED `(S[pss]\NP)/NP` and promotes it to
+/// `λx. ∃a. v(x, a)` at a cost penalty for the PRE-nominal participial ("the predicted deficiency"),
+/// and it runs where leaves are seeded. The post-nominal counterpart wants the same treatment plus the
+/// `cat_pp_arg` shape. The alternative — running the shift table over leaf cells — is a driver change
+/// affecting every shift, and would need its own measurement.
 ///
 /// A provenance guard cannot substitute for the feature: after `to` composes in, the oblique participle's
 /// category is `(S[pss]\NP)/NP` by `ForwardComp` and then `ForwardApp` — the same category and the same
