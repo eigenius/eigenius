@@ -31,7 +31,13 @@
 #   scripts/reseed-lexicon-db.sh                 # WordNet --all + UMLS WRN-relevant subset
 #   scripts/reseed-lexicon-db.sh --umls-all      # UMLS all semantic types (large; ~prior 1.9 GB store)
 #   scripts/reseed-lexicon-db.sh --no-build      # skip the kernel image rebuild (image already matches HEAD)
-#   scripts/reseed-lexicon-db.sh --snapshot-dir /path/to/dir
+#   scripts/reseed-lexicon-db.sh --snapshot-dir /path/to/dir   # a path
+#   scripts/reseed-lexicon-db.sh --snapshot-dir my-snap-name   # a bare NAME → $SNAPSHOT_ROOT/my-snap-name
+#
+# Either form is resolved to an ABSOLUTE path before it reaches `docker -v`. That matters: docker
+# treats a non-absolute `-v` source as a NAMED VOLUME, not a bind mount, so the store would land in
+# a docker volume while the local directory stayed empty. The snapshot copy is verified afterwards
+# (CURRENT present, size sane) and the script FAILS rather than reporting success on an empty dir.
 #
 # Env overrides:
 #   ENDPOINT       kernel gRPC endpoint to load into (default: 127.0.0.1:50051)
@@ -68,6 +74,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$SNAPSHOT_DIR" ]] || SNAPSHOT_DIR="$SNAPSHOT_ROOT/wordnet-umls-$(date +%Y-%m-%d)"
+# A bare NAME (no `/`) means "under SNAPSHOT_ROOT", matching the default's shape. Anything with a
+# `/` is a path. Either way SNAPSHOT_DIR ends up ABSOLUTE before it reaches `docker -v`, and that is
+# load-bearing: `docker run -v <relative-or-bare>:/dst` does NOT bind-mount, it creates a docker
+# NAMED VOLUME. The 3 GB store then lands in that volume, the local directory stays empty, and the
+# run still looks like it worked. Verified failure mode, 2026-07-27.
+[[ "$SNAPSHOT_DIR" == */* ]] || SNAPSHOT_DIR="$SNAPSHOT_ROOT/$SNAPSHOT_DIR"
+mkdir -p "$(dirname "$SNAPSHOT_DIR")"
+SNAPSHOT_DIR="$(cd "$(dirname "$SNAPSHOT_DIR")" && pwd)/$(basename "$SNAPSHOT_DIR")"
 
 # WRN-relevant UMLS semantic types (mirrors scripts/provision-umls.sh DEFAULT_TUIS): Disease,
 # Cell/Molecular Dysfunction, Neoplastic Process, Gene or Genome, Diagnostic Procedure,
@@ -177,10 +191,35 @@ mkdir -p "$SNAPSHOT_DIR"
 docker run --rm -v "$VOLUME":/src:ro -v "$SNAPSHOT_DIR":/dst alpine \
   sh -c "cp -a /src/. /dst/ && chown -R $(id -u):$(id -g) /dst"
 
+# ── VERIFY the copy. A reseed that reports success on an empty directory is worse than one that
+# fails: the emptiness is discovered later, by a measurement that silently used the wrong store.
+# `du` showing kilobytes after copying gigabytes is a hard error, not a line of output.
+SNAP_BYTES="$(du -sb "$SNAPSHOT_DIR" | cut -f1)"
+MIN_BYTES=$((512 * 1024 * 1024))
+if [[ ! -f "$SNAPSHOT_DIR/CURRENT" ]] || (( SNAP_BYTES < MIN_BYTES )); then
+  echo >&2
+  echo "error: the snapshot copy produced nothing usable." >&2
+  echo "  dir    : $SNAPSHOT_DIR" >&2
+  echo "  bytes  : $SNAP_BYTES (expected >= $MIN_BYTES)" >&2
+  echo "  CURRENT: $([[ -f "$SNAPSHOT_DIR/CURRENT" ]] && echo present || echo MISSING)" >&2
+  echo >&2
+  echo "  The seeded store is still in docker volume '$VOLUME' — it is NOT lost. Recover with:" >&2
+  echo "    docker run --rm -v $VOLUME:/src:ro -v $SNAPSHOT_DIR:/dst alpine \\" >&2
+  echo "      sh -c 'cp -a /src/. /dst/ && chown -R $(id -u):$(id -g) /dst'" >&2
+  echo >&2
+  echo "  Check also for a stray docker NAMED VOLUME with the snapshot's name — that is what" >&2
+  echo "  'docker -v' creates when handed a non-absolute path: docker volume ls" >&2
+  exit 1
+fi
+
 echo
 echo "================================================================"
 echo "reseed complete. snapshot: $SNAPSHOT_DIR"
-echo "size: $(du -sh "$SNAPSHOT_DIR" | cut -f1)"
+printf "size: %s (%.2f GiB / %.2f GB, %s files)\n" \
+  "$SNAP_BYTES" \
+  "$(echo "scale=4; $SNAP_BYTES/1073741824" | bc)" \
+  "$(echo "scale=4; $SNAP_BYTES/1000000000" | bc)" \
+  "$(ls -1 "$SNAPSHOT_DIR" | wc -l)"
 echo "run the (d) measurement against it with:"
 echo "  EIGENIUS_DB_SNAPSHOT=$SNAPSHOT_DIR scripts/measure-parse-rate.sh"
 echo

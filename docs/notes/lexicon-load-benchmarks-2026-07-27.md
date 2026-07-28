@@ -209,8 +209,12 @@ EIGENIUS_DB_SNAPSHOT=/abs/path/wordnet-umls-aligned-<date> \
   scripts/measure-parse-rate.sh --replay experiments/parsing/ranks/<recording>.json
 ```
 
-`scripts/reseed-lexicon-db.sh` reports success on an empty snapshot. `du` showing 4.0 K after a copy
-of gigabytes should be a hard failure, not a line of output — an open gap in that script.
+**FIXED after this run** (`scripts/reseed-lexicon-db.sh`): `--snapshot-dir` now accepts either a path
+or a bare name (resolved under `SNAPSHOT_ROOT`), and is made ABSOLUTE before it reaches `docker -v`.
+The snapshot copy is then verified — `CURRENT` present and size ≥ 512 MiB — and the script EXITS 1
+with recovery instructions instead of printing `size: 4.0K` and reporting success. The sibling scripts
+(`add-layer-to-snapshot.sh`, `build-alignment-snapshot.sh`) already passed `readlink -f` paths and
+were never affected.
 
 For a lexicon change that does **not** touch `BOOTSTRAP_CHAIN`, test with a patch layer first and
 skip the reseed entirely: `scripts/add-layer-to-snapshot.sh --base <snap> --out <snap>-x patch.esl`

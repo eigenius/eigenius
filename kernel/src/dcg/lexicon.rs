@@ -629,17 +629,19 @@ mod scope_bearing_tests {
     use crate::dcg::rules::combinators::is_modal_functor;
     use std::sync::Arc;
 
-    /// **`lexicon:scope_bearing` must cover everything the category sniff catches.**
+    /// **Every entry with the auxiliary category shape must DECLARE `lexicon:scope_bearing`.**
     ///
-    /// `combinators::build` tags a scope-bearing operator's OUTPUT `Combinator::Modal` two ways: the
-    /// DECLARED property (this flag → `Combinator::ScopeOperator` on the leaf) and the INFERRED
-    /// `is_modal_functor` category test. They are additive so a missing declaration degrades to the
-    /// old behaviour rather than silently dropping an auxiliary's `Modal` tag — and this test is what
-    /// makes retiring the sniff safe, by pinning that the declaration is a SUPERSET of it.
+    /// `combinators::build` tags a scope-bearing operator's output `Combinator::Modal` from the
+    /// DECLARED property alone (this flag → `Combinator::ScopeOperator` on the leaf). It used to also
+    /// INFER the property from the category via `is_modal_functor`; that inference was retired once
+    /// this test showed the declaration covers it. `is_modal_functor` survives as a `#[cfg(test)]`
+    /// predicate for exactly this check — it is now the COMPLETENESS OBLIGATION, not a fallback: an
+    /// auxiliary added to `closed-class.esl` without the flag would silently lose its `Modal` tag, so
+    /// it fails here instead.
     ///
-    /// Negation is the part the sniff cannot reach: `not` is `fwd(VP[bse], VP[bse])` /
+    /// Negation is the part no category test can reach: `not` is `fwd(VP[bse], VP[bse])` /
     /// `fwd(VP[adj], VP[adj])`, and the latter is byte-identical to the adverb adjective-modifier
-    /// category, so no category test can single it out. Declaring it is the point.
+    /// category (`dcg::category::adverb_modifier_cats`). Declaring it is the point.
     ///
     /// CI-runnable, no snapshot (the behavioural check is `negation_scope_blocks_adjunct_escape` in
     /// `crates/eigenius-wordnet/tests/db_backed_encoding.rs`).
@@ -648,8 +650,9 @@ mod scope_bearing_tests {
         let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
         let lex = LexicalIndex::build(Arc::clone(ctx.head()));
 
-        // (1) SUPERSET: every entry the sniff would catch is also declared. If this fails, retiring
-        // `is_modal_functor` would lose that entry's `Modal` tag — the silent failure mode.
+        // (1) COMPLETENESS: every entry with the auxiliary category shape declares the flag. Since
+        // `build` no longer infers from the category, a miss here means that entry has NO `Modal`
+        // tag at all — a VP-adjunct could attach above it and escape its scope.
         for form in [
             "does", "do", "did", "can", "could", "may", "might", "must", "will", "would", "should",
             "not", "is", "are", "was", "were", "affects", "the", "in",

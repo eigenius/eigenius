@@ -390,30 +390,40 @@ fn combine_other_grammar(left: &CategoryPayload, right: &CategoryPayload) -> Opt
     None
 }
 
-/// Materialise the [`Item`] for a [`SemRecipe`] from the two children's full items — the ONLY place a
-/// child sem is read. For the dependent nominal rules ([`SemRecipe::Rule`]) the result CATEGORY
-/// also embeds the modifier's meaning (CN-as-types), so it too is built here.
-/// A **modal / do-support auxiliary** functor category `(S[dcl,fin]\NP)/(S[dcl,bse]\NP)` — a forward
-/// functor from a BASE verbal VP to a FINITE one (`can`/`may`/…, and the declarative do-support). Its
-/// forward-application output is tagged [`Combinator::Modal`] so a VP-adjunct cannot attach above it.
+/// The **modal / do-support auxiliary** functor category `(S[dcl,fin]\NP)/(S[dcl,bse]\NP)` — a forward
+/// functor from a BASE verbal VP to a FINITE one.
+///
+/// **No longer consulted by the grammar** (2026-07-27). Being scope-bearing is now DECLARED —
+/// `lexicon:scope_bearing` on the entry, surfacing as [`Combinator::ScopeOperator`] on the leaf — and
+/// [`build`] reads only that. Inferring it from the category could never be complete: sentential
+/// negation is `fwd(VP[bse], VP[bse])` / `fwd(VP[adj], VP[adj])`, and the second is byte-identical to
+/// the adverb adjective-modifier category, so no shape test can single it out.
+///
+/// Kept as a TEST-ONLY predicate because it still expresses a real completeness obligation: every
+/// entry with this shape is an auxiliary and must carry the declaration.
+/// `dcg::lexicon::scope_bearing_tests` asserts exactly that, so a modal added to
+/// `closed-class.esl` without the flag fails CI instead of silently losing its `Modal` tag.
+#[cfg(test)]
 pub(crate) fn is_modal_functor(cat: &Exp) -> bool {
+    /// `S[_,<fin>]\NP` — a verbal VP `bwd(cat_s(_, <fin>), NP)` with the given finiteness feature.
+    fn is_vp_with_fin(cat: &Exp, fin: &str) -> bool {
+        let Some([s, _np]) = is_ctor(cat, "bwd") else {
+            return false;
+        };
+        let Some([_mood, f]) = is_ctor(s, "cat_s") else {
+            return false;
+        };
+        matches!(f, Exp::InductiveCtor(_, n, _) if n == fin)
+    }
     let Some([res, arg]) = is_ctor(cat, "fwd") else {
         return false;
     };
     is_vp_with_fin(res, "fin") && is_vp_with_fin(arg, "bse")
 }
 
-/// `S[_,<fin>]\NP` — a verbal VP `bwd(cat_s(_, <fin>), NP)` with the given finiteness feature name.
-fn is_vp_with_fin(cat: &Exp, fin: &str) -> bool {
-    let Some([s, _np]) = is_ctor(cat, "bwd") else {
-        return false;
-    };
-    let Some([_mood, f]) = is_ctor(s, "cat_s") else {
-        return false;
-    };
-    matches!(f, Exp::InductiveCtor(_, n, _) if n == fin)
-}
-
+/// Materialise the [`Item`] for a [`SemRecipe`] from the two children's full items — the ONLY place a
+/// child sem is read. For the dependent nominal rules ([`SemRecipe::Rule`]) the result CATEGORY
+/// also embeds the modifier's meaning (CN-as-types), so it too is built here.
 fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> Item {
     match recipe {
         SemRecipe::DetRefine { cat, t } => {
@@ -436,21 +446,18 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
         SemRecipe::Apply { cat, order } => {
             let (sem, prov) = match order {
                 AppOrder::Fwd => {
-                    // A modal / do-support aux (`(S[dcl,fin]\NP)/(S[dcl,bse]\NP)`, functor = left)
-                    // tags its finite-VP output `Modal`, so a later VP-adjunct PP cannot attach ABOVE
-                    // it (`Combinator::Modal` / `ProvGuard::LeftNotModal`) and escape the modal scope.
-                    // Two ways to be a scope-bearing operator, and they are ADDITIVE on purpose.
-                    // `is_modal_functor` INFERS it from the category (`VP[fin]/VP[bse]` — the
-                    // auxiliaries); `Combinator::ScopeOperator` is DECLARED on the entry
-                    // (`lexicon:scope_bearing`) and reaches here as the functor's leaf provenance.
-                    // The declared form is what covers sentential negation, whose category a test
-                    // cannot separate from an adverb's. Keeping the inference alongside it means a
-                    // missing declaration degrades to today's behaviour rather than silently
-                    // dropping an auxiliary's `Modal` tag — the failure mode the whole lib suite
-                    // missed once already.
-                    let prov = if left.prov() == Combinator::ScopeOperator
-                        || is_modal_functor(left.cat())
-                    {
+                    // A SCOPE-BEARING operator (sentential negation, a modal, declarative
+                    // do-support) tags its output `Modal`, so a VP-adjunct cannot attach ABOVE it
+                    // (`ProvGuard::LeftNotModal`) and escape the operator's scope.
+                    //
+                    // The property is DECLARED — `lexicon:scope_bearing` on the entry, arriving here
+                    // as the functor's leaf provenance ([`Combinator::ScopeOperator`]) — not inferred
+                    // from the category. Inference could never be complete: negation is
+                    // `fwd(VP[bse], VP[bse])` / `fwd(VP[adj], VP[adj])`, the second byte-identical to
+                    // the adverb adjective-modifier category. Completeness of the declaration is
+                    // pinned in CI by `dcg::lexicon::scope_bearing_tests`, which fails if an entry
+                    // with the auxiliary category shape lacks the flag.
+                    let prov = if left.prov() == Combinator::ScopeOperator {
                         Combinator::Modal
                     } else {
                         Combinator::ForwardApp
