@@ -615,10 +615,17 @@ impl Guard {
                 binds.get(*meta),
                 Some(Exp::InductiveCtor(_, n, _)) if n == "pl"
             ),
-            Guard::NotPpRefined(op) => match is_ctor(&op.pick(left, right).cat, "cat_n") {
-                Some([ty, _num]) => !super::constructions::is_pp_refined(ty),
-                _ => true,
-            },
+            // Checks `cat_np` as well as `cat_n`: the adjacency argument is about the SURFACE (a PP
+            // postmodifier cannot sit between a modifier and its head), so it does not care whether the
+            // modifier is a bare noun or a full NP. Inspecting only `cat_n` made this silently inert on
+            // `named_compound`, whose left operand is a `cat_np` — found by `grammar_rule_guard_matrix`.
+            Guard::NotPpRefined(op) => {
+                let cat = &op.pick(left, right).cat;
+                match is_ctor(cat, "cat_n").or_else(|| is_ctor(cat, "cat_np")) {
+                    Some([ty, _num]) => !super::constructions::is_pp_refined(ty),
+                    _ => true,
+                }
+            }
         }
     }
 }
@@ -657,6 +664,9 @@ fn refine_rules() -> &'static [CatRule] {
                     Guard::NotCompoundRefined(Operand::Right),
                     Guard::NotAdjectiveRefined(Operand::Right),
                     Guard::NotKindRaised(Operand::Left),
+                    // Same PP-adjacency constraint its sibling `kind_compound` carries (32bfd21): a
+                    // PP-postmodified modifier would need its PP to sit between it and the head.
+                    Guard::NotPpRefined(Operand::Left),
                 ],
                 build: refine_named_compound,
             },
