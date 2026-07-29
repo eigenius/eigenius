@@ -3416,8 +3416,22 @@ fn wrn_first_page_over_full_lexicon() {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(40);
             eprintln!("  RAW «{}»", text.trim());
+            // Verbalise alongside the raw term. Adjudicating a reading means deciding whether it is
+            // ADMISSIBLE, which needs it in English; and it must be done HERE rather than through
+            // `trace_one_sentence`, which runs cap-only without the document overlay and so reports
+            // a different reading set — "These data sets are project Achilles and project DRIVE."
+            // has 0 readings there and 1 here. The adjudication ledger is keyed on THIS sweep.
+            let vnames = unit_sense_names(&text, &index, &lem, &head);
+            let vb = Vb {
+                names: &vnames,
+                layer: &head,
+            };
             for (i, it) in index.parse(&text, &lem).iter().enumerate().take(rmax) {
-                eprintln!("      [R{i}] {}", pretty_term(it.sem()));
+                // Print the SKELETON each reading erases to. The adjudication ledger is keyed on
+                // skeletons, but a verdict is formed by reading the ENGLISH — so without this line
+                // the two artifacts cannot be joined and the gloss has to be matched by eye.
+                eprintln!("      [R{i}] sk={}", erase_senses(&pretty_term(it.sem())));
+                eprintln!("           ≈ {}", verbalize(it.sem(), &vb));
             }
         }
         report.push(UnitReport { text, outcome });
