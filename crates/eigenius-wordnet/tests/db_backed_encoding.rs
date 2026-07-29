@@ -640,7 +640,12 @@ fn umls_name(cui: &str, layer: &Arc<Layer>) -> Option<String> {
     let name = d.split('—').next().unwrap_or(d);
     let name = name.split('â').next().unwrap_or(name);
     let name = name.split(" - ").next().unwrap_or(name);
-    Some(name.trim().to_string())
+    // A concept with NO definition has no em-dash at all — its description is just
+    // `"Depletion. UMLS CUI C0333668."` — so the splits above leave the provenance suffix attached
+    // and every reading mentioning it verbalises as "a Depletion. UMLS CUI C0333668. of WRN gene".
+    // Cut at the suffix directly, then drop the sentence period the label is left with.
+    let name = name.split(" UMLS CUI ").next().unwrap_or(name);
+    Some(name.trim().trim_end_matches('.').trim().to_string())
 }
 
 /// Naming + layer context threaded through the walk.
@@ -680,6 +685,16 @@ fn axiom_local(e: &Exp) -> Option<&str> {
         }
         Exp::EigonResource(r) => r.id().map(|i| i.as_str().rsplit(':').next().unwrap_or("")),
         _ => None,
+    }
+}
+
+/// `logic:False` — the negation codomain. It is built as `Exp::InductiveType(logic:False, [])`
+/// (`constructions::negate_prop`), NOT as an axiom or class, so `axiom_local` never matched it and
+/// the verbaliser's negation arms were dead: every negated proposition reached the ⟦…⟧ bracket.
+fn is_false(e: &Exp) -> bool {
+    match e {
+        Exp::InductiveType(d, args) => args.is_empty() && d.iri.as_str().ends_with("logic:False"),
+        _ => axiom_local(e) == Some("False"),
     }
 }
 
@@ -727,15 +742,27 @@ fn verbalize(sem: &Exp, vb: &Vb) -> String {
             );
         }
     }
+    // Negation `A → False`. The Pi branch below catches the `Pi(_, A, False)` readback, but a
+    // non-dependent arrow can also read back as `Exp::Arrow`, which that branch never sees — so a
+    // negated coordination (`And(respond(x), prep_to(x, …)) → False`) stayed bracketed.
+    if let Some((a, f)) = as_arrow(sem) {
+        if is_false(f) {
+            return format!("not ({})", verbalize(a, vb));
+        }
+    }
     if let Exp::Pi(binder, dom, cod) = sem {
-        if axiom_local(cod) == Some("False") {
+        if is_false(cod) {
             return format!("not ({})", verbalize(dom, vb));
         }
         // Existential GQ (`exists_sem`/`obj_exists_sem`, closed-class.esl): `∀C:Prop. (∀x:A. body(x) →
         // C) → C`, readback `Pi(C, Prop, (Pi(x, A=Σ, body → C)) → C)`. Non-dependent `→` reads back as
         // `Pi(Patt::Unit, …)`, so match via `as_arrow`. → "some {A} {body}".
         if let Some((Exp::Pi(xb, a, arr), _c)) = as_arrow(cod) {
-            if matches!(a.as_ref(), Exp::Sig(..)) {
+            // The restrictor may be a Σ-REFINED noun ("some MSI cell lines") or a PLAIN class
+            // ("many cancers", "some cancers") — the quantifier encoding is identical either way,
+            // and `quant_clause` goes through `bare_np`, which handles both. Requiring `Σ` here left
+            // every unrefined-subject GQ bracketed: 46 of the residual ⟦…⟧ on the audited units.
+            if matches!(a.as_ref(), Exp::Sig(..) | Exp::EigonClass(..)) {
                 if let Some((body, _)) = as_arrow(arr) {
                     return format!("some {}", quant_clause(a, xb, body, vb));
                 }
@@ -743,9 +770,9 @@ fn verbalize(sem: &Exp, vb: &Vb) -> String {
         }
         // Universal / negative GQ over a Σ noun (`forall_sem`: `∀x:A. body`; `no_sem`: `∀x:A. body →
         // False`). Object variants (`obj_*`) fill the subject in, so the readback shape matches.
-        if matches!(dom.as_ref(), Exp::Sig(..)) {
+        if matches!(dom.as_ref(), Exp::Sig(..) | Exp::EigonClass(..)) {
             if let Some((body, f)) = as_arrow(cod) {
-                if axiom_local(f) == Some("False") {
+                if is_false(f) {
                     return format!("no {}", quant_clause(dom, binder, body, vb));
                 }
             }
@@ -758,6 +785,20 @@ fn verbalize(sem: &Exp, vb: &Vb) -> String {
         return format!("{} {np}", article(&np));
     }
     let (head, args) = app_spine(sem);
+    // An application headed by a BOUND VARIABLE. The predicate slot of a clausal complement
+    // ("These findings show that WRN is …", "We found that WRN was …") holds the abstracted
+    // variable, so the embedded clause reads back as `G#0(C1337007)`. A bare `Var` already
+    // verbalises to the empty string — it carries no surface — and its application should too;
+    // render just the arguments. Without this the whole embedded clause fell to the ⟦…⟧ bracket,
+    // which made every `that`-complement unit unauditable.
+    if matches!(head, Exp::Var(_)) && !args.is_empty() {
+        let parts: Vec<String> = args
+            .iter()
+            .map(|a| verbalize(a, vb))
+            .filter(|s| !s.is_empty())
+            .collect();
+        return parts.join(" ");
+    }
     if let Some(local) = axiom_local(head) {
         match (local, args.len()) {
             ("subclass_of", 2) => {
@@ -799,6 +840,21 @@ fn verbalize(sem: &Exp, vb: &Vb) -> String {
             ("speaker", _) => return "we".to_string(),
             ("anaphor", _) => return "it".to_string(),
             _ => {}
+        }
+        // A PP predication standing ALONE — `prep_in(subj, obj)`. `verb_pp` merges the common
+        // `And(V(subj), prep(subj, obj))` shape into a single clause, but a PP conjunct it cannot
+        // merge — a distributed coordination, or a clausal complement — reached the ⟦…⟧ bracket.
+        // The subject is usually a bound restrictor variable (verbalising to ""), giving "in X".
+        if let Some(p) = local.strip_prefix("prep_") {
+            if args.len() == 2 {
+                let subj = verbalize(args[0], vb);
+                let obj = verbalize(args[1], vb);
+                return if subj.is_empty() {
+                    format!("{p} {obj}")
+                } else {
+                    format!("{subj} {p} {obj}")
+                };
+            }
         }
         // Verb: `v{offset}_{frame}(obj, subj)` transitive / `(subj)` intransitive (category
         // `(S\NP)/NP` — object first; convert.rs:225).
@@ -951,9 +1007,25 @@ fn noun_phrase(base: &Exp, restr: &Exp, vb: &Vb) -> String {
             }
             Some("is_a") if a.len() == 2 => post.push(format!("that is {}", indefinite(a[1], vb))),
             Some("named") if a.len() == 2 => post.push(format!("named {}", verbalize(a[1], vb))),
-            // A restrictor conjunct we do not recognise (e.g. an embedded GQ modifier `Π… prep_with …`)
-            // is BRACKETED, never dropped — a silent drop makes a gloss look complete when it is not.
-            _ => post.push(format!("⟦{}⟧", pretty_term(c))),
+            // A restrictor headed by the Σ's OWN BOUND VARIABLE — `G#0(C1337007)`. This is the
+            // clausal complement's predicate slot ("the finding that … WRN"): the abstracted
+            // predicate applied to its argument. A bare `Var` carries no surface, so render the
+            // ARGUMENTS. `about` is a gloss for the predication, in the same spirit as the `that
+            // is` / `named` arms above — it names the participant without claiming the relation.
+            // Without this every `that`-complement unit bracketed its entire embedded clause.
+            None if matches!(h, Exp::Var(_)) && !a.is_empty() => {
+                let inner: Vec<String> = a
+                    .iter()
+                    .map(|x| verbalize(x, vb))
+                    .filter(|x| !x.is_empty())
+                    .collect();
+                post.push(format!("about {}", inner.join(" ")));
+            }
+            // Anything else: hand it to `verbalize` rather than bracketing it here. An embedded GQ
+            // restrictor (`Π… prep_of …`, "of a DNA repair pathway") is perfectly renderable by the
+            // quantifier arms — bracketing it at this level threw that away. `verbalize` still
+            // brackets what IT cannot render, so the "never silently dropped" property is kept.
+            _ => post.push(verbalize(c, vb)),
         }
     }
     let mut s = String::new();
