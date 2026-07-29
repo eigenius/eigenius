@@ -763,8 +763,19 @@ fn verbalize(sem: &Exp, vb: &Vb) -> String {
             // and `quant_clause` goes through `bare_np`, which handles both. Requiring `Σ` here left
             // every unrefined-subject GQ bracketed: 46 of the residual ⟦…⟧ on the audited units.
             if matches!(a.as_ref(), Exp::Sig(..) | Exp::EigonClass(..)) {
-                if let Some((body, _)) = as_arrow(arr) {
-                    return format!("some {}", quant_clause(a, xb, body, vb));
+                let parts = cps_body_parts(arr);
+                if !parts.is_empty() {
+                    let preds: Vec<String> = parts
+                        .iter()
+                        .map(|p| quant_clause_pred(xb, p, vb))
+                        .filter(|x| !x.is_empty())
+                        .collect();
+                    let np = bare_np(a, vb);
+                    return if preds.is_empty() {
+                        format!("some {np}")
+                    } else {
+                        format!("some {np}, {}", preds.join(" and "))
+                    };
                 }
             }
         }
@@ -836,6 +847,23 @@ fn verbalize(sem: &Exp, vb: &Vb) -> String {
                     format!("{subj} is the {cls} that is {restr}")
                 };
             }
+            // `poss_of` is POLYMORPHIC — `forall (A:Set) => A -> Entity -> Prop` — so it reads back
+            // with the Set as a leading argument and the pair (possessed, possessor) after it.
+            // Accept both arities; without this "their MSS counterparts" bracketed.
+            ("poss_of", 2 | 3) => {
+                let (owned, owner) = if args.len() == 3 {
+                    (args[1], args[2])
+                } else {
+                    (args[0], args[1])
+                };
+                let o = verbalize(owner, vb);
+                let n = verbalize(owned, vb);
+                return if o.is_empty() {
+                    format!("its {n}")
+                } else {
+                    format!("{o}'s {n}")
+                };
+            }
             ("Possible" | "modal", 1) => return format!("possibly, {}", verbalize(args[0], vb)),
             ("speaker", _) => return "we".to_string(),
             ("anaphor", _) => return "it".to_string(),
@@ -860,9 +888,26 @@ fn verbalize(sem: &Exp, vb: &Vb) -> String {
         // `(S\NP)/NP` — object first; convert.rs:225).
         if local.starts_with('v') && local.contains('_') {
             let verb = name_atom(local, vb);
+            // The frame tag is the suffix after the last `_` (`convert.rs`: `_i` intransitive,
+            // `_t` transitive, `_p` PP-oblique, `_as` ESSIVE, `_d` ditransitive). A 3-argument
+            // frame had no arm at all, so every essive clause — "identified WRN AS the top
+            // dependency", "evaluated MSI AS a biomarker" — bracketed in full.
+            let tag = local.rsplit('_').next().unwrap_or("");
             return match args.as_slice() {
                 [subj] => format!("{} {verb}", verbalize(subj, vb)),
                 [obj, subj] => format!("{} {verb} {}", verbalize(subj, vb), verbalize(obj, vb)),
+                [obj, comp, subj] if tag == "as" => format!(
+                    "{} {verb} {} as {}",
+                    verbalize(subj, vb),
+                    verbalize(obj, vb),
+                    verbalize(comp, vb)
+                ),
+                [a, b, subj] => format!(
+                    "{} {verb} {} {}",
+                    verbalize(subj, vb),
+                    verbalize(a, vb),
+                    verbalize(b, vb)
+                ),
                 _ => format!("⟦{}⟧", pretty_term(sem)),
             };
         }
@@ -902,6 +947,16 @@ fn verb_pp(left: &Exp, right: &Exp, vb: &Vb) -> Option<String> {
 /// A quantifier's body over the bound entity: "{NP}, {predicate}" with the bound variable (already
 /// named by the NP) rendered as "it", so the coreference is legible — "some group of cell lines, we
 /// identified it". Fail-honest: an empty predicate degrades to just the NP.
+/// One conjunct of a quantifier body, with the bound variable replaced by the anaphor placeholder —
+/// the per-part half of [`quant_clause`], so a CPS body with SEVERAL conjuncts can render each.
+fn quant_clause_pred(xbinder: &Patt, body: &Exp, vb: &Vb) -> String {
+    let body = match xbinder {
+        Patt::Var(x) => subst_var(body, x, &anaphor_atom()),
+        _ => body.clone(),
+    };
+    verbalize(&body, vb).trim().to_string()
+}
+
 fn quant_clause(np_sig: &Exp, xbinder: &Patt, body: &Exp, vb: &Vb) -> String {
     let np = bare_np(np_sig, vb);
     let body = match xbinder {
@@ -914,6 +969,26 @@ fn quant_clause(np_sig: &Exp, xbinder: &Patt, body: &Exp, vb: &Vb) -> String {
     } else {
         format!("{np}, {pred}")
     }
+}
+
+/// The BODY of a CPS-encoded quantifier: peel the whole arrow chain `A → B → … → C → C` and drop the
+/// trailing continuation variables, leaving `[A, B, …]` — the conjuncts the quantifier asserts.
+///
+/// Taking only the FIRST antecedent silently DROPS the rest, and on this corpus that lost an entire
+/// comparative: "MSI cell lines … showed greater dependence on WRN than their MSS counterparts."
+/// reads back as `poss_of(…) → gt(…) → G#0 → G#0`, and rendering just `poss_of` gave the stub
+/// "some SIL1 gene counterpart, its it" — the `gt` comparison, which is the whole claim, vanished.
+fn cps_body_parts(e: &Exp) -> Vec<&Exp> {
+    let mut parts = Vec::new();
+    let mut cur = e;
+    while let Some((a, b)) = as_arrow(cur) {
+        parts.push(a);
+        cur = b;
+    }
+    while matches!(parts.last(), Some(Exp::Var(_))) {
+        parts.pop();
+    }
+    parts
 }
 
 /// A function type `A → B`, however it reads back — the explicit `Exp::Arrow` or the non-dependent
@@ -1007,6 +1082,15 @@ fn noun_phrase(base: &Exp, restr: &Exp, vb: &Vb) -> String {
             }
             Some("is_a") if a.len() == 2 => post.push(format!("that is {}", indefinite(a[1], vb))),
             Some("named") if a.len() == 2 => post.push(format!("named {}", verbalize(a[1], vb))),
+            // A possessive restrictor — `Σx:N. poss_of(N, x, owner)`, "their MSS counterparts".
+            Some("poss_of") if a.len() == 2 || a.len() == 3 => {
+                let owner = verbalize(a[a.len() - 1], vb);
+                pre.push(if owner.is_empty() {
+                    "its".to_string()
+                } else {
+                    format!("{owner}'s")
+                });
+            }
             // A restrictor headed by the Σ's OWN BOUND VARIABLE — `G#0(C1337007)`. This is the
             // clausal complement's predicate slot ("the finding that … WRN"): the abstracted
             // predicate applied to its argument. A bare `Var` carries no surface, so render the
