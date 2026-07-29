@@ -24,8 +24,13 @@
 #   faithfulness  the correct reading is present   -> expected-readings.tsv  (a pin per unit)
 #   validity      every present reading is judged  -> adjudications.tsv      (a verdict per skeleton)
 #
+# `correct` IS NOT RECORDED HERE. `expected-readings.tsv` already asserts, per unit, which skeleton is
+# the intended reading — that is exactly a `correct` verdict, adjudicated with a note. Copying those
+# into this ledger would give the same fact two sources of truth that can drift, so the script READS
+# the pin file and treats each pin as the unit's `correct`. This ledger holds the OTHER readings.
+#
 # THE VERDICTS. Exactly one of:
-#   correct    the intended reading of the sentence. At most one per unit; it is also the pin.
+#   correct    the intended reading — taken from `expected-readings.tsv`, not written here.
 #   available  structurally available and NOT something the grammar should refuse — semantically
 #              false, or true but dispreferred. Ranking's problem, not the grammar's. A PP that could
 #              attach high or low gives one `correct` and one `available`, not an `invalid`.
@@ -111,9 +116,18 @@ for ln in io.open(dump, encoding="utf-8"):
 if unit_filter:
     produced = collections.OrderedDict((u, s) for u, s in produced.items() if unit_filter in u)
 
-# the ledger
+# `correct` verdicts come from the PIN FILE, which already adjudicates one skeleton per unit.
+pins = "experiments/parsing/expected-readings.tsv"
 verdicts, malformed = {}, []
-VALID = {"correct", "available", "invalid"}
+if os.path.exists(pins):
+    for ln in io.open(pins, encoding="utf-8"):
+        if ln.startswith("#") or not ln.strip():
+            continue
+        f = ln.rstrip("\n").split("\t")
+        if len(f) >= 2:
+            verdicts[(f[0].strip(), f[1].strip())] = ("correct", "pinned in expected-readings.tsv")
+n_pins = len(verdicts)
+VALID = {"available", "invalid"}
 if os.path.exists(ledger):
     for i, ln in enumerate(io.open(ledger, encoding="utf-8"), 1):
         if ln.startswith("#") or not ln.strip():
@@ -132,6 +146,7 @@ stale = [k for k in verdicts if k not in {(u, s) for u, ss in produced.items() f
 by = collections.Counter(verdicts[k][0] for k in adj)
 print("\n=== skeleton adjudication ledger: %s ===" % ledger)
 print("  units %d   skeletons %d" % (n_units, n_sk))
+print("  pins read from expected-readings.tsv: %d" % n_pins)
 print("  ADJUDICATED   %4d  (correct %d, available %d, invalid %d)"
       % (len(adj), by["correct"], by["available"], by["invalid"]))
 print("  UNADJUDICATED %4d" % len(una))
