@@ -558,6 +558,38 @@ pub fn coordinate_np(
     // and it removes a whole class of cross-kind coordination noise. Mind the 2026-07-11 lesson
     // (`d63-wordnet-umls-concept-unification.md` §2): lattice edges added wholesale broke parses and
     // were reverted, so the edge wanted here is a targeted one, not the ISA tree.
+    // **EXPERIMENT (2026-07-28): conjunct-parallelism.** Refuse a coordination that pairs a
+    // Σ-REFINED conjunct with an unrefined one. On the germline unit the invalid family coordinates
+    // `Σx:Mutation. prep_in(x, …)` — the whole "germline mutations in the MMR genes MSH2" NP — with
+    // three BARE gene names, which strands "germline mutations in" on the first disjunct and asserts
+    // that MSH6/PMS2/MLH1 themselves cause Lynch syndrome. Measured against the `Entity`-top rule
+    // this needs no semantic-type knowledge at all.
+    // **Conjunct parallelism.** Refuse a coordination that pairs a Σ-REFINED member with a bare one.
+    //
+    // The germline unit's invalid family coordinates `kind_of(Σx:C0206530. … prep_in(x, the(MMR
+    // genes MSH2)) …)` — the WHOLE "germline mutations in the MMR genes MSH2" NP — with three bare
+    // gene names. The predicate then distributes, so "germline mutations in" is STRANDED on the
+    // first disjunct and the reading asserts that MSH6/PMS2/MLH1 themselves cause Lynch syndrome.
+    // False under every sense assignment: a gene does not cause the syndrome, mutations in it do.
+    //
+    // Read off the MEMBER SEMS, not the conjunct types: the types here are plain classes
+    // (`C0206530`, `C1333234`, `T028`) and the refinement lives entirely in the sem, so a
+    // type-level test cannot see it (measured — a `matches!(lt, Exp::Sig(..))` version never fired).
+    // Consulting the sem is sanctioned for this rule: `Coordinate` is one of the two that declare
+    // `reads_sem`, so its firing decision is already sem-dependent and packing carries the bit.
+    fn refined_member(m: &Exp) -> bool {
+        // `kind_of(Σ…)` — a kind realised from a REFINED common noun.
+        match m {
+            Exp::App(f, a) => {
+                matches!(f.as_ref(), Exp::EigonAxiom(i) if i.as_str() == "urn:eigenius:ontology:kind_of")
+                    && matches!(a.as_ref(), Exp::Sig(..))
+            }
+            _ => false,
+        }
+    }
+    if members.iter().any(refined_member) != refined_member(&r_member) {
+        return None;
+    }
     let c = common_super(&lt, &rt, layer)?;
     let mut all = members;
     all.push(r_member);

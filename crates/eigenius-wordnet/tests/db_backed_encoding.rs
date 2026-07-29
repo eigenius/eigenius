@@ -5617,6 +5617,32 @@ fn probe_cross_kind_np_coordination() {
             "urn:eigenius:umlssty:T028",
             "urn:eigenius:umlssty:T116",
         ),
+        // MSI (C0920269, T049 Cell or Molecular Dysfunction) and MMR deficiency (C0265325, T047
+        // Disease or Syndrome). Reports `lexicon:Entity` — every semantic type is declared
+        // `class umlssty:Tnnn : lexicon:Entity` (`subclass_of` count 0 across all 127), so the walk
+        // reaches the top before anything else.
+        //
+        // It NEED NOT: the UMLS Semantic Network (now provisioned at references/umls/<rel>/NET/)
+        // makes both children of T046 Pathologic Function — SRDEF tree numbers `B2.2.1.2.1` and
+        // `B2.2.1.2.2`, and SRSTR states both `isa` rows. Adding just that edge was measured to make
+        // this pair report `umlssty:T046` while leaving every other row here unchanged, and to be
+        // parse-neutral on the page (234/1078 both ways).
+        //
+        // It is NOT imported, because the change it was meant to enable — refusing an `Entity`-top
+        // coordination — was superseded by conjunct-parallelism in `coordinate_np`, which removes
+        // strictly more invalid readings, needs no semantic-type knowledge, and does not break the
+        // ten `closed_class_determiners` coordination tests that the `Entity` rule did. Kept in the
+        // census as the standing record of what a `⊤` join does and does not tell you.
+        (
+            "MSI ⊔ MMR deficiency  [the refusal's precondition]",
+            "urn:eigenius:umlscui:C0920269",
+            "urn:eigenius:umlscui:C0265325",
+        ),
+        (
+            "T049 ⊔ T047 (their sem-types)",
+            "urn:eigenius:umlssty:T049",
+            "urn:eigenius:umlssty:T047",
+        ),
         (
             "reflexive control",
             "urn:eigenius:umlscui:C0017337",
@@ -6086,5 +6112,71 @@ fn negation_scope_blocks_adjunct_escape() {
     assert!(
         skeletons.iter().any(|s| s.contains(") → False")),
         "the wide-scope negation reading must survive; got {skeletons:#?}"
+    );
+}
+
+/// **Conjunct parallelism: a coordination may not strand a modifier on one disjunct** (2026-07-28).
+///
+/// `coordinate_np` refuses to pair a Σ-refined member with a bare one. Without it the germline unit
+/// coordinates the WHOLE "germline mutations in the MMR genes MSH2" NP with three bare gene names;
+/// the predicate then distributes, "germline mutations in" is stranded on the first disjunct, and
+/// the reading asserts that MSH6/PMS2/MLH1 THEMSELVES cause Lynch syndrome. That is false under every
+/// sense assignment — a gene does not cause the syndrome, mutations in it do — so it is an invalid
+/// reading, not a dispreferred one.
+///
+/// Measured: this unit 9 -> 1 skeletons, and `Thus, MSI tumours need novel therapies.` 2 -> 1 (the
+/// loss there is `MSI tumours` read as an implicit juxtaposition LIST, `And(need(…, bare), need(…,
+/// MSI-tumours))`, with no coordinator present). Page 234 -> 225, encoded 10 -> 12, grammar-gap 0.
+///
+/// **Two earlier attempts at this unit are recorded so they are not retried.** Refusing a
+/// `common_super` join at `lexicon:Entity` removed the same 8 skeletons but (a) gapped "MSI and MMR
+/// deficiency create vulnerabilities" unless a targeted UMLS `T047`/`T049 -> T046` edge was imported,
+/// and (b) broke ten `closed_class_determiners` coordination tests, because a demo domain with no
+/// semantic-type layer has `⊤` as the GENUINE join for `CellLine` and `Gene` — "HeLa and BRCA1
+/// affect HeLa" must parse. A type-level selectional restriction from the UMLS Semantic Network was
+/// also measured and rejected: `SRSTRE2` licenses both the gene and the protein reading of
+/// "MLH1 promoter" (`produces` vs `interacts_with`).
+///
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     coordination_may_not_strand_a_modifier -- --ignored --nocapture
+#[test]
+#[ignore = "DB-backed; --ignored --nocapture"]
+fn coordination_may_not_strand_a_modifier() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let index = build_index(&head);
+    let lem = morphy();
+
+    let skeletons = |text: &str| -> std::collections::BTreeSet<String> {
+        index
+            .parse(text, &lem)
+            .iter()
+            .map(|it| erase_senses(&pretty_term(it.sem())))
+            .collect()
+    };
+
+    let g = skeletons(
+        "Germline mutations in the MMR genes MSH2, MSH6, PMS2 or MLH1 cause Lynch syndrome.",
+    );
+    assert!(!g.is_empty(), "the germline unit must still parse");
+    // The invalid family is clause-level: `Or` OUTERMOST over four propositions, three of them bare.
+    // The correct reading keeps the `Or` INSIDE a Σ restrictor, over four `named` appositions.
+    let stranded: Vec<&String> = g.iter().filter(|s| s.starts_with("Or(")).collect();
+    assert!(
+        stranded.is_empty(),
+        "a coordination stranded the `in the MMR genes …` modifier on one disjunct, asserting that \
+         the bare genes cause Lynch syndrome: {stranded:#?}"
+    );
+    assert!(
+        g.iter().any(|s| s.contains("named(") && s.contains("prep_in(")),
+        "the correct distributed reading — `Or` inside the Σ, over four `named` appositions — must \
+         survive; this must be a REFUSAL of the invalid family, not a coverage loss. Got {g:#?}"
+    );
+
+    // Cross-sort coordination of two BARE conjuncts stays licensed: parallelism is about stranding a
+    // modifier, not about the conjuncts' kinds. This is the case the `Entity`-top rule wrongly killed.
+    assert!(
+        !skeletons("MSI and MMR deficiency create vulnerabilities.").is_empty(),
+        "coordinating two unrefined conjuncts of unlike kind must still parse"
     );
 }
