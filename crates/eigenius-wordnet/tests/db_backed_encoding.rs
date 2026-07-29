@@ -823,6 +823,18 @@ fn verbalize(sem: &Exp, vb: &Vb) -> String {
                 return format!("{} is {}", verbalize(args[0], vb), indefinite(args[1], vb));
             }
             // Top-level gradable-adjective predication: `gt(deg_X(subj), std_X)` → "subj is X".
+            // Two shapes share `gt` and only the ADJECTIVE one renders. A plain gradable
+            // predication compares against the STANDARD — `gt(deg_X(subj), std_X)` -> "subj is X".
+            // A COMPARATIVE compares against a real target, `gt(deg_X_rel(subj), <target>)`, and its
+            // `than`-clause is currently DROPPED: "MSI cell lines showed greater dependence on WRN
+            // than their MSS counterparts." renders as "WRN protein, human is a00725772".
+            //
+            // TRACED 2026-07-29, and the fix is NOT this arm alone. The discriminator is `args[1]`
+            // (standard vs target), not a `deg_` prefix on `args[0]` — that prefix is present in
+            // BOTH shapes (`deg_a00725772_rel`). But rendering the target requires an arm for
+            // `deg_X_rel(a, b)` as well, which has none: adding the "more … than …" branch WITHOUT
+            // it took bracketed glosses from 31 to 1833 of 2871, because that shape is pervasive.
+            // Measured and reverted. The comparative stays mis-rendered until `deg_*_rel` renders.
             ("gt" | "lt", 2) => {
                 let (dh, da) = app_spine(args[0]);
                 if let (Some(dl), Some(subj)) = (axiom_local(dh), da.first()) {
@@ -3531,7 +3543,8 @@ fn wrn_first_page_over_full_lexicon() {
                 // Print the SKELETON each reading erases to. The adjudication ledger is keyed on
                 // skeletons, but a verdict is formed by reading the ENGLISH — so without this line
                 // the two artifacts cannot be joined and the gloss has to be matched by eye.
-                eprintln!("      [R{i}] sk={}", erase_senses(&pretty_term(it.sem())));
+                eprintln!("      [R{i}] {}", pretty_term(it.sem()));
+                eprintln!("           sk={}", erase_senses(&pretty_term(it.sem())));
                 eprintln!("           ≈ {}", verbalize(it.sem(), &vb));
             }
         }
