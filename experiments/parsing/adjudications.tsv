@@ -1,0 +1,34 @@
+# Skeleton adjudication ledger — the VALIDITY gate. TAB-separated, 4 fields:
+#   sentence <TAB> skeleton (sense-erased) <TAB> verdict <TAB> evidence
+#
+# Run `scripts/audit-skeletons.sh` to check coverage; it FAILS while anything is unadjudicated and
+# writes a worksheet of the missing rows with `--worksheet`.
+#
+# WHY THIS EXISTS, SEPARATELY FROM expected-readings.tsv. That file gates FAITHFULNESS — the correct
+# reading is still present — and says nothing about the other readings, so a unit can pass it while
+# carrying invalid ones. Nothing checked those. An informal review of them on 2026-07-28 produced
+# impressions rather than findings: it SAMPLED (`sort -u | head -6`) instead of enumerating, drifted
+# between the two questions, and had no stated admissibility criterion, so "looks wrong" stood in for
+# three different verdicts. One claim from that pass was wrong on inspection (the PARP-1 unit was
+# called all-flat; 8 of its 10 readings are nested). This ledger is the correction: one row per
+# skeleton, a verdict, and the evidence.
+#
+# VERDICTS — exactly one of:
+#   correct    the intended reading. At most one per unit; it is also the pin.
+#   available  structurally available and NOT the grammar's to refuse — semantically false, or true
+#              but dispreferred. A PP that may attach high or low yields one `correct` and one
+#              `available`. Ranking's problem.
+#   invalid    the grammar should not produce it. Evidence MUST establish inadmissibility under EVERY
+#              sense assignment, and name the rule that should block it. This is the defect backlog.
+#
+# The `available`/`invalid` line decides rule-change vs ranking-change, so argue over it. A merely
+# false reading is `available`. The germline family qualified as `invalid` because "MSH6 causes Lynch
+# syndrome" is false whether MSH6 denotes the gene or the protein — no sense assignment rescues it.
+#
+
+# Seeded 2026-07-28 with ONLY the verdicts established by evidence at the time; the remainder is
+# deliberately left unadjudicated rather than bulk-filled, so the gate reports the real state.
+# Skeleton strings are copied VERBATIM from the worksheet - a first attempt typed them by hand and all
+# rows registered as stale, which is what the (unit, skeleton) key is for.
+This state has frequent insertion or deletion mutations.	Or(§(the(ΣG#0:§. named(G#0, kind_of(§))).1, the(§)), §(the(ΣG#0:§. named(G#0, kind_of(§))).1, the(§)))	invalid	Sole reading of the unit, and wrong in every content word: `state` -> wn:n08137738 "the federal department in the United States that sets and maintains food standards", `frequent` -> C0332183 "Frequently" (an ADVERB concept) as the object's HEAD class, and `insertion mutation` -> C1512796 apposed to it as a NAME. Inadmissible independent of those senses: `named(x, kind_of(K))` puts a KIND in the naming-token slot, which `Combinator::DerivedIndividual` documents as refusable ("not a kind, which is the same thing the singular path already refuses"). ISOLATED BY MINIMAL PAIR: "frequent insertion mutations" parses correctly and "insertion or deletion mutations" parses correctly; only the combination fails, because a pre-nominal adjective has NO route over an RNR-distributed modifier coordination and apposition is the only rule left that can consume it. Grepped all 225 skeletons: this shape occurs exactly ONCE. FIX NEEDS BOTH HALVES - refusing `named(x, kind_of(K))` alone would GAP the unit, since the correct adjective-over-group reading does not currently exist.
+Scientists can exploit synthetic lethality for cancer therapeutics.	Possible(§(kind_of(ΣG#0:§. prep_for(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), kind_of(§)))	correct	Sole reading and it is right: "possibly, scientist exploit a Synthetic Lethality for a Cancer therapeutic". `Possible(...)` is outermost, so the modal scopes over the whole predication; the `for` PP attaches inside the OBJECT (`Sigma G#0. prep_for(G#0, cancer-therapeutic)`), which is the intended low attachment.
