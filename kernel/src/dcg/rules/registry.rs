@@ -182,6 +182,7 @@ enum BinKind {
     AppositiveSubj,
     AppositiveObj,
     ApposeGroup,
+    ModifyGroup,
 }
 
 impl BinRule {
@@ -194,13 +195,14 @@ impl BinRule {
             BinRule::AppositiveSubj => BinKind::AppositiveSubj,
             BinRule::AppositiveObj => BinKind::AppositiveObj,
             BinRule::ApposeGroup => BinKind::ApposeGroup,
+            BinRule::ModifyGroup => BinKind::ModifyGroup,
         }
     }
 }
 
 /// The token-keyed binary rule table (all `const`, so no `LazyLock`). Priority = order, but site
 /// order is not load-bearing (both drivers build every site).
-static BIN_RULES: [TokBinRule; 7] = [
+static BIN_RULES: [TokBinRule; 8] = [
     TokBinRule {
         name: "relativize",
         kind: BinKind::Relativize,
@@ -241,6 +243,13 @@ static BIN_RULES: [TokBinRule; 7] = [
         kind: BinKind::ApposeGroup,
         trigger: trig_appose_group,
         build: build_appose_group,
+        reads_sem: false,
+    },
+    TokBinRule {
+        name: "modify_group",
+        kind: BinKind::ModifyGroup,
+        trigger: trig_modify_group,
+        build: build_modify_group,
         reads_sem: false,
     },
     TokBinRule {
@@ -362,6 +371,14 @@ fn trig_appose_group(_g: &Grammar, _tokens: &[String], i: usize, j: usize, out: 
     }
 }
 
+/// Modifier over a coordinated group `[cat_mod] [cat_group]`: ADJACENT operands, every split a
+/// candidate — the same shape as `trig_appose_group`, since both are plain adjacency.
+fn trig_modify_group(_g: &Grammar, _tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
+    for m in i..j {
+        out.push(BinSite::new((i, m), (m + 1, j), BinRule::ModifyGroup));
+    }
+}
+
 /// Reciprocal `[group] <TV> each other`: keyed on the TRAILING reserved pair, verb `[s, j-2]`.
 fn trig_reciprocal(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
     if j >= 3
@@ -461,6 +478,16 @@ fn build_appositive_obj(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Opti
 /// Close nominal apposition. The result is tagged [`Combinator::Apposed`] — the apposition normal
 /// form (see that variant): an already-apposed group takes no SECOND classifier, and this rule's
 /// trigger offers every split of the cell, so without the check the classifiers stack.
+/// `[cat_mod] [cat_group]` -> the group with the modifier distributed over every member. The
+/// modifier must be a plain `cat_mod`; the decision is category-based (the sem is only used to
+/// build), so `reads_sem` stays false.
+fn build_modify_group(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
+    super::super::category::is_ctor(l.cat(), "cat_mod")?;
+    let cost = l.cost().saturating_add(r.cost());
+    super::constructions::modify_group(l.sem(), r.cat(), r.sem(), &g.layer)
+        .map(|(cat, sem)| Item::from_parts(cat, sem, Combinator::Compound, cost))
+}
+
 fn build_appose_group(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
     // No SECOND classifier over an apposed group, and no classifier over members that are DERIVED
     // individuals rather than names ([`Combinator::DerivedIndividual`], propagated to the group by
@@ -707,6 +734,10 @@ pub(crate) enum BinRule {
     /// other `BinRule`s there is NO reserved token between the two spans; the head and group are
     /// ADJACENT, so every split is tried and the rule gates by shape + head-kind at construction.
     ApposeGroup,
+    /// `[cat_mod] [cat_group]` -> the group with the modifier distributed over every bare-kind
+    /// member (`modify_group`). Supplies the reading an adjective standing before an RNR-distributed
+    /// modifier coordination needs — "frequent [insertion or deletion] mutations".
+    ModifyGroup,
 }
 
 /// Which composed-cell unary shift a [`super::super::chart::forest::Edge::Unary`] represents (D63 blueprint §11 3c.4b).

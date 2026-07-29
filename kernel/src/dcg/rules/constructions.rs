@@ -603,6 +603,65 @@ pub fn coordinate_np(
     Some((group_cat, list_term(&all)))
 }
 
+/// **Modifier over a coordinated group** — `[cat_mod] [cat_group(C, conn, num)]` → a group whose
+/// every member carries the modifier.
+///
+/// WHY IT IS NEEDED. RNR head distribution (`parse::seed::distribute_head`) emits, per conjunct, a
+/// bare-kind `cat_np(C, num)` with sem `kind_of(C)`, which `coordinate_np` folds into a `cat_group`.
+/// But `mod_apply`'s right pattern is `cat_n(C, num)` — a common noun. So a pre-nominal adjective
+/// standing BEFORE a coordinated modifier list has no rule that can consume it:
+///
+/// ```text
+///   "frequent insertion mutations"                 parses  (mod_apply over a cat_n)
+///   "insertion or deletion mutations"              parses  (RNR -> a cat_group)
+///   "frequent insertion or deletion mutations"     did NOT — nothing takes cat_mod + cat_group
+/// ```
+///
+/// With no rule available, close apposition was the only remaining consumer of the stranded
+/// adjective, and it produced `named(Frequently, kind_of(Insertion-Mutation))` — a KIND in the
+/// naming-token slot, and the unit's ONLY reading. So the sentence had no admissible parse at all.
+///
+/// The distribution is the same move [`appose_group`] makes for a classifier: refine every member
+/// rather than the group as a whole, and let the result ride the existing distributive machinery
+/// unchanged. `frequent [insertion or deletion] mutations` ⟿
+/// `Or(frequent-insertion-mutation, frequent-deletion-mutation)`, which is what the phrase means —
+/// the adjective scopes over both conjuncts.
+///
+/// Deliberately NARROW: fires only when EVERY member is a bare kind `kind_of(K)`, i.e. exactly the
+/// RNR-produced group. A group of named individuals or definite designations is left alone — an
+/// adjective does not refine a name.
+pub fn modify_group(
+    mod_sem: &Exp,
+    group_cat: &Exp,
+    group_sem: &Exp,
+    layer: &Arc<Layer>,
+) -> Option<(Exp, Exp)> {
+    is_ctor(group_cat, "cat_group")?;
+    let members = group_members(group_sem)?;
+    if members.is_empty() {
+        return None;
+    }
+    let kind_of_iri = "urn:eigenius:ontology:kind_of";
+    let mut out = Vec::with_capacity(members.len());
+    for m in &members {
+        // Every member must be `kind_of(K)`; anything else and the rule does not apply.
+        let Exp::App(f, k) = m else { return None };
+        if !matches!(f.as_ref(), Exp::EigonAxiom(i) if i.as_str() == kind_of_iri) {
+            return None;
+        }
+        // `kind_of(Σx:K. restr(x))` — the restrictor left UN-REDUCED, as every modifier rule leaves
+        // it (`is_adjective_refined` reads that shape to tell a modifier from an axiom restrictor).
+        let x = "__modgrp_x";
+        let restr = Exp::App(Box::new(mod_sem.clone()), Box::new(Exp::Var(x.into())));
+        let sig = Exp::Sig(Patt::Var(x.into()), k.clone(), Box::new(restr));
+        out.push(Exp::App(Box::new((**f).clone()), Box::new(sig)));
+    }
+    let _ = layer;
+    // The group's type parameter is unchanged: each refined member is a Σ over its old base, hence
+    // still below the group's common supertype.
+    Some((group_cat.clone(), list_term(&out)))
+}
+
 /// One NP conjunct for [`coordinate_np`]: its **type**, its **entity sem**, and the shared `cat` /
 /// `num` inductive decls. Handles a determined/named `cat_np` (sem is already an entity) and a bare
 /// **kind** `cat_n` (its kind sem is realised as an entity via `kind_of` — the bare-nominal shift's
