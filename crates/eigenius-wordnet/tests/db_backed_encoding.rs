@@ -3426,7 +3426,24 @@ fn wrn_first_page_over_full_lexicon() {
                 names: &vnames,
                 layer: &head,
             };
-            for (i, it) in index.parse(&text, &lem).iter().enumerate().take(rmax) {
+            // Use `parse_open`, not `parse`: the latter returns CLOSED readings only, so the two
+            // units with an unresolved referent hole ("MSI cell lines from these four lineages …",
+            // "The lines from rare lineages …") dumped nothing at all — 48 and 4 skeletons with no
+            // gloss between them, which is most of the largest unit on the page. An OPEN parse is
+            // still a reading to adjudicate; it just has a hole the D64 resolver has not filled.
+            let (closed_r, open_r) = index.parse_open(&text, &lem);
+            if !open_r.is_empty() {
+                eprintln!(
+                    "      ({} closed, {} OPEN — holes awaiting resolution)",
+                    closed_r.len(),
+                    open_r.len()
+                );
+            }
+            let all: Vec<&Item> = closed_r
+                .iter()
+                .chain(open_r.iter().map(|o| &o.item))
+                .collect();
+            for (i, it) in all.into_iter().enumerate().take(rmax) {
                 // Print the SKELETON each reading erases to. The adjudication ledger is keyed on
                 // skeletons, but a verdict is formed by reading the ENGLISH — so without this line
                 // the two artifacts cannot be joined and the gloss has to be matched by eye.
