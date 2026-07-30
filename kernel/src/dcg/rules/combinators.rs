@@ -1844,6 +1844,25 @@ fn group_member_fits(slot: &Exp, c: &Exp, layer: &Arc<Layer>) -> bool {
 // lexicon-dependent rules existed. It survived only as a test harness and now lives with the tests
 // that use it (`kernel/tests/lexicon_validates.rs`), so the engine has exactly one driver family.
 
+/// A one-line category summary for the arity probe: the constructor name plus its immediate
+/// argument constructors, which is enough to recognise `fwd(cat_s, …)` shapes without dumping a
+/// whole `InductiveCtor` tree.
+fn cat_brief(c: &Exp) -> String {
+    match c {
+        Exp::InductiveCtor(_, n, args) => {
+            let inner: Vec<String> = args
+                .iter()
+                .map(|a| match a {
+                    Exp::InductiveCtor(_, m, _) => m.clone(),
+                    _ => "_".to_string(),
+                })
+                .collect();
+            format!("{n}({})", inner.join(","))
+        }
+        _ => "?".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod dispatch_tests {
 
@@ -2889,24 +2908,5 @@ mod dispatch_tests {
         );
         assert_eq!(got.sem(), &expected);
         assert_eq!(got.prov(), Combinator::ForwardApp);
-    }
-}
-
-/// A one-line category summary for the arity probe: the constructor name plus its immediate
-/// argument constructors, which is enough to recognise `fwd(cat_s, …)` shapes without dumping a
-/// whole `InductiveCtor` tree.
-fn cat_brief(c: &Exp) -> String {
-    match c {
-        Exp::InductiveCtor(_, n, args) => {
-            let inner: Vec<String> = args
-                .iter()
-                .map(|a| match a {
-                    Exp::InductiveCtor(_, m, _) => m.clone(),
-                    _ => "_".to_string(),
-                })
-                .collect();
-            format!("{n}({})", inner.join(","))
-        }
-        _ => "?".to_string(),
     }
 }
