@@ -569,15 +569,41 @@ impl Grammar {
                 let mut subst = CatSubst::new();
                 subst.insert(tvar.clone(), base.clone());
                 let cat = subst_cat(body, &subst);
-                let sem = match head {
-                    "fwd" => Exp::Lam(
+                // DISPATCH ON THE CATEGORY'S ARITY, not on the body's head constructor alone. `a`
+                // supplies THREE raised categories and two of them are `bwd`-headed:
+                //
+                //   bwd(cat_s(dcl,adj), cat_np(Entity,num_any))        PREDICATIVE VP, ⟦·⟧ arity 1
+                //   bwd(bwd(cat_s,cat_np), fwd(bwd(cat_s,cat_np),NP))  OBJECT GQ,      ⟦·⟧ arity 2
+                //
+                // Head-dispatch alone gave the predicative category the object-GQ sem `λTV. λsubj. …`,
+                // one λ too deep — 2397 such items on the WRN page, the largest violation of the
+                // category/sem arity invariant and the origin of ~1000 more that inherited it through
+                // application. The head constructor does not determine the arity; the denotation does.
+                let arity = cat_arity_denote(&cat);
+                let sem = match (head, arity) {
+                    // PREDICATIVE: "these groups are MSI lines" — the bare kind predicated of the
+                    // subject. `⟦S[adj]\NP⟧ = Entity → Prop`, so exactly one λ.
+                    ("bwd", Some(1)) => Exp::Lam(
+                        Patt::Var("subj".into()),
+                        Box::new(Exp::App(
+                            Box::new(Exp::App(
+                                Box::new(Exp::EigonAxiom(
+                                    crate::ontology::iri::Iri::parse("urn:eigenius:ontology:is_a")
+                                        .expect("is_a iri"),
+                                )),
+                                Box::new(Exp::Var("subj".into())),
+                            )),
+                            Box::new(t.clone()),
+                        )),
+                    ),
+                    ("fwd", _) => Exp::Lam(
                         Patt::Var("V".into()),
                         Box::new(Exp::App(
                             Box::new(Exp::Var("V".into())),
                             Box::new(kind.clone()),
                         )),
                     ),
-                    "bwd" => {
+                    ("bwd", _) => {
                         let tv_app = Exp::App(
                             Box::new(Exp::App(
                                 Box::new(Exp::Var("TV".into())),
@@ -609,6 +635,14 @@ impl Grammar {
                 // FAIL CLOSED: do not mint an item whose sem cannot inhabit its own category. This
                 // refuses exactly the inconsistent pairings; a consistent one is untouched.
                 if cat_arity_denote(&cat) != Some(sem_lambda_depth(&sem)) {
+                    if std::env::var("EIGENIUS_TRACE_KR").is_ok() {
+                        eprintln!(
+                            "  !! KR-REFUSED head={head} cat_arity={:?} sem_depth={} cat={:?}",
+                            cat_arity_denote(&cat),
+                            sem_lambda_depth(&sem),
+                            crate::dcg::category::pretty_cat_dbg(&cat)
+                        );
+                    }
                     return None;
                 }
                 Some(Item::from_parts(
