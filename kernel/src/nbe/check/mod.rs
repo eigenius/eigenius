@@ -404,6 +404,20 @@ fn check_inductive_type_args(
 /// Port of `check` from the reference.
 pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError> {
     match (exp, typ) {
+        // A λ against a UNIVERSE is a type error, and reporting it as one matters: without this arm
+        // the pair falls through to `check_infer`, which cannot type a bare λ, so the diagnostic came
+        // back `CannotInfer("cannot infer type of: Lam(…)")` — true but silent about what was
+        // expected. The refusal itself is right: a λ is a VALUE, and a type-level function's type is a
+        // Π, never a `Sort`, so nothing legitimate checks a λ against a universe.
+        //
+        // Worth a named error because this is the shape the DCG's felicity gate hits when an
+        // ill-typed reading reaches it — `logic:And` (whose parameters are `Prop`) applied to a
+        // type-raised quantifier. That path is how the missing inductive-argument check was found.
+        (Exp::Lam(..), Val::Sort(n)) => Err(CheckError::TypeMismatch(format!(
+            "a λ cannot inhabit a universe: expected a type in Sort({n}), got an abstraction \
+             {:?}. (A type-level function has a Π type, not a Sort.)",
+            readback_val(ctx.rho.len(), &Val::Sort(*n))
+        ))),
         // Lambda against Pi type
         (Exp::Lam(p, e), Val::Pi(t, g)) => {
             let gen = gen_val(&ctx.rho);

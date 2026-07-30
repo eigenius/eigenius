@@ -125,7 +125,7 @@ impl Parser {
                 // last stage, so a silent `.ok()?` here turns any type error into an unexplained
                 // grammar-gap; recovering the reason otherwise means bisecting the derivation by hand.
                 if std::env::var("EIGENIUS_TRACE_GATE").is_ok() {
-                    eprintln!("  !! GATE REFUSED cat={:?}\n     err={e:?}", it.cat());
+                    eprintln!("  !! GATE REFUSED prov={:?} err={e:?}", it.prov());
                 }
                 return None;
             }

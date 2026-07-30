@@ -244,11 +244,52 @@ pub struct Item {
     pub semantics: SemanticPayload,
 }
 
+/// The constructor name of a category, for the mismatch probe's one-line output.
+fn cat_head(c: &Exp) -> String {
+    match c {
+        Exp::InductiveCtor(_, n, args) => format!("{n}/{}", args.len()),
+        other => format!("{other:?}").chars().take(24).collect(),
+    }
+}
+
 impl Item {
     /// Assemble an item from its parts — the single constructor the composition rules
     /// and lexical index build through (replacing the old `Item::from_parts(cat, sem, prov, cost)`
     /// literal now that the fields live in two payloads).
     pub fn from_parts(cat: Exp, sem: Exp, prov: Combinator, cost: Cost) -> Self {
+        // `EIGENIUS_TRACE_MISMATCH=1` — the CATEGORY/SEM AGREEMENT invariant. Every rule's output
+        // must satisfy `sem : ⟦cat⟧`; nothing checks that until the full-span felicity gate, so a
+        // rule may mint an item whose category says `Prop` while its sem is still an abstraction.
+        // Categories then agree at every subsequent step (which is why every rule fires) and only the
+        // gate objects — reporting an unexplained grammar-gap far from the cause.
+        //
+        // This prints the PROVENANCE, so the offending rule names itself.
+        // EXCLUDES a hole abstraction. An unresolved referent is a free variable that the felicity
+        // gate's OPEN path abstracts into a TYPED PARAMETER and checks against a Π-type, so an item
+        // with a `cat_s` category and a `λ$anaphor$…` sem is a legitimate open parse, not a mismatch.
+        // Without this the probe reported ~3128 false positives against 30 real ones on the WRN page.
+        if std::env::var("EIGENIUS_TRACE_MISMATCH").is_ok()
+            && !matches!(&sem, Exp::Lam(crate::nbe::term::Patt::Var(v), _) if v.starts_with("$anaphor$"))
+            && matches!(sem, Exp::Lam(..))
+            && matches!(crate::dcg::category::denote_cat(&cat), Ok(Exp::Sort(0)))
+        {
+            let shape = match &sem {
+                Exp::Lam(p, b) => format!(
+                    "λ{p:?}. {}",
+                    match b.as_ref() {
+                        Exp::Lam(..) => "λ…",
+                        Exp::App(..) => "App(…)",
+                        Exp::InductiveType(d, _) => d.name.as_str(),
+                        _ => "…",
+                    }
+                ),
+                _ => "?".to_string(),
+            };
+            eprintln!(
+                "  !! CAT/SEM MISMATCH prov={prov:?} cat={} sem={shape}",
+                cat_head(&cat)
+            );
+        }
         Item {
             category: CategoryPayload { cat, prov, cost },
             semantics: SemanticPayload { sem },
