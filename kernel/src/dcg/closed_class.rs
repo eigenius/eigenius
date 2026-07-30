@@ -44,6 +44,34 @@ const DETERMINERS: &[&str] = &[
     "some", "each", "every", "all", "any", "no", "several", "many", "few", "fewer", "most", "both",
 ];
 
+/// **Demonstratives** — `this`/`that`/`these`/`those` (2026-07-29).
+///
+/// The closed-class layer has always claimed these (`closed-class.esl`: "A definite ('the',
+/// 'this'/'that', 'these'/'those') denotes a fixed, presupposed referent") and ships determiner
+/// entries for all four — `this` 2, `that` 3, `these` 2, `those` 2 — but they were missing from the
+/// list above, so a content importer was free to seed a noun on them. UMLS does:
+///
+///   C0039828  CHV `SY` **these**   the MeSH PUBLICATION TYPE *Theses*
+///   C1080058  CHV `PT` **this**    the insect genus *This <Coelopellini>* (NCBI `SCN` "This")
+///
+/// Three atoms, two concepts, and the `these` one alone accounted for **24 of the 48 skeletons** on
+/// "MSI cell lines from these four lineages showed greater dependence on WRN than their MSS
+/// counterparts." — `these four lineages` re-bracketed as a THREE-nominal compound (*a Theses four
+/// line*) instead of the definite `the(Σ… four lineage)`. Page-wide the artefact reached 622 of 2871
+/// printed readings across 3 units.
+///
+/// This is the same defect class the module header already names ("terminology reifications of the
+/// function word itself"), and it is NOT reachable by the two mechanisms that look adjacent:
+/// - `drops.rs` requires a WordNet-NOUN collision, and `these` is not a WordNet noun in any POS
+///   (checked across index.{noun,verb,adj,adv} — all four demonstratives are absent), so it never
+///   becomes a drop candidate;
+/// - case-sensitive symbol matching ([`super::parse::all_caps_symbol`]) does not apply — `this` and
+///   `These` are not all-caps, so both entries survive that filter.
+///
+/// Dropping the content sense cannot open a grammar gap: the closed class supplies all four, and
+/// WordNet has no content entry on any of them to lose.
+const DEMONSTRATIVES: &[&str] = &["this", "that", "these", "those"];
+
 /// The copula and its inflections — the grammatical core of predication. `being` is EXCLUDED: it is a
 /// legitimate common noun ("a living being"), and its progressive use needs no content sense.
 const COPULA: &[&str] = &["be", "is", "are", "was", "were", "am", "been"];
@@ -55,6 +83,7 @@ pub fn is_closed_class_surface(form: &str) -> bool {
     let f = form.trim().to_ascii_lowercase();
     PREPOSITIONS_AND_CONJUNCTIONS.contains(&f.as_str())
         || DETERMINERS.contains(&f.as_str())
+        || DEMONSTRATIVES.contains(&f.as_str())
         || COPULA.contains(&f.as_str())
 }
 
@@ -69,6 +98,11 @@ mod tests {
         }
         for f in ["some", "each", "no", "both"] {
             assert!(is_closed_class_surface(f), "{f} is a determiner");
+        }
+        // Demonstratives, case-insensitively — a sentence-initial `These` must be caught too, and
+        // since `tokenize` stopped lowercasing (2026-07-29) that is the form the importer sees.
+        for f in ["this", "that", "these", "those", "These", "THOSE"] {
+            assert!(is_closed_class_surface(f), "{f} is a demonstrative");
         }
         for f in ["be", "is", "were", "been"] {
             assert!(is_closed_class_surface(f), "{f} is a copula form");
