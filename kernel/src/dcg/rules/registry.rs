@@ -657,13 +657,19 @@ impl Grammar {
                 //   COST PENALTY of one `COMPOUND_STEP_PENALTY` step: NO EFFECT AT ALL, byte-identical
                 //   page. Which is the diagnosis: the problem is not ranking.
                 //
-                // The real mechanism is OPEN-vs-CLOSED classification, and `open 2 -> 1` is the
-                // signal. That unit's correct reading is an OPEN parse — "less dependent on WRN [than
-                // …]" leaves an elided-`than` referent hole — and a unit with ANY closed reading is
-                // classified AMBIG, after which its open readings are not in the skeleton set. So a
-                // spurious CLOSED reading MASKS a correct OPEN one, and no cost can reorder across
-                // that boundary. Fixing it belongs in classification (an open reading should not be
-                // discarded merely because a closed rival exists), not here.
+                // A THIRD EXPLANATION WAS ALSO WRONG, and is corrected here rather than left standing:
+                // I first read `open 2 -> 1` as OPEN-vs-CLOSED masking — the correct reading still
+                // produced but not counted once a closed rival existed. It is not. Dumped with
+                // `parse_open`, the unit reports NO open parses at all, 8 closed readings over a single
+                // skeleton, and its pinned `λ$anaphor$0. gt(…)` comparative is absent. The reading is
+                // NOT PRODUCED, not merely uncounted — a genuine COVERAGE REGRESSION from this branch.
+                //
+                // The null cost-penalty result should have said so at the time: if the cause were
+                // ranking OR classification, a penalty would have moved something. It moved nothing,
+                // which means the comparative candidate never reaches the point where either applies.
+                // The elided-`than` shift that mints it (`UnaryKind::ElidedThan`) is the thing to look
+                // at — whether the predicative items crowd its input out of a beamed cell before it
+                // fires. UNRESOLVED; do not treat the page's `grammar-gap 0` as meaning this is settled.
                 Some(Item::from_parts(
                     cat,
                     sem,
