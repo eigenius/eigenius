@@ -472,6 +472,30 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
                     Combinator::BackwardApp,
                 ),
             };
+            // `EIGENIUS_TRACE_ARITY=1` — name the FUNCTOR whose sem arity exceeds its category's.
+            //
+            // `Item::from_parts` can flag that the RESULT is under-applied (a `Prop` category over a
+            // sem that evaluates to a closure) but not who caused it: it has no view of the children.
+            // Here both are in scope, so the functor's category is printable — and since every
+            // downstream application inherits the defect, only the origin is worth reporting.
+            if std::env::var("EIGENIUS_TRACE_ARITY").is_ok()
+                && matches!(super::super::category::denote_cat(&cat), Ok(Exp::Sort(0)))
+            {
+                if let Ok(v) = crate::nbe::eval::eval(&sem, &crate::nbe::env::Rho::Nil) {
+                    if matches!(v, crate::nbe::val::Val::Lam(..)) {
+                        let (f, a) = match order {
+                            AppOrder::Fwd => (left, right),
+                            AppOrder::Bwd => (right, left),
+                        };
+                        eprintln!(
+                            "  !! ARITY functor={} arg={} fprov={:?}",
+                            cat_brief(f.cat()),
+                            cat_brief(a.cat()),
+                            f.prov()
+                        );
+                    }
+                }
+            }
             Item::from_parts(cat, sem, prov, Cost::ZERO)
         }
         SemRecipe::FwdComp { cat } => {
@@ -2865,5 +2889,24 @@ mod dispatch_tests {
         );
         assert_eq!(got.sem(), &expected);
         assert_eq!(got.prov(), Combinator::ForwardApp);
+    }
+}
+
+/// A one-line category summary for the arity probe: the constructor name plus its immediate
+/// argument constructors, which is enough to recognise `fwd(cat_s, …)` shapes without dumping a
+/// whole `InductiveCtor` tree.
+fn cat_brief(c: &Exp) -> String {
+    match c {
+        Exp::InductiveCtor(_, n, args) => {
+            let inner: Vec<String> = args
+                .iter()
+                .map(|a| match a {
+                    Exp::InductiveCtor(_, m, _) => m.clone(),
+                    _ => "_".to_string(),
+                })
+                .collect();
+            format!("{n}({})", inner.join(","))
+        }
+        _ => "?".to_string(),
     }
 }
