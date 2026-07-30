@@ -244,6 +244,36 @@ pub struct Item {
     pub semantics: SemanticPayload,
 }
 
+/// Arrow depth of `⟦cat⟧` — the number of arguments a category declares.
+fn cat_arity_of(c: &Exp) -> Option<usize> {
+    let mut t = crate::dcg::category::denote_cat(c).ok()?;
+    let mut n = 0;
+    while let Exp::Arrow(_, cod) | Exp::Pi(_, _, cod) = t {
+        t = *cod;
+        n += 1;
+    }
+    Some(n)
+}
+
+/// Leading-λ count of a sem's VALUE — the number of arguments it actually takes.
+fn sem_arity_of(sem: &Exp) -> Option<usize> {
+    let mut v = crate::nbe::eval::eval(sem, &crate::nbe::env::Rho::Nil).ok()?;
+    let mut n = 0;
+    while let crate::nbe::val::Val::Lam(g) = v {
+        v = g
+            .apply(crate::nbe::val::Val::Nt(crate::nbe::val::Neut::Gen(
+                n,
+                format!("__ar{n}"),
+            )))
+            .ok()?;
+        n += 1;
+        if n > 8 {
+            break;
+        }
+    }
+    Some(n)
+}
+
 /// The constructor name of a category, for the mismatch probe's one-line output.
 fn cat_head(c: &Exp) -> String {
     match c {
@@ -290,30 +320,24 @@ impl Item {
                 cat_head(&cat)
             );
         }
-        // `EIGENIUS_TRACE_UNDERAPP=1` — the SAME invariant, tested on the VALUE instead of the
-        // syntax. This is the one that sees the real population.
+        // `EIGENIUS_TRACE_UNDERAPP=1` — THE CATEGORY/SEM ARITY INVARIANT, on every item.
         //
-        // The syntactic probe above only catches a λ a RULE WROTE. The dominant defect is an
-        // `Exp::App(f, x)` supplied fewer arguments than `f`'s arity: syntactically an `App`, but it
-        // EVALUATES to a partially-applied closure, and readback then prints it as `λG#0. …`. That is
-        // why four construction-time traces reported 0 hits while the gate refused 3308 candidates on
-        // one unit. Evaluating here closes that blind spot.
+        // A category declares how many arguments a constituent takes (the arrow depth of `⟦cat⟧`); its
+        // sem must take exactly that many. Nothing checks this until the full-span felicity gate, so a
+        // rule may mint an item whose sem is over-abstracted; categories then agree at every later
+        // step, every rule fires, and only the gate objects — as a type error far from its cause.
         //
-        // A sem with free variables (an unresolved referent hole) fails `eval` against the empty
-        // environment and is skipped — which conveniently drops exactly the open-parse false positives
-        // the syntactic probe had to exclude by name.
-        // Excludes a hole abstraction, as the syntactic probe does. `eval` against the empty
-        // environment does NOT error on the free referent variable — it yields a neutral, and the
-        // enclosing `λ$anaphor$…` evaluates to a closure — so these must be filtered by name here too
-        // (measured: 360 of the first run's 390 `Other` hits were exactly that).
+        // Tested on the VALUE. An `Exp::App(f, x)` given fewer arguments than `f`'s arity is
+        // syntactically an application and only becomes a closure under evaluation, so a syntactic
+        // λ-count cannot see the dominant case. Free-variable sems (referent holes) are skipped: they
+        // evaluate to a closure over a neutral and are legitimate open parses.
         if std::env::var("EIGENIUS_TRACE_UNDERAPP").is_ok()
             && !matches!(&sem, Exp::Lam(crate::nbe::term::Patt::Var(v), _) if v.starts_with("$anaphor$"))
-            && matches!(crate::dcg::category::denote_cat(&cat), Ok(Exp::Sort(0)))
         {
-            if let Ok(v) = crate::nbe::eval::eval(&sem, &crate::nbe::env::Rho::Nil) {
-                if matches!(v, crate::nbe::val::Val::Lam(..)) {
+            if let (Some(ca), Some(sa)) = (cat_arity_of(&cat), sem_arity_of(&sem)) {
+                if sa > ca {
                     eprintln!(
-                        "  !! UNDER-APPLIED prov={prov:?} cat={} — denotes Prop, sem evaluates to a closure",
+                        "  !! ARITY-INVARIANT prov={prov:?} cat={} cat_arity={ca} sem_arity={sa}",
                         cat_head(&cat)
                     );
                 }

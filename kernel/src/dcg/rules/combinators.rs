@@ -478,20 +478,21 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
             // sem that evaluates to a closure) but not who caused it: it has no view of the children.
             // Here both are in scope, so the functor's category is printable — and since every
             // downstream application inherits the defect, only the origin is worth reporting.
-            if std::env::var("EIGENIUS_TRACE_ARITY").is_ok()
-                && matches!(super::super::category::denote_cat(&cat), Ok(Exp::Sort(0)))
-            {
-                if let Ok(v) = crate::nbe::eval::eval(&sem, &crate::nbe::env::Rho::Nil) {
-                    if matches!(v, crate::nbe::val::Val::Lam(..)) {
-                        let (f, a) = match order {
-                            AppOrder::Fwd => (left, right),
-                            AppOrder::Bwd => (right, left),
-                        };
+            if std::env::var("EIGENIUS_TRACE_ARITY").is_ok() {
+                let (f, a) = match order {
+                    AppOrder::Fwd => (left, right),
+                    AppOrder::Bwd => (right, left),
+                };
+                // Compare the FUNCTOR's own arities, not the result's. Flagging the result only ever
+                // names the application that tripped over the defect; flagging the functor names the
+                // item that CARRIES it, and the first such item in a derivation is the origin.
+                if let (Some(ca), Some(sa)) = (cat_arity(f.cat()), sem_arity(f.sem())) {
+                    if sa > ca {
                         eprintln!(
-                            "  !! ARITY functor={} arg={} fprov={:?}",
+                            "  !! ARITY functor={} cat_arity={ca} sem_arity={sa} fprov={:?} arg={}",
                             cat_brief(f.cat()),
-                            cat_brief(a.cat()),
-                            f.prov()
+                            f.prov(),
+                            cat_brief(a.cat())
                         );
                     }
                 }
@@ -1861,6 +1862,38 @@ fn cat_brief(c: &Exp) -> String {
         }
         _ => "?".to_string(),
     }
+}
+
+/// Arrow-depth of a category's denotation — how many arguments it declares.
+fn cat_arity(c: &Exp) -> Option<usize> {
+    let mut t = super::super::category::denote_cat(c).ok()?;
+    let mut n = 0;
+    while let Exp::Arrow(_, cod) | Exp::Pi(_, _, cod) = t {
+        t = *cod;
+        n += 1;
+    }
+    Some(n)
+}
+
+/// Leading-λ count of a sem's VALUE — how many arguments it actually takes. Evaluated, because an
+/// `Exp::App` given too few arguments is syntactically an application and only becomes a closure
+/// under evaluation; a syntactic λ-count cannot see it.
+fn sem_arity(sem: &Exp) -> Option<usize> {
+    let mut v = crate::nbe::eval::eval(sem, &crate::nbe::env::Rho::Nil).ok()?;
+    let mut n = 0;
+    while let crate::nbe::val::Val::Lam(g) = v {
+        v = g
+            .apply(crate::nbe::val::Val::Nt(crate::nbe::val::Neut::Gen(
+                n,
+                format!("__arity{n}"),
+            )))
+            .ok()?;
+        n += 1;
+        if n > 8 {
+            break;
+        }
+    }
+    Some(n)
 }
 
 #[cfg(test)]

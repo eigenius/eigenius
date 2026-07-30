@@ -592,6 +592,25 @@ impl Grammar {
                     }
                     _ => return None,
                 };
+                // THE SEM MUST MATCH THE CATEGORY IT IS STAMPED WITH. The `"bwd"` branch above builds
+                // an arity-2 sem (`λTV. λsubj. …`) for an OBJECT-GQ category
+                // `(S\NP)\((S\NP)/NP)`, whose `⟦·⟧` is arity 2. But the branch is selected by the
+                // body's HEAD CONSTRUCTOR, and a `bwd`-headed body can also be a plain VP
+                // `bwd(cat_s, X)` — arity 1 — in which case the arity-2 sem is one λ too deep.
+                //
+                // Measured on the WRN page with `EIGENIUS_TRACE_UNDERAPP=1`: 2719 such items, the
+                // largest single violation of the category/sem arity invariant on the page and the
+                // ORIGIN of the rest (818 `ForwardApp` + 240 more inherit it, because every
+                // application of an over-abstracted functor stays over-abstracted). Nothing catches it
+                // until the full-span felicity gate, which then reports a type error far from here —
+                // `logic:And` applied to a closure — and, on the one unit where no well-typed route
+                // also fires, an unexplained grammar-gap.
+                //
+                // FAIL CLOSED: do not mint an item whose sem cannot inhabit its own category. This
+                // refuses exactly the inconsistent pairings; a consistent one is untouched.
+                if cat_arity_denote(&cat) != Some(sem_lambda_depth(&sem)) {
+                    return None;
+                }
                 Some(Item::from_parts(
                     cat,
                     sem,
@@ -970,6 +989,29 @@ fn apply_reduced_relative(
         .map(|cat| Item::with_cost(cat, it.sem().clone(), it.cost()))
         .into_iter()
         .collect()
+}
+
+/// Arrow depth of `⟦cat⟧` — how many arguments a category declares. `None` if `⟦·⟧` fails.
+fn cat_arity_denote(c: &Exp) -> Option<usize> {
+    let mut t = super::super::category::denote_cat(c).ok()?;
+    let mut n = 0;
+    while let Exp::Arrow(_, cod) | Exp::Pi(_, _, cod) = t {
+        t = *cod;
+        n += 1;
+    }
+    Some(n)
+}
+
+/// Leading-λ count of a sem term. These sems are built here as explicit nested `Exp::Lam`s, so a
+/// syntactic count is exact — no evaluation needed.
+fn sem_lambda_depth(sem: &Exp) -> usize {
+    let mut e = sem;
+    let mut n = 0;
+    while let Exp::Lam(_, body) = e {
+        e = body;
+        n += 1;
+    }
+    n
 }
 
 #[cfg(test)]
