@@ -1725,7 +1725,7 @@ fn is_compound_refined(cat: &Exp) -> bool {
 /// meaning-distinct adjective-inside compound (`red blood cell`) is licensed by the lexicon as a
 /// multiword unit (§4), never rebuilt here. Intersective adjectives in compounds are not yet in scope
 /// (absent from this corpus's residual). The adequacy battery witnesses no reading lost.
-fn is_adjective_refined(cat: &Exp) -> bool {
+pub(super) fn is_adjective_refined(cat: &Exp) -> bool {
     let Some([Exp::Sig(_, _, body), _]) = is_ctor(cat, "cat_n") else {
         return false;
     };

@@ -583,6 +583,7 @@ impl Grammar {
                 let sem = match (head, arity) {
                     // PREDICATIVE: "these groups are MSI lines" — the bare kind predicated of the
                     // subject. `⟦S[adj]\NP⟧ = Entity → Prop`, so exactly one λ.
+                    //
                     ("bwd", Some(1)) => Exp::Lam(
                         Patt::Var("subj".into()),
                         Box::new(Exp::App(
@@ -645,6 +646,24 @@ impl Grammar {
                     }
                     return None;
                 }
+                // TWO FIXES FOR THE DISPLACEMENT WERE TRIED AND BOTH FAILED — recorded so neither is
+                // retried. «The lines from rare lineages were less dependent on WRN.» loses its
+                // expected reading once this branch exists.
+                //
+                //   REFUSAL, gated on `is_adjective_refined(noun.cat())`: too broad. It also removes
+                //   "the group is an INDETERMINATE line" — a legitimate predicate nominal over an
+                //   adjective-modified noun — and the target unit gapped again.
+                //
+                //   COST PENALTY of one `COMPOUND_STEP_PENALTY` step: NO EFFECT AT ALL, byte-identical
+                //   page. Which is the diagnosis: the problem is not ranking.
+                //
+                // The real mechanism is OPEN-vs-CLOSED classification, and `open 2 -> 1` is the
+                // signal. That unit's correct reading is an OPEN parse — "less dependent on WRN [than
+                // …]" leaves an elided-`than` referent hole — and a unit with ANY closed reading is
+                // classified AMBIG, after which its open readings are not in the skeleton set. So a
+                // spurious CLOSED reading MASKS a correct OPEN one, and no cost can reorder across
+                // that boundary. Fixing it belongs in classification (an open reading should not be
+                // discarded merely because a closed rival exists), not here.
                 Some(Item::from_parts(
                     cat,
                     sem,
