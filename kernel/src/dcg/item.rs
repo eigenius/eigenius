@@ -290,6 +290,35 @@ impl Item {
                 cat_head(&cat)
             );
         }
+        // `EIGENIUS_TRACE_UNDERAPP=1` — the SAME invariant, tested on the VALUE instead of the
+        // syntax. This is the one that sees the real population.
+        //
+        // The syntactic probe above only catches a λ a RULE WROTE. The dominant defect is an
+        // `Exp::App(f, x)` supplied fewer arguments than `f`'s arity: syntactically an `App`, but it
+        // EVALUATES to a partially-applied closure, and readback then prints it as `λG#0. …`. That is
+        // why four construction-time traces reported 0 hits while the gate refused 3308 candidates on
+        // one unit. Evaluating here closes that blind spot.
+        //
+        // A sem with free variables (an unresolved referent hole) fails `eval` against the empty
+        // environment and is skipped — which conveniently drops exactly the open-parse false positives
+        // the syntactic probe had to exclude by name.
+        // Excludes a hole abstraction, as the syntactic probe does. `eval` against the empty
+        // environment does NOT error on the free referent variable — it yields a neutral, and the
+        // enclosing `λ$anaphor$…` evaluates to a closure — so these must be filtered by name here too
+        // (measured: 360 of the first run's 390 `Other` hits were exactly that).
+        if std::env::var("EIGENIUS_TRACE_UNDERAPP").is_ok()
+            && !matches!(&sem, Exp::Lam(crate::nbe::term::Patt::Var(v), _) if v.starts_with("$anaphor$"))
+            && matches!(crate::dcg::category::denote_cat(&cat), Ok(Exp::Sort(0)))
+        {
+            if let Ok(v) = crate::nbe::eval::eval(&sem, &crate::nbe::env::Rho::Nil) {
+                if matches!(v, crate::nbe::val::Val::Lam(..)) {
+                    eprintln!(
+                        "  !! UNDER-APPLIED prov={prov:?} cat={} — denotes Prop, sem evaluates to a closure",
+                        cat_head(&cat)
+                    );
+                }
+            }
+        }
         Item {
             category: CategoryPayload { cat, prov, cost },
             semantics: SemanticPayload { sem },
