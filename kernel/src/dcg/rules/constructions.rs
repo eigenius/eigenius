@@ -45,7 +45,14 @@ fn generalized_coord(
     depth: usize,
 ) -> Option<Exp> {
     match denote {
-        Exp::Sort(0) => Some(Exp::InductiveType(op.clone(), vec![a.clone(), b.clone()])),
+        Exp::Sort(0) => {
+            if std::env::var("EIGENIUS_TRACE_COORD").is_ok()
+                && (matches!(a, Exp::Lam(..)) || matches!(b, Exp::Lam(..)))
+            {
+                eprintln!("  !! generalized_coord Sort(0) with a Lam argument: denote={denote:?}");
+            }
+            Some(Exp::InductiveType(op.clone(), vec![a.clone(), b.clone()]))
+        }
         Exp::Arrow(_, cod) | Exp::Pi(_, _, cod) => {
             let var = format!("conj{depth}");
             let app = |f: &Exp| Exp::App(Box::new(f.clone()), Box::new(Exp::Var(var.clone())));
@@ -927,6 +934,15 @@ fn sigma_base(ty: &Exp) -> &Exp {
 /// `logic:Or`): `op(op(p₀, p₁), p₂)…` — the left-branching coordination normal
 /// form. `None` if `preds` is empty.
 fn fold_conn(op: &Arc<InductiveDecl>, preds: Vec<Exp>) -> Option<Exp> {
+    if std::env::var("EIGENIUS_TRACE_COORD").is_ok()
+        && preds.iter().any(|p| matches!(p, Exp::Lam(..)))
+    {
+        eprintln!(
+            "  !! fold_conn over {} preds, at least one a Lam",
+            preds.len()
+        );
+    }
+
     let mut iter = preds.into_iter();
     let mut acc = iter.next()?;
     for p in iter {

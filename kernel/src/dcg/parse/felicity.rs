@@ -120,7 +120,15 @@ impl Parser {
             // CLOSED: `nf` is a hole-free `Prop`; check it directly against ⟦cat⟧.
             let mut ctx =
                 CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
-            check(&mut ctx, &nf, &expected_val).ok()?;
+            if let Err(e) = check(&mut ctx, &nf, &expected_val) {
+                // `EIGENIUS_TRACE_GATE=1` — WHY a full-span candidate was refused. The gate is the
+                // last stage, so a silent `.ok()?` here turns any type error into an unexplained
+                // grammar-gap; recovering the reason otherwise means bisecting the derivation by hand.
+                if std::env::var("EIGENIUS_TRACE_GATE").is_ok() {
+                    eprintln!("  !! GATE REFUSED cat={:?}\n     err={e:?}", it.cat());
+                }
+                return None;
+            }
             let item = Item::from_parts(it.cat().clone(), nf, it.prov(), it.cost());
             return Some(FelicitousOutcome::Closed(item));
         }
