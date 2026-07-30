@@ -126,6 +126,9 @@ impl Parser {
                 // grammar-gap; recovering the reason otherwise means bisecting the derivation by hand.
                 if std::env::var("EIGENIUS_TRACE_GATE").is_ok() {
                     eprintln!("  !! GATE REFUSED prov={:?} err={e:?}", it.prov());
+                    if let Some(w) = conn_over_function(&nf) {
+                        eprintln!("     {w}");
+                    }
                 }
                 return None;
             }
@@ -218,4 +221,42 @@ pub(super) fn is_finite_clause(cat: &Exp) -> bool {
         }
         _ => false,
     }
+}
+
+/// Find a **connective applied to a function** in a NORMALIZED sem — the (B) defect.
+///
+/// `logic:And`/`logic:Or` are declared `(P : Prop, Q : Prop) : Prop`, so an argument that is an
+/// abstraction is ill-typed and can never reduce to a `Prop`.
+///
+/// This runs on `nf`, at the gate, because a CONSTRUCTION-TIME test cannot find it: every DCG site
+/// builds the connective over `Exp::App(…)` terms and the λ only surfaces after β-normalization.
+/// Instrumenting `generalized_coord`, `fold_conn` and `conjoin_canonical` for a syntactic
+/// `Exp::Lam` argument gave 0 hits across the whole page — cap-only and under replay — for exactly
+/// that reason. Reports the connective, the argument index and the binder, which with `it.prov()`
+/// beside it names the construction.
+fn conn_over_function(e: &Exp) -> Option<String> {
+    if let Exp::InductiveType(d, args) = e {
+        if matches!(
+            d.iri.as_str(),
+            "urn:eigenius:logic:And" | "urn:eigenius:logic:Or"
+        ) {
+            for (i, a) in args.iter().enumerate() {
+                if let Exp::Lam(p, body) = a {
+                    return Some(format!(
+                        "CONN-OVER-FUNCTION: {}(arg#{i}) is λ{p:?}. {}",
+                        d.name,
+                        match body.as_ref() {
+                            Exp::App(..) => "App(…)",
+                            Exp::Lam(..) => "λ…",
+                            Exp::InductiveType(d2, _) => d2.name.as_str(),
+                            _ => "…",
+                        }
+                    ));
+                }
+            }
+        }
+    }
+    Parser::sem_subterms(e)
+        .into_iter()
+        .find_map(conn_over_function)
 }

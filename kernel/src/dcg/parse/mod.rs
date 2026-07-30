@@ -901,7 +901,7 @@ impl Parser {
     /// ctors). Variants that never wrap a described concept in a lexical sem (literals, sorts,
     /// data/case, codata) yield none; a missed variant only stops the walk there (→ the category
     /// fallback), never a wrong gloss.
-    fn sem_subterms(e: &Exp) -> Vec<&Exp> {
+    pub(super) fn sem_subterms(e: &Exp) -> Vec<&Exp> {
         match e {
             Exp::Lam(_, b) | Exp::Con(_, b) | Exp::Fst(b) | Exp::Snd(b) => vec![b.as_ref()],
             Exp::App(a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) | Exp::Pair(a, b) => {
