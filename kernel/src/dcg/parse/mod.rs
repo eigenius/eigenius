@@ -740,8 +740,26 @@ impl Parser {
                 let surface = tokens[i..=j].join(" ");
                 let mut senses: Vec<SenseCandidate> = Vec::new();
                 let mut seen: BTreeSet<String> = BTreeSet::new();
+                // CASE-SENSITIVE ACRONYM MATCH — the SAME filter `lookup_span` applies, and it has to
+                // be here too or the ranker is asked about senses that can never seed.
+                //
+                // This pass reaches `entries_for` DIRECTLY rather than through `lookup_span`, so
+                // until now it saw the unfiltered candidate list: for a lowercase `cell` it offered
+                // the ranker the CELP pseudogene alongside the ordinary noun. Two costs, and the
+                // second is the one that matters. The wasted prompt line is cosmetic. But the ranker
+                // returns an ELIMINATION signal — at the base cap the seeder takes no more senses
+                // than the ranker kept — so an impossible sense competing for a top-`cap` slot can
+                // displace a real one, and the displaced sense is then unavailable to the parse.
+                //
+                // Deliberately NOT measurable with the cap-only instrument: this whole function is
+                // gated on `sense_ranker`, so cap-only never executes it. Its reach was measured
+                // instead as rank-key misses against the tracked recording — see the commit.
+                let surface_all_caps = all_caps_symbol(surface.trim());
                 for c in self.candidate_lemmas(&surface, lemmatizer) {
                     for e in self.scoped(self.lex.entries_for(&c), scope) {
+                        if !surface_all_caps && all_caps_symbol(&e.form) {
+                            continue;
+                        }
                         let Some(sense) = e.sense else { continue };
                         if !seen.insert(sense.clone()) {
                             continue;
