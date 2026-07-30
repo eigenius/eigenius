@@ -679,7 +679,19 @@ impl Grammar {
                 //                           unchanged (8 readings, 1 skeleton, no open parse).
                 //   classify budget         no `CLASSIFY_BUDGET` drop is logged for this unit.
                 //
-                // AND THE DECISIVE ONE: parsed STANDALONE the comparative is abundant on BOTH paths —
+                // ROOT CAUSE, FOUND BY A CAP SWEEP ON A ONE-SENTENCE REPRO (which reproduces the
+                // failure, so it is neither the ranker nor the document glossary):
+                //     cap= 2   open 0   24 closed readings, 2 skeletons
+                //     cap= 8   open 0   48 closed readings, 2 skeletons
+                //     cap=32   open 1    0 closed readings, 8 skeletons   <- comparative returns
+                // The comparative is only reachable ABOVE THE SENSE CAP. Before this branch existed
+                // the unit had NO closed readings at cap 2, so the pipeline yielded the OPEN
+                // comparative and the pin hit; the predicative readings now compete at cap 2 and it
+                // does not survive. The reading was living on the ABSENCE OF COMPETITION, not on
+                // merit — the `SENSE_CAP = 2` emission-order truncation already documented in
+                // `parse::seed` and in the header of `expected-readings.tsv`.
+                //
+                // Supporting: parsed STANDALONE the comparative is abundant on BOTH paths —
                 // `unpacked closed×16 open×720`, `packed closed×24 open×1080`. In the page sweep the
                 // same sentence yields ZERO open parses. So the chart builds the reading and the loss
                 // is CONTEXT-DEPENDENT: what the sweep adds is the document glossary (abbreviation /
