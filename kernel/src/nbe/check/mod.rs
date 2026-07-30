@@ -335,7 +335,26 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
             crate::nbe::positivity::check_positivity(decl)?;
             validate_indexed_ctor_conclusions(ctx, decl)
         }
-        Exp::InductiveType(_, _) => Ok(()),
+        // An APPLIED inductive type. The DECL's validity is established once (at ingest, by the
+        // ground resolver, plus `Exp::Inductive` above); its ARGUMENTS are supplied afresh at every
+        // use site, so decl validity says nothing about them and they must be checked here.
+        //
+        // THIS IS WHERE EIGENTT DIVERGED FROM ITS REFERENCE, and the divergence is why the check was
+        // missing. `references/nanoda_lib` (Lean's kernel) has NO applied-inductive node: a type
+        // former is a `Const` carrying a Π type, so `And P Q` is an ordinary `App` spine and
+        // `infer_app` (src/tc.rs) walks the Π, infers each argument, and `assert_def_eq`s it against
+        // the binder type. Parameters are checked by the ORDINARY APPLICATION RULE. EigenTT fused
+        // former and arguments into one node for chain-resident decls, and that node's typing rule
+        // never re-implemented the telescope walk it displaced — so `Ok(())` accepted anything.
+        //
+        // What the leak was hiding, and why it is NOT merely cosmetic: the DCG built
+        // `logic:And(GQ₁, GQ₂)` to coordinate quantified NPs, applying `logic:And (P : Prop, Q : Prop)`
+        // to CONTINUATION-PASSING QUANTIFIERS — functions, not `Prop`s. The felicity gate calls
+        // `check(sem, ⟦cat⟧)` and treats the kernel as the oracle, so every such reading was admitted.
+        // Closing the leak turned that into a `grammar-gap`, which is exactly what it always was: a
+        // sentence whose only readings were ill-typed. The coordination rule now uses POINTWISE
+        // conjunction (`λk. And(f(k), g(k))`), so `And` receives `Prop`s and the terms type-check.
+        Exp::InductiveType(decl, args) => check_inductive_type_args(ctx, decl, args),
         // Applied codata type. Admitted as a type when the decl is
         // already known valid; the declaration-site validation runs
         // at ingest time via the ground resolver. We conservatively
@@ -344,6 +363,40 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
 
         a => check(ctx, a, &Val::Sort(1)),
     }
+}
+
+/// Check an applied inductive type's arguments against its `params ++ indices` telescope — the
+/// telescope walk `infer_app` performs in the reference kernel (see the note at the `InductiveType`
+/// arm of [`check_type`]).
+///
+/// Each telescope type may mention EARLIER binders, so the types are evaluated in an environment
+/// extended with the preceding arguments' values, exactly as nanoda's `inst(binder_type, ctx)` does.
+///
+/// Two deliberate tolerances, neither of them a fudge:
+/// - a **stub** decl (`params` and `indices` both empty — the self-reference EigenTT writes inside a
+///   constructor's own type) carries no telescope to check against. Those occurrences are validated
+///   at DECLARATION time by `check_positivity` + `validate_indexed_ctor_conclusions`, not here.
+/// - a **short** argument list is checked as a prefix rather than rejected on arity, so a partially
+///   applied former (which several sized-inductive call sites construct) keeps working. Arity is not
+///   this rule's business; the arguments that ARE supplied must still be well-typed.
+fn check_inductive_type_args(
+    ctx: &mut CheckCtx,
+    decl: &std::sync::Arc<crate::nbe::term::InductiveDecl>,
+    args: &[Exp],
+) -> Result<(), CheckError> {
+    let mut rho = ctx.rho.clone();
+    for ((patt, ty), arg) in decl
+        .params
+        .iter()
+        .chain(decl.indices.iter())
+        .zip(args.iter())
+    {
+        let ty_val = ctx.eval(ty, &rho)?;
+        check(ctx, arg, &ty_val)?;
+        let arg_val = ctx.eval(arg, &ctx.rho)?;
+        rho = rho.extend(patt.clone(), arg_val);
+    }
+    Ok(())
 }
 
 /// Check that an expression has a given type (checking mode).
@@ -3362,6 +3415,69 @@ mod tests {
         assert!(
             err.contains("no admitted") || err.contains("witness"),
             "expected missing-witness diagnostic, got: {err}"
+        );
+    }
+
+    /// **An applied inductive type must CHECK ITS PARAMETER ARGUMENTS.**
+    ///
+    /// `logic:And (P : Prop, Q : Prop) : Prop`, so `And(λx. …, Q)` is ill-formed — a λ is not a
+    /// `Prop`. `check_type` used to admit it unconditionally (`Exp::InductiveType(_, _) => Ok(())`),
+    /// trusting declaration-site validation; but a DECL is validated once while ARGUMENTS are
+    /// supplied at every use site, so decl validity says nothing about them.
+    ///
+    /// The reference kernel never had this hole and could not: `references/nanoda_lib` has no
+    /// applied-inductive node, so `And P Q` is an ordinary `App` spine whose arguments `infer_app`
+    /// checks against the Π binder types. EigenTT fused former and arguments into one node and the
+    /// displaced telescope walk was never re-implemented.
+    ///
+    /// Found through the DCG: readings on the WRN page asserted `logic:And` over CONTINUATION-PASSING
+    /// quantifiers — functions, not `Prop`s. The felicity gate calls `check(sem, ⟦cat⟧)` and treats
+    /// the kernel as the oracle, so those readings were admitted; closing the hole reveals them as
+    /// the ill-typed terms they always were.
+    #[test]
+    fn applied_inductive_type_checks_its_parameter_arguments() {
+        // data Box (P : Prop) : Prop — one Prop parameter, mirroring `logic:And`'s telescope.
+        let decl = InductiveDecl {
+            iri: Iri::parse("urn:eigenius:test:Box").unwrap(),
+            name: "Box".to_string(),
+            params: vec![(Patt::Var("P".to_string()), Exp::Sort(0))],
+            indices: vec![],
+            sort: Exp::Sort(0),
+            ctors: vec![],
+        };
+
+        // A genuine Prop argument must still pass. (`Exp::One` is NOT one — it inhabits `Sort(1)`
+        // per the `(Exp::One, Val::Sort(1))` arm — so this needs a parameterless inductive in
+        // `Sort(0)`.)
+        let prop_decl = InductiveDecl {
+            iri: Iri::parse("urn:eigenius:test:TrueP").unwrap(),
+            name: "TrueP".to_string(),
+            params: vec![],
+            indices: vec![],
+            sort: Exp::Sort(0),
+            ctors: vec![],
+        };
+        let a_prop = Exp::InductiveType(std::sync::Arc::new(prop_decl), vec![]);
+        let ok = Exp::InductiveType(std::sync::Arc::new(decl.clone()), vec![a_prop]);
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new());
+        assert!(
+            check(&mut ctx, &ok, &Val::Sort(0)).is_ok(),
+            "Box(TrueP) must remain well-formed — the check must not reject valid arguments"
+        );
+
+        // A λ is not a Prop, so this must be REJECTED.
+        let bad = Exp::InductiveType(
+            std::sync::Arc::new(decl),
+            vec![Exp::Lam(
+                Patt::Var("k".to_string()),
+                Box::new(Exp::Var("k".to_string())),
+            )],
+        );
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new());
+        assert!(
+            check(&mut ctx, &bad, &Val::Sort(0)).is_err(),
+            "Box(λk. k) must be rejected — accepting it lets an ill-typed proposition through the \
+             felicity gate, which treats this checker as the oracle"
         );
     }
 }

@@ -3576,6 +3576,18 @@ fn wrn_first_page_over_full_lexicon() {
                 // skeletons, but a verdict is formed by reading the ENGLISH — so without this line
                 // the two artifacts cannot be joined and the gloss has to be matched by eye.
                 eprintln!("      [R{i}] {}", pretty_term(it.sem()));
+                // `EIGENIUS_DEBUG_SEM=1` — the CATEGORY and the raw `Exp` beside the pretty form.
+                // Worth its keep: the pretty printer renders `logic:And(P, Q)` and an ordinary
+                // application identically, so a term that looked like an ill-typed `And(λ…, …)` could
+                // not be diagnosed from the printed form alone. The `{:?}` showed it was
+                // `Exp::InductiveType(AndDecl{params:[(P,Sort(0)),(Q,Sort(0))]}, [Lam(…), …])`, which
+                // located the real defect in `check_type` — an applied inductive type was admitted
+                // without checking its parameter arguments. Reach for this before theorising about a
+                // skeleton string.
+                if std::env::var("EIGENIUS_DEBUG_SEM").is_ok() {
+                    eprintln!("           CAT={}", pretty_term(it.cat()));
+                    eprintln!("           DBG={:?}", it.sem());
+                }
                 eprintln!("           sk={}", erase_senses(&pretty_term(it.sem())));
                 eprintln!("           ≈ {}", verbalize(it.sem(), &vb));
             }
