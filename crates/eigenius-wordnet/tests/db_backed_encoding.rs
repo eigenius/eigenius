@@ -835,9 +835,41 @@ fn verbalize(sem: &Exp, vb: &Vb) -> String {
             // `deg_X_rel(a, b)` as well, which has none: adding the "more … than …" branch WITHOUT
             // it took bracketed glosses from 31 to 1833 of 2871, because that shape is pervasive.
             // Measured and reverted. The comparative stays mis-rendered until `deg_*_rel` renders.
+            // Two shapes share `gt`.
+            //
+            //   PLAIN GRADABLE     gt(deg_X(subj), std_X)                     -> "subj is X"
+            //   RELATIONAL COMPARATIVE
+            //                      gt(deg_X_rel(g, s0), deg_X_rel(g, s1))     -> "s0 is more X on g than s1"
+            //
+            // `deg_{loc}_rel : Entity(ground) -> Entity(subject) -> float` (`convert.rs`), so a
+            // comparative is TWO relational degrees over the SAME ground with different subjects.
+            // "MSI cell lines … showed greater dependence on WRN than their MSS counterparts."
+            //
+            // TWO EARLIER ATTEMPTS FAILED HERE, both measured:
+            //  - discriminating on a `deg_` prefix in `args[0]` did nothing, because BOTH shapes
+            //    carry it (`deg_a00725772_rel`);
+            //  - discriminating on `args[1]` and then verbalising that argument took bracketed
+            //    glosses from 31 to 1833 of 2871, because a bare `deg_X_rel(a, b)` has no arm of its
+            //    own and the shape is pervasive.
+            // Destructuring BOTH arguments here avoids that: `verbalize` is never called on a
+            // relational degree, only on its operands.
             ("gt" | "lt", 2) => {
-                let (dh, da) = app_spine(args[0]);
-                if let (Some(dl), Some(subj)) = (axiom_local(dh), da.first()) {
+                let (h0, a0) = app_spine(args[0]);
+                let (h1, a1) = app_spine(args[1]);
+                let l0 = axiom_local(h0);
+                if let (Some(d0), Some(d1)) = (l0, axiom_local(h1)) {
+                    if d0.ends_with("_rel") && d0 == d1 && a0.len() == 2 && a1.len() == 2 {
+                        let word = if local == "gt" { "more" } else { "less" };
+                        return format!(
+                            "{} is {word} {} on {} than {}",
+                            verbalize(a0[1], vb),
+                            name_atom(d0, vb),
+                            verbalize(a0[0], vb),
+                            verbalize(a1[1], vb)
+                        );
+                    }
+                }
+                if let (Some(dl), Some(subj)) = (l0, a0.first()) {
                     return format!("{} is {}", verbalize(subj, vb), name_atom(dl, vb));
                 }
             }
