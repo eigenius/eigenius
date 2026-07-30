@@ -29,3 +29,23 @@ candidate sense list, so any lexicon change that touches a sentence's candidates
 the replay falls back to seed order, and sense elimination silently switches off for that sentence
 (observed: readings 1218 -> 1953, encoded 9 -> 8, and a pin failing for that reason alone). The harness
 asserts on key misses — do not work around it; re-record instead.
+
+## `2026-07-29-demonstratives.json`
+
+Adopted 2026-07-29 as the replay reference for the snapshot
+`wordnet-umls-aligned-2026-07-29-demonstratives` (the demonstratives leaving the content lexicon,
+`166b234`; UMLS `--umls-all` + `merges-lemma-keyed.json`). Recorded live at commit `f832837`.
+Replays drift-free against that snapshot: **124 hits, 0 key misses**.
+
+    EIGENIUS_DB_SNAPSHOT=…/wordnet-umls-aligned-2026-07-29-demonstratives \
+      scripts/measure-parse-rate.sh --replay experiments/parsing/ranks/2026-07-29-demonstratives.json
+
+**It is draw 1 of 3, adopted on that ground alone — not because it scored best.** Draw 2 scored one
+pin higher (60 vs 59 pre-re-pin) and adopting it would have been the resample-to-green this file
+warns against. The other two draws are recorded as the variance band in the header of
+`../expected-readings.tsv`; the useful finding there is that `total-skeletons` was **identical at 171
+across all three draws** while pins moved, so structure is comparable across draws and pins are not.
+
+**It scores 60/62 on the faithfulness gate, and both misses are explained** in that header — one is
+this lexicon's documented draw-variance unit, the other a sense-elimination miss whose structure is
+still seedable. Neither is a coverage loss.
