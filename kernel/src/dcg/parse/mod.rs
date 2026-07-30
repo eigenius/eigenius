@@ -917,6 +917,100 @@ const ENTITY_IRI: &str = "urn:eigenius:lexicon:Entity";
 // there directly, with `kind_of(t)` pre-substituted, so the kind shift never routes through `apply`'s
 // `DetRefine` witness-projection (which mis-fired `Fst(kind_of(Σ))` on refined/compound nouns).
 
+/// Whether `s` is an **ALL-CAPS symbol** — at least one cased character, and none of them lowercase
+/// (`CELL`, `DNA`, `MSH2`, `BILE SALT-DEPENDENT LIPASE`; not `cell`, `RecQ`, `cAMP`, `Microsatellite
+/// Instability`, `2026`).
+///
+/// This is the discriminator for CASE-SENSITIVE ACRONYM MATCHING (the refinement
+/// [`super::lexicon::LexicalIndex`] documents as deferred from v1). The lexical index is keyed on
+/// LOWERCASED forms and must stay that way — sentence-initial `Cell lines…` has to reach the lemma
+/// `cell` — but that fold also makes an all-caps nomenclature symbol reachable from the lowercase
+/// common noun it happens to spell. So the rule is applied at the point of use and is DELIBERATELY
+/// ASYMMETRIC ([`Parser::lookup_span`]):
+///
+/// - an all-caps ENTRY (`CELL`) is reachable only from an all-caps OBSERVED token;
+/// - a non-all-caps entry (`cell`, `RecQ`, `Microsatellite Instability`) is reachable from any
+///   casing, exactly as before.
+///
+/// The asymmetry is the whole design. Making the match symmetric (exact case both ways) breaks
+/// sentence-initial capitalisation, and keying on "contains an uppercase" instead of "is all-caps"
+/// would stop Title-case terminology — `Microsatellite Instability`, `Werner Syndrome` — from
+/// matching the lowercase prose that actually mentions it. All-caps is the narrowest predicate that
+/// separates a nomenclature SYMBOL from a name.
+///
+/// Measured over MRCONSO 2026AA: 178,664 distinct all-caps English atoms, of which **4,319**
+/// lowercase onto a WordNet common-noun lemma. 24 of those surfaces occur on the WRN reference page,
+/// and every one except `DNA`/`RNA` occurs there ONLY in lowercase — so the rule removes the
+/// spurious symbol sense without costing a single real symbol mention on that page.
+///
+/// What this gives up: a document writing a human gene symbol in lowercase (`wrn`) no longer reaches
+/// it. That is the same tradeoff already accepted for `as`=arsenic — the document glossary is the
+/// recovery path — and lowercase is not the convention for human gene symbols.
+pub fn all_caps_symbol(s: &str) -> bool {
+    let mut saw_upper = false;
+    for c in s.chars() {
+        if c.is_lowercase() {
+            return false;
+        }
+        saw_upper |= c.is_uppercase();
+    }
+    saw_upper
+}
+
+#[cfg(test)]
+mod all_caps_symbol_tests {
+    use super::all_caps_symbol;
+
+    /// The predicate separates a nomenclature SYMBOL from a name and from ordinary prose.
+    #[test]
+    fn flags_symbols_and_spares_names() {
+        // Symbols — reachable only from an all-caps token once the filter is on.
+        for s in [
+            "CELL",
+            "DNA",
+            "RNA",
+            "MSI",
+            "WRN",
+            "MSH2",
+            "A",
+            "BILE SALT-DEPENDENT LIPASE",
+        ] {
+            assert!(all_caps_symbol(s), "{s} is an all-caps symbol");
+        }
+        // NOT symbols. `RecQ`/`cAMP` are mixed-case gene forms and `Microsatellite Instability` is
+        // Title-case terminology: keying on "contains an uppercase" instead of "is all-caps" would
+        // stop all three from matching the lowercase prose that mentions them.
+        for s in [
+            "cell",
+            "RecQ",
+            "cAMP",
+            "Microsatellite Instability",
+            "Werner Syndrome",
+            "microsatellite-stable",
+        ] {
+            assert!(!all_caps_symbol(s), "{s} must NOT be treated as a symbol");
+        }
+        // No cased character at all ⇒ not a symbol (never filters anything).
+        for s in ["2026", "-", "", "4-1"] {
+            assert!(!all_caps_symbol(s), "{s} has no cased character");
+        }
+    }
+
+    /// **The asymmetry is the design.** A symmetric (exact-case) rule would break sentence-initial
+    /// capitalisation, which is why v1 folded case in the first place. Encoded as the two directions
+    /// the filter in [`Parser::lookup_span`] actually takes.
+    #[test]
+    fn asymmetry_keeps_sentence_initial_capitalisation_working() {
+        // Observed token side: `Cell` (sentence-initial) is NOT all-caps, so the filter engages and
+        // drops all-caps entries — while the lowercase lemma entry `cell`, which is what
+        // `Cell lines were distinct.` must reach, is not all-caps and so survives.
+        assert!(!all_caps_symbol("Cell"));
+        assert!(!all_caps_symbol("cell"));
+        // …and the symbol is still reachable when the document actually writes it as a symbol.
+        assert!(all_caps_symbol("CELL"));
+    }
+}
+
 fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("valid lexicon iri")
 }
@@ -941,6 +1035,7 @@ mod tests {
             in_lexicon: None,
             sense: Some(sense.to_string()),
             gloss: None,
+            form: String::new(),
         }
     }
 

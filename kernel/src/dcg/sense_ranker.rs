@@ -117,7 +117,13 @@ fn rank_key(sentence: &str, context: &str, words: &[WordSenses]) -> String {
     k.push_str(context);
     for w in words {
         k.push('\u{1f}');
-        k.push_str(w.surface);
+        // LOWERCASED, and it must stay that way. The ranking question is about the WORD, not its
+        // casing, and every recording predates `tokenize` preserving case (2026-07-29) — so the
+        // recorded surfaces are lowercase. Keying on the raw surface would make a capitalised
+        // sentence-initial token miss its own recording, which `assert_replay_faithful` turns into a
+        // hard failure. Normalising here (and identically in the replay's key rebuild) keeps every
+        // committed recording valid across that change.
+        k.push_str(&w.surface.to_lowercase());
         for c in w.candidates {
             k.push('\u{1e}');
             k.push_str(&c.sense);
@@ -210,7 +216,8 @@ impl ReplaySenseRanker {
             k.push_str(&r.context);
             for w in &r.words {
                 k.push('\u{1f}');
-                k.push_str(&w.surface);
+                // Same normalisation as `rank_key` — see the note there.
+                k.push_str(&w.surface.to_lowercase());
                 for s in &w.senses {
                     k.push('\u{1e}');
                     k.push_str(s);

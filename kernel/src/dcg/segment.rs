@@ -127,12 +127,23 @@ pub fn is_nonprose(token: &str) -> bool {
     first.is_ascii_digit() || !token.chars().any(|c| c.is_ascii_alphabetic())
 }
 
-/// Split prose into lowercased word tokens. Token-internal **separators** — em/en-dashes
-/// (`—`/`–`), slashes, and brackets — are normalised to spaces first, so `"not—can"` →
+/// Split prose into word tokens, **preserving the source's case**. Token-internal **separators** —
+/// em/en-dashes (`—`/`–`), slashes, and brackets — are normalised to spaces first, so `"not—can"` →
 /// `["not", "can"]` and `"and/or"` → `["and", "or"]` (D62 S0). Hyphens (`-`) are kept, so
 /// hyphenated compounds (`"double-stranded"`) stay intact. Each token is then trimmed of
-/// leading/trailing non-alphanumerics (so `"BRCA1,"` → `"brca1"`); empties are dropped.
+/// leading/trailing non-alphanumerics (so `"BRCA1,"` → `"BRCA1"`); empties are dropped.
 /// Multiword forms are recovered by re-joining spans at lookup time, not here.
+///
+/// **CASE IS PRESERVED HERE, and folded where a lowercase key is actually wanted** (2026-07-29).
+/// This function used to `to_lowercase()` every token, which destroyed the distinction between a
+/// nomenclature SYMBOL and the common noun it spells before any consumer could see it: `CELL` (HGNC
+/// `NS` for the CELP pseudogene) became indistinguishable from `cell`, so `MSI cell lines…` read
+/// `cell` as a GENE in 16 of its 48 skeletons. Case-insensitive LOOKUP is still right — the lexical
+/// index stays lowercase-keyed, and sentence-initial `Cell lines…` must reach the lemma `cell` — so
+/// every consumer that needs a key lowercases at the point of use ([`Parser::has_token`],
+/// `lookup_span`'s `s_lc`, the [`Lemmatizer`](super::lemmatizer::Lemmatizer), `ReservedTable::kind`,
+/// `rank_key`). The one consumer that needs the ORIGINAL is
+/// [`all_caps_symbol`](super::parse::all_caps_symbol), which is the whole point.
 pub fn tokenize(text: &str) -> Vec<String> {
     // Bracket/dash/slash separators → spaces; the **comma** is preserved as a standalone `,` token
     // (D62 S0) so the parser can key multi-item list coordination on it. Other punctuation is still
@@ -153,10 +164,8 @@ pub fn tokenize(text: &str) -> Vec<String> {
             if t == "," {
                 Some(",".to_string())
             } else {
-                let s = t
-                    .trim_matches(|c: char| !c.is_alphanumeric())
-                    .to_lowercase();
-                (!s.is_empty()).then_some(s)
+                let s = t.trim_matches(|c: char| !c.is_alphanumeric());
+                (!s.is_empty()).then_some(s.to_string())
             }
         })
         .collect();
@@ -210,13 +219,16 @@ fn strip_bracketed_asides(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn tokenize_lowercases_and_strips_edge_punctuation() {
+    fn tokenize_preserves_case_and_strips_edge_punctuation() {
+        // CASE IS PRESERVED (2026-07-29): `BRCA1` must stay distinguishable from a lowercase
+        // common noun, or an all-caps nomenclature symbol becomes reachable from ordinary prose
+        // (`CELL` the CELP pseudogene vs the noun `cell`). Consumers fold where they need a key.
         assert_eq!(
             tokenize("HeLa depends on BRCA1."),
-            ["hela", "depends", "on", "brca1"]
+            ["HeLa", "depends", "on", "BRCA1"]
         );
         // The comma between content tokens is preserved as a `,` token (D62 S0 list coordination).
-        assert_eq!(tokenize("  A,  b!  "), ["a", ",", "b"]);
+        assert_eq!(tokenize("  A,  b!  "), ["A", ",", "b"]);
         assert!(tokenize("   ").is_empty());
         assert!(tokenize("").is_empty());
     }

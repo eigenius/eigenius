@@ -260,6 +260,23 @@ pub struct LexEntry {
     pub item: Item,
     pub in_lexicon: Option<Iri>,
     pub sense: Option<String>,
+    /// The entry's `lexicon:form` in its **ORIGINAL CASE** — the index keys are lowercased, so this
+    /// is the only place the source's capitalisation survives lookup.
+    ///
+    /// It exists for ACRONYM DISAMBIGUATION, the refinement this type's index documents as deferred
+    /// from v1. A case-insensitive index is right for retrieval — `Cell lines…` sentence-initially
+    /// must still reach the lemma `cell` — but it makes an all-caps nomenclature symbol reachable
+    /// from the lowercase common noun it happens to spell. Measured over MRCONSO 2026AA: 4,319
+    /// distinct all-caps English atoms lowercase onto a WordNet common-noun lemma, 24 of them on the
+    /// WRN reference page. `CELL` (HGNC `NS` for the CELP pseudogene, C1413337, plus OMIM `ACR` for
+    /// CEL, C1413336) is why `MSI cell lines` had 16 skeletons reading `cell` as a GENE.
+    ///
+    /// The drop set cannot fix this and should not: `drops.rs` keeps clean all-caps collisions
+    /// DELIBERATELY (`CAT` the catalase gene, `SET` the oncogene are real symbols) and its
+    /// `DROP_TTYS` excludes `ACR`/`NS`. The symbol is legitimate; reaching it from lowercase prose is
+    /// not. So the fix belongs at the point of use, keyed on the OBSERVED token — see
+    /// [`super::parse::all_caps_symbol`].
+    pub form: String,
     /// The entry's own `core:description` — **the gloss the reranker reads**.
     ///
     /// It cannot come from the `sem`: a function word's `sem` is an inline λ-term, with no IRI and
@@ -419,6 +436,7 @@ impl LexicalIndex {
                 in_lexicon: read_in_lexicon(entry),
                 gloss: read_description(entry),
                 sense: read_sense(entry),
+                form: form.trim().to_string(),
             });
         }
         self.overlay = overlay;
@@ -453,6 +471,7 @@ impl LexicalIndex {
                 in_lexicon: read_in_lexicon(r.as_ref()),
                 gloss: read_description(r.as_ref()),
                 sense: read_sense(r.as_ref()),
+                form: form.trim().to_string(),
             });
         }
         (by_form, max_words)
@@ -494,6 +513,7 @@ impl LexicalIndex {
                 in_lexicon: read_in_lexicon(r.as_ref()),
                 gloss: read_description(r.as_ref()),
                 sense: read_sense(r.as_ref()),
+                form: form.trim().to_string(),
             });
         }
         items

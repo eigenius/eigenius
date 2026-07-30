@@ -141,8 +141,17 @@ impl ReservedTable {
     }
 
     /// The kind of `token`, if it is a reserved construct.
+    ///
+    /// Folds case: `by_form` is lowercase-keyed by construction, and since [`tokenize`] stopped
+    /// lowercasing (2026-07-29) a sentence-initial `That`/`And` arrives capitalised. A reserved
+    /// construct is grammar, not vocabulary — its casing carries nothing.
+    ///
+    /// [`tokenize`]: super::segment::tokenize
     pub fn kind(&self, token: &str) -> Option<ReservedKind> {
-        self.by_form.get(token).copied()
+        self.by_form
+            .get(token)
+            .or_else(|| self.by_form.get(token.to_lowercase().as_str()))
+            .copied()
     }
 
     /// Whether `token` is the given reserved kind.

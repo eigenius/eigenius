@@ -89,9 +89,30 @@ impl Parser {
             .entries_for(&s_lc)
             .iter()
             .any(|e| e.in_lexicon.is_none() && is_ctor(e.item.cat(), "cat_forall").is_some());
+        // CASE-SENSITIVE ACRONYM MATCH ([`super::all_caps_symbol`]). The index is keyed on lowercased
+        // forms, so an all-caps nomenclature SYMBOL is otherwise reachable from the lowercase common
+        // noun it happens to spell. `CELL` — HGNC `NS` for the CELP pseudogene (C1413337) and OMIM
+        // `ACR` for CEL (C1413336) — is why `MSI cell lines from these four lineages…` carried 16
+        // skeletons that read `cell` as a GENE, via `named(…)`, which only a `cat_np` named individual
+        // can supply.
+        //
+        // Applied HERE and not in the index, for two reasons. The index deliberately "does lookup and
+        // nothing else" (its `LexicalLookup` note), and `entries_for` receives a LOWERCASED key — the
+        // observed token's casing is already gone by then. `lookup_span` still holds the raw surface,
+        // and it is where the sibling surface-keyed prunes (`surface_is_function`,
+        // `surface_is_determiner`) already live.
+        //
+        // Not fixable in the drop set, and it should not be: `drops.rs` keeps clean all-caps
+        // collisions DELIBERATELY (`CAT` the catalase gene, `SET` the oncogene are real symbols) and
+        // its `DROP_TTYS` excludes `ACR`/`NS`. The symbol is legitimate; reaching it from lowercase
+        // prose is not.
+        let surface_all_caps = super::all_caps_symbol(surface.trim());
         let mut out = Vec::new();
         for c in &candidates {
             let mut entries = self.scoped(self.lex.entries_for(c), scope);
+            if !surface_all_caps {
+                entries.retain(|e| !super::all_caps_symbol(&e.form));
+            }
             if surface_is_function {
                 entries.retain(|e| {
                     e.in_lexicon.is_none()
