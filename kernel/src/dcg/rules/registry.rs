@@ -667,9 +667,24 @@ impl Grammar {
                 // The null cost-penalty result should have said so at the time: if the cause were
                 // ranking OR classification, a penalty would have moved something. It moved nothing,
                 // which means the comparative candidate never reaches the point where either applies.
-                // The elided-`than` shift that mints it (`UnaryKind::ElidedThan`) is the thing to look
-                // at — whether the predicative items crowd its input out of a beamed cell before it
-                // fires. UNRESOLVED; do not treat the page's `grammar-gap 0` as meaning this is settled.
+                // FIVE MECHANISMS HAVE BEEN REFUTED BY MEASUREMENT, recorded so none is retried:
+                //   open-vs-closed masking  the unit reports NO open parses at all, so nothing is
+                //                           merely uncounted (`parse_open` dump).
+                //   ranking / cost          a `COMPOUND_STEP_PENALTY` on this item changed nothing,
+                //                           byte-identical page.
+                //   cell-beam eviction      `cell_beam` defaults to `None` (exact chart) and the
+                //                           packed path passes `None`; the node is never built, not
+                //                           evicted.
+                //   widen-on-failure / cap  raising the harness `SENSE_CAP` 2 -> 4 leaves this unit
+                //                           unchanged (8 readings, 1 skeleton, no open parse).
+                //   classify budget         no `CLASSIFY_BUDGET` drop is logged for this unit.
+                //
+                // AND THE DECISIVE ONE: parsed STANDALONE the comparative is abundant on BOTH paths —
+                // `unpacked closed×16 open×720`, `packed closed×24 open×1080`. In the page sweep the
+                // same sentence yields ZERO open parses. So the chart builds the reading and the loss
+                // is CONTEXT-DEPENDENT: what the sweep adds is the document glossary (abbreviation /
+                // named-entity injection) and the sense-ranker replay. That is where to look next, not
+                // in this rule and not in the chart. UNRESOLVED; `grammar-gap 0` does not settle it.
                 Some(Item::from_parts(
                     cat,
                     sem,
