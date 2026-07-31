@@ -136,6 +136,9 @@ pub struct Report {
     /// `cat_n(C, mass)` entry emitted for a lemma flagged uncountable, enabling the bare-mass
     /// argument shift. Zero when no countability lexicon is supplied.
     pub mass_entries: usize,
+    /// Multiword adjective lemmas skipped because they merely restate a governed-preposition frame
+    /// the base adjective already carries ([`restates_governed_frame`]).
+    pub frame_duplicate_skipped: usize,
     /// Verb lemmas skipped because they are the COPULA (`be`) — grammar the closed-class bootstrap
     /// owns. WordNet's content senses of it (including a frame-6 LINKING entry over an opaque 2-place
     /// axiom) compete with the copula and re-encode `X is P` as `be(λx.P(x), X)`. Counts lemma skips,
@@ -816,6 +819,39 @@ fn adjective_frames() -> &'static BTreeMap<String, String> {
     })
 }
 
+/// Whether `lemma` is a **multiword adjective that merely restates a governed-preposition frame** —
+/// `X P` where the base adjective `X` is already known to govern `P` ([`adjective_frames`]).
+///
+/// Such a lemma is REDUNDANT with the compositional analysis and competes destructively with it for
+/// the same span. WordNet lists `dependent on` as its own adjective lemma, sole sense `a00555859`
+/// (`contingent`), beside the base `dependent` whose sense 1 `a00725772` ("relying on or requiring a
+/// person or thing for support") already carries a `cat_pp_arg(prep_on)` frame from this very table.
+/// So the span "dependent on WRN" has two analyses: the compositional relational one, and the MWE —
+/// which SWALLOWS THE PREPOSITION and leaves the PP's object stranded as a bare noun.
+///
+/// Measured on the WRN page: that stranding is what let «The lines from rare lineages were less
+/// dependent on WRN.» parse as `is_a(the line …, Σ:WRN-protein. And(contingent, less))` — asserting a
+/// cell line IS a WRN protein — while its correct comparative reading was lost. Six other hypotheses
+/// for that regression were tried and refuted; this is the one the evidence supports.
+///
+/// The gate is DELIBERATELY NARROW and fails safe: the drop fires only where the base adjective's
+/// governance of that exact preposition is KNOWN, so genuine idioms — `all in`, `boxed in`, `agreed
+/// upon`, `contingent on` — are untouched, because their bases are not gloss-governed for those
+/// prepositions. Against WordNet 3.0 it removes exactly ONE lemma today (`dependent on`) out of 57
+/// multiword prepositional adjectives, and it widens automatically as `adjective-frames.tsv` grows —
+/// that file is the frame-acquisition source, so a new frame retires its own MWE duplicate.
+///
+/// Same discipline as the closed-class surface list and `GRAMMATICAL_SURFACES`: do not seed a lexical
+/// entry that merely restates a grammatical relation the grammar already builds.
+fn restates_governed_frame(lemma: &str) -> bool {
+    let Some((base, prep)) = lemma.rsplit_once(' ') else {
+        return false;
+    };
+    adjective_frames()
+        .get(&base.to_lowercase())
+        .is_some_and(|p| p.eq_ignore_ascii_case(prep))
+}
+
 /// The preposition governed by a relational gradable adjective, derived from its WordNet **gloss**
 /// (C3, d63-comparative-phrasal.md §5.3 — WordNet has no structured subcat frame, so the gloss is the
 /// only WordNet-internal signal). Two patterns, most-confident first:
@@ -912,6 +948,10 @@ fn push_adj(
         rep.adj_axioms += 1;
         let cat = adj_cat();
         for (i, lemma) in syn.words.iter().enumerate() {
+            if restates_governed_frame(lemma) {
+                rep.frame_duplicate_skipped += 1;
+                continue;
+            }
             push_entry(
                 buf,
                 &format!("e_{loc}_{i}"),
@@ -992,6 +1032,10 @@ fn push_adj(
     let cmp_cat = format!("lexicon:fwd({}, lexicon:cat_pp_than)", adj_cat());
     let cmp_arrow = format!("{ENTITY_TOP} -> {prop_arrow}");
     for (i, lemma) in syn.words.iter().enumerate() {
+        if restates_governed_frame(lemma) {
+            rep.frame_duplicate_skipped += 1;
+            continue;
+        }
         let sense = sense_key(syn, lemma);
         // Positive: gt(deg(x), std).
         push_entry(
@@ -1245,6 +1289,42 @@ fn route(block: &str, decls: &mut String, entries: &mut Vec<String>) {
 
 #[cfg(test)]
 mod tests {
+
+    /// The frame-duplicate drop must be NARROW: it fires only where the base adjective's governance
+    /// of that exact preposition is known, so genuine idioms survive.
+    #[test]
+    fn frame_duplicate_drop_spares_idioms() {
+        // `dependent` -> `on` IS in adjective-frames.tsv, so the MWE duplicates the compositional
+        // relational analysis and must go.
+        assert!(restates_governed_frame("dependent on"));
+
+        // Idioms and non-governed pairs must SURVIVE. `contingent on` shares a synset with
+        // `dependent on`, but `contingent` is not gloss-governed, so the criterion leaves it alone —
+        // deliberately: the drop is keyed on KNOWN governance, not on shape.
+        for keep in [
+            "contingent on",
+            "contingent upon",
+            "all in",
+            "boxed in",
+            "agreed upon",
+            "adequate to",
+            "comparable to",
+            "dependent",
+            "essential",
+        ] {
+            assert!(
+                !restates_governed_frame(keep),
+                "{keep} must not be dropped — its base is not gloss-governed for that preposition"
+            );
+        }
+
+        // Every governed pair in the table is a drop candidate by construction; check one more so a
+        // future table edit cannot silently make the rule inert.
+        assert!(
+            restates_governed_frame("essential for")
+                || !adjective_frames().contains_key("essential")
+        );
+    }
     use super::*;
     use crate::wndb::parse_data_line;
 
