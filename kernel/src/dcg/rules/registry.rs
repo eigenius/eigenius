@@ -684,12 +684,23 @@ impl Grammar {
                 //     cap= 2   open 0   24 closed readings, 2 skeletons
                 //     cap= 8   open 0   48 closed readings, 2 skeletons
                 //     cap=32   open 1    0 closed readings, 8 skeletons   <- comparative returns
-                // The comparative is only reachable ABOVE THE SENSE CAP. Before this branch existed
-                // the unit had NO closed readings at cap 2, so the pipeline yielded the OPEN
-                // comparative and the pin hit; the predicative readings now compete at cap 2 and it
-                // does not survive. The reading was living on the ABSENCE OF COMPETITION, not on
-                // merit — the `SENSE_CAP = 2` emission-order truncation already documented in
-                // `parse::seed` and in the header of `expected-readings.tsv`.
+                // CORRECTION: that is NOT a sense-cap truncation, and the cap sweep was over-read.
+                // Diffing the terms at the two caps names the competing analyses exactly:
+                //
+                //   correct   `dependent` + `on`   -> a00725772, WordNet SENSE 1 of the lemma
+                //             ("relying on or requiring a person or thing for support"), used in its
+                //             RELATIONAL frame `deg_a00725772_rel(ground, subject)` with `on` as the
+                //             governed preposition; `less` as a comparative degree operator.
+                //   survives  `dependent on`       -> a00555859 `contingent`, the ONLY sense of the
+                //             MULTIWORD lemma `dependent_on`; plus `less` -> a01555416 `less(a)`, the
+                //             quantifier sense ("comparative of `little', used with mass nouns").
+                //
+                // a00725772 is sense 1 and is dropped by NO cap. The competition is MULTIWORD-vs-
+                // COMPOSITIONAL over the span — the ambiguity `parse::seed` documents as "carried as
+                // competing chart edges" — and the MWE swallows the preposition, which is why `on`
+                // appears to vanish and leaves `WRN` bare for this rule to predicate as a nominal.
+                // Raising the cap changes which full-span candidate survives; it does not restore a
+                // dropped sense, because none was dropped.
                 //
                 // Supporting: parsed STANDALONE the comparative is abundant on BOTH paths —
                 // `unpacked closed×16 open×720`, `packed closed×24 open×1080`. In the page sweep the
