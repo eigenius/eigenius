@@ -45,7 +45,9 @@ pub struct Candidate {
     pub surface: String,
     /// UMLS concept id.
     pub cui: String,
-    /// UMLS definition (`MRDEF`) — **empty for 51% of concepts**, which is why the fields below
+    /// UMLS definition (`MRDEF`) — **empty for 40% of the CANDIDATES here (40,736 of 102,292), and
+    /// for 89% of the Metathesaurus at large** (267,162 of 2,509,295 CUIs carry one; measured
+    /// 2026-07-29 against 2026AA) — which is why the fields below
     /// exist. UMLS simply never wrote a definition for `Deficiency` (C0011155), whose surface *is* a
     /// WordNet lemma (`lack / deficiency / want`); requiring a gloss silently excluded it, and with
     /// it the whole Functional/Qualitative-Concept bucket — precisely the abstract nouns that overlap

@@ -178,11 +178,41 @@ is its job.
 - **The prompt changed between v1 and v2** (the metadata-artefact rule; the un-glossed handling), and
   the resume reuses v1's verdicts rather than re-judging them. ~$40 saved against a mild
   inconsistency — the new rules target territory v1 never touched, but it is not free.
-- **Junk senses are filtered at parse time, not in the lexicon.** `Specialty Type - cancer` (a
-  *discipline*, competing with the disease) and `C0686904` "Patient need for (contextual qualifier)"
-  (a data-entry qualifier competing with the verb *need*) are still entries; the reranker now
-  eliminates them in context. That is arguably better than a static filter — it is contextual — but
-  the junk is still there. **The real fix is upstream:** the UMLS importer should not seed a
-  `(contextual qualifier)` / `(attribute)` / metadata concept as a content-noun `LexicalEntry` at
-  all. That is a separate lever from alignment (which only merges genuine duplicates) and from
-  reranking (which only hides them per-sentence).
+- **Junk senses are now retracted in the lexicon, not only at parse time (2026-07-20).** The drop
+  set's **second path** (`crate::drops`, "metadata-artefact CONCEPTS") removes them at import:
+  `Specialty Type - cancer` (`C1547140`, an HL7 oncology-specialty code competing with the disease)
+  and `Specific (qualifier value)` (`C0205369`, an adjective reified as a code — the sense the
+  reranker-gloss fix had to demote per sentence) no longer seed a `LexicalEntry`. The concept is
+  identified from its UMLS preferred name — a curated set of HL7 code-table prefixes (`Specialty Type
+  - `, `Specimen Source Codes - `, …) and the SNOMED modifier tags `(qualifier value)` / `(attribute)`
+  / `(qualifier)` — under the same gate the case path uses (collision ⇒ WordNet covers the surface; a
+  confident `same=false` verdict; never a merged surface). It caught **258** junk `(cui, form)` atoms
+  across **235** concepts over the whole lexicon (drops.json 17 → 275). This is distinct from
+  alignment (which only merges genuine duplicates) and reranking (which only hides them per-sentence).
+  - **Residual gap:** the criterion is preferred-name-pattern-based, not source-based. A cleaner
+    signal is the atom's SAB (HL7V2.5 / HL7V3.0 / administrative vocabularies), but `Candidate` does
+    not carry SAB; adding it would let the importer refuse an administrative-source atom on a
+    common-word surface without curating prefixes. Entity-tagged SNOMED concepts a real noun carries
+    (`(finding)`, `(procedure)`, `(substance)`) are deliberately left in — they are genuine senses.
+
+## `merges-lemma-keyed.json` — a DERIVED artifact (2026-07-26)
+
+`merges.json` stays the recorded adjudication: 38 389 LLM verdicts, never hand-edited. This file is
+mechanically derived from it and regenerable; it is **not** a second source of truth.
+
+**Filter:** drop a merge whose `surface` is a regular English plural (`-ies→-y`, `-s` excluding
+`-ss`/`-us`/`-is`) of ANOTHER surface merged for the SAME `cui`. 38 389 → **30 776** (7 613 dropped).
+
+**Why.** The lexicon is lemma-keyed and WordNet honours that by construction, but UMLS `MRCONSO.STR`
+holds surface strings, so plurals ship as forms. On 2026-07-12 `merges.json` was deliberately grown
+26 690 → 38 389 *to add those plural surfaces*, and 24% of the merges are now inflected forms. Once the
+importer prunes inflected duplicates (`convert::is_inflection_of_sibling`) those merges match no entry
+in the base chain and become no-ops — silent dead weight that also makes the run's "entries redefined"
+count stop meaning what it used to.
+
+**Scoped WITHIN one cui, deliberately.** The sibling is the evidence that the surface really is an
+inflection. Without it the crude rule is unreliable: the no-sibling group is dominated by non-plurals
+(`aids`→`aid`, `acoustics`→`acoustic`, `nervus abducens`, `acanthosis nigricans`), so those merges are
+left ALONE rather than corrected. Correcting them would rewrite `aids` to `aid`.
+
+**Regenerate** with the filter above over `merges.json`; do not edit either file by hand.

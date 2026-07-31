@@ -814,6 +814,25 @@ pub(super) fn is_binary_relation_cat(cat: &Exp) -> bool {
     is_ctor(s, "cat_s").is_some() && is_ctor(subj, "cat_np").is_some()
 }
 
+/// Compact category rendering for probe output: nested constructor names, no decl inlining.
+pub fn pretty_cat_dbg(c: &Exp) -> String {
+    match c {
+        Exp::InductiveCtor(_, n, args) if args.is_empty() => n.clone(),
+        Exp::InductiveCtor(_, n, args) => format!(
+            "{n}({})",
+            args.iter()
+                .map(pretty_cat_dbg)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        Exp::Var(v) => v.clone(),
+        Exp::EigonClass(_) => "C".to_string(),
+        Exp::Lam(_, b) => format!("λ.{}", pretty_cat_dbg(b)),
+        Exp::Sig(..) => "Σ".to_string(),
+        _ => "_".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

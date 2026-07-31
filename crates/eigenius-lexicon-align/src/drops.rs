@@ -77,6 +77,169 @@ pub fn is_irregular_case(s: &str) -> bool {
     }
 }
 
+// ── The second drop path: metadata-artefact CONCEPTS ────────────────────────────────────────────
+//
+// The case path above retracts a junk SURFACE of a real concept (`gENE`). This path retracts a real
+// surface of a junk CONCEPT: a UMLS entry that is not a lexical noun at all but an administrative
+// code-table value or a SNOMED modifier, whose surface collides with a common word. `Specialty Type
+// - cancer` (`C1547140`, an HL7 oncology-*specialty* code) seeds a spurious "cancer" reading against
+// the disease; `Specific (qualifier value)` (`C0205369`) seeds a spurious noun against the adjective
+// (the sense the 2026-07-20 reranker-gloss fix had to demote per sentence). The concept is
+// identified from its UMLS preferred name — the same signal [`Candidate::umls_atoms`] documents as
+// how a real merge is told from a metadata artefact — and the drop is gated on the SAME trusted
+// evidence the case path uses (collision ⇒ WordNet covers the surface; a confident `same=false`
+// verdict ⇒ not the WordNet sense; never a merged surface). Both sets are curated from the MRCONSO
+// preferred-name distribution over the colliding, `same=false`-≥`DROP_CONFIDENCE` population
+// (2026-07-20); neither pattern matches on any merged concept.
+
+/// HL7 v2/v3 administrative code-table field names. A concept whose UMLS preferred name is
+/// `<one of these> - <value>` is a code-table entry (`Specialty Type - cancer`, `Specimen Source
+/// Codes - Bone`, `Act Class - act`), never a content concept: the `<value>` collides with a common
+/// word but denotes the code, not the thing the word names.
+const CODESYSTEM_PREFIXES: &[&str] = &[
+    "specimen source codes",
+    "specimen type",
+    "specimen action code",
+    "act class",
+    "act code",
+    "act priority",
+    "role class",
+    "role code",
+    "kind of quantity",
+    "specialty type",
+    "what subject filter",
+    "transaction counts and value totals",
+    "transaction type",
+    "message waiting priority",
+    "quantity limited request",
+    "query quantity unit",
+    "value type",
+    "organization unit type",
+    "visit user code",
+    "table cell vertical align",
+    "table cell horizontal align",
+    "authorization mode",
+    "diagnostic service section id",
+    "charge type",
+    "parameterized data type",
+    "degree of relationship",
+    "mdf attribute type",
+    "confidentiality",
+    "processing id",
+    "processing mode",
+    "message structure",
+    "administrative gender",
+    "marital status",
+    "patient class",
+    "check digit scheme",
+    "coordinate system data type",
+    "amount type",
+];
+
+/// SNOMED CT metadata-hierarchy semantic tags. A concept whose UMLS preferred name ends
+/// `(qualifier value)` / `(attribute)` / `(qualifier)` is a MODIFIER value in SNOMED's model, not an
+/// entity — an adjective (`Specific`, `Common`, `Double`) reified as a code. Entity tags a real noun
+/// carries (`(finding)`, `(procedure)`, `(substance)`, `(disorder)`, `(physical object)`) are
+/// deliberately EXCLUDED: those mark genuine concepts, not scaffolding.
+const METADATA_TAGS: &[&str] = &["qualifier value", "attribute", "qualifier"];
+
+/// Semantic types that mark an **information / idea artefact** — a code, identifier, terminology,
+/// database record, or software system, NOT a content entity. Combined with [`INFO_NAME_TOKENS`] this
+/// catches the informational metadata the code-table PREFIX misses: `Protein Info` (`C1521746`, a
+/// GenBank record), `Accession Number (identifier)`, `Acute - Triage Code`, `ARIA Oncology
+/// Information System`. (The `cross-lexicon merge gap` turned out to be more of THIS, not unmerged
+/// duplicates — the duplicates the adjudicator left are genuine distinct senses.)
+const INFO_TUIS: &[&str] = &[
+    "Intellectual Product",
+    "Conceptual Entity",
+    "Idea or Concept",
+    "Classification",
+];
+
+/// Semantic types that are always a REAL content concept — never dropped even if the name looks
+/// code-ish (`Alanine Transaminase` a.k.a. `ALT`, an Enzyme; a gene; a chemical). The safety floor.
+const SUBSTANCE_TUIS: &[&str] = &[
+    "Enzyme",
+    "Amino Acid, Peptide, or Protein",
+    "Organic Chemical",
+    "Pharmacologic Substance",
+    "Gene or Genome",
+    "Nucleotide Sequence",
+    "Biologically Active Substance",
+    "Nucleic Acid, Nucleoside, or Nucleotide",
+];
+
+/// Name tokens marking an information/code artefact (word-boundary match).
+const INFO_NAME_TOKENS: &[&str] = &[
+    "code",
+    "codes",
+    "identifier",
+    "info",
+    "information",
+    "terminology",
+    "actclass",
+    "nomenclature",
+];
+
+/// Is this concept an **informational metadata artefact** — an `INFO_TUIS` type whose name is a code /
+/// identifier / info-record reification — as opposed to a real substance/gene (`SUBSTANCE_TUIS`, kept)?
+/// Validated over the 2026-07-20 population: 193 concepts, all codes/specimen-codes/info-systems, none
+/// a merged pair, none a genuine content concept (the substance floor excludes `ALT`).
+fn is_informational_metadata(umls_name: &str, tuis: &[String]) -> bool {
+    if tuis.iter().any(|t| SUBSTANCE_TUIS.contains(&t.as_str())) {
+        return false;
+    }
+    if !tuis.iter().any(|t| INFO_TUIS.contains(&t.as_str())) {
+        return false;
+    }
+    let name = umls_name.to_lowercase();
+    name.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|tok| INFO_NAME_TOKENS.contains(&tok))
+        || name.contains("value set")
+        || name.contains("code set")
+}
+
+/// Is this concept a metadata artefact — an administrative code-table entry, a SNOMED modifier value,
+/// or an information/code artefact — as read from its UMLS preferred name (+ semantic type)? Neither
+/// pattern set matches a merged concept in the 2026-07-20 population.
+fn is_metadata_concept(umls_name: &str, tuis: &[String]) -> bool {
+    let name = umls_name.to_lowercase();
+    if let Some((prefix, _value)) = name.split_once(" - ") {
+        if CODESYSTEM_PREFIXES.contains(&prefix.trim()) {
+            return true;
+        }
+    }
+    if let Some(open) = name.rfind('(') {
+        if let Some(inner) = name[open + 1..].strip_suffix(')') {
+            if METADATA_TAGS.contains(&inner.trim()) {
+                return true;
+            }
+        }
+    }
+    is_informational_metadata(umls_name, tuis)
+}
+
+/// The colliding atom form(s) to drop for a metadata concept: every atom whose lowercase IS the
+/// candidate surface. The importer keys its per-surface entry by the verbatim `lexicon:form` and
+/// matches a drop by exact casing, so we emit each casing present (whichever survived first-seen
+/// dedup is thereby covered). Empty when no atom collides exactly (a lemma-only collision) → no drop,
+/// fail closed.
+fn metadata_atom_forms(c: &Candidate) -> Vec<String> {
+    if !is_metadata_concept(&c.umls_name, &c.tuis) {
+        return Vec::new();
+    }
+    let mut forms: Vec<String> = c
+        .umls_atoms
+        .iter()
+        .filter_map(|a| a.split_once('|').map(|(_tty, s)| s))
+        .filter(|s| s.to_lowercase() == c.surface)
+        .map(|s| s.to_string())
+        .collect();
+    forms.sort();
+    forms.dedup();
+    forms
+}
+
 /// The original-case atom form colliding on `c.surface`, if that atom is an irregular-cased `SY`/`PEP`
 /// atom — the drop's target. `None` when no such atom is present (the colliding atom is clean-cased,
 /// a preferred type, or simply not among the concept's retained atoms → fail closed, no drop).
@@ -128,8 +291,11 @@ pub fn resolve_drops(candidates: &[Candidate], verdicts: &[Verdict]) -> (Vec<Dro
         }
     }
 
-    // Per `(cui, surface)`: does it MERGE on any synset (→ never drop), and is there a confident
-    // `same=false` witness with an irregular colliding atom (→ the drop candidate)?
+    // Two drop paths, one gate. A `same=false`-≥`DROP_CONFIDENCE` witness licenses a drop of either
+    // (1) an irregular-cased colliding atom — a junk SURFACE of a real concept (`gENE`), or (2) every
+    // colliding atom of a metadata-artefact CONCEPT (`Specialty Type - cancer`). Keyed by `(cui,
+    // form)` — a metadata concept can carry several colliding casings, each its own drop. `merged`
+    // tracks `(cui, surface)` so a surface the concept merges on is never dropped (the merge owns it).
     let mut merged: BTreeSet<(String, String)> = BTreeSet::new();
     let mut cand: BTreeMap<(String, String), (String, f32)> = BTreeMap::new();
 
@@ -137,10 +303,10 @@ pub fn resolve_drops(candidates: &[Candidate], verdicts: &[Verdict]) -> (Vec<Dro
         let Some(v) = by_pair.get(&(c.cui.as_str(), c.offset.as_str())) else {
             continue; // unjudged — fail closed
         };
-        let key = (c.cui.clone(), c.surface.to_lowercase());
+        let surface = c.surface.to_lowercase();
         if v.same {
             if v.confidence >= MERGE_CONFIDENCE {
-                merged.insert(key);
+                merged.insert((c.cui.clone(), surface));
             }
             continue;
         }
@@ -148,11 +314,17 @@ pub fn resolve_drops(candidates: &[Candidate], verdicts: &[Verdict]) -> (Vec<Dro
         if v.confidence < DROP_CONFIDENCE {
             continue; // "cannot tell" default — not evidence of junk
         }
-        if let Some(form) = irregular_atom_for(c) {
+        let mut forms: Vec<String> = Vec::new();
+        if let Some(f) = irregular_atom_for(c) {
+            forms.push(f);
+        }
+        forms.extend(metadata_atom_forms(c));
+        for form in forms {
+            let key = (c.cui.clone(), form);
             match cand.get(&key) {
                 Some((_, conf)) if *conf >= v.confidence => {}
                 _ => {
-                    cand.insert(key, (form, v.confidence));
+                    cand.insert(key, (surface.clone(), v.confidence));
                 }
             }
         }
@@ -160,7 +332,7 @@ pub fn resolve_drops(candidates: &[Candidate], verdicts: &[Verdict]) -> (Vec<Dro
 
     let mut stats = DropStats::default();
     let mut out = Vec::new();
-    for ((cui, surface), (form, confidence)) in cand {
+    for ((cui, form), (surface, confidence)) in cand {
         if merged.contains(&(cui.clone(), surface.clone())) {
             stats.merged_not_dropped += 1;
             continue; // the merge owns this surface — redefined, not dropped
@@ -187,6 +359,13 @@ mod tests {
             offset: offset.into(),
             umls_atoms: atoms.iter().map(|s| s.to_string()).collect(),
             ..Default::default()
+        }
+    }
+    /// A candidate carrying a UMLS preferred name — the metadata-path discriminator.
+    fn cand_named(surface: &str, cui: &str, offset: &str, name: &str, atoms: &[&str]) -> Candidate {
+        Candidate {
+            umls_name: name.into(),
+            ..cand(surface, cui, offset, atoms)
         }
     }
     fn verdict(cui: &str, offset: &str, surface: &str, same: bool, confidence: f32) -> Verdict {
@@ -300,5 +479,129 @@ mod tests {
         let cands = [cand("gene", "C5849123", "05436752", &["SY|gENE"])];
         let (drops, _) = resolve_drops(&cands, &[]);
         assert!(drops.is_empty());
+    }
+
+    // ── The metadata-concept path ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn metadata_name_patterns_flag_scaffolding_only() {
+        let no_tui: &[String] = &[];
+        // Administrative code-table entries.
+        assert!(is_metadata_concept("Specialty Type - cancer", no_tui));
+        assert!(is_metadata_concept("Specimen Source Codes - Bone", no_tui));
+        assert!(is_metadata_concept("Act Class - act", no_tui));
+        // SNOMED modifier tags.
+        assert!(is_metadata_concept("Specific (qualifier value)", no_tui));
+        assert!(is_metadata_concept("Adherence (attribute)", no_tui));
+        assert!(is_metadata_concept(
+            "Arbitrary (property) (qualifier value)",
+            no_tui
+        )); // trailing tag wins
+            // NOT scaffolding: a real dashed concept whose prefix is not a code-system, and real SNOMED
+            // entity tags a genuine noun carries.
+        assert!(!is_metadata_concept(
+            "Blood - brain barrier anatomy",
+            no_tui
+        ));
+        assert!(!is_metadata_concept("Beans - dietary", no_tui));
+        assert!(!is_metadata_concept("Impaired health (finding)", no_tui));
+        assert!(!is_metadata_concept("Biopsy (procedure)", no_tui));
+        assert!(!is_metadata_concept("4-aminobenzoic acid", no_tui));
+    }
+
+    #[test]
+    fn informational_metadata_dropped_but_substances_kept() {
+        let ip = &["Intellectual Product".to_string()];
+        let ce = &["Conceptual Entity".to_string()];
+        // Information / code artefacts (an INFO_TUIS type + a code/info/identifier name).
+        assert!(is_informational_metadata("Protein Info", ce)); // C1521746, the GenBank record
+        assert!(is_informational_metadata("Acute - Triage Code", ip));
+        assert!(is_informational_metadata(
+            "Accession Number (identifier)",
+            ip
+        ));
+        assert!(is_informational_metadata(
+            "ARIA Oncology Information System",
+            ip
+        ));
+        assert!(is_informational_metadata("Basophil Specimen Code", ip));
+        // Substance floor: never drop a real enzyme/gene/chemical, even if the name looks code-ish.
+        let enzyme = &["Enzyme".to_string()];
+        assert!(!is_informational_metadata("Alanine Transaminase", enzyme)); // ALT
+                                                                             // Needs BOTH an info TUI and an info name — a plain content concept is not caught.
+        assert!(!is_informational_metadata("Protein", ce)); // no info token
+        assert!(!is_informational_metadata(
+            "Triage Code",
+            &["Finding".to_string()]
+        )); // not an info TUI
+    }
+
+    /// The WRN-page culprit: `Specialty Type - cancer` (`C1547140`, an HL7 oncology-specialty code)
+    /// seeds a spurious "cancer" reading against the disease. Its colliding atom `Cancer` is dropped.
+    #[test]
+    fn a_metadata_codesystem_concept_is_dropped() {
+        let cands = [cand_named(
+            "cancer",
+            "C1547140",
+            "14239918",
+            "Specialty Type - cancer",
+            &["PT|Cancer", "PN|Specialty Type - cancer"],
+        )];
+        let verdicts = [verdict("C1547140", "14239918", "cancer", false, 0.98)];
+        let (drops, _) = resolve_drops(&cands, &verdicts);
+        assert_eq!(drops.len(), 1);
+        assert_eq!(drops[0].cui, "C1547140");
+        assert_eq!(drops[0].form, "Cancer"); // the colliding atom, original case
+        assert_eq!(drops[0].surface, "cancer");
+    }
+
+    /// A SNOMED `(qualifier value)` concept — an adjective reified as a code — is dropped, the sense
+    /// the reranker-gloss fix had to demote per sentence. The WordNet noun/adjective survive it.
+    #[test]
+    fn a_metadata_qualifier_value_concept_is_dropped() {
+        let cands = [cand_named(
+            "specific",
+            "C0205369",
+            "00003553",
+            "Specific (qualifier value)",
+            &["PT|Specific"],
+        )];
+        let verdicts = [verdict("C0205369", "00003553", "specific", false, 0.9)];
+        let (drops, _) = resolve_drops(&cands, &verdicts);
+        assert_eq!(drops.len(), 1);
+        assert_eq!(drops[0].form, "Specific");
+    }
+
+    /// A concept whose UMLS name merely CONTAINS a spaced dash but whose prefix is not a code-system
+    /// (`Blood - brain barrier anatomy`) is a real concept, never a metadata drop.
+    #[test]
+    fn a_real_dashed_concept_is_not_dropped() {
+        let cands = [cand_named(
+            "blood",
+            "C0005902",
+            "05405324",
+            "Blood - brain barrier anatomy",
+            &["PT|Blood"],
+        )];
+        let verdicts = [verdict("C0005902", "05405324", "blood", false, 0.95)];
+        let (drops, _) = resolve_drops(&cands, &verdicts);
+        assert!(drops.is_empty());
+    }
+
+    /// Merge precedence holds for the metadata path too: a metadata-named concept that the
+    /// adjudicator MERGED on the surface is redefined, not dropped.
+    #[test]
+    fn a_merged_metadata_concept_is_not_dropped() {
+        let cands = [cand_named(
+            "emergency",
+            "C0175673",
+            "07357388",
+            "Emergency (qualifier value)",
+            &["PT|Emergency"],
+        )];
+        let verdicts = [verdict("C0175673", "07357388", "emergency", true, 0.95)];
+        let (drops, stats) = resolve_drops(&cands, &verdicts);
+        assert!(drops.is_empty());
+        assert_eq!(stats.merged_not_dropped, 0); // never even a drop candidate
     }
 }

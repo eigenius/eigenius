@@ -280,8 +280,13 @@ fn main() -> ExitCode {
     let (doc, rep) = render_document(&subset, &args.version, &mass, &drops);
     eprintln!(
         "umls import ({}): {} semantic-type classes, {} concept classes → {} lexical entries \
-         ({} junk atoms dropped)",
-        args.version, rep.semantic_types, rep.concepts, rep.entries, rep.junk_skipped,
+         ({} junk atoms dropped; {} inflected duplicates pruned)",
+        args.version,
+        rep.semantic_types,
+        rep.concepts,
+        rep.entries,
+        rep.junk_skipped,
+        rep.inflected_skipped,
     );
 
     if let Some(path) = &args.out {
@@ -349,6 +354,7 @@ fn emit_partitioned(
     let mut total_entries = 0usize;
     let mut total_mass = 0usize;
     let mut total_junk = 0usize;
+    let mut total_inflected = 0usize;
     let mut chunk_concepts = 0usize;
 
     let flush = |idx: usize, cur: &str| -> std::io::Result<PathBuf> {
@@ -376,6 +382,7 @@ fn emit_partitioned(
         total_entries += brep.entries;
         total_mass += brep.mass_entries;
         total_junk += brep.junk_skipped;
+        total_inflected += brep.inflected_skipped;
         chunk_concepts += 1;
     }
     if chunk_concepts > 0 {
@@ -389,7 +396,7 @@ fn emit_partitioned(
     }
 
     eprintln!(
-        "umls import ({version}): {sty} semantic-type classes, {} concept classes → {total_entries} lexical entries ({total_mass} additive mass entries, RC-1 head-inheritance; {total_junk} junk atoms dropped)",
+        "umls import ({version}): {sty} semantic-type classes, {} concept classes → {total_entries} lexical entries ({total_mass} additive mass entries, RC-1 head-inheritance; {total_junk} junk atoms dropped; {total_inflected} inflected duplicates pruned)",
         subset.concepts.len(),
     );
     eprintln!(

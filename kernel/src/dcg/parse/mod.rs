@@ -64,7 +64,7 @@ use std::sync::Arc;
 
 use crate::layer::Layer;
 use crate::nbe::check::{check, exp_mentions_var, CheckCtx};
-use crate::nbe::env::{Gamma, Rho};
+use crate::nbe::env::Rho;
 use crate::nbe::eval::eval;
 use crate::nbe::readback::{readback_val, try_readback_val};
 use crate::nbe::term::{Exp, Patt};
@@ -87,7 +87,15 @@ use super::sense_ranker::{SenseCandidate, SenseRanker, WordSenses};
 /// reach ~2k well-typed parses, so this bounds the forest while keeping every
 /// plausible reading; it sits far above any closed-class / demo forest, so those are
 /// unaffected (no truncation, order preserved by the stable cost-0 sort).
-pub const DEFAULT_FOREST_CAP: usize = 256;
+///
+/// **256 → 2048 (2026-07-25).** At 256 this was not a safety bound, it was deciding the grammar: on
+/// "PARP-1 inhibitors are successful in cancers with deficiencies in homologous recombination." the
+/// reported structure count tracked the constant itself — k=256 → 2 skeletons, 1024 → 6, 2048 → 13,
+/// with the fully-nested (correct) reading last in every prefix. A result that scales smoothly with
+/// an arbitrary constant is a measurement of the constant. Raised with the [`CLASSIFY_BUDGET`] log
+/// as the standing signal for whether it still binds; see that constant for why a fixed number is a
+/// step rather than the design.
+pub const DEFAULT_FOREST_CAP: usize = 2048;
 
 /// **Felicity-eval budget** (fail-closed OOM guard): the number of full-span candidates the
 /// felicity loop will NbE-eval, after cost-sorting. The top chart cell is unbeamed (Lever B beams
@@ -95,9 +103,36 @@ pub const DEFAULT_FOREST_CAP: usize = 256;
 /// candidates; over the full lexicon, widen-on-failure escalation makes that thousands, and each
 /// felicity check is a full eval/readback/check of an **impredicative-∃** GQ sem — evaluating all of
 /// them OOMs (witnessed: ~400 doubly-∃ candidates SIGKILL the process). Cost-sorting first and
-/// classifying only the lowest-cost `CLASSIFY_BUDGET` bounds the work without changing the result
-/// for normal forests (which have far fewer candidates): the kept readings are the most-frequent /
-/// most-preferred, exactly what the forest cap would keep.
+/// classifying only the lowest-cost `CLASSIFY_BUDGET` bounds the work.
+///
+/// The budget is spent on **distinct sems** ([`retain_distinct_sems`]), not on raw candidates. A
+/// duplicate costs a full NbE eval and buys nothing: `subsume_duplicates` collapses it afterwards
+/// anyway. Witnessed 2026-07-25 on "We also identified MSI cell lines from rare lineages." — after
+/// core-en `bnp` gave a bare kind a plain `cat_np`, every kind-argument reading acquired a second
+/// derivation and the unit reached **376 candidates carrying 44 distinct sems** (88% duplicate
+/// mass). The duplicates filled the 256 window, pushing that unit's correct nested-PP readings —
+/// which sit higher in the cost order than the flat VP-adjunct ones — out of it entirely: 4
+/// structural skeletons → 2, with no diagnostic, and `grammar-gap` blind to it because the sentence
+/// still parsed. Pre-`bnp` the same unit fitted (192 candidates) and kept all 4. Deduplicating
+/// first is what makes "bounds the work without changing the result" true rather than aspirational.
+///
+/// …and it is spent across **distinct bracketings** ([`skeleton::spread_over_keys`]), not down a
+/// cost prefix, because a cost prefix is biased *systematically* against the correct reading: a
+/// deeper derivation costs more, so the first thing a prefix drops is the deeply-nested PP
+/// attachment.
+///
+/// **THE NUMBER IS A STEP, NOT THE DESIGN.** There is no constant at which this stops binding —
+/// candidate count grows with length and coordination density, and at 4096 the page's 24-token unit
+/// ("Project Achilles and project DRIVE identified WRN as…") still offered 5920 distinct candidates.
+/// The OOM justification above is also STALE: the witnessed ~400-candidate SIGKILL predates the
+/// distinct-sem dedup, so those 400 raw candidates would be far fewer evals today, and nobody has
+/// re-measured where the real limit sits. 2048 is adopted because it is strictly better than 256 on
+/// every measurement taken, and because the truncation is no longer silent — it LOGS what it drops,
+/// and once the expected-reading corpus covers all 62 units a truncated-away correct reading trips
+/// the faithfulness gate instead of hiding in an improving metric. That pairing (loud log + full
+/// pin coverage) is the feedback loop this constant never had; an outcome-keyed adaptive rule
+/// ("stop when the last N evals yield no new post-felicity skeleton") is only worth building if
+/// that loop shows the fixed number still costing us readings.
 pub const CLASSIFY_BUDGET: usize = DEFAULT_FOREST_CAP;
 
 /// Upper bound for widen-on-failure of the sense cap (GH #97): when a capped parse of an
@@ -176,7 +211,20 @@ pub struct Parser {
     grammar: Grammar,
     /// The processing parameters ([`ParseConfig`]).
     config: ParseConfig,
+    /// The document this parser is reading, as sentences, for the reranker's CONTEXT WINDOW.
+    /// `None` ⇒ rank each sentence in isolation (the prior behaviour). Set with
+    /// [`Parser::with_document`]; the sweep supplies the page.
+    document: Option<Arc<Vec<String>>>,
+    /// Sentences of context on EACH side of the ranked sentence. **Default 0 — off**, so a plain
+    /// parser reproduces the isolated-sentence behaviour the committed baseline was measured under.
+    /// The context window CHANGES the reranker's answer (and is unproven), so it is opt-in: set it
+    /// (with a document) via [`Parser::with_document`], driven by the `--context-window` measurement arm.
+    context_sentences: usize,
 }
+
+/// The default context-window size the `--context-window` arm turns on. A passage, not a corpus:
+/// enough to fix the domain (genomics vs geography) without burying the target sentence.
+pub const CONTEXT_SENTENCES: usize = 2;
 
 impl Parser {
     /// Build a parser over `layer` — the one-call path: constructs the [`LexicalIndex`] and wraps it.
@@ -206,6 +254,8 @@ impl Parser {
                 packing: true, // default ON (§11 3g.2 / B9)
                 ..ParseConfig::default()
             },
+            document: None,
+            context_sentences: 0,
         }
     }
 
@@ -259,6 +309,19 @@ impl Parser {
     /// static `sense_rank` cap.
     pub fn with_sense_ranker(mut self, ranker: Box<dyn SenseRanker + Send + Sync>) -> Self {
         self.config.sense_ranker = Some(ranker);
+        self
+    }
+
+    /// Supply the DOCUMENT (its sentences) and the context-window size for the contextual reranker.
+    /// `window` sentences on EACH side of the ranked sentence enter the prompt; **`window == 0` is
+    /// off** — each sentence is ranked alone, the behaviour the committed baseline was measured under.
+    /// Builder-style; the `--context-window` measurement arm passes [`CONTEXT_SENTENCES`].
+    ///
+    /// A non-zero window CHANGES the ranker's question, hence its cache key: a `ranks.json` recorded
+    /// under a different window MISSES rather than replaying a stale answer.
+    pub fn with_document(mut self, sentences: Vec<String>, window: usize) -> Self {
+        self.document = Some(Arc::new(sentences));
+        self.context_sentences = window;
         self
     }
 
@@ -677,8 +740,26 @@ impl Parser {
                 let surface = tokens[i..=j].join(" ");
                 let mut senses: Vec<SenseCandidate> = Vec::new();
                 let mut seen: BTreeSet<String> = BTreeSet::new();
+                // CASE-SENSITIVE ACRONYM MATCH — the SAME filter `lookup_span` applies, and it has to
+                // be here too or the ranker is asked about senses that can never seed.
+                //
+                // This pass reaches `entries_for` DIRECTLY rather than through `lookup_span`, so
+                // until now it saw the unfiltered candidate list: for a lowercase `cell` it offered
+                // the ranker the CELP pseudogene alongside the ordinary noun. Two costs, and the
+                // second is the one that matters. The wasted prompt line is cosmetic. But the ranker
+                // returns an ELIMINATION signal — at the base cap the seeder takes no more senses
+                // than the ranker kept — so an impossible sense competing for a top-`cap` slot can
+                // displace a real one, and the displaced sense is then unavailable to the parse.
+                //
+                // Deliberately NOT measurable with the cap-only instrument: this whole function is
+                // gated on `sense_ranker`, so cap-only never executes it. Its reach was measured
+                // instead as rank-key misses against the tracked recording — see the commit.
+                let surface_all_caps = all_caps_symbol(surface.trim());
                 for c in self.candidate_lemmas(&surface, lemmatizer) {
                     for e in self.scoped(self.lex.entries_for(&c), scope) {
+                        if !surface_all_caps && all_caps_symbol(&e.form) {
+                            continue;
+                        }
                         let Some(sense) = e.sense else { continue };
                         if !seen.insert(sense.clone()) {
                             continue;
@@ -738,7 +819,7 @@ impl Parser {
                 candidates: c,
             })
             .collect();
-        let rankings = ranker.rank(text, &words);
+        let rankings = ranker.rank(text, &self.document_context(text), &words);
         if rankings.len() != words.len() {
             return None; // malformed reply ⇒ degrade to the static cap
         }
@@ -757,17 +838,79 @@ impl Parser {
         Some(map)
     }
 
-    /// The `core:description` gloss of a leaf item's `sem` entity — the text the reranker reasons
-    /// over for that sense. An `EigonResource` carries its resource inline; a class/axiom is
-    /// resolved by IRI in the chain. `None` for an inline λ-term sem (function words) or a
-    /// description-less entity.
+    /// The surrounding sentences for `text` — `context_sentences` on each side, joined. Empty when the
+    /// window is off (the default), no document was supplied, or `text` is not one of its sentences.
+    fn document_context(&self, text: &str) -> String {
+        if self.context_sentences == 0 {
+            return String::new(); // window off (default) — rank in isolation
+        }
+        let Some(doc) = self.document.as_ref() else {
+            return String::new();
+        };
+        let t = text.trim();
+        let Some(i) = doc.iter().position(|s| s.trim() == t) else {
+            return String::new();
+        };
+        let lo = i.saturating_sub(self.context_sentences);
+        let hi = (i + self.context_sentences + 1).min(doc.len());
+        doc[lo..hi]
+            .iter()
+            .map(|s| s.trim())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// The `core:description` gloss the reranker reasons over for a leaf item's sense: the description
+    /// of the FIRST chain entity found in a pre-order walk of `sem` that carries one.
+    ///
+    /// A bare noun / UMLS sem is an `EigonClass` at the ROOT — resolved directly, as before. A gradable
+    /// adjective's sem is `λx. gt(deg_X(x), std_X)`, whose sense gloss is carried on the NESTED `deg_X`
+    /// axiom — "the sense's semantic anchor" (`crates/eigenius-wordnet/src/convert.rs`, D63 §6a index
+    /// c), likewise a verb's synset gloss on its verb axiom — so the walk must descend the `Lam`/`App`
+    /// to reach it. Before this, only the root was checked, so every gradable adjective (and any sense
+    /// whose concept is nested) rendered to the reranker as the bare-category fallback
+    /// ("grammatical (function-word) reading; category …"), which read as a function word to omit and
+    /// lost to any described UMLS concept competing for the surface. Grammar operators (`gt`, `And`,
+    /// `kind_of`, the determiner λ-terms) carry no `core:description`, so the first hit is always the
+    /// sense anchor. `None` (→ the category fallback) when nothing in the term is described — a genuine
+    /// closed-class λ-term.
     fn sem_gloss(&self, sem: &Exp) -> Option<String> {
         match sem {
-            Exp::EigonResource(r) => read_description(r),
-            Exp::EigonClass(i) | Exp::EigonAxiom(i) => {
-                read_description(self.grammar.layer.resolve(i)?.as_ref())
+            Exp::EigonResource(r) => {
+                if let Some(d) = read_description(r) {
+                    return Some(d);
+                }
             }
-            _ => None,
+            Exp::EigonClass(i) | Exp::EigonAxiom(i) => {
+                if let Some(r) = self.grammar.layer.resolve(i) {
+                    if let Some(d) = read_description(r.as_ref()) {
+                        return Some(d);
+                    }
+                }
+            }
+            _ => {}
+        }
+        Self::sem_subterms(sem)
+            .into_iter()
+            .find_map(|child| self.sem_gloss(child))
+    }
+
+    /// The immediate sub-expressions a gloss walk ([`Self::sem_gloss`]) descends into — the
+    /// lambda-calculus core plus inductive-ctor args, which is every shape a lexical sem takes
+    /// (`Lam`/`App` for adjectives and verbs, pairs/projections, annotations, `compound_kind`-style
+    /// ctors). Variants that never wrap a described concept in a lexical sem (literals, sorts,
+    /// data/case, codata) yield none; a missed variant only stops the walk there (→ the category
+    /// fallback), never a wrong gloss.
+    pub(super) fn sem_subterms(e: &Exp) -> Vec<&Exp> {
+        match e {
+            Exp::Lam(_, b) | Exp::Con(_, b) | Exp::Fst(b) | Exp::Snd(b) => vec![b.as_ref()],
+            Exp::App(a, b) | Exp::Arrow(a, b) | Exp::Times(a, b) | Exp::Pair(a, b) => {
+                vec![a.as_ref(), b.as_ref()]
+            }
+            Exp::Pi(_, a, b) | Exp::Sig(_, a, b) => vec![a.as_ref(), b.as_ref()],
+            Exp::Ann(a, b) => vec![a.as_ref(), b.as_ref()],
+            Exp::InductiveType(_, args) | Exp::InductiveCtor(_, _, args) => args.iter().collect(),
+            _ => Vec::new(),
         }
     }
 }
@@ -791,6 +934,100 @@ const ENTITY_IRI: &str = "urn:eigenius:lexicon:Entity";
 // [`LexicalIndex::kind_raised_nps`] (D63 reshape §7.4): the raised subject/object sems are now built
 // there directly, with `kind_of(t)` pre-substituted, so the kind shift never routes through `apply`'s
 // `DetRefine` witness-projection (which mis-fired `Fst(kind_of(Σ))` on refined/compound nouns).
+
+/// Whether `s` is an **ALL-CAPS symbol** — at least one cased character, and none of them lowercase
+/// (`CELL`, `DNA`, `MSH2`, `BILE SALT-DEPENDENT LIPASE`; not `cell`, `RecQ`, `cAMP`, `Microsatellite
+/// Instability`, `2026`).
+///
+/// This is the discriminator for CASE-SENSITIVE ACRONYM MATCHING (the refinement
+/// [`super::lexicon::LexicalIndex`] documents as deferred from v1). The lexical index is keyed on
+/// LOWERCASED forms and must stay that way — sentence-initial `Cell lines…` has to reach the lemma
+/// `cell` — but that fold also makes an all-caps nomenclature symbol reachable from the lowercase
+/// common noun it happens to spell. So the rule is applied at the point of use and is DELIBERATELY
+/// ASYMMETRIC ([`Parser::lookup_span`]):
+///
+/// - an all-caps ENTRY (`CELL`) is reachable only from an all-caps OBSERVED token;
+/// - a non-all-caps entry (`cell`, `RecQ`, `Microsatellite Instability`) is reachable from any
+///   casing, exactly as before.
+///
+/// The asymmetry is the whole design. Making the match symmetric (exact case both ways) breaks
+/// sentence-initial capitalisation, and keying on "contains an uppercase" instead of "is all-caps"
+/// would stop Title-case terminology — `Microsatellite Instability`, `Werner Syndrome` — from
+/// matching the lowercase prose that actually mentions it. All-caps is the narrowest predicate that
+/// separates a nomenclature SYMBOL from a name.
+///
+/// Measured over MRCONSO 2026AA: 178,664 distinct all-caps English atoms, of which **4,319**
+/// lowercase onto a WordNet common-noun lemma. 24 of those surfaces occur on the WRN reference page,
+/// and every one except `DNA`/`RNA` occurs there ONLY in lowercase — so the rule removes the
+/// spurious symbol sense without costing a single real symbol mention on that page.
+///
+/// What this gives up: a document writing a human gene symbol in lowercase (`wrn`) no longer reaches
+/// it. That is the same tradeoff already accepted for `as`=arsenic — the document glossary is the
+/// recovery path — and lowercase is not the convention for human gene symbols.
+pub fn all_caps_symbol(s: &str) -> bool {
+    let mut saw_upper = false;
+    for c in s.chars() {
+        if c.is_lowercase() {
+            return false;
+        }
+        saw_upper |= c.is_uppercase();
+    }
+    saw_upper
+}
+
+#[cfg(test)]
+mod all_caps_symbol_tests {
+    use super::all_caps_symbol;
+
+    /// The predicate separates a nomenclature SYMBOL from a name and from ordinary prose.
+    #[test]
+    fn flags_symbols_and_spares_names() {
+        // Symbols — reachable only from an all-caps token once the filter is on.
+        for s in [
+            "CELL",
+            "DNA",
+            "RNA",
+            "MSI",
+            "WRN",
+            "MSH2",
+            "A",
+            "BILE SALT-DEPENDENT LIPASE",
+        ] {
+            assert!(all_caps_symbol(s), "{s} is an all-caps symbol");
+        }
+        // NOT symbols. `RecQ`/`cAMP` are mixed-case gene forms and `Microsatellite Instability` is
+        // Title-case terminology: keying on "contains an uppercase" instead of "is all-caps" would
+        // stop all three from matching the lowercase prose that mentions them.
+        for s in [
+            "cell",
+            "RecQ",
+            "cAMP",
+            "Microsatellite Instability",
+            "Werner Syndrome",
+            "microsatellite-stable",
+        ] {
+            assert!(!all_caps_symbol(s), "{s} must NOT be treated as a symbol");
+        }
+        // No cased character at all ⇒ not a symbol (never filters anything).
+        for s in ["2026", "-", "", "4-1"] {
+            assert!(!all_caps_symbol(s), "{s} has no cased character");
+        }
+    }
+
+    /// **The asymmetry is the design.** A symmetric (exact-case) rule would break sentence-initial
+    /// capitalisation, which is why v1 folded case in the first place. Encoded as the two directions
+    /// the filter in [`Parser::lookup_span`] actually takes.
+    #[test]
+    fn asymmetry_keeps_sentence_initial_capitalisation_working() {
+        // Observed token side: `Cell` (sentence-initial) is NOT all-caps, so the filter engages and
+        // drops all-caps entries — while the lowercase lemma entry `cell`, which is what
+        // `Cell lines were distinct.` must reach, is not all-caps and so survives.
+        assert!(!all_caps_symbol("Cell"));
+        assert!(!all_caps_symbol("cell"));
+        // …and the symbol is still reachable when the document actually writes it as a symbol.
+        assert!(all_caps_symbol("CELL"));
+    }
+}
 
 fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("valid lexicon iri")
@@ -816,6 +1053,7 @@ mod tests {
             in_lexicon: None,
             sense: Some(sense.to_string()),
             gloss: None,
+            form: String::new(),
         }
     }
 

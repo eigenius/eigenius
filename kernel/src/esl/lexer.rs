@@ -385,17 +385,20 @@ impl<'a> Lexer<'a> {
 
     fn lex_string(&mut self, pos: Position) -> Result<Token, EslError> {
         self.advance(); // opening "
-        let mut s = String::new();
+                        // Accumulate RAW BYTES and decode UTF-8 once at the end. Pushing each byte as `c as char`
+                        // would be Latin-1 decoding: a multibyte char (`—` = E2 80 94, `β`, an accent) would split
+                        // into per-byte mojibake (`â…`), corrupting every non-ASCII gloss and surface form on load.
+        let mut bytes: Vec<u8> = Vec::new();
         loop {
             match self.advance() {
                 None => return Err(EslError::lexer(pos, "unterminated string literal")),
                 Some(b'"') => break,
                 Some(b'\\') => match self.advance() {
-                    Some(b'"') => s.push('"'),
-                    Some(b'\\') => s.push('\\'),
-                    Some(b'n') => s.push('\n'),
-                    Some(b'r') => s.push('\r'),
-                    Some(b't') => s.push('\t'),
+                    Some(b'"') => bytes.push(b'"'),
+                    Some(b'\\') => bytes.push(b'\\'),
+                    Some(b'n') => bytes.push(b'\n'),
+                    Some(b'r') => bytes.push(b'\r'),
+                    Some(b't') => bytes.push(b'\t'),
                     Some(c) => {
                         return Err(EslError::lexer(
                             pos,
@@ -404,9 +407,11 @@ impl<'a> Lexer<'a> {
                     }
                     None => return Err(EslError::lexer(pos, "unterminated escape")),
                 },
-                Some(c) => s.push(c as char),
+                Some(c) => bytes.push(c),
             }
         }
+        let s = String::from_utf8(bytes)
+            .map_err(|_| EslError::lexer(pos.clone(), "invalid UTF-8 in string literal"))?;
         Ok(Token {
             kind: TokenKind::StringLit(s),
             pos,
@@ -776,6 +781,19 @@ mod tests {
     fn unterminated_string_error() {
         let result = tokenize(r#""hello"#);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn string_literal_preserves_utf8() {
+        // Multibyte chars must survive lexing intact — before this, `c as char` decoded each UTF-8
+        // byte as Latin-1, so `—`/`β` came out as per-byte mojibake (`â…`) and corrupted every
+        // non-ASCII gloss and surface form on load.
+        assert_eq!(
+            kinds(r#""Repeat Pattern — β-catenin café""#),
+            vec![TokenKind::StringLit(
+                "Repeat Pattern — β-catenin café".into()
+            )]
+        );
     }
 
     #[test]

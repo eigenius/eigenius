@@ -62,6 +62,8 @@ impl Grammar {
             for i in 0..=(n - len) {
                 let j = i + len - 1;
                 let mut produced = Vec::new();
+                // The cell's right context — constant for every item in it, so packing stays sound.
+                let rctx = super::super::rules::RightContext::after(&self.reserved, tokens, j);
                 for k in i..j {
                     if protected_split.get(k).copied().unwrap_or(false) {
                         continue;
@@ -70,13 +72,13 @@ impl Grammar {
                     let rights = &chart[k + 1][j];
                     for l in lefts {
                         for r in rights {
-                            if let Some(item) = apply(l, r, &self.layer) {
+                            if let Some(item) = apply(l, r, &self.layer, rctx) {
                                 produced.push(item);
                             }
                             // Combinatory-core spike: the extra CCG combinators (crossed + backward
                             // composition), applied alongside the hand-built rules when enabled.
                             if combinatory_core {
-                                produced.extend(apply_core(l, r, &self.layer));
+                                produced.extend(apply_core(l, r, &self.layer, rctx));
                             }
                         }
                     }
@@ -177,7 +179,7 @@ impl Grammar {
                 for shift in unary_shifts() {
                     let produced: Vec<Item> = chart[i][j]
                         .iter()
-                        .flat_map(|it| shift.run(self, it, (i, j)))
+                        .flat_map(|it| shift.run(self, it, (i, j), rctx))
                         .collect();
                     chart[i][j].extend(produced);
                 }

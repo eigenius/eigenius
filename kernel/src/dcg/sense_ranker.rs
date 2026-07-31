@@ -57,7 +57,7 @@ pub struct WordSenses<'a> {
 /// per word); each inner `Vec` should be a permutation of `0..candidates.len()` (callers must
 /// tolerate a malformed reply — e.g. an LLM omission — by falling back to the seed order).
 pub trait SenseRanker {
-    fn rank(&self, sentence: &str, words: &[WordSenses]) -> Vec<Vec<usize>>;
+    fn rank(&self, sentence: &str, context: &str, words: &[WordSenses]) -> Vec<Vec<usize>>;
 }
 
 /// The trivial deterministic ranker: keep each word's candidates in seed order (identity
@@ -66,7 +66,7 @@ pub trait SenseRanker {
 pub struct IdentityRanker;
 
 impl SenseRanker for IdentityRanker {
-    fn rank(&self, _sentence: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+    fn rank(&self, _sentence: &str, _context: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
         words
             .iter()
             .map(|w| (0..w.candidates.len()).collect())
@@ -81,6 +81,11 @@ impl SenseRanker for IdentityRanker {
 pub struct RankRecord {
     /// The sentence the ranking was conditioned on.
     pub sentence: String,
+    /// The surrounding PASSAGE the ranking was conditioned on (empty = ranked in isolation). Part of
+    /// the question, so it is part of the replay key — a recording made with a different context
+    /// window must MISS, not silently replay an answer to a different question.
+    #[serde(default)]
+    pub context: String,
     /// Per word: the surface form, its candidate sense labels **in seed order**, and the
     /// permutation the ranker returned (indices into `senses`, most-plausible-first).
     pub words: Vec<RankedWord>,
@@ -102,11 +107,23 @@ pub struct RankedWord {
 /// order**. Both matter — the same word ranks differently in a different sentence, and a different
 /// candidate set is a different question. Two runs whose lexicon changed will therefore MISS the
 /// cache rather than silently replay a stale answer.
-fn rank_key(sentence: &str, words: &[WordSenses]) -> String {
+fn rank_key(sentence: &str, context: &str, words: &[WordSenses]) -> String {
+    // The CONTEXT is part of the question: the same sentence ranked with different surrounding
+    // sentences is a different query and may get a different answer. Including it means a recording
+    // made under a different context window MISSES (and `assert_replay_faithful` makes that fatal)
+    // instead of silently replaying a context-free answer.
     let mut k = String::from(sentence);
+    k.push('\u{1d}');
+    k.push_str(context);
     for w in words {
         k.push('\u{1f}');
-        k.push_str(w.surface);
+        // LOWERCASED, and it must stay that way. The ranking question is about the WORD, not its
+        // casing, and every recording predates `tokenize` preserving case (2026-07-29) — so the
+        // recorded surfaces are lowercase. Keying on the raw surface would make a capitalised
+        // sentence-initial token miss its own recording, which `assert_replay_faithful` turns into a
+        // hard failure. Normalising here (and identically in the replay's key rebuild) keeps every
+        // committed recording valid across that change.
+        k.push_str(&w.surface.to_lowercase());
         for c in w.candidates {
             k.push('\u{1e}');
             k.push_str(&c.sense);
@@ -149,10 +166,11 @@ impl<R: SenseRanker> RecordingSenseRanker<R> {
 }
 
 impl<R: SenseRanker> SenseRanker for RecordingSenseRanker<R> {
-    fn rank(&self, sentence: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
-        let order = self.inner.rank(sentence, words);
+    fn rank(&self, sentence: &str, context: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+        let order = self.inner.rank(sentence, context, words);
         let rec = RankRecord {
             sentence: sentence.to_string(),
+            context: context.to_string(),
             words: words
                 .iter()
                 .zip(order.iter())
@@ -167,7 +185,7 @@ impl<R: SenseRanker> SenseRanker for RecordingSenseRanker<R> {
         self.log
             .lock()
             .expect("rank log")
-            .insert(rank_key(sentence, words), rec);
+            .insert(rank_key(sentence, context, words), rec);
         order
     }
 }
@@ -194,9 +212,12 @@ impl ReplaySenseRanker {
         for r in records {
             // Rebuild the key from the recorded question, so it matches what `rank` will compute.
             let mut k = r.sentence.clone();
+            k.push('\u{1d}');
+            k.push_str(&r.context);
             for w in &r.words {
                 k.push('\u{1f}');
-                k.push_str(&w.surface);
+                // Same normalisation as `rank_key` — see the note there.
+                k.push_str(&w.surface.to_lowercase());
                 for s in &w.senses {
                     k.push('\u{1e}');
                     k.push_str(s);
@@ -224,8 +245,8 @@ impl ReplaySenseRanker {
 }
 
 impl SenseRanker for ReplaySenseRanker {
-    fn rank(&self, sentence: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
-        match self.by_key.get(&rank_key(sentence, words)) {
+    fn rank(&self, sentence: &str, context: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+        match self.by_key.get(&rank_key(sentence, context, words)) {
             Some(order) => {
                 self.hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 order.clone()
@@ -233,7 +254,7 @@ impl SenseRanker for ReplaySenseRanker {
             None => {
                 self.misses
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                IdentityRanker.rank(sentence, words)
+                IdentityRanker.rank(sentence, context, words)
             }
         }
     }
@@ -299,7 +320,7 @@ mod anthropic {
     }
 
     impl SenseRanker for AnthropicSenseRanker {
-        fn rank(&self, sentence: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+        fn rank(&self, sentence: &str, context: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
             let identity = || -> Vec<Vec<usize>> {
                 words
                     .iter()
@@ -309,8 +330,16 @@ mod anthropic {
             if words.is_empty() {
                 return Vec::new();
             }
+            // DOCUMENT CONTEXT (D63, 2026-07-21): the neighbouring sentences. A sense that is
+            // plausible for an isolated sentence is often obviously wrong in the passage — "regions"
+            // pulls UMLS "Geographic Locations" until the surrounding genomics text rules it out.
+            let context_block = if context.trim().is_empty() {
+                String::new()
+            } else {
+                format!("Passage (for context only — do NOT rank its words):\n  {context}\n\n")
+            };
             let mut prompt = format!(
-                "In the sentence:\n  \"{sentence}\"\nrank each word's candidate senses by \
+                "{context_block}In the sentence:\n  \"{sentence}\"\nrank each word's candidate senses by \
                  contextual plausibility (most-likely sense first). Return `rankings`: one list \
                  per word (in the given order), listing that word's candidate indices \
                  most-plausible first.\n\n\
@@ -409,7 +438,7 @@ mod tests {
             surface: "w",
             candidates: &cands,
         }];
-        assert_eq!(IdentityRanker.rank("s", &words), vec![vec![0, 1, 2]]);
+        assert_eq!(IdentityRanker.rank("s", "", &words), vec![vec![0, 1, 2]]);
     }
 
     /// Live WSD: a real model must pick the contextual sense (JSON-Schema-constrained). Skips
@@ -439,6 +468,7 @@ mod tests {
         }];
         let r = ranker.rank(
             "The bank approved the loan after reviewing the application.",
+            "",
             &words,
         );
         assert_eq!(r.len(), 1, "one ranking for the one word");
@@ -456,7 +486,7 @@ mod tests {
     /// non-identity order, so a replay that silently fell back to the seed order would be caught.
     struct ReverseRanker;
     impl SenseRanker for ReverseRanker {
-        fn rank(&self, _s: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+        fn rank(&self, _s: &str, _c: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
             words
                 .iter()
                 .map(|w| (0..w.candidates.len()).rev().collect())
@@ -483,7 +513,7 @@ mod tests {
         }];
 
         let rec = RecordingSenseRanker::new(ReverseRanker);
-        let live = rec.rank("we sat on the bank", &words);
+        let live = rec.rank("we sat on the bank", "", &words);
         assert_eq!(
             live,
             vec![vec![2, 1, 0]],
@@ -497,7 +527,7 @@ mod tests {
 
         // Replay: same question → the SAME answer, with no ranker behind it at all.
         let replay = ReplaySenseRanker::load(&path).unwrap();
-        let got = replay.rank("we sat on the bank", &words);
+        let got = replay.rank("we sat on the bank", "", &words);
         assert_eq!(
             got, live,
             "replay must reproduce the recorded ranking exactly"
@@ -514,7 +544,7 @@ mod tests {
             candidates: &c,
         }];
         let rec = RecordingSenseRanker::new(ReverseRanker);
-        rec.rank("sentence A", &words);
+        rec.rank("sentence A", "", &words);
         let dir = std::env::temp_dir().join("eigenius-rank-replay-test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("ranks-miss.json");
@@ -522,7 +552,7 @@ mod tests {
 
         let replay = ReplaySenseRanker::load(&path).unwrap();
         // A DIFFERENT sentence — the recording cannot answer it.
-        let got = replay.rank("sentence B", &words);
+        let got = replay.rank("sentence B", "", &words);
         assert_eq!(got, vec![vec![0, 1]], "a miss falls back to seed order");
         assert_eq!(
             replay.misses(),
@@ -536,7 +566,7 @@ mod tests {
             surface: "bank",
             candidates: &c2,
         }];
-        replay.rank("sentence A", &words2);
+        replay.rank("sentence A", "", &words2);
         assert_eq!(
             replay.misses(),
             2,

@@ -80,19 +80,10 @@ impl Lemmatizer for MorphyLemmatizer {
     /// skips the common non-plural `-s` endings (`-ss`/`-us`/`-is`) and very short stems; irregular
     /// plurals (`mice`) are already the exception list's job, not `-s`-shaped, so untouched.
     fn regular_plural_stem(&self, surface: &str) -> Option<String> {
-        let s = surface.trim().to_lowercase();
-        if let Some(stem) = s.strip_suffix("ies") {
-            if stem.len() >= 2 {
-                return Some(format!("{stem}y"));
-            }
-        }
-        if let Some(stem) = s.strip_suffix('s') {
-            let skip = s.ends_with("ss") || s.ends_with("us") || s.ends_with("is");
-            if stem.len() >= 3 && !skip {
-                return Some(stem.to_string());
-            }
-        }
-        None
+        // The shared rule (kernel `dcg::lemmatizer`), not a local copy: the UMLS importer's
+        // inflected-form QC gate must detach exactly what this reduces, or a dropped surface loses its
+        // entry. Same anti-drift argument as the shared closed-class list.
+        eigenius_kernel::dcg::regular_plural_stem(surface)
     }
 }
 

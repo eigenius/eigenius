@@ -28,7 +28,9 @@
 //! Shared by BOTH chart paths: [`Parser::seed_leaves`] is the single entry point the packed forest
 //! and the flat beamed chart both build their leaf cells from.
 
-use super::super::category::{is_adjective_cat, is_binary_relation_cat, kind_of};
+use super::super::category::{
+    is_adjective_cat, is_binary_relation_cat, is_ctor, is_vp_adjunct_prep, kind_of,
+};
 use super::super::chart::{beam_cell, cell_histogram, Chart};
 use super::super::lexicon::{FormEntries, LexEntry};
 use super::super::rules::constructions::coordinate_np;
@@ -87,9 +89,30 @@ impl Parser {
             .entries_for(&s_lc)
             .iter()
             .any(|e| e.in_lexicon.is_none() && is_ctor(e.item.cat(), "cat_forall").is_some());
+        // CASE-SENSITIVE ACRONYM MATCH ([`super::all_caps_symbol`]). The index is keyed on lowercased
+        // forms, so an all-caps nomenclature SYMBOL is otherwise reachable from the lowercase common
+        // noun it happens to spell. `CELL` — HGNC `NS` for the CELP pseudogene (C1413337) and OMIM
+        // `ACR` for CEL (C1413336) — is why `MSI cell lines from these four lineages…` carried 16
+        // skeletons that read `cell` as a GENE, via `named(…)`, which only a `cat_np` named individual
+        // can supply.
+        //
+        // Applied HERE and not in the index, for two reasons. The index deliberately "does lookup and
+        // nothing else" (its `LexicalLookup` note), and `entries_for` receives a LOWERCASED key — the
+        // observed token's casing is already gone by then. `lookup_span` still holds the raw surface,
+        // and it is where the sibling surface-keyed prunes (`surface_is_function`,
+        // `surface_is_determiner`) already live.
+        //
+        // Not fixable in the drop set, and it should not be: `drops.rs` keeps clean all-caps
+        // collisions DELIBERATELY (`CAT` the catalase gene, `SET` the oncogene are real symbols) and
+        // its `DROP_TTYS` excludes `ACR`/`NS`. The symbol is legitimate; reaching it from lowercase
+        // prose is not.
+        let surface_all_caps = super::all_caps_symbol(surface.trim());
         let mut out = Vec::new();
         for c in &candidates {
             let mut entries = self.scoped(self.lex.entries_for(c), scope);
+            if !surface_all_caps {
+                entries.retain(|e| !super::all_caps_symbol(&e.form));
+            }
             if surface_is_function {
                 entries.retain(|e| {
                     e.in_lexicon.is_none()
@@ -99,6 +122,25 @@ impl Parser {
             }
             if surface_is_determiner {
                 entries.retain(|e| e.in_lexicon.is_none() || !is_adjective_cat(e.item.cat()));
+            }
+            // **A `-s` surface cannot take a PLURAL subject** (verb-side number refinement). Morphology
+            // reduces `affects` to `affect`, and the lemma's entry is the BASE form, whose finite
+            // category encodes agreement with a plural/non-3sg subject — so seeding it at a 3sg span
+            // let `The genes affects cells.` parse. Traced 2026-07-26: the noun was correctly `pl`
+            // throughout and the verb supplied
+            // `fwd(bwd(cat_s(dcl, fin), cat_np(Entity, pl)), …)` alongside the correct `sg` one.
+            //
+            // The nominal counterpart of this is [`with_noun_num`], which REWRITES an underspecified
+            // `num_any`; a verb's subject number is already concrete in the lexicon, so the base-form
+            // entry is simply the wrong entry for this surface and is dropped rather than restamped.
+            //
+            // Deliberately keyed on the `-s` detachment alone
+            // ([`crate::dcg::regular_plural_stem`], shared with Morphy and the UMLS importer), NOT on
+            // "the candidate was reduced". The importer emits base + gerund/passive participles only,
+            // so a PAST-tense surface (`affected`, `ran`) is reachable ONLY through its lemma's finite
+            // entry; dropping on any reduction would gap every past-tense verb.
+            if crate::dcg::regular_plural_stem(&s_lc).as_deref() == Some(c.as_str()) {
+                entries.retain(|e| !has_plural_finite_subject(e.item.cat()));
             }
             if entries.is_empty() {
                 continue;
@@ -145,8 +187,46 @@ impl Parser {
                 // `sense_cap_key` sorts unranked entries last, so the truncate takes exactly the
                 // entry that should be exempt. Pass 2 (the ranks-`None` widen) recovers it (the sweep
                 // held at `grammar-gap 0`), but the grammatical core should not be eliminable at all.
-                // Partitioning the closed class out is the fix; a first attempt broke
-                // `sense_reranker_overrides_static_cap_order` and needs the seeding path understood.
+                //
+                // THE UNDERLYING SHAPE (characterised 2026-07-24): the cap is keyed per **SENSE**
+                // (`sense_cap_key` reads only sense fields) but truncates per **ENTRY**. One sense
+                // legitimately has SEVERAL entries — the same meaning in different grammatical
+                // categories: `with` (sense "with") is a noun-modifier `cat_pp/NP`, an argument marker
+                // `cat_pp_arg(prep_with)/NP` AND a VP-adjunct `((S\NP)\(S\NP))/NP`; a governed gradable
+                // adjective (one WordNet sense) is a predicative `S[adj]\NP`, a `cat_measure`, a
+                // `cat_measure/cat_pp_arg(prep)` and a positive-relational `(S[adj]\NP)/cat_pp_arg(prep)`.
+                // Those share one key, so the truncate cuts CATEGORIES of a sense the ranker KEPT,
+                // arbitrarily by emission order (a stable sort preserves it). Measured consequences: the
+                // WRN page's `concordant with …` unit GAPS at base cap and floods on widen (8 of its 16
+                // skeletons), `a_subj` seeds only at cap>=4, and Fix A (c)'s positive-relational entry —
+                // emitted 4th — never seeds at base cap, so it is inert on the page.
+                //
+                // TWO FIXES MEASURED AND REJECTED (2026-07-24), both parser-only:
+                //  (1) cap by SENSE (keep every category of each kept sense). Same-ranks A/B: readings
+                //      724 -> 757, total-skeletons 229 -> 248, **encoded 10 -> 0** (every unit lost
+                //      single-reading status) and the target unit stayed at 16. Cap-only readings fell
+                //      33% (1741 -> 1169, the avoided widen-floods) but the tracked STRUCTURAL lever
+                //      rose — extra categories per sense are genuine added ambiguity in the reranked
+                //      regime. Net loss; not shipped.
+                //  (1b) cap by SENSE, RE-TESTED 2026-07-25 on the tree that now carries the Eisner
+                //      guards (`LeftNotRaised` covering `KindRaised`, `RightNotKindRaised`, the
+                //      sortal-name guard), since the first rejection was blamed on duplicate
+                //      derivations those guards remove. It is STILL a loss: same-ranks replay gave
+                //      encoded 11 -> 4 (the guards recovered part of the earlier 10 -> 0, not enough)
+                //      and readings 347 -> 352. Crucially it does NOT fix what motivated the retry:
+                //      "does not lead to cell death" needs `lead`'s frame-04 PP-oblique sense
+                //      (02555908 "be conducive to" / 02635956 "tend to or result in"), and those are
+                //      SEPARATE SENSES among lead's 14 verb senses — not categorial variants of a KEPT
+                //      sense. Capping by sense cannot reach a sense the draw never kept. That unit is a
+                //      SENSE-RANKING problem (the documented ~5% temperature-0 draw variance over a
+                //      2-slot cap), not a cap-mechanics one.
+                //  (2) exempt the closed class (`in_lexicon.is_none()`) from the cap — the shape the
+                //      note above proposes. It FAILS `sense_reranker_overrides_static_cap_order`, which
+                //      is why the earlier attempt failed too: `in_lexicon.is_none()` means UNTAGGED, not
+                //      closed-class. Test fixtures and demo entries are untagged as well, and the cap
+                //      tests rely on their being capped, so the predicate exempts far more than the
+                //      grammatical core. A real fix needs a POSITIVE closed-class marker (or a
+                //      category-shape test), not the absence of a lexicon tag.
                 let mut eff = cap;
                 // Apply the reranker's ELIMINATION at EVERY cap rung, not just the base — INCLUDING
                 // during widen. An eliminated sense (absent from `ranks`) stays out even when the cap
@@ -192,6 +272,24 @@ impl Parser {
             // is this bug.) INERT until a pair is actually merged: distinct-lexicon senses carry
             // different class IRIs, so `(cat, sem)` differs and nothing collapses. O(n²) over one
             // lemma's (already cap-bounded) senses.
+            // **The cap is a fragile equilibrium, and removing INVALID entries exposes that** (measured
+            // 2026-07-26). The UMLS importer began pruning inflected duplicate forms
+            // (`convert::is_inflection_of_sibling`) — 52 505 entries a lemma-keyed lexicon should never
+            // have held. Cap-only, that moved exactly three units on the reference page: the germline
+            // unit 73 -> 41 (the intended effect — a plural surface stopped carrying a singular
+            // reading), and TWO units UP, 18 -> 52 and 40 -> 60, for a net +22.
+            //
+            // The rise is displacement, not new grammar. `entries_for("models")` and
+            // `entries_for("model")` draw on different concepts, and items compete for this cap per
+            // candidate and for `CELL_BEAM` per cell; removing entries frees room that refills with a
+            // different category — the added skeletons pair a 2-place predicate with a ONE-place one,
+            // i.e. the singular's VERB reading (`model`, `arrest`) surfacing where the plural form's
+            // noun-only entries used to sit. Those two units were encoding correctly only because the
+            // invalid entries happened to occupy the slots.
+            //
+            // So it is not an argument against pruning invalid forms — it is a second witness that the
+            // cap truncates by a criterion (emission order) that carries no linguistic content. See the
+            // long note above for two fixes already measured and rejected; this is the same shape.
             dedup_same_concept(&mut entries);
             // Morphological number (D63 §5.1, the Slice-1 deferral): a surface
             // that morphology *reduced* to this lemma was inflected (plural,
@@ -403,6 +501,42 @@ impl Parser {
     /// `n × n` chart (only leaf spans `[i,j]` populated) and the accumulated beam-drop count.
     /// Behaviour-identical to the inline seeding it replaces — the packed path calls it with
     /// `beam = None` (packing bounds via k-best, not a beam).
+    /// Drop a preposition's VP-adjunct reading at position `p` when the ADJECTIVE head immediately to
+    /// its left (`[p-1]`) subcategorizes for exactly that preposition (`X / cat_pp_arg(prep_P)`, X a
+    /// `cat_measure` or `S[adj]\NP`) and the surface at `p` offers the matching `cat_pp_arg(prep_P)`
+    /// argument marker. The governed PP is then the head's argument, never a free adjunct — so the
+    /// `And`-introducing entry (`is_vp_adjunct_prep`) is removed. Adjective-scoped by design (see the
+    /// call site); verbs are excluded because they can genuinely both govern and adjunct one preposition.
+    /// Single-token head/preposition adjacency (the page's shape); an intervening adverb slips it.
+    fn suppress_governed_adjunct(&self, chart: &mut Chart, n: usize) {
+        for p in 1..n {
+            // The preposition governed by an adjective head immediately to the left.
+            let governed_prep: Option<Exp> = chart[p - 1][p - 1].iter().find_map(|it| {
+                let [res, arg] = is_ctor(it.cat(), "fwd")? else {
+                    return None;
+                };
+                let [prep] = is_ctor(arg, "cat_pp_arg")? else {
+                    return None;
+                };
+                (is_ctor(res, "cat_measure").is_some() || is_adjective_cat(res))
+                    .then(|| prep.clone())
+            });
+            let Some(prep) = governed_prep else {
+                continue;
+            };
+            // Disambiguate only when this surface offers BOTH the matching argument marker and a
+            // competing VP-adjunct reading — otherwise there is nothing spurious to drop.
+            let has_matching_arg = chart[p][p].iter().any(|it| {
+                matches!(is_ctor(it.cat(), "fwd"),
+                    Some([a, _]) if matches!(is_ctor(a, "cat_pp_arg"), Some([pp]) if *pp == prep))
+            });
+            let has_adjunct = chart[p][p].iter().any(|it| is_vp_adjunct_prep(it.cat()));
+            if has_matching_arg && has_adjunct {
+                chart[p][p].retain(|it| !is_vp_adjunct_prep(it.cat()));
+            }
+        }
+    }
+
     pub(super) fn seed_leaves(
         &self,
         tokens: &[String],
@@ -488,6 +622,19 @@ impl Parser {
             chart[a][b].extend(d);
         }
 
+        // Argument/adjunct suppression (D63 §8.13): a governed-ADJECTIVE head immediately followed by
+        // its subcategorized preposition takes that PP as its ARGUMENT, so the preposition's competing
+        // VP-adjunct entry (the `And`-introducing `((S\NP)\(S\NP))/NP`, closed-class.esl `prep_*_sem`)
+        // is spurious there and is dropped, leaving only the transparent `cat_pp_arg` marker. Scoped to
+        // ADJECTIVE heads (`cat_measure` / `S[adj]\NP` over `cat_pp_arg(prep)`): a governed adjective has
+        // no competing adjunct use of its preposition ("dependent on X" is always the complement),
+        // unlike a verb ("operate on Monday" — the temporal adjunct is real). Coverage-safe: lifted at
+        // the FINAL widen rung (mirroring multiword-preference, line below), so the adjunct entry is
+        // re-admitted if suppressing it would gap the sentence — `grammar-gap 0` holds by construction.
+        if !matches!(cap, Some(c) if c >= SENSE_CAP_WIDEN_MAX) {
+            self.suppress_governed_adjunct(&mut chart, n);
+        }
+
         // Forward bounded type-raising `T` (D63 §8.9 Slice 6-T) at the LEAF cells: a name `NP` lifts
         // to `S/(S\NP)` so it can forward-compose into a relative clause's object-extraction body.
         // ENF (`TypeRaised` provenance) keeps these inert outside extraction. Composed cells are
@@ -501,10 +648,33 @@ impl Parser {
             // so it can coordinate before meeting the head noun. This is the universal leaf point —
             // after ALL seeding paths — mirroring the leaf `raise_nps` above; composed cells lift via
             // the `ModLift` unary shift.
-            let mods: Vec<Item> = row[i]
+            let mut mods: Vec<Item> = row[i]
                 .iter()
                 .flat_map(super::super::rules::combinators::mod_lifts)
                 .collect();
+            // Attributive past-participle lift, GATED: only when this surface has NO lexical adjective
+            // (else the WordNet adjective already covers the attributive use, and the rule's
+            // reduced-passive reading would just double-seed — "reduced"/"increased"). Where there is
+            // no adjective ("predicted"), the rule is the only source of the attributive reading.
+            if !row[i].iter().any(|it| is_adjective_cat(it.cat())) {
+                let parts: Vec<Item> = row[i]
+                    .iter()
+                    .flat_map(super::super::rules::combinators::participial_lifts)
+                    .collect();
+                mods.extend(parts);
+            }
+            // POST-nominal oblique participial lift — UNGATED, unlike the pre-nominal one above. Its
+            // gate exists because a lexical adjective already covers the ATTRIBUTIVE use; there is no
+            // adjective entry that covers "compared to MSS cell lines", so there is nothing to
+            // double-seed against. Must run at the LEAF: the lift is on the still-unsaturated functor
+            // (that is where oblique and transitive are still distinguishable), and `compared` is one
+            // token — the `UnaryShift` table only runs over spans of length >= 2.
+            mods.extend(
+                row[i]
+                    .iter()
+                    .flat_map(super::super::rules::combinators::oblique_participial_lifts)
+                    .collect::<Vec<_>>(),
+            );
             row[i].extend(mods);
             // A leaf cell is non-top iff the sentence has >1 token; the beam caps it across all
             // candidate lemmas/POS of the token (`sense_cap` already bounds it per-lemma).
@@ -519,6 +689,27 @@ impl Parser {
                     tokens[i],
                     cell_histogram(&row[i])
                 );
+            }
+            // Targeted LEAF dump — the twin of the composed-cell dump in `chart::unpacked`, which
+            // only fires inside `for len in 2..=n` and so can never show a single-token cell. Leaf
+            // categories are what decide whether a seed-time lift has anything to fire on, so they
+            // need their own view. Set `EIGENIUS_DUMP_CELL=i..i`.
+            if let Ok(want) = std::env::var("EIGENIUS_DUMP_CELL") {
+                if want == format!("{i}..{i}") {
+                    eprintln!(
+                        "  ===== DUMP leaf[{i}..{i}] tok={:?} ({} items, sample 20) =====",
+                        tokens[i],
+                        row[i].len()
+                    );
+                    for it in row[i].iter().take(20) {
+                        eprintln!(
+                            "    [{:?} cost={:?}] {}",
+                            it.prov(),
+                            it.cost(),
+                            crate::dcg::pretty::pretty_term(it.cat())
+                        );
+                    }
+                }
             }
         }
         (chart, beam_drops)
@@ -833,6 +1024,27 @@ pub(super) fn sense_cap_key(
 /// Only a `cat_n(T, num_any)` item is refined (to `cat_n(T, <num>)`); verbs,
 /// names, and multiword leaves pass through unchanged. The `lexicon:Num` decl is
 /// reused from the existing `num_any` ctor, so no decl lookup is needed.
+/// Whether a category takes a **plural subject on a FINITE clause** — it contains the subject slot
+/// `bwd(cat_s(_, fin), cat_np(_, pl))` at any depth, so it matches an intransitive VP as well as a
+/// transitive verb's `fwd(VP, obj)` and any further-curried frame. A BASE-form VP is
+/// `bwd(cat_s(_, bse), cat_np(_, num_any))` and never matches, which is what keeps the check off
+/// infinitives and participles.
+fn has_plural_finite_subject(cat: &Exp) -> bool {
+    if let Some([res, arg]) = is_ctor(cat, "bwd") {
+        let finite = matches!(is_ctor(res, "cat_s"),
+            Some([_, Exp::InductiveCtor(_, f, _)]) if f == "fin");
+        let plural_subj = matches!(is_ctor(arg, "cat_np"),
+            Some([_, Exp::InductiveCtor(_, n, _)]) if n == "pl");
+        if finite && plural_subj {
+            return true;
+        }
+    }
+    match cat {
+        Exp::InductiveCtor(_, _, args) => args.iter().any(has_plural_finite_subject),
+        _ => false,
+    }
+}
+
 pub(super) fn with_noun_num(it: &Item, num_name: &str) -> Item {
     if let Exp::InductiveCtor(decl, name, args) = it.cat() {
         if name == "cat_n" && args.len() == 2 {

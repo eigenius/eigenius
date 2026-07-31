@@ -45,8 +45,12 @@ use super::abbrev::{
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use super::category::{denote_cat, resolve_inductive};
-use crate::layer::{normalize_value, resolve_active_value_indexes, Layer};
+use super::augment::{LexicalBinding, LexiconAugmentation, Provenance, ResolutionMethod};
+use super::category::{denote_cat, is_adjective_cat, resolve_inductive};
+use super::named_entity::extract_named_entities_with;
+use crate::layer::{
+    normalize_value, resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage,
+};
 use crate::nbe::term::Exp;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
@@ -250,6 +254,12 @@ fn cat_is_mass(cat: &Exp) -> bool {
 /// The class(es) a resource is a *direct instance of* — its `is_a` targets excluding `core:Class`
 /// itself. For a UMLS named individual (`resource umlscui:C : umlssty:T`) this is its semantic-type
 /// class(es); for a class node (`is_a = [core:Class]`) it is empty.
+///
+/// A reference target may be stored as a `ResourceRef` (bootstrap-loaded resources) OR as a `String`
+/// IRI (a resource minted in-process and round-tripped through the persistent backend, which serialises
+/// the ref as its IRI string) — both denote the same class, so accept either (as [`Resource::is_instance_of`]
+/// does). Only matching `ResourceRef` silently drops a persisted named individual's type, misclassifying
+/// it as a bare class (→ a common-noun alias instead of the proper-noun one).
 fn instance_type_classes(r: &Resource) -> Vec<Iri> {
     let (Ok(is_a), Ok(class)) = (Iri::parse(wk::IS_A), Iri::parse(wk::CLASS)) else {
         return Vec::new();
@@ -258,9 +268,11 @@ fn instance_type_classes(r: &Resource) -> Vec<Iri> {
         Some(Value::Array(vs)) => vs
             .iter()
             .filter_map(|v| match v {
-                Value::ResourceRef(iri) if *iri != class => Some(iri.clone()),
+                Value::ResourceRef(iri) => Some(iri.clone()),
+                Value::String(s) => Iri::parse(s).ok(),
                 _ => None,
             })
+            .filter(|iri| *iri != class)
             .collect(),
         _ => Vec::new(),
     }
@@ -410,6 +422,150 @@ pub fn glossary_resources(layer: &Arc<Layer>, defs: &[AbbrDef]) -> Vec<Resource>
         }
     }
     out
+}
+
+// ── Stage A: named-entity source (D63 `d63-named-entity-glossary-source.md`) ──────
+//
+// Deterministic apposition NER (`super::named_entity`) → doc-local **named individuals**. The recognizer
+// needs the common-noun head test ([`is_common_noun`], injected); emission mints a head-typed individual
+// and emits its `cat_np` proper-noun alias (the individual arm of [`abbreviation_resources`]), packaged
+// as [`LexicalBinding`]s for the in-memory augment overlay — NOT a persistent doc layer (the overlay is
+// the lighter, already-sweep-chained path; §3d).
+
+/// Does `form` have a **common-noun** (`cat_n`) lexical entry in the chain?
+pub fn is_common_noun(layer: &Arc<Layer>, form: &str) -> bool {
+    entries_for_form(layer, form)
+        .iter()
+        .filter_map(|r| entry_cat(layer, r))
+        .any(|c| matches!(&c, Exp::InductiveCtor(_, n, _) if n == "cat_n"))
+}
+
+/// Does `form` have an **adjective** (`S[adj]\NP`) lexical entry in the chain?
+pub fn is_adjective(layer: &Arc<Layer>, form: &str) -> bool {
+    entries_for_form(layer, form)
+        .iter()
+        .filter_map(|r| entry_cat(layer, r))
+        .any(|c| is_adjective_cat(&c))
+}
+
+/// The apposition **head admissibility** test: a noun that is NOT (also) an adjective. Just "is a common
+/// noun" does not discriminate — in the served lexicon nearly every surface has *some* noun sense — so
+/// the load-bearing filter is rejecting attributive adjectives ("somatic MMR", "other DNA"). Verb heads
+/// ("identified WRN") are rejected by the recognizer's recurrence requirement, not here (the noun/verb
+/// homonym "project" must stay admissible).
+pub fn is_apposition_head(layer: &Arc<Layer>, form: &str) -> bool {
+    is_common_noun(layer, form) && !is_adjective(layer, form)
+}
+
+/// The concept the first **common-noun** (`cat_n`) entry for `form` denotes — the head noun's class,
+/// used to TYPE a named individual minted under it (§3b head-typing). `None` if `form` has no common-noun
+/// entry with a resolvable `sem`.
+fn common_noun_concept(layer: &Arc<Layer>, form: &str) -> Option<Iri> {
+    let sem_prop = Iri::parse("urn:eigenius:lexicon:sem").ok()?;
+    for r in entries_for_form(layer, form) {
+        let is_cat_n = entry_cat(layer, &r)
+            .is_some_and(|c| matches!(&c, Exp::InductiveCtor(_, n, _) if n == "cat_n"));
+        if !is_cat_n {
+            continue;
+        }
+        match r.get(&sem_prop) {
+            Some(Value::ResourceRef(iri)) => return Some(iri.clone()),
+            Some(Value::String(s)) => return Iri::parse(s).ok(),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// **Named-entity augmentation** — recognize `<head> <Name>` appositions in `document`
+/// ([`extract_named_entities_with`], head-test = [`is_apposition_head`], admitted on ≥2 occurrences) and
+/// emit each as a doc-local **named individual**: mint `urn:eigenius:doc:ni_<slug>` typed at the HEAD
+/// noun's class ([`common_noun_concept`], else `lexicon:Entity`), and emit its `cat_np(head_type, sg)`
+/// proper-noun alias (the individual arm of [`abbreviation_resources`], resolved over a throwaway
+/// in-memory chain carrying the minted individual — `resolve` only, no index build). Returns a
+/// [`LexiconAugmentation`] (entries in `added`, minted individuals in `supporting`) to MERGE into the
+/// document's augmentation — the same in-memory overlay the OOV grounding uses, so no persistent layer is
+/// committed.
+pub fn named_entity_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmentation {
+    let Ok(entry_class) = Iri::parse("urn:eigenius:lexicon:LexicalEntry") else {
+        return LexiconAugmentation::default();
+    };
+    let entity = Iri::parse("urn:eigenius:lexicon:Entity").ok();
+
+    let names = extract_named_entities_with(document, |w| is_apposition_head(base, w));
+    let mut added = Vec::new();
+    let mut supporting = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+
+    for ne in names {
+        let key = slug(&ne.surface);
+        if !seen.insert(key.clone()) {
+            continue;
+        }
+        // Head-typed individual: the concept the head common noun denotes, else lexicon:Entity.
+        let Some(head_type) = common_noun_concept(base, &ne.head).or_else(|| entity.clone()) else {
+            continue;
+        };
+        let Ok(ni_iri) = Iri::parse(&format!("urn:eigenius:doc:ni_{key}")) else {
+            continue;
+        };
+        let p = |s: &str| Iri::parse(s).expect("valid well-known iri");
+        let mut ni = Resource::new(ni_iri.clone());
+        ni.set(
+            p(wk::IS_A),
+            Value::Array(vec![Value::ResourceRef(head_type.clone())]),
+        );
+        ni.set(
+            p(wk::DESCRIPTION),
+            Value::String(format!(
+                "Doc-local named individual (apposition NER, D63): {:?}.",
+                ne.surface
+            )),
+        );
+
+        // Emit the cat_np alias, resolving the individual over a throwaway in-memory chain (resolve only —
+        // NO LexicalIndex::build, so no parent materialisation).
+        let mut b = LayerBuilder::new("ne-emit", Some(Arc::clone(base)));
+        if b.add_resource(ni.clone()).is_err() {
+            continue;
+        }
+        let tmp = Arc::new(b.build(LayerStorage::in_memory()));
+        let binding = AbbreviationBinding {
+            abbr: &ne.surface,
+            long_form: &ne.surface,
+            concept_iri: ni_iri.as_str(),
+            doc_ns: "urn:eigenius:doc",
+        };
+        let Some(rs) = abbreviation_resources(&tmp, &binding) else {
+            continue;
+        };
+        let (entries, extra): (Vec<Resource>, Vec<Resource>) =
+            rs.into_iter().partition(|r| r.is_instance_of(&entry_class));
+        if entries.is_empty() {
+            continue;
+        }
+        supporting.push(ni);
+        supporting.extend(extra);
+        for proposed in entries {
+            added.push(LexicalBinding {
+                proposed,
+                provenance: Provenance {
+                    surface: ne.surface.clone(),
+                    long_form: None,
+                    context: ne.surface.clone(),
+                    method: ResolutionMethod::NameRecognized,
+                    grounded_to: None,
+                    confidence: None,
+                },
+            });
+        }
+    }
+
+    LexiconAugmentation {
+        added,
+        supporting,
+        missing_oov: Vec::new(),
+    }
 }
 
 /// **Stage A → the document glossary** — the Stage-A→B seam of the D63 preprocessing pipeline

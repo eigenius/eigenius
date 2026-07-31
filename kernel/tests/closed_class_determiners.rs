@@ -258,7 +258,7 @@ fn widen_on_failure_overrides_a_misranking_reranker() {
 /// [`PreferSense`]).
 struct BurySense(&'static str);
 impl SenseRanker for BurySense {
-    fn rank(&self, _sentence: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+    fn rank(&self, _sentence: &str, _context: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
         words
             .iter()
             .map(|w| {
@@ -406,7 +406,7 @@ fn index_with_zarg(cap: usize, ranker: Option<Box<dyn SenseRanker + Send + Sync>
 /// (others keep seed order) — the CI stand-in for "the context prefers this sense".
 struct PreferSense(&'static str);
 impl SenseRanker for PreferSense {
-    fn rank(&self, _sentence: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
+    fn rank(&self, _sentence: &str, _context: &str, words: &[WordSenses]) -> Vec<Vec<usize>> {
         words
             .iter()
             .map(|w| {
@@ -1123,7 +1123,8 @@ fn fronted_participial_adjunct_is_an_open_parse_with_a_controlled_subject() {
     // D62 §2 #5a: a subject-gapped present-participle VP fronted as a sentence adjunct
     // ("affecting BRCA1, HeLa affects BRCA1" — schematically "hypothesizing that P, we Q") asserts
     // the participial proposition alongside the matrix, with the participle's subject CONTROLLED — a
-    // referent hole (D64) ⇒ an OPEN parse. Sem: `And(matrix, participle(hole))`.
+    // referent hole (D64) ⇒ an OPEN parse. The open sem ABSTRACTS the hole (D64 parametric proposition):
+    // `λhole. And(matrix, participle(hole))`.
     let (_layer, index) = index_over_bootstrap();
     let (closed, open) = index.parse_open("affecting BRCA1 , HeLa affects BRCA1", &Identity);
     assert!(
@@ -1133,8 +1134,8 @@ fn fronted_participial_adjunct_is_an_open_parse_with_a_controlled_subject() {
     assert!(!open.is_empty(), "fronted participial yields an open parse");
     let sem = pretty_term(open[0].item.sem());
     assert!(
-        sem.starts_with("And(") && sem.matches("affects").count() == 2,
-        "conjoins the matrix and the participial proposition (controlled subject a hole): {sem}"
+        sem.starts_with('λ') && sem.contains("And(") && sem.matches("affects").count() == 2,
+        "abstracts the controlled subject over a conjunction of matrix + participial proposition: {sem}"
     );
     assert_eq!(
         open[0].holes.len(),
@@ -1980,7 +1981,7 @@ fn coordinate_prop_and_coordinate_np_are_disjoint() {
                 grown.push(Item::new(cat, sem));
             }
             for r in &pool {
-                if let Some(it) = apply(l, r, &layer) {
+                if let Some(it) = apply(l, r, &layer, eigenius_kernel::dcg::RightContext::Other) {
                     grown.push(it);
                 }
                 for op in OPS {
@@ -2048,11 +2049,15 @@ fn coordinate_prop_and_coordinate_np_are_disjoint() {
     );
 }
 
-/// D63 §5.3 — **close naming apposition**: a SORTAL common noun + a proper NAME (`gene BRCA1`,
-/// `Project Achilles`) → the definite individual of the sortal kind bearing that name,
-/// `kind_of(Σx:Sortal. named(x, name))`, an `Entity`-typed NP usable as a bare subject/object. The
-/// name's own class need NOT be the sortal (coining), so it is distinct from `appose_group`'s
-/// kind-checked group apposition — the singleton, un-type-checked case.
+/// D63 §5.3 — **close naming apposition**, i.e. the CLASSIFIER + DESIGNATOR construction: a sortal
+/// common noun + a proper name or identifier (`gene BRCA1`, `project Achilles`, `chromosome 7`) → the
+/// definite INDIVIDUAL of the classifier's type bearing that designator, `the(Σx:Sortal. named(x,
+/// designator)).1`, at `cat_np(Sortal, …)` — the classifier supplies the TYPE, the designator supplies
+/// the IDENTITY. The designator's own class need NOT be the sortal (coining), so this is distinct from
+/// `appose_group`'s kind-checked group apposition — the singleton, un-type-checked case.
+///
+/// Was `kind_of(Σ…)` at `cat_np(Entity, …)` until 2026-07-25 — a kind coerced to an entity, with the
+/// classifier's class discarded. See `build_name` for why that shape cost 204 skeletons on one unit.
 #[test]
 fn sortal_plus_proper_name_is_a_named_individual() {
     let (_layer, index) = index_over_bootstrap();
@@ -2065,9 +2070,9 @@ fn sortal_plus_proper_name_is_a_named_individual() {
     assert!(
         closed.iter().any(|it| {
             let s = pretty_term(it.sem());
-            s.contains("named(") && s.contains("kind_of(")
+            s.contains("named(") && s.contains("the(") && !s.contains("kind_of(")
         }),
-        "expected a `kind_of(Σ… named(…))` named-individual reading, got: {:?}",
+        "expected a definite-individual `the(Σ… named(…)).1` reading (NOT the old kind coercion), got: {:?}",
         closed
             .iter()
             .map(|it| pretty_term(it.sem()))

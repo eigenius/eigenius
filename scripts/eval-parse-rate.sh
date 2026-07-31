@@ -92,6 +92,11 @@ TR=$(field 'total-readings'  "$SUMMARY"); [[ "$TR" =~ ^[0-9]+$ ]] || TR=""
 # sense choices cannot mask a structural change; the tracked lever, less cap/sense-entangled than
 # total-readings). Absent on logs from before it was wired (2026-07-19).
 TS=$(field 'total-skeletons' "$SUMMARY"); [[ "$TS" =~ ^[0-9]+$ ]] || TS=""
+# expected-hits / expected-curated (the FAITHFULNESS signal — how many curated units still contain
+# their verified-correct reading). Replaces encoded-count, which a correctness fix can lower (a unit
+# encoded on a WRONG reading becomes ambiguous once the right one is restored). Absent on old logs.
+EH=$(field 'expected-hits'    "$SUMMARY"); [[ "$EH" =~ ^[0-9]+$ ]] || EH=""
+EC=$(field 'expected-curated' "$SUMMARY"); [[ "$EC" =~ ^[0-9]+$ ]] || EC=""
 
 # ── Trap 3: which KIND of run was this? ──────────────────────────────────────
 RERANK="$(grep -m1 -E '^contextual reranker:' "$LOG" | sed 's/^contextual reranker: //' || echo 'unknown')"
@@ -156,9 +161,30 @@ if [[ "$USE_JSON" == "1" ]]; then
   [[ "$U" -ne "$BUNI" ]] && echo "    NOTE: unit count differs ($BUNI → $U) — a different page or segmentation."
   printf '    %-16s %s → %s %s\n' "grammar-gap" "$BGAP" "$GAP" \
     "$([[ "$GAP" -gt "$BGAP" ]] && echo '  REGRESSION' || { [[ "$GAP" -lt "$BGAP" ]] && echo '  improved' || echo '  (unchanged)'; })"
-  printf '    %-16s %s → %s %s\n' "encoded" "$BENC" "$ENC" \
-    "$([[ "$ENC" -lt "$BENC" ]] && echo '  REGRESSION' || { [[ "$ENC" -gt "$BENC" ]] && echo '  improved' || echo '  (unchanged)'; })"
-  [[ "$GAP" -gt "$BGAP" || "$ENC" -lt "$BENC" ]] && RC=2
+  # encoded is INFORMATIONAL, not gated: a correctness fix can lower it (a unit encoded on the WRONG
+  # reading becomes ambiguous when the right reading is restored — the 2026-07-20 gloss bug). The
+  # faithfulness gate is expected-hits below.
+  printf '    %-16s %s → %s %s\n' "encoded (info)" "$BENC" "$ENC" \
+    "$([[ "$ENC" -lt "$BENC" ]] && echo '  lower (not gated — see expected-hits)' || { [[ "$ENC" -gt "$BENC" ]] && echo '  higher' || echo '  (unchanged)'; })"
+  [[ "$GAP" -gt "$BGAP" ]] && RC=2
+
+  # ── Faithfulness gate: no curated unit may LOSE its expected (verified-correct) reading ──────────
+  BEH=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('expected_reading_hits',0))")
+  BEC=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('expected_reading_curated',0))")
+  if [[ -n "$EH" ]]; then
+    if [[ "$EH" -lt "$BEH" ]]; then
+      printf '    %-16s %s → %s   REGRESSION (a curated unit lost its expected reading)\n' \
+        "expected-hits" "$BEH" "$EH"; RC=2
+    elif [[ -n "$EC" && "$EC" -lt "$BEC" ]]; then
+      printf '    %-16s %s → %s   REGRESSION (curated set shrank %s → %s)\n' \
+        "expected-hits" "$BEH" "$EH" "$BEC" "$EC"; RC=2
+    else
+      printf '    %-16s %s/%s → %s/%s%s\n' "expected-hits" "$BEH" "$BEC" "$EH" "$EC" \
+        "$([[ "$EH" -gt "$BEH" ]] && echo '   more coverage' || echo '   (all hold)')"
+    fi
+  else
+    echo "    expected-hits    (not in this log — predates the faithfulness gate; re-measure)"
+  fi
 
   # ── Multiplicity gate: total_readings must not exceed the ceiling (over-generation must not grow) ─
   BCEIL=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('total_readings_ceiling',0))")
@@ -221,9 +247,16 @@ if [[ -n "$BASE" && -f "$BASE" ]]; then
   echo "  vs baseline ($(basename "$BASE")):"
   printf '    %-16s %s → %s %s\n' "grammar-gap" "$BGAP" "$GAP" \
     "$([[ "$GAP" -gt "$BGAP" ]] && echo '  REGRESSION' || { [[ "$GAP" -lt "$BGAP" ]] && echo '  improved' || echo '  (unchanged)'; })"
-  printf '    %-16s %s → %s %s\n' "encoded" "$BENC" "$ENC" \
-    "$([[ "$ENC" -lt "$BENC" ]] && echo '  REGRESSION' || { [[ "$ENC" -gt "$BENC" ]] && echo '  improved' || echo '  (unchanged)'; })"
-  [[ "$GAP" -gt "$BGAP" || "$ENC" -lt "$BENC" ]] && RC=2
+  # encoded informational (see the --baseline path); faithfulness is expected-hits.
+  printf '    %-16s %s → %s %s\n' "encoded (info)" "$BENC" "$ENC" \
+    "$([[ "$ENC" -lt "$BENC" ]] && echo '  lower (not gated)' || { [[ "$ENC" -gt "$BENC" ]] && echo '  higher' || echo '  (unchanged)'; })"
+  BEH2=$(field 'expected-hits' "$BSUM")
+  [[ "$EH" =~ ^[0-9]+$ && "$BEH2" =~ ^[0-9]+$ ]] && {
+    printf '    %-16s %s → %s %s\n' "expected-hits" "$BEH2" "$EH" \
+      "$([[ "$EH" -lt "$BEH2" ]] && echo '  REGRESSION' || echo '  (all hold)')"
+    [[ "$EH" -lt "$BEH2" ]] && RC=2
+  }
+  [[ "$GAP" -gt "$BGAP" ]] && RC=2
 fi
 
 exit "$RC"

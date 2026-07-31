@@ -153,9 +153,28 @@ pub fn entry_to_item(layer: &Arc<Layer>, entry: &Resource) -> Result<Item, Strin
         .and_then(Value::as_integer)
         .unwrap_or(0)
         .max(0) as u32;
-    Ok(Item::with_cost(
+    // `lexicon:scope_bearing` — the entry is a scope-bearing operator (sentential negation, a modal,
+    // do-support), so its leaf carries [`Combinator::ScopeOperator`] and the combinator can tag the
+    // operator's OUTPUT `Modal` without sniffing the category. Read HERE, exactly once, next to
+    // `sense_rank`: the parse then never re-derives the property, and the firing decision downstream
+    // reads only provenance. Absent ⇒ an ordinary leaf. See [`Combinator::ScopeOperator`] for why the
+    // property is declared rather than inferred.
+    let prov = if entry
+        .get(&iri("urn:eigenius:lexicon:scope_bearing"))
+        .and_then(|v| match v {
+            Value::Boolean(b) => Some(*b),
+            _ => None,
+        })
+        .unwrap_or(false)
+    {
+        super::item::Combinator::ScopeOperator
+    } else {
+        super::item::Combinator::Other
+    };
+    Ok(Item::from_parts(
         cat,
         resolve_sem_value(layer, sem_v)?,
+        prov,
         super::item::Cost::from_sense_rank(sense_rank),
     ))
 }
@@ -241,6 +260,23 @@ pub struct LexEntry {
     pub item: Item,
     pub in_lexicon: Option<Iri>,
     pub sense: Option<String>,
+    /// The entry's `lexicon:form` in its **ORIGINAL CASE** — the index keys are lowercased, so this
+    /// is the only place the source's capitalisation survives lookup.
+    ///
+    /// It exists for ACRONYM DISAMBIGUATION, the refinement this type's index documents as deferred
+    /// from v1. A case-insensitive index is right for retrieval — `Cell lines…` sentence-initially
+    /// must still reach the lemma `cell` — but it makes an all-caps nomenclature symbol reachable
+    /// from the lowercase common noun it happens to spell. Measured over MRCONSO 2026AA: 4,319
+    /// distinct all-caps English atoms lowercase onto a WordNet common-noun lemma, 24 of them on the
+    /// WRN reference page. `CELL` (HGNC `NS` for the CELP pseudogene, C1413337, plus OMIM `ACR` for
+    /// CEL, C1413336) is why `MSI cell lines` had 16 skeletons reading `cell` as a GENE.
+    ///
+    /// The drop set cannot fix this and should not: `drops.rs` keeps clean all-caps collisions
+    /// DELIBERATELY (`CAT` the catalase gene, `SET` the oncogene are real symbols) and its
+    /// `DROP_TTYS` excludes `ACR`/`NS`. The symbol is legitimate; reaching it from lowercase prose is
+    /// not. So the fix belongs at the point of use, keyed on the OBSERVED token — see
+    /// [`super::parse::all_caps_symbol`].
+    pub form: String,
     /// The entry's own `core:description` — **the gloss the reranker reads**.
     ///
     /// It cannot come from the `sem`: a function word's `sem` is an inline λ-term, with no IRI and
@@ -400,6 +436,7 @@ impl LexicalIndex {
                 in_lexicon: read_in_lexicon(entry),
                 gloss: read_description(entry),
                 sense: read_sense(entry),
+                form: form.trim().to_string(),
             });
         }
         self.overlay = overlay;
@@ -434,6 +471,7 @@ impl LexicalIndex {
                 in_lexicon: read_in_lexicon(r.as_ref()),
                 gloss: read_description(r.as_ref()),
                 sense: read_sense(r.as_ref()),
+                form: form.trim().to_string(),
             });
         }
         (by_form, max_words)
@@ -475,6 +513,7 @@ impl LexicalIndex {
                 in_lexicon: read_in_lexicon(r.as_ref()),
                 gloss: read_description(r.as_ref()),
                 sense: read_sense(r.as_ref()),
+                form: form.trim().to_string(),
             });
         }
         items
@@ -599,6 +638,88 @@ mod referential_definite_tests {
                 mentions_the(q).iter().all(|&b| !b),
                 "`{q}` must stay quantificational (no ontology:the)"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod scope_bearing_tests {
+    use super::{LexicalIndex, LexicalLookup};
+    use crate::dcg::item::Combinator;
+    use crate::dcg::rules::combinators::is_modal_functor;
+    use std::sync::Arc;
+
+    /// **Every entry with the auxiliary category shape must DECLARE `lexicon:scope_bearing`.**
+    ///
+    /// `combinators::build` tags a scope-bearing operator's output `Combinator::Modal` from the
+    /// DECLARED property alone (this flag → `Combinator::ScopeOperator` on the leaf). It used to also
+    /// INFER the property from the category via `is_modal_functor`; that inference was retired once
+    /// this test showed the declaration covers it. `is_modal_functor` survives as a `#[cfg(test)]`
+    /// predicate for exactly this check — it is now the COMPLETENESS OBLIGATION, not a fallback: an
+    /// auxiliary added to `closed-class.esl` without the flag would silently lose its `Modal` tag, so
+    /// it fails here instead.
+    ///
+    /// Negation is the part no category test can reach: `not` is `fwd(VP[bse], VP[bse])` /
+    /// `fwd(VP[adj], VP[adj])`, and the latter is byte-identical to the adverb adjective-modifier
+    /// category (`dcg::category::adverb_modifier_cats`). Declaring it is the point.
+    ///
+    /// CI-runnable, no snapshot (the behavioural check is `negation_scope_blocks_adjunct_escape` in
+    /// `crates/eigenius-wordnet/tests/db_backed_encoding.rs`).
+    #[test]
+    fn scope_bearing_covers_the_modal_category_sniff() {
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let lex = LexicalIndex::build(Arc::clone(ctx.head()));
+
+        // (1) COMPLETENESS: every entry with the auxiliary category shape declares the flag. Since
+        // `build` no longer infers from the category, a miss here means that entry has NO `Modal`
+        // tag at all — a VP-adjunct could attach above it and escape its scope.
+        for form in [
+            "does", "do", "did", "can", "could", "may", "might", "must", "will", "would", "should",
+            "not", "is", "are", "was", "were", "affects", "the", "in",
+        ] {
+            for e in lex.entries_for(form) {
+                if is_modal_functor(e.item.cat()) {
+                    assert_eq!(
+                        e.item.prov(),
+                        Combinator::ScopeOperator,
+                        "`{form}` has an entry the category sniff catches but which does NOT \
+                         declare lexicon:scope_bearing — retiring the sniff would drop its Modal tag"
+                    );
+                }
+            }
+        }
+
+        // (2) NEGATION is declared, and is exactly what the sniff MISSES — both of its entries.
+        let nots = lex.entries_for("not");
+        assert_eq!(
+            nots.len(),
+            2,
+            "expected the two `not` entries (verbal + adjectival)"
+        );
+        for e in &nots {
+            assert_eq!(
+                e.item.prov(),
+                Combinator::ScopeOperator,
+                "sentential negation must declare lexicon:scope_bearing — without it a VP-adjunct \
+                 attaches ABOVE the negation and escapes its scope"
+            );
+            assert!(
+                !is_modal_functor(e.item.cat()),
+                "if the sniff started catching `not`, this test's premise is stale — the flag was \
+                 introduced precisely because no category test can single negation out"
+            );
+        }
+
+        // (3) NOT over-applied: an ordinary content word and a determiner stay untagged, so the
+        // flag cannot silently spread to categories that legitimately host an adjunct above them.
+        for form in ["affects", "the", "in"] {
+            for e in lex.entries_for(form) {
+                assert_ne!(
+                    e.item.prov(),
+                    Combinator::ScopeOperator,
+                    "`{form}` must not be scope-bearing"
+                );
+            }
         }
     }
 }

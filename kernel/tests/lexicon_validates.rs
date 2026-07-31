@@ -468,7 +468,9 @@ fn cky_parse(tokens: &[Item], layer: &Arc<Layer>) -> Vec<Item> {
             for k in i..j {
                 for l in &chart[i][k].clone() {
                     for r in &chart[k + 1][j].clone() {
-                        if let Some(item) = apply(l, r, layer) {
+                        if let Some(item) =
+                            apply(l, r, layer, eigenius_kernel::dcg::RightContext::Other)
+                        {
                             produced.push(item);
                         }
                     }
@@ -1343,7 +1345,13 @@ fn determiner_unifies_type_var_and_substitutes_through_result() {
     //     `S/(S\NP_Gene)` (variable resolved) and the sem `det(Gene)`.
     let det = Item::new(poly, det_sem_exp());
     let noun = Item::new(noun_cat, Exp::EigonClass(gene.clone()));
-    let out = apply(&det, &noun, &layer).expect("polymorphic determiner applies to its noun");
+    let out = apply(
+        &det,
+        &noun,
+        &layer,
+        eigenius_kernel::dcg::RightContext::Other,
+    )
+    .expect("polymorphic determiner applies to its noun");
     assert_eq!(
         out.cat(),
         &concrete_result,
@@ -1527,7 +1535,13 @@ fn cat_forall_dependent_application_instantiates_and_stays_felicitous() {
     );
     let expected = poly_cat(&layer, "urn:eigenius:lexicon:e_det_result");
 
-    let out = apply(&det, &noun, &layer).expect("cat_forall determiner applies to its noun");
+    let out = apply(
+        &det,
+        &noun,
+        &layer,
+        eigenius_kernel::dcg::RightContext::Other,
+    )
+    .expect("cat_forall determiner applies to its noun");
     assert_eq!(
         out.cat(),
         &expected,
@@ -1602,8 +1616,13 @@ fn every_gene_q_composes_via_apply_to_a_quantified_prop() {
         q,                                                 // q : Entity → Prop
     );
 
-    let out = apply(&det_result, &vp, &layer)
-        .expect("S/(S\\NP_Gene) must apply to S\\NP_Entity via contravariant subsumption");
+    let out = apply(
+        &det_result,
+        &vp,
+        &layer,
+        eigenius_kernel::dcg::RightContext::Other,
+    )
+    .expect("S/(S\\NP_Gene) must apply to S\\NP_Entity via contravariant subsumption");
 
     // The produced category is a declarative S → Prop.
     assert!(

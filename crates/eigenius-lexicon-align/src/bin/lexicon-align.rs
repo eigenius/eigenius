@@ -231,7 +231,7 @@ fn build_drops(
         stats.merged_not_dropped
     );
     eprintln!(
-        "DROPS                 {}   (same=false, confidence ≥ {DROP_CONFIDENCE}, irregular-cased SY/PEP atom)",
+        "DROPS                 {}   (same=false, confidence ≥ {DROP_CONFIDENCE}; irregular-cased SY/PEP atom, or metadata-artefact concept)",
         drops.len()
     );
     for d in drops.iter().take(40) {

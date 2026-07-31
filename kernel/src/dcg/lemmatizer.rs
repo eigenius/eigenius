@@ -50,6 +50,35 @@ pub trait Lemmatizer {
     }
 }
 
+/// The **regular English plural detachment** — `morph.c`'s `-ies→-y` / `-s` rules, with no dictionary
+/// check. `None` if `surface` is not a regular plural.
+///
+/// Free-standing and shared, for the same reason
+/// [`closed_class::is_closed_class_surface`](super::closed_class::is_closed_class_surface) is: two
+/// consumers must not drift. Morphy's [`Lemmatizer::regular_plural_stem`] is this function, and the
+/// UMLS importer uses it to decide that a form is a regular inflection of ANOTHER form of the same
+/// concept — the QC gate that keeps inflected surfaces out of a lemma-keyed lexicon. If the two rule
+/// sets disagreed, the importer would keep forms the lemmatizer can already reach, or drop forms it
+/// cannot, and either way a surface would lose its entry.
+///
+/// The exclusions are the ones that make `-s` unreliable: `-ss` (`process`), `-us` (`virus`), and `-is`
+/// (`analysis`) are not plural markers, and a stem shorter than the bound is noise (`is` → `i`).
+pub fn regular_plural_stem(surface: &str) -> Option<String> {
+    let s = surface.trim().to_lowercase();
+    if let Some(stem) = s.strip_suffix("ies") {
+        if stem.len() >= 2 {
+            return Some(format!("{stem}y"));
+        }
+    }
+    if let Some(stem) = s.strip_suffix('s') {
+        let skip = s.ends_with("ss") || s.ends_with("us") || s.ends_with("is");
+        if stem.len() >= 3 && !skip {
+            return Some(stem.to_string());
+        }
+    }
+    None
+}
+
 /// The trivial lemmatizer — every surface form is its own lemma (no morphology).
 /// The baseline before plugging in WordNet's Morphy.
 pub struct Identity;

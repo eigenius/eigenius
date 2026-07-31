@@ -229,6 +229,93 @@ readings  median 32   ≈   skeletons  median 6   ×   sense×  median 5.5
 Both axes are live and they *multiply*. Collapsing senses perfectly leaves ~18% of readings;
 perfecting the structural normal form leaves ~15%. **Neither alone reaches ENCODED.**
 
+### 7c. Faithfulness = "the unit contains its expected reading", not encoded-count
+
+Encoded-count is a **weak** faithfulness signal: a unit can be encoded on the WRONG reading. On
+2026-07-20 a gloss bug made "specific repair proteins" close on `compound_kind(x, C0205369 "Specific
+(qualifier)")` — one reading, ENCODED, and wrong. Fixing it restored the adjective reading, so the unit
+became AMBIG ×2 and encoded *fell*. Chasing encoded upward would have rewarded the bug.
+
+So faithfulness is gated on **expected-reading hits** instead. `experiments/parsing/expected-readings.tsv`
+pins, per curated unit, the sense-erased skeleton of the reading a human has verified is correct
+(`sentence <TAB> skeleton <TAB> note`). The gate asserts each unit still **contains** that skeleton among
+its readings — drift-free (senses erased) and robust to added ambiguity: a unit going ENCODED→AMBIG while
+keeping the right reading is **not** a regression. `eval-parse-rate.sh` regresses on a hit drop or a
+curated-set shrink; `encoded` is reported but no longer gated.
+
+Author entries from a run: `EIGENIUS_DUMP_SKELETONS=1 scripts/measure-parse-rate.sh --replay <ranks>`
+prints every unit's skeleton set; pick the correct one and pin it. **`encoded` ≠ `correct`** — verify
+each entry; the 2026-07-21 seed (the 20 single-reading units) is provisional and pending sign-off.
+
+### 7b. The skeleton eraser must erase the LEXICON PREFIX too
+
+`total-skeletons` is the tracked structural lever, and it is only as good as `erase_senses`. The
+erasure replaces **the whole token** carrying a run of ≥4 digits — not just the digit run.
+
+That distinction is not cosmetic. The original erased only the digits, so the lexicon prefix survived:
+
+```
+n07342049 → n§        (WordNet)
+C0205341  → C§        (UMLS)      ← different strings!
+```
+
+A word with one WordNet sense and one UMLS sense therefore produced **two "skeletons" for one
+bracketing**. Measured on the reference page (2026-07-21): **86 of 326 skeletons — 26% — were this
+artifact.** Corrected, `total-skeletons` is **240** and `sense×` rises 2.86 → 3.88, because those 86
+belong to the sense axis. Nothing else moved (grammar-gap 0, encoded 10, total-readings 931): it is a
+measurement correction, no reading was removed.
+
+**Why it matters:** grammar changes are scored against `total-skeletons`. Under the old eraser a
+quarter of that signal was sense noise, so a lexicon change that added a cross-lexicon sense pair would
+show up as *structural over-generation*, and a genuine grammar fix would be diluted. If you ever see
+skeleton counts move without a grammar change, check the eraser first.
+
+How it surfaced: the attribution instrument reported the unit *"Nucleotide repeat regions are
+microsatellites"* as 4 readings / 4 skeletons / `sense× 1.0` while simultaneously showing **two 2-way
+surviving sense sites** — arithmetic that is only consistent if senses were being counted as structure.
+
+### 7a. Attribution — which span, which rule, which sense
+
+The split above says *structure vs sense*; it does not say **which word or which rule**. That question
+used to be answered by hand (dump readings, erase senses, swap-ladder a trigger, look up each CUI) —
+slow, and it produced several wrong diagnoses. `kernel/src/dcg/chart/attribute.rs` now reads it off the
+packed forest directly: every OR-node that branches becomes a labelled *site* (competing `Leaf` edges ⇒
+**sense**, competing rule/split edges ⇒ **structure**, named from `BinRule` / `UnaryKind`, and for the
+lumped `Combinator::Compound` refined by the restrictor axiom into compound / adjective / pp / essive).
+
+```bash
+scripts/measure-parse-rate.sh --attribution --replay <run>/ranks.json   # page roll-up
+EIGENIUS_TRACE_SENTENCE="…" EIGENIUS_TRACE_ATTRIBUTION=1 \
+  cargo test -p eigenius-wordnet --test db_backed_encoding trace_one_sentence -- --ignored --nocapture
+```
+
+The roll-up ranks levers by `excess = Σ(factor−1)` — sense sites by surface form, structure sites by
+named construction, with generic apply/compose lumped. A partial roll-up is emitted every 10 units, so
+an interrupted run still leaves usable data (but see trap 4: a partial run is not a *result*).
+
+**Read the two halves differently.**
+
+*SENSE sites are felicity-intersected and DO rank.* Attribution runs after the top-span type-check and
+dedup, so each sense is checked against the readings that actually survived (`n/m` = surviving/raw; a
+non-survivor prints `[pruned]`). This matters enormously: on the reference page the surface `has` seeds
+**7** noun/concept senses — `Hemagglutination test`, `Han Chinese`, `Ha Antibody`, hour-angle,
+`rich_person`, plus UMLS `Possess`/`Have` — and **all 7 are pruned**. Ranking the raw forest put `has`
+first; ranking survivors drops it out of the top 15 entirely. **Never size a lever from raw counts** —
+an earlier analysis did exactly that and produced a wholly spurious root cause.
+
+*STRUCTURE sites are RAW and rank NOTHING.* `kbest` records no per-reading derivation (items carry no
+provenance and it truncates per node), so bracketings cannot be intersected. `compound` branching in
+47/62 units is an upper bound, **not** evidence that residual multiplicity is structural — §6 measures
+the extracted readings as sense-dominated, and the two count different populations. Making this half
+rankable requires threading derivation ids through `kbest`/`cube`/`materialize_unary`.
+
+Sense labels resolve through the layer chain — `C0018905 "Hemagglutination test" [T059]` — since the
+importer emits each concept as `class umlscui:<CUI> : umlssty:<TUI>` with a `description`. No
+`MRSTY`/`MRCONSO` side-lookup.
+
+The instrument is **read-only**: on the reference replay, grammar-gap / encoded / total-readings /
+total-skeletons are identical with and without `--attribution` (0 / 10 / 931 / 326).
+
 ---
 
 ## 8. What the recorded rankings already show

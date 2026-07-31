@@ -304,6 +304,25 @@ resource lexicon:a_pred : lexicon:LexicalEntry {
     lexicon:sense    = "a";
     lexicon:grade    = epistemic:declared;
 }
+// `an` — the ORTHOGRAPHIC ALLOMORPH of the predicative `a`, and it must exist wherever `a` does.
+// It did not: `a` carried three entries (a_pred / a_subj / a_obj) and `an` only two, so "X is AN
+// interaction between two genetic events" had NO predicate-nominal route. The NP was forced to be an
+// existential quantifier, and the between-PP — with nowhere to land inside it — attached at the VP
+// level and ended up on the SUBJECT, in every reading. Witnessed 2026-07-25 by a minimal pair that
+// differs only in the article:
+//   "… is A relationship between two genetic events."  → is_a(SL, ΣG#0. … prep_between(G#0, …))  ✓ nests
+//   "… is AN interaction between two genetic events."  → prep_between(SL, …) in ALL readings      ✗
+// Same defect class as the missing plural `some` (2026-07-24): an entry present for one surface form
+// and absent for its variant, which reads as a GRAMMAR gap rather than the lexical hole it is.
+resource lexicon:an_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite article/determiner introducing a singular noun ('an interaction').";
+    lexicon:form     = "an";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:pred_nominal_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => lexicon:Entity -> Prop );
+    lexicon:sense    = "a";
+    lexicon:grade    = epistemic:declared;
+}
 
 // ── Kind-subject predicate nominal: `are` (D63 §8.5, Slice 3c kind subjects) ──
 // "Genes are cell lines" → subclass_of(Gene, CellLine). The KIND copula `are`
@@ -351,6 +370,7 @@ resource lexicon:not_vp : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "not";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 // not — over an adjectival predicate ("is not primary").
 resource lexicon:not_adj : lexicon:LexicalEntry {
@@ -361,6 +381,7 @@ resource lexicon:not_adj : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "not";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 // Declarative do-support (verbal negation / emphatic) — finiteness-lifting `λP.P`.
 resource lexicon:does_decl : lexicon:LexicalEntry {
@@ -371,6 +392,7 @@ resource lexicon:does_decl : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "do";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:do_decl : lexicon:LexicalEntry {
     core:description = "grammatical: DO-support auxiliary, carrying tense in negation and questions ('do not lead').";
@@ -380,6 +402,7 @@ resource lexicon:do_decl : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "do";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:did_decl : lexicon:LexicalEntry {
     core:description = "grammatical: past DO-support auxiliary ('did not respond').";
@@ -389,6 +412,7 @@ resource lexicon:did_decl : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "do";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 
 // ── Progressive + perfect auxiliaries (D63 §8.9 Slice 6-aux) ──────────
@@ -594,6 +618,19 @@ resource lexicon:were_passive_by : lexicon:LexicalEntry {
     lexicon:sense    = "be";
     lexicon:grade    = epistemic:declared;
 }
+// BASE form under a modal — "can/may be limited by toxicity". The `is/are/was/were` above lift the
+// agentive `pass` VP to a FINITE clause; a modal ("can") selects a BASE `S[dcl,bse]\NP` complement, so
+// the agentive passive under a modal needs this `be : (S[dcl,bse]\NP)/(S[dcl,pass]\NP)`. Same
+// `copula_sem` (λP.P) and same `pass`-only selection (never the active `pss`).
+resource lexicon:be_passive_by : lexicon:LexicalEntry {
+    core:description = "grammatical: base form of BE — passive auxiliary under a modal.";
+    lexicon:form     = "be";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+    lexicon:grade    = epistemic:declared;
+}
 
 // ── Modal auxiliaries (D63 §8.9 Slice 6-aux) ─────────────────────────
 // "HeLa can affect BRCA1" → Possible(affects(brca1, hela)); "… must …" → Necessary(…).
@@ -627,6 +664,7 @@ resource lexicon:can_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "can";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:could_modal : lexicon:LexicalEntry {
     core:description = "grammatical: modal auxiliary of possibility (past/hypothetical).";
@@ -636,6 +674,7 @@ resource lexicon:could_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "can";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:may_modal : lexicon:LexicalEntry {
     core:description = "grammatical: modal auxiliary of possibility ('WRN dependency may require lineages').";
@@ -645,6 +684,7 @@ resource lexicon:may_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "may";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:might_modal : lexicon:LexicalEntry {
     core:description = "grammatical: modal auxiliary of possibility (weaker/hypothetical).";
@@ -654,6 +694,7 @@ resource lexicon:might_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "may";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:must_modal : lexicon:LexicalEntry {
     core:description = "grammatical: modal auxiliary of necessity.";
@@ -663,6 +704,7 @@ resource lexicon:must_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "must";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 // will / would / should — each its OWN opaque operator (not ◇/□); see logic.esl.
 resource lexicon:will_sem : lexicon:SemTerm {
@@ -691,6 +733,7 @@ resource lexicon:will_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "will";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:would_modal : lexicon:LexicalEntry {
     core:description = "grammatical: modal auxiliary of conditional/hypothetical mood.";
@@ -700,6 +743,7 @@ resource lexicon:would_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "would";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 resource lexicon:should_modal : lexicon:LexicalEntry {
     core:description = "grammatical: modal auxiliary of obligation or expectation.";
@@ -709,6 +753,7 @@ resource lexicon:should_modal : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "should";
     lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }
 
 // ── Clausal complements: complementizer `that` (D63 §8.11 Slice 6-cl) ──
@@ -1348,6 +1393,16 @@ resource lexicon:less_deg : lexicon:LexicalEntry {
     lexicon:sense    = "less.deg";
     lexicon:grade    = epistemic:declared;
 }
+// (6e′) ELIDED-`than` is a GRAMMAR SHIFT, not a lexical entry (D63 §8.12;
+// d63-single-skeleton-defects.md). "more/less X" with no `than` is complete on its own: the comparative
+// `((S[adj]\NP)/cat_pp_than)/cat_measure` above takes its measure to `(S[adj]\NP)/cat_pp_than`, and the
+// `elided_than` unary shift (kernel: dcg::rules::constructions + the UnaryKind::ElidedThan table entry)
+// saturates the pending `cat_pp_than` standard with the anaphoric placeholder `lexicon:anaphor` (→ an
+// OPEN parse the D64 resolver fills — the elided comparison target). One general rule over any
+// `X/cat_pp_than` REPLACES the former per-word `more_deg_bare`/`less_deg_bare` entries; the explicit
+// `than_marker` still supplies an overt standard for "more X than Y". (`than [PP]` — the RELATUM
+// standard "more dependent on WRN than on MSI" — is a separate two-measure relational-comparative slice,
+// not a `than` widening; see kernel/tests/comparative_than.rs.)
 
 // ── Argument-PP markers: prepositions as VERB/ADJECTIVE-subcategorized oblique complements ──
 // "contributes TO cancers", "results FROM X", "dependent ON WRN", "associated WITH Z": the head
@@ -1415,6 +1470,17 @@ resource lexicon:for_arg : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:argmarker_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
     lexicon:sense    = "for";
+    lexicon:grade    = epistemic:declared;
+}
+// `of` as a GOVERNED complement marker ("MSI consists of repeats", "composed of") — `of` had only a
+// noun-post-modifier entry, so a verb governing `of` had no derivation at all (0 readings).
+resource lexicon:of_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition for a verb governing `of` ('consists of X').";
+    lexicon:form     = "of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp_arg(lexicon:prep_of), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "of";
     lexicon:grade    = epistemic:declared;
 }
 resource lexicon:at_arg : lexicon:LexicalEntry {
@@ -1510,7 +1576,24 @@ resource lexicon:each_subj : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:forall_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
-    lexicon:sense    = "each"; 
+    lexicon:sense    = "each";
+    lexicon:grade    = epistemic:declared;
+}
+// `each` in OBJECT position — the type-raised counterpart of `each_subj`, mirroring `every_obj`
+// (truth-conditionally `each` ≈ `every`, so it takes the same `obj_forall_sem`). Its absence was a
+// COVERAGE gap, not merely a missing reading: every other determiner in this lexicon carries a
+// subj/obj pair, and `each` carried only the subject entry, so a `each`-object sentence had NO parse
+// at all. Witnessed 2026-07-25 — "WRN affects each gene." → 0 readings, while the structurally
+// identical "WRN affects every gene." → 4. Found by sweeping the determiner inventory for
+// subj/obj asymmetries after the `an_pred` hole (same defect class: an entry present for one form
+// and absent for its sibling, which reads as a grammar gap rather than the lexical hole it is).
+resource lexicon:each_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: distributive universal determiner in object position ('WRN affects each gene').";
+    lexicon:form     = "each";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_forall_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "each";
     lexicon:grade    = epistemic:declared;
 }
 // all — universal, plural.
@@ -1584,6 +1667,28 @@ resource lexicon:some_obj : lexicon:LexicalEntry {
     core:description = "grammatical: existential determiner — at least one member ('some cells died').";
     lexicon:form     = "some";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "some";
+    lexicon:grade    = epistemic:declared;
+}
+// some — existential, PLURAL ('some MSI lines'). Mirrors `several`/`many` below (plural existential
+// `cat_forall(pl, …)`); `some` shipped only the singular, so a plural "some X" had NO determiner reading
+// and fell back to the UMLS `C0205392` "Some (qualifier value)" NOUN, which piled into a spurious
+// `compound_kind` (D63 Defect 2a). The UMLS noun is now withheld at import (DETERMINER_SURFACES).
+resource lexicon:some_pl_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential determiner ('some MSI lines'). First-cut existential, cardinality opaque.";
+    lexicon:form     = "some";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "some";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:some_pl_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: plural existential determiner ('some MSI lines'), object position.";
+    lexicon:form     = "some";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:obj_exists_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "some";
@@ -2046,4 +2151,196 @@ resource lexicon:rc_each : lexicon:ReservedConstruct {
 resource lexicon:rc_other : lexicon:ReservedConstruct {
     lexicon:construct_form = "other";
     lexicon:construct_kind = lexicon:rk_reciprocal_other;
+}
+
+// ── Preposition coverage holes (2026-07-26) ──────────────────────────
+// Found by `probe_preposition_role_coverage`, a 0-reading sweep over every preposition x role. The
+// page-based `grammar-gap 0` is blind to a construction the 62-sentence corpus does not contain, so
+// these sat undetected: `without`/`among`/`beyond` had NO entry in ANY role, and
+// at/into/upon/against/about/by had no noun-post-modifier form. Confirmed on natural sentences
+// ("Cells survive without oxygen." 0 -> 4; "The paper by the authors was clear." 0 -> 2) and
+// page-NEUTRAL (578 skeletons / 2473 readings / 44 pins, all unchanged) -- a fix the page could
+// neither motivate nor validate.
+resource lexicon:nmod_at_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => ontology:prep_at(x, y)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:at_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition as a noun post-modifier ('the change at X').";
+    lexicon:form     = "at";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_at_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "at";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:nmod_into_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => ontology:prep_into(x, y)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:into_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition as a noun post-modifier ('the change into X').";
+    lexicon:form     = "into";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_into_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "into";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:nmod_upon_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => ontology:prep_upon(x, y)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:upon_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition as a noun post-modifier ('the change upon X').";
+    lexicon:form     = "upon";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_upon_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "upon";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:nmod_against_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => ontology:prep_against(x, y)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:against_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition as a noun post-modifier ('the change against X').";
+    lexicon:form     = "against";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_against_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "against";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:nmod_about_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => ontology:prep_about(x, y)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:about_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition as a noun post-modifier ('the change about X').";
+    lexicon:form     = "about";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_about_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "about";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:nmod_by_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => ontology:prep_by(x, y)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:by_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition as a noun post-modifier ('the change by X').";
+    lexicon:form     = "by";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_by_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "by";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:nmod_without_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => ontology:prep_without(x, y)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:without_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition as a noun post-modifier ('the change without X').";
+    lexicon:form     = "without";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_without_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "without";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:nmod_among_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => ontology:prep_among(x, y)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:among_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition as a noun post-modifier ('the change among X').";
+    lexicon:form     = "among";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_among_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "among";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:nmod_beyond_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => ontology:prep_beyond(x, y)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:beyond_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition as a noun post-modifier ('the change beyond X').";
+    lexicon:form     = "beyond";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_beyond_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "beyond";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:prep_without_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            logic:And(V(s), ontology:prep_without(s, x))
+          : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:without_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition as a VP adjunct ('acts without X').";
+    lexicon:form     = "without";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_without_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "without";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:prep_among_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            logic:And(V(s), ontology:prep_among(s, x))
+          : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:among_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition as a VP adjunct ('acts among X').";
+    lexicon:form     = "among";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_among_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "among";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:prep_beyond_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            logic:And(V(s), ontology:prep_beyond(s, x))
+          : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:beyond_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition as a VP adjunct ('acts beyond X').";
+    lexicon:form     = "beyond";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_beyond_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "beyond";
+    lexicon:grade    = epistemic:declared;
 }

@@ -182,6 +182,7 @@ enum BinKind {
     AppositiveSubj,
     AppositiveObj,
     ApposeGroup,
+    ModifyGroup,
 }
 
 impl BinRule {
@@ -194,13 +195,14 @@ impl BinRule {
             BinRule::AppositiveSubj => BinKind::AppositiveSubj,
             BinRule::AppositiveObj => BinKind::AppositiveObj,
             BinRule::ApposeGroup => BinKind::ApposeGroup,
+            BinRule::ModifyGroup => BinKind::ModifyGroup,
         }
     }
 }
 
 /// The token-keyed binary rule table (all `const`, so no `LazyLock`). Priority = order, but site
 /// order is not load-bearing (both drivers build every site).
-static BIN_RULES: [TokBinRule; 7] = [
+static BIN_RULES: [TokBinRule; 8] = [
     TokBinRule {
         name: "relativize",
         kind: BinKind::Relativize,
@@ -244,6 +246,13 @@ static BIN_RULES: [TokBinRule; 7] = [
         reads_sem: false,
     },
     TokBinRule {
+        name: "modify_group",
+        kind: BinKind::ModifyGroup,
+        trigger: trig_modify_group,
+        build: build_modify_group,
+        reads_sem: false,
+    },
+    TokBinRule {
         name: "reciprocal",
         kind: BinKind::Reciprocal,
         trigger: trig_reciprocal,
@@ -270,7 +279,18 @@ fn trig_relativize(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut
 }
 
 /// Coordination `[X] and/or/`,` [Y]`: a coordinating connective BETWEEN the operands (the connective
-/// IRI rides in the `BinRule::Coordinate` tag).
+/// IRI rides in the `BinRule::Coordinate` tag). A comma contributes the neutral
+/// [`LIST_CONN`](super::constructions::LIST_CONN) that a trailing `and`/`or` rebinds.
+///
+/// **Resolving the comma's inherited connective HERE does not work, and the attempt is recorded so it
+/// is not retried** (2026-07-26). The comma's connective is a property of the whole list, and this
+/// trigger sees only one CELL: `MSH2 , MSH6` inside "MSH2, MSH6, PMS2 or MLH1" is built in a cell that
+/// ENDS before the `or`, so a scan bounded by `j` finds nothing to inherit. Measured: adding the scan
+/// left the page byte-identical per unit (507 skeletons before and after). Widening the scan to the
+/// whole sentence mis-inherits instead — the comma in "A, B affect X or Y" would take the `or` — and
+/// bounding it correctly needs to know where the nominal list ends, i.e. POS/lexical information that
+/// [`Grammar`] does not carry (no lexicon: `layer`, `reserved`, `dets`). See
+/// [`super::constructions::complete_coord`] for what the fix requires instead.
 // `c` is a split-point index used for both operand spans, not just to index `tokens`.
 #[allow(clippy::needless_range_loop)]
 fn trig_coordinate(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
@@ -351,6 +371,14 @@ fn trig_appose_group(_g: &Grammar, _tokens: &[String], i: usize, j: usize, out: 
     }
 }
 
+/// Modifier over a coordinated group `[cat_mod] [cat_group]`: ADJACENT operands, every split a
+/// candidate — the same shape as `trig_appose_group`, since both are plain adjacency.
+fn trig_modify_group(_g: &Grammar, _tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
+    for m in i..j {
+        out.push(BinSite::new((i, m), (m + 1, j), BinRule::ModifyGroup));
+    }
+}
+
 /// Reciprocal `[group] <TV> each other`: keyed on the TRAILING reserved pair, verb `[s, j-2]`.
 fn trig_reciprocal(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
     if j >= 3
@@ -370,6 +398,22 @@ fn build_relativize(_g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<
     relativize(l.cat(), r.cat(), r.sem()).map(|(cat, sem)| Item::with_cost(cat, sem, cost))
 }
 
+/// Whether a coordination conjunct denotes a **derived individual** rather than a name
+/// ([`Combinator::DerivedIndividual`]) — so a group containing it is not a designator group.
+///
+/// Three shapes, all cheap and all category-or-provenance only: an already-tagged item (a definite
+/// designation, or a group that inherited the tag), a `KindRaised` bare-kind NP, and a bare `cat_n`
+/// conjunct — which `coordinate_np`'s `np_conjunct` realises as `kind_of(K)` WITHOUT routing it through
+/// the `KindRaised` shift, and which is therefore the shape the singular `name` rule's
+/// `NotKindRaised` guard never sees. That asymmetry is what left the group path admitting kind
+/// designators after the singular path had stopped.
+fn is_derived_individual(it: &Item) -> bool {
+    matches!(
+        it.prov(),
+        Combinator::DerivedIndividual | Combinator::KindRaised
+    ) || is_ctor(it.cat(), "cat_n").is_some()
+}
+
 /// The list-with-operator model (D63 §8.4 Phase 3): a prop-ending conjunct builds/extends a deferred
 /// `cat_coord`; an NP conjunct builds a `cat_group`. Each enforces its own left-branching NF, so no
 /// outer `is_coordination` guard here — the sem-reading NF check lives inside `coordinate_prop`.
@@ -377,11 +421,26 @@ fn build_coordinate(g: &Grammar, rule: BinRule, l: &Item, r: &Item) -> Option<It
     let BinRule::Coordinate(op) = rule else {
         return None;
     };
+    // An apposed group is CLOSED (the apposition normal form, [`Combinator::Apposed`]): appending a
+    // member to "the MMR genes MSH2, MSH6" would leave that member outside the classifier's scope, so
+    // only a prefix of the surface list would be classified. An `Apposed` item is always a
+    // `cat_group`, so this can only ever have reached the `coordinate_np` arm below.
+    if l.prov() == Combinator::Apposed {
+        return None;
+    }
     let cost = l.cost().saturating_add(r.cost());
+    // A group inherits [`Combinator::DerivedIndividual`] from ANY derived conjunct, so `appose_group`
+    // can refuse an impure designator group by reading provenance (which `Sig` carries) rather than the
+    // member sems (which would make its firing decision sem-dependent and need a new packing bit).
+    let prov = if is_derived_individual(l) || is_derived_individual(r) {
+        Combinator::DerivedIndividual
+    } else {
+        Combinator::Other
+    };
     coordinate_prop(op, l.cat(), l.sem(), r.cat(), r.sem(), &g.layer)
         .or_else(|| coordinate_np(op, l.cat(), l.sem(), r.cat(), r.sem(), &g.layer))
         .or_else(|| coordinate_mod(l.cat(), l.sem(), r.cat(), r.sem(), &g.layer))
-        .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
+        .map(|(cat, sem)| Item::from_parts(cat, sem, prov, cost))
 }
 
 fn build_but_not(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
@@ -416,10 +475,32 @@ fn build_appositive_obj(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Opti
     g.appositive_obj(l, r)
 }
 
+/// Close nominal apposition. The result is tagged [`Combinator::Apposed`] — the apposition normal
+/// form (see that variant): an already-apposed group takes no SECOND classifier, and this rule's
+/// trigger offers every split of the cell, so without the check the classifiers stack.
+/// `[cat_mod] [cat_group]` -> the group with the modifier distributed over every member. The
+/// modifier must be a plain `cat_mod`; the decision is category-based (the sem is only used to
+/// build), so `reads_sem` stays false.
+fn build_modify_group(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
+    super::super::category::is_ctor(l.cat(), "cat_mod")?;
+    let cost = l.cost().saturating_add(r.cost());
+    super::constructions::modify_group(l.sem(), r.cat(), r.sem(), &g.layer)
+        .map(|(cat, sem)| Item::from_parts(cat, sem, Combinator::Compound, cost))
+}
+
 fn build_appose_group(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
+    // No SECOND classifier over an apposed group, and no classifier over members that are DERIVED
+    // individuals rather than names ([`Combinator::DerivedIndividual`], propagated to the group by
+    // `build_coordinate`).
+    if matches!(
+        r.prov(),
+        Combinator::Apposed | Combinator::DerivedIndividual
+    ) {
+        return None;
+    }
     let cost = l.cost().saturating_add(r.cost());
     appose_group(l.cat(), r.cat(), r.sem(), &g.layer)
-        .map(|(cat, sem)| Item::with_cost(cat, sem, cost))
+        .map(|(cat, sem)| Item::from_parts(cat, sem, Combinator::Apposed, cost))
 }
 
 /// One firing **site** of a token-keyed binary construction inside a chart cell: the two operand
@@ -468,9 +549,14 @@ impl Grammar {
         if !matches!(num, Exp::InductiveCtor(_, n, _) if n == want_num) {
             return Vec::new();
         }
-        let base = base_class(t); // the raised category's NP index (a class in the subsumption lattice)
-        let kind = kind_of(t.clone()); // the nominalized whole type — `kind_of(Σx:C.R)` for a compound
-        det_cats
+        // The determiner-shaped RAISES stay, for the constructions that genuinely need a generalized
+        // quantifier: coordination with a determined GQ ("genes or a cell line"), composition into a
+        // relative clause / extraction, and coordinated predicate nominals. They are kept OUT of plain
+        // application by the Eisner guards (`ProvGuard::LeftNotRaised` / `RightNotKindRaised`), so they
+        // never re-derive what the plain `cat_np` below already gives.
+        let base = base_class(t);
+        let kind = kind_of(t.clone());
+        let mut out: Vec<Item> = det_cats
             .iter()
             .filter_map(|det_cat| {
                 let head = cat_forall_body_head(det_cat)?;
@@ -483,17 +569,42 @@ impl Grammar {
                 let mut subst = CatSubst::new();
                 subst.insert(tvar.clone(), base.clone());
                 let cat = subst_cat(body, &subst);
-                let sem = match head {
-                    // subject-raised `S/(S\NP)`: `λV. V(kind)`.
-                    "fwd" => Exp::Lam(
+                // DISPATCH ON THE CATEGORY'S ARITY, not on the body's head constructor alone. `a`
+                // supplies THREE raised categories and two of them are `bwd`-headed:
+                //
+                //   bwd(cat_s(dcl,adj), cat_np(Entity,num_any))        PREDICATIVE VP, ⟦·⟧ arity 1
+                //   bwd(bwd(cat_s,cat_np), fwd(bwd(cat_s,cat_np),NP))  OBJECT GQ,      ⟦·⟧ arity 2
+                //
+                // Head-dispatch alone gave the predicative category the object-GQ sem `λTV. λsubj. …`,
+                // one λ too deep — 2397 such items on the WRN page, the largest violation of the
+                // category/sem arity invariant and the origin of ~1000 more that inherited it through
+                // application. The head constructor does not determine the arity; the denotation does.
+                let arity = cat_arity_denote(&cat);
+                let sem = match (head, arity) {
+                    // PREDICATIVE: "these groups are MSI lines" — the bare kind predicated of the
+                    // subject. `⟦S[adj]\NP⟧ = Entity → Prop`, so exactly one λ.
+                    //
+                    ("bwd", Some(1)) => Exp::Lam(
+                        Patt::Var("subj".into()),
+                        Box::new(Exp::App(
+                            Box::new(Exp::App(
+                                Box::new(Exp::EigonAxiom(
+                                    crate::ontology::iri::Iri::parse("urn:eigenius:ontology:is_a")
+                                        .expect("is_a iri"),
+                                )),
+                                Box::new(Exp::Var("subj".into())),
+                            )),
+                            Box::new(t.clone()),
+                        )),
+                    ),
+                    ("fwd", _) => Exp::Lam(
                         Patt::Var("V".into()),
                         Box::new(Exp::App(
                             Box::new(Exp::Var("V".into())),
                             Box::new(kind.clone()),
                         )),
                     ),
-                    // object-raised `(S\NP)\((S\NP)/NP)`: `λTV. λsubj. TV(kind, subj)`.
-                    "bwd" => {
+                    ("bwd", _) => {
                         let tv_app = Exp::App(
                             Box::new(Exp::App(
                                 Box::new(Exp::Var("TV".into())),
@@ -508,9 +619,95 @@ impl Grammar {
                     }
                     _ => return None,
                 };
-                // Tag `KindRaised` so the attributive rule can refuse the predicative `S[adj]\NP` form
-                // as a pre-nominal modifier (the bare-mass `And` over-generation), while it stays
-                // available for its legit argument/predication uses. ENF-inert.
+                // THE SEM MUST MATCH THE CATEGORY IT IS STAMPED WITH. The `"bwd"` branch above builds
+                // an arity-2 sem (`λTV. λsubj. …`) for an OBJECT-GQ category
+                // `(S\NP)\((S\NP)/NP)`, whose `⟦·⟧` is arity 2. But the branch is selected by the
+                // body's HEAD CONSTRUCTOR, and a `bwd`-headed body can also be a plain VP
+                // `bwd(cat_s, X)` — arity 1 — in which case the arity-2 sem is one λ too deep.
+                //
+                // Measured on the WRN page with `EIGENIUS_TRACE_UNDERAPP=1`: 2719 such items, the
+                // largest single violation of the category/sem arity invariant on the page and the
+                // ORIGIN of the rest (818 `ForwardApp` + 240 more inherit it, because every
+                // application of an over-abstracted functor stays over-abstracted). Nothing catches it
+                // until the full-span felicity gate, which then reports a type error far from here —
+                // `logic:And` applied to a closure — and, on the one unit where no well-typed route
+                // also fires, an unexplained grammar-gap.
+                //
+                // FAIL CLOSED: do not mint an item whose sem cannot inhabit its own category. This
+                // refuses exactly the inconsistent pairings; a consistent one is untouched.
+                if cat_arity_denote(&cat) != Some(sem_lambda_depth(&sem)) {
+                    if std::env::var("EIGENIUS_TRACE_KR").is_ok() {
+                        eprintln!(
+                            "  !! KR-REFUSED head={head} cat_arity={:?} sem_depth={} cat={:?}",
+                            cat_arity_denote(&cat),
+                            sem_lambda_depth(&sem),
+                            crate::dcg::category::pretty_cat_dbg(&cat)
+                        );
+                    }
+                    return None;
+                }
+                // TWO FIXES FOR THE DISPLACEMENT WERE TRIED AND BOTH FAILED — recorded so neither is
+                // retried. «The lines from rare lineages were less dependent on WRN.» loses its
+                // expected reading once this branch exists.
+                //
+                //   REFUSAL, gated on `is_adjective_refined(noun.cat())`: too broad. It also removes
+                //   "the group is an INDETERMINATE line" — a legitimate predicate nominal over an
+                //   adjective-modified noun — and the target unit gapped again.
+                //
+                //   COST PENALTY of one `COMPOUND_STEP_PENALTY` step: NO EFFECT AT ALL, byte-identical
+                //   page. Which is the diagnosis: the problem is not ranking.
+                //
+                // A THIRD EXPLANATION WAS ALSO WRONG, and is corrected here rather than left standing:
+                // I first read `open 2 -> 1` as OPEN-vs-CLOSED masking — the correct reading still
+                // produced but not counted once a closed rival existed. It is not. Dumped with
+                // `parse_open`, the unit reports NO open parses at all, 8 closed readings over a single
+                // skeleton, and its pinned `λ$anaphor$0. gt(…)` comparative is absent. The reading is
+                // NOT PRODUCED, not merely uncounted — a genuine COVERAGE REGRESSION from this branch.
+                //
+                // The null cost-penalty result should have said so at the time: if the cause were
+                // ranking OR classification, a penalty would have moved something. It moved nothing,
+                // which means the comparative candidate never reaches the point where either applies.
+                // FIVE MECHANISMS HAVE BEEN REFUTED BY MEASUREMENT, recorded so none is retried:
+                //   open-vs-closed masking  the unit reports NO open parses at all, so nothing is
+                //                           merely uncounted (`parse_open` dump).
+                //   ranking / cost          a `COMPOUND_STEP_PENALTY` on this item changed nothing,
+                //                           byte-identical page.
+                //   cell-beam eviction      `cell_beam` defaults to `None` (exact chart) and the
+                //                           packed path passes `None`; the node is never built, not
+                //                           evicted.
+                //   widen-on-failure / cap  raising the harness `SENSE_CAP` 2 -> 4 leaves this unit
+                //                           unchanged (8 readings, 1 skeleton, no open parse).
+                //   classify budget         no `CLASSIFY_BUDGET` drop is logged for this unit.
+                //
+                // ROOT CAUSE, FOUND BY A CAP SWEEP ON A ONE-SENTENCE REPRO (which reproduces the
+                // failure, so it is neither the ranker nor the document glossary):
+                //     cap= 2   open 0   24 closed readings, 2 skeletons
+                //     cap= 8   open 0   48 closed readings, 2 skeletons
+                //     cap=32   open 1    0 closed readings, 8 skeletons   <- comparative returns
+                // CORRECTION: that is NOT a sense-cap truncation, and the cap sweep was over-read.
+                // Diffing the terms at the two caps names the competing analyses exactly:
+                //
+                //   correct   `dependent` + `on`   -> a00725772, WordNet SENSE 1 of the lemma
+                //             ("relying on or requiring a person or thing for support"), used in its
+                //             RELATIONAL frame `deg_a00725772_rel(ground, subject)` with `on` as the
+                //             governed preposition; `less` as a comparative degree operator.
+                //   survives  `dependent on`       -> a00555859 `contingent`, the ONLY sense of the
+                //             MULTIWORD lemma `dependent_on`; plus `less` -> a01555416 `less(a)`, the
+                //             quantifier sense ("comparative of `little', used with mass nouns").
+                //
+                // a00725772 is sense 1 and is dropped by NO cap. The competition is MULTIWORD-vs-
+                // COMPOSITIONAL over the span — the ambiguity `parse::seed` documents as "carried as
+                // competing chart edges" — and the MWE swallows the preposition, which is why `on`
+                // appears to vanish and leaves `WRN` bare for this rule to predicate as a nominal.
+                // Raising the cap changes which full-span candidate survives; it does not restore a
+                // dropped sense, because none was dropped.
+                //
+                // Supporting: parsed STANDALONE the comparative is abundant on BOTH paths —
+                // `unpacked closed×16 open×720`, `packed closed×24 open×1080`. In the page sweep the
+                // same sentence yields ZERO open parses. So the chart builds the reading and the loss
+                // is CONTEXT-DEPENDENT: what the sweep adds is the document glossary (abbreviation /
+                // named-entity injection) and the sense-ranker replay. That is where to look next, not
+                // in this rule and not in the chart. UNRESOLVED; `grammar-gap 0` does not settle it.
                 Some(Item::from_parts(
                     cat,
                     sem,
@@ -518,7 +715,46 @@ impl Grammar {
                     noun.cost(),
                 ))
             })
-            .collect()
+            .collect();
+        // PLAIN `cat_np`, following core-en's `bnp` type-changing rule (`n $1 → np $1`,
+        // `unary-rules.xsl`). A bare kind is NOT a generalized quantifier — core-en type-raises only
+        // `QuantNP` — so under Chierchia's `∩` it denotes an INDIVIDUAL (`kind_of(t) : Entity`) and a
+        // plain referential NP is its correct category.
+        //
+        // Needed because type-raising FIXES the result category: the object raise
+        // `(S\NP)\((S\NP)/NP)` only satisfies a functor whose innermost argument is its NP with
+        // result `S\NP`. A verb with a further argument after its object — the ESSIVE
+        // `((S\NP)/cat_pp_arg(prep_as))/NP`, the ditransitive — is unreachable, and no composition
+        // degree repairs it (`<Bⁿ` needs `((S\NP)/NP)/Z…`; the essive's argument order is reversed).
+        // Witnessed: "We evaluated WRN as a biomarker" parsed (proper noun → plain `cat_np`) while
+        // "We evaluated MSI as a biomarker" gapped (bare kind → raised only). A plain `cat_np` fills
+        // ANY argument slot, closing the whole class of frame instead of one raise shape per frame.
+        //
+        // AGREEMENT: take the number the determiner-derived raise supplied — a bare MASS noun agrees
+        // SINGULAR ("instability affects HeLa"); a bare plural stays plural. Keeping the noun's own
+        // `mass` feature would fail to agree with a 3sg verb.
+        if let Exp::InductiveCtor(decl, _, _) = noun.cat() {
+            if let Exp::InductiveCtor(num_decl, _, _) = num {
+                out.push(Item::from_parts(
+                    Exp::InductiveCtor(
+                        decl.clone(),
+                        "cat_np".into(),
+                        vec![
+                            base_class(t),
+                            Exp::InductiveCtor(
+                                num_decl.clone(),
+                                if want_num == "mass" { "sg" } else { want_num }.into(),
+                                Vec::new(),
+                            ),
+                        ],
+                    ),
+                    kind_of(t.clone()),
+                    Combinator::KindRaised,
+                    noun.cost(),
+                ));
+            }
+        }
+        out
     }
 
     /// Bare-MASS NP shift — the kind shift over a mass noun, singular agreement (reuse `a`).
@@ -541,7 +777,18 @@ impl Grammar {
     /// rule applied at BOTH leaf seeding AND to COMPOSED cells in both chart paths, so a compound
     /// `cat_n` (`repeat regions`, formed by the `KindCompound` rule) shifts exactly like a leaf noun —
     /// `bnp` is a rule over any `n`, not a leaf-only shortcut. Non-`cat_n`/non-plural/non-mass → empty.
+    ///
+    /// **A naming-refined noun is excluded** (2026-07-26): `cat_n(Σx:C. named(x, d), num)` has at most
+    /// ONE inhabitant, so it has no kind to denote — its bare use is [`definite_designation`], which
+    /// gives the individual. Letting `bnp` also fire minted `kind_of(Σx:C. named(x, d))` alongside every
+    /// `the(Σx:C. named(x, d)).1`, a systematic duplicate: `Genes MSH2 affect cells.` returned 8 readings
+    /// of which exactly 4 were that shadow. This is the same kind of normal-form statement as
+    /// [`Guard::NotCompoundRefined`] / [`Guard::NotKindRaised`], not a filter on bad output — a uniquely
+    /// naming restrictor is what makes the kind reading degenerate.
     pub(crate) fn bare_nominal_shifts(&self, it: &Item) -> Vec<Item> {
+        if definite_designation(it.cat()).is_some() {
+            return Vec::new();
+        }
         let mut v: Vec<Item> = crate::dcg::kind_subject(it.cat(), it.sem())
             .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
             .into_iter()
@@ -603,6 +850,10 @@ pub(crate) enum BinRule {
     /// other `BinRule`s there is NO reserved token between the two spans; the head and group are
     /// ADJACENT, so every split is tried and the rule gates by shape + head-kind at construction.
     ApposeGroup,
+    /// `[cat_mod] [cat_group]` -> the group with the modifier distributed over every bare-kind
+    /// member (`modify_group`). Supplies the reading an adjective standing before an RNR-distributed
+    /// modifier coordination needs — "frequent [insertion or deletion] mutations".
+    ModifyGroup,
 }
 
 /// Which composed-cell unary shift a [`super::super::chart::forest::Edge::Unary`] represents (D63 blueprint §11 3c.4b).
@@ -612,8 +863,16 @@ pub(crate) enum UnaryKind {
     Raise,
     /// Bare-plural / bare-mass argument shift: a plural/mass `cat_n` → a deferred-quantifier NP.
     BareNp,
+    /// Definite designation (D63 §5.3): a naming-refined noun `cat_n(Σx:C. named(x, d), num)` → the
+    /// individual it uniquely picks out, `cat_np(C, num)` with `the(Σ…).1`. The bare half of the
+    /// classifier+designator construction, whose `name` rule now yields the refined noun so a
+    /// determiner can reach it (`definite_designation`).
+    DefiniteDesignation,
     /// Fronted participial adjunct: a subject-gapped `ger` VP → a sentence pre-modifier `S/S`.
     FrontParticipial,
+    /// Reduced relative (core-en `rrel`): a subject-gapped `pss` VP → a noun post-modifier `cat_pp`,
+    /// so `pp_mod` attaches it. The post-nominal counterpart of `FrontParticipial`.
+    ReducedRelative,
     /// Fronted-modifier comma absorption (D62 §2 #5): a sentence-initial `S/S` pre-modifier at
     /// `[0, j-1]` absorbs a trailing comma at `j`, yielding the same modifier over `[0, j]` (so it can
     /// forward-apply across the otherwise node-less comma to the matrix clause). The child is the
@@ -627,6 +886,10 @@ pub(crate) enum UnaryKind {
     /// `cat_mod` (`mod_lifts`), so modifiers can coordinate before meeting the head noun. Fires on
     /// composed cells; leaves are lifted at seed time (mirroring `BareNp`).
     ModLift,
+    /// Elided-`than` standard defaulting (D63 §8.12): a comparative awaiting its `than` complement,
+    /// `X / cat_pp_than` → `X` with the standard bound to the anaphoric placeholder (`elided_than`),
+    /// an OPEN parse. Replaces the `more_deg_bare`/`less_deg_bare` lexical entries.
+    ElidedThan,
 }
 
 /// A **composed-cell unary shift** (Phase 2c/2d): its [`UnaryKind`] tag and how it applies to one
@@ -643,22 +906,32 @@ pub(crate) struct UnaryShift {
     apply: UnaryApply,
 }
 
-/// Apply a shift to ONE cell item, given the cell span (for hole freshening). Every shift is
-/// **per-item-independent** — `raise_nps`/`bare_nominal_shifts` map each item alone — so applying the
-/// shift item-by-item (packed) equals applying it to the whole cell at once (unpacked).
-type UnaryApply = fn(&Grammar, &Item, (usize, usize)) -> Vec<Item>;
+/// Apply a shift to ONE cell item, given the cell span (for hole freshening) and the cell's
+/// [`super::RightContext`] (for the constructions whose completeness depends on what follows). Every
+/// shift is **per-item-independent** — `raise_nps`/`bare_nominal_shifts` map each item alone — so
+/// applying the shift item-by-item (packed) equals applying it to the whole cell at once (unpacked);
+/// both the span and the right context are properties of the CELL, so neither breaks that.
+type UnaryApply = fn(&Grammar, &Item, (usize, usize), super::RightContext) -> Vec<Item>;
 
 impl UnaryShift {
-    pub(crate) fn run(&self, g: &Grammar, it: &Item, span: (usize, usize)) -> Vec<Item> {
-        (self.apply)(g, it, span)
+    pub(crate) fn run(
+        &self,
+        g: &Grammar,
+        it: &Item,
+        span: (usize, usize),
+        rctx: super::RightContext,
+    ) -> Vec<Item> {
+        (self.apply)(g, it, span, rctx)
     }
 }
 
-/// The ordered composed-cell shift table (all `const`). **ORDER IS LOAD-BEARING**: coordination
-/// completion, then bare-nominal, then type-raise (so the raise sees the shifted NPs), then fronted
-/// participial — matching the CKY. Both drivers iterate this in order, each shift reading the cell
-/// state left by the previous.
-static UNARY_SHIFTS: [UnaryShift; 5] = [
+/// The ordered composed-cell shift table (all `const`). **ORDER IS LOAD-BEARING**: modifier-lift,
+/// coordination completion, elided-`than` completion, bare-nominal, then type-raise (so the raise sees
+/// the shifted NPs), then fronted participial — matching the CKY. Both drivers iterate this in order,
+/// each shift reading the cell state left by the previous. Elided-`than` sits after coordination and
+/// before the NP shifts: its input `X/cat_pp_than` and output `S[adj]\NP` are untouched by the others,
+/// so its position only keeps it out of `ModLift` (no attributive comparative modifier is minted).
+static UNARY_SHIFTS: [UnaryShift; 8] = [
     UnaryShift {
         kind: UnaryKind::ModLift,
         name: "mod_lift",
@@ -668,6 +941,19 @@ static UNARY_SHIFTS: [UnaryShift; 5] = [
         kind: UnaryKind::CoordComplete,
         name: "coord_complete",
         apply: apply_coord_complete,
+    },
+    UnaryShift {
+        kind: UnaryKind::ElidedThan,
+        name: "elided_than",
+        apply: apply_elided_than,
+    },
+    // Before `BareNp`/`Raise` so the designated individual is available to the raise (a subject GQ /
+    // relative-clause body needs it), and after `ModLift` so it is not also minted as a pre-nominal
+    // modifier — the named-compound rule (`[cat_np] [cat_n]`) already covers that direction.
+    UnaryShift {
+        kind: UnaryKind::DefiniteDesignation,
+        name: "definite_designation",
+        apply: apply_definite_designation,
     },
     UnaryShift {
         kind: UnaryKind::BareNp,
@@ -684,6 +970,11 @@ static UNARY_SHIFTS: [UnaryShift; 5] = [
         name: "front_participial",
         apply: apply_front_participial,
     },
+    UnaryShift {
+        kind: UnaryKind::ReducedRelative,
+        name: "reduced_relative",
+        apply: apply_reduced_relative,
+    },
 ];
 
 pub(crate) fn unary_shifts() -> &'static [UnaryShift] {
@@ -691,36 +982,133 @@ pub(crate) fn unary_shifts() -> &'static [UnaryShift] {
 }
 
 /// Coordination list-completion: fold a prop-ending `cat_coord` into its base category.
-fn apply_coord_complete(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
-    complete_coord(it.cat(), it.sem(), &g.layer)
+fn apply_coord_complete(
+    g: &Grammar,
+    it: &Item,
+    _span: (usize, usize),
+    rctx: super::RightContext,
+) -> Vec<Item> {
+    complete_coord(it.cat(), it.sem(), &g.layer, rctx)
         .map(|(cat, sem)| Item::with_cost(cat, sem, it.cost()))
         .into_iter()
         .collect()
 }
 
 /// Bare-nominal shift: a plural/mass `cat_n` → the copula kind-subject edge + raised bare-argument NPs.
-fn apply_bare_np(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
+fn apply_bare_np(
+    g: &Grammar,
+    it: &Item,
+    _span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
     g.bare_nominal_shifts(it)
 }
 
-/// Pre-nominal modifier lift: a modifier-eligible item → a standalone `cat_mod` (`combinators::mod_lifts`).
-fn apply_mod_lift(_g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
-    super::combinators::mod_lifts(it)
+/// Elided-`than` standard defaulting: a comparative `X / cat_pp_than` → `X` with the standard bound to
+/// the anaphoric placeholder, freshened to this span (`$anaphor$i_j`) exactly as a pronoun's hole — so
+/// the completed clause is an OPEN parse the D64 resolver fills.
+fn apply_elided_than(
+    g: &Grammar,
+    it: &Item,
+    span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
+    let (i, j) = span;
+    elided_than(it.cat(), it.sem(), &g.layer)
+        .map(|(cat, sem)| Item::with_cost(cat, freshen_anaphor(&sem, &hole_base(i, j)), it.cost()))
+        .into_iter()
+        .collect()
+}
+
+/// Pre-nominal modifier lift on COMPOSED cells: an adjective → `cat_mod` (`mod_lifts`), plus a
+/// transitive past participle → a reduced-passive `cat_mod` (`participial_lifts`). Ungated here — a
+/// composed span has no single surface to check for an adjective sibling — so the participial's cost
+/// penalty is what bounds it; the leaf gate lives in `parse::seed` (adjective-present ⇒ suppressed).
+fn apply_mod_lift(
+    _g: &Grammar,
+    it: &Item,
+    _span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
+    let mut v = super::combinators::mod_lifts(it);
+    v.extend(super::combinators::participial_lifts(it));
+    v
 }
 
 /// Forward bounded type-raise: a name `NP` → `S/(S\NP)`.
-fn apply_raise(g: &Grammar, it: &Item, _span: (usize, usize)) -> Vec<Item> {
+fn apply_raise(
+    g: &Grammar,
+    it: &Item,
+    _span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
     g.raise_nps(std::slice::from_ref(it))
 }
 
 /// Fronted participial adjunct: a subject-gapped `ger` VP → a sentence pre-modifier `S/S`, its
 /// controlled-subject hole freshened to this span.
-fn apply_front_participial(g: &Grammar, it: &Item, span: (usize, usize)) -> Vec<Item> {
+fn apply_front_participial(
+    g: &Grammar,
+    it: &Item,
+    span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
     let (i, j) = span;
     front_participial(it.cat(), it.sem(), &g.layer)
         .map(|(cat, sem)| Item::with_cost(cat, freshen_anaphor(&sem, &hole_base(i, j)), it.cost()))
         .into_iter()
         .collect()
+}
+
+/// Reduced relative: `S[dcl,pss]\NP` → `cat_pp` with the sem carried through unchanged (both denote
+/// `Entity -> Prop`), so the existing `pp_mod` rule conjoins it into the noun's restrictor.
+/// Definite designation: a naming-refined noun → the individual it uniquely picks out. Tagged
+/// [`Combinator::DerivedIndividual`], the only thing distinguishing it from a proper name downstream.
+fn apply_definite_designation(
+    _g: &Grammar,
+    it: &Item,
+    _span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
+    definite_designation(it.cat())
+        .map(|(cat, sem)| Item::from_parts(cat, sem, Combinator::DerivedIndividual, it.cost()))
+        .into_iter()
+        .collect()
+}
+
+fn apply_reduced_relative(
+    g: &Grammar,
+    it: &Item,
+    _span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
+    reduced_relative(it.cat(), &g.layer)
+        .map(|cat| Item::with_cost(cat, it.sem().clone(), it.cost()))
+        .into_iter()
+        .collect()
+}
+
+/// Arrow depth of `⟦cat⟧` — how many arguments a category declares. `None` if `⟦·⟧` fails.
+fn cat_arity_denote(c: &Exp) -> Option<usize> {
+    let mut t = super::super::category::denote_cat(c).ok()?;
+    let mut n = 0;
+    while let Exp::Arrow(_, cod) | Exp::Pi(_, _, cod) = t {
+        t = *cod;
+        n += 1;
+    }
+    Some(n)
+}
+
+/// Leading-λ count of a sem term. These sems are built here as explicit nested `Exp::Lam`s, so a
+/// syntactic count is exact — no evaluation needed.
+fn sem_lambda_depth(sem: &Exp) -> usize {
+    let mut e = sem;
+    let mut n = 0;
+    while let Exp::Lam(_, body) = e {
+        e = body;
+        n += 1;
+    }
+    n
 }
 
 #[cfg(test)]

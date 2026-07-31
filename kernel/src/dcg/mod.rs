@@ -33,15 +33,18 @@
 //!   + multi-span lemmatized seeding + CKY + the kernel felicity filter.
 
 pub mod abbrev;
+pub mod attribution;
 pub mod augment;
 pub mod category;
 pub(crate) mod chart;
+pub mod closed_class;
 pub mod glossary;
 mod grammar;
 mod holes;
 pub mod item;
 pub mod lemmatizer;
 pub mod lexicon;
+pub mod named_entity;
 pub mod parse;
 pub mod pipeline;
 pub mod pretty;
@@ -49,6 +52,7 @@ mod reserved;
 mod rules;
 pub mod segment;
 pub mod sense_ranker;
+pub mod skeleton;
 
 /// Direct Anthropic tool-use client for the reasoning-layer LLM calls (sense ranker / proposers) —
 /// structured output via forced `tool_choice`, replacing the `allms` prompt-inject-and-parse path.
@@ -83,14 +87,16 @@ pub use category::{
 pub use glossary::AnthropicAbbreviationProposer;
 pub use glossary::{
     abbreviation_resources, document_glossary_resources, document_glossary_resources_with,
-    glossary_resources, ground_abbreviation, ground_long_form, AbbreviationBinding,
+    glossary_resources, ground_abbreviation, ground_long_form, is_adjective, is_apposition_head,
+    is_common_noun, named_entity_augmentation, AbbreviationBinding,
 };
 pub use item::{Combinator, Cost, Item};
-pub use lemmatizer::{Identity, Lemmatizer, Pos};
+pub use lemmatizer::{regular_plural_stem, Identity, Lemmatizer, Pos};
 pub use lexicon::{
     entry_to_item, gate_entry, resolve_lexicon_profile, resolve_sem, resolve_sem_value, LexEntry,
     LexicalIndex, LexicalLookup,
 };
+pub use named_entity::{extract_named_entities_with, NamedEntity};
 pub use parse::{
     Candidate, HoleInfo, HoleKind, OpenParse, ParseConfig, Parser, ProposeCtx, Proposer,
     SentenceOutcome, DEFAULT_FOREST_CAP,
@@ -102,6 +108,7 @@ pub use rules::constructions::{
     appose_group, cats_coordinate, complete_coord, coordinate_np, coordinate_prop, distribute,
     distribute_object, kind_subject, reciprocate, relativize, type_raise,
 };
+pub use rules::RightContext;
 pub use segment::{is_nonprose, segment_sentences, tokenize};
 #[cfg(feature = "use-llm")]
 pub use sense_ranker::AnthropicSenseRanker;

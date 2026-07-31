@@ -158,6 +158,8 @@ data lexicon:Prep {
     prep_about,   // "concerned about"
     prep_against, // "protective against"
     prep_into,    // "differentiate into"
+    prep_of,      // "consists of", "composed of" — added 2026-07-26; `of` had a noun-post-modifier
+                  // entry but no governed-arg one, so "MSI consists of repeats." gave 0 readings
     prep_as,      // essive / object-predicative "as": "identify X as Y", "regard X as Y" (D63 §5.3)
     prep_any,     // underspecified ⊤: meets any specific prep. Prep-agnostic verb frames
                   // carry this; a specific marker refines it at composition.
@@ -331,6 +333,10 @@ property lexicon:sense : core:string {
 }
 property lexicon:sense_rank : core:integer {
     description = "Optional 0-based sense-FREQUENCY rank (D63 §8.7 Stage B): for a polysemous lemma, its senses in WordNet `index.<pos>` order are frequency-sorted (sense 1 = most frequent), so rank = sense index − 1. The parser sums leaf ranks into a parse COST and returns the forest lowest-cost-first, capped — so the most-frequent-sense readings rank first. Absent ⇒ 0 (closed-class / domain entries are unranked, hence never penalized).";
+    domain lexicon:LexicalEntry;
+}
+property lexicon:scope_bearing : core:boolean {
+    description = "The entry is a SCOPE-BEARING operator: applying it EMBEDS its argument under a connective and yields a new situation index, rather than decorating the argument's. Sentential negation, the modals, declarative do-support. Read once at seed time (dcg::lexicon::entry_to_item), which tags the leaf Combinator::ScopeOperator; the combinator then tags the operator's OUTPUT Combinator::Modal, and ProvGuard::LeftNotModal refuses a VP-adjunct that would attach ABOVE it — where it would land on the outer index and escape the operator's scope ('do not respond to X' must not mean 'do not respond, AND respond to X'). The distinction is core-en's: its Negation family (auxv.xsl, pos=V closed) is (s.1.from-6.E\\np)/(s.6.E2\\np), deriving a NEW index from its argument's, while its Adverb family (adv.xsl, pos=Adv) is s.1.E\\s.1.E with LF HasProp(E,P) — the SAME index, decorated. DECLARED rather than inferred from the category, because no category test separates negation over an adjectival VP from an adverb's adjective-modifier category: both are fwd(VP[adj], VP[adj]). Absent ⇒ false.";
     domain lexicon:LexicalEntry;
 }
 property lexicon:grade : core:resource {

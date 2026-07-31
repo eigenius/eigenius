@@ -323,16 +323,34 @@ mod tests {
             cat_n("urn:eigenius:umlscui:C1"),
             cls("urn:eigenius:umlscui:C1"),
         );
-        let det_id = f.get_or_create(0, 0, node_sig(&det), &det);
+        let det_id = f.get_or_create(
+            0,
+            0,
+            node_sig(&det),
+            &det,
+            crate::dcg::rules::RightContext::Other,
+        );
         f.push_edge(det_id, Edge::Leaf(det.clone()));
-        let mw_id = f.get_or_create(1, 2, node_sig(&mw), &mw);
+        let mw_id = f.get_or_create(
+            1,
+            2,
+            node_sig(&mw),
+            &mw,
+            crate::dcg::rules::RightContext::Other,
+        );
         f.push_edge(mw_id, Edge::Leaf(mw.clone()));
         // A combined node spanning [0..2].
         let np = leaf(
             ctor("cat_np", vec![cls("urn:eigenius:umlscui:C1")]),
             Exp::Unit,
         );
-        let np_id = f.get_or_create(0, 2, node_sig(&np), &np);
+        let np_id = f.get_or_create(
+            0,
+            2,
+            node_sig(&np),
+            &np,
+            crate::dcg::rules::RightContext::Other,
+        );
         f.push_edge(
             np_id,
             Edge::Combine {
@@ -412,13 +430,25 @@ mod tests {
         let tokens: Vec<String> = ["x", "y"].iter().map(|s| s.to_string()).collect();
         let mut f = Forest::new(2);
         let child = leaf(cat_n("urn:eigenius:umlscui:C9"), Exp::Unit);
-        let cid = f.get_or_create(0, 0, node_sig(&child), &child);
+        let cid = f.get_or_create(
+            0,
+            0,
+            node_sig(&child),
+            &child,
+            crate::dcg::rules::RightContext::Other,
+        );
         f.push_edge(cid, Edge::Leaf(child.clone()));
         let parent = leaf(
             ctor("cat_np", vec![cls("urn:eigenius:umlscui:C9")]),
             Exp::Unit,
         );
-        let pid = f.get_or_create(0, 1, node_sig(&parent), &parent);
+        let pid = f.get_or_create(
+            0,
+            1,
+            node_sig(&parent),
+            &parent,
+            crate::dcg::rules::RightContext::Other,
+        );
         // Two Unary edges onto the same child → the second must be deduped.
         f.push_edge(
             pid,

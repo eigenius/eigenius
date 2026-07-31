@@ -136,6 +136,14 @@ pub struct Report {
     /// `cat_n(C, mass)` entry emitted for a lemma flagged uncountable, enabling the bare-mass
     /// argument shift. Zero when no countability lexicon is supplied.
     pub mass_entries: usize,
+    /// Multiword adjective lemmas skipped because they merely restate a governed-preposition frame
+    /// the base adjective already carries ([`restates_governed_frame`]).
+    pub frame_duplicate_skipped: usize,
+    /// Verb lemmas skipped because they are the COPULA (`be`) — grammar the closed-class bootstrap
+    /// owns. WordNet's content senses of it (including a frame-6 LINKING entry over an opaque 2-place
+    /// axiom) compete with the copula and re-encode `X is P` as `be(λx.P(x), X)`. Counts lemma skips,
+    /// so one per (frame-kind × synset) occurrence of `be`.
+    pub copula_skipped: usize,
 }
 
 /// The emittable categorial shapes a verb frame maps to. Higher-order shapes
@@ -311,6 +319,17 @@ fn push_entry(
     sense: &str,
     ranks: &SenseRanks,
 ) {
+    // CLOSED-CLASS SURFACE: the bootstrap owns this word's grammatical reading, so WordNet must not
+    // seed a content entry on it (`eigenius_kernel::dcg::closed_class`, the list both importers share).
+    // WordNet's collisions here are element-symbol / acronym homonyms — `As` is BOTH arsenic
+    // (14629149) and American Samoa (08991878), `Be` beryllium, `In` indium — which let a function word
+    // pile into a compound noun: "We evaluated MSI **as** a biomarker for WRN dependency" parsed as a
+    // compound "a Microsatellite-Instability *As* dependency" (19 structural readings, the WRN page's
+    // worst unit). The single choke point for all emission sites, so every POS is covered at once; the
+    // synset's axioms still ship (only the ENTRY is withheld, mirroring the UMLS importer).
+    if eigenius_kernel::dcg::closed_class::is_closed_class_surface(form) {
+        return;
+    }
     // Sense-frequency rank (D63 §8.7 Stage B): emit `lexicon:sense_rank` only when it is
     // non-zero (rank 0 = the most-frequent sense, and the parser's default — so the
     // overwhelming majority of entries stay rank-free, keeping the ESL lean).
@@ -523,6 +542,29 @@ fn head_pps(lemma: &str) -> Vec<String> {
 /// A curated, high-precision set: each canonically licenses `V NP as NP`. Any synset containing one of
 /// these lemmas gets an ADDITIONAL [`FrameKind::Essive`] category (in [`push_verb`]) on top of its
 /// frame-derived categories. British + American spellings both listed.
+/// Verbs that take an oblique PP complement WordNet's frame inventory does not record — the verb
+/// analogue of `adjective-frames.tsv`. WordNet's PP frames (4/12/23/27) are the only route to
+/// [`FrameKind::PpOblique`], and a verb whose synsets carry only transitive frames therefore cannot
+/// take a marked complement at all.
+///
+/// Witnessed 2026-07-26 on `compare`: its synsets carry frames 8/9/10/11 (transitive) only, so
+/// `compared` had `(S[pss]\NP)/NP` but NO `(S[pss]\NP)/cat_pp_arg(...)`. "compared to MSS cell
+/// lines" therefore had no participial derivation and collapsed into the NOUN reading
+/// (`wn:compare.n.04746842`, *comparison*) — which is why the reference page's worst unit (204
+/// skeletons) heads its essive NP on *comparison* in 84 readings and has NO fully-correct reading.
+///
+/// Additive, like [`ESSIVE_VERBS`]: a synset containing one of these lemmas gets an EXTRA
+/// [`FrameKind::PpOblique`] category on top of its frame-derived ones. The emitted marker is
+/// `prep_any` (the wildcard that meets any specific marker), matching how WordNet's own PP frames are
+/// treated — the governed preposition is not recorded per-verb here, only the fact that an oblique
+/// complement is licensed.
+const PP_OBLIQUE_VERBS: &[&str] = &["compare", "contrast"];
+
+/// Whether `lemma` licenses an oblique PP complement per the curated set ([`PP_OBLIQUE_VERBS`]).
+fn is_pp_oblique_verb(lemma: &str) -> bool {
+    PP_OBLIQUE_VERBS.contains(&lemma.to_ascii_lowercase().as_str())
+}
+
 const ESSIVE_VERBS: &[&str] = &[
     "identify",
     "regard",
@@ -580,7 +622,12 @@ const ESSIVE_VERBS: &[&str] = &[
     "utilise",
     "employ",
     "adopt",
-    // --- Group 6: High-Frequency / High-Risk (Apply low verb-prior weights) ---
+    // --- Group 6: Appraisal & Assessment (verb-dominant; `evaluate X as Y` — the WRN `We evaluated
+    //     MSI as a biomarker for WRN dependency` case, which gapped without this) ---
+    "evaluate",
+    "assess",
+    "deem",
+    // --- Group 7: High-Frequency / High-Risk (Apply low verb-prior weights) ---
     //   "see",   // Danger: Hyper-frequent. Must not override standard transitive "see [NP]".
     //   "use",   // Danger: Hyper-frequent noun/verb.
     //   "class", // Danger: Hyper-frequent noun ("the python class").
@@ -601,6 +648,11 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
     // of the synset's frame-derived categories.
     if syn.words.iter().any(|w| is_essive_verb(w)) {
         kinds.insert(FrameKind::Essive);
+    }
+    // Same shape for the oblique-PP complement WordNet does not record ("compared TO X") — see
+    // `PP_OBLIQUE_VERBS`.
+    if syn.words.iter().any(|w| is_pp_oblique_verb(w)) {
+        kinds.insert(FrameKind::PpOblique);
     }
     if kinds.is_empty() {
         rep.verbs_deferred += 1;
@@ -629,6 +681,22 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
         // (3sg/pl) and the participles existed.
         let cat_fin_past = kind.cat("fin", "num_any");
         for (i, lemma) in syn.words.iter().enumerate() {
+            // The COPULA is grammar, not a content verb: skip WordNet's `be` senses (D63, the WRN
+            // page's worst unit). WordNet gives `be` 8 verb synsets, and `02604760` "have the quality
+            // of being" carries frame 6 → `FrameKind::LinkingAdj`, so it emits a linking entry
+            // `(S[dcl,fin]\NP)/(S[dcl,adj]\NP)` over an OPAQUE 2-place axiom. That re-encodes "X is P"
+            // as `be(λx.P(x), X)` — destroying the copula's transparency, since `X is P` **is** `P(X)`
+            // — and competes with the closed-class copula that already covers every inflection
+            // (`ontologies/lexicon/closed-class.esl`). Measured: that opaque-`be` family plus a
+            // type-raising artifact riding on it accounted for 8 of the 16 structural readings of
+            // "These classifications were highly concordant with … and with …". Per-LEMMA, not
+            // per-synset: `be`'s synsets also carry legitimate content lemmas (`follow`, `live`,
+            // `equal`, `cost`), which keep their entries. `have`/`do` are NOT skipped — they are
+            // genuine content verbs on this corpus ("this state has frequent … mutations").
+            if is_copula_lemma(lemma) {
+                rep.copula_skipped += 1;
+                continue;
+            }
             let sense = sense_key(syn, lemma);
             // Base form — the lemma surface (do-support / modal complement; num_any).
             push_entry(
@@ -712,8 +780,76 @@ fn push_sem_term(buf: &mut String, id: &str, term: &str) {
 }
 
 /// The predicative adjective category `S[dcl,adj]\NP` (requires the copula; D63 §8.5 3a).
+/// Whether `lemma` is the COPULA — grammar the closed-class bootstrap owns, so WordNet's content verb
+/// senses of it must not be emitted (see the skip in [`push_verb`]). Only `be` itself: the importer
+/// derives every inflection (`is`/`are`/`was`/`were`) from the lemma, so skipping the lemma removes them
+/// all. `being` is not listed because it is not a verb LEMMA here (and is a legitimate common noun).
+fn is_copula_lemma(lemma: &str) -> bool {
+    lemma.trim().eq_ignore_ascii_case("be")
+}
+
 fn adj_cat() -> String {
     format!("lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))")
+}
+
+/// Curated adjective **subcategorization frames** (lemma → governed preposition) — the frame-acquisition
+/// source for [`governed_preposition`] when WordNet's gloss yields none (low-recall: it needs the lemma
+/// followed by its prep in its OWN gloss, missing e.g. "dependent" → "on"). Embedded at compile time
+/// (`include_str!`) and parsed once; the high-confidence output an LLM proposer gives for a gradable
+/// adjective's frame (offline generation is the scale path). Crate-local (`crates/eigenius-wordnet/
+/// adjective-frames.tsv`) so it is embeddable inside the Docker build context (a sibling of the
+/// runtime-arg `experiments/lexicon-align/drops.json`/`merges.json`, which are read at import instead).
+fn adjective_frames() -> &'static BTreeMap<String, String> {
+    static FRAMES: std::sync::OnceLock<BTreeMap<String, String>> = std::sync::OnceLock::new();
+    FRAMES.get_or_init(|| {
+        include_str!("../adjective-frames.tsv")
+            .lines()
+            .filter_map(|l| {
+                let l = l.trim();
+                if l.is_empty() || l.starts_with('#') {
+                    return None;
+                }
+                let mut f = l.split('\t');
+                Some((
+                    f.next()?.trim().to_lowercase(),
+                    f.next()?.trim().to_string(),
+                ))
+            })
+            .collect()
+    })
+}
+
+/// Whether `lemma` is a **multiword adjective that merely restates a governed-preposition frame** —
+/// `X P` where the base adjective `X` is already known to govern `P` ([`adjective_frames`]).
+///
+/// Such a lemma is REDUNDANT with the compositional analysis and competes destructively with it for
+/// the same span. WordNet lists `dependent on` as its own adjective lemma, sole sense `a00555859`
+/// (`contingent`), beside the base `dependent` whose sense 1 `a00725772` ("relying on or requiring a
+/// person or thing for support") already carries a `cat_pp_arg(prep_on)` frame from this very table.
+/// So the span "dependent on WRN" has two analyses: the compositional relational one, and the MWE —
+/// which SWALLOWS THE PREPOSITION and leaves the PP's object stranded as a bare noun.
+///
+/// Measured on the WRN page: that stranding is what let «The lines from rare lineages were less
+/// dependent on WRN.» parse as `is_a(the line …, Σ:WRN-protein. And(contingent, less))` — asserting a
+/// cell line IS a WRN protein — while its correct comparative reading was lost. Six other hypotheses
+/// for that regression were tried and refuted; this is the one the evidence supports.
+///
+/// The gate is DELIBERATELY NARROW and fails safe: the drop fires only where the base adjective's
+/// governance of that exact preposition is KNOWN, so genuine idioms — `all in`, `boxed in`, `agreed
+/// upon`, `contingent on` — are untouched, because their bases are not gloss-governed for those
+/// prepositions. Against WordNet 3.0 it removes exactly ONE lemma today (`dependent on`) out of 57
+/// multiword prepositional adjectives, and it widens automatically as `adjective-frames.tsv` grows —
+/// that file is the frame-acquisition source, so a new frame retires its own MWE duplicate.
+///
+/// Same discipline as the closed-class surface list and `GRAMMATICAL_SURFACES`: do not seed a lexical
+/// entry that merely restates a grammatical relation the grammar already builds.
+fn restates_governed_frame(lemma: &str) -> bool {
+    let Some((base, prep)) = lemma.rsplit_once(' ') else {
+        return false;
+    };
+    adjective_frames()
+        .get(&base.to_lowercase())
+        .is_some_and(|p| p.eq_ignore_ascii_case(prep))
 }
 
 /// The preposition governed by a relational gradable adjective, derived from its WordNet **gloss**
@@ -756,7 +892,12 @@ fn governed_preposition(gloss: &str, lemma: &str) -> Option<String> {
         }
         from += i + key.len();
     }
-    None
+    // (3) Curated / LLM frame fallback — the gloss heuristic is low-recall (misses "dependent" → "on",
+    // whose gloss says "contingent on"). A frame is admitted only if its preposition is in `PREPS`.
+    adjective_frames()
+        .get(&lemma.to_lowercase())
+        .filter(|p| PREPS.contains(&p.as_str()))
+        .cloned()
 }
 
 /// Map a `governed_preposition` result to its `lexicon:Prep` feature constructor (D63 §5.3
@@ -807,6 +948,10 @@ fn push_adj(
         rep.adj_axioms += 1;
         let cat = adj_cat();
         for (i, lemma) in syn.words.iter().enumerate() {
+            if restates_governed_frame(lemma) {
+                rep.frame_duplicate_skipped += 1;
+                continue;
+            }
             push_entry(
                 buf,
                 &format!("e_{loc}_{i}"),
@@ -849,6 +994,20 @@ fn push_adj(
         buf.push_str(&format!(
             "axiom wn:deg_{loc}_rel : {ENTITY_TOP} -> {ENTITY_TOP} -> core:float\n\n"
         ));
+        // C3-positive (Fix A piece (c), d63-single-skeleton-defects.md): the POSITIVE relational
+        // predication — "these classifications are concordant WITH X", "WRN is essential FOR
+        // proliferation". Exactly the 1-place positive (`pos_sem`: measure vs the absolute standard)
+        // with the GROUND threaded: `λr. λx. gt(deg_rel(r, x), std)`. Without it a governed adjective
+        // had NO positive relational reading — only the comparative consumed the `cat_measure/cat_pp_arg`
+        // form — so "concordant with X" fell back to a 1-place adjective plus a free `with` VP-adjunct
+        // (`And(gt(concordant(x)), prep_with(x, X))`), which does not bind the relatum into the degree.
+        // Reuses `std_{loc}` deliberately: the positive's standard is ABSOLUTE (unlike the comparative's
+        // anaphoric `cmp_attrib_sem`), and the standard is a per-sense threshold, not per-ground.
+        push_sem_term(
+            buf,
+            &format!("pos_rel_sem_{loc}"),
+            &format!("( fun (r : {ENTITY_TOP}) => fun (x : {ENTITY_TOP}) => measurements:gt(wn:deg_{loc}_rel(r, x), wn:std_{loc}) : {ENTITY_TOP} -> {prop_arrow} )"),
+        );
     }
     push_sem_term(
         buf,
@@ -873,6 +1032,10 @@ fn push_adj(
     let cmp_cat = format!("lexicon:fwd({}, lexicon:cat_pp_than)", adj_cat());
     let cmp_arrow = format!("{ENTITY_TOP} -> {prop_arrow}");
     for (i, lemma) in syn.words.iter().enumerate() {
+        if restates_governed_frame(lemma) {
+            rep.frame_duplicate_skipped += 1;
+            continue;
+        }
         let sense = sense_key(syn, lemma);
         // Positive: gt(deg(x), std).
         push_entry(
@@ -916,6 +1079,27 @@ fn push_adj(
                 ),
                 &format!("deg_{loc}_rel"),
                 &format!("{ENTITY_TOP} -> {ENTITY_TOP} -> core:float"),
+                &sense,
+                ranks,
+            );
+            rep.entries += 1;
+            // C3-positive (Fix A (c)): the POSITIVE relational predication `(S[adj]\NP)/cat_pp_arg(prep)`
+            // — consume the governed PP (the ground), yield a predicative adjective comparing the
+            // 2-place measure to the absolute standard. This is what lets "concordant WITH X" bind X as
+            // the relatum instead of stranding it as a free VP-adjunct; the copula then lifts it as any
+            // other predicative adjective. Additive: the `cat_measure` form above still serves the
+            // comparative (`more concordant with X than …`).
+            push_entry(
+                buf,
+                &format!("e_{loc}_{i}_rp"),
+                lemma,
+                &format!(
+                    "lexicon:fwd({}, lexicon:cat_pp_arg({}))",
+                    adj_cat(),
+                    prep_ctor(&prep)
+                ),
+                &format!("pos_rel_sem_{loc}"),
+                &cmp_arrow,
                 &sense,
                 ranks,
             );
@@ -1105,6 +1289,42 @@ fn route(block: &str, decls: &mut String, entries: &mut Vec<String>) {
 
 #[cfg(test)]
 mod tests {
+
+    /// The frame-duplicate drop must be NARROW: it fires only where the base adjective's governance
+    /// of that exact preposition is known, so genuine idioms survive.
+    #[test]
+    fn frame_duplicate_drop_spares_idioms() {
+        // `dependent` -> `on` IS in adjective-frames.tsv, so the MWE duplicates the compositional
+        // relational analysis and must go.
+        assert!(restates_governed_frame("dependent on"));
+
+        // Idioms and non-governed pairs must SURVIVE. `contingent on` shares a synset with
+        // `dependent on`, but `contingent` is not gloss-governed, so the criterion leaves it alone —
+        // deliberately: the drop is keyed on KNOWN governance, not on shape.
+        for keep in [
+            "contingent on",
+            "contingent upon",
+            "all in",
+            "boxed in",
+            "agreed upon",
+            "adequate to",
+            "comparable to",
+            "dependent",
+            "essential",
+        ] {
+            assert!(
+                !restates_governed_frame(keep),
+                "{keep} must not be dropped — its base is not gloss-governed for that preposition"
+            );
+        }
+
+        // Every governed pair in the table is a drop candidate by construction; check one more so a
+        // future table edit cannot silently make the rule inert.
+        assert!(
+            restates_governed_frame("essential for")
+                || !adjective_frames().contains_key("essential")
+        );
+    }
     use super::*;
     use crate::wndb::parse_data_line;
 
@@ -1438,6 +1658,17 @@ mod tests {
     }
 
     #[test]
+    fn evaluate_is_a_curated_essive_verb() {
+        // `We evaluated MSI as a biomarker for WRN dependency` gapped because `evaluate` was not in the
+        // essive set; guard the appraisal group. `treat`/`use` stay out (dominant-noun risk).
+        assert!(is_essive_verb("evaluate"));
+        assert!(is_essive_verb("assess"));
+        assert!(is_essive_verb("deem"));
+        assert!(!is_essive_verb("treat"));
+        assert!(!is_essive_verb("use"));
+    }
+
+    #[test]
     fn essive_verb_emits_object_predicative_as_frame() {
         // `identify` is a curated essive verb (D63 §5.3): on TOP of its frame-derived transitive
         // category, `push_verb` emits the object-predicative essive `((S\NP)/cat_pp_arg(prep_as))/NP` —
@@ -1575,6 +1806,36 @@ mod tests {
     }
 
     #[test]
+    fn copula_lemma_is_skipped_but_its_synset_siblings_survive() {
+        // The copula is grammar (closed-class bootstrap), so WordNet's `be` verb senses must not be
+        // emitted — its frame-6 LINKING entry re-encodes "X is P" as an opaque `be(λx.P(x), X)` and
+        // competed with the copula (8 of 16 readings on the WRN page's worst unit). The skip is
+        // per-LEMMA: a synset carrying `be` alongside a content lemma keeps the content lemma.
+        let be_and_follow =
+            syn("02445925 41 v 02 be 0 follow 9 000 02 + 22 00 + 08 01 | work in a specific place");
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_verb(&mut buf, &be_and_follow, &mut rep, &SenseRanks::new());
+        assert!(
+            !buf.contains("lexicon:form     = \"be\";"),
+            "the copula lemma must not be emitted:\n{buf}"
+        );
+        assert!(
+            !buf.contains("lexicon:form     = \"were\";")
+                && !buf.contains("lexicon:form     = \"is\";"),
+            "nor any inflection derived from it:\n{buf}"
+        );
+        assert!(
+            buf.contains("lexicon:form     = \"follow\";"),
+            "the synset's content sibling lemma MUST survive:\n{buf}"
+        );
+        assert!(rep.copula_skipped > 0, "the skip is counted");
+        // `have`/`do` are genuine content verbs on this corpus and are NOT skipped.
+        assert!(!is_copula_lemma("have") && !is_copula_lemma("do"));
+        assert!(is_copula_lemma("be") && is_copula_lemma("Be"));
+    }
+
+    #[test]
     fn linking_verb_emits_copula_adjective_category() {
         // frames 6/7 → linking (copular) verb (D63 §8.5, gap #5 `remained true`): an opaque
         // `(Entity → Prop) → Entity → Prop` axiom and the category `(S[dcl,fin]\NP)/(S[dcl,adj]\NP)`,
@@ -1682,6 +1943,28 @@ mod tests {
     }
 
     #[test]
+    fn governed_preposition_falls_back_to_curated_frames() {
+        // Fix A piece (a): the REAL "dependent" synset glosses are "addicted to a drug" / "contingent on
+        // something else" — no "dependent on", so the gloss heuristic yields NONE. The curated frame file
+        // (adjective-frames.tsv) supplies the governed preposition.
+        assert_eq!(
+            governed_preposition("contingent on something else", "dependent"),
+            Some("on".to_string())
+        );
+        assert_eq!(
+            governed_preposition("absolutely necessary; vitally necessary", "essential"),
+            Some("for".to_string())
+        );
+        // A gloss-derived prep still wins (the fallback only fires when the gloss yields none).
+        assert_eq!(
+            governed_preposition("usually followed by `to'", "proportional"),
+            Some("to".to_string())
+        );
+        // An adjective in neither the gloss nor the frame file stays non-relational.
+        assert_eq!(governed_preposition("of great size", "large"), None);
+    }
+
+    #[test]
     fn relational_gradable_adjective_emits_ground_taking_measure() {
         // C3: a gradable adjective whose gloss governs a preposition (`dependent on`) also gets a 2-place
         // measure `deg_rel` + a `cat_measure/cat_pp_arg` reading (the ground `on X` fills the first arg),
@@ -1714,6 +1997,53 @@ mod tests {
         assert!(buf.contains("lexicon:sem      = wn:deg_a00000001_rel;"));
         // the bare 1-place measure (C1) is STILL present for the ground-less reading.
         assert!(buf.contains("lexicon:sem      = wn:deg_a00000001;"));
+    }
+
+    #[test]
+    fn relational_gradable_adjective_emits_positive_predication() {
+        // C3-positive (Fix A (c)): the relational adjective ALSO gets a POSITIVE predicative reading
+        // `(S[adj]\NP)/cat_pp_arg(prep)` — consume the governed PP (the ground), compare the 2-place
+        // measure to the ABSOLUTE standard: `λr.λx. gt(deg_rel(r, x), std)`. Without it "dependent ON
+        // WRN" / "concordant WITH X" had no reading binding the relatum into the degree — only the
+        // comparative consumed the `cat_measure` form — so the PP stranded as a free VP-adjunct.
+        let dependent = syn(
+            "00000001 00 a 01 dependent 0 000 | contingent on something; \"dependent on charity\"",
+        );
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_adj(
+            &mut buf,
+            &dependent,
+            &mut rep,
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+        );
+        // The positive-relational sem: the 2-place measure vs the absolute standard.
+        assert!(
+            buf.contains("measurements:gt(wn:deg_a00000001_rel(r, x), wn:std_a00000001)"),
+            "positive relational sem `gt(deg_rel(r, x), std)`:\n{buf}"
+        );
+        // The predicative category taking the governed PP as its argument.
+        assert!(
+            buf.contains(
+                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_on)) );"
+            ),
+            "positive relational cat `(S[adj]\\NP)/cat_pp_arg(prep_on)`:\n{buf}"
+        );
+        assert!(buf.contains("lexicon:sem      = wn:pos_rel_sem_a00000001;"));
+        // A NON-relational gradable adjective gets no positive-relational entry (nothing to ground).
+        let mut buf2 = String::new();
+        push_adj(
+            &mut buf2,
+            &syn("00000002 00 a 01 large 0 000 | of great size"),
+            &mut Report::default(),
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+        );
+        assert!(
+            !buf2.contains("pos_rel_sem_"),
+            "a non-governed adjective must not get a positive-relational reading:\n{buf2}"
+        );
     }
 
     #[test]

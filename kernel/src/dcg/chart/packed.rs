@@ -62,7 +62,8 @@ impl Grammar {
                     let lk = self.kbest(forest, l, k, memo);
                     let rk = self.kbest(forest, r, k, memo);
                     let layer = &self.layer;
-                    self.cube(&lk, &rk, k, &mut cands, |l, r| apply(l, r, layer));
+                    let rctx = forest.nodes[node_id].rctx;
+                    self.cube(&lk, &rk, k, &mut cands, |l, r| apply(l, r, layer, rctx));
                 }
                 packed::Edge::Binary { left, right, rule } => {
                     let (l, r, rule) = (*left, *right, *rule);
@@ -76,12 +77,45 @@ impl Grammar {
                     let (child, kind) = (*child, *kind);
                     let ck = self.kbest(forest, child, k, memo);
                     for it in &ck {
-                        self.materialize_unary(it, kind, span, &mut cands);
+                        self.materialize_unary(
+                            it,
+                            kind,
+                            span,
+                            forest.nodes[node_id].rctx,
+                            &mut cands,
+                        );
                     }
                 }
             }
         }
         cands.sort_by_key(|it| it.cost());
+        // Spend `k` on DISTINCT (category, sem) pairs. A node's edges routinely materialise the same
+        // item twice — after core-en's `bnp` a bare kind reaches an argument slot both as a plain
+        // `cat_np` and as its raised copy, and the two assemble identical sems — and each duplicate
+        // otherwise consumes a k-best slot, evicting a genuinely different reading at the SAME cost
+        // of a cheaper one. Witnessed: "The MSI relationship compared favourably to other strong
+        // biomarkers for vulnerabilities." saturated k=256 with 52 distinct readings and lost its
+        // nested-PP bracketing. Keyed on the category too, not the sem alone: a refined `cat_n`
+        // carries its restrictor INSIDE the category, so two items sharing a sem can still combine
+        // differently upstream. Cost-sorted first, so the survivor is the cheapest derivation.
+        let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        cands.retain(|it| seen.insert(format!("{:?}|{:?}", it.cat(), it.sem())));
+        // …and spend `k` on distinct STRUCTURES, not on a flat cost prefix. Sense multiplicity
+        // inside a node dwarfs structural multiplicity — "PARP-1 inhibitors are successful in
+        // cancers with deficiencies in homologous recombination." reaches 2048 candidates carrying
+        // 297 structures — so a prefix fills with sense-variants of the cheapest bracketing and the
+        // deeper (correct) nestings never reach the felicity gate at all. Before this, that unit's
+        // skeleton count tracked `k` itself: 256 -> 2, 1024 -> 6, 2048 -> 13. A result that scales
+        // smoothly with an arbitrary constant is the signature of a budget deciding the grammar.
+        // Keyed on the CATEGORY too: a refined `cat_n` carries its restrictor inside the category,
+        // so two items sharing a sem structure can still combine differently upstream.
+        let mut cands = super::super::skeleton::spread_over_keys(cands, |it| {
+            format!(
+                "{}|{}",
+                super::super::skeleton::skeleton_of(it.cat()),
+                super::super::skeleton::skeleton_of(it.sem())
+            )
+        });
         cands.truncate(k);
         memo[node_id] = Some(cands.clone());
         cands
@@ -187,6 +221,7 @@ impl Grammar {
         it: &Item,
         kind: UnaryKind,
         span: (usize, usize),
+        rctx: super::super::rules::RightContext,
         out: &mut Vec<Item>,
     ) {
         // Comma absorption carries the sentence-premodifier through unchanged (it now spans the
@@ -197,7 +232,7 @@ impl Grammar {
             UnaryKind::AbsorbComma => out.push(it.clone()),
             _ => {
                 if let Some(shift) = unary_shifts().iter().find(|s| s.kind == kind) {
-                    out.extend(shift.run(self, it, span));
+                    out.extend(shift.run(self, it, span, rctx));
                 }
             }
         }
@@ -241,8 +276,9 @@ impl Grammar {
         // Group leaf items into nodes (one `Leaf` edge each; same-`Sig` items share a node).
         for (i, row) in leaves.iter().enumerate() {
             for (j, cell) in row.iter().enumerate().skip(i) {
+                let rctx = super::super::rules::RightContext::after(&self.reserved, tokens, j);
                 for it in cell {
-                    let id = forest.get_or_create(i, j, node_sig(it), it);
+                    let id = forest.get_or_create(i, j, node_sig(it), it, rctx);
                     forest.push_edge(id, Edge::Leaf(it.clone()));
                 }
             }
@@ -251,6 +287,10 @@ impl Grammar {
         for len in 2..=n {
             for i in 0..=(n - len) {
                 let j = i + len - 1;
+                // The cell's right context: a function of `j` alone, hence identical for every item in
+                // every node of this cell — which is what keeps a rule that consults it decidable on a
+                // node's representative.
+                let rctx = super::super::rules::RightContext::after(&self.reserved, tokens, j);
                 // Collect combinations first (immutable borrow of `forest`), then insert.
                 let mut edges: Vec<(Sig, Item, NodeId, NodeId)> = Vec::new();
                 for k in i..j {
@@ -264,14 +304,14 @@ impl Grammar {
                         for &r in &rights {
                             let lrep = forest.nodes[l].rep.clone();
                             let rrep = forest.nodes[r].rep.clone();
-                            if let Some(result) = apply(&lrep, &rrep, &self.layer) {
+                            if let Some(result) = apply(&lrep, &rrep, &self.layer, rctx) {
                                 edges.push((node_sig(&result), result, l, r));
                             }
                         }
                     }
                 }
                 for (sig, result, l, r) in edges {
-                    let id = forest.get_or_create(i, j, sig, &result);
+                    let id = forest.get_or_create(i, j, sig, &result, rctx);
                     forest.push_edge(id, Edge::Combine { left: l, right: r });
                 }
 
@@ -287,7 +327,7 @@ impl Grammar {
                     self.binary_edges(&forest, site.left, site.right, site.rule, &mut bin);
                 }
                 for (sig, item, left, right, rule) in bin {
-                    let id = forest.get_or_create(i, j, sig, &item);
+                    let id = forest.get_or_create(i, j, sig, &item, rctx);
                     forest.push_edge(id, Edge::Binary { left, right, rule });
                 }
 
@@ -301,12 +341,12 @@ impl Grammar {
                 for shift in unary_shifts() {
                     for id in forest.cells[i][j].values().copied().collect::<Vec<_>>() {
                         let rep = forest.nodes[id].rep.clone();
-                        for item in shift.run(self, &rep, (i, j)) {
+                        for item in shift.run(self, &rep, (i, j), rctx) {
                             unary.push((node_sig(&item), item, id, shift.kind));
                         }
                     }
                     for (sig, item, child, kind) in unary.drain(..) {
-                        let nid = forest.get_or_create(i, j, sig, &item);
+                        let nid = forest.get_or_create(i, j, sig, &item, rctx);
                         forest.push_edge(nid, Edge::Unary { child, kind });
                     }
                 }
@@ -323,8 +363,49 @@ impl Grammar {
                         }
                     }
                     for (sig, item, child, kind) in unary.drain(..) {
-                        let nid = forest.get_or_create(i, j, sig, &item);
+                        let nid = forest.get_or_create(i, j, sig, &item, rctx);
                         forest.push_edge(nid, Edge::Unary { child, kind });
+                    }
+                }
+                // Targeted cell dump (`EIGENIUS_DUMP_CELL=i..j`) — the PACKED path's twin of the ones
+                // in `chart::unpacked` and `parse::seed`. This is the PRODUCTION path, so a difference
+                // that only shows here (packing collapses distinct derivations onto one representative)
+                // is invisible in the other two. Prints each node's representative category.
+                if let Ok(want) = std::env::var("EIGENIUS_DUMP_CELL") {
+                    if want == format!("{i}..{j}") {
+                        eprintln!(
+                            "  ===== DUMP packed[{i}..{j}] ({} nodes) =====",
+                            forest.cells[i][j].len()
+                        );
+                        for nid in forest.cells[i][j].values() {
+                            let n = &forest.nodes[*nid];
+                            let edges: Vec<String> = n
+                                .edges
+                                .iter()
+                                .map(|e| match e {
+                                    Edge::Leaf(_) => "Leaf".to_string(),
+                                    Edge::Combine { left, right } => {
+                                        format!(
+                                            "Combine({}+{})",
+                                            super::super::pretty::pretty_term(
+                                                forest.nodes[*left].rep.cat()
+                                            ),
+                                            super::super::pretty::pretty_term(
+                                                forest.nodes[*right].rep.cat()
+                                            )
+                                        )
+                                    }
+                                    Edge::Unary { kind, .. } => format!("Unary({kind:?})"),
+                                    Edge::Binary { .. } => "Binary".to_string(),
+                                })
+                                .collect();
+                            eprintln!(
+                                "    [{:?}] {}\n        <- {}",
+                                n.rep.prov(),
+                                super::super::pretty::pretty_term(n.rep.cat()),
+                                edges.join("\n        <- ")
+                            );
+                        }
                     }
                 }
             }

@@ -35,9 +35,9 @@ use super::super::item::{Combinator, Cost, Item};
 use super::super::pretty::unspine;
 use crate::nbe::term::Exp;
 
-/// A packing **signature**: a category key, the Eisner normal-form provenance, and the one sem
-/// property a combination decision consults (`is_coord`, below). Two items share a node iff they share
-/// a `Sig` — the equivalence class that behaves identically under all future combination.
+/// A packing **signature**: a category key, the Eisner normal-form provenance, and the two derivation
+/// properties a rule decision consults (`is_coord` and `is_designation`, below). Two items share a node
+/// iff they share a `Sig` — the equivalence class that behaves identically under all future combination.
 ///
 /// For **index-independent** categories the key is the type-index-erased [`cat_shape`] (the coarse key
 /// that collapses the sense-product — the packing win). For categories whose combinability is
@@ -45,7 +45,7 @@ use crate::nbe::term::Exp;
 /// [`super::super::category::cat_has_selectional_slot`]) the key keeps the indices ([`cat_key`], prefixed
 /// `sel:`), so e.g. two object type-raised GQs of different classes never share a node — the small
 /// unpacked residue of per-cell packing (D63 §11 3d).
-pub(crate) type Sig = (String, Combinator, bool);
+pub(crate) type Sig = (String, Combinator, bool, bool);
 
 /// **The packing invariant**: a `Sig` must capture EVERY property a future combination decision can
 /// consult. Two items sharing a `Sig` are decided identically, which is what licenses the packed CKY
@@ -66,6 +66,16 @@ pub(crate) type Sig = (String, Combinator, bool);
 /// decision stays exact. Without this bit, deciding those rules on a representative would drop an edge
 /// that every *other* item in the node needed — silently, and only on sentences that put both kinds of
 /// sem in one cell.
+///
+/// **`is_designation` is the second such bit** (2026-07-26). The `DefiniteDesignation` shift
+/// ([`super::super::rules::constructions::definite_designation`]) fires on a noun whose Σ-restrictor is
+/// a NAMING, `cat_n(Σx:C. named(x, d), num)` — a property of the type INDEX, which `cat_shape` erases
+/// by design. So `gene MSH2` (naming-refined) and `gene MSH2` read as a compound (`compound_kind`-
+/// refined) collapsed into one node, the shift was decided once on whichever was the representative,
+/// and when that was the compound the apposition item lost its `cat_np` edge outright. Measured, packed
+/// vs unpacked on the same index: `Project Achilles affects cells.` → 0 readings packed / 4 unpacked;
+/// `WRN affects project Achilles.` → 0 apposition readings packed / 8 unpacked. Carrying the bit
+/// restores the exactness the invariant above demands.
 pub(crate) fn node_sig(it: &Item) -> Sig {
     let key = if super::super::category::cat_has_selectional_slot(it.cat()) {
         format!("sel:{}", cat_key(it.cat()))
@@ -76,6 +86,7 @@ pub(crate) fn node_sig(it: &Item) -> Sig {
         key,
         it.prov(),
         super::super::rules::constructions::sem_is_coordination(it.sem()),
+        super::super::rules::constructions::definite_designation(it.cat()).is_some(),
     )
 }
 
@@ -116,6 +127,12 @@ pub(crate) struct PNode {
     /// the result category for signature computation. Sound under index-independence: every item in
     /// the node combines identically, so any representative gives the correct edge + result `Sig`.
     pub rep: Item,
+    /// The cell's [`RightContext`](super::super::rules::RightContext) — what token follows this span.
+    /// Stored on the NODE rather than recomputed at extraction because the extractor has no token
+    /// stream, and because storing it makes it impossible for the build pass and the extraction pass to
+    /// disagree. A property of the span, hence identical for every item in the node — which is why a
+    /// rule may consult it and still be decided on `rep`.
+    pub rctx: super::super::rules::RightContext,
     pub edges: Vec<Edge>,
 }
 
@@ -134,9 +151,18 @@ impl Forest {
         }
     }
 
-    /// The node for `sig` at cell `[i][j]`, created (with representative `rep`) if absent. Returns its
-    /// [`NodeId`]. The `rep` of an existing node is kept (the first-seen representative).
-    pub fn get_or_create(&mut self, i: usize, j: usize, sig: Sig, rep: &Item) -> NodeId {
+    /// The node for `sig` at cell `[i][j]`, created (with representative `rep` and the cell's right
+    /// context) if absent. Returns its [`NodeId`]. The `rep` of an existing node is kept (the
+    /// first-seen representative); `rctx` is a function of `j` alone, so every caller for a given cell
+    /// supplies the same value.
+    pub fn get_or_create(
+        &mut self,
+        i: usize,
+        j: usize,
+        sig: Sig,
+        rep: &Item,
+        rctx: super::super::rules::RightContext,
+    ) -> NodeId {
         if let Some(&id) = self.cells[i][j].get(&sig) {
             return id;
         }
@@ -144,6 +170,7 @@ impl Forest {
         self.nodes.push(PNode {
             span: (i, j),
             rep: rep.clone(),
+            rctx,
             edges: Vec::new(),
         });
         self.cells[i][j].insert(sig, id);
@@ -379,15 +406,63 @@ mod tests {
             "a coordination sem and a plain sem at the SAME cat_shape must NOT share a node — \
              `Coordinate` / `ButNot` decide on this predicate, so it belongs in the Sig"
         );
-        // The bit is the only difference: category key and provenance are identical.
-        let (kp, pp, cp) = node_sig(&plain);
-        let (kc, pc, cc) = node_sig(&conjoined);
+        // The bit is the only difference: category key, provenance and the designation bit are identical.
+        let (kp, pp, cp, dp) = node_sig(&plain);
+        let (kc, pc, cc, dc) = node_sig(&conjoined);
         assert_eq!(
-            (kp, pp),
-            (kc, pc),
+            (kp, pp, dp),
+            (kc, pc, dc),
             "only the coordination bit should differ"
         );
         assert!(!cp && cc, "the coordination bit must track the sem");
+    }
+
+    /// The packing invariant again, for the SECOND sem/index-derived bit. `DefiniteDesignation` fires on
+    /// a naming-refined noun, and `cat_shape` erases the type index that distinguishes one from a
+    /// compound-refined noun at the same shape — so without `is_designation` in the `Sig` the two pack
+    /// together and the shift is decided once, on whichever is the representative. That silently cost
+    /// every bare classifier+designator its NP: `Project Achilles affects cells.` read 0 packed against
+    /// 4 unpacked.
+    #[test]
+    fn node_sig_separates_a_naming_refined_noun_from_a_compound_refined_one() {
+        let x = "G#0";
+        let refined = |restr_axiom: &str| {
+            let restr = Exp::App(
+                Box::new(Exp::App(
+                    Box::new(Exp::EigonAxiom(Iri::parse(restr_axiom).unwrap())),
+                    Box::new(Exp::Var(x.into())),
+                )),
+                Box::new(Exp::EigonAxiom(
+                    Iri::parse("urn:eigenius:lexicon:msh2").unwrap(),
+                )),
+            );
+            let sig_ty = Exp::Sig(
+                crate::nbe::term::Patt::Var(x.into()),
+                Box::new(cls("urn:eigenius:lexicon:Gene")),
+                Box::new(restr),
+            );
+            leaf(Exp::InductiveCtor(
+                crate::nbe::term::list_decl(),
+                "cat_n".into(),
+                vec![
+                    sig_ty,
+                    Exp::InductiveCtor(crate::nbe::term::list_decl(), "sg".into(), vec![]),
+                ],
+            ))
+        };
+        let named = refined("urn:eigenius:ontology:named");
+        let compound = refined("urn:eigenius:ontology:compound_kind");
+        assert_eq!(
+            cat_shape(named.cat()),
+            cat_shape(compound.cat()),
+            "the two are INDISTINGUISHABLE by cat_shape — that is what makes the bit necessary"
+        );
+        assert_ne!(
+            node_sig(&named),
+            node_sig(&compound),
+            "a naming-refined noun and a compound-refined one must NOT share a node — \
+             `DefiniteDesignation` decides on that index property"
+        );
     }
 
     #[test]
@@ -400,10 +475,28 @@ mod tests {
             vec![cls("urn:eigenius:lexicon:Gene"), ctor("sg", vec![])],
         ));
         let mut f = Forest::new(1);
-        let id_a = f.get_or_create(0, 0, node_sig(&a), &a);
-        let id_b = f.get_or_create(0, 0, node_sig(&b), &b);
+        let id_a = f.get_or_create(
+            0,
+            0,
+            node_sig(&a),
+            &a,
+            crate::dcg::rules::RightContext::Other,
+        );
+        let id_b = f.get_or_create(
+            0,
+            0,
+            node_sig(&b),
+            &b,
+            crate::dcg::rules::RightContext::Other,
+        );
         assert_eq!(id_a, id_b, "same Sig ⇒ same node");
-        let id_n = f.get_or_create(0, 0, node_sig(&noun), &noun);
+        let id_n = f.get_or_create(
+            0,
+            0,
+            node_sig(&noun),
+            &noun,
+            crate::dcg::rules::RightContext::Other,
+        );
         assert_ne!(id_a, id_n, "different cat_shape ⇒ different node");
         f.push_edge(id_a, Edge::Leaf(a));
         f.push_edge(id_a, Edge::Leaf(b));

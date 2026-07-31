@@ -76,6 +76,83 @@ pub enum Combinator {
     /// VP-adjunct case) while leaving subject application untouched (there the argument is the subject
     /// NP, not the modal VP). ENF-inert.
     Modal,
+    /// A **close-apposition output** (`appose_group`): a designator group whose members the classifier
+    /// has already been distributed over. It is a NORMAL FORM, and the tag is what enforces that —
+    /// carried so `build_appose_group` can refuse it as a further apposition's group (a second
+    /// classifier would nest a definite designation inside `named`, whose second argument is a naming
+    /// TOKEN and never a description) and `build_coordinate` can refuse it as a conjunct (a member
+    /// appended afterwards would escape the classifier's scope, so only a prefix of the list would be
+    /// classified). Both re-applications were INVISIBLE while the rule passed the group through
+    /// unchanged, because re-applying an identity is an identity; distributing made them
+    /// term-distinct and they multiplied — the reference page's germline unit went 112 → 497
+    /// skeletons, with up to 8 `named`s over 4 designators. ENF-inert.
+    Apposed,
+    /// A **derived individual** — an entity reached by COERCION rather than denoted by a name. Two
+    /// producers, and they are one notion:
+    /// - a **definite designation** (`definite_designation`), `the(Σx:C. named(x, d)).1`: the
+    ///   individual a naming-refined noun uniquely picks out — description-derived;
+    /// - a **kind realization**, `kind_of(K)`: a bare `cat_n` conjunct made argument-fillable by
+    ///   `coordinate_np`'s `np_conjunct` — kind-derived.
+    ///
+    /// Either way the category is an ordinary `cat_np(C, num)`, indistinguishable from a proper name's,
+    /// so only provenance can tell them apart — the same reason the `name` rule needs `NotKindRaised`
+    /// alongside `ProperName`.
+    ///
+    /// Carried so a derived individual cannot be a **DESIGNATOR**. `ontology:named`'s second argument is
+    /// a naming TOKEN: not a description, so `named(x, the(Σy:C. named(y, d)).1)` — "the gene named the
+    /// gene named MSH2" — is not a naming; and not a kind, which is the same thing the singular path
+    /// already refuses ("nucleotide repeat regions" read as a nucleotide *named* a repeat region). The
+    /// designation case arises because one string admits two bracketings: "[the MMR genes] [MSH2, …]"
+    /// apposes plain names, while "[the MMR] [genes MSH2, …]" designates "genes MSH2" and apposes THAT.
+    /// Refusing the second keeps the first, so no span loses its analysis.
+    ///
+    /// **Propagated through coordination** (`build_coordinate`): a group inherits the tag from any
+    /// conjunct that is derived, which is what lets `appose_group` refuse an impure designator group by
+    /// reading provenance — a property `Sig` already carries — instead of the member sems, which would
+    /// make its firing decision sem-dependent and need a new packing bit. Coordinating derived
+    /// individuals is untouched ("the gene MSH2 and the gene MSH6", "MSI and MMR deficiency create
+    /// vulnerabilities"); only classifying them AGAIN is blocked. ENF-inert.
+    DerivedIndividual,
+    /// A **seed-time oblique participial lift** (`oblique_participial_lifts`): a post-nominal modifier
+    /// still awaiting its PP argument, `cat_pp/cat_pp_arg(P)`.
+    ///
+    /// **ENF-constrained, and the exact mirror of [`Self::TypeRaised`]** — that one may only *compose*,
+    /// never forward-apply; this one may only *forward-apply*, never be the primary of a composition
+    /// ([`ProvGuard::LeftNotObliqueParticipial`] on `forward_comp`). The reason is the same: the other
+    /// route re-derives a reading plain application already gives. Composing the lift with the
+    /// preposition and then applying to the object,
+    ///
+    /// ```text
+    /// [cat_pp/cat_pp_arg] · [cat_pp_arg/NP] -> [cat_pp/NP],  then · [NP] -> cat_pp
+    /// ```
+    ///
+    /// yields the same `cat_pp` over the same span with the same sem as applying the lift directly to
+    /// the assembled `cat_pp_arg`. Measured on "… the top preferential dependency in MSI cell lines
+    /// compared to MSS cell lines" (2026-07-27): the span `[16..20]` carried FOUR derivations of
+    /// `cat_pp` across two nodes (the routes split by provenance, so `Sig` keeps them apart) where the
+    /// shift route it replaced carried one.
+    ObliqueParticipial,
+    /// A **scope-bearing operator's lexical leaf** — an entry declaring `lexicon:scope_bearing`
+    /// (sentential negation `not`, the modals, do-support). Set once at seeding by
+    /// [`crate::dcg::lexicon::entry_to_item`]; the tag exists so [`Self::Modal`] can be put on the
+    /// operator's OUTPUT without the combinator having to sniff the category or read a sem.
+    ///
+    /// The distinction it encodes is core-en's. There, negation is an auxiliary-verb family
+    /// (`auxv.xsl`, `family name="Negation" pos="V" closed="true"`) whose category
+    /// `(s.1.from-6.E\np)/(s.6.E2\np)` derives a NEW situation index from its argument's, while an
+    /// adverb (`adv.xsl`, `pos="Adv"`) is `s.1.E\s.1.E` with LF `HasProp(E, P)` — the SAME index,
+    /// decorated. A VP-adjunct attaching above an index-preserving modifier lands on the same event
+    /// and is the same claim; above an index-SHIFTING operator it lands on the outer index and
+    /// escapes the embedded one. Only the latter must be refused.
+    ///
+    /// A category test cannot draw that line here: `not_adj` is `fwd(VP[adj], VP[adj])`, which is
+    /// byte-identical to the adverb adjective-modifier category ([`crate::dcg::category`]'s
+    /// `adverb_modifier_cats`). Hence the property is DECLARED on the entry rather than inferred,
+    /// and read once — a combine-time decision then reads only provenance, which `Sig` already
+    /// carries, so no packing bit is added (the constraint [`Self::DerivedIndividual`] documents).
+    ///
+    /// ENF-inert: it must still forward-apply to its VP, so no `ProvGuard` refuses it.
+    ScopeOperator,
     /// Any other producer (lexical leaf, coordination, group/distributive rules) —
     /// not a composition output, so ENF never constrains it.
     Other,
@@ -167,11 +244,105 @@ pub struct Item {
     pub semantics: SemanticPayload,
 }
 
+/// Arrow depth of `⟦cat⟧` — the number of arguments a category declares.
+fn cat_arity_of(c: &Exp) -> Option<usize> {
+    let mut t = crate::dcg::category::denote_cat(c).ok()?;
+    let mut n = 0;
+    while let Exp::Arrow(_, cod) | Exp::Pi(_, _, cod) = t {
+        t = *cod;
+        n += 1;
+    }
+    Some(n)
+}
+
+/// Leading-λ count of a sem's VALUE — the number of arguments it actually takes.
+fn sem_arity_of(sem: &Exp) -> Option<usize> {
+    let mut v = crate::nbe::eval::eval(sem, &crate::nbe::env::Rho::Nil).ok()?;
+    let mut n = 0;
+    while let crate::nbe::val::Val::Lam(g) = v {
+        v = g
+            .apply(crate::nbe::val::Val::Nt(crate::nbe::val::Neut::Gen(
+                n,
+                format!("__ar{n}"),
+            )))
+            .ok()?;
+        n += 1;
+        if n > 8 {
+            break;
+        }
+    }
+    Some(n)
+}
+
+/// The constructor name of a category, for the mismatch probe's one-line output.
+fn cat_head(c: &Exp) -> String {
+    match c {
+        Exp::InductiveCtor(_, n, args) => format!("{n}/{}", args.len()),
+        other => format!("{other:?}").chars().take(24).collect(),
+    }
+}
+
 impl Item {
     /// Assemble an item from its parts — the single constructor the composition rules
     /// and lexical index build through (replacing the old `Item::from_parts(cat, sem, prov, cost)`
     /// literal now that the fields live in two payloads).
     pub fn from_parts(cat: Exp, sem: Exp, prov: Combinator, cost: Cost) -> Self {
+        // `EIGENIUS_TRACE_MISMATCH=1` — the CATEGORY/SEM AGREEMENT invariant. Every rule's output
+        // must satisfy `sem : ⟦cat⟧`; nothing checks that until the full-span felicity gate, so a
+        // rule may mint an item whose category says `Prop` while its sem is still an abstraction.
+        // Categories then agree at every subsequent step (which is why every rule fires) and only the
+        // gate objects — reporting an unexplained grammar-gap far from the cause.
+        //
+        // This prints the PROVENANCE, so the offending rule names itself.
+        // EXCLUDES a hole abstraction. An unresolved referent is a free variable that the felicity
+        // gate's OPEN path abstracts into a TYPED PARAMETER and checks against a Π-type, so an item
+        // with a `cat_s` category and a `λ$anaphor$…` sem is a legitimate open parse, not a mismatch.
+        // Without this the probe reported ~3128 false positives against 30 real ones on the WRN page.
+        if std::env::var("EIGENIUS_TRACE_MISMATCH").is_ok()
+            && !matches!(&sem, Exp::Lam(crate::nbe::term::Patt::Var(v), _) if v.starts_with("$anaphor$"))
+            && matches!(sem, Exp::Lam(..))
+            && matches!(crate::dcg::category::denote_cat(&cat), Ok(Exp::Sort(0)))
+        {
+            let shape = match &sem {
+                Exp::Lam(p, b) => format!(
+                    "λ{p:?}. {}",
+                    match b.as_ref() {
+                        Exp::Lam(..) => "λ…",
+                        Exp::App(..) => "App(…)",
+                        Exp::InductiveType(d, _) => d.name.as_str(),
+                        _ => "…",
+                    }
+                ),
+                _ => "?".to_string(),
+            };
+            eprintln!(
+                "  !! CAT/SEM MISMATCH prov={prov:?} cat={} sem={shape}",
+                cat_head(&cat)
+            );
+        }
+        // `EIGENIUS_TRACE_UNDERAPP=1` — THE CATEGORY/SEM ARITY INVARIANT, on every item.
+        //
+        // A category declares how many arguments a constituent takes (the arrow depth of `⟦cat⟧`); its
+        // sem must take exactly that many. Nothing checks this until the full-span felicity gate, so a
+        // rule may mint an item whose sem is over-abstracted; categories then agree at every later
+        // step, every rule fires, and only the gate objects — as a type error far from its cause.
+        //
+        // Tested on the VALUE. An `Exp::App(f, x)` given fewer arguments than `f`'s arity is
+        // syntactically an application and only becomes a closure under evaluation, so a syntactic
+        // λ-count cannot see the dominant case. Free-variable sems (referent holes) are skipped: they
+        // evaluate to a closure over a neutral and are legitimate open parses.
+        if std::env::var("EIGENIUS_TRACE_UNDERAPP").is_ok()
+            && !matches!(&sem, Exp::Lam(crate::nbe::term::Patt::Var(v), _) if v.starts_with("$anaphor$"))
+        {
+            if let (Some(ca), Some(sa)) = (cat_arity_of(&cat), sem_arity_of(&sem)) {
+                if sa > ca {
+                    eprintln!(
+                        "  !! ARITY-INVARIANT prov={prov:?} cat={} cat_arity={ca} sem_arity={sa}",
+                        cat_head(&cat)
+                    );
+                }
+            }
+        }
         Item {
             category: CategoryPayload { cat, prov, cost },
             semantics: SemanticPayload { sem },

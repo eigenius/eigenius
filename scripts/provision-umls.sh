@@ -23,7 +23,9 @@
 #
 #   extract   unzip only the RRF files the importer needs (MRCONSO/MRSTY/MRSAB/
 #             MRRANK/MRDEF) into references/umls/<release>/META/ (gitignored — UMLS
-#             data is licensed and is NEVER committed).
+#             data is licensed and is NEVER committed). ALSO extracts the Semantic
+#             Network into references/umls/<release>/NET/ when the FULL release zip
+#             is present — see the NET block below for why it is not in the others.
 #   convert   run the DETERMINISTIC importer (no LLM) → an Eigon-ESL document: a typed
 #             mirror (umls:Concept classes under umls:SemanticType classes) + a derived
 #             lexicon (lexicon:umls). Only SRL-0 (Level 0) sources are emitted; the
@@ -51,6 +53,13 @@ cd "$ROOT"
 RELEASE="${RELEASE:-2026AA}"
 UMLS_ZIP="${UMLS_ZIP:-references/umls-${RELEASE}-metathesaurus-level0.zip}"
 META="${META:-references/umls/${RELEASE}/META}"
+# The Semantic Network (SRDEF/SRSTR/SRSTRE1/SRSTRE2) — the semantic-TYPE layer, as opposed to META's
+# concept layer. It is a SEPARATE UMLS Knowledge Source and is NOT in any `-metathesaurus-*.zip`:
+# those contain `<RELEASE>/META/` and nothing else. It ships only in the FULL release, and there it
+# is nested one level deeper — `<RELEASE>-full/<release>aa-otherks.nlm` is itself a zip holding
+# `<RELEASE>/NET/`.
+NET="${NET:-references/umls/${RELEASE}/NET}"
+UMLS_FULL_ZIP="${UMLS_FULL_ZIP:-references/umls-${RELEASE}-full.zip}"
 OUT="${OUT:-umls.esl}"
 
 # Default semantic-type allowlist — the WRN-paper-relevant types (Disease or Syndrome,
@@ -85,6 +94,38 @@ if [[ "$missing" == "1" ]]; then
   done
 fi
 echo ">> META: $META"
+
+# ── extract the Semantic Network (optional; only the FULL release carries it) ──
+# Small — SRDEF 41 KB, SRSTR 30 KB — and it is the only source of the semantic-TYPE hierarchy
+# (`isa` between types, plus SRDEF's tree numbers). MRSTY gives a concept's TYPES but says nothing
+# about how those types relate, which is why `common_super` bottoms out at `lexicon:Entity` for
+# every UMLS pair without this.
+NET_FILES=(SRDEF SRFIL SRFLD SRSTR SRSTRE1 SRSTRE2 SU)
+net_missing=0
+for f in "${NET_FILES[@]}"; do [[ -f "$NET/$f" ]] || net_missing=1; done
+if [[ "$net_missing" == "1" ]]; then
+  if [[ -f "$UMLS_FULL_ZIP" ]]; then
+    mkdir -p "$NET"
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    echo ">> extracting the Semantic Network from $UMLS_FULL_ZIP → $NET"
+    # `2026aa-otherks.nlm` is a zip-in-a-zip; pull it out, then take NET/ from it.
+    otherks="$(unzip -Z1 "$UMLS_FULL_ZIP" '*otherks.nlm' 2>/dev/null | head -1)"
+    if [[ -n "$otherks" ]]; then
+      unzip -o -j "$UMLS_FULL_ZIP" "$otherks" -d "$tmp" >/dev/null
+      unzip -o -j "$tmp/$(basename "$otherks")" "${RELEASE}/NET/*" -d "$NET" >/dev/null
+      chmod 644 "$NET"/* 2>/dev/null || true
+      echo ">> NET: $NET ($(ls -1 "$NET" | wc -l) files)"
+    else
+      echo ">> WARNING: no *otherks.nlm inside $UMLS_FULL_ZIP — Semantic Network not extracted" >&2
+    fi
+    rm -rf "$tmp"; trap - EXIT
+  else
+    echo ">> NET: skipped — no $UMLS_FULL_ZIP. The Semantic Network is NOT in the"
+    echo "         metathesaurus-only archives; fetch the Full Release to get it."
+  fi
+else
+  echo ">> NET: $NET"
+fi
 
 # ── convert + validate ────────────────────────────────────────────────
 TUI_ARGS=()

@@ -74,6 +74,19 @@ axiom ontology:prep_from : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_between : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_within  : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_to      : lexicon:Entity -> lexicon:Entity -> Prop
+// Added 2026-07-26 after a 0-reading role sweep (`probe_preposition_role_coverage`) found 14
+// coverage holes the page-based `grammar-gap 0` could not see: `without`/`among`/`beyond` had NO
+// entry in any role ("Cells survive without oxygen." -> 0 readings) and at/into/upon/against/about/by
+// could not post-modify a noun ("The paper by the authors was clear." -> 0).
+axiom ontology:prep_at      : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_into    : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_upon    : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_against : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_about   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_by      : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_without : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_among   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_beyond  : lexicon:Entity -> lexicon:Entity -> Prop
 
 // ── Naming apposition (D63 §5.3, close apposition of a sortal + a proper name) ────────
 // `named(x, n)`: the individual `x` bears the proper name whose token is `n` — the coining
