@@ -38,42 +38,38 @@
     "expected_reading_hits": 60,
     "expected_reading_curated": 62,
     "skeleton_histogram": {
-      "_comment": "units bucketed by their SKELETON count, from the same replay as `skeletons` above (237, 2026-07-27, post restrictor-order canonicalisation). The total is CONCENTRATED, not spread: one unit carries 20% and the 7+ tail carries 60%, so the page total moves when a single unit moves. Read it before choosing a target -- and note skeleton count alone is the WRONG criterion. The 48-unit is the largest and the LEAST tractable: it is lexical sense multiplicity (`line` alone has 34 noun classes), which no grammar rule can reach. Rank by STRUCTURAL ambiguity instead. The measured decomposition of the 263-skeleton page was: conjunct ORDER 26 (spurious, now fixed); name-vs-kind (`compound`/`compound_kind`, `kind_of(X)`/`X`) 84 -- a LEXICAL distinction with different types (Entity vs Set), so glossary/NER territory, not rules; the rest structural.",
+      "_comment": "units bucketed by their SKELETON count, from the same replay as `skeletons` above (179, 2026-07-30, `wordnet-umls-aligned-2026-07-30-framedup`). REGENERATED — the previous figures were stale at 237 skeletons (2026-07-27) and still listed the comparative unit at 48, which is now 4. The total is far less CONCENTRATED than it was: the largest unit no longer carries a fifth of the page, because the demonstrative drop (166b234), case-sensitive symbols (950f1e9) and the frame-duplicate drop (7a34f71) each removed whole families of readings from the tail. Read it before choosing a target — and note skeleton count alone is the WRONG criterion: rank by STRUCTURAL ambiguity, not by count.",
       "buckets": {
         "1": {
-          "units": 23,
-          "skeletons": 23
+          "units": 25,
+          "skeletons": 25
         },
         "2-3": {
           "units": 22,
           "skeletons": 45
         },
         "4-6": {
-          "units": 6,
-          "skeletons": 27
+          "units": 8,
+          "skeletons": 40
         },
         "7-10": {
-          "units": 8,
-          "skeletons": 68
+          "units": 5,
+          "skeletons": 43
         },
         "11-20": {
           "units": 2,
           "skeletons": 26
-        },
-        "21-50": {
-          "units": 1,
-          "skeletons": 48
         }
       },
       "top_units": {
-        "MSI cell lines from these four lineages showed greater dependence on WRN than their MSS counterparts.": 48,
         "We analysed these data sets for genes that are selectively essential in cancer cells with MSI.": 14,
-        "These findings show that WRN is a promising drug target for MSI cancers.": 12,
+        "MSI cell lines from these four lineages showed greater dependence on WRN than their MSS counterparts.": 12,
         "PARP-1 inhibitors are successful in cancers with deficiencies in homologous recombination.": 10,
         "Many cancers exhibit an impairment of a DNA repair pathway.": 9,
-        "Germline mutations in the MMR genes MSH2, MSH6, PMS2 or MLH1 cause Lynch syndrome.": 9,
-        "Some cancers do not respond to immune checkpoint blockade.": 9,
-        "Depletion of WRN induced double-stranded DNA breaks.": 8
+        "These findings show that WRN is a synthetic-lethal vulnerability for MSI cancers.": 8,
+        "These findings show that WRN is a promising drug target for MSI cancers.": 8,
+        "MSI is associated with notable responses to immune checkpoint blockade.": 8,
+        "We found that WRN was selectively essential in MSI models.": 6
       }
     },
     "_expected_reading_note_2026_07_29": "hits 60 of 62 CURATED, and the 2-unit shortfall is EXPECTED and explained — see the header of expected-readings.tsv. Both are sense-selection misses with the STRUCTURE intact, not lost readings. «Synthetic lethality is an interaction between two genetic events.» is this lexicon's documented draw-variance unit (missed in draws 1 and 3, HIT in draw 2); its closest rival has the SAME `between` attachment and differs only in taking `two genetic events` as a quantified GQ instead of a bare kind. «Depletion of WRN induced double-stranded DNA breaks.» differs from its pin by ONE TOKEN — `prep_of(G#0, §)` against `prep_of(G#0, kind_of(§))` — i.e. WRN realising as the class `WRN protein, human` instead of the HGNC-symboled named individual `WRN gene`. That is Axis B, not grammar; and the gene reading is NOT AVAILABLE for this unit at all (no produced skeleton carries the bare form), which matches the page-wide finding of 5 units missing it. DO NOT repin either: repinning would bake the wrong analysis in. `expected_reading_curated` rises 61 -> 62 because the page is now fully pinned (65e62a6)."
