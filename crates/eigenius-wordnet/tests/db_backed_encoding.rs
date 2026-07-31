@@ -511,7 +511,16 @@ fn erase_senses_normalises_hole_binder_names() {
 /// proposer under `use-llm`).
 #[test]
 fn schwartz_hearst_binds_msi_mss_from_the_original_page() {
-    let source = std::fs::read_to_string(WRN_PAGE).expect("original first-page-cleaned.txt");
+    // `references/` is gitignored (licensed source material), so the page is absent in CI and on a
+    // fresh clone — skip rather than fail, as every other `WRN_PAGE` consumer here does.
+    let page_path = std::env::var("EIGENIUS_WRN_PAGE").unwrap_or_else(|_| WRN_PAGE.to_string());
+    let source = match std::fs::read_to_string(&page_path) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("SKIP: {page_path} not found");
+            return;
+        }
+    };
     let defs = extract_abbreviations(&source);
     let has = |sf: &str, lf: &str| {
         defs.iter()
