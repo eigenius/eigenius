@@ -1,18 +1,18 @@
 {
   "_comment": "The reference measurement the parse-rate gate is judged against. Run logs are NOT committed (experiments/*/results/ is gitignored); this is the distilled result + provenance. Update it DELIBERATELY, never to make a red run go green.",
   "provenance": {
-    "commit": "f1ab74a",
-    "date": "2026-07-29",
+    "commit": "7a34f71",
+    "date": "2026-07-30",
     "profile": "release",
     "features": [
       "use-llm"
     ],
     "reranker": "AnthropicSenseRanker (live), recorded; this baseline is the drift-free REPLAY of draw 1 of 3",
     "page": "references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt",
-    "snapshot": "wordnet-umls-aligned-2026-07-29-demonstratives",
+    "snapshot": "wordnet-umls-aligned-2026-07-30-framedup",
     "ranks": "experiments/parsing/ranks/2026-07-29-demonstratives.json",
-    "replay": "124 hits, 0 key misses (drift-free — the property that makes the recording usable)",
-    "note": "Reseeded for ONE importer change: the demonstratives joining the shared closed-class surface list (166b234), which drops 3 UMLS atoms across 2 concepts (C0039828/CHV `these` = the MeSH publication type *Theses*; C1080058 `this`/`This` = the insect genus *This <Coelopellini>*). Reseed reported 9,192,392 resources against the benchmarks note's 9,192,394 for the same full `--umls-all` import — a delta of exactly the 2 entries removed (3 atoms, but forms dedup case-insensitively so `this`/`This` collapse), which is also the evidence that the two snapshots are otherwise recipe-identical. Alignment layer rebuilt from the SAME committed `merges-lemma-keyed.json`: 40,027 entries redefined, and neither dropped concept is a merge target (C0039828 merges on `theses`/`thesis`, never `these`), so alignment and the drop are disjoint. Also in this baseline, both PARSER-side and needing no reseed: case-sensitive nomenclature-symbol matching (950f1e9) and the same filter applied to the sense ranker's candidate list (f832837).",
+    "replay": "62 hits, 0 key misses — the SAME recording as the previous snapshot. Dropping the multiword lemma `dependent on` does NOT invalidate it: the rank key covers only OVER-CAP spans, and that span had exactly one sense, so it was never in a ranking request. Predicted otherwise and was wrong; the live re-record this reseed seemed to require was not needed.",
+    "note": "Reseeded for ONE importer change: the demonstratives joining the shared closed-class surface list (166b234), which drops 3 UMLS atoms across 2 concepts (C0039828/CHV `these` = the MeSH publication type *Theses*; C1080058 `this`/`This` = the insect genus *This <Coelopellini>*). Reseed reported 9,192,392 resources against the benchmarks note's 9,192,394 for the same full `--umls-all` import — a delta of exactly the 2 entries removed (3 atoms, but forms dedup case-insensitively so `this`/`This` collapse), which is also the evidence that the two snapshots are otherwise recipe-identical. Alignment layer rebuilt from the SAME committed `merges-lemma-keyed.json`: 40,027 entries redefined, and neither dropped concept is a merge target (C0039828 merges on `theses`/`thesis`, never `these`), so alignment and the drop are disjoint. Also in this baseline, both PARSER-side and needing no reseed: case-sensitive nomenclature-symbol matching (950f1e9) and the same filter applied to the sense ranker's candidate list (f832837). ALSO IN THIS SNAPSHOT (7a34f71): the WordNet importer drops a multiword adjective lemma that merely restates a governed-preposition frame — `X P` where `adjective-frames.tsv` says base `X` governs `P`. Exactly ONE lemma against WordNet 3.0, `dependent on` (2 entries: positive + cat_measure), hence the resource count 9,192,392 -> 9,192,390. Idioms are spared by construction (`all in`, `boxed in`, `agreed upon`, `contingent on`), pinned by `frame_duplicate_drop_spares_idioms`.",
     "attribution": "The page totals here are NOT a clean A/B against the previous baseline — snapshot AND recording both changed. Attribution was done CAP-ONLY (deterministic, no LLM, comparable across snapshots): the demonstrative drop alone is total-skeletons 467 -> 343 (-124, -26.6%) and total-readings 6680 -> 5395 (-19.2%), with grammar-gap 0 held, encoded 2 -> 3 and cap-only pin hits 53 -> 54. All 16 units whose skeleton sets changed contain a demonstrative: zero collateral on the other 46. The case-sensitive symbol fix was attributed separately under the PREVIOUS snapshot and recording: 225 -> 196 skeletons, 1069 -> 1041 readings, pins 62/62 held. The sense-ranker change is attributable by NEITHER instrument (cap-only never executes that code; the replay is what it invalidates) and its reach was measured as 36 of 62 rank-key misses."
   },
   "_provenance_note_2026-07-25-copula": "Re-baselined for TWO importer fixes made after ADJUDICATING the 16 structural readings of the page's worst unit (\"These classifications were highly concordant with PCR-based MSI phenotyping and with predicted MMR deficiency\") instead of theorising about the sense cap. Those 16 decomposed as 4 families x 4 modifier-bracketings; 12 were plainly WRONG. (1) THE COPULA IS GRAMMAR (9f52ba1): WordNet gives `be` 8 verb synsets and 02604760 'have the quality of being' carries frame 6 -> FrameKind::LinkingAdj, emitting (S[dcl,fin]\\NP)/(S[dcl,adj]\\NP) over an OPAQUE 2-place axiom -- re-encoding 'X is P' as be(lambda x.P(x), X), destroying the copula's transparency (X is P **is** P(X)) and competing with the closed-class copula; a type-raising artifact (the SUBJECT applied as a 2-place function) rides on it. UMLS separately gave `were` a cat_n sense (the verb as a plural NOUN) via the `Be`=beryllium symbol homonym. Fixed by the mechanism already used for do/does/not/to/lead, prepositions/conjunctions and determiners: a per-LEMMA copula skip in the WordNet importer (synset siblings follow/live/equal keep their entries) + COPULA_SURFACES in the UMLS importer (`being` EXCLUDED -- a legitimate common noun). (2) Fix A (c) (6437edc): the POSITIVE relational predication for governed adjectives, `(S[adj]\\NP)/cat_pp_arg(prep)` with sem lambda r.lambda x. gt(deg_rel(r,x), std) -- previously only the COMPARATIVE consumed the relational cat_measure, so 'concordant WITH X' could not bind the relatum. MEASURED: deterministic cap-only A/B isolates the copula fix at total-skeletons 239 -> 196 (-18%) and readings 1741 -> 1560; the drift-free reranked REPLAY (record == replay exactly) gives total-skeletons 178 (the lowest recorded), readings 735, encoded 10, grammar-gap 0, expected-hits 23/23. The target unit fell 16 -> 4 skeletons and the 10/12/16-skeleton buckets emptied (only the 19-skeleton essive unit remains an outlier). skeletons_ceiling ratcheted 300 -> 250. Draw results/2026-07-24-2320-9f52ba1-first-page-cnl-v3-reranked (runtime 231s). RESIDUAL on that unit: 4 skeletons = family A (copula + `with`-ADJUNCT, which (c) should supersede but cannot here because two cat_pp_arg PPs cannot COORDINATE -- coordinate_prop needs a prop-ending category) x2 bracketings, plus family B (the adjective read as a NOMINAL kind, needing the documented adjective-competing-qualifier filter) x2. See history[0]. ",
@@ -32,9 +32,9 @@
     "open": 2,
     "encoded": 12,
     "total_readings_ceiling": 1900,
-    "total_readings": 905,
+    "total_readings": 988,
     "skeletons_ceiling": 400,
-    "skeletons": 171,
+    "skeletons": 179,
     "expected_reading_hits": 60,
     "expected_reading_curated": 62,
     "skeleton_histogram": {
@@ -104,6 +104,14 @@
     "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible — two senses with different labels and the SAME sem are one concept — but the pre-dedup caveat still stands."
   },
   "history": [
+    {
+      "date": "2026-07-30",
+      "commit": "7a34f71",
+      "encoded": 12,
+      "skeletons": 179,
+      "readings": 988,
+      "note": "Frame-duplicate drop. Recovers «The lines from rare lineages were less dependent on WRN.», whose comparative had been lost when the predicative kind-raise (ff1690f) gave the competing MULTIWORD analysis a route to a full parse. Clean lexicon-only A/B, same parser, cap-only: open 1 -> 2, expected-hits 53 -> 54, readings 5742 -> 5718, skeletons 342 -> 344. Under the tracked replay: pins 59 -> 60, gap 0 held. The two remaining pin misses are the documented ones — draw variance, and WRN gene availability (Axis B)."
+    },
     {
       "date": "2026-07-29",
       "commit": "f1ab74a",
