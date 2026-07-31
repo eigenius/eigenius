@@ -15,6 +15,16 @@ FROM node:22-alpine AS notebook-builder
 
 WORKDIR /build
 
+# npm defaults to 15 parallel sockets, which the WSL2/Docker NAT path resets
+# part-way through a large fetch: the 3-dep SDK tree below installs in ~3s while
+# the 34-dep notebooks tree dies at ~40s with ECONNRESET on the same mount and
+# registry. Cap concurrency and widen the retry window so a reset is survivable
+# rather than fatal.
+ENV NPM_CONFIG_MAXSOCKETS=4 \
+    NPM_CONFIG_FETCH_RETRIES=5 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000
+
 # The SDK is a `file:` dependency of notebooks/, so npm needs both trees to
 # resolve the workspace symlink.
 COPY clients/eigenius-ts/ clients/eigenius-ts/
