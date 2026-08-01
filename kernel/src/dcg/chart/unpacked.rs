@@ -26,7 +26,7 @@
 //! Its growth is bounded by a per-cell BEAM rather than by packing — hence the widen-on-failure ladder
 //! escalates the beam here (and only the sense cap on the packed path).
 
-use super::super::category::{is_ctor, is_sentence_premod, is_vp_adjunct_prep};
+use super::super::category::{is_ctor, is_sentence_premod, is_vp_adjunct_prep, slash_parts};
 use super::super::grammar::Grammar;
 use super::super::item::Item;
 use super::super::pretty::pretty_term;
@@ -142,8 +142,8 @@ impl Grammar {
                                 }
                                 for vp in &chart[k + 1][j] {
                                     // VP must be `S\NP` (a clause missing its subject).
-                                    if !matches!(is_ctor(vp.cat(), "bwd"),
-                                        Some([s, _]) if is_ctor(s, "cat_s").is_some())
+                                    if !matches!(slash_parts(vp.cat(), "bwd"),
+                                        Some((_m, s, _)) if is_ctor(s, "cat_s").is_some())
                                     {
                                         continue;
                                     }

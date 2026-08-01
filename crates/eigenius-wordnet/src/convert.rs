@@ -229,17 +229,17 @@ impl FrameKind {
         let obj = format!("lexicon:cat_np({ENTITY_TOP}, lexicon:num_any)");
         let s = format!("lexicon:cat_s(lexicon:dcl, lexicon:{fin})");
         match self {
-            FrameKind::Intransitive => format!("lexicon:bwd({s}, {subj})"),
-            FrameKind::Transitive => format!("lexicon:fwd(lexicon:bwd({s}, {subj}), {obj})"),
+            FrameKind::Intransitive => format!("lexicon:bwd(lexicon:m_all, {s}, {subj})"),
+            FrameKind::Transitive => format!("lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), {obj})"),
             FrameKind::Ditransitive => {
-                format!("lexicon:fwd(lexicon:fwd(lexicon:bwd({s}, {subj}), {obj}), {obj})")
+                format!("lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), {obj}), {obj})")
             }
             // Essive `((S\NP)/cat_pp_arg(prep_as))/NP` — the object NP binds first (adjacent to the
             // verb), then the `as`-marked predicative complement `cat_pp_arg(prep_as)` (⟦·⟧ = Entity).
             // Same 3-place `Entity → Entity → Entity → Prop` axiom as the ditransitive; the distinct
             // `prep_as` marker forces the `as`, so a plain transitive verb still rejects a stray `as Y`.
             FrameKind::Essive => format!(
-                "lexicon:fwd(lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_pp_arg(lexicon:prep_as)), {obj})"
+                "lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), lexicon:cat_pp_arg(lexicon:prep_as)), {obj})"
             ),
             // Argument-PP verb: `(S\NP)/cat_pp_arg(prep_any)` — the object arrives through a transparent
             // argument-marker preposition (`to`/`on`/…). Distinct from a bare NP so the preposition is
@@ -249,15 +249,15 @@ impl FrameKind {
             // gloss-governed ADJECTIVES, where WordNet's gloss does carry the governance).
             FrameKind::PpOblique => {
                 format!(
-                    "lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_pp_arg(lexicon:prep_any))"
+                    "lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), lexicon:cat_pp_arg(lexicon:prep_any))"
                 )
             }
             // Clause-taking: `(S\NP)/cat_cp` — the complement is an embedded clause.
-            FrameKind::Clausal => format!("lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:cat_cp)"),
+            FrameKind::Clausal => format!("lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), lexicon:cat_cp)"),
             // Linking (copular) verb: `(S[dcl,fin]\NP)/(S[dcl,adj]\NP)` — consumes a predicative-
             // adjective VP and yields a finite VP, like the copula `be`'s `adj` complement.
             FrameKind::LinkingAdj => format!(
-                "lexicon:fwd(lexicon:bwd({s}, {subj}), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), {obj}))"
+                "lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), {obj}))"
             ),
         }
     }
@@ -789,7 +789,7 @@ fn is_copula_lemma(lemma: &str) -> bool {
 }
 
 fn adj_cat() -> String {
-    format!("lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))")
+    format!("lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))")
 }
 
 /// Curated adjective **subcategorization frames** (lemma → governed preposition) — the frame-acquisition
@@ -1029,7 +1029,10 @@ fn push_adj(
         &format!("( fun (x : {ENTITY_TOP}) => measurements:gt(wn:deg_{loc}(x), wn:deg_{loc}(lexicon:anaphor)) : {prop_arrow} )"),
     );
     let pos_cat = adj_cat();
-    let cmp_cat = format!("lexicon:fwd({}, lexicon:cat_pp_than)", adj_cat());
+    let cmp_cat = format!(
+        "lexicon:fwd(lexicon:m_all, {}, lexicon:cat_pp_than)",
+        adj_cat()
+    );
     let cmp_arrow = format!("{ENTITY_TOP} -> {prop_arrow}");
     for (i, lemma) in syn.words.iter().enumerate() {
         if restates_governed_frame(lemma) {
@@ -1074,7 +1077,7 @@ fn push_adj(
                 &format!("e_{loc}_{i}_r"),
                 lemma,
                 &format!(
-                    "lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg({}))",
+                    "lexicon:fwd(lexicon:m_all, lexicon:cat_measure, lexicon:cat_pp_arg({}))",
                     prep_ctor(&prep)
                 ),
                 &format!("deg_{loc}_rel"),
@@ -1094,7 +1097,7 @@ fn push_adj(
                 &format!("e_{loc}_{i}_rp"),
                 lemma,
                 &format!(
-                    "lexicon:fwd({}, lexicon:cat_pp_arg({}))",
+                    "lexicon:fwd(lexicon:m_all, {}, lexicon:cat_pp_arg({}))",
                     adj_cat(),
                     prep_ctor(&prep)
                 ),
@@ -1166,7 +1169,7 @@ fn push_adj(
                         &format!("e_{loc}_dr_{}_{j}", local(noun)),
                         nlemma,
                         &format!(
-                            "lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg({}))",
+                            "lexicon:fwd(lexicon:m_all, lexicon:cat_measure, lexicon:cat_pp_arg({}))",
                             prep_ctor(prep)
                         ),
                         &format!("deg_{loc}_rel"),
@@ -1630,7 +1633,7 @@ mod tests {
         ));
         // Finite 3sg has a SINGULAR subject slot (6-agr); object slot stays num_any.
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
         assert!(buf.contains("lexicon:sem      = wn:v00275082_t;"));
         // base (num_any) + finite 3sg ("eats", sg) + finite plural ("eat", pl) forms.
@@ -1638,16 +1641,16 @@ mod tests {
         assert!(buf.contains("lexicon:form     = \"eats\";")); // fin 3sg
                                                                // bse keeps a num_any subject (the aux supplies agreement).
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
         // plural-finite has a PLURAL subject slot (6-agr).
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
         // Finite SIMPLE PAST — same surface as the participle but a finite (`fin`) clause head with a
         // `num_any` subject (past tense has no number agreement). The object slot stays num_any.
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
         assert_eq!(rep.verb_axioms, 1);
         // Per lemma: base + finite 3sg + finite plural + gerund + past participle + finite simple
@@ -1691,7 +1694,7 @@ mod tests {
         // first (adjacent), then the `as`-marked predicative complement `cat_pp_arg(prep_as)`.
         assert!(buf.contains("lexicon:form     = \"identifies\";"));
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_as)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_as)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
         // Essive is ADDITIVE: the frame-8 transitive category is still emitted.
         assert!(buf.contains("axiom wn:v00618451_t :"));
@@ -1728,11 +1731,11 @@ mod tests {
         // gerund (regular -ing) + its `ger` category.
         assert!(buf.contains("lexicon:form     = \"eating\";"));
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"
         ));
         // irregular past participle (eat → eaten) + its `pss` category, same axiom.
         assert!(buf.contains("lexicon:form     = \"eaten\";"));
-        assert!(buf.contains("lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"));
+        assert!(buf.contains("lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );"));
         // participles point at the same predicate axiom as the finite form.
         assert!(buf.contains("lexicon:sem      = wn:v00275082_t;"));
         // the regular members inflect too: corrode → corroded, rust → rusting.
@@ -1786,7 +1789,7 @@ mod tests {
         assert!(buf.contains(
             "axiom wn:v00001234_d : lexicon:Entity -> lexicon:Entity -> lexicon:Entity -> Prop"
         ));
-        assert!(buf.contains("lexicon:fwd(lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))"));
+        assert!(buf.contains("lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))"));
     }
 
     #[test]
@@ -1800,7 +1803,7 @@ mod tests {
         assert!(buf.contains("axiom wn:v00000003_c : Prop -> lexicon:Entity -> Prop"));
         assert!(buf.contains("lexicon:form     = \"shows\";")); // 3sg
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_cp) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_cp) );"
         ));
         assert!(buf.contains("lexicon:sem      = wn:v00000003_c;"));
     }
@@ -1849,7 +1852,7 @@ mod tests {
         // 3sg "remains" over an `adj` complement, singular subject.
         assert!(buf.contains("lexicon:form     = \"remains\";"));
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );"
         ));
         // The corpus form: past "remained" (fin, number-agnostic) also emitted.
         assert!(buf.contains("lexicon:form     = \"remained\";"));
@@ -1880,7 +1883,7 @@ mod tests {
         assert!(buf.contains("lexicon:sem      = wn:pos_sem_a00000001;"));
         assert!(buf.contains("lexicon:sem      = wn:cmp_sem_a00000001;"));
         assert!(buf.contains(
-            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than) );"
+            "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than) );"
         ));
         // C1 (d63-comparative-phrasal.md §5.3): a bare `cat_measure` reading of `deg_X` — so the
         // closed-class `more`/`less` operators combine (periphrastic comparative at scale).
@@ -1989,7 +1992,7 @@ mod tests {
         );
         assert!(
             buf.contains(
-                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );"
+                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );"
             ),
             "relational cat_measure/cat_pp_arg(prep_on) reading — the gloss `dependent on` governs `on` \
              (C3-precision):\n{buf}"
@@ -2026,7 +2029,7 @@ mod tests {
         // The predicative category taking the governed PP as its argument.
         assert!(
             buf.contains(
-                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_on)) );"
+                "lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_on)) );"
             ),
             "positive relational cat `(S[adj]\\NP)/cat_pp_arg(prep_on)`:\n{buf}"
         );

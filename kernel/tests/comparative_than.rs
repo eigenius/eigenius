@@ -57,7 +57,7 @@ resource lexicon:dependent_rel_sem : lexicon:SemTerm {
 resource lexicon:dependent_rel : lexicon:LexicalEntry {
     core:description = "relational adjective: X depends on Y (importer cat_measure/cat_pp_arg(prep_on)).";
     lexicon:form     = "dependent";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );
     lexicon:sem      = lexicon:dependent_rel_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> core:float );
     lexicon:sense    = "wn:dependent.a.01";
@@ -79,7 +79,7 @@ resource lexicon:dependent_pos_rel_sem : lexicon:SemTerm {
 resource lexicon:dependent_pos_rel : lexicon:LexicalEntry {
     core:description = "relational adjective, POSITIVE predication (importer (S[adj]\\NP)/cat_pp_arg(prep_on)).";
     lexicon:form     = "dependent";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_on)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_on)) );
     lexicon:sem      = lexicon:dependent_pos_rel_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:dependent.a.01";

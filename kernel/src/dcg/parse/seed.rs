@@ -29,7 +29,7 @@
 //! and the flat beamed chart both build their leaf cells from.
 
 use super::super::category::{
-    is_adjective_cat, is_binary_relation_cat, is_ctor, is_vp_adjunct_prep, kind_of,
+    is_adjective_cat, is_binary_relation_cat, is_ctor, is_vp_adjunct_prep, kind_of, slash_parts,
 };
 use super::super::chart::{beam_cell, cell_histogram, Chart};
 use super::super::lexicon::{FormEntries, LexEntry};
@@ -512,9 +512,7 @@ impl Parser {
         for p in 1..n {
             // The preposition governed by an adjective head immediately to the left.
             let governed_prep: Option<Exp> = chart[p - 1][p - 1].iter().find_map(|it| {
-                let [res, arg] = is_ctor(it.cat(), "fwd")? else {
-                    return None;
-                };
+                let (_m, res, arg) = slash_parts(it.cat(), "fwd")?;
                 let [prep] = is_ctor(arg, "cat_pp_arg")? else {
                     return None;
                 };
@@ -527,8 +525,8 @@ impl Parser {
             // Disambiguate only when this surface offers BOTH the matching argument marker and a
             // competing VP-adjunct reading — otherwise there is nothing spurious to drop.
             let has_matching_arg = chart[p][p].iter().any(|it| {
-                matches!(is_ctor(it.cat(), "fwd"),
-                    Some([a, _]) if matches!(is_ctor(a, "cat_pp_arg"), Some([pp]) if *pp == prep))
+                matches!(slash_parts(it.cat(), "fwd"),
+                    Some((_m, a, _)) if matches!(is_ctor(a, "cat_pp_arg"), Some([pp]) if *pp == prep))
             });
             let has_adjunct = chart[p][p].iter().any(|it| is_vp_adjunct_prep(it.cat()));
             if has_matching_arg && has_adjunct {
@@ -1030,7 +1028,7 @@ pub(super) fn sense_cap_key(
 /// `bwd(cat_s(_, bse), cat_np(_, num_any))` and never matches, which is what keeps the check off
 /// infinitives and participles.
 fn has_plural_finite_subject(cat: &Exp) -> bool {
-    if let Some([res, arg]) = is_ctor(cat, "bwd") {
+    if let Some((_m, res, arg)) = slash_parts(cat, "bwd") {
         let finite = matches!(is_ctor(res, "cat_s"),
             Some([_, Exp::InductiveCtor(_, f, _)]) if f == "fin");
         let plural_subj = matches!(is_ctor(arg, "cat_np"),

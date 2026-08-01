@@ -165,10 +165,63 @@ data lexicon:Prep {
                   // carry this; a specific marker refines it at composition.
 }
 
+// Mode — the SLASH MODALITY of multimodal CCG (Baldridge 2002 ch. 5, Figure 5.1
+// p. 102; the notation table is OpenCCG's `docs/guide/guide.tex` Table "Slash
+// modes"). A *syntactic* feature, erased by ⟦·⟧ exactly like Num/Fin/Prep — it
+// does NOT change what a slash denotes (`⟦fwd(m,A,B)⟧ = ⟦B⟧→⟦A⟧` for every `m`),
+// it restricts WHICH COMBINATORY RULES may consume that slash.
+//
+// The seven modes form an INHERITANCE HIERARCHY in Baldridge's orientation, "in
+// which a modality has all the powers of its supertypes". A rule is KEYED to a
+// modality and accepts a slash bearing that modality **or any subtype**:
+//
+//                          m_app  (⋆)              root: application only
+//              ┌─────────────┼─────────────┐
+//         m_cross_left   m_harm      m_cross_right
+//             (◁×)        (⋄)             (×▷)
+//              └──────┬────┴─────┬─────────┘
+//                m_perm_left  m_perm_right
+//                    (◁)          (▷)
+//                     └─────┬──────┘
+//                        m_all  (·)             bottom: all rules
+//
+// So application is keyed to the ROOT `m_app`, which is precisely why EVERY slash
+// can apply; harmonic composition is keyed to `m_harm` and therefore admits
+// `m_harm`/`m_perm_left`/`m_perm_right`/`m_all` but REFUSES `m_app` and both
+// crossed modes. `m_app` is the least permissive slash, `m_all` the most.
+//
+// Beware the orientation: as an inheritance hierarchy `⋆` is the ROOT (a supertype
+// of everything), while as an ordering on PERMISSIVENESS it is the least permissive
+// point. Both readings are in the literature; the arrows above are Baldridge's.
+//
+// Why Eigenius needs this (D63, "decide multimodal slashes vs. a coarser global
+// regime"): the coarse regime lets any slash compose, and each escape discovered
+// downstream has been answered with another `ProvGuard` variant. A governed
+// complement — `give rise TO`, `depend ON`, `associated WITH` — must not compose
+// away from its head, which core-en states categorially by marking that slash `*`
+// (`v.xsl`'s `tv.phrasal` is `iv /▷ np[acc] /★ prt`).
+//
+// Bare `x` (OpenCCG's "permutative") is deliberately ABSENT: it is a rule-class in
+// Baldridge's prose, not a node in Figure 5.1, so it has no place in the lattice.
+data lexicon:Mode {
+    m_app,         // ⋆ — application only; the hierarchy ROOT. A governed particle/preposition
+                   // slash, a coordinator's slashes, punctuation. Composition CANNOT consume it.
+    m_harm,        // ⋄ — harmonic (order-preserving) composition. Baldridge's determiner: `np/⋄n`.
+    m_cross_left,  // ◁× — crossed composition, leftward only.
+    m_cross_right, // ×▷ — crossed composition, rightward only.
+    m_perm_left,   // ◁ — associative permutative left: subtype of BOTH m_cross_left and m_harm.
+    m_perm_right,  // ▷ — associative permutative right: subtype of BOTH m_harm and m_cross_right.
+                   // Baldridge's transitive verb is `(sᵢ\◁np)/▷np`.
+    m_all,         // · — all rules; the hierarchy BOTTOM. The MIGRATION DEFAULT: it reproduces the
+                   // pre-mode regime exactly (every slash composable), so introducing modes is a
+                   // behaviour-preserving no-op until a slash is deliberately tightened.
+}
+
 // Cat — the categorial type (a small inductive at Type 1, since cat_n/cat_np
 // store a `Set`). The homomorphism ⟦·⟧ : Cat → EigenTT type is a recursor over
 // it (`denote_cat`): ⟦cat_s(m,_)⟧ = ⟦m⟧ ; ⟦cat_n(_,_)⟧ = Set ; ⟦cat_np(T,_)⟧ = T ;
 // ⟦A/B⟧ = ⟦A\B⟧ = ⟦B⟧→⟦A⟧ ; ⟦cat_forall(_,λT.R)⟧ = ΠT:Set. ⟦R⟧.
+// The slash modality is denotation-transparent: ⟦fwd(m,A,B)⟧ ignores `m`.
 data lexicon:Cat : Type 1 {
     // S[mood,fin] — a sentence/clause. Mood is semantic (drives ⟦·⟧); fin records
     // the verb form the clause is built on.
@@ -178,12 +231,14 @@ data lexicon:Cat : Type 1 {
     cat_n  : Set -> lexicon:Num -> lexicon:Cat,
     // NP[num](T) — a noun phrase / named entity of type T (⟦NP(T)⟧ = T).
     cat_np : Set -> lexicon:Num -> lexicon:Cat,
-    // A/B — forward slash: seeks a B on its RIGHT, yields A (e.g. a transitive
-    // verb (S\NP)/NP seeks its object rightward).
-    fwd : lexicon:Cat -> lexicon:Cat -> lexicon:Cat,
-    // A\B — backward slash: seeks a B on its LEFT, yields A (e.g. a VP S\NP seeks
-    // its subject leftward).
-    bwd : lexicon:Cat -> lexicon:Cat -> lexicon:Cat,
+    // A/ₘB — forward slash: seeks a B on its RIGHT, yields A (e.g. a transitive
+    // verb (S\NP)/NP seeks its object rightward). `m` is the slash MODALITY: it
+    // restricts which combinatory rules may consume this slash, and is erased by
+    // ⟦·⟧ (`⟦fwd(m,A,B)⟧ = ⟦B⟧→⟦A⟧` for every `m`).
+    fwd : lexicon:Mode -> lexicon:Cat -> lexicon:Cat -> lexicon:Cat,
+    // A\ₘB — backward slash: seeks a B on its LEFT, yields A (e.g. a VP S\NP seeks
+    // its subject leftward). `m` as for `fwd`.
+    bwd : lexicon:Mode -> lexicon:Cat -> lexicon:Cat -> lexicon:Cat,
     // Num·∀T:Set. R[T] — the polymorphic determiner: the dependent forward slash
     // over a common-noun type. Consumes an N[Num] of type T (binding T, checking
     // number agreement) and yields the result category R[T]; e.g. `every` is

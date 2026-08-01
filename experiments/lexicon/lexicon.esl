@@ -149,7 +149,7 @@ resource lexicon:e_hela : lexicon:LexicalEntry {
 //     object-first: ⟦cat⟧ = Gene → CellLine → Prop = typeof(depends_on).
 resource lexicon:e_depends_on : lexicon:LexicalEntry {
     lexicon:form     = "depends on";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:CellLine, lexicon:sg)), lexicon:cat_np(lexicon:Gene, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:CellLine, lexicon:sg)), lexicon:cat_np(lexicon:Gene, lexicon:num_any)) );
     lexicon:sem      = lexicon:depends_on;
     lexicon:sem_type = type_expr( lexicon:Gene -> lexicon:CellLine -> Prop );
     lexicon:sense    = "wn:depend.v.01";
@@ -165,7 +165,7 @@ resource lexicon:e_depends_on : lexicon:LexicalEntry {
 //     refinement) is the engine rule in Slice 3b.
 resource lexicon:e_primary : lexicon:LexicalEntry {
     lexicon:form     = "primary";
-    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:is_primary;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "wn:primary.a.01";
@@ -197,7 +197,7 @@ resource lexicon:larger_cmp_sem : lexicon:SemTerm {
 // positive "large": an adjectival predicate (like `primary`), but measure-derived.
 resource lexicon:e_large : lexicon:LexicalEntry {
     lexicon:form     = "large";
-    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:large_pos_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "wn:large.a.01";
@@ -206,7 +206,7 @@ resource lexicon:e_large : lexicon:LexicalEntry {
 // comparative "larger": (S[adj]\NP)/cat_pp_than, λy.λx. gt(deg_large(x), deg_large(y)).
 resource lexicon:e_larger : lexicon:LexicalEntry {
     lexicon:form     = "larger";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_than) );
     lexicon:sem      = lexicon:larger_cmp_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:large.a.01";
@@ -228,7 +228,7 @@ resource lexicon:larger_attrib_sem : lexicon:SemTerm {
 }
 resource lexicon:e_larger_attrib : lexicon:LexicalEntry {
     lexicon:form     = "larger";
-    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:larger_attrib_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "wn:large.a.01";
@@ -248,7 +248,7 @@ resource lexicon:e_larger_attrib : lexicon:LexicalEntry {
 axiom lexicon:deg_dependent : lexicon:Entity -> lexicon:Entity -> core:float
 resource lexicon:e_dependence : lexicon:LexicalEntry {
     lexicon:form     = "dependence";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );
     lexicon:sem      = lexicon:deg_dependent;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> core:float );
     lexicon:sense    = "wn:dependence.n.01";
@@ -265,7 +265,7 @@ resource lexicon:e_dependence : lexicon:LexicalEntry {
 // take it (`*greater dependent`); the importer separates adjective-scale from noun-scale (d63 §5.6).
 resource lexicon:e_dependent_adj : lexicon:LexicalEntry {
     lexicon:form     = "dependent";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_measure, lexicon:cat_pp_arg(lexicon:prep_on)) );
     lexicon:sem      = lexicon:deg_dependent;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> core:float );
     lexicon:sense    = "wn:dependent.a.01";
@@ -291,7 +291,7 @@ resource lexicon:e_affects : lexicon:LexicalEntry {
     lexicon:form     = "affects";
     // Finite 3sg → SINGULAR subject slot (D63 §8.10 6-agr). Object slot stays `num_any`
     // (agreement is subject-only). `HeLa affects BRCA1` ✓ / `*genes affects …` ✗.
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
@@ -305,7 +305,7 @@ resource lexicon:e_affects : lexicon:LexicalEntry {
 //      entry below (which is non-finite, the do-support/modal complement).
 resource lexicon:e_affect_pl : lexicon:LexicalEntry {
     lexicon:form     = "affect";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
@@ -320,7 +320,7 @@ resource lexicon:e_affect_pl : lexicon:LexicalEntry {
 axiom lexicon:shows : Prop -> lexicon:Entity -> Prop
 resource lexicon:e_shows : lexicon:LexicalEntry {
     lexicon:form     = "shows";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_cp) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_cp) );
     lexicon:sem      = lexicon:shows;
     lexicon:sem_type = type_expr( Prop -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:show.v.01";
@@ -328,7 +328,7 @@ resource lexicon:e_shows : lexicon:LexicalEntry {
 }
 resource lexicon:e_show_pl : lexicon:LexicalEntry {
     lexicon:form     = "show";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_cp) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_cp) );
     lexicon:sem      = lexicon:shows;
     lexicon:sem_type = type_expr( Prop -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:show.v.01";
@@ -342,7 +342,7 @@ resource lexicon:e_show_pl : lexicon:LexicalEntry {
 //     collective parse (D63 §8.4 Phase 6).
 resource lexicon:e_form_complex : lexicon:LexicalEntry {
     lexicon:form     = "form a complex";
-    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_group(lexicon:Entity, lexicon:conn_and, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_group(lexicon:Entity, lexicon:conn_and, lexicon:num_any)) );
     lexicon:sem      = lexicon:forms_complex;
     lexicon:sem_type = type_expr( core:List(lexicon:Entity) -> Prop );
     lexicon:sense    = "wn:form.v.04";
@@ -356,7 +356,7 @@ resource lexicon:e_form_complex : lexicon:LexicalEntry {
 //     (a bare base clause is not a finite root).
 resource lexicon:e_affect_bse : lexicon:LexicalEntry {
     lexicon:form     = "affect";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
@@ -371,7 +371,7 @@ resource lexicon:e_affect_bse : lexicon:LexicalEntry {
 // auxiliary sentences ("HeLa is affecting BRCA1", "HeLa has affected BRCA1") parse.
 resource lexicon:e_affect_ger : lexicon:LexicalEntry {
     lexicon:form     = "affecting";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
@@ -379,7 +379,7 @@ resource lexicon:e_affect_ger : lexicon:LexicalEntry {
 }
 resource lexicon:e_affect_pss : lexicon:LexicalEntry {
     lexicon:form     = "affected";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
@@ -392,7 +392,7 @@ resource lexicon:e_affect_pss : lexicon:LexicalEntry {
 //      "we analysed …") parse, vs only present + auxiliary participle.
 resource lexicon:e_affect_fin_past : lexicon:LexicalEntry {
     lexicon:form     = "affected";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:affect.v.01";
@@ -405,7 +405,7 @@ resource lexicon:e_affect_fin_past : lexicon:LexicalEntry {
 axiom lexicon:arises : lexicon:Entity -> Prop
 resource lexicon:e_arises : lexicon:LexicalEntry {
     lexicon:form     = "arises";
-    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
     lexicon:sem      = lexicon:arises;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "wn:arise.v.01";
@@ -413,7 +413,7 @@ resource lexicon:e_arises : lexicon:LexicalEntry {
 }
 resource lexicon:e_arising : lexicon:LexicalEntry {
     lexicon:form     = "arising";
-    lexicon:cat      = type_expr( lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:arises;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "wn:arise.v.01";
@@ -429,7 +429,7 @@ resource lexicon:e_arising : lexicon:LexicalEntry {
 axiom lexicon:give_rise_to : lexicon:Entity -> lexicon:Entity -> Prop
 resource lexicon:e_gives_rise_to : lexicon:LexicalEntry {
     lexicon:form     = "gives rise to";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:give_rise_to;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:give_rise_to.v.01";
@@ -437,7 +437,7 @@ resource lexicon:e_gives_rise_to : lexicon:LexicalEntry {
 }
 resource lexicon:e_give_rise_to : lexicon:LexicalEntry {
     lexicon:form     = "give rise to";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:give_rise_to;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:give_rise_to.v.01";
@@ -445,7 +445,7 @@ resource lexicon:e_give_rise_to : lexicon:LexicalEntry {
 }
 resource lexicon:e_gave_rise_to : lexicon:LexicalEntry {
     lexicon:form     = "gave rise to";
-    lexicon:cat      = type_expr( lexicon:fwd(lexicon:bwd(lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:give_rise_to;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:give_rise_to.v.01";

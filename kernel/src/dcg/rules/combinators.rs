@@ -30,7 +30,8 @@ use crate::layer::Layer;
 use crate::nbe::term::{Exp, Patt};
 
 use super::super::category::{
-    cat_subsumes, feat_meets, is_ctor, match_cat, subst_cat, unify_cat, CatPat, CatSubst,
+    cat_subsumes, feat_meets, is_ctor, match_cat, slash_parts, subst_cat, unify_cat, CatPat,
+    CatSubst,
 };
 use super::super::item::{CategoryPayload, Combinator, Cost, Item, COMPOUND_STEP_PENALTY};
 use super::super::pretty::pretty_term;
@@ -214,13 +215,14 @@ impl CombKind {
                     Operand::Left => (left, right),
                     Operand::Right => (right, left),
                 };
-                let args = is_ctor(&fun.cat, slash)?;
-                if args.len() != 2 {
-                    return None;
-                }
-                let subst = unify_cat(&args[1], &arg.cat, layer)?;
+                // APPLICATION is keyed to the lattice ROOT `⋆` (Baldridge (192): `X/⋆Y Y ⇒ X`), and
+                // every modality is `⋆` or a subtype of it — so every slash applies, whatever its
+                // mode, and there is no licensing test here. This is the one rule class modes never
+                // restrict; it is precisely why `⋆` means "application ONLY".
+                let (_mode, res, slot) = slash_parts(&fun.cat, slash)?;
+                let subst = unify_cat(slot, &arg.cat, layer)?;
                 Some(SemRecipe::Apply {
-                    cat: subst_cat(&args[0], &subst),
+                    cat: subst_cat(res, &subst),
                     order: match functor {
                         Operand::Left => AppOrder::Fwd,
                         Operand::Right => AppOrder::Bwd,
@@ -228,19 +230,28 @@ impl CombKind {
                 })
             }
             CombKind::Compose { slash } => {
-                let (l, r) = (is_ctor(&left.cat, slash)?, is_ctor(&right.cat, slash)?);
-                if l.len() != 2 || r.len() != 2 {
+                let (lm, l_res, l_arg) = slash_parts(&left.cat, slash)?;
+                let (rm, r_res, r_arg) = slash_parts(&right.cat, slash)?;
+                // HARMONIC composition, keyed to `⋄` (Baldridge (194): `X/⋄Y Y/⋄Z ⇒B X/⋄Z`). BOTH
+                // slashes must license it, so a governed complement marked `⋆` cannot be composed
+                // away from its head — the categorial statement of what `ProvGuard` approximates.
+                if !harmonic_licenses(lm) || !harmonic_licenses(rm) {
                     return None;
                 }
-                let subst = unify_cat(&l[1], &r[0], layer)?;
+                let subst = unify_cat(l_arg, r_res, layer)?;
                 let Exp::InductiveCtor(decl, _, _) = &left.cat else {
                     return None;
                 };
                 Some(SemRecipe::FwdComp {
+                    // The result carries the rule's keyed modality, as `⇒B X/⋄Z` writes it.
                     cat: Exp::InductiveCtor(
                         decl.clone(),
                         (*slash).into(),
-                        vec![subst_cat(&l[0], &subst), subst_cat(&r[1], &subst)],
+                        vec![
+                            lm.clone(),
+                            subst_cat(l_res, &subst),
+                            subst_cat(r_arg, &subst),
+                        ],
                     ),
                 })
             }
@@ -407,7 +418,7 @@ fn combine_other_grammar(left: &CategoryPayload, right: &CategoryPayload) -> Opt
 pub(crate) fn is_modal_functor(cat: &Exp) -> bool {
     /// `S[_,<fin>]\NP` — a verbal VP `bwd(cat_s(_, <fin>), NP)` with the given finiteness feature.
     fn is_vp_with_fin(cat: &Exp, fin: &str) -> bool {
-        let Some([s, _np]) = is_ctor(cat, "bwd") else {
+        let Some((_m, s, _np)) = slash_parts(cat, "bwd") else {
             return false;
         };
         let Some([_mood, f]) = is_ctor(s, "cat_s") else {
@@ -415,7 +426,7 @@ pub(crate) fn is_modal_functor(cat: &Exp) -> bool {
         };
         matches!(f, Exp::InductiveCtor(_, n, _) if n == fin)
     }
-    let Some([res, arg]) = is_ctor(cat, "fwd") else {
+    let Some((_m, res, arg)) = slash_parts(cat, "fwd") else {
         return false;
     };
     is_vp_with_fin(res, "fin") && is_vp_with_fin(arg, "bse")
@@ -876,14 +887,10 @@ pub(crate) fn oblique_participial_lifts(it: &Item) -> Vec<Item> {
 /// The argument is carried through UNCHANGED, so the governed preposition (`prep_any` for WordNet's
 /// preposition-agnostic PP frames) still has to be matched by whatever fills it.
 fn oblique_participial_cat(cat: &Exp) -> Option<Exp> {
-    use super::super::category::is_ctor;
-    let [vp, arg] = is_ctor(cat, "fwd")? else {
-        return None;
-    };
+    use super::super::category::{is_ctor, slash_parts};
+    let (mode, vp, arg) = slash_parts(cat, "fwd")?;
     is_ctor(arg, "cat_pp_arg")?;
-    let [s, subj] = is_ctor(vp, "bwd")? else {
-        return None;
-    };
+    let (_vm, s, subj) = slash_parts(vp, "bwd")?;
     is_ctor(subj, "cat_np")?;
     let [mood, voice] = is_ctor(s, "cat_s")? else {
         return None;
@@ -901,6 +908,9 @@ fn oblique_participial_cat(cat: &Exp) -> Option<Exp> {
         decl.clone(),
         "fwd".into(),
         vec![
+            // The derived modifier INHERITS the source slash's modality — deriving a category
+            // must not silently relax what rules may consume it.
+            mode.clone(),
             Exp::InductiveCtor(decl.clone(), "cat_pp".into(), Vec::new()),
             arg.clone(),
         ],
@@ -917,14 +927,10 @@ const PARTICIPIAL_MOD_PENALTY: u32 = 12;
 /// encoding used by `closed-class.esl`'s `passive_sem` (`∀C:Prop. (∀a. TV(x,a) → C) → C`), so the
 /// modifier reading and the finite short passive denote identically.
 fn participial_restrictor(cat: &Exp, tv: &Exp) -> Option<Exp> {
-    use super::super::category::is_ctor;
-    let [vp, obj] = is_ctor(cat, "fwd")? else {
-        return None;
-    };
+    use super::super::category::{is_ctor, slash_parts};
+    let (_m, vp, obj) = slash_parts(cat, "fwd")?;
     is_ctor(obj, "cat_np")?;
-    let [s, subj] = is_ctor(vp, "bwd")? else {
-        return None;
-    };
+    let (_vm, s, subj) = slash_parts(vp, "bwd")?;
     is_ctor(subj, "cat_np")?;
     let [_typ, voice] = is_ctor(s, "cat_s")? else {
         return None;
@@ -998,6 +1004,55 @@ fn refine_pp_mod(binds: &CatSubst, left: &Item, right: &Item, layer: &Arc<Layer>
 // interprets this table; each builder is one arm of the former `build` match. See
 // `docs/notes/grammar-formalization-plan.md` (Phase 2).
 
+// ─────────────────────────── multimodal slash licensing (Baldridge 2002 ch. 5) ───────────────────
+//
+// A combinatory rule is KEYED to a modality and consumes a slash bearing that modality **or any
+// SUBTYPE of it** ("a modality has all the powers of its supertypes", §5.2). The lattice is
+// `lexicon:Mode`, declared in `lexicon-ontology.esl` from Figure 5.1 (p. 102):
+//
+//                      m_app (⋆)                    root — application only
+//          ┌───────────────┼───────────────┐
+//     m_cross_left     m_harm       m_cross_right
+//         (◁×)          (⋄)             (×▷)
+//          └───────┬────┴──────┬─────────┘
+//            m_perm_left   m_perm_right
+//                (◁)           (▷)
+//                 └──────┬──────┘
+//                     m_all (·)                     bottom — all rules
+//
+// APPLICATION is keyed to the ROOT `m_app`, so every slash applies — which is why there is no
+// `application_licenses`: it would be constantly true.
+
+/// The modality name a slash carries, or `None` if `cat` is not a slash.
+fn slash_mode_name(mode: &Exp) -> Option<&str> {
+    match mode {
+        Exp::InductiveCtor(_, n, _) => Some(n.as_str()),
+        _ => None,
+    }
+}
+
+/// Whether a slash bearing `mode` may be consumed by the HARMONIC composition rules — keyed to
+/// `⋄` (194), so it admits `m_harm` and its subtypes `m_perm_left`/`m_perm_right`/`m_all`, and
+/// refuses `m_app` (application only) and the two crossed modes.
+fn harmonic_licenses(mode: &Exp) -> bool {
+    matches!(
+        slash_mode_name(mode),
+        Some("m_harm" | "m_perm_left" | "m_perm_right" | "m_all")
+    )
+}
+
+/// Whether a slash bearing `mode` may be consumed by the CROSSED composition rules. Baldridge
+/// states (200) over the bare `×` CLASS ("we employ the modalities ◁× and ×▷ in defining the
+/// crossed composition rules"), not over one directional node — `×` is a rule-class shorthand with
+/// no point in Figure 5.1, which is exactly why OpenCCG's mode table has eight entries where the
+/// lattice has seven nodes. So the class is both crossed nodes plus their subtypes.
+fn crossed_licenses(mode: &Exp) -> bool {
+    matches!(
+        slash_mode_name(mode),
+        Some("m_cross_left" | "m_cross_right" | "m_perm_left" | "m_perm_right" | "m_all")
+    )
+}
+
 /// An anonymous category-pattern wildcard (`?_`).
 fn wild() -> CatPat {
     CatPat::Var("_")
@@ -1010,23 +1065,32 @@ fn any_np_pat() -> CatPat {
 fn any_s_pat() -> CatPat {
     CatPat::Ctor("cat_s", vec![wild(), wild()])
 }
-/// A VP `S\NP` — `bwd(cat_s, cat_np)`.
+/// A forward-slash pattern `A/ₘB`. The slash MODALITY is wildcarded: a `CatPat` is a structural
+/// SHAPE test, and modality restricts which rules may fire, not what a category looks like. Rule
+/// licensing by mode is enforced where rules fire ([`mode_licenses`]), never by pattern shape.
+/// Going through this constructor is also what keeps the mode slot from being forgotten — a
+/// hand-written `Ctor("fwd", vec![a, b])` would silently never match (D63 multimodal slashes).
+fn fwd_pat(res: CatPat, arg: CatPat) -> CatPat {
+    CatPat::Ctor("fwd", vec![wild(), res, arg])
+}
+/// A backward-slash pattern `A\ₘB` — mode wildcarded, as [`fwd_pat`].
+fn bwd_pat(res: CatPat, arg: CatPat) -> CatPat {
+    CatPat::Ctor("bwd", vec![wild(), res, arg])
+}
+/// A VP `S\NP` — `bwd(m, cat_s, cat_np)`.
 fn vp_pat() -> CatPat {
-    CatPat::Ctor("bwd", vec![any_s_pat(), any_np_pat()])
+    bwd_pat(any_s_pat(), any_np_pat())
 }
 /// A type-raised subject GQ `S/(S\NP)` — the right operand every GQ-prep rule consumes.
 fn raised_gq_pat() -> CatPat {
-    CatPat::Ctor("fwd", vec![any_s_pat(), vp_pat()])
+    fwd_pat(any_s_pat(), vp_pat())
 }
 
 /// The agentive-passive `by`'s functor RESULT — `(S[pass]\NP) \ ((S[pss]\NP)/NP)`: a passive patient-VP
 /// awaiting the unsaturated active participle on its left. Distinct from every `pp_res` above (it is a
 /// `bwd` whose left is a VP and right is a `fwd`), so `gq_prep_passive_agent` stays trigger-disjoint.
 fn passive_agent_res_pat() -> CatPat {
-    CatPat::Ctor(
-        "bwd",
-        vec![vp_pat(), CatPat::Ctor("fwd", vec![vp_pat(), any_np_pat()])],
-    )
+    bwd_pat(vp_pat(), fwd_pat(vp_pat(), any_np_pat()))
 }
 
 /// The "other grammar" rule table (built once). Priority = order: close-naming apposition first, then
@@ -1059,7 +1123,7 @@ fn other_grammar_rules() -> &'static [CatRule] {
             // GQ-as-prep-object, PpMod: `[cat_pp/NP] [raised-GQ]` → a post-nominal `cat_pp` modifier.
             CatRule {
                 name: "gq_prep_ppmod",
-                left_pat: Ctor("fwd", vec![Ctor("cat_pp", vec![]), any_np_pat()]),
+                left_pat: fwd_pat(Ctor("cat_pp", vec![]), any_np_pat()),
                 right_pat: raised_gq_pat(),
                 guards: &[],
                 build: gq_prep_ppmod,
@@ -1067,7 +1131,7 @@ fn other_grammar_rules() -> &'static [CatRule] {
             // GQ-as-prep-object, ArgMarker: `[cat_pp_arg/NP] [raised-GQ]` → an oblique argument marker.
             CatRule {
                 name: "gq_prep_argmarker",
-                left_pat: Ctor("fwd", vec![Ctor("cat_pp_arg", vec![wild()]), any_np_pat()]),
+                left_pat: fwd_pat(Ctor("cat_pp_arg", vec![wild()]), any_np_pat()),
                 right_pat: raised_gq_pat(),
                 guards: &[],
                 build: gq_prep_argmarker,
@@ -1075,10 +1139,7 @@ fn other_grammar_rules() -> &'static [CatRule] {
             // GQ-as-prep-object, VpAdjunct: `[(S\NP)\(S\NP)/NP] [raised-GQ]` → a VP modifier.
             CatRule {
                 name: "gq_prep_vpadjunct",
-                left_pat: Ctor(
-                    "fwd",
-                    vec![Ctor("bwd", vec![vp_pat(), vp_pat()]), any_np_pat()],
-                ),
+                left_pat: fwd_pat(bwd_pat(vp_pat(), vp_pat()), any_np_pat()),
                 right_pat: raised_gq_pat(),
                 guards: &[],
                 build: gq_prep_vpadjunct,
@@ -1090,7 +1151,7 @@ fn other_grammar_rules() -> &'static [CatRule] {
             // above (its `pp_res` is `bwd(VP, fwd(VP, NP))`, none of `cat_pp`/`cat_pp_arg`/`bwd(VP,VP)`).
             CatRule {
                 name: "gq_prep_passive_agent",
-                left_pat: Ctor("fwd", vec![passive_agent_res_pat(), any_np_pat()]),
+                left_pat: fwd_pat(passive_agent_res_pat(), any_np_pat()),
                 right_pat: raised_gq_pat(),
                 guards: &[],
                 build: gq_prep_passive_agent,
@@ -1177,8 +1238,8 @@ fn build_name(binds: &CatSubst, left: &Item, right: &Item, _layer: &Arc<Layer>) 
 /// The result category of a GQ-as-prep-object raise: the preposition functor's own result
 /// (`pp_res` in `fwd(pp_res, cat_np)`), re-extracted from the left operand.
 fn gq_pp_res(left: &Item) -> Exp {
-    match is_ctor(left.cat(), "fwd") {
-        Some([res, _]) => res.clone(),
+    match slash_parts(left.cat(), "fwd") {
+        Some((_m, res, _)) => res.clone(),
         _ => unreachable!("a gq-prep rule matched a non-fwd left"),
     }
 }
@@ -1282,9 +1343,9 @@ fn apply_group(
     rctx: super::RightContext,
 ) -> Option<Item> {
     // Distributive SUBJECT (D63 §8.4 Phase 6): a `cat_group` subject meeting a VP `S\NP` distributes.
-    if let (Some([c, _conn, gnum]), Some([result, slot])) = (
+    if let (Some([c, _conn, gnum]), Some((_m, result, slot))) = (
         is_ctor(left.cat(), "cat_group"),
-        is_ctor(right.cat(), "bwd"),
+        slash_parts(right.cat(), "bwd"),
     ) {
         let num_agrees =
             matches!(is_ctor(slot, "cat_np"), Some([_, snum]) if feat_meets(gnum, snum));
@@ -1300,8 +1361,8 @@ fn apply_group(
         }
     }
     // Distributive OBJECT (D63 §8.4 Phase 6): a transitive verb seeking a `cat_group` object.
-    if let (Some([result, slot]), Some([c, ..])) = (
-        is_ctor(left.cat(), "fwd"),
+    if let (Some((_m, result, slot)), Some([c, ..])) = (
+        slash_parts(left.cat(), "fwd"),
         is_ctor(right.cat(), "cat_group"),
     ) {
         if group_member_fits(slot, c, layer) {
@@ -1356,53 +1417,64 @@ pub fn apply_core(
             )),
         )
     };
-    let mk = |decl: &Arc<crate::nbe::term::InductiveDecl>, ctor: &str, a: Exp, b: Exp| {
-        Exp::InductiveCtor(decl.clone(), ctor.into(), vec![a, b])
-    };
+    // The composed RESULT carries the rule's keyed modality, exactly as Baldridge writes it:
+    // `X/⋄Y Y/⋄Z ⇒B X/⋄Z` (194), `X/×Y Y\×Z ⇒B X\×Z` (200a). It is NOT inherited from the inputs.
+    let mk =
+        |decl: &Arc<crate::nbe::term::InductiveDecl>, ctor: &str, mode: &Exp, a: Exp, b: Exp| {
+            Exp::InductiveCtor(decl.clone(), ctor.into(), vec![mode.clone(), a, b])
+        };
 
     // Forward family: left is the primary functor `A/B` (fwd); not itself a composition output.
     if !primary_blocked(left.prov()) {
-        if let (Exp::InductiveCtor(decl, _, _), Some([a, b])) =
-            (left.cat(), is_ctor(left.cat(), "fwd"))
+        if let (Exp::InductiveCtor(decl, _, _), Some((lm, a, b))) =
+            (left.cat(), slash_parts(left.cat(), "fwd"))
         {
             // >Bx (crossed): `A/B · B\C → A\C`. left.arg(B) unifies right.result(B).
-            if let Some([rr, rc]) = is_ctor(right.cat(), "bwd") {
-                if let Some(subst) = unify_cat(b, rr, layer) {
-                    out.push(Item::from_parts(
-                        mk(decl, "bwd", subst_cat(a, &subst), subst_cat(rc, &subst)),
-                        compose_sem(left.sem(), right.sem()),
-                        Combinator::CrossedComp,
-                        Cost::ZERO,
-                    ));
+            if let Some((rm, rr, rc)) = slash_parts(right.cat(), "bwd") {
+                // BOTH slashes must license the crossed class — (200a) keys `X/×Y Y\×Z`.
+                if crossed_licenses(lm) && crossed_licenses(rm) {
+                    if let Some(subst) = unify_cat(b, rr, layer) {
+                        out.push(Item::from_parts(
+                            mk(decl, "bwd", lm, subst_cat(a, &subst), subst_cat(rc, &subst)),
+                            compose_sem(left.sem(), right.sem()),
+                            Combinator::CrossedComp,
+                            Cost::ZERO,
+                        ));
+                    }
                 }
             }
         }
     }
     // Backward family: right is the primary functor `X\Y` (bwd); not itself a composition output.
     if !primary_blocked(right.prov()) {
-        if let (Exp::InductiveCtor(decl, _, _), Some([x, y])) =
-            (right.cat(), is_ctor(right.cat(), "bwd"))
+        if let (Exp::InductiveCtor(decl, _, _), Some((rm, x, y))) =
+            (right.cat(), slash_parts(right.cat(), "bwd"))
         {
             // <B (harmonic): `Y\Z · X\Y → X\Z`. left=Y\Z (bwd), unify left.result(Y) ~ right.arg(Y).
-            if let Some([ly, lz]) = is_ctor(left.cat(), "bwd") {
-                if let Some(subst) = unify_cat(ly, y, layer) {
-                    out.push(Item::from_parts(
-                        mk(decl, "bwd", subst_cat(x, &subst), subst_cat(lz, &subst)),
-                        compose_sem(right.sem(), left.sem()),
-                        Combinator::BackwardComp,
-                        Cost::ZERO,
-                    ));
+            if let Some((lm, ly, lz)) = slash_parts(left.cat(), "bwd") {
+                // BOTH slashes must license the harmonic class — (194b) keys `Y\⋄Z X\⋄Y`.
+                if harmonic_licenses(lm) && harmonic_licenses(rm) {
+                    if let Some(subst) = unify_cat(ly, y, layer) {
+                        out.push(Item::from_parts(
+                            mk(decl, "bwd", rm, subst_cat(x, &subst), subst_cat(lz, &subst)),
+                            compose_sem(right.sem(), left.sem()),
+                            Combinator::BackwardComp,
+                            Cost::ZERO,
+                        ));
+                    }
                 }
             }
             // <Bx (crossed): `Y/Z · X\Y → X/Z`. left=Y/Z (fwd), unify left.result(Y) ~ right.arg(Y).
-            if let Some([ly, lz]) = is_ctor(left.cat(), "fwd") {
-                if let Some(subst) = unify_cat(ly, y, layer) {
-                    out.push(Item::from_parts(
-                        mk(decl, "fwd", subst_cat(x, &subst), subst_cat(lz, &subst)),
-                        compose_sem(right.sem(), left.sem()),
-                        Combinator::CrossedComp,
-                        Cost::ZERO,
-                    ));
+            if let Some((lm, ly, lz)) = slash_parts(left.cat(), "fwd") {
+                if crossed_licenses(lm) && crossed_licenses(rm) {
+                    if let Some(subst) = unify_cat(ly, y, layer) {
+                        out.push(Item::from_parts(
+                            mk(decl, "fwd", rm, subst_cat(x, &subst), subst_cat(lz, &subst)),
+                            compose_sem(right.sem(), left.sem()),
+                            Combinator::CrossedComp,
+                            Cost::ZERO,
+                        ));
+                    }
                 }
             }
         }
@@ -2006,6 +2078,16 @@ mod dispatch_tests {
     use crate::ontology::iri::Iri;
 
     fn ct(name: &str, args: Vec<Exp>) -> Exp {
+        // A slash carries a leading MODALITY (D63 multimodal slashes). Tests build the permissive
+        // `m_all` unless a case is specifically about mode licensing, so this helper injects it and
+        // the call sites keep reading as `A/B` / `A\\B`.
+        let args = if name == "fwd" || name == "bwd" {
+            let mut v = vec![Exp::InductiveCtor(list_decl(), "m_all".into(), Vec::new())];
+            v.extend(args);
+            v
+        } else {
+            args
+        };
         Exp::InductiveCtor(list_decl(), name.into(), args)
     }
     fn cls(s: &str) -> Exp {
@@ -2860,6 +2942,82 @@ mod dispatch_tests {
         );
         assert_eq!(got.sem(), &expected);
         assert_eq!(got.prov(), Combinator::ForwardComp);
+    }
+
+    /// A slash carrying an EXPLICIT modality — `ct` injects the permissive `m_all`, so mode-licensing
+    /// tests need to name the mode themselves.
+    fn ct_mode(name: &str, mode: &str, args: Vec<Exp>) -> Exp {
+        let mut v = vec![Exp::InductiveCtor(list_decl(), mode.into(), Vec::new())];
+        v.extend(args);
+        Exp::InductiveCtor(list_decl(), name.into(), v)
+    }
+
+    // ── multimodal slash licensing (Baldridge 2002 §5.2) ─────────────────────────────────────────
+    //
+    // These three tests are the WITNESS that the mode machinery does what the lattice says, and they
+    // are deliberately written BEFORE any lexical entry is tightened to `m_app`: the migration ships
+    // with every slash at `m_all`, so without them nothing would exercise a non-permissive mode.
+
+    #[test]
+    fn application_only_slash_refuses_composition() {
+        // `A/⋆B ∘ B/⋆C` must NOT compose: harmonic composition is keyed to `⋄` (194), and `m_app` is
+        // the lattice ROOT — not a subtype of `⋄` — so it cannot serve as input. This is the
+        // categorial statement of what a governed complement needs: `give rise TO` must not let `to`
+        // compose away from its head.
+        let pp = ct("cat_pp", vec![]);
+        let l = mk_item(
+            ct_mode("fwd", "m_app", vec![s_fin(), ent_np()]),
+            ax("urn:eigenius:lexicon:f"),
+        );
+        let r = mk_item(
+            ct_mode("fwd", "m_app", vec![ent_np(), pp]),
+            ax("urn:eigenius:lexicon:g"),
+        );
+        assert!(
+            apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other).is_none(),
+            "an application-only slash must not compose"
+        );
+    }
+
+    #[test]
+    fn application_only_slash_still_applies() {
+        // …but `m_app` means application ONLY, not application NEVER. Application is keyed to the
+        // lattice root (192), so every modality — `m_app` included — still applies. If this ever
+        // fails, `m_app` has become a category no rule can consume, and tightening a slash to it
+        // would open a grammar gap rather than remove a spurious reading.
+        let l = mk_item(
+            ct_mode("fwd", "m_app", vec![s_fin(), ent_np()]),
+            ax("urn:eigenius:lexicon:verb"),
+        );
+        let r = mk_item(ent_np(), ax("urn:eigenius:lexicon:subj"));
+        let got = apply(&l, &r, &layer(), crate::dcg::rules::RightContext::Other)
+            .expect("A/⋆B · B → A must still apply");
+        assert_eq!(got.cat(), &s_fin(), "application is keyed to the root ⋆");
+    }
+
+    #[test]
+    fn one_application_only_operand_is_enough_to_refuse() {
+        // (194) keys BOTH slashes: `X/⋄Y Y/⋄Z`. A permissive primary does not rescue a `m_app`
+        // secondary — otherwise marking the governed slash would be defeated by its head.
+        let pp = ct("cat_pp", vec![]);
+        let permissive = mk_item(
+            ct("fwd", vec![s_fin(), ent_np()]),
+            ax("urn:eigenius:lexicon:f"),
+        );
+        let restricted = mk_item(
+            ct_mode("fwd", "m_app", vec![ent_np(), pp]),
+            ax("urn:eigenius:lexicon:g"),
+        );
+        assert!(
+            apply(
+                &permissive,
+                &restricted,
+                &layer(),
+                crate::dcg::rules::RightContext::Other
+            )
+            .is_none(),
+            "a permissive primary must not license an application-only secondary"
+        );
     }
 
     #[test]
