@@ -533,15 +533,25 @@ pub(crate) fn resolve_inductive(layer: &Arc<Layer>, iri_str: &str) -> Option<Arc
 /// adverb contributes nothing to the claim `Prop` (the science-transparent default; the
 /// measurement subset's obligation semantics is a later arm). Grounded in the WRN attachment
 /// positions:
-/// 1. **adjective modifier** `(S[adj]\NP)/(S[adj]\NP)` — "selectively essential", "highly concordant";
-/// 2. **VP modifier, forward** `(S\NP)/(S\NP)` — "commonly affects …";
-/// 3. **VP modifier, backward** `(S\NP)\(S\NP)` — "arrest selectively".
+/// 1. **pre-modifier, forward** `(S[f]\NP[n])/(S[f]\NP[n])` — "selectively essential", "highly
+///    concordant" (`f = adj`), "commonly affects …" (`f = fin`);
+/// 2. **VP modifier, backward** `(S[fin]\NP[n])\(S[fin]\NP[n])` — "arrest selectively".
 ///
-/// The VP modifier fixes the clause feature to `fin` (so it matches a *verbal* clause but not an
-/// `adj` clause — keeping it disjoint from the adjective modifier, no spurious duplicate parses) and
-/// keeps the subject **number** a free variable, so agreement flows through the modifier unchanged.
-/// The adjective modifier is fixed (`adj`, `num_any`), since predicative adjectives are uniform.
-/// `None` if the `lexicon:Cat`/`Mood`/`Fin`/`Num` inductives don't resolve.
+/// The forward modifier BINDS the clause feature, so it returns exactly the feature it consumed.
+/// It used to be two categories with the result feature FIXED — `adj` for the adjective modifier and
+/// `fin` for the forward VP modifier — and the `adj` one LAUNDERED: once `pred ⊑ adj` entered
+/// [`feat_meets`], it took a predicate nominal by subsumption and handed back a plain `adj`, which
+/// [`is_adjective_cat`] then accepted for the attributive lift. That is the same shape as `fin_any`
+/// laundering finiteness (`3ae672d`): a rule `X → X` over a feature it does not carry through.
+/// Binding is the fix, and it also collapses the two into one — a bound `f` covers `fin` as well, so
+/// keeping a separate `fin`-fixed forward category would only duplicate every VP-adverb derivation.
+///
+/// The BACKWARD modifier stays fixed at `fin`. It never laundered (it accepts `fin` and returns
+/// `fin`), and post-adjectival adverbs are not attested on the reference page, so binding it would
+/// widen coverage on no evidence.
+///
+/// The subject **number** is a free variable throughout, so agreement flows through the modifier
+/// unchanged. `None` if the `lexicon:Cat`/`Mood`/`Fin` inductives don't resolve.
 /// The **predicative adjective** category `S[adj]\NP` = `bwd(cat_s(dcl, adj), cat_np(Entity, num_any))`
 /// — fixed `adj` / `num_any`, since predicative adjectives are uniform. Shared by the adverb
 /// adjective-modifier cat ([`adverb_modifier_cats`]) and the D63 denominal `X-based` adjective
@@ -580,25 +590,28 @@ pub fn adverb_modifier_cats(layer: &Arc<Layer>) -> Option<Vec<Exp>> {
     // freely (Baldridge's `skillfully` is `(s\◁np)/▷(s\◁np)`, both slashes permutative).
     let m_all = mode_value(layer, MODE_ALL)?;
 
-    // 1. Adjective modifier — over the uniform predicative-adjective cat `S[adj]\NP`.
-    let adjp = predicative_adjective_cat(layer)?;
-    let adj_mod = ctor("fwd", vec![m_all.clone(), adjp.clone(), adjp]);
-
-    // 2/3. VP modifier — fixed `fin` clause (verbal, disjoint from `adj`), free subject number.
-    let fin_c = Exp::InductiveCtor(fin, "fin".to_string(), vec![]);
     let nvar = Exp::Var("__adv_num".to_string());
-    let vp = ctor(
-        "bwd",
-        vec![
-            m_all.clone(),
-            ctor("cat_s", vec![dcl, fin_c]),
-            ctor("cat_np", vec![entity, nvar]),
-        ],
-    );
-    let vp_mod_fwd = ctor("fwd", vec![m_all.clone(), vp.clone(), vp.clone()]);
+    let clause = |feat: Exp| {
+        ctor(
+            "bwd",
+            vec![
+                m_all.clone(),
+                ctor("cat_s", vec![dcl.clone(), feat]),
+                ctor("cat_np", vec![entity.clone(), nvar.clone()]),
+            ],
+        )
+    };
+
+    // 1. Forward pre-modifier — the clause feature is BOUND, so the adverb hands back whatever it
+    //    consumed (`adj`, `pred`, `fin`, …) instead of collapsing it to one value.
+    let bound = clause(Exp::Var("__adv_fin".to_string()));
+    let fwd_mod = ctor("fwd", vec![m_all.clone(), bound.clone(), bound]);
+
+    // 2. Backward VP modifier — verbal only; returns the `fin` it accepts, so nothing to bind.
+    let vp = clause(Exp::InductiveCtor(fin, "fin".to_string(), vec![]));
     let vp_mod_bwd = ctor("bwd", vec![m_all, vp.clone(), vp]);
 
-    Some(vec![adj_mod, vp_mod_fwd, vp_mod_bwd])
+    Some(vec![fwd_mod, vp_mod_bwd])
 }
 
 /// The transparent **sentence modifier** categories `S/S` and `S\S` (D62 Phase 3) — for
@@ -974,6 +987,70 @@ mod tests {
                  — `check` rejects an undeclared constructor, so this is live the moment anything \
                  type-checks a Cat term (today only `⟦·⟧`'s erasure hides it)"
             );
+        }
+    }
+
+    /// An adverb must hand back the clause feature it consumed.
+    ///
+    /// `pred ⊑ adj` ([`pred_subsumes_adj`]) makes SELECTION permissive by design — the copula,
+    /// negation and every adverb have to accept a predicate nominal. The cost is that any rule which
+    /// accepts `adj` and returns a FIXED `adj` launders `pred` into `adj`, and [`is_adjective_cat`]
+    /// then admits the laundered result for the attributive lift (`mod_lifts`), reopening exactly the
+    /// hole `lexicon:pred` was introduced to close. The forward adverb modifier was that rule.
+    ///
+    /// The cure is a BOUND feature variable shared by result and argument, so this pins the structure
+    /// rather than the measurement it produced (`invalid` 11 → 6, 2026-08-02).
+    #[test]
+    fn the_forward_adverb_modifier_binds_the_clause_feature_it_consumes() {
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let cats = adverb_modifier_cats(ctx.head()).expect("adverb modifier cats resolve");
+
+        /// `bwd(m, cat_s(mood, FEAT), cat_np(…))` → `FEAT`.
+        fn clause_feat(c: &Exp) -> Option<&Exp> {
+            let (_m, s, _np) = slash_parts(c, "bwd")?;
+            match is_ctor(s, "cat_s")? {
+                [_mood, feat] => Some(feat),
+                _ => None,
+            }
+        }
+        fn feat_name(f: &Exp) -> Option<&str> {
+            match f {
+                Exp::InductiveCtor(_, n, args) if args.is_empty() => Some(n.as_str()),
+                _ => None,
+            }
+        }
+
+        let fwd = cats
+            .iter()
+            .find_map(|c| slash_parts(c, "fwd"))
+            .expect("a forward adverb modifier is seeded");
+        let (_m, res, arg) = fwd;
+        let rf = clause_feat(res).expect("the forward modifier's RESULT is a clause");
+        let af = clause_feat(arg).expect("the forward modifier's ARGUMENT is a clause");
+        assert!(
+            matches!(rf, Exp::Var(_)),
+            "the forward adverb's result clause feature must be a VARIABLE — a fixed value launders \
+             every feature that reaches it by subsumption; got {rf:?}"
+        );
+        assert_eq!(
+            rf, af,
+            "result and argument must share ONE variable, or `unify_feat` has nothing to propagate"
+        );
+
+        // No seeded adverb category may FIX `adj`: that is the laundering shape, and `pred` reaches
+        // any such slot through the meet.
+        for c in &cats {
+            let (_dir, _m, res, arg) = as_slash(c).expect("every adverb category is a slash");
+            for side in [res, arg] {
+                if let Some(f) = clause_feat(side).and_then(feat_name) {
+                    assert_ne!(
+                        f, "adj",
+                        "adverb category {c:?} fixes the clause feature to `adj`, which `pred` \
+                         subsumes into — it will launder a predicate nominal back into an \
+                         attributive-capable adjective"
+                    );
+                }
+            }
         }
     }
 
