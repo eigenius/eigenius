@@ -1418,9 +1418,19 @@ fn probe_false_identity_provenance() {
             closed.len(),
             open.len()
         );
+        use eigenius_kernel::dcg::category::pretty_cat_dbg;
         let mut rows: Vec<(String, String)> = closed
             .iter()
-            .map(|it| (format!("{:?}", it.prov()), pretty_term(it.sem())))
+            .map(|it| {
+                (
+                    // The ROOT CATEGORY matters as much as the combinator: a predicate-nominal
+                    // `is_a` needs a copula, and `is_finite_clause` admits a root only at
+                    // `fin`/`fin_any` — so a copula-less `is_a` root means some entry is handing
+                    // back a FINITE clause where an `adj`-featured one was expected.
+                    format!("{:?} :: {}", it.prov(), pretty_cat_dbg(it.cat())),
+                    pretty_term(it.sem()),
+                )
+            })
             .collect();
         rows.sort();
         rows.dedup();
