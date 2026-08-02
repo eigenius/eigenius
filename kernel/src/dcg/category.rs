@@ -456,7 +456,34 @@ fn slot_is_concrete_nonentity(slot: &Exp) -> bool {
 /// underspecified top (`*_any`). `Any = ⊤`, unification = meet (`⊓`). Public so
 /// `apply` can check determiner/noun number agreement on `cat_forall`.
 pub fn feat_meets(a: &Exp, b: &Exp) -> bool {
-    a == b || is_any_feat(a) || is_any_feat(b)
+    a == b || is_any_feat(a) || is_any_feat(b) || pred_subsumes_adj(a, b)
+}
+
+/// `pred ⊑ adj` — the ONE non-flat pair in the feature lattice, and the reason it exists.
+///
+/// A PREDICATE NOMINAL is a predicative complement, so everything that selects one must accept it:
+/// the copula, negation, and — the open set — every WordNet adverb typed
+/// `(S[adj]\NP)/(S[adj]\NP)`. Enumerating that set is not possible from the closed-class file, and
+/// trying to (four `_prednom` copulas + `not_adj_prednom`) left `grammar-gap 1` on «These
+/// observations suggest that WRN dependency is not simply a result of MMR deficiency.», where
+/// `simply` is exactly such an adverb.
+///
+/// What `pred` must NOT do is license ATTRIBUTIVE use: English has no bare attributive predicate
+/// nominal (*"a drug-target cancer"). That is a separate test — [`is_adjective_cat`] matches the
+/// ctor name EXACTLY, so it keeps refusing `pred` no matter what the meet admits. Subsumption for
+/// selection, exact match for attribution; the two questions are asked in different places and this
+/// is the pair that makes them come apart.
+fn pred_subsumes_adj(a: &Exp, b: &Exp) -> bool {
+    fn name(e: &Exp) -> Option<&str> {
+        match e {
+            Exp::InductiveCtor(_, n, args) if args.is_empty() => Some(n.as_str()),
+            _ => None,
+        }
+    }
+    matches!(
+        (name(a), name(b)),
+        (Some("adj"), Some("pred")) | (Some("pred"), Some("adj"))
+    )
 }
 
 /// Feature **unification** (D63 §8.10) — the binding-aware generalization of
