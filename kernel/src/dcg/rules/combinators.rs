@@ -2473,6 +2473,65 @@ mod dispatch_tests {
         assert_eq!(got.prov(), Combinator::Compound);
     }
 
+    /// A PREDICATE NOMINAL must not become an ATTRIBUTIVE modifier. `mod_lifts` encodes that as
+    /// `prov != KindRaised`, which covers the BARE kind-raise (`kind_raised_nps`) — but the
+    /// predicative indefinite article `a_pred` reaches the SAME category `S[adj]\NP` with the SAME
+    /// `is_a` sem by ordinary application, so it carries ordinary provenance and the guard never sees
+    /// it. Same asymmetry `is_derived_individual` records for coordination: a shape the
+    /// `NotKindRaised` guard never sees.
+    ///
+    /// This test WITNESSES the open route (it asserts today's behaviour, which is the defect).
+    #[test]
+    fn predicate_nominal_from_a_pred_still_lifts_to_an_attributive_modifier() {
+        // `a promising drug target` — `a_pred` applied, so: S[adj]\NP, sem λsubj. is_a(subj, C).
+        let target = cls("urn:eigenius:lexicon:Protein");
+        let pred_nominal_sem = Exp::Lam(
+            Patt::Var("subj".into()),
+            Box::new(Exp::App(
+                Box::new(Exp::App(
+                    Box::new(ax("urn:eigenius:ontology:is_a")),
+                    Box::new(Exp::Var("subj".into())),
+                )),
+                Box::new(target.clone()),
+            )),
+        );
+        let pred_cat = ct(
+            "bwd",
+            vec![
+                ct("cat_s", vec![ct("dcl", vec![]), ct("adj", vec![])]),
+                np(cls("urn:eigenius:lexicon:Entity")),
+            ],
+        );
+        // Ordinary application provenance — NOT `KindRaised`.
+        let it = mk_item(pred_cat, pred_nominal_sem);
+        assert_ne!(it.prov(), Combinator::KindRaised);
+
+        let mods = mod_lifts(&it);
+        assert_eq!(
+            mods.len(),
+            1,
+            "OPEN ROUTE: a predicate nominal lifts to cat_mod because the guard keys on provenance"
+        );
+
+        // ... and it then refines a noun, giving `Σx:cancer. is_a(x, target)` — "a cancer that is a
+        // drug target", the false-identity shape the ledger records for the two `show that WRN is …`
+        // units.
+        let cancer = cls("urn:eigenius:lexicon:Cell");
+        let r = mk_item(n(cancer.clone()), cancer.clone());
+        let got = apply(
+            &mods[0],
+            &r,
+            &layer(),
+            crate::dcg::rules::RightContext::Other,
+        )
+        .expect("cat_mod + cat_n → refined noun");
+        let sem = format!("{:?}", got.sem());
+        assert!(
+            sem.contains("is_a"),
+            "the refined noun carries an is_a predication: {sem}"
+        );
+    }
+
     #[test]
     fn attrib_adjective_lifts_to_cat_mod_then_refines_a_plain_noun() {
         // A predicative `S[adj]\NP` does NOT refine a noun directly — `cat_mod` is the sole attributive
