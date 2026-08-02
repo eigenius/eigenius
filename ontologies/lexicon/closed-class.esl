@@ -284,8 +284,13 @@ resource lexicon:were_copula : lexicon:LexicalEntry {
 // The PREDICATIVE indefinite article: "HeLa is **a cell line**". Distinct from the
 // existential determiner `a` — here `a` is semantically the membership former, not a
 // quantifier. It consumes the common noun (binding its type T) and yields an
-// **adjectival** predicate `S[dcl,adj]\NP` `λs. is_a(s, T)`, which the existing
-// copula `is`/`are` then lifts to a finite VP (reusing 3a — no new copula). Subject
+// **predicate nominal** `S[dcl,pred]\NP` `λs. is_a(s, T)`, which the copula then
+// lifts to a finite VP. It used to yield `S[dcl,adj]\NP` and reuse the adjectival
+// copula outright ("no new copula"); that is what this feature split changes, and
+// the four `_prednom` copula entries below are the cost of it. The reason is that
+// `adj` licenses ATTRIBUTIVE use and a predicate nominal must not have it: sharing
+// the feature let `a promising drug target for MSI` modify `cancers`, splitting the
+// compound "MSI cancers" and asserting `is_a(WRN, cancer)` (d44dfda). Subject
 // dispatch is by type-checking: an instance subject (`hela : CellLine ≤ Entity`)
 // makes `is_a(hela, CellLine)` felicitous. (The `subclass_of` reading for KIND
 // subjects awaits bare-plural/generic subjects — deferred.)
@@ -298,7 +303,7 @@ resource lexicon:pred_nominal_sem : lexicon:SemTerm {
 resource lexicon:a_pred : lexicon:LexicalEntry {
     core:description = "grammatical: indefinite article/determiner introducing a singular noun ('a gene').";
     lexicon:form     = "a";
-    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pred), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:pred_nominal_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => lexicon:Entity -> Prop );
     lexicon:sense    = "a";
@@ -317,7 +322,7 @@ resource lexicon:a_pred : lexicon:LexicalEntry {
 resource lexicon:an_pred : lexicon:LexicalEntry {
     core:description = "grammatical: indefinite article/determiner introducing a singular noun ('an interaction').";
     lexicon:form     = "an";
-    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pred), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:pred_nominal_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => lexicon:Entity -> Prop );
     lexicon:sense    = "a";
@@ -2343,4 +2348,70 @@ resource lexicon:beyond_prep : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "beyond";
     lexicon:grade    = epistemic:declared;
+}
+
+// ── PREDICATE-NOMINAL siblings of the copula and of adjectival negation ──
+// `a_pred`/`an_pred` now yield `S[dcl,pred]\NP` rather than `S[dcl,adj]\NP`, because a predicate
+// nominal is PREDICATIVE ONLY while `adj` licenses attributive use (see the `pred` note in
+// lexicon-ontology.esl, and d44dfda for the 7 `invalid` rows the shared feature cost).
+//
+// Everything that SELECTS a predicative complement must therefore select `pred` as well as `adj`.
+// That is exactly the copula and adjectival negation — enumerated here rather than bound over,
+// because binding over `lexicon:Fin` would also admit `bse`/`inf`/`ger`/`pss`/`pass` and re-open
+// do-support ("*is affect"). Two values, two entries; the enumeration IS the statement.
+
+// is — copula over a PREDICATE NOMINAL, 3sg: "WRN is a drug target".
+resource lexicon:is_copula_prednom : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular present of BE — copula or auxiliary.";
+    lexicon:form     = "is";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pred), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+    lexicon:grade    = epistemic:declared;
+}
+
+// are — copula over a PREDICATE NOMINAL, plural.
+resource lexicon:are_copula_prednom : lexicon:LexicalEntry {
+    core:description = "grammatical: plural present of BE — copula or auxiliary.";
+    lexicon:form     = "are";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pred), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+    lexicon:grade    = epistemic:declared;
+}
+
+// was — PAST copula over a PREDICATE NOMINAL, sg.
+resource lexicon:was_copula_prednom : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular past of BE — copula or auxiliary.";
+    lexicon:form     = "was";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pred), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+    lexicon:grade    = epistemic:declared;
+}
+
+// were — PAST copula over a PREDICATE NOMINAL, plural.
+resource lexicon:were_copula_prednom : lexicon:LexicalEntry {
+    core:description = "grammatical: plural past of BE — copula or auxiliary.";
+    lexicon:form     = "were";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:pl)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pred), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+    lexicon:grade    = epistemic:declared;
+}
+
+// not — over a PREDICATE NOMINAL ("is not a drug target").
+resource lexicon:not_adj_prednom : lexicon:LexicalEntry {
+    core:description = "grammatical: sentential negation ('does not lead to').";
+    lexicon:form     = "not";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pred), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pred), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:neg_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "not";
+    lexicon:grade    = epistemic:declared;
+    lexicon:scope_bearing = true;
 }

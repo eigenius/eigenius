@@ -807,36 +807,17 @@ pub(crate) fn cat_mod_cat() -> Exp {
 /// noun. A genuine attributive adjective `S[adj]\NP` lifts with its sem UNCHANGED (already `λx. adj(x)`);
 /// a `KindRaised` bare-noun predicative form does **not** lift — it stays out of modifier position,
 /// reproducing the old `refine_attrib` `NotProv(KindRaised)` guard as a lift-time gate rather than an
-/// application-time one. Fires at leaf seeding (`seed.rs`) and on composed cells (the `ModLift` unary
-/// shift), mirroring `bare_nominal_shifts`.
-/// EXPERIMENT ONLY, NOT THE FIX (2026-08-01). Whether `sem` is a PREDICATE NOMINAL — `λs. is_a(s, T)`,
-/// the reduced form of `lexicon:pred_nominal_sem` (`closed-class.esl:292`) after the predicative
-/// article `a_pred`/`an_pred` has taken its class argument.
+/// application-time one.
 ///
-/// This reads the SEM, which every other guard here deliberately refuses to do (`Guard` is
-/// "category-only … never a sem"). It exists to SIZE the defect before paying for the structural
-/// change, not to ship: the real fix is that `cat_s(dcl, adj)` conflates a genuine ADJECTIVE
-/// (attributive-capable) with a PREDICATE NOMINAL (predicative-only), and a predicate nominal needs
-/// its own clause feature so `is_adjective_cat` never matches it and no guard is needed at all.
-fn is_predicate_nominal_sem(sem: &Exp) -> bool {
-    // Sems are stored UN-REDUCED (see `restrictor_key`'s note), so the predicative article's sem
-    // reaches here as `App(Lam(T. Lam(s. is_a(s, T))), C)`, not as the reduced `Lam(s. is_a(s, C))`.
-    // A structural match on the reduced shape fires on NOTHING -- measured 2026-08-01, bit-identical
-    // to baseline on every metric. Testing for the `is_a` AXIOM anywhere in the sem is coarse but
-    // sufficient to SIZE the defect: a genuine attributive adjective's sem never mentions `is_a`.
-    format!("{sem:?}").contains("is_a")
-}
-
+/// A PREDICATE NOMINAL needs no guard here, and that is the point of `lexicon:pred`. It used to wear
+/// `cat_s(dcl, adj)` and arrive by ordinary application from `a_pred`, so neither of the two things
+/// this function may inspect — the category and the provenance — could tell it from a real
+/// attributive adjective, and it lifted (d44dfda: 7 `invalid` ledger rows, including `is_a(WRN,
+/// cancer)` from splitting the compound "MSI cancers"). Now it wears `cat_s(dcl, pred)` and
+/// [`is_adjective_cat`] simply does not match it. Fires at leaf seeding (`seed.rs`) and on composed cells (the `ModLift` unary
+/// shift), mirroring `bare_nominal_shifts`.
 pub(crate) fn mod_lifts(it: &Item) -> Vec<Item> {
-    // FALSIFICATION PROBE 2026-08-01: disable ALL attributive lifts. Crude and coverage-destroying by
-    // design -- the question is only whether the residual false-identity rows route through here.
-    if std::env::var("EIGENIUS_NO_MOD_LIFT").is_ok() {
-        return Vec::new();
-    }
-    if super::super::category::is_adjective_cat(it.cat())
-        && it.prov() != Combinator::KindRaised
-        && !is_predicate_nominal_sem(it.sem())
-    {
+    if super::super::category::is_adjective_cat(it.cat()) && it.prov() != Combinator::KindRaised {
         return vec![Item::from_parts(
             cat_mod_cat(),
             it.sem().clone(),
@@ -2033,6 +2014,7 @@ mod dispatch_tests {
                             | "pss"
                             | "pass"
                             | "adj"
+                            | "pred"
                             | "fin_any"
                             | "sg"
                             | "pl"

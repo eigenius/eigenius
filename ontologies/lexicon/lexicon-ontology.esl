@@ -108,6 +108,19 @@ data lexicon:Fin {
     adj,      // predicative adjective — "primary" (after the copula `is`/`are`);
               // distinct from `bse` so the copula selects adjectives, do-support
               // selects base verbs, and attributive `adj`+noun is recognizable.
+    pred,     // PREDICATE NOMINAL — "a drug target" in "WRN is a drug target". The
+              // copula takes it exactly where it takes `adj`, but it is PREDICATIVE
+              // ONLY: English has no bare attributive predicate nominal (*"a
+              // drug-target cancer"), while a genuine adjective is attributive by
+              // default. Distinct from `adj` BECAUSE that is the only difference that
+              // matters, and encoding it anywhere else has already failed —
+              // `mod_lifts` may inspect a category and a provenance, and the
+              // predicative article `a_pred` defeats both (its category WAS the
+              // adjective category, its provenance is ordinary application), so the
+              // `NotKindRaised` guard never saw it. The measured cost of that: the
+              // compound "MSI cancers" split so `cancers` could head a noun refined
+              // by the predicate nominal to its left, yielding `is_a(WRN, cancer)` —
+              // 7 of the adjudication ledger's 15 `invalid` rows (d44dfda).
     fin_any,  // underspecified ⊤: meets any form.
 }
 
