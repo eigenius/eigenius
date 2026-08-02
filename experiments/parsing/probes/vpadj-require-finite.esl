@@ -151,3 +151,34 @@ resource lexicon:beyond_prep : lexicon:LexicalEntry {
     lexicon:sense    = "beyond";
     lexicon:grade    = epistemic:declared;
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// FOLLOW-UP 2026-08-01 — `fin_verbal` attempted and REVERTED (bootstrap change, full reseed).
+//
+// Added `fin_verbal` to `lexicon:Fin` (meets fin|bse|inf|ger|pss|pass, refuses `adj`), taught
+// `feat_meets` the partial wildcard, and gave it to these same 11 prepositions. Measured:
+//
+//   grammar-gap      0  -> 2    FATAL (coverage is non-negotiable)
+//   encoded          12 -> 13
+//   expected-hits    60 -> 55   worse than plain `fin`'s 57
+//   total-readings   988 -> 850
+//   total-skeletons  179 -> 135  largest reduction seen
+//
+// CAUSE — a defect in the change, not in the idea. `is_finite_clause`
+// (kernel/src/dcg/parse/felicity.rs) admits a root at `fin` or `fin_any` ONLY. Setting the
+// preposition's RESULT to `fin_verbal` means any clause built through a VP-adjunct PP roots at
+// `cat_s(dcl,fin_verbal)`, which the gate rejects — units 7 and 14 gapped for exactly that, and the
+// two extra pin losses (55 vs 57) are the same cause. `fin_verbal` is strictly MORE permissive than
+// `fin`, so losing more pins than the `fin` run was the tell that the fault was elsewhere.
+//
+// The four options and what each costs, now all measured:
+//   result `fin_any`               launders; admits `adj`; the false identities  (baseline, 179)
+//   result `fin`                   too narrow; loses `bse`-after-modal pins       (160, -3 pins)
+//   result `fin_verbal`            root gate rejects it                          (135, GAP 2)
+//   result bound via cat_fin_forall  correct, but un-collapses masked ambiguity   (207, -1 pin)
+//
+// The ARGUMENT and the RESULT want different treatments and this conflated them: the argument
+// should be `fin_verbal` (accept any verbal VP, refuse an adjectival one) while the RESULT should
+// PRESERVE the input's finiteness rather than name a value. That is the `cat_fin_forall` binder on
+// the result plus `fin_verbal` on the argument — a combination not yet tested, and the only one of
+// the four that is not already known to fail.
