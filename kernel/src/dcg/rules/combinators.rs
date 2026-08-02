@@ -809,8 +809,34 @@ pub(crate) fn cat_mod_cat() -> Exp {
 /// reproducing the old `refine_attrib` `NotProv(KindRaised)` guard as a lift-time gate rather than an
 /// application-time one. Fires at leaf seeding (`seed.rs`) and on composed cells (the `ModLift` unary
 /// shift), mirroring `bare_nominal_shifts`.
+/// EXPERIMENT ONLY, NOT THE FIX (2026-08-01). Whether `sem` is a PREDICATE NOMINAL — `λs. is_a(s, T)`,
+/// the reduced form of `lexicon:pred_nominal_sem` (`closed-class.esl:292`) after the predicative
+/// article `a_pred`/`an_pred` has taken its class argument.
+///
+/// This reads the SEM, which every other guard here deliberately refuses to do (`Guard` is
+/// "category-only … never a sem"). It exists to SIZE the defect before paying for the structural
+/// change, not to ship: the real fix is that `cat_s(dcl, adj)` conflates a genuine ADJECTIVE
+/// (attributive-capable) with a PREDICATE NOMINAL (predicative-only), and a predicate nominal needs
+/// its own clause feature so `is_adjective_cat` never matches it and no guard is needed at all.
+fn is_predicate_nominal_sem(sem: &Exp) -> bool {
+    // Sems are stored UN-REDUCED (see `restrictor_key`'s note), so the predicative article's sem
+    // reaches here as `App(Lam(T. Lam(s. is_a(s, T))), C)`, not as the reduced `Lam(s. is_a(s, C))`.
+    // A structural match on the reduced shape fires on NOTHING -- measured 2026-08-01, bit-identical
+    // to baseline on every metric. Testing for the `is_a` AXIOM anywhere in the sem is coarse but
+    // sufficient to SIZE the defect: a genuine attributive adjective's sem never mentions `is_a`.
+    format!("{sem:?}").contains("is_a")
+}
+
 pub(crate) fn mod_lifts(it: &Item) -> Vec<Item> {
-    if super::super::category::is_adjective_cat(it.cat()) && it.prov() != Combinator::KindRaised {
+    // FALSIFICATION PROBE 2026-08-01: disable ALL attributive lifts. Crude and coverage-destroying by
+    // design -- the question is only whether the residual false-identity rows route through here.
+    if std::env::var("EIGENIUS_NO_MOD_LIFT").is_ok() {
+        return Vec::new();
+    }
+    if super::super::category::is_adjective_cat(it.cat())
+        && it.prov() != Combinator::KindRaised
+        && !is_predicate_nominal_sem(it.sem())
+    {
         return vec![Item::from_parts(
             cat_mod_cat(),
             it.sem().clone(),
@@ -2506,29 +2532,13 @@ mod dispatch_tests {
         let it = mk_item(pred_cat, pred_nominal_sem);
         assert_ne!(it.prov(), Combinator::KindRaised);
 
-        let mods = mod_lifts(&it);
-        assert_eq!(
-            mods.len(),
-            1,
-            "OPEN ROUTE: a predicate nominal lifts to cat_mod because the guard keys on provenance"
-        );
-
-        // ... and it then refines a noun, giving `Σx:cancer. is_a(x, target)` — "a cancer that is a
-        // drug target", the false-identity shape the ledger records for the two `show that WRN is …`
-        // units.
-        let cancer = cls("urn:eigenius:lexicon:Cell");
-        let r = mk_item(n(cancer.clone()), cancer.clone());
-        let got = apply(
-            &mods[0],
-            &r,
-            &layer(),
-            crate::dcg::rules::RightContext::Other,
-        )
-        .expect("cat_mod + cat_n → refined noun");
-        let sem = format!("{:?}", got.sem());
+        // THE ASYMMETRY: the category says "adjective" and the provenance says "ordinary
+        // application", so neither of the two things `mod_lifts` is allowed to look at can tell this
+        // apart from a genuine attributive adjective. That is the defect, and it is a CATEGORY
+        // problem — `cat_s(dcl, adj)` is being used for two things that do not distribute alike.
         assert!(
-            sem.contains("is_a"),
-            "the refined noun carries an is_a predication: {sem}"
+            super::super::super::category::is_adjective_cat(it.cat()),
+            "a predicate nominal wears the adjective category"
         );
     }
 
