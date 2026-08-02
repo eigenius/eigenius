@@ -53,6 +53,31 @@
 //
 // See vpadj-crossproduct.esl: making every one of the 49 (result, argument) pairs expressible does NOT
 // recover this pin either. `fin_any` licenses a derivation no concrete pair licenses.
+//
+// WHAT IT REMOVES, adjudicated (scripts/audit-skeletons.sh, same snapshot + ranks, UNADJUDICATED 0 on
+// both arms). Scoring by skeleton count alone understated this: of the 13 verdict-carrying skeletons
+// the layer removes, SEVEN are `invalid` -- the defect backlog itself, not the ambiguity tail.
+//
+//     invalid  15 rows / 7 units  ->  8 rows / 4 units
+//     available                        6 removed, 98 kept
+//
+//   cleared outright   «We found that WRN was selectively essential in MSI models.»        2 -> 0
+//                      «These libraries define genes that were essential for prolif...»    2 -> 0
+//                      «We ascertained MSI status with sequencing.»                        1 -> 0
+//   reduced            «These classifications were highly concordant with PCR-based ...»   5 -> 3
+//   untouched          «... WRN is a synthetic-lethal vulnerability for MSI cancers.»      2
+//                      «... WRN is a promising drug target for MSI cancers.»               2
+//                      «We hypothesized ... would give rise to ...» (scope island)         1
+//
+// All seven are the predicative kind-raise FALSE-IDENTITY family (ff1690f), which is what 3ae672d
+// predicted: those readings root at `cat_s(dcl, fin_any)` and the correct ones at `fin`. The four
+// residual false identities do NOT root through a VP-adjunct preposition, so the ledger's own named
+// mechanism is what remains -- the kind-raise must not predicate a nominal whose head is an argument
+// of a preposition or of a gloss-governed adjective (`adjective-frames.tsv` records the governance
+// for `essential`, `concordant`, `associated`).
+//
+// NOT ADOPTED. The cost is the "MSI is associated" pin, and a lost pin is a lost CORRECT reading,
+// which outranks backlog reduction. Adopting this needs that pin recovered by some other route.
 // ─────────────────────────────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════
 
