@@ -1,0 +1,158 @@
+// ════════════════════════════════════════════════════════════════════
+// VP-ADJUNCT PREPOSITIONS BIND FINITENESS instead of laundering it (fin_any -> cat_fin_forall).
+//
+// SHADOWING ONLY: same 11 resource IRIs as the base, only `lexicon:cat` differs. `⟦·⟧` ERASES the
+// feature binder ("⟦cat_fin_forall(λf. R)⟧ = ⟦R⟧"), so `sem`/`sem_type` are untouched and every
+// entry denotes exactly what it denoted before.
+//
+// DEFECT. Each of these is `((S[fin_any]\NP) \ (S[fin_any]\NP)) / NP` — the modifier takes a
+// `fin_any` VP and yields a `fin_any` VP, ERASING whatever finiteness the verb supplied. That is
+// the wildcard `lexicon:Cat`'s own comment on `cat_fin_forall` warns about: it exists "rather than
+// the `*_any` wildcard (which meets anything AND erases it, laundering agreement)", and the example
+// it gives for the binder is a VP-modifier shape — this is the intended mechanism, simply not
+// applied to these 11.
+//
+// TWO SYMPTOMS, ONE CAUSE. The ledger blames this family for its 42 `available` PP-attachment rows
+// ("carries `fin_any` on both sides, so a PP unifies with the inner or the outer VP"). The root
+// probe (3ae672d) shows it ALSO launders finiteness to the clause root: every false-identity
+// reading in the `invalid` family roots at `cat_s(dcl,fin_any)` while the correct readings root at
+// genuine `fin`. A one-line diagnostic rejecting `fin_any` roots killed all 4 false identities of
+// «We ascertained MSI status with sequencing» and kept all 4 correct readings.
+//
+// FIX. Bind the feature: `cat_fin_forall(λf. ((S[f]\NP) \ (S[f]\NP)) / NP)`. The modifier now
+// PRESERVES the VP's finiteness. An adjectival VP stays `adj`, so a copula-less predication reaches
+// the root as `cat_s(dcl,adj)` — which `is_finite_clause` already rejects, with no gate change.
+//
+// KILL CRITERION: grammar-gap 0 and expected-hits 60/62. Prepositions covered: between, within, in,
+// for, to, with, on, from, without, among, beyond — `with` and `for` are the ones in the failing units.
+//
+// ─────────────────────────────────────────────────────────────────────
+// RESULT 2026-08-01: NET NEGATIVE, but informative. Coverage held (grammar-gap 0, encoded 12).
+//
+//   total-readings   988 -> 978   improved
+//   total-skeletons  179 -> 207   ROSE by 28
+//   expected-hits    60  -> 59    lost «MSI is associated with notable responses to immune
+//                                 checkpoint blockade.»
+//
+// SKELETONS ROSE because `fin_any` was COLLAPSING distinct derivations, not creating them: the
+// wildcard erases the very feature that tells two analyses apart, so they shared a skeleton.
+// Binding `f` makes them distinguishable and they surface separately. The baseline count of 179 is
+// therefore partly an artefact of wildcard masking — a caution for reading that metric at all.
+//
+// The lost pin is the unit that also blocked the frame 22/23 swap: it needs `with` ABSORBED as an
+// argument and `to` NESTING at the same time, and binding finiteness across all 11 prepositions
+// uniformly is too coarse to leave that combination reachable.
+//
+// NOT a refutation of the diagnosis — the false identities really do root at `fin_any`, and the
+// one-line root-gate diagnostic (3ae672d) killed all 4 of them while keeping all 4 correct readings.
+// It refutes THIS remedy: migrating all 11 VP-adjunct prepositions at once. A narrower cut (only the
+// prepositions implicated in a false identity, or binding only where the VP is already `fin`) is
+// untested.
+// ════════════════════════════════════════════════════════════════════
+
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace logic     = "urn:eigenius:logic";
+namespace ontology  = "urn:eigenius:ontology";
+namespace epistemic = "urn:eigenius:reflection:epistemic";
+namespace measurements = "urn:eigenius:measurements";
+namespace core         = "urn:eigenius:core";
+
+resource lexicon:between_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a relation between two things.";
+    lexicon:form     = "between";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) ) );
+    lexicon:sem      = lexicon:prep_between_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "between";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:within_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking containment ('within the region').";
+    lexicon:form     = "within";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) ) );
+    lexicon:sem      = lexicon:prep_within_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "within";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:in_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking location or containment ('in colon cancers').";
+    lexicon:form     = "in";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) ) );
+    lexicon:sem      = lexicon:prep_in_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "in";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:for_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking purpose or beneficiary ('essential for growth').";
+    lexicon:form     = "for";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) ) );
+    lexicon:sem      = lexicon:prep_for_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "for";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:to_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a goal or recipient, or the infinitival marker ('lead to death', 'to test').";
+    lexicon:form     = "to";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) ) );
+    lexicon:sem      = lexicon:prep_to_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "to";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:with_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking accompaniment or instrument ('cancers with MSI').";
+    lexicon:form     = "with";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) ) );
+    lexicon:sem      = lexicon:prep_with_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "with";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:on_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking position or dependence ('depends on').";
+    lexicon:form     = "on";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) ) );
+    lexicon:sem      = lexicon:prep_on_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "on";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:from_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking origin or source ('arise from mutations').";
+    lexicon:form     = "from";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) ) );
+    lexicon:sem      = lexicon:prep_from_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "from";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:without_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition as a VP adjunct ('acts without X').";
+    lexicon:form     = "without";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) ) );
+    lexicon:sem      = lexicon:prep_without_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "without";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:among_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition as a VP adjunct ('acts among X').";
+    lexicon:form     = "among";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) ) );
+    lexicon:sem      = lexicon:prep_among_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "among";
+    lexicon:grade    = epistemic:declared;
+}
+resource lexicon:beyond_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition as a VP adjunct ('acts beyond X').";
+    lexicon:form     = "beyond";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) ) );
+    lexicon:sem      = lexicon:prep_beyond_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "beyond";
+    lexicon:grade    = epistemic:declared;
+}
